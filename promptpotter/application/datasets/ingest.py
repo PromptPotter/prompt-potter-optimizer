@@ -33,6 +33,7 @@ from promptpotter.application.datasets.prompts import (
 )
 from promptpotter.application.jobs.launcher.checkin import create_checkin_campaign
 from promptpotter.application.jobs.launcher.draft_build import overlay_from_campaign_config
+from promptpotter.application.origin import canonical_origin_campaign
 from promptpotter.application.scoring.formula import (
     DIALS_KEY,
     parse_dials,
@@ -49,8 +50,13 @@ from promptpotter.domain.pipeline_parsing import merge_node_blocks
 from promptpotter.domain.scoring import anchored_criterion_dials
 from promptpotter.infrastructure.backend import build_backend_client
 from promptpotter.infrastructure.llm.capabilities import refresh_model_capabilities
+from promptpotter.infrastructure.store.dataset_access import (
+    backend_type_of_dataset,
+    readable_dataset_dir,
+)
 from promptpotter.infrastructure.store.layout import validate_dataset_name
 from promptpotter.infrastructure.store.stores import Stores
+from promptpotter.shared.errors import NotFoundError
 
 # Per-file upload cap. 25 MB comfortably holds ``MAX_SAMPLES`` 500-byte rows
 # plus headroom; rejects the obvious DOS shapes (multi-hundred-MB blobs) before
@@ -124,22 +130,24 @@ class SlugTakenError(Exception):
         super().__init__(f"slug {slug!r} already exists in this tenant's collection")
 
 
-def ingest_draft(
+async def ingest_draft(
     *,
     stores: Stores,
     blob: bytes,
     filename: str,
     slug: str | None = None,
-    backend_nodes: dict[str, Any] | None = None,
+    backend_url: str = DEFAULT_BACKEND_URL,
 ) -> DraftCampaign:
-    """Format is detected from ``filename``. ``SlugTakenError`` is raised BEFORE the check-in campaign is
-    minted, so a collision leaves no orphan. Byte-size capping belongs to the wire boundary, not here."""
+    """``SlugTakenError`` is raised BEFORE the check-in campaign is minted, so a collision leaves no
+    orphan. The backend's node declaration is read HERE: without it a draft draws locks no run enforces."""
 
     table = read_tabular(blob, fmt=format_from_filename(filename or "upload.csv"))
     base_slug = (slug or default_slug_from_filename(filename or "upload")).lower()
     validate_dataset_name(base_slug)  # raises ValueError on a bad slug
     if stores.tenant_datasets.slug_exists(base_slug):
         raise SlugTakenError(base_slug, stores.tenant_datasets.suggest_free_slug(base_slug))
+    await refresh_capabilities(stores)
+    backend_nodes = await fetch_backend_nodes(DEFAULT_CONNECTOR, backend_url=backend_url)
 
     preview = [dict(row) for row in table.rows[:PREVIEW_ROWS]]
     draft = new_draft(
@@ -151,7 +159,7 @@ def ingest_draft(
         source_file=filename or "",
         column_label_sets=_column_label_sets(list(table.headers), list(table.rows)),
     )
-    draft = draft.patch(backend_nodes=dict(backend_nodes or {}))
+    draft = draft.patch(backend_nodes=backend_nodes)
     # Mint the check-in campaign + stash the raw rows + headers under it;
     # materialization to Samples waits until the column mapping is confirmed (at
     # Start). The resolution block lets an operator open checkin/cache.json and
@@ -166,19 +174,19 @@ def ingest_draft(
     return keyed
 
 
-def draft_from_dataset(
+async def draft_from_dataset(
     *,
     stores: Stores,
     dataset_dir: Path,
     dataset_name: str,
     overrides: dict[str, Any] | None = None,
-    backend_nodes: dict[str, Any] | None = None,
     origin_campaign: Campaign | None = None,
 ) -> DraftCampaign:
     """Build a fully-confirmed draft straight from an authored dataset's files, then mint a check-in. The
     node config rides through as ``pipeline_overlay``, PRESERVING the backend model/provider.
     ``origin_campaign`` anchors an origin REUSE: its frozen config layers over the dataset file's
-    nodes, the order a run resolves in, so the draft opens on what that origin ran."""
+    nodes, the order a run resolves in, so the draft opens on what that origin ran — and the
+    backend's node declaration is read off ITS connector, not what the shared file says today."""
 
     items = resolve_dataset_items(stores, dataset_name)
     rows: list[dict[str, str]] = [
@@ -197,6 +205,13 @@ def draft_from_dataset(
                 f"path yet and is launched with `python -m promptpotter new {dataset_name}`."
             ),
         )
+
+    await refresh_capabilities(stores)
+    backend_nodes = await fetch_backend_nodes(
+        origin_campaign.backend_type
+        if origin_campaign is not None
+        else backend_type_of_dataset(stores, dataset_name)
+    )
 
     # One validated parse of the dataset's config files. The `or` ladders below fire only where
     # the authored file leaves a field empty. The optimizer LLM is install-global
@@ -291,7 +306,7 @@ def draft_from_dataset(
             "pipeline_steps": authored.active_steps,
             # Reuse re-probes rather than inheriting: the committed dataset carries only the
             # overlay, and the service may have moved since it was written.
-            "backend_nodes": dict(backend_nodes or {}),
+            "backend_nodes": backend_nodes,
             # The origin HOLDS its candidate library — carry the committed value so
             # reopening surfaces the dependency as already FULFILLED (not Missing),
             # and a re-mint re-persists it through the one origin-write seam.
@@ -311,10 +326,30 @@ def draft_from_dataset(
     return keyed
 
 
+async def draft_from_origin(*, stores: Stores, origin_id: str) -> DraftCampaign:
+    """Open a campaign-backed origin as a prefilled check-in: the canonical campaign's dataset, under
+    what that campaign RAN. Marked ``reused_origin_id``, so starting it seeds C0 from the origin."""
+    campaign = canonical_origin_campaign(stores, origin_id)
+    if campaign is None:
+        raise NotFoundError(f"Origin '{origin_id}' not found", code="command_target_not_found")
+    overrides: dict[str, Any] = {"reused_origin_id": origin_id}
+    seed = stores.campaigns.read_cycle_seed(campaign.root_hop)
+    if seed is not None and seed.origin_prompt_fields:
+        overrides["origin_prompt_fields"] = dict(seed.origin_prompt_fields)
+    return await draft_from_dataset(
+        stores=stores,
+        dataset_dir=readable_dataset_dir(stores, campaign.dataset_name),
+        dataset_name=campaign.dataset_name,
+        overrides=overrides,
+        origin_campaign=campaign,
+    )
+
+
 __all__ = [
     "MAX_UPLOAD_BYTES",
     "SlugTakenError",
     "draft_from_dataset",
+    "draft_from_origin",
     "fetch_backend_nodes",
     "ingest_draft",
     "refresh_capabilities",

@@ -50,6 +50,7 @@ class ForkCyclePayload(CyclePayload):
     # lineage provenance the wire omits.
     seed: dict[str, Any]
     steered_by: str = Field(default="", max_length=256)
+    reason: str = Field(default="", max_length=512)
     keep_rounds: bool = Field(
         default=False,
         description=(
@@ -127,7 +128,7 @@ class ChangeRunLimitsPayload(CyclePayload):
 
 
 class StartRunPayload(CyclePayload, LaunchLimits):
-    kind: Literal["new", "resume"]
+    pass
 
 
 class StepCyclePayload(CyclePayload):
@@ -338,6 +339,13 @@ KIND_OF_PAYLOAD: dict[type[CommandPayload], str] = {
 }
 if len(KIND_OF_PAYLOAD) != len(PAYLOAD_MODEL_FOR_KIND):
     raise RuntimeError("two command kinds share one payload type; give each its own.")
+
+
+class DatasetReplaced(StrictModel):
+    """The ``replace-dataset`` response: the subject echoed, nothing more — the counts and the
+    versioned slug are on the migration's own record, and no caller reads them off the wire."""
+
+    slug: str = Field(description="The dataset name now free for new data.")
 
 
 class CommandAcceptedBody(StrictModel):

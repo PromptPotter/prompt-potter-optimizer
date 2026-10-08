@@ -11,12 +11,11 @@ from __future__ import annotations
 import contextvars
 import copy
 import functools
-import hashlib
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast, get_args
 
 from pydantic import Field
 
@@ -42,7 +41,7 @@ from promptpotter.domain.search_point import PARAM_SCOPE_KEYS, WHO_ANSWERS_KEYS
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.io import read_json, read_yaml
 from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
-from promptpotter.shared.hashing import shapes_optimizer_prompt
+from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
 from promptpotter.shared.plugin_registry import BUILT_IN
 
 if TYPE_CHECKING:
@@ -111,10 +110,6 @@ def _parse(document: Mapping[str, Any], schemas: Mapping[str, Any]) -> PipelineS
     return parse_pipeline_response({**document, "resolved_schemas": dict(schemas)})
 
 
-def _digest(value: object) -> str:
-    return hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()[:16]
-
-
 @dataclass(frozen=True)
 class SelectedOptimizer:
     """One campaign's optimizer. ``document`` is the manifest as authored; ``schema`` is it parsed
@@ -147,14 +142,14 @@ class SelectedOptimizer:
         """``Selector.stamps_theta``, read before a ``RoundPlan`` exists — round 0's origin
         document stamps it too."""
         walk = self.schema.pipelines["default"]
-        name = next(n for n in walk if self.node(n).wire_type is NodeKind.SELECTOR)
+        name = next(n for n in walk if self.node(n).kind is NodeKind.SELECTOR)
         return cast("Selector", optimizers.member(name)).stamps_theta
 
     @property
     def sampler(self) -> Sampler:
         """The member ``default`` draws each round's panel with."""
         walk = self.schema.pipelines["default"]
-        name = next(n for n in walk if self.node(n).wire_type is NodeKind.SAMPLER)
+        name = next(n for n in walk if self.node(n).kind is NodeKind.SAMPLER)
         return cast("Sampler", optimizers.member(name))
 
     def round_cells(self, pool: int) -> int:
@@ -179,10 +174,10 @@ class SelectedOptimizer:
         return dict(self.document["nodes"][name].get("config") or {})
 
     def knobs(self, name: str) -> StrictModel:
-        return _knobs(name, self.node(name).wire_type, self.node_config(name))
+        return _knobs(name, self.node(name).kind, self.node_config(name))
 
     def declared_knobs(self, name: str) -> StrictModel:
-        return _knobs(name, self.node(name).wire_type, self.file_config(name))
+        return _knobs(name, self.node(name).kind, self.file_config(name))
 
     @property
     def runtime(self) -> OptimizerRuntime:
@@ -191,6 +186,11 @@ class SelectedOptimizer:
     @property
     def pacing(self) -> OptimizerPacing:
         return self.runtime.pacing(self)
+
+    @property
+    def phases(self) -> frozenset[str]:
+        """The phases this optimizer brackets on the ledger beside the bench's own."""
+        return frozenset(p.phase for p in self.runtime.phases)
 
     def prompt_hashes(self) -> dict[str, str]:
         """Per llm node, what shapes the call it sends under the bound L4 edit. A round banks these,
@@ -203,16 +203,16 @@ class SelectedOptimizer:
     def member_nodes(self) -> tuple[str, ...]:
         """Every declared node an implementation answers, in declaration order."""
         table = optimizers.registered()
-        return tuple(n.name for n in self.schema.config_nodes if n.name in table)
+        return tuple(n.name for n in self.schema.declared_nodes if n.name in table)
 
     @property
     def llm_nodes(self) -> tuple[str, ...]:
-        return tuple(n.name for n in self.schema.config_nodes if n.wire_type is NodeKind.LLM)
+        return tuple(n.name for n in self.schema.declared_nodes if n.kind is NodeKind.LLM)
 
     @property
     def proposer(self) -> str:
         """The first llm node `default` walks — the node whose model is "the optimizer's model"."""
-        return next(n.name for n in self.schema.nodes if n.wire_type is NodeKind.LLM)
+        return next(n.name for n in self.schema.nodes if n.kind is NodeKind.LLM)
 
     def model(self, node: str | None = None) -> str:
         return str(self.node_config(node or self.proposer)["model"])
@@ -222,7 +222,7 @@ class SelectedOptimizer:
         body = _prompt_body(self.document, cfg)
         fields, renames = _resolved_prompt_parts(dict(declared))
         schema_key = _resolved_key(cfg.get("schema_family"), cfg.get("schema_version"))
-        return _digest(
+        return stable_hash(
             [
                 {**body, **fields} if body is not None and fields else body,
                 renames,
@@ -320,7 +320,7 @@ def _select(
             f"optimization.nodes names {unknown}, which optimizer {name!r} does not declare "
             f"(it has {sorted(declared)})."
         )
-    if taken := sorted(set(declared) & {n.name for n in checkin_manifest().schema.config_nodes}):
+    if taken := sorted(set(declared) & {n.name for n in checkin_manifest().schema.declared_nodes}):
         raise ValueError(f"optimizer {name!r} declares {taken}, which the bench's check-in owns.")
     overlaid = copy.deepcopy(dict(document))
     for node, config in overlay.items():
@@ -335,8 +335,8 @@ def _select(
         resolved_schemas=schemas,
     )
     # Every member's knobs validate NOW, so a bad overlay stops the run before it spends.
-    for declared_node in selected.schema.config_nodes:
-        if declared_node.wire_type in MEMBER_KINDS or declared_node.name in optimizers.registered():
+    for declared_node in selected.schema.declared_nodes:
+        if declared_node.kind in MEMBER_KINDS or declared_node.name in optimizers.registered():
             selected.knobs(declared_node.name)
     _refuse_unknown_llm_keys(selected)
     return selected
@@ -363,14 +363,17 @@ def select_optimizer(opt: OptimizationConfig) -> SelectedOptimizer:
     return resolve_optimizer(opt.optimizer, opt.nodes)
 
 
+KnobType = Literal["boolean", "integer", "number", "string", "array", "object"]
+
+_KNOB_TYPES: tuple[KnobType, ...] = get_args(KnobType)
+
+
 class KnobRow(StrictModel):
     """One knob of one optimizer node, as a settings surface offers it."""
 
     key: str = Field(description="The knob's name under `nodes.{node}.config`")
     description: str = Field(description="What the knob does — its field description")
-    type: str = Field(
-        description="JSON Schema type the value takes: boolean | integer | number | string | object"
-    )
+    type: KnobType = Field(description="JSON Schema type the value takes")
     options: list[str] | None = Field(
         description="The closed set a string knob takes, in declared order; null when open"
     )
@@ -403,6 +406,16 @@ class OptimizerKnobsResponse(StrictModel):
     nodes: list[NodeKnobs] = Field(description="Every node taking a knob, in declared order")
 
 
+def _knob_type(kind: Mapping[str, Any]) -> KnobType:
+    """The JSON Schema type a knob's model declares, as the closed set a settings surface picks a
+    widget by. One outside it is refused here, where it would otherwise draw no control."""
+    declared = kind.get("type") or ("object" if "properties" in kind else "string")
+    for known in _KNOB_TYPES:
+        if known == declared:
+            return known
+    raise ValueError(f"knob type {declared!r} is none of {', '.join(_KNOB_TYPES)}")
+
+
 def _knob_row(key: str, prop: Mapping[str, Any], defs: Mapping[str, Any], value: Any) -> KnobRow:
     options = [
         defs[ref["$ref"].rsplit("/", 1)[-1]] if "$ref" in ref else ref
@@ -414,7 +427,7 @@ def _knob_row(key: str, prop: Mapping[str, Any], defs: Mapping[str, Any], value:
     return KnobRow(
         key=key,
         description=str(prop.get("description") or ""),
-        type=str(kind.get("type") or ("object" if "properties" in kind else "string")),
+        type=_knob_type(kind),
         options=[str(v) for v in enum] if enum else None,
         nullable=nullable,
         minimum=kind.get("minimum"),
@@ -436,8 +449,7 @@ def optimizer_knobs(name: str) -> OptimizerKnobsResponse:
             for key, prop in (schema.get("properties") or {}).items()
         ]
         if rows:
-            wire_type = selected.node(node).wire_type
-            nodes.append(NodeKnobs(node=node, kind=str(wire_type), knobs=rows))
+            nodes.append(NodeKnobs(node=node, kind=str(selected.node(node).kind), knobs=rows))
     return OptimizerKnobsResponse(optimizer=selected.name, version=selected.version, nodes=nodes)
 
 

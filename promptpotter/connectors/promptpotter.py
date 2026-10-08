@@ -20,15 +20,15 @@ from promptpotter.domain.l4 import proxies
 from promptpotter.domain.l4.inner_origin import INNER_ORIGIN_KEY
 from promptpotter.domain.l4.proxies import INNER_RESULT_KEY, OUTER_PROXY_KEYS
 from promptpotter.domain.pipeline_overlay import node_config_items
-from promptpotter.domain.pipeline_schema import stable_hash
 from promptpotter.shared.errors import PayloadInvalidError
-from promptpotter.shared.hashing import module_source_digest
+from promptpotter.shared.hashing import module_source_digest, stable_hash
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
     from pathlib import Path
     from types import ModuleType
 
+    from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
@@ -118,14 +118,7 @@ def promptpotter_wire_adapter(
     inner-optimizer prompt node; a ``model`` key rides untouched and merges at the inner ``llm_call``."""
     payload: dict[str, Any] = {"query": query}
 
-    optimizer_prompt_overrides: dict[str, dict[str, Any]] = {}
-    for k, v in node_config_items(pipeline_params):
-        # The inner-origin fingerprint is identity config, not an override —
-        # the inner loop must never see it as a template field.
-        stripped = {fk: fv for fk, fv in v.items() if fk != INNER_ORIGIN_KEY}
-        if stripped:
-            optimizer_prompt_overrides[k] = stripped
-
+    optimizer_prompt_overrides = {k: dict(v) for k, v in node_config_items(pipeline_params) if v}
     if optimizer_prompt_overrides:
         payload["optimizer_prompt_overrides"] = optimizer_prompt_overrides
 
@@ -143,29 +136,26 @@ def _resolve_panel(panel: Mapping[str, Any]) -> dict[str, Any]:
     return InnerTasks.model_validate(panel).model_dump(mode="json", exclude_unset=True)
 
 
-def _extract_experiment(
-    experiment_data: dict[str, Any],
-) -> tuple[list[dict[str, Any]], list[str]]:
-    """Inner-benchmark tasks → ``(queries, index_terms)``. **There is no label to match in L4** —
-    the cell is graded by ``compute_outer_proxies``, so ``ground_truth`` is ``None`` and says so."""
-    queries = [
+def _extract_experiment(experiment_data: dict[str, Any]) -> list[dict[str, Any]]:
+    """Inner-benchmark tasks → rows. **There is no label to match in L4** — the cell is graded by
+    ``compute_outer_proxies``, so ``ground_truth`` is ``None`` and says so."""
+    return [
         {"query": t["id"], "ground_truth": None, "source_pin": dict(t)}
         for t in experiment_data["tasks"]
     ]
-    return queries, []
 
 
 async def _in_process_run(
-    _workload: InProcessWorkload, query: str, payload: dict[str, Any]
+    _workload: InProcessWorkload, sample: Sample, payload: dict[str, Any]
 ) -> dict[str, Any]:
     """Run an inner cycle and return its three proxy metrics."""
-    return await run_inner_cycle(query, payload)
+    return await run_inner_cycle(sample, payload)
 
 
-def _cell_envelope_s(query: str, pipeline_params: dict[str, Any] | None) -> float:
+def _cell_envelope_s(sample: Sample, pipeline_params: dict[str, Any] | None) -> float:
     """Through this connector's OWN adapter, so the envelope and the run that spends it read one
     payload — the cell's identity, and therefore its banked depth, is in the overrides."""
-    return inner_cell_envelope_s(query, promptpotter_wire_adapter(query, pipeline_params))
+    return inner_cell_envelope_s(sample, promptpotter_wire_adapter(sample.query, pipeline_params))
 
 
 CONNECTOR = Connector(

@@ -98,42 +98,11 @@ export const IconBolt = ({ size }: GlyphProps) => (
   </Icon>
 );
 
-export const IconSearch = ({ size }: GlyphProps) => (
-  <Icon size={size} strokeWidth={1.6}>
-    <circle cx="11" cy="11" r="7" />
-    <path d="m20 20-4.3-4.3" />
-  </Icon>
-);
-
-export const IconChecklist = ({ size }: GlyphProps) => (
-  <Icon size={size} strokeWidth={1.6}>
-    <path d="m4 7 2 2 4-4" />
-    <path d="m4 14 2 2 4-4" />
-    <path d="M13 8h8" />
-    <path d="M13 15h8" />
-  </Icon>
-);
-
 export const IconDatabase = ({ size }: GlyphProps) => (
   <Icon size={size} strokeWidth={1.6}>
     <ellipse cx="12" cy="5" rx="8" ry="3" />
     <path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5" />
     <path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6" />
-  </Icon>
-);
-
-export const IconArrowToBase = ({ size }: GlyphProps) => (
-  <Icon size={size} strokeWidth={1.6}>
-    <path d="M12 3v12" />
-    <path d="m6 9 6 6 6-6" />
-    <path d="M5 21h14" />
-  </Icon>
-);
-
-export const IconTrendUp = ({ size }: GlyphProps) => (
-  <Icon size={size} strokeWidth={1.6}>
-    <polyline points="3 17 9 11 13 15 21 7" />
-    <path d="M14 7h7v7" />
   </Icon>
 );
 

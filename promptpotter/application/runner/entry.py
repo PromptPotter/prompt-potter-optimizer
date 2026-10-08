@@ -8,12 +8,11 @@ import logging
 from dataclasses import dataclass, replace
 from functools import partial
 from pathlib import Path
-from typing import Any
 
 from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.bench.resume_and_fork.fork_siblings import (
-    _mint_fork,
     cleanup_stub_fork_if_empty,
+    mint_fork,
 )
 from promptpotter.application.campaign_config import (
     CampaignConfig,
@@ -79,13 +78,20 @@ from promptpotter.domain.pipeline_overlay import (
 from promptpotter.domain.results import CycleResult, RoundResult, round_clocks
 from promptpotter.domain.ruler import AbilityReading
 from promptpotter.domain.run_records import (
+    CycleFinal,
     CycleSeed,
     ErrorRecord,
     ForkSpec,
     RebaseRequest,
 )
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.spend import BudgetChange, CeilingMeter, SpendCeilings, SpendRollup
+from promptpotter.domain.spend import (
+    BudgetChange,
+    CeilingMeter,
+    SpendCeilings,
+    SpendRollup,
+    declare_ceiling,
+)
 from promptpotter.infrastructure.llm.pricing import refresh_rates_in_background
 from promptpotter.infrastructure.llm.rate_limit import get_abort_check, set_abort_check
 from promptpotter.infrastructure.llm.spend_book import SpendBook
@@ -134,8 +140,7 @@ def _build_budget_gate(
     observers: RunObservers,
     cycle_dir: Path,
     *,
-    usd_cap: float | None,
-    token_cap: int | None,
+    declared: SpendCeilings,
     meters: CeilingMeter,
     reserve: SpendCeilings,
 ) -> BudgetGate:
@@ -148,28 +153,20 @@ def _build_budget_gate(
     dashboard = observers.dashboard
     spent = dashboard.spend_metered(meters)
 
-    def _usd_cap() -> float | None:
-        saved = read_run_limits_mirror(cycle_dir).usd
-        return saved if saved is not None else usd_cap
+    # The mirror carries only the arms moved since launch, so each reading is the launch's own
+    # with those laid over it — one layering, the one admission composed the ceiling with.
+    def _ceiling() -> SpendCeilings:
+        return declare_ceiling(declared, read_run_limits_mirror(cycle_dir).ceiling)
 
-    def _token_cap() -> int | None:
-        saved = read_run_limits_mirror(cycle_dir).tokens
-        return saved if saved is not None else token_cap
-
-    def _usd_reserve() -> float | None:
-        moved = read_reserve_mirror(cycle_dir).usd
-        return moved if moved is not None else reserve.usd
-
-    def _token_reserve() -> int | None:
-        moved = read_reserve_mirror(cycle_dir).tokens
-        return moved if moved is not None else reserve.tokens
+    def _reserve() -> SpendCeilings:
+        return declare_ceiling(reserve, read_reserve_mirror(cycle_dir))
 
     # Seeded from the rollup the resume folded, then fed by the ledger itself.
     book = SpendBook(
-        usd_cap=_usd_cap,
-        tokens_cap=_token_cap,
-        usd_reserve=_usd_reserve,
-        tokens_reserve=_token_reserve,
+        usd_cap=lambda: _ceiling().usd,
+        tokens_cap=lambda: _ceiling().tokens,
+        usd_reserve=lambda: _reserve().usd,
+        tokens_reserve=lambda: _reserve().tokens,
         meters=meters,
         usd_spent=spent.usd,
         tokens_spent=spent.tokens,
@@ -198,8 +195,10 @@ def _arm_run_controls(
     gate = _build_budget_gate(
         observers,
         cycle_dir,
-        usd_cap=campaign_config.optimization.spend_budget_usd,
-        token_cap=campaign_config.optimization.token_budget,
+        declared=SpendCeilings(
+            campaign_config.optimization.spend_budget_usd,
+            campaign_config.optimization.token_budget,
+        ),
         meters=ceiling_meter(session.arm),
         reserve=session.reserve,
     )
@@ -379,7 +378,6 @@ async def _prepare_run(
         seed=seed,
         listener=cb,
     )
-    observers.readout.set_origin(origin.report.accuracy)
     if origin.locked_scoring is not None:
         campaign_config = campaign_config.model_copy(update={"scoring": origin.locked_scoring})
 
@@ -441,8 +439,7 @@ def _build_cycle_result(
         origin_level_se=origin_lv[1] if origin_lv is not None else None,
         round_levels=[t for t, _ in levels],
         round_level_ses=[se for _, se in levels],
-        # An unlimited `max_rounds` declares no budget, which is what this field's 0 means.
-        round_budget=(cycle.config.optimization.max_rounds or 0) if cycle is not None else 0,
+        round_budget=cycle.config.optimization.max_rounds if cycle is not None else None,
         result_prompt_fields=picked_sp.prompt_fields if picked_sp else {},
         result_pipeline_params=picked_sp.pipeline_params if picked_sp else None,
         stop_reason=stop_reason,
@@ -522,7 +519,7 @@ def _close_cycle(
             session.hop,
             started_at=started_at,
             finished_at=finished_at,
-            optimizer_phases=frozenset(p.phase for p in bound_optimizer().runtime.phases),
+            optimizer_phases=bound_optimizer().phases,
             bench=banked,
         )
     cycle_result = _build_cycle_result(
@@ -579,6 +576,10 @@ async def _run_single_cycle(
     cb = observers.callbacks
     pre_loop_cycle_id = session.state.cycle_id
 
+    def forked_from() -> str | None:
+        """The cycle this run forked off, once run init has minted a fork under it."""
+        return pre_loop_cycle_id if pre_loop_cycle_id != session.state.cycle_id else None
+
     cycle: Cycle | None = None
     cancel_exc: asyncio.CancelledError | None = None
     budget_gate: BudgetGate | None = None
@@ -602,23 +603,13 @@ async def _run_single_cycle(
         )
 
         # Fork-on-divergence: rebuild observers around the fork's own ledger.
-        forked = (
-            pre_loop_cycle_id
-            and session.state.cycle_id
-            and pre_loop_cycle_id != session.state.cycle_id
-        )
-        if forked and pre_loop_cycle_id:
-            # Carry phase_ctx across the rebuild: INIT.enter fired on the parent callbacks and
-            # will not re-fire, so without it RoundStartView reads zeros on every forked round.
-            parent_phase_ctx = observers.callbacks._phase_ctx
+        if forked_from():
             observers = build_run_observers(
                 session=session,
                 campaign_config=campaign_config,
                 resumed_from_round=session.state.resumed_from_round,
-                origin_accuracy=origin.report.accuracy,
-                fork_readout=observers.readout,
+                forked_from=observers,
             )
-            observers.callbacks._phase_ctx = parent_phase_ctx
             cb = observers.callbacks
 
         # The gate probes go through the dashboard, which already owns the spend rollup, rather
@@ -637,7 +628,7 @@ async def _run_single_cycle(
                     demo=session.scoring.require_partition().demo,
                 ),
                 started_at=started_at,
-                optimizer_phases=frozenset(p.phase for p in bound_optimizer().runtime.phases),
+                optimizer_phases=bound_optimizer().phases,
                 spend=observers.dashboard.state.spend,
                 cb=cb,
             )
@@ -701,14 +692,11 @@ async def _run_single_cycle(
     )
     # A fork that never completed a round leaves an empty dir. Ahead of the re-raise below,
     # because a cancellation is one of the interrupts that produces one.
-    forked_in_this_run = (
-        pre_loop_cycle_id and session.state.cycle_id and pre_loop_cycle_id != session.state.cycle_id
-    )
-    if forked_in_this_run and cycle_result.n_rounds_after_origin == 0:
+    if (parent_cycle_id := forked_from()) and cycle_result.n_rounds_after_origin == 0:
         cleanup_stub_fork_if_empty(
             campaign_store=session.store.campaigns,
             hop=session.hop,
-            parent_cycle_id=pre_loop_cycle_id,
+            parent_cycle_id=parent_cycle_id,
         )
 
     if cancel_exc is not None:
@@ -736,7 +724,7 @@ def _mint_and_rebase_fork(
         # No `origin_prompt_fields`: a rebase replays its origin from the parent's round, so it
         # has no C0 provenance to stamp.
         seed = CycleSeed(config_overrides=rebase_req.config_overrides)
-    new_cycle_id = _mint_fork(
+    new_cycle_id = mint_fork(
         campaign_store=session.store.campaigns,
         parent=CycleHop(campaign_id=session.campaign_id, cycle_id=parent_cycle_id),
         session_id=session.session_id or "",
@@ -750,15 +738,12 @@ def _mint_and_rebase_fork(
     )
     session.state.cycle_id = new_cycle_id
     session.state.resumed_from_round = rebase_req.fork_from_round
-    parent_phase_ctx = observers.callbacks._phase_ctx
     observers = build_run_observers(
         session=session,
         campaign_config=prep.campaign_config,
         resumed_from_round=rebase_req.fork_from_round,
-        origin_accuracy=prep.origin.report.accuracy,
-        fork_readout=observers.readout,
+        forked_from=observers,
     )
-    observers.callbacks._phase_ctx = parent_phase_ctx
     logger.info(
         "Auto-rebase #%d/%d: %s → %s at round %d [trigger=%s, reason=%s]",
         rebase_count,
@@ -938,57 +923,41 @@ def _finalize_run(
         # the formatted traceback before returning.
         crash_traceback = session.state.crash_traceback if has_traceback else None
 
-        rounds = cycle_result.rounds
-        round_formula = resolve_cell_formula(
-            session.scoring.scorer_cell_formula, session.pipeline_schema
-        )[0]
-        # The run's own two endpoints, which `output.py::from_disk_log` reads off THIS block to
-        # build the digest's status view — the campaign index carries no other copy of `started_at`.
-        wall_clock = scan_ledger_wall_clock(
-            [CycleLayout(session.store.campaigns.cycle_dir(session.hop)).ledger],
-            started_at=cycle_result.started_at,
-            finished_at=cycle_result.finished_at,
-            optimizer_phases=frozenset(
-                p.phase for p in select_optimizer(config.optimization).runtime.phases
-            ),
-        )
-        final_block: dict[str, Any] = {
-            "started_at": cycle_result.started_at,
-            "finished_at": cycle_result.finished_at,
-            # WHERE that span went, folded from the chronology and banked because the records it
-            # is read from are compactable and no round document carries a timestamp.
-            "wall_clock": wall_clock.model_dump(),
-            # Spread rather than re-spelled, so the served key IS the field a reader greps for —
-            # and every clock names its own question, because a bare round count on this block
-            # is what gets quoted as the result. Seconds are the `wall_clock.round_ended_s` entry
-            # under the same round number, never a second copy banked beside it.
-            **round_clocks(rounds, accuracy_ceiling=config.accuracy_ceiling)._asdict(),
-            "prompt_hashes": bound_optimizer().prompt_hashes(),
-            # On the origin's OWN samples — never `rounds[0].reference_composite`, which
-            # is round 1's winner's matched floor on a different sample basis.
-            "origin_composite_fitness": cycle_result.origin_composite_fitness,
-            # The formula EVERY number above was computed under, resolved by the same call the
-            # dashboard makes: one resolution, now four readers — the export names it too, since
-            # a fitness handed to another program without its formula is a number, not a result.
-            "scorer_cell_formula": round_formula,
-            # The grader every `objective` above was scored under.
-            "scorer_id": session.scoring.scorer_id,
-            "mode": "diag" if diag else "full",
-            # Basis: the pick the optimizer DECLARED (`Cycle.selection`), which may name a different
-            # round than the index's top-level `best_accuracy`/`best_round` — those read the rounds'
-            # shared cells, so no accuracy scalar is duplicated here.
-            "result_round": cycle_result.result_round,
-            "result_prompt_fields": cycle_result.result_prompt_fields,
-            "result_pipeline_params": cycle_result.result_pipeline_params,
-        }
         session.store.campaigns.mark_finished(
             session.hop,
             stop_reason=stop_reason,
             finished_at=cycle_result.finished_at,
             interrupted_round=interrupted_round,
             crash_traceback=crash_traceback,
-            final=final_block,
-            export=_export_artifact(session, cycle_result, cycle, formula=round_formula),
+            final=CycleFinal(
+                started_at=cycle_result.started_at,
+                wall_clock=scan_ledger_wall_clock(
+                    [CycleLayout(session.store.campaigns.cycle_dir(session.hop)).ledger],
+                    started_at=cycle_result.started_at,
+                    finished_at=cycle_result.finished_at,
+                    optimizer_phases=bound_optimizer().phases,
+                ),
+                **round_clocks(
+                    cycle_result.rounds, accuracy_ceiling=config.accuracy_ceiling
+                )._asdict(),
+                prompt_hashes=bound_optimizer().prompt_hashes(),
+                origin_composite_fitness=cycle_result.origin_composite_fitness,
+                scorer_id=session.scoring.scorer_id,
+                mode="diag" if diag else "full",
+                result_round=cycle_result.result_round,
+                result_prompt_fields=cycle_result.result_prompt_fields,
+                result_pipeline_params=cycle_result.result_pipeline_params,
+            ),
+            # The formula every exported number was computed under, resolved by the same call
+            # run init stamps the index with.
+            export=_export_artifact(
+                session,
+                cycle_result,
+                cycle,
+                formula=resolve_cell_formula(
+                    session.scoring.scorer_cell_formula, session.pipeline_schema
+                )[0],
+            ),
         )
         write_log_md(session, config)
         # Re-rendered once `final` is banked: the round-close render could not carry the bench
@@ -996,13 +965,10 @@ def _finalize_run(
         if cycle is not None:
             write_review_md(session, cycle)
     # Declared BEFORE the drain, so dashboard.json's stopped state is in place before the audit
-    # settles. `_halted_mid_round` threads `"interrupted": true` into a partial round file. The
-    # append reaches the projection through the same door every other fact does — it is a
-    # subscriber — so there is no second path to keep in step with this one.
+    # settles; the append reaches the projection as a subscriber, the door every other fact takes.
     if not is_paused:
         declare_run_phase(session, RunPhase.TERMINAL, stop_reason=stop_reason, spend=spend)
-    observers.audit._halted_mid_round = interrupted_round is not None
-    observers.drain_all()
+    observers.drain_all(interrupted=interrupted_round is not None)
 
     obs = session.state.obs
     langfuse_trace_id: str | None = None

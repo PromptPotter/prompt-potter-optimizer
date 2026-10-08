@@ -38,8 +38,8 @@ class ExplorationBudget(enum.StrEnum):
 
 @shapes_optimizer_prompt
 def exploration_budget(stall_count: int, l1_patience: int) -> ExplorationBudget:
-    """Widen the budget with MEASURED L1 stall depth, never a round-count schedule. Pure, and called by both the prompt side
-    and the validator side with the same stall depth, so the two consumers can never disagree on the mapping."""
+    """Widen the budget with MEASURED L1 stall depth, never a round-count schedule. Pure; the round banks the result and the
+    validators read the banked value."""
     if stall_count <= 0:
         return ExplorationBudget.TIGHT
     if stall_count >= l1_patience:
@@ -275,13 +275,14 @@ class EscalationFSM:
         stall_count: int,
         entry_comp: float | None,
         entry_theta: float | None,
-        current_comp: float,
+        current_comp: float | None,
         current_theta: float | None,
         current_theta_se: float | None,
     ) -> LayerReading:
-        """First-ask grace: a layer that has not fired has no entry reading and stalls on nothing.
+        """First-ask grace: a layer that has not fired has no entry reading and stalls on nothing —
+        nor does a cycle whose rounds read no cell, which has no peak to stall against.
         A cleared advance moves the ratchet, so steps too small to clear it singly accumulate."""
-        if entry_comp is None:
+        if entry_comp is None or current_comp is None:
             return LayerReading(stall_count, None, entry_theta, None)
         improved, comparator = self._improved(
             current_comp, entry_comp, current_theta, entry_theta, current_theta_se
@@ -293,7 +294,7 @@ class EscalationFSM:
     def ask_l2_escalation(
         self,
         *,
-        current_composite_fitness: float,
+        current_composite_fitness: float | None,
         current_theta: float | None = None,
         current_theta_se: float | None = None,
         escalation_ladder: EscalationLadder,
@@ -388,8 +389,8 @@ class EscalationFSM:
 
     @staticmethod
     def _landed(
-        reading: LayerReading, best_composite_fitness: float, best_theta: float | None
-    ) -> tuple[int, float, float | None]:
+        reading: LayerReading, best_composite_fitness: float | None, best_theta: float | None
+    ) -> tuple[int, float | None, float | None]:
         """Each scale's ratchet is seeded by the first reading it has, so a ruler that warms after
         the layer's first fire still gives it a θ to compare against."""
         comp = reading.best_composite_fitness_at_entry
@@ -404,7 +405,7 @@ class EscalationFSM:
         self,
         reading: LayerReading,
         *,
-        best_composite_fitness: float,
+        best_composite_fitness: float | None,
         best_theta: float | None = None,
     ) -> None:
         self._l1_stall_count = 0
@@ -419,7 +420,7 @@ class EscalationFSM:
         self,
         reading: LayerReading | None,
         *,
-        best_composite_fitness: float,
+        best_composite_fitness: float | None,
         best_theta: float | None = None,
     ) -> None:
         """A new plan invalidates L2's progress, so L2's counters clear. ``None`` is a heal: it

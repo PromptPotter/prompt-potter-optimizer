@@ -154,7 +154,10 @@ class IdentityContext:
     user_id: UserId                  # NewType[str]; stable per (issuer, subject)
     tenant_id: TenantId              # NewType[str]; storage scope
     issuer: Issuer | None            # NewType[str]; None in Stage-0 auth-off
-    claims: Mapping[str, object]     # raw verified ID-Token claims; empty in Stage-0
+    email: str | None                # the sign-in the seam resolved; None in Stage-0
+    provider: str | None
+    access_state: AccessState        # "active" | "blocked"; active in Stage-0
+    claims: Mapping[str, object]     # what only a delegated principal carries; empty in Stage-0
     capabilities: frozenset[str]     # flat capability set; RBAC rides Stage 2
 ```
 

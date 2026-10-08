@@ -14,8 +14,9 @@ from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.io import read_json_optional, validate_path_component
 from promptpotter.infrastructure.store.layout import (
     CycleLayout,
+    cycle_dir_for,
     inner_sandboxes_dir,
-    sandbox_owner_path,
+    read_sandbox_owner,
     tenant_workspace,
 )
 from promptpotter.shared.clock import SUSPEND_GRACE_S, sleep_measuring_suspend
@@ -42,20 +43,20 @@ def _store_for(cycle_dir: Path) -> CampaignStore:
 
 
 def reap_cycle_by_id(projects_root: Path, hop: CycleHop) -> bool:
-    """Stamp a single dead cycle terminal, resolving its dir across tenants. Judges no liveness —
-    the registry has already proven the task gone. Idempotent, ``False`` on a missing cycle."""
+    """Stamp a single dead cycle terminal, resolving its dir across tenants and inner sandboxes.
+    Judges no liveness — the registry has already proven the producer gone."""
     try:
         validate_path_component(hop.campaign_id)
         validate_path_component(hop.cycle_id)
     except ValueError:
         return False
-    matches = list(
-        projects_root.glob(f"*/campaigns/{hop.campaign_id}/cycles/{hop.cycle_id}/index.json")
+    pattern = f"*/campaigns/{hop.campaign_id}/cycles/{hop.cycle_id}/index.json"
+    index_path = next(
+        (path for root in _sweep_roots(projects_root) for path in root.glob(pattern)), None
     )
-    if not matches:
+    if index_path is None:
         return False
-    cycle_dir = matches[0].parent
-    stamped = _store_for(cycle_dir).mark_producer_vanished(hop)
+    stamped = _store_for(index_path.parent).mark_producer_vanished(hop)
     if stamped:
         logger.info("reaped cycle %s/%s (producer_vanished)", hop.campaign_id, hop.cycle_id)
     return stamped
@@ -95,31 +96,19 @@ def reclaim_orphan_sandboxes(projects_root: Path) -> int:
         # The owner names itself in the sandbox's own `owner.json` — never glob by directory
         # name. That name is the content-addressed cycle_id, so any campaign in any tenant
         # that ran the same origin would answer "owner exists".
-        owner = read_json_optional(sandbox_owner_path(sandbox))
-        if not isinstance(owner, dict):
-            # No owner record and no way to derive one from a hashed name. Not provably an
-            # orphan, so it is KEPT — this function deletes on a fact, never on a guess.
+        owner = read_sandbox_owner(sandbox)
+        if owner is None:
+            # No usable owner record: not provably an orphan and nameable to no workspace to bank
+            # INTO, so it is KEPT — this function deletes on a fact, never on a guess.
             continue
-        cycle_index = (
-            projects_root
-            / str(owner.get("tenant_id", ""))
-            / "campaigns"
-            / str(owner.get("campaign_id", ""))
-            / "cycles"
-            / str(owner.get("cycle_id", ""))
-            / "index.json"
+        workspace = tenant_workspace(projects_root, owner.tenant_id)
+        owner_cycle = cycle_dir_for(
+            workspace, CycleHop(campaign_id=owner.campaign_id, cycle_id=owner.cycle_id)
         )
-        if cycle_index.is_file():
+        if CycleLayout(owner_cycle).manifest.is_file():
             continue
         try:
-            store = CampaignStore(tenant_workspace(projects_root, str(owner.get("tenant_id", ""))))
-        except ValueError as exc:
-            # An owner triple that will not validate cannot name a workspace to bank INTO, and
-            # this function deletes on a fact: the sandbox is kept, money and all.
-            logger.warning("orphan inner sandbox %s names an unusable owner: %s", sandbox, exc)
-            continue
-        try:
-            store.delete_inner_sandbox(sandbox, campaign_id=str(owner.get("campaign_id", "")))
+            CampaignStore(workspace).delete_inner_sandbox(sandbox, campaign_id=owner.campaign_id)
         except OSError as exc:
             # Reported, never swallowed: an unreclaimable sandbox is the exact silence
             # this function exists to end.

@@ -113,7 +113,7 @@ class PipelineData(LedgerPipelineData, total=False):
     ``InjectionBundle.trajectory_results``, never a ledger record."""
 
     # The pipeline's result ranking — the terminal ranker's output, derived at
-    # measurement time (``terminal_ranking``). The scorer + ``find_gt_rank`` read this.
+    # measurement time (``terminal_ranking``). The scorer reads this.
     result_ranking: list[dict[str, Any]]
     # Raw per-node ranker outputs, copied from the wire response for per-node
     # diagnostics (retriever recall vs ranker precision). One of these is the source
@@ -192,8 +192,8 @@ class QueryMeasurement(TypedDict):
     pipeline_data: PipelineData | None
     # ---- Stamped after measurement, by the scorer and the walk -------------------
     # Where the ground truth landed in the terminal ranking, and how many candidates it
-    # ranked against — computed once at scoring time (``find_gt_rank``); the MISS tag reads
-    # the pair and must never re-derive it.
+    # ranked against — computed once at measure time (``rank_ground_truth``); every reader
+    # takes the pair and none re-derives it.
     ground_truth_rank: NotRequired[int | None]
     n_candidates: NotRequired[int]
     # The candidate's composite over samples-so-far, attached for the ledger path only
@@ -274,7 +274,7 @@ UNREAD_PIPELINE_KEYS: frozenset[str] = frozenset(
 
 ``reasoning_trace`` reaches only the three L1 transcript panels, and only for rows live in the
 current cycle; ``total_time`` is zeroed on replay anyway. ``turns`` joins them because a judge
-grades it at MEASURE time and every judge evaluator is ``from_rows=False``, so no re-grade ever
+grades it at MEASURE time and banks its verdict on the row, so no re-grade ever
 reaches back for the conversation — and it is the largest thing such a cell carries.
 ``step_phases`` joins them for the reason it exists: it is sub-node structure beside the per-node
 attribution the cost term actually reads, so nothing in the loop consults it and moving it costs

@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import traceback
 from collections.abc import Awaitable, Callable
 from typing import Any, NoReturn
 
@@ -27,13 +28,22 @@ from promptpotter.application.jobs.registry import (
 )
 from promptpotter.application.runner.termination import run_stop_reason
 from promptpotter.config.settings import settings
-from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.connector import BackendUnreachableError
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.launch_limits import HeldLimits, LaunchLimits
-from promptpotter.domain.phases import StopOutcome, StopReason, stop_reason_outcome
+from promptpotter.domain.phases import (
+    STOP_REASON_INFO,
+    StopOutcome,
+    StopReason,
+    stop_reason_outcome,
+)
+from promptpotter.infrastructure.projections.live_dashboard.projection import (
+    LiveDashboardProjection,
+)
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.infrastructure.store.user_store import User
+from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ConflictError, MachineBusyError
-from promptpotter.shared.identity import claim_email
 
 logger = logging.getLogger(__name__)
 
@@ -70,23 +80,50 @@ def launch_interrupted(exc: BaseException) -> bool:
 
 
 def release_slot(
-    job_registry: JobRegistry, job_id: str, exc: BaseException, *, admitted: bool = True
+    job_registry: JobRegistry,
+    job_id: str,
+    exc: BaseException,
+    *,
+    stores: Stores,
+    hop: CycleHop | None,
+    session_id: str = "",
+    admitted: bool = True,
 ) -> None:
-    """Hand the machine slot back so a failed launch never wedges the box at capacity. EVERY launch
-    failure answers for the job; only one that already bound the cycle answers for the cycle too.
-
-    A launch that never got past ADMISSION is ``stopped``, not ``failed`` — the account's ceiling, a
-    dark backend and a busy machine each REFUSE it before anything runs or spends."""
+    """The ONE path a failed launch leaves by: the machine slot handed back, the cycle *hop* names
+    stamped — ``stopped``, not ``failed``, where ADMISSION refused it. Called inside the ``except``."""
     if admitted or launch_interrupted(exc):
         stop_reason = run_stop_reason(exc)
     else:
         stop_reason = StopReason.NOT_ADMITTED
     job_registry.mark_finished(job_id, status=job_status_for(stop_reason), stop_reason=stop_reason)
+    if hop is None:
+        return
+    info = STOP_REASON_INFO[stop_reason]
+    # Best-effort — it must never mask *exc*.
+    try:
+        LiveDashboardProjection.write_launch_stop(
+            CycleDir(stores.campaigns.cycle_dir(hop)),
+            hop=hop,
+            session_id=session_id,
+            exc=exc,
+            stop_reason=stop_reason,
+        )
+        # A crash gets ``finished_at``; an interrupt gets the paused declaration above and none,
+        # since a ``finished_at`` unresumes a pause.
+        if info.outcome is not StopOutcome.PAUSED:
+            stores.campaigns.mark_finished(
+                hop,
+                stop_reason=stop_reason,
+                finished_at=utcnow_iso(),
+                crash_traceback=traceback.format_exc() if info.has_traceback else None,
+            )
+    except Exception:
+        logger.exception("failed to record launch stop for %s/%s", hop.campaign_id, hop.cycle_id)
 
 
 async def probe_backend(backend_type: str, backend_url: str) -> None:
     """Resolve the connector and run its reachability probe. A connector opts out by leaving
-    ``Connector.preflight = None``; a raised ``BackendUnreachableError`` becomes a 503.
+    ``Connector.preflight = None``; the ``BackendUnreachableError`` raised here becomes a 503.
 
     **Every launch ingress asks the CONNECTOR, never a bare wire probe.** An `in_process`
     connector has no wire, so a bare probe refuses a campaign over a backend it never touches —
@@ -101,14 +138,15 @@ async def probe_backend(backend_type: str, backend_url: str) -> None:
     connector = connectors.get(backend_type)
     if connector.preflight is None:
         return
-    await connector.preflight(backend_url)
+    if (down := await connector.preflight(backend_url)) is not None:
+        raise BackendUnreachableError(connector.name, backend_url, down)
 
 
 def _user_of(stores: Stores) -> User:
     return stores.users.get_or_create(
         user_id=str(stores.identity.user_id),
         tenant_id=str(stores.identity.tenant_id),
-        email=claim_email(stores.identity),
+        email=stores.identity.email,
     )
 
 
@@ -286,7 +324,7 @@ async def admit_and_hold(
         job_registry.set_caps(job.job_id, cap_usd=reserve.usd, cap_tokens=reserve.tokens)
         t_caps = time.perf_counter()
     except BaseException as exc:
-        release_slot(job_registry, job.job_id, exc, admitted=False)
+        release_slot(job_registry, job.job_id, exc, stores=stores, hop=None, admitted=False)
         raise
 
     # Pre-202 phase timing — the operator waits on the synchronous part of a launch, so where it

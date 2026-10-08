@@ -78,7 +78,9 @@ invariants:
                       wedged process reads "running" forever. Freshness proves ATTACHMENT,
                       never PROGRESS. The ray head derives `wedged` from the other input —
                       progress = a non-heartbeat ledger append — gated on the server still
-                      saying `running`, and it is a DISPLAY state: nothing writes it, it is not
+                      saying `running`, over the windows runtime_flags.py owns (WEDGED_AFTER_S,
+                      RECENT_STEP_S; generated into the browser, never hand-copied), and it is a
+                      DISPLAY state: nothing writes it, it is not
                       a RunPhase member, and it must not become one. `gate` is excluded from
                       the test, because the origin gate legitimately heartbeats with zero
                       progress until a human decides, and it already has a state that says so.

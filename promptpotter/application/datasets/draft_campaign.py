@@ -421,7 +421,6 @@ def default_campaign_config(draft: DraftCampaign) -> CampaignConfig:
         {
             "dataset_name": draft.slug,
             "scoring": draft_scoring_block(draft),
-            "exclude_nodes": list(connector.default_exclude_nodes),
             "optimization": optimization,
         }
     )

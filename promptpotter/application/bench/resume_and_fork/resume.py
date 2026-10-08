@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.bench.resume_and_fork.fork_siblings import (
     ForkResult,
-    _mint_fork,
+    mint_fork,
 )
 from promptpotter.application.bench.resume_and_fork.repair import apply_correction
 from promptpotter.application.bench.resume_and_fork.replayers import (
@@ -77,17 +77,10 @@ def _optimizer_mismatches(
     prior: list[RoundResult], selected: SelectedOptimizer
 ) -> dict[int, ReplayMismatch]:
     """Rounds produced by a DIFFERENT optimizer than the one loaded now. Asked PER ROUND so an edit
-    forks from where it bites; an unstamped round is REPORTED, never guessed."""
+    forks from where it bites."""
 
     current = selected.prompt_hashes()
     out: dict[int, ReplayMismatch] = {}
-    unstamped = [t.round for t in prior if not t.optimizer_state.prompt_hashes]
-    if unstamped:
-        logger.warning(
-            "Round(s) %s carry no optimizer stamp, so whether they ran under the optimizer "
-            "loaded now cannot be asked — they are neither confirmed nor diverged.",
-            ", ".join(str(r) for r in unstamped),
-        )
     for t in prior:
         recorded = t.optimizer_state.prompt_hashes
         moved = sorted(n for n, h in recorded.items() if current.get(n) != h)
@@ -123,23 +116,18 @@ async def resume_with_divergence_check(
     """Rescore prior rounds under the active scorer; halt or fork on divergence. Short-circuits on a
     ``NONE`` / ``POLICY_ONLY`` config diff — the parent's data trace is fully valid."""
     sc = session.scoring
-    scorer = sc.scorer
-    assert scorer is not None, "session.scoring.scorer required for divergence replay"
+    scorer = sc.require_scorer()
     prior = campaign_store.load_rounds_range(hop, 0, resumed_from_round - 1)
 
-    def _rescore(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        out: list[dict[str, Any]] = list(items or [])
-        rescore_results(out, scorer)
-        return out
-
+    # In place: each row is restamped where it sits.
     for t in prior:
-        _rescore(t.results)
+        rescore_results(t.results, scorer)
         for items in t.all_candidate_results.values():
-            _rescore(items)
+            rescore_results(items, scorer)
 
     # For the CYCLE's own state, never as a comparison anchor: the PoBB prior seed and the
     # trajectory pool read these rows, and each election's anchor rides its own decision record.
-    _rescore(cycle.tracking.current_results)
+    rescore_results(cycle.tracking.current_results, scorer)
 
     # Fingerprinted BEFORE any repair, from ONE cycle, so both sets differ by exactly what the
     # repair changed. Deep copies because the repair mutates `prior` in place. No pre-replay:
@@ -208,7 +196,7 @@ async def resume_with_divergence_check(
                         ),
                     },
                 )
-            new_cycle_id = _mint_fork(
+            new_cycle_id = mint_fork(
                 campaign_store,
                 hop,
                 session.session_id,

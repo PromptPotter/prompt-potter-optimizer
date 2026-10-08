@@ -8,15 +8,7 @@ import logging
 from pathlib import Path
 from typing import Any, cast, get_args
 
-from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.projection_envelope import ProjectionEnvelope, ProjectionKind
-from promptpotter.infrastructure.projections.live_dashboard.state import (
-    overlay_criterion_dials,
-    overlay_verify,
-    warming_payload,
-)
-from promptpotter.infrastructure.runtime_flags import derive_run_phase, overlay_armed_controls
-from promptpotter.infrastructure.store.io import read_json_optional
 from promptpotter.infrastructure.store.layout import CycleLayout
 
 logger = logging.getLogger(__name__)
@@ -30,29 +22,26 @@ class CycleLedgerTail:
     """Incremental reader over one cycle's ledger, tracking a byte position alongside the line index it stamps as
     ``sequence``. The reads are synchronous file I/O — callers on an event loop use ``asyncio.to_thread``."""
 
-    def __init__(self, cycle_dir: Path, hop: CycleHop) -> None:
-        self._layout = CycleLayout(cycle_dir)
-        self._hop = hop
-        self._cycle_id = hop.cycle_id
-        self._ledger_path = self._layout.ledger
+    def __init__(self, cycle_dir: Path, cycle_id: str) -> None:
+        self._cycle_id = cycle_id
+        self._ledger_path = CycleLayout(cycle_dir).ledger
         self._byte_pos = 0
         self._line_index = 0
 
-    def snapshot_frame(self) -> ProjectionEnvelope:
-        """The leading frame: the cycle's dashboard (or a warming shape) plus where the tail picks up.
+    def snapshot_frame(self, body: dict[str, Any]) -> ProjectionEnvelope:
+        """The leading frame: *body* — the cycle's served dashboard, the same read the poll route
+        returns — plus where the tail picks up.
 
         It picks up one PAST the offset the dashboard is a fold OF (``at_offset``), not at
         end-of-file. The dashboard write is debounced, so records can land between the fold and the
         file's mtime; parked at EOF, the client would never receive those. A warming shape carries
         no ``at_offset`` and parks at EOF."""
-        body = self._read_dashboard()
         folded = body.get("at_offset")
         offset = (
             self._seek_to_line(folded + 1)
             if isinstance(folded, int) and not isinstance(folded, bool) and folded >= -1
             else self._seek_to_eof()
         )
-        body["snapshot_at_offset"] = offset
         return ProjectionEnvelope(
             kind="stream_snapshot",
             cycle_id=self._cycle_id,
@@ -84,31 +73,6 @@ class CycleLedgerTail:
 
     # ---- internals ----
 
-    def _read_dashboard(self) -> dict[str, Any]:
-        """The snapshot body, with ``run_phase`` DERIVED and the armed controls RE-READ rather than
-        served as stored — the same single authority the dashboard route serves, so the first chat
-        frame and the first poll cannot disagree about whether the run is alive or about which
-        ceiling and look-ahead depth are in force."""
-        dashboard = self._layout.dashboard
-        body: Any = None
-        reason = ""
-        try:
-            body = read_json_optional(dashboard)
-        except json.JSONDecodeError:
-            logger.warning("dashboard.json malformed at %s; warming_up snapshot", dashboard)
-            reason = "dashboard_unreadable"
-        run_phase = str(derive_run_phase(self._layout.cycle_dir))
-        if isinstance(body, dict):
-            body["run_phase"] = run_phase
-            overlay_armed_controls(body, self._layout.cycle_dir)
-            overlay_criterion_dials(body)
-            overlay_verify(body, self._layout.cycle_dir)
-            return body
-        warming = warming_payload(self._hop, run_phase=run_phase)
-        if reason:
-            warming["reason"] = reason
-        return warming
-
     def _seek_to_line(self, line: int) -> int:
         """Park the cursor so the next read STARTS at ``line``; returns where it parked, clamped to
         end-of-file. Counts bytes rather than trusting the number: a dashboard can name an offset
@@ -131,7 +95,7 @@ class CycleLedgerTail:
 
     def _seek_to_eof(self) -> int:
         """Count complete lines and park the byte cursor after the last one.
-        Returns the line count (= ``snapshot_at_offset`` = where the tail begins)."""
+        Returns the line count (= the snapshot's ``sequence`` = where the tail begins)."""
         if not self._ledger_path.exists():
             self._byte_pos = 0
             self._line_index = 0

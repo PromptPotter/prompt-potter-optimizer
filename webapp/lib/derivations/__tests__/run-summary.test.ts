@@ -89,7 +89,6 @@ describe("runSummary", () => {
   it("reports the last closed round's verdict, skipping an empty one", () => {
     expect(runSummary(finished)?.lastRound).toEqual({
       round: 2,
-      candidates: 2,
       improved: null,
       verdictReason: null,
       facts: [],
@@ -116,7 +115,6 @@ describe("runSummary", () => {
     );
     expect(lost?.lastRound).toEqual({
       round: 1,
-      candidates: 2,
       improved: false,
       verdictReason: null,
       facts: [],

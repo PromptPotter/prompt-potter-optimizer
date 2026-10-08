@@ -22,9 +22,9 @@ from promptpotter.domain.phases import (
 )
 from promptpotter.domain.results import (
     DisplayMetric,
+    SharedCellPoint,
     best_round_on_shared_cells,
     candidate_label,
-    overlap_row,
 )
 from promptpotter.domain.results_health import is_degraded
 from promptpotter.domain.ruler import AbilityReading
@@ -48,11 +48,7 @@ from promptpotter.domain.scoring import (
 )
 from promptpotter.domain.spend import CeilingMeter, MeteredSpend, SpendRollup
 from promptpotter.infrastructure.ledger import CycleEventLog, open_with_history
-from promptpotter.infrastructure.projections.audit_trail import (
-    audit_rounds_dir,
-    build_node_block,
-    read_most_recent_round_nodes,
-)
+from promptpotter.infrastructure.projections.audit_trail import build_node_block
 from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.projections.live_dashboard.blocks import (
     build_candidate_rows,
@@ -74,12 +70,6 @@ from promptpotter.infrastructure.projections.live_dashboard.state import (
     LoopWarning,
     RunLimits,
 )
-from promptpotter.infrastructure.projections.live_state import (
-    LiveStateCore,
-    apply_phase,
-    apply_race_standing,
-    roll_p_best_at_round_complete,
-)
 from promptpotter.infrastructure.runtime_flags import (
     armed_run_limits,
     effective_lookahead,
@@ -98,7 +88,7 @@ from promptpotter.shared.errors import is_error_result
 from promptpotter.shared.instrument import NO_ROUND_SLOT
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Mapping
 
     from promptpotter.domain.connector import MeasuredUnit
     from promptpotter.domain.results import RoundResult
@@ -143,7 +133,6 @@ class LiveDashboardProjection(Projection):
         display_metric: DisplayMetric,
         langfuse_trace_url: str | None = None,
         resume_from: LiveDashboardState | None = None,
-        initial_llm_nodes: dict[str, dict[str, Any]] | None = None,
     ) -> None:
         cycle_path = Path(cycle_dir)
         self.cycle_dir = cycle_path
@@ -181,8 +170,11 @@ class LiveDashboardProjection(Projection):
         self._waiting: tuple[int, float] | None = None
         self._backpressure: BackpressureReading | None = None
         # Sticky LLM-call mirror for ``current_round.nodes`` — owned here, not on the
-        # audit-trail, which records the same event independently into its round flush.
-        self._sticky_llm_calls: dict[str, dict[str, Any]] = dict(initial_llm_nodes or {})
+        # audit-trail, which records the same event independently into its round flush. A resume
+        # opens on the blocks its seed's fold held, so they show before the first new call lands.
+        self._sticky_llm_calls: dict[str, dict[str, Any]] = (
+            {} if resume_from is None else dict(resume_from.current_round.nodes)
+        )
         # ``(call_id, node)`` of the optimizer call in progress — view-private, because the ONE
         # thing it decides is which node ``_active_node`` lights. It was a served field for a
         # reader that never arrived.
@@ -191,19 +183,6 @@ class LiveDashboardProjection(Projection):
         self._proposer_node: str | None = None
         self._measurement_node: str | None = None
         self._step_node: str | None = None
-        self._core = LiveStateCore(
-            round_num=self.state.round,
-            # Origin anchor seeds from round 0 if it's already on disk (resume);
-            # otherwise apply_phase sets it at INIT:exit. Origin is just round 0.
-            origin_acc=next(
-                (r.accuracy for r in self.state.rounds if r.round == 0 and r.accuracy is not None),
-                0.0,
-            ),
-            # The core's own running MAX, seeded from the resumed high-water. 0.0 is the
-            # identity element of that max, not a reported number — `s.best` stays `None`
-            # until a round settles, and only it reaches the browser.
-            best_acc=self.state.best if self.state.best is not None else 0.0,
-        )
         # RLock so the boundary-flush path can be called from inside a handler already holding
         # it via `on_record`; the Timer thread takes the same lock and cannot race a mutation.
         self._persist_lock: threading.RLock = threading.RLock()
@@ -238,9 +217,6 @@ class LiveDashboardProjection(Projection):
         resume_from = resolve_resume_state(
             Cut(cycle=cycle_dir, hop=hop), Path(cycle_dir), resumed_from_round
         )
-        # Surfaces prior rounds' L1/L2/L3 outputs before the first new call lands.
-        initial_llm_nodes = read_most_recent_round_nodes(audit_rounds_dir(Path(cycle_dir)))
-
         view = cls(
             cycle_dir,
             state_path=CycleLayout(Path(cycle_dir)).dashboard,
@@ -251,7 +227,6 @@ class LiveDashboardProjection(Projection):
             display_metric=display_metric,
             langfuse_trace_url=langfuse_trace_url,
             resume_from=resume_from,
-            initial_llm_nodes=initial_llm_nodes,
         )
         # Stamped at WIRING, not on a phase event: origin scoring runs before INIT fires, and the
         # browser reads the `1` default as "this backend holds one sample" and disables the
@@ -285,11 +260,20 @@ class LiveDashboardProjection(Projection):
         happened. Pair with ``mark_finished`` only on a terminal stop — a ``finished_at`` unresumes
         a pause.
 
-        The declaration goes on the LEDGER first, like every other one: ``derive_run_phase`` reads
-        it there, so a stop written only into this file is a pause no reader sees."""
+        Both facts go on the LEDGER and the file is the fold of it: ``derive_run_phase`` reads the
+        declaration there, and an error written only into this file is one no replay shows."""
         cycle_path = Path(cycle_dir)
         interrupted = stop_reason_outcome(stop_reason) is StopOutcome.PAUSED
-        CycleEventLog.open(cycle_dir).append(
+        ledger = CycleEventLog.open(cycle_dir)
+        if not interrupted:
+            ledger.append(
+                ErrorRecord(
+                    kind="launch_failed",
+                    message=str(exc) or type(exc).__name__,
+                    stop_reason=stop_reason,
+                )
+            )
+        ledger.append(
             PhaseRecord(
                 phase=CONTROL_PHASE,
                 event=str(RunPhase.PAUSED if interrupted else RunPhase.TERMINAL),
@@ -299,18 +283,6 @@ class LiveDashboardProjection(Projection):
         state = resolve_resume_state(Cut(cycle=CycleDir(cycle_path), hop=hop), cycle_path, None)
         if session_id:
             state.session_id = session_id
-        if interrupted:
-            state.declared_phase = RunPhase.PAUSED
-        else:
-            state.error = DashboardError(
-                kind="launch_failed",
-                message=str(exc) or type(exc).__name__,
-                stop_reason=stop_reason,
-            )
-            state.stop_reason = stop_reason
-            state.declared_phase = RunPhase.TERMINAL
-            state.state = DashboardState.STOPPED
-        state.state_since = utcnow_iso()
         write_json(CycleLayout(cycle_path).dashboard, state.model_dump(), default=str)
 
     # -- State transitions ----------------------------------------------------
@@ -419,9 +391,6 @@ class LiveDashboardProjection(Projection):
             # origin's θ cannot be fit before a second arm exists. That re-emit carries only
             # this lean record, so absorbing the correction here is what keeps the served
             # `rounds[0]` from holding a COLD θ everything later differences against.
-            # Candidate ids are ROUND-SCOPED, so a P(best) map carried into the next round would
-            # rank a candidate against a stranger.
-            roll_p_best_at_round_complete(self._core)
             raw = record.payload.get("ability")
             if isinstance(raw, dict):
                 ability = AbilityReading.model_validate(raw)
@@ -576,23 +545,20 @@ class LiveDashboardProjection(Projection):
         qi = int(record.sample_idx or 0)
         qt = int(record.sample_total or 0)
         if ev == "sample_started":
-            sid = payload.get("sample_id")
             # The launch depth is this SAMPLE's, kept on its open-marker rather than on the state:
             # `sample_lookahead` is the depth in force and is read from the flag at `_persist`.
-            launched_at = int(payload.get("sample_lookahead") or 1)
-            if sid is not None:
-                self._open_samples[int(sid)] = (
-                    str(payload.get("query_preview") or ""),
-                    ci,
-                    ct,
-                    launched_at,
-                )
+            self._open_samples[payload["sample_id"]] = (
+                payload["query_preview"],
+                ci,
+                ct,
+                payload["sample_lookahead"],
+            )
             self._refresh_open_sample_markers()
             # The bench pass keeps its state through its cells, as no round's measurement runs it.
             if self.state.state is not DashboardState.BENCH:
                 self._set_state(DashboardState.SCORING)
         elif ev == "sample_scored":
-            result = payload.get("result") or {}
+            result = payload["result"]
             # `is not None`, never `or`: sample_id 0 is falsy, and coercing it to a sentinel
             # leaves every candidate's first sample open, so it lands in the discard count.
             scored_sid = result.get("sample_id")
@@ -616,13 +582,13 @@ class LiveDashboardProjection(Projection):
             self._buffer.seed_candidate(
                 ci,
                 ct,
-                payload.get("changes_description") or "",
-                payload.get("pipeline_overlay"),
-                payload.get("prompt_fields"),
-                payload.get("resolved_pipeline_params"),
+                payload["changes_description"],
+                payload["pipeline_overlay"],
+                payload["prompt_fields"],
+                payload["resolved_pipeline_params"],
             )
         elif ev == "candidate_scored":
-            scores = payload.get("scores") or {}
+            scores = payload["scores"]
             # Still open at close ⇒ launched and never absorbed, but only a sample launched INTO
             # an armed window is the ARMING's cost: at depth 1 exactly one sample is in flight, so
             # one open here failed on its own and belongs to no control.
@@ -634,44 +600,28 @@ class LiveDashboardProjection(Projection):
             self._update_current_acc(scores)
             self._buffer.set_candidate_scores(ci, ct, scores)
         elif ev == "sample_order_preview":
-            order = payload.get("sample_order")
-            if isinstance(order, list):
-                self.state.declared_sample_order = [int(sid) for sid in order]
+            self.state.declared_sample_order = payload["sample_order"]
         elif ev == "race_standing":
-            current_id = payload.get("current_id") or ""
-            n_samples = int(payload.get("n_samples") or 0)
-            p_best = float(payload.get("p_best") or 0.0)
-            self._buffer.update_p_best(ci, ct, current_id, n_samples, p_best)
-            # Mirrored into the shared core so ReadoutProjection sees the same round-wide state.
-            apply_race_standing(self._core, str(payload["member"]), current_id, n_samples, p_best)
+            self._buffer.record_race_standing(
+                payload["member"], payload["current_id"], payload["n_samples"], payload["p_best"]
+            )
         elif ev == "flight":
-            self._flight = (
-                int(payload.get("out") or 0),
-                int(payload.get("allowed") or 0),
-                int(payload.get("most") or 0),
-            )
-            afford, reserve = payload.get("affordable"), payload.get("cell_usd")
-            self._affordable = None if afford is None else int(afford)
-            self._cell_reserve_usd = None if reserve is None else float(reserve)
-            waiting = payload.get("waiting")
-            self._waiting = (
-                (int(waiting["sample_id"]), float(waiting["since"]))
-                if isinstance(waiting, dict)
-                else None
-            )
-            held = payload.get("backpressure")
-            self._backpressure = (
-                BackpressureReading.model_validate(held) if isinstance(held, dict) else None
-            )
+            self._flight = (payload["out"], payload["allowed"], payload["most"])
+            self._affordable = payload["affordable"]
+            self._cell_reserve_usd = payload["cell_usd"]
+            waiting = payload["waiting"]
+            self._waiting = None if waiting is None else (waiting["sample_id"], waiting["since"])
+            held = payload["backpressure"]
+            self._backpressure = None if held is None else BackpressureReading.model_validate(held)
         elif ev == "race_catch_up":
             self._append_catch_up(
                 CatchUpLogEntry(
-                    member=str(payload["member"]),
-                    round=int(record.round or 0),
+                    member=payload["member"],
+                    round=record.round,
                     candidate_idx=ci,
                     candidate_total=ct,
-                    sample_id=int(payload.get("sample_id") or 0),
-                    prior_ids=[str(p) for p in (payload.get("prior_ids") or [])],
+                    sample_id=payload["sample_id"],
+                    prior_ids=payload["prior_ids"],
                 )
             )
         # One flush for EVERY branch, so none can forget: a branch that does leaves a finished
@@ -726,10 +676,6 @@ class LiveDashboardProjection(Projection):
             # Rewind/fork-in-place clamp: drop rounds this run will overwrite. Sole clamp
             # writer; `round:display` is the sole growth site.
             s.rounds = [r for r in s.rounds if r.round < s.round]
-
-        # Mirrored for ReadoutProjection parity. The core's ``best_acc`` is a hard-first SUBSET
-        # score and must NOT feed ``s.best``, which `round:display` derives from ``s.rounds``.
-        apply_phase(self._core, event, view)
 
     def _refresh_open_sample_markers(self) -> None:
         """Point the in-flight scalars at the OLDEST open sample. Derived, not assigned: under
@@ -908,6 +854,7 @@ class LiveDashboardProjection(Projection):
             return
         started = time.perf_counter()
         self.compose()
+        self._stamp_armed_controls()
         try:
             write_json(self.state_path, self.state.model_dump(), default=str)
             self._persist_cost_s = time.perf_counter() - started
@@ -922,10 +869,26 @@ class LiveDashboardProjection(Projection):
                 self.state_path,
             )
 
+    def _stamp_armed_controls(self) -> None:
+        """What the operator has ARMED right now, onto the file being written — never ``compose``'s:
+        a fold of a past moment must not carry the present's controls. No SERVED read depends on it."""
+        s = self.state
+        # `_build_budget_gate` prefers `run_limits.json` over the admitted cap, so the stamped
+        # value alone would quote a ceiling nothing enforces.
+        if s.run_limits is not None:
+            armed = armed_run_limits(self.cycle_dir)
+            if armed:
+                s.run_limits = s.run_limits.model_copy(update=armed)
+        # CLAMPED: an unclamped 8 beside `max_cells_in_flight: 2` writes a depth nothing is
+        # running. Both readings end at `effective_lookahead` — the one "depth in force".
+        s.sample_lookahead = effective_lookahead(
+            read_sample_lookahead(self.cycle_dir), s.max_cells_in_flight
+        )
+        s.sample_lookahead_auto = sample_lookahead_auto(self.cycle_dir)
+
     def compose(self) -> LiveDashboardState:
         """Settle the served shape onto ``state`` and return it — everything a reader needs that is
-        derived rather than folded. Idempotent; the write path calls it, and a replay calls it once
-        at the end rather than after every record."""
+        derived from the fold alone. Idempotent; a replay calls it once, after its last record."""
         s = self.state
         # Stamp the moment this write is OF, before composing anything from it. The write is
         # debounced, so it lands after later records have already arrived — `at_offset` names
@@ -940,28 +903,9 @@ class LiveDashboardProjection(Projection):
             measurement_node=self._measurement_node,
             candidates=build_candidate_rows(self._buffer, self.short_formula_template),
             nodes=self._current_round_nodes(),
-            racing=build_racing_block(self._core, self._buffer.p_best_top),
+            racing=build_racing_block(self._buffer),
             overlap=self._buffer.overlap,
         )
-        # The ARMED ceiling, never the one INIT declared. `_build_budget_gate` prefers
-        # `run_limits.json` over the admitted cap, so serving the stamped value left every
-        # reader — the budget control's prefill, the run strip — quoting a number nothing would
-        # enforce. Overlaid at the single write, so no reader has to join two sources.
-        if s.run_limits is not None:
-            armed = armed_run_limits(self.cycle_dir)
-            if armed:
-                s.run_limits = s.run_limits.model_copy(update=armed)
-        # Same shape as the spend caps above, and for the same narrow purpose: keeping the FILE
-        # self-consistent for whoever opens it. No SERVED read depends on it — this writer cannot
-        # answer for a press landing between its own records, so
-        # `runtime_flags.py::overlay_armed_controls` re-reads both on the way out.
-        #
-        # CLAMPED here too: an unclamped 8 beside `max_cells_in_flight: 2` writes a depth nothing
-        # is running. Both readings end at `effective_lookahead` — the one "depth in force".
-        s.sample_lookahead = effective_lookahead(
-            read_sample_lookahead(self.cycle_dir), s.max_cells_in_flight
-        )
-        s.sample_lookahead_auto = sample_lookahead_auto(self.cycle_dir)
         # Nothing scoring: the most the NEXT round could hold — every candidate's cells and one
         # catch-up per cell — so a press can be sized before the round it will apply to begins.
         if any(self._flight):
@@ -996,12 +940,11 @@ class LiveDashboardProjection(Projection):
 
 
 def _best_on_shared_cells(rounds: Iterable[RoundSummary | RoundResult]) -> float | None:
-    """``state.best`` for *rounds*, through the projection the cycle index elects on: handed a
-    row without the flattened overlap pair, the derivation collapses the trajectory onto round 0."""
-    best, at_round = best_round_on_shared_cells(
-        [{"round": r.round, "accuracy": r.accuracy, **overlap_row(r.overlap)} for r in rounds]
+    """``state.best`` for *rounds* — the rate the cycle index elects on."""
+    best = best_round_on_shared_cells(
+        [SharedCellPoint.of(r.round, r.accuracy, r.overlap) for r in rounds]
     )
-    return None if at_round is None else best
+    return None if best is None else best[0]
 
 
 def resolve_resume_state(
@@ -1018,7 +961,7 @@ def resolve_resume_state(
 
     **The one place the trajectory is CUT**: rounds at or past ``resumed_from_round`` drop and
     ``best`` is RE-DERIVED, because a carried rolling max keeps a peak the rewind just discarded."""
-    prior = fold_at(seed)
+    prior = fold_at(seed, wiring=None)
     surviving = [
         r for r in prior.rounds if resumed_from_round is None or r.round < resumed_from_round
     ]
@@ -1033,24 +976,20 @@ def resolve_resume_state(
     )
 
 
-def fold_at(cut: Cut) -> LiveDashboardState:
-    """The cycle's dashboard state as of *cut* (``domain/cycle_paths.py``) — the SAME fold the
-    runner drives, given records off disk instead of off an append.
-
-    The ledger is the ONLY input, so that no projection depends on its own output. The wiring
-    constants (``WIRING_FIELDS``) are stamped at run start and ride no record, so they come back at
-    their model defaults here and the serving route stamps the live ones over them — the same
-    overlay it already does for ``run_phase``."""
+def fold_at(cut: Cut, *, wiring: Mapping[str, Any] | None) -> LiveDashboardState:
+    """The cycle's dashboard state as of *cut* — the SAME fold the runner drives, off disk. *wiring*
+    (``WIRING_FIELDS``) rides no record, so it is an INPUT taken BEFORE the fold composes."""
     view = LiveDashboardProjection(
         cut.cycle,
         state_path=None,
         hop=cut.hop,
-        # The wiring, at the model's own defaults — `WIRING_FIELDS` names what the caller stamps.
         session_id="",
         arms_per_round=0,
         sp_budget_round=0,
         display_metric="accuracy",
     )
+    for name, value in (wiring or {}).items():
+        setattr(view.state, name, value)
     limit = None if cut.offset is None else cut.offset + 1
     for offset, record in open_with_history(cut.cycle).iter(limit):
         view.on_record(record, offset)

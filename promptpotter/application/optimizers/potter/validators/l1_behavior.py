@@ -12,7 +12,6 @@ from promptpotter.application.optimizers.potter.dispatch.injections.layer_state 
 )
 from promptpotter.application.optimizers.potter.dispatch.injections.registry import (
     STALL_EXPLORATION,
-    citable_fields,
     injection_table,
 )
 from promptpotter.application.optimizers.potter.validators.behavior_base import (
@@ -20,7 +19,7 @@ from promptpotter.application.optimizers.potter.validators.behavior_base import 
     ValidatorContext,
 )
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
-from promptpotter.domain.candidate_diff import variant_prose_written
+from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.search_point import PARAM_SCOPE_KEYS
 
 __all__ = [
@@ -51,11 +50,26 @@ def extract_l1_variants(container: dict[str, Any] | None) -> list[dict[str, Any]
 _PHRASE_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z_\-]{2,}")
 
 
+def _variant_prose_written(variant: dict[str, Any]) -> dict[str, str]:
+    """A prose mutation rides two different carriers depending on whether the campaign evolves a
+    target prompt or a node's own template — reading one answers inverted on the other kind."""
+    written = {
+        f: str(v)
+        for f, v in (variant.get("prompt_fields_updates") or {}).items()
+        if f in PROMPT_STRING_FIELDS and v
+    }
+    for n, cfg in node_config_items(variant.get("pipeline_overlay")):
+        for p, v in cfg.items():
+            if p in PROMPT_STRING_FIELDS and v:
+                written[f"{n}.{p}"] = str(v)
+    return written
+
+
 def _variant_text_blob(variant: dict[str, Any]) -> str:
     """Both carriers count — on an L4 cycle the prose rides ``changes_description`` and no
     override slot, so scanning the overrides alone leaves a one-sentence blob to match against."""
     parts = [str(variant.get("changes_description") or "")]
-    parts.extend(variant_prose_written(variant).values())
+    parts.extend(_variant_prose_written(variant).values())
     return "\n".join(parts).lower()
 
 
@@ -134,13 +148,13 @@ def _check_param_scope_discipline(round_dict: dict[str, Any], ctx: ValidatorCont
 def _check_evidence_grounding_present(
     round_dict: dict[str, Any], ctx: ValidatorContext
 ) -> CheckResult:
-    """Per the L1 contract: *no data justifying a choice ⇒ do not gamble*. The citable set is
-    re-derived from the round-start layout, and the citation must also QUOTE the shown prompt."""
+    """The cited panel must be on the menu the round's call offered, and the citation must also
+    QUOTE the shown prompt. A round that banked no menu is judged on the quote alone."""
     variants = extract_l1_variants(round_dict)
     if not variants:
         return CheckResult("evidence_grounding_present", True, "no variants emitted")
 
-    citable = _round_citable_fields(ctx)
+    citable = ctx.citable
     shown = _rendered_l1_prompt(round_dict)
     offenders: list[tuple[str, str]] = []
     for i, v in enumerate(variants):
@@ -151,8 +165,8 @@ def _check_evidence_grounding_present(
             continue
         field_name = str(eg.get("field") or "").strip()
         citation = str(eg.get("citation") or "").strip()
-        if field_name not in citable:
-            offenders.append((label, _uncitable_reason(field_name, ctx)))
+        if citable is not None and field_name not in citable:
+            offenders.append((label, _uncitable_reason(field_name)))
             continue
         if not citation:
             offenders.append((label, "empty_citation"))
@@ -191,7 +205,7 @@ def _check_not_only_param_variants(
         return CheckResult("not_only_param_variants", True, "every prompt field is held")
 
     for v in variants:
-        if variant_prose_written(v):
+        if _variant_prose_written(v):
             return CheckResult(
                 "not_only_param_variants",
                 True,
@@ -287,16 +301,6 @@ def run_all_checks(round_dict: dict[str, Any], ctx: ValidatorContext) -> list[Ch
 # --- support helpers used by checks ---------------------------------------
 
 
-def _round_citable_fields(ctx: ValidatorContext) -> tuple[str, ...]:
-    """The same derivation that built the round's citation menu, replayed off the layout the
-    round's optimizer state banked. Falls open to every citable panel when none was banked."""
-    if ctx.l1_layout is not None:
-        return citable_fields(ctx.l1_layout, exploration_budget=ctx.exploration_budget)
-    return tuple(
-        sorted([n for n, i in injection_table().items() if i.citable] + [STALL_EXPLORATION])
-    )
-
-
 _NORMALIZE_RE = re.compile(r"[^a-z0-9]+")
 
 # A quoted run shorter than this cannot adjudicate fabrication either way: it matches
@@ -329,7 +333,7 @@ def _citation_in_prompt(citation: str, shown: str) -> bool:
     return longest in shown
 
 
-def _uncitable_reason(field_name: str, ctx: ValidatorContext) -> str:
+def _uncitable_reason(field_name: str) -> str:
     if not field_name:
         return "no_field"
     if field_name == STALL_EXPLORATION:
@@ -421,7 +425,7 @@ def _stale_prompt_field(ctx: ValidatorContext, held: frozenset[str]) -> str | No
     for r in recent_two:
         for v in extract_l1_variants(r):
             # Leaf of `field` / `node.field` — same axis either carrier wrote it through.
-            mutated_fields.update(k.rpartition(".")[2] for k in variant_prose_written(v))
+            mutated_fields.update(k.rpartition(".")[2] for k in _variant_prose_written(v))
     for field_name in PROMPT_STRING_FIELDS:
         if field_name not in mutated_fields and field_name not in held:
             return field_name

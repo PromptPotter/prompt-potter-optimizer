@@ -10,6 +10,7 @@ import type {
   LineageNode,
   MeteredSpend,
   RunsWithParam,
+  VendorModels,
 } from "@/lib/api";
 import { campaignDisplayName } from "@/lib/names";
 import { runPhaseLabel, runPhaseMark, type RunPhaseMark } from "@/lib/run-phase";
@@ -23,7 +24,6 @@ import {
   fmtUsd,
   fmtValue,
   shortId,
-  vendorOf,
 } from "@/lib/format";
 import type { RunGroup } from "./campaign-forest";
 import { METER_WORD, meteredBucketsLine } from "./spend";
@@ -192,25 +192,14 @@ function roundsPart(run: RunGroup, cap: number | null): string {
     : `R${run.answering.rounds_closed}/${cap}`;
 }
 
-// Full ids: `gpt-oss-20b` versus `gpt-oss-120b` is the distinction a vendor mark cannot draw.
-export function campaignModels(run: RunGroup): string[] {
-  const runsWith = run.campaign.runs_with;
-  if (runsWith == null) return [];
-  const seen = new Set<string>();
-  for (const p of runsWith.params) {
-    if (p.key === "model" && p.value != null) seen.add(settingValue(p.value));
-  }
-  return [...seen];
+// Served whole: which param is a model and whose it is are the pipeline resolution's answers.
+export function campaignVendors(run: RunGroup): VendorModels[] {
+  return run.campaign.runs_with?.vendors ?? [];
 }
 
-export function campaignVendors(run: RunGroup): { vendor: string; models: string[] }[] {
-  const byVendor = new Map<string, string[]>();
-  for (const model of campaignModels(run)) {
-    const arr = byVendor.get(vendorOf(model));
-    if (arr) arr.push(model);
-    else byVendor.set(vendorOf(model), [model]);
-  }
-  return [...byVendor].map(([vendor, models]) => ({ vendor, models }));
+// Full ids: `gpt-oss-20b` versus `gpt-oss-120b` is the distinction a vendor mark cannot draw.
+export function campaignModels(run: RunGroup): string[] {
+  return campaignVendors(run).flatMap((v) => v.models);
 }
 
 // No resolved setting rides this line: no served predicate picks the ones worth the space

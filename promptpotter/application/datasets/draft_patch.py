@@ -16,8 +16,10 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 from pydantic import Field, ValidationError
 
 from promptpotter.application.campaign_config import merge_config_layers
+from promptpotter.application.datasets.csv_ingest import candidate_library_from_rows
 from promptpotter.application.datasets.draft_campaign import (
     OptimizationOverrides,
+    load_checkin_draft,
     rendered_pipeline_json,
 )
 from promptpotter.application.optimizer_manifest import resolve_optimizer
@@ -26,7 +28,7 @@ from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import description_key, description_path
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.shared.errors import ConflictError, PayloadInvalidError
+from promptpotter.shared.errors import ConflictError, NotFoundError, PayloadInvalidError
 
 if TYPE_CHECKING:
     from promptpotter.application.datasets.draft_campaign import DraftCampaign
@@ -38,6 +40,7 @@ __all__ = [
     "DraftPatchPlan",
     "EditDraftPatch",
     "apply_draft_patch",
+    "candidate_library_from_column",
     "plan_draft_patch",
 ]
 
@@ -208,6 +211,29 @@ def _narrowing_follows_schema(
                 kept.append(key)
         out[name] = {**block, "optimizer": {**opt, "param_keys": kept}}
     return out
+
+
+def candidate_library_from_column(stores: Stores, draft_id: str, column: str) -> tuple[str, ...]:
+    """The distinct values of one of the draft's own columns, as candidate-library terms — the
+    "build from the dataset" derivation, for any ingress to hand to ``dispatch_draft_patch``."""
+    draft = load_checkin_draft(stores, draft_id)
+    if draft is None:
+        raise NotFoundError(f"draft {draft_id!r} not found.", code="command_target_not_found")
+    if column not in draft.headers:
+        raise PayloadInvalidError(
+            f"column {column!r} is not one of the dataset's columns {list(draft.headers)}."
+        )
+    bank = stores.checkin.load_bank(draft_id)
+    if bank is None:
+        raise PayloadInvalidError("draft has no cached rows to build from.")
+    terms = candidate_library_from_rows(bank.get("items", []), column)
+    if not terms:
+        raise PayloadInvalidError(
+            f"column {column!r} has no usable values.",
+            code="ingest_failed",
+            details={"reason": "empty"},
+        )
+    return terms
 
 
 def apply_draft_patch(draft: DraftCampaign, plan: DraftPatchPlan) -> DraftCampaign:

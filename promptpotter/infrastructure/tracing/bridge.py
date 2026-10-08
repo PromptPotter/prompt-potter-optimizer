@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, get_args
 
 from promptpotter.config.settings import DATASET_NAME, settings
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import StopReason
 from promptpotter.infrastructure.tracing.events import (
     CampaignEnd,
@@ -127,32 +128,19 @@ class ObservabilityBridge:
     def from_settings(
         cls,
         store_base_dir: str | Path,
-        campaign_id: str = "",
+        hop: CycleHop,
         *,
         langfuse: LangfuseLogger | None,
     ) -> ObservabilityBridge:
 
-        file_sink = FileSink(store_base_dir, campaign_id)
+        file_sink = FileSink(store_base_dir, hop)
         lf_sink = (
-            LangfuseSink(store_base_dir, campaign_id, langfuse)
+            LangfuseSink(store_base_dir, hop.campaign_id, langfuse)
             if (langfuse and langfuse.enabled)
             else None
         )
         mlflow_sink = MLflowSink(store_base_dir) if settings.MLFLOW_ENABLED else None
         return cls(file_sink=file_sink, langfuse_sink=lf_sink, mlflow_sink=mlflow_sink)
-
-    @classmethod
-    def file_only(
-        cls,
-        store_base_dir: str | Path,
-        campaign_id: str = "",
-    ) -> ObservabilityBridge:
-
-        return cls(
-            file_sink=FileSink(store_base_dir, campaign_id),
-            langfuse_sink=None,
-            mlflow_sink=MLflowSink(store_base_dir) if settings.MLFLOW_ENABLED else None,
-        )
 
     def emit(self, event: Event) -> None:
         """Call each sink handler routed to ``event``'s type under :func:`graceful`. An event type
@@ -213,15 +201,19 @@ class ObservabilityBridge:
         dataset: Sequence[Sample | dict[str, Any]],
         tracing_campaign_id: str,
         campaign_id: str,
+        cycle_id: str | None,
         langfuse_session_id: str | None,
         langfuse: LangfuseLogger | None,
     ) -> ObservabilityBridge | None:
-        if not (tenant_root and backend_id):
+        """``None`` for a run that minted no cycle: every sink writes under one."""
+        if not (tenant_root and backend_id and cycle_id):
             return None
 
         bridge: ObservabilityBridge | None = None
         with graceful("Failed to create ObservabilityBridge"):
-            bridge = cls.from_settings(tenant_root, campaign_id, langfuse=langfuse)
+            bridge = cls.from_settings(
+                tenant_root, CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), langfuse=langfuse
+            )
         if bridge is None:
             return None
 
@@ -231,6 +223,7 @@ class ObservabilityBridge:
                     campaign_id=tracing_campaign_id,
                     config=config_snapshot,
                     origin_accuracy=origin_accuracy,
+                    cycle_id=cycle_id,
                     session_id=langfuse_session_id,
                 )
             )

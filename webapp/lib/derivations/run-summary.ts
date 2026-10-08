@@ -8,7 +8,7 @@ import { runPhaseLabel } from "@/lib/run-phase";
 import { SPEND_STAT_LABEL, spendStat, type SummaryFacts } from "./campaign-summary";
 import { bestObserveTarget } from "./searchPoint";
 import { headlineStats } from "./headline-stats";
-import { roundHasCandidates, sortedRounds } from "./round-candidates";
+import { roundHasCandidates } from "./round-candidates";
 import { readSpend } from "./spend";
 
 export interface RunSummary {
@@ -29,7 +29,6 @@ export interface RunSummary {
   // holds no election, so its `improved` is `null`.
   lastRound: {
     round: number;
-    candidates: number;
     improved: boolean | null;
     verdictReason: string | null;
     // The optimizer's own words about that round, whichever optimizer ran it.
@@ -61,7 +60,7 @@ export function runSummaryFacts(s: RunSummary): SummaryFacts {
 
 export function runSummary(dash: DashboardSnapshot | null): RunSummary | null {
   if (!dash?.cycle_id) return null;
-  const closed = sortedRounds(dash).filter(roundHasCandidates);
+  const closed = (dash.rounds ?? []).filter(roundHasCandidates);
   const target = bestObserveTarget(dash);
   const champion = target
     ? closed.find((r) => r.round === target.round)?.candidates[target.idx]
@@ -81,7 +80,6 @@ export function runSummary(dash: DashboardSnapshot | null): RunSummary | null {
     lastRound: last
       ? {
           round: last.round,
-          candidates: last.candidates.length,
           improved: last.improved,
           verdictReason: last.verdict_reason,
           // Guarded: `dashboard.json` is served verbatim, and a file an older build wrote lacks it.

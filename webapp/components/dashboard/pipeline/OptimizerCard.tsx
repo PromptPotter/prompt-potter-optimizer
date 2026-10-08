@@ -1,9 +1,8 @@
 "use client";
 import { useState } from "react";
 import { cx } from "@/lib/cx";
-import { measurementNode } from "@/lib/derivations";
 import { runPhaseLabel } from "@/lib/run-phase";
-import { useDashboard } from "@/lib/hooks/useDashboard";
+import { useCycleStream } from "@/lib/poll";
 import { useRoundNodes } from "@/lib/hooks/useRoundNodes";
 import {
   Button,
@@ -28,7 +27,7 @@ interface Props {
 export function OptimizerCard({ pipeline }: Props) {
   const [knobsOpen, setKnobsOpen] = useState(false);
   // Liveness off the cycle stream's poll age: a frozen campaign still has a `dash`.
-  const { dash, isLive } = useDashboard();
+  const { dash, isLive } = useCycleStream();
   const view = pipeline?.view ?? null;
   const activeId = dash?.current_round.active_node ?? null;
   const {
@@ -107,7 +106,7 @@ export function OptimizerCard({ pipeline }: Props) {
           reach={pipeline?.reach ?? null}
           scope="optimizer"
           // One level drawn, yet the measurement node still runs the whole campaign pipeline.
-          nestsNode={measurementNode(pipeline)}
+          nestsNode={pipeline?.measurement_node ?? null}
           activeNode={isLive && viewingLive ? activeId : null}
           isLive={isLive}
           tone="neutral"

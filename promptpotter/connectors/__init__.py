@@ -15,7 +15,6 @@ if typing.TYPE_CHECKING:
 __all__ = [
     "DEFAULT_CONNECTOR",
     "ENTRY_POINT_GROUP",
-    "Connector",
     "connector_origins",
     "get",
     "registered",
@@ -37,9 +36,20 @@ def _validate(c: object, origin: str) -> Connector:
     if not isinstance(c, Connector):
         raise RuntimeError(f"[{origin}] resolved to {type(c).__name__}, not a Connector.")
     where = f"connector {c.name!r} [{origin}]"
-    for hook in ("wire_adapter", "extract_experiment", "session_factory"):
-        if not callable(getattr(c, hook, None)):
+    hooks = {
+        "wire_adapter": c.wire_adapter,
+        "session_factory": c.session_factory,
+    }
+    for hook, fn in hooks.items():
+        if not callable(fn):
             raise RuntimeError(f"{where}: {hook} is not callable.")
+    # The panel file and its reader are one declaration: either alone is a file nobody reads or
+    # a reader nothing calls.
+    if bool(c.experiment_file) != callable(c.extract_experiment):
+        raise RuntimeError(
+            f"{where}: experiment_file {c.experiment_file!r} requires extract_experiment "
+            f"{'set' if c.experiment_file else 'unset'}."
+        )
     valid_execution = set(typing.get_args(ConnectorExecution))
     if c.execution not in valid_execution:
         raise RuntimeError(f"{where}: execution {c.execution!r} not in {valid_execution}.")
@@ -57,6 +67,9 @@ def _validate(c: object, origin: str) -> Connector:
     # A cell that holds THIS machine runs on it, and a remote one runs on its backend's.
     if c.cells_hold_the_machine and c.execution != "in_process":
         raise RuntimeError(f"{where}: cells_hold_the_machine needs execution='in_process'.")
+    # The overlay is swept for where a machine slot is taken, and only such a cell takes one.
+    if c.compose_overlay is not None and not c.cells_hold_the_machine:
+        raise RuntimeError(f"{where}: compose_overlay needs cells_hold_the_machine.")
     # A remote backend answers `GET /pipeline` itself, so a second declaration would never be read.
     if c.pipeline_declaration is not None and c.execution != "in_process":
         raise RuntimeError(f"{where}: pipeline_declaration needs execution='in_process'.")

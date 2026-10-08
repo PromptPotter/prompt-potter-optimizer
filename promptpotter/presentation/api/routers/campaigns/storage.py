@@ -1,143 +1,26 @@
-"""On-disk size, read-only. ONE taxonomy, MECE: every byte lands in exactly one of six leaves. The ``--keep-results`` keepsake
-is a cross-cutting SUBSET — surface it as a note, never a summed figure, or the partition stops being MECE."""
+"""The storage report's three reads — ``application/maintenance/storage_report.py`` owns the taxonomy and the pooling."""
 
 from __future__ import annotations
 
-import functools
-import json
-from pathlib import Path
-from typing import TYPE_CHECKING
-
 from fastapi import Request, Response
-from pydantic import Field
 
-from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.store.io import iter_files, read_json_tolerant
-from promptpotter.infrastructure.store.layout import SHARED_CACHE_DIRS, FileKind, classify
+from promptpotter.application.maintenance.storage_report import (
+    CampaignStorageResponse,
+    DatasetStorageResponse,
+    WorkspaceStorageResponse,
+    campaign_storage,
+    storage_by_dataset,
+    workspace_storage,
+)
 from promptpotter.presentation.api.deps import StoresDep
 from promptpotter.presentation.api.routers.campaigns._conditional import conditional_json
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
-from promptpotter.shared.errors import NotFoundError
-
-if TYPE_CHECKING:
-    from promptpotter.domain.campaign import Campaign
-    from promptpotter.infrastructure.store.stores import Stores
-
-# Per-sample arrays inside a public round file that the backend produced → ``connector``.
-_CONNECTOR_ROUND_KEYS = (
-    "results",
-    "all_candidate_results",
-    "overlap_results",
-    "reference_results",
-)
-
-# Loop's four leaves, then the full six (top-level Connector / Loop / Dataset flattened).
-_LOOP_LEAVES = ("state", "trace", "history", "reports")
-_LEAVES = ("dataset", "connector", *_LOOP_LEAVES)
-
-
-@functools.lru_cache(maxsize=2048)
-def _connector_bytes_of(_path: str, _mtime_ns: int, _size: int) -> int:
-    """The backend's share of one round file, memoized on the file's CONTENT IDENTITY.
-
-    Keyed on ``(path, mtime, size)`` rather than path alone, so it can never serve a stale figure:
-    a round rewritten by a repair or replaced by a rewind arrives under a different key and is
-    re-read. That exactness is what lets it be cached at all — this panel reports disk usage, where
-    a number that lags the disk is the bug rather than the optimisation.
-
-    Worth caching because the read is the expensive half of the walk and the answer never moves:
-    every storage request re-parsed and re-serialized every banked round document, which on this
-    workspace was 18 MB of JSON for a figure that had not changed since the round closed."""
-    doc = read_json_tolerant(Path(_path))
-    if not isinstance(doc, dict):
-        return 0
-    return sum(len(json.dumps(doc[k])) for k in _CONNECTOR_ROUND_KEYS if k in doc)
-
-
-def _campaign_split(root: Path) -> dict[str, int]:
-    """One walk of a campaign tree → ``{leaf: bytes}`` over the six MECE leaves, which sum exactly to the on-disk total.
-    ``ROUND_PUBLIC`` is the lone straddler — backend arrays to ``connector``, the searchpoint remainder to ``state``."""
-    acc = dict.fromkeys(_LEAVES, 0)
-    if not root.is_dir():
-        return acc
-    # Walked per request: only the whole listing covers these bytes (a directory's mtime stands
-    # still while a file below it grows), and taking that listing IS this walk.
-    below = len(root.parts)
-    for path, st in iter_files(root):
-        kind = classify(path.parts[below:])
-        if kind is FileKind.ROUND_PUBLIC:
-            conn = min(_connector_bytes_of(str(path), st.st_mtime_ns, st.st_size), st.st_size)
-            acc["connector"] += conn
-            acc["state"] += st.st_size - conn
-        else:
-            acc[kind.leaf] += st.st_size
-    return acc
-
-
-def _dir_size(root: Path, *, skip: frozenset[str] = frozenset()) -> int:
-    """Bytes under *root*, skipping the top-level names in *skip*."""
-    return sum(st.st_size for _, st in iter_files(root, skip=skip))
-
-
-def _owned_campaign_splits(stores: Stores) -> list[tuple[Campaign, dict[str, int]]]:
-    """Every campaign the caller owns, each with its six-leaf split — the ONE scan both workspace
-    readers below project from. They pool it differently (by dataset, by campaign) and neither owns
-    the walk; two copies of this loop is two chances for the two panels to disagree about the same
-    bytes."""
-    owner = str(stores.identity.user_id)
-    return [
-        (campaign, _campaign_split(stores.campaigns.campaign_root_dir(campaign.campaign_id)))
-        for campaign in stores.campaigns.list_campaigns(lifecycle="all", owner_user_id=owner)
-    ]
-
-
-def _leaf_fields(acc: dict[str, int]) -> dict[str, int]:
-    return {f"{k}_bytes": acc[k] for k in _LEAVES}
-
-
-class CampaignStorageResponse(StrictModel):
-    campaign_id: str = Field(description="The campaign measured")
-    on_disk_bytes: int = Field(description="Whole campaign-dir footprint — sum of the six leaves")
-    dataset_bytes: int = Field(description="langfuse ground-truth mirror (the input-data copy)")
-    connector_bytes: int = Field(description="Backend-produced: node-I/O cache + per-sample arrays")
-    state_bytes: int = Field(description="Loop resume point: round searchpoint state + overrides")
-    trace_bytes: int = Field(description="Loop telemetry: streams, prompts, langfuse loop trace")
-    history_bytes: int = Field(description="Loop event spine: ledger.jsonl")
-    reports_bytes: int = Field(description="Readable output: manifest + reports + hard_samples")
 
 
 @campaigns_router.get("/campaigns/{campaign_id}/storage", response_model=CampaignStorageResponse)
 def get_campaign_storage(request: Request, stores: StoresDep, campaign_id: str) -> Response:
     """On-disk size of the campaign tree, split into the six MECE leaves. 404 on cross-user."""
-    campaign = stores.campaigns.load_owned(campaign_id, str(stores.identity.user_id))
-    if campaign is None:
-        raise NotFoundError(f"Campaign not found: {campaign_id}")
-    acc = _campaign_split(stores.campaigns.campaign_root_dir(campaign_id))
-    return conditional_json(
-        request,
-        CampaignStorageResponse(
-            campaign_id=campaign_id, on_disk_bytes=sum(acc.values()), **_leaf_fields(acc)
-        ),
-    )
-
-
-# --- per-dataset tier breakdown (the Files-view "cake") -----------------------
-
-
-class DatasetStorageEntry(StrictModel):
-    dataset_name: str
-    total_bytes: int = Field(description="On disk — the sum of the six leaves")
-    dataset_bytes: int
-    connector_bytes: int
-    state_bytes: int
-    trace_bytes: int
-    history_bytes: int
-    reports_bytes: int
-
-
-class DatasetStorageResponse(StrictModel):
-    total_bytes: int = Field(description="Grand total across the caller's datasets")
-    datasets: list[DatasetStorageEntry] = Field(description="Fattest-first per-dataset leaf splits")
+    return conditional_json(request, campaign_storage(stores, campaign_id))
 
 
 @campaigns_router.get("/workspace/storage-by-dataset", response_model=DatasetStorageResponse)
@@ -145,53 +28,7 @@ def get_storage_by_dataset(request: Request, stores: StoresDep) -> Response:
     """Per-dataset on-disk leaf breakdown (the Files-view 'cake') — every campaign of a
     dataset pooled, then split into the six MECE leaves. Includes archived campaigns; the
     shared measurement store is excluded (it's not per-dataset-owned)."""
-    by_dataset: dict[str, dict[str, int]] = {}
-    for campaign, split in _owned_campaign_splits(stores):
-        acc = by_dataset.setdefault(campaign.dataset_name, dict.fromkeys(_LEAVES, 0))
-        for k in _LEAVES:
-            acc[k] += split[k]
-    entries = [
-        DatasetStorageEntry(dataset_name=name, total_bytes=sum(acc.values()), **_leaf_fields(acc))
-        for name, acc in by_dataset.items()
-    ]
-    entries.sort(key=lambda e: e.total_bytes, reverse=True)
-    return conditional_json(
-        request,
-        DatasetStorageResponse(total_bytes=sum(e.total_bytes for e in entries), datasets=entries),
-    )
-
-
-# --- workspace rollup — accounts for 100% of the tenant's disk ----------------
-
-
-class WorkspaceStorageEntry(StrictModel):
-    campaign_id: str
-    dataset_name: str
-    lifecycle_status: str
-    on_disk_bytes: int = Field(description="Whole campaign-dir footprint")
-    dataset_bytes: int
-    connector_bytes: int
-    state_bytes: int
-    trace_bytes: int
-    history_bytes: int
-    reports_bytes: int
-
-
-class WorkspaceStorageResponse(StrictModel):
-    total_bytes: int = Field(
-        description="The tenant's real on-disk total — campaigns + caches + other"
-    )
-    shared_cache_bytes: int = Field(
-        description="Cross-campaign reuse caches ("
-        + ", ".join(f"{d}/" for d in SHARED_CACHE_DIRS)
-        + ") — survive delete"
-    )
-    other_bytes: int = Field(
-        description="Everything else under the tenant: sessions, workspace ledger, dataset/backend stores"
-    )
-    campaigns: list[WorkspaceStorageEntry] = Field(
-        description="Fattest-first per-campaign totals (active + archived)"
-    )
+    return conditional_json(request, storage_by_dataset(stores))
 
 
 @campaigns_router.get("/workspace/storage", response_model=WorkspaceStorageResponse)
@@ -200,34 +37,4 @@ def get_workspace_storage(request: Request, stores: StoresDep) -> Response:
     plus the shared caches and a residual ``other`` slice so the grand total equals the
     tenant's real footprint — answers "where did the bucket sizes go?", nothing excluded.
     Includes archived campaigns — they stay in ``campaigns/``, flagged, not moved."""
-    entries: list[WorkspaceStorageEntry] = []
-    campaigns_total = 0
-    for campaign, acc in _owned_campaign_splits(stores):
-        on_disk = sum(acc.values())
-        campaigns_total += on_disk
-        entries.append(
-            WorkspaceStorageEntry(
-                campaign_id=campaign.campaign_id,
-                dataset_name=campaign.dataset_name,
-                lifecycle_status=campaign.lifecycle_status,
-                on_disk_bytes=on_disk,
-                **_leaf_fields(acc),
-            )
-        )
-    entries.sort(key=lambda e: e.on_disk_bytes, reverse=True)
-    base = stores.base_dir
-    shared = sum(_dir_size(base / name) for name in SHARED_CACHE_DIRS)
-    # Each byte is counted ONCE and the three parts ARE the total, rather than the total being
-    # walked a third time and `other` recovered by subtraction — which needed a `max(0, …)` guard,
-    # and a clamp on a residual is the shape of two walks that disagreed. Both halves read the ONE
-    # declaration: named in the sum but not the skip set, a cache would be counted twice.
-    other = _dir_size(base, skip=frozenset({"campaigns", *SHARED_CACHE_DIRS}))
-    return conditional_json(
-        request,
-        WorkspaceStorageResponse(
-            total_bytes=campaigns_total + shared + other,
-            shared_cache_bytes=shared,
-            other_bytes=other,
-            campaigns=entries,
-        ),
-    )
+    return conditional_json(request, workspace_storage(stores))

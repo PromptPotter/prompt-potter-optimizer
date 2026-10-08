@@ -157,7 +157,7 @@ Pick the *single closest* match. If two apply, pick the one upstream of the othe
 
 Symptom: candidates are valid, well-formed, distinct as strings, and all test the *same idea*. Measured: ten edits that each asked the target to reason further before answering — one hypothesis, ten wordings, every one +0.000. The generator was re-proposing roughly a third of the time.
 
-**No counter detects this.** `idea_fingerprint` is content-word overlap and caught **0 of 15** of those pairs, so a clean `l1_n_repeat` is *not* evidence of novelty. This is what produces the broken lift shape (`r1 3/6 · r2 1/5`).
+**No counter detects this.** `idea_fingerprint` is content-word overlap and caught **0 of 15** of those pairs, so a round with no `repeat_variant` rejection (`l1_rejected` on its optimizer state) is *not* evidence of novelty. This is what produces the broken lift shape (`r1 3/6 · r2 1/5`).
 
 Diagnosis, and it is free: read the `changes_description` texts across rounds yourself and judge them semantically. With 107 decision points on disk this is a Tier-0 retrospective — no run required.
 

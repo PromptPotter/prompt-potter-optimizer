@@ -22,13 +22,12 @@ import {
   ToolbarSep,
   ToolbarSpacer,
 } from "@/components/ui";
-import { isMeasuring, liveCandidates } from "@/lib/poll";
+import { isMeasuring, liveCandidates, useCycleStream } from "@/lib/poll";
 import { ABORT_LENS_LABELS } from "@/lib/api/types.generated";
 import type { DashboardCandidate, RoundSummary } from "@/lib/api/types";
 import { subjectKey, withMask } from "@/lib/api/reads";
 import { useCompareSelection } from "@/lib/compare-selection";
 import { useSelection } from "@/lib/SelectionContext";
-import { useDashboard } from "@/lib/hooks/useDashboard";
 import { Criterion } from "@/components/shell/scoring/Criterion";
 import { ApplyScenarioPanel } from "@/components/candidates/ApplyScenarioPanel";
 import {
@@ -47,11 +46,10 @@ import {
   displayMetricLabel,
   nodeKeyOf,
   pathOf,
-  sortedRounds,
   verifyByLabel,
   type DisplayMetric,
 } from "@/lib/derivations";
-import { isSelectedCandidate } from "@/lib/types";
+import { isSelectedCandidate, selectedCandidateOf } from "@/lib/types";
 import { encodeCyclePath } from "@/lib/ids";
 import { useWorkspace } from "@/lib/workspace";
 import { useLineage } from "@/lib/hooks/useLineage";
@@ -78,7 +76,7 @@ const LENS_OPTIONS: readonly { value?: string; label?: string; heading?: string 
 ];
 
 export function CandidatesCard() {
-  const { dash, isLive } = useDashboard();
+  const { dash, isLive } = useCycleStream();
   const unit = dash?.measured_unit ?? "sample";
   const {
     campaignId,
@@ -109,9 +107,8 @@ export function CandidatesCard() {
 
   const inflightCandidates: DashboardCandidate[] = useMemo(() => liveCandidates(dash), [dash]);
 
-  // Keyed on `dash?.rounds`, the only slice `sortedRounds` reads.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const history: RoundSummary[] = useMemo(() => sortedRounds(dash), [dash?.rounds]);
+  // Served in round order; memoed so an absent `rounds` is one stable empty list.
+  const history: RoundSummary[] = useMemo(() => dash?.rounds ?? [], [dash?.rounds]);
 
   const verifyReadings = useMemo(() => verifyByLabel(history), [history]);
 
@@ -234,14 +231,7 @@ export function CandidatesCard() {
         return;
       }
       // A bar click INSPECTS, never navigates — a course bar included.
-      setSelectionForCandidate({
-        cycle_id: leafCycleId,
-        round: v.round,
-        candidate_id: v.candidate_id,
-        label: v.label,
-        accuracy: v.accuracy,
-        is_selected: v.is_selected,
-      });
+      setSelectionForCandidate(selectedCandidateOf(leafCycleId, v.round, v.candidate_id, v.label));
     },
     [setSelectionForCandidate, leafCycleId],
   );

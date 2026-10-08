@@ -6,13 +6,12 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import uuid
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.bench.resume_and_fork.fork_siblings import (
-    _mint_fork,
-    mint_operator_fork,
-)
-from promptpotter.application.datasets.dataset_replace import recover_pending_replacements
+from promptpotter.application.bench.resume_and_fork.fork_siblings import mint_fork
+from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
+from promptpotter.application.commands.payloads import ForkCyclePayload
 from promptpotter.application.jobs.launcher.admission import probe_backend
 from promptpotter.application.jobs.mint import resolve_cycle_plan
 from promptpotter.application.knobs import DiffScope, classify_config_diff
@@ -24,8 +23,9 @@ from promptpotter.domain.pipeline_overlay import (
     permitted_models_for_campaign,
     steers_disallowed_model,
 )
-from promptpotter.domain.run_records import ConfigOverrides, CycleSeed, ForkSpec, ForkTrigger
+from promptpotter.domain.run_records import ForkSpec, ForkTrigger
 from promptpotter.infrastructure.runtime_flags import is_checkin
+from promptpotter.infrastructure.store.campaign_store.store import cycle_final
 from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.cli.commands._shared import (
@@ -43,8 +43,8 @@ from promptpotter.presentation.cli.commands._shared import (
 )
 from promptpotter.presentation.cli.commands.new import cmd_new
 from promptpotter.presentation.cli.session import load_session, no_dataset_hint
-from promptpotter.shared.errors import ResumeDivergenceError
-from promptpotter.shared.identity import CAMPAIGN_BABYSIT_CAP, has_capability
+from promptpotter.shared.errors import PotterError, ResumeDivergenceError
+from promptpotter.shared.identity import acting_principal_id
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
@@ -92,8 +92,8 @@ def _prepare_cycle_for_resume(
             "Run `python -m promptpotter new <dataset>` to mint a fresh campaign."
         )
 
-    if campaign.root_content_hash == "":
-        # Only an unstarted check-in campaign carries an empty hash — both mint
+    if campaign.root_content_hash is None:
+        # Only an unstarted check-in campaign carries none — both mint
         # seams stamp it (auto_mint at mint, finalize_checkin at Start).
         raise SystemExit(
             f"ERROR: campaign {ctx.campaign_id} has no stamped identity — an "
@@ -176,12 +176,11 @@ def _maybe_fork_diag_sibling(args: argparse.Namespace, ctx: SessionCtx, session:
         and getattr(args, "resume_from_round", None) is None
     ):
         return
-    existing_index = session.store.campaigns.load(ctx.hop) or {}
-    if (existing_index.get("final") or {}).get("mode") != "diag":
+    final = cycle_final(session.store.campaigns.load(ctx.hop) or {})
+    if final is None or final.mode != "diag":
         return
 
-    tenant_id = session.identity.tenant_id
-    new_cycle_id = _mint_fork(
+    new_cycle_id = mint_fork(
         session.store.campaigns,
         ctx.hop,
         ctx.session_id,
@@ -189,14 +188,53 @@ def _maybe_fork_diag_sibling(args: argparse.Namespace, ctx: SessionCtx, session:
         ForkSpec(
             trigger=ForkTrigger.OPERATOR_DIAG,
             reason="diag-sibling BFS exploration",
-            issued_by=tenant_id,
+            issued_by=acting_principal_id(session.identity),
         ),
     )
     ctx.cycle_id = new_cycle_id
     session.state.cycle_id = new_cycle_id
 
 
-def _maybe_fork_operator_rewind(
+async def _dispatch_fork(
+    ctx: SessionCtx,
+    session: Session,
+    *,
+    from_round: int,
+    seed: dict[str, Any],
+    keep_rounds: bool = False,
+    reason: str = "",
+) -> str:
+    """Cut an operator fork through the SAME ``fork-cycle`` command the browser fires and point the
+    session at it: the loop then runs inline, where the web's detaches. Returns the parent's cycle id."""
+    parent = ctx.hop
+
+    async def _adopt(fork: CycleHop) -> None:
+        ctx.cycle_id = fork.cycle_id
+        session.state.cycle_id = fork.cycle_id
+
+    try:
+        await CommandDispatcher(session.store).dispatch_cycle_command(
+            CommandCall(
+                ForkCyclePayload(
+                    campaign_id=parent.campaign_id,
+                    cycle_id=parent.cycle_id,
+                    round=from_round,
+                    seed=seed,
+                    steered_by=acting_principal_id(session.identity),
+                    keep_rounds=keep_rounds,
+                    reason=reason,
+                ),
+                uuid.uuid4().hex,
+            ),
+            expected_version=None,
+            start_fork=_adopt,
+        )
+    except PotterError as exc:
+        raise SystemExit(f"ERROR: fork refused — {exc}") from exc
+    return parent.cycle_id
+
+
+async def _maybe_fork_operator_rewind(
     args: argparse.Namespace, ctx: SessionCtx, session: Session
 ) -> None:
     """``--rewind N``: mint an OPERATOR_REWIND sibling at round N with the parent intact. Rounds 0..N-1
@@ -217,38 +255,16 @@ def _maybe_fork_operator_rewind(
     reason = (getattr(args, "rewind_reason", "") or "").strip() or (
         f"operator rewind to round {rewind_to}"
     )
-    tenant_id = session.identity.tenant_id
-    parent_cycle_id = ctx.cycle_id
-    new_cycle_id = _mint_fork(
-        session.store.campaigns,
-        CycleHop(campaign_id=ctx.campaign_id, cycle_id=parent_cycle_id),
-        ctx.session_id,
-        rewind_to,
-        ForkSpec(
-            trigger=ForkTrigger.OPERATOR_REWIND,
-            reason=reason,
-            issued_by=tenant_id,
-        ),
+    parent_cycle_id = await _dispatch_fork(
+        ctx, session, from_round=rewind_to, seed={}, keep_rounds=True, reason=reason
     )
-    ctx.cycle_id = new_cycle_id
-    session.state.cycle_id = new_cycle_id
     logger.info(
         "Operator rewind: %s → %s at round %d [reason=%s]",
         parent_cycle_id,
-        new_cycle_id,
+        ctx.cycle_id,
         rewind_to,
         reason,
     )
-
-
-def _origin_candidate_id(session: Session, cycle_id: str, from_round: int) -> str:
-    """The branch-point candidate the fork inherits its C0 from. Empty string when the round file is
-    missing or holds no candidate — the inherit path then re-scores."""
-    round_file = session.store.campaigns.load_round_file(
-        CycleHop(campaign_id=session.campaign_id, cycle_id=cycle_id), from_round
-    )
-    scores = getattr(round_file, "candidate_scores", None) or [] if round_file else []
-    return scores[0].candidate_id if scores else ""
 
 
 def _steer_overlay(specs: list[str], schema: PipelineSchema) -> dict[str, dict[str, Any]]:
@@ -270,7 +286,7 @@ def _steer_overlay(specs: list[str], schema: PipelineSchema) -> dict[str, dict[s
             raise SystemExit(f"ERROR: --steer expects NODE.PARAM=VALUE, got {spec!r}")
         declared_node = schema.get_node(node)
         if declared_node is None:
-            names = ", ".join(n.name for n in schema.config_nodes) or "(none)"
+            names = ", ".join(n.name for n in schema.declared_nodes) or "(none)"
             raise SystemExit(f"ERROR: --steer names no node called {node!r}; nodes: {names}")
         kind = declared_node.param_types.get(param)
         if kind is None:
@@ -289,11 +305,11 @@ def _steer_overlay(specs: list[str], schema: PipelineSchema) -> dict[str, dict[s
     return overlay
 
 
-def _maybe_fork_operator_steer(args: argparse.Namespace, ctx: SessionCtx, session: Session) -> None:
-    """``--steer NODE.PARAM=VALUE``: the CLI twin of the web steer-fork; C0 is INHERITED, so only the
-    candidate is measured. A steer to a gateway or to a model the node does not PERMIT needs
-    ``campaign.babysit`` and grades the branch C. Which values the fork then declares as its own
-    search space is `mint_operator_fork`'s rule, not this door's."""
+async def _maybe_fork_operator_steer(
+    args: argparse.Namespace, ctx: SessionCtx, session: Session
+) -> None:
+    """``--steer NODE.PARAM=VALUE``: the web steer-fork from a terminal; C0 is INHERITED. A steer to
+    a gateway or a non-PERMITTED model needs ``campaign.babysit`` — the dispatcher's gate; this warns."""
     specs = getattr(args, "steer", None)
     if not specs:
         return
@@ -305,20 +321,12 @@ def _maybe_fork_operator_steer(args: argparse.Namespace, ctx: SessionCtx, sessio
 
     overlay = _steer_overlay(specs, session.pipeline_schema)
 
-    # The SAME function the web fork-cycle applier and `fork-preview` call, over the same list —
-    # the origin's frozen per-node permitted set, off the campaign manifest. `ctx.campaign_config`
-    # is a different list, one the inherited overlay and the cycle seed have already moved.
+    # The terminal's `fork-preview`: the SAME function the fork-cycle applier gates on, over the
+    # origin's frozen per-node permitted set — never `ctx.campaign_config`, which the seed has moved.
     campaign = session.store.campaigns.load_campaign(ctx.campaign_id)
     frozen_config = campaign.config if campaign else None
     disallowed = steers_disallowed_model(frozen_config, overlay)
     if disallowed:
-        # Same capability gate the web fork-cycle applier runs. The terminal owner
-        # holds it; a delegated sub-principal without it is refused here.
-        if not has_capability(session.identity, CAMPAIGN_BABYSIT_CAP):
-            raise SystemExit(
-                f"ERROR: steering to a gateway, or to a model the node does not permit, "
-                f"requires the {CAMPAIGN_BABYSIT_CAP} capability."
-            )
         permitted = permitted_models_for_campaign(frozen_config)
         steered = ", ".join(
             f"{node}.{param}={value!r}"
@@ -330,34 +338,23 @@ def _maybe_fork_operator_steer(args: argparse.Namespace, ctx: SessionCtx, sessio
         print(f"   the origin: {permitted or '{} (nothing sanctioned)'}.")
         print("   This branch will be marked babysat (grade C); the origin's C0 is inherited.")
         print()
-        # The `campaign.babysit` cap (checked above) is the authorization — same as the
-        # web fork-cycle path, which has no confirm. The TTY prompt is a courtesy: an
-        # explicit typed "no" cancels; a non-TTY run (None) proceeds on the cap.
+        # The `campaign.babysit` cap is the authorization and the dispatcher checks it. The TTY
+        # prompt is a courtesy: a typed "no" cancels; a non-TTY run (None) proceeds on the cap.
         if confirm_tty("Proceed with the babysit steer?", default_no=True) is False:
             raise SystemExit("Cancelled. The active campaign is unchanged.")
 
+    seed: dict[str, Any] = {"pipeline_overlay": overlay}
     steer_max = getattr(args, "steer_max_rounds", None)
-    config_overrides = (
-        ConfigOverrides(max_rounds=steer_max) if steer_max is not None else ConfigOverrides()
-    )
-    parent_cycle_id = ctx.cycle_id
-    new_cycle_id = mint_operator_fork(
-        stores=session.store,
-        hop=CycleHop(campaign_id=ctx.campaign_id, cycle_id=parent_cycle_id),
-        from_round=0,
-        # The origin candidate in the parent's round 0 — the C0 the fork inherits
-        # (skips the origin re-score, straight to L1 on the steered values).
-        from_candidate_id=_origin_candidate_id(session, parent_cycle_id, 0),
-        seed=CycleSeed(pipeline_overlay=overlay, config_overrides=config_overrides),
-        steered_by=str(session.identity.user_id),
-    )
-    ctx.cycle_id = new_cycle_id
-    session.state.cycle_id = new_cycle_id
+    if steer_max is not None:
+        seed["config_overrides"] = {"max_rounds": steer_max}
+    # No candidate named: the fork inherits the parent's C0 and goes straight to L1 on the
+    # steered values.
+    parent_cycle_id = await _dispatch_fork(ctx, session, from_round=0, seed=seed)
     logger.info(
         "Operator steer-fork (%s): %s → %s [overlay=%s]",
         "babysit, grade C" if disallowed else "clean, sanctioned values",
         parent_cycle_id,
-        new_cycle_id,
+        ctx.cycle_id,
         overlay,
     )
 
@@ -474,10 +471,6 @@ async def cmd_resume(args: argparse.Namespace) -> CommandResult:
     # cheaply before init_services so the operator gets a clear next step instead of
     # a confusing dataset-not-found deep in the loop.
 
-    # The same guard both web launchers open with: a crashed version-and-repoint leaves the
-    # campaign pointing at a name whose data has moved to `-vN`, so heal before resolving the pin.
-    # Cheap no-op when nothing is pending — and the terminal was the one door that skipped it.
-    recover_pending_replacements(stores=_stores)
     _campaigns = _stores.campaigns
     _campaign = _campaigns.load_campaign(ctx.campaign_id)
     if _campaign is not None and is_checkin(_campaigns.cycle_dir(_campaign.root_hop)):
@@ -532,8 +525,8 @@ async def cmd_resume(args: argparse.Namespace) -> CommandResult:
     session.state.cycle_id = ctx.cycle_id
 
     _maybe_fork_diag_sibling(args, ctx, session)
-    _maybe_fork_operator_rewind(args, ctx, session)
-    _maybe_fork_operator_steer(args, ctx, session)
+    await _maybe_fork_operator_rewind(args, ctx, session)
+    await _maybe_fork_operator_steer(args, ctx, session)
 
     log_startup_summary(
         session,

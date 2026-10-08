@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable, Collection, Mapping, Sequence
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, Literal, NamedTuple, NotRequired, TypedDict, overload
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple, NotRequired, TypedDict
 
 from pydantic import ConfigDict, Field, computed_field
 
@@ -11,7 +11,6 @@ from promptpotter.domain.bench import BenchColumns, BenchScore
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.optimizer_state import OptimizerState
 from promptpotter.domain.phases import StopReason
-from promptpotter.domain.pipeline_schema import stable_hash
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.ruler import AbilityReading, ThetaCaveat
 from promptpotter.domain.run_records import ErrorRecord
@@ -24,13 +23,12 @@ from promptpotter.domain.search_point import (
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.wounds import (
-    INVARIANT_REASONS,
     RuntimeFailure,
     ValidationFailure,
-    collapse_reason,
+    collapse_counts,
 )
 from promptpotter.shared.errors import ConflictError, is_error_result
-from promptpotter.shared.hashing import shapes_optimizer_prompt
+from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
@@ -58,6 +56,7 @@ __all__ = [
     "ScoreboardRankKey",
     "ScoreboardRow",
     "ScoredCandidate",
+    "SharedCellPoint",
     "VerifyPass",
     "VerifyReading",
     "VerifyStrategy",
@@ -65,6 +64,7 @@ __all__ = [
     "best_line",
     "best_round_on_shared_cells",
     "candidate_label",
+    "degradation_reading",
     "diagnostic_held",
     "invariant_collapses",
     "is_electable",
@@ -72,13 +72,12 @@ __all__ = [
     "is_leader_eligible",
     "measured_cells",
     "merge_known_outcomes",
+    "order_floor",
     "origin_panel",
-    "overlap_row",
     "overlap_series",
     "parent_key",
     "parse_candidate_label",
     "proposal_collapses",
-    "resolved_fitness",
     "round_clocks",
     "scoreboard_rank_key",
     "unscoreable_cells",
@@ -94,7 +93,8 @@ class ArmOutcome(StrEnum):
     SKIPPED = "skipped"  # the operator cut it short
     # Errors kept repeating on THIS arm while the others measured: its fault, counted against it.
     BROKEN = "broken"
-    ELIMINATED = "eliminated"  # the eliminator stopped buying it
+    # The eliminator stopped buying it; `Eliminator.stop_disqualifies` says whether as a rejection.
+    ELIMINATED = "eliminated"
     LOCKED_IN = "locked_in"  # the eliminator stopped it far enough ahead to call
 
     @property
@@ -119,6 +119,28 @@ class DegradationContext(TypedDict, total=False):
     fatal: bool
     warning_types: dict[str, int]
     source: str
+
+
+def degradation_reading(
+    *,
+    source: str,
+    degraded_count: int,
+    total_scored: int,
+    warning_types: Mapping[str, int],
+    dominant_warning: str,
+    fatal: bool = False,
+) -> DegradationContext:
+    """The reading EVERY rule that breaks a walk hands over, with the rate derived here so the
+    report and the wound read one number."""
+    return {
+        "degraded_rate": degraded_count / total_scored if total_scored else 0.0,
+        "degraded_count": degraded_count,
+        "total_scored": total_scored,
+        "dominant_warning": dominant_warning,
+        "fatal": fatal,
+        "warning_types": dict(warning_types),
+        "source": source,
+    }
 
 
 @shapes_optimizer_prompt
@@ -152,60 +174,50 @@ def parse_candidate_label(label: str) -> tuple[int, int]:
     return round_num, idx_one_based - 1
 
 
-def overlap_row(overlap: OverlapReading | None) -> dict[str, float | None]:
-    """The pair ``best_round_on_shared_cells`` elects on, flattened out of a round's reading.
-    Members are ordered by round, so the last is this round's own subject and the first is C0.
-    Every carrier of a round row projects through here, or the cycle index and the resume rebuild
-    read different shapes of one fact."""
-    members = overlap.members if overlap else []
-    if not members:
-        return {"overlap_accuracy": None, "overlap_origin_accuracy": None}
-    return {
-        "overlap_accuracy": members[-1].accuracy,
-        "overlap_origin_accuracy": members[0].accuracy,
-    }
+class SharedCellPoint(NamedTuple):
+    """One closed round as ``best_round_on_shared_cells`` reads it — and, as ``_asdict()``, the
+    row the cycle index lists, so the index and the resume rebuild hold one shape of one fact."""
+
+    round: int
+    accuracy: float | None
+    # This round's own subject, then C0, each on the cells the whole line has answered.
+    overlap_accuracy: float | None
+    overlap_origin_accuracy: float | None
+
+    @classmethod
+    def of(
+        cls, round_num: int, accuracy: float | None, overlap: OverlapReading | None
+    ) -> SharedCellPoint:
+        """Members are ordered by round: the last is the round's own subject, the first is C0."""
+        members = overlap.members if overlap else []
+        if not members:
+            return cls(round_num, accuracy, None, None)
+        return cls(round_num, accuracy, members[-1].accuracy, members[0].accuracy)
 
 
-def best_round_on_shared_cells(
-    rounds: list[dict[str, Any]],
-) -> tuple[float, int | None]:
-    """Sole definition of the headline-best derivation, so the cycle index and the resume rebuild
-    agree by construction. NOT the winner export, which argmaxes ``composite_fitness`` — §0.5.
+def best_round_on_shared_cells(points: Sequence[SharedCellPoint]) -> tuple[float, int] | None:
+    """Sole definition of the headline-best derivation — ``(rate, round)``, or ``None`` where no
+    round recorded a number. NOT the winner export, which argmaxes ``composite_fitness`` — §0.5.
 
     Elected on ``overlap_accuracy``, the one per-round number that is neither confounded nor
     biased: ``accuracy`` rides whatever subset the acquisition bought, and θ is the elected arm's
     own maximum draw and so carries the winner's curse.
 
-    The ORIGIN competes like any round, and round 0 is FILLED here rather than read — C0 alone has
-    nothing to read against, and a headline blind to it crowns rounds the shared cells put BELOW
-    the origin. Newest wins, because rows compared against each other must be on one set. The fill
-    lands on the caller's rows, which is what persists it into the cycle index. A cycle whose line
-    shares no measurable cell has run only its origin, and answers with it."""
-    # A row without the flattened pair skipped `overlap_row` — the one failure this derivation
-    # cannot survive quietly, since the fall-through below then crowns C0 on every resume.
-    unprojected = [r.get("round") for r in rounds if "overlap_accuracy" not in r]
-    if unprojected:
-        raise ValueError(
-            f"rounds {unprojected} carry no `overlap_accuracy`: this row shape reached the "
-            "election without `results.py::overlap_row`, which would collapse the whole "
-            "trajectory onto round 0. Project every carrier's rows through it."
-        )
-    # By ROUND, not by list order: the append path rewrites one row in place, so position does not
-    # order this list. `is not None` because a 0.0 origin is a measurement, not an absence.
-    read = [r for r in rounds if r.get("overlap_origin_accuracy") is not None]
-    if read:
-        newest = max(read, key=lambda r: int(r.get("round") or 0))
-        for r in rounds:
-            if r.get("round") == 0:
-                r["overlap_accuracy"] = newest["overlap_origin_accuracy"]
-    # `or 0.0` would rank a round that never recorded a score alongside one that genuinely scored
-    # 0% — and could crown it. A round with no number doesn't back the headline.
-    shared = [r for r in rounds if r.get("overlap_accuracy") is not None]
+    The ORIGIN competes like any round, on the NEWEST reading of it: rates compared against each
+    other must be on one set. A cycle whose line shares no measurable cell answers with its origin."""
+    # By ROUND, not by position: the append path rewrites one row in place. `is not None` because
+    # a 0.0 origin is a measurement, not an absence.
+    read = [p for p in points if p.overlap_origin_accuracy is not None]
+    origin_rate = max(read, key=lambda p: p.round).overlap_origin_accuracy if read else None
+    # A round with no number does not back the headline: floored to 0.0 it could be crowned.
+    shared = [
+        (rate, p.round)
+        for p in points
+        if (rate := origin_rate if p.round == 0 and read else p.overlap_accuracy) is not None
+    ]
     if shared:
-        best = max(shared, key=lambda r: float(r["overlap_accuracy"]))
-        return (float(best["overlap_accuracy"]), best.get("round"))
-    origin = next((r for r in rounds if r.get("accuracy") is not None), None)
-    return (float(origin["accuracy"]), origin.get("round")) if origin else (0.0, None)
+        return max(shared, key=lambda pair: pair[0])
+    return next(((p.accuracy, p.round) for p in points if p.accuracy is not None), None)
 
 
 class ScoredCandidate(StrictModel):
@@ -218,10 +230,10 @@ class ScoredCandidate(StrictModel):
     label: str
     changes_description: str = ""
     # ``None`` is UNSCOREABLE and is not ``0.0``: a candidate that ran and produced nothing usable
-    # scored zero, one whose every row errored was never read. ``composite_fitness`` beside it
-    # keeps its floor, so this moves no election — only what a surface may report.
+    # scored zero, one whose every row errored — or that was rejected before it cost a sample —
+    # was never read. Both carry it, over one population; an election floors it where it orders.
     accuracy: float | None
-    composite_fitness: float
+    composite_fitness: float | None
     total: int
     evaluators: dict[str, float] = Field(default_factory=dict)
     pipeline_overlay: dict[str, Any] | None = None
@@ -320,8 +332,8 @@ class BankedSearchPointError(ConflictError):
 
 
 def is_leader_eligible(cs: ScoredCandidate) -> bool:
-    """A VALIDITY predicate, never a ranking one — an eliminator's stop is a budget decision and
-    disqualifies nothing. Whether the round can READ the arm is :func:`is_electable`."""
+    """A VALIDITY predicate, never a ranking one. An eliminator's stop is not judged here but where
+    ``Measured.electable`` is built; whether the round can READ the arm is :func:`is_electable`."""
     return cs.outcome not in (ArmOutcome.BROKEN, ArmOutcome.SKIPPED)
 
 
@@ -363,18 +375,10 @@ def merge_known_outcomes(
     return list(by_sid.values())
 
 
-@overload
-def resolved_fitness(composite_fitness: float | None, accuracy: float) -> float: ...
-@overload
-def resolved_fitness(composite_fitness: float | None, accuracy: float | None) -> float | None: ...
-def resolved_fitness(composite_fitness: float | None, accuracy: float | None) -> float | None:
-    """THE composite-or-accuracy rule, one implementation: an honest ``0.0`` is a real score, so
-    only genuine absence degrades to ``accuracy``. Every display and ranking site routes here.
-
-    ``None`` out only when BOTH are absent — an unscoreable candidate has no number rather than a
-    low one. Overloaded so a caller that has already established a real accuracy keeps a ``float``
-    and needs no cast: the two arms are a fact about the input, not something to re-assert."""
-    return composite_fitness if composite_fitness is not None else accuracy
+def order_floor(score: float | None) -> float:
+    """Where an ABSENT score sits in an ordering: below every measured one. The only place an
+    unscoreable arm becomes a number, and it never leaves the comparison it is asked for."""
+    return score if score is not None else -math.inf
 
 
 # Declared once: a caller restating the tuple misses the next term added to the key.
@@ -389,7 +393,7 @@ def scoreboard_rank_key(
     is_selected: bool = False,
     is_partial: bool = False,
 ) -> ScoreboardRankKey:
-    """``resolved_fitness``'s argmax form: the order ``RoundResult.scoreboard`` persists in.
+    """The order ``RoundResult.scoreboard`` persists in.
 
     On a warm round rank 1 IS the crown, by construction: the round is won on Rasch θ-lift over
     the parent (``elect_round_winner``), so a table ordered on the composite could seat the winner
@@ -399,51 +403,22 @@ def scoreboard_rank_key(
     ⚠️ A mask lens must keep passing two arguments (``mask/verdicts.py``). It exists to show a
     DIFFERENT ordering under a masked formula, and pinning the active-formula winner to rank 1
     there would leave it unable to disagree."""
-    # An UNSCOREABLE arm is no score, not a low one, so it sorts to the bottom on the device a
-    # missing θ uses — it must never outrank a candidate that was actually read.
-    shown = resolved_fitness(composite_fitness, accuracy)
     return (
         is_selected,
         # A rate the operator CUT SHORT never outranks one measured on the whole panel: the round
         # order is stratified, so the cells a stopped walk kept are a biased slice rather than a
         # smaller sample of the same thing.
         not is_partial,
-        theta if theta is not None else -math.inf,
-        shown if shown is not None else -math.inf,
-        accuracy if accuracy is not None else -math.inf,
+        order_floor(theta),
+        order_floor(composite_fitness),
+        order_floor(accuracy),
     )
 
 
-# ``ScoredCandidate``'s display subset, spelled once and deliberately narrower than the
-# ``candidate_scores`` dump beside it in the same file: scoreboard = the display table,
-# candidate_scores = the complete record.
-_SCOREBOARD_INCLUDE: set[str] = {
-    "candidate_id",
-    "changes_description",
-    "accuracy",
-    "composite_fitness",
-    "total",
-    "mean_fitness_ci_lo",
-    "mean_fitness_ci_hi",
-    # Without it the table cannot tell a candidate REJECTED before it cost a sample from one that
-    # got everything wrong, nor a broken arm from one the eliminator stopped.
-    "outcome",
-    "reference_accuracy",
-    "reference_composite",
-    # The election's own number and the margin it was decided on. Without these the table can
-    # seat a winner it has no column able to explain — the state that sent an operator hunting
-    # for a bug in a round that was decided correctly.
-    "theta",
-    "theta_se",
-    "theta_caveat",
-    "reference_lift",
-    "reference_lift_ci_lo",
-    "reference_lift_ci_hi",
-}
-
-
 class ScoreboardRow(StrictModel):
-    """One rank-ordered row of ``RoundResult.scoreboard`` — the round file's display table."""
+    """One rank-ordered row of ``RoundResult.scoreboard`` — the round file's display table, and
+    deliberately narrower than the ``candidate_scores`` dump beside it: that one is the complete
+    record. Every field but ``rank`` and ``is_selected`` is ``ScoredCandidate``'s of the same name."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -454,10 +429,10 @@ class ScoreboardRow(StrictModel):
     # whose every row errored was never read. Omitted here, the round document's own
     # ``model_dump()`` raised building this row out of exactly such a candidate.
     accuracy: float | None
-    composite_fitness: float
+    composite_fitness: float | None
     total: int
-    # ``INVALID`` means the ``accuracy`` / ``composite_fitness`` beside it are ``INVALID_SCORES``'
-    # synthetic 0.0, which nothing may render as a rate.
+    # Without it the table cannot tell a candidate REJECTED before it cost a sample from one that
+    # got everything wrong, nor a broken arm from one the eliminator stopped.
     outcome: ArmOutcome
     # ``None`` for a row that did not cover the parent's panel — see ``ScoredCandidate``: the
     # file carries the absence rather than a 0.0 that reads as a verdict the parent never gave.
@@ -480,6 +455,9 @@ class ScoreboardRow(StrictModel):
     is_selected: bool
 
 
+_SCOREBOARD_INCLUDE: set[str] = set(ScoreboardRow.model_fields) - {"rank", "is_selected"}
+
+
 class CandidateProposal(StrictModel):
     """The child OSP carries the resulting prompt, so its prompt edit is ``candidate_delta``
     against the parent; the overlay and this candidate's own failures ride here because nothing
@@ -495,11 +473,7 @@ class CandidateProposal(StrictModel):
 
 def proposal_collapses(proposals: Sequence[CandidateProposal]) -> dict[str, int]:
     """``invariant_collapses`` as the round is proposed, off each proposal's own failures."""
-    counts: dict[str, int] = {}
-    for cp in proposals:
-        if reason := collapse_reason(cp.validation_failures):
-            counts[reason] = counts.get(reason, 0) + 1
-    return counts
+    return collapse_counts(cp.validation_failures for cp in proposals)
 
 
 class ReferenceReading(StrictModel):
@@ -785,19 +759,10 @@ def round_clocks(rounds: Sequence[RoundResult], *, accuracy_ceiling: float | Non
 @shapes_optimizer_prompt
 def invariant_collapses(candidate_scores: Sequence[ScoredCandidate]) -> dict[str, int]:
     """How many proposals each ``INVARIANT_REASONS`` member collapsed — DERIVED from the arms: a
-    collapsed candidate rides them as ``ArmOutcome.INVALID``, never dropped. One reason per
-    candidate, or the parts would sum past the population."""
-    counts: dict[str, int] = {}
-    for cand in candidate_scores:
-        if cand.outcome is not ArmOutcome.INVALID:
-            continue
-        reason = next(
-            (vf.reason for vf in cand.validation_failures if vf.reason in INVARIANT_REASONS),
-            None,
-        )
-        if reason:
-            counts[reason] = counts.get(reason, 0) + 1
-    return counts
+    collapsed candidate rides them as ``ArmOutcome.INVALID``, never dropped."""
+    return collapse_counts(
+        c.validation_failures for c in candidate_scores if c.outcome is ArmOutcome.INVALID
+    )
 
 
 class OptimizerFact(StrictModel):
@@ -832,7 +797,7 @@ class RoundResult(StrictModel):
     # ``None`` where the round measured nothing readable — see ``ScoredCandidate.accuracy``. Not
     # defaulted: a MISSING key must fail rather than quietly become a rate.
     accuracy: float | None
-    composite_fitness: float = 0.0
+    composite_fitness: float | None
     total: int
     improved: bool
     # One-sided two-proportion p-value vs the parent; drives the IMPROVED gate. None ⇒ no test ran.
@@ -933,9 +898,8 @@ class RoundResult(StrictModel):
     # What that optimizer says about the round (`OptimizerRuntime.round_facts`), stamped at the
     # close so every surface renders one wording, the projection included, which cannot ask it.
     optimizer_facts: list[OptimizerFact] = Field(default_factory=list)
-    # "generation_only" for a diag round (L1 variants generated, never scored — every
-    # scoring scalar below is a structural zero, not a measurement); "" for a scored round.
-    status: str = ""
+    # A diag round: variants generated, never scored, so every reading on the document is absent.
+    generation_only: bool = False
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -984,6 +948,13 @@ class RoundResult(StrictModel):
             for i, c in enumerate(ranked, start=1)
         ]
 
+    def rows_of(self, individual_id: str) -> list[dict[str, Any]]:
+        """The rows this round read one individual on: its own walk where it raced as an arm,
+        else its reading as a reference."""
+        if individual_id in self.all_candidate_results:
+            return self.all_candidate_results[individual_id]
+        return self.reference_results[individual_id]
+
     def cell_delta(self, candidate_id: str) -> CellDelta:
         """What one edit did to its parent's cells, paired: the cells it GAINED and the ones it
         LOST. An accuracy nets the two into one number, so an edit that cracks a cell its parent
@@ -1022,8 +993,8 @@ class CycleResult(StrictModel):
     # other basis is comparing two different measurements.
     origin_accuracy: float | None
     # `None`, not 0.0, on a cycle that never started — the rule every accuracy and level here
-    # follows. A stand-in 0.0 becomes round 0's lift bar in `l1/stats.py::_top_lifts`, which
-    # reports the first round's whole composite as its improvement over an origin nothing scored.
+    # follows. A stand-in 0.0 reads as an origin that scored nothing, so the first round's whole
+    # composite would be its lift.
     origin_composite_fitness: float | None = None
     # The L4 outer proxy's inner-search signal: the origin's level and the ability each round
     # The PARENT each round ended on — the winner it crowned, or the one carried forward when it
@@ -1049,8 +1020,9 @@ class CycleResult(StrictModel):
     # ``len(round_levels)``: a cycle stopped early by ``lives`` holds fewer levels, so
     # a mean over "rounds that happened" compares two estimands — and it points the wrong way,
     # since ``lives`` stops a STALLING cycle and the shorter series pays it for quitting once it
-    # had lifted. 0 = never declared, and the law falls back to the series length.
-    round_budget: int = 0
+    # had lifted. ``None`` = the config declared no cap; the law's reading of either is
+    # ``l4/proxies.py::effective_round_budget``.
+    round_budget: int | None = None
     result_prompt_fields: dict[str, Any]
     result_pipeline_params: dict[str, Any] | None = None
     stop_reason: StopReason

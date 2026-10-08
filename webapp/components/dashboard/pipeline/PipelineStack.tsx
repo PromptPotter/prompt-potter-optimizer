@@ -1,8 +1,8 @@
 "use client";
 import { useState, type ReactNode } from "react";
-import { measurementNode, pipelineReadStatus } from "@/lib/derivations";
+import { pipelineReadStatus } from "@/lib/derivations";
 import { useConnector } from "@/lib/hooks/useConnector";
-import { useDashboard } from "@/lib/hooks/useDashboard";
+import { useCycleStream } from "@/lib/poll";
 import { useNestedPipelines } from "@/lib/hooks/useNestedPipelines";
 import { useOptimizerPipeline } from "@/lib/hooks/useOptimizerPipeline";
 import type { NodeReach } from "@/lib/api";
@@ -51,7 +51,7 @@ const CAMPAIGN_LEVEL = 1;
 
 export function PipelineStack({ datasetName, samplesOpen, onToggleSamples }: Props) {
   const cv = useConnector();
-  const { dash } = useDashboard();
+  const { dash } = useCycleStream();
   const [outermost, setOutermost] = useState(CAMPAIGN_LEVEL);
   // Gated on the campaign pipeline resolving, so an anon preview fires nothing.
   const nested = useNestedPipelines(cv.nests, cv.pipelineStatus === "ok");
@@ -73,7 +73,7 @@ export function PipelineStack({ datasetName, samplesOpen, onToggleSamples }: Pro
       connector: "PromptPotter",
       reach: optimizer?.reach ?? null,
       scope: "optimizer",
-      nestsNode: measurementNode(optimizer ?? null),
+      nestsNode: optimizer?.measurement_node ?? null,
       // The one level `active_node` speaks for.
       activeNode,
       isLive: cv.isLive,

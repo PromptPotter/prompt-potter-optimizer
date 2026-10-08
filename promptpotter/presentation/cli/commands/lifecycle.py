@@ -31,10 +31,8 @@ from promptpotter.application.commands.payloads import (
     StepCyclePayload,
     UnarchiveCampaignPayload,
 )
-from promptpotter.application.jobs.capacity import resolve_run_capacity
-from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.runner.origin_gate import GateDecision
-from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, default_jobs_dir
+from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.domain.launch_limits import RoundsCap
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.cli.commands._shared import (
@@ -87,17 +85,18 @@ async def _refused(awaitable: Awaitable[object], ids: dict[str, str]) -> Command
 
 async def _dispatch(
     args: argparse.Namespace, payload_for: Callable[[str], LifecyclePayload]
-) -> CommandResult | None:
-    """Dispatch what *payload_for* builds. ``None`` on success; a result when the campaign is absent or not the caller's
-    (existence-leak gate: not_found, never 403), or when the target is the active campaign."""
+) -> tuple[CommandResult | None, str]:
+    """Dispatch what *payload_for* builds, returning ``(refusal_or_None, campaign_id)`` — the id the
+    typed needle RESOLVED to. Absent and not-the-caller's refuse alike: not_found, never 403."""
     stores = build_stores(identity_from_args(args), projects_root=DEFAULT_PROJECTS_ROOT)
     campaign_id = resolve_campaign_hint(stores, args.campaign_id)
-    return await _refused(
+    refusal = await _refused(
         CommandDispatcher(stores).dispatch_lifecycle(
             CommandCall(payload_for(campaign_id), uuid.uuid4().hex)
         ),
         {"campaign_id": campaign_id},
     )
+    return refusal, campaign_id
 
 
 def _reason_suffix(args: argparse.Namespace) -> str:
@@ -106,12 +105,11 @@ def _reason_suffix(args: argparse.Namespace) -> str:
 
 
 async def cmd_archive(args: argparse.Namespace) -> CommandResult:
-    refusal = await _dispatch(
+    refusal, campaign_id = await _dispatch(
         args, lambda c: ArchiveCampaignPayload(campaign_id=c, reason=args.reason)
     )
     if refusal is not None:
         return refusal
-    campaign_id: str = args.campaign_id
     logger.info("lifecycle: %s -> archived (flagged in place)", campaign_id)
     return CommandResult(
         data={"campaign_id": campaign_id, "lifecycle_status": "archived"},
@@ -120,10 +118,9 @@ async def cmd_archive(args: argparse.Namespace) -> CommandResult:
 
 
 async def cmd_unarchive(args: argparse.Namespace) -> CommandResult:
-    refusal = await _dispatch(args, lambda c: UnarchiveCampaignPayload(campaign_id=c))
+    refusal, campaign_id = await _dispatch(args, lambda c: UnarchiveCampaignPayload(campaign_id=c))
     if refusal is not None:
         return refusal
-    campaign_id: str = args.campaign_id
     logger.info("lifecycle: %s -> active (flag cleared)", campaign_id)
     return CommandResult(
         data={"campaign_id": campaign_id, "lifecycle_status": "active"},
@@ -218,15 +215,10 @@ async def cmd_set_limits(args: argparse.Namespace) -> CommandResult:
         # Passed only when given: an explicit `None` here is the LIFT, not "untouched".
         **({} if rounds_cap is None else {"max_rounds": rounds_cap.max_rounds}),
     )
-    # The ONE verb here that needs the registry: the clamp counts in-flight commitments against
-    # the account, and `hold_run_limits` asks whether a live job carries the ceiling too. It is
-    # disk-backed over `default_jobs_dir()`, so this reads the server's jobs rather than an empty
-    # set — the dispatcher refuses outright without one, which is what left this verb unrunnable.
-    # No `on_reap`: this process exits in a second and may not touch the server's live cycle.
     refused = await _refused(
-        CommandDispatcher(
-            store, JobRegistry(default_jobs_dir(), capacity=resolve_run_capacity)
-        ).dispatch_cycle_command(CommandCall(payload, uuid.uuid4().hex), expected_version=None),
+        CommandDispatcher(store).dispatch_cycle_command(
+            CommandCall(payload, uuid.uuid4().hex), expected_version=None
+        ),
         {"campaign_id": campaign_id, "cycle_id": cycle_id},
     )
     if refused is not None:
@@ -401,13 +393,11 @@ async def cmd_cancel_queued(args: argparse.Namespace) -> CommandResult:
 
     A terminal run leaves the queue by Ctrl+C, because the wait happens in this process. This verb
     is for the ones that do not: a browser launch queued behind a full box, which nothing else in
-    the terminal can reach. `python -m promptpotter machine` lists the job ids."""
+    the terminal can reach."""
     job_id: str = str(getattr(args, "job_id", "") or "").strip()
     stores = build_stores(identity_from_args(args), projects_root=DEFAULT_PROJECTS_ROOT)
     refused = await _refused(
-        CommandDispatcher(
-            stores, JobRegistry(default_jobs_dir(), capacity=resolve_run_capacity)
-        ).dispatch_workspace_command(
+        CommandDispatcher(stores).dispatch_workspace_command(
             CommandCall(CancelQueuedRunPayload(job_id=job_id), uuid.uuid4().hex)
         ),
         {"job_id": job_id},
@@ -437,7 +427,7 @@ async def cmd_set_concurrent_cycles(args: argparse.Namespace) -> CommandResult:
 async def cmd_delete(args: argparse.Namespace) -> CommandResult:
     """Destructively remove a campaign. ``--keep-results`` spares the keepsake tier."""
     keep_results: bool = args.keep_results
-    refusal = await _dispatch(
+    refusal, campaign_id = await _dispatch(
         args,
         lambda c: DeleteCampaignPayload(
             campaign_id=c, reason=args.reason, keep_results=keep_results
@@ -445,7 +435,6 @@ async def cmd_delete(args: argparse.Namespace) -> CommandResult:
     )
     if refusal is not None:
         return refusal
-    campaign_id: str = args.campaign_id
     mode = "deleted (keepsake kept)" if keep_results else "deleted (removed)"
     logger.info("lifecycle: %s -> %s", campaign_id, mode)
     return CommandResult(

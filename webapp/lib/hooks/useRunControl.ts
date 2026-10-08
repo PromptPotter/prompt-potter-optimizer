@@ -3,7 +3,7 @@ import { useState } from "react";
 import { postPauseCycle, postStartRun } from "@/lib/api";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { phasePauseLabel, runPhaseAction, type RunAction } from "@/lib/run-phase";
-import { useDashboard } from "@/lib/hooks/useDashboard";
+import { useCycleStream } from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";
 
 // Start / pause the viewed cycle — the VERB, with no opinion about what it looks like; every
@@ -23,7 +23,7 @@ export interface RunControl {
 }
 
 export function useRunControl(): RunControl | null {
-  const { dash } = useDashboard();
+  const { dash } = useCycleStream();
   const { campaignId, cycleId } = useWorkspace();
   const cmd = useCommand<"pause-cycle" | "start-run">("run-control");
   const [pausing, setPausing] = useState(false);
@@ -47,7 +47,7 @@ export function useRunControl(): RunControl | null {
       return;
     }
     // A paused cycle's worker has exited, so resume is a relaunch: the same branch as start.
-    void cmd.run("start-run", () => postStartRun(campaignId, cycleId, "resume"));
+    void cmd.run("start-run", () => postStartRun(campaignId, cycleId));
   };
 
   return {

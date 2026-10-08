@@ -1,5 +1,5 @@
-// The connector state: one join of `/backends`, the campaign's resolved pipeline and the live
-// per-node observations, made in `lib/hooks/useConnector.ts` and nowhere else.
+// The connector state: one join of `/backends` and the campaign's resolved pipeline, made in
+// `lib/hooks/useConnector.ts` and nowhere else.
 
 import type {
   BackendHealthResponse,
@@ -10,13 +10,16 @@ import type {
   NodeOutputSchema,
   NodeReach,
 } from "@/lib/api";
-import type { NodeDataLike, PipelineView } from "./pipeline";
+import type { PipelineView } from "./pipeline";
 
 export type PipelineStatus = "unbound" | "loading" | "ok" | "error";
 
 export interface ConnectorView {
   connector: string | null;
   backendType: string | null;
+  // Served (`CampaignPipelineResponse.self_optimization`): an L4 unit has no HTTP backend and no
+  // per-sample roster, so those panels branch on this. False until the resolution lands.
+  selfOptimization: boolean;
   // The optimizer manifest the course runs; null until the resolution lands.
   optimizer: string | null;
   // That optimizer's knob values per node as the course runs them; null until it lands.
@@ -28,10 +31,7 @@ export interface ConnectorView {
   others: BackendResponse[];
   baseUrl: string | null;
   isTls: boolean | null;
-  currentNodes: Record<string, NodeDataLike>;
   isLive: boolean;
-  // `dashboard.json::state`; the target LLM is called only during "scoring", "origin" and "bench".
-  phase: string | null;
   // Real reachability, distinct from `isLive` (is the optimizer scoring through it right now).
   health: BackendHealthResponse | null;
   nodeConfigSchema: Record<string, NodeConfigParam[]> | null;

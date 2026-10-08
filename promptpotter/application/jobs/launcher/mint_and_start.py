@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import time
 from collections.abc import Mapping
@@ -19,10 +18,9 @@ from promptpotter.application.campaign_config import (
 )
 from promptpotter.application.datasets.authored import (
     dataset_campaign_path,
-    read_campaign_config_file,
+    load_dataset_campaign_config,
 )
 from promptpotter.application.datasets.csv_ingest import Table, materialize_samples
-from promptpotter.application.datasets.dataset_replace import recover_pending_replacements
 from promptpotter.application.datasets.draft_campaign import (
     DraftCampaign,
     committed_pipeline_json,
@@ -36,11 +34,15 @@ from promptpotter.application.jobs.launcher.admission import (
     release_slot,
 )
 from promptpotter.application.jobs.launcher.draft_build import (
-    _build_default_campaign_json,
-    _build_task_context,
+    default_campaign_json,
+    draft_task_context,
 )
-from promptpotter.application.jobs.launcher.run_job import JobSpec, record_launch_stop, spawn_job
-from promptpotter.application.jobs.mint import fresh_campaign_id, mint_framed_cycle
+from promptpotter.application.jobs.launcher.run_job import JobSpec, spawn_job
+from promptpotter.application.jobs.mint import (
+    fresh_campaign_id,
+    mint_framed_cycle,
+    under_declared_record,
+)
 from promptpotter.application.jobs.quota import QuotaExceededError
 from promptpotter.application.jobs.registry import Job, JobRegistry
 from promptpotter.application.optimizer_manifest import select_optimizer
@@ -53,10 +55,9 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.launch_limits import LaunchLimits
 from promptpotter.infrastructure.store.dataset_access import (
     DatasetAccessError,
-    dataset_pipeline_path,
+    declared_backend_type,
     readable_dataset_dir,
 )
-from promptpotter.infrastructure.store.io import read_yaml_optional
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import PayloadInvalidError
 
@@ -83,7 +84,7 @@ class OriginIncompleteError(PayloadInvalidError):
         )
 
 
-def _assert_origin_ready(draft: DraftCampaign) -> None:
+def assert_origin_ready(draft: DraftCampaign) -> None:
     """The one gate both mint paths run BEFORE anything irreversible — the checklist, not the
     operator, decides, so a false-ready never reaches mint."""
     readiness = origin_readiness(draft)
@@ -110,7 +111,7 @@ def dataset_campaign_config(
 ) -> CampaignConfig:
     """The dataset's own campaign declaration under the ``optimization`` a launch chose — what
     admission reads the budget arms off, since neither that nor a node overlay moves one."""
-    config = load_campaign_config(read_campaign_config_file(dataset_campaign_path(dataset_root)))
+    config = load_dataset_campaign_config(dataset_campaign_path(dataset_root))
     return with_optimization(config, optimization) if optimization else config
 
 
@@ -172,15 +173,12 @@ async def mint_campaign_command(
 
     *job* is the accepted launch (``launcher.admission::request_launch``) — already holding a slot,
     or queued for one, in which case the first ``await`` below is the wait."""
-    # A crashed version-and-repoint leaves a campaign pointing at a name whose data has moved
-    # to `-vN`, so heal before resolving a pin. Cheap no-op when nothing is pending.
-    recover_pending_replacements(stores=stores)
     try:
         dataset_root = readable_dataset_dir(stores, dataset_name)
     except DatasetAccessError:
         raise LaunchError(f"dataset not found: {dataset_name!r}") from None
 
-    backend_type = _read_backend_type_from_dataset(dataset_root, dataset_name)
+    backend_type = declared_backend_type(dataset_root)
 
     held = await admit_and_hold(
         stores=stores,
@@ -191,16 +189,17 @@ async def mint_campaign_command(
         backend_type=backend_type,
         backend_url=backend_url,
         requested=limits,
-        # The dataset's own declaration, read before the session exists: the overlay that
-        # `build_cycle_config` folds on afterwards touches no budget arm. No hop — a fresh mint
-        # has no seed and no standing ceiling.
-        config=lambda: dataset_campaign_config(dataset_root, optimization=optimization),
+        # The dataset's own declaration under the head-to-head an arm joins, read before the
+        # session exists. No hop — a fresh mint has no seed and no standing ceiling.
+        config=lambda: under_declared_record(
+            stores, dataset_campaign_config(dataset_root, optimization=optimization), arm
+        ),
         hop=None,
     )
 
-    # SETUP — the ids bind only once the mint resolves; init them so the failure handler can tell
-    # "crashed before a cycle existed" (nothing to mark) from "crashed after mint" (mark it).
-    campaign_id = cycle_id = ""
+    # The hop binds only once the mint resolves, so the failure path can tell "crashed before a
+    # cycle existed" (nothing to stamp) from "crashed after mint" (stamp it).
+    hop: CycleHop | None = None
     try:
         # The operator waits on this one synchronously (round-0 scoring is already backgrounded),
         # so it is the dominant pre-202 cost and lands on disk beside admission's own line.
@@ -213,7 +212,7 @@ async def mint_campaign_command(
         logger.info("mint[%s]: init_services=%.2fs", dataset_name, time.perf_counter() - _t0)
 
         # Reused-dataset setup edits ride the overlay onto a per-campaign snapshot;
-        # prepare_fresh_cycle freezes the result into the Campaign manifest.
+        # the mint freezes the result into the Campaign manifest.
         campaign_config = build_cycle_config(
             session, dataset_root, optimization=optimization, pipeline_overlay=pipeline_overlay
         )
@@ -230,46 +229,39 @@ async def mint_campaign_command(
             limits=limits,
             origin_override=origin_override,
         )
-        campaign_id, cycle_id = minted.campaign_id, minted.cycle_id
+        hop = CycleHop(campaign_id=minted.campaign_id, cycle_id=minted.cycle_id)
         # Resolve the reservation onto the cycle it now names. Every hop-keyed join reads this —
         # `running_job_for` (how `change-run-limits` reaches the held cap), `reap_cycle_by_id`,
         # the holder readout — and each answers nothing at all against `UNRESOLVED_HOP`.
-        job_registry.update_target(
-            job.job_id, hop=CycleHop(campaign_id=campaign_id, cycle_id=cycle_id)
-        )
+        job_registry.update_target(job.job_id, hop=hop)
 
     except BaseException as exc:
-        release_slot(job_registry, job.job_id, exc)
-        if campaign_id and cycle_id:
-            record_launch_stop(
-                stores=stores,
-                hop=CycleHop(campaign_id=campaign_id, cycle_id=cycle_id),
-                session_id="",
-                exc=exc,
-            )
+        release_slot(job_registry, job.job_id, exc, stores=stores, hop=hop)
         raise
 
+    assert hop is not None, "the mint bound it or raised"
     spawn_job(
         job_registry,
         JobSpec.of(
             stores=stores,
             job_registry=job_registry,
             job_id=job.job_id,
-            hop=CycleHop(campaign_id=campaign_id, cycle_id=cycle_id),
+            hop=hop,
             session_id=session.session_id,
             limits=held,
             backend_url=backend_url,
         ),
+        stores=stores,
     )
 
     logger.info(
         "mint-campaign: minted %s/%s for user %s (job %s)",
-        campaign_id,
-        cycle_id,
+        hop.campaign_id,
+        hop.cycle_id,
         stores.identity.user_id,
         job.job_id,
     )
-    return campaign_id, cycle_id, job
+    return hop.campaign_id, hop.cycle_id, job
 
 
 def materialize_and_write_origin(
@@ -295,10 +287,10 @@ def materialize_and_write_origin(
         source_file=draft.source_file,
         headers=draft.headers,
         pipeline_json=committed_pipeline_json(draft),
-        campaign_json=_build_default_campaign_json(draft),
+        campaign_json=default_campaign_json(draft),
         task_description=draft.raw_task_description,
         prompt_default=draft.committed_prompt_fields(),
-        task_context=_build_task_context(draft),
+        task_context=draft_task_context(draft),
     )
     persist_origin_candidate_library(stores, draft.slug, draft)
 
@@ -316,19 +308,12 @@ async def start_run_command(
     job_registry: JobRegistry,
     job: Job,
     hop: CycleHop,
-    kind: str,
     limits: LaunchLimits,
     stop_after_rounds: int | None = None,
     backend_url: str = DEFAULT_BACKEND_URL,
 ) -> Job:
-    """Start a run of an existing cycle in its own process; ``kind`` ∈ ``{"new", "resume"}`` mirrors the two CLI
-    verbs. ``stop_after_rounds`` bounds the run in place (``step-round``)."""
-    if kind not in ("new", "resume"):
-        raise LaunchError(f"start-run kind must be 'new' or 'resume', got {kind!r}")
-
-    # Same guard as the mint path — a resumed cycle must not resolve a pin a crashed Replace
-    # left dangling.
-    recover_pending_replacements(stores=stores)
+    """Start a run of an existing cycle in its own process, from wherever its ledger stands.
+    ``stop_after_rounds`` bounds the run in place (``step-round``)."""
     campaign = stores.campaigns.load_campaign(hop.campaign_id)
     if campaign is None or campaign.owner_user_id != str(stores.identity.user_id):
         raise LaunchError(f"campaign not found or not owned: {hop.campaign_id}")
@@ -337,14 +322,14 @@ async def start_run_command(
         dataset_root = readable_dataset_dir(stores, campaign.dataset_name)
     except DatasetAccessError:
         raise LaunchError(f"dataset not found: {campaign.dataset_name!r}") from None
-    backend_type = _read_backend_type_from_dataset(dataset_root, campaign.dataset_name)
+    backend_type = declared_backend_type(dataset_root)
     dataset_name = campaign.dataset_name
 
     held = await admit_and_hold(
         stores=stores,
         job_registry=job_registry,
         job=job,
-        verb=kind,
+        verb="start-run",
         dataset_name=dataset_name,
         backend_type=backend_type,
         backend_url=backend_url,
@@ -365,30 +350,16 @@ async def start_run_command(
             backend_url=backend_url,
             stop_after_rounds=stop_after_rounds,
         ),
+        stores=stores,
     )
     return job
-
-
-def _read_backend_type_from_dataset(dataset_root: Path, dataset_name: str) -> str:
-    """Resolve ``backend_type`` from the dataset's ``pipeline.yaml`` for the preflight. Raises
-    :class:`LaunchError` when absent — the launch cannot proceed without it."""
-    raw_path = dataset_pipeline_path(dataset_root)
-    try:
-        raw = read_yaml_optional(raw_path)
-    except json.JSONDecodeError as exc:
-        raise LaunchError(f"dataset {dataset_name!r} pipeline.yaml is malformed: {exc}") from exc
-    if raw is None:
-        raise LaunchError(f"dataset {dataset_name!r} has no pipeline.yaml — cannot resolve backend")
-    bt = raw.get("backend_type")
-    if not isinstance(bt, str) or not bt:
-        raise LaunchError(f"dataset {dataset_name!r} pipeline.yaml is missing 'backend_type'")
-    return bt.lower()
 
 
 __all__ = [
     "LaunchError",
     "OriginIncompleteError",
     "QuotaExceededError",
+    "assert_origin_ready",
     "build_cycle_config",
     "dataset_campaign_config",
     "materialize_and_write_origin",

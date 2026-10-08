@@ -192,6 +192,13 @@ and delete the entry if the answer is no.
 
 **Webapp — the control-plane session's files**
 
+- **Late — a node's schema reading travels as three props.** `schema` / `schemaStatus` /
+  `outputSchema` are drilled side by side into every `NodeSurface` host
+  (`components/shell/searchpoint/LeaderSummary.tsx::ConfigBox` is one), so a fourth fact about the
+  schema is an edit at each host. Action: one reading object. **Rides with:** any change to
+  `NodeSurface`'s props or to a host that passes them. **Re-test:**
+  `grep -rln schemaStatus webapp/components` — the count of hosts still passing it loose.
+
 ## Bypasses — one defect class, held for ONE holistic pass
 
 **A path that goes around the mechanism the rest of the code rides, and re-derives the answer
@@ -313,8 +320,9 @@ an untyped dict.
   ignores it.** The dataset key is already backend-neutral; what is harbor-only is the reader
   (`harbor.py::PACKAGE_CACHE_SCOPES`). Action: a `Connector.package_cache_scopes` declaration,
   empty by default, that run init checks the declared scope against — with one connector it would
-  have one reader and guard nothing. **Re-test:** a second `connectors/*.py` that runs cells in a
-  container; while harbor is the only one, this waits.
+  have one reader and guard nothing. **Re-test:** grep `connectors/protocol.py` for
+  `package_cache_scopes`; `dbllmbench` is the second connector running cells in a container and
+  ignores the key, so this no longer waits.
 
 **Coupon + BYO build (Lane A2 — blocked on the build itself; ADR-0003 § Host coupon + BYO keys):**
 - **Re-test for all three below: grep the package for `grant.json`.** It is prose-only today, so
@@ -332,9 +340,10 @@ an untyped dict.
   covers), and the per-run **reservation** (`Job.cap_usd` / `cap_tokens`) — without it two concurrent
   launches are each admitted against the same remainder and the pair spends ~2× the ceiling.
 - **`domain/run_records.py::TokenUsageRecord` lacks `key_source`** → `/auth/activity`
-  `group_by=api_key` (`routers/auth.py`) fakes a *provider slug* as the key id. Once real
-  `key_source: host|user` lands (declared on `TokenUsagePayload` in the asyncapi), replace the
-  fake-slug derivation with the real dimension. Blocker: the coupon build adds the field.
+  `group_by=api_key` (`application/jobs/account_activity.py`) groups by the recorded `provider` —
+  who billed, not whose key. Once real `key_source: host|user` lands (declared on
+  `TokenUsagePayload` in the asyncapi), the axis gains that dimension. Blocker: the coupon build
+  adds the field.
 
 **Needs a capability neither the bench nor the preprint opens** — the bar is "does M13 or M14 need
 it", and these do not. The bench does not rescue the first one in particular: a third party ships an optimizer through
@@ -359,6 +368,12 @@ an entry point, in-process, so it never touches the inbound credential.
   `provider: groq` in any `datasets/*/pipeline.yaml`; while none pins one the path cannot fire.
 
 **Needs a live run, not a decision:**
+- **Middle — `presentation/teleprompter.py::compile_loop` has never been compiled against DSPy.**
+  Its `nodes` argument takes the campaign shape `{node: {config: {...}}}`, and DSPy is not in the
+  repo venv, so the teleprompter is type-checked and never run. A DSPy host gets the optimizer loop
+  and not every surface; what it must get is a `compile` that works. **Re-test:**
+  `pip install -e ".[dspy]"` in a scratch venv, then one `PromptPotterOpt(...).compile(student,
+  trainset=...)` on a three-row trainset — a result closes this, a raise names what to adapt.
 - **`_rebank_on_branch`'s re-bank has never been observed** — fixed to take each corrected round
   through the whole ingress, but the cycle it was measured on went with a store wipe, so the fix is
   reasoned, not seen. **Re-test:** repair a fork, then confirm each corrected round carries its own

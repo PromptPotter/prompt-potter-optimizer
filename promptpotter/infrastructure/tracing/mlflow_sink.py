@@ -21,8 +21,7 @@ class MLflowSink:
         self._initialized = False
 
     def on_campaign_start(self, event: CampaignStart) -> None:
-        if event.session_id:
-            self._cycle_id = event.session_id
+        self._cycle_id = event.cycle_id
 
     def on_round_end(self, event: RoundEnd) -> None:
 
@@ -51,10 +50,10 @@ class MLflowSink:
         if event.n_candidates:
             params["n_candidates"] = str(event.n_candidates)
 
-        metrics = {
-            "accuracy": event.accuracy,
-            "total": float(event.total),
-        }
+        # A round that scored nothing has no accuracy, and `log_metrics` raises on a `None`.
+        metrics = {"total": float(event.total)}
+        if event.accuracy is not None:
+            metrics["accuracy"] = event.accuracy
         tags = {
             "improved": str(event.improved).lower(),
             "next_action": event.next_action,

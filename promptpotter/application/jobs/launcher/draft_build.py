@@ -21,7 +21,7 @@ from promptpotter.application.pipeline_resolve import resolve_pipeline_for_draft
 from promptpotter.domain.pipeline_schema import (
     CANDIDATE_LIBRARY,
     PipelineDependency,
-    dependencies_from_node_types,
+    dependencies_from_node_roles,
 )
 from promptpotter.domain.search_point import TaskDecomposition
 
@@ -59,10 +59,10 @@ def draft_active_steps(draft: DraftCampaign) -> list[str]:
 def draft_pipeline_dependencies(draft: DraftCampaign) -> tuple[PipelineDependency, ...]:
     """Scoped to the ACTIVE steps, so a dependency surfaces only when a node needing it runs —
     TermNorm's ``llm_only`` default raises none, the full pipeline raises ``candidate_library``."""
-    connector = connectors.get(draft.connector)
-    active = set(draft.pipeline_steps or connector.default_pipeline)
-    node_types = {n: t for n, t in connector.node_types.items() if n in active}
-    return dependencies_from_node_types(node_types)
+    active = set(draft_active_steps(draft))
+    return dependencies_from_node_roles(
+        {n: r for n, r in connectors.get(draft.connector).node_roles.items() if n in active}
+    )
 
 
 def _dependency_fulfilled(dep: PipelineDependency, draft: DraftCampaign) -> bool:
@@ -102,7 +102,7 @@ def _draft_schema_source(draft: DraftCampaign) -> str:
     resolution — a campaign read has a schema whoever answered for it."""
     if draft.backend_nodes:
         return "backend"
-    return "local" if connectors.get(draft.connector).in_process_run is not None else "unreachable"
+    return "local" if connectors.get(draft.connector).execution == "in_process" else "unreachable"
 
 
 def draft_wire(draft: DraftCampaign, workspace: Path | None = None) -> dict[str, Any]:
@@ -127,7 +127,7 @@ def draft_wire(draft: DraftCampaign, workspace: Path | None = None) -> dict[str,
     }
 
 
-def _build_default_campaign_json(draft: DraftCampaign) -> dict[str, Any]:
+def default_campaign_json(draft: DraftCampaign) -> dict[str, Any]:
     """Written as the DELTA from defaults, so a knob nobody chose never reaches disk and a later
     rename cannot make the file unreadable — which matters because ``CampaignConfig`` forbids extras.
 
@@ -138,9 +138,9 @@ def _build_default_campaign_json(draft: DraftCampaign) -> dict[str, Any]:
     return {"campaign_config": config.model_dump(mode="json", exclude_defaults=True)}
 
 
-def _build_task_context(draft: DraftCampaign) -> dict[str, Any]:
+def draft_task_context(draft: DraftCampaign) -> TaskDecomposition:
     """The check-in already decomposed the task, so the run reads ``task_context.yaml`` directly
     instead of re-decomposing through a second LLM call."""
     return TaskDecomposition.from_dict(
         {**draft.decomposed_task_context, "raw_description": draft.raw_task_description}
-    ).to_dict()
+    )

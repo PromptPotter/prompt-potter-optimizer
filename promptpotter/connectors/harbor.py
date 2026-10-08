@@ -15,6 +15,7 @@ import asyncio
 import functools
 import json
 import logging
+import os
 import re
 import sys
 import tempfile
@@ -29,14 +30,14 @@ from promptpotter.config.settings import non_utf8_encoding
 from promptpotter.connectors.protocol import Connector, InProcessWorkload, NoopSession
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.pipeline_overlay import node_config_items
-from promptpotter.domain.pipeline_schema import LLMSpendBound, stable_hash
+from promptpotter.domain.pipeline_schema import LLMSpendBound
 from promptpotter.domain.spend import StepTokenUsage, TokenAccount
 from promptpotter.infrastructure.docker_host import (
     CONTAINER_PRODUCER,
     PACKAGE_CACHE_PROXY,
-    claim_machine,
+    PRODUCER_SCRATCH,
     docker,
-    docker_server_version,
+    docker_daemon_fault,
     ensure_package_cache,
     forget_package_cache,
     machine_step,
@@ -51,12 +52,13 @@ from promptpotter.infrastructure.llm.spend_book import (
 from promptpotter.infrastructure.llm.telemetry import emit_backend_warning
 from promptpotter.shared.errors import (
     CellInfrastructureError,
-    CellSendRefusedError,
     CellThrottledError,
     CellUnscoreableError,
     ErrorCategory,
+    cell_failure,
     is_provider_credit_refusal,
 )
+from promptpotter.shared.hashing import stable_hash
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -66,6 +68,7 @@ if TYPE_CHECKING:
     from harbor.models.trial.result import TrialResult
     from harbor.trial.trial import Trial
 
+    from promptpotter.domain.sample import Sample
     from promptpotter.domain.value_tree import Delivery
     from promptpotter.infrastructure.store.stores import Stores
 
@@ -128,14 +131,9 @@ AGENT_KWARG_KEYS = frozenset(
     }
 )
 
-# Trial scratch, NOT under the workspace: Harbor nests `<trials_dir>/<trial>/<role>/…` and a
-# workspace path is already deep — the MAX_PATH wall that forced L4's `.inner` registry flat.
-# Nothing durable lives here; reward, digest and token counts land in the measurement archive.
-_TRIALS_HOME = Path(tempfile.gettempdir()) / "promptpotter-harbor"
-
-# This process's scratch. Harbor stops an environment in a `finally` (`trial/trial.py::run`), so
-# only a HARD KILL leaves one behind, for `docker_host.reap_dead_producers` to sweep.
-_TRIALS_ROOT = _TRIALS_HOME / CONTAINER_PRODUCER
+# Trial scratch is this process's on the Docker host, NOT under the workspace (`connectors/CLAUDE.md`
+# § Execution mode): only a HARD KILL leaves one behind, for `docker_host.reap_dead_producers`.
+_TRIALS_ROOT = PRODUCER_SCRATCH
 # Read by the compose overlay, which interpolates it into the producer label.
 _PRODUCER_ENV = "PROMPTPOTTER_HARBOR_PRODUCER"
 
@@ -331,11 +329,9 @@ def _resolve_experiment(panel: Mapping[str, Any]) -> dict[str, Any]:
     return {**panel, "tasks": [by_id[i] for i in wanted]}
 
 
-def _extract_experiment(
-    experiment_data: Mapping[str, Any],
-) -> tuple[list[dict[str, Any]], list[str]]:
-    """Harbor tasks → ``(queries, index_terms)``, and **the one place this backend's answer shape
-    is declared** (``connectors/CLAUDE.md`` § The answer shape).
+def _extract_experiment(experiment_data: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Harbor tasks → rows, and **the one place this backend's answer shape is declared**
+    (``connectors/CLAUDE.md`` § The answer shape).
 
     Normally there is no label — the task's own verifier grades the cell. A task MAY declare an
     ``answer``, making the bank label-carrying, which is what keeps a published auto-rater alive on
@@ -366,29 +362,7 @@ def _extract_experiment(
         if question := str(t.get("question") or "").strip():
             row["question"] = question
         out.append(row)
-    return out, []
-
-
-def _current_task(
-    panel: Mapping[str, Any] | None, query: str
-) -> tuple[dict[str, Any], str, dict[str, Any]]:
-    """The declared task for one query, plus the reward key and agent block it is graded under."""
-    if panel is None:
-        raise RuntimeError(
-            f"harbor connector: this run's workload carries no {TASKS_FILE}, so no task can be "
-            "resolved for it."
-        )
-    for task in panel["tasks"]:
-        if (task or {}).get("id") == query:
-            return (
-                task,
-                panel.get("reward_key") or DEFAULT_TASK_REWARD_KEY,
-                panel.get("agent") or {},
-            )
-    raise RuntimeError(
-        f"harbor connector: no task declared for {query!r} in {TASKS_FILE}. The samples being "
-        "scored did not come from this workload's panel."
-    )
+    return out
 
 
 # The gateway whose request body carries reasoning effort as `reasoning.effort`. Any other gateway
@@ -554,7 +528,7 @@ async def _version_check(_http: httpx.AsyncClient, _base_url: str) -> str | None
     return ".".join(version.split(".")[:2]) if version else None
 
 
-async def _preflight(backend_url: str) -> None:
+async def _preflight(_backend_url: str) -> str | None:
     """Three things must be true before a campaign starts spending: Harbor imports, this
     interpreter decodes UTF-8 by default, and a container runtime answers. All three fail LOUDLY
     here rather than as N identical errored rows — a missing extra, a locale-encoded interpreter
@@ -562,27 +536,23 @@ async def _preflight(backend_url: str) -> None:
     reward of 0."""
     try:
         from harbor.trial.trial import Trial  # noqa: F401
-    except ImportError as exc:
+    except ImportError:
         # Name the interpreter, because the likeliest cause is that this is the WRONG one. A bare
         # `python` on Windows resolves to the system install, which imports promptpotter fine and
         # none of its extras -- and "pip install the extra" is then a cure that pollutes that
         # interpreter instead of using the venv that already has it.
-        raise BackendUnreachableError(
-            "harbor",
-            backend_url,
+        return (
             f"the 'harbor' extra is not importable from {sys.executable}.\n"
             f"  If that is not this repo's .venv, re-run with the venv's interpreter:\n"
             f"    .venv\\Scripts\\python.exe -m promptpotter ...\n"
-            f'  If it IS the venv, install the extra: pip install -e ".[harbor]"',
-        ) from exc
+            f'  If it IS the venv, install the extra: pip install -e ".[harbor]"'
+        )
 
     # Harbor reads `task.toml`, `instruction.md` and the ATIF trajectory with a bare `read_text()`,
     # so the decode falls to the locale encoding and any task carrying a byte outside it raises
     # inside `Task.__init__`. Upstream's to fix; ours is to refuse rather than discover it per cell.
     if (encoding := non_utf8_encoding()) is not None:
-        raise BackendUnreachableError(
-            "harbor",
-            backend_url,
+        return (
             f"this interpreter decodes files as {encoding!r}, not UTF-8, "
             # ASCII only in this string, deliberately -- an em dash or an ellipsis included. It is
             # printed to the very console whose encoding it is complaining about, so a non-ASCII
@@ -593,11 +563,10 @@ async def _preflight(backend_url: str) -> None:
             "with UTF-8 mode on:\n"
             "  PowerShell:  $env:PYTHONUTF8 = '1'\n"
             "  bash:        export PYTHONUTF8=1\n"
-            "  or per-run:  python -X utf8 -m promptpotter ...",
+            "  or per-run:  python -X utf8 -m promptpotter ..."
         )
 
-    version = await docker_server_version("harbor", backend_url)
-    logger.debug("harbor preflight: docker server %s", version)
+    return await docker_daemon_fault()
 
 
 def _agent_install_script(tools: tuple[tuple[str, str], ...]) -> str:
@@ -797,6 +766,12 @@ def _read_trajectory(path: Path) -> list[dict[str, Any]]:
     return [s for s in steps or [] if isinstance(s, dict)]
 
 
+def _trial_root(result: TrialResult) -> Path:
+    # `trials_dir` is ours (`_trial_config`) and Harbor lays a trial out as `<trial_name>/<role>/…`,
+    # so the directory is addressable without parsing `trial_uri`.
+    return _TRIALS_ROOT / str(result.trial_name)
+
+
 def _trajectory_sources(result: TrialResult) -> list[tuple[Path, str | None]]:
     """Every ATIF trajectory this trial wrote, with the STEP each one served.
 
@@ -804,7 +779,7 @@ def _trajectory_sources(result: TrialResult) -> list[tuple[Path, str | None]]:
     step. Walking ``step_results`` rather than globbing is what makes the STEP NAME available — the
     axis per-step terms pool on, and why a turn ordinal never becomes one
     (``domain/scoring.py::TurnRecord``)."""
-    root = _TRIALS_ROOT / str(getattr(result, "trial_name", "") or "")
+    root = _trial_root(result)
     steps = getattr(result, "step_results", None) or []
     if steps:
         return [
@@ -821,8 +796,7 @@ def _turns(result: TrialResult) -> list[dict[str, Any]]:
         for raw in _read_trajectory(path):
             turns.append(_turn(raw, len(turns) + 1, step))
     if not turns:
-        root = _TRIALS_ROOT / str(getattr(result, "trial_name", "") or "")
-        _warn_layout_drift(f"no agent trajectory under {root}")
+        _warn_layout_drift(f"no agent trajectory under {_trial_root(result)}")
     return turns
 
 
@@ -887,7 +861,7 @@ def _answer(result: TrialResult) -> str:
     from harbor.models.trial.paths import EnvironmentPaths, TrialPaths
 
     source = str(EnvironmentPaths.artifacts_dir / ANSWER_FILENAME)
-    root = _TRIALS_ROOT / str(getattr(result, "trial_name", "") or "")
+    root = _trial_root(result)
     roots = [root] + [
         root / "steps" / str(sr.step_name) for sr in getattr(result, "step_results", None) or []
     ]
@@ -930,15 +904,16 @@ def _step_rewards(result: TrialResult) -> dict[str, float]:
 _PHASES: tuple[str, ...] = ("environment_setup", "agent_setup", "agent_execution", "verifier")
 
 
-def _phase_timings(result: TrialResult, elapsed: float) -> dict[str, float]:
-    """Where the episode's wall clock went, in seconds — Harbor's own four phases plus what it
-    did not attribute.
+def _phase_timings(result: TrialResult, attempt_s: float) -> dict[str, float]:
+    """Where the GRADED attempt's wall clock went, in seconds — Harbor's own four phases plus what
+    it did not attribute.
 
     Read from ``TrialResult``'s ``TimingInfo`` pairs rather than stopwatched here: Harbor already
     brackets each phase, and a second set of brackets around the same work would drift from it and
-    give two answers to one question. The remainder — total minus the phases Harbor reported —
-    lands under ``overhead`` so the map SUMS to the cell's measured wall clock; without it a reader
+    give two answers to one question. The remainder — the attempt minus the phases Harbor reported
+    — lands under ``overhead`` so the map SUMS to that attempt's wall clock; without it a reader
     would silently take the parts for the whole, which is the failure this key exists to prevent.
+    The cell's own clock (``step_timings``) also counts every attempt this one replaced.
 
     An absent phase is omitted rather than zeroed. ``0.0`` says the phase ran instantly, absence
     says Harbor did not report it, and on a task with no verifier only one of those is true."""
@@ -952,7 +927,7 @@ def _phase_timings(result: TrialResult, elapsed: float) -> dict[str, float]:
         if seconds >= 0.0:
             out[phase] = seconds
     if out:
-        out["overhead"] = max(0.0, elapsed - sum(out.values()))
+        out["overhead"] = max(0.0, attempt_s - sum(out.values()))
     return out
 
 
@@ -974,7 +949,7 @@ def _provider_throttle(result: TrialResult) -> str | None:
         if _PROVIDER_THROTTLE.search(detail):
             return detail
     if any(kind == "AgentTimeoutError" for kind, _ in failures):
-        return _first_line(_TRIALS_ROOT / result.trial_name / "trial.log", _PROVIDER_THROTTLE)
+        return _first_line(_trial_root(result) / "trial.log", _PROVIDER_THROTTLE)
     return None
 
 
@@ -995,8 +970,7 @@ def _infrastructure_failure(result: TrialResult) -> tuple[str, ErrorCategory] | 
             )
         if kind in _HARNESS_TIMEOUTS or _HARNESS_NETWORK_FAILURE.search(detail):
             return detail[:300], ErrorCategory.CONNECTION
-    root = _TRIALS_ROOT / result.trial_name
-    for log in root.rglob("test-stdout.txt"):
+    for log in _trial_root(result).rglob("test-stdout.txt"):
         if log.parent.name == "verifier" and (line := _first_line(log, _FETCH_FAILURE)):
             return (
                 f"the verifier could not download what it installs: {line}",
@@ -1109,9 +1083,7 @@ def _digest(
     if said := _agent_decisions(turns):
         lines.append(f"\nAGENT DECISIONS:\n{said}")
 
-    # The artifacts Harbor wrote for this trial. `trials_dir` is ours and it lays them out as
-    # `<trial_name>/<role>/…`, so the directory is addressable without parsing `trial_uri`.
-    root = _TRIALS_ROOT / str(getattr(result, "trial_name", "") or "")
+    root = _trial_root(result)
     panes = sorted(root.glob("agent/*.pane")) if root.is_dir() else []
     if panes and (pane := _read_tail(panes[0], _TERMINAL_TAIL_CAP)):
         lines.append(f"\nTERMINAL (tail):\n{pane}")
@@ -1127,9 +1099,9 @@ def _digest(
 def _outcome_note(result: TrialResult) -> str | None:
     """``pipeline_data.outcome_note``, which ``failing_samples`` renders where a labelled cell
     shows what was said against the truth. ``None`` where the verifier printed no failed check."""
-    root = _TRIALS_ROOT / str(getattr(result, "trial_name", "") or "")
+    log = _trial_root(result) / "verifier" / "test-stdout.txt"
     try:
-        text = (root / "verifier" / "test-stdout.txt").read_text(encoding="utf-8", errors="replace")
+        text = log.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return None
     failures = _VERIFIER_FAILURE.findall(_TERMINAL_ESC.sub("", text))
@@ -1236,15 +1208,24 @@ class _Episode:
     tools: tuple[tuple[str, str], ...]
 
 
-def _episode(workload: InProcessWorkload, query: str, payload: dict[str, Any]) -> _Episode:
-    task, reward_key, agent_cfg = _current_task(workload.experiment, query)
+def _episode(workload: InProcessWorkload, sample: Sample, payload: dict[str, Any]) -> _Episode:
+    # The task IS the sample's pin (`_task_pin`): the pins `_task_config` builds a trial from.
+    task = sample.source_pin
+    if task is None:
+        raise CellUnscoreableError(
+            f"harbor task {sample.query!r} carries no pin, so it is no row of a {TASKS_FILE}.",
+            spent={},
+            step_timings={},
+        )
+    panel = workload.experiment or {}
+    agent_cfg = panel.get("agent") or {}
     agent_kwargs = dict(agent_cfg.get("kwargs") or {})
     agent_kwargs.update(payload.get("agent_kwargs") or {})
     agent_name = agent_cfg.get("name") or "terminus-2"
     return _Episode(
-        query=query,
+        query=sample.query,
         task=task,
-        reward_key=reward_key,
+        reward_key=panel.get("reward_key") or DEFAULT_TASK_REWARD_KEY,
         agent_name=agent_name,
         agent_kwargs=agent_kwargs,
         # The MODEL comes from the node config, never from the agent block — `datasets/CLAUDE.md`
@@ -1252,7 +1233,7 @@ def _episode(workload: InProcessWorkload, query: str, payload: dict[str, Any]) -
         # a second spelling in `harbor_tasks.yaml` would be a second owner of the same fact.
         model_name=payload.get("model_name"),
         environment=agent_cfg.get("environment") or "docker",
-        cached=(workload.experiment or {}).get("package_cache") == "verifier",
+        cached=panel.get("package_cache") in PACKAGE_CACHE_SCOPES,
         prompt=payload.get("prompt"),
         in_system_prompt=payload[SKILL_DELIVERY_KEY] == "system_prompt",
         # terminus-2 installs asciinema only while it records; baking it otherwise adds a tool.
@@ -1267,6 +1248,7 @@ def _episode(workload: InProcessWorkload, query: str, payload: dict[str, Any]) -
 def _trial_config(episode: _Episode, skills: list[str]) -> Any:
     from harbor.models.trial import config as harbor_config
 
+    os.environ[_PRODUCER_ENV] = CONTAINER_PRODUCER
     return harbor_config.TrialConfig(
         task=_task_config(episode.task, harbor_config),
         trials_dir=_TRIALS_ROOT,
@@ -1343,24 +1325,6 @@ async def _attempt(episode: _Episode) -> tuple[TrialResult, float]:
         return result, time.monotonic() - start
 
 
-def _infrastructure_error(
-    query: str,
-    n: int,
-    cause: str,
-    category: ErrorCategory,
-    spent: dict[str, StepTokenUsage],
-    spent_s: float,
-) -> CellInfrastructureError:
-    message = (
-        f"harbor task {query!r} measured the infrastructure, not the agent, "
-        f"on attempt {n}/{_INFRA_ATTEMPTS}: {cause}"
-    )
-    timings = {AGENT_NODE: spent_s}
-    if category is ErrorCategory.CONNECTION:
-        return CellInfrastructureError(message, spent=spent, step_timings=timings)
-    return CellSendRefusedError(message, category=category, spent=spent, step_timings=timings)
-
-
 async def _back_off(query: str, n: int, cause: str, category: ErrorCategory) -> None:
     logger.warning(
         "harbor task %r attempt %d/%d measured the infrastructure (%s); retrying in %.0fs",
@@ -1386,13 +1350,11 @@ async def _back_off(query: str, n: int, cause: str, category: ErrorCategory) -> 
     await asyncio.sleep(_INFRA_BACKOFF_S * n)
 
 
-async def _run_episode(
-    episode: _Episode,
-) -> tuple[TrialResult, float, dict[str, StepTokenUsage], float]:
+async def _run_episode(episode: _Episode) -> tuple[TrialResult, float, dict[str, StepTokenUsage]]:
+    """The graded attempt, how long THAT attempt took, and every attempt's spend."""
     query = episode.query
     # Every attempt's spend, discarded ones included: a retried episode still ran the agent.
     attempts: list[dict[str, StepTokenUsage]] = []
-    spent_s = 0.0
     for n in range(1, _INFRA_ATTEMPTS + 1):
         try:
             result, elapsed = await _attempt(episode)
@@ -1400,36 +1362,36 @@ async def _run_episode(
             cause, category = str(exc), exc.category
         else:
             attempts.append(_step_tokens(result, episode.model_name))
-            spent_s += elapsed
             if (throttle := _provider_throttle(result)) is not None:
                 # The provider's load, which the run answers for every cell at once.
                 raise CellThrottledError(
                     f"harbor task {query!r} was throttled by its model provider: {throttle}",
                     spent=_sum_spend(attempts),
-                    step_timings={AGENT_NODE: spent_s},
+                    step_timings={},
                 )
             if (failure := _infrastructure_failure(result)) is None:
                 break
             cause, category = failure
         forget_package_cache()
         if n == _INFRA_ATTEMPTS or category is not ErrorCategory.CONNECTION:
-            raise _infrastructure_error(query, n, cause, category, _sum_spend(attempts), spent_s)
+            raise cell_failure(
+                f"harbor task {query!r} measured the infrastructure, not the agent, "
+                f"on attempt {n}/{_INFRA_ATTEMPTS}: {cause}",
+                category,
+                spent=_sum_spend(attempts),
+            )
         await _back_off(query, n, cause, category)
-    return result, elapsed, _sum_spend(attempts), spent_s
+    return result, elapsed, _sum_spend(attempts)
 
 
-def _reward(
-    result: TrialResult, episode: _Episode, bill: dict[str, StepTokenUsage], spent_s: float
-) -> float | int:
+def _reward(result: TrialResult, episode: _Episode, bill: dict[str, StepTokenUsage]) -> float | int:
     query = episode.query
     # BEFORE the reward is read: Harbor drops a step with no verifier result from its own
     # denominator, so the number below would describe fewer steps than the task declared, and
     # describe it as a success.
     if unscoreable := _unscoreable_step(result):
         raise CellUnscoreableError(
-            f"harbor task {query!r}: {unscoreable}.",
-            spent=bill,
-            step_timings={AGENT_NODE: spent_s},
+            f"harbor task {query!r}: {unscoreable}.", spent=bill, step_timings={}
         )
 
     rewards = result.verifier_result.rewards if result.verifier_result else None
@@ -1441,7 +1403,7 @@ def _reward(
             f"harbor task {query!r} produced no reward under key {episode.reward_key!r} "
             f"(rewards={rewards}); the episode is unscoreable, not a zero.",
             spent=bill,
-            step_timings={AGENT_NODE: spent_s},
+            step_timings={},
         )
     return cast("float | int", reward)
 
@@ -1478,15 +1440,13 @@ def _episode_data(
     result: TrialResult,
     episode: _Episode,
     reward: float | int,
-    elapsed: float,
+    attempt_s: float,
     bill: dict[str, StepTokenUsage],
 ) -> dict[str, Any]:
     turns = _turns(result)
     data: dict[str, Any] = {
         REWARD_KEY: float(reward),
         "terminal_node": AGENT_NODE,
-        "total_time": elapsed,
-        "step_timings": {AGENT_NODE: elapsed},
         "step_tokens": bill,
         "reasoning_trace": _digest(result, episode.query, reward, turns),
         ANSWER_KEY: _answer(result),
@@ -1497,7 +1457,7 @@ def _episode_data(
         data["turns"] = turns
     if note := _outcome_note(result):
         data["outcome_note"] = note
-    if phases := _phase_timings(result, elapsed):
+    if phases := _phase_timings(result, attempt_s):
         data["step_phases"] = phases
     if (opened := _skill_arrival(result, episode)) is not None:
         data[SKILL_KEY] = opened
@@ -1506,18 +1466,14 @@ def _episode_data(
 
 
 async def _in_process_run(
-    workload: InProcessWorkload, query: str, payload: dict[str, Any]
+    workload: InProcessWorkload, sample: Sample, payload: dict[str, Any]
 ) -> dict[str, Any]:
     """Run one episode and project its verdict onto the ``{"data": {…}}`` shape ``measure_sample``
     parses from an HTTP body — so the scorer reads a Harbor result identically to a remote one."""
-    episode = _episode(workload, query, payload)
-    with machine_step():
-        await claim_machine(
-            _TRIALS_HOME, compose_overlay=_DOCKER_OVERLAY, producer_env=_PRODUCER_ENV
-        )
-    result, elapsed, bill, spent_s = await _run_episode(episode)
-    reward = _reward(result, episode, bill, spent_s)
-    return {"data": _episode_data(result, episode, reward, elapsed, bill)}
+    episode = _episode(workload, sample, payload)
+    result, attempt_s, bill = await _run_episode(episode)
+    reward = _reward(result, episode, bill)
+    return {"data": _episode_data(result, episode, reward, attempt_s, bill)}
 
 
 CONNECTOR = Connector(
@@ -1554,6 +1510,7 @@ CONNECTOR = Connector(
     # cell in flight reserves its whole bound (`_sent_spend_bound`).
     max_cells_in_flight=5,
     cells_hold_the_machine=True,
+    compose_overlay=_DOCKER_OVERLAY,
     # The keys always emitted that a formula reads, verified against the dataset's declared
     # mappings at init. Per-step rewards are NOT here — a single-step task emits none, so
     # declaring them would fail init for every task that is not multi-step.
@@ -1577,7 +1534,7 @@ CONNECTOR = Connector(
     # be ingested either (`datasets/ingest.py` refuses a connector declaring an `experiment_file`
     # and carrying no labels), so a seed here reaches nothing. What a measurement declares must not
     # ship, and change, independently of the measurement.
-    # No `node_types`: that roster exists to raise INPUT DEPENDENCIES (a `candidate_source` node
+    # No `node_roles`: that roster exists to raise INPUT DEPENDENCIES (a `candidate_source` node
     # wants a candidate library dropped in place). An agent node wants nothing but its task.
 )
 

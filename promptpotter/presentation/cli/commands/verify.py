@@ -54,7 +54,6 @@ async def cmd_verify(args: argparse.Namespace) -> CommandResult:
     try:
         outcome = await verify_candidate(
             stores=stores,
-            identity=identity,
             hop=hop,
             candidate_id=spec.candidate_id,
             samples=args.samples,

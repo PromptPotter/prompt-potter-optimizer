@@ -14,27 +14,21 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from promptpotter.application.optimizers.nodes import CheckResult
-from promptpotter.application.optimizers.potter.records import L1Layout
 
 __all__ = ["CheckFn", "ValidatorContext"]
 
 
 @dataclass(frozen=True)
 class ValidatorContext:
-    """``exploration_budget`` gates the ``stall_exploration`` escape hatch; ``None`` means the
-    wiring layer could not determine it, and those citations then fail open."""
+    """What one round's generation call offered, off the round's banked state: the citation menu on
+    its wire and the budget it is composed under. Both ``None`` on a round that banked no call."""
 
-    round_num: int
     prior_rounds: list[dict[str, Any]] = field(default_factory=list)
-    l1_layout: L1Layout | None = None
+    citable: tuple[str, ...] | None = None
     context_object: list[str] = field(default_factory=list)
     exploration_budget: str | None = None
-    # Axes the round-start AxisIndex flagged as ``peaked``. Used by
-    # ``evidence_grounding_present`` to reject variants that cite
-    # ``axis_memory`` to justify mutating a peaked axis without naming a
-    # rebut (the critique naming that axis, or exploration_budget=wide).
-    # Populated by ``l1/stats.py::review_reading`` from each round's
-    # ``PotterRoundState.axis_memory_peaked``, banked as L1 proposed.
+    # Axes the round-start AxisIndex flagged ``peaked``: citing ``axis_memory`` to mutate one
+    # needs a rebut — the critique naming that axis, or a wide exploration budget.
     peaked_axes: frozenset[str] = field(default_factory=frozenset)
 
 

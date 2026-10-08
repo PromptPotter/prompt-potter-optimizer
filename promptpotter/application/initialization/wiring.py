@@ -8,7 +8,7 @@ import logging
 import re
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from promptpotter import connectors, judges
 from promptpotter.application import optimizers
@@ -24,13 +24,14 @@ from promptpotter.application.optimizer_manifest import resolve_optimizer
 from promptpotter.application.pipeline_resolve import (
     dataset_pipeline_declaration,
     overlay_dataset_pipeline,
+    resolve_campaign_config,
 )
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.config.settings import (
     DEFAULT_BACKEND_ID,
     DEFAULT_BACKEND_URL,
 )
-from promptpotter.connectors.protocol import InProcessWorkload
+from promptpotter.connectors.protocol import Connector, InProcessWorkload
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.optimizer_state import round_payload_type
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
@@ -42,22 +43,26 @@ from promptpotter.infrastructure.llm.capabilities import ensure_model_capabiliti
 from promptpotter.infrastructure.store.archive_queries import maintain_measurement_index
 from promptpotter.infrastructure.store.dataset_access import (
     dataset_experiment,
-    dataset_pipeline_path,
+    declared_backend_type,
     extract_panel_rows,
     readable_dataset_dir,
 )
-from promptpotter.infrastructure.store.io import read_yaml_optional
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.infrastructure.tracing.langfuse_client import LangfuseLogger
 from promptpotter.shared.errors import PayloadInvalidError
-from promptpotter.shared.identity import IdentityContext, default_identity
+from promptpotter.shared.identity import IdentityContext
+
+if TYPE_CHECKING:
+    from promptpotter.application.campaign_config import CampaignConfig
+    from promptpotter.domain.campaign import Campaign
+    from promptpotter.domain.cycle_paths import CycleHop
 
 logger = logging.getLogger(__name__)
 
 
 async def _verify_connector_revision(
     client: BackendClient,
-    connector: connectors.Connector,
+    connector: Connector,
 ) -> None:
     """WARN on drift between ``connector.expected_revision`` and the live backend's. Opt-in per
     connector; a network error says "could not verify", never "mismatch"."""
@@ -96,7 +101,7 @@ async def _verify_connector_revision(
 def _warn_if_labels_have_no_ranker(
     schema: PipelineSchema,
     samples: list[Sample],
-    connector: connectors.Connector | None,
+    connector: Connector | None,
     status: Callable[[str], None],
 ) -> None:
     """**Labels and a ranker travel together.** A dataset carrying ground truth and no node emitting
@@ -129,7 +134,7 @@ def _warn_if_labels_have_no_ranker(
 
 def _verify_required_observation_keys(
     schema: PipelineSchema,
-    connector: connectors.Connector,
+    connector: Connector,
     dataset_name: str | None,
 ) -> None:
     """Fails at arm time rather than letting a dropped key reach the formula as a measurement
@@ -157,7 +162,7 @@ async def _resolve_pipeline_schema(
     dataset_config_dir: Path | None,
     status: Callable[[str], None],
     *,
-    connector: connectors.Connector,
+    connector: Connector,
     experiment: dict[str, Any] | None,
 ) -> tuple[PipelineSchema, dict[str, Any]]:
     """Backend schema underneath, dataset overlay on top; an ``in_process`` connector has no backend, so the dataset's
@@ -217,31 +222,12 @@ async def _resolve_pipeline_schema(
     )
 
 
-def _read_backend_type(dataset_config_dir: Path | None, dataset_name: str | None) -> str:
-    """Resolve backend_type from the dataset's ``pipeline.yaml``. Typed for the same reason its
-    sibling is: a bare ``ValueError`` becomes a 500 the webapp retries forever."""
-    if not dataset_name or dataset_config_dir is None:
-        raise PayloadInvalidError(
-            "dataset_name required to resolve backend_type for connector lookup",
-            code="pipeline_config_invalid",
-        )
-    raw = read_yaml_optional(dataset_pipeline_path(dataset_config_dir))
-    bt = (raw or {}).get("backend_type")
-    if not isinstance(bt, str) or not bt:
-        raise PayloadInvalidError(
-            f"backend_type missing or empty in {dataset_config_dir}/pipeline.yaml",
-            code="pipeline_config_invalid",
-            details={"dataset_config_dir": str(dataset_config_dir)},
-        )
-    return bt.lower()
-
-
 def _load_dataset_into_session(
     session: Session,
     dataset_name: str,
     status: Callable[[str], None],
     *,
-    connector: connectors.Connector,
+    connector: Connector,
     experiment: dict[str, Any] | None,
 ) -> None:
     """Populate session.samples + index_terms — out of the connector's own experiment document where
@@ -259,7 +245,7 @@ def _load_dataset_into_session(
                 f"generated on this machine (it is gitignored — rebuild it).",
                 code="pipeline_config_invalid",
             )
-        queries, session.index_terms = extract_panel_rows(connector, dataset_name, experiment)
+        queries = extract_panel_rows(connector, dataset_name, experiment)
         session.samples = samples_from_dicts(queries)
         status(f"Experiment: {connector.experiment_file} ({len(queries)} tasks)")
         return
@@ -348,7 +334,8 @@ async def init_services(
     backend_url: str = DEFAULT_BACKEND_URL,
     backend_id: str = "",
     on_status: Callable[[str], None] | None = None,
-    identity: IdentityContext | None = None,
+    *,
+    identity: IdentityContext,
     stores: Stores | None = None,
     enable_tracing: bool = True,
     program: object | None = None,
@@ -362,10 +349,8 @@ async def init_services(
 
     complete_registries(every_treatment=False)
 
-    resolved_identity = identity if identity is not None else default_identity()
-
     if stores is None:
-        stores = build_stores(resolved_identity, projects_root=DEFAULT_PROJECTS_ROOT)
+        stores = build_stores(identity, projects_root=DEFAULT_PROJECTS_ROOT)
 
     # Off-thread: this takes a CROSS-PROCESS lock on the tenant-global index, which no sandbox
     # isolates — held on the event loop it blocks every other cell in the group and every
@@ -376,7 +361,7 @@ async def init_services(
     await ensure_model_capabilities(Path(stores.base_dir))
 
     dataset_config_dir = readable_dataset_dir(stores, dataset_name)
-    backend_type = _read_backend_type(dataset_config_dir, dataset_name)
+    backend_type = declared_backend_type(dataset_config_dir)
     connector = connectors.get(backend_type)
     experiment = dataset_experiment(dataset_config_dir, connector)
     client = build_backend_client(
@@ -407,7 +392,7 @@ async def init_services(
         pipeline_declaration=pipeline_declaration,
         dataset_name=dataset_name,
         dataset_config_dir=dataset_config_dir,
-        identity=resolved_identity,
+        identity=identity,
         tenant_root=str(stores.base_dir),
         # ``enable_tracing=False`` (L4 inner campaigns) force-disables the cloud
         # Langfuse logger so ``bridge.from_settings`` skips ``LangfuseSink`` — no
@@ -425,4 +410,25 @@ async def init_services(
     return session
 
 
-__all__ = ["complete_registries", "init_services"]
+async def bind_cycle_session(
+    stores: Stores,
+    campaign: Campaign,
+    hop: CycleHop,
+    *,
+    backend_url: str = DEFAULT_BACKEND_URL,
+) -> tuple[Session, CampaignConfig]:
+    """A session bound to the EXISTING cycle at *hop*, and the config a resume of it reads. Unbound,
+    the runner mints a fresh campaign and steals the active pointer from the cycle it is asked to run."""
+    session = await init_services(
+        backend_url=backend_url,
+        backend_id=campaign.backend_id,
+        dataset_name=campaign.dataset_name,
+        identity=stores.identity,
+        stores=stores,
+    )
+    session.campaign_id = hop.campaign_id
+    session.state.cycle_id = hop.cycle_id
+    return session, resolve_campaign_config(stores, campaign, hop)
+
+
+__all__ = ["bind_cycle_session", "complete_registries", "init_services"]

@@ -5,7 +5,7 @@ import { ensureChartRegistered, getCss, lineChartDefaults, useThemeVersion } fro
 import { Badge, CardFrame } from "@/components/ui";
 import { metricInkToken } from "@/components/candidates/series";
 import { degradedRoundNotices, fitnessTrend } from "@/lib/derivations";
-import { useDashboard } from "@/lib/hooks/useDashboard";
+import { useCycleStream } from "@/lib/poll";
 import { useMediaQuery } from "@/lib/hooks/useMediaQuery";
 
 ensureChartRegistered();
@@ -13,7 +13,7 @@ ensureChartRegistered();
 // The bench (each graded selection on held-out rows) is the headline for every optimizer; the
 // round line is the search-pool composite, θ only where a round elects on it. `compact` is a DENSITY.
 export const TrendChart = memo(function TrendChart({ compact = false }: { compact?: boolean }) {
-  const { dash, isLive } = useDashboard();
+  const { dash, isLive } = useCycleStream();
   const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
   // Subscribe to the theme so a flip pulls fresh canvas inks.
   useThemeVersion();

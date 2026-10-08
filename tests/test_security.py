@@ -17,11 +17,13 @@ from typing import Any
 import pytest
 
 
-def test_the_check_in_model_reads_no_held_out_row(built_stores: Any, tmp_path: Path) -> None:
+def test_the_check_in_model_reads_no_held_out_row(
+    built_stores: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The origin resolver is an LLM handed sample rows WITH their labels, and it writes the prompt
     every optimizer starts from. A bench row in its preview is the headline's exam read by the one
     authoring the answer sheet: every number renders, only higher, and no rerun unreads it."""
-    from promptpotter.application.datasets.ingest import draft_from_dataset
+    from promptpotter.application.datasets import ingest
     from promptpotter.application.datasets.origin_resolve import build_origin_consultation
     from promptpotter.domain.bench import DatasetSplit, partition_bank
     from promptpotter.domain.sample import Sample
@@ -35,7 +37,17 @@ def test_the_check_in_model_reads_no_held_out_row(built_stores: Any, tmp_path: P
         "  dataset_split:\n    bench: 30\n  optimization:\n    degradation_threshold: 0.4\n",
         encoding="utf-8",
     )
-    draft = draft_from_dataset(stores=built_stores, dataset_dir=dataset_dir, dataset_name="heldout")
+
+    async def _offline(*_: Any, **__: Any) -> dict[str, Any]:
+        return {}
+
+    monkeypatch.setattr(ingest, "refresh_capabilities", _offline)
+    monkeypatch.setattr(ingest, "fetch_backend_nodes", _offline)
+    draft = asyncio.run(
+        ingest.draft_from_dataset(
+            stores=built_stores, dataset_dir=dataset_dir, dataset_name="heldout"
+        )
+    )
     content, _ = build_origin_consultation(draft)
     held = partition_bank(bank, DatasetSplit(bench=30)).bench
     assert not [s.id for s in held if f'"{s.query}"' in content], "a bench row reached the resolver"
@@ -283,6 +295,7 @@ async def test_cell_envelope_cancels_the_inner_campaign(tmp_path: Path, monkeypa
     from promptpotter.infrastructure.llm import telemetry as llm_telemetry
     from promptpotter.infrastructure.store.io import write_json
     from promptpotter.shared.errors import CellUnscoreableError
+    from promptpotter.shared.identity import default_identity
 
     class _RecordingLedger:
         def __init__(self) -> None:
@@ -299,12 +312,7 @@ async def test_cell_envelope_cancels_the_inner_campaign(tmp_path: Path, monkeypa
     cancelled = asyncio.Event()
 
     async def _hanging_inner(
-        ctx: Any,
-        spec: Any,
-        overrides: Any,
-        cycle_dir_box: dict[str, Path],
-        spawned_by: dict[str, Any],
-        spawn_role: Any,
+        cell: Any, cycle_dir_box: dict[str, Path], spawned_by: dict[str, Any]
     ) -> CycleResult:
         """Models the campaign as it BEHAVED, not as it should: it outlives the envelope and
         then SWALLOWS the cancellation, returning a normal result.
@@ -352,7 +360,7 @@ async def test_cell_envelope_cancels_the_inner_campaign(tmp_path: Path, monkeypa
         spawn_context.InnerSpawnContext(
             inner_sandbox_root=tmp_path,
             dataset_config_dir=tmp_path,
-            identity=None,  # type: ignore[arg-type]  # the stubbed inner run never reads it
+            identity=default_identity(),
             shared_root=tmp_path,
             spawn_campaign_id="ppself__aaaaaa",
             spawn_cycle_id="cycle_deadbeef0000",
@@ -368,11 +376,16 @@ async def test_cell_envelope_cancels_the_inner_campaign(tmp_path: Path, monkeypa
     # The connector DECLARES the seconds and the scoring seam PUTS THEM IN FORCE — driven apart
     # here exactly as `measure_sample` drives them, so a cell keeping its own timeout would pass
     # this while the seam bounded nothing.
+    from promptpotter.domain.sample import Sample
+
     query = "justlogic-d234/seed-0"
-    envelope = CellEnvelope(spawn.inner_cell_envelope_s(query, {}), label=query)
+    cell = Sample(
+        id=0, query=query, ground_truth=None, source_pin={"id": query, "inner_dataset_seed": 0}
+    )
+    envelope = CellEnvelope(spawn.inner_cell_envelope_s(cell, {}), label=query)
     with pytest.raises(CellUnscoreableError, match="wall-clock envelope"):
         async with envelope:
-            await spawn.run_inner_cycle(query, {})
+            await spawn.run_inner_cycle(cell, {})
 
     assert started.is_set(), "the inner campaign never started — the envelope proved nothing"
     assert cancelled.is_set(), "the inner campaign outlived its envelope and kept spending"
@@ -810,7 +823,9 @@ async def test_a_budget_change_leaves_the_arm_it_did_not_touch_alone(
         campaign_id="camp-3", dataset_name="ds1", created_at="", root_cycle_id=hop.cycle_id
     )
     stores.campaigns.create_campaign(campaign)
-    registry = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1)
+    registry = JobRegistry(
+        tmp_path / "jobs", capacity=lambda _live: 1, projects_root=tmp_path / "projects"
+    )
     job = registry.request_slot(user_id="sub-9", dataset_name="ds1", hop=hop)
     assert job.status == "pending", "an empty box must hand out a slot, not a place in line"
     registry.set_caps(job.job_id, cap_usd=0.30, cap_tokens=5_000_000)
@@ -914,7 +929,9 @@ def test_a_moved_ceiling_counts_the_cycles_own_spend_once(
     bill(root, 0.1)
     bill(root, 0.1)
     bill(hop, 0.3)
-    registry = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1)
+    registry = JobRegistry(
+        tmp_path / "jobs", capacity=lambda _live: 1, projects_root=tmp_path / "projects"
+    )
     job = registry.request_slot(user_id="sub-7", dataset_name="ds1", hop=hop)
     registry.set_caps(job.job_id, cap_usd=0.8, cap_tokens=None)
 
@@ -959,7 +976,9 @@ async def test_moving_one_ceiling_leaves_the_other_at_its_launch_cap(
     from promptpotter.domain.spend import BudgetChange, MeteredSpend, SpendCeilings
 
     hop = CycleHop(campaign_id="camp-4", cycle_id="cycle_budget0001")
-    registry = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1)
+    registry = JobRegistry(
+        tmp_path / "jobs", capacity=lambda _live: 1, projects_root=tmp_path / "projects"
+    )
     job = registry.request_slot(user_id="default", dataset_name="ds1", hop=hop)
     registry.set_caps(job.job_id, cap_usd=0.30, cap_tokens=5_000_000)
     spent = MeteredSpend(
@@ -980,8 +999,7 @@ async def test_moving_one_ceiling_leaves_the_other_at_its_launch_cap(
     gate = _build_budget_gate(
         observers,
         built_stores.campaigns.cycle_dir(hop),
-        usd_cap=0.30,
-        token_cap=210_000,
+        declared=SpendCeilings(0.30, 210_000),
         meters="bill",
         reserve=SpendCeilings(None, None),
     )
@@ -1016,9 +1034,9 @@ def test_a_non_finite_budget_cannot_disarm_the_spend_ceiling() -> None:
     at = {"campaign_id": "camp-nan", "cycle_id": "cycle_nan000000"}
     for bad in (float("nan"), float("inf"), float("-inf")):
         with pytest.raises(ValidationError):
-            StartRunPayload(**at, kind="resume", spend_budget_usd=bad)
+            StartRunPayload(**at, spend_budget_usd=bad)
         with pytest.raises(ValidationError):
-            StartRunPayload(**at, kind="resume", halt_at_accuracy=bad)
+            StartRunPayload(**at, halt_at_accuracy=bad)
         with pytest.raises(ValidationError):
             MintCampaignPayload(dataset_name="ds", spend_budget_usd=bad)
         with pytest.raises(ValidationError):
@@ -1027,17 +1045,15 @@ def test_a_non_finite_budget_cannot_disarm_the_spend_ceiling() -> None:
     # And the guard rejects only what it names: the bounds themselves still admit, or a launch
     # that CAN be metered is refused instead — the same ceiling gone, the other direction. All
     # THREE limits ride: a dropped arm is a ceiling the caller declared and the run never had.
-    run = StartRunPayload(
-        **at, kind="resume", spend_budget_usd=0.0, halt_at_accuracy=1.0, token_budget=5_000
-    )
+    run = StartRunPayload(**at, spend_budget_usd=0.0, halt_at_accuracy=1.0, token_budget=5_000)
     assert (run.spend_budget_usd, run.halt_at_accuracy, run.token_budget) == (0.0, 1.0, 5_000)
     # The token arm is counted, not priced — a float is a typo, not a rounding instruction.
     with pytest.raises(ValidationError):
-        StartRunPayload(**at, kind="resume", token_budget=5_000.5)
+        StartRunPayload(**at, token_budget=5_000.5)
     # `bool` IS an `int` in Python and Pydantic coerces it unless the field is strict, so an
     # unguarded ceiling admits `true` as 1 — a $1 cap the operator never wrote.
     with pytest.raises(ValidationError):
-        StartRunPayload(**at, kind="resume", token_budget=True)
+        StartRunPayload(**at, token_budget=True)
     with pytest.raises(ValidationError):
         ChangeRunLimitsPayload(**at, max_usd=True)
 
@@ -1079,7 +1095,7 @@ async def test_a_revoked_principal_cannot_replay_an_applied_command(tmp_path: Pa
             CommandCall(PauseCyclePayload(campaign_id="c", cycle_id="y"), "k1"),
             Applier(
                 lambda: touched.append("applied"),
-                on_replay=lambda: touched.append("replayed"),
+                replay=lambda: touched.append("replayed"),
             ),
         )
     assert touched == [], "the dedupe short-circuit answered before the capability gate"
@@ -1131,8 +1147,7 @@ def test_a_ceiling_the_operator_set_is_never_silently_unenforced(tmp_path: Path)
     gate = _build_budget_gate(
         observers,
         cycle_dir,
-        usd_cap=None,
-        token_cap=None,
+        declared=SpendCeilings(None, None),
         meters="bill",
         reserve=SpendCeilings(None, None),
     )
@@ -1202,6 +1217,7 @@ def test_no_burst_of_sends_records_spend_past_its_ceiling(
     from openai.types.chat import ChatCompletion
 
     from promptpotter.domain.run_records import SpendHoldRecord, TokenUsageRecord
+    from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.ledger import CycleEventLog
     from promptpotter.infrastructure.llm.openai_compat import OpenAICompatibleClient
     from promptpotter.infrastructure.llm.pricing import Rate
@@ -1435,6 +1451,7 @@ def test_no_burst_of_sends_records_spend_past_its_ceiling(
     # NEVER sent again — the backend is still working it, and a second POST was a second bill
     # nobody recorded. Nor is a 5xx the backend declares deterministic: its bill stays unreported.
     from promptpotter.application.scoring.sample_measurement import cell_billing
+    from promptpotter.connectors.termnorm import TermNormSession
     from promptpotter.infrastructure.backend import BackendClient
     from promptpotter.shared.errors import CellHaltedError
 
@@ -1469,7 +1486,7 @@ def test_no_burst_of_sends_records_spend_past_its_ceiling(
     cells = BackendClient(
         "http://termnorm",
         wire_adapter=lambda query, params: {"query": query},
-        session=types.SimpleNamespace(),  # type: ignore[arg-type]
+        session=TermNormSession(),
         workload=types.SimpleNamespace(),  # type: ignore[arg-type]
         prompt_delivery=types.SimpleNamespace(),  # type: ignore[arg-type]
     )
@@ -1489,7 +1506,7 @@ def test_no_burst_of_sends_records_spend_past_its_ceiling(
             with spending_under(wallet), pytest.raises(ends):
                 asyncio.run(
                     cells.run_query(
-                        "q",
+                        Sample(id=0, query="q", ground_truth=None),
                         bound=cell,
                         billed=cell_billing(types.SimpleNamespace(nodes=[]), {}),  # type: ignore[arg-type]
                     )
@@ -1506,7 +1523,7 @@ def test_no_burst_of_sends_records_spend_past_its_ceiling(
     # answered and leaves only the send it had out unreported — never the whole cell.
     turns: list[Any] = []
 
-    async def episode(_workload: Any, _query: str, _payload: dict[str, Any]) -> dict[str, Any]:
+    async def episode(_workload: Any, _sample: Any, _payload: dict[str, Any]) -> dict[str, Any]:
         for n in range(4):
             hang[0] = n == 3
             turns.append(
@@ -1517,7 +1534,7 @@ def test_no_burst_of_sends_records_spend_past_its_ceiling(
                     max_tokens=100,
                 )
             )
-        return {"data": {}}
+        return {"data": {"terminal_node": "agent"}}
 
     agent = BackendClient(
         "",
@@ -1541,7 +1558,11 @@ def test_no_burst_of_sends_records_spend_past_its_ceiling(
     whole = SendBound(input_tokens=100_000, output_tokens=50_000, usd=0.5)
 
     async def cancel_mid_episode() -> None:
-        cell = asyncio.ensure_future(agent.run_query("q", bound=whole, billed=lambda _d: None))
+        cell = asyncio.ensure_future(
+            agent.run_query(
+                Sample(id=0, query="q", ground_truth=None), bound=whole, billed=lambda _d: None
+            )
+        )
         while len(turns) < 3:
             await asyncio.sleep(0.001)
         await asyncio.sleep(0.05)
@@ -1747,7 +1768,8 @@ def test_a_run_in_its_own_process_spends_as_the_account_that_launched_it(
         user_id=UserId("sub-9"),
         tenant_id=TenantId("sub-9"),
         issuer=Issuer("https://accounts.google.com"),
-        claims={"email": "a@example.com", "spend_ceiling_usd": 2.0},
+        email="a@example.com",
+        claims={"spend_ceiling_usd": 2.0},
         capabilities=frozenset({"campaign.run"}),
     )
     stores = build_stores(
@@ -1763,7 +1785,9 @@ def test_a_run_in_its_own_process_spends_as_the_account_that_launched_it(
     )
     wire = JobSpec.of(
         stores=stores,
-        job_registry=JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1),
+        job_registry=JobRegistry(
+            tmp_path / "jobs", capacity=lambda _live: 1, projects_root=tmp_path / "projects"
+        ),
         job_id="job-a",
         hop=CycleHop(campaign_id="ds__000001", cycle_id="cycle_root"),
         session_id=None,
@@ -1971,7 +1995,7 @@ def test_an_exhausted_account_cannot_spend_before_a_campaign_exists(
     from promptpotter.config.settings import settings
     from promptpotter.infrastructure.store.user_store import User
 
-    monkeypatch.setattr("promptpotter.application.jobs.quota.default_jobs_dir", lambda: tmp_path)
+    monkeypatch.setattr("promptpotter.application.jobs.registry.default_jobs_dir", lambda: tmp_path)
     user = User(user_id="sub-turn", tenant_id="sub-turn", created_at="2026-01-01")
     ledger = tmp_path / "spent.jsonl"
     ledger.write_text(
@@ -2015,6 +2039,7 @@ async def test_a_refused_mint_bills_no_check_in(monkeypatch: pytest.MonkeyPatch)
     land before it."""
     import types
 
+    from promptpotter.application.campaign_config import load_campaign_config, merge_config_layers
     from promptpotter.application.datasets.authored import load_dataset_campaign_config
     from promptpotter.application.initialization.wiring import complete_registries
     from promptpotter.application.jobs import mint
@@ -2033,11 +2058,14 @@ async def test_a_refused_mint_bills_no_check_in(monkeypatch: pytest.MonkeyPatch)
     session: Any = types.SimpleNamespace()
     # The split holds 150 rows out, so the search keeps 20: under CAPO's block of 30.
     bank = [Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(170)]
+    base = load_dataset_campaign_config(template)
     for optimization in (
         {"optimizer": "capo", "nodes": {"l1_generate": {"config": {}}}},
         {"optimizer": "capo", "nodes": {}},
     ):
-        config = load_dataset_campaign_config(template, overrides={"optimization": optimization})
+        config = load_campaign_config(
+            merge_config_layers(base.model_dump(mode="json"), {"optimization": optimization})
+        )
         with pytest.raises(PayloadInvalidError):
             await mint.mint_framed_cycle(
                 session,

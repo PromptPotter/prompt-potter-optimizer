@@ -10,7 +10,7 @@ import type {
   HardSampleOrder,
   HardSamplesScope,
 } from "@/lib/api";
-import { useDashboard } from "@/lib/hooks/useDashboard";
+import { useCycleStream } from "@/lib/poll";
 import { useCells, type SeriesTotals } from "@/lib/hooks/useCells";
 import type { CyclePath } from "@/lib/ids";
 
@@ -54,7 +54,7 @@ export function HardSamplesProvider({
   // `null` sends no override, so the server resolves the dataset's declared `hard_sample_order`;
   // the browser never restates that default.
   const [rankedByPick, setRankedBy] = useState<HardSampleOrder | null>(null);
-  const { isLive } = useDashboard();
+  const { isLive } = useCycleStream();
   const p = useCells(path, datasetName, scope, rankedByPick, isLive);
   // Keyed on the FIELDS, never on `p`, which is a fresh object every render.
   const value = useMemo<HardSamples>(

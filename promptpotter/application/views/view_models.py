@@ -4,7 +4,7 @@ one event that lands on disk; the live-only events have no disk counterpart."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from promptpotter.domain.bench import BenchSubject
 from promptpotter.domain.dashboard_rows import RunStanding
@@ -60,8 +60,6 @@ class ViewContext:
     # The optimizer's standing entering the current round; its cap is the denominator every ♥
     # readout renders against, since a run banking stalls may have no ``max_rounds``.
     run_standing: RunStanding | None = None
-    parent_accuracy: float = 0.0
-    parent_composite_fitness: float | None = None
     composite_fitness_formula: str | None = None
     composite_fitness_formula_short: str | None = None
     display_metric: DisplayMetric = "accuracy"
@@ -70,11 +68,9 @@ class ViewContext:
     node_param_keys: dict[str, list[str]] | None = None
 
     def ledger_anchors(self) -> dict[str, Any]:
-        """The five scalars a ledger subscriber re-syncs from (``ReadoutProjection._phase_ctx``). Not
+        """The three scalars a ledger subscriber re-syncs from (``ReadoutProjection._phase_ctx``). Not
         ``asdict``: that re-emitted both whole ``*_sp_flat`` prompts per candidate and per round."""
         return {
-            "parent_accuracy": self.parent_accuracy,
-            "parent_composite_fitness": self.parent_composite_fitness,
             "composite_fitness_formula": self.composite_fitness_formula,
             "composite_fitness_formula_short": self.composite_fitness_formula_short,
             "display_metric": self.display_metric,
@@ -139,7 +135,7 @@ class RoundStartView:
     round: int
     max_rounds: int
     standing: str
-    current_acc: float
+    current_acc: float | None
     prompt_preview: str
     arms: int | None
     note: str
@@ -270,7 +266,6 @@ class RoundCompleteView:
     yet. Round-trip invariant target."""
 
     round: int
-    parent_acc: float
     scores: tuple[ScoreEntry, ...]
     # The selected arm's candidate label; ``""`` on a round that held its best-so-far.
     winner_label: str
@@ -301,10 +296,6 @@ class RoundCompleteView:
     # WHICH number leads the verdict line. Carried rather than read from config at render
     # time: a knob resolved in the renderer is one the disk round-trip cannot reproduce.
     display_metric: DisplayMetric = "accuracy"
-    # ``RoundResult.ability``'s θ. ``None`` while the ruler is cold, where the headline falls back
-    # to accuracy — a cold θ is logit-accuracy on the arm's own subset, so headlining it dresses a
-    # subset-relative number as the difficulty-adjusted one.
-    ability_theta: float | None = None
 
 
 @dataclass(frozen=True)
@@ -345,7 +336,8 @@ class DigestStatusView:
     # ``None`` where the cycle banked no round 0 — `origin_accuracy_of` reads it off the round
     # documents and there is no stored copy, so absent means never scored, not scored zero.
     origin_accuracy: float | None
-    best_accuracy: float
+    # ``None`` until round 0 banks.
+    best_accuracy: float | None
     best_round: int | None
     rounds_completed: int
     started_at: str | None
@@ -362,7 +354,7 @@ class RoundDigestView:
     accuracy: float | None
     improved: bool
     total: int
-    composite_fitness: float
+    composite_fitness: float | None
     changes_description: str
     facts: tuple[OptimizerFact, ...]
     # Mirrors `RoundResult.stamps_theta`.
@@ -418,12 +410,12 @@ class ForkSummaryView:
     """One row of the family-root log.md ``## Forks`` section; forks themselves render an empty tuple."""
 
     cycle_id: str
-    mode: str
-    best_accuracy: float
+    # What the id's own separator says the cycle is (``layout.py::sibling_kind``).
+    kind: Literal["root", "fork", "diag"]
+    best_accuracy: float | None
     origin_accuracy: float | None
     n_rounds: int
     stop_reason: StopReason | None
-    finished_at: str | None
 
 
 @dataclass(frozen=True)
@@ -433,8 +425,8 @@ class LogMdView:
     formula: str | None
     hard_samples: HardSamplesView | None
     final: FinalWinnerView | None
+    # Best first, so the head is the family's best wherever it beats this cycle's own.
     forks: tuple[ForkSummaryView, ...] = ()
-    family_best: tuple[float, str] | None = None
 
 
 AnyView = (

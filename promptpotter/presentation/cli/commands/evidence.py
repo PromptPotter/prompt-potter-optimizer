@@ -9,12 +9,7 @@ from typing import get_args
 
 from promptpotter.application.evidence.head_to_head import HeadToHeadRow
 from promptpotter.application.evidence.metric_catalogue import MEASURAND, MetricUnit
-from promptpotter.application.evidence.read import (
-    Evidence,
-    campaigns_on_dataset,
-    subject_evidence,
-)
-from promptpotter.application.evidence.subjects import SubjectSpec, parse_subject
+from promptpotter.application.evidence.read import Evidence, select_evidence
 from promptpotter.application.views.render.primitives import fmt_ci, fmt_pvalue
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
@@ -26,7 +21,6 @@ from promptpotter.presentation.cli.commands._shared import (
     CommandResult,
     get_verbose,
     identity_from_args,
-    resolve_campaign_hint,
 )
 
 logger = logging.getLogger("promptpotter.presentation.cli")
@@ -314,19 +308,19 @@ def _config_lines(ev: Evidence) -> list[str]:
     ``--config`` was asked for; identical keys are counted, not printed, because the comparison is
     the point and a wall of matching model names buries it."""
     read = [r for r in ev.subjects if r.config is not None]
-    if len(read) < 2:
+    bands = ev.config_keys
+    if bands is None or len(read) < 2:
         return []
-    keys = sorted({k for r in read if r.config for k in r.config})
-    differs = [k for k in keys if len({(r.config or {}).get(k) for r in read}) > 1]
     width = max(28, *(len(r.label[:24]) + 2 for r in read))
     lines = [
         "",
-        f"{len(differs)} of {len(keys)} configured key(s) differ across "
-        f"{len(read)} searchpoint(s); the rest are identical and not printed.",
+        f"{len(bands.differs)} configured key(s) are set differently across {len(read)} "
+        f"searchpoint(s) and {len(bands.one_sided)} are configured by only some; the "
+        f"{len(bands.same)} identical are not printed.",
         "",
         f"{'key':<30}" + "".join(f"{r.label[:24]:<{width}}" for r in read),
     ]
-    for key in differs:
+    for key in [*bands.differs, *bands.one_sided]:
         # A prose field is a paragraph — one line per key stays a table, and the full value is
         # in `--json` rather than wrapped across the terminal.
         cells = _diff_window([(r.config or {}).get(key) for r in read], width - 2)
@@ -608,44 +602,18 @@ async def cmd_evidence(args: argparse.Namespace) -> CommandResult:
     setup_logging(style="full" if get_verbose() else "cli")
     stores = build_stores(identity_from_args(args), projects_root=DEFAULT_PROJECTS_ROOT)
     try:
-        # The campaign half of every address goes through the ONE matcher, so
-        # `--subject course:ca6d4d/cycle_x` reaches the same campaign here as `--subject
-        # campaign:ca6d4d` and as `verify` does. One that still resolves to nothing rides
-        # `unread_subjects`, which is the read's own way of saying so.
-        specs = [
-            spec._replace(campaign_id=resolve_campaign_hint(stores, spec.campaign_id))
-            for spec in (parse_subject(raw) for raw in args.subject)
-        ]
-    except ValueError as exc:
-        return CommandResult(data={"error": str(exc)}, human=str(exc))
-    specs = specs or [
-        SubjectSpec("campaign", cid) for cid in campaigns_on_dataset(stores, args.dataset or "")
-    ]
-    grid: tuple[str, str] | None = None
-    if args.grid:
-        axes = [a.strip() for a in args.grid.split(",") if a.strip()]
-        if len(axes) != 2:
-            msg = (
-                f"--grid takes exactly two factor names separated by a comma, got {args.grid!r}. "
-                "A grid has two axes at any number of factors — the rest are marginalised into "
-                "the cells, never given a third dimension."
-            )
-            return CommandResult(data={"error": msg}, human=msg)
-        grid = (axes[0], axes[1])
-    try:
-        ev = subject_evidence(
+        ev = select_evidence(
             stores,
-            specs,
+            subjects=args.subject,
+            dataset=args.dataset or "",
+            grid=args.grid or "",
             include_ranking=args.ranking,
             include_winner_chain=args.winner_chain,
             include_config=args.config,
             metric=args.metric or MEASURAND,
-            grid=grid,
         )
     except (ValueError, SyntaxError) as exc:
-        # No prefix: the read raises about the METRIC or about the SELECTION and says which, so
-        # stamping "Invalid --metric" on both mislabelled every unmeasured selection as a typo in
-        # a flag the operator had not passed.
+        # No prefix: the read raises about an ADDRESS, the METRIC or the SELECTION and says which.
         return CommandResult(data={"error": str(exc)}, human=str(exc))
     lines = [
         *_head_to_head_lines(ev),

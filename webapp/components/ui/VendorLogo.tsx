@@ -1,5 +1,5 @@
 "use client";
-// The mark for who TRAINED a model, keyed by `lib/format.ts::vendorOf`. Never fetch a logo at
+// The mark for who TRAINED a model, keyed by the served `VendorModels.vendor`. Never fetch a logo at
 // runtime: OpenRouter's icon path answers a miss with HTTP 200 HTML, breaking silently.
 import type { CSSProperties } from "react";
 import { cx } from "@/lib/cx";

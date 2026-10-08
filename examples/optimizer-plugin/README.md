@@ -7,7 +7,7 @@ The smallest optimizer the bench runs, registered through entry points alone —
 |---|---|
 | `pyproject.toml` | The registration: one `promptpotter.optimizer_nodes` entry per member, one `promptpotter.optimizer_runtimes` entry for the manifest. |
 | `example_optimizer/pipeline.yaml` | The manifest. `default` walks a sampler, the proposing node `propose`, the bench's measurement and a selector — the least a round takes. |
-| `example_optimizer/members.py` | The three members, the working state and the runtime. Every arm `propose` makes carries `source="example:propose"`. |
+| `example_optimizer/members.py` | The three members, the round payload and the runtime. Every arm `propose` makes carries `source="example:propose"`. |
 | `example_optimizer/operators.py` | What `propose` sends. |
 
 ## Install and check

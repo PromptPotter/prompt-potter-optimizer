@@ -66,7 +66,12 @@ from promptpotter.infrastructure.store.dataset_access import (
     readable_dataset_rows,
 )
 from promptpotter.infrastructure.store.io import read_json
-from promptpotter.infrastructure.store.layout import campaign_root_dir_for, cycle_dir_for
+from promptpotter.infrastructure.store.layout import (
+    CampaignLayout,
+    CycleLayout,
+    campaign_root_dir_for,
+    cycle_dir_for,
+)
 from promptpotter.infrastructure.store.read_model import derived
 from promptpotter.infrastructure.store.stores import Stores, resolve_cycle_path
 from promptpotter.shared.errors import BadRequestError, NotFoundError, PayloadInvalidError
@@ -247,7 +252,7 @@ def _load_dataset_rows(
             details={"dataset_name": name},
         ) from exc
     if panel is not None:
-        raw = {"name": name, "items": [s.model_dump() for s in samples_from_dicts(panel[0])]}
+        raw = {"name": name, "items": [s.model_dump() for s in samples_from_dicts(panel)]}
     else:
         raw = readable_dataset_rows(stores, name)
     if raw is None:
@@ -306,7 +311,7 @@ def _resolve_scope_artifact(
         )
         if not cycle_dir.exists():
             raise NotFoundError(f"Cycle '{campaign_id}/{cycle_id}' not found")
-        path = cycle_dir / "hard_samples.json"
+        path = CycleLayout(cycle_dir).hard_samples
         if not path.is_file():
             return {}
         cycle_artifact: dict[str, Any] = read_json(path)
@@ -317,7 +322,7 @@ def _resolve_scope_artifact(
         campaign_dir = campaign_root_dir_for(stores.base_dir, campaign_id)
         if not campaign_dir.exists():
             raise NotFoundError(f"Campaign '{campaign_id}' not found")
-        path = campaign_dir / "hard_samples.json"
+        path = CampaignLayout(campaign_dir).hard_samples
         if not path.is_file():
             return {}
         campaign_artifact: dict[str, Any] = read_json(path)

@@ -1,7 +1,6 @@
 "use client";
 import { useMemo } from "react";
 import { fetchOptimizerRoster, type DraftCampaignWire, type DraftPatch } from "@/lib/api";
-import { measurementNode } from "@/lib/derivations";
 import { StaticConnectorProvider, useConnector } from "@/lib/hooks/useConnector";
 import { useOptimizerPipeline } from "@/lib/hooks/useOptimizerPipeline";
 import { readyData, useRead } from "@/lib/hooks/useRead";
@@ -102,7 +101,7 @@ function OptimizerSetupInner({
         connector="PromptPotter"
         reach={doc?.reach ?? null}
         scope="optimizer"
-        nestsNode={measurementNode(doc)}
+        nestsNode={doc?.measurement_node ?? null}
         activeNode={null}
         isLive={false}
         tone="neutral"

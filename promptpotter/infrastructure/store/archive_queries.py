@@ -3,7 +3,7 @@ Nothing enforces that mechanically, and claiming a guard that does not exist is 
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Iterable, Iterator
 from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any
 
@@ -183,14 +183,13 @@ def runs_since(
 def replay_feed(
     stores: Stores,
     node_configs: list[tuple[str, dict[str, Any]]],
-    is_fatal: Callable[[dict[str, Any]], bool] | None = None,
 ) -> ReplayFeed:
     """Per-sample cache reuse from prior runs sharing *node_configs*, keyed by ``sample_key``.
 
     The grade floor is the feed's, not the caller's: this is the seam ADR-0005's "every consumer
     excludes ``C``" is enforced at, and a replayed row is re-archived under the reading run, so a
     caller free to lower it could launder a ``C`` cell into the δ ruler."""
-    return ReplayFeed(stores.archive, node_configs, is_fatal)
+    return ReplayFeed(stores.archive, node_configs)
 
 
 # -- writes -------------------------------------------------------------------

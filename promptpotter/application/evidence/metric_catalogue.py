@@ -300,8 +300,8 @@ def resolve_metric(
     expression, so nothing can make the two disagree.
 
     Raises ``ValueError`` / ``SyntaxError`` on anything unresolvable; the route turns those into a
-    clean 400, which is the contract ``routers/campaigns/cycles.py::_resolve_lens`` already holds
-    for ``?lens=``. HTTP status is not this layer's to know."""
+    clean 400, the contract ``mask/record.py::parse_lens`` holds for ``?lens=``. HTTP status is
+    not this layer's to know."""
     if selector.startswith(CUSTOM_METRIC_PREFIX):
         expression = selector[len(CUSTOM_METRIC_PREFIX) :].strip()
         if not expression:

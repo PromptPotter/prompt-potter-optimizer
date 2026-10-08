@@ -7,7 +7,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.bench.difficulty import DifficultyView, _calibrate_delta_ruler
+from promptpotter.application.bench.difficulty import DifficultyView, calibrate_delta_ruler
 from promptpotter.application.bench.resume_and_fork.replayers import (
     ReplayMismatch,
     replay_all_mismatches,
@@ -105,8 +105,7 @@ def _make_replay_verdict(
     """The replay as a verdict on the shared fold. Rescoring happens HERE, not in a prior pass, because the fold only
     asks about rounds still on the carried-over side of the departure."""
     sc = session.scoring
-    scorer = sc.scorer
-    assert scorer is not None, "session.scoring.scorer required for A/B replay"
+    scorer = sc.require_scorer()
 
     def verdict(rnd: MaskRound) -> VerdictOutcome:
         rd = rnd.round_data
@@ -145,8 +144,7 @@ def ab_replay_cycle(
     """Re-derive a campaign under the active engine + scorer; no LLM calls. The walk is the CAMPAIGN's — a fork shares its
     parent's measurements, so an invalidating change reaches every branch below and a per-cycle answer cannot say that."""
     sc = session.scoring
-    scorer = sc.scorer
-    assert scorer is not None, "session.scoring.scorer required for A/B replay"
+    scorer = sc.require_scorer()
 
     record = load_mask_record(session.store, hop.campaign_id, lens=None, with_replay=True)
     round_0 = next(
@@ -180,7 +178,7 @@ def ab_replay_cycle(
         enable_2pl=campaign_config.optimization.enable_2pl_graduation,
         origin_sp_hash=origin_sp_hash,
     )
-    ruler, _ = _calibrate_delta_ruler(
+    ruler, _ = calibrate_delta_ruler(
         round_0.results, view.n_min, enable_2pl=view.enable_2pl, archive_obs=view.archive()
     )
 

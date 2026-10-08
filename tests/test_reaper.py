@@ -608,7 +608,7 @@ async def test_a_run_in_its_own_process_is_judged_by_its_own_lock(tmp_path: Path
     from promptpotter.application.jobs.registry import JobRegistry
 
     jobs_dir = tmp_path / "jobs"
-    registry = JobRegistry(jobs_dir, capacity=lambda _live: 1)
+    registry = JobRegistry(jobs_dir, capacity=lambda _live: 1, projects_root=tmp_path / "projects")
     job = registry.request_slot(user_id="u", dataset_name="d", hop=_HOP)
     watcher = asyncio.create_task(asyncio.sleep(0))
     registry.attach_task(job.job_id, watcher)

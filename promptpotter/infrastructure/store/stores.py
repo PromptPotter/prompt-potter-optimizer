@@ -15,6 +15,7 @@ from promptpotter.domain.cycle_paths import CycleHop, CyclePath, WorkspaceDir
 from promptpotter.infrastructure.store.backend_store import BackendStore
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.checkin_draft_store import CheckinDraftStore
+from promptpotter.infrastructure.store.dataset_replace import heal_pending_replacements
 from promptpotter.infrastructure.store.diagnostic_run_store import DiagnosticRunStore
 from promptpotter.infrastructure.store.io import (
     read_json_optional,
@@ -161,7 +162,7 @@ def build_stores(
     shared = shared_root if shared_root is not None else root
     shared_tenant = shared / identity.tenant_id
     bench_root = benchmarks_root if benchmarks_root is not None else benchmark_datasets_root()
-    return Stores(
+    stores = Stores(
         base_dir=tenant_dir,
         projects_root=root,
         shared_root=shared,
@@ -180,6 +181,11 @@ def build_stores(
         diagnostic_runs=DiagnosticRunStore(tenant_dir),
         users=UserStore(tenant_dir),
     )
+    # A replace repoints the WORKSPACE's campaigns; a sandbox shares the dataset tier and holds
+    # none of them, so replaying a marker from inside one would complete it half-applied.
+    if shared == root:
+        heal_pending_replacements(stores)
+    return stores
 
 
 def inner_sandbox_store(

@@ -12,13 +12,9 @@ unchanged.
 
 from __future__ import annotations
 
-import asyncio
+import contextlib
 import json
 import logging
-import shutil
-import tempfile
-import time
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -28,20 +24,28 @@ from promptpotter.config.settings import settings
 from promptpotter.connectors.protocol import Connector, InProcessWorkload, NoopSession
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import LLMSpendBound
-from promptpotter.infrastructure.docker_host import docker, docker_server_version
+from promptpotter.infrastructure.docker_host import (
+    PRODUCER_SCRATCH,
+    docker,
+    docker_daemon_fault,
+    machine_step,
+    run_cell_container,
+)
 from promptpotter.infrastructure.llm.registry import openai_compat_spec
+from promptpotter.infrastructure.store.io import rmtree_robust
 from promptpotter.shared.errors import (
     CellInfrastructureError,
-    CellSendRefusedError,
     CellThrottledError,
     CellUnscoreableError,
     ErrorCategory,
+    cell_failure,
     is_provider_credit_refusal,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import TurnRecord
     from promptpotter.domain.spend import StepTokenUsage
 
@@ -122,13 +126,9 @@ _COMMIT_LABEL = "org.promptpotter.db-llm-bench.commit"
 _IMAGES_CHECKED: set[str] = set()
 
 
-def _extract_experiment(
-    experiment_data: Mapping[str, Any],
-) -> tuple[list[dict[str, Any]], list[str]]:
-    """Upstream's questions → ``(queries, index_terms)``, and **the one place this backend's answer
-    shape is declared** (``connectors/CLAUDE.md`` § The answer shape): no label, because the
-    harness executes the query and compares the RESULT, and the expected value is not text a
-    generated query could be matched against."""
+def _extract_experiment(experiment_data: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Upstream's questions → rows, and **the one place this backend's answer shape is declared**
+    (``connectors/CLAUDE.md`` § The answer shape): no label, the harness compares the query RESULT."""
     return [
         {
             "query": q["question"],
@@ -143,22 +143,21 @@ def _extract_experiment(
             },
         }
         for q in experiment_data["questions"]
-    ], []
+    ]
 
 
-def _current_question(panel: Mapping[str, Any] | None, query: str) -> dict[str, Any]:
-    if panel is None:
-        raise RuntimeError(
-            f"dbllmbench connector: this run's workload carries no {QUESTIONS_FILE}, so no "
-            "question can be resolved for it."
+def _upstream_question(workload: InProcessWorkload, sample: Sample) -> dict[str, Any]:
+    """The harness's own row for *sample*, whole: its pin holds only what the cell is graded
+    against, and the harness reads the rest. Run init numbers the samples off this document."""
+    questions = (workload.experiment or {}).get("questions") or []
+    if sample.id >= len(questions) or questions[sample.id].get("question") != sample.query:
+        raise CellUnscoreableError(
+            f"dbllmbench question {sample.query[:80]!r} is not row {sample.id} of the "
+            f"{QUESTIONS_FILE} this run opened with.",
+            spent={},
+            step_timings={},
         )
-    for question in panel["questions"]:
-        if question.get("question") == query:
-            return dict(question)
-    raise RuntimeError(
-        f"dbllmbench connector: no question {query[:80]!r} in {QUESTIONS_FILE}. The samples being "
-        "scored did not come from this workload's panel."
-    )
+    return dict(questions[sample.id])
 
 
 def dbllmbench_wire_adapter(query: str, pipeline_params: dict[str, Any] | None) -> dict[str, Any]:
@@ -335,9 +334,7 @@ def _first_error(record: Mapping[str, Any]) -> str | None:
 
 
 def project_records(
-    records: list[dict[str, Any]],
-    levels: tuple[int, ...] = RETRY_LEVELS,
-    runs: int = REPETITIONS,
+    records: list[dict[str, Any]], levels: tuple[int, ...], runs: int
 ) -> dict[str, float]:
     """One question's result records → the observations a formula reads. ``records`` is each of
     the *runs* repetitions at every retry level in *levels*, as the harness wrote them."""
@@ -405,10 +402,10 @@ def _outcome_note(first: list[dict[str, Any]]) -> str | None:
     return None
 
 
-async def _preflight(backend_url: str) -> None:
+async def _preflight(_backend_url: str) -> str | None:
     """The image and the database are checked by the first cell — the harness validates both
     before it calls a model."""
-    await docker_server_version("dbllmbench", backend_url)
+    return await docker_daemon_fault()
 
 
 async def _check_image(image: str) -> None:
@@ -417,13 +414,9 @@ async def _check_image(image: str) -> None:
     the diagnostics and the embedded launch measure cells without ever running it."""
     if image in _IMAGES_CHECKED:
         return
-    try:
-        code, out = await docker(
-            "image", "inspect", "--format", f'{{{{index .Config.Labels "{_COMMIT_LABEL}"}}}}',
-            image, timeout=30,
-        )  # fmt: skip
-    except (OSError, TimeoutError) as exc:
-        raise CellInfrastructureError(f"dbllmbench: {exc}", spent={}, step_timings={}) from exc
+    code, out = await docker(
+        "image", "inspect", "--format", f'{{{{index .Config.Labels "{_COMMIT_LABEL}"}}}}', image
+    )
     built = (
         "Build it from promptpotter/connectors/resources/dbllmbench.Dockerfile, whose header has "
         "the command."
@@ -445,30 +438,29 @@ async def _check_image(image: str) -> None:
     _IMAGES_CHECKED.add(image)
 
 
-def _failure(
-    query: str, log: str, spent: dict[str, StepTokenUsage], elapsed: float
-) -> CellUnscoreableError:
+def _failure(query: str, log: str, spent: dict[str, StepTokenUsage]) -> CellUnscoreableError:
     """A harness that ended without a full set of verdicts measured its provider, its database or
     this machine — never the prompt. Which one decides what the run does next."""
     tail = log[-600:]
-    timings = {WRITER_NODE: elapsed}
     message = f"dbllmbench question {query[:80]!r} ended without a verdict: {tail}"
     if "transient provider error" in log or "provider timeout" in log:
         # The provider's load, outlasting the harness's own backoff.
-        return CellThrottledError(message, spent=spent, step_timings=timings)
-    if "fatal provider error" in log and is_provider_credit_refusal(log):
-        return CellSendRefusedError(
-            message, category=ErrorCategory.PROVIDER_CREDIT, spent=spent, step_timings=timings
-        )
-    return CellInfrastructureError(message, spent=spent, step_timings=timings)
+        return CellThrottledError(message, spent=spent, step_timings={})
+    refused = "fatal provider error" in log and is_provider_credit_refusal(log)
+    return cell_failure(
+        message,
+        ErrorCategory.PROVIDER_CREDIT if refused else ErrorCategory.CONNECTION,
+        spent=spent,
+    )
 
 
 async def _in_process_run(
-    workload: InProcessWorkload, query: str, payload: dict[str, Any]
+    workload: InProcessWorkload, sample: Sample, payload: dict[str, Any]
 ) -> dict[str, Any]:
     """Run one question through the harness and project its records onto the ``{"data": {…}}``
     shape ``measure_sample`` parses from an HTTP body."""
-    question = _current_question(workload.experiment, query)
+    query = sample.query
+    question = _upstream_question(workload, sample)
     cfg: dict[str, Any] = payload.get("config") or {}
     prompt = str(payload.get("prompt") or "")
     image = cfg.get("runner_image")
@@ -479,12 +471,13 @@ async def _in_process_run(
     config, env = harness_config(cfg, prompt)
     db = next(iter(config["dbs"][0]))
     template = _asset(cfg, "template")
-    await _check_image(str(image))
+    with machine_step():
+        await _check_image(str(image))
 
-    # Scratch in the system temp dir, never the workspace: nothing durable lives here.
-    work = Path(tempfile.mkdtemp(prefix="pp-dbllmbench-"))
     name = f"pp-dbllmbench-{uuid4().hex[:12]}"
-    start = time.monotonic()
+    # Under this process's scratch on the Docker host, so a hard kill's leftover is swept.
+    work = PRODUCER_SCRATCH / name
+    work.mkdir()
     try:
         (work / "config.yml").write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
         (work / "questions.json").write_text(
@@ -500,50 +493,36 @@ async def _in_process_run(
             f"&& cp /tmp/template.txt {_WORK}/template.txt "
             f"&& exec db-llm-bench {_WORK}/config.yml {_WORK}/out.json"
         )
-        args = ["run", "--rm", "--pull", "never", "--name", name]
-        args += ["--add-host", "host.docker.internal:host-gateway"]
+        args = ["--pull", "never", "--add-host", "host.docker.internal:host-gateway"]
         for key in env:
             args += ["-e", key]
         args += ["-v", f"{work}:{_WORK}", str(image), "sh", "-c", cut]
-        try:
-            code, log = await docker(*args, env=env, timeout=_CELL_TIMEOUT_S)
-        except asyncio.CancelledError:
-            # The docker CLI was only attached: left alone, the container goes on calling the
-            # provider for a cell nobody will read.
-            await asyncio.shield(docker("kill", name, timeout=30))
-            raise
-        except TimeoutError as exc:
-            await docker("kill", name, timeout=30)
-            raise CellInfrastructureError(
-                f"dbllmbench question {query[:80]!r}: {exc}",
-                spent={},
-                step_timings={WRITER_NODE: time.monotonic() - start},
-            ) from exc
-        elapsed = time.monotonic() - start
+        with machine_step():
+            code, log = await run_cell_container(name, *args, env=env, timeout=_CELL_TIMEOUT_S)
         try:
             written = json.loads((work / "out.json").read_text(encoding="utf-8"))
             records = list(written["questions"][0]["dbs"][db]["results"])
         except (OSError, ValueError, KeyError, IndexError, TypeError):
             records = []
     finally:
-        shutil.rmtree(work, ignore_errors=True)
+        with contextlib.suppress(OSError):
+            rmtree_robust(work)
 
     levels = retry_levels(cfg)
     top = [r for r in records if r.get("maxRetries") == levels[-1]]
     spent = _spent(top, cfg)
-    timings = {WRITER_NODE: elapsed}
     if code != 0:
-        raise _failure(query, log, spent, elapsed)
+        raise _failure(query, log, spent)
     if stall := next((s for r in top if (s := _stalled(r)) is not None), None):
         raise CellThrottledError(
-            f"dbllmbench question {query[:80]!r}: {stall}", spent=spent, step_timings=timings
+            f"dbllmbench question {query[:80]!r}: {stall}", spent=spent, step_timings={}
         )
     try:
         observed = project_records(records, levels, repetitions(cfg))
     except ValueError as exc:
         # Nothing to grade, and a 0.0 here would read as three runs that all missed.
         raise CellUnscoreableError(
-            f"dbllmbench question {query[:80]!r}: {exc}.", spent=spent, step_timings=timings
+            f"dbllmbench question {query[:80]!r}: {exc}.", spent=spent, step_timings={}
         ) from exc
 
     first = [r for r in records if r.get("maxRetries") == levels[0]]
@@ -554,8 +533,6 @@ async def _in_process_run(
         **observed,
         ANSWER_KEY: str(shown.get("generated") or ""),
         "terminal_node": WRITER_NODE,
-        "total_time": elapsed,
-        "step_timings": timings,
         "step_tokens": spent,
         "reasoning_trace": _digest(top),
         "turns": _turns(query, shown),

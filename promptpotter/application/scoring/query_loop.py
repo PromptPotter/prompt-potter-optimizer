@@ -18,14 +18,10 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 from promptpotter.application.run_phase_control import pause_requested
 from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.application.scoring.sample_measurement import (
-    STALE_DATA_LOAD_PROTOCOL,
     cell_bound,
     emit_replayed_step_tokens,
+    execute_stale_data_protocol,
     measure_sample,
-    needs_rerun,
-)
-from promptpotter.application.scoring.sample_measurement import (
-    execute_stale_data_protocol as _execute_stale_data_protocol,
 )
 from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.phases import (
@@ -35,6 +31,7 @@ from promptpotter.domain.phases import (
     StopLoop,
     StopReason,
 )
+from promptpotter.domain.results_health import is_deprecated
 from promptpotter.domain.scoring import CellScorer, QueryMeasurement
 from promptpotter.domain.spend import StepTokenUsage
 from promptpotter.domain.validators import StopRule, StopSignal
@@ -57,6 +54,7 @@ from promptpotter.shared.errors import (
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.intelligence.indexes.sample import SampleIndex
+    from promptpotter.application.scoring.metrics import ScoreSummary
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.infrastructure.store.measurement_archive import CellClaim
@@ -237,9 +235,7 @@ class QueryLoopResult:
     stop_signal: StopSignal | None = None
 
 
-def _with_running(
-    result: QueryMeasurement, running: dict[str, Any], run_id: str
-) -> QueryMeasurement:
+def _with_running(result: QueryMeasurement, running: ScoreSummary, run_id: str) -> QueryMeasurement:
     """A shallow copy carrying the candidate's running fitness and the archive run the row lands
     in — the ledger's copy. The persisted results keep the clean result, not this copy: an archived
     row is already filed under its run."""
@@ -282,6 +278,29 @@ def _emit_cached_step_tokens(row: QueryMeasurement) -> None:
     )
 
 
+class RunRecorder(Protocol):
+    """The archive run a walk's rows land in — the gateway's, seen from the loop it drives."""
+
+    def scores(self, results: list[QueryMeasurement]) -> ScoreSummary:
+        """The candidate's running fitness over ``results``, which rides out on the sample
+        snapshot so a live surface shows it moving."""
+        ...
+
+    def persist(self, results: list[QueryMeasurement]) -> ScoreSummary:
+        """Write what ``results`` holds and the run does not, and return :meth:`scores` over them.
+        A sample is on disk iff it was TAKEN — a discarded look-ahead acquisition is not."""
+        ...
+
+    def bank(self, results: list[QueryMeasurement], rows: list[QueryMeasurement]) -> None:
+        """Keep ``rows`` — back and not yet taken — as priors of this run: the walk resumed from
+        a stop replays each when it reaches it."""
+        ...
+
+    def close(self, results: list[QueryMeasurement], scores: ScoreSummary) -> None:
+        """The run's closing write, once the walk is decided."""
+        ...
+
+
 @dataclass
 class QueryLoopState:
     """Read-only context threaded through per-sample processing."""
@@ -294,21 +313,9 @@ class QueryLoopState:
     cached_sample_results: dict[int, QueryMeasurement]
     on_sample_scored: Callable[[QueryMeasurement, int, int], None] | None
     sample_index: SampleIndex | None
-    scorer: CellScorer  # narrowed from session.scoring.scorer (asserted non-None on construction)
     # The cached entry itself, so display can show the original DEPR row before the retry row.
     deprecated_samples: dict[int, QueryMeasurement]
-    # Persists results-so-far after each fresh measurement and returns the running fitness over
-    # them. The promise: a sample is on disk iff it was TAKEN — a discarded look-ahead acquisition
-    # is paid for and deliberately not here.
-    persist_fresh: Callable[[list[QueryMeasurement]], dict[str, Any]]
-    # Ridden out on the sample snapshot so the live surfaces show a candidate fitness that moves
-    # in real time instead of sitting at 0. A fresh sample reads it off ``persist_fresh``'s
-    # return rather than folding twice.
-    running_scores: Callable[[list[QueryMeasurement]], dict[str, Any]]
-    # The run's closing write, given the walk's rows and its scores once it is decided.
-    record_run: Callable[[list[QueryMeasurement], dict[str, Any]], None]
-    # Keeps rows the walk has back and has not taken, beside the rows it has, for a resumption.
-    bank: Callable[[list[QueryMeasurement], list[QueryMeasurement]], None]
+    recorder: RunRecorder
     # A cell no prior covers: the row another walk banked or is measuring, else this walk's hold on
     # it. ``None`` where nothing is archived or the walk re-measures on purpose.
     claim_cell: (
@@ -322,6 +329,10 @@ class QueryLoopState:
     # The replays already priced when the walk opened: none waits on the ceiling and no spend stop
     # lands on one.
     rereads: frozenset[int]
+
+    @property
+    def scorer(self) -> CellScorer:
+        return self.session.scoring.require_scorer()
 
     def priced(self, sample: Sample) -> None:
         """Mark this sample's cell priced — billed fresh or metered as a replay. Said on the ledger
@@ -358,10 +369,9 @@ async def _maybe_recover_degraded(
     ctx: QueryLoopState,
 ) -> QueryMeasurement:
 
-    if not needs_rerun(result):
+    if not is_deprecated(result):
         return result
-    recovered, _step = await _execute_stale_data_protocol(
-        list(STALE_DATA_LOAD_PROTOCOL),
+    recovered, _step = await execute_stale_data_protocol(
         sample,
         cast(dict[str, Any], result),
         ctx.session,
@@ -379,7 +389,7 @@ class _Acquired:
     sample: Sample
     idx: int
     result: QueryMeasurement
-    fresh: bool  # False ⇒ replayed from the prior cache (no ``persist_fresh``)
+    fresh: bool  # False ⇒ replayed from the prior cache (nothing to persist)
     deprecated_display: QueryMeasurement | None = None
     # Held until the row is on disk or discarded, so no other walk measures the cell meanwhile.
     claim: CellClaim | None = None
@@ -547,9 +557,8 @@ class Walk:
 
         self.results.append(acq.result)
         try:
-            running = (
-                ctx.persist_fresh(self.results) if acq.fresh else ctx.running_scores(self.results)
-            )
+            recorder = ctx.recorder
+            running = recorder.persist(self.results) if acq.fresh else recorder.scores(self.results)
         finally:
             if acq.claim is not None:
                 acq.claim.release()
@@ -666,7 +675,7 @@ class Walk:
                 paid.append(acq.sample)
             samples.append(acq.sample)
         if rows:
-            self.ctx.bank(self.results, rows)
+            self.ctx.recorder.bank(self.results, rows)
             # Billed already, and the resumed walk meets each as a replay.
             for sample in paid:
                 self.ctx.priced(sample)

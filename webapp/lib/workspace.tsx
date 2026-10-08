@@ -41,7 +41,6 @@ import { usePoll } from "./hooks/usePoll";
 import { readThrough } from "./read-cache";
 import { bumpRevalidation, useRevalidation } from "./revalidate";
 import { useAuthGate } from "./auth-context";
-import { isSelfOptimization } from "./derivations";
 import { hasLiveProducer, dockPriority } from "./run-phase";
 
 interface WorkspaceState {
@@ -310,9 +309,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const leafHop = viewedPath ? pathLeaf(viewedPath) : null;
   const leafCampaignId = leafHop?.campaignId ?? null;
   const leafCycleId = leafHop?.cycleId ?? null;
-  const leafIsL4 = isSelfOptimization(
-    campaigns.find((c) => c.campaign_id === leafCampaignId)?.backend_type,
-  );
+  const leafIsL4 =
+    campaigns.find((c) => c.campaign_id === leafCampaignId)?.self_optimization === true;
 
   const cycleEntry =
     cycleId && campaignId

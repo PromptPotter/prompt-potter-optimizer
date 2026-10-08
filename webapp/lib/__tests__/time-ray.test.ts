@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { fmtGap } from "@/lib/format";
-import { raySteps, rayHead, WEDGED_AFTER_S } from "@/lib/derivations";
+import { raySteps, rayHead } from "@/lib/derivations";
 import type { RayItem } from "@/lib/api/types";
+import { WEDGED_AFTER_S } from "@/lib/api/types.generated";
 
 const ROOT = "camp::cycle_root";
 const INNER = "camp::cycle_root~inner::cycle_in";

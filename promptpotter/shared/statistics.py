@@ -359,21 +359,20 @@ def two_way_effect_sds(
         (cells_by_arm[a][c] - arm_mean[a] - cell_mean[c] + grand) ** 2 for a in arms for c in shared
     )
     residual = math.sqrt(ss / ((len(arms) - 1) * (len(shared) - 1)))
-    cell_sd = sample_sd(list(cell_mean.values()))
-    arm_sd = sample_sd(list(arm_mean.values()))
-    if cell_sd is None or arm_sd is None:  # both margins are guarded >= 2 above
-        return None
-    return (cell_sd, arm_sd, residual)
+    # Both margins hold two or more values by the guards above.
+    return (_sd(list(cell_mean.values())), _sd(list(arm_mean.values())), residual)
+
+
+def _sd(xs: list[float]) -> float:
+    mean = sum(xs) / len(xs)
+    return math.sqrt(sum((x - mean) ** 2 for x in xs) / (len(xs) - 1))
 
 
 def sample_sd(xs: list[float]) -> float | None:
     """Sample SD (n−1). ``None`` below two points — one reading has no spread, and reporting 0.0
     for it would claim perfect precision from a single measurement. The ONE spelling: it was
     written out three times, and only the copy carrying this guard was right."""
-    if len(xs) < 2:
-        return None
-    mean = sum(xs) / len(xs)
-    return math.sqrt(sum((x - mean) ** 2 for x in xs) / (len(xs) - 1))
+    return None if len(xs) < 2 else _sd(xs)
 
 
 def rank_correlation(xs: list[float], ys: list[float]) -> float | None:
@@ -381,13 +380,7 @@ def rank_correlation(xs: list[float], ys: list[float]) -> float | None:
     exists to correlate."""
     if len(xs) != len(ys) or len(xs) < 3:
         return None
-    rx, ry = _average_ranks(xs), _average_ranks(ys)
-    mx, my = sum(rx) / len(rx), sum(ry) / len(ry)
-    sxx = sum((x - mx) ** 2 for x in rx)
-    syy = sum((y - my) ** 2 for y in ry)
-    if sxx == 0.0 or syy == 0.0:
-        return None
-    return sum((x - mx) * (y - my) for x, y in zip(rx, ry, strict=True)) / math.sqrt(sxx * syy)
+    return _pearson(_average_ranks(xs), _average_ranks(ys))
 
 
 def _average_ranks(values: list[float]) -> list[float]:
@@ -421,12 +414,12 @@ def _rank_agreement(full: Sequence[float], proxy: Sequence[float]) -> float:
     return total / len(pairs)
 
 
-def _pearson(xs: Sequence[float], ys: Sequence[float]) -> float:
+def _pearson(xs: Sequence[float], ys: Sequence[float]) -> float | None:
+    """``None`` where either side is constant: a column that orders nothing has no correlation."""
     mx, my = sum(xs) / len(xs), sum(ys) / len(ys)
     sxy = sum((x - mx) * (y - my) for x, y in zip(xs, ys, strict=True))
     sxx, syy = sum((x - mx) ** 2 for x in xs), sum((y - my) ** 2 for y in ys)
-    # A constant column orders nothing, so it correlates with nothing.
-    return sxy / math.sqrt(sxx * syy) if sxx > 0.0 and syy > 0.0 else 0.0
+    return sxy / math.sqrt(sxx * syy) if sxx > 0.0 and syy > 0.0 else None
 
 
 def greedy_column_subset(
@@ -454,8 +447,9 @@ def greedy_column_subset(
             taken = [*chosen, j]
             proxy = [(sums[i] + columns[j][i]) / len(taken) for i in range(n_rows)]
             separation = sum(spreads[c] for c in taken) / len(taken) / widest if widest else 0.0
+            # A constant column correlates with nothing, so it adds no redundancy.
             redundancy = (
-                sum(abs(_pearson(columns[j], columns[c])) for c in chosen) / len(chosen)
+                sum(abs(_pearson(columns[j], columns[c]) or 0.0) for c in chosen) / len(chosen)
                 if chosen
                 else 0.0
             )

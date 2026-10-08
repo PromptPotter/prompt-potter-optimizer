@@ -10,7 +10,7 @@ import type {
   RoundSummary,
   RoundSummaryCandidate,
   ScoredCandidate,
-} from "@/lib/types";
+} from "@/lib/api/types";
 
 export function sampleRow(over: Partial<DashboardSample> = {}): DashboardSample {
   return {
@@ -18,7 +18,7 @@ export function sampleRow(over: Partial<DashboardSample> = {}): DashboardSample 
     sample_id: null,
     status: "HIT",
     fitness: null,
-    terminal_node: "",
+    terminal_node: null,
     cached: false,
     time_s: null,
     cost_s: null,
@@ -73,6 +73,8 @@ export function liveRow(over: Partial<LiveCandidate> = {}): LiveCandidate {
     reference_lift: null,
     reference_lift_ci_lo: null,
     reference_lift_ci_hi: null,
+    reference_lift_side: null,
+    panel_cut: false,
     // "Nothing crowned yet": the election lands at the end of scoring, not at round close.
     is_selected: false,
     outcome: null,
@@ -183,7 +185,7 @@ export function roundDoc(over: Partial<RoundResult> = {}): RoundResult {
       },
     },
     optimizer_facts: [],
-    status: "",
+    generation_only: false,
     overlap: null,
     overlap_results: {},
     round_id: "round_0",
@@ -314,6 +316,8 @@ export function summaryCandidate(
     reference_lift: null,
     reference_lift_ci_lo: null,
     reference_lift_ci_hi: null,
+    reference_lift_side: null,
+    panel_cut: false,
     ...over,
   };
 }
@@ -325,6 +329,7 @@ export function summaryRound(over: Partial<RoundSummary> = {}): RoundSummary {
     composite_fitness: 0,
     total: 0,
     ability: null,
+    ability_on_series_ruler: false,
     best_so_far: null,
     bench: null,
     improved: null,
@@ -337,6 +342,7 @@ export function summaryRound(over: Partial<RoundSummary> = {}): RoundSummary {
     health: null,
     overlap: null,
     panel_precision: null,
+    panel_precision_verdict: null,
     optimizer_facts: [],
     ...over,
   };

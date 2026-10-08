@@ -23,22 +23,6 @@ export function forkKeysOf(viewedNode: LineageNode | undefined): Set<string> {
   );
 }
 
-// Painted only where it is NEWS — under its own budget, or shorter than its round's fullest
-// panel (an eliminator's cut); the tooltip footer is the denominator of record.
-export function partialPanels(views: readonly CandidateView[]): (number | null)[] {
-  const fullest = new Map<number, number>();
-  for (const v of views) {
-    if (v.n_samples == null) continue;
-    fullest.set(v.round, Math.max(fullest.get(v.round) ?? 0, v.n_samples));
-  }
-  return views.map((v) => {
-    const n = v.n_samples;
-    if (n == null) return null;
-    if (v.n_expected != null && n < v.n_expected) return n;
-    return n < (fullest.get(v.round) ?? n) ? n : null;
-  });
-}
-
 // Each candidate's last `verify`, keyed by label, off its closed round row. A dashboard an older
 // build wrote, or one replayed at a past moment, carries none.
 export function verifyByLabel(
@@ -116,8 +100,9 @@ export function candidateViews({
   // one only at completion). Live side of each supersede cut only — retired tails double a round.
   return splitRetired(viewedNode?.children ?? []).live.map<CandidateView>((n, i) => {
     const isCourse = n.kind === "course";
-    // A cut that broke before measuring anything renders blank, never as its origin's number.
-    const own = isCourse ? (n.best_accuracy ?? n.origin_accuracy) : n.accuracy;
+    // A course is drawn at its served headline; one that measured nothing serves none and
+    // renders blank, never as its origin's number.
+    const own = isCourse ? n.headline_accuracy : n.accuracy;
     const live = isCourse ? undefined : inflightByLabel.get(n.label);
     // An INVALID candidate reports `INVALID_SCORES`' synthetic 0.0 and the tree withholds it, so
     // falling back to the live half would put the fabricated number back on the bar.
@@ -147,9 +132,12 @@ export function candidateViews({
       referenceLift: isCourse ? null : n.reference_lift,
       referenceLiftCiLo: isCourse ? null : n.reference_lift_ci_lo,
       referenceLiftCiHi: isCourse ? null : n.reference_lift_ci_hi,
+      referenceLiftSide: isCourse ? null : n.reference_lift_side,
       is_selected: m.is_selected ?? false,
       n_samples: m.scored_samples ?? null,
       n_expected: m.expected_samples ?? null,
+      // Off the same half as the counts it judges.
+      panelCut: m.panel_cut === true,
       cached_samples: m.cached_samples ?? null,
       source: useLive ? "inflight" : "history",
       // The route composes `lens` and `samples` in one read, so a picked set masks this number
@@ -163,6 +151,7 @@ export function candidateViews({
       // SERVED, never inferred from whether the round has closed: a round that HELD crowned
       // nobody and reads exactly like one still scoring.
       electionPending: !isCourse && !n.election_held,
+      crown: n.crown,
       verify: isCourse ? undefined : verifyByLabel.get(n.label),
       bench: isCourse ? undefined : benchByLabel.get(n.label),
       overlapAccuracy: whole

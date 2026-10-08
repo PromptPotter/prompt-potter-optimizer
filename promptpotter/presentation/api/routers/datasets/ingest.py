@@ -13,26 +13,21 @@ from promptpotter.application.commands.checkin_dispatch import dispatch_draft_pa
 from promptpotter.application.commands.dispatcher import CommandCall
 from promptpotter.application.commands.payloads import EditDraftCampaignPayload
 from promptpotter.application.datasets.csv_ingest import (
-    MAX_SAMPLES,
-    IngestError,
-    candidate_library_from_rows,
     parse_candidate_library,
 )
-from promptpotter.application.datasets.draft_campaign import load_checkin_draft
-from promptpotter.application.datasets.draft_patch import EditDraftPatch
+from promptpotter.application.datasets.draft_patch import (
+    EditDraftPatch,
+    candidate_library_from_column,
+)
 from promptpotter.application.datasets.ingest import (
     MAX_UPLOAD_BYTES,
     SlugTakenError,
     draft_from_dataset,
-    fetch_backend_nodes,
     ingest_draft,
-    refresh_capabilities,
 )
 from promptpotter.application.jobs.launcher.draft_build import draft_wire
-from promptpotter.connectors import DEFAULT_CONNECTOR
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.dataset_access import (
-    backend_type_of_dataset,
     readable_dataset_dir,
 )
 from promptpotter.presentation.api.deps import (
@@ -43,7 +38,6 @@ from promptpotter.presentation.api.routers.datasets._router import datasets_rout
 from promptpotter.shared.errors import (
     ConflictError,
     ContentTooLargeError,
-    NotFoundError,
     PayloadInvalidError,
 )
 
@@ -95,22 +89,14 @@ async def ingest_dataset(
     nothing runs until the operator starts it via ``/commands/start-checkin``.
     """
     blob = await _read_capped(request, file, MAX_UPLOAD_BYTES)
-    await refresh_capabilities(stores)
 
     # Parse → mint the check-in campaign → persist its bank. Shared with the CLI
     # `new <file>` path (`application/datasets/ingest.py`) so both surfaces drive
     # the identical orchestration; the handler only maps errors to HTTP.
     try:
-        draft = ingest_draft(
-            stores=stores,
-            blob=blob,
-            filename=file.filename or "",
-            slug=slug,
-            backend_nodes=await fetch_backend_nodes(DEFAULT_CONNECTOR),
+        draft = await ingest_draft(
+            stores=stores, blob=blob, filename=file.filename or "", slug=slug
         )
-    except IngestError as exc:
-        exc.details["max_samples"] = MAX_SAMPLES
-        raise
     except ValueError as exc:
         raise PayloadInvalidError(str(exc), details={"reason": "bad_slug"}) from None
     except SlugTakenError as exc:
@@ -187,23 +173,7 @@ async def build_candidate_library_from_column(
     `draft_id` is the check-in campaign id.
     """
     idemp = ensure_idempotency_key(idempotency_key)
-    draft = load_checkin_draft(stores, body.draft_id)
-    if draft is None:
-        raise NotFoundError(f"draft {body.draft_id!r} not found.", code="command_target_not_found")
-    if body.column not in draft.headers:
-        raise PayloadInvalidError(
-            f"column {body.column!r} is not one of the dataset's columns {list(draft.headers)}."
-        )
-    bank = stores.checkin.load_bank(body.draft_id)
-    if bank is None:
-        raise PayloadInvalidError("draft has no cached rows to build from.")
-    terms = candidate_library_from_rows(bank.get("items", []), body.column)
-    if not terms:
-        raise PayloadInvalidError(
-            f"column {body.column!r} has no usable values.",
-            code="ingest_failed",
-            details={"reason": "empty"},
-        )
+    terms = candidate_library_from_column(stores, body.draft_id, body.column)
     return await dispatch_draft_patch(stores, _candidate_library_call(body.draft_id, terms, idemp))
 
 
@@ -217,12 +187,7 @@ async def draft_from_existing_dataset(name: str, stores: StoresDep) -> dict[str,
     the same resolver as the other dataset reads; nothing runs until the operator
     starts it via ``/commands/start-checkin``.
     """
-    dataset_dir = readable_dataset_dir(stores, name)
-    await refresh_capabilities(stores)
-    draft = draft_from_dataset(
-        stores=stores,
-        dataset_dir=dataset_dir,
-        dataset_name=name,
-        backend_nodes=await fetch_backend_nodes(backend_type_of_dataset(stores, name)),
+    draft = await draft_from_dataset(
+        stores=stores, dataset_dir=readable_dataset_dir(stores, name), dataset_name=name
     )
     return draft_wire(draft, stores.base_dir)

@@ -3,7 +3,6 @@ reconstruction; resume and fork are driven by the round files."""
 
 from __future__ import annotations
 
-import logging
 import uuid
 from pathlib import Path
 from typing import Any
@@ -32,30 +31,17 @@ from promptpotter.infrastructure.tracing.events import (
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.instrument import instrument_depth
 
-logger = logging.getLogger(__name__)
-
 
 class FileSink:
-    def __init__(self, store_base_dir: str | Path, campaign_id: str = "") -> None:
-        self._tenant_root = WorkspaceDir(Path(store_base_dir))
-        self._campaign_id = campaign_id
-        self._cycle_id: str | None = None
+    def __init__(self, store_base_dir: str | Path, hop: CycleHop) -> None:
+        self._scope = cycle_dir_for(WorkspaceDir(Path(store_base_dir)), hop)
         self._campaign_traces: dict[str, str] = {}
         self._round_observation_ids: dict[tuple[str, int], tuple[str, str]] = {}
         self._node_observations: dict[tuple[str, int, str], tuple[str, str]] = {}
 
-    def _scope_dir(self) -> Path:
-        if self._campaign_id and self._cycle_id:
-            return cycle_dir_for(
-                self._tenant_root, CycleHop(campaign_id=self._campaign_id, cycle_id=self._cycle_id)
-            )
-        # Orphan fallback for out-of-campaign file_only() emits — tucked
-        # under traces/obs/ so it doesn't compete with operator views.
-        return self._tenant_root / "traces" / "obs"
-
     def _log_event(self, event: dict[str, Any]) -> None:
         event["timestamp"] = utcnow_iso()
-        append_jsonl(self._scope_dir() / "langfuse" / "events.jsonl", event)
+        append_jsonl(self._scope / "langfuse" / "events.jsonl", event)
 
     def _write_trace(
         self,
@@ -75,7 +61,7 @@ class FileSink:
             "metadata": metadata or {},
             "tags": tags or [],
         }
-        write_json(self._scope_dir() / "langfuse" / "traces" / f"{trace_id}.json", trace)
+        write_json(self._scope / "langfuse" / "traces" / f"{trace_id}.json", trace)
         return trace_id
 
     def _write_observation(
@@ -117,7 +103,7 @@ class FileSink:
         # The id is still returned and still bookkept by callers: a skipped dump must not
         # change control flow, only what lands on disk. Top-level campaigns are untouched.
         if not instrument_depth():
-            obs_dir = self._scope_dir() / "langfuse" / "observations" / trace_id
+            obs_dir = self._scope / "langfuse" / "observations" / trace_id
             write_json(obs_dir / f"{observation_id}.json", observation)
         return observation_id
 
@@ -132,7 +118,7 @@ class FileSink:
             "dataType": data_type,
             "timestamp": utcnow_iso(),
         }
-        append_jsonl(self._scope_dir() / "langfuse" / "scores" / f"{trace_id}.jsonl", score)
+        append_jsonl(self._scope / "langfuse" / "scores" / f"{trace_id}.jsonl", score)
 
     def _finalize_observation(
         self,
@@ -141,9 +127,7 @@ class FileSink:
         output: Any,
         metadata_extra: dict[str, Any] | None = None,
     ) -> None:
-        obs_path = (
-            self._scope_dir() / "langfuse" / "observations" / trace_id / f"{observation_id}.json"
-        )
+        obs_path = self._scope / "langfuse" / "observations" / trace_id / f"{observation_id}.json"
         obs_data = read_json_optional(obs_path)
         if obs_data is None:
             return
@@ -155,16 +139,10 @@ class FileSink:
 
     def on_dataset_registered(self, event: DatasetRegistered) -> None:
 
-        ds_dir = self._scope_dir() / "langfuse" / "datasets" / event.dataset_name
+        ds_dir = self._scope / "langfuse" / "datasets" / event.dataset_name
         ds_dir.mkdir(parents=True, exist_ok=True)
-        n_registered = 0
-        seen: set[str] = set()
         for query, ground_truth in event.items:
-            if not query or query in seen:
-                continue
-            seen.add(query)
             item_id = dataset_item_id(event.dataset_name, query)
-            n_registered += 1
             # Every launch registers the whole panel again, and a dataset's rows are never
             # re-cut under a name it already used: a file already there is this item.
             if (ds_dir / f"{item_id}.json").exists():
@@ -177,31 +155,15 @@ class FileSink:
             }
             write_json(ds_dir / f"{item_id}.json", item_data)
 
-        n_input = len(event.items)
-        n_skipped = n_input - n_registered
-        if n_skipped > 0:
-            logger.debug(
-                "Dataset '%s': %d items registered, %d duplicates/empty skipped (from %d input)",
-                event.dataset_name,
-                n_registered,
-                n_skipped,
-                n_input,
-            )
-
         self._log_event(
             {
                 "event": "dataset_registered",
                 "dataset_name": event.dataset_name,
-                "n_items": n_registered,
-                "n_input": n_input,
-                "n_skipped": n_skipped,
+                "n_items": len(event.items),
             }
         )
 
     def on_campaign_start(self, event: CampaignStart) -> None:
-        # event.session_id carries the cycle_id; bind so writes target campaigns/{cycle_id}/.
-        if event.session_id:
-            self._cycle_id = event.session_id
         trace_id = self._write_trace(
             name="optimization_loop",
             input_data={
@@ -237,7 +199,8 @@ class FileSink:
             },
             tags=["dataset_run"],
         )
-        self._write_score(trace_id, "accuracy", event.accuracy)
+        if event.accuracy is not None:
+            self._write_score(trace_id, "accuracy", event.accuracy)
         self._log_event(
             {
                 "event": "dataset_run",
@@ -362,7 +325,7 @@ class FileSink:
         # directories and breaks nothing.
         family = "target_prompt"
         version = event.lineage_id[:8] if event.lineage_id else "unknown"
-        prompt_dir = self._scope_dir() / "prompts" / family / version
+        prompt_dir = self._scope / "prompts" / family / version
         write_text(prompt_dir / "prompt.txt", event.rendered_prompt)
         metadata = {
             "family": family,
@@ -386,7 +349,7 @@ class FileSink:
     def on_campaign_end(self, event: CampaignEnd) -> None:
         trace_id = self._campaign_traces.get(event.campaign_id, "")
         if trace_id:
-            trace_path = self._scope_dir() / "langfuse" / "traces" / f"{trace_id}.json"
+            trace_path = self._scope / "langfuse" / "traces" / f"{trace_id}.json"
             trace_data = read_json_optional(trace_path)
             if trace_data is not None:
                 trace_data["output"] = {

@@ -44,6 +44,5 @@ export function degradedRoundNotices(dash: DashboardSnapshot | null): DegradedRo
         `degraded on ${fmtPct0(r.health.degraded_rate)} of samples`,
     });
   }
-  out.sort((a, b) => a.round - b.round);
   return out;
 }

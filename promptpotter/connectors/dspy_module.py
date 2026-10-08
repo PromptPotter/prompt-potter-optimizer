@@ -4,16 +4,18 @@ declares ``execution="in_process"`` and calls the student once, because a progra
 from __future__ import annotations
 
 import logging
-import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.connectors.protocol import Connector, InProcessWorkload, NoopSession
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.spend import StepTokenUsage
+from promptpotter.shared.errors import CellUnscoreableError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from promptpotter.domain.sample import Sample
 
 logger = logging.getLogger(__name__)
 
@@ -44,9 +46,9 @@ class DspyProgram:
     :data:`SCORE_KEY` and the campaign formula reads that key, so PromptPotter never has to
     reproduce a grading rule the DSPy program already owns."""
 
-    examples: dict[str, Any]
-    """``dspy.Example`` per query text — the join a scored row uses to find its own row back.
-    Keyed by query because that is the only field a :class:`Sample` and an example share."""
+    examples: list[Any]
+    """The trainset's ``dspy.Example`` rows, in the order its samples were numbered — a sample's
+    ``id`` is its example's position."""
 
 
 def dspy_wire_adapter(query: str, pipeline_params: dict[str, Any] | None) -> dict[str, Any]:
@@ -61,14 +63,6 @@ def dspy_wire_adapter(query: str, pipeline_params: dict[str, Any] | None) -> dic
         if params := {k: v for k, v in cfg.items() if k != "prompt"}:
             payload["params"] = params
     return payload
-
-
-def _extract_experiment(
-    experiment_data: dict[str, Any],
-) -> tuple[list[dict[str, Any]], list[str]]:
-    """Always empty: a DSPy caller hands its rows to ``run_campaign`` directly, so there
-    is no experiment doc for this connector to read one out of."""
-    return [], []
 
 
 def _configured(student: Any, prompt: str | None, params: dict[str, Any]) -> Any:
@@ -116,44 +110,76 @@ async def _acall(student: Any, example: Any) -> Any:
 
 
 async def _in_process_run(
-    workload: InProcessWorkload, query: str, payload: dict[str, Any]
+    workload: InProcessWorkload, sample: Sample, payload: dict[str, Any]
 ) -> dict[str, Any]:
     """Score one example under one candidate, projected onto the ``{"data": {…}}`` shape
     ``measure_sample`` parses from an HTTP body — so the scorer reads a DSPy result identically
     to a remote one."""
     program = workload.program
-    if not isinstance(program, DspyProgram):
-        raise RuntimeError(
-            "dspy connector: this run's workload carries no program — PromptPotterOpt.acompile "
-            "hands the student to open_session(program=...), so something else opened it."
+    if not isinstance(program, DspyProgram) or sample.id >= len(program.examples):
+        raise CellUnscoreableError(
+            f"dspy connector: sample {sample.id} is no row of the trainset this run opened with "
+            "— PromptPotterOpt.acompile hands the student and its rows to open_session(program=...).",
+            spent={},
+            step_timings={},
         )
-    example = program.examples.get(query)
-    if example is None:
-        raise RuntimeError(
-            f"dspy connector: no example for query {query[:80]!r}. The trainset that keyed this "
-            "campaign is not the one being scored — reuse the name only with the same rows."
-        )
+    example = program.examples[sample.id]
 
     import dspy
 
     student = _configured(program.student, payload.get("prompt"), payload.get("params") or {})
-    start = time.monotonic()
     # `track_usage` is what makes the STUDENT's spend visible at all: its calls go through
     # litellm, not our client, so `emit_token_usage` never fires for them and without this the
     # campaign's spend ceiling would bound the optimizer half of a compile and nothing else.
     with dspy.context(track_usage=True):
         prediction = await _acall(student, example)
-    elapsed = time.monotonic() - start
 
     return {
         "data": {
             RESULT_KEY: [str(prediction)],
             SCORE_KEY: float(program.metric(example, prediction)),
             "terminal_node": PROGRAM_NODE,
-            "total_time": elapsed,
-            "step_timings": {PROGRAM_NODE: elapsed},
             "step_tokens": _step_tokens(prediction),
         }
+    }
+
+
+def dataset_pipeline(
+    *,
+    model: str,
+    temperature: float,
+    extra: dict[str, Any],
+    tune: tuple[str, ...],
+    allowed: dict[str, list[str]],
+) -> dict[str, Any]:
+    """The ``pipeline.yaml`` a dspy dataset declares: the caller's program as the ONE node, and the
+    two observations :func:`_in_process_run` emits mapped where the scorer reads them."""
+    node = {
+        "type": "llm",
+        "runtime": "in_process",
+        "node_role": "ranker",
+        "description": "The caller's dspy.Module, scored by the caller's metric.",
+        "prompt_info": {"template_variables": []},
+        "config": {"model": model, "temperature": temperature, **extra},
+        "optimizer": {
+            "param_keys": list(tune),
+            "param_allowed_values": dict(allowed),
+            "observation_name": PROGRAM_NODE,
+            # `is_llm` on the prediction mapping makes a per-node `model` REQUIRED, so no
+            # measurement is attributed to whichever LM happens to be configured.
+            "observation_mappings": [
+                {"pipeline_key": RESULT_KEY, "is_llm": True},
+                {"pipeline_key": SCORE_KEY},
+            ],
+        },
+    }
+    return {
+        "name": "DSPy",
+        "backend_name": "DSPy",
+        "backend_type": "dspy",
+        "available_models": sorted({model, *allowed.get("model", [])}),
+        "nodes": {PROGRAM_NODE: node},
+        "pipelines": {"default": [PROGRAM_NODE]},
     }
 
 
@@ -186,15 +212,12 @@ CONNECTOR = Connector(
     execution="in_process",
     wire_adapter=dspy_wire_adapter,
     session_factory=NoopSession,
-    extract_experiment=_extract_experiment,
     in_process_run=_in_process_run,
     # One call into the caller's module — no latency to hide behind, so overlapping two
     # buys nothing and only doubles peak memory in the host's own process.
     max_cells_in_flight=1,
-    # Both keys `_in_process_run` always emits. `PromptPotterOpt` writes the pipeline.yaml that
-    # declares them, so this holds today by construction — which is the point of stating it: the
-    # guarantee stops depending on that writer staying correct. Drop a mapping there and init
-    # raises, instead of the formula grading a score that was silently dropped.
+    # Both keys `_in_process_run` always emits and `dataset_pipeline` declares: drop a mapping
+    # there and init raises, instead of the formula grading a score that was silently dropped.
     required_observation_keys=(RESULT_KEY, SCORE_KEY),
     default_pipeline=(PROGRAM_NODE,),
 )
@@ -206,4 +229,5 @@ __all__ = [
     "RESULT_KEY",
     "SCORE_KEY",
     "DspyProgram",
+    "dataset_pipeline",
 ]

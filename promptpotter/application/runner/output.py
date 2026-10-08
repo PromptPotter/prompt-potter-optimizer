@@ -4,6 +4,7 @@ session-scoped and touches disk; the pure ``review.md`` renderer it calls is ``r
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -24,17 +25,20 @@ from promptpotter.application.views.view_models import (
     RoundDigestView,
 )
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
-from promptpotter.domain.results import HardSampleOrder, RoundResult
+from promptpotter.domain.results import HardSampleOrder, RoundResult, order_floor
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.projections.audit_trail import load_round_audits
+from promptpotter.infrastructure.projections.live_dashboard.state import served_spend
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_spend
 from promptpotter.infrastructure.store.campaign_store.store import (
     cycle_ending,
+    cycle_final,
     origin_accuracy_of,
 )
 from promptpotter.infrastructure.store.io import read_json_tolerant, write_json, write_text
 from promptpotter.infrastructure.store.layout import (
+    CampaignLayout,
     CycleLayout,
     campaign_cycles_dir,
     sibling_kind,
@@ -84,7 +88,7 @@ def _filter_artifact_to_live_candidates(
 def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> None:
     """Build + persist the heatmap artifacts at cycle and campaign scope. There is no DATASET-scope
     file: that scope is cross-campaign, so no campaign owns it and the route folds it per request."""
-    if not session.state.cycle_id or session.store is None:
+    if not session.state.cycle_id:
         return
 
     store = session.store.campaigns
@@ -117,7 +121,7 @@ def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> None:
     with graceful("cycle hard_samples.json write failed"):
         write_json(CycleLayout(cycle_dir).hard_samples, cycle_artifact)
     with graceful("campaign hard_samples.json write failed"):
-        write_json(campaign_dir / "hard_samples.json", campaign_artifact)
+        write_json(CampaignLayout(campaign_dir).hard_samples, campaign_artifact)
 
 
 def _load_p_best_trajectory(
@@ -158,29 +162,29 @@ def from_disk_log(
     *,
     hard_samples_artifact: dict[str, Any] | None = None,
     streams_dir: Path | None = None,
-    fork_indices: list[dict[str, Any]] | None = None,
+    fork_indices: Sequence[dict[str, Any]] = (),
     hard_sample_order: HardSampleOrder = "info_gain",
     spend_by_round: dict[str, SpendRollup] | None = None,
 ) -> LogMdView:
-    """``fork_indices`` is the sibling-cycle ``index.json`` blobs, rendered as ``## Cycles`` on the
-    campaign digest; the per-cycle log.md passes ``None``.
+    """``fork_indices`` is the sibling-cycle ``index.json`` blobs, rendered as ``## Forks`` on the
+    campaign digest; the per-cycle log.md passes none.
 
     **Looks dead, is not** — no live caller reaches it during a run, because it exists for the
     cycles that HAVE no live ledger: a foreign fork sibling and a historical cycle, where
     ``index.json`` is the only source there is."""
-    final = index.get("final") or {}
+    final = cycle_final(index)
     status = DigestStatusView(
-        campaign_id=str(index.get("cycle_id") or ""),
+        campaign_id=index["cycle_id"],
         parent_session_id=index.get("parent_session_id"),
         optimizer=next((t.optimizer_state.manifest for t in rounds), None),
         stop_reason=cycle_ending(index),
         origin_accuracy=origin_accuracy_of(index),
-        best_accuracy=float(index.get("best_accuracy", 0.0)),
+        best_accuracy=index["best_accuracy"],
         best_round=index.get("best_round"),
-        rounds_completed=int(index.get("n_rounds", 0)),
-        started_at=final.get("started_at"),
-        finished_at=final.get("finished_at"),
-        gen_only_rounds=sum(1 for t in rounds if t.status == "generation_only"),
+        rounds_completed=index["n_rounds"],
+        started_at=final.started_at if final else None,
+        finished_at=index.get("finished_at"),
+        gen_only_rounds=sum(1 for t in rounds if t.generation_only),
     )
 
     round_views: list[RoundDigestView] = []
@@ -191,7 +195,7 @@ def from_disk_log(
         round_views.append(
             RoundDigestView(
                 round=t.round,
-                label=t.label.strip() or t.round_id,
+                label=t.label,
                 accuracy=t.accuracy,
                 improved=t.improved,
                 total=t.total,
@@ -213,8 +217,8 @@ def from_disk_log(
 
     final_view = (
         FinalWinnerView(
-            result_prompt_fields=dict(final.get("result_prompt_fields") or {}),
-            result_pipeline_params=dict(final.get("result_pipeline_params") or {}),
+            result_prompt_fields=final.result_prompt_fields,
+            result_pipeline_params=final.result_pipeline_params or {},
         )
         if final
         else None
@@ -228,47 +232,34 @@ def from_disk_log(
         if hard_samples_artifact
         else None
     )
-    fork_views: tuple[ForkSummaryView, ...] = ()
-    family_best: tuple[float, str] | None = None
-    if fork_indices:
-        live = [fi for fi in fork_indices if int(fi.get("n_rounds") or 0) > 0]
-        fork_views = tuple(
-            sorted(
-                (_fork_summary_from_index(fi) for fi in live),
-                key=lambda v: v.best_accuracy,
-                reverse=True,
-            )
+    # Best first; a fork that measured nothing sorts under every one that did.
+    fork_views = tuple(
+        sorted(
+            (_fork_summary_from_index(fi) for fi in fork_indices if fi["n_rounds"] > 0),
+            key=lambda v: order_floor(v.best_accuracy),
+            reverse=True,
         )
-        candidates: list[tuple[float, str]] = [
-            (float(index.get("best_accuracy", 0.0)), str(index.get("cycle_id") or ""))
-        ]
-        for fv in fork_views:
-            candidates.append((fv.best_accuracy, fv.cycle_id))
-        family_best = max(candidates, key=lambda c: c[0])
-
+    )
     return LogMdView(
         status=status,
         rounds=tuple(round_views),
-        # Top-level key is the running cycle's copy, stamped at init; `final` only exists at stop.
-        formula=final.get("scorer_cell_formula") or index.get("scorer_cell_formula"),
+        # Stamped at run init, so a RUNNING cycle's digest names the formula its numbers carry.
+        formula=index.get("scorer_cell_formula"),
         hard_samples=hard,
         final=final_view,
         forks=fork_views,
-        family_best=family_best,
     )
 
 
 def _fork_summary_from_index(fork_index: dict[str, Any]) -> ForkSummaryView:
-    final = fork_index.get("final") or {}
-    cycle_id = str(fork_index.get("cycle_id") or "")
+    cycle_id: str = fork_index["cycle_id"]
     return ForkSummaryView(
         cycle_id=cycle_id,
-        mode=str(final.get("mode") or (sibling_kind(cycle_id) if cycle_id else "")),
-        best_accuracy=float(fork_index.get("best_accuracy", 0.0)),
+        kind=sibling_kind(cycle_id),
+        best_accuracy=fork_index["best_accuracy"],
         origin_accuracy=origin_accuracy_of(fork_index),
-        n_rounds=int(fork_index.get("n_rounds", 0) or 0),
+        n_rounds=fork_index["n_rounds"],
         stop_reason=cycle_ending(fork_index),
-        finished_at=final.get("finished_at") or fork_index.get("finished_at"),
     )
 
 
@@ -277,7 +268,7 @@ def write_log_md(session: Session, config: CampaignConfig) -> None:
     once more when the run is stamped finished: `mark_finished` writes the stop, the finish time
     and the winner into `index.json` AFTER the last round rendered, so a digest left there reads
     `active` for good."""
-    if not session.state.cycle_id or session.store is None:
+    if not session.state.cycle_id:
         return
     with graceful("log.md render failed"):
         store = session.store.campaigns
@@ -286,33 +277,21 @@ def write_log_md(session: Session, config: CampaignConfig) -> None:
 
 
 def _spend_by_round(layout: CycleLayout) -> dict[str, SpendRollup]:
-    """The projection's per-round spend split, read back off ``dashboard.json``.
-
-    READ, never re-folded: the browser's cost strip and the ``log.md`` round line are the same
-    number or one of them is wrong, and a ledger walk here is a second arithmetic for it. Empty
-    for a cycle with no dashboard on disk — a foreign fork sibling, or one that has not yet billed
-    anything. A malformed entry is SKIPPED rather than defaulted: an unreadable rollup is not a
-    free round."""
-    raw = (read_json_tolerant(layout.dashboard, {}) or {}).get("spend_by_round")
-    if not isinstance(raw, dict):
-        return {}
-    out: dict[str, SpendRollup] = {}
-    for key, body in raw.items():
-        with graceful(f"unreadable spend_by_round[{key}]"):
-            out[str(key)] = SpendRollup.model_validate(body)
-    return out
+    """The per-round spend split the browser's cost strip reads, so the ``log.md`` round line is
+    the same number. Empty for a cycle whose dashboard serves none."""
+    served = served_spend(read_json_tolerant(layout.dashboard, {}))
+    return served[1] if served else {}
 
 
 def _render_cycle_log_md(store: CampaignStore, hop: CycleHop, config: CampaignConfig) -> None:
     index = store.load(hop)
     if not index:
         return
-    n_rounds = int(index.get("n_rounds", 0) or 0)
-    rounds = store.load_rounds_range(hop, 0, n_rounds - 1) if n_rounds else []
+    rounds = _banked_rounds(store, hop, index)
     layout = CycleLayout(store.cycle_dir(hop))
     # The heat map `write_hard_samples_artifacts` put on disk, at the scope the campaign reads it.
     hard_samples = (
-        store.campaign_root_dir(hop.campaign_id) / "hard_samples.json"
+        CampaignLayout(store.campaign_root_dir(hop.campaign_id)).hard_samples
         if config.optimization.seed_heatmap_from_archive
         else layout.hard_samples
     )
@@ -322,7 +301,6 @@ def _render_cycle_log_md(store: CampaignStore, hop: CycleHop, config: CampaignCo
             rounds,
             hard_samples_artifact=read_json_tolerant(hard_samples),
             streams_dir=layout.streams,
-            fork_indices=None,
             hard_sample_order=config.hard_sample_order,
             spend_by_round=_spend_by_round(layout),
         )
@@ -340,50 +318,47 @@ def _render_campaign_log_md(store: CampaignStore, campaign_id: str) -> None:
     index = store.load(root)
     if not index:
         return
-    n_rounds = int(index.get("n_rounds", 0) or 0)
-    rounds = store.load_rounds_range(root, 0, n_rounds - 1) if n_rounds else []
     root_layout = CycleLayout(store.cycle_dir(root))
-    fork_indices = _load_sibling_indices(store, campaign_id, exclude=root.cycle_id)
     content = to_markdown(
         from_disk_log(
             index,
-            rounds,
+            _banked_rounds(store, root, index),
             streams_dir=root_layout.streams,
-            fork_indices=fork_indices,
+            fork_indices=_load_sibling_indices(store, campaign_id, exclude=root.cycle_id),
             spend_by_round=_spend_by_round(root_layout),
         )
     )
-    write_text(store.campaign_root_dir(campaign_id) / "log.md", content)
+    write_text(CampaignLayout(store.campaign_root_dir(campaign_id)).log_md, content)
 
 
 def _load_sibling_indices(
     store: CampaignStore, campaign_id: str, *, exclude: str
-) -> list[dict[str, Any]] | None:
+) -> list[dict[str, Any]]:
+    """Every other cycle of the campaign, as ``CampaignStore.load`` answers for each — a survey, so
+    one unreadable sibling is skipped rather than failing the digest."""
     cycles_dir = campaign_cycles_dir(store.campaign_root_dir(campaign_id))
-    if not cycles_dir.is_dir():
-        return None
     out: list[dict[str, Any]] = []
-    for cycle_dir in sorted(cycles_dir.iterdir()):
-        if not cycle_dir.is_dir() or cycle_dir.name == exclude:
-            continue
+    for cycle_dir in sorted(p for p in cycles_dir.iterdir() if p.is_dir() and p.name != exclude):
         blob = read_json_tolerant(CycleLayout(cycle_dir).manifest)
-        if not isinstance(blob, dict):
-            continue
-        blob["cycle_id"] = cycle_dir.name
-        out.append(blob)
-    return out or None
+        if isinstance(blob, dict):
+            out.append({**blob, "cycle_id": cycle_dir.name})
+    return out
+
+
+def _banked_rounds(store: CampaignStore, hop: CycleHop, index: dict[str, Any]) -> list[RoundResult]:
+    n_rounds: int = index["n_rounds"]
+    return store.load_rounds_range(hop, 0, n_rounds - 1) if n_rounds else []
 
 
 def write_review_md(session: Session, cycle: Cycle) -> None:
-    if not session.state.cycle_id or session.store is None:
+    if not session.state.cycle_id:
         return
     with graceful("review.md render failed"):
         store = session.store.campaigns
         index = store.load(session.hop)
         if not index:
             return
-        n_rounds = int(index.get("n_rounds", 0) or 0)
-        rounds = store.load_rounds_range(session.hop, 0, n_rounds - 1) if n_rounds else []
+        rounds = _banked_rounds(store, session.hop, index)
         cycle_dir = store.cycle_dir(session.hop)
         round_audits = load_round_audits(cycle_dir, [r.round for r in rounds])
         td = cycle.framing

@@ -199,10 +199,10 @@ def campaign_cells(stores: Stores, campaign_id: str, wanted: set[int] | None = N
     candidates: list[CellCandidate] = []
     cells: list[CellRow] = []
     for entry in stores.campaigns.enumerate_cycles():
-        if entry["campaign_id"] != campaign_id:
+        if entry.campaign_id != campaign_id:
             continue
         cands, rows = cycle_cells(
-            stores, CycleHop(campaign_id=campaign_id, cycle_id=entry["cycle_id"]), wanted
+            stores, CycleHop(campaign_id=campaign_id, cycle_id=entry.cycle_id), wanted
         )
         candidates.extend(cands)
         cells.extend(rows)

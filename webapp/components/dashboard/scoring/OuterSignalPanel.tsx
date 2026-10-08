@@ -3,10 +3,10 @@
 // ONE shared axis across rounds — per-round auto-scaling hides the tightening a reader is here to see.
 
 import { memo, useMemo } from "react";
-import { useDashboard } from "@/lib/hooks/useDashboard";
+import { useCycleStream } from "@/lib/poll";
 import type { RoundSummary, RoundSummaryCandidate } from "@/lib/api/types";
 import { CardFrame, Badge } from "@/components/ui";
-import { NOT_SEPARABLE } from "@/lib/fitness";
+import { NOT_SEPARABLE, type LiftSide } from "@/lib/fitness";
 import { fmtSigned } from "@/lib/format";
 
 const AXIS_W = 220;
@@ -23,6 +23,8 @@ type Lift = {
   lift: number;
   lo: number;
   hi: number;
+  // SERVED (`reference_lift_side`): this arm's interval against 0, never the round's verdict.
+  side: LiftSide;
   label: string;
   // SERVED three-state (`RoundResult.separable`) over the whole electable field; `null` (no arm
   // carried an interval) is not `false`.
@@ -38,7 +40,8 @@ function liftsOf(rounds: RoundSummary[]): Lift[] {
       !c ||
       c.reference_lift === null ||
       c.reference_lift_ci_lo === null ||
-      c.reference_lift_ci_hi === null
+      c.reference_lift_ci_hi === null ||
+      c.reference_lift_side == null
     )
       continue;
     out.push({
@@ -46,6 +49,7 @@ function liftsOf(rounds: RoundSummary[]): Lift[] {
       lift: c.reference_lift,
       lo: c.reference_lift_ci_lo,
       hi: c.reference_lift_ci_hi,
+      side: c.reference_lift_side,
       label: c.label,
       separable: r.separable,
     });
@@ -56,18 +60,25 @@ function liftsOf(rounds: RoundSummary[]): Lift[] {
 // `null` keeps its own word: "inconclusive" would report an unasked question as a negative answer.
 function verdictWord(d: Lift): { tone: "success" | "danger" | "accent"; word: string } {
   if (d.separable === true) {
-    if (d.hi < 0) return { tone: "danger", word: "worse" };
-    return { tone: d.lo > 0 ? "success" : "accent", word: "separated" };
+    if (d.side === "below") return { tone: "danger", word: "worse" };
+    return { tone: d.side === "above" ? "success" : "accent", word: "separated" };
   }
   return { tone: "accent", word: d.separable === false ? "inconclusive" : "unbracketed" };
 }
 
+const STROKE: Record<LiftSide, string> = {
+  above: "var(--color-success)",
+  below: "var(--color-danger)",
+  spans: "var(--color-text-secondary)",
+};
+
+const PRECISION_ADVICE: Record<NonNullable<RoundSummary["panel_precision_verdict"]>, string> = {
+  noise: "The panel is re-reading its own noise — sharpen the cells before buying more of them.",
+  spread: "The cells genuinely differ — that spread is signal about where this optimizer prompt works.",
+};
+
 function LiftRow({ d, x }: { d: Lift; x: (v: number) => number }) {
-  const stroke = d.lo > 0
-    ? "var(--color-success)"
-    : d.hi < 0
-      ? "var(--color-danger)"
-      : "var(--color-text-secondary)";
+  const stroke = STROKE[d.side];
   const value = `${fmtSigned(d.lift)} [${fmtSigned(d.lo)}, ${fmtSigned(d.hi)}]`;
   return (
     <div className="ov-row">
@@ -99,7 +110,7 @@ function LiftRow({ d, x }: { d: Lift; x: (v: number) => number }) {
 }
 
 export const OuterSignalPanel = memo(function OuterSignalPanel() {
-  const { dash } = useDashboard();
+  const { dash } = useCycleStream();
   const rounds = useMemo(() => dash?.rounds ?? [], [dash?.rounds]);
   const lifts = useMemo(() => liftsOf(rounds), [rounds]);
 
@@ -113,9 +124,12 @@ export const OuterSignalPanel = memo(function OuterSignalPanel() {
   }, [lifts]);
 
   const latest = lifts.length ? lifts[lifts.length - 1] : null;
-  const precision = useMemo(() => {
-    return rounds.filter((r) => r.round > 0 && r.panel_precision).at(-1)?.panel_precision ?? null;
-  }, [rounds]);
+  const precise = useMemo(
+    () => rounds.filter((r) => r.round > 0 && r.panel_precision).at(-1) ?? null,
+    [rounds],
+  );
+  const precision = precise?.panel_precision ?? null;
+  const advice = precise?.panel_precision_verdict;
 
   return (
     <CardFrame title="Outer signal" headingTag="h2">
@@ -133,7 +147,7 @@ export const OuterSignalPanel = memo(function OuterSignalPanel() {
             </Badge>{" "}
             Round {latest.round}&rsquo;s leading arm lifts <strong>{fmtSigned(latest.lift)}</strong> [
             {fmtSigned(latest.lo)}, {fmtSigned(latest.hi)}] over its parent, on the cells both measured.
-            {latest.lo <= 0 && latest.hi >= 0
+            {latest.side === "spans"
               ? " The interval spans 0 — this panel cannot yet tell that arm from its parent, and the point estimate above should not be read as a win."
               : ""}
           </p>
@@ -146,10 +160,8 @@ export const OuterSignalPanel = memo(function OuterSignalPanel() {
           {precision ? (
             <p className="l4-lede">
               Each cell was measured to ±{precision.estimation_sd.toFixed(3)} logits; the cells
-              landed ±{precision.observed_sd.toFixed(3)} apart across {precision.n_cells}.{" "}
-              {precision.estimation_sd >= precision.observed_sd
-                ? "The panel is re-reading its own noise — sharpen the cells before buying more of them."
-                : "The cells genuinely differ — that spread is signal about where this optimizer prompt works."}
+              landed ±{precision.observed_sd.toFixed(3)} apart across {precision.n_cells}.
+              {advice ? ` ${PRECISION_ADVICE[advice]}` : ""}
             </p>
           ) : null}
         </>

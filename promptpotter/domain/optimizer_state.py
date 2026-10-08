@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Annotated, ClassVar, Self, TypedDict, Unpack
 
-from pydantic import ConfigDict, Field, SerializeAsAny, model_validator
+from pydantic import ConfigDict, SerializeAsAny, model_validator
 
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.hashing import shapes_optimizer_prompt
@@ -87,10 +87,10 @@ class OptimizerState(StrictModel):
     manifest: str
     # Which prompts of the manifest produced this round, per llm node — the only thing that can
     # answer "was this round produced by the optimizer I am holding now?" once the process exited.
-    # Resume diverges at the FIRST round that disagrees. Empty on a generation-only round.
+    # Resume diverges at the FIRST round that disagrees.
     # IDENTITY, NOT A FIRE RECORD — every node is named on every round, including ones that never
     # run. Which node RAN, and what each panel cost it, is the ledger's `llm_call`.
-    prompt_hashes: dict[str, str] = Field(default_factory=dict)
+    prompt_hashes: dict[str, str]
     payload: SerializeAsAny[RoundPayload]
 
     @model_validator(mode="before")

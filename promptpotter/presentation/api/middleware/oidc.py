@@ -17,9 +17,8 @@ from promptpotter.infrastructure.identity.grants import (
 )
 from promptpotter.infrastructure.identity.session import SessionData
 from promptpotter.shared.identity import (
-    ACCESS_ACTIVE,
-    ACCESS_BLOCKED,
     OWNER_COMMAND_CAPABILITIES,
+    AccessState,
     IdentityContext,
     Issuer,
     TenantId,
@@ -31,21 +30,19 @@ logger = logging.getLogger(__name__)
 SESSION_COOKIE_NAME = "promptpotter_session"
 
 
-def resolve_access_state(email: str | None, bundle: IdentityBundle) -> str:
+def resolve_access_state(email: str | None, bundle: IdentityBundle) -> AccessState:
     """Is this account entitled to act? Signing up IS the grant, so this answers ``active`` for everyone the
     operator has not blocked. The ONE derivation — the capability set and the served ``access_state`` both
     read it, so an account cannot be blocked on one surface and active on another."""
-    return (
-        ACCESS_BLOCKED if check_blocklist(bundle.paths.blocklist, email).blocked else ACCESS_ACTIVE
-    )
+    return "blocked" if check_blocklist(bundle.paths.blocklist, email).blocked else "active"
 
 
-def _session_capabilities(access_state: str) -> frozenset[str]:
+def _session_capabilities(access_state: AccessState) -> frozenset[str]:
     """Capabilities for an authenticated web identity — every ENTITLED user owns their tenant, so each
     holds the owner set, the box's operator included. A BLOCKED account holds none: the dispatcher's
     `_require_capability_for` refuses every command with the same 404 a stranger already gets, so no
     surface needs its own check."""
-    if access_state == ACCESS_BLOCKED:
+    if access_state == "blocked":
         return frozenset()
     return OWNER_COMMAND_CAPABILITIES
 
@@ -58,29 +55,25 @@ def _delegated_identity(data: SessionData, grant: PrincipalGrant) -> IdentityCon
             user_id=UserId(data.user_id),
             tenant_id=TenantId(data.tenant_id),
             issuer=Issuer(data.issuer) if data.issuer else None,
-            claims={
-                "email": data.email,
-                "provider": data.provider,
-                "subject": data.subject,
-                # A sub-principal's entitlement IS its grant, never the blocklist — it acts inside a
-                # delegator's tenant and was provisioned by the admin channel. Revoked reads as blocked
-                # for the same reason a blocked signup does: authenticated, holding nothing.
-                "access_state": ACCESS_BLOCKED,
-            },
+            email=data.email,
+            provider=data.provider,
+            # A sub-principal's entitlement IS its grant, never the blocklist — it acts inside a
+            # delegator's tenant. Revoked reads as blocked: authenticated, holding nothing.
+            access_state="blocked",
+            claims={"subject": data.subject},
             capabilities=frozenset(),
         )
     return IdentityContext(
         user_id=UserId(grant.delegated_by),
         tenant_id=TenantId(grant.delegated_by),
         issuer=Issuer(data.issuer) if data.issuer else None,
+        email=data.email,
+        provider=data.provider,
         claims={
-            "email": data.email,
-            "provider": data.provider,
             "subject": data.subject,
             "principal": data.user_id,
             "delegated_by": grant.delegated_by,
             "spend_ceiling_usd": grant.spend_ceiling_usd,
-            "access_state": ACCESS_ACTIVE,
         },
         capabilities=resolve_effective_capabilities(grant, OWNER_COMMAND_CAPABILITIES),
     )
@@ -102,12 +95,10 @@ def _identity_context_from_session(
         user_id=UserId(data.user_id),
         tenant_id=TenantId(data.tenant_id),
         issuer=Issuer(data.issuer) if data.issuer else None,
-        claims={
-            "email": data.email,
-            "provider": data.provider,
-            "subject": data.subject,
-            "access_state": access_state,
-        },
+        email=data.email,
+        provider=data.provider,
+        access_state=access_state,
+        claims={"subject": data.subject},
         capabilities=_session_capabilities(access_state),
     )
 

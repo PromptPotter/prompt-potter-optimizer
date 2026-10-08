@@ -20,7 +20,7 @@ from promptpotter.domain.results import RoundResult
 from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.projections.audit_trail import load_round_audits
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_spend
-from promptpotter.infrastructure.store.layout import CycleLayout
+from promptpotter.infrastructure.store.layout import CampaignLayout, CycleLayout
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.shared.identity import default_identity
 
@@ -35,7 +35,6 @@ def main(argv: list[str]) -> int:
         print(f"no index.json at {cycle_dir}", file=sys.stderr)
         return 2
 
-    index = json.loads((cycle_dir / "index.json").read_text(encoding="utf-8"))
     complete_registries()
     rounds = [
         RoundResult.model_validate(json.loads(f.read_text(encoding="utf-8")))
@@ -45,7 +44,8 @@ def main(argv: list[str]) -> int:
 
     # The SAME frozen snapshot the live renderer reads (``cycle.config``). Fails loud
     # when the cycle dir sits outside a campaign tree — that input is unsupported.
-    manifest = json.loads((cycle_dir.parent.parent / "campaign.json").read_text(encoding="utf-8"))
+    manifest_path = CampaignLayout(cycle_dir.parent.parent).manifest
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     config = load_campaign_config(manifest["config"])
 
     # The campaign's framing, read where a run reads it — the live path's ``cycle.framing``.
@@ -54,6 +54,9 @@ def main(argv: list[str]) -> int:
     stores = build_stores(default_identity(tenant_dir.name), projects_root=tenant_dir.parent)
     td = campaign_framing(stores, config, manifest["dataset_name"])
     context_object = [td.pipeline_purpose, td.optimization_goals, td.key_challenges]
+    hop = CycleHop(campaign_id=cycle_dir.parent.parent.name, cycle_id=cycle_dir.name)
+    index = stores.campaigns.load(hop)
+    assert index is not None  # the file's presence was checked above
 
     content = render_review_md(
         index,
@@ -62,9 +65,7 @@ def main(argv: list[str]) -> int:
         context_object=context_object,
         accuracy_ceiling=config.accuracy_ceiling,
         optimizer=select_optimizer(config.optimization),
-        bench=read_cycle_bench(
-            stores, CycleHop(campaign_id=cycle_dir.parent.parent.name, cycle_id=cycle_dir.name)
-        ),
+        bench=read_cycle_bench(stores, hop),
         spend=scan_ledger_spend(ledger_chain(CycleDir(cycle_dir)))[0],
     )
     out_path = cycle_dir / "review.md"

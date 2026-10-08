@@ -28,16 +28,18 @@ from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.runner.entry import RunMode, run_optimization
 from promptpotter.application.runner.origin_gate import submit_gate_decision
 from promptpotter.config.logging import setup_logging
+from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.config.settings import DEFAULT_BACKEND_ID, DEFAULT_BACKEND_URL
 from promptpotter.domain.campaign import ArmRequest
 from promptpotter.domain.results import CycleResult
+from promptpotter.infrastructure.identity.migration import registered_or_default_identity
+from promptpotter.infrastructure.store.stores import build_stores
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.domain.launch_limits import LaunchLimits
     from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.store.stores import Stores
-    from promptpotter.shared.identity import IdentityContext
 
 # `submit_gate_decision` is re-exported under its OWN name because this module IS the embedded
 # surface — a capability it does not name is one a host program cannot find, and a second spelling
@@ -68,19 +70,20 @@ async def open_session(
     backend_url: str = DEFAULT_BACKEND_URL,
     backend_id: str = DEFAULT_BACKEND_ID,
     on_status: StatusFn | None = None,
-    identity: IdentityContext | None = None,
     stores: Stores | None = None,
     program: object | None = None,
 ) -> Session:
-    """``identity``, ``stores`` and ``program`` pass straight through to :func:`init_services`: a
-    parameter this adapter declines to forward is a capability no host can reach."""
+    """*stores* names the workspace and, through its identity, whose it is; unset, it is the local
+    operator's own — the one the terminal and an auth-off web session resolve."""
     setup_logging()
+    if stores is None:
+        stores = build_stores(registered_or_default_identity(), projects_root=DEFAULT_PROJECTS_ROOT)
     session = await init_services(
         dataset_name=dataset_name,
         backend_url=backend_url,
         backend_id=backend_id,
         on_status=on_status,
-        identity=identity,
+        identity=stores.identity,
         stores=stores,
         program=program,
     )

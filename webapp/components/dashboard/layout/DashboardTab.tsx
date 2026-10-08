@@ -8,7 +8,6 @@ import { useCandidatesState } from "@/lib/candidates-store";
 import { useHardSamples } from "@/lib/hard-samples";
 import { useSelection } from "@/lib/SelectionContext";
 import { useWorkspace } from "@/lib/workspace";
-import { isSelfOptimization } from "@/lib/derivations";
 import { RunErrorBanner } from "./RunErrorBanner";
 import { TopStrip } from "./TopStrip";
 import { TimeRay } from "./TimeRay";
@@ -42,10 +41,10 @@ export function DashboardTab() {
   // `campaignId` is the ROOT hop and depth 1 is the outer view, so a drilled-in inner run gets
   // the plain dashboard.
   const { viewedPath, campaignId, campaigns } = useWorkspace();
-  const rootBackendType = campaigns.find((c) => c.campaign_id === campaignId)?.backend_type;
-  const isOuterSelfOpt = viewedPath?.length === 1 && isSelfOptimization(rootBackendType);
+  const rootSelfOpt = campaigns.find((c) => c.campaign_id === campaignId)?.self_optimization;
+  const isOuterSelfOpt = viewedPath?.length === 1 && rootSelfOpt === true;
   // An L4 unit has no cache.json roster — its samples ARE the inner campaigns.
-  const hasSamples = !isSelfOptimization(cv.backendType);
+  const hasSamples = !cv.selfOptimization;
 
   return (
     <div className="content" id="content-dashboard">

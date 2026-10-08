@@ -133,12 +133,6 @@ class _Candidates:
             # is copied by name. Election and θ are not: they belong to the ROUND, and the
             # round says so on its own close record (`scan_ledger_round_closes`).
             fields = {key: scores.get(key) for key in _SCORED_INCLUDE}
-            if not int(scores.get("total") or 0):
-                # A report over ZERO rows carries no measurement — an INVALID candidate's
-                # synthetic 0.0 reads as getting every answer wrong. Identity and state survive;
-                # numbers nothing earned do not (``_merge`` skips ``None``).
-                fields["accuracy"] = None
-                fields["composite_fitness"] = None
             self._merge(
                 (rnd, idx),
                 state="invalid" if scores.get("outcome") == ArmOutcome.INVALID else "measured",
@@ -222,6 +216,24 @@ class _RoundCloses:
             )
 
     def value(self) -> dict[int, LedgerRoundClose]:
+        return dict(self._by_round)
+
+
+class _ElectableCounts:
+    probes: ClassVar[frozenset[str]] = frozenset({"phase"})
+
+    def __init__(self) -> None:
+        self._by_round: dict[int, int] = {}
+
+    def feed(self, offset: int, rec: dict[str, Any]) -> None:
+        if rec.get("phase") != "round" or rec.get("event") != "complete":
+            return
+        rnd, payload = rec.get("round"), rec.get("payload")
+        count = payload.get("electable_count") if isinstance(payload, dict) else None
+        if isinstance(rnd, int) and isinstance(count, int) and not isinstance(count, bool):
+            self._by_round[rnd] = count
+
+    def value(self) -> dict[int, int]:
         return dict(self._by_round)
 
 
@@ -317,6 +329,7 @@ LEDGER_FOLDS = (
     _Decisions,
     _Elections,
     _RoundCloses,
+    _ElectableCounts,
     _RunStanding,
     _ControlPhase,
     _Verify,
@@ -389,6 +402,12 @@ def scan_ledger_round_closes(ledger_path: Path) -> dict[int, LedgerRoundClose]:
     supersedes. **A round with no entry never closed, and that is the honest answer** — nothing invents one.
     A close with no readable payload is still a close."""
     return _view(ledger_path, _RoundCloses)
+
+
+def scan_ledger_electable_counts(ledger_path: Path) -> dict[int, int]:
+    """``round -> how many arms its election could choose between``, as the round's close banked
+    it; last write per round wins. A round with no entry has not closed."""
+    return _view(ledger_path, _ElectableCounts)
 
 
 def scan_ledger_run_standing(ledger_path: Path) -> RunStanding | None:
@@ -672,6 +691,7 @@ __all__ = [
     "scan_ledger_cycle_seed",
     "scan_ledger_decisions",
     "scan_ledger_declared_phase",
+    "scan_ledger_electable_counts",
     "scan_ledger_elections",
     "scan_ledger_round_closes",
     "scan_ledger_run_standing",

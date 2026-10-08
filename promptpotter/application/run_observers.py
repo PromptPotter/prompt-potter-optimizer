@@ -80,7 +80,6 @@ def build_campaign_emitter(
     session: Session,
     campaign_config: CampaignConfig,
     *,
-    origin_accuracy: float | None,
     resumed_from_round: int | None = None,
     langfuse_trace_url: str | None = None,
 ) -> LiveDashboardProjection | None:
@@ -267,7 +266,7 @@ class RunCallbacks:
                     "round_result": {
                         "round": round_result.round,
                         "accuracy": round_result.accuracy,
-                        "composite_fitness": float(round_result.composite_fitness),
+                        "composite_fitness": round_result.composite_fitness,
                     },
                     "run_standing": standing.model_dump(),
                     "phase_ctx": self._phase_ctx.ledger_anchors(),
@@ -559,10 +558,11 @@ class RunObservers:
                 unreported.usd,
             )
 
-    def drain_all(self) -> None:
+    def drain_all(self, *, interrupted: bool = False) -> None:
         """``drain()`` every projection + reset both emission ContextVars. Called on EVERY stop reason, so
-        the audit cache reflects the ledger even on interrupt."""
-        self.audit.drain()
+        the audit cache reflects the ledger even on interrupt; ``interrupted`` marks the partial
+        round file of a stop that left a round open."""
+        self.audit.drain(interrupted=interrupted)
         self.dashboard.drain()
         self.racing.drain()
         # The SSE stream isn't a subscriber — it tails the on-disk ledger
@@ -583,16 +583,14 @@ def build_run_observers(
     campaign_config: CampaignConfig,
     readout_sink: StatusFn | None = None,
     resumed_from_round: int | None = None,
-    origin_accuracy: float | None = None,
-    fork_readout: ReadoutProjection | None = None,
+    forked_from: RunObservers | None = None,
 ) -> RunObservers:
-    """Open the ledger with its history bound; build + bind every observer. A fork mid-launch
-    passes its parent's ``fork_readout``, rebound to its own ``readout.log`` so the round table
-    carries over. An unminted session is a bug."""
-    if session.state.cycle_id is None or session.store is None:
+    """Open the ledger with its history bound; build + bind every observer. A fork mid-launch passes
+    the observers it ``forked_from`` and keeps their readout and view context: INIT:enter fires once."""
+    if session.state.cycle_id is None:
         raise RuntimeError(
             "build_run_observers: session must already be minted via "
-            "jobs.mint.prepare_fresh_cycle — it needs both cycle_id and store"
+            "jobs.mint.prepare_fresh_cycle — it needs a cycle_id"
         )
 
     cycle_dir = CycleDir(session.store.campaigns.cycle_dir(session.hop))
@@ -612,19 +610,13 @@ def build_run_observers(
         else None
     )
     readout = (
-        ReadoutProjection.for_campaign(
-            session,
-            campaign_config,
-            sink=readout_sink,
-            origin_acc=0.0 if origin_accuracy is None else origin_accuracy,
-        )
-        if fork_readout is None
-        else fork_readout
+        ReadoutProjection.for_campaign(session, campaign_config, sink=readout_sink)
+        if forked_from is None
+        else forked_from.readout
     )
     dashboard = build_campaign_emitter(
         session,
         campaign_config,
-        origin_accuracy=origin_accuracy,
         resumed_from_round=resumed_from_round,
         langfuse_trace_url=trace_url,
     )
@@ -653,7 +645,11 @@ def build_run_observers(
     # ledger still calls paused, and the ledger is where the run phase is read.
     declare_run_phase(session, RunPhase.RUNNING)
 
-    callbacks = RunCallbacks(ledger=ledger)
+    callbacks = (
+        RunCallbacks(ledger=ledger)
+        if forked_from is None
+        else RunCallbacks(ledger=ledger, _phase_ctx=forked_from.callbacks._phase_ctx)
+    )
     # Bind the ledger into the per-asyncio-task ContextVar so emit_token_usage
     # finds it without a process-global sink. Token rides on RunObservers so
     # drain_all can restore the prior context on teardown.

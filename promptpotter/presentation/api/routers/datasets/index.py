@@ -3,43 +3,20 @@ and need nothing measured. The leaderboard reads live in ``leaderboard.py``, ing
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import Field
 
-from promptpotter.application.datasets.authored import (
-    dataset_campaign_path,
-    load_dataset_campaign_config,
-)
 from promptpotter.application.pipeline_resolve import (
-    dataset_pipeline_declaration,
-    experiment_outside_run,
-    nested_pipeline_ref,
-)
-from promptpotter.domain.pipeline_parsing import parse_pipeline_response
-from promptpotter.domain.pipeline_schema import (
-    ModelCapability,
-    NestedPipelineRef,
-    NodeConfigParam,
-    NodeOutputSchema,
-    NodeReach,
-    PipelineView,
-    reach_map,
+    DatasetPipelineResponse,
+    resolve_pipeline_for_dataset,
 )
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.llm.capabilities import resolve_schema_menu
-from promptpotter.infrastructure.store.dataset_access import (
-    list_readable_datasets,
-    readable_dataset_dir,
-)
+from promptpotter.infrastructure.store.dataset_access import list_readable_datasets
 from promptpotter.presentation.api.deps import (
     StoresDep,
 )
 from promptpotter.presentation.api.routers.datasets._router import datasets_router
-from promptpotter.shared.errors import (
-    NotFoundError,
-)
 
 
 class DatasetIndexEntry(StrictModel):
@@ -89,91 +66,10 @@ def list_datasets(stores: StoresDep) -> DatasetIndexResponse:
     )
 
 
-class DatasetPipelineResponse(StrictModel):
-    """Target pipeline view for a dataset overlay. `view` drives the webapp chat-pane hero;
-    `pipeline` is the full parsed schema for consumers needing per-node config; `connector` is
-    the original-cased name for chip labelling.
-    """
-
-    name: str
-    connector: str
-    # The connector KIND read straight off the raw overlay (`termnorm` / `promptpotter` / …).
-    # A connector-level fact, peer of `connector` — NOT a `PipelineSchema` field, so it is
-    # surfaced here rather than smuggled through `pipeline` (the parser drops unknown keys).
-    # The webapp branches self-optimization (pp-self) rendering on it.
-    backend_type: str | None
-    pipeline: dict[str, Any]
-    view: PipelineView | None
-    # Every param each node carries, keyed by node — COMPLETE (prompt + nested params
-    # included, carrying no value), because `movable_by` is summed per node to answer
-    # "where does the search reach here". The config editor draws all but the prompt fields;
-    # `never_axis` names the construction that forbids one (a cost lever, the output-schema
-    # contract) and `held` what THIS campaign closed — either of which the operator may still
-    # set on a fork.
-    node_config_schema: dict[str, list[NodeConfigParam]]
-    # That sum, done here rather than by the caller. This read answers for a DATASET, so its
-    # reading is about topology — which is exactly what an unrun nested pipeline is, and the only
-    # thing this route is still asked for.
-    reach: dict[str, NodeReach]
-    # Per-node structured-output contract (read-only) — the steer panel shows it
-    # beside the config so the operator sees the WHOLE node (model + params +
-    # prompt + the structured output it produces). None for nodes with no schema.
-    node_output_schema: dict[str, NodeOutputSchema | None]
-    # The only wire naming a nested pipeline: otherwise a client can recover the inner
-    # benchmark only as a prefix of `spawned_by.task`, which needs a cell already spawned.
-    nests: NestedPipelineRef | None
-    # What each model on this pipeline's menu ACCEPTS and costs, resolved server-side so no surface
-    # re-derives it. It rides the pipeline read rather than a call of its own because it answers
-    # about `node_config_schema`'s rows — which effort rungs are inert, which declared param the
-    # provider drops, what one Mtok costs — and a row rendered before its capabilities land is a
-    # row asserting a setting that may not exist. Empty is UNKNOWN, never "supports nothing".
-    model_capabilities: dict[str, ModelCapability]
-
-
 @datasets_router.get("/{name}/pipeline", response_model=DatasetPipelineResponse)
 def get_dataset_pipeline(name: str, stores: StoresDep) -> DatasetPipelineResponse:
-    """Return the dataset overlay's parsed pipeline schema, graph view, and per-node
-    config + output schema.
-
-    Identity-gated through the same resolver as the other dataset reads — there is
-    no unauthenticated path to a benchmark's pipeline/overlay config.
-    """
-    dataset_dir = readable_dataset_dir(stores, name)
-    raw = dataset_pipeline_declaration(stores, dataset_dir, experiment_outside_run(dataset_dir))
-    if raw is None:
-        raise NotFoundError(f"Dataset '{name}' has no pipeline.yaml")
-    # `parse_pipeline_response` strips lone surrogates at parse time so the
-    # rendered model is already wire-safe (some overlays carry escape
-    # sequences pointing at lone low surrogates that crash UTF-8 encode).
-    schema = parse_pipeline_response(raw)
-    connector = (raw.get("backend_name") or raw.get("name") or name).strip()
-    backend_type = raw.get("backend_type")
-    # Apply the dataset's default search-space narrowing so the setup editor opens
-    # showing the recommended per-node locks (e.g. retrieval nodes origin-locked); the
-    # draft's own overlay edits layer on top client-side. model/provider are always
-    # optimizer-locked (operator-owned axes), so no per-campaign policy is read here.
-    campaign_path = dataset_campaign_path(dataset_dir)
-    if campaign_path.is_file():
-        cfg = load_dataset_campaign_config(campaign_path)
-        schema = schema.narrow(cfg.optimizer_narrowing)
-    rows = schema.node_config_schema()
-    return DatasetPipelineResponse(
-        name=name,
-        connector=connector,
-        backend_type=backend_type,
-        pipeline=schema.model_dump(by_alias=True),
-        view=schema.view,
-        node_config_schema=rows,
-        reach=reach_map(rows),
-        node_output_schema=schema.node_output_schemas(),
-        nests=nested_pipeline_ref(dataset_dir, schema.view),
-        model_capabilities=resolve_schema_menu(schema, workspace=Path(stores.base_dir)),
-    )
+    """One dataset's declared pipeline, gated by the resolver every dataset read shares."""
+    return resolve_pipeline_for_dataset(stores, name)
 
 
-__all__ = [
-    "DatasetIndexEntry",
-    "DatasetIndexResponse",
-    "DatasetPipelineResponse",
-    "NestedPipelineRef",
-]
+__all__ = ["DatasetIndexEntry", "DatasetIndexResponse"]

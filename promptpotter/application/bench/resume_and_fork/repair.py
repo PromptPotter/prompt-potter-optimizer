@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 
 from promptpotter.application.bench.resume_and_fork.fork_siblings import (
     ForkResult,
-    _mint_fork,
+    mint_fork,
 )
 from promptpotter.application.bench.resume_and_fork.replayers import ReplayMismatch
 from promptpotter.application.bench.round_analysis import compute_round_diagnostics
@@ -391,7 +391,7 @@ async def apply_correction(
         from_round=cut.rounds[0],
         from_candidate_id=cut.edge,
     )
-    repair_target = _mint_fork(
+    repair_target = mint_fork(
         campaign_store, hop, session.session_id, cut.resume_at, repair_spec, surviving_rounds=lifted
     )
     logger.warning(
@@ -428,7 +428,7 @@ async def apply_correction(
         repair_target,
     )
     if drifted:
-        await cycle.optimizer.runtime.rederive(campaign_store, branch, session, cycle, drifted)
+        await cycle.optimizer.runtime.rederive(campaign_store, branch, cycle, drifted)
 
     # GRADE the cut now its consequence is known, by RE-SERIALIZING the spec it was minted
     # from — `update` replaces `index.json::fork` wholesale, so a hand-built dict dropped

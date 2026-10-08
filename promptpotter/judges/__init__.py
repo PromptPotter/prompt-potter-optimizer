@@ -8,12 +8,12 @@ from functools import partial
 from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application.scoring.evaluators import Evaluator, validate_campaign_evaluator
-from promptpotter.domain.pipeline_schema import stable_hash
 from promptpotter.judges.call import absent, bind_cache
 from promptpotter.judges.grounding import ANSWER_GROUNDING, EVIDENCE_RETRIEVAL
 from promptpotter.judges.protocol import Judge, JudgeSpec
 from promptpotter.judges.simpleqa import SEALQA, SIMPLEQA
 from promptpotter.shared.errors import CellSendRefusedError
+from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.plugin_registry import load_registry, lookup
 
 logger = logging.getLogger(__name__)

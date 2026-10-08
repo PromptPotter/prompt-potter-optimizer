@@ -23,6 +23,12 @@ from promptpotter.application.commands.payloads import (
     OriginGateDecisionPayload,
     StartCheckinPayload,
 )
+from promptpotter.application.config_map import (
+    ConfigCoupling,
+    ConfigEstimandGroup,
+    ConfigKnob,
+    ConfigMapResponse,
+)
 from promptpotter.application.evidence.comparison import (
     ArmReplicate,
     Comparability,
@@ -45,6 +51,7 @@ from promptpotter.application.evidence.head_to_head import (
 )
 from promptpotter.application.evidence.metric_catalogue import MetricSpec
 from promptpotter.application.evidence.read import (
+    ConfigKeys,
     EditSpread,
     EffectProvenance,
     Evidence,
@@ -56,7 +63,16 @@ from promptpotter.application.evidence.subjects import (
     SubjectReading,
     WinnerChainPoint,
 )
+from promptpotter.application.jobs.account_activity import ActivityBucket, ActivityResponse
+from promptpotter.application.jobs.quota import QuotaStatus
 from promptpotter.application.maintenance.archive_maintenance import ArchiveReport
+from promptpotter.application.maintenance.storage_report import (
+    CampaignStorageResponse,
+    DatasetStorageEntry,
+    DatasetStorageResponse,
+    WorkspaceStorageEntry,
+    WorkspaceStorageResponse,
+)
 from promptpotter.application.optimizer_manifest import (
     KnobRow,
     NodeKnobs,
@@ -64,10 +80,13 @@ from promptpotter.application.optimizer_manifest import (
     OptimizerKnobsResponse,
     OptimizerRoster,
 )
+from promptpotter.application.origin import OriginEntry
 from promptpotter.application.pipeline_resolve import (
     CampaignPipelineResponse,
     CampaignRunsWith,
+    DatasetPipelineResponse,
     RunsWithParam,
+    VendorModels,
 )
 from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.bench import (
@@ -86,6 +105,7 @@ from promptpotter.domain.cells import (
     CellsResponse,
     DatasetItem,
 )
+from promptpotter.domain.cycle_listing import CycleListEntry, SpawnedBy
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.dashboard_rows import (
     DashboardCandidate,
@@ -148,22 +168,18 @@ from promptpotter.infrastructure.store.lineage_queries import (
     LineageDivergence,
     LineageNode,
 )
+from promptpotter.main import HealthResponse
 from promptpotter.presentation.api.routers.active import (
     ActiveSessionResponse,
-    CycleListEntry,
     CyclesResponse,
     MachineHolder,
     MachineQueueEntry,
     MachineStatusResponse,
     OptimizerPipelineResponse,
-    SpawnedBy,
 )
 from promptpotter.presentation.api.routers.auth import (
-    ActivityBucket,
-    ActivityResponse,
     ConnectedAccount,
     MeResponse,
-    QuotaStatus,
     UserSettings,
 )
 from promptpotter.presentation.api.routers.backends import (
@@ -176,29 +192,16 @@ from promptpotter.presentation.api.routers.campaigns.files import (
     FilesResponse,
 )
 from promptpotter.presentation.api.routers.campaigns.manifests import (
-    CampaignDetailResponse,
     CampaignListResponse,
     CampaignSummary,
-    ConfigCoupling,
-    ConfigEstimandGroup,
-    ConfigKnob,
-    ConfigMapResponse,
     ForkPreviewResponse,
-)
-from promptpotter.presentation.api.routers.campaigns.storage import (
-    CampaignStorageResponse,
-    DatasetStorageEntry,
-    DatasetStorageResponse,
-    WorkspaceStorageEntry,
-    WorkspaceStorageResponse,
 )
 from promptpotter.presentation.api.routers.datasets.index import (
     DatasetIndexEntry,
     DatasetIndexResponse,
-    DatasetPipelineResponse,
 )
-from promptpotter.presentation.api.routers.origins import OriginEntry, OriginListResponse
-from promptpotter.presentation.api.routers.verify import DiagnosticRunListResponse
+from promptpotter.presentation.api.routers.diagnostics import DiagnosticRunListResponse
+from promptpotter.presentation.api.routers.origins import OriginListResponse
 
 EXPORTED_MODELS: list[type[BaseModel]] = [
     # Nested types first so the TS file reads top-down.
@@ -278,6 +281,7 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     StartCheckinPayload,
     # --- campaigns/manifests router ---
     RunsWithParam,  # nested in CampaignRunsWith — the emitter does not recurse
+    VendorModels,  # nested in CampaignRunsWith
     CampaignRunsWith,  # nested in CampaignSummary
     Arm,  # nested in CampaignSummary and HeadToHeadRow
     CampaignSummary,
@@ -290,6 +294,7 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     EffectProvenance,
     EditSpread,
     RankedEdit,
+    ConfigKeys,
     Comparability,
     ArmReplicate,
     FactorCell,
@@ -339,6 +344,7 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     ActivityBucket,
     ActivityResponse,
     # --- backends + machine status ---
+    HealthResponse,
     BackendResponse,
     BackendHealthResponse,
     MachineHolder,
@@ -361,7 +367,6 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     DatasetStorageEntry,
     DatasetStorageResponse,
     # --- campaign manifest detail + the two self-describing schemas the panels render ---
-    CampaignDetailResponse,
     OptimizerKnobsResponse,
     NodeKnobs,
     KnobRow,
@@ -503,6 +508,16 @@ def _emit_enum_union(enum_cls: type[enum.Enum], note: str) -> str:
     return f"// {note}\nexport type {enum_cls.__name__} = {members};"
 
 
+def _emit_lifecycle_filter() -> str:
+    """Emit ``LifecycleFilter``, the ``?lifecycle=`` set ``GET /campaigns`` and the store's one
+    filter gateway both take — a query param, so no response model carries it."""
+    from promptpotter.domain.campaign import LifecycleFilter
+
+    members = " | ".join(repr(m) for m in typing.get_args(LifecycleFilter.__value__))
+    note = "`GET /campaigns?lifecycle=` (domain/campaign.py::LifecycleFilter); absent = 'active'."
+    return f"// {note}\nexport type LifecycleFilter = {members};"
+
+
 def _emit_arm_outcomes_ended_early() -> str:
     """Emit ``ArmOutcome.ended_early`` as the member list the webapp's stopped-walk badge reads."""
     from promptpotter.domain.results import ArmOutcome
@@ -601,8 +616,8 @@ def _emit_abort_lens_labels() -> str:
     rows = "\n".join(f"  {variant!r}: {label!r}," for variant, label in ABORT_LENS_LABELS.items())
     return (
         "// Abort-lens variant -> operator label, in picklist order. Mirror of\n"
-        "// pobb/checks.py::ABORT_LENS_LABELS, whose keys are asserted against the API edge's\n"
-        "// own `_ABORT_SUPPRESS` at import. Don't hand-list these.\n"
+        "// pobb/checks.py::ABORT_LENS_LABELS, whose keys are asserted against\n"
+        "// `ABORT_LENS_SUPPRESS` at import. Don't hand-list these.\n"
         "export const ABORT_LENS_LABELS: Record<string, string> = {\n"
         f"{rows}\n"
         "};"
@@ -663,13 +678,22 @@ def _emit_run_freshness() -> str:
     The browser's status banner hand-copied the ``30``, so the two answered the same question in two
     languages: a change to the server's window would have left the banner calling a reaped cycle
     live, with nothing anywhere to say the numbers had parted."""
-    from promptpotter.infrastructure.runtime_flags import RUN_FRESH_S
+    from promptpotter.infrastructure.runtime_flags import (
+        RECENT_STEP_S,
+        RUN_FRESH_S,
+        WEDGED_AFTER_S,
+    )
 
     return (
         "// Seconds of silence after which a cycle's producer is treated as vanished. Mirror of\n"
         "// infrastructure/runtime_flags.py::RUN_FRESH_S, which owns it and derives `run_phase`\n"
         "// from it. Don't hand-copy this threshold.\n"
-        f"export const RUN_FRESH_S = {RUN_FRESH_S};"
+        f"export const RUN_FRESH_S = {RUN_FRESH_S};\n\n"
+        "// The time-ray head's two windows over the gap since the last non-heartbeat step: how\n"
+        "// long a step stays what the run is doing, and how long a running cycle may be silent\n"
+        "// before it reads wedged. Mirror of infrastructure/runtime_flags.py, which owns both.\n"
+        f"export const RECENT_STEP_S = {RECENT_STEP_S};\n"
+        f"export const WEDGED_AFTER_S = {WEDGED_AFTER_S};"
     )
 
 
@@ -772,6 +796,7 @@ def main() -> int:
             "(domain/phases.py::DashboardState).",
         )
     )
+    blocks.append(_emit_lifecycle_filter())
     blocks.append(_emit_command_kinds())
     blocks.append(_emit_non_activity_kinds())
     blocks.append(_emit_stop_reason_tables())

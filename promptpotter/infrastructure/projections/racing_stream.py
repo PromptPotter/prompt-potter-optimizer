@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
 
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.run_records import SnapshotRecord
@@ -43,42 +42,28 @@ class RacingStreamProjection(Projection):
     def _handle_snapshot(self, record: SnapshotRecord) -> None:
         if record.event != "race_standing":
             return
-        if record.round is None:
-            return
-
-        payload: dict[str, Any] = dict(record.payload)
-        current_id = str(payload.get("current_id", ""))
-        if not current_id:
-            return
-        member = str(payload["member"])
-        p_best = float(payload.get("p_best") or 0.0)
+        payload = record.payload
+        current_id: str = payload["current_id"]
+        p_best: float = payload["p_best"]
 
         if self._last_round != record.round:
             # New round → reset the delta origin.
             self._last_p_best = {}
             self._last_round = record.round
 
-        delta = p_best - self._last_p_best.get(current_id, p_best)
-
-        # Per-prior θ comparison (p_better = P(θ_cand > θ_prior), n_paired)
-        # — the operator's main triangulation surface. When one prior gates
-        # the abort, its p_better on this line tells the story.
-        paired_breakdown: dict[str, dict[str, float]] = {
-            str(pid): {str(k): float(v) for k, v in (entry or {}).items()}
-            for pid, entry in (payload.get("paired_breakdown") or {}).items()
-        }
-
         line = {
-            "round": int(record.round),
-            "sample_idx": int(record.sample_idx if record.sample_idx is not None else -1),
+            "round": record.round,
+            "sample_idx": record.sample_idx,
             "current_id": current_id,
-            "n_samples": int(payload.get("n_samples", 0)),
+            "n_samples": payload["n_samples"],
             "p_best": p_best,
-            "p_best_delta": delta,
-            "paired_breakdown": paired_breakdown,
+            "p_best_delta": p_best - self._last_p_best.get(current_id, p_best),
+            # Per-prior θ comparison (p_better = P(θ_cand > θ_prior), n_paired): when one prior
+            # gates the abort, its p_better on this line tells the story.
+            "paired_breakdown": payload["paired_breakdown"],
         }
 
-        path = self.streams_dir / f"round_{record.round:04d}_{member}.jsonl"
+        path = self.streams_dir / f"round_{record.round:04d}_{payload['member']}.jsonl"
         try:
             append_jsonl(path, line)
         except OSError as exc:

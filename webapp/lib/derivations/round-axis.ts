@@ -12,7 +12,7 @@ export function availableRounds(
   // Excludes empty rows a round that measured nothing closes, else `useEffectiveRound` falls back to one as
   // `lastCompleted` and the round-scoped surfaces blank.
   const closed = closedRoundNumbers(dash);
-  const completed = [...closed].sort((a, b) => a - b);
+  const completed = [...closed];
   const liveRound = roundOf(dash);
   const live =
     isLive && liveRound != null && !closed.has(liveRound) ? liveRound : null;

@@ -2,7 +2,7 @@
 // `ConnectorProvider` owns the join, so this never fetches, derives or matches by string.
 
 import { cx } from "@/lib/cx";
-import { connectorReachability, interiorNodes, isSelfOptimization } from "@/lib/derivations";
+import { connectorReachability, interiorNodes } from "@/lib/derivations";
 import type { ConnectorView } from "@/lib/types";
 
 const SECURITY_DOC_URL =
@@ -16,20 +16,17 @@ export function ConnectorInspector({ view }: Props) {
   const {
     connector,
     backendType,
+    selfOptimization: selfOpt,
     view: pipelineView,
     others,
     baseUrl,
     isTls,
-    currentNodes,
     health,
   } = view;
   // Shared with CriticalAlertBanner (lib/derivations/connector-state.ts), so LED and banner agree.
   const { reachable, stateCls, stateLabel } = connectorReachability(health);
-  // An L4 unit's backend is PromptPotter itself, with no HTTP backend to probe; the real one lives
-  // in the inner run.
-  const selfOpt = isSelfOptimization(backendType);
-  // No resolved connector means nothing is probed: a terminal "idle", never a perpetual
-  // "probing…" (frontend-surface-contract.md § I1).
+  // An L4 unit's backend is PromptPotter itself (`selfOpt`): nothing to probe. No resolved connector
+  // is a terminal "idle", never a perpetual "probing…" (frontend-surface-contract.md § I1).
   const noBackend = connector == null && !selfOpt;
   const label = selfOpt ? "self-optimization" : noBackend ? "idle" : stateLabel;
   const footText = selfOpt

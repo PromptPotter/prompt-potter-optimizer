@@ -12,7 +12,7 @@ import logging
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from promptpotter.application.bench.difficulty import _calibrate_delta_ruler
+from promptpotter.application.bench.difficulty import calibrate_delta_ruler
 from promptpotter.application.datasets.authored import dataset_cell_scorer
 from promptpotter.application.intelligence.exploration import extend_ruler
 from promptpotter.application.intelligence.hard_sample_archive import build_archive_observations
@@ -73,7 +73,7 @@ def _fit_or_extend(
         return None
     held = session.store.campaigns.read_ruler(session.hop, dataset_name=dataset_name)
     if held is None:
-        ruler, _ = _calibrate_delta_ruler(
+        ruler, _ = calibrate_delta_ruler(
             None,
             campaign_config.optimization.elimination_n_min,
             enable_2pl=campaign_config.optimization.enable_2pl_graduation,

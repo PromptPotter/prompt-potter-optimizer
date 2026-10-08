@@ -33,8 +33,3 @@ export function useMediaQuery(query: string): boolean {
 export function useIsPortraitPhone(): boolean {
   return useMediaQuery("(orientation: portrait) and (max-width: 767px)");
 }
-
-// Mirrors `--bp-sm`, so a JS branch flips with the `@media` rules around it.
-export function useIsPhone(): boolean {
-  return useMediaQuery("(max-width: 640px)");
-}

@@ -7,7 +7,7 @@ import logging
 import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from typing import NewType
+from typing import Literal, NewType
 
 from promptpotter.shared.errors import NotFoundError
 
@@ -103,8 +103,7 @@ TERMINAL_IDENTITY_ID = "default"
 # blocklist is the operator's revoke: a blocked account is a real, authenticated
 # identity with an EMPTY capability set, and the dispatcher's existing gate is what
 # makes that state real, so no surface needs a second check.
-ACCESS_ACTIVE = "active"
-ACCESS_BLOCKED = "blocked"
+AccessState = Literal["active", "blocked"]
 
 
 @dataclass(frozen=True)
@@ -112,6 +111,12 @@ class IdentityContext:
     user_id: UserId
     tenant_id: TenantId
     issuer: Issuer | None = None
+    # The sign-in the web seam resolved; both absent on the terminal identity, which has none.
+    email: str | None = None
+    provider: str | None = None
+    # Entitlement as the web seam resolved it. The CLI and the ``PROMPTPOTTER_AUTH=off`` harness
+    # run as the local operator, entitled by construction: no blocklist stands on that path.
+    access_state: AccessState = "active"
     claims: Mapping[str, object] = field(default_factory=dict)
     capabilities: frozenset[str] = field(default_factory=frozenset)
 
@@ -161,22 +166,7 @@ def acting_principal_id(identity: IdentityContext) -> str:
     return str(identity.user_id)
 
 
-def claim_email(identity: IdentityContext) -> str | None:
-    raw = identity.claims.get("email")
-    return raw if isinstance(raw, str) else None
-
-
-def claim_access_state(identity: IdentityContext) -> str:
-    """Entitlement as the web seam resolved it. Absent means this is not an OIDC session — the CLI and the
-    ``PROMPTPOTTER_AUTH=off`` harness both run as the local operator, who is entitled by construction
-    because no blocklist stands on that path."""
-    raw = identity.claims.get("access_state")
-    return raw if isinstance(raw, str) else ACCESS_ACTIVE
-
-
 __all__ = [
-    "ACCESS_ACTIVE",
-    "ACCESS_BLOCKED",
     "CAMPAIGN_BABYSIT_CAP",
     "CAMPAIGN_BUDGET_CAP",
     "CAMPAIGN_CAP_BY_NAME",
@@ -187,6 +177,7 @@ __all__ = [
     "CAMPAIGN_STEP_CAP",
     "OWNER_COMMAND_CAPABILITIES",
     "TERMINAL_IDENTITY_ID",
+    "AccessState",
     "IdentityContext",
     "Issuer",
     "SafeName",
@@ -194,8 +185,6 @@ __all__ = [
     "UserId",
     "acting_principal_id",
     "capabilities_from_names",
-    "claim_access_state",
-    "claim_email",
     "default_identity",
     "has_capability",
     "require_capability",

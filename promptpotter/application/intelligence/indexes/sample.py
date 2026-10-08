@@ -7,8 +7,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application.scoring.formula import rescore_results
-from promptpotter.application.scoring.metrics import fold_cells
+from promptpotter.application.scoring.metrics import CellFold, fold_cells
 from promptpotter.domain.measurement_provenance import entry_grade
+from promptpotter.domain.results_health import UNKNOWN_STEP, terminal_node
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import (
     CellScorer,
@@ -30,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 def _graded_reading(
     detail: dict[str, Any], scorer: CellScorer
-) -> tuple[dict[str, Any] | None, str | None]:
+) -> tuple[CellFold | None, str | None]:
     """Grade *detail*'s rows IN PLACE — the sample index reads them next — and fold them; ``None``
     and the reason where one row cannot be graded under *scorer*."""
     rows = rescore_results(detail.get("measurements") or [], scorer)
@@ -81,13 +82,13 @@ class SampleIndex:
         self._unscoreable_runs: set[str] = set()
         # run_id -> (the detail signature it was read at, ``fold_cells`` over the run's rows graded
         # under the refreshing scorer).
-        self._readings: dict[str, tuple[list[int], dict[str, Any]]] = {}
+        self._readings: dict[str, tuple[list[int], CellFold]] = {}
         # Whether the persisted per-run fold was replayed instead of re-derived. Decides
         # append-vs-replace when this refresh writes back; `None` until the first refresh.
         self._fold_seeded: bool | None = None
         # `(archive entry, its reading)` for every run an optimizer may learn from, as of the last
         # refresh, and how many refreshes that has been — so a reader folds each one once.
-        self.runs: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        self.runs: list[tuple[dict[str, Any], CellFold]] = []
         self.generation = 0
 
     def register(self, sample: Sample) -> None:
@@ -122,7 +123,7 @@ class SampleIndex:
             # `None` means "contributes no failure mode" — an error result is not a
             # bottleneck reading, and neither is a hit.
             failure_mode = (
-                None if (hit or is_error_result(item)) else pd.get("terminal_node", "unknown")
+                None if (hit or is_error_result(item)) else terminal_node(item) or UNKNOWN_STEP
             )
             cells.append([sid, hit, degraded, failure_mode])
 

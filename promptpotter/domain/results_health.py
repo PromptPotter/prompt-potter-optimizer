@@ -39,8 +39,9 @@ class ResultClassification:
     fatal_codes: frozenset[str]
 
     @property
-    def is_fatal(self) -> bool:
-        """True iff the sample should be treated as deprecated (fatal OR infra)."""
+    def deprecates(self) -> bool:
+        """Whether the sample is deprecated — an infra or a fatal code, never a bare advisory. Only
+        ``fatal_codes`` fast-eliminate (``dominant_fatal``)."""
         return bool(self.fatal_codes or self.infra_codes)
 
     @property
@@ -76,15 +77,21 @@ def _is_refusal(result: Mapping[str, Any]) -> bool:
     return bool(_REFUSAL_PATTERN.match(head))
 
 
+# The step an advisory is filed under when its source names none — a warning with no ``step``, or
+# a result whose row says no node it reached.
+UNKNOWN_STEP = "unknown"
+
+
 def _collect_advisories(result: Mapping[str, Any]) -> set[str]:
     pd = result.get("pipeline_data") or {}
     advisories: set[str] = set()
     for w in (pd.get("diagnostics") or {}).get("warnings") or []:
-        advisories.add(f"{w.get('step', 'unknown')}:{w.get('code', 'unknown')}")
+        advisories.add(f"{w.get('step', UNKNOWN_STEP)}:{w.get('code', 'unknown')}")
+    reached = terminal_node(result) or UNKNOWN_STEP
     if not advisories and is_error_result(result):
-        advisories.add(f"{terminal_node(result)}:error")
+        advisories.add(f"{reached}:error")
     if _is_refusal(result):
-        advisories.add(f"{terminal_node(result)}:model_refusal")
+        advisories.add(f"{reached}:model_refusal")
     return advisories
 
 
@@ -95,22 +102,22 @@ def _structural_advisory_keys(result: Mapping[str, Any]) -> set[str]:
     keys: set[str] = set()
     for w in (pd.get("diagnostics") or {}).get("warnings") or []:
         if w.get("kind") == "structural":
-            keys.add(f"{w.get('step', 'unknown')}:{w.get('code', 'unknown')}")
+            keys.add(f"{w.get('step', UNKNOWN_STEP)}:{w.get('code', 'unknown')}")
     return keys
 
 
-def terminal_node(result: Mapping[str, Any]) -> str:
-    """The deepest node this result reached, read off its OWN ``pipeline_data`` rather than a literal name, so truncation
-    classification keys on this result's terminal node and fires for a multi-node terminal LLM too."""
+def terminal_node(result: Mapping[str, Any]) -> str | None:
+    """The deepest node this result reached, off its OWN ``pipeline_data`` — the ONE reading of it.
+    ``None`` where the row names none, and no reader may fill that in with a node of its choosing."""
     pd = result.get("pipeline_data") or {}
-    return pd.get("terminal_node") or "llm_only"
+    return pd.get("terminal_node") or None
 
 
-def _terminal_llm_shape(result: Mapping[str, Any]) -> tuple[str | None, int]:
+def _terminal_llm_shape(result: Mapping[str, Any], node: str) -> tuple[str | None, int]:
     """(finish_reason, reasoning_tokens) from the terminal LLM node's step_tokens;
     (None, 0) if missing."""
     pd = result.get("pipeline_data") or {}
-    st = (pd.get("step_tokens") or {}).get(terminal_node(result)) or {}
+    st = (pd.get("step_tokens") or {}).get(node) or {}
     fr = st.get("finish_reason")
     reasoning = int(st.get("reasoning") or 0)
     return (fr, reasoning)
@@ -135,8 +142,8 @@ def classify_result(result: Mapping[str, Any]) -> ResultClassification:
     # round-level version of this same question).
     predicted = str(result.get("predicted") or "").strip()
     answered = bool(predicted) and predicted != NO_RESULT
-    if f"{node}:content_empty" in advisories and not answered:
-        finish_reason, reasoning_tokens = _terminal_llm_shape(result)
+    if node is not None and f"{node}:content_empty" in advisories and not answered:
+        finish_reason, reasoning_tokens = _terminal_llm_shape(result, node)
         # ``reasoning_tokens > 0`` is proof the model WORKED — it neither refused (a refusal
         # carries content, or ``finish_reason=content_filter``) nor idled. Emitting nothing
         # visible after thinking is a property of the ROUTE, deterministic for every prompt
@@ -184,6 +191,12 @@ def classify_result(result: Mapping[str, Any]) -> ResultClassification:
         infra_codes=frozenset(infra),
         fatal_codes=frozenset(fatals),
     )
+
+
+def is_deprecated(result: Mapping[str, Any]) -> bool:
+    """The ONE reading of "this row is deprecated", for every count, the replay filter and the
+    stale-data ladder. A schema repair that went on to answer leaves a gradeable row, which is not one."""
+    return classify_result(result).deprecates
 
 
 def _failure_kind(step_statuses: Mapping[str, str], warning: WarningDict) -> str | None:

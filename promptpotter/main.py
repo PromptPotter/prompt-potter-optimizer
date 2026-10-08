@@ -11,23 +11,23 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import Field
 from scalar_fastapi import get_scalar_api_reference
 from starlette.datastructures import MutableHeaders
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from promptpotter.application.initialization.wiring import complete_registries
-from promptpotter.application.jobs.capacity import resolve_run_capacity
-from promptpotter.application.jobs.reaper import periodic_sweep, reap_cycle_by_id
-from promptpotter.application.jobs.registry import Job, JobRegistry
+from promptpotter.application.jobs.reaper import periodic_sweep
+from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.config.logging import setup_logging, silence_proactor_disconnect_noise
 from promptpotter.config.paths import (
     DEFAULT_PROJECTS_ROOT,
-    default_jobs_dir,
     user_data_root,
     webapp_static_root,
 )
 from promptpotter.config.settings import APP_VERSION, non_utf8_encoding, settings
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.identity.bundle import build_identity_bundle
 from promptpotter.infrastructure.identity.paths import default_identity_paths
 from promptpotter.presentation.admin_bot import notify_operator
@@ -39,8 +39,8 @@ from promptpotter.presentation.api.routers.backends import backends_router
 from promptpotter.presentation.api.routers.campaigns import campaigns_router
 from promptpotter.presentation.api.routers.commands import commands_router
 from promptpotter.presentation.api.routers.datasets import datasets_router
+from promptpotter.presentation.api.routers.diagnostics import diagnostics_router
 from promptpotter.presentation.api.routers.origins import origins_router
-from promptpotter.presentation.api.routers.verify import verify_router
 from promptpotter.presentation.terminal.server_banner import render_server_banner
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import PotterError
@@ -89,20 +89,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
 
     # Liveness reconciler. The registry stamps a cycle terminal the moment its
-    # job is proven dead (torn task, or a producer process that is gone) via
-    # on_reap — including, at the first read after a restart, every job this
+    # job is proven dead (torn task, or a producer process that is gone) —
+    # including, at the first read after a restart, every job this
     # server's previous incarnation left behind. The background periodic sweep
     # clears dead CYCLES the registry never saw, for the server's whole uptime.
     # Both keep the OS-style dock and the on-disk truth honest — a vanished
     # producer is not a live unit. See application/jobs/reaper.py.
-    def _on_reap(job: Job) -> None:
-        reap_cycle_by_id(DEFAULT_PROJECTS_ROOT, job.hop)
-
-    registry = JobRegistry(
-        default_jobs_dir(),
-        capacity=resolve_run_capacity,
-        on_reap=_on_reap,
-    )
+    registry = JobRegistry.attach()
     app.state.job_registry = registry
     sweep_task = asyncio.create_task(periodic_sweep(DEFAULT_PROJECTS_ROOT))
     yield
@@ -277,14 +270,21 @@ app.add_middleware(SecurityHeadersMiddleware)
 _health = APIRouter(tags=["Health"])
 
 
+class HealthResponse(StrictModel):
+    status: str
+    service: str
+    timestamp: str
+    version: str = Field(description="`APP_VERSION` — the browser's one source of it")
+
+
 @_health.get("/health")
-async def health_check() -> dict[str, str]:
-    return {
-        "status": "healthy",
-        "service": settings.BRAND_SERVICE_NAME,
-        "timestamp": utcnow_iso(),
-        "version": APP_VERSION,
-    }
+async def health_check() -> HealthResponse:
+    return HealthResponse(
+        status="healthy",
+        service=settings.BRAND_SERVICE_NAME,
+        timestamp=utcnow_iso(),
+        version=APP_VERSION,
+    )
 
 
 # Include routers. Each router owns its own tags (and prefix where it maps to a
@@ -295,7 +295,7 @@ app.include_router(campaigns_router, prefix="/api/v1")
 app.include_router(active_router, prefix="/api/v1")
 app.include_router(datasets_router, prefix="/api/v1")
 app.include_router(origins_router, prefix="/api/v1")
-app.include_router(verify_router, prefix="/api/v1")
+app.include_router(diagnostics_router, prefix="/api/v1")
 app.include_router(commands_router, prefix="/api/v1")
 app.include_router(auth_router, prefix="/api/v1")
 

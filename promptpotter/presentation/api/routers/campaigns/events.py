@@ -11,10 +11,11 @@ from pathlib import Path
 from fastapi import Query
 from sse_starlette import EventSourceResponse
 
+from promptpotter.application.served_dashboard import served_dashboard
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.infrastructure.projections.event_stream import CycleLedgerTail
 from promptpotter.infrastructure.store.layout import cycle_dir_for
-from promptpotter.infrastructure.store.stores import resolve_cycle_path
+from promptpotter.infrastructure.store.stores import Stores, resolve_cycle_path
 from promptpotter.presentation.api.deps import StoresDep, decode_descend
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 from promptpotter.shared.errors import NotFoundError
@@ -31,10 +32,11 @@ logger = logging.getLogger(__name__)
 _SSE_POLL_INTERVAL_S = 0.5
 
 
-async def _stream(tail: CycleLedgerTail) -> AsyncIterator[str]:
+async def _stream(tail: CycleLedgerTail, stores: Stores, hop: CycleHop) -> AsyncIterator[str]:
     """Snapshot envelope, then poll the ledger for the live tail, yielding each frame as a JSON string. File reads run via
     ``asyncio.to_thread`` so the event loop never blocks on disk I/O."""
-    yield (await asyncio.to_thread(tail.snapshot_frame)).model_dump_json()
+    snapshot = await asyncio.to_thread(lambda: tail.snapshot_frame(served_dashboard(stores, hop)))
+    yield snapshot.model_dump_json()
     while True:
         for envelope in await asyncio.to_thread(tail.read_new):
             yield envelope.model_dump_json()
@@ -58,9 +60,8 @@ async def stream_cycle_events(
     campaign/cycle). For any real cycle — running, paused, or finished — frames
     arrive in this order:
 
-    1. One ``stream_snapshot`` frame — payload is the cycle's current
-       ``dashboard.json`` body + ``snapshot_at_offset`` indicating the ledger
-       high-water mark reflected in the snapshot.
+    1. One ``stream_snapshot`` frame — payload is the cycle's served dashboard,
+       and ``sequence`` the ledger offset the tail picks up at.
     2. Live tail — every record appended to ``.runtime/ledger.jsonl`` after the
        snapshot is fanned out as a ``ProjectionEnvelope`` with ``kind`` = the
        record's ``record_type`` and ``sequence`` = the record's ledger offset.
@@ -82,9 +83,11 @@ async def stream_cycle_events(
     cycle_dir = Path(cycle_dir_for(leaf_store.base_dir, leaf))
     if not cycle_dir.exists():
         raise NotFoundError(f"Unknown cycle {leaf_campaign}/{leaf_cycle}.")
-    tail = CycleLedgerTail(cycle_dir, leaf)
+    tail = CycleLedgerTail(cycle_dir, leaf_cycle)
     # sep="\n": LF line endings (the contract's `data: <json>\n\n`; the default
     # is CRLF). X-Accel-Buffering: the one proxy-defeating header sse-starlette
     # does not set itself; Content-Type it sets, Cache-Control the no_store_on_api
     # middleware forces to no-store regardless.
-    return EventSourceResponse(_stream(tail), sep="\n", headers={"X-Accel-Buffering": "no"})
+    return EventSourceResponse(
+        _stream(tail, leaf_store, leaf), sep="\n", headers={"X-Accel-Buffering": "no"}
+    )

@@ -123,7 +123,7 @@ writes, and why — [`docs/operations/persistence-and-state.md`](../../docs/oper
 
 ## Stores
 
-`store/stores.py`: `Stores` frozen dataclass + `build_stores(identity, *, projects_root=…, benchmarks_root=…, shared_root=…)`. `shared_root` roots every CONTENT-ADDRESSED cache and equals `projects_root` everywhere except an L4 inner sandbox, which isolates campaign state but must NOT isolate a cache keyed by content hash, nor the dataset tier (`tenant_datasets`) its inner benchmark resolves through. **`store/layout.py::SHARED_CACHE_DIRS` is the sole enumeration of that set**, because three surfaces must agree on it — `build_stores` roots them, `cli/commands/reset.py` preserves them, and the workspace storage report counts them as shared. A cache named in one list and not the others is destroyed by `reset` or double-counted, silently, and one of those costs money.
+`store/stores.py`: `Stores` frozen dataclass + `build_stores(identity, *, projects_root=…, benchmarks_root=…, shared_root=…)`. `shared_root` roots every CONTENT-ADDRESSED cache and equals `projects_root` everywhere except an L4 inner sandbox, which isolates campaign state but must NOT isolate a cache keyed by content hash, nor the dataset tier (`tenant_datasets`) its inner benchmark resolves through. **`store/layout.py::SHARED_CACHE_DIRS` is the sole enumeration of that set**, because three surfaces must agree on it — `build_stores` roots them, `application/maintenance/reset.py` preserves them, and the workspace storage report counts them as shared. A cache named in one list and not the others is destroyed by `reset` or double-counted, silently, and one of those costs money.
 
 `Stores.identity` is the sole source of tenant scope, with `Stores.tenant_id` a derived `@property` returning the `TenantId` newtype — never an independent field (identity-foundation no-drift gate #4). Composite over the leaf stores `Stores` declares as its own fields, one class per `store/*.py`, except `optimizer_reuse` and `judge_reuse` — two instances of the one `LLMReuseCache` differing only in namespace directory. Separate attributes rather than a shared instance: a grader able to read the loop's cached answers would be a ruler fed by what it measures. **Cite one as attribute → class → file.**
 
@@ -227,9 +227,11 @@ adapters live in `promptpotter/connectors/`.
 
 ## Docker host
 
-`docker_host.py` is the ONE `docker` CLI call, daemon probe, package cache and dead-producer sweep.
-**A containerized connector imports it and passes what is its own** — scratch home, compose
-overlay — never a second copy beside its adapter.
+`docker_host.py` is the ONE `docker` CLI call, daemon probe, package cache, labelled cell
+container, producer scratch and dead-producer sweep. **Taking a machine slot claims the machine**
+(`backend.py::MachineSlots.hold`), so a connector calls no claim: it declares `compose_overlay`,
+keeps scratch under `PRODUCER_SCRATCH` and starts a container of its own only through
+`run_cell_container`.
 
 ## Tracing — fan-out only, and DORMANT ON PURPOSE
 

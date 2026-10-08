@@ -39,11 +39,14 @@ from promptpotter.application.views.view_models import (
     VerifyGradedView,
 )
 from promptpotter.domain.candidate_diff import group_diff_keys
+from promptpotter.domain.ruler import is_flat_ruler_id
 from promptpotter.domain.spend import CeilingMeter
 from promptpotter.shared.composite import render_composite_fitness_block
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+    from promptpotter.domain.ruler import AbilityReading
 
 
 def _render_init_enter(v: InitEnterView) -> str:
@@ -106,7 +109,7 @@ def _render_round_start(v: RoundStartView) -> str:
             "",
             _node_block(
                 "GENERATE",
-                f"Parent accuracy {v.current_acc:.1%}",
+                f"Parent accuracy {fmt_pct(v.current_acc)}",
                 f"Parent prompt   {v.prompt_preview}",
                 f"Candidates      {arms}" + (f"   {v.note}" if v.note else ""),
                 f"Model           {v.model}",
@@ -132,9 +135,11 @@ def _render_measure_enter(v: MeasureEnterView) -> str:
     )
 
 
-def render_round_verdict(v: RoundCompleteView, basis: Sequence[str]) -> str:
-    """The round's verdict as ONE block: the board, who was selected and why, then *basis* — the
-    lift interval and the overlap series, which exist only once the round has closed."""
+def render_round_verdict(
+    v: RoundCompleteView, basis: Sequence[str], ability: AbilityReading | None
+) -> str:
+    """The round's verdict as ONE block: the board, who was selected and why, then *basis* (the lift
+    interval and the overlap series) and *ability*, the frontier θ — all three only once it closed."""
     out: list[str] = [""]
     if board := _scoreboard(v.scores, v.winner_label, theta=v.stamps_theta):
         out.append(board)
@@ -155,9 +160,18 @@ def render_round_verdict(v: RoundCompleteView, basis: Sequence[str]) -> str:
     # Accuracy does not disappear; it moves into the parenthetical, so declaring the other loses
     # no reading.
     acc_txt = fmt_pct(v.winner_accuracy)
-    ability = v.stamps_theta and v.display_metric == "ability" and v.ability_theta is not None
-    headline = f"θ {v.ability_theta:+.3f}" if ability else acc_txt
-    detail = [acc_txt] if ability else []
+    # A cold θ is logit-accuracy on the arm's own subset, so headlining it dresses a
+    # subset-relative number as the difficulty-adjusted one: the headline stays accuracy.
+    theta = (
+        ability.theta
+        if v.stamps_theta
+        and v.display_metric == "ability"
+        and ability is not None
+        and not is_flat_ruler_id(ability.ruler_id or "")
+        else None
+    )
+    headline = acc_txt if theta is None else f"θ {theta:+.3f}"
+    detail = [] if theta is None else [acc_txt]
 
     if v.improved:
         # An arm that stopped short gets no reference rate rather than the full-set one:

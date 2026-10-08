@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 from promptpotter.infrastructure.identity.paths import default_identity_paths
 from promptpotter.infrastructure.store.io import read_json, write_json
+from promptpotter.infrastructure.store.layout import CampaignLayout
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.identity import default_identity
 
@@ -76,7 +77,7 @@ def _rewrite_campaign_ownership(campaigns_root: Path, user_id: str) -> None:
         return
     rewritten = 0
     for campaign_dir in campaigns_root.iterdir():
-        manifest = campaign_dir / "campaign.json"
+        manifest = CampaignLayout(campaign_dir).manifest
         if not manifest.is_file():
             continue
         try:

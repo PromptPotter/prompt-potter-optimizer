@@ -30,7 +30,6 @@ from promptpotter.domain.bench import (
     BenchSubject,
 )
 from promptpotter.domain.phases import STOP_REASON_INFO, CampaignPhase, StopOutcome, emit_phase
-from promptpotter.domain.results import resolved_fitness
 from promptpotter.infrastructure.store.archive_queries import load_run
 from promptpotter.infrastructure.store.read_model import derived
 from promptpotter.shared.instrument import NO_ROUND_SLOT, MeasurementRole
@@ -109,13 +108,9 @@ def level_columns(rows: list[QueryMeasurement]) -> BenchColumns:
     """One population's level in both columns, each with its band — for the bench's pass and a
     verify's alike, so the two cannot bracket a level differently."""
     folded = fold_cells(rows)
-    accuracy = folded["accuracy"]
-    # The composite floors at 0.0 over no scoreable row; a column over none has no value.
     levels: dict[BenchColumn, float | None] = {
-        "accuracy": accuracy,
-        "composite": None
-        if accuracy is None
-        else resolved_fitness(folded["composite_fitness"], accuracy),
+        "accuracy": folded["accuracy"],
+        "composite": folded["composite_fitness"],
     }
 
     def column(name: BenchColumn) -> BandedValue | None:
@@ -132,7 +127,7 @@ def paired_lift(rows: list[QueryMeasurement], reference: list[QueryMeasurement])
 
     def column(name: BenchColumn) -> BandedValue | None:
         paired = matched_parent_lift(rows, reference, grade=COLUMN_GRADE[name])
-        return None if paired is None else _banded(*paired)
+        return None if paired is None else _banded(paired.lift, paired.ci_lo, paired.ci_hi)
 
     return BenchColumns(accuracy=column("accuracy"), composite=column("composite"))
 
@@ -250,7 +245,7 @@ async def score_on_bench(
     if scored.stopped is not None:
         signal = scored.signal
         cause = (
-            f": {signal.check_result['last_error']}"
+            f": {signal.check_result['dominant_warning']}"
             if signal is not None and signal.check_name == SCORING_ERROR_ABORT
             else ""
         )

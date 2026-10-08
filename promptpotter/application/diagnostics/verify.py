@@ -17,9 +17,8 @@ from promptpotter.application.initialization.loop_start import (
     diagnostic_pass,
     diagnostic_trace,
 )
-from promptpotter.application.initialization.wiring import init_services
+from promptpotter.application.initialization.wiring import bind_cycle_session
 from promptpotter.application.optimizer_manifest import select_optimizer
-from promptpotter.application.pipeline_resolve import resolve_campaign_config
 from promptpotter.application.run_observers import RunCallbacks
 from promptpotter.application.runner.bench import level_columns, paired_lift
 from promptpotter.application.runner.termination import BudgetGate
@@ -48,7 +47,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import CellScorer, QueryMeasurement
     from promptpotter.infrastructure.store.stores import Stores
-    from promptpotter.shared.identity import IdentityContext
 
 logger = logging.getLogger(__name__)
 
@@ -225,7 +223,6 @@ def _scored_candidate(
 async def verify_candidate(
     *,
     stores: Stores,
-    identity: IdentityContext,
     hop: CycleHop,
     candidate_id: str,
     samples: int | None,
@@ -242,16 +239,7 @@ async def verify_candidate(
     round_num, entry = _scored_candidate(stores, hop, candidate_id)
     label = entry.label
 
-    session = await init_services(
-        backend_id=campaign.backend_id,
-        dataset_name=campaign.dataset_name,
-        identity=identity,
-        stores=stores,
-    )
-    session.campaign_id = hop.campaign_id
-    session.state.cycle_id = hop.cycle_id
-
-    campaign_config = resolve_campaign_config(stores, campaign, hop)
+    session, campaign_config = await bind_cycle_session(stores, campaign, hop)
     log_fn = log or (lambda *_a, **_k: None)
     arm_diagnostic_scoring(session, campaign_config, source=RunSource.VERIFY, log=log_fn)
 
@@ -383,7 +371,6 @@ async def verify_candidate(
 async def verify_on_saturation(
     *,
     stores: Stores,
-    identity: IdentityContext,
     hop: CycleHop,
     round_num: int,
     accuracy: float | None,
@@ -418,7 +405,6 @@ async def verify_on_saturation(
     try:
         return await verify_candidate(
             stores=stores,
-            identity=identity,
             hop=hop,
             candidate_id=winner_id,
             samples=None,

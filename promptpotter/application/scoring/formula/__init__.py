@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from promptpotter.application.scoring.formula.compiler import (
     DIALS_KEY,
-    LENS_DIALS_PREFIX,
     ScoringFormulaError,
     ScoringTermMissingError,
     auto_scorer_id,
@@ -19,7 +18,6 @@ from promptpotter.application.scoring.formula.rescore import rescore_results
 
 __all__ = [
     "DIALS_KEY",
-    "LENS_DIALS_PREFIX",
     "SCORING_FUNCTIONS",
     "ScoringFormulaError",
     "ScoringTermMissingError",

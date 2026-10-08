@@ -11,7 +11,7 @@ from promptpotter.application.views.render.primitives import (
     _step_tag,
 )
 from promptpotter.domain.l4.proxies import OUTER_PROXY_KEYS
-from promptpotter.domain.results_health import classify_result
+from promptpotter.domain.results_health import is_deprecated, terminal_node
 from promptpotter.domain.scoring import (
     is_hit,
     is_unscored,
@@ -114,11 +114,7 @@ def fmt_query_result(
     q = _ellide((r.get("query") or "").replace("\n", " ").strip(), 15)
     err = r.get("error") or ("pipeline error" if is_error_result(r) else None)
     pd = r.get("pipeline_data") or {}
-    step_name = pd.get("terminal_node")
-    if step_name is None and (st := pd.get("step_timings")):
-        # Last non-None entry wins (dict insertion order).
-        step_name = next((n for n, t in reversed(list(st.items())) if t is not None), None)
-    step = _step_tag(step_name, display_tags)
+    step = _step_tag(terminal_node(r), display_tags)
 
     tt = shown_seconds(cast("QueryMeasurement", r), cached=cached)
 
@@ -128,7 +124,7 @@ def fmt_query_result(
         # (`domain/dashboard_rows.py::sample_status`) — two readouts of one row may not disagree
         # about whether it was ever scored.
         tag = "ERR"
-    elif classify_result(r).is_fatal:
+    elif is_deprecated(r):
         tag = "DEPR"
     elif is_unscored(r):
         # Asked before the hit ladder for the same reason ``ERR`` is: an ungraded row carries no
@@ -267,7 +263,7 @@ def fmt_query_result(
             "entire stale-data ladder exhausted → still degraded; "
             "score counts but flag this candidate",
         )
-    elif r.get("degraded_observed") and not classify_result(r).is_fatal:
+    elif r.get("degraded_observed") and not is_deprecated(r):
         # Skip the "toward rerun" annotation on fatal classifications — candidate is already dead.
         obs = r.get("degraded_obs_count", "?")
         threshold = r.get("degraded_obs_threshold", "?")

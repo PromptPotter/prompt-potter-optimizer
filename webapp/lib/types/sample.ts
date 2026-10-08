@@ -18,7 +18,6 @@ export interface SampleRow {
   query: string;
   predicted: string;
   ground_truth: string;
-  terminal_node: string;
   // A replay's true 0.0; `cost_s` is what the cell took when it was measured.
   elapsed_s: number | null;
   cost_s: number | null;

@@ -57,7 +57,6 @@ async def cmd_ab(args: argparse.Namespace) -> CommandResult:
     try:
         report = await ab_replay_campaign(
             stores=stores,
-            identity=identity,
             hop=_target(args, stores),
             log=logger.info if get_verbose() else None,
         )

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from collections import Counter
-from typing import Literal
+from typing import Literal, NamedTuple, get_args
 
 from promptpotter.application.evidence.metric_catalogue import MetricSpec, catalogue_for
 from promptpotter.application.evidence.subjects import SubjectReading
@@ -216,39 +216,53 @@ def _pairwise(rows: list[SubjectReading]) -> list[PairwiseComparison]:
     return out
 
 
-def stamp_comparable(rows: list[SubjectReading]) -> list[SubjectReading]:
-    """Each subject's OWN verdict against the rest of the selection — the majority dataset first,
-    then the majority ruler. Served because a surface that struck rows through on its own would
-    have to pick the odd one out from `comparability`'s selection-wide reason, and two surfaces
-    would pick differently."""
-    majority_dataset = Counter(r.dataset_name for r in rows).most_common(1)[0][0]
-    stamped = Counter(
-        r.ability.ruler_id for r in rows if r.ability is not None and r.ability.ruler_id is not None
-    )
-    majority_ruler = stamped.most_common(1)[0][0] if stamped else None
+class _RowVerdict(NamedTuple):
+    comparable: bool | None
+    reason: ComparabilityReason
+    note: str
 
-    def verdict(row: SubjectReading) -> tuple[bool | None, str]:
+
+def _row_verdicts(rows: list[SubjectReading]) -> list[_RowVerdict]:
+    """Each subject against the rest of the selection — the majority dataset first, then the
+    majority ruler. A dataset name is compared as stored: an unnamed row shares a question with none."""
+    if not rows:
+        return []
+    majority_dataset = Counter(r.dataset_name for r in rows).most_common(1)[0][0]
+    stamped = [r.ability for r in rows if r.ability is not None and r.ability.ruler_id is not None]
+    majority_id = Counter(a.ruler_id for a in stamped).most_common(1)[0][0] if stamped else None
+    majority = next((a for a in stamped if a.ruler_id == majority_id), None)
+
+    def verdict(row: SubjectReading) -> _RowVerdict:
         if row.dataset_name != majority_dataset:
-            return False, (
+            return _RowVerdict(
+                False,
+                "datasets_differ",
                 f"Measured on {row.dataset_name or 'another dataset'}, while the rest of this "
                 f"selection is on {majority_dataset or 'a different one'} — they share no "
-                f"question, so nothing here pairs and only its own level is readable."
+                f"question, so nothing here pairs and only its own level is readable.",
             )
-        ruler = row.ability.ruler_id if row.ability is not None else None
         # UNKNOWN on either side, which is not a yes: an unstamped origin may sit on any scale,
         # and a selection where nothing is stamped can vouch for none of it.
-        if ruler is None or majority_ruler is None:
-            return None, ""
-        if ruler != majority_ruler:
-            return False, (
+        if row.ability is None or row.ability.ruler_id is None or majority is None:
+            return _RowVerdict(None, "ruler_unstamped", "")
+        if not row.ability.comparable_to(majority):
+            return _RowVerdict(
+                False,
+                "rulers_differ",
                 "Read against a different ruler from the rest of this selection — its cells "
-                "still pair where they overlap, its absolute level is on another scale."
+                "still pair where they overlap, its absolute level is on another scale.",
             )
-        return True, ""
+        return _RowVerdict(True, "one_ruler", "")
 
+    return [verdict(r) for r in rows]
+
+
+def stamp_comparable(rows: list[SubjectReading]) -> list[SubjectReading]:
+    """Each subject's OWN verdict, served so no surface picks the odd row out of `comparability`'s
+    selection-wide reason for itself."""
     return [
-        r.model_copy(update=dict(zip(("comparable", "comparable_note"), verdict(r), strict=True)))
-        for r in rows
+        r.model_copy(update={"comparable": v.comparable, "comparable_note": v.note})
+        for r, v in zip(rows, _row_verdicts(rows), strict=True)
     ]
 
 
@@ -272,46 +286,51 @@ def replicates(rows: list[SubjectReading]) -> list[ArmReplicate]:
     return out
 
 
+# The selection's verdict and sentence per reason, in PRECEDENCE order: the first reason any row
+# carries is the selection's. Different datasets are different measurands, so that one leads.
+_SELECTION_VERDICT: dict[ComparabilityReason, tuple[bool | None, str]] = {
+    "datasets_differ": (
+        False,
+        "Comparability NO — this selection spans several datasets, which measure different "
+        "things. The values are not one quantity and no pairing rescues them; the roster and "
+        "spend still compare, the numbers do not.",
+    ),
+    "ruler_unstamped": (
+        None,
+        "Comparability UNKNOWN — at least one origin carries no δ ruler, which is not "
+        "the same as yes. Absolute levels above may sit on different δ scales: pair on cells, "
+        "do not read the value column across campaigns.",
+    ),
+    "rulers_differ": (
+        False,
+        "Comparability NO — these origins were measured on different δ rulers, so their "
+        "absolute values are not one quantity. Only within-ruler comparisons hold.",
+    ),
+    "one_ruler": (
+        True,
+        "Comparability YES — these origins were measured on one δ ruler, so their values are "
+        "directly comparable.",
+    ),
+}
+assert set(_SELECTION_VERDICT) == set(get_args(ComparabilityReason))
+
+
 def comparability(rows: list[SubjectReading]) -> Comparability:
-    datasets = sorted({r.dataset_name for r in rows if r.dataset_name})
-    readings = [r.ability for r in rows]
-    stamped = [a for a in readings if a is not None and a.ruler_id is not None]
-    reason: ComparabilityReason
-    verdict: bool | None
-    note: str
-    if len(datasets) > 1:
-        # Different measurands entirely — no ruler agreement could rescue this, so it outranks
-        # everything below.
-        reason, verdict = "datasets_differ", False
-        note = (
-            "Comparability NO — this selection spans several datasets, which measure different "
-            "things. The values are not one quantity and no pairing rescues them; the roster and "
-            "spend still compare, the numbers do not."
-        )
-    elif not readings or len(stamped) != len(readings):
-        reason, verdict = "ruler_unstamped", None
-        note = (
-            "Comparability UNKNOWN — at least one origin carries no δ ruler, which is not "
-            "the same as yes. Absolute levels above may sit on different δ scales: pair on cells, "
-            "do not read the value column across campaigns."
-        )
-    elif not all(a.comparable_to(stamped[0]) for a in stamped):
-        reason, verdict = "rulers_differ", False
-        note = (
-            "Comparability NO — these origins were measured on different δ rulers, so their "
-            "absolute values are not one quantity. Only within-ruler comparisons hold."
-        )
-    else:
-        reason, verdict = "one_ruler", True
-        note = (
-            "Comparability YES — these origins were measured on one δ ruler, so their values are "
-            "directly comparable."
-        )
+    carried = {v.reason for v in _row_verdicts(rows)}
+    # An empty selection vouches for nothing, which is UNKNOWN rather than a yes.
+    reason: ComparabilityReason = "ruler_unstamped"
+    for candidate in _SELECTION_VERDICT:
+        if candidate in carried:
+            reason = candidate
+            break
+    verdict, note = _SELECTION_VERDICT[reason]
     return Comparability(
         verdict=verdict,
         reason=reason,
-        datasets=datasets,
-        n_rulers=len({a.ruler_id for a in stamped}),
+        datasets=sorted({r.dataset_name for r in rows if r.dataset_name}),
+        n_rulers=len(
+            {r.ability.ruler_id for r in rows if r.ability and r.ability.ruler_id is not None}
+        ),
         note=note,
     )
 

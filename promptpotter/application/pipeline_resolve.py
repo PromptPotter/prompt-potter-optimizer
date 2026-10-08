@@ -16,6 +16,10 @@ from promptpotter.application.campaign_config import (
     load_campaign_config,
     under_record,
 )
+from promptpotter.application.datasets.authored import (
+    dataset_campaign_path,
+    load_dataset_campaign_config,
+)
 from promptpotter.application.datasets.draft_campaign import (
     DraftCampaign,
     declared_pipeline_json,
@@ -31,7 +35,11 @@ from promptpotter.application.datasets.prompts import (
 )
 from promptpotter.application.evidence.subjects import SubjectSpec
 from promptpotter.application.optimizer_manifest import select_optimizer
-from promptpotter.application.runner.inner.tasks import inner_tasks_path, load_inner_tasks
+from promptpotter.application.runner.inner.tasks import (
+    inner_tasks_path,
+    is_self_optimization,
+    load_inner_tasks,
+)
 from promptpotter.config.settings import (
     PROMPT_STRING_FIELDS,
 )
@@ -53,14 +61,13 @@ from promptpotter.domain.pipeline_schema import (
     NodeReach,
     NodeSearchNarrowing,
     ParamSource,
-    PipelineNode,
     PipelineView,
     reach_map,
-    stable_hash,
 )
 from promptpotter.domain.search_point import strip_rendered_prompt
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.llm.capabilities import resolve_menu, resolve_schema_menu
+from promptpotter.infrastructure.llm.registry import normalize_model_id
 from promptpotter.infrastructure.runtime_flags import is_checkin
 from promptpotter.infrastructure.store.dataset_access import (
     DatasetAccessError,
@@ -74,14 +81,17 @@ from promptpotter.infrastructure.store.read_model import derived, file_sig
 from promptpotter.judges import judge_instrument
 from promptpotter.shared.errors import (
     CellUnscoreableError,
+    NotFoundError,
     PayloadInvalidError,
     StoredConfigInvalidError,
 )
+from promptpotter.shared.hashing import stable_hash
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from promptpotter.application.initialization.session import Session
+    from promptpotter.connectors.protocol import Connector
     from promptpotter.domain.campaign import Campaign
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.run_records import CycleSeed
@@ -100,12 +110,15 @@ neither a tunable — nothing may put either in `param_keys`."""
 __all__ = [
     "CampaignPipelineResponse",
     "CampaignRunsWith",
+    "DatasetPipelineResponse",
     "RunsWithParam",
+    "VendorModels",
     "apply_identity_layer",
     "apply_node_overlay",
     "campaign_runs_with",
     "configure_and_apply_pipeline",
     "dataset_pipeline_declaration",
+    "measurement_node",
     "merge_declared_layers",
     "merge_pipeline_params",
     "missing_template_vars",
@@ -113,6 +126,7 @@ __all__ = [
     "resolve_campaign_config",
     "resolve_pipeline_config_params",
     "resolve_pipeline_for_campaign",
+    "resolve_pipeline_for_dataset",
     "resolve_pipeline_for_draft",
     "resolve_root_config",
     "resolved_dataset_name",
@@ -167,7 +181,7 @@ def merge_pipeline_params(
     if schema:
         # DECLARED, not the running chain: this guard strips an edit to a node that does not
         # EXIST — a hallucinated name — and a node reached only by escalating exists.
-        _declared = {n.name for n in schema.config_nodes}
+        _declared = {n.name for n in schema.declared_nodes}
         for k, _cfg in list(node_config_items(merged)):
             if k not in _declared:
                 logger.warning("Dropping LLM override for undeclared node %r", k)
@@ -297,19 +311,16 @@ def schema_as_run(
         return schema
     unanswered = sorted(set(running.values()) - set(schema.model_capabilities))
 
-    def as_run(nodes: list[PipelineNode]) -> list[PipelineNode]:
-        return [
-            n.model_copy(update={"current_config": {**n.current_config, "model": running[n.name]}})
-            if n.name in running
-            else n
-            for n in nodes
-        ]
-
-    # Both lists: `get_node` reads the declared one, the chain walks the other.
     return schema.model_copy(
         update={
-            "nodes": as_run(schema.nodes),
-            "declared_nodes": as_run(schema.declared_nodes),
+            "declared_nodes": [
+                n.model_copy(
+                    update={"current_config": {**n.current_config, "model": running[n.name]}}
+                )
+                if n.name in running
+                else n
+                for n in schema.declared_nodes
+            ],
             "model_capabilities": {
                 **schema.model_capabilities,
                 **resolve_menu(unanswered, workspace=workspace),
@@ -366,11 +377,11 @@ def apply_identity_layer(
     return pipeline_params
 
 
-def _connector_of(raw: Mapping[str, Any] | None) -> connectors.Connector | None:
+def _connector_of(raw: Mapping[str, Any] | None) -> Connector | None:
     return connectors.registered().get(str((raw or {}).get("backend_type") or ""))
 
 
-def _dataset_connector(dataset_dir: Path) -> connectors.Connector | None:
+def _dataset_connector(dataset_dir: Path) -> Connector | None:
     return _connector_of(read_yaml_optional(dataset_pipeline_path(dataset_dir)))
 
 
@@ -607,6 +618,10 @@ class CampaignPipelineResponse(StrictModel):
     dataset_name: str
     connector: str
     backend_type: str
+    self_optimization: bool = Field(
+        description="This campaign optimizes the optimizer itself (L4): one measured row is a "
+        "whole inner campaign, so it has no registered backend and no per-sample data of its own"
+    )
     optimizer: str = Field(
         description="The optimizer manifest the addressed course runs — the one answer a surface "
         "reads which optimizer's graph, knobs and analytics apply by, a check-in's draft included"
@@ -630,6 +645,18 @@ class CampaignPipelineResponse(StrictModel):
     is_single_node: bool
 
 
+def _identity_keys(
+    provenance: Mapping[str, dict[str, ParamSource]],
+) -> dict[str, frozenset[str]]:
+    """Per node, the keys the identity layer wrote — read off the merge's own provenance, never a
+    name list."""
+    return {
+        node: owned
+        for node, stamps in provenance.items()
+        if (owned := frozenset(k for k, source in stamps.items() if source == "identity"))
+    }
+
+
 def _recorded_identity(
     params: dict[str, Any],
     recorded: Mapping[str, Any],
@@ -637,12 +664,11 @@ def _recorded_identity(
 ) -> dict[str, Any]:
     """Give a MEASURED point back the identity values it ran under. Recomputing is right on the RUN
     path and wrong on a finished read — the same defect as a shared ``pipeline.yaml``, one layer
-    down. Which keys those are is read off the merge's own provenance, never a name list."""
+    down."""
     out = dict(params)
-    for node, stamps in provenance.items():
-        owned = [k for k, source in stamps.items() if source == "identity"]
+    for node, owned in _identity_keys(provenance).items():
         node_recorded = recorded.get(node)
-        if not owned or not isinstance(node_recorded, dict):
+        if not isinstance(node_recorded, dict):
             continue
         merged = dict(out.get(node) or {})
         merged.update({k: node_recorded[k] for k in owned if k in node_recorded})
@@ -684,6 +710,12 @@ def _round_overlays(path: Path) -> dict[str, tuple[dict[str, Any], dict[str, Any
     }
 
 
+def measurement_node(view: PipelineView | None) -> str | None:
+    """The node of *view* that runs the measurement — the one a nested pipeline hangs off. The ONE
+    reading of it, for a campaign's ``nests`` and an optimizer manifest's own graph alike."""
+    return next((n.id for n in (view.nodes if view else []) if n.kind == "measurement"), None)
+
+
 def nested_pipeline_ref(dataset_dir: Path, view: PipelineView | None) -> NestedPipelineRef | None:
     """Owning an ``inner_tasks.yaml`` IS what makes a dataset outer (``runner/inner/tasks.py``);
     no name test recognises one. Here because both read doors need it and neither imports a router."""
@@ -692,8 +724,8 @@ def nested_pipeline_ref(dataset_dir: Path, view: PipelineView | None) -> NestedP
     except CellUnscoreableError:
         # A read-only view must not raise where the runner would.
         return None
-    node = next((n for n in (view.nodes if view else []) if n.kind == "measurement"), None)
-    return NestedPipelineRef(node=node.id, dataset=panel.inner_benchmark) if node else None
+    node = measurement_node(view)
+    return NestedPipelineRef(node=node, dataset=panel.inner_benchmark) if node else None
 
 
 def resolved_output_schemas(
@@ -817,7 +849,7 @@ def _draft_merge(draft: DraftCampaign, *, workspace: Path | None) -> _Merge:
         None,
         filtered,
         workspace=workspace,
-        base_config={n.name: dict(n.current_config) for n in filtered.config_nodes},
+        base_config={n.name: dict(n.current_config) for n in filtered.declared_nodes},
         provenance=provenance,
     )
     return _Merge(
@@ -917,6 +949,7 @@ def resolve_pipeline_for_draft(
         dataset_name=draft.slug,
         connector=draft.connector,
         backend_type=draft.connector,
+        self_optimization=is_self_optimization(draft.connector),
         optimizer=m.cfg.optimization.optimizer,
         optimizer_knobs=_optimizer_knobs(m.cfg),
         params=params,
@@ -991,6 +1024,7 @@ def resolve_pipeline_for_campaign(
         connector=str((m.raw or {}).get("backend_name") or campaign.dataset_name),
         # The campaign's FROZEN kind — one `pipeline.yaml` serves every campaign on the slug.
         backend_type=campaign.backend_type,
+        self_optimization=is_self_optimization(campaign.backend_type),
         optimizer=m.cfg.optimization.optimizer,
         optimizer_knobs=_optimizer_knobs(m.cfg),
         params=params,
@@ -1005,6 +1039,46 @@ def resolve_pipeline_for_campaign(
     )
 
 
+class DatasetPipelineResponse(StrictModel):
+    """One dataset's pipeline as DECLARED — the body of ``GET /datasets/{name}/pipeline``. Topology
+    only: the level a ``nests`` pointer names, which no campaign has to have run."""
+
+    connector: str
+    view: PipelineView | None
+    node_config_schema: dict[str, list[NodeConfigParam]] = Field(
+        description="Every param each node carries, valueless — what `reach` is summed over"
+    )
+    reach: dict[str, NodeReach]
+    nests: NestedPipelineRef | None = Field(
+        description="The pipeline this one nests in turn; the only wire naming it before a cell "
+        "has spawned"
+    )
+
+
+def resolve_pipeline_for_dataset(stores: Stores, dataset_name: str) -> DatasetPipelineResponse:
+    """The DATASET arm of the one resolution: the declaration under the dataset's own campaign
+    template, so the reach drawn for an unrun level is the reach that level would search."""
+    dataset_dir = readable_dataset_dir(stores, dataset_name)
+    raw = dataset_pipeline_declaration(stores, dataset_dir, experiment_outside_run(dataset_dir))
+    if raw is None:
+        raise NotFoundError(f"Dataset '{dataset_name}' has no pipeline.yaml")
+    cfg = load_dataset_campaign_config(dataset_campaign_path(dataset_dir))
+    _, filtered = _resolve_active_schema(
+        parse_pipeline_response(raw),
+        exclude=list(cfg.exclude_nodes),
+        narrowing=cfg.optimizer_narrowing,
+        dataset_dir=dataset_dir,
+    )
+    rows = filtered.node_config_schema()
+    return DatasetPipelineResponse(
+        connector=str(raw.get("backend_name") or raw.get("name") or dataset_name).strip(),
+        view=filtered.view,
+        node_config_schema=rows,
+        reach=reach_map(rows),
+        nests=nested_pipeline_ref(dataset_dir, filtered.view),
+    )
+
+
 class RunsWithParam(StrictModel):
     """One setting a campaign's root course runs with, and the layer that chose it."""
 
@@ -1014,11 +1088,27 @@ class RunsWithParam(StrictModel):
     source: ParamSource
 
 
+class VendorModels(StrictModel):
+    """The models of one vendor that a campaign's root course runs."""
+
+    vendor: str = Field(
+        description="Who TRAINED them: the namespace of the model id, or the bare id where it "
+        "names none. Lowercased, routing suffix dropped."
+    )
+    models: list[str] = Field(
+        description="Full ids, de-duplicated, routing suffix kept: it routes and bills, so it "
+        "names a different run."
+    )
+
+
 class CampaignRunsWith(StrictModel):
     """What a campaign's root course runs with — the root's pipeline resolution, cut to settings."""
 
     params: list[RunsWithParam] = Field(
         description="Scalar settings in active-step order, `model` included; no prompt text"
+    )
+    vendors: list[VendorModels] = Field(
+        description="Every model in `params`, grouped under its vendor in first-seen order"
     )
     optimizer: str = Field(description="The optimizer manifest the root course runs")
     max_rounds: int | None = Field(
@@ -1090,22 +1180,34 @@ def _runs_with(stores: Stores, campaign: Campaign, draft: DraftCampaign | None) 
         read = _campaign_merge(stores, campaign, SubjectSpec("campaign", campaign.campaign_id))
         m, params = read, read.with_seed(read.params)
     stripped = strip_rendered_prompt(params)
-    nodes = {n.name: n for n in m.filtered.config_nodes}
+    nodes = {n.name: n for n in m.filtered.declared_nodes}
     out: list[RunsWithParam] = []
+    by_vendor: dict[str, list[str]] = {}
     for name in m.active:
         if name not in stripped:
             continue
         cfg = stripped[name]
         for key in sorted(set(cfg) - {OUTPUT_SCHEMA_KEY}):
-            if nodes[name].param_kind(key) in _RUNS_WITH_KINDS:
-                out.append(
-                    RunsWithParam(
-                        node=name, key=key, value=cfg[key], source=m.provenance[name][key]
-                    )
-                )
+            kind = nodes[name].param_kind(key)
+            if kind not in _RUNS_WITH_KINDS:
+                continue
+            out.append(
+                RunsWithParam(node=name, key=key, value=cfg[key], source=m.provenance[name][key])
+            )
+            if kind == "model" and cfg[key] is not None:
+                models = by_vendor.setdefault(_vendor_of(cfg[key]), [])
+                if cfg[key] not in models:
+                    models.append(cfg[key])
     return CampaignRunsWith(
-        params=out, optimizer=m.cfg.optimization.optimizer, max_rounds=m.cfg.optimization.max_rounds
+        params=out,
+        vendors=[VendorModels(vendor=v, models=ms) for v, ms in by_vendor.items()],
+        optimizer=m.cfg.optimization.optimizer,
+        max_rounds=m.cfg.optimization.max_rounds,
     )
+
+
+def _vendor_of(model: str) -> str:
+    return normalize_model_id(model).partition("/")[0]
 
 
 def configure_and_apply_pipeline(
@@ -1133,6 +1235,7 @@ def configure_and_apply_pipeline(
     # This is where the connector `model`/config enters BOTH the measurement identity
     # (`content_hash`/`node_configs` over `session.pipeline_params`) AND the origin cycle id
     # (`build_origin_cycle_id` hashes these merged params). Starting prompts land on top below.
+    provenance: dict[str, dict[str, ParamSource]] = {}
     pipeline_params = resolve_pipeline_config_params(
         active,
         campaign_config.pipeline_overlay,
@@ -1142,6 +1245,7 @@ def configure_and_apply_pipeline(
         experiment=session.backend_client.workload.experiment,
         stores=session.store,
         workspace=session.store.base_dir,
+        provenance=provenance,
     )
 
     ships_prompts = dataset_dir is not None and has_dataset_prompts(dataset_dir)
@@ -1174,6 +1278,7 @@ def configure_and_apply_pipeline(
         filtered, pipeline_params, active, session.store.base_dir
     )
     session.pipeline_params = pipeline_params
+    session.identity_keys = _identity_keys(provenance)
 
     nodes_str = ", ".join(active)
     excl_str = f"  Excluded: {', '.join(exclude)}" if exclude else ""

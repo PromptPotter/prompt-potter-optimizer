@@ -45,7 +45,7 @@ decides its own outer key (`termnorm` flattens `pipeline_params` into `node_conf
 dict through. **The session contract works for in-process backends via a noop**
 (`protocol.py::NoopSession`, which every in-process connector passes), at the cost of the HTTP shape leaking
 into the rest of `BackendClient`. And **`extract_experiment` is the impedance-match seam**:
-both connectors yield `(queries, index_terms)` from very different bodies, so **a new
+every panel-owning connector yields the same rows from a very different body, so **a new
 connector shapes its `experiment_data` to fit the loader, never the reverse**.
 
 ## TermNorm is not a third party
@@ -69,7 +69,9 @@ touch one side, fix both. Debugging →
 `in_process`), never on the connector name** — so a new backend's transport is a capability it
 declares, not a branch in the core loop. `__init__.py::_validate` enforces the pairing with
 `in_process_run`, whose reply is the `{"data": {…}}` shape the scorer parses from a `/matches`
-body. **`in_process` is a statement about TRANSPORT — there is no HTTP — and about nothing else:**
+body. **It is handed the `Sample`, and core clocks it** (`BackendClient._clocked`): the row is
+`sample.source_pin`, never a search of the panel, and no connector stamps `total_time` /
+`step_timings`. **`in_process` is a statement about TRANSPORT — there is no HTTP — and about nothing else:**
 a `harbor` cell holds a container, spends real money and takes minutes.
 
 **Per-run state is the `workload` argument, never a ContextVar or a module cache.**
@@ -300,9 +302,11 @@ no wire, so declaring a token on one fails the registry guard.
 ## Conventions
 
 - Wire adapters are pure functions: `(query, pipeline_params) -> dict`.
-  No I/O, no logging beyond debug-level drops.
-- `extract_experiment` returns `(queries, index_terms)` — the index_terms
-  list may be empty for connectors with no retrieval index.
+  No I/O, no logging beyond debug-level drops. The `identity_config` layer never reaches one —
+  `sample_measurement.py::measure_sample` removes it first.
+- `extract_experiment` returns the panel's rows and is declared exactly where `experiment_file`
+  is (`__init__.py::_validate`); a connector with no panel file states its answer shape on the
+  rows its dataset loads. The retrieval term index is run init's, never a connector's.
 - **A declared `experiment_file` OWNS its dataset's panel, and
   `dataset_access.py::dataset_experiment` is its ONE reader** — `init_services`, and every read
   outside a run: `GET /datasets`, `/origins`, `/cells` and the campaign pipeline. L4's

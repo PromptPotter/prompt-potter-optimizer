@@ -6,7 +6,7 @@ import type { ReactNode } from "react";
 import { cx } from "@/lib/cx";
 import { useSelectNode } from "@/lib/hooks/useSelectNode";
 import { campaignDisplayName } from "@/lib/names";
-import { effectTone, fmtPct0, fmtSigned } from "@/lib/format";
+import { effectTone, fmtPct0, fmtSigned, fmtThetaSe } from "@/lib/format";
 import { CAVEAT_COPY } from "@/components/candidates/AbilityInfo";
 import {
   accuracyStat,
@@ -21,10 +21,8 @@ import {
   panelCellLabel,
   pathOf,
   phaseStatus,
-  roundSizes,
   spendLabel,
   splitRetired,
-  wasElected,
   type NodeKind,
   type OriginGroup,
   type RetiredGroup,
@@ -395,7 +393,6 @@ function CandidateRow({
   // Keyed on the ROUND, not the label: a fork's C0 replays the candidate it was cut from.
   const isOrigin = (cand.round ?? 0) === 0;
   const cutFrom = cutFromLabel(cand, siblings);
-  const elected = wasElected(cand.is_selected, roundSizes(siblings).get(cand.round ?? 0) ?? 1);
   const retiredBy = cand.superseded_by;
 
   const cycleId = candPath[candPath.length - 1]!.cycleId;
@@ -416,13 +413,17 @@ function CandidateRow({
       ? "invalid — never measured"
       : isOrigin
         ? "origin"
-        : elected
+        : cand.crown === "elected"
           ? "won its round"
-          : cand.election_held
-            ? "not elected"
-            : cand.status === "minted"
-              ? "not measured yet"
-              : "awaiting election";
+          : cand.crown === "uncontested"
+            ? "advanced uncontested"
+            : cand.is_selected
+              ? "selected"
+              : cand.election_held
+                ? "not elected"
+                : cand.status === "minted"
+                  ? "not measured yet"
+                  : "awaiting election";
 
   // θ is a row only where this node's optimizer stamps one; elsewhere a blank reads as a cold ruler.
   const caveat = cand.stamps_theta ? cand.theta_caveat : null;
@@ -433,10 +434,7 @@ function CandidateRow({
   if (cand.stamps_theta) {
     stats.push({
       label: "Ability θ",
-      value:
-        cand.theta == null
-          ? "—"
-          : `${cand.theta.toFixed(2)}${cand.theta_se != null ? ` ± ${cand.theta_se.toFixed(2)}` : ""}`,
+      value: fmtThetaSe(cand.theta, cand.theta_se),
       sub: caveat ? "not ability — see below" : "what the round elects on",
       className: caveat ? "summary-block-warn" : undefined,
     });
@@ -508,7 +506,7 @@ function CandidateRow({
                     ⑂{cutFrom ? ` from ${cutFrom}` : ""}
                   </span>
                 )}
-                {elected && (
+                {cand.crown === "elected" && (
                   <span className="unit-library-kind" title="Elected this round's winner">
                     won
                   </span>

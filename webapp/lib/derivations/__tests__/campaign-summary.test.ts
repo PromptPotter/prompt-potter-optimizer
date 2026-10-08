@@ -6,7 +6,6 @@ import {
   campaignTitle,
   campaignVendors,
 } from "../campaign-summary";
-import { vendorOf } from "@/lib/format";
 import type { RunGroup } from "../campaign-forest";
 import type { BenchScore, CampaignRunsWith, CampaignSummary, CycleListEntry } from "@/lib/api";
 
@@ -50,7 +49,7 @@ function run(over: {
 const runsWith = (
   params: CampaignRunsWith["params"],
   max_rounds: number | null,
-): CampaignRunsWith => ({ params, optimizer: "potter", max_rounds });
+): CampaignRunsWith => ({ params, vendors: [], optimizer: "potter", max_rounds });
 
 describe("campaignLineParts", () => {
   // No served setting reaches the row: models ride the vendor mark, the rest the hover card.
@@ -108,51 +107,21 @@ describe("campaignLineParts", () => {
   });
 });
 
-describe("vendorOf", () => {
-  it("reads the namespace, which is who TRAINED the model", () => {
-    expect(vendorOf("openai/gpt-oss-120b")).toBe("openai");
-    expect(vendorOf("meta-llama/llama-4-70b")).toBe("meta-llama");
-  });
-
-  // Two colons, told apart only by POSITION: a gateway sits left of the slash and names who
-  // SERVED the call, the `:nitro` routing suffix sits right of it on the model's own name.
-  it("looks past a gateway prefix and through a routing suffix", () => {
-    expect(vendorOf("groq:openai/gpt-oss-120b")).toBe("openai");
-    expect(vendorOf("qwen/qwen3.7-flash:nitro")).toBe("qwen");
-  });
-
-  it("answers with the id itself when it carries no namespace", () => {
-    expect(vendorOf("GPT-4")).toBe("gpt-4");
-    expect(vendorOf("gpt-4:nitro")).toBe("gpt-4");
-  });
-});
-
 describe("campaignModels / campaignVendors", () => {
-  const twoVendors = run({
-    runsWith: runsWith(
-      [
-        { node: "solve", key: "model", value: "openai/gpt-oss-20b:nitro", source: "campaign" },
-        { node: "judge", key: "model", value: "openai/gpt-oss-120b", source: "dataset" },
-        { node: "l1_generate", key: "model", value: "deepseek/deepseek-v4-flash", source: "backend" },
-        { node: "l1_critique", key: "model", value: "openai/gpt-oss-20b:nitro", source: "backend" },
-      ],
-      6,
-    ),
-  });
-
-  it("lists every model whole, de-duplicated — the suffix routes and bills, so it stays", () => {
+  it("lists every served model whole, in the order of the marks that stand for them", () => {
+    const twoVendors = run({
+      runsWith: {
+        ...runsWith([], 6),
+        vendors: [
+          { vendor: "openai", models: ["openai/gpt-oss-20b:nitro", "openai/gpt-oss-120b"] },
+          { vendor: "deepseek", models: ["deepseek/deepseek-v4-flash"] },
+        ],
+      },
+    });
     expect(campaignModels(twoVendors)).toEqual([
       "openai/gpt-oss-20b:nitro",
       "openai/gpt-oss-120b",
       "deepseek/deepseek-v4-flash",
-    ]);
-  });
-
-  // Three OpenAI models are ONE brand to count.
-  it("collapses models to their vendors, each keeping the ids it stands for", () => {
-    expect(campaignVendors(twoVendors)).toEqual([
-      { vendor: "openai", models: ["openai/gpt-oss-20b:nitro", "openai/gpt-oss-120b"] },
-      { vendor: "deepseek", models: ["deepseek/deepseek-v4-flash"] },
     ]);
   });
 

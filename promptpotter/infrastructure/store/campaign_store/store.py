@@ -9,15 +9,22 @@ from pathlib import Path
 from typing import Any
 
 from promptpotter.domain.bench import BankPartition
-from promptpotter.domain.campaign import Campaign, CampaignResult, HeadToHeadRecord
+from promptpotter.domain.campaign import (
+    Campaign,
+    CampaignResult,
+    HeadToHeadRecord,
+    LifecycleFilter,
+)
+from promptpotter.domain.cycle_listing import CycleListEntry
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.export import PromptExport, parse_prompt_export
 from promptpotter.domain.launch_limits import RoundsCap
 from promptpotter.domain.phases import RunPhase, StopReason
-from promptpotter.domain.results import RoundResult, best_round_on_shared_cells, overlap_row
+from promptpotter.domain.results import RoundResult, SharedCellPoint, best_round_on_shared_cells
 from promptpotter.domain.ruler import DeltaRuler
 from promptpotter.domain.run_records import (
     MINT_KIND_FOR_TRIGGER,
+    CycleFinal,
     CycleSeed,
     CycleSeedRecord,
     ForkTrigger,
@@ -56,8 +63,8 @@ from promptpotter.infrastructure.store.io import (
     write_yaml,
 )
 from promptpotter.infrastructure.store.layout import (
-    CAMPAIGN_RESULT,
     ROUND_GLOB,
+    CampaignLayout,
     CycleLayout,
     campaign_cycles_dir,
     campaign_root_dir_for,
@@ -87,8 +94,8 @@ def _index_round(rr: RoundResult) -> dict[str, Any]:
     and every resume open. The round DOCUMENT is where a round is read in full.
 
     The overlap pair is this round's winner scored on the cells its whole line has answered — the
-    number `best_round_on_shared_cells` elects on, and the one shape every carrier projects."""
-    return {"round": rr.round, "accuracy": rr.accuracy, **overlap_row(rr.overlap)}
+    number `best_round_on_shared_cells` elects on."""
+    return SharedCellPoint.of(rr.round, rr.accuracy, rr.overlap)._asdict()
 
 
 def origin_accuracy_of(index: dict[str, Any]) -> float | None:
@@ -123,13 +130,19 @@ def cycle_ending(index: Mapping[str, Any]) -> StopReason | None:
     return StopReason(index["stop_reason"]) if index.get("finished_at") else None
 
 
+def cycle_final(index: Mapping[str, Any]) -> CycleFinal | None:
+    """What the cycle banked when it stopped, or ``None`` where it has not — or was stamped
+    terminal by something other than its own runner (a reap, a supersede cut), which banks none."""
+    final = index.get("final")
+    return None if final is None else CycleFinal.model_validate(final)
+
+
 def _apply_best(data: dict[str, Any]) -> None:
     """Never argmax ``cumulative_accuracy``: no rescore backs that series, so the headline
-    would exceed anything the cycle measured. Two deliberate bases — ``architecture.md`` §0.5.
-
-    The derivation FILLS round 0's shared-cell score on the rows handed to it, which is how the
-    origin reaches an election it records no reading for; writing them back persists that."""
-    data["best_accuracy"], data["best_round"] = best_round_on_shared_cells(data["rounds"])
+    would exceed anything the cycle measured. Two deliberate bases — ``architecture.md`` §0.5."""
+    data["best_accuracy"], data["best_round"] = best_round_on_shared_cells(
+        [SharedCellPoint(**row) for row in data["rounds"]]
+    ) or (None, None)
 
 
 def reproject_round_index(
@@ -185,7 +198,7 @@ def _fresh_sibling_index_blob(
         "forked_at": forked_at,
         "rounds": [],
         "n_rounds": 0,
-        "best_accuracy": 0.0,
+        "best_accuracy": None,
         "created_at": forked_at,
         "updated_at": forked_at,
         "forked_at_offset": forked_at_offset,
@@ -247,8 +260,11 @@ class CampaignStore:
     def cycle_dir(self, hop: CycleHop) -> Path:
         return cycle_dir_for(self._base_dir, hop)
 
+    def _campaign_layout(self, campaign_id: str) -> CampaignLayout:
+        return CampaignLayout(self.campaign_root_dir(campaign_id))
+
     def _manifest_path(self, campaign_id: str) -> Path:
-        return self.campaign_root_dir(campaign_id) / "campaign.json"
+        return self._campaign_layout(campaign_id).manifest
 
     def _layout(self, hop: CycleHop) -> CycleLayout:
         return CycleLayout(self.cycle_dir(hop))
@@ -289,7 +305,7 @@ class CampaignStore:
         root = self._campaigns_root()
         if not root.exists():
             return []
-        return sorted(p.parent for p in root.glob("*/campaign.json"))
+        return sorted(p for p in root.iterdir() if CampaignLayout(p).manifest.is_file())
 
     def campaign_cycle_dirs(self, campaign_id: str) -> list[Path]:
         """One campaign's cycle directories — the enumeration `bank_spend` reads before
@@ -331,13 +347,11 @@ class CampaignStore:
 
     def load_result(self, campaign_id: str) -> CampaignResult | None:
         """``None`` until the campaign's line first banks one — no launch has reached its origin."""
-        data = read_json_optional(self.campaign_root_dir(campaign_id) / CAMPAIGN_RESULT)
+        data = read_json_optional(self._campaign_layout(campaign_id).result)
         return None if data is None else CampaignResult.model_validate(data)
 
     def write_result(self, campaign_id: str, result: CampaignResult) -> None:
-        write_json(
-            self.campaign_root_dir(campaign_id) / CAMPAIGN_RESULT, result.model_dump(mode="json")
-        )
+        write_json(self._campaign_layout(campaign_id).result, result.model_dump(mode="json"))
 
     def load_head_to_head(self, head_to_head_id: str) -> HeadToHeadRecord | None:
         data = read_json_optional(head_to_head_path(self._base_dir, head_to_head_id))
@@ -368,16 +382,35 @@ class CampaignStore:
         return count
 
     def list_campaign_ids(self) -> list[str]:
-        root = self._campaigns_root()
-        if not root.is_dir():
-            return []
-        return sorted(p.name for p in root.iterdir() if (p / "campaign.json").is_file())
+        return sorted(p.name for p in self.iter_campaign_dirs())
+
+    @staticmethod
+    def _ids_matching(ids: list[str], needle: str) -> list[str]:
+        """The ONE needle rule, for a campaign and a cycle alike: the full id, else a 6-hex suffix
+        or a prefix, else a substring. An empty needle names every id."""
+        if needle in ids:
+            return [needle]
+        matches = [i for i in ids if i.endswith(f"__{needle}") or i.startswith(needle)]
+        if needle and not matches:
+            matches = [i for i in ids if needle in i]
+        return matches
+
+    def match_campaign_ids(self, needle: str) -> list[str]:
+        """Every campaign *needle* could name, so every entry point that names a campaign reaches
+        the same one; more than one answer is the caller's ambiguity to refuse."""
+        return self._ids_matching(self.list_campaign_ids(), needle)
+
+    def match_cycle_ids(self, campaign_id: str, needle: str) -> list[str]:
+        """Every cycle of *campaign_id* that *needle* could name. The exact arm is what lets a
+        root cycle be named at all: every fork and diag of it carries its id as a prefix."""
+        ids = [p.name for p in self.campaign_cycle_dirs(campaign_id)]
+        return self._ids_matching(ids, needle)
 
     def list_campaigns(
         self,
         dataset_name: str | None = None,
         *,
-        lifecycle: str = "active",
+        lifecycle: LifecycleFilter = "active",
         owner_user_id: str | None = None,
     ) -> list[Campaign]:
         """The sole lifecycle/owner filter gateway — API and CLI pass through, never re-filtering.
@@ -495,7 +528,7 @@ class CampaignStore:
         record, so the spend is banked here rather than by the caller. After the guard: a refused
         delete keeps its rows, and a tombstone beside them is the same money counted twice."""
         campaign_dir = self.campaign_root_dir(campaign_id)
-        if not (campaign_dir / "campaign.json").is_file():
+        if not CampaignLayout(campaign_dir).manifest.is_file():
             return False
         self._guard_and_release(campaign_id, "delete")
         bank_spend(
@@ -560,6 +593,14 @@ class CampaignStore:
         data["cycle_id"] = hop.cycle_id
         return data
 
+    def session_id_of(self, hop: CycleHop) -> str:
+        """The session *hop* was minted under (``index.json::parent_session_id``). Raises rather
+        than answering ``""``: an active pointer saved under no session names a cycle no verb loads."""
+        session_id = str((self.load(hop) or {}).get("parent_session_id") or "")
+        if not session_id:
+            raise NotFoundError(f"cycle {hop.cycle_id!r} in {hop.campaign_id!r} names no session")
+        return session_id
+
     def create(
         self,
         hop: CycleHop,
@@ -576,7 +617,8 @@ class CampaignStore:
             "parent_session_id": existing.get("parent_session_id", ""),
             "parent_cycle_id": None,
             "n_rounds": 0,
-            "best_accuracy": 0.0,
+            # Unmeasured until round 0 banks: `_apply_best` is the only writer of a number here.
+            "best_accuracy": None,
             "rounds": [],
             # Babysat marker: flips True the moment an operator manually
             # intervenes (today: skip-searchpoint), so the cycle is permanently
@@ -701,7 +743,7 @@ class CampaignStore:
         finished_at: str,
         interrupted_round: int | None = None,
         crash_traceback: str | None = None,
-        final: dict[str, Any] | None = None,
+        final: CycleFinal | None = None,
         export: PromptExport | None = None,
     ) -> None:
 
@@ -710,7 +752,7 @@ class CampaignStore:
             "finished_at": finished_at,
         }
         if final is not None:
-            updates["final"] = final
+            updates["final"] = final.model_dump()
         # Store partial-round / traceback markers based on what the caller computed
         # (halted_mid_round → interrupted_round; has_traceback → crash_traceback).
         remove_keys: list[str] = []
@@ -795,8 +837,8 @@ class CampaignStore:
             return False
         return self._stamp_terminal(hop, StopReason.PRODUCER_VANISHED)
 
-    def _entry_from_index(self, index_path: Path) -> dict[str, Any]:
-        """THE decoder of ``index.json`` into the served ``CycleListEntry`` shape."""
+    def _entry_from_index(self, index_path: Path) -> CycleListEntry:
+        """THE decoder of ``index.json`` into the served ``CycleListEntry``."""
         campaign_id, cycle_id = self._ids_from_index_path(index_path)
         data = read_json_tolerant(index_path)
         kind = sibling_kind(cycle_id)
@@ -806,7 +848,7 @@ class CampaignStore:
         # the one computation the picker, both live dots, and the badge all
         # read — no surface re-derives "running" from its own inputs.
         is_terminal = isinstance(data, dict) and bool(data.get("finished_at"))
-        run_phase = str(derive_run_phase(index_path.parent, is_terminal=is_terminal))
+        run_phase = derive_run_phase(index_path.parent, is_terminal=is_terminal)
         if not isinstance(data, dict):
             data = {}
         header_raw = data.get("header")
@@ -816,29 +858,29 @@ class CampaignStore:
         # Derived from the one owner (campaign.json::dataset_name) — no per-cycle copy.
         campaign = self.load_campaign(campaign_id)
         dataset_name = campaign.dataset_name if campaign is not None else ""
-        return {
-            "campaign_id": campaign_id,
-            "cycle_id": cycle_id,
-            "parent_session_id": data.get("parent_session_id", ""),
-            "parent_cycle_id": data.get("parent_cycle_id")
+        return CycleListEntry(
+            campaign_id=campaign_id,
+            cycle_id=cycle_id,
+            parent_session_id=data.get("parent_session_id", ""),
+            parent_cycle_id=data.get("parent_cycle_id")
             or (None if kind == "root" else root_cycle_id(cycle_id)),
-            "dataset_name": dataset_name,
-            "backend_id": header.get("backend_id", ""),
-            "mint_kind": _mint_kind(kind, fork_trigger),
-            "is_root": kind == "root",
-            "stop_reason": cycle_ending(data),
-            "superseded_by": data.get("superseded_by"),
-            "run_phase": run_phase,
-            "best_accuracy": data.get("best_accuracy"),
-            "origin_accuracy": origin_accuracy_of(data),
-            "rounds_closed": sum(1 for r in data.get("rounds") or [] if r.get("round", 0) > 0),
-            "created_at": data.get("created_at", ""),
-            "updated_at": data.get("updated_at", ""),
-            "human_intervened": bool(data.get("human_intervened", False)),
-            "spawned_by": data.get("spawned_by"),
-        }
+            dataset_name=dataset_name,
+            backend_id=header.get("backend_id", ""),
+            mint_kind=_mint_kind(kind, fork_trigger),
+            is_root=kind == "root",
+            stop_reason=cycle_ending(data),
+            superseded_by=data.get("superseded_by"),
+            run_phase=run_phase,
+            best_accuracy=data.get("best_accuracy"),
+            origin_accuracy=origin_accuracy_of(data),
+            rounds_closed=sum(1 for r in data.get("rounds") or [] if r.get("round", 0) > 0),
+            created_at=data.get("created_at", ""),
+            updated_at=data.get("updated_at", ""),
+            human_intervened=bool(data.get("human_intervened", False)),
+            spawned_by=data.get("spawned_by"),
+        )
 
-    def enumerate_cycles(self) -> list[dict[str, Any]]:
+    def enumerate_cycles(self) -> list[CycleListEntry]:
         return [self._entry_from_index(p) for p in self._index_files()]
 
     def _stub_deletion_blocked(self, hop: CycleHop) -> str | None:
@@ -1261,4 +1303,4 @@ class CampaignStore:
             )
 
 
-__all__ = ["CampaignStore", "cycle_ending", "origin_accuracy_of"]
+__all__ = ["CampaignStore", "cycle_ending", "cycle_final", "origin_accuracy_of"]

@@ -7,7 +7,7 @@ import { cx } from "@/lib/cx";
 import { TERMS } from "@/lib/terms";
 import { headlineStats, pathOf, prefixReading, readSpend, runningInnerRun } from "@/lib/derivations";
 import { fmtText, fmtDuration, fmtSigned, fmtUsd, fmtTokens } from "@/lib/format";
-import { useDashboard } from "@/lib/hooks/useDashboard";
+import { useCycleStream } from "@/lib/poll";
 import { useLineageTree } from "@/lib/lineage";
 import { useWorkspace } from "@/lib/workspace";
 import { RunControlButton } from "@/components/shell/remote/RunControlButton";
@@ -65,7 +65,7 @@ export function RemoteControl() {
     drillInto,
     backToOuter,
   } = useWorkspace();
-  const { dash, status } = useDashboard();
+  const { dash, status } = useCycleStream();
   const cmd = useCommand<"skip" | "sample-lookahead">("remote-control");
   const [open, setOpen] = useState(false);
   const isOuterView = (viewedPath?.length ?? 1) === 1;

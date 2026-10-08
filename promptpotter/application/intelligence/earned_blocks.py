@@ -11,7 +11,12 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.config.settings import ANSWER_SPACE_CAP
 from promptpotter.domain.candidate_diff import candidate_delta
 from promptpotter.infrastructure.store.io import read_json_optional
-from promptpotter.infrastructure.store.layout import ROUND_GLOB, CycleLayout, campaign_cycles_dir
+from promptpotter.infrastructure.store.layout import (
+    ROUND_GLOB,
+    CampaignLayout,
+    CycleLayout,
+    campaign_cycles_dir,
+)
 from promptpotter.shared.instrument import instrument_mode
 
 if TYPE_CHECKING:
@@ -127,7 +132,7 @@ def mine_earned_blocks(stores: Stores) -> dict[str, list[EarnedBlock]]:
             continue
         # The manifest, never the directory name: `<dataset>__<hash>` is a rendering of the id, and
         # a dataset whose own name carries `__` would split at the wrong place.
-        manifest = read_json_optional(campaign_dir / "campaign.json")
+        manifest = read_json_optional(CampaignLayout(campaign_dir).manifest)
         dataset = str((manifest or {}).get("dataset_name") or campaign_dir.name)
         for cycle_dir in sorted(cycles_dir.iterdir()):
             rounds_dir = CycleLayout(cycle_dir).rounds

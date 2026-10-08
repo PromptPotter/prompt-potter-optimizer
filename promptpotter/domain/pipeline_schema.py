@@ -1,6 +1,4 @@
 import enum
-import hashlib
-import json
 from collections.abc import Iterable, Mapping
 from typing import Annotated, Any, Literal
 
@@ -10,7 +8,7 @@ from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.value_tree import Delivery, ValueLeaf, visibility_of
-from promptpotter.shared.hashing import shapes_optimizer_prompt
+from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
 
 # Prompt-decomposition fields the prompt editor owns — excluded from the
 # operator-editable node-config surface (they live in `param_keys` too, but the
@@ -172,14 +170,10 @@ def _stated_permitted(
     return permitted if permitted != options or set(permitted) != set(absent) else None
 
 
-@shapes_optimizer_prompt
-def stable_hash(value: Any) -> str:
-    blob = json.dumps(value, sort_keys=True, default=str).encode()
-    return hashlib.sha256(blob).hexdigest()[:16]
+class NodeRole(enum.StrEnum):
+    """What a node's OUTPUT is to the scorer — the wire key ``node_role``. A node declaring none
+    has no role (``None``); :class:`NodeKind` is the other axis, what the node IS."""
 
-
-class NodeType(enum.StrEnum):
-    NONE = ""
     CANDIDATE_SOURCE = "candidate_source"
     RANKER = "ranker"
     ENRICHER = "enricher"
@@ -253,7 +247,7 @@ CANDIDATE_LIBRARY_FILE = "candidate_library.txt"
 
 
 class PipelineDependency(StrictModel):
-    """Read off the node taxonomy, so a new connector declares one node type and gets detection
+    """Read off the node taxonomy, so a new connector declares one node role and gets detection
     for free. Surfaced to the operator as a missing input — never a hidden fabricated default."""
 
     model_config = ConfigDict(frozen=True)
@@ -264,16 +258,14 @@ class PipelineDependency(StrictModel):
     hint: str
 
 
-def dependencies_from_node_types(
-    node_type_by_name: Mapping[str, NodeType],
+def dependencies_from_node_roles(
+    role_by_name: Mapping[str, NodeRole],
 ) -> tuple[PipelineDependency, ...]:
     """The single derivation both ingest and a live :class:`PipelineSchema` share, so the two never
-    drift. New node-type→input rules add an arm here, nowhere else."""
+    drift. New node-role→input rules add an arm here, nowhere else."""
     deps: list[PipelineDependency] = []
     candidate_sources = sorted(
-        name
-        for name, node_type in node_type_by_name.items()
-        if node_type == NodeType.CANDIDATE_SOURCE
+        name for name, role in role_by_name.items() if role == NodeRole.CANDIDATE_SOURCE
     )
     if candidate_sources:
         served = ", ".join(candidate_sources)
@@ -328,6 +320,15 @@ class NodePromptInfo(StrictModel):
     template_variables: list[str] = Field(default_factory=list)
 
 
+ViewKind = Literal["io", "llm", "tool", "retriever", "cache", "measurement"]
+"""The coarse vocabulary the CLIENT styles a graph node by: exactly what
+``pipeline_parsing.py::_derive_node_kind`` can emit, plus the two ``io`` ends. A member the producer
+cannot produce is one the client styles and captions for nothing."""
+
+ParamKind = Literal["model", "enum", "number", "bool", "string", "prompt", "description", "nested"]
+"""The surface that OWNS a param — :class:`NodeConfigParam` says what each one draws."""
+
+
 class PipelineViewNode(StrictModel):
     """One node's place in the flow, as a tier and a rank rather than as pixels.
 
@@ -343,9 +344,7 @@ class PipelineViewNode(StrictModel):
     # The node's own declared `description`, which a surface shows as its explainer; `""` where
     # the declaration gives none, and on the two `io` ends.
     description: str = ""
-    # Exactly what `pipeline_parsing.py::_derive_node_kind` can emit — a member here the
-    # producer cannot produce is one the client styles and captions for nothing.
-    kind: str = ""  # "io" | "llm" | "tool" | "retriever" | "cache" | "measurement"
+    kind: ViewKind
     tier: int = 0
     rank: int = 0
 
@@ -410,8 +409,8 @@ class PipelineNode(StrictModel):
     # `None` is "the producer declared no type", a real state and deliberately not a member: an
     # UNDECLARED node reading as some default kind is the silence this enum replaces. Anything
     # else is refused at parse.
-    wire_type: NodeKind | None = None
-    node_type: NodeType = NodeType.NONE
+    kind: NodeKind | None = None
+    role: NodeRole | None = None
     param_keys: set[str] = Field(default_factory=set)
     # What ``narrow`` TOOK AWAY — the axes this dataset declared and this campaign closed.
     # Without it the two reasons an axis is shut are one state on the wire: "the dataset never
@@ -446,8 +445,17 @@ class PipelineNode(StrictModel):
     def emits_ranking(self) -> bool:
         """Does this node put a ranked list on the wire — the "a sample can be scored off it" signal.
         Asked as a predicate rather than spelled as a set of names at each site, so a new ranking
-        node type is admitted here and nowhere else instead of being skipped in silence."""
-        return self.node_type in (NodeType.RANKER, NodeType.CANDIDATE_SOURCE)
+        node role is admitted here and nowhere else instead of being skipped in silence."""
+        return self.role in (NodeRole.RANKER, NodeRole.CANDIDATE_SOURCE)
+
+    def ranking_in(self, pipeline_data: Mapping[str, object]) -> list[Any] | None:
+        """The ranked list this node put on a row's ``pipeline_data``, under the key it DECLARES.
+        ``None`` where the node emitted nothing: it did not run, which is not an empty ranking."""
+        for key in self.output_keys:
+            if key in pipeline_data:
+                emitted = pipeline_data[key]
+                return emitted if isinstance(emitted, list) else []
+        return None
 
     @property
     def is_llm(self) -> bool:
@@ -463,7 +471,7 @@ class PipelineNode(StrictModel):
             return []
         return [description_key(p) for p in description_paths(self.output_schema.json_schema)]
 
-    def param_kind(self, key: str) -> str:
+    def param_kind(self, key: str) -> ParamKind:
         if description_path(key) is not None:
             return "description"
         if key in _PROMPT_OWNED_FIELDS:
@@ -519,9 +527,7 @@ class NodeConfigParam(StrictModel):
 
     key: str
     value: Any = None
-    kind: (
-        str  # "model" | "enum" | "number" | "bool" | "string" | "prompt" | "description" | "nested"
-    )
+    kind: ParamKind
     options: list[str] = Field(default_factory=list)
     description: str = ""
     never_axis: Literal["", "cost_lever", "schema_owned"] = ""
@@ -692,13 +698,11 @@ class PipelineSchema(StrictModel):
     name: str = ""
     version: str = ""
     description: str = ""
-    nodes: list[PipelineNode] = Field(default_factory=list)
-    # Every node the manifest DECLARES — a superset of `nodes`, which holds only the ones a
-    # round runs. Identity stays on `nodes`: folding these into `sp_hash` re-keys every
-    # banked measurement. Empty means "same as `nodes`"; read it through `config_nodes`.
+    # Every node the manifest DECLARES — what a CONFIG surface covers and the optimizer may edit,
+    # whether or not a pipeline names it. The chain a round runs is `nodes`, read off `pipelines`.
     declared_nodes: list[PipelineNode] = Field(default_factory=list)
-    # Every declared sequence by name, `default` included. The others are an optimizer's own members'
-    # to run — a controller's alternatives, a phase; the manifest digest folds them.
+    # Every declared sequence by name. `default` is the chain a round runs; the others are an
+    # optimizer's own members' to run, and the manifest digest folds them.
     pipelines: dict[str, list[str]] = Field(default_factory=dict)
     available_models: list[str] = Field(default_factory=list)
     view: PipelineView | None = None
@@ -716,7 +720,14 @@ class PipelineSchema(StrictModel):
         # param" are questions about the manifest, not about this round's chain — an
         # node off the chain resolving to None merges its nested params shallow and loses
         # every sibling key.
-        return {n.name: n for n in (self.declared_nodes or self.nodes)}
+        return {n.name: n for n in self.declared_nodes}
+
+    @property
+    def nodes(self) -> list[PipelineNode]:
+        """The chain a round RUNS: the declared nodes ``pipelines["default"]`` names, in its order.
+        Identity stays on it — folding every declared node into ``sp_hash`` re-keys each measurement."""
+        declared = self._node_map
+        return [declared[name] for name in self.pipelines.get("default", ()) if name in declared]
 
     @property
     def active_steps(self) -> tuple[str, ...]:
@@ -747,13 +758,6 @@ class PipelineSchema(StrictModel):
         """The WIRE base only. The origin cycle id does NOT derive from it — ``build_origin_cycle_id``
         hashes the overlay-merged params, so the cycle id and the measurement key agree."""
         return {"steps": list(self.active_steps)}
-
-    @property
-    def config_nodes(self) -> list[PipelineNode]:
-        """The nodes a CONFIG surface covers — every declared one, not just the running chain.
-        Read it wherever the answer is "what can the operator see and unlock": a node absent
-        from the surface is not a locked node, it is nothing at all."""
-        return self.declared_nodes or self.nodes
 
     def model_options(self, node: "PipelineNode") -> list[str]:
         """The PERMITTED model set for one node — its own ``param_allowed_values["model"]`` when
@@ -902,7 +906,7 @@ class PipelineSchema(StrictModel):
         is chosen and the spend is committed.
         """
         models = set(self.available_models)
-        for node in self.config_nodes:
+        for node in self.declared_nodes:
             models.update(node.param_allowed_values.get("model", ()))
             if isinstance(picked := node.current_config.get("model"), str) and picked:
                 models.add(picked)
@@ -933,11 +937,11 @@ class PipelineSchema(StrictModel):
         # A model row is synthesized on the carrier only when no node OWNS a model —
         # otherwise the native row (justlogic's `llm_only.model`) is authoritative.
         model_declared = any(
-            "model" in (n.param_keys | set(n.current_config)) for n in self.config_nodes
+            "model" in (n.param_keys | set(n.current_config)) for n in self.declared_nodes
         )
         model_carrier = None if model_declared else self._model_carrier()
         out: dict[str, list[NodeConfigParam]] = {}
-        for n in self.config_nodes:
+        for n in self.declared_nodes:
             params: list[NodeConfigParam] = []
             resolved = (values or {}).get(n.name, n.current_config)
             stamped = (sources or {}).get(n.name, {})
@@ -1045,17 +1049,15 @@ class PipelineSchema(StrictModel):
                 # a fork because the seed overlay outranks the dataset. `never_axis` stays
                 # empty — that names a construction nobody may search; this is simply a key the
                 # node did not open.
+                menu = list(model_menu or self.available_models)
+                allowed = self.model_options(n)
                 params.append(
                     NodeConfigParam(
                         key="model",
                         value=resolved.get("model", n.current_config.get("model")),
                         kind="model",
-                        options=list(model_menu or self.available_models),
-                        permitted=(
-                            self.model_options(n)
-                            if self.model_options(n) != list(model_menu or self.available_models)
-                            else None
-                        ),
+                        options=menu,
+                        permitted=_stated_permitted(allowed, menu, allowed),
                         description="Optimizer model for this node — install-global by "
                         "default, operator-steerable on a fork.",
                         source=stamped.get("model", "unset"),
@@ -1072,18 +1074,21 @@ class PipelineSchema(StrictModel):
     def node_output_schemas(self) -> dict[str, NodeOutputSchema | None]:
         """The read-only companion to :meth:`node_config_schema`, so the steer panel can show the WHOLE
         node: model + params + prompt + the structured output it produces."""
-        return {n.name: n.output_schema for n in self.config_nodes}
+        return {n.name: n.output_schema for n in self.declared_nodes}
 
     def get_node(self, name: str) -> PipelineNode | None:
         return self._node_map.get(name)
 
     def filter_to_steps(self, steps: list[str]) -> "PipelineSchema":
-        # Both lists, so a filtered schema cannot still resolve a node it just excluded.
+        # The declaration too, so a filtered schema cannot still resolve a node it just excluded.
         active = set(steps)
         return self.model_copy(
             update={
-                "nodes": [n for n in self.nodes if n.name in active],
                 "declared_nodes": [n for n in self.declared_nodes if n.name in active],
+                "pipelines": {
+                    **self.pipelines,
+                    "default": [n for n in self.pipelines.get("default", ()) if n in active],
+                },
             },
         )
 
@@ -1134,19 +1139,12 @@ class PipelineSchema(StrictModel):
                 )
             return out
 
-        # Both lists, or a narrowed campaign still renders the un-narrowed knobs on every
-        # node that runs outside the default chain.
-        return self.model_copy(
-            update={
-                "nodes": _narrowed(self.nodes),
-                "declared_nodes": _narrowed(self.declared_nodes),
-            }
-        )
+        return self.model_copy(update={"declared_nodes": _narrowed(self.declared_nodes)})
 
     def node_configs(self, pipeline_params: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
         """Canonical SearchPoint identity: ordered ``[(node, config), ...]`` for hashing.
 
-        Spans what the optimizer may EDIT (:attr:`config_nodes`), not just what this round RUNS — a
+        Spans what the optimizer may EDIT (``declared_nodes``), not just what this round RUNS — a
         node only an alternative pipeline reaches still changes the measurement, and keyed on the
         chain alone an edit landing there is indistinguishable from its parent.
 
@@ -1158,7 +1156,7 @@ class PipelineSchema(StrictModel):
         in_chain = {node.name for node in self.nodes}
         result: list[tuple[str, dict[str, Any]]] = [
             (node.name, cfg)
-            for node in self.config_nodes
+            for node in self.declared_nodes
             if node.name not in in_chain
             and isinstance(cfg := pipeline_params.get(node.name, {}), dict)
             and cfg
@@ -1182,14 +1180,14 @@ class PipelineSchema(StrictModel):
         (``Connector.prompt_delivery``), and a default would answer "always arrives" for the one
         backend where that is false — which is a wrong number, not a missing one.
 
-        DECLARED nodes, matching :attr:`config_nodes`: what the optimizer may EDIT is not what this
+        DECLARED nodes: what the optimizer may EDIT is not what this
         round happens to run, or a node only an alternative pipeline reaches could never be told to
         improve. Pinned values stay in the tree, marked immutable — "configured and held" is what a
         reader of the harness asks for as much as "being searched".
         """
         leaves: list[ValueLeaf] = []
         prompt_node = next(iter(self.prompt_node_names()), None)
-        for step in self.config_nodes:
+        for step in self.declared_nodes:
             declared = set(step.param_keys) - PARAM_FORBIDDEN_KEYS - SCHEMA_OWNED_FIELDS
             # The node the prompt renders onto takes its prompt fields through the
             # `prompt_fields_updates` slot, never as node params: one carrier, so one lock.
@@ -1283,8 +1281,8 @@ __all__ = [
     "NodeKind",
     "NodeOutputSchema",
     "NodePromptInfo",
+    "NodeRole",
     "NodeSpendBound",
-    "NodeType",
     "ObservationMapping",
     "ParamSource",
     "PipelineDependency",
@@ -1294,6 +1292,5 @@ __all__ = [
     "PipelineViewEdge",
     "PipelineViewNode",
     "WebSpendBound",
-    "dependencies_from_node_types",
-    "stable_hash",
+    "dependencies_from_node_roles",
 ]

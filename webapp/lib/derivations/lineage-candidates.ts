@@ -2,7 +2,7 @@
 // `id` and `label` are minted on the node — never re-derived from a list position.
 
 import type { LineageNode } from "@/lib/api";
-import type { SelectedCandidate } from "@/lib/types";
+import { selectedCandidateOf, type SelectedCandidate } from "@/lib/types";
 import { encodeCyclePath, nodeAddress, type CyclePath } from "@/lib/ids";
 
 // The one served-path → CyclePath conversion; no surface re-maps one by hand.
@@ -99,21 +99,9 @@ export function nodeKeyOf(node: LineageNode): string {
   return nodeAddress(pathOf(node), node.id);
 }
 
-// The one selection mint. `label` is a downstream JOIN KEY, so it carries the MINTING course's
-// label — a fork-contributed attempt's round document speaks that one, not the renumbered one.
-export function selectedCandidateOf(
-  node: LineageNode,
-  cycleId: string,
-  accuracy: number | null = node.accuracy,
-): SelectedCandidate {
-  return {
-    cycle_id: cycleId,
-    round: node.round ?? 0,
-    candidate_id: node.id,
-    label: node.course_label,
-    accuracy,
-    is_selected: node.is_selected,
-  };
+// A tree node as a selection: `course_label` is the label the minting course's documents speak.
+export function selectedNodeOf(node: LineageNode, cycleId: string): SelectedCandidate {
+  return selectedCandidateOf(cycleId, node.round ?? 0, node.id, node.course_label);
 }
 
 // `course` is null at a fork's address (a fork is not a node); `candidates` follows
@@ -143,6 +131,32 @@ export function indexLineage(root: LineageNode | null): LineageIndex {
   };
   visit(root);
   return index;
+}
+
+// A candidate by its lineage id, anywhere in the tree. A repair leaves two nodes on one id, so the
+// one still on a line answers.
+export function candidateById(index: LineageIndex, id: string): LineageNode | null {
+  let retired: LineageNode | null = null;
+  for (const { candidates } of index.values()) {
+    for (const c of candidates) {
+      if (c.id !== id) continue;
+      if (!c.superseded_by) return c;
+      retired = c;
+    }
+  }
+  return retired;
+}
+
+// The origin of the timeline `node` is on, as the tree names it (`origin_id`) — never a walk up
+// `parent_ids`, and never the label a round-0 arm happens to wear.
+export function originOf(index: LineageIndex, node: LineageNode | undefined): LineageNode | null {
+  return node?.origin_id ? candidateById(index, node.origin_id) : null;
+}
+
+// At a fork's address there is no course, so the attempts it contributed answer for it.
+export function originAt(index: LineageIndex, path: CyclePath | null): LineageNode | null {
+  const here = path ? index.get(encodeCyclePath(path)) : undefined;
+  return originOf(index, here?.course ?? here?.candidates[0]);
 }
 
 // Served tree only: a `dashboard.json` row id is positional (`r{round}_{idx}`) and never

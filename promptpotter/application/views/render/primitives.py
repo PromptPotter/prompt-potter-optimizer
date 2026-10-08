@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import NodeKind
-from promptpotter.domain.results import ArmOutcome, resolved_fitness, scoreboard_rank_key
+from promptpotter.domain.results import ArmOutcome, scoreboard_rank_key
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -28,6 +28,12 @@ def fmt_ci(lower: float | None, upper: float | None, *, spec: str) -> str:
     if lower is None or upper is None:
         return "—"
     return f"[{spec.format(lower)}, {spec.format(upper)}]"
+
+
+def fmt_fitness(score: float | None) -> str:
+    """A composite, or ``—`` where no cell was read: an unmeasured arm has no score, and ``0.0000``
+    would print it as a measured one that failed everything."""
+    return "—" if score is None else f"{score:.4f}"
 
 
 def fmt_pvalue(p: float | None) -> str:
@@ -233,7 +239,6 @@ def _scoreboard(
             winner_mark = f"  {GREEN}{BOLD}*{RESET}"
         else:
             winner_mark = ""
-        comp_val = resolved_fitness(s.composite_fitness, acc)
         # "---", never "0.000": a candidate outside the election fit has no ability, and while the
         # ruler is cold NO row has one — a zero there would read as a measured mid-scale ability.
         theta_str = "---" if s.theta is None else f"{s.theta:+.3f}"
@@ -242,7 +247,7 @@ def _scoreboard(
         acc_str = "—" if acc is None else f"{acc:.1%}"
         row = (
             f"{i:<4d}{label:<8s}{cells:>7s}   {acc_str:>8s}   {ci_str:>16s}   "
-            f"{comp_val:>9.4f}{theta_cell}   {delta_str:>7s}{winner_mark}"
+            f"{fmt_fitness(s.composite_fitness):>9s}{theta_cell}   {delta_str:>7s}{winner_mark}"
         )
         lines.append(f"  {_box_line(row, width=w)}")
 
@@ -252,7 +257,7 @@ def _scoreboard(
 
 # `ai` marks a node that OWNS a model (`is_llm`, as `llm_only` does); an optimizer node, which
 # owns none, reads better as `l1_g`/`l1_c` than as `ai_1`/`ai_2`.
-_WIRE_TYPE_TAGS: dict[NodeKind, str] = {
+_KIND_TAGS: dict[NodeKind, str] = {
     NodeKind.RETRIEVER: "retr",
     NodeKind.TOOL: "tool",
     NodeKind.CACHE: "cach",
@@ -268,9 +273,7 @@ def display_tags(schema: PipelineSchema | None) -> dict[str, str]:
         # the same place a declared kind this map does not carry lands.
         (
             n.name,
-            "ai"
-            if n.is_llm
-            else (_WIRE_TYPE_TAGS.get(n.wire_type) if n.wire_type else None) or n.name[:4],
+            "ai" if n.is_llm else (_KIND_TAGS.get(n.kind) if n.kind else None) or n.name[:4],
         )
         for n in schema.nodes
     ]

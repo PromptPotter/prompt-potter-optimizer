@@ -2,24 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import Query, Request, Response
 from pydantic import Field
 
-from promptpotter.application.campaign_config import (
-    Estimand,
-    estimand_doc,
-    knob_label,
-)
+from promptpotter.application.campaign_config import CampaignConfig
+from promptpotter.application.config_map import ConfigMapResponse, config_map
 from promptpotter.application.datasets.draft_campaign import load_checkin_draft
 from promptpotter.application.evidence.subjects import SubjectSpec, parse_subject
 from promptpotter.application.jobs.launcher.draft_build import draft_wire
-from promptpotter.application.knobs import (
-    check_couplings,
-    declared_couplings,
-    resolve_knob_states,
-)
 from promptpotter.application.pipeline_resolve import (
     CampaignPipelineResponse,
     CampaignRunsWith,
@@ -28,8 +20,15 @@ from promptpotter.application.pipeline_resolve import (
     resolve_root_config,
 )
 from promptpotter.application.runner.campaign_result import read_campaign_bench, read_line_spend
+from promptpotter.application.runner.inner.tasks import is_self_optimization
 from promptpotter.domain.bench import BenchScore
-from promptpotter.domain.campaign import Arm, Campaign, ceiling_meter
+from promptpotter.domain.campaign import (
+    Arm,
+    Campaign,
+    LifecycleFilter,
+    LifecycleStatus,
+    ceiling_meter,
+)
 from promptpotter.domain.pipeline_overlay import (
     permitted_models_for_campaign,
     steers_disallowed_model,
@@ -41,7 +40,7 @@ from promptpotter.infrastructure.store.stores import Stores, descend_store
 from promptpotter.presentation.api.deps import StoresDep, decode_descend
 from promptpotter.presentation.api.routers.campaigns._conditional import conditional_json
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
-from promptpotter.shared.errors import BadRequestError, NotFoundError, PayloadInvalidError
+from promptpotter.shared.errors import BadRequestError, NotFoundError
 
 
 class CampaignSummary(StrictModel):
@@ -63,16 +62,21 @@ class CampaignSummary(StrictModel):
         default="",
         description=(
             "Connector KIND this campaign runs against ('termnorm' / 'promptpotter' / …), FROZEN "
-            "on the manifest at mint. The webapp's ONE test for a self-optimizing (L4) campaign — "
-            "it renders the 'inner loops' disclosure and the pp-self panel variants on it. "
-            "Re-pointing or deleting the dataset dir never changes it: a campaign outlives its "
-            "dataset dir, and what it RAN is a fact about the campaign."
+            "on the manifest at mint. Re-pointing or deleting the dataset dir never changes it: a "
+            "campaign outlives its dataset dir, and what it RAN is a fact about the campaign."
+        ),
+    )
+    self_optimization: bool = Field(
+        description=(
+            "This campaign optimizes the optimizer itself (L4), answered off `backend_type` by "
+            "the connector registry. The one test a surface draws the 'inner loops' disclosure "
+            "and the self-optimization panel variants on — never a comparison of `backend_type`."
         ),
     )
     owner_user_id: str = Field(
         default="default", description="UserId of the operator who minted the campaign"
     )
-    lifecycle_status: str = Field(
+    lifecycle_status: LifecycleStatus = Field(
         default="active",
         description="Operator visibility intent: 'active' (default sidebar), 'archived' (hidden), 'deleted' (soft-marked, data retained)",
     )
@@ -144,10 +148,16 @@ class CampaignListResponse(StrictModel):
 
 
 class CampaignDetailResponse(CampaignSummary):
-    root_content_hash: str = Field(
-        default="", description="Content hash of the origin search point — the campaign identity"
+    root_content_hash: str | None = Field(
+        description="Content hash of the origin search point — the campaign identity; null on "
+        "an unstarted check-in"
     )
-    config: dict[str, Any] = Field(description="Frozen CampaignConfig snapshot for this campaign")
+    config: CampaignConfig = Field(
+        description=(
+            "The config the campaign's root runs under — its draft's while it is still authoring, "
+            "and for an arm the manifest with its head-to-head record's split and budget laid on."
+        )
+    )
 
 
 def _campaign_summary(campaign: Campaign, stores: Stores) -> CampaignSummary:
@@ -160,6 +170,7 @@ def _campaign_summary(campaign: Campaign, stores: Stores) -> CampaignSummary:
         root_cycle_id=campaign.root_cycle_id,
         backend_id=campaign.backend_id,
         backend_type=campaign.backend_type,
+        self_optimization=is_self_optimization(campaign.backend_type),
         owner_user_id=campaign.owner_user_id,
         lifecycle_status=campaign.lifecycle_status,
         lifecycle_changed_at=campaign.lifecycle_changed_at,
@@ -176,19 +187,18 @@ def _campaign_summary(campaign: Campaign, stores: Stores) -> CampaignSummary:
     )
 
 
-_LIFECYCLE_FILTERS = ("active", "archived", "deleted", "checkin", "all")
-
-
 @campaigns_router.get("/campaigns", response_model=CampaignListResponse)
 def list_campaigns(
     request: Request,
     stores: StoresDep,
     dataset: str | None = Query(default=None, description="Filter to one dataset"),
-    lifecycle: str = Query(
-        default="active",
-        description="'active' (default), 'archived' or 'deleted' — the visibility intent; "
-        "'checkin' — the authoring phase, asked of the root cycle's flag; or 'all'",
-    ),
+    lifecycle: Annotated[
+        LifecycleFilter,
+        Query(
+            description="'active' (default), 'archived' or 'deleted' — the visibility intent; "
+            "'checkin' — the authoring phase, asked of the root cycle's flag; or 'all'",
+        ),
+    ] = "active",
     descend: str | None = Query(None),
 ) -> Response:
     """Every campaign in one store owned by the caller, newest first.
@@ -207,10 +217,6 @@ def list_campaigns(
     ``root_cycle_id`` (their origin), so BOTH lists must be available at every
     depth for one tree builder to serve L4, L5, and the top level alike.
     """
-    if lifecycle not in _LIFECYCLE_FILTERS:
-        raise PayloadInvalidError(
-            f"Invalid lifecycle filter: {lifecycle!r}. Expected one of {_LIFECYCLE_FILTERS}."
-        )
     leaf = descend_store(stores, decode_descend(descend))
     owner = str(leaf.identity.user_id)
     campaigns = leaf.campaigns.list_campaigns(dataset, lifecycle=lifecycle, owner_user_id=owner)
@@ -264,7 +270,7 @@ def get_campaign(stores: StoresDep, campaign_id: str) -> CampaignDetailResponse:
     return CampaignDetailResponse(
         **_campaign_summary(campaign, stores).model_dump(),
         root_content_hash=campaign.root_content_hash,
-        config=campaign.config,
+        config=resolve_root_config(stores, campaign),
     )
 
 
@@ -361,52 +367,6 @@ def _pipeline_subject(at: str, campaign_id: str) -> SubjectSpec:
     return spec
 
 
-class ConfigKnob(StrictModel):
-    path: str = Field(
-        description="Dotted CampaignConfig path (or const.<NAME> for a hardcoded floor)"
-    )
-    label: str = Field(description="Short display name (prefix-stripped)")
-    value: Any = Field(description="Effective value in this campaign's frozen config")
-    source: str = Field(
-        description="Where the value came from: default | campaign (operator-set) | required | "
-        "manifest (an optimizer node's knob, as its manifest declares it)"
-    )
-
-
-class ConfigEstimandGroup(StrictModel):
-    key: str = Field(description="Estimand key (selection, difficulty, ability, …)")
-    label: str = Field(description="Human-readable estimand name")
-    doc: str = Field(description="Plain-language one-liner of what this estimand is")
-    knobs: list[ConfigKnob] = Field(description="Knobs that move this estimand, in declared order")
-
-
-class ConfigCoupling(StrictModel):
-    name: str = Field(description="Coupling id")
-    labels: list[str] = Field(description="Short display names for those knobs")
-    relation: str = Field(description="The relationship rule, plain language")
-    consequence: str = Field(description="What goes wrong when the combination is violated")
-    severity: str = Field(
-        description="collision (soundness) | inert (wasted knob) | info (relationship)"
-    )
-    active: bool = Field(
-        description="True when this campaign's config is in the violating combination"
-    )
-
-
-class ConfigMapResponse(StrictModel):
-    """The config-map for one campaign: every knob grouped by the statistical
-    estimand it moves (with effective value + source layer), plus every declared
-    coupling flagged active/inactive against this campaign's frozen config.
-
-    Server-authored from the single ``application.knobs`` registry — the same source
-    the pre-run preflight warning reads, so the webapp panel never disagrees with the
-    engine on which knobs collide.
-    """
-
-    groups: list[ConfigEstimandGroup] = Field(description="Estimand groups, in declared order")
-    couplings: list[ConfigCoupling] = Field(description="Declared couplings, active ones flagged")
-
-
 @campaigns_router.get("/campaigns/{campaign_id}/config-map", response_model=ConfigMapResponse)
 def get_campaign_config_map(stores: StoresDep, campaign_id: str) -> ConfigMapResponse:
     """The knob coupling/provenance map for one campaign — what moves which
@@ -418,42 +378,4 @@ def get_campaign_config_map(stores: StoresDep, campaign_id: str) -> ConfigMapRes
     campaign = stores.campaigns.load_owned(campaign_id, str(stores.identity.user_id))
     if campaign is None:
         raise NotFoundError(f"Campaign not found: {campaign_id}")
-    config = resolve_root_config(stores, campaign)
-
-    states = resolve_knob_states(config)
-    knob_models = {
-        s.path: ConfigKnob(
-            path=s.path,
-            label=knob_label(s.path),
-            value=s.value,
-            source=s.source,
-        )
-        for s in states
-    }
-    groups: list[ConfigEstimandGroup] = []
-    for estimand in Estimand:
-        knobs = [knob_models[s.path] for s in states if estimand in s.estimands]
-        if not knobs:
-            continue
-        groups.append(
-            ConfigEstimandGroup(
-                key=estimand.value,
-                label=estimand.value.replace("_", " ").title(),
-                doc=estimand_doc(estimand),
-                knobs=knobs,
-            )
-        )
-
-    active = {c.name for c in check_couplings(config)}
-    couplings = [
-        ConfigCoupling(
-            name=c.name,
-            labels=[knob_label(k) for k in c.knobs],
-            relation=c.relation,
-            consequence=c.consequence,
-            severity=c.severity,
-            active=c.name in active,
-        )
-        for c in declared_couplings(config)
-    ]
-    return ConfigMapResponse(groups=groups, couplings=couplings)
+    return config_map(resolve_root_config(stores, campaign))

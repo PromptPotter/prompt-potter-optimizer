@@ -8,7 +8,7 @@ import contextlib
 import logging
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from promptpotter.application.campaign_config import load_campaign_config
 from promptpotter.application.diagnostics.seed_screen import class_floor, draw_bank
@@ -37,6 +37,7 @@ from promptpotter.domain.l4.proxies import (
     INNER_RESULT_KEY,
     PARENT_LEVEL_SE_KEY,
     compute_outer_proxies,
+    effective_round_budget,
     floor_reason,
     inner_cell_facts,
     mean_parent_level_se,
@@ -44,7 +45,6 @@ from promptpotter.domain.l4.proxies import (
 )
 from promptpotter.domain.launch_limits import LaunchLimits
 from promptpotter.domain.phases import REFUSAL_STOPS, RunPhase, StopReason
-from promptpotter.domain.pipeline_schema import stable_hash
 from promptpotter.domain.results import ArmOutcome, candidate_label, invariant_collapses
 from promptpotter.infrastructure.llm.heartbeat import heartbeat
 from promptpotter.infrastructure.llm.telemetry import _CURRENT_ROUND, _CYCLE_LEDGER
@@ -59,7 +59,7 @@ from promptpotter.shared.errors import (
     CellUnscoreableError,
     ErrorCategory,
 )
-from promptpotter.shared.hashing import shapes_optimizer_prompt
+from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
 from promptpotter.shared.instrument import (
     MAX_INSTRUMENT_DEPTH,
     MeasurementRole,
@@ -74,6 +74,8 @@ if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
     from promptpotter.domain.results import CycleResult
     from promptpotter.domain.sample import Sample
+    from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
+    from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
 
@@ -138,7 +140,7 @@ def _lift_shape(result: CycleResult) -> str:
     if not marks:
         return "lifts: none — no L1 round closed."
     n = sum(1 for rr in l1 if rr.improved)
-    budget = max(result.round_budget, len(l1))
+    budget = effective_round_budget(result)
     return f"lifts: {marks} ({n}/{budget}; target: early and often, thinning late)"
 
 
@@ -278,32 +280,53 @@ def inner_campaign_id(
     return f"{spec.inner_dataset}__{digest}"
 
 
-def _banked_inner_rounds(ctx: InnerSpawnContext, campaign_id: str) -> int:
-    indexes = ctx.inner_sandbox_root.glob(f"*/campaigns/{campaign_id}/cycles/*/index.json")
-    return max(
-        (len((read_json_optional(p) or {}).get("rounds") or []) for p in indexes),
-        default=0,
-    )
+class _InnerCell(NamedTuple):
+    """One outer cell as an inner campaign: the panel task, the optimizer prompts under test, why it
+    runs, and the campaign those address. Resolved in the OUTER task, which alone carries the role."""
+
+    ctx: InnerSpawnContext
+    spec: InnerTaskSpec
+    overrides: dict[str, dict[str, Any]]
+    role: MeasurementRole
+    campaign_id: str
 
 
-def inner_cell_envelope_s(query: str, payload: dict[str, Any]) -> float:
-    """What the `promptpotter` connector DECLARES one cell may spend — budgeted over the rounds
-    that REMAIN, since charging a continued cell the full budget leaves the wall bounding almost
-    nothing. ``max(1, …)`` grants a fully-banked cycle the round it needs to replay and finalize.
-
-    Resolved in the OUTER task, before the inner campaign exists, which is the only place the
-    banked count can be read: the seam enforcing it is one layer up and knows none of this."""
+def _resolve_inner_cell(sample: Sample, payload: dict[str, Any]) -> _InnerCell:
     ctx = inner_spawn_context()
     if ctx is None:
         raise RuntimeError(
             "promptpotter connector: no inner-spawn context published — "
             "run_optimization must call publish_inner_spawn_context first."
         )
-    spec = resolve_inner_task(ctx, query)
+    spec = resolve_inner_task(_cells(ctx), sample)
+    overrides = payload.get("optimizer_prompt_overrides") or {}
     role = cand.role if (cand := measured_candidate()) else MeasurementRole.PANEL
-    campaign_id = inner_campaign_id(spec, payload.get("optimizer_prompt_overrides") or {}, role)
-    banked = _banked_inner_rounds(ctx, campaign_id)
-    return OUTER_SAMPLE_WALL_S_PER_ROUND * max(1, (spec.n_rounds + 1) - banked)
+    return _InnerCell(ctx, spec, overrides, role, inner_campaign_id(spec, overrides, role))
+
+
+def _sandbox_stores(ctx: InnerSpawnContext) -> Stores:
+    """Only campaign STATE is sandboxed. The content-addressed caches stay on the REAL tenant tree
+    via ``shared_root``: re-scoring a hit would re-pay for it AND redraw its stochastic value."""
+    return build_stores(
+        ctx.identity, projects_root=ctx.inner_sandbox_root, shared_root=ctx.shared_root
+    )
+
+
+def _banked_inner_rounds(store: CampaignStore, root: CycleHop) -> int:
+    """The round records on the cycle answering for *root*'s line now — the one a continued cell
+    reopens (``_open_inner_campaign``), so what it is granted and what it resumes are one count."""
+    index = store.load(store.line_holder(root))
+    return len(index["rounds"]) if index else 0
+
+
+def inner_cell_envelope_s(sample: Sample, payload: dict[str, Any]) -> float:
+    """What the `promptpotter` connector DECLARES one cell may spend, budgeted over the rounds that
+    REMAIN. ``max(1, …)`` grants a fully-banked cycle the round it needs to replay and finalize."""
+    cell = _resolve_inner_cell(sample, payload)
+    store = _sandbox_stores(cell.ctx).campaigns
+    campaign = store.load_campaign(cell.campaign_id)
+    banked = _banked_inner_rounds(store, campaign.root_hop) if campaign else 0
+    return OUTER_SAMPLE_WALL_S_PER_ROUND * max(1, (cell.spec.n_rounds + 1) - banked)
 
 
 def _open_inner_campaign(
@@ -312,7 +335,7 @@ def _open_inner_campaign(
     train_data: list[Sample],
     *,
     campaign_id: str,
-) -> int:
+) -> None:
     """Continue unless something is LIVE on it — every terminal class resumes, reaped included.
     ``stop_reason_outcome`` governs scoring (``domain/l4/proxies.py``), never resumption."""
 
@@ -321,7 +344,7 @@ def _open_inner_campaign(
     root = CycleHop(campaign_id=campaign_id, cycle_id=plan.cycle_id)
     if store.load(root) is None:
         prepare_fresh_cycle(session, campaign_config, train_data, campaign_id=campaign_id, arm=None)
-        return 0
+        return
 
     # A rebase retires the root under `superseded_by`; the banked trajectory is its successor's.
     hop = store.line_holder(root)
@@ -356,45 +379,34 @@ def _open_inner_campaign(
     session.campaign_id = campaign_id
     session.state.cycle_id = hop.cycle_id
     save_active_pointer(session.store.base_dir, session_id, hop)
-    banked = len(existing.get("rounds") or [])
     logger.info(
         "inner campaign %s/%s CONTINUES from %d banked round record(s) (was %s)",
         campaign_id,
         hop.cycle_id,
-        banked,
+        _banked_inner_rounds(store, root),
         phase,
     )
-    return banked
 
 
 def _cells(ctx: InnerSpawnContext) -> InnerCells:
-    assert ctx.cells is not None, "resolve_inner_task refuses a context carrying no panel"
+    assert ctx.cells is not None, "run init refuses an outer dataset that holds no panel"
     return ctx.cells
 
 
 async def _run_inner_campaign(
-    ctx: InnerSpawnContext,
-    spec: InnerTaskSpec,
-    optimizer_prompt_overrides: dict[str, dict[str, Any]],
+    cell: _InnerCell,
     cycle_dir_box: dict[str, Path],
     spawned_by: dict[str, Any],
-    spawn_role: MeasurementRole,
 ) -> CycleResult:
     """Runs in a FRESH task, so the per-task ContextVars are isolated. ``.spend`` is captured from
     live state rather than the sandbox's debounced ``dashboard.json``, which would race."""
+    ctx, spec = cell.ctx, cell.spec
     # Set in THIS task's context copy, so they cannot reach the outer's optimizer. The SPECIMEN
     # under test, not part of the instrument — the same channel carries a normal outer cycle's
     # own optimizer prompt SET, so it is not mode-gated.
-    set_optimizer_prompt_overrides(optimizer_prompt_overrides or None)
+    set_optimizer_prompt_overrides(cell.overrides or None)
 
-    # Only campaign STATE is sandboxed. The content-addressed caches stay on the REAL tenant
-    # tree via `shared_root`: a hit there is the same measurement by content hash, and
-    # re-scoring it would re-pay for it AND redraw its stochastic value under the outer fitness.
-    store = build_stores(
-        ctx.identity,
-        projects_root=ctx.inner_sandbox_root,
-        shared_root=ctx.shared_root,
-    )
+    store = _sandbox_stores(ctx)
     # The directory name is a hash, so this file is the only place the three owner names
     # survive for a human or the orphan reaper. Written here rather than at
     # `publish_inner_spawn_context`, which fires for EVERY cycle and would mint empty sandboxes.
@@ -445,23 +457,13 @@ async def _run_inner_campaign(
     )
 
     # A retry must not orphan the rounds the previous attempt banked.
-    _open_inner_campaign(
-        session,
-        campaign_config,
-        train_data,
-        campaign_id=inner_campaign_id(spec, optimizer_prompt_overrides, spawn_role),
-    )
+    _open_inner_campaign(session, campaign_config, train_data, campaign_id=cell.campaign_id)
     if session.campaign_id and session.state.cycle_id:
         # An L4-only fact, so it stays out of the generic mint seam every campaign shares.
         session.store.campaigns.update(session.hop, {"spawned_by": spawned_by})
         # Publish the minted dir so the outer heartbeat's detail_fn can tail this dashboard.
         cycle_dir_box["dir"] = session.store.campaigns.cycle_dir(session.hop)
-    observers = build_run_observers(
-        session=session,
-        campaign_config=campaign_config,
-        resumed_from_round=None,
-        origin_accuracy=0.0,
-    )
+    observers = build_run_observers(session=session, campaign_config=campaign_config)
     try:
         result = await run_optimization(
             train_data,
@@ -506,15 +508,10 @@ async def _run_inner_campaign(
     return result
 
 
-async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]:
+async def run_inner_cycle(sample: Sample, payload: dict[str, Any]) -> dict[str, Any]:
     """Projects the three proxy metrics onto the ``{"data": {…}}`` shape ``measure_sample`` parses
     from an HTTP body, so the outer scorer reads an inner result identically to a remote one."""
-    ctx = inner_spawn_context()
-    if ctx is None:
-        raise RuntimeError(
-            "promptpotter connector: no inner-spawn context published — "
-            "run_optimization must call publish_inner_spawn_context first."
-        )
+    query = sample.query
     depth = instrument_depth()
     if depth >= MAX_INSTRUMENT_DEPTH:
         raise RuntimeError(
@@ -523,39 +520,21 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
             "campaign. An inner dataset whose own backend_type is 'promptpotter' recurses "
             "without bound — check the inner_benchmark named in inner_tasks.yaml."
         )
-    spec = resolve_inner_task(ctx, query)
-    overrides = payload.get("optimizer_prompt_overrides") or {}
-
     # A FAILED outcome surfaces as a returned ``stop_reason``; the runner does not raise, so it
     # is classified below with every other no-evidence shape rather than caught here. A run that
     # merely failed to improve is a SUCCESS with poor proxies — measured, so a bad mutation is
-    # still penalised. `spawn_role` is captured in the OUTER task, like `spawned_by` below.
-    spawn_role = cand.role if (cand := measured_candidate()) else MeasurementRole.PANEL
-    campaign_id = inner_campaign_id(spec, overrides, spawn_role)
+    # still penalised.
+    cell = _resolve_inner_cell(sample, payload)
+    ctx, spec, campaign_id = cell.ctx, cell.spec, cell.campaign_id
     start = time.monotonic()
     # Filled by the inner task once the campaign is open, for the progress line to read its
     # dashboard. What the campaign spends reaches the outer ledger call by call, as each settles
     # against the outer run's book (`spend_book.py::SpendBook.mirror`).
     cycle_dir_box: dict[str, Path] = {}
-    return await _measure_inner_cell(
-        ctx, spec, query, campaign_id, overrides, spawn_role, start, cycle_dir_box
-    )
 
-
-async def _measure_inner_cell(
-    ctx: InnerSpawnContext,
-    spec: InnerTaskSpec,
-    query: str,
-    campaign_id: str,
-    overrides: dict[str, dict[str, Any]],
-    spawn_role: MeasurementRole,
-    start: float,
-    cycle_dir_box: dict[str, Path],
-) -> dict[str, Any]:
     # This runs in the OUTER task, so ``_CYCLE_LEDGER`` still holds the outer ledger. The
     # heartbeat below appends to it, because the inner campaign emits only to its OWN sandbox
     # ledger and the outer surfaces would read the silence as a vanished producer.
-
     outer_ledger = _CYCLE_LEDGER.get()
     # Captured in the OUTER task and handed over explicitly: the inner task gets a COPY of this
     # context and rebinds `_CURRENT_ROUND`, so a read over there attributes the campaign to
@@ -590,15 +569,15 @@ async def _measure_inner_cell(
     # The inner campaign measures no OUTER candidate: unbound, its own optimizer calls would bill
     # under the outer cell's role.
     inner_task = asyncio.create_task(
-        _run_inner_campaign(ctx, spec, overrides, cycle_dir_box, spawned_by, spawn_role),
+        _run_inner_campaign(cell, cycle_dir_box, spawned_by),
         context=measured_candidate_context(None),
     )
 
     heartbeat_task = asyncio.create_task(
         # NOT an optimizer node name: a whole campaign runs here, so naming it after one node
         # charges that node with the entire wall clock and a healthy run reads as a hang. The
-        # `step_timings`/`step_tokens` keying below answers a different question (spend
-        # attribution) — do not re-align this display label to it.
+        # `terminal_node` stamp below answers a different question (which config the row depends
+        # on) — do not re-align this display label to it.
         heartbeat(
             outer_ledger,
             call_id=f"inner:{query}",
@@ -629,7 +608,6 @@ async def _measure_inner_cell(
         heartbeat_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await heartbeat_task
-    elapsed = time.monotonic() - start
     if (refused := _REFUSALS.get(result.stop_reason)) is not None:
         # The inner run spends the outer run's provider key and ceiling, so the refusal is every
         # later cell's: a hole that halts the walk, never an excluded cell the walk steps past.
@@ -643,7 +621,6 @@ async def _measure_inner_cell(
     # `CellUnscoreableError`, which `measure_sample` resolves to this cell's UNSCOREABLE row.
     proxies = compute_outer_proxies(result)
     facts = inner_cell_facts(result, campaign_id)
-    terminal = _cells(ctx).terminal
 
     data: dict[str, Any] = {
         # A summary line for the reader, not an answer to be matched: this cell carries no label
@@ -665,9 +642,7 @@ async def _measure_inner_cell(
         # The archive's reuse contract: a named node means "this outcome depends on config only
         # UP TO that node". An inner campaign consumes the ENTIRE outer config at once, so the
         # only honest stamp is `InnerCells.terminal`.
-        "terminal_node": terminal,
-        "total_time": elapsed,
-        "step_timings": {terminal: elapsed},
+        "terminal_node": _cells(ctx).terminal,
         # No `step_tokens`: every call the campaign made was billed as it settled
         # (`spend_book.py::SpendBook.mirror`). Returning it HERE would bill the cell twice, a
         # continued cell's whole history again, and the lot whenever the archive replays this row.

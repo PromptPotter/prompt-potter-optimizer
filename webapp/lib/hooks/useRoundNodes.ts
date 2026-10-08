@@ -3,7 +3,7 @@
 // against `current_round.round`, never "has it closed": the adapters' calls land after the flush.
 
 import { useMemo } from "react";
-import { useDashboard } from "./useDashboard";
+import { useCycleStream } from "@/lib/poll";
 import { useEffectiveRound } from "./useEffectiveRound";
 import { useRoundAudit } from "./useRoundFile";
 import { useWorkspace } from "@/lib/workspace";
@@ -21,7 +21,7 @@ export interface RoundNodes {
 }
 
 export function useRoundNodes(): RoundNodes {
-  const { dash } = useDashboard();
+  const { dash } = useCycleStream();
   const { viewedPath } = useWorkspace();
   const { round } = useEffectiveRound();
   const showsCurrent = round != null && round === (dash?.current_round.round ?? null);

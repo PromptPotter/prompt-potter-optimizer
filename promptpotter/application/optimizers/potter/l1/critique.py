@@ -29,7 +29,6 @@ if TYPE_CHECKING:
     from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.optimizers.potter.state import PotterState
     from promptpotter.domain.results import RoundResult
-    from promptpotter.infrastructure.ledger import CycleEventLog
 
 logger = logging.getLogger(__name__)
 
@@ -73,9 +72,7 @@ async def ensure_prior_critique(cycle: Cycle, state: PotterState) -> None:
     last: Exception | None = None
     for attempt in range(1, CRITIQUE_RESEND_ATTEMPTS + 1):
         try:
-            payload.critique = await run_l1_critique(
-                cycle, state, prior, round_num=prior.round, ledger=session.state.ledger
-            )
+            payload.critique = await run_l1_critique(cycle, state, prior)
             break
         # A refused send — an empty account, a quota, the ceiling — is decided: re-sent, it is
         # refused again, and swallowed it halts as a PAUSE that `resume` re-enters forever.
@@ -115,12 +112,7 @@ async def ensure_prior_critique(cycle: Cycle, state: PotterState) -> None:
 
 
 async def run_l1_critique(
-    cycle: Cycle,
-    state: PotterState,
-    round_result: RoundResult,
-    *,
-    round_num: int,
-    ledger: CycleEventLog | None = None,
+    cycle: Cycle, state: PotterState, round_result: RoundResult
 ) -> CritiqueReadout:
     """Build the critique from pipeline stats + LLM analysis. The output is materialized to a dict so persistence does not
     drag Pydantic into the domain serialization path."""
@@ -135,8 +127,8 @@ async def run_l1_critique(
         template=template,
         response_model=L1CritiqueOutput,
         context=LLMCallContext(
-            ledger=ledger,
-            round_num=round_num,
+            ledger=cycle.session.state.ledger,
+            round_num=round_result.round,
             cache=cycle.session.store.optimizer_reuse,
             injection_chars=injection_char_counts(rendered, prompt_vars),
             injection_dropped=injection_coverage_counts(coverage),

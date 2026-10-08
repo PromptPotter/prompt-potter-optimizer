@@ -7,6 +7,7 @@ import type { PipelineDoc } from "@/lib/types";
 const doc = (resolved_prompts: Record<string, Record<string, unknown>>): PipelineDoc => ({
   resolved_prompts,
   view: null,
+  measurement_node: null,
   node_config_schema: {},
   node_output_schema: {},
   model_capabilities: {},

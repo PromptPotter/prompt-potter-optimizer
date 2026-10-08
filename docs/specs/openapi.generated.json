@@ -168,7 +168,7 @@
       },
       "ActivityBucket": {
         "additionalProperties": false,
-        "description": "One bucket of the Activity pane's three stacked bar charts.\n\n``series`` maps each colour-axis label (model name or provider slug)\nto its per-metric value in this bucket; the frontend uses it to draw\nstacked bars. ``spend_usd`` / ``tokens`` / ``requests`` are the\nbucket totals (= sum of series values), kept for empty-state checks.",
+        "description": "One time bucket of the Activity pane's three stacked bar charts.",
         "properties": {
           "requests": {
             "title": "Requests",
@@ -185,6 +185,7 @@
             "additionalProperties": {
               "type": "number"
             },
+            "description": "Billed USD per `series_labels` entry. An unpriced call adds nothing here and still counts in the other two.",
             "title": "Series Spend",
             "type": "object"
           },
@@ -204,6 +205,7 @@
             "type": "integer"
           },
           "ts": {
+            "description": "Epoch seconds at the bucket's leading edge",
             "title": "Ts",
             "type": "number"
           }
@@ -212,7 +214,10 @@
           "ts",
           "spend_usd",
           "tokens",
-          "requests"
+          "requests",
+          "series_spend",
+          "series_tokens",
+          "series_requests"
         ],
         "title": "ActivityBucket",
         "type": "object"
@@ -229,6 +234,7 @@
             "type": "array"
           },
           "group_by": {
+            "description": "The colour axis: `model` is the exact model id, `api_key` is who billed the call (`TokenUsageRecord.provider`).",
             "enum": [
               "model",
               "api_key"
@@ -237,6 +243,7 @@
             "type": "string"
           },
           "series_labels": {
+            "description": "Every series in the window, in first-seen order — one colour per label, stable across the buckets. A call outside the optimizer's own carries its kind.",
             "items": {
               "type": "string"
             },
@@ -819,6 +826,138 @@
         "title": "Body_upload_candidate_library_api_v1_datasets_draft_candidate_library_post",
         "type": "object"
       },
+      "CampaignConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "accuracy_ceiling": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 1.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The accuracy a best-reachable prompt would score on this dataset at this campaign's model. `index.json::final.rounds_to_ceiling` counts rounds against `CEILING_FRACTION` of it, and the value is banked beside that count so a reader never has to guess the denominator. `None` (default) → the clock reports nothing, which is the honest reading: a ceiling is a joint claim about the dataset AND the model, so only the dataset owner can declare one (`datasets/{slug}/campaign.yaml::campaign_config`) and a guessed value makes every campaign on it publish a round count nobody can defend. DISPLAY config — it moves no gate, no selection and no stop.",
+            "title": "Accuracy Ceiling"
+          },
+          "bench_each_round": {
+            "default": false,
+            "description": "Grade each round's declared selection on the bench set too, so the trend carries a held-out series beside the round composite. A round that selects a new individual costs one more bench pass, a cell per bench row — the ranked `dataset_split.bench` and every bench-only row the bank declares; a held round costs nothing. Off: only the origin and the final selection are graded, which the headline needs either way.",
+            "title": "Bench Each Round",
+            "type": "boolean"
+          },
+          "dataset_name": {
+            "default": "",
+            "title": "Dataset Name",
+            "type": "string"
+          },
+          "dataset_split": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DatasetSplit"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How run init partitions the bank into the search pool every optimizer draw reads, the held-out bench set the headline is scored on, and a demo pool. `None` holds nothing out: the whole bank is the search pool and there is no bench score."
+          },
+          "display_metric": {
+            "default": "accuracy",
+            "description": "Which fitness number the operator's round and candidate views display first (lineage node value, Best tile, sidebar). DISPLAY config, not search state — the optimizer's selector decides on its own objective, and the campaign's headline is the bench score; this only picks the number the human READS, client-overridable per session. `ability` shows θ (a logit, jargon) where the selector stamps one — defaults to `accuracy` so θ is never forced on an operator who didn't ask for it. Rides the `composite_fitness_formula` serve path to `dashboard.json::display_metric`; never on `OptSearchPoint`.",
+            "enum": [
+              "accuracy",
+              "composite",
+              "ability"
+            ],
+            "title": "Display Metric",
+            "type": "string"
+          },
+          "exclude_nodes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Exclude Nodes",
+            "type": "array"
+          },
+          "hard_sample_order": {
+            "default": "info_gain",
+            "description": "Which key ranks the hard-sample leaderboard — the heatmap, the table and the `log.md` heatmap, which all read ONE served rank. `info_gain` sorts by the queue mechanism's acquisition score (`pick_value`: decision-information gain + δ learning gain), contested-at-the-leader samples first; `difficulty` sorts by the Rasch ruler δ_s alone, hardest first. DISPLAY config: it picks the order the human READS and never what the engine scores, which is `build_round_order` and reaches no knob. Client-overridable per session, like `display_metric`.",
+            "enum": [
+              "info_gain",
+              "difficulty"
+            ],
+            "title": "Hard Sample Order",
+            "type": "string"
+          },
+          "judges": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JudgeSpec"
+            },
+            "description": "LLM-as-judge graders for datasets whose answer is free text, where no deterministic matcher can grade a cell. Each value names a registered judge (`promptpotter.judges`) and the models to run it on; its verdict is banked as a per-sample observation the `scoring` formula reads. **The KEY is the term that formula reads, not the judge's name** — so one cell can carry several graded terms, which is what a multi-step schema (retrieve -> ground -> answer) is, and two terms may run the same rubric on different models without one verdict landing on top of the other. Declaration order is the step order. `Scope.DATA` because swapping a judge invalidates every verdict taken under the old one, so a resume must run divergence detection rather than carry them forward. **Their models are declared here and inherited from nowhere** — not from the permitted model set, not from the pipeline's node config, not from the optimizer's own LLMs. A judge is a ruler, and a ruler that moved with whatever the search was last steered to would not be one.",
+            "title": "Judges",
+            "type": "object"
+          },
+          "optimization": {
+            "$ref": "#/components/schemas/OptimizationConfig"
+          },
+          "optimizer_narrowing": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/NodeSearchNarrowing"
+            },
+            "description": "Per-node declaration over the dataset's optimizer search space — the per-campaign param-lock + value-space lever beside `exclude_nodes` (whole node). `provider`/`route_order` are always locked. **`param_keys` SUBSETS and `param_allowed_values` REPLACES** (`PipelineSchema.narrow`, applied at pipeline setup): a campaign may only close axes the dataset opened, but the value space is its own statement — which is what lets an operator ADD a model or a reasoning rung no `pipeline.yaml` on disk carries. `param_allowed_values['model']` is also the ONE permitted model set: what the optimizer may pick, and what a human fork may steer to without tainting the branch. A steer outside it is a `campaign.babysit` act — warned + graded C (`overlay_sets_model_outside_allowed`). Nothing declared for a node = nothing sanctioned there, the restrictive default.",
+            "title": "Optimizer Narrowing",
+            "type": "object"
+          },
+          "pipeline_overlay": {
+            "additionalProperties": true,
+            "title": "Pipeline Overlay",
+            "type": "object"
+          },
+          "scoring": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scoring"
+          },
+          "sp_budget_origin": {
+            "default": 40,
+            "description": "Origin eval budget — how many bank samples the origin (C0) is scored on at check-in. The bench's, whatever the optimizer: a round's own panel is its sampler's knob. Wide because origin breadth is the one breadth that is nearly free: θ_origin is the term EVERY delta subtracts, and its rows are content-addressed cache replayed into every candidate arm, fork and resume — paid once per config. Candidate breadth is paid per candidate, per round. Every comparison downstream is matched by sample_id or θ-space, so an origin scored on a superset stays like-for-like. A bank smaller than this scores on the whole bank (`sample_dataset` is a prefix slice) — not an error.",
+            "minimum": 1.0,
+            "title": "Sp Budget Origin",
+            "type": "integer"
+          },
+          "task_framing": {
+            "default": "committed",
+            "description": "Which task framing every target render splices in. `committed` (default) runs under the dataset's `task_context.yaml`, which the first mint decomposes from `task_description.md` when none is committed yet. `off` runs UNFRAMED on purpose — the ablation arm — even where framing exists, and the campaign manifest keeps the delta, so the result never reads as a framed one.",
+            "enum": [
+              "committed",
+              "off"
+            ],
+            "title": "Task Framing",
+            "type": "string"
+          }
+        },
+        "required": [
+          "optimization"
+        ],
+        "title": "CampaignConfig",
+        "type": "object"
+      },
       "CampaignDetailResponse": {
         "additionalProperties": false,
         "properties": {
@@ -841,7 +980,7 @@
           },
           "backend_type": {
             "default": "",
-            "description": "Connector KIND this campaign runs against ('termnorm' / 'promptpotter' / …), FROZEN on the manifest at mint. The webapp's ONE test for a self-optimizing (L4) campaign — it renders the 'inner loops' disclosure and the pp-self panel variants on it. Re-pointing or deleting the dataset dir never changes it: a campaign outlives its dataset dir, and what it RAN is a fact about the campaign.",
+            "description": "Connector KIND this campaign runs against ('termnorm' / 'promptpotter' / …), FROZEN on the manifest at mint. Re-pointing or deleting the dataset dir never changes it: a campaign outlives its dataset dir, and what it RAN is a fact about the campaign.",
             "title": "Backend Type",
             "type": "string"
           },
@@ -862,10 +1001,8 @@
             "type": "string"
           },
           "config": {
-            "additionalProperties": true,
-            "description": "Frozen CampaignConfig snapshot for this campaign",
-            "title": "Config",
-            "type": "object"
+            "$ref": "#/components/schemas/CampaignConfig",
+            "description": "The config the campaign's root runs under — its draft's while it is still authoring, and for an arm the manifest with its head-to-head record's split and budget laid on."
           },
           "created_at": {
             "description": "ISO 8601 creation timestamp",
@@ -896,10 +1033,9 @@
             "type": "string"
           },
           "lifecycle_status": {
+            "$ref": "#/components/schemas/LifecycleStatus",
             "default": "active",
-            "description": "Operator visibility intent: 'active' (default sidebar), 'archived' (hidden), 'deleted' (soft-marked, data retained)",
-            "title": "Lifecycle Status",
-            "type": "string"
+            "description": "Operator visibility intent: 'active' (default sidebar), 'archived' (hidden), 'deleted' (soft-marked, data retained)"
           },
           "owner_user_id": {
             "default": "default",
@@ -908,10 +1044,16 @@
             "type": "string"
           },
           "root_content_hash": {
-            "default": "",
-            "description": "Content hash of the origin search point — the campaign identity",
-            "title": "Root Content Hash",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Content hash of the origin search point — the campaign identity; null on an unstarted check-in",
+            "title": "Root Content Hash"
           },
           "root_cycle_id": {
             "description": "The campaign's root cycle id — `cycle_<root_content_hash>`, so it IS the campaign's ORIGIN identity. Campaigns on one declaration share it and differ only in the random `campaign_id` suffix, which is what makes them separate RUNS of that origin; the sidebar groups the forest by this key.",
@@ -928,6 +1070,11 @@
               }
             ],
             "description": "What the ROOT course runs with — a second transport of the answer `GET /campaigns/{id}/pipeline` gives at the root, never a second source. Null when the root pipeline did not resolve. `max_rounds` is the DECLARED rounds cap; 0 means origin only."
+          },
+          "self_optimization": {
+            "description": "This campaign optimizes the optimizer itself (L4), answered off `backend_type` by the connector registry. The one test a surface draws the 'inner loops' disclosure and the self-optimization panel variants on — never a comparison of `backend_type`.",
+            "title": "Self Optimization",
+            "type": "boolean"
           },
           "spend_metered": {
             "$ref": "#/components/schemas/MeteredSpend",
@@ -954,6 +1101,7 @@
           "dataset_name",
           "created_at",
           "root_cycle_id",
+          "self_optimization",
           "spend_used_usd",
           "spend_unpriced_tokens",
           "spend_unreported_usd",
@@ -961,6 +1109,7 @@
           "bench",
           "runs_with",
           "arm",
+          "root_content_hash",
           "config"
         ],
         "title": "CampaignDetailResponse",
@@ -1087,6 +1236,11 @@
             "title": "Reach",
             "type": "object"
           },
+          "self_optimization": {
+            "description": "This campaign optimizes the optimizer itself (L4): one measured row is a whole inner campaign, so it has no registered backend and no per-sample data of its own",
+            "title": "Self Optimization",
+            "type": "boolean"
+          },
           "view": {
             "anyOf": [
               {
@@ -1104,6 +1258,7 @@
           "dataset_name",
           "connector",
           "backend_type",
+          "self_optimization",
           "optimizer",
           "optimizer_knobs",
           "params",
@@ -1146,10 +1301,19 @@
             },
             "title": "Params",
             "type": "array"
+          },
+          "vendors": {
+            "description": "Every model in `params`, grouped under its vendor in first-seen order",
+            "items": {
+              "$ref": "#/components/schemas/VendorModels"
+            },
+            "title": "Vendors",
+            "type": "array"
           }
         },
         "required": [
           "params",
+          "vendors",
           "optimizer",
           "max_rounds"
         ],
@@ -1235,7 +1399,7 @@
           },
           "backend_type": {
             "default": "",
-            "description": "Connector KIND this campaign runs against ('termnorm' / 'promptpotter' / …), FROZEN on the manifest at mint. The webapp's ONE test for a self-optimizing (L4) campaign — it renders the 'inner loops' disclosure and the pp-self panel variants on it. Re-pointing or deleting the dataset dir never changes it: a campaign outlives its dataset dir, and what it RAN is a fact about the campaign.",
+            "description": "Connector KIND this campaign runs against ('termnorm' / 'promptpotter' / …), FROZEN on the manifest at mint. Re-pointing or deleting the dataset dir never changes it: a campaign outlives its dataset dir, and what it RAN is a fact about the campaign.",
             "title": "Backend Type",
             "type": "string"
           },
@@ -1284,10 +1448,9 @@
             "type": "string"
           },
           "lifecycle_status": {
+            "$ref": "#/components/schemas/LifecycleStatus",
             "default": "active",
-            "description": "Operator visibility intent: 'active' (default sidebar), 'archived' (hidden), 'deleted' (soft-marked, data retained)",
-            "title": "Lifecycle Status",
-            "type": "string"
+            "description": "Operator visibility intent: 'active' (default sidebar), 'archived' (hidden), 'deleted' (soft-marked, data retained)"
           },
           "owner_user_id": {
             "default": "default",
@@ -1310,6 +1473,11 @@
               }
             ],
             "description": "What the ROOT course runs with — a second transport of the answer `GET /campaigns/{id}/pipeline` gives at the root, never a second source. Null when the root pipeline did not resolve. `max_rounds` is the DECLARED rounds cap; 0 means origin only."
+          },
+          "self_optimization": {
+            "description": "This campaign optimizes the optimizer itself (L4), answered off `backend_type` by the connector registry. The one test a surface draws the 'inner loops' disclosure and the self-optimization panel variants on — never a comparison of `backend_type`.",
+            "title": "Self Optimization",
+            "type": "boolean"
           },
           "spend_metered": {
             "$ref": "#/components/schemas/MeteredSpend",
@@ -1336,6 +1504,7 @@
           "dataset_name",
           "created_at",
           "root_cycle_id",
+          "self_optimization",
           "spend_used_usd",
           "spend_unpriced_tokens",
           "spend_unreported_usd",
@@ -2026,6 +2195,11 @@
           },
           "severity": {
             "description": "collision (soundness) | inert (wasted knob) | info (relationship)",
+            "enum": [
+              "collision",
+              "inert",
+              "info"
+            ],
             "title": "Severity",
             "type": "string"
           }
@@ -2077,6 +2251,43 @@
         "title": "ConfigEstimandGroup",
         "type": "object"
       },
+      "ConfigKeys": {
+        "additionalProperties": false,
+        "description": "Every configured key across the subjects that carry a config, in exactly one band.",
+        "properties": {
+          "differs": {
+            "description": "Every subject configures it, and not all alike",
+            "items": {
+              "type": "string"
+            },
+            "title": "Differs",
+            "type": "array"
+          },
+          "one_sided": {
+            "description": "Not every subject configures it: a different pipeline, not a disagreement",
+            "items": {
+              "type": "string"
+            },
+            "title": "One Sided",
+            "type": "array"
+          },
+          "same": {
+            "description": "Every subject configures it alike",
+            "items": {
+              "type": "string"
+            },
+            "title": "Same",
+            "type": "array"
+          }
+        },
+        "required": [
+          "differs",
+          "one_sided",
+          "same"
+        ],
+        "title": "ConfigKeys",
+        "type": "object"
+      },
       "ConfigKnob": {
         "additionalProperties": false,
         "properties": {
@@ -2111,10 +2322,10 @@
       },
       "ConfigMapResponse": {
         "additionalProperties": false,
-        "description": "The config-map for one campaign: every knob grouped by the statistical\nestimand it moves (with effective value + source layer), plus every declared\ncoupling flagged active/inactive against this campaign's frozen config.\n\nServer-authored from the single ``application.knobs`` registry — the same source\nthe pre-run preflight warning reads, so the webapp panel never disagrees with the\nengine on which knobs collide.",
+        "description": "Built off the couplings the pre-run preflight warning reads, so no surface disagrees with\nthe engine on which knobs collide.",
         "properties": {
           "couplings": {
-            "description": "Declared couplings, active ones flagged",
+            "description": "Declared couplings in reading order: the ones this config violates first, then gravest severity first, declaration order within a severity",
             "items": {
               "$ref": "#/components/schemas/ConfigCoupling"
             },
@@ -2581,32 +2792,10 @@
       },
       "DatasetPipelineResponse": {
         "additionalProperties": false,
-        "description": "Target pipeline view for a dataset overlay. `view` drives the webapp chat-pane hero;\n`pipeline` is the full parsed schema for consumers needing per-node config; `connector` is\nthe original-cased name for chip labelling.",
+        "description": "One dataset's pipeline as DECLARED — the body of ``GET /datasets/{name}/pipeline``. Topology\nonly: the level a ``nests`` pointer names, which no campaign has to have run.",
         "properties": {
-          "backend_type": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Backend Type"
-          },
           "connector": {
             "title": "Connector",
-            "type": "string"
-          },
-          "model_capabilities": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/ModelCapability"
-            },
-            "title": "Model Capabilities",
-            "type": "object"
-          },
-          "name": {
-            "title": "Name",
             "type": "string"
           },
           "nests": {
@@ -2617,7 +2806,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "The pipeline this one nests in turn; the only wire naming it before a cell has spawned"
           },
           "node_config_schema": {
             "additionalProperties": {
@@ -2626,26 +2816,8 @@
               },
               "type": "array"
             },
+            "description": "Every param each node carries, valueless — what `reach` is summed over",
             "title": "Node Config Schema",
-            "type": "object"
-          },
-          "node_output_schema": {
-            "additionalProperties": {
-              "anyOf": [
-                {
-                  "$ref": "#/components/schemas/NodeOutputSchema"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "title": "Node Output Schema",
-            "type": "object"
-          },
-          "pipeline": {
-            "additionalProperties": true,
-            "title": "Pipeline",
             "type": "object"
           },
           "reach": {
@@ -2667,18 +2839,29 @@
           }
         },
         "required": [
-          "name",
           "connector",
-          "backend_type",
-          "pipeline",
           "view",
           "node_config_schema",
           "reach",
-          "node_output_schema",
-          "nests",
-          "model_capabilities"
+          "nests"
         ],
         "title": "DatasetPipelineResponse",
+        "type": "object"
+      },
+      "DatasetReplaced": {
+        "additionalProperties": false,
+        "description": "The ``replace-dataset`` response: the subject echoed, nothing more — the counts and the\nversioned slug are on the migration's own record, and no caller reads them off the wire.",
+        "properties": {
+          "slug": {
+            "description": "The dataset name now free for new data.",
+            "title": "Slug",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug"
+        ],
+        "title": "DatasetReplaced",
         "type": "object"
       },
       "DatasetSplit": {
@@ -2789,6 +2972,55 @@
           "datasets"
         ],
         "title": "DatasetStorageResponse",
+        "type": "object"
+      },
+      "DeterminismClamp": {
+        "additionalProperties": false,
+        "description": "What a campaign PINS on every optimizer call — how the draw is made and which host makes\nit. Applied last, so it beats the node's file config and any per-call override alike.",
+        "properties": {
+          "route_order": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The upstream HOSTS behind the gateway, in order, every optimizer call is routed to (the gateway's own `provider_name`s — read them off `served_by` in the ledger, never from a catalogue). Hosts of one model disagree systematically, so an unpinned route makes a measurement whose producer nothing can name. `None` (default) lets the gateway re-rank per call.",
+            "title": "Route Order"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Sampling seed every optimizer node sends. Temperature 0 pins the distribution and not the draw, so without a seed the provider is still free to sample differently on identical input. It rides `hash_call`, so two campaigns differing only here bank separate replies rather than serving one campaign's answer under the other's name. `None` (default) sends none.",
+            "title": "Seed"
+          },
+          "temperature": {
+            "anyOf": [
+              {
+                "maximum": 2.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Sampling temperature EVERY optimizer node runs at, overriding its own — including `l1_generate`'s `temperature: creativity`, the dominant run-to-run noise source. `None` (default) leaves each node the value its pipeline file declares.",
+            "title": "Temperature"
+          }
+        },
+        "title": "DeterminismClamp",
         "type": "object"
       },
       "DiagnosticRunListResponse": {
@@ -3037,6 +3269,16 @@
         "properties": {
           "comparability": {
             "$ref": "#/components/schemas/Comparability"
+          },
+          "config_keys": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConfigKeys"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "edits": {
             "items": {
@@ -4039,6 +4281,36 @@
         "title": "HeadToHeadRow",
         "type": "object"
       },
+      "HealthResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "service": {
+            "title": "Service",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "timestamp": {
+            "title": "Timestamp",
+            "type": "string"
+          },
+          "version": {
+            "description": "`APP_VERSION` — the browser's one source of it",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "service",
+          "timestamp",
+          "version"
+        ],
+        "title": "HealthResponse",
+        "type": "object"
+      },
       "Instrument": {
         "additionalProperties": false,
         "description": "What graded a bench headline: two are one quantity only where every field agrees.",
@@ -4098,6 +4370,70 @@
           "origin"
         ],
         "title": "Instrument",
+        "type": "object"
+      },
+      "JudgeSpec": {
+        "additionalProperties": false,
+        "description": "What a campaign declares to put a judge in its scoring: which judge, on which models.\n\nDeliberately carries NO version — identity comes from the registered judge itself, so an\noperator cannot forget to bump one.",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "stages": {
+            "items": {
+              "$ref": "#/components/schemas/JudgeStage"
+            },
+            "title": "Stages",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "stages"
+        ],
+        "title": "JudgeSpec",
+        "type": "object"
+      },
+      "JudgeStage": {
+        "additionalProperties": false,
+        "description": "One model call in a judge's composition. ``model`` and ``provider`` are required and\ndeclared HERE, nowhere else — a judge that borrowed the loop's model would silently start\ngrading with whatever the operator last steered the search to.",
+        "properties": {
+          "max_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Tokens"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "role": {
+            "default": "grade",
+            "title": "Role",
+            "type": "string"
+          },
+          "temperature": {
+            "default": 0.0,
+            "title": "Temperature",
+            "type": "number"
+          }
+        },
+        "required": [
+          "model",
+          "provider"
+        ],
+        "title": "JudgeStage",
         "type": "object"
       },
       "KindSpend": {
@@ -4240,7 +4576,15 @@
             "title": "Options"
           },
           "type": {
-            "description": "JSON Schema type the value takes: boolean | integer | number | string | object",
+            "description": "JSON Schema type the value takes",
+            "enum": [
+              "boolean",
+              "integer",
+              "number",
+              "string",
+              "array",
+              "object"
+            ],
             "title": "Type",
             "type": "string"
           },
@@ -4263,6 +4607,24 @@
         ],
         "title": "KnobRow",
         "type": "object"
+      },
+      "LifecycleFilter": {
+        "enum": [
+          "active",
+          "archived",
+          "deleted",
+          "checkin",
+          "all"
+        ],
+        "type": "string"
+      },
+      "LifecycleStatus": {
+        "enum": [
+          "active",
+          "archived",
+          "deleted"
+        ],
+        "type": "string"
       },
       "LineageDivergence": {
         "additionalProperties": false,
@@ -4381,6 +4743,22 @@
             "title": "Course Label",
             "type": "string"
           },
+          "crown": {
+            "anyOf": [
+              {
+                "enum": [
+                  "elected",
+                  "uncontested"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How a selected candidate came to advance: `elected` over at least one other electable arm, or `uncontested` as the only one its round could choose — the origin's round always, and a round whose other arms were all eliminated or invalid. Read off the electable count the round's CLOSE banks, so it lands one step after `is_selected`: null on a selected candidate whose round has not closed yet, and on every candidate that is not selected.",
+            "title": "Crown"
+          },
           "dataset_name": {
             "default": "",
             "title": "Dataset Name",
@@ -4430,6 +4808,18 @@
               }
             ],
             "description": "Which side of this cut the run CONTINUES on, derived from `trigger` (`FORK_DIRECTION`). `offshoot` = this branch hangs off a line that keeps running; `supersede` = this branch IS the line and the PARENT is what was left behind. Null for roots and inner runs, which were not cut from anything. Served, never derived in the client — the two read identically on disk and only this says them apart."
+          },
+          "headline_accuracy": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Courses only — the one accuracy a course is drawn at: its `best_accuracy`, or its `origin_accuracy` while it has only run its origin. Null on a course that measured nothing, and on a candidate.",
+            "title": "Headline Accuracy"
           },
           "id": {
             "description": "Course: the cycle_id. Candidate: the searchpoint id minted at L1/origin.",
@@ -4526,6 +4916,18 @@
             "description": "This course's round-0 score. A course that has only run its origin has this and no `best_accuracy`, so reading only `best` blanks its bar.",
             "title": "Origin Accuracy"
           },
+          "origin_id": {
+            "default": "",
+            "description": "The `id` of the origin candidate — C0 — of the timeline this node is on. A course names its own; a candidate names its course's, and an attempt a fork contributed names the origin of the timeline it was folded onto, never the fork's replayed C0. An inner course starts its own timeline, so its candidates name ITS C0. Empty on a course that has minted nothing.",
+            "title": "Origin Id",
+            "type": "string"
+          },
+          "panel_cut": {
+            "default": false,
+            "description": "This candidate stopped short of its round's panel: under its own `expected_samples`, or under the fullest panel a candidate of its round reached on this timeline — an eliminator's cut. The retired side of a supersede cut is judged among itself. False on a course and on a candidate that measured nothing.",
+            "title": "Panel Cut",
+            "type": "boolean"
+          },
           "parent_ids": {
             "description": "Every candidate this node derives from — one for a mutation, several for a crossover; empty only at the true root. Lineage is a DAG; this tree hangs the node under `parent_ids[0]`. A course carries the same edge its own C0 carries.",
             "items": {
@@ -4575,6 +4977,23 @@
               }
             ],
             "title": "Reference Lift Ci Lo"
+          },
+          "reference_lift_side": {
+            "anyOf": [
+              {
+                "enum": [
+                  "above",
+                  "below",
+                  "spans"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Which side of 0 that interval sits on: `above`, `below`, or `spans` where the round could not separate this candidate from its parent. Null where it carries no interval. Served so no surface reads the sign of the bounds for itself.",
+            "title": "Reference Lift Side"
           },
           "round": {
             "anyOf": [
@@ -4658,10 +5077,21 @@
             "type": "boolean"
           },
           "status": {
-            "default": "",
-            "description": "Candidate: minted | measured | invalid — never 'winner' (that rides `is_selected`). `invalid` was rejected before it cost a sample, so it carries no accuracy: its stored 0.0 is synthetic and reads as getting every answer wrong. Empty on a course, whose ending is `stop_reason`.",
-            "title": "Status",
-            "type": "string"
+            "anyOf": [
+              {
+                "enum": [
+                  "minted",
+                  "measured",
+                  "invalid"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Candidate: minted | measured | invalid — never 'winner' (that rides `is_selected`). `invalid` was rejected before it cost a sample, so it carries no accuracy: its stored 0.0 is synthetic and reads as getting every answer wrong. Null on a course, whose ending is `stop_reason`.",
+            "title": "Status"
           },
           "steered_by": {
             "anyOf": [
@@ -4883,6 +5313,19 @@
           "busy"
         ],
         "title": "MachineStatusResponse",
+        "type": "object"
+      },
+      "ManifestNodeOverlay": {
+        "additionalProperties": false,
+        "description": "One optimizer node's delta over its manifest's ``config`` — the shape a target pipeline's\noverlay takes. Validated against the node's own knobs when the optimizer is selected.",
+        "properties": {
+          "config": {
+            "additionalProperties": true,
+            "title": "Config",
+            "type": "object"
+          }
+        },
+        "title": "ManifestNodeOverlay",
         "type": "object"
       },
       "MeResponse": {
@@ -5383,6 +5826,16 @@
             "type": "string"
           },
           "kind": {
+            "enum": [
+              "model",
+              "enum",
+              "number",
+              "bool",
+              "string",
+              "prompt",
+              "description",
+              "nested"
+            ],
             "title": "Kind",
             "type": "string"
           },
@@ -5550,6 +6003,173 @@
         "title": "NodeReach",
         "type": "object"
       },
+      "NodeSearchNarrowing": {
+        "additionalProperties": false,
+        "description": "A campaign's own declaration over the dataset's, and the two halves do NOT compose the same\nway — see :meth:`PipelineSchema.narrow`.\n\n``param_keys`` SUBSETS: the dataset's ``pipeline.yaml`` declares the maximum tunable surface\nand a campaign may only close axes within it — the prompt-decomposition fields included, so\none left out is a prompt field the optimizer may not rewrite.\n\n``param_allowed_values`` REPLACES: a value space is not a permission over the dataset's, it is\nthis campaign's statement of what its axis ranges over, with the dataset's list as the default\nit starts from. That is what lets an operator ADD a value — a model the catalogue predates, a\nreasoning rung a node never listed — through the channel that already carries the narrowing.",
+        "properties": {
+          "param_allowed_values": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "title": "Param Allowed Values",
+            "type": "object"
+          },
+          "param_keys": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Param Keys"
+          }
+        },
+        "title": "NodeSearchNarrowing",
+        "type": "object"
+      },
+      "OptimizationConfig": {
+        "additionalProperties": false,
+        "description": "The bench's own loop config, plus which optimizer runs and its overlay. An optimizer's knobs\nare its nodes' ``config`` in its manifest, never fields here.",
+        "properties": {
+          "degradation_fatal_fastpath": {
+            "default": true,
+            "description": "End a candidate at the first FATAL sample (empty response, content-filtered, structurally broken) without spending the rest of its budget. Active while the degradation check runs (`degradation_threshold` > 0); the rate-based check stays governed by that threshold. The bench's, run on every optimizer's arms.",
+            "title": "Degradation Fatal Fastpath",
+            "type": "boolean"
+          },
+          "degradation_threshold": {
+            "title": "Degradation Threshold",
+            "type": "number"
+          },
+          "determinism": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DeterminismClamp"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pin the optimizer's decoding and its route so a re-run reproduces this campaign's trajectory and can name the host that produced each number. `None` (default) → every node runs at its own file settings and the gateway routes per call. An L4 inner cell is one caller among the rest: its panel's `inner_optimizer_temperature` and its cell seed arrive here."
+          },
+          "elimination_n_min": {
+            "default": 6,
+            "description": "Minimum distinct samples before θ is read as ability: the δ ruler stays flat below it, and no eliminator cuts an arm (nor a selector crowns one) on fewer — the floor on n for a posterior to be meaningful.",
+            "title": "Elimination N Min",
+            "type": "integer"
+          },
+          "enable_2pl_graduation": {
+            "default": true,
+            "description": "Allow the per-cycle difficulty ruler to graduate from 1PL (difficulty δ only) to 2PL (per-sample discrimination aₛ too) when a data-rich, genuinely-discriminating dataset wins held-out cross-validation. The switch is gated — cold/non-discriminating datasets stay 1PL — so this only ever changes the ruler where 2PL provably fits better out-of-sample; it can never regress a dataset. Off → always 1PL (the slice-2 behaviour).",
+            "title": "Enable 2Pl Graduation",
+            "type": "boolean"
+          },
+          "lift_reference": {
+            "default": "best_so_far",
+            "description": "What each arm's lift is read against — its `reference_id` and every `reference_*` number, the round's `separable` and its `p_value`. ``best_so_far`` (default): the round's selected best-so-far individual, re-scored on the round's panel and paired with the arm on the cells both measured. ``parents``: the arm's own `parent_ids`, each re-measured on exactly the cells the arm measured; a crossover child is read against the better of its parents there, the bar it must clear to have added anything over what it recombined. An arm with no parent has no reference.",
+            "enum": [
+              "best_so_far",
+              "parents"
+            ],
+            "title": "Lift Reference",
+            "type": "string"
+          },
+          "max_rounds": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": 50,
+            "description": "Max rounds. 0 = measure the origin (round 0) and stop — the origin-only run; None = unlimited, bounded only by ``HARD_CAP_ARMS``, the arms raced across the run.",
+            "title": "Max Rounds"
+          },
+          "nodes": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ManifestNodeOverlay"
+            },
+            "description": "This campaign's overlay on the selected manifest, keyed by node name — ``{node: {config: {...}}}``, the shape a target pipeline's overlay takes. An optimizer's knobs, a paper's configuration and each llm node's ``config.model`` all ride here; each node validates its own knobs when the optimizer is selected.",
+            "title": "Nodes",
+            "type": "object"
+          },
+          "optimizer": {
+            "default": "potter",
+            "description": "The optimizer manifest this campaign runs — a directory under ``promptpotter/assets/optimizers/``. Every entry point selects it here; nothing selects it install-wide.",
+            "minLength": 1,
+            "title": "Optimizer",
+            "type": "string"
+          },
+          "origin_gate": {
+            "default": "strict",
+            "description": "Halt after round 0 when the origin's degradation verdict is non-healthy, instead of optimizing against a broken floor — the common failure while bringing up a new connector. ``strict`` (default) halts on ``critical`` or ``degraded``; ``critical_only`` halts only on a structurally-broken origin; ``off`` disarms the gate. The operator overrides knowingly with a plain ``resume`` — round 0 is already on disk, so the loop skips the gate and goes straight to L1.",
+            "enum": [
+              "strict",
+              "critical_only",
+              "off"
+            ],
+            "title": "Origin Gate",
+            "type": "string"
+          },
+          "panel_gate": {
+            "default": "strict",
+            "description": "Halt at the end of a round whose electable candidates carry HOLES — cells the loop attempted and got no measurement back from — instead of electing a winner from a comparison whose arms ran different cell sets. ``strict`` (default) halts on any hole; ``off`` disarms. The halt is resumable and the round is not persisted, so a plain ``resume`` re-runs it: the cached candidates replay, the missing cells are re-measured, and the round decides on a complete panel. A PoBB elimination is NOT a hole (those cells were never attempted) and neither is a classifier-deprecated sample.",
+            "enum": [
+              "strict",
+              "off"
+            ],
+            "title": "Panel Gate",
+            "type": "string"
+          },
+          "seed_heatmap_from_archive": {
+            "default": false,
+            "description": "Round-end hard-sample artifact's Rasch fit folds in archive observations. δ_s ordering on the heatmap X-axis reflects cross-cycle evidence.",
+            "title": "Seed Heatmap From Archive",
+            "type": "boolean"
+          },
+          "spend_budget_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": 0.025,
+            "description": "Halt this cycle when cumulative spend (optimizer + backend) ≥ this value in USD. The campaign's own layer of the run's budget: a fork seed, a standing ``set-limits`` and a launch flag (CLI ``--spend-budget``) each SET over it, raise or lower, and the account admits the result whole or refuses the launch. Default ≈ a 5-round run on the free-backend setup (measured ~$0.019) with headroom; raise ``max_rounds`` and let this be the binding limit. ``None`` disarms the USD ceiling. Tenant-wide enforcement is M12 / JobRegistry work; this gate halts the current cycle at the next round boundary.",
+            "title": "Spend Budget Usd"
+          },
+          "token_budget": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Halt this cycle when cumulative tokens (optimizer + backend, input + output) ≥ this value. ``None`` — the default — disarms it, leaving ``spend_budget_usd`` as the single ceiling: a token is worth a different amount on every route, so a token cap sized for one model silently becomes a different budget on the next, and it was the cap that halted runs far below their USD ceiling. Dollars are the model-invariant measure and every route we run reports a wire cost. Set an integer for the one case USD cannot see — a backend that BILLS but reports no cost, where spend reads low and ``unpriced_tokens`` on the dashboard is the tell. Whichever of the two ceilings trips first halts the cycle.",
+            "title": "Token Budget"
+          }
+        },
+        "required": [
+          "degradation_threshold"
+        ],
+        "title": "OptimizationConfig",
+        "type": "object"
+      },
       "OptimizerEntry": {
         "additionalProperties": false,
         "description": "One optimizer this install can run, as a picker offers it.",
@@ -5633,6 +6253,18 @@
         "additionalProperties": false,
         "description": "What the OPTIMIZER runs — the manifest's peer of ``GET /campaigns/{id}/pipeline``. The raw\nmanifest keys are not served: ``nodes`` was a second, untyped spelling of ``node_config_schema``.",
         "properties": {
+          "measurement_node": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The node of `view` that runs the measurement — where a campaign's pipeline nests under this graph, as `nests.node` names it per campaign. Null where the manifest declares no measurement node.",
+            "title": "Measurement Node"
+          },
           "model_capabilities": {
             "additionalProperties": {
               "$ref": "#/components/schemas/ModelCapability"
@@ -5697,6 +6329,7 @@
         },
         "required": [
           "view",
+          "measurement_node",
           "node_config_schema",
           "node_output_schema",
           "model_capabilities",
@@ -6012,7 +6645,14 @@
             "type": "string"
           },
           "kind": {
-            "default": "",
+            "enum": [
+              "io",
+              "llm",
+              "tool",
+              "retriever",
+              "cache",
+              "measurement"
+            ],
             "title": "Kind",
             "type": "string"
           },
@@ -6033,14 +6673,15 @@
         },
         "required": [
           "id",
-          "label"
+          "label",
+          "kind"
         ],
         "title": "PipelineViewNode",
         "type": "object"
       },
       "QuotaStatus": {
         "additionalProperties": false,
-        "description": "Live snapshot of the abuse-limit knobs vs. usage.\n\nDrives the Account → Usage & limits pane. ``*_max`` mirrors `user.json`\nso the operator can hand-edit limits; ``*_used`` is the live count\nthat ``check_launch_quotas`` would gate against on the next launch.\nThe spend and token pairs are LIFETIME — used-ever against the account's\ntotal ceilings — while the campaign pair stays per-day, because one is an\nallowance and the other an abuse limit. ``spend_unpriced_tokens`` is what\nthe USD pair CANNOT see: billed tokens with no resolvable rate, which make\n``spend_used_total_usd`` a floor and leave the token pair as the binding one.",
+        "description": "An account's usage against the limits its next launch is gated on.\n\nThe spend and token pairs are LIFETIME, used-ever against the account's total ceilings; the\ncampaign pair is per-day, because one is an allowance and the other an abuse limit.",
         "properties": {
           "campaigns_today": {
             "title": "Campaigns Today",
@@ -6080,6 +6721,7 @@
             "title": "Spend Budget Usd Total"
           },
           "spend_unpriced_tokens": {
+            "description": "Billed tokens with no resolvable rate. Non-zero makes `spend_used_total_usd` a floor and leaves the token pair as the binding one.",
             "title": "Spend Unpriced Tokens",
             "type": "integer"
           },
@@ -7175,6 +7817,31 @@
         "title": "ValidationError",
         "type": "object"
       },
+      "VendorModels": {
+        "additionalProperties": false,
+        "description": "The models of one vendor that a campaign's root course runs.",
+        "properties": {
+          "models": {
+            "description": "Full ids, de-duplicated, routing suffix kept: it routes and bills, so it names a different run.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Models",
+            "type": "array"
+          },
+          "vendor": {
+            "description": "Who TRAINED them: the namespace of the model id, or the bare id where it names none. Lowercased, routing suffix dropped.",
+            "title": "Vendor",
+            "type": "string"
+          }
+        },
+        "required": [
+          "vendor",
+          "models"
+        ],
+        "title": "VendorModels",
+        "type": "object"
+      },
       "WinnerChainPoint": {
         "additionalProperties": false,
         "description": "One step of the branch standing behind a subject — the winner chain from the origin up to\nits head, each point read on ITS OWN cells under the selected metric. Opt-in\n(``include_winner_chain``), because every point past the origin opens a round document.\n\n**Named for the chain, never \"trajectory\".** The subsets move between rounds, so this reads\neach point on the evidence that point actually had; the round's own `overlap` line is the\nOPPOSITE basis — that same chain on one shared set of cells. Two readings of one sequence\nthat disagree by construction, and under one word a reader could tell them apart from\nneither name. The word survives where a series genuinely is one (`p_best_trajectory`,\n`parent_level_trajectory`, the Sample-trajectory grid).",
@@ -7414,7 +8081,7 @@
     },
     "/api/v1/auth/activity": {
       "get": {
-        "description": "Time-bucketed spend / requests / tokens over the requested window.\n\nWalks every per-cycle ``.runtime/ledger.jsonl`` under the user's\n`campaigns/*/cycles/*/` and projects ``TokenUsageRecord`` rows whose\n`timestamp` lands in the window onto ``_N_BUCKETS`` evenly-spaced\nbins, each at the price it was stamped with when it was recorded.\n\n``group_by`` selects the colour axis: ``model`` = exact model string,\n``api_key`` = derived provider slug (``openai`` / ``groq`` /\n``anthropic`` / ``openrouter``).",
+        "description": "Time-bucketed spend / requests / tokens over the requested window.\n\nEvery billed call on the account whose timestamp lands in the window, on\nevenly spaced bins, each at the price it was stamped with when it was\nrecorded.\n\n``group_by`` selects the colour axis: ``model`` = exact model string,\n``api_key`` = who billed the call (``openai`` / ``groq`` / ``anthropic`` /\n``openrouter``).",
         "operationId": "activity_api_v1_auth_activity_get",
         "parameters": [
           {
@@ -7608,8 +8275,8 @@
     },
     "/api/v1/auth/quota-status": {
       "get": {
-        "description": "Live quota snapshot for the Account → Usage & limits pane.\n\nSpend and tokens sum ``TokenUsageRecord`` across the account's WHOLE ledger via\n``sum_user_spend`` — uncapped, so an over-budget account shows the true\noverage rather than clamping the display to the cap; concurrent + daily\ncounts ride the `JobRegistry`. The served ceilings are the RESOLVED ones\n(``lifetime_ceilings``), never the raw nullable overrides, so the browser\nis not left joining a null against an install default to learn its own caps.",
-        "operationId": "quota_status_api_v1_auth_quota_status_get",
+        "description": "Live quota snapshot for the Account → Usage & limits pane.\n\nUsage is uncapped, so an over-budget account shows the true overage rather\nthan clamping the display to the cap. The served ceilings are the RESOLVED\nones, never the raw nullable overrides, so the browser is not left joining\na null against an install default to learn its own caps.",
+        "operationId": "get_quota_status_api_v1_auth_quota_status_get",
         "responses": {
           "200": {
             "content": {
@@ -7622,7 +8289,7 @@
             "description": "Successful Response"
           }
         },
-        "summary": "Quota Status",
+        "summary": "Get Quota Status",
         "tags": [
           "Auth"
         ]
@@ -7788,10 +8455,9 @@
             "name": "lifecycle",
             "required": false,
             "schema": {
+              "$ref": "#/components/schemas/LifecycleFilter",
               "default": "active",
-              "description": "'active' (default), 'archived' or 'deleted' — the visibility intent; 'checkin' — the authoring phase, asked of the root cycle's flag; or 'all'",
-              "title": "Lifecycle",
-              "type": "string"
+              "description": "'active' (default), 'archived' or 'deleted' — the visibility intent; 'checkin' — the authoring phase, asked of the root cycle's flag; or 'all'"
             }
           },
           {
@@ -8055,7 +8721,7 @@
     },
     "/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/events:subscribe": {
       "get": {
-        "description": "Subscribe to a cycle's live ledger via SSE.\n\nReturns ``404`` only when the cycle directory does not exist (unknown\ncampaign/cycle). For any real cycle — running, paused, or finished — frames\narrive in this order:\n\n1. One ``stream_snapshot`` frame — payload is the cycle's current\n   ``dashboard.json`` body + ``snapshot_at_offset`` indicating the ledger\n   high-water mark reflected in the snapshot.\n2. Live tail — every record appended to ``.runtime/ledger.jsonl`` after the\n   snapshot is fanned out as a ``ProjectionEnvelope`` with ``kind`` = the\n   record's ``record_type`` and ``sequence`` = the record's ledger offset.\n3. Heartbeat comment line every 15 s.\n\nThe path ids address the top-level (root) cycle; the optional ``descend``\nquery walks into the previous hop's ``.inner/<key>`` sandbox one\n``campaign::cycle`` hop at a time, so ONE stream serves a top-level cycle or\nan L4 inner descendant (:func:`resolve_cycle_path`) — the chat feed follows\nthe same viewed leaf the dashboard does. Absent/empty ``descend`` is a plain\nper-cycle subscribe, byte-identical to a top-level read.\n\nSee ``docs/developer/event-stream.md`` for the certified Profile A contract.",
+        "description": "Subscribe to a cycle's live ledger via SSE.\n\nReturns ``404`` only when the cycle directory does not exist (unknown\ncampaign/cycle). For any real cycle — running, paused, or finished — frames\narrive in this order:\n\n1. One ``stream_snapshot`` frame — payload is the cycle's served dashboard,\n   and ``sequence`` the ledger offset the tail picks up at.\n2. Live tail — every record appended to ``.runtime/ledger.jsonl`` after the\n   snapshot is fanned out as a ``ProjectionEnvelope`` with ``kind`` = the\n   record's ``record_type`` and ``sequence`` = the record's ledger offset.\n3. Heartbeat comment line every 15 s.\n\nThe path ids address the top-level (root) cycle; the optional ``descend``\nquery walks into the previous hop's ``.inner/<key>`` sandbox one\n``campaign::cycle`` hop at a time, so ONE stream serves a top-level cycle or\nan L4 inner descendant (:func:`resolve_cycle_path`) — the chat feed follows\nthe same viewed leaf the dashboard does. Absent/empty ``descend`` is a plain\nper-cycle subscribe, byte-identical to a top-level read.\n\nSee ``docs/developer/event-stream.md`` for the certified Profile A contract.",
         "operationId": "stream_cycle_events_api_v1_campaigns__campaign_id__cycles__cycle_id__events_subscribe_get",
         "parameters": [
           {
@@ -8783,9 +9449,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Replace Dataset Api V1 Commands Replace Dataset Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/DatasetReplaced"
                 }
               }
             },
@@ -9597,7 +10261,7 @@
     },
     "/api/v1/datasets/{name}/pipeline": {
       "get": {
-        "description": "Return the dataset overlay's parsed pipeline schema, graph view, and per-node\nconfig + output schema.\n\nIdentity-gated through the same resolver as the other dataset reads — there is\nno unauthenticated path to a benchmark's pipeline/overlay config.",
+        "description": "One dataset's declared pipeline, gated by the resolver every dataset read shares.",
         "operationId": "get_dataset_pipeline_api_v1_datasets__name__pipeline_get",
         "parameters": [
           {
@@ -9686,7 +10350,7 @@
         },
         "summary": "List Diagnostic Runs",
         "tags": [
-          "Verify"
+          "Diagnostics"
         ]
       }
     },
@@ -9819,11 +10483,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "title": "Response Health Check Api V1 Health Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/HealthResponse"
                 }
               }
             },
@@ -9971,8 +10631,8 @@
     },
     "/api/v1/origins": {
       "get": {
-        "description": "Every runnable origin in the caller's tenant — campaign-backed + prepared, newest first.\n\nTenant-scoped (like the dashboard's ``/cycles``), NOT owner-filtered: a\nCLI-minted campaign and a browser OIDC session can share a tenant yet differ\nin ``user_id``, so owner-filtering would hide the operator's own origins.\n``Stores.identity`` still blocks cross-tenant reads. Prepared origins (ready\ndatasets with no campaign yet) sort to the top so freshly-prepared work is\nseen first.",
-        "operationId": "list_origins_api_v1_origins_get",
+        "description": "Every runnable origin in the caller's tenant — prepared first (ready datasets with no\ncampaign yet), then campaign-backed, newest first. Tenant-scoped, not owner-filtered.",
+        "operationId": "get_origins_api_v1_origins_get",
         "responses": {
           "200": {
             "content": {
@@ -9985,7 +10645,7 @@
             "description": "Successful Response"
           }
         },
-        "summary": "List Origins",
+        "summary": "Get Origins",
         "tags": [
           "Origins"
         ]
@@ -9993,8 +10653,8 @@
     },
     "/api/v1/origins/{origin_id}/draft": {
       "post": {
-        "description": "Open a chosen prior origin as a prefilled check-in campaign — the picker's\n\"Reuse an origin\" path for a campaign-backed origin.\n\nResolves the origin's EXACT prompt fields: a campaign that was itself minted\nfrom an origin carries those fields on its root-cycle seed, so reuse them\nverbatim; a normally-minted campaign has no seed and ``draft_from_dataset``\nalready loaded the dataset's authored prompt. The draft is marked\n``reused_origin_id`` so starting it (``/commands/start-checkin``) seeds C0\nvia ``origin_override`` and stamps the ``campaign_origin`` lineage. Nothing\nruns until the operator starts the check-in.",
-        "operationId": "draft_from_origin_api_v1_origins__origin_id__draft_post",
+        "description": "Open a chosen prior origin as a prefilled check-in campaign — the picker's \"Reuse an\norigin\" path for a campaign-backed origin. Nothing runs until the operator starts the\ncheck-in (``/commands/start-checkin``).",
+        "operationId": "post_origin_draft_api_v1_origins__origin_id__draft_post",
         "parameters": [
           {
             "in": "path",
@@ -10012,7 +10672,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Draft From Origin Api V1 Origins  Origin Id  Draft Post",
+                  "title": "Response Post Origin Draft Api V1 Origins  Origin Id  Draft Post",
                   "type": "object"
                 }
               }
@@ -10030,7 +10690,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Draft From Origin",
+        "summary": "Post Origin Draft",
         "tags": [
           "Origins"
         ]

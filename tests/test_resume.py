@@ -28,10 +28,7 @@ from promptpotter.application.scoring.formula import (
     compile_scorer,
     rescore_results,
 )
-from promptpotter.application.scoring.search_point_scorer import (
-    archivable_priors,
-    merge_with_unprocessed_priors,
-)
+from promptpotter.application.scoring.search_point_scorer import merge_with_unprocessed_priors
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_records import CycleSeed
@@ -67,7 +64,8 @@ def _round(**kw: Any) -> RoundResult:
     return RoundResult.model_validate(
         {
             "label": "C0",
-            "accuracy": 0.0,
+            "accuracy": None,
+            "composite_fitness": None,
             "total": 0,
             "improved": False,
             "prompt_fields": {},
@@ -183,7 +181,7 @@ def test_round_winner_replay_ranks_against_the_recorded_parent() -> None:
 
 def test_a_collapse_cut_is_replayed_as_a_collapse_not_under_the_epsilon_rule() -> None:
     """A collapse cut returns before ``elimination_p_best`` is ever reached, so it holds no
-    posterior and the ``epsilon`` / ``recorded_p_best`` on its record are placeholders. Re-derived
+    posterior, and an ``epsilon`` / ``recorded_p_best`` on its record is a placeholder. Re-derived
     under the ε rule it computes a REAL p_best — this arm beats its prior 4 cells to 0 — reads
     "not cut", and reports a divergence no scorer change caused.
 
@@ -230,6 +228,60 @@ def test_a_collapse_cut_is_replayed_as_a_collapse_not_under_the_epsilon_rule() -
         }
     )
     assert replay_decisions(round_data, decisions) is None
+
+
+def test_a_cut_made_past_an_errored_cell_replays_on_the_cells_it_was_fit_on() -> None:
+    """The live rule fits on the arm's GRADED cells, and the decision archives those. Silent harm:
+    archived as the walk, the cut reads un-reproducible and a fork DISCARDS every round from here on."""
+    from types import SimpleNamespace
+
+    from promptpotter.application.optimizers.potter.pobb.checks import EliminationGate
+    from promptpotter.application.optimizers.potter.race import PoBBRace
+    from promptpotter.domain.search_point import JobSearchPoint
+    from tests.factories import measurement, measurements, pobb_knobs
+
+    cycle = SimpleNamespace(
+        optimizer=SimpleNamespace(knobs=lambda node: pobb_knobs(epsilon=0.30)),
+        config=SimpleNamespace(optimization=SimpleNamespace(elimination_n_min=4)),
+        difficulty=SimpleNamespace(ruler=None),
+        tracking=SimpleNamespace(
+            current_results=measurements([1.0] * 10), current_sp=JobSearchPoint()
+        ),
+        rounds=[],
+        pending_decisions=[],
+        session=SimpleNamespace(backend_client=SimpleNamespace(measured_unit="sample")),
+    )
+    race = PoBBRace(
+        SimpleNamespace(cycle=cycle, round_num=3, callbacks=None),
+        SimpleNamespace(cells=list(range(10))),
+        lambda sp, sample, prior_id: None,
+        node="pobb",
+    )
+    rows = [
+        measurement(i, None, error="boom", error_category="transient")
+        if i == 2
+        else measurement(i, 1.0 if i == 4 else 0.0)
+        for i in range(8)
+    ]
+    signal = race.rule([]).check(rows)
+    reading = race.judge(signal, candidate_id="c1", results=rows, labels={"c1": "C3.1"})
+    assert reading is not None and reading.context["gate"] == EliminationGate.EPSILON
+
+    [decision] = cycle.pending_decisions
+    assert decision.data["candidate_sample_ids"] == ["0", "1", "3", "4", "5", "6", "7"]
+    replayed = replay_decisions(
+        _round(round=3, all_candidate_results={"c1": rows}),
+        _decisions(
+            {
+                "kind": decision.kind,
+                "round": decision.round,
+                "inputs_ref": decision.inputs_ref,
+                "outcome": decision.outcome,
+                "data": decision.data,
+            }
+        ),
+    )
+    assert replayed is None, "the cut the live rule made is the cut its own record replays"
 
 
 def test_inherit_fork_origin_unmodified_inherits_else_rescores(built_stores: Stores) -> None:
@@ -338,11 +390,7 @@ def test_merge_with_unprocessed_priors_preserves_full_archive_on_partial_run() -
     fields (provenance, item_count) would be computed off that short set.
     """
     dataset_sample_ids = set(range(20))
-    prior_tail = archivable_priors(
-        cached_sample_results={i: _prior(i) for i in dataset_sample_ids},
-        dataset_sample_ids=dataset_sample_ids,
-        deprecated_samples={},
-    )
+    prior_tail = {i: _prior(i) for i in dataset_sample_ids}
     # Simulate a partial run: 6 cache hits + 1 fresh measurement.
     merged = merge_with_unprocessed_priors([_prior(i) for i in range(7)], prior_tail)
     assert len(merged) == 20
@@ -1286,10 +1334,11 @@ def test_a_deepened_inner_cell_continues_the_cycle_that_holds_its_line(
         store=built_stores, session_id="", campaign_id="", state=types.SimpleNamespace(cycle_id="")
     )
     open_campaign: Any = spawn._open_inner_campaign
-    continued = open_campaign(session, None, [], campaign_id=_CAMPAIGN)
+    open_campaign(session, None, [], campaign_id=_CAMPAIGN)
 
     assert session.state.cycle_id == successor.cycle_id, "the retired root was reopened"
-    assert continued == len(banked)
+    # The wall the cell is granted counts the same cycle's rounds, never the retired root's one.
+    assert spawn._banked_inner_rounds(store, root) == len(banked)
 
 
 def test_a_resumed_cycle_clocks_only_its_own_launch(tmp_path: Path) -> None:
@@ -1363,7 +1412,7 @@ def test_a_resumed_campaign_clocks_every_launch_and_sends_its_origin_pass_once(
     ledger.parent.mkdir(parents=True, exist_ok=True)
     bank = [Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(6)]
     partition = partition_bank(bank, DatasetSplit(bench=2))
-    schema, origin_sp = PipelineSchema(name="s", nodes=[]), JobSearchPoint()
+    schema, origin_sp = PipelineSchema(name="s"), JobSearchPoint()
     scoring = SimpleNamespace(require_partition=lambda: partition, scorer_id="grader")
     session = SimpleNamespace(store=stores, hop=root, pipeline_schema=schema, scoring=scoring)
     sent: list[str] = []

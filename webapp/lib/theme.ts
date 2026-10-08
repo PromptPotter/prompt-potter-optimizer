@@ -53,10 +53,6 @@ export function getCss(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
 
-export function cssRgba(rgbVar: string, alpha: number): string {
-  return `rgba(${getCss(rgbVar)},${alpha})`;
-}
-
 // Every categorical chart reads `--chart-series-1..8` (tokens.css) through here; never a local copy.
 const SERIES_SLOTS = 8;
 

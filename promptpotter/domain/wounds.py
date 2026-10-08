@@ -94,10 +94,22 @@ class ValidationFailure(StrictModel):
     )
 
 
+@shapes_optimizer_prompt
 def collapse_reason(failures: Iterable[ValidationFailure]) -> str | None:
     """The ``INVARIANT_REASONS`` member that collapsed a proposal, ``None`` where none did. One
     per proposal, or the collapse counts would sum past the population."""
     return next((vf.reason for vf in failures if vf.reason in INVARIANT_REASONS), None)
+
+
+@shapes_optimizer_prompt
+def collapse_counts(populations: Iterable[Iterable[ValidationFailure]]) -> dict[str, int]:
+    """How many proposals each ``INVARIANT_REASONS`` member collapsed, over one failure list per
+    proposal — the ONE tally, whichever carrier holds the lists."""
+    counts: dict[str, int] = {}
+    for failures in populations:
+        if reason := collapse_reason(failures):
+            counts[reason] = counts.get(reason, 0) + 1
+    return counts
 
 
 class RuntimeFailure(StrictModel):
@@ -174,6 +186,7 @@ __all__ = [
     "NurseOwner",
     "RuntimeFailure",
     "ValidationFailure",
+    "collapse_counts",
     "collapse_reason",
     "rf_dedup_key",
 ]

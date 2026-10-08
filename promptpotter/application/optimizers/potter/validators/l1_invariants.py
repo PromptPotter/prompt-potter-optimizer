@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from dataclasses import dataclass
 from itertools import pairwise
 from typing import Any
 
@@ -23,35 +22,22 @@ from promptpotter.domain.candidate_diff import (
     same_idea,
 )
 from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.results import ArmOutcome, CandidateProposal, is_leader_eligible
+from promptpotter.domain.results import (
+    ArmOutcome,
+    CandidateProposal,
+    RoundResult,
+    is_leader_eligible,
+)
 from promptpotter.domain.wounds import INVARIANT_REASONS, ValidationFailure
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["L1YieldStats", "detect_invariants", "lost_ideas"]
+__all__ = ["detect_invariants", "lost_ideas"]
 
 
-@dataclass(frozen=True)
-class L1YieldStats:
-    """Field names mirror ``RoundDiagnostics.l1_yield`` so callers spread via ``dataclasses.asdict``."""
-
-    l1_yield: float  # n_valid / n_proposed (1.0 when no proposals)
-    l1_n_no_op: int
-    l1_n_duplicate: int
-    # Cross-ROUND collapses (the other two are round-local): re-proposals of an idea a prior
-    # round already measured and lost. Zero wherever no prior rounds are passed.
-    l1_n_repeat: int = 0
-    # Set when the optimizer prompt made L1's own output unparseable — the round then holds zero
-    # candidates. `detect_invariants` never sets it (it only sees proposals that exist); it is
-    # stamped from `l1_generate`'s return in `generate_or_load_candidates`.
-    l1_parse_failure: str | None = None
-
-
-def lost_ideas(prior_rounds: Sequence[Any]) -> list[tuple[int, frozenset[str]]]:
-    """Measured losses only: ``accuracy == 0.0`` on an unmeasured candidate is the absence of
-    evidence, not a defeat, and of the three cut gates only ε is a loss. Each idea is read against
-    the parent it was mutated from — the round BEFORE its own, whose ``prompt_fields`` is that
-    round's winner once one promotes."""
+def lost_ideas(prior_rounds: Sequence[RoundResult]) -> list[tuple[int, frozenset[str]]]:
+    """Measured losses only, each on a paired reading: an ε cut, PoBB's posterior, or a walked arm
+    whose ``reference_lift`` interval sits wholly below zero. Each reads against the round BEFORE its own."""
     out: list[tuple[int, frozenset[str]]] = []
     for parent_round, rr in pairwise(prior_rounds):
         parent, parent_pp = parent_round.prompt_fields, parent_round.pipeline_params
@@ -62,7 +48,7 @@ def lost_ideas(prior_rounds: Sequence[Any]) -> list[tuple[int, frozenset[str]]]:
                 # ε alone measured this arm against its priors; COLLAPSED is no measurement.
                 if cand.elimination_context.get("gate") != EliminationGate.EPSILON:
                     continue
-            elif cand.reference_accuracy is None or (cand.accuracy > cand.reference_accuracy):
+            elif cand.reference_lift_ci_hi is None or cand.reference_lift_ci_hi >= 0.0:
                 continue
             if fp := candidate_idea(cand.prompt_fields, parent, cand.pipeline_overlay, parent_pp):
                 out.append((rr.round, fp))
@@ -73,18 +59,16 @@ def detect_invariants(
     proposals: list[CandidateProposal],
     parent_opt_sp: OptSearchPoint,
     parent_pipeline_params: dict[str, Any] | None,
-    prior_rounds: Sequence[Any] = (),
-) -> L1YieldStats:
-    """Rejecting is destructive and leaves no trace, so a repeat is never allowed to EMPTY the
-    round — if rejection would leave no live proposal, they are all restored."""
+    prior_rounds: Sequence[RoundResult] = (),
+) -> None:
+    """Stamps each collapse on its proposal. A repeat is never allowed to EMPTY the round — if
+    rejection would leave no live proposal, none is rejected."""
     parent_pp = parent_pipeline_params or {}
     for cp in proposals:
         cp.validation_failures = [
             vf for vf in cp.validation_failures if vf.reason not in INVARIANT_REASONS
         ]
     seen: dict[tuple[Any, ...], int] = {}
-    n_no_op = 0
-    n_duplicate = 0
     tried = lost_ideas(prior_rounds)
     # Repeats are collected, not applied inline: whether they may be rejected at all depends on
     # how many proposals SURVIVE the other two gates, which is only known after the loop.
@@ -106,7 +90,6 @@ def detect_invariants(
                     reason="no_op_variant",
                 ),
             ]
-            n_no_op += 1
             continue
         sig = delta.signature()
         if sig in seen:
@@ -120,7 +103,6 @@ def detect_invariants(
                     reason="duplicate_variant",
                 ),
             ]
-            n_duplicate += 1
             continue
         seen[sig] = i
         n_live += 1
@@ -140,7 +122,6 @@ def detect_invariants(
     # none is rejected. The loop then re-tests a known-dead idea for one round, which the
     # ALREADY TRIED panel still marks — strictly better than handing PoBB an empty population
     # and burning the turn on nothing.
-    n_repeat = 0
     if len(repeats) < n_live:
         for cp, echo in repeats:
             cp.validation_failures = [
@@ -152,7 +133,6 @@ def detect_invariants(
                     reason="repeat_variant",
                 ),
             ]
-            n_repeat += 1
     elif repeats:
         logger.debug(
             "repeat_variant: %d/%d proposals re-propose a lost idea — none rejected "
@@ -160,11 +140,3 @@ def detect_invariants(
             len(repeats),
             n_live,
         )
-    n = len(proposals)
-    yield_ = (n - n_no_op - n_duplicate - n_repeat) / n if n else 1.0
-    return L1YieldStats(
-        l1_yield=yield_,
-        l1_n_no_op=n_no_op,
-        l1_n_duplicate=n_duplicate,
-        l1_n_repeat=n_repeat,
-    )

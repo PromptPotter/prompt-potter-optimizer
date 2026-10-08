@@ -4,7 +4,7 @@ import { Bar } from "react-chartjs-2";
 import { barChartDefaults, ensureChartRegistered, seriesColor, useThemeVersion } from "@/lib/theme";
 import { Badge, CardFrame } from "@/components/ui";
 import { SPEND_BUCKETS, costSeries, prefixReading, roundCosts, spendLines } from "@/lib/derivations";
-import { useDashboard } from "@/lib/hooks/useDashboard";
+import { useCycleStream } from "@/lib/poll";
 import { fmtUsd } from "@/lib/format";
 
 ensureChartRegistered();
@@ -12,7 +12,7 @@ ensureChartRegistered();
 // What each round COST, on the trend's x-axis — its own strip, since dollars and fitness are
 // different units. Stacked by kind, never pooled; prefix-cache rides the tooltip (no dollars-saved is served).
 export const CostStrip = memo(function CostStrip() {
-  const { dash } = useDashboard();
+  const { dash } = useCycleStream();
   // Subscribe to the theme so a flip pulls fresh inks: a `<canvas>` has no cascade.
   useThemeVersion();
   // eslint-disable-next-line react-hooks/exhaustive-deps

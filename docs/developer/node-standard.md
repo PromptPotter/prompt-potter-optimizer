@@ -68,9 +68,10 @@ rule: a key PP does not *use* gets no model field, but the key still belongs in 
 The decisions the models cannot state:
 
 - **`backend_type` is required and is never a `PipelineSchema` field.** The parser drops it, so
-  readers take it off the raw overlay. It picks the connector at init (`wiring._read_backend_type`
-  raises when absent) and is served on `CampaignSummary.backend_type` — the ONE test for a
-  self-optimizing (L4) campaign, which the webapp branches on (`isSelfOptimization`).
+  readers take it off the raw overlay. It picks the connector at init (`dataset_access.py::declared_backend_type`
+  raises when absent) and is served on `CampaignSummary.backend_type`. Whether it names the recursion connector — the ONE
+  test for a self-optimizing (L4) campaign — is `runner/inner/tasks.py::is_self_optimization`,
+  served as `self_optimization` so the webapp branches on a bool and never on the name.
 - **`pipelines` must contain `default`** — the active step order unless a campaign overrides it,
   and the same node may appear in several sequences. **The other names are read too, and this is
   what decides whether a node is drawn at all:** a sequence sharing steps with `default` is an
@@ -82,7 +83,7 @@ The decisions the models cannot state:
   optimizer publishes its check-in node as a one-step pipeline of its own. `derive_pipeline_view`
   reads exactly this, and no manifest declares a `view` of its own.
 - **Declaring a node and running it are separate, and the CONFIG surface follows the declaration.**
-  `PipelineSchema.config_nodes` covers every node under `nodes:`, whether or not a pipeline names
+  `PipelineSchema.declared_nodes` covers every node under `nodes:`, whether or not a pipeline names
   it — a node absent from the surface is not a locked node the operator can open, it is nothing at
   all, with no row and no lock. Identity follows the declaration too, but only where a point
   CONFIGURES an off-chain node (`node_configs` → `sp_hash`) — a node only an alternative reaches

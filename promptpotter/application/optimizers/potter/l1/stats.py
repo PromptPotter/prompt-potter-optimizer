@@ -1,17 +1,13 @@
-"""L1Stats — per-cycle L1 fitness statistics, pure aggregation. ``round_1_verdict`` is the round-1 halt gate, read by
-``review.md`` and the L4 outer loop."""
+"""L1Stats — per-cycle L1 statistics, pure aggregation over the round documents. Every number
+here is ``review.md``'s: the header table, and ``round_1_verdict`` as its conformance line."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal
 
 from promptpotter.application.optimizers.nodes import CheckResult, ReviewReading, ReviewStat
-from promptpotter.application.optimizers.potter.escalation.state import (
-    exploration_budget,
-    l1_stall_depth,
-)
-from promptpotter.application.optimizers.potter.knobs import potter_knobs
+from promptpotter.application.optimizers.potter.escalation.state import l1_stall_depth
 from promptpotter.application.optimizers.potter.records import PotterRoundState
 from promptpotter.application.optimizers.potter.validators.behavior_base import ValidatorContext
 from promptpotter.application.optimizers.potter.validators.l1_behavior import (
@@ -24,15 +20,12 @@ from promptpotter.application.views.render.optimizer_prompt_text import (
     format_l1_critique_for_prompt,
 )
 from promptpotter.domain.optimizer_state import PARSE_FAILURE_CHARGED
-from promptpotter.domain.results import OptimizerFact, RoundResult, invariant_collapses
-
-if TYPE_CHECKING:
-    from promptpotter.application.optimizer_manifest import SelectedOptimizer
+from promptpotter.domain.results import OptimizerFact, RoundResult
 
 __all__ = ["L1Stats", "compute_l1_stats", "review_reading", "round_facts"]
 
-# The four the verdict can take, typed rather than described: the L4 outer loop reads this, so an
-# arm nothing emits is a measurement nobody can get and one nothing checks is a typo that ships.
+# The four the verdict can take, typed rather than described: an arm nothing emits is a reading
+# nobody can get, and one nothing checks is a typo that ships.
 RoundOneVerdict = Literal["healthy", "degraded", "broken", "unknown"]
 
 
@@ -42,7 +35,7 @@ class L1Stats:
     cycle with no rounds did not fail to yield, and a rate over zero checks is not a clean bill of health."""
 
     yield_rate: float | None
-    top_lift_mean: float | None
+    top_reference_lift_mean: float | None
     behavior_pass_rate: float | None
     stagnation_max: int
     l2_fires: int
@@ -55,14 +48,11 @@ class L1Stats:
 def compute_l1_stats(
     rounds: list[RoundResult],
     *,
-    origin_composite_fitness: float | None,
     behavior_results: list[list[CheckResult]],
     l2_behavior_results: list[list[CheckResult]] | None = None,
 ) -> L1Stats:
     yield_rate = _mean_yield_rate(rounds)
-    top_lifts = _top_lifts(rounds, origin_composite_fitness)
-    top_lift_mean = sum(top_lifts) / len(top_lifts) if top_lifts else None
-    stagnation_max = _max_stagnation_streak(top_lifts)
+    top_lifts = _top_reference_lifts(rounds)
     behavior_pass_rate = _behavior_pass_rate(behavior_results)
     l2_behavior_pass_rate = _behavior_pass_rate(l2_behavior_results or [])
     # A round's L2 checks are empty exactly where L2 did not fire (`_behavior_per_round`).
@@ -73,9 +63,12 @@ def compute_l1_stats(
     )
     return L1Stats(
         yield_rate=yield_rate,
-        top_lift_mean=top_lift_mean,
+        top_reference_lift_mean=sum(top_lifts) / len(top_lifts) if top_lifts else None,
         behavior_pass_rate=behavior_pass_rate,
-        stagnation_max=stagnation_max,
+        # The stall the escalation ladder paces on, at its deepest: one rule, read per prefix.
+        stagnation_max=max(
+            (l1_stall_depth(rounds[: i + 1]) for i in range(len(rounds))), default=0
+        ),
         l2_fires=l2_fires,
         l2_behavior_pass_rate=l2_behavior_pass_rate,
         round_1_verdict=round_1_verdict,
@@ -83,30 +76,21 @@ def compute_l1_stats(
 
 
 def review_reading(
-    selected: SelectedOptimizer,
     rounds: list[RoundResult],
     audits: list[dict[str, Any] | None],
     *,
     context_object: list[str],
-    origin_composite_fitness: float | None,
 ) -> ReviewReading:
     audits = [*audits, *[None] * (len(rounds) - len(audits))]
-    l1_checks, l2_checks = _behavior_per_round(
-        rounds, audits, context_object, potter_knobs(selected).escalation.l1_patience
-    )
-    stats = compute_l1_stats(
-        rounds,
-        origin_composite_fitness=origin_composite_fitness,
-        behavior_results=l1_checks,
-        l2_behavior_results=l2_checks,
-    )
+    l1_checks, l2_checks = _behavior_per_round(rounds, audits, context_object)
+    stats = compute_l1_stats(rounds, behavior_results=l1_checks, l2_behavior_results=l2_checks)
     return ReviewReading(
         checks=l1_checks,
         check_ids=tuple(CHECK_REGISTRY),
         verdict=ReviewStat("round-1 conformance", stats.round_1_verdict),
         stats=(
             ReviewStat("yield_rate", stats.yield_rate, ".2f"),
-            ReviewStat("top_lift_mean", stats.top_lift_mean, "+.4f"),
+            ReviewStat("top_reference_lift_mean", stats.top_reference_lift_mean, "+.4f"),
             ReviewStat("behavior_pass_rate", stats.behavior_pass_rate, ".2f"),
             ReviewStat("l2_behavior_pass_rate", stats.l2_behavior_pass_rate, ".2f"),
             ReviewStat("stagnation_max", stats.stagnation_max),
@@ -126,18 +110,17 @@ _COLLAPSE_WORDS = {"no_op_variant": "no-op", "duplicate_variant": "dup", "repeat
 
 
 def round_facts(round_result: RoundResult) -> list[OptimizerFact]:
-    """Potter's words about a round: L1's yield where a proposal collapsed — a full yield is no
-    news — and the critique the round hands its next generation."""
+    """Potter's words about a round: L1's yield where a proposal was rejected — a full yield is
+    no news — and the critique the round hands its next generation."""
     state = round_result.optimizer_state.payload_as(PotterRoundState)
     facts: list[OptimizerFact] = []
-    if state.l1_yield < 1.0:
-        collapses = invariant_collapses(round_result.candidate_scores)
-        n_total = round_result.candidates_scored
-        n_valid = max(0, n_total - sum(collapses.get(r, 0) for r in _COLLAPSE_WORDS))
+    if state.l1_rejected:
+        live = state.l1_proposed - sum(state.l1_rejected.values())
         bits = ", ".join(
-            f"{collapses[r]} {w}" for r, w in _COLLAPSE_WORDS.items() if collapses.get(r)
+            f"{n} {_COLLAPSE_WORDS.get(reason, reason.replace('_', ' '))}"
+            for reason, n in state.l1_rejected.items()
         )
-        text = f"{n_valid}/{n_total} ({bits})"
+        text = f"{live}/{state.l1_proposed} ({bits})"
         facts.append(
             OptimizerFact(
                 key="l1_yield", label="L1 yield", text=text, value=state.l1_yield, kind="stat"
@@ -154,33 +137,24 @@ def _behavior_per_round(
     rounds: list[RoundResult],
     audits: list[dict[str, Any] | None],
     context_object: list[str],
-    l1_patience: int,
 ) -> tuple[list[list[CheckResult]], list[list[CheckResult]]]:
     """Per-round L1 + L2 behaviour-check results (same length as ``rounds``).
     L2 returns ``[]`` for rounds where L2 didn't fire — absent fire ≠ conformance failure."""
     l1_out: list[list[CheckResult]] = []
     l2_out: list[list[CheckResult]] = []
     prior_audits: list[dict[str, Any]] = []
-    for i, round_data in enumerate(rounds):
-        round_num = round_data.round
-        # The depth ENTERING the round, which is what its L1 generation was shown.
-        budget = (
-            exploration_budget(l1_stall_depth(rounds[:i]), l1_patience).value
-            if round_num >= 1
-            else None
-        )
-        audit = audits[i] if i < len(audits) else None
+    for round_data, audit in zip(rounds, audits, strict=True):
         if audit is None:
             l1_out.append([])
             l2_out.append([])
             continue
+        # What the round's own call offered, as the round banked it — never derived again here.
         payload = round_data.optimizer_state.payload_as(PotterRoundState)
         ctx = ValidatorContext(
-            round_num=round_num,
             prior_rounds=list(prior_audits),
-            l1_layout=payload.memory.l1_layout,
+            citable=None if payload.l1_citable is None else tuple(payload.l1_citable),
             context_object=context_object,
-            exploration_budget=budget,
+            exploration_budget=payload.l1_exploration_budget,
             peaked_axes=frozenset(payload.axis_memory_peaked),
         )
         l1_out.append(run_all_checks(audit, ctx))
@@ -203,8 +177,7 @@ def _compute_round_1_verdict(
     if parse_failure in PARSE_FAILURE_CHARGED:
         return "broken"
     # The remaining reason is TOOLING — an empty or truncated provider response. This verdict is
-    # a CHARGE against the optimizer prompt and the L4 outer loop scores it, so grading provider
-    # flakiness `broken` would bank a prompt as bad for a round that never reached one.
+    # a CHARGE against the optimizer prompt, and a round that never reached one earns none.
     if parse_failure is not None:
         return "unknown"
     if not round_1_behavior:
@@ -230,31 +203,15 @@ def _mean_yield_rate(rounds: list[RoundResult]) -> float | None:
     return sum(yields) / len(yields)
 
 
-def _top_lifts(rounds: list[RoundResult], origin_composite_fitness: float | None) -> list[float]:
-    """Per-round (best variant composite_fitness − parent composite_fitness). Round 0's parent
-    is the origin composite_fitness; subsequent rounds inherit the prior round's.
-
-    An origin that was never scored has NO bar, so the first round contributes no lift at all.
-    Measured against a stand-in 0.0 it reports its whole composite as improvement, and that
-    fabricated number then reaches both the mean and the stagnation streak."""
-    lifts: list[float] = []
-    parent = origin_composite_fitness
+def _top_reference_lifts(rounds: list[RoundResult]) -> list[float]:
+    """Each round's best arm against its parent, on the cells both read — the paired lift the
+    round already banked. A round whose arms carry none (the origin, an unread panel) adds none."""
+    tops: list[float] = []
     for r in rounds:
-        if parent is not None:
-            lifts.append(r.composite_fitness - parent)
-        parent = r.composite_fitness
-    return lifts
-
-
-def _max_stagnation_streak(top_lifts: list[float]) -> int:
-    longest = current = 0
-    for lift in top_lifts:
-        if lift <= 0.0:
-            current += 1
-            longest = max(longest, current)
-        else:
-            current = 0
-    return longest
+        lifts = [cs.reference_lift for cs in r.candidate_scores if cs.reference_lift is not None]
+        if lifts:
+            tops.append(max(lifts))
+    return tops
 
 
 def _behavior_pass_rate(behavior_results: list[list[CheckResult]]) -> float | None:

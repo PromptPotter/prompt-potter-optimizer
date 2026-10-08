@@ -3,7 +3,6 @@ deliberately absent: their 3-tier sourcing policy would force this reader to tak
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -11,7 +10,7 @@ from typing import Any
 import yaml
 from pydantic import ValidationError
 
-from promptpotter.application.campaign_config import CampaignConfig, merge_config_layers
+from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.campaign_config import (
     load_campaign_config as validate_campaign_config,
 )
@@ -36,7 +35,7 @@ class AuthoredDataset:
     """``pipeline.yaml::backend_type``, lowercased; ``""`` when the field is absent.
 
     Intentionally non-raising so each consumer decides: the draft path defaults
-    to ``DEFAULT_CONNECTOR``, the launcher raises ``LaunchError`` on a blank."""
+    to ``DEFAULT_CONNECTOR``, a launch refuses a blank (``declared_backend_type``)."""
 
     pipeline_nodes: dict[str, Any]
     """The WHOLE ``pipeline.yaml::nodes.{name}`` dicts (config + optimizer + …),
@@ -81,19 +80,11 @@ def read_campaign_config_file(path: Path) -> dict[str, Any]:
     return result
 
 
-def load_dataset_campaign_config(
-    path: Path, *, overrides: Mapping[str, Any] | None = None
-) -> CampaignConfig:
+def load_dataset_campaign_config(path: Path) -> CampaignConfig:
     """The read-and-validate pair, owned once. ``CampaignConfig`` is ``extra="forbid"``, so a dropped knob
-    makes every file naming it unloadable — a property of OUR deploy, remedied by ``restamp --apply``.
-
-    *overrides* is the ONE supported way a caller shapes a dataset's config without editing the
-    shared file: a nested mapping merged on before validation, so an unknown knob raises here
-    rather than being dropped. Hand-patching the parsed dict instead is what this replaces.
-    """
+    makes every file naming it unloadable — a property of OUR deploy, remedied by ``restamp --apply``."""
     try:
-        raw = read_campaign_config_file(path)
-        return validate_campaign_config(merge_config_layers(raw, overrides) if overrides else raw)
+        return validate_campaign_config(read_campaign_config_file(path))
     except ValidationError as exc:
         reason = "; ".join(f"{'.'.join(map(str, e['loc']))}: {e['msg']}" for e in exc.errors())
         raise StoredConfigInvalidError(path=str(path), reason=reason) from exc

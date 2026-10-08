@@ -8,7 +8,7 @@ import { useWorkspace } from "@/lib/workspace";
 import { CardFrame, Badge, type BadgeTone } from "@/components/ui";
 import { fmtValue } from "@/lib/format";
 
-const SEVERITY_TONE: Record<string, BadgeTone> = {
+const SEVERITY_TONE: Record<ConfigCoupling["severity"], BadgeTone> = {
   collision: "danger",
   inert: "accent",
   info: "default",
@@ -48,11 +48,6 @@ export function ConfigMapPanel() {
   if (read.status === "loading") return <p className="mech-empty">Loading config map…</p>;
   const map = read.data;
 
-  const order = ["collision", "inert", "info"];
-  const couplings = [...map.couplings].sort((a, b) => {
-    if (a.active !== b.active) return a.active ? -1 : 1;
-    return order.indexOf(a.severity) - order.indexOf(b.severity);
-  });
   const active = map.couplings.filter((c) => c.active);
   const hasCollision = active.some((c) => c.severity === "collision");
 
@@ -75,7 +70,7 @@ export function ConfigMapPanel() {
           </p>
         )}
         <ul className="cmap-couplings">
-          {couplings.map((c) => (
+          {map.couplings.map((c) => (
             <CouplingRow key={c.name} c={c} />
           ))}
         </ul>

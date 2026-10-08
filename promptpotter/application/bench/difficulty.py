@@ -14,7 +14,6 @@ from promptpotter.application.intelligence.exploration import (
     dedup_observations,
     extend_ruler,
     fit_theta_given_delta,
-    graded_response,
     graduate_ruler_model,
     observations_from_results,
 )
@@ -28,7 +27,6 @@ from promptpotter.domain.ruler import (
     is_flat_ruler_id,
     theta_caveat,
 )
-from promptpotter.domain.scoring import is_graded
 from promptpotter.infrastructure.store.archive_queries import memory_scoped
 from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import CycleLayout
@@ -41,7 +39,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["DifficultyView", "RulerScope"]
+__all__ = ["DifficultyView", "RulerScope", "calibrate_delta_ruler"]
 
 # Which archive rows a fit reads — `dataset`: every campaign's on the cycle's dataset
 # (`docs/architecture.md` § Three data scopes); `campaign`: a controlled arm's own line alone.
@@ -100,7 +98,24 @@ def _cycle_history(rounds: list[RoundResult]) -> list[Observation]:
     return dedup_observations(*groups)
 
 
-def _calibrate_delta_ruler(
+def _with_origin(
+    origin_results: list[dict[str, Any]] | None, archive_obs: list[Observation]
+) -> list[Observation]:
+    """*archive_obs* under the cycle's own origin rows, which win the cells both hold: an inner
+    cycle that cache-replays its origin banks that run INSIDE its own evidence epoch."""
+    origin_obs = observations_from_results({ORIGIN_ABILITY_ID: list(origin_results or [])})
+    return dedup_observations(archive_obs, origin_obs)
+
+
+def _origin_theta(obs: list[Observation], ruler: DeltaRuler | None) -> tuple[float, float] | None:
+    """C0's ability over every origin row in *obs* — on *ruler*'s cells, or flat where it is cold.
+    Never the JOINT fit's ``post.theta[ORIGIN_ABILITY_ID]``: ``fit_rasch`` re-anchors per call."""
+    origin = [o for o in obs if o.candidate_id == ORIGIN_ABILITY_ID]
+    entries = ruler.entries() if ruler is not None else None
+    return fit_theta_given_delta(origin, entries).get(ORIGIN_ABILITY_ID)
+
+
+def calibrate_delta_ruler(
     origin_results: list[dict[str, Any]] | None,
     n_min: int,
     *,
@@ -111,14 +126,7 @@ def _calibrate_delta_ruler(
     (``docs/methods/verdict-resolution.md``). It locks the anchor; ``extend_ruler`` grows the
     membership afterwards without moving it. Cold start returns ``None``, which reads FLAT."""
 
-    origin_obs = [
-        Observation(ORIGIN_ABILITY_ID, int(sid), graded_response(r))
-        for r in origin_results or []
-        if (sid := r.get("sample_id")) is not None and is_graded(r)
-    ]
-    # ``origin_obs`` wins the cells both hold: an inner cycle that cache-replays its origin
-    # banked that run INSIDE its own evidence epoch, where the archive read cannot see it.
-    obs = dedup_observations(archive_obs, origin_obs)
+    obs = _with_origin(origin_results, archive_obs)
     if not obs:
         return None, None
     # Two warmth conditions, both knowable without fitting — below either the ruler stays flat
@@ -139,15 +147,7 @@ def _calibrate_delta_ruler(
             ruler = post.anchored(fitted)
             if fitted == "2PL":
                 logger.info("δ ruler graduated to 2PL (%d samples fit)", len(post.delta))
-    # θ_C0 THROUGH THE SAME ESTIMATOR EVERY OTHER LEVEL USES. Never hand back the JOINT fit's
-    # ``post.theta[ORIGIN_ABILITY_ID]``: ``fit_rasch`` re-anchors ``mean(θ)==0`` per call, so
-    # its scale is set by whichever arms were in the pool and the L4 law then differences two
-    # estimators — a BIAS channel, which does not average out over a panel.
-    # ``obs``, not ``origin_obs``: the deduped set carries the archive's origin rows too.
-    origin_obs_all = [o for o in obs if o.candidate_id == ORIGIN_ABILITY_ID]
-    entries = ruler.entries() if ruler is not None else None
-    theta = fit_theta_given_delta(origin_obs_all, entries)
-    return ruler, theta.get(ORIGIN_ABILITY_ID)
+    return ruler, _origin_theta(obs, ruler)
 
 
 def _given_ruler(session: Session) -> DeltaRuler | None:
@@ -174,7 +174,7 @@ def _refuse_unreproducible_rounds(session: Session) -> None:
 
     Warmth is monotone within a cycle, so the LAST round document answers this in one read — and
     a fresh mint has no round files at all, which is the silent path. Falling through instead is
-    what the fix removes: ``_calibrate_delta_ruler`` would walk an archive that has grown since the lock and
+    what the fix removes: ``calibrate_delta_ruler`` would walk an archive that has grown since the lock and
     hand back a different scale under the same cycle."""
 
     cycle_dir = session.store.campaigns.cycle_dir(session.hop)
@@ -189,23 +189,6 @@ def _refuse_unreproducible_rounds(session: Session) -> None:
     raise RulerUnpersistedError(
         stamped, campaign_id=session.hop.campaign_id, cycle_id=session.hop.cycle_id
     )
-
-
-def _origin_theta_on(
-    origin_results: list[dict[str, Any]] | None,
-    ruler: DeltaRuler,
-    archive_obs: list[Observation],
-) -> tuple[float, float] | None:
-    """C0's ability on an ALREADY-anchored ruler — read on the cells that ruler carries, though
-    the archive has grown since the lock."""
-
-    origin_obs = observations_from_results({ORIGIN_ABILITY_ID: list(origin_results or [])})
-    obs = [
-        o
-        for o in dedup_observations(archive_obs, origin_obs)
-        if o.candidate_id == ORIGIN_ABILITY_ID
-    ]
-    return fit_theta_given_delta(obs, ruler.entries()).get(ORIGIN_ABILITY_ID)
 
 
 _FRONTIER_ABILITY_ID = "_frontier"
@@ -261,9 +244,10 @@ class DifficultyView:
         view.observations = view.archive()
         given = _given_ruler(session)
         if given is not None:
+            # Read on the cells that ruler carries, though the archive has grown since the lock.
             view.ruler = given
-            return view, _origin_theta_on(origin_results, given, view.observations)
-        view.ruler, origin_theta = _calibrate_delta_ruler(
+            return view, _origin_theta(_with_origin(origin_results, view.observations), given)
+        view.ruler, origin_theta = calibrate_delta_ruler(
             origin_results, view.n_min, enable_2pl=view.enable_2pl, archive_obs=view.observations
         )
         return view, origin_theta
@@ -326,7 +310,7 @@ class DifficultyView:
             # The ≥2-arm floor is satisfied the moment the round's own candidates are banked, so
             # the attempt sits BEFORE the election that needs it rather than after the round closed.
             # This relaxes the TIMING, never the rule — a one-arm pool still stays flat.
-            ruler, origin_theta = _calibrate_delta_ruler(
+            ruler, origin_theta = calibrate_delta_ruler(
                 rounds[0].results,
                 self.n_min,
                 enable_2pl=self.enable_2pl,

@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from collections.abc import Hashable
+from collections.abc import Hashable, Mapping, Sequence
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
@@ -46,13 +46,13 @@ from promptpotter.application.evidence.metric_catalogue import (
     resolve_metric,
 )
 from promptpotter.application.evidence.subjects import (
-    LENS_SCORE_PREFIX,
     ScenarioReading,
     SubjectMask,
     SubjectReading,
     SubjectSpec,
     WinnerChainPoint,
     authorship_of,
+    parse_subject,
 )
 from promptpotter.application.mask.load import load_mask_record
 from promptpotter.application.mask.scenario import scenario_spine
@@ -61,13 +61,20 @@ from promptpotter.domain.candidate_diff import build_candidate_flat, flatten_sp_
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.l4.inner_origin import instrument_of
 from promptpotter.domain.ruler import AbilityReading
+from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.infrastructure.projections.live_dashboard.state import served_spend
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_candidates,
     scan_ledger_elections,
 )
 from promptpotter.infrastructure.store.io import read_json_tolerant
-from promptpotter.infrastructure.store.layout import ROUND_GLOB, CycleLayout, campaign_cycles_dir
+from promptpotter.infrastructure.store.layout import (
+    ROUND_GLOB,
+    CampaignLayout,
+    CycleLayout,
+    campaign_cycles_dir,
+)
 from promptpotter.infrastructure.store.read_model import derived, file_sig
 from promptpotter.infrastructure.store.stores import descend_store
 from promptpotter.shared.clock import utcnow_iso
@@ -148,6 +155,28 @@ class EditSpread(StrictModel):
     n_edits: int = 0
 
 
+class ConfigKeys(StrictModel):
+    """Every configured key across the subjects that carry a config, in exactly one band."""
+
+    differs: list[str] = Field(description="Every subject configures it, and not all alike")
+    one_sided: list[str] = Field(
+        description="Not every subject configures it: a different pipeline, not a disagreement"
+    )
+    same: list[str] = Field(description="Every subject configures it alike")
+
+    @classmethod
+    def of(cls, configs: list[dict[str, str]]) -> ConfigKeys:
+        bands = cls(differs=[], one_sided=[], same=[])
+        for key in sorted({k for config in configs for k in config}):
+            if any(key not in config for config in configs):
+                bands.one_sided.append(key)
+            elif len({config[key] for config in configs}) > 1:
+                bands.differs.append(key)
+            else:
+                bands.same.append(key)
+        return bands
+
+
 class Evidence(StrictModel):
     """The whole read for one selection of subjects — recomputed on every fetch."""
 
@@ -171,6 +200,8 @@ class Evidence(StrictModel):
     # roster is otherwise the only evidence they were dropped, and a subject that silently thins a
     # selection is the channel-level twin of scoring an unread cell as zero.
     unread_subjects: list[str] = Field(default_factory=list)
+    # How the `config` maps on the roster line up. `None` unless they were asked for.
+    config_keys: ConfigKeys | None = None
     # What this selection VARIES on, discovered rather than declared, with the marginal at each
     # level. Empty where every subject ran the same way — which is a reading, not a gap: a roster
     # with no factor is a replicate set, and `replicates` below is the surface for that.
@@ -211,7 +242,7 @@ def _dataset_name(manifest: dict[str, Any]) -> str:
 
 
 def _dataset_of(campaign_dir: Path) -> str:
-    return _dataset_name(read_json_tolerant(campaign_dir / "campaign.json", {}))
+    return _dataset_name(read_json_tolerant(CampaignLayout(campaign_dir).manifest, {}))
 
 
 def campaigns_on_dataset(stores: Stores, dataset_name: str) -> list[str]:
@@ -222,6 +253,58 @@ def campaigns_on_dataset(stores: Stores, dataset_name: str) -> list[str]:
         for child in stores.campaigns.iter_campaign_dirs()
         if _dataset_of(child) == dataset_name
     ]
+
+
+def _named(stores: Stores, spec: SubjectSpec) -> SubjectSpec:
+    """*spec* with its campaign half resolved through the store's matcher. One that matches nothing
+    is left as typed and rides ``unread_subjects``; an address inside a sandbox names that tree's ids."""
+    if spec.inside:
+        return spec
+    matches = stores.campaigns.match_campaign_ids(spec.campaign_id)
+    if len(matches) > 1:
+        raise ValueError(
+            f"{spec.campaign_id!r} in subject {spec.key!r} matches {len(matches)} campaigns: "
+            f"{', '.join(matches[:5])}. Pass the full id."
+        )
+    return spec._replace(campaign_id=matches[0]) if matches else spec
+
+
+def select_evidence(
+    stores: Stores,
+    *,
+    subjects: Sequence[str],
+    dataset: str = "",
+    grid: str = "",
+    include_ranking: bool = False,
+    include_winner_chain: bool = False,
+    include_config: bool = False,
+    metric: str = MEASURAND,
+) -> Evidence:
+    """The read as an entry point ASKS for it, so the route and the terminal pool one selection.
+    *dataset* ADDS one campaign subject per campaign bound to it, beside any named."""
+    specs = [_named(stores, parse_subject(raw)) for raw in subjects]
+    if dataset:
+        named = {s.key for s in specs}
+        specs += [
+            spec
+            for cid in campaigns_on_dataset(stores, dataset)
+            if (spec := SubjectSpec("campaign", cid)).key not in named
+        ]
+    axes = [a.strip() for a in grid.split(",") if a.strip()]
+    if grid and len(axes) != 2:
+        raise ValueError(
+            f"A grid takes exactly two factor names separated by a comma, got {grid!r}. It has two "
+            "axes at any number of factors — the rest are marginalised into the cells."
+        )
+    return subject_evidence(
+        stores,
+        specs,
+        include_ranking=include_ranking,
+        include_winner_chain=include_winner_chain,
+        include_config=include_config,
+        metric=metric,
+        grid=(axes[0], axes[1]) if axes else None,
+    )
 
 
 class _ChainPoint(NamedTuple):
@@ -421,6 +504,11 @@ def subject_evidence(
         ),
         metric=reading,
         unread_subjects=sorted(set(wanted) - set(heads)),
+        config_keys=(
+            ConfigKeys.of([r.config for r in rows if r.config is not None])
+            if include_config
+            else None
+        ),
         factors=factors(rows, levels, spec_metric),
         grid=grid_reading(rows, levels, spec_metric, grid) if grid else None,
         replicates=replicates(rows),
@@ -472,7 +560,7 @@ def _at(stores: Stores, spec: SubjectSpec) -> tuple[Stores, Path] | None:
 def _files_read(spec: SubjectSpec, campaign_dir: Path) -> Hashable:
     """The signature of every file a subject WITHOUT a lens reads: the campaign manifest and, in
     the one cycle it sits in, the index, the ledger, the dashboard and each round document."""
-    manifest = campaign_dir / "campaign.json"
+    manifest = CampaignLayout(campaign_dir).manifest
     cycle_id = spec.cycle_id or str(read_json_tolerant(manifest, {}).get("root_cycle_id", ""))
     layout = CycleLayout(campaign_cycles_dir(campaign_dir) / cycle_id)
     try:
@@ -503,7 +591,7 @@ def _read_subject(stores: Stores, spec: SubjectSpec, campaign_dir: Path) -> _Sub
 
 def _resolve_head(stores: Stores, spec: SubjectSpec, campaign_dir: Path) -> _Head | None:
     """The rows a subject's numbers come from, or ``None`` where nothing on disk answers it."""
-    manifest = read_json_tolerant(campaign_dir / "campaign.json", {})
+    manifest = read_json_tolerant(CampaignLayout(campaign_dir).manifest, {})
     dataset_name = _dataset_name(manifest)
     if spec.kind == "campaign":
         # The campaign's ROOT cycle — C0 — named by the manifest, never whichever sibling a
@@ -599,11 +687,9 @@ def _scenario(
     carried a different one of them forward.
     """
     try:
-        record = load_mask_record(
-            stores, spec.campaign_id, spec.samples, lens=spec.lens.removeprefix(LENS_SCORE_PREFIX)
-        )
+        record = load_mask_record(stores, spec.campaign_id, spec.samples, lens=spec.lens)
     except ScoringFormulaError as exc:
-        raise ValueError(f"The lens {spec.lens!r} cannot grade this branch: {exc}") from exc
+        raise ValueError(f"The lens on {spec.key!r} cannot grade this branch: {exc}") from exc
     cycle = next((c for c in record.cycles if c.cycle_id == spec.cycle_id), None)
     if cycle is None:
         return None
@@ -824,7 +910,7 @@ def _cell_means(channels: dict[str, dict[str, float]]) -> dict[str, float]:
     return means
 
 
-def _spend_to_round(dash: dict[str, Any]) -> dict[str, float]:
+def _spend_to_round(by_round: Mapping[str, SpendRollup]) -> dict[str, float]:
     """``round -> USD this cycle had spent by the END of it``, cumulative and filled forward.
 
     Folded FORWARD off the served per-round atom (``dashboard.json::spend_by_round``), never off
@@ -842,15 +928,7 @@ def _spend_to_round(dash: dict[str, Any]) -> dict[str, float]:
     rounds before the cut carry what the parent spent on them — the same roll-up as
     ``cycle_spend_usd`` beside it, read per round.
     """
-    per_round: dict[int, float] = {}
-    for key, rollup in (dash.get("spend_by_round") or {}).items():
-        try:
-            rnd = int(key)
-        except (TypeError, ValueError):
-            continue
-        usd = (rollup or {}).get("total_used_usd")
-        if isinstance(usd, int | float):
-            per_round[rnd] = per_round.get(rnd, 0.0) + float(usd)
+    per_round = {int(key): rollup.total_used_usd for key, rollup in by_round.items()}
     if not per_round:
         return {}
     running = 0.0
@@ -864,8 +942,7 @@ def _spend_to_round(dash: dict[str, Any]) -> dict[str, float]:
 def _cycle_facts(cycle_dir: Path) -> _CycleFacts:
     layout = CycleLayout(cycle_dir)
     doc = read_json_tolerant(layout.round_file(0), {})
-    dash = read_json_tolerant(layout.dashboard, {})
-    spend = dash.get("spend")
+    spend, spend_by_round = served_spend(read_json_tolerant(layout.dashboard, {})) or (None, {})
     # The configuration the cycle ran under IS the arm — its hashes are stamped on round 0
     # precisely so a campaign paused before round 1 still names what it measured.
     hashes = (doc.get("optimizer_state") or {}).get("prompt_hashes")
@@ -879,9 +956,9 @@ def _cycle_facts(cycle_dir: Path) -> _CycleFacts:
         arm_id=_arm_hash(dict(hashes)) if isinstance(hashes, dict) and hashes else None,
         instrument_id=str(instrument) if isinstance(instrument, str) else None,
         ability=AbilityReading.model_validate(raw) if isinstance(raw, dict) else None,
-        spend_usd=(spend or {}).get("total_used_usd") if isinstance(spend, dict) else None,
+        spend_usd=spend.total_used_usd if spend else None,
         rounds_scored=max(len(list(layout.rounds.glob(ROUND_GLOB))) - 1, 0),
-        spend_to_round=_spend_to_round(dash),
+        spend_to_round=_spend_to_round(spend_by_round),
     )
 
 
@@ -920,7 +997,7 @@ def _reading_row(
         comparable_note="",
         mask=(
             SubjectMask(
-                lens=spec.lens or None,
+                lens=spec.lens.spelling if spec.lens else None,
                 samples=sorted(spec.samples) if spec.samples else None,
             )
             if spec.lens or spec.samples
@@ -1043,6 +1120,7 @@ def _finalize(campaign_id: str, sp_hash: str, acc: _Accum) -> RankedEdit:
 
 
 __all__ = [
+    "ConfigKeys",
     "EditSpread",
     "EffectProvenance",
     "Evidence",

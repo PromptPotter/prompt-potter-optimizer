@@ -5,6 +5,7 @@ only through ``nodes.WorkingState``; ``members.py::PotterRuntime`` mints it."""
 from __future__ import annotations
 
 import logging
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -14,6 +15,7 @@ from promptpotter.application.intelligence.earned_blocks import (
 )
 from promptpotter.application.intelligence.indexes.axis import AxisIndex
 from promptpotter.application.intelligence.sibling_wounds import gather_sibling_runtime_failures
+from promptpotter.application.optimizers.nodes import Population
 from promptpotter.application.optimizers.potter.dispatch.layout import default_l1_layout
 from promptpotter.application.optimizers.potter.escalation.state import (
     EscalationFSM,
@@ -22,12 +24,8 @@ from promptpotter.application.optimizers.potter.escalation.state import (
     surviving_phase_records,
 )
 from promptpotter.application.optimizers.potter.knobs import potter_knobs
-from promptpotter.application.optimizers.potter.records import (
-    POTTER_MANIFEST,
-    L2L3Memory,
-    PotterRoundState,
-)
-from promptpotter.domain.optimizer_state import OptimizerState
+from promptpotter.application.optimizers.potter.records import L2L3Memory, PotterRoundState
+from promptpotter.application.scoring.candidate_report import fatal_validation_failures
 from promptpotter.domain.wounds import rf_dedup_key
 from promptpotter.infrastructure.store.layout import root_cycle_id
 
@@ -39,16 +37,25 @@ if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.optimizers.nodes import WorkingState
+    from promptpotter.application.optimizers.potter.l1.generate import L1Generation
     from promptpotter.domain.results import RoundResult
     from promptpotter.infrastructure.ledger import CycleEventLog
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["PotterState", "potter_state"]
+__all__ = ["L1Population", "PotterState", "potter_state"]
 
 
 def _origin_memory() -> L2L3Memory:
     return L2L3Memory(l1_layout=default_l1_layout())
+
+
+@dataclass(frozen=True)
+class L1Population(Population):
+    """What ``l1_generate`` hands ``theta_election``: its population, and the state the round
+    generated under."""
+
+    payload: PotterRoundState
 
 
 @dataclass
@@ -88,33 +95,29 @@ class PotterState:
         )
         return cls(memory=memory, earned_blocks=earned_blocks)
 
-    def snapshot(
-        self,
-        *,
-        l1_yield: float,
-        l1_parse_failure: str | None,
-        prompt_hashes: dict[str, str],
-        axis_memory_peaked: list[str],
-    ) -> OptimizerState:
-        """What a round document banks — a copy, so a later fire cannot rewrite a closed round."""
-        return OptimizerState(
-            manifest=POTTER_MANIFEST,
-            prompt_hashes=prompt_hashes,
-            payload=PotterRoundState(
-                memory=self.memory.model_copy(deep=True),
-                l1_yield=l1_yield,
-                l1_parse_failure=l1_parse_failure,
-                axis_memory_peaked=axis_memory_peaked,
-            ),
+    def snapshot(self, cycle: Cycle, generation: L1Generation) -> PotterRoundState:
+        """What a round banks once every reject posture has read *generation* — a copy, so a later
+        fire cannot rewrite a closed round. The yield is counted here and nowhere else."""
+        axes = self.axes(cycle)
+        rejected = Counter(
+            fatal[0].reason
+            for cp in generation.proposals
+            if (fatal := fatal_validation_failures(cp.validation_failures))
+        )
+        proposed = len(generation.proposals)
+        return PotterRoundState(
+            memory=self.memory.model_copy(deep=True),
+            l1_yield=(proposed - rejected.total()) / proposed if proposed else 1.0,
+            l1_proposed=proposed,
+            l1_rejected=dict(rejected),
+            l1_parse_failure=generation.parse_failure,
+            l1_citable=None if generation.citable is None else list(generation.citable),
+            l1_exploration_budget=generation.exploration_budget,
+            axis_memory_peaked=sorted(axes.peaked_axes()) if axes else [],
         )
 
-    def origin_state(self, selected: SelectedOptimizer) -> OptimizerState:
-        return self.snapshot(
-            l1_yield=1.0,
-            l1_parse_failure=None,
-            prompt_hashes=selected.prompt_hashes(),
-            axis_memory_peaked=[],
-        )
+    def origin_payload(self) -> PotterRoundState:
+        return PotterRoundState(memory=self.memory.model_copy(deep=True))
 
     def replay(self, last: RoundResult) -> None:
         self.memory = last.optimizer_state.payload_as(PotterRoundState).memory.model_copy(deep=True)

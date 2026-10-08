@@ -13,6 +13,7 @@ from typing import Any, cast
 from promptpotter.application.campaign_config import CampaignConfig, apply_config_overrides
 from promptpotter.application.datasets.authored import config_cell_scorer
 from promptpotter.application.mask.record import (
+    Lens,
     MaskCandidate,
     MaskCycle,
     MaskReading,
@@ -22,7 +23,6 @@ from promptpotter.application.mask.record import (
 )
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
 from promptpotter.application.scoring.formula import (
-    LENS_DIALS_PREFIX,
     origin_anchors,
     parse_dials,
     realize_dials,
@@ -72,14 +72,13 @@ def read_rows(rows: list[dict[str, Any]], scorer: CellScorer) -> MaskReading | N
     """*rows* graded and folded under *scorer*, on copies — the round document keeps its own grades.
     ``None`` where no row carries a verdict, which is no reading rather than a 0.0 floor."""
     graded = rescore_results([dict(r) for r in rows], scorer)
-    cells = measured_cells(graded)
-    if not cells:
-        return None
     folded = fold_cells(cast("list[QueryMeasurement]", graded))
+    if folded["composite_fitness"] is None:
+        return None
     return MaskReading(
-        composite_fitness=float(folded["composite_fitness"]),
+        composite_fitness=folded["composite_fitness"],
         accuracy=folded["accuracy"],
-        n_scored=len(cells),
+        n_scored=len(measured_cells(graded)),
     )
 
 
@@ -99,9 +98,9 @@ def load_lineage_spine(stores: Stores, campaign_id: str) -> list[SpineCycle]:
     because a layer waits on this to fork and the four scalars per round are all it needs."""
     cycles: list[SpineCycle] = []
     for entry in stores.campaigns.enumerate_cycles():
-        if entry["campaign_id"] != campaign_id:
+        if entry.campaign_id != campaign_id:
             continue
-        cid = entry["cycle_id"]
+        cid = entry.cycle_id
         cdir = cycle_dir_for(stores.base_dir, CycleHop(campaign_id=campaign_id, cycle_id=cid))
         index = read_json_tolerant(CycleLayout(cdir).manifest)
         if not isinstance(index, dict):
@@ -209,16 +208,15 @@ def load_mask_record(
     campaign_id: str,
     samples: frozenset[int] | None = None,
     *,
-    lens: str | None,
+    lens: Lens | None,
     with_replay: bool = False,
 ) -> MaskRecord:
-    """Every cycle, each arm graded under *lens* — a ``per_cell`` formula, or ``dials:`` weights
-    realized against this campaign's origin — or its cycle's own scorer.
-    *with_replay* reads through the TYPED loader, which raises on a document the models reject."""
+    """Every cycle, each arm graded under *lens* (``score:`` / ``dials:``) or, with none or an
+    ``abort:`` one, its cycle's own scorer. *with_replay* reads through the TYPED loader, which raises."""
     campaign = stores.campaigns.load_campaign(campaign_id)
     if campaign is None:
         raise NotFoundError(f"Campaign '{campaign_id}' not found")
-    entries = [e for e in stores.campaigns.enumerate_cycles() if e["campaign_id"] == campaign_id]
+    entries = [e for e in stores.campaigns.enumerate_cycles() if e.campaign_id == campaign_id]
 
     # Pass 1: each cycle's round files + tree edges + the crowns its LEDGER recorded. The rows
     # come from the document because nothing else holds them; the election does not.
@@ -227,7 +225,7 @@ def load_mask_record(
     crowns: dict[str, dict[int, str]] = {}
     decisions: dict[str, dict[int, list[dict[str, Any]]]] = {}
     for e in entries:
-        cid = e["cycle_id"]
+        cid = e.cycle_id
         cdir = cycle_dir_for(stores.base_dir, CycleHop(campaign_id=campaign_id, cycle_id=cid))
         index = read_json_tolerant(CycleLayout(cdir).manifest)
         if not isinstance(index, dict):
@@ -264,7 +262,8 @@ def load_mask_record(
     for cid in files:
         _order(cid)
 
-    if lens and lens.startswith(LENS_DIALS_PREFIX):
+    formula = lens.body if lens is not None and lens.kind == "score" else None
+    if lens is not None and lens.kind == "dials":
         # The campaign's ONE origin: round 0 of the cycle nothing was forked from.
         root = next((cid for cid in order if edges[cid][0] not in files), None)
         origin_file = files[root].get(0, {}) if root is not None else {}
@@ -273,11 +272,11 @@ def load_mask_record(
             for rows in (origin_file.get("all_candidate_results") or {}).values()
             for row in rows
         ]
-        lens = realize_dials(
-            parse_dials(lens.removeprefix(LENS_DIALS_PREFIX)),
+        formula = realize_dials(
+            parse_dials(lens.body),
             _dial_anchors(resolve_campaign_config(stores, campaign, None), origin_rows),
         )
-    overrides = lens_overrides(lens)
+    overrides = lens_overrides(formula)
 
     # Pass 2: thread the carried-forward winner's ROWS. A round's parent is the winner at the end
     # of the prior round; when it holds (no candidate winner) it carries unchanged. Rows rather
@@ -338,7 +337,7 @@ def load_mask_record(
                 cycle_id=cid, parent_cycle_id=parent, fork_from_round=from_round, rounds=rounds
             )
         )
-    return MaskRecord(cycles=cycles, criterion=lens)
+    return MaskRecord(cycles=cycles, criterion=formula)
 
 
 __all__ = [

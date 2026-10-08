@@ -65,7 +65,7 @@ by its wall clock against a fixed anchor; the reason is the comment beside it in
   `floor_reason`, a collapsed arm is dropped from the election and eliminated at PoBB.
 - **One estimator per subtraction.** Reading the two ends of one difference through different estimators
   makes the shrinkage on the anchor move with the arm — a bias, which unlike noise does not average out over
-  a panel. `_calibrate_delta_ruler` reads θ_C0 through the same conditional estimator on both branches. The
+  a panel. `calibrate_delta_ruler` reads θ_C0 through the same conditional estimator on both branches. The
   residual anchor *wander* is measured and not worth buying out: within-seed r = +0.75, ~2% of the delta's
   variance for a ~3% spend increase.
 

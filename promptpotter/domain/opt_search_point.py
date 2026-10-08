@@ -18,10 +18,9 @@ from pydantic import ConfigDict, Field
 
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.pipeline_overlay import fold_output_contract
-from promptpotter.domain.pipeline_schema import stable_hash
-from promptpotter.domain.search_point import JobSearchPoint, SearchPoint, TaskDecomposition
+from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.shared.hashing import shapes_optimizer_prompt
+from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
@@ -67,7 +66,7 @@ def _check_render_order(cls: type[PromptTemplate]) -> None:
         )
 
 
-class PromptTemplate(SearchPoint):
+class PromptTemplate(StrictModel):
     """The scheme shared by job + optimizer prompts: the six ``render()`` decomposition fields
     (``PROMPT_STRING_FIELDS``)."""
 

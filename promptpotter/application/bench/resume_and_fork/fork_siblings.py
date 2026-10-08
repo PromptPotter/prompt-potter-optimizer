@@ -46,9 +46,9 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "ForkResult",
-    "_mint_fork",
     "cleanup_stub_fork_if_empty",
     "declare_steered_values",
+    "mint_fork",
     "mint_operator_fork",
 ]
 
@@ -149,7 +149,7 @@ def _fork_suffix(*parts: str) -> str:
     return hashlib.sha256("|".join((*parts, stamp)).encode()).hexdigest()[:8]
 
 
-def _mint_fork(
+def mint_fork(
     campaign_store: CampaignStore,
     parent: CycleHop,
     session_id: str,
@@ -164,12 +164,12 @@ def _mint_fork(
         payload = payload.model_copy(update={"from_round": fork_from_round})
     if payload.trigger in _ZERO_ROUND_TRIGGERS and fork_from_round != 0:
         raise ValueError(
-            f"_mint_fork({payload.trigger.value}) branches from the origin and lifts no parent "
+            f"mint_fork({payload.trigger.value}) branches from the origin and lifts no parent "
             f"round, so fork_from_round must be 0; got {fork_from_round}"
         )
     if payload.trigger in _REBASE_TRIGGERS:
         if payload.trigger is ForkTrigger.SCORING_DIVERGENCE and surviving_rounds is None:
-            raise ValueError("_mint_fork(SCORING_DIVERGENCE) requires surviving_rounds")
+            raise ValueError("mint_fork(SCORING_DIVERGENCE) requires surviving_rounds")
         if surviving_rounds is None:
             # L2_REBASE / L3_REBASE / OPERATOR_REWIND: lift rounds 0..fork_from_round-1
             # from the parent's round files.
@@ -330,13 +330,17 @@ def mint_operator_fork(
     stores: Stores,
     hop: CycleHop,
     from_round: int,
-    from_candidate_id: str,
     seed: CycleSeed,
     steered_by: str,
+    from_candidate_id: str = "",
     keep_rounds: bool = False,
+    reason: str = "",
 ) -> str:
     """The operator-initiated fork entry; no parallel creation path exists. Every operator fork is a clean
     offshoot carrying *seed* — recorded, not forbidden: operators may act, and we record that they did.
+
+    An offshoot naming no candidate branches from the parent's C0, the origin candidate of its
+    round 0 — an entry point with no searchpoint to point at still inherits that measurement.
 
     ``keep_rounds`` picks which of the two the act is. Default is the OFFSHOOT: branch from the
     origin, re-score the edited searchpoint, number rounds from 1 — the steer that starts over from
@@ -344,7 +348,6 @@ def mint_operator_fork(
     lifted and the fork continues at N under the seed's overrides. That is the shape a mask
     preview earns — the preview names the round the record stops holding, and this is the fork that
     keeps everything before it."""
-    parent_index = stores.campaigns.load(hop) or {}
     campaign = stores.campaigns.load_campaign(hop.campaign_id)
     seed = declare_steered_values(
         seed, campaign.config.get("optimizer_narrowing") if campaign else None
@@ -357,9 +360,14 @@ def mint_operator_fork(
             "keep_rounds lifts the parent's round 0 as its origin, so the seed must not "
             "declare origin_prompt_fields; fork without keep_rounds to start from an edited origin"
         )
+    if not from_candidate_id and not keep_rounds:
+        origin_round = stores.campaigns.load_round_file(hop, 0)
+        if origin_round is not None and origin_round.candidate_scores:
+            from_candidate_id = origin_round.candidate_scores[0].candidate_id
     spec = ForkSpec(
         trigger=ForkTrigger.OPERATOR_REWIND if keep_rounds else ForkTrigger.OPERATOR_STEERED,
-        reason=(
+        reason=reason
+        or (
             f"operator-applied from round {from_round} of {hop.cycle_id}"
             if keep_rounds
             else f"operator-steered fork from {hop.cycle_id}"
@@ -369,10 +377,10 @@ def mint_operator_fork(
         from_candidate_id=from_candidate_id or None,
         seed=seed,
     )
-    return _mint_fork(
+    return mint_fork(
         stores.campaigns,
         hop,
-        str(parent_index.get("parent_session_id", "")),
+        stores.campaigns.session_id_of(hop),
         from_round if keep_rounds else 0,
         spec,
     )

@@ -4,10 +4,10 @@ import { memo, useMemo } from "react";
 // `Bar` wrapper types its data as bar-only. Both controllers register in `lib/theme.ts`.
 import { Chart } from "react-chartjs-2";
 import { ensureChartRegistered, getCss, useThemeVersion } from "@/lib/theme";
-import { partialPanels, type DisplayMetric } from "@/lib/derivations";
+import type { DisplayMetric } from "@/lib/derivations";
 import type { MeasuredUnit } from "@/lib/api/types";
-import { fmtSigned, unitCount } from "@/lib/format";
-import { NOT_SEPARABLE, liftSeparates } from "@/lib/fitness";
+import { fmtSigned, fmtTheta, unitCount } from "@/lib/format";
+import { NOT_SEPARABLE } from "@/lib/fitness";
 import type { CandidateView } from "@/lib/types";
 import {
   activeSeries,
@@ -336,14 +336,17 @@ export const FitnessChart = memo(function FitnessChart({
     return null;
   }, [views]);
 
-  // The served lift, claimed only where its 95% interval excludes 0.
+  // The served lift, claimed only where its 95% interval is served clear of 0.
   const crown = useMemo(() => {
     const v = parentIdx == null ? undefined : views[parentIdx];
-    const { referenceLift: lift, referenceLiftCiLo: lo, referenceLiftCiHi: hi } =
-      v ?? {};
-    if (lift == null || lo == null || hi == null || (lo <= 0 && hi >= 0)) return "";
-    return ` ${fmtSigned(lift, 2)}`;
+    if (v?.referenceLift == null || v.referenceLiftSide == null || v.referenceLiftSide === "spans")
+      return "";
+    return ` ${fmtSigned(v.referenceLift, 2)}`;
   }, [views, parentIdx]);
+
+  // Painted only where it is NEWS — a served `panel_cut`; the tooltip footer is the denominator
+  // of record.
+  const cutCounts = useMemo(() => views.map((v) => (v.panelCut ? v.n_samples : null)), [views]);
 
   const data = useMemo<ChartData<"bar" | "line">>(() => {
     const bars = active.filter((s) => s.kind === "bar").length;
@@ -470,7 +473,7 @@ export const FitnessChart = memo(function FitnessChart({
               const se = views[idx]?.theta_se;
               // Named "se", not ±: the drawn whisker is the wider 95% band.
               const tail = typeof se === "number" ? `, se ${se.toFixed(2)}` : "";
-              lines.push(`ability θ ${theta.toFixed(2)}${tail} (elected on θ, not accuracy)`);
+              lines.push(`ability θ ${fmtTheta(theta)}${tail} (elected on θ, not accuracy)`);
             }
             const ciLo = views[idx]?.meanFitnessCiLo;
             const ciHi = views[idx]?.meanFitnessCiHi;
@@ -481,7 +484,7 @@ export const FitnessChart = memo(function FitnessChart({
             const lLo = views[idx]?.referenceLiftCiLo;
             const lHi = views[idx]?.referenceLiftCiHi;
             if (lift != null && lLo != null && lHi != null) {
-              const flat = liftSeparates(lLo, lHi) ? "" : ` — ${NOT_SEPARABLE}`;
+              const flat = views[idx]?.referenceLiftSide === "spans" ? ` — ${NOT_SEPARABLE}` : "";
               lines.push(
                 `accuracy lift vs parent ${fmtSigned(lift)} [${fmtSigned(lLo)}, ${fmtSigned(lHi)}]${flat}`,
               );
@@ -494,14 +497,14 @@ export const FitnessChart = memo(function FitnessChart({
           },
         },
       },
-      barCaps: { counts: partialPanels(views), parent: parentIdx, crown },
+      barCaps: { counts: cutCounts, parent: parentIdx, crown },
       divergenceLine: { index: divergenceBoundary },
       inFlightPulse: { index: inFlightIndex },
       ciWhisker: { bands },
       xBridge: { onGeometry },
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [themeVersion, ctx, rotate, views, selectedKey, onSelect, divergenceBoundary, inFlightIndex, showAbility, parentIdx, crown, onGeometry, bands]);
+  }), [themeVersion, ctx, rotate, views, selectedKey, onSelect, divergenceBoundary, inFlightIndex, showAbility, parentIdx, crown, cutCounts, onGeometry, bands]);
 
   return (
     <div className="fitness-chart-frame">

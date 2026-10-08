@@ -14,12 +14,11 @@ from __future__ import annotations
 import inspect
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
-from functools import partial
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from promptpotter.application.scoring.classification import scoreable_rows
 from promptpotter.application.scoring.formula.compiler import CELL_INTRINSIC_NAMES, CELL_TERMS
-from promptpotter.domain.pipeline_schema import NodeType
+from promptpotter.domain.pipeline_schema import NodeRole
 from promptpotter.domain.results_health import is_degraded
 from promptpotter.domain.scoring import (
     all_verifier_graded,
@@ -44,7 +43,6 @@ __all__ = [
     "all_evaluators",
     "cell_terms_meta",
     "materialize_round_values",
-    "materialize_row_derivable",
     "materialize_sample_values",
     "resolve_cell_formula",
     "validate_campaign_evaluator",
@@ -58,12 +56,12 @@ def compute_accuracy(*, results: list[QueryMeasurement], **_: Any) -> float | No
 
     **With no scoreable row left there is no rate at all.** Scoring it 0.0 invents the worst
     possible measurement out of no measurement, and at L4, where a cell is a whole inner campaign,
-    that reads as "drove the inner loop maximally DOWN". The composite keeps its 0.0 floor — that
-    one is the elected quantity and ``total == 0`` is the marker beside it — but the RATE may not."""
+    that reads as "drove the inner loop maximally DOWN". The composite beside it is absent on the
+    same rows (``metrics.py::CellFold``)."""
     scoreable = scoreable_rows(results)
     if not scoreable:
         return None
-    return sum(r.get("fitness", 0.0) for r in scoreable) / len(scoreable)
+    return sum(r["fitness"] for r in scoreable) / len(scoreable)
 
 
 def compute_error_rate(*, results: list[QueryMeasurement], **_: Any) -> float | None:
@@ -82,7 +80,6 @@ def _compute_recall(
     *,
     results: list[QueryMeasurement],
     node: PipelineNode,
-    candidate_key: str,
     **_: Any,
 ) -> float | None:
     def _step_ran(r: QueryMeasurement) -> bool:
@@ -96,9 +93,7 @@ def _compute_recall(
         return None
     found = 0
     for r in scoped:
-        pd = r.get("pipeline_data") or {}
-        raw = pd.get(candidate_key)
-        candidates: list[Any] = list(raw) if isinstance(raw, list) else []
+        candidates = node.ranking_in(r.get("pipeline_data") or {}) or []
         gt = r.get("ground_truth", "")
         if any(extract_item_label(c) == gt for c in candidates):
             found += 1
@@ -141,8 +136,8 @@ def has_limit_node(schema: PipelineSchema) -> bool:
     return bool(_limit_nodes(schema))
 
 
-def _retrieval_shortfall_for_result(
-    result: QueryMeasurement, schema: PipelineSchema
+def compute_retrieval_shortfall_per_sample(
+    *, result: QueryMeasurement, schema: PipelineSchema, **_: Any
 ) -> float | None:
     pd = result.get("pipeline_data") or {}
     ratios: list[float] = []
@@ -157,25 +152,15 @@ def _retrieval_shortfall_for_result(
     return sum(ratios) / len(ratios)
 
 
-def compute_retrieval_shortfall_per_sample(
-    *, result: QueryMeasurement, schema: PipelineSchema | None = None, **_: Any
-) -> float | None:
-    if schema is None:
-        return None
-    return _retrieval_shortfall_for_result(result, schema)
-
-
-def compute_mean_retrieval_shortfall(
-    *, results: list[QueryMeasurement], schema: PipelineSchema, **_: Any
-) -> float | None:
-    values: list[float] = []
-    for r in results:
-        v = _retrieval_shortfall_for_result(r, schema)
-        if v is not None:
-            values.append(v)
-    if not values:
-        return None
-    return sum(values) / len(values)
+def compute_mean_retrieval_shortfall(*, results: list[QueryMeasurement], **_: Any) -> float | None:
+    """The mean of what each cell BANKED (``retrieval_shortfall``, written at measure time against
+    the limits that cell ran under), never re-derived against this round's schema."""
+    values = [
+        float(banked)
+        for r in results
+        if isinstance(banked := (r.get("pipeline_data") or {}).get("retrieval_shortfall"), float)
+    ]
+    return sum(values) / len(values) if values else None
 
 
 @dataclass(frozen=True)
@@ -192,18 +177,16 @@ class Evaluator:
     # `judges/CLAUDE.md` § The seam says why a round materializer may never await.
     # `high` = larger is better; `low` = larger is worse (the webapp's mask editor direction-corrects).
     direction: Literal["high", "low"] = "high"
-    node_type: NodeType | None = None
-    # An extra structural requirement no node type can express (``has_limit_node``). The declared
-    # ``node_type`` is NOT restated here — ``applies`` asks it.
+    node_role: NodeRole | None = None
+    # An extra structural requirement no node role can express (``has_limit_node``). The declared
+    # ``node_role`` is NOT restated here — ``applies`` asks it.
     requires: Callable[[PipelineSchema], bool] = field(default=lambda _schema: True)
 
     def applies(self, schema: PipelineSchema) -> bool:
-        """Has this evaluator anything to measure on ``schema``. The declared ``node_type`` IS half
+        """Has this evaluator anything to measure on ``schema``. The declared ``node_role`` IS half
         the test, asked here rather than re-spelled per entry as a lambda — a typo in such a copy
         is an evaluator that silently never renders."""
-        if self.node_type is not None and not any(
-            n.node_type == self.node_type for n in schema.nodes
-        ):
+        if self.node_role is not None and not any(n.role == self.node_role for n in schema.nodes):
             return False
         return self.requires(schema)
 
@@ -211,20 +194,14 @@ class Evaluator:
     # backend rather than 0.0. Declared rather than derived because ``applies`` sees the schema
     # alone and the fact lives in the ROWS (`connectors/CLAUDE.md` § The answer shape).
     needs_labels: bool = False
-    # True ⇒ a pure function of the persisted per-sample rows alone (``compute`` needs
-    # only ``results`` — no ``schema`` / ``node``), so ``candidate_report.py`` refreshes exactly
-    # this subset from the rows over a snapshot off disk (``materialize_row_derivable``). The
-    # complement (recall / cache / *_shortfall) needs the unpersisted schema.
-    from_rows: bool = False
 
 
 _REGISTRY: list[Evaluator] = [
     Evaluator(
         name="accuracy",
-        description="Mean per-sample score across non-deprecated samples.",
+        description="Mean per-sample score across the samples that carry a verdict.",
         scope="per_round",
         compute=compute_accuracy,
-        from_rows=True,
     ),
     Evaluator(
         name="error_rate",
@@ -232,7 +209,6 @@ _REGISTRY: list[Evaluator] = [
         scope="per_round",
         compute=compute_error_rate,
         direction="low",
-        from_rows=True,
     ),
     Evaluator(
         name="degraded_rate",
@@ -240,22 +216,21 @@ _REGISTRY: list[Evaluator] = [
         scope="per_round",
         compute=compute_degraded_rate,
         direction="low",
-        from_rows=True,
     ),
     Evaluator(
         name="source_recall",
         description="Fraction of queries where GT appears in a candidate_source node's output.",
         scope="per_round",
-        compute=partial(_compute_recall, candidate_key="candidate_ranking"),
-        node_type=NodeType.CANDIDATE_SOURCE,
+        compute=_compute_recall,
+        node_role=NodeRole.CANDIDATE_SOURCE,
         needs_labels=True,
     ),
     Evaluator(
         name="candidate_recall",
-        description="Fraction of queries where GT appears in a ranker node's final_ranking.",
+        description="Fraction of queries where GT appears in a ranker node's output.",
         scope="per_round",
-        compute=partial(_compute_recall, candidate_key="final_ranking"),
-        node_type=NodeType.RANKER,
+        compute=_compute_recall,
+        node_role=NodeRole.RANKER,
         needs_labels=True,
     ),
     Evaluator(
@@ -263,7 +238,7 @@ _REGISTRY: list[Evaluator] = [
         description="Fraction of queries resolved by a cache node (non-null timing).",
         scope="per_round",
         compute=compute_cache_hit_rate,
-        node_type=NodeType.CACHE,
+        node_role=NodeRole.CACHE,
     ),
     Evaluator(
         name="retrieval_shortfall",
@@ -304,19 +279,12 @@ def _validate_evaluator(ev: Evaluator, origin: str) -> None:
             f"paths that re-derive over archived rows, so an awaiting compute re-bills the whole "
             f"measurement history on every refresh. Measure once at per_sample scope instead."
         )
-    if ev.scope == "per_sample":
-        if ev.name in CELL_INTRINSIC_NAMES:
-            raise ValueError(
-                f"{where}: the name collides with a term `cell_namespace` binds itself, so the "
-                f"value would be silently dropped by the pipeline_data splat and no formula could "
-                f"reach it. Pick another name."
-            )
-        if ev.from_rows:
-            raise ValueError(
-                f"{where}: `from_rows` is a per_round declaration — `materialize_row_derivable` "
-                f"skips every per_sample entry — so setting it here is dead config that reads as "
-                f"protection."
-            )
+    if ev.scope == "per_sample" and ev.name in CELL_INTRINSIC_NAMES:
+        raise ValueError(
+            f"{where}: the name collides with a term `cell_namespace` binds itself, so the "
+            f"value would be silently dropped by the pipeline_data splat and no formula could "
+            f"reach it. Pick another name."
+        )
 
 
 def validate_campaign_evaluator(ev: Evaluator, origin: str) -> None:
@@ -400,10 +368,10 @@ def _concrete_round_entries(
             continue
         if not ev.applies(schema):
             continue
-        if ev.node_type is None:
+        if ev.node_role is None:
             out.append((ev.name, ev, None))
             continue
-        matching = [n for n in schema.nodes if n.node_type == ev.node_type]
+        matching = [n for n in schema.nodes if n.role == ev.node_role]
         namespace = len(matching) > 1
         for node in matching:
             display_name = f"{node.name}_{ev.name}" if namespace else ev.name
@@ -431,18 +399,6 @@ def materialize_round_values(
     return values
 
 
-def materialize_row_derivable(results: list[QueryMeasurement]) -> dict[str, float]:
-    """The per-round evaluators that are pure functions of the persisted rows (``Evaluator.from_rows``)."""
-    out: dict[str, float] = {}
-    for ev in _REGISTRY:
-        if ev.scope != "per_round" or not ev.from_rows:
-            continue
-        value = _round_value(ev, ev.compute(results=results))
-        if value is not None:
-            out[ev.name] = float(value)
-    return out
-
-
 async def materialize_sample_values(
     schema: PipelineSchema,
     result: QueryMeasurement,
@@ -467,7 +423,7 @@ async def materialize_sample_values(
     otherwise overwrite a package name silently, per cell.
 
     The caller writes these TOP-LEVEL into ``pipeline_data``, which is what makes them addressable
-    from a scoring formula — see :func:`materialize_row_derivable` for the complement."""
+    from a scoring formula."""
     values: dict[str, float] = {}
     for ev in (*_REGISTRY, *extra):
         if ev.scope != "per_sample":

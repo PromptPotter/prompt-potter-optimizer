@@ -23,7 +23,7 @@ from promptpotter.domain.l4.proxies import (
     PARENT_LEVEL_SE_KEY,
 )
 from promptpotter.domain.pipeline_schema import WebSpendBound
-from promptpotter.domain.results_health import classify_result, terminal_node
+from promptpotter.domain.results_health import classify_result, is_deprecated, terminal_node
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import (
     CellScorer,
@@ -123,7 +123,7 @@ def interpolate_pipeline_params(
     return out
 
 
-__all__ = ["execute_stale_data_protocol", "measure_sample", "needs_rerun"]
+__all__ = ["execute_stale_data_protocol", "measure_sample"]
 
 # Wire-response keys always kept on pipeline_data, whatever the pipeline schema.
 # ``reasoning_trace`` is the task model's chain-of-thought (head-capped at the backend); the
@@ -483,6 +483,19 @@ def _classify_http_error(exc: httpx.HTTPStatusError) -> tuple[ErrorCategory, str
     return ErrorCategory.SERVER, f"HTTP {code} — backend transient error{tail}"
 
 
+def _without_identity(
+    pipeline_params: dict[str, Any], identity_keys: Mapping[str, frozenset[str]]
+) -> dict[str, Any]:
+    """What a backend is SENT. The identity layer says what a cell was measured UNDER and is no
+    backend's tunable, so it stops here — before the bound, the envelope and the wire adapter."""
+    return {
+        node: {k: v for k, v in cfg.items() if k not in owned}
+        if (owned := identity_keys.get(node)) and isinstance(cfg, dict)
+        else cfg
+        for node, cfg in pipeline_params.items()
+    }
+
+
 async def measure_sample(
     sample: Sample,
     session: Session,
@@ -495,7 +508,9 @@ async def measure_sample(
     ground_truth = sample.ground_truth or ""
     pipeline_schema = session.pipeline_schema
     try:
-        wire_params = interpolate_pipeline_params(pipeline_params or {}, sample.model_dump())
+        wire_params = interpolate_pipeline_params(
+            _without_identity(pipeline_params or {}, session.identity_keys), sample.model_dump()
+        )
         data, envelope = await _send_cell(sample, session, wire_params)
 
         # The head of the TERMINAL ranker's output, read through the schema rather than a
@@ -570,7 +585,7 @@ async def _send_cell(
     client = session.backend_client
     bound = await cell_bound(session, wire_params)
     envelope = CellEnvelope(
-        client.cell_envelope_s(query, wire_params), label=f"{sample.id}:{query[:40]}"
+        client.cell_envelope_s(sample, wire_params), label=f"{sample.id}:{query[:40]}"
     )
     # Created UNCONDITIONALLY and OUTSIDE the envelope scope: this loop carries the envelope's
     # only sighting of a machine sleep, and its teardown must not unwind inside the timeout.
@@ -588,7 +603,7 @@ async def _send_cell(
         async with envelope:
             try:
                 resp = await client.run_query(
-                    query,
+                    sample,
                     pipeline_params=wire_params,
                     bound=bound,
                     billed=cell_billing(session.pipeline_schema, wire_params),
@@ -633,8 +648,7 @@ def _observations(
     data: Mapping[str, Any], ranked: list[Any], pipeline_schema: PipelineSchema
 ) -> dict[str, Any]:
     """What the backend reported for this cell, as ``pipeline_data`` opens."""
-    # `result_ranking` is the canonical derived terminal ranking the scorer + find_gt_rank
-    # read; the raw per-node observation keys are copied below for their own diagnostics.
+    # `result_ranking` is the canonical derived terminal ranking the scorer reads; the raw per-node observation keys are copied below for their own diagnostics.
     pd: dict[str, Any] = {"result_ranking": ranked}
     for key in pipeline_schema.observation_keys | _INFRA_KEYS:
         val = data.get(key)
@@ -696,16 +710,6 @@ def _unmeasured(sample: Sample, exc: Exception) -> QueryMeasurement:
     return _error_result(sample, failure, category=ErrorCategory.UNKNOWN)
 
 
-def find_gt_rank(result: Mapping[str, Any]) -> int | None:
-    """Find ground truth rank in the terminal ranking. Returns 1-indexed or None."""
-    gt = result.get("ground_truth", "")
-    if not gt:
-        return None
-    pd = result.get("pipeline_data") or {}
-    rank, _ = rank_ground_truth(pd.get("result_ranking", []), result.get("predicted") or "", gt)
-    return rank
-
-
 def compare_rerun(
     cached_result: Mapping[str, Any], rerun_result: Mapping[str, Any], scorer: CellScorer
 ) -> dict[str, Any]:
@@ -714,8 +718,8 @@ def compare_rerun(
     rerun_hit = is_hit(rerun.get("fitness"))
     hit_change = f"{'HIT' if cached_hit else 'MISS'}->{'HIT' if rerun_hit else 'MISS'}"
 
-    cached_rank = find_gt_rank(cached_result)
-    rerun_rank = find_gt_rank(rerun_result)
+    cached_rank = cached_result.get("ground_truth_rank")
+    rerun_rank = rerun_result.get("ground_truth_rank")
     rank_change = (
         f"{cached_rank}->{rerun_rank}"
         if cached_rank is not None and rerun_rank is not None
@@ -740,6 +744,8 @@ def _rerun_would_repeat_token_budget_failure(
     # membership tests are string matches on ``f"{node}:…"``, so a second spelling of the node
     # makes them MISS silently and the ladder pays for a rerun guaranteed to fail identically.
     node = terminal_node(cached_result)
+    if node is None:
+        return False
     cl = classify_result(cached_result)
     budget_exhausted = (
         f"{node}:reasoning_budget_exhausted" in cl.infra_codes
@@ -765,14 +771,7 @@ def _rerun_would_repeat_token_budget_failure(
     return int(rerun_max_tokens) <= cached_completion
 
 
-def needs_rerun(row: Mapping[str, Any]) -> bool:
-    """Whether the stale-data ladder re-sends a row: an infra or fatal code, never a bare warning.
-    A schema repair that went on to answer leaves an advisory and a gradeable row, which replays."""
-    return classify_result(row).is_fatal
-
-
 async def execute_stale_data_protocol(
-    protocol_steps: list[str],
     sample: Sample,
     cached_result: dict[str, Any],
     session: Session,
@@ -784,9 +783,9 @@ async def execute_stale_data_protocol(
     Observation counts come from ``sample_index``, constant within a round — no mutable state."""
     result = cached_result
 
-    for step in protocol_steps:
+    for step in STALE_DATA_LOAD_PROTOCOL:
         if pause_requested(session):
-            return {**result, "cached": result.get("cached", False)}, "paused"
+            return result, "paused"
         if step == "rerun":
             historical = sample_index.degradation_count(sample.id) if sample_index else 0
             effective_count = historical + 1
@@ -812,7 +811,7 @@ async def execute_stale_data_protocol(
             result["rerun_comparison"] = compare_rerun(
                 cached_result, result, session.scoring.require_scorer()
             )
-            if not needs_rerun(result):
+            if not is_deprecated(result):
                 return result, "rerun"
 
         elif step == "sampleswitch":

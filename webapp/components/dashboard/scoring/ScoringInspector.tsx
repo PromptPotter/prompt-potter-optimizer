@@ -1,7 +1,7 @@
 "use client";
 import { useMemo } from "react";
 import { useRoundRows } from "@/lib/hooks/useRoundRows";
-import { useDashboard } from "@/lib/hooks/useDashboard";
+import { useCycleStream } from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";
 import type { SelectedCandidate } from "@/lib/types";
 import {
@@ -26,7 +26,7 @@ interface Props {
 // Dashboard HOST for `shell/searchpoint/SearchpointDrillIn`: it owns only the streaming cycle, the
 // round in flight and the fork verb. No stitch (`useRoundRows`): the live round never fetches its file.
 export function ScoringInspector({ selected, onClose }: Props) {
-  const { dash } = useDashboard();
+  const { dash } = useCycleStream();
   const cv = useConnector();
   const { viewedPath } = useWorkspace();
   const round = useRoundRows(selected?.round ?? null);

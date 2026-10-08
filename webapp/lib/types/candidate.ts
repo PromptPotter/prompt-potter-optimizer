@@ -1,7 +1,7 @@
 // The one per-candidate row behind every surface that lists, plots or selects candidates. Only
 // `lib/derivations/round-candidates.ts` merges origin, closed and in-flight rows into it.
 
-import type { AbilityReading, ArmOutcome, VerifyReading } from "@/lib/api/types";
+import type { AbilityReading, ArmOutcome, LineageNode, VerifyReading } from "@/lib/api/types";
 
 export type CandidateSource = "history" | "inflight";
 
@@ -11,7 +11,7 @@ export interface CandidateRow {
   key: string;
   round: number;
   idx: number;
-  // `r${round}_${idx}` when the round summary has not stamped an id yet.
+  // The lineage id on a closed row; positional (`liveCandidateId`) on one still in flight.
   candidate_id: string;
   label: string;
   accuracy: number | null;
@@ -57,6 +57,11 @@ export interface ElectedRow extends CandidateRow {
 
 // ONE array feeds both the bars and the dendrogram beneath them, so they cannot disagree.
 export interface CandidateView extends CandidateRow {
+  // Served (`reference_lift_side`): which side of 0 the lift interval sits on. `null` where the
+  // candidate carries no interval.
+  referenceLiftSide: LineageNode["reference_lift_side"];
+  // Served (`panel_cut`): stopped short of its round's panel, by its own budget or an eliminator.
+  panelCut: boolean;
   // `null` with no `score:` lens, or where the candidate is unscorable under it.
   lensValue: number | null;
   compositeRank: number | null;
@@ -66,6 +71,9 @@ export interface CandidateView extends CandidateRow {
   // Never inferred from the round closing: the election decides the adapters' whole pass
   // earlier, so only this may explain an absent crown.
   electionPending: boolean;
+  // Served (`LineageNode.crown`): how a selected candidate advanced. `null` on every other bar,
+  // and on a selected one until its round closes.
+  crown: LineageNode["crown"];
   // This candidate's last `verify`, as served: the level on cells its rounds never bought.
   verify?: VerifyReading;
   // This candidate read on the held-out bench set. `rows` is set only while its pass is still

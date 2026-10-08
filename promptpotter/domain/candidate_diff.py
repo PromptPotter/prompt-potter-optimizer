@@ -36,7 +36,6 @@ __all__ = [
     "idea_fingerprint",
     "parent_param_value",
     "same_idea",
-    "variant_prose_written",
 ]
 
 
@@ -130,21 +129,6 @@ def changed_words(parent: str, child: str) -> str:
         if j2 > j1:
             spans.append(f'+"{" ".join(new[j1:j2])}"')
     return " ".join(spans)
-
-
-def variant_prose_written(variant: dict[str, Any]) -> dict[str, str]:
-    """A prose mutation rides two different carriers depending on whether the campaign evolves a
-    target prompt or a node's own template — reading one answers inverted on the other kind."""
-    written = {
-        f: str(v)
-        for f, v in (variant.get("prompt_fields_updates") or {}).items()
-        if f in PROMPT_STRING_FIELDS and v
-    }
-    for n, cfg in node_config_items(variant.get("pipeline_overlay")):
-        for p, v in cfg.items():
-            if p in PROMPT_STRING_FIELDS and v:
-                written[f"{n}.{p}"] = str(v)
-    return written
 
 
 # --- the IDEA a delta carries ----------------------------------------------
@@ -249,7 +233,7 @@ def idea_fingerprint(values: Iterable[str]) -> frozenset[str]:
     ``changes_description`` instead it sits at chance, so build no successor on that prose.
 
     **Measured miss rate, and the successor is HELD rather than owed:** content-word overlap caught
-    **0 of 15** real re-proposal pairs on the banked corpus, so ``l1_n_repeat`` reads 0 while the
+    **0 of 15** real re-proposal pairs on the banked corpus, so a round's ``repeat_variant`` count reads 0 while the
     generator restates one hypothesis indefinitely — worse than no counter, because a 0 reads as
     hygiene. Every fix is a NEW mechanism (embeddings, an LLM judge per pair) and the closing phase
     opens none. The cheaper twin is already planned — ``l1_generate`` semantic widening, owed

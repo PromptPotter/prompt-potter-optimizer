@@ -9,14 +9,15 @@ import threading
 import time
 from typing import NamedTuple
 
+from pydantic import Field
+
 from promptpotter.application.campaign_config import CampaignConfig
-from promptpotter.application.jobs.capacity import resolve_run_capacity
 from promptpotter.application.jobs.registry import JobRegistry
-from promptpotter.config.paths import default_jobs_dir
 from promptpotter.config.settings import settings
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.launch_limits import HeldLimits, LaunchLimits, RoundsCap
 from promptpotter.domain.spend import BudgetChange, SpendCeilings, declare_ceiling
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.identity.migration import registered_user_id
 from promptpotter.infrastructure.identity.paths import default_identity_paths
 from promptpotter.infrastructure.llm.spend_book import SpendBook, unbounded_spend_book
@@ -33,7 +34,6 @@ from promptpotter.shared.errors import PayloadInvalidError, PotterError
 from promptpotter.shared.identity import (
     CAMPAIGN_BUDGET_CAP,
     TERMINAL_IDENTITY_ID,
-    claim_email,
     has_capability,
 )
 
@@ -204,6 +204,69 @@ def read_account_wallet(
     return AccountWallet(spent, ceilings, headroom, history=history)
 
 
+class QuotaStatus(StrictModel):
+    """An account's usage against the limits its next launch is gated on.
+
+    The spend and token pairs are LIFETIME, used-ever against the account's total ceilings; the
+    campaign pair is per-day, because one is an allowance and the other an abuse limit.
+    """
+
+    spend_used_total_usd: float = Field(
+        description="What the providers BILLED this account, over its whole life. Never an "
+        "estimate: a send whose bill never came is `spend_unreported_usd`, not this."
+    )
+    spend_budget_usd_total: float | None
+    spend_unpriced_tokens: int = Field(
+        description="Billed tokens with no resolvable rate. Non-zero makes "
+        "`spend_used_total_usd` a floor and leaves the token pair as the binding one."
+    )
+    spend_unreported_usd: float = Field(
+        description="The most that sends which ended with no bill (cancelled, timed out, killed "
+        "with a run) may have cost, at the bounds they were admitted on. Not spent — unknown. It "
+        "binds the ceiling beside `spend_used_total_usd`."
+    )
+    tokens_used_total: int
+    token_budget_total: int | None
+    concurrent_running: int
+    concurrent_queued: int = Field(
+        description="This account's launches waiting for a machine slot. They count against "
+        "`max_concurrent_cycles` exactly as running ones do."
+    )
+    max_concurrent_cycles: int
+    max_concurrent_cycles_writable: bool = Field(
+        description="Whether this caller may move `max_concurrent_cycles` through "
+        "`set-concurrent-cycles`. False on the host's key, where the host sets it."
+    )
+    campaigns_today: int
+    max_campaigns_per_day: int
+
+
+def quota_status(*, stores: Stores, job_registry: JobRegistry) -> QuotaStatus:
+    """The counts :func:`check_launch_quotas` gates the next launch on, beside the RESOLVED ceilings
+    (:func:`lifetime_ceilings`). Usage is uncapped, so an account past its ceiling reads its overage."""
+    user = stores.users.get_or_create(
+        user_id=str(stores.identity.user_id),
+        tenant_id=str(stores.identity.tenant_id),
+        email=stores.identity.email,
+    )
+    spent = sum_user_spend(ledgers=account_ledgers(stores.campaigns))
+    ceilings = lifetime_ceilings(user=user, spends_own_key=spends_the_hosts_own_key(stores))
+    return QuotaStatus(
+        spend_used_total_usd=round(spent.used_usd, 6),
+        spend_budget_usd_total=ceilings.usd,
+        spend_unpriced_tokens=spent.unpriced_tokens,
+        spend_unreported_usd=round(spent.unreported_usd, 6),
+        tokens_used_total=spent.used_tokens,
+        token_budget_total=ceilings.tokens,
+        concurrent_running=len(job_registry.list_running(user_id=user.user_id)),
+        concurrent_queued=len(job_registry.list_queued(user_id=user.user_id)),
+        max_concurrent_cycles=user.max_concurrent_cycles,
+        max_concurrent_cycles_writable=concurrent_cycles_writable(stores),
+        campaigns_today=len(job_registry.list_created_today(user_id=user.user_id)),
+        max_campaigns_per_day=user.max_campaigns_per_day,
+    )
+
+
 def admit_launch(
     *,
     declared: SpendCeilings,
@@ -304,7 +367,7 @@ def admit_spend(*, stores: Stores, bucket: str) -> SpendBook:
     wallet = read_account_wallet(
         user=user,
         stores=stores,
-        job_registry=JobRegistry(default_jobs_dir(), capacity=resolve_run_capacity),
+        job_registry=JobRegistry.attach(),
     )
     if wallet.contended:
         raise _contended("what this account has left")
@@ -619,7 +682,7 @@ def set_concurrent_cycles(*, stores: Stores, limit: int) -> User:
     user = stores.users.get_or_create(
         user_id=str(stores.identity.user_id),
         tenant_id=str(stores.identity.tenant_id),
-        email=claim_email(stores.identity),
+        email=stores.identity.email,
     )
     updated = user.model_copy(update={"max_concurrent_cycles": limit})
     stores.users.save(updated)
@@ -652,6 +715,7 @@ def _delegated_spend_ceiling(stores: Stores) -> float | None:
 __all__ = [
     "AccountWallet",
     "QuotaExceededError",
+    "QuotaStatus",
     "admit_launch",
     "admit_spend",
     "check_launch_quotas",
@@ -663,6 +727,7 @@ __all__ = [
     "lifetime_ceilings",
     "next_launch_limits",
     "overrun",
+    "quota_status",
     "read_account_wallet",
     "set_concurrent_cycles",
     "spends_the_hosts_own_key",

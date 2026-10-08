@@ -11,6 +11,8 @@ from promptpotter.shared.hashing import shapes_optimizer_prompt
 if TYPE_CHECKING:
     import httpx
 
+    from promptpotter.domain.sample import Sample
+
 __all__ = [
     "BackendUnreachableError",
     "CellEnvelopeSeconds",
@@ -71,20 +73,19 @@ class WireAdapter(Protocol):
 
 
 class CellEnvelopeSeconds(Protocol):
-    """Pure ``(query, pipeline_params) → seconds`` — the same two arguments :class:`WireAdapter`
-    shapes a request from, because what one cell may spend is decided by the same pair. The NUMBER
-    only; the bound it puts in force is ``application/scoring/cell_envelope.py::CellEnvelope``."""
+    """Pure ``(sample, pipeline_params) → seconds``, the pair a cell is run from. The NUMBER only;
+    the bound it puts in force is ``application/scoring/cell_envelope.py::CellEnvelope``."""
 
     def __call__(
         self,
-        query: str,
+        sample: Sample,
         pipeline_params: dict[str, Any] | None,
     ) -> float: ...
 
 
 class SessionProtocol(Protocol):
-    """Session lifecycle for stateful backends, keeping ``BackendClient`` session-agnostic. Implementations own idempotency
-    and recovery; a backend without sessions passes a no-op."""
+    """Session lifecycle for stateful backends, and how this backend's error replies READ — so
+    ``BackendClient`` parses no backend's envelope. A backend without sessions passes a no-op."""
 
     async def set_terms(
         self,
@@ -93,4 +94,11 @@ class SessionProtocol(Protocol):
         terms: list[str],
     ) -> dict[str, Any]: ...
 
-    async def recover(self, http: httpx.AsyncClient, base_url: str) -> bool: ...
+    async def recover(self, http: httpx.AsyncClient, base_url: str, reply: httpx.Response) -> bool:
+        """Whether *reply*, a 400, reported a lost session that is now re-established — so the
+        request is worth one resend."""
+        ...
+
+    def resend_refused(self, reply: httpx.Response) -> str | None:
+        """The backend's reason where *reply*, a 5xx, says a resend ends the same way."""
+        ...

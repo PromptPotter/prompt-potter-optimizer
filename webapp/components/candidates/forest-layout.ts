@@ -1,7 +1,7 @@
 // Cladogram geometry for the one tree `/tree` serves: lanes, node and branch coordinates. No React.
 
 import type { LineageDivergence, LineageNode } from "@/lib/api";
-import { candidatesOf, nodeKeyOf, pathOf, wasElected } from "@/lib/derivations";
+import { candidatesOf, nodeKeyOf, pathOf } from "@/lib/derivations";
 import { encodeCyclePath, type CyclePath } from "@/lib/ids";
 
 // Horizontal only: a surface that must fit narrower drops the text and closes the columns — never
@@ -217,8 +217,8 @@ export interface RoundNodePos {
   candKey: string;
   candidateId: string;
   isWinner: boolean;
-  // Display-only: a single-arm round advances without an election.
-  isElected: boolean;
+  // Served: `uncontested` advanced as its round's only arm, with no election to win.
+  crown: LineageNode["crown"];
   isExpanded: boolean;
   isLastInLane: boolean;
   courseKind: CourseKind;
@@ -253,7 +253,6 @@ function placedNode(
   y: number,
   isExpanded: boolean,
   label: string,
-  roundSize: number,
 ): RoundNodePos {
   return {
     courseKey: laneKey,
@@ -270,7 +269,7 @@ function placedNode(
     candKey: nodeKeyOf(cand),
     candidateId: cand.id,
     isWinner: cand.is_selected,
-    isElected: wasElected(cand.is_selected, roundSize),
+    crown: cand.crown,
     isExpanded,
     isLastInLane: false,
     courseKind: l.course.course_kind ?? "root",
@@ -306,16 +305,7 @@ export function placeNodes(layouts: Map<string, LaneLayout>, d: Density): {
         // A retired candidate is passed over, or the band plots the abandoned line.
         const stand = winner ?? cands.find((c) => !c.superseded_by) ?? cands[0];
         if (!stand) continue;
-        const node = placedNode(
-          laneKey,
-          l,
-          stand,
-          colX(round),
-          y,
-          false,
-          winner?.label ?? "",
-          cands.length,
-        );
+        const node = placedNode(laneKey, l, stand, colX(round), y, false, winner?.label ?? "");
         nodes.push(node);
         spineByKeyRound.set(`${laneKey}::r${round}`, node);
         if (winner) nodeByCandidate.set(winner.id, node);
@@ -340,7 +330,7 @@ export function placeNodes(layouts: Map<string, LaneLayout>, d: Density): {
       const roundNodes: RoundNodePos[] = [];
       cands.forEach((cand, i) => {
         const y = TOP_PAD + (l.laneOffset + topRow + i) * LANE_H;
-        const node = placedNode(laneKey, l, cand, x, y, true, cand.label, cands.length);
+        const node = placedNode(laneKey, l, cand, x, y, true, cand.label);
         nodes.push(node);
         roundNodes.push(node);
         if (!cand.superseded_by) nodeByCandidate.set(cand.id, node);

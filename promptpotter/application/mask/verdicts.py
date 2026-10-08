@@ -1,4 +1,4 @@
-"""Verdict strategies — each lives beside the math it asks, selected at the API edge. The FOLD is what is
+"""Verdict strategies — each lives beside the math it asks, selected by the lens. The FOLD is what is
 shared, which is why ``replay`` lives in ``resume_and_fork/ab_replay.py`` with the replayers."""
 
 from __future__ import annotations

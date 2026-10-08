@@ -33,9 +33,3 @@ export function connectorReachability(health: BackendHealthResponse | null): Con
     stateLabel: reachable ? "reachable" : down ? "unreachable" : "probing…",
   };
 }
-
-// pp-self has no registered backend, roster or llm/tool `view`, so HTTP-shaped panels branch on
-// this rather than read as misconfigured; its per-sample data lives in the inner cycle.
-export function isSelfOptimization(backendType: string | null | undefined): boolean {
-  return backendType === "promptpotter";
-}

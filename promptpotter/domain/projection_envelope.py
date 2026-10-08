@@ -273,10 +273,6 @@ class ProjectionEnvelope(StrictModel):
     kind: ProjectionKind = Field(
         description="Closed-set discriminator; every CycleRecord record_type, plus stream_snapshot.",
     )
-    version: int = Field(
-        default=1,
-        description="Envelope shape version. Bump only on a breaking restructure of this class; payload churn is per-kind.",
-    )
     cycle_id: str = Field(
         description="Target cycle the frame describes; redundant with the channel address but stamped per-frame for fan-in demux.",
     )
@@ -286,5 +282,5 @@ class ProjectionEnvelope(StrictModel):
     )
     payload: dict[str, Any] = Field(
         default_factory=dict,
-        description="Per-kind body. For record-derived kinds, the record's model_dump; for stream_snapshot, the dashboard.json content + snapshot_at_offset.",
+        description="Per-kind body. For record-derived kinds, the record's model_dump; for stream_snapshot, the cycle's served dashboard.",
     )

@@ -1,9 +1,9 @@
-"""PoBB as the measurement drives it — potter's eliminator: the round's prior pool, seeded with the
-parent, the stop rule each walk reads, and the ledger decision each cut or lock-in leaves."""
+"""PoBB as the measurement drives it — potter's eliminator: the round's prior pool seeded with the
+parent, the catch-up calls pairing each prior with the arm on turn, the stop rule, the ledger decision."""
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from functools import partial
 from typing import TYPE_CHECKING, Any, cast
@@ -15,14 +15,19 @@ from promptpotter.application.optimizers.potter.pobb.checks import (
     EliminationContext,
     EliminationGate,
     PoBBCheck,
+    PoBBStop,
 )
 from promptpotter.application.optimizers.potter.records import PotterCheckpointKind
-from promptpotter.domain.results import ArmOutcome
 
 if TYPE_CHECKING:
     import asyncio
 
-    from promptpotter.application.optimizers.nodes import CatchUpFn, Panel, RoundContext
+    from promptpotter.application.optimizers.nodes import (
+        CatchUp,
+        CatchUpFn,
+        Panel,
+        RoundContext,
+    )
     from promptpotter.application.scoring.query_loop import Walk
     from promptpotter.domain.connector import MeasuredUnit
     from promptpotter.domain.sample import Sample
@@ -30,44 +35,23 @@ if TYPE_CHECKING:
     from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.domain.validators import StopSignal
 
-__all__ = ["PoBBRace", "pobb_decision_data"]
+__all__ = ["CatchUpPool", "PoBBRace"]
 
 
 def _reason(ctx: EliminationContext, unit: MeasuredUnit) -> str:
     q = f"q{ctx['queries_scored']}/{ctx['total_queries']}"
+    if ctx["gate"] is EliminationGate.COLLAPSED:
+        return (
+            f"answer collapsed {q}  one label for every {unit} — no measurement of ability to score"
+        )
     n = ctx["n_priors"]
     priors = f"(of {n} prior{'' if n == 1 else 's'})"
-    match ctx["gate"]:
-        case EliminationGate.LOCK_IN:
-            return f"leader locked {q}  p_best={ctx['p_best']:.1%} {priors}"
-        case EliminationGate.COLLAPSED:
-            return (
-                f"answer collapsed {q}  one label for every {unit} — "
-                "no measurement of ability to score"
-            )
-        case EliminationGate.EPSILON:
-            leader = ctx.get("leader_label") or ctx["leader_id"][:8] or "?"
-            return (
-                f"eliminated {q}  p_best={ctx['p_best']:.1%} < eps={ctx['epsilon']:.0%}  "
-                f"vs {leader} {priors}"
-            )
-
-
-def pobb_decision_data(
-    candidate_score: dict[str, Any],
-    *,
-    candidate_sample_ids: list[str] | None = None,
-    prior_histories: dict[str, dict[str, float]] | None = None,
-) -> dict[str, Any]:
-    """Archival data for PoBB decisions — the per-prior per-sample GRADED responses ARE the snapshot at decision time,
-    so replay re-fits θ from exactly these without crawling prior rounds."""
-    return {
-        "p_best": float(candidate_score.get("p_best", 0.0)),
-        "leader_id": str(candidate_score.get("leader_id", "")),
-        "paired_breakdown": dict(candidate_score.get("paired_breakdown") or {}),
-        "candidate_sample_ids": list(candidate_sample_ids or []),
-        "prior_histories": dict(prior_histories or {}),
-    }
+    if ctx["gate"] is EliminationGate.LOCK_IN:
+        return f"leader locked {q}  p_best={ctx['p_best']:.1%} {priors}"
+    return (
+        f"eliminated {q}  p_best={ctx['p_best']:.1%} < eps={ctx['epsilon']:.0%}  "
+        f"vs {ctx['leader_label']} {priors}"
+    )
 
 
 @dataclass
@@ -99,21 +83,99 @@ class _PriorsAhead:
         return self.pobb.earliest_stop(results, upcoming, unresolved=unresolved)
 
 
-class PoBBRace:
+class CatchUpPool:
+    """The priors of one round and the calls that catch each up on a cell it lacks, so every
+    comparison the stop rule makes is on identical cells. One measurement per (prior, cell)."""
+
+    def __init__(self, check: PoBBCheck, measure: CatchUpFn) -> None:
+        self._check = check
+        self._measure = measure
+        self._sps: dict[str, JobSearchPoint] = {}
+        self._pending: dict[tuple[str, int], CatchUp] = {}
+        self._on_catch_up: Callable[[int, list[str]], None] | None = None
+
+    def admit(self, candidate_id: str, results: list[QueryMeasurement], sp: JobSearchPoint) -> None:
+        self._check.register_completed(results, candidate_id=candidate_id)
+        self._sps[candidate_id] = sp
+
+    def _unstarted(self, sample: Sample) -> list[str]:
+        return [
+            cid
+            for cid, held in self._check.priors_by_sample.items()
+            if str(sample.id) not in held and (cid, sample.id) not in self._pending
+        ]
+
+    def start_backfill(self, sample: Sample, room: int) -> list[asyncio.Future[Any]]:
+        """Start measuring up to ``room`` of the priors that lack ``sample``, so the calls overlap
+        the cell's own. Nothing is written or graded until :meth:`commit_backfills` takes them."""
+        started: list[asyncio.Future[Any]] = []
+        for cid in self._unstarted(sample)[: max(room, 0)]:
+            backfill = self._measure(self._sps[cid], sample, cid)
+            self._pending[(cid, sample.id)] = backfill
+            started.append(backfill[0])
+        return started
+
+    def owed_backfills(self, sample: Sample) -> int:
+        return len(self._unstarted(sample))
+
+    def backfills_in_flight(self) -> list[asyncio.Future[Any]]:
+        return [call for call, *_ in self._pending.values() if not call.done()]
+
+    def backfills_for(self, sample: Sample) -> list[asyncio.Future[Any]]:
+        """The catch-up calls started for ``sample`` and not yet committed."""
+        return [call for (_, sid), (call, *_) in self._pending.items() if sid == sample.id]
+
+    def commit_backfills(self, sample: Sample) -> None:
+        """Take every started catch-up on ``sample``, in prior order — the moment a serial round
+        would have measured them, so what reaches disk, and in what order, is the serial round's."""
+        fresh: list[str] = []
+        for cid, held in self._check.priors_by_sample.items():
+            backfill = self._pending.pop((cid, sample.id), None)
+            if backfill is None:
+                continue
+            self._check.extend_prior(cid, backfill[1]())
+            if str(sample.id) in held:
+                fresh.append(cid)
+        if fresh and self._on_catch_up is not None:
+            self._on_catch_up(sample.id, fresh)
+
+    def bank_backfills(self, samples: Sequence[Sample]) -> None:
+        """Write, ungraded, the catch-ups back for *samples* — cells a stopped round's walks were
+        sure to take, so the resumed round replays these rather than paying for them again."""
+        wanted = {s.id for s in samples}
+        for key, (call, commit, _) in list(self._pending.items()):
+            landed = call.done() and not call.cancelled() and call.exception() is None
+            if key[1] in wanted and landed:
+                del self._pending[key]
+                commit()
+
+    def discard_backfills(self) -> None:
+        """Drop every measurement no walk took — paid, and never written, as a serial round would
+        never have made it — save what :meth:`bank_backfills` kept."""
+        for _call, _commit, discard in self._pending.values():
+            discard()
+        self._pending.clear()
+
+
+class PoBBRace(CatchUpPool):
     """One round's PoBB. The parent is its first prior, so candidate #1 has a comparator —
     without one PoBB short-circuits on an empty pool and the round's first arm is uneliminable."""
 
     def __init__(self, ctx: RoundContext, panel: Panel, catch_up: CatchUpFn, *, node: str) -> None:
         cycle = ctx.cycle
+        super().__init__(
+            PoBBCheck(
+                cast("PoBBKnobs", cycle.optimizer.knobs("pobb")),
+                n_min=cycle.config.optimization.elimination_n_min,
+                n_samples=len(panel.cells),
+                ruler=cycle.difficulty.ruler,
+            ),
+            catch_up,
+        )
         self._ctx = ctx
         self._node = node
-        self._check = PoBBCheck(
-            cast("PoBBKnobs", cycle.optimizer.knobs("pobb")),
-            n_min=cycle.config.optimization.elimination_n_min,
-            n_samples=len(panel.cells),
-            ruler=cycle.difficulty.ruler,
-            backfill_fn=catch_up,
-        )
+        # The one prior no arm of this round labels, so its label is the race's to hold.
+        self._parent_label: dict[str, str] = {}
         # `current_results` = best-so-far per-sample history; `current_sp` is the leader,
         # backfill-able on the candidate's hard samples.
         parent_results = cycle.tracking.current_results
@@ -121,11 +183,9 @@ class PoBBRace:
         if parent_results and parent_sp is not None:
             # Named for the round that ELECTED it: a held round keeps the parent it had.
             elected_in = next((rr.round for rr in reversed(cycle.rounds) if rr.improved), 0)
-            self._check.register_completed(
-                cast("list[QueryMeasurement]", parent_results),
-                candidate_id=f"R{elected_in}_winner",
-                sp=parent_sp,
-            )
+            parent = f"R{elected_in}_winner"
+            self._parent_label[parent] = parent
+            self.admit(parent, cast("list[QueryMeasurement]", parent_results), parent_sp)
 
     @property
     def n_priors(self) -> int:
@@ -144,8 +204,8 @@ class PoBBRace:
         self._check.set_current(
             candidate_id,
             on_snapshot=partial(callbacks.on_race_standing, self._node, round_num, idx, n),
-            on_backfill=partial(callbacks.on_race_catch_up, self._node, round_num, idx, n),
         )
+        self._on_catch_up = partial(callbacks.on_race_catch_up, self._node, round_num, idx, n)
 
     def judge(
         self,
@@ -157,117 +217,54 @@ class PoBBRace:
     ) -> EliminationReading | None:
         """This arm's elimination context, and the decision its cut or lock-in leaves — read off
         the priors BEFORE the arm joins them, which is the pool the stop rule tested against."""
-        if signal is None:
+        if not isinstance(signal, PoBBStop):
             return None
-        check = self._check
-        cr = signal.check_result
-        if signal.check_name != check.name:
-            return None
-        priors_at_test = list(check.prior_ids)
-        elim_ctx: EliminationContext | None = None
-        if signal.outcome in (ArmOutcome.ELIMINATED, ArmOutcome.LOCKED_IN):
-            leader_id = str(cr.get("leader_id", ""))
-            gate = EliminationGate(cr["gate"])
-            elim_ctx = {"gate": gate, "p_best": float(cr.get("p_best", 0.0))}
-            if gate is EliminationGate.EPSILON:
-                elim_ctx["epsilon"] = float(cr["epsilon"])
-            elim_ctx["leader_id"] = leader_id
-            elim_ctx["queries_scored"] = int(cr.get("queries_scored", len(results)))
-            elim_ctx["total_queries"] = int(cr.get("total_samples", check.n_samples))
-            elim_ctx["n_priors"] = int(cr.get("n_priors", 0))
-            # Seeded priors (``R{N}_winner``) carry operator-readable ids; this round's resolve
-            # through the labels already scored (``C2.3``).
-            if leader_id in priors_at_test:
-                leader_label = labels.get(leader_id) or (
-                    leader_id if leader_id.startswith("R") and leader_id.endswith("_winner") else ""
-                )
-                if leader_label:
-                    elim_ctx["leader_label"] = leader_label
-
-        queries_scored = int(cr.get("queries_scored", len(results)))
-        recorded_p_best = float(cr.get("p_best", 0.0))
-        # The sample IDs in play at decision time + each prior's grade on exactly those samples:
-        # replay reads these directly, with no cross-round crawl and no backfill replay.
-        candidate_sample_ids = [
-            str(r.get("sample_id", ""))
-            for r in results[:queries_scored]
-            if r.get("sample_id") is not None
-        ]
-        prior_histories = check.snapshot_priors(candidate_sample_ids)
-        decisions = self._ctx.cycle.pending_decisions
+        context, fit = signal.check_result, signal.fit
+        gate = context["gate"]
         round_num = self._ctx.round_num
-        if signal.outcome is ArmOutcome.ELIMINATED:
-            record_decision(
-                decisions,
-                PotterCheckpointKind.ELIMINATION_CUT,
-                {
-                    "candidate_id": candidate_id,
-                    # WHICH gate cut it, so the replayer re-derives the rule that fired. Only ε
-                    # computed a posterior, so `epsilon`/`recorded_p_best` mean something only there.
-                    "gate": cr["gate"],
-                    "prior_candidate_ids": priors_at_test,
-                    "queries_scored": queries_scored,
-                    "epsilon": float(cr.get("epsilon", check.epsilon)),
-                    "n_min": int(check.n_min),
-                    "round_num": round_num,
-                    "recorded_p_best": recorded_p_best,
+        inputs: dict[str, Any] = {
+            "candidate_id": candidate_id,
+            "prior_candidate_ids": self._check.prior_ids,
+            "queries_scored": context["queries_scored"],
+            "round_num": round_num,
+        }
+        data: dict[str, Any] = {}
+        if fit is not None:
+            context = {
+                **context,
+                "leader_label": {**self._parent_label, **labels}[context["leader_id"]],
+            }
+            inputs["recorded_p_best"] = context["p_best"]
+            # The cells the posterior was fit on and each paired prior's grade on exactly those:
+            # a replay re-fits from these, with no cross-round crawl and no catch-up of its own.
+            data = {
+                "p_best": context["p_best"],
+                "leader_id": context["leader_id"],
+                "paired_breakdown": signal.paired_breakdown,
+                "candidate_sample_ids": fit.cells,
+                "prior_histories": {
+                    pid: dict(zip(fit.cells, grades, strict=True))
+                    for pid, grades in fit.priors.items()
                 },
-                True,
-                node=self._node,
-                data=pobb_decision_data(
-                    cr,
-                    candidate_sample_ids=candidate_sample_ids,
-                    prior_histories=prior_histories,
-                ),
-                round=round_num,
-            )
-        if signal.outcome is ArmOutcome.LOCKED_IN:
-            record_decision(
-                decisions,
-                PotterCheckpointKind.LEADER_LOCK_IN,
-                {
-                    "candidate_id": candidate_id,
-                    "prior_candidate_ids": priors_at_test,
-                    "queries_scored": queries_scored,
-                    "lock_in": float(check.lock_in),
-                    "lock_in_n_min": int(check.lock_in_n_min),
-                    "round_num": round_num,
-                    "recorded_p_best": recorded_p_best,
-                },
-                True,
-                node=self._node,
-                data=pobb_decision_data(
-                    cr,
-                    candidate_sample_ids=candidate_sample_ids,
-                    prior_histories=prior_histories,
-                ),
-                round=round_num,
-            )
-        if elim_ctx is None:
-            return None
+            }
+        check = self._check
+        if gate is EliminationGate.LOCK_IN:
+            kind = PotterCheckpointKind.LEADER_LOCK_IN
+            inputs |= {"lock_in": float(check.lock_in), "lock_in_n_min": int(check.lock_in_n_min)}
+        else:
+            kind = PotterCheckpointKind.ELIMINATION_CUT
+            # WHICH gate cut it, so the replayer re-derives the rule that fired.
+            inputs |= {"gate": gate, "n_min": int(check.n_min)}
+            if gate is EliminationGate.EPSILON:
+                inputs["epsilon"] = context["epsilon"]
+        record_decision(
+            self._ctx.cycle.pending_decisions,
+            kind,
+            inputs,
+            True,
+            node=self._node,
+            data=data,
+            round=round_num,
+        )
         unit = self._ctx.cycle.session.backend_client.measured_unit
-        return EliminationReading(reason=_reason(elim_ctx, unit), context=elim_ctx)
-
-    def admit(self, candidate_id: str, results: list[QueryMeasurement], sp: JobSearchPoint) -> None:
-        self._check.register_completed(results, candidate_id=candidate_id, sp=sp)
-
-    def start_backfill(self, sample: Sample, room: int) -> list[asyncio.Future[Any]]:
-        return self._check.start_backfill(sample, room)
-
-    def owed_backfills(self, sample: Sample) -> int:
-        return self._check.owed_backfills(sample)
-
-    def backfills_in_flight(self) -> list[asyncio.Future[Any]]:
-        return self._check.backfills_in_flight()
-
-    def backfills_for(self, sample: Sample) -> list[asyncio.Future[Any]]:
-        return self._check.backfills_for(sample)
-
-    def commit_backfills(self, sample: Sample) -> None:
-        self._check.commit_backfills(sample)
-
-    def bank_backfills(self, samples: Sequence[Sample]) -> None:
-        self._check.bank_backfills(samples)
-
-    def discard_backfills(self) -> None:
-        self._check.discard_backfills()
+        return EliminationReading(reason=_reason(context, unit), context=context)

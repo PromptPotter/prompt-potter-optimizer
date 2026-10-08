@@ -11,7 +11,7 @@ from collections import Counter
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.domain.pipeline_schema import NodeType
+from promptpotter.domain.pipeline_schema import NodeRole
 from promptpotter.domain.results_health import is_degraded
 from promptpotter.domain.scoring import extract_item_label, is_verifier_graded
 from promptpotter.shared import text_list_items, text_list_rank
@@ -91,7 +91,7 @@ def cell_feedback(row: Mapping[str, Any]) -> str:
 
 # ---------------------------------------------------------------------------
 # Per-sample diagnostics — typed mixed values (bool/int/str/None), keyed off
-# ``PipelineNode.node_type``.
+# ``PipelineNode.role``.
 # ---------------------------------------------------------------------------
 
 
@@ -107,53 +107,37 @@ def extract_sample_diagnostics(
     if not pd:
         return diag
 
-    # Namespace a node's diagnostics by step name only when ≥2 nodes share its type.
-    type_counts = Counter(s.node_type for s in pipeline_schema.nodes if s.node_type)
+    # Namespace a node's diagnostics by step name only when ≥2 nodes share its role.
+    role_counts = Counter(s.role for s in pipeline_schema.nodes)
     for step in pipeline_schema.nodes:
         extracted = _extract_node_diagnostics(step, pd, gt)
         if extracted is None:
             continue
-        prefix = f"{step.name}_" if type_counts[step.node_type] > 1 else ""
+        prefix = f"{step.name}_" if role_counts[step.role] > 1 else ""
         for k, v in extracted.items():
             diag[f"{prefix}{k}"] = v
     return diag
 
 
-def _diag_ranking(
-    pd: Mapping[str, Any],
-    gt: str,
-    *,
-    key: str,
-    label: str,
-) -> dict[str, float | bool | int | str | None]:
-    """Diagnostics report the ground-truth position 0-based; :func:`find_rank` is the canonical
-    1-based walk.
-
-    ``gt_in_*`` is absent rather than ``False`` where there is no label — the same distinction
-    :func:`_diag_ranker` already draws for a width-1 ranking. ``False`` is a positive claim that
-    the truth was NOT in the pool, and a panel reading it hands the optimizer a retrieval fault
-    to chase on a backend whose verifier already answered. The COUNT beside it stays: how many
-    candidates a node emitted is a fact about the node, not about a label."""
-    candidates = pd.get(key, [])
-    rank = find_rank(candidates, gt)
-    pos = rank - 1 if rank is not None else None
-    return {
-        f"gt_in_{label}": None if is_verifier_graded(gt) else pos is not None,
-        f"n_{label}_candidates": len(candidates),
-        f"gt_{label}_rank": pos,
-    }
-
-
 def _diag_candidate_source(
     node: PipelineNode, pd: Mapping[str, Any], gt: str
 ) -> dict[str, float | bool | int | str | None]:
-    return _diag_ranking(pd, gt, key="candidate_ranking", label="source")
+    """Diagnostics report the ground-truth position 0-based; :func:`find_rank` is the canonical
+    1-based walk. ``gt_in_source`` is ABSENT rather than ``False`` where there is no label."""
+    candidates = node.ranking_in(pd) or []
+    rank = find_rank(candidates, gt)
+    pos = rank - 1 if rank is not None else None
+    return {
+        "gt_in_source": None if is_verifier_graded(gt) else pos is not None,
+        "n_source_candidates": len(candidates),
+        "gt_source_rank": pos,
+    }
 
 
 def _diag_ranker(
     node: PipelineNode, pd: Mapping[str, Any], gt: str
 ) -> dict[str, float | bool | int | str | None]:
-    candidates = pd.get("final_ranking", [])
+    candidates = node.ranking_in(pd) or []
     rank = find_rank(candidates, gt)
     pos = rank - 1 if rank is not None else None
     top_score_gap: float | None = None
@@ -201,14 +185,14 @@ def _extract_node_diagnostics(
 ) -> dict[str, float | bool | int | str | None] | None:
     """Explicit match rather than a string-keyed table, so grepping a diagnostic's name lands on
     its call site."""
-    match node.node_type:
-        case NodeType.CANDIDATE_SOURCE:
+    match node.role:
+        case NodeRole.CANDIDATE_SOURCE:
             return _diag_candidate_source(node, pd, gt)
-        case NodeType.RANKER:
+        case NodeRole.RANKER:
             return _diag_ranker(node, pd, gt)
-        case NodeType.ENRICHER:
+        case NodeRole.ENRICHER:
             return _diag_enricher(node, pd, gt)
-        case NodeType.CACHE:
+        case NodeRole.CACHE:
             return _diag_cache(node, pd, gt)
         case _:
             return None

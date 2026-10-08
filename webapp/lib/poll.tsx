@@ -22,7 +22,7 @@ import { encodeCyclePath, pathLeaf, type CyclePath } from "./ids";
 import { useAuthGate } from "./auth-context";
 import { ageTextSeconds } from "./format";
 import type { LiveCandidate, LiveDashboardState, RayItem } from "./api/types";
-import { RUN_FRESH_S } from "./api/types.generated";
+import { RUN_FRESH_S, type RunPhase } from "./api/types.generated";
 import { usePoll } from "./hooks/usePoll";
 import { bumpRevalidation, useRevalidation } from "./revalidate";
 import { hasLiveProducer } from "./run-phase";
@@ -34,14 +34,15 @@ export type StatusKind = "live" | "stale" | "offline" | "gone";
 
 export type DashboardSnapshot = LiveDashboardState;
 
-export interface WarmingSnapshot {
+// Hand-written: `live_dashboard/state.py::warming_payload` is a bare dict with no model to
+// generate from.
+interface WarmingSnapshot {
   warming_up: true;
   campaign_id: string;
   cycle_id: string;
-  phase_hint: string;
   // Separates "no snapshot YET" from "EVER": a producer that died during init reads
   // `detached`/`terminal` here while still having no dashboard.
-  run_phase: string;
+  run_phase: RunPhase;
 }
 
 function isWarming(d: unknown): d is WarmingSnapshot {
@@ -75,25 +76,52 @@ export interface CycleStreamState {
   statusText: string;
   statusHint: string;
   termKey: string;
-  error: string | null;
   // Running AND fresh AND showing the head — the one gate for every transient indicator.
   // Composed once, in `useCycleStreamSource`; consumers never re-derive it.
   isLive: boolean;
-  phase: string | null;
   at: number | null;
 }
 
-const INITIAL_STATE: CycleStreamState = {
-  dash: null,
-  status: "offline",
-  statusText: "Connecting…",
-  statusHint: "",
-  termKey: "status_offline",
-  error: null,
-  isLive: false,
-  phase: null,
-  at: null,
-};
+// What a unit shows before its first read lands — or, with no unit in view, in place of one.
+function openingState(hasUnit: boolean): CycleStreamState {
+  return {
+    dash: null,
+    status: "offline",
+    statusText: hasUnit ? "Switching to active campaign…" : "No active campaign",
+    statusHint: hasUnit
+      ? ""
+      : "Start a campaign: `python -m promptpotter new <dataset>` in another terminal.",
+    termKey: "status_offline",
+    isLive: false,
+    at: null,
+  };
+}
+
+// What the dashboard tick remembers between polls of ONE unit. Stamped with that unit's key and
+// replaced on a mismatch, so nothing has to clear it when the view moves.
+interface UnitScratch {
+  key: string | null;
+  stampMismatch: number;
+  gone: number;
+  // The same `run_phase` rides `/cycles` (10 s) and `/tree` (5 s); a change seen here re-ticks
+  // both so three surfaces do not sit apart on one transition.
+  lastPhase: string | null;
+}
+
+// A `Last-Modified` answers for one unit at one moment: the same file mtime reads differently at
+// "the head" and at "offset N", so a validator replayed across either would 304 the fold away.
+interface HeldValidator {
+  key: string | null;
+  at: number | null;
+  value: string | null;
+}
+
+// The address the hook is rendered for, as the ticks and `loadOlder` read it between renders.
+interface LiveAddress {
+  path: CyclePath | null;
+  key: string | null;
+  at: number | null;
+}
 
 // Rides out a one-tick re-instantiation during `new`.
 const STAMP_MISMATCH_LIMIT = 3;
@@ -146,11 +174,9 @@ export interface BucketResult {
   termKey: string;
 }
 
-// `current_round.round` is authoritative; the fall-through covers re-instantiation before any
-// phase has fired.
+// The round in flight. `current_round.round` IS the writer's `state.round`, so it is the one read.
 export function roundOf(dash: DashboardSnapshot | null): number | null {
-  const r = dash?.current_round.round ?? dash?.round;
-  return typeof r === "number" ? r : null;
+  return dash?.current_round.round ?? null;
 }
 
 function wallclockAgeS(iso: string | null | undefined): number | null {
@@ -219,7 +245,10 @@ function useCycleStreamSource(
   path: CyclePath | null,
   intervalMs: number,
 ): { stream: CycleStreamState; ray: TimeRayState } {
-  const [state, setState] = useState<CycleStreamState>(INITIAL_STATE);
+  // The whole encoded path is the identity: a cycle_id is unique only within its campaign, an
+  // inner one only within its parent's sandbox.
+  const unitKey = path ? encodeCyclePath(path) : null;
+  const [state, setState] = useState<CycleStreamState>(() => openingState(unitKey !== null));
   const [ray, setRay] = useState<RayWindows>(EMPTY_RAY);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [at, setAtState] = useState<number | null>(null);
@@ -227,75 +256,54 @@ function useCycleStreamSource(
   // Identity-stable by construction (workspace.tsx) — the tick must not re-arm on it.
   const { reportAddressGone } = useWorkspace();
   const [revalCount, setRevalCount] = useState(0);
-  const cycleRef = useRef<string | null>(null);
-  const campaignRef = useRef<string | null>(null);
-  const stampMismatchRef = useRef(0);
-  const goneRef = useRef(0);
-  const lastModifiedRef = useRef<string | null>(null);
-  // The same `run_phase` rides `/cycles` (10 s) and `/tree` (5 s); a change seen here re-ticks
-  // both so three surfaces do not sit apart on one transition.
-  const lastPhaseRef = useRef<string | null>(null);
-  const pathRef = useRef<CyclePath | null>(null);
-  const atRef = useRef<number | null>(null);
-  // Stamped with its key rather than cleared, keeping writes out of render (`react-hooks/refs`);
-  // replaying a stale ETag would 304 into an empty window.
+
+  const [prevKey, setPrevKey] = useState(unitKey);
+  if (unitKey !== prevKey) {
+    setPrevKey(unitKey);
+    // A moment is an offset into ONE cycle's ledger and means nothing in another.
+    setAtState(null);
+    setState(openingState(unitKey !== null));
+    setRay(EMPTY_RAY);
+    setRevalCount((c) => c + 1);
+  }
+
+  // Everything a tick keeps between polls is STAMPED with the address it describes and read back
+  // only on a match, so a late response cannot poison the next unit's validator.
+  const liveRef = useRef<LiveAddress>({ path: null, key: null, at: null });
+  // Declared before `usePoll`, whose effects fire the ticks that read it.
+  useEffect(() => {
+    liveRef.current = { path, key: unitKey, at };
+  });
+  const scratchRef = useRef<UnitScratch>({ key: null, stampMismatch: 0, gone: 0, lastPhase: null });
+  const validatorRef = useRef<HeldValidator>({ key: null, at: null, value: null });
   const rayEtagRef = useRef<{ key: string | null; etag: string | null }>({
     key: null,
     etag: null,
   });
   const loadingOlderRef = useRef(false);
 
-  // The whole encoded path is the identity: a cycle_id is unique only within its campaign, an
-  // inner one only within its parent's sandbox.
-  const unitKeyRef = useRef<string | null>(null);
-  const unitKey = path ? encodeCyclePath(path) : null;
-  if (unitKeyRef.current !== unitKey) {
-    unitKeyRef.current = unitKey;
-    pathRef.current = path;
-    const leaf = path ? pathLeaf(path) : null;
-    cycleRef.current = leaf?.cycleId ?? null;
-    campaignRef.current = leaf?.campaignId ?? null;
-    stampMismatchRef.current = 0;
-    goneRef.current = 0;
-    lastModifiedRef.current = null;
-    lastPhaseRef.current = null;
-    // A moment is an offset into ONE cycle's ledger and means nothing in another.
-    atRef.current = null;
-    setAtState(null);
-    setState({ ...INITIAL_STATE, statusText: "Switching to active campaign…" });
-    setRay(EMPTY_RAY);
-    setRevalCount((c) => c + 1);
-  }
-
-  // The same file mtime answers "the head" and "offset N" differently, so a head validator
-  // replayed here would 304 the fold away before it was ever fetched.
   const setAt = useCallback((offset: number | null) => {
-    atRef.current = offset;
-    lastModifiedRef.current = null;
     setAtState(offset);
     setRevalCount((c) => c + 1);
   }, []);
 
-  useEffect(() => {
-    if (!path) {
-      setState({
-        ...INITIAL_STATE,
-        statusText: "No active campaign",
-        statusHint:
-          "Start a campaign: `python -m promptpotter new <dataset>` in another terminal.",
-      });
-    }
-  }, [path]);
-
   const tickDash = async (signal: AbortSignal) => {
-    const id = cycleRef.current;
-    const cmp = campaignRef.current;
-    const p = pathRef.current;
-    if (!id || !cmp || !p) return;
+    const { path: p, key, at: moment } = liveRef.current;
+    if (!p || key === null) return;
+    const { cycleId: id, campaignId: cmp } = pathLeaf(p);
+    if (scratchRef.current.key !== key) {
+      scratchRef.current = { key, stampMismatch: 0, gone: 0, lastPhase: null };
+    }
+    const unit = scratchRef.current;
+    const held = validatorRef.current;
+    const known = held.key === key && held.at === moment ? held.value : null;
+    // The view moved while this read was in flight: its answer describes another address.
+    const superseded = () =>
+      signal.aborted || liveRef.current.key !== key || liveRef.current.at !== moment;
     try {
-      const resp = await fetchDashboardByPath(p, lastModifiedRef.current, signal, atRef.current);
-      if (signal.aborted) return;
-      goneRef.current = 0;
+      const resp = await fetchDashboardByPath(p, known, signal, moment);
+      if (superseded()) return;
+      unit.gone = 0;
 
       if (resp.kind === "not_modified") {
         setState((prev) => {
@@ -314,11 +322,11 @@ function useCycleStreamSource(
         return;
       }
 
-      if (resp.validator) lastModifiedRef.current = resp.validator;
+      if (resp.validator) validatorRef.current = { key, at: moment, value: resp.validator };
 
       if (isWarming(resp.data)) {
-        stampMismatchRef.current = 0;
-        const stillComing = hasLiveProducer((resp.data as WarmingSnapshot).run_phase);
+        unit.stampMismatch = 0;
+        const stillComing = hasLiveProducer(resp.data.run_phase);
         setState((prev) => ({
           ...prev,
           dash: null,
@@ -328,9 +336,7 @@ function useCycleStreamSource(
             ? "First snapshot lands when origin completes — campaign is initialising."
             : "The run stopped before its first snapshot. Nothing to show for this cycle.",
           termKey: "status_warming_up",
-          error: null,
           isLive: false,
-          phase: "warming_up",
         }));
         return;
       }
@@ -345,8 +351,8 @@ function useCycleStreamSource(
         console.debug(
           `[cycle-stream] dropped dashboard payload — stamp ${reported} != unit ${expected}`,
         );
-        stampMismatchRef.current += 1;
-        if (stampMismatchRef.current >= STAMP_MISMATCH_LIMIT) {
+        unit.stampMismatch += 1;
+        if (unit.stampMismatch >= STAMP_MISMATCH_LIMIT) {
           setState((prev) => ({
             ...prev,
             status: "stale",
@@ -361,10 +367,10 @@ function useCycleStreamSource(
         }
         return;
       }
-      stampMismatchRef.current = 0;
-      if (dash.run_phase !== lastPhaseRef.current) {
-        const first = lastPhaseRef.current === null;
-        lastPhaseRef.current = dash.run_phase;
+      unit.stampMismatch = 0;
+      if (dash.run_phase !== unit.lastPhase) {
+        const first = unit.lastPhase === null;
+        unit.lastPhase = dash.run_phase;
         // The first observation is this unit's opening read, not a transition.
         if (!first) bumpRevalidation();
       }
@@ -377,22 +383,18 @@ function useCycleStreamSource(
         statusText: bucket.statusText,
         statusHint: bucket.statusHint,
         termKey: bucket.termKey,
-        error: null,
         isLive: bucket.status === "live" && dash.run_phase === "running",
-        phase: typeof dash.state === "string" ? dash.state : null,
       }));
     } catch (e) {
-      if ((e as Error).name === "AbortError" || signal.aborted) return;
+      if (superseded()) return;
       onAuthError(e);
-      reportIncident(e, { surface: "dashboard", address: unitKeyRef.current });
+      reportIncident(e, { surface: "dashboard", address: key });
 
       // The route answers `warming_up` at 200 for a cycle with no dashboard yet, so a 404 here
       // means the cycle dir itself is gone.
       if (failureKind(e) === "gone") {
-        goneRef.current += 1;
-        if (goneRef.current >= GONE_CONFIRM_LIMIT && unitKeyRef.current) {
-          reportAddressGone(unitKeyRef.current);
-        }
+        unit.gone += 1;
+        if (unit.gone >= GONE_CONFIRM_LIMIT) reportAddressGone(key);
         setState((prev) => ({
           ...prev,
           // Every number in the kept snapshot would describe a run no longer on disk.
@@ -402,19 +404,17 @@ function useCycleStreamSource(
           statusHint:
             "It was deleted, or its store was reset. Returning to the active run.",
           termKey: "status_gone",
-          error: null,
           isLive: false,
         }));
         return;
       }
-      goneRef.current = 0;
+      unit.gone = 0;
       setState((prev) => ({
         ...prev,
         status: "offline",
         statusText: "PromptPotter API unreachable",
         statusHint: "Reconnecting every 5 s — check the server is running.",
         termKey: "status_offline",
-        error: (e as Error).message,
         // `dash.run_phase` stays untouched, so a client blip cannot read an in-flight cycle as gone.
         isLive: false,
       }));
@@ -422,13 +422,13 @@ function useCycleStreamSource(
   };
 
   const tickRay = async (signal: AbortSignal) => {
-    const p = pathRef.current;
-    const key = unitKeyRef.current;
+    const { path: p, key } = liveRef.current;
     if (!p) return;
+    // Replaying a stale ETag would 304 into an empty window.
     const known = rayEtagRef.current.key === key ? rayEtagRef.current.etag : null;
     try {
       const res = await fetchTimeRay(p, { limit: RAY_WINDOW }, known, signal);
-      if (signal.aborted || unitKeyRef.current !== key) return;
+      if (signal.aborted || liveRef.current.key !== key) return;
       if (res.kind === "not_modified") {
         setRay((prev) => (prev.loaded ? prev : { ...prev, loaded: true }));
         return;
@@ -473,13 +473,12 @@ function useCycleStreamSource(
 
   const cursor = ray.cursor;
   const loadOlder = useCallback(() => {
-    const p = pathRef.current;
-    const key = unitKeyRef.current;
+    const { path: p, key } = liveRef.current;
     if (!p || !cursor || loadingOlderRef.current) return;
     loadingOlderRef.current = true;
     void fetchTimeRay(p, { limit: RAY_WINDOW, before: cursor })
       .then((res) => {
-        if (res.kind !== "ok" || unitKeyRef.current !== key) return;
+        if (res.kind !== "ok" || liveRef.current.key !== key) return;
         setRay((prev) => ({
           ...prev,
           older: [...res.data.items, ...prev.older],

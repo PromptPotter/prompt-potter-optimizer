@@ -10,7 +10,8 @@ from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application.bench.difficulty import DifficultyView
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, select_optimizer
-from promptpotter.application.scoring.metrics import _compute_accuracy
+from promptpotter.application.optimizers.nodes import round_state
+from promptpotter.application.scoring.metrics import fold_cells
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.optimizer_state import OptimizerState
@@ -48,7 +49,7 @@ def _origin_round(
     """C0's row IS what the scoring gateway produced, plus the two facts only a round close can
     add: its θ on the cycle's δ ruler where the selector stamps one, and a reference that is
     itself. Nothing re-derived."""
-    deprecated = _compute_accuracy(cast("list[QueryMeasurement]", results))["deprecated"]
+    deprecated = fold_cells(cast("list[QueryMeasurement]", results))["deprecated"]
     arm = ability if stamps_theta else None
     row = report.model_copy(
         update={
@@ -108,7 +109,7 @@ class CycleRoundState:
     # ``None`` is unmeasured. It reads one round's rows, so it never names the result:
     # ``Cycle.selection``.
     current_accuracy: float | None = None
-    current_composite_fitness: float = 0.0
+    current_composite_fitness: float | None = None
     current_results: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -183,7 +184,7 @@ class Cycle:
                     # C0's measurement is optimizer-independent but its critique is not, and
                     # a campaign paused before round 1 would otherwise hold nothing naming the
                     # optimizer it ran under.
-                    optimizer_state=working_state.origin_state(selected),
+                    optimizer_state=round_state(selected, working_state.origin_payload()),
                     stamps_theta=selected.stamps_theta,
                 )
             ],

@@ -48,7 +48,7 @@ class ExportMeasurement(StrictModel):
     # read it. Naming an empty string here would make "unnamed" indistinguishable from a formula
     # called "".
     formula: str | None
-    composite_fitness: float
+    composite_fitness: float | None
     accuracy: float | None
     n: int
     # ``None`` on a round that crowned nobody, and on the origin round, whose lift over itself is

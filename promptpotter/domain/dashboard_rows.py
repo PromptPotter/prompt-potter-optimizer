@@ -11,7 +11,7 @@ here would invert this module's one-way import."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 
 from pydantic import ConfigDict, Field
@@ -33,14 +33,51 @@ from promptpotter.domain.wounds import ValidationFailure
 __all__ = [
     "DashboardCandidate",
     "DashboardSample",
+    "LiftSide",
     "LiveCandidate",
     "OptimizerLimit",
+    "PrecisionVerdict",
     "RoundSummary",
     "RoundSummaryCandidate",
     "RunStanding",
     "SampleStatus",
+    "lift_side",
+    "panel_cuts",
+    "precision_verdict",
     "sample_status",
 ]
+
+#: Which side of 0 one arm's lift interval sits on. `spans` is the arm its round could not tell
+#: from its parent; it says nothing about the round's own verdict (`RoundSummary.separable`).
+LiftSide = Literal["above", "below", "spans"]
+
+#: Which lever an L4 panel's spread calls for: `noise` where the cells were measured no more
+#: sharply than they landed apart, so they want sharpening; `spread` where they genuinely differ.
+PrecisionVerdict = Literal["noise", "spread"]
+
+
+def lift_side(lo: float | None, hi: float | None) -> LiftSide | None:
+    """The ONE reading of an interval's sign, for every surface that words or colours a lift.
+    `None` where the arm carries no interval."""
+    if lo is None or hi is None:
+        return None
+    return "above" if lo > 0 else "below" if hi < 0 else "spans"
+
+
+def precision_verdict(precision: PanelPrecision) -> PrecisionVerdict:
+    """Measurement error that reaches the observed spread leaves nothing for the cells to differ by."""
+    return "noise" if precision.estimation_sd >= precision.observed_sd else "spread"
+
+
+def panel_cuts(panels: Sequence[tuple[int | None, int | None]]) -> list[bool]:
+    """Which arms of ONE round stopped short, from each arm's `(scored, expected)`: under its own
+    panel, or under the fullest any arm reached. An arm that measured nothing is not cut."""
+    fullest = max((scored for scored, _ in panels if scored is not None), default=0)
+    return [
+        scored is not None and ((expected is not None and scored < expected) or scored < fullest)
+        for scored, expected in panels
+    ]
+
 
 #: The tape's four marks. ERR and UNSC are each a state of their OWN, not a bad MISS — neither row
 #: was graded, so reading an absent fitness as one reports a backend fault (ERR) or the active
@@ -83,8 +120,10 @@ class DashboardSample(StrictModel):
         "`CellRow.fitness` carries, so a live cell shades a partial grade `status` rounds to "
         "HIT or MISS. Null on an errored row, which was never graded.",
     )
-    terminal_node: str = Field(
-        default="", description="Pipeline node the row terminated at; the tape badges it."
+    terminal_node: str | None = Field(
+        default=None,
+        description="The deepest pipeline node the row reached; the tape badges it. Null where "
+        "the row names none.",
     )
     cached: bool = Field(
         default=False,
@@ -205,6 +244,10 @@ class DashboardCandidate(StrictModel):
     reference_lift: float | None = None
     reference_lift_ci_lo: float | None = None
     reference_lift_ci_hi: float | None = None
+    # Two readings of the fields above, decided on the way out (`overlay_round_readings`) and
+    # WIRE-ONLY: the lift interval's side of 0 (`lift_side`) and a short panel (`panel_cuts`).
+    reference_lift_side: LiftSide | None = Field(default=None, exclude=True)
+    panel_cut: bool = Field(default=False, exclude=True)
     # On the BASE, because the election is not a closing act: `elect_round_winner` runs at the
     # end of SCORING, two LLM calls before the round closes, and the live row is the only
     # surface that can say so then. `False` until it lands, and on every row of a round that
@@ -235,7 +278,7 @@ class RoundSummaryCandidate(DashboardCandidate):
 
     candidate_id: str
     accuracy: float | None
-    composite_fitness: float
+    composite_fitness: float | None
     outcome: ArmOutcome
     expected_samples: int
     is_selected: bool
@@ -284,7 +327,7 @@ class RoundSummary(StrictModel):
     # ``None`` where the round measured nothing readable, so the chart draws a GAP rather
     # than a point at zero (`ScoredCandidate.accuracy`).
     accuracy: float | None
-    composite_fitness: float
+    composite_fitness: float | None
     # The rows `accuracy` is a mean over — the winner's, or on a held round the parent's on this
     # panel. Mirrors `RoundResult.total`; no arm's own count stands in for it.
     total: int
@@ -297,6 +340,9 @@ class RoundSummary(StrictModel):
     # fabricates a number no individual scored. Mirrors `RoundResult.ability` where the round's
     # selector stamps θ, and is ``None`` everywhere else.
     ability: AbilityReading | None = None
+    # Whether `ability` is on the scale the cycle's θ series is drawn on, the first ruler a round
+    # stamped (`AbilityReading.comparable_to`). WIRE-ONLY, decided in `overlay_round_readings`.
+    ability_on_series_ruler: bool = Field(default=False, exclude=True)
     # The cycle's best on shared cells as it stood when this round closed, a fork's seeded rounds
     # included — the BEST line, served so no surface folds its own.
     best_so_far: float | None = None
@@ -341,5 +387,8 @@ class RoundSummary(StrictModel):
     # round: an ordinary sample is graded and carries no error bar to decompose. The VERDICT is
     # not here; it rides `candidates[].reference_lift*` like every other level's.
     panel_precision: PanelPrecision | None = None
+    # Which lever those two bars call for (`precision_verdict`), null where `panel_precision` is.
+    # WIRE-ONLY and beside the reading: `PanelPrecision` is hashed into the L4 estimator's identity.
+    panel_precision_verdict: PrecisionVerdict | None = Field(default=None, exclude=True)
     # Mirrors `RoundResult.optimizer_facts`: the optimizer's own words about this round.
     optimizer_facts: list[OptimizerFact] = Field(default_factory=list)

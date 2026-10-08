@@ -3,12 +3,12 @@
 // exempt from any "hide non-functional controls" sweep and from the no-M-milestone gate.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useHardSamples } from "@/lib/hard-samples";
-import { useDashboard } from "@/lib/hooks/useDashboard";
+import { useCycleStream } from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";
 import { useIngest } from "@/lib/ingest-flow";
 import { IngestConversation } from "@/components/ingest/IngestConversation";
 import { hasLiveProducer } from "@/lib/run-phase";
-import { draftForCampaign, isSelfOptimization, runSummary } from "@/lib/derivations";
+import { draftForCampaign, runSummary } from "@/lib/derivations";
 import { HardSamplesHeatmap } from "@/components/dashboard/samples/HardSamplesHeatmap";
 import { NodeDetail } from "@/components/shell/node-surface/NodeDetail";
 import { PipelineStack } from "@/components/dashboard/pipeline/PipelineStack";
@@ -31,7 +31,7 @@ interface Props {
 // above the thread is deliberately MINIATURE — the Dashboard reads the same surfaces at size.
 export function ChatPane({ checkinCampaignId, onOpenDashboard }: Props) {
   const { datasetName } = useHardSamples();
-  const { dash } = useDashboard();
+  const { dash } = useCycleStream();
   // The feed and its gate decision follow the viewed LEAF hop (an L4 inner campaign tails its own cycle);
   // root identity (session, ingest compose) stays on the root exports.
   const { viewedPath, cycleId, leafCampaignId, leafCycleId } = useWorkspace();
@@ -78,7 +78,7 @@ export function ChatPane({ checkinCampaignId, onOpenDashboard }: Props) {
 
   const cv = useConnector();
   // An L4 unit has no cache.json roster — its samples ARE the inner campaigns.
-  const selfOpt = isSelfOptimization(cv.backendType);
+  const selfOpt = cv.selfOptimization;
   const { node: selectedNode, setSelectionForNode } = useSelection();
   // A campaign being set up previews the DRAFT's searchpoint, only for the campaign that draft is:
   // the ingest thread outlives a sidebar selection.

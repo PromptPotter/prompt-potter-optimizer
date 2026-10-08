@@ -69,7 +69,7 @@ in the signature rather than dropped silently.
 
 **Your program's spend is counted.** Its calls go through litellm rather than our client, so the
 adapter tracks their usage per prediction and rolls it onto the campaign ledger — which is what
-makes `Loop(spend_budget_usd=…)` bound the whole compile rather than half of it. DSPy does not
+makes `compile_loop(spend_budget_usd=…)` bound the whole compile rather than half of it. DSPy does not
 record usage for a completion its own cache served, and PromptPotter's measurement cache sits
 above that, so the only calls that go uncounted are ones DSPy replayed that we did not. For exact
 metering, `dspy.configure_cache(enable_disk_cache=False, enable_memory_cache=False)`.
@@ -96,17 +96,17 @@ each layer tolerates before handing up (full mechanism:
 [`../concepts/the-loop.md`](../concepts/the-loop.md)):
 
 ```python
-from promptpotter.presentation.teleprompter import Loop
+from promptpotter.presentation.teleprompter import compile_loop
 
-loop = Loop(
+loop = compile_loop(
     optimizer="potter",       # which optimizer proposes — any name optimizer_roster() lists
     nodes={                   # that optimizer's node knobs; omitted keeps its manifest's
-        "adaptive_queue": {"sp_budget_round": 20},  # rows each candidate is scored on — the cost knob
-        "l1_generate": {"n_variants": 6},       # candidates generated per round
-        "escalation": {"l1_patience": 0,        # L1 mutates the winner
-                       "l2_patience": 2,        # L2 observes the history, re-aims L1
-                       "l3_patience": 1},       # L3 replans the strategy L1 works within
-        "pobb": {"epsilon": 0.2},               # how aggressively trailing candidates are killed
+        "adaptive_queue": {"config": {"sp_budget_round": 20}},  # rows each candidate is scored on — the cost knob
+        "l1_generate": {"config": {"n_variants": 6}},       # candidates generated per round
+        "escalation": {"config": {"l1_patience": 0,         # L1 mutates the winner
+                                  "l2_patience": 2,         # L2 observes the history, re-aims L1
+                                  "l3_patience": 1}},       # L3 replans the strategy L1 works within
+        "pobb": {"config": {"epsilon": 0.2}},               # how aggressively trailing candidates are killed
     },
     max_rounds=5,
     elimination_n_min=4,      # samples a candidate gets before it may be pruned
@@ -117,9 +117,10 @@ loop = Loop(
 The three layers are potter's. `optimizer="capo"` (or `gepa`, `levi`) swaps the proposer and
 keeps everything around it; its `nodes` are that manifest's knobs, which
 `GET /optimizers/{name}/knobs` lists, and a knob the manifest does not take is refused when the
-`Loop` is built. The values above are an illustration, not the defaults: omitting `nodes` runs
-the named manifest as declared, the same defaults every other entry point runs it at, and the loop
-fields' own defaults live on the `Loop` dataclass. Read them off the fields.
+loop is built. `compile_loop` returns the campaign's own `OptimizationConfig`, so `nodes` takes the
+shape every other entry point writes and any field of that schema is a keyword here. The values
+above are an illustration, not the defaults: omitting `nodes` runs the named manifest as declared,
+and the three values a compile starts from are `teleprompter.py::_COMPILE_DEFAULTS`.
 
 ## The node is your program
 

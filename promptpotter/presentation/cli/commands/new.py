@@ -201,11 +201,12 @@ async def _ingest_checkin(args: argparse.Namespace) -> str:
     stores = build_stores(identity_from_args(args), projects_root=DEFAULT_PROJECTS_ROOT)
 
     try:
-        draft = ingest_draft(
+        draft = await ingest_draft(
             stores=stores,
             blob=file_path.read_bytes(),
             filename=file_path.name,
             slug=args.slug,
+            **({"backend_url": args.backend_url} if args.backend_url else {}),
         )
     except IngestError as exc:
         raise SystemExit(f"ERROR: could not parse {file_path.name}: {exc.message}") from None

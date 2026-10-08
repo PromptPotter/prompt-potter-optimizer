@@ -1,12 +1,7 @@
 "use client";
-import { useDashboard } from "@/lib/hooks/useDashboard";
+import { useCycleStream } from "@/lib/poll";
 import { useConnector } from "@/lib/hooks/useConnector";
-import {
-  isSelfOptimization,
-  runSummary,
-  runSummaryFacts,
-  type RunSummary,
-} from "@/lib/derivations";
+import { runSummary, runSummaryFacts, type RunSummary } from "@/lib/derivations";
 import { stopReasonNextStep } from "@/lib/run-phase";
 import { cx } from "@/lib/cx";
 import { pressable } from "@/components/ui";
@@ -25,7 +20,7 @@ interface Props {
 }
 
 export function RunCard({ sampleOrder, onOpenDashboard }: Props) {
-  const { dash, isLive } = useDashboard();
+  const { dash, isLive } = useCycleStream();
   const cv = useConnector();
   const summary = runSummary(dash);
 
@@ -43,7 +38,7 @@ export function RunCard({ sampleOrder, onOpenDashboard }: Props) {
       </div>
       <LeaderSummary />
       {/* A pp-self outer cycle has no per-sample roster; the sidebar and L4 rows already `drillInto`. */}
-      {!isSelfOptimization(cv.backendType) && (
+      {!cv.selfOptimization && (
         <div className="run-box">
           <HardSamplesPreview sampleOrder={sampleOrder} />
         </div>

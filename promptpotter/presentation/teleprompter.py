@@ -30,69 +30,46 @@ from promptpotter.application.datasets.authored import (
 )
 from promptpotter.application.datasets.loaders import samples_from_dicts
 from promptpotter.application.embedded_run import open_session, run_campaign
-from promptpotter.application.optimizer_manifest import resolve_optimizer
+from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
 from promptpotter.application.runner.entry import RunMode
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.connectors.dspy_module import (
-    PROGRAM_NODE,
-    RESULT_KEY,
     SCORE_KEY,
     DspyProgram,
+    dataset_pipeline,
 )
 from promptpotter.domain.launch_limits import LaunchLimits
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
-from promptpotter.domain.pipeline_schema import ManifestNodeOverlay
+from promptpotter.infrastructure.identity.migration import registered_or_default_identity
 from promptpotter.infrastructure.store.dataset_access import dataset_pipeline_path
 from promptpotter.infrastructure.store.io import write_text, write_yaml
 from promptpotter.infrastructure.store.stores import build_stores
-from promptpotter.shared.identity import default_identity
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable
     from pathlib import Path
 
     from promptpotter.domain.export import PromptExport
 
-__all__ = ["Loop", "Node", "PromptPotterOpt"]
+__all__ = ["Node", "PromptPotterOpt", "compile_loop"]
 
 
-_DEFAULT_OPTIMIZER: str = OptimizationConfig.model_fields["optimizer"].default
+# What a compile starts from where the caller names nothing: the one field the schema requires,
+# and a round count and pruning floor sized for a trainset rather than a benchmark.
+_COMPILE_DEFAULTS: dict[str, Any] = {
+    "max_rounds": 5,
+    "degradation_threshold": 0.4,
+    "elimination_n_min": 4,
+}
 
 
-@dataclass(frozen=True)
-class Loop:
-    """Loop control. Every field has a default, so ``Loop()`` is a complete configuration."""
-
-    optimizer: str = _DEFAULT_OPTIMIZER
-    """Which optimizer proposes: any name ``optimizer_roster()`` lists."""
-
-    nodes: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
-    """Knobs on that optimizer's nodes, ``{node: {knob: value}}``, refused at construction when
-    the manifest does not take them; the manifest's declared values run everywhere else."""
-
-    max_rounds: int = 5
-    degradation_threshold: float = 0.4
-    elimination_n_min: int = 4
-    spend_budget_usd: float | None = None
-    token_budget: int | None = None
-
-    def __post_init__(self) -> None:
-        resolve_optimizer(self.optimizer, self._overlay())
-
-    def _overlay(self) -> dict[str, ManifestNodeOverlay]:
-        return {node: ManifestNodeOverlay(config=dict(knobs)) for node, knobs in self.nodes.items()}
-
-    def _optimization(self) -> dict[str, Any]:
-        return {
-            "optimizer": self.optimizer,
-            "max_rounds": self.max_rounds,
-            "degradation_threshold": self.degradation_threshold,
-            "elimination_n_min": self.elimination_n_min,
-            "spend_budget_usd": self.spend_budget_usd,
-            "token_budget": self.token_budget,
-            "nodes": {n: o.model_dump(mode="json") for n, o in self._overlay().items()},
-        }
+def compile_loop(**knobs: Any) -> OptimizationConfig:
+    """Loop control for a compile: the campaign's own ``OptimizationConfig``, so every knob any entry
+    point takes is reachable, and one the schema or manifest refuses is refused before ``compile``."""
+    optimization = OptimizationConfig.model_validate({**_COMPILE_DEFAULTS, **knobs})
+    select_optimizer(optimization)
+    return optimization
 
 
 @dataclass(frozen=True)
@@ -122,7 +99,7 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
         *,
         metric: Callable[[Any, Any], Any],
         dataset_name: str,
-        loop: Loop | None = None,
+        loop: OptimizationConfig | None = None,
         node: Node | None = None,
         task_description: str = "",
         scoring: str = SCORE_KEY,
@@ -130,7 +107,7 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
         super().__init__()
         self.metric = metric
         self.dataset_name = dataset_name
-        self.loop = loop or Loop()
+        self.loop = loop or compile_loop()
         self.node = node or Node(model="openai/gpt-4o-mini")
         self.task_description = task_description
         self.scoring = scoring
@@ -172,23 +149,23 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
         writes declares no ``dataset_split``, so the whole trainset is the search pool, no bench
         score is taken, and the caller evaluates the returned program on its own held-out rows."""
         rows = samples_from_dicts([{"query": _query_of(ex), "ground_truth": ""} for ex in trainset])
-        program = DspyProgram(
-            student=student,
-            metric=self.metric,
-            examples={_query_of(ex): ex for ex in trainset},
-        )
-        if len(program.examples) != len(trainset):
+        if (distinct := len({row.key for row in rows})) != len(trainset):
             raise ValueError(
-                f"trainset has {len(trainset)} examples but only {len(program.examples)} distinct "
-                "inputs — a duplicate row cannot be told from its twin at scoring time."
+                f"trainset has {len(trainset)} examples but only {distinct} distinct inputs — "
+                "twin rows share one measurement, so each replays the other's score."
             )
+        program = DspyProgram(student=student, metric=self.metric, examples=list(trainset))
 
-        self._write_dataset_dir()
-        session = await open_session(self.dataset_name, program=program)
+        # The operator's own workspace, resolved once: the dataset this writes and the campaign
+        # the session mints have to land in the one tree the terminal and the webapp read.
+        stores = build_stores(registered_or_default_identity(), projects_root=DEFAULT_PROJECTS_ROOT)
+        dataset_dir = stores.tenant_datasets.dataset_dir(self.dataset_name)
+        self._write_dataset_dir(dataset_dir)
+        session = await open_session(self.dataset_name, stores=stores, program=program)
         try:
             # No overrides, budgets included: the file this compile just wrote IS the projection
             # of `loop` and `nodes`, so passing them again would be a second path to the same values.
-            config = load_dataset_campaign_config(self._campaign_path())
+            config = load_dataset_campaign_config(dataset_campaign_path(dataset_dir))
             configure_and_apply_pipeline(session, config)
             result = await run_campaign(
                 session,
@@ -211,55 +188,23 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
 
     # -- the dataset the campaign is keyed by -------------------------------------------------
 
-    def _dataset_dir(self) -> Path:
-        stores = build_stores(default_identity(), projects_root=DEFAULT_PROJECTS_ROOT)
-        return stores.tenant_datasets.dataset_dir(self.dataset_name)
-
-    def _campaign_path(self) -> Path:
-        return dataset_campaign_path(self._dataset_dir())
-
-    def _write_dataset_dir(self) -> None:
+    def _write_dataset_dir(self, dataset_dir: Path) -> None:
         """Materialize the files a campaign resolves by name. Rewritten every compile, because they
         are a projection of the arguments just passed — not operator-authored config that a second
         compile would be clobbering."""
-        write_text(self._dataset_dir() / "task_description.md", self.task_description)
-        node: dict[str, Any] = {
-            "type": "llm",
-            "runtime": "in_process",
-            "node_role": "ranker",
-            "description": "The caller's dspy.Module, scored by the caller's metric.",
-            "prompt_info": {"template_variables": []},
-            "config": {
-                "model": self.node.model,
-                "temperature": self.node.temperature,
-                **self.node.extra,
-            },
-            "optimizer": {
-                "param_keys": list(self.node.tune),
-                "param_allowed_values": dict(self.node.allowed),
-                "observation_name": PROGRAM_NODE,
-                # `is_llm` on the prediction mapping is what makes a per-node `model` REQUIRED,
-                # which is the check that stops a measurement being attributed to whichever LM
-                # happened to be configured.
-                "observation_mappings": [
-                    {"pipeline_key": RESULT_KEY, "is_llm": True},
-                    {"pipeline_key": SCORE_KEY},
-                ],
-            },
-        }
+        write_text(dataset_dir / "task_description.md", self.task_description)
         write_yaml(
-            dataset_pipeline_path(self._dataset_dir()),
-            {
-                "name": "DSPy",
-                "backend_name": "DSPy",
-                "backend_type": "dspy",
-                "available_models": sorted({self.node.model, *self.node.allowed.get("model", [])}),
-                "nodes": {PROGRAM_NODE: node},
-                "pipelines": {"default": [PROGRAM_NODE]},
-            },
+            dataset_pipeline_path(dataset_dir),
+            dataset_pipeline(
+                model=self.node.model,
+                temperature=self.node.temperature,
+                extra=self.node.extra,
+                tune=self.node.tune,
+                allowed=self.node.allowed,
+            ),
         )
         write_yaml(
-            self._campaign_path(),
+            dataset_campaign_path(dataset_dir),
             {
                 "campaign_config": {
                     "dataset_name": self.dataset_name,
@@ -267,7 +212,7 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
                     # number through. Overriding `scoring` composes evaluators on top of it.
                     "scoring": self.scoring,
                     "display_metric": "accuracy",
-                    "optimization": self.loop._optimization(),
+                    "optimization": self.loop.model_dump(mode="json", exclude_unset=True),
                 }
             },
         )

@@ -537,9 +537,6 @@ def auto_scorer_id(
 # ``per_cell`` once the origin is measured (`application/origin.py::lock_criterion`), and the same
 # text is a ``dials:`` lens's payload.
 DIALS_KEY = "dials"
-# A lens spelled as dials rather than as a formula: ``dials:tokens=0.08``. The reader realizes it
-# against the campaign's own anchors, so no caller has to know the criterion's shape.
-LENS_DIALS_PREFIX = f"{DIALS_KEY}:"
 
 
 def _refuse_dials(text: str, why: str) -> PayloadInvalidError:
@@ -650,7 +647,6 @@ __all__ = [
     "CELL_CHANNELS",
     "CELL_TERMS",
     "DIALS_KEY",
-    "LENS_DIALS_PREFIX",
     "SAFE_BUILTINS",
     "CellTerm",
     "CompiledExpression",

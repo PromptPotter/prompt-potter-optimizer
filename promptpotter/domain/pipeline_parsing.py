@@ -16,13 +16,14 @@ from promptpotter.domain.pipeline_schema import (
     NodeKind,
     NodeOutputSchema,
     NodePromptInfo,
-    NodeType,
+    NodeRole,
     ObservationMapping,
     PipelineNode,
     PipelineSchema,
     PipelineView,
     PipelineViewEdge,
     PipelineViewNode,
+    ViewKind,
     description_key,
     description_paths,
 )
@@ -117,7 +118,7 @@ def _node_kind(name: str, raw: object) -> NodeKind | None:
     )
 
 
-def _derive_node_kind(node: PipelineNode | None) -> str:
+def _derive_node_kind(node: PipelineNode) -> ViewKind:
     """The DECLARED kind (:class:`NodeKind`) mapped to the coarser vocabulary the CLIENT styles
     (``PipelineViewNode.kind``). Cache role wins — a hit short-circuits the pipeline.
 
@@ -125,11 +126,9 @@ def _derive_node_kind(node: PipelineNode | None) -> str:
     declared type from a view kind spelled into a manifest, and every unlisted string fell through
     to ``tool`` — so a kind the client styles for nothing and a kind nobody declared were one
     answer. Now the first is this match's job and the second is refused at parse."""
-    if node is None:
-        return "tool"
-    if node.node_type is NodeType.CACHE:
+    if node.role is NodeRole.CACHE:
         return "cache"
-    kind = node.wire_type
+    kind = node.kind
     # An undeclared node is plumbing until its producer says otherwise — the one place the old
     # catch-all survives, now naming the single input it actually covers.
     if kind is None:
@@ -209,7 +208,7 @@ def derive_pipeline_view(
                 id=name,
                 label=name,
                 description=descriptions[name],
-                kind=_derive_node_kind(nodes.get(name)),
+                kind=_derive_node_kind(nodes[name]),
                 tier=tier,
                 rank=rank,
             )
@@ -226,7 +225,7 @@ def derive_pipeline_view(
         _edge(sequence[i], sequence[i + 1], "forward")
     # The bench walks an optimizer's chain once per round, and an alternative re-runs a chain — so
     # a loopless view is a target pipeline, which a renderer may lay out as a straight rail.
-    repeats = bool(introduced) or any(n.wire_type in MEMBER_KINDS for n in nodes.values())
+    repeats = bool(introduced) or any(n.kind in MEMBER_KINDS for n in nodes.values())
     if repeats and chain:
         _edge(chain[-1], chain[0], "loop")
     for fresh, seq in introduced:
@@ -338,12 +337,12 @@ def _check_member_structure(
 ) -> None:
     def kind(name: str) -> NodeKind | None:
         node = parsed.get(name)
-        return node.wire_type if node is not None else None
+        return node.kind if node is not None else None
 
     def refuse(message: str, **details: Any) -> NoReturn:
         raise PayloadInvalidError(message, code="pipeline_config_invalid", details=details)
 
-    if not any(node.wire_type in MEMBER_KINDS for node in parsed.values()):
+    if not any(node.kind in MEMBER_KINDS for node in parsed.values()):
         return
     default = list(pipelines.get("default") or [])
     measurements = [n for n in default if kind(n) is NodeKind.GATEWAY]
@@ -385,12 +384,12 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
     nodes = config.get("nodes", {})
     resolved_metadata = _extract_resolved_metadata(config)
 
-    # Step order from pipelines.default, fallback to nodes dict order
-    step_order = config.get("pipelines", {}).get("default", list(nodes.keys()))
+    # A manifest naming no `default` runs its nodes in declaration order.
+    pipelines = {"default": list(nodes), **(config.get("pipelines") or {})}
 
     # EVERY declared node, because the alternative pipelines name nodes beside the chain and
-    # both the view and the config surface reach them. `steps` below stays the chain alone,
-    # which is what keeps `active_steps` — and so `sp_hash` — a fact about the round.
+    # both the view and the config surface reach them. The chain stays `pipelines["default"]`
+    # alone, which is what keeps `active_steps` — and so `sp_hash` — a fact about the round.
     parsed: dict[str, PipelineNode] = {}
     for name in nodes:
         node = nodes.get(name, {})
@@ -417,8 +416,8 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
 
         step_kwargs: dict[str, Any] = {
             "name": name,
-            "wire_type": kind,
-            "node_type": node.get("node_role", ""),
+            "kind": kind,
+            "role": node.get("node_role") or None,
             "param_keys": pk,
             "param_descriptions": opt.get("param_descriptions", {}),
             "param_allowed_values": opt.get("param_allowed_values", {}),
@@ -520,25 +519,21 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
 
         parsed[name] = PipelineNode(**step_kwargs)
 
-    steps: list[PipelineNode] = [parsed[name] for name in step_order if name in parsed]
-
     # DEBUG, not INFO: this is a pure parse on a READ path, so it fires per request and scales
     # with polling rather than with anything happening — measured at two per `GET /origins`, one
     # per dataset. At INFO it printed a line every few seconds into the console an operator
     # supervises a live run in, which is where the run's own events have to be findable.
     logger.debug(
-        "Parsed pipeline '%s' with %d steps",
+        "Parsed pipeline '%s' with %d nodes",
         config.get("name", "unknown"),
-        len(steps),
+        len(parsed),
     )
 
-    pipelines = config.get("pipelines") or {"default": step_order}
     _check_member_structure(parsed, pipelines)
     schema = PipelineSchema(
         name=config.get("name", "").lower(),
         version=config.get("version", ""),
         description=config.get("description", ""),
-        nodes=steps,
         declared_nodes=list(parsed.values()),
         pipelines={name: list(seq) for name, seq in pipelines.items()},
         available_models=config.get("available_models", []),

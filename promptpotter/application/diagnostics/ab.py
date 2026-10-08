@@ -12,14 +12,12 @@ from promptpotter.application.bench.resume_and_fork.ab_replay import (
     ab_replay_cycle,
 )
 from promptpotter.application.initialization.loop_start import arm_diagnostic_scoring
-from promptpotter.application.initialization.wiring import init_services
-from promptpotter.application.pipeline_resolve import resolve_campaign_config
+from promptpotter.application.initialization.wiring import bind_cycle_session
 from promptpotter.domain.measurement_provenance import RunSource
 
 if TYPE_CHECKING:
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.infrastructure.store.stores import Stores
-    from promptpotter.shared.identity import IdentityContext
 
 __all__ = ["ab_replay_campaign"]
 
@@ -27,7 +25,6 @@ __all__ = ["ab_replay_campaign"]
 async def ab_replay_campaign(
     *,
     stores: Stores,
-    identity: IdentityContext,
     hop: CycleHop,
     log: Callable[[str], None] | None = None,
 ) -> AbReport:
@@ -36,14 +33,6 @@ async def ab_replay_campaign(
     campaign = stores.campaigns.load_campaign(hop.campaign_id)
     if campaign is None:
         raise AbReplayError(f"campaign {hop.campaign_id!r} has no manifest on disk.")
-    session = await init_services(
-        backend_id=campaign.backend_id,
-        dataset_name=campaign.dataset_name,
-        identity=identity,
-        stores=stores,
-    )
-    session.campaign_id = hop.campaign_id
-    session.state.cycle_id = hop.cycle_id
-    campaign_config = resolve_campaign_config(stores, campaign, hop)
+    session, campaign_config = await bind_cycle_session(stores, campaign, hop)
     arm_diagnostic_scoring(session, campaign_config, source=RunSource.AB, log=log)
     return ab_replay_cycle(hop, session, campaign_config)

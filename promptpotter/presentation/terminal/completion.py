@@ -5,10 +5,12 @@ from __future__ import annotations
 
 import html
 import json
+import textwrap
 from typing import TYPE_CHECKING, assert_never, get_args
 
 from promptpotter.application.views.render.primitives import (
     BOLD,
+    BOX_WIDTH,
     GREEN,
     RED,
     RESET,
@@ -25,6 +27,8 @@ from promptpotter.domain.phases import (
 from promptpotter.infrastructure.tracing.langfuse_client import langfuse_trace_url
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from promptpotter.application.initialization.session import Session
     from promptpotter.domain.bench import BenchReading, BenchScore
     from promptpotter.domain.pipeline_schema import PipelineSchema
@@ -38,8 +42,10 @@ def render_completion(
     *,
     pipeline_schema: PipelineSchema | None = None,
     dataset_name: str | None = None,
-    campaign_id: str | None = None,
+    campaign_dir: Path | None = None,
 ) -> str:
+    """The ONE read-out of a finished cycle, whichever entry point ran it: the box, the winning
+    overlay, then where the campaign's artifacts are — addressed, never reprinted."""
     # The OUTCOME, never the member: `StopOutcome.PAUSED` is the one non-terminal class, and a
     # second reason in it (a panel the bounds cut) read as COMPLETE against a name comparison.
     info = STOP_REASON_INFO[result.stop_reason]
@@ -74,8 +80,8 @@ def render_completion(
         fields.append(f"Next         {info.next_step}")
     if dataset_name:
         fields.append(f"Dataset      {dataset_name}")
-    if campaign_id:
-        fields.append(f"Campaign     {campaign_id}")
+    if campaign_dir is not None:
+        fields.append(f"Campaign     {campaign_dir.name}")
     if result.cycle_id:
         fields.append(f"Cycle ID     {result.cycle_id}")
     if result.session_id:
@@ -83,10 +89,26 @@ def render_completion(
     if trace_url := langfuse_trace_url(result.langfuse_trace_id):
         fields.append(f"Langfuse     {trace_url}")
 
-    out = ["", _dbox_block(title, *fields)]
+    # Wrapped under the value column, never left to the box to cut: the bench line, an error and a
+    # next step all outrun it, and a truncated instruction is not one.
+    wrapped = [
+        line
+        for field in fields
+        for line in textwrap.wrap(field, width=BOX_WIDTH - 4, subsequent_indent=" " * 13)
+    ]
+    out = ["", _dbox_block(title, *wrapped)]
     if overlay_block := render_pipeline_overlay(result.result_pipeline_params, pipeline_schema):
         out.append("")
         out.append(overlay_block)
+    if campaign_dir is not None:
+        out += [
+            "",
+            f"Directory: {campaign_dir}",
+            "  campaign.json          — manifest",
+            "  log.md                 — campaign digest",
+            f"  cycles/{result.cycle_id or '?'}/  — session telemetry (dashboard.json) + rounds"
+            " + readout.log",
+        ]
     return "\n".join(out)
 
 
@@ -160,7 +182,11 @@ def report_completion(result: CycleResult, *, session: Session) -> None:
             result,
             pipeline_schema=session.pipeline_schema,
             dataset_name=session.dataset_name,
-            campaign_id=session.campaign_id or None,
+            campaign_dir=(
+                session.store.campaigns.campaign_root_dir(session.campaign_id)
+                if session.campaign_id
+                else None
+            ),
         )
     )
     _try_display_html(render_completion_html(result))

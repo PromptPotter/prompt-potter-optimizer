@@ -4,8 +4,7 @@ from typing import Literal, NamedTuple
 
 from pydantic import Field
 
-from promptpotter.application.mask.record import parse_sample_ids
-from promptpotter.application.scoring.formula import LENS_DIALS_PREFIX
+from promptpotter.application.mask.record import Lens, parse_lens, parse_sample_ids
 from promptpotter.domain.cycle_paths import (
     CycleHop,
     CyclePath,
@@ -13,26 +12,14 @@ from promptpotter.domain.cycle_paths import (
     encode_cycle_path,
 )
 from promptpotter.domain.ruler import AbilityReading
-from promptpotter.domain.run_records import UNATTRIBUTED_OPERATOR
+from promptpotter.domain.run_records import OPERATOR_ORIGIN_SOURCES, UNATTRIBUTED_OPERATOR
 from promptpotter.domain.strict_model import StrictModel
 
 SubjectKind = Literal["campaign", "course", "candidate"]
 
-# The two `IndividualLineage.source` stamps a HUMAN authors — an operator-steered fork's C0 and a
-# campaign minted from a chosen prior origin. Every other source names the LAYER that proposed the
-# point and passes through verbatim, so a source added later reads as itself rather than joining
-# the operator's arm in silence.
-_OPERATOR_SOURCES = frozenset({"fork_seed", "campaign_origin"})
-
 # How many path segments each kind addresses. The parse is arity-checked off this, so a kind added
 # here without a resolver fails at the door rather than resolving to the wrong depth.
 _SUBJECT_ARITY: dict[SubjectKind, int] = {"campaign": 1, "course": 2, "candidate": 3}
-
-# The one lens a comparable LEVEL can be read under, in its two spellings — a formula, or the
-# dials that realize into one (`LENS_DIALS_PREFIX`). `abort:` is deliberately absent: switching a
-# PoBB gate off changes which candidates ran to term, not what any of them scored, so it decorates
-# the lineage tree and has no per-cell value to plot here.
-LENS_SCORE_PREFIX = "score:"
 
 
 class SubjectSpec(NamedTuple):
@@ -54,9 +41,9 @@ class SubjectSpec(NamedTuple):
     # works on it unchanged once the store has descended; without it the whole of a
     # `promptpotter-self` tree is unaddressable.
     inside: CyclePath = ()
-    # `score:<formula>`, a `per_cell` composite. Course-only: a campaign is an origin no election
-    # reaches, and a candidate one point rather than a chain; neither has an election to re-decide.
-    lens: str = ""
+    # Course-only: a campaign is an origin no election reaches, and a candidate one point rather
+    # than a chain; neither has an election to re-decide.
+    lens: Lens | None = None
     samples: frozenset[int] | None = None
 
     @property
@@ -69,7 +56,7 @@ class SubjectSpec(NamedTuple):
         if self.inside:
             parts.append(f"in={encode_cycle_path(self.inside)}")
         if self.lens:
-            parts.append(f"lens={self.lens}")
+            parts.append(f"lens={self.lens.spelling}")
         if self.samples:
             parts.append("samples=" + ",".join(str(s) for s in sorted(self.samples)))
         return ";".join(parts)
@@ -102,19 +89,14 @@ def parse_subject(spec: str) -> SubjectSpec:
             f"Subject {spec!r} addresses {len([p for p in parts if p])} id(s); a "
             f"{kind!r} subject takes exactly {arity}."
         )
-    lens, samples, inside = "", None, CyclePath()
+    lens: Lens | None = None
+    samples, inside = None, CyclePath()
     for segment in segments:
         name, _, value = segment.partition("=")
         if name == "in":
             inside = decode_cycle_path(value)
         elif name == "lens":
-            if not value.startswith((LENS_SCORE_PREFIX, LENS_DIALS_PREFIX)):
-                raise ValueError(
-                    f"Unknown lens {value!r} on {spec!r} (expected "
-                    f"'{LENS_SCORE_PREFIX}<formula>' or '{LENS_DIALS_PREFIX}<term=weight,…>'; an "
-                    "abort lens is a lineage-tree question, not a comparable level)."
-                )
-            lens = value
+            lens = parse_lens(value, allow_abort=False)
         elif name == "samples":
             samples = parse_sample_ids(value)
         else:
@@ -133,8 +115,8 @@ def parse_subject(spec: str) -> SubjectSpec:
 
 def authorship_of(source: str, issued_by: str) -> str:
     """``SubjectReading.arm_id`` cannot answer this: it hashes round 0's optimizer prompts, so two
-    forks of one campaign share an arm however differently their origins were authored."""
-    if source not in _OPERATOR_SOURCES:
+    forks of one campaign share an arm. A non-human source names its LAYER and passes through verbatim."""
+    if source not in OPERATOR_ORIGIN_SOURCES:
         return source
     return f"operator:{issued_by or UNATTRIBUTED_OPERATOR}"
 
@@ -319,7 +301,6 @@ class SubjectReading(StrictModel):
 
 
 __all__ = [
-    "LENS_SCORE_PREFIX",
     "ScenarioReading",
     "SubjectKind",
     "SubjectMask",

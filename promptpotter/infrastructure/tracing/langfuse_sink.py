@@ -49,20 +49,16 @@ class LangfuseSink:
         # (run_id, query) → (trace_id, dataset_name, origin) — Topology B in-flight.
         self._query_trace_ids: dict[tuple[str, str], tuple[str, str, str]] = {}
 
-        # Resolved lazily on first CampaignStart (session_id lives there).
-        self._state_session_id: str | None = None
+        # Resolved on the first event naming a cycle; the id state lives in that cycle's dir.
+        self._state_cycle_id: str | None = None
         self._state_path: Path | None = None
 
-    def _session_state_path(self, session_id: str) -> Path:
-        # session_id == cycle_id here; langfuse state lives in the cycle dir.
-        hop = CycleHop(campaign_id=self._campaign_id, cycle_id=session_id)
-        return cycle_dir_for(self._base, hop) / "langfuse" / "state.json"
-
-    def _bind_session(self, session_id: str) -> None:
-        if self._state_session_id == session_id:
+    def _bind_cycle(self, cycle_id: str) -> None:
+        if self._state_cycle_id == cycle_id:
             return
-        self._state_session_id = session_id
-        self._state_path = self._session_state_path(session_id)
+        self._state_cycle_id = cycle_id
+        hop = CycleHop(campaign_id=self._campaign_id, cycle_id=cycle_id)
+        self._state_path = cycle_dir_for(self._base, hop) / "langfuse" / "state.json"
         existing = read_json_optional(self._state_path)
         if existing:
             self._trace_ids.update(existing.get("trace_ids", {}))
@@ -99,8 +95,7 @@ class LangfuseSink:
         return self._trace_ids.get(campaign_id)
 
     def on_campaign_start(self, event: CampaignStart) -> None:
-        if event.session_id:
-            self._bind_session(event.session_id)
+        self._bind_cycle(event.cycle_id)
         cloud_id = self._lf.create_trace(
             name="optimization_loop",
             input={
@@ -146,8 +141,6 @@ class LangfuseSink:
             )
             minted: dict[tuple[str, str], str] = {}
             for query, ground_truth in event.items:
-                if not query:
-                    continue
                 cloud_id = self._lf.create_dataset_item(
                     dataset_name=event.dataset_name,
                     input={"query": query},
@@ -165,7 +158,11 @@ class LangfuseSink:
         trace_id = self._trace_ids.get(event.campaign_id)
         if not trace_id:
             return
-        round_observation_id = self._round_observation_ids.get((event.campaign_id, event.round_num))
+        round_observation_id = (
+            None
+            if event.round_num is None
+            else self._round_observation_ids.get((event.campaign_id, event.round_num))
+        )
         self._lf.create_span(
             trace_id=trace_id,
             name=f"run_{event.run_id[:8]}",
@@ -322,7 +319,7 @@ class LangfuseSink:
 
     def on_query_score_start(self, event: QueryScoreStart) -> None:
         if event.session_id:
-            self._bind_session(event.session_id)
+            self._bind_cycle(event.session_id)
         metadata: dict[str, Any] = {
             "run_id": event.run_id,
             "llm_provider": event.llm_provider,

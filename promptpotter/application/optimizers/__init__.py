@@ -20,7 +20,6 @@ __all__ = [
     "ENTRY_POINT_GROUP",
     "RUNTIME_ENTRY_POINT_GROUP",
     "member",
-    "member_origins",
     "other_optimizer_packages",
     "registered",
     "runtime",
@@ -105,10 +104,6 @@ def _load_runtimes() -> tuple[Mapping[str, OptimizerRuntime], Mapping[str, str]]
 
 def registered() -> Mapping[str, NodeMember]:
     return _load()[0]
-
-
-def member_origins() -> Mapping[str, str]:
-    return _load()[1]
 
 
 def member(name: str) -> NodeMember:

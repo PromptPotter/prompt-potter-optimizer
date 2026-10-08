@@ -1,11 +1,10 @@
 "use client";
-// ONE gesture: pick a served tree node — navigate to it and inspect it. Every writer of a node
-// selection goes through here, so none can invent its `accuracy` / `is_selected`.
+// ONE gesture: pick a served tree node — navigate to it and inspect it.
 
 import { useCallback } from "react";
 import { useSelection } from "@/lib/SelectionContext";
 import { isSelectedCandidate } from "@/lib/types";
-import { pathOf, selectedCandidateOf } from "@/lib/derivations";
+import { pathOf, selectedNodeOf } from "@/lib/derivations";
 import { pathLeaf, type CyclePath } from "@/lib/ids";
 import type { LineageNode } from "@/lib/api";
 
@@ -41,7 +40,7 @@ export function useSelectNode(
       const selected = isSelectedCandidate(candidate, cycleId, node.round ?? 0, node.id);
       if (selected) selectCyclePath(timeline, null);
       else selectCyclePath(nodePath, node.id);
-      setSelectionForCandidate(selected ? null : selectedCandidateOf(node, cycleId));
+      setSelectionForCandidate(selected ? null : selectedNodeOf(node, cycleId));
     },
     [candidate, selectCyclePath, setSelectionForCandidate],
   );

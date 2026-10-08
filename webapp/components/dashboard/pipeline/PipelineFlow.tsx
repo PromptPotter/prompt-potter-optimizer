@@ -10,8 +10,7 @@ import {
 import type { NodeReach } from "@/lib/api";
 import type { NodeScope } from "@/lib/SelectionContext";
 import type { PipelineStatus } from "@/lib/types";
-import { useDashboard } from "@/lib/hooks/useDashboard";
-import { isMeasuring } from "@/lib/poll";
+import { isMeasuring, useCycleStream } from "@/lib/poll";
 import { useSelection } from "@/lib/SelectionContext";
 import {
   agentLabel,
@@ -116,7 +115,7 @@ function PipelineBox({
   models,
 }: BoxProps) {
   const { node: selected, setSelectionForNode: setSelected } = useSelection();
-  const { dash } = useDashboard();
+  const { dash } = useCycleStream();
   const interior = interiorNodes(view);
   const CELL_W = compact ? 44 : models ? 132 : 72;
   const CELL_W_OPEN = 132;

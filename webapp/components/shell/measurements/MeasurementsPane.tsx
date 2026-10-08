@@ -15,7 +15,7 @@ import { cx } from "@/lib/cx";
 import { fitnessStyle } from "@/lib/derivations";
 import { useHardSamples } from "@/lib/hard-samples";
 import { useCells } from "@/lib/hooks/useCells";
-import { useDashboard } from "@/lib/hooks/useDashboard";
+import { useCycleStream } from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";
 import {
   DataTable,
@@ -112,7 +112,7 @@ export function MeasurementsPane({
 }) {
   const shared = useHardSamples();
   const { viewedPath, openCell, openCellOwner, setOpenCell, releaseCell } = useWorkspace();
-  const { isLive } = useDashboard();
+  const { isLive } = useCycleStream();
   const paneId = useId();
   const [groupBy, setGroupBy] = useState<GroupBy>(preset.groupBy ?? "none");
   const [status, setStatus] = useState<StatusPick>("all");

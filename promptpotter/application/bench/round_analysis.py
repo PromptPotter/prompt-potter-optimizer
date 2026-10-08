@@ -5,16 +5,10 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from promptpotter.application.scoring.classification import (
-    get_ranked_items,
-    ranked_item_keys_from_schema,
-)
-from promptpotter.application.scoring.row_diagnostics import (
-    extract_sample_diagnostics,
-    rank_ground_truth,
-)
+from promptpotter.application.scoring.row_diagnostics import extract_sample_diagnostics
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.results import RoundResult
+from promptpotter.domain.results_health import UNKNOWN_STEP, terminal_node
 from promptpotter.domain.round_diagnostics import (
     EvolutionRow,
     NearMiss,
@@ -45,15 +39,14 @@ def compute_round_diagnostics(
 ) -> RoundDiagnostics:
     """Compute typed deterministics over a completed round. *rounds_history* MUST contain *round_result* as its LAST
     element — callers fold the round into ``cycle.rounds`` before computing diagnostics."""
-    ranked_item_keys = ranked_item_keys_from_schema(pipeline_schema)
     results = round_result.results
 
-    rank_buckets, top_k, near_misses, n_valid = _rank_analysis(results, ranked_item_keys)
+    rank_buckets, top_k, near_misses, n_valid = _rank_analysis(results)
     error_rate, warning_rate = _pipeline_health(results)
     evolution_rows, anomalies = _evolution(rounds_history)
     trend, trend_desc = _trend(rounds_history)
     diff_lines = _cross_candidate_diff(round_result)
-    samples = _sample_diagnostics(results, ranked_item_keys, pipeline_schema)
+    samples = _sample_diagnostics(results, pipeline_schema)
 
     return RoundDiagnostics(
         rank_buckets=rank_buckets,
@@ -77,7 +70,7 @@ def compute_round_diagnostics(
 
 
 def _rank_analysis(
-    results: list[dict[str, Any]], ranked_item_keys: list[str] | None
+    results: list[dict[str, Any]],
 ) -> tuple[dict[str, int], dict[int, float], list[NearMiss], int]:
     # A rank is a POSITION AGAINST A LABEL. With none, every walk below returns `None`, so every
     # row lands in `not_found` and every top-k reads 0.0 — measured on a Harbor origin that solved
@@ -87,13 +80,10 @@ def _rank_analysis(
     # `n_valid` still answers — it counts rows that were measured, which is not a rank claim.
     if all_verifier_graded(r.get("ground_truth") for r in results):
         return {}, {}, [], sum(1 for r in results if not is_error_result(r))
-    keys = ranked_item_keys or None
+    # The rank the MEASUREMENT stamped, against the terminal ranker's list: on a retrieve-then-rank
+    # pipeline the first non-empty ranking key is the candidate pool, never the prediction's list.
     rank_map: dict[int, int | None] = {
-        i: rank_ground_truth(
-            get_ranked_items(r, keys), r.get("predicted") or "", r.get("ground_truth", "")
-        )[0]
-        for i, r in enumerate(results)
-        if not is_error_result(r)
+        i: r.get("ground_truth_rank") for i, r in enumerate(results) if not is_error_result(r)
     }
     buckets: dict[str, int] = dict.fromkeys(_RANK_BUCKET_KEYS, 0)
     near_misses: list[NearMiss] = []
@@ -241,7 +231,6 @@ def _cross_candidate_diff(round_result: RoundResult) -> list[str]:
 
 def _sample_diagnostics(
     results: list[dict[str, Any]],
-    ranked_item_keys: list[str] | None,
     pipeline_schema: PipelineSchema | None,
 ) -> list[SampleDiag]:
     """Per-sample tactical view (≤8 actionable misses, capped for token budget)."""
@@ -251,11 +240,6 @@ def _sample_diagnostics(
             continue
         pd = r.get("pipeline_data") or {}
         diag = pd.get("diagnostics") or {}
-        rank, _ = rank_ground_truth(
-            get_ranked_items(r, ranked_item_keys),
-            r.get("predicted") or "",
-            r.get("ground_truth", ""),
-        )
         sd: dict[str, Any] | None = None
         if pipeline_schema is not None:
             sd = extract_sample_diagnostics(r, pipeline_schema)
@@ -264,8 +248,8 @@ def _sample_diagnostics(
                 query=r.get("query", "")[:80],
                 ground_truth=(r.get("ground_truth") or "")[:60],
                 predicted=(r.get("predicted") or "?")[:60],
-                rank=rank,
-                terminal_node=pd.get("terminal_node", "unknown"),
+                rank=r.get("ground_truth_rank"),
+                terminal_node=terminal_node(r) or UNKNOWN_STEP,
                 gt_in_source=(sd or {}).get("gt_in_source"),
                 gt_in_ranked=(sd or {}).get("gt_in_ranked"),
                 warnings=[_warning_str(w) for w in (diag.get("warnings") or ())],

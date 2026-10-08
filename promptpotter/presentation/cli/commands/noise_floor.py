@@ -36,7 +36,6 @@ async def cmd_noise_floor(args: argparse.Namespace) -> CommandResult:
     try:
         outcome = await measure_noise_floor(
             stores=stores,
-            identity=identity,
             hop=CycleHop(campaign_id=campaign_id, cycle_id=cycle_id),
             k=args.k,
             log=logger.info if get_verbose() else None,

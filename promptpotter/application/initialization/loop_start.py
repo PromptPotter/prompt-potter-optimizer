@@ -275,7 +275,7 @@ async def _emit_preflight_and_init_session(
         config,
         dataset,
         target_models,
-        task_context=origin.framing.to_dict(),
+        framing=origin.framing,
         cell_usd=None if bound is None else bound.usd,
         measured_cell_usd=measured_cell_usd,
     )
@@ -358,6 +358,7 @@ def _start_observability_and_scoring(
         dataset=dataset,
         tracing_campaign_id=tracing_campaign_id,
         campaign_id=session.campaign_id,
+        cycle_id=resolved_cycle_id,
         langfuse_session_id=langfuse_session_id or resolved_cycle_id,
         langfuse=session.langfuse,
     )

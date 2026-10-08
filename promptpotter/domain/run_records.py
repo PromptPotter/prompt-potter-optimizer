@@ -16,12 +16,14 @@ from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.instrument import MeasurementRole
 
 __all__ = [
+    "OPERATOR_ORIGIN_SOURCES",
     "BenchCheckpointKind",
     "CandidateMintedRecord",
     "CheckpointKind",
     "CommandAckRecord",
     "CommandRecord",
     "ConfigOverrides",
+    "CycleFinal",
     "CycleRecord",
     "CycleSeed",
     "CycleSeedRecord",
@@ -34,6 +36,7 @@ __all__ = [
     "LLMCallStartRecord",
     "LedgerCandidate",
     "LedgerRoundClose",
+    "OriginSource",
     "PhaseRecord",
     "PricedKeyRecord",
     "ResumeCheckpointRecord",
@@ -415,7 +418,7 @@ class RoundWarningRecord(StrictModel):
 
 
 class ForkTrigger(enum.StrEnum):
-    """One value per caller of :func:`_mint_fork`."""
+    """One value per caller of :func:`mint_fork`."""
 
     OPERATOR_DIAG = "operator_diag"
     OPERATOR_REWIND = "operator_rewind"
@@ -511,9 +514,21 @@ class ConfigOverrides(StrictModel):
     scoring: str | dict[str, str] | None = None
 
 
+class OriginSource(enum.StrEnum):
+    """Which act seeded a cycle's C0. The two human acts are the members an ``evidence`` row files
+    under the operator (``OPERATOR_ORIGIN_SOURCES``)."""
+
+    FORK_SEED = "fork_seed"
+    CAMPAIGN_ORIGIN = "campaign_origin"
+    REPLAYED = ""
+    """The seed carries no origin: an L2/L3 rebase replays its own C0, which has none to stamp."""
+
+
+OPERATOR_ORIGIN_SOURCES = frozenset(OriginSource) - {OriginSource.REPLAYED}
+
+
 class CycleSeed(StrictModel):
-    """``pipeline_overlay`` merges ON TOP of the dataset overlay for this cycle only.
-    ``origin_source`` is empty when the cycle recovers its origin by replay, which has no C0 to stamp."""
+    """``pipeline_overlay`` merges ON TOP of the dataset overlay for this cycle only."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -528,8 +543,8 @@ class CycleSeed(StrictModel):
         "campaign-from-origin seed.",
     )
     config_overrides: ConfigOverrides = Field(default_factory=ConfigOverrides)
-    origin_source: str = Field(
-        default="",
+    origin_source: OriginSource = Field(
+        default=OriginSource.REPLAYED,
         description=(
             "Which act seeded C0 — 'fork_seed' | 'campaign_origin', naming its lineage's "
             "`changes_description`; empty when the seed carries no origin (an L2/L3 rebase "
@@ -564,7 +579,7 @@ class CandidateMintedRecord(StrictModel):
 
 
 # What the cycle's OWN ledger can answer about a candidate: `invalid` is rejected before it cost a
-# sample, so its stored 0.0 is `INVALID_SCORES`' synthetic one. Never `winner` — election is a
+# sample, so it carries no score. Never `winner` — election is a
 # round-close fact the ledger does not carry, and an unclosed round must invent no crown.
 CandidateState = Literal["minted", "measured", "invalid"]
 
@@ -680,6 +695,36 @@ class WallClock(StrictModel):
     # observed a wait; 0.0 = enveloped cells waited for nothing. A headline counting a suspended
     # box as work is not publishable, which is why the two silences stay apart.
     unworked_s: float | None = None
+
+
+class CycleFinal(StrictModel):
+    """``index.json::final`` — what a cycle banks once, when it STOPS. Every fact here has no other
+    home on the index: when it finished and why are the ending's own top-level keys, and the
+    formula its numbers carry is stamped at run init, where a running cycle's digest reads it."""
+
+    model_config = ConfigDict(frozen=True)
+
+    started_at: str
+    # WHERE the span went, folded from the chronology and banked because the records it is read
+    # from are compactable and no round document carries a timestamp.
+    wall_clock: WallClock
+    # ``RoundClocks``, spread so each clock names its own question; the seconds are the
+    # ``wall_clock.round_ended_s`` entry under the same round number.
+    rounds_to_separable: int | None
+    rounds_to_improved: int | None
+    rounds_to_ceiling: int | None
+    accuracy_ceiling: float | None
+    prompt_hashes: dict[str, str]
+    # On the origin's OWN samples — never round 1's matched floor, a different sample basis.
+    origin_composite_fitness: float | None
+    # The grader every ``objective`` in the cycle was scored under.
+    scorer_id: str
+    mode: Literal["diag", "full"]
+    # The pick the optimizer DECLARED, which may name a different round than the index's
+    # ``best_round`` — that one reads the rounds' shared cells.
+    result_round: int
+    result_prompt_fields: dict[str, Any]
+    result_pipeline_params: dict[str, Any] | None
 
 
 class ElectionRecord(StrictModel):

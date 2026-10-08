@@ -138,8 +138,15 @@ class PotterRoundState(RoundPayload, manifest=POTTER_MANIFEST):
     memory: L2L3Memory
     # Feedback FOR the next round's `l1_generate`, distilled after this round's scoring.
     critique: CritiqueReadout | None = None
-    # STORED, not derived: a fact about GENERATION, fixed before any candidate has a score.
+    # STORED, not derived: the share of `l1_proposed` no reject posture killed, fixed before any
+    # score; `l1_rejected` counts each proposal under the first reason that cost it its measurement.
     l1_yield: float = 1.0
+    l1_proposed: int = 0
+    l1_rejected: dict[str, int] = Field(default_factory=dict)
+    # The citation menu the wire schema offered `l1_generate` and the exploration budget its
+    # prompt was composed under. ``None`` where no call was composed: round 0, a replayed generation.
+    l1_citable: list[str] | None = None
+    l1_exploration_budget: str | None = None
     # Why this round's L1 output was unparseable (zero candidates), or None. The round owns it:
     # a parse failure yields no candidate to charge. One of `domain/optimizer_state.py`'s three.
     l1_parse_failure: str | None = None

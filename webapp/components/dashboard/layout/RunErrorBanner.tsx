@@ -1,10 +1,10 @@
 // Both run alerts from `dashboard.json` — fatal `error` and non-fatal `recent_loop_warnings`.
 
 import { STOP_REASON_LABELS } from "@/lib/api/types.generated";
-import { useDashboard } from "@/lib/hooks/useDashboard";
+import { useCycleStream } from "@/lib/poll";
 
 export function RunErrorBanner() {
-  const { dash } = useDashboard();
+  const { dash } = useCycleStream();
   const err = dash?.error;
   const warnings = (dash?.recent_loop_warnings ?? []).slice(-4).reverse();
 

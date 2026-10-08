@@ -514,7 +514,7 @@ def build_parser() -> argparse.ArgumentParser:
         "dataset",
         nargs="?",
         default="",
-        help="Pool every campaign on this dataset. Omit it and pass --subject instead.",
+        help="Pool every campaign on this dataset, beside any --subject names.",
     )
     p_evidence.add_argument(
         "--subject",
@@ -525,7 +525,7 @@ def build_parser() -> argparse.ArgumentParser:
         "'course:<campaign>/<cycle>' (one branch, at its last elected winner) or "
         "'candidate:<campaign>/<cycle>/<candidate>' (one searchpoint). The campaign id accepts "
         "the same short prefix every other verb does. May span datasets, which the comparability "
-        "line then reports on. Overrides the dataset argument. An L4 inner run names the sandbox "
+        "line then reports on. An L4 inner run names the sandbox "
         "chain it lives in, same codec as the API's '?descend=': "
         "';in=<outer_campaign>::<outer_cycle>', one hop per level. A mask rides the same "
         "address, ';'-separated: ';samples=3,7,11' reads every value over those samples only, and "

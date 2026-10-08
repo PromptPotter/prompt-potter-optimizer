@@ -5,8 +5,7 @@ import { liveCandidate, liveCandidates, type DashboardSnapshot } from "@/lib/pol
 import { PROMPT_STRING_FIELDS } from "@/lib/prompt-fields";
 import type { LiveCandidate } from "@/lib/api/types";
 import type { ElectedRow, RoundResult, SampleRow } from "@/lib/types";
-import { roundHasCandidates, sortedRounds } from "./round-candidates";
-import { wasElected } from "./election";
+import { roundHasCandidates } from "./round-candidates";
 
 // best = the parent the search expands from; latest = in-flight while running, else the last
 // measured; selected = a pick made on another surface, offered only while one exists.
@@ -163,7 +162,7 @@ function targetAt(
 // The most recent served crown, not the highest θ ever: after a rewind the two differ, and a strict
 // global best would need a served pointer.
 export function bestObserveTarget(dash: DashboardSnapshot | null): ObserveTarget | null {
-  const rounds = sortedRounds(dash).filter(roundHasCandidates).reverse();
+  const rounds = (dash?.rounds ?? []).filter(roundHasCandidates).reverse();
   for (const r of rounds) {
     const idx = r.candidates.findIndex((c) => c.is_selected);
     const w = idx >= 0 ? r.candidates[idx] : null;
@@ -173,7 +172,7 @@ export function bestObserveTarget(dash: DashboardSnapshot | null): ObserveTarget
       idx,
       w.candidate_id,
       w.label,
-      wasElected(true, r.candidates.length) ? "best" : "origin",
+      r.round === 0 ? "origin" : "best",
     );
   }
   return null;
@@ -181,7 +180,7 @@ export function bestObserveTarget(dash: DashboardSnapshot | null): ObserveTarget
 
 // The closed half of `latest`; the host, which alone knows the run is live, switches to `liveObserveConfig`.
 export function latestClosedTarget(dash: DashboardSnapshot | null): ObserveTarget | null {
-  const rounds = sortedRounds(dash).filter(roundHasCandidates);
+  const rounds = (dash?.rounds ?? []).filter(roundHasCandidates);
   const last = rounds.at(-1);
   if (!last) return null;
   const idx = last.candidates.length - 1;

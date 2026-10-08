@@ -1,7 +1,7 @@
 // Bracket-dendrogram geometry for the strip under the fitness bars. Pure numbers: x arrives and
 // leaves as fractions of the chart's plot width.
 
-import { roundSizes, wasElected } from "@/lib/derivations";
+import type { CandidateView } from "@/lib/types";
 
 export const NODE_ROW_Y = 7; // candidate dot cy, px from the strip top
 export const NODE_R = 3;
@@ -15,8 +15,8 @@ export interface DendroNode {
   round: number;
   label: string;
   isWinner: boolean;
-  // Display-only: a single-arm round advances without an election.
-  isElected: boolean;
+  // Served: `uncontested` advanced as its round's only arm, with no election to win.
+  crown: CandidateView["crown"];
   // Keeps its bar slot but joins no round band: its descent is cross-cycle, which the Forest draws.
   isFork: boolean;
   // Spine index === bar category index — the alignment contract.
@@ -53,6 +53,7 @@ export interface DendroRow {
   label: string;
   candidate_id: string;
   is_selected: boolean;
+  crown: CandidateView["crown"];
   is_fork: boolean;
 }
 
@@ -72,8 +73,6 @@ export function dendrogram(
     return { nodes, stubs, brackets, height: FLOOR_H };
   }
 
-  const sizes = roundSizes(rows.filter((r) => !r.is_fork));
-
   rows.forEach((r, i) => {
     nodes.push({
       key: r.key,
@@ -81,7 +80,7 @@ export function dendrogram(
       round: r.round,
       label: r.label,
       isWinner: r.is_selected,
-      isElected: wasElected(r.is_selected, sizes.get(r.round) ?? 1),
+      crown: r.crown,
       isFork: r.is_fork,
       i,
       xf: centers[i]!,

@@ -8,7 +8,7 @@ import {
   observeOptions,
 } from "../searchPoint";
 import type { DashboardSnapshot } from "@/lib/poll";
-import type { LiveCandidate } from "@/lib/types";
+import type { LiveCandidate } from "@/lib/api/types";
 import {
   currentRound,
   dash,
@@ -137,8 +137,8 @@ describe("bestObserveTarget — the parent", () => {
       ),
     });
 
-  it("takes the MOST RECENT served crown, not the highest round number on file", () => {
-    const t = bestObserveTarget(dash({ rounds: [crowned(2, 1, 3), crowned(0, 0, 1), crowned(1, 2, 3)] }));
+  it("takes the MOST RECENT served crown", () => {
+    const t = bestObserveTarget(dash({ rounds: [crowned(0, 0, 1), crowned(1, 2, 3), crowned(2, 1, 3)] }));
     expect(t?.round).toBe(2);
     expect(t?.courseLabel).toBe("C2.2");
     expect(t?.candidateId).toBe("r2c1");

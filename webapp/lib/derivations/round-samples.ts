@@ -31,7 +31,6 @@ function liveSamplesFor(
       query: s.query,
       predicted: s.predicted,
       ground_truth: s.ground_truth,
-      terminal_node: s.terminal_node,
       elapsed_s: s.time_s,
       cost_s: s.cost_s ?? null,
       cache_share: cacheShare(s.cache_read_tokens, s.input_tokens, s.cached),
@@ -49,7 +48,6 @@ interface RawHistoricalSample {
   cached?: boolean;
   // A row's token counts and both clocks live ONLY here, per node; no top-level twin exists.
   pipeline_data?: {
-    terminal_node?: unknown;
     step_tokens?: unknown;
     step_timings?: unknown;
     total_time?: unknown;
@@ -95,8 +93,6 @@ export function historicalSamplesFor(
       query: typeof s.query === "string" ? s.query : "",
       predicted: typeof s.predicted === "string" ? s.predicted : "",
       ground_truth: typeof s.ground_truth === "string" ? s.ground_truth : "",
-      terminal_node:
-        typeof s.pipeline_data?.terminal_node === "string" ? s.pipeline_data.terminal_node : "",
       elapsed_s: elapsed,
       cost_s: foldStepTimings(s.pipeline_data?.step_timings),
       cache_share: (() => {

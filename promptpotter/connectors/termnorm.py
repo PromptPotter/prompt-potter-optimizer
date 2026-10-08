@@ -9,9 +9,8 @@ import httpx
 
 from promptpotter.config.settings import settings
 from promptpotter.connectors.protocol import Connector
-from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.pipeline_overlay import node_config_items
-from promptpotter.domain.pipeline_schema import NodeType
+from promptpotter.domain.pipeline_schema import NodeRole
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +45,16 @@ def termnorm_wire_adapter(
 # ---------------------------------------------------------------------------
 
 
+def _error_envelope(reply: httpx.Response) -> dict[str, Any]:
+    """TermNorm's error body: ``{status, message, code, detail}`` from the global handler in its
+    ``main.py``, ``detail`` being whatever the raising handler passed."""
+    try:
+        body = reply.json()
+    except ValueError:
+        return {}
+    return body if isinstance(body, dict) else {}
+
+
 class TermNormSession:
     """TermNorm-shaped ``SessionProtocol``. Keeps ``BackendClient.run_query()`` free of session semantics:
     the transport asks the session to init or recover; the session owns terms, idempotency, reinit."""
@@ -72,7 +81,11 @@ class TermNormSession:
         result: dict[str, Any] = resp.json()
         return result
 
-    async def recover(self, http: httpx.AsyncClient, base_url: str) -> bool:
+    async def recover(self, http: httpx.AsyncClient, base_url: str, reply: httpx.Response) -> bool:
+        # A backend reload drops its in-memory sessions, so this self-heals rather than aborting
+        # the round.
+        if _error_envelope(reply).get("code") != "no_session":
+            return False
         if not self._terms:
             logger.error(
                 "Backend requires session but no terms available. "
@@ -85,86 +98,12 @@ class TermNormSession:
         await self.set_terms(http, base_url, terms)
         return True
 
-
-# ---------------------------------------------------------------------------
-# Experiment-data extraction
-# ---------------------------------------------------------------------------
-
-
-def _split_query(query: str) -> tuple[str, str]:
-    """Split ``"bom_material / process"``; no slash ⇒ an empty process."""
-    if "/" in query:
-        last_slash = query.rfind("/")
-        primary = query[:last_slash].strip()
-        secondary = query[last_slash + 1 :].strip()
-    else:
-        primary = query.strip()
-        secondary = ""
-    return primary, secondary
-
-
-def _build_query_item(query: str) -> dict[str, Any]:
-    primary, secondary = _split_query(query)
-    return {
-        "query": query,
-        "bom_material": primary,
-        "process": secondary,
-        "query_fields": {"bom_material": primary, "process": secondary},
-    }
-
-
-def _extract_index_terms(experiment_data: dict[str, Any]) -> list[str]:
-    entries = set()
-    for m in experiment_data.get("mappings", []):
-        entry = m.get("dataset_entry", "").strip()
-        if entry and entry != "--":
-            entries.add(entry)
-    return sorted(entries)
-
-
-def _extract_ground_truth_map(experiment_data: dict[str, Any]) -> dict[str, str]:
-    gt_map: dict[str, str] = {}
-    for m in experiment_data.get("mappings", []):
-        bom = m.get("bom_material", "")
-        entry = m.get("dataset_entry", "").strip()
-        if bom and entry and entry != "--":
-            gt_map[bom] = entry
-    return gt_map
-
-
-def _extract_queries(experiment_data: dict[str, Any]) -> list[dict[str, Any]]:
-    """Queries with valid ground truth — joins evaluation_result queries to mappings via bom_material."""
-    gt_map = _extract_ground_truth_map(experiment_data)
-
-    runs = experiment_data.get("runs", [])
-    if not runs:
-        return []
-
-    queries: list[dict[str, Any]] = []
-    for er in runs[0].get("evaluation_results", []):
-        query = er["query"]
-        primary, _ = _split_query(query)
-
-        if primary not in gt_map:
-            continue
-
-        queries.append(
-            {
-                **_build_query_item(query),
-                "ground_truth": gt_map[primary],
-                "original_predicted": er.get("predicted", ""),
-                "original_latency_ms": er.get("latency_ms", 0),
-                "original_confidence": er.get("confidence", 0),
-            }
-        )
-
-    return queries
-
-
-def _extract_experiment(
-    experiment_data: dict[str, Any],
-) -> tuple[list[dict[str, Any]], list[str]]:
-    return _extract_queries(experiment_data), _extract_index_terms(experiment_data)
+    def resend_refused(self, reply: httpx.Response) -> str | None:
+        """``detail.retryable: false`` — TermNorm's deadline on a provider request."""
+        detail = _error_envelope(reply).get("detail")
+        if not isinstance(detail, dict) or detail.get("retryable") is not False:
+            return None
+        return f"{detail.get('error_code')}: {detail.get('message')}"
 
 
 # ---------------------------------------------------------------------------
@@ -172,35 +111,27 @@ def _extract_experiment(
 # ---------------------------------------------------------------------------
 
 
-async def _termnorm_preflight(backend_url: str) -> None:
+async def _termnorm_preflight(backend_url: str) -> str | None:
     """Ping ``GET /status`` before the launcher accepts a write command; only a TCP-level connect failure
-    raises. Every other shape passes silently — the runner surfaces it as an ``ErrorRecord`` if it recurs."""
+    is down. Every other shape passes silently — the runner surfaces it as an ``ErrorRecord`` if it recurs."""
     async with httpx.AsyncClient(timeout=httpx.Timeout(5.0, connect=3.0)) as http:
         try:
-            resp = await http.get(f"{backend_url}/status")
+            # 5xx responses past the connect are operator-visible later via the
+            # ledger; preflight is concerned with reachability, not health.
+            await http.get(f"{backend_url}/status")
         except httpx.ConnectError as exc:
-            raise BackendUnreachableError(
-                backend_type="termnorm",
-                backend_url=backend_url,
-                # Where to GET this backend is TermNorm's fact, not the launcher's: stated at the
-                # ingress it prints for every connector, over a probe that named its own cause.
-                detail=(
-                    f"{str(exc).strip() or 'connection refused'} at {backend_url}.\n\n"
-                    "The TermNorm backend ships in a sibling repo. Clone it beside "
-                    "this checkout, then start it:\n"
-                    "  TermNorm-excel\\backend-api\\start-server-py-LLMs.bat\n\n"
-                    "Install guide: docs/manual/02-install.md"
-                ),
-            ) from exc
-        except httpx.ConnectTimeout as exc:
-            raise BackendUnreachableError(
-                backend_type="termnorm",
-                backend_url=backend_url,
-                detail="connect timeout",
-            ) from exc
-        # 5xx responses past the connect are operator-visible later via the
-        # ledger; preflight is concerned with reachability, not health.
-        del resp
+            # Where to GET this backend is TermNorm's fact, not the launcher's: stated at the
+            # ingress it prints for every connector, over a probe that named its own cause.
+            return (
+                f"{str(exc).strip() or 'connection refused'} at {backend_url}.\n\n"
+                "The TermNorm backend ships in a sibling repo. Clone it beside "
+                "this checkout, then start it:\n"
+                "  TermNorm-excel\\backend-api\\start-server-py-LLMs.bat\n\n"
+                "Install guide: docs/manual/02-install.md"
+            )
+        except httpx.ConnectTimeout:
+            return "connect timeout"
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -248,7 +179,6 @@ CONNECTOR = Connector(
     name="termnorm",
     wire_adapter=termnorm_wire_adapter,
     session_factory=TermNormSession,
-    extract_experiment=_extract_experiment,
     expected_revision=_EXPECTED_REVISION,
     version_check=_termnorm_version_check,
     preflight=_termnorm_preflight,
@@ -265,9 +195,9 @@ CONNECTOR = Connector(
     # dependency the operator drops in place. ``llm_only`` (the fresh-upload
     # default) lists neither, so no dependency appears until the operator selects
     # the full pipeline.
-    node_types={
-        "token_matching": NodeType.CANDIDATE_SOURCE,
-        "fuzzy_matching": NodeType.CANDIDATE_SOURCE,
+    node_roles={
+        "token_matching": NodeRole.CANDIDATE_SOURCE,
+        "fuzzy_matching": NodeRole.CANDIDATE_SOURCE,
     },
     # R4: connector-owned seed for ``campaign.json::optimization`` — the bench's required
     # threshold, mirroring ``datasets/gsm8k/campaign.yaml``. An optimizer's knobs are its

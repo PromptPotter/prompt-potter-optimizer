@@ -9,7 +9,7 @@ from promptpotter.domain.results import DiagnosticRunRecord
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.presentation.api.deps import StoresDep
 
-verify_router = APIRouter(tags=["Verify"])
+diagnostics_router = APIRouter(tags=["Diagnostics"])
 
 
 class DiagnosticRunListResponse(StrictModel):
@@ -19,7 +19,7 @@ class DiagnosticRunListResponse(StrictModel):
     runs: list[DiagnosticRunRecord]
 
 
-@verify_router.get("/diagnostic-runs", response_model=DiagnosticRunListResponse)
+@diagnostics_router.get("/diagnostic-runs", response_model=DiagnosticRunListResponse)
 def list_diagnostic_runs(
     stores: StoresDep,
     dataset: str | None = Query(default=None, description="Filter to one dataset."),
@@ -29,4 +29,4 @@ def list_diagnostic_runs(
     return DiagnosticRunListResponse(n=len(runs), runs=runs)
 
 
-__all__ = ["DiagnosticRunListResponse", "verify_router"]
+__all__ = ["DiagnosticRunListResponse", "diagnostics_router"]

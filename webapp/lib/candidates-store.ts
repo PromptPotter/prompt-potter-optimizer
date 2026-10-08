@@ -2,8 +2,8 @@
 // Module-scoped rather than a context: the card and `lib/lineage.tsx` both read it and neither
 // contains the other.
 
-import { useSyncExternalStore } from "react";
 import type { DisplayMetric } from "@/lib/derivations";
+import { createModuleStore } from "@/lib/module-store";
 
 interface CandidatesState {
   showForest: boolean;
@@ -25,7 +25,7 @@ interface CandidatesState {
   expandedForLane: string | null;
 }
 
-let state: CandidatesState = {
+const store = createModuleStore<CandidatesState>({
   showForest: false,
   metrics: new Set<DisplayMetric>(["accuracy"]),
   metricsSeededForCycle: null,
@@ -35,40 +35,16 @@ let state: CandidatesState = {
   expanded: new Set<string>(),
   expandedForCampaign: null,
   expandedForLane: null,
-};
+});
 
-const listeners = new Set<() => void>();
-
-// Deferred: the per-cycle seeds write during render, and a subscriber told mid-render is an update
-// to a component React is still rendering.
-function emit(): void {
-  queueMicrotask(() => {
-    for (const l of listeners) l();
-  });
-}
-
-function subscribe(l: () => void): () => void {
-  listeners.add(l);
-  return () => {
-    listeners.delete(l);
-  };
-}
-
-function getSnapshot(): CandidatesState {
-  return state;
-}
-
-export function setCandidatesState(patch: Partial<CandidatesState>): void {
-  state = { ...state, ...patch };
-  emit();
-}
+export const setCandidatesState = store.set;
 
 export function useCandidatesState(): CandidatesState {
-  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  return store.useStore();
 }
 
 export function toggleMetric(m: DisplayMetric): void {
-  const next = new Set(state.metrics);
+  const next = new Set(store.get().metrics);
   if (next.has(m)) {
     if (next.size === 1) return;
     next.delete(m);

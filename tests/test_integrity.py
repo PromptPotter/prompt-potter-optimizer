@@ -29,6 +29,7 @@ from unittest import mock
 
 import pytest
 import yaml
+from factories import pipeline_schema
 
 from promptpotter.application.optimizers.potter.dispatch.layout import (
     NODE_LAYOUTS,
@@ -166,17 +167,15 @@ def test_sp_hash_is_not_recoverable_from_the_stripped_config() -> None:
     from promptpotter.domain.pipeline_schema import (
         NodePromptInfo,
         PipelineNode,
-        PipelineSchema,
     )
 
-    schema = PipelineSchema(
+    schema = pipeline_schema(
         name="t",
         version="1",
         nodes=[
             PipelineNode(
                 name="llm_only",
-                wire_type="llm",
-                node_type="",
+                kind="llm",
                 param_keys=[],
                 prompt_info=NodePromptInfo(),
                 tunes_llm=False,
@@ -839,7 +838,7 @@ def test_a_provider_throttle_or_empty_account_is_never_the_models_grade(
     monkeypatch.setattr(rate_limit, "_COOLDOWN_BASE_S", 0.0)
     upstream = '{"error":{"code":429,"metadata":{"raw":"m is temporarily rate-limited upstream."}}}'
     daily = '{"error":{"message":"Rate limit exceeded: free-models-per-day","code":429}}'
-    reward = {"data": {"reward": 1.0}}
+    reward = {"data": {"reward": 1.0, "terminal_node": "agent"}}
 
     def backend(**transport: Any) -> BackendClient:
         return BackendClient(
@@ -854,10 +853,10 @@ def test_a_provider_throttle_or_empty_account_is_never_the_models_grade(
     def in_process(*throttles: str) -> BackendClient:
         pending = list(throttles)
 
-        async def run(_workload: Any, _query: str, _payload: Any) -> dict[str, Any]:
+        async def run(_workload: Any, _sample: Sample, _payload: Any) -> dict[str, Any]:
             if pending:
                 raise CellThrottledError(pending.pop(0), spent={}, step_timings={})
-            return reward
+            return {"data": dict(reward["data"])}
 
         return backend(execution="in_process", in_process_run=run)
 
@@ -876,10 +875,12 @@ def test_a_provider_throttle_or_empty_account_is_never_the_models_grade(
     async def cell(client: BackendClient) -> dict[str, Any]:
         bind_spend_book(unbounded_spend_book())
         bound = SendBound(input_tokens=1, output_tokens=1, usd=0.0)
-        return await client.run_query("q", bound=bound, billed=lambda _data: None)
+        return await client.run_query(
+            Sample(id=0, query="q", ground_truth="a"), bound=bound, billed=lambda _data: None
+        )
 
     for sent in (in_process, remote):
-        assert asyncio.run(cell(sent(upstream, upstream))) == reward
+        assert asyncio.run(cell(sent(upstream, upstream)))["data"]["reward"] == 1.0
         with pytest.raises(SendRefusedError) as quota:
             asyncio.run(cell(sent(daily)))
         assert quota.value.category is ErrorCategory.PROVIDER_THROTTLED
@@ -912,9 +913,10 @@ def test_a_provider_throttle_or_empty_account_is_never_the_models_grade(
         backend_client=SimpleNamespace(
             holds_own_sends=True,
             derives_spend_bounds=False,
-            cell_envelope_s=lambda _query, _params: None,
+            cell_envelope_s=lambda _sample, _params: None,
             run_query=_still_broken,
         ),
+        identity_keys={},
         state=SimpleNamespace(ledger=None),
     )
     hole = asyncio.run(
@@ -1084,7 +1086,9 @@ def test_unframed_ablation_renders_no_framing_where_one_is_committed(built_store
         load_campaign_config,
     )
 
-    built_stores.tenant_datasets.save_task_context("gsm8k", {"domain": "grade-school arithmetic"})
+    built_stores.tenant_datasets.save_task_context(
+        "gsm8k", TaskDecomposition(domain="grade-school arithmetic")
+    )
     framed = CampaignConfig(optimization=OptimizationConfig(degradation_threshold=0.05))
     unframed = framed.model_copy(update={"task_framing": "off"})
 
@@ -1365,17 +1369,13 @@ def _persisting_walk(root: Path, panel: list[Sample]) -> tuple[Any, JobSearchPoi
     stores, as each process has its own."""
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.scoring.formula import compile_scorer
-    from promptpotter.domain.pipeline_schema import NodePromptInfo, NodeType, PipelineNode
+    from promptpotter.domain.pipeline_schema import NodePromptInfo, PipelineNode
     from promptpotter.infrastructure.store.stores import build_stores
     from promptpotter.shared.identity import default_identity
 
-    schema = PipelineSchema(
+    schema = pipeline_schema(
         name="claims",
-        nodes=[
-            PipelineNode(
-                name="solve", node_type=NodeType.NONE, tunes_llm=False, prompt_info=NodePromptInfo()
-            )
-        ],
+        nodes=[PipelineNode(name="solve", tunes_llm=False, prompt_info=NodePromptInfo())],
     )
     session = Session(
         store=build_stores(
@@ -1690,22 +1690,18 @@ def test_a_dead_claimers_cell_is_taken_over(tmp_path: Path, monkeypatch) -> None
     from factories import pobb_knobs
 
     from promptpotter.application.optimizers.potter.pobb.checks import PoBBCheck
+    from promptpotter.application.optimizers.potter.race import CatchUpPool
     from promptpotter.application.runner.measurement import _catch_up
 
     spare = Sample(id=2, query="q2", ground_truth="a")
     feed = ReplayFeed(
         session.store.archive, session.pipeline_schema.node_configs(sp.pipeline_params)
     )
-    race = PoBBCheck(
-        pobb_knobs(),
-        n_min=6,
-        n_samples=1,
-        ruler=None,
-        backfill_fn=functools.partial(
-            _catch_up, types.SimpleNamespace(session=session, sample_index=None)
-        ),
+    race = CatchUpPool(
+        PoBBCheck(pobb_knobs(), n_min=6, n_samples=1, ruler=None),
+        functools.partial(_catch_up, types.SimpleNamespace(session=session, sample_index=None)),
     )
-    race.register_completed([], candidate_id="prior", sp=sp)
+    race.admit("prior", [], sp)
 
     async def _discarded() -> bool:
         (call,) = race.start_backfill(spare, 1)
@@ -1775,9 +1771,9 @@ def test_unscoreable_cells_counts_holes_but_not_stops_or_deprecated_rows() -> No
     (``domain/results_health.py``), so a recovered retry is an ordinary scored row and never needs
     this protection — which stays, for samples that really did come back empty.
     """
-    from promptpotter.application.scoring.classification import is_deprecated
     from promptpotter.config.settings import NO_RESULT
     from promptpotter.domain.results import unscoreable_cells
+    from promptpotter.domain.results_health import is_deprecated
 
     def row(sample_id: int, **extra: Any) -> dict[str, Any]:
         return {"sample_id": sample_id, "predicted": "TRUE", **extra}
@@ -1800,6 +1796,7 @@ def test_unscoreable_cells_counts_holes_but_not_stops_or_deprecated_rows() -> No
         22,
         predicted=NO_RESULT,
         pipeline_data={
+            "terminal_node": "llm_only",
             "diagnostics": {
                 "warnings": [
                     {
@@ -1809,7 +1806,7 @@ def test_unscoreable_cells_counts_holes_but_not_stops_or_deprecated_rows() -> No
                         "kind": "transient",
                     }
                 ]
-            }
+            },
         },
     )
     assert is_deprecated(deprecated), "fixture drift — this row must classify as deprecated"
@@ -2142,7 +2139,7 @@ def test_no_held_out_row_reaches_a_round_panel_or_an_archive_view() -> None:
 
     demo_ids = frozenset(s.id for s in part.demo)
     for leak in (part.search[0].id, part.bench[0].id):
-        outcome = L1_SHOTS_IN_DEMO_POOL.run(
+        outcome = L1_SHOTS_IN_DEMO_POOL.check(
             {"shot_ids": [part.demo[0].id, leak]}, demo_ids=demo_ids, k_max=len(demo_ids)
         )
         rejected = [f.value for f in outcome.evidence["failures"]] if outcome else []
@@ -2863,7 +2860,7 @@ def test_a_measured_point_is_served_the_SCHEMA_it_ran_under() -> None:
     from promptpotter.domain.pipeline_schema import description_key
 
     schema = _pipeline_schema("justlogic-d234")
-    base = {n.name: dict(n.current_config) for n in schema.config_nodes}
+    base = {n.name: dict(n.current_config) for n in schema.declared_nodes}
     declared = resolved_output_schemas(schema, base)["llm_only"]
     assert declared is not None
 
@@ -2921,7 +2918,7 @@ def test_every_tuned_llm_node_is_offered_the_text_or_structured_toggle() -> None
             "pipelines": {"default": ["structured", "prose", "pinned", "lookup"]},
         }
     )
-    opts = {n.name: schema.param_options(n, SCHEMA_TOGGLE_PARAM) for n in schema.config_nodes}
+    opts = {n.name: schema.param_options(n, SCHEMA_TOGGLE_PARAM) for n in schema.declared_nodes}
     assert opts["structured"] == [ANSWER_AS_TEXT, ANSWER_AS_JSON]
     assert opts["prose"] == [ANSWER_AS_TEXT]
     assert opts["pinned"] is None
@@ -2977,7 +2974,7 @@ def test_answering_in_TEXT_sends_no_contract_to_answer_INTO() -> None:
     from promptpotter.domain.pipeline_schema import ANSWER_AS_TEXT, description_key
 
     schema = _pipeline_schema("justlogic-d234")
-    base = {n.name: dict(n.current_config) for n in schema.config_nodes}
+    base = {n.name: dict(n.current_config) for n in schema.declared_nodes}
     assert "output_schema" in base["llm_only"] and "answer_field" in base["llm_only"]
 
     untouched = copy.deepcopy(base)
@@ -3068,7 +3065,7 @@ def test_a_campaign_runs_the_config_it_froze_whatever_its_dataset_file_says_late
         backend_client=types.SimpleNamespace(max_cells_in_flight=2, measured_unit="sample"),
         samples=[],
     )
-    emitter = build_campaign_emitter(cast(Any, session), capo, origin_accuracy=None)
+    emitter = build_campaign_emitter(cast(Any, session), capo)
     assert emitter is not None
     crossovers = select_optimizer(capo.optimization).node_config("capo_crossover")["crossovers"]
     assert emitter.state.arms_per_round == 4 + crossovers
@@ -3398,21 +3395,20 @@ def test_the_l4_generator_is_shown_the_optimizer_prompts_it_rewrites() -> None:
     from promptpotter.application.optimizers.potter.l1.population import parse_population
     from promptpotter.connectors.promptpotter import promptpotter_wire_adapter
     from promptpotter.domain.opt_search_point import PROMPT_STRING_FIELDS, OptSearchPoint
-    from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
+    from promptpotter.domain.pipeline_schema import PipelineNode
     from promptpotter.domain.results import CandidateProposal
     from promptpotter.domain.round_diagnostics import RoundDiagnostics
 
     fields = list(PROMPT_STRING_FIELDS)
 
     def outer_schema(nodes: tuple[str, ...]) -> PipelineSchema:
-        return PipelineSchema(
+        return pipeline_schema(
             name="promptpotter-self",
             version="1",
             nodes=[
                 PipelineNode(
                     name=name,
-                    wire_type="llm",
-                    node_type="",
+                    kind="llm",
                     param_keys=fields,
                     param_types=dict.fromkeys(fields, "string"),
                     tunes_llm=False,
@@ -3881,7 +3877,7 @@ def test_an_illegal_inner_steer_is_rejected_and_a_real_steer_is_not() -> None:
     potter = resolve_optimizer("potter", {})
 
     def steer(overlay: dict[str, dict[str, str]]) -> Any:
-        return L1_INNER_STEER_IS_LEGAL.run(overlay, inner_optimizer=potter)
+        return L1_INNER_STEER_IS_LEGAL.check(overlay, inner_optimizer=potter)
 
     c21 = (
         "Critique each inner run's trajectory by monitoring the change in score from round to "
@@ -3939,7 +3935,7 @@ def test_a_gutted_prompt_field_is_rejected_and_a_tightening_is_not() -> None:
     potter = resolve_optimizer("potter", {})
 
     def gutted(overlay: dict[str, dict[str, str]], parent: dict[str, dict[str, str]]) -> Any:
-        return L1_PROMPT_FIELD_NOT_GUTTED.run(
+        return L1_PROMPT_FIELD_NOT_GUTTED.check(
             overlay, inner_optimizer=potter, pipeline_params=parent
         )
 
@@ -3987,6 +3983,7 @@ def test_the_l4_dataset_is_recognized_as_one(tmp_path: Path) -> None:
     pooled verdict is wrong with no symptom.
     """
     from promptpotter.application.campaign_config import load_campaign_config
+    from promptpotter.application.datasets.loaders import samples_from_dicts
     from promptpotter.application.optimizer_manifest import select_optimizer
     from promptpotter.application.runner.inner.tasks import (
         inner_instrument_config,
@@ -4009,10 +4006,12 @@ def test_the_l4_dataset_is_recognized_as_one(tmp_path: Path) -> None:
     # The SHIPPED config, not a hand-built one — the question is what the panel runs under.
     base = load_campaign_config(read_yaml(d / "campaign.yaml")["campaign_config"])
     cells = resolve_inner_cells(build_stores(default_identity(), projects_root=tmp_path), panel)
-    ctx = types.SimpleNamespace(dataset_config_dir=d, cells=cells)
+    l4 = get("promptpotter")
+    resolved = l4.extract_experiment(l4.resolve_experiment(read_yaml(spec)))
+    rows = {row.query: row for row in samples_from_dicts(resolved)}
     for task in panel.tasks:
         derived = inner_instrument_config(
-            resolve_inner_task(ctx, task.id),
+            resolve_inner_task(cells, rows[task.id]),
             base,
             llm_node="llm_only",
             n_scored=40,
@@ -4028,7 +4027,7 @@ def test_the_l4_dataset_is_recognized_as_one(tmp_path: Path) -> None:
     shown = cells.optimizer
     graph = parse_pipeline_response(cells.pipeline())
     for task in panel.tasks:
-        task_spec = resolve_inner_task(ctx, task.id)
+        task_spec = resolve_inner_task(cells, rows[task.id])
         cell = inner_instrument_config(
             task_spec,
             load_campaign_config(dict(cells.by_dataset[task_spec.inner_dataset].campaign_config)),
@@ -4038,10 +4037,18 @@ def test_the_l4_dataset_is_recognized_as_one(tmp_path: Path) -> None:
         ran = select_optimizer(cell.optimization)
         assert shown.treatment() == ran.treatment()
         assert shown.knobs("escalation") == ran.knobs("escalation")
-        assert {n.name for n in graph.config_nodes if n.tunes_llm} == set(ran.llm_nodes)
+        assert {n.name for n in graph.declared_nodes if n.tunes_llm} == set(ran.llm_nodes)
 
 
 # 7. Money — what a call is billed, and against which price
+
+
+def _row_scoring() -> Any:
+    """A session's scoring whose scorer reads each row's own stamped grades."""
+    scorer = types.SimpleNamespace(
+        fitness=lambda r: r["fitness"], objective=lambda r: r["objective"]
+    )
+    return types.SimpleNamespace(scorer=scorer, require_scorer=lambda: scorer)
 
 
 def _walk_over(
@@ -4061,6 +4068,20 @@ def _walk_over(
     campaign already priced."""
     from promptpotter.shared.instrument import measured_candidate_context
 
+    class _Recorder:
+        def scores(self, rows: Any) -> Any:
+            return {"accuracy": 1.0}
+
+        def persist(self, rows: Any) -> Any:
+            return on_taken(rows) if on_taken else self.scores(rows)
+
+        def bank(self, rows: Any, kept: Any) -> None:
+            if banked is not None:
+                banked.update({r["sample_id"]: r for r in kept})
+
+        def close(self, rows: Any, scores: Any) -> None:
+            return None
+
     ctx = query_loop.QueryLoopState(
         search_point=JobSearchPoint(),
         session=session,
@@ -4068,17 +4089,9 @@ def _walk_over(
         cached_sample_results=dict(cached or {}),
         on_sample_scored=None,
         sample_index=None,
-        scorer=types.SimpleNamespace(
-            fitness=lambda r: r["fitness"], objective=lambda r: r["objective"]
-        ),
         deprecated_samples={},
-        persist_fresh=on_taken or (lambda rows: {"accuracy": 1.0}),
-        running_scores=lambda rows: {"accuracy": 1.0},
-        record_run=lambda rows, scores: None,
+        recorder=_Recorder(),
         claim_cell=None,
-        bank=lambda rows, kept: (banked if banked is not None else {}).update(
-            {r["sample_id"]: r for r in kept}
-        ),
         cell_keys={s.id: f"cell_{s.id}" for s in dataset},
         counted={f"cell_{sid}" for sid in rereads or ()},
         rereads=frozenset(rereads or ()),
@@ -4123,6 +4136,7 @@ async def _walk(
     from factories import pobb_knobs
 
     from promptpotter.application.optimizers.potter.pobb.checks import PoBBCheck
+    from promptpotter.application.optimizers.potter.race import CatchUpPool
     from promptpotter.application.runner.termination import BudgetGate
     from promptpotter.domain.pipeline_schema import WebSpendBound
     from promptpotter.domain.spend import TokenAccount
@@ -4170,14 +4184,14 @@ async def _walk(
         return call, _commit, call.cancel
 
     # A parent measured on none of the round's cells, so every cell owes it one catch-up call.
-    priors = PoBBCheck(
-        pobb_knobs(), n_min=6, n_samples=len(dataset), ruler=None, backfill_fn=_backfill
+    priors = CatchUpPool(
+        PoBBCheck(pobb_knobs(), n_min=6, n_samples=len(dataset), ruler=None), _backfill
     )
-    priors.register_completed([], candidate_id="parent", sp=JobSearchPoint())
+    priors.admit("parent", [], JobSearchPoint())
     # The one seam stubbed; the window, cursors, checkpoints and discard are shipping code.
     with mock.patch.object(query_loop, "measure_sample", _measure), spending_under(book):
         session = types.SimpleNamespace(
-            scoring=types.SimpleNamespace(scorer=lambda r: 1.0),
+            scoring=_row_scoring(),
             state=types.SimpleNamespace(ledger=None),
             pause_check=lambda: pause_after_call is not None and len(returned) >= pause_after_call,
             skip_check=None,
@@ -4265,7 +4279,7 @@ async def _round(
         return {"accuracy": 1.0}
 
     session = types.SimpleNamespace(
-        scoring=types.SimpleNamespace(scorer=lambda r: 1.0),
+        scoring=_row_scoring(),
         state=types.SimpleNamespace(ledger=None),
         pause_check=lambda: flag["pause"],
         skip_check=None,
@@ -4319,7 +4333,7 @@ async def test_a_cell_that_ran_without_a_grade_still_bills_what_it_spent() -> No
     spent = {"agent": {"input": 1200, "output": 300, "estimated": False, "cost_usd": 0.0076}}
 
     async def _ran_ungraded(*_args: Any) -> dict[str, Any]:
-        raise CellUnscoreableError("verifier timed out", spent=spent, step_timings={"agent": 138.0})
+        raise CellUnscoreableError("verifier timed out", spent=spent, step_timings={})
 
     client = BackendClient(
         "http://unused",
@@ -4342,6 +4356,7 @@ async def test_a_cell_that_ran_without_a_grade_still_bills_what_it_spent() -> No
     ledger = _Ledger()
     session = types.SimpleNamespace(
         pipeline_schema=types.SimpleNamespace(nodes=[]),
+        identity_keys={},
         state=types.SimpleNamespace(ledger=None),
         backend_client=client,
         scoring=types.SimpleNamespace(
@@ -4736,7 +4751,7 @@ async def test_a_resumed_arm_re_reads_its_cells_and_still_reaches_its_bench(
     ledger = CycleEventLog.open(CycleDir(tmp_path / "cycle"))
     ledger.bind(book)
     session = types.SimpleNamespace(
-        scoring=types.SimpleNamespace(scorer=lambda r: 1.0),
+        scoring=_row_scoring(),
         state=types.SimpleNamespace(ledger=None),
         pause_check=lambda: False,
         skip_check=None,
@@ -4947,7 +4962,7 @@ def test_a_wire_step_entry_reaches_the_ledger_whole() -> None:
             }
         }
     }
-    entry = _compute_step_tokens(wire, PipelineSchema(name="t", nodes=[]), {})["agent"]
+    entry = _compute_step_tokens(wire, PipelineSchema(name="t"), {})["agent"]
 
     missing = sorted(k for k in _WIRE_SEEDED if k not in entry)
     assert not missing, f"the re-seed dropped wire keys the connector reported: {missing}"
@@ -5308,7 +5323,7 @@ def test_first_mint_decomposes_once_and_bills_the_run_it_frames(
             task_intent="match", answer_format="one regex", task_context=decomposition
         ), 0
 
-    def minting(session: Any, campaign_config: Any, _data: Any, **kwargs: Any) -> Any:
+    def minting(session: Any, campaign_config: Any, *_bank: Any, **kwargs: Any) -> Any:
         framing = mint.campaign_framing(session.store, campaign_config, session.dataset_name)
         framing_at_mint.append(framing.domain)
         return mint.MintedCycle(
@@ -5319,7 +5334,7 @@ def test_first_mint_decomposes_once_and_bills_the_run_it_frames(
         )
 
     monkeypatch.setattr(task_context, "run_checkin", scripted_checkin)
-    monkeypatch.setattr(mint, "prepare_fresh_cycle", minting)
+    monkeypatch.setattr(mint, "_mint_runnable", minting)
     bank = [Sample(id=1, query="q", ground_truth="a")]
     for campaign_id in ("c1", "c2"):
         asyncio.run(
@@ -5356,7 +5371,7 @@ def test_the_bench_pass_bills_and_clocks_under_its_own_name(built_stores, tmp_pa
     from promptpotter.application.scoring.formula.rescore import rescore_results
     from promptpotter.application.scoring.search_point_scorer import score_search_point
     from promptpotter.domain.bench import DatasetSplit, partition_bank
-    from promptpotter.domain.pipeline_schema import NodePromptInfo, NodeType, PipelineNode
+    from promptpotter.domain.pipeline_schema import NodePromptInfo, PipelineNode
     from promptpotter.domain.run_records import TokenUsageRecord
     from promptpotter.domain.spend import TokenAccount
     from promptpotter.infrastructure.ledger import CycleEventLog
@@ -5367,13 +5382,9 @@ def test_the_bench_pass_bills_and_clocks_under_its_own_name(built_stores, tmp_pa
     from promptpotter.shared.clock import utcnow_iso
 
     bank = [Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(8)]
-    schema = PipelineSchema(
+    schema = pipeline_schema(
         name="bench-spend",
-        nodes=[
-            PipelineNode(
-                name="solve", node_type=NodeType.NONE, tunes_llm=False, prompt_info=NodePromptInfo()
-            )
-        ],
+        nodes=[PipelineNode(name="solve", tunes_llm=False, prompt_info=NodePromptInfo())],
     )
     session = Session(
         store=built_stores,
@@ -5487,7 +5498,7 @@ def test_a_ledger_index_serves_the_file_as_it_stands(tmp_path: Path) -> None:
     def tailed() -> tuple[float, int, CycleSeed | None, float]:
         spend, calls = scan_ledger_spend([LedgerSpan(ledger.path)])
         wallet = iter_user_token_usage(ledgers=[ledger.path], since=0.0, until=float("inf"))
-        charted = sum(row["cost_usd"] for row in wallet)
+        charted = sum(row.billed_usd or 0.0 for row in wallet)
         return spend.total_used_usd, calls, scan_ledger_cycle_seed(ledger.path), charted
 
     def cold() -> tuple[float, int, CycleSeed | None, float]:
@@ -5629,7 +5640,9 @@ def test_committed_framing_never_writes_into_install_content(built_stores: Any) 
     (install / "task_description.md").write_text("Solve grade-school math.\n", encoding="utf-8")
     before = _tree_bytes(install)
 
-    built_stores.tenant_datasets.save_task_context("gsm8k", {"domain": "grade-school arithmetic"})
+    built_stores.tenant_datasets.save_task_context(
+        "gsm8k", TaskDecomposition(domain="grade-school arithmetic")
+    )
 
     assert _tree_bytes(install) == before, (
         "the decomposition was written into benchmarks_root — install content, "
@@ -5859,7 +5872,9 @@ def test_a_cycle_with_an_unfinished_job_refuses_a_second_producer(tmp_path: Path
     from promptpotter.domain.phases import StopReason
     from promptpotter.shared.errors import CycleBusyError
 
-    registry = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1)
+    registry = JobRegistry(
+        tmp_path / "jobs", capacity=lambda _live: 1, projects_root=tmp_path / "projects"
+    )
     running = CycleHop(campaign_id="c", cycle_id="cycle_live")
     waiting = CycleHop(campaign_id="c", cycle_id="cycle_queued")
     first = registry.request_slot(user_id="u", dataset_name="d", hop=running)

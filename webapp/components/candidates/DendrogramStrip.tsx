@@ -42,6 +42,7 @@ export const DendrogramStrip = memo(function DendrogramStrip({
           label: v.label,
           candidate_id: v.candidate_id,
           is_selected: v.is_selected,
+          crown: v.crown,
           is_fork: forkKeys.has(v.key),
         })),
       [views, forkKeys],
@@ -103,7 +104,7 @@ export const DendrogramStrip = memo(function DendrogramStrip({
                 aria-label={
                   n.isFork
                     ? `Fork ${n.label} — a sibling course cut from this cycle; opens it — ${value}`
-                    : `Candidate ${n.label}${n.isElected ? ", round winner" : ""} — ${value}`
+                    : `Candidate ${n.label}${n.crown === "elected" ? ", round winner" : ""} — ${value}`
                 }
                 className={cx("cand-dendro-hit", selected && "selected")}
               >
@@ -111,11 +112,13 @@ export const DendrogramStrip = memo(function DendrogramStrip({
                   {n.label}
                   {n.isFork
                     ? " · a fork — a sibling course cut from this cycle. Click to open it."
-                    : n.isElected
+                    : n.crown === "elected"
                       ? " · round winner (the parent this round elected)"
-                      : n.isWinner
+                      : n.crown === "uncontested"
                         ? " · the round's only arm — it advances without an election"
-                        : " · eliminated"}
+                        : n.isWinner
+                          ? " · selected — its round has not closed yet"
+                          : " · eliminated"}
                 </title>
                 {/* Centred on the dot: a full-height stub would take the hit test off every node it crosses. */}
                 <circle cx={pct(n.xf)} cy={n.y} r={8} className="cand-dendro-hitarea" />

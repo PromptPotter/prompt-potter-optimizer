@@ -17,35 +17,27 @@ from promptpotter.application.bench.resume_and_fork.decisions import (
     resume_checkpoint_gating,
 )
 from promptpotter.application.initialization.wiring import init_services
-from promptpotter.application.jobs.capacity import resolve_run_capacity
 from promptpotter.application.jobs.launcher.admission import (
     admit_and_hold,
-    job_status_for,
     refuse_as_busy,
-    release_slot,
     request_launch,
 )
+from promptpotter.application.jobs.launcher.run_job import run_held_job
 from promptpotter.application.jobs.registry import JobRegistry
-from promptpotter.application.run_observers import build_run_observers
-from promptpotter.application.runner.entry import run_optimization
 from promptpotter.config.logging import setup_logging
-from promptpotter.config.paths import default_jobs_dir
 from promptpotter.config.settings import (
     DEFAULT_BACKEND_ID,
     DEFAULT_BACKEND_URL,
 )
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.launch_limits import HeldLimits, LaunchLimits
-from promptpotter.domain.phases import (
-    STOP_REASON_INFO,
-    StopOutcome,
-    stop_reason_outcome,
-)
+from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.infrastructure.identity.migration import registered_or_default_identity
 from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
 from promptpotter.infrastructure.store.io import write_text
-from promptpotter.infrastructure.store.layout import CycleLayout, campaign_cycles_dir
+from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.session_pointer import read_active_pointer
+from promptpotter.presentation.terminal.completion import render_completion
 from promptpotter.shared.identity import IdentityContext
 
 if TYPE_CHECKING:
@@ -107,28 +99,6 @@ def log_startup_summary(
     ds = f"{dataset_name or '?'} ({dataset_len} queries)"
     logger.info(
         "%s · backend %s · dataset %s", pipeline_summary(session, pipeline_params), backend_url, ds
-    )
-
-
-def campaign_result_human(campaign_dir: Path, *, dataset_name: str, result: CycleResult) -> str:
-    """Operator-facing summary block for an ended ``new`` / ``resume`` run — how it ended, dataset,
-    campaign, cycle, and where on disk each artifact landed."""
-    cycle_id = result.cycle_id
-    info = STOP_REASON_INFO[result.stop_reason]
-    ended = [f"Ended:     {info.label}"]
-    if result.error is not None:
-        ended.append(f"Error:     {result.error.kind}: {result.error.message}")
-    if info.next_step:
-        ended.append(f"Next:      {info.next_step}")
-    return (
-        "\n".join(ended) + "\n"
-        f"Dataset:   {dataset_name}\n"
-        f"Campaign:  {campaign_dir.name}\n"
-        f"Cycle:     {cycle_id or '?'}\n"
-        f"Directory: {campaign_dir}\n"
-        f"  campaign.json          — manifest\n"
-        f"  log.md                 — campaign digest\n"
-        f"  cycles/{cycle_id or '?'}/  — session telemetry (dashboard.json) + rounds + readout.log"
     )
 
 
@@ -205,22 +175,10 @@ def backend_unreachable_result(exc: BackendUnreachableError) -> CommandResult:
 _LATEST_READOUT_POINTER = Path("logs/latest-readout-path.txt")
 
 
-def _build_observers(
-    session: Session,
-    campaign_config: CampaignConfig,
-    origin_acc: float,
-) -> RunObservers:
-
-    observers = build_run_observers(
-        session=session,
-        campaign_config=campaign_config,
-        readout_sink=functools.partial(print, flush=True),
-        origin_accuracy=origin_acc,
-    )
+def _point_at_readout(session: Session) -> None:
     readout = CycleLayout(session.store.campaigns.cycle_dir(session.hop).absolute()).readout
     with contextlib.suppress(OSError):
         write_text(_LATEST_READOUT_POINTER, f"{readout}\n")
-    return observers
 
 
 async def _hold_machine_slot(
@@ -238,11 +196,9 @@ async def _hold_machine_slot(
     merely retried in a loop would take the next free slot ahead of a browser launch that has
     waited longer. ``--no-wait`` leaves the line and refuses instead, naming the holder."""
 
-    # No `on_reap`: this process ATTACHES to the machine-global jobs dir, it does not own it, so it
-    # counts and releases slots but stamps nobody's cycle. Releasing needs no ownership — a job's
-    # producer holds an OS lock for its own lifetime, so a crashed server's jobs cannot wedge the
-    # box until it restarts, and a genuinely live run is never touched.
-    registry = JobRegistry(default_jobs_dir(), capacity=resolve_run_capacity)
+    # Releasing needs no ownership — a job's producer holds an OS lock for its own lifetime, so a
+    # crashed server's jobs cannot wedge the box until it restarts, and a live run is never touched.
+    registry = JobRegistry.attach()
     dataset_name = ctx.init_params.get("dataset_name") or ""
     job = request_launch(
         stores=session.store,
@@ -300,46 +256,32 @@ async def drive_cycle(
     check-in, and a slot held across operator typing is a slot nobody else can have."""
 
     registry, job, held = await _hold_machine_slot(args, ctx, session, campaign_config)
-    registry.mark_started(job.job_id)
-    pre_origin_acc = ctx.state.get("origin_accuracy", 0.0)
-    try:
-        observers = _build_observers(session, campaign_config, pre_origin_acc)
-
-        # Control-local hooks (pause.flag under .runtime/) are bound centrally in
-        # run_optimization (the single runner seam) so CLI and API launches behave
-        # identically — no per-entry-point wiring here.
-        result = await run_optimization(
-            train_data,
-            campaign_config,
-            session=session,
-            observers=observers,
-            mode=mode,
-            # What admission HELD — the campaign's declaration under the flags, admitted against
-            # the account. For the operator of the box, metered in neither unit, that is the
-            # declaration itself; a delegate reaching the terminal under `--tenant` is held to the
-            # ceiling their grant allows, exactly as in the browser.
-            limits=held,
-        )
-    except BaseException as exc:
-        release_slot(registry, job.job_id, exc)
-        raise
-    registry.mark_finished(
-        job.job_id, status=job_status_for(result.stop_reason), stop_reason=result.stop_reason
+    _point_at_readout(session)
+    return await run_held_job(
+        registry,
+        job.job_id,
+        session,
+        campaign_config,
+        train_data,
+        mode=mode,
+        # For the box's operator, metered in neither unit, what admission held is the declaration
+        # itself; a delegate under `--tenant` is held to their grant's ceiling, as in the browser.
+        limits=held,
+        readout_sink=functools.partial(print, flush=True),
     )
-    return result, observers
 
 
 def cycle_result_command(
     ctx: SessionCtx, session: Session, cycle_result: CycleResult
 ) -> CommandResult:
     """The shared finish tail for ``new`` / ``resume`` — result payload + human summary."""
-    campaign_dir = session.store.campaigns.campaign_root_dir(ctx.campaign_id)
     return CommandResult(
         data=cycle_result.model_dump(),
-        human=campaign_result_human(
-            campaign_dir,
-            dataset_name=ctx.init_params.get("dataset_name") or "?",
-            result=cycle_result,
+        human=render_completion(
+            cycle_result,
+            pipeline_schema=session.pipeline_schema,
+            dataset_name=ctx.init_params.get("dataset_name"),
+            campaign_dir=session.store.campaigns.campaign_root_dir(ctx.campaign_id),
         ),
         outcome=stop_reason_outcome(cycle_result.stop_reason),
     )
@@ -371,15 +313,9 @@ def divergence_hint() -> str:
 
 
 def _campaign_matches(stores: Stores, needle: str) -> list[str]:
-    """Full id, 6-hex suffix, unambiguous prefix, then substring — the ONE matcher, so every verb
-    that names a campaign reaches the same one. Raises on ambiguity: picking one of several is the
-    only outcome worse than not resolving at all."""
-    ids = stores.campaigns.list_campaign_ids()
-    if needle in ids:
-        return [needle]
-    candidates = [cid for cid in ids if cid.endswith(f"__{needle}") or cid.startswith(needle)]
-    if needle and not candidates:
-        candidates = [cid for cid in ids if needle in cid]
+    """The store's matcher, exiting on ambiguity: picking one of several is the only outcome worse
+    than not resolving at all."""
+    candidates = stores.campaigns.match_campaign_ids(needle)
     if len(candidates) > 1:
         raise SystemExit(
             f"ERROR: {needle!r} matches {len(candidates)} campaigns: "
@@ -407,29 +343,24 @@ def resolve_campaign_hint(stores: Stores, needle: str) -> str:
 
 
 def resolve_cycle(stores: Stores, campaign_id: str, hint: str | None) -> str:
-    """Resolve a cycle id within *campaign_id*; ``hint=None`` auto-picks the sole cycle (raises on ambiguity)."""
-    cycles_dir = campaign_cycles_dir(stores.campaigns.campaign_root_dir(campaign_id))
-    if not cycles_dir.exists():
-        raise SystemExit(f"ERROR: campaign {campaign_id!r} has no cycles/ directory.")
-    ids = sorted(p.name for p in cycles_dir.iterdir() if p.is_dir())
-    if not ids:
-        raise SystemExit(f"ERROR: campaign {campaign_id!r} has no cycles on disk.")
-    if hint:
-        matches = [cid for cid in ids if cid == hint or cid.startswith(hint) or hint in cid]
-        if not matches:
-            raise SystemExit(f"ERROR: no cycle in {campaign_id!r} matches {hint!r}.")
-        if len(matches) > 1:
-            raise SystemExit(
-                f"ERROR: {hint!r} matches {len(matches)} cycles in {campaign_id!r}: "
-                f"{', '.join(matches[:5])}."
-            )
+    """*hint* → a cycle id of *campaign_id* through the store's matcher, the rule a campaign needle
+    resolves by; ``hint=None`` names every cycle, so it resolves only where the campaign has one."""
+    matches = stores.campaigns.match_cycle_ids(campaign_id, hint or "")
+    if len(matches) == 1:
         return matches[0]
-    if len(ids) > 1:
+    if not matches:
         raise SystemExit(
-            f"ERROR: campaign {campaign_id!r} has {len(ids)} cycles; pass --cycle <prefix>. "
-            f"Available: {', '.join(ids[:5])}{'…' if len(ids) > 5 else ''}."
+            f"ERROR: no cycle in {campaign_id!r} matches {hint!r}."
+            if hint
+            else f"ERROR: campaign {campaign_id!r} has no cycles on disk."
         )
-    return ids[0]
+    listed = f"{', '.join(matches[:5])}{'…' if len(matches) > 5 else ''}"
+    raise SystemExit(
+        f"ERROR: {hint!r} matches {len(matches)} cycles in {campaign_id!r}: {listed}."
+        if hint
+        else f"ERROR: campaign {campaign_id!r} has {len(matches)} cycles; pass --cycle <prefix>. "
+        f"Available: {listed}."
+    )
 
 
 def resolve_target(args: argparse.Namespace, store: Stores) -> tuple[str, str]:

@@ -6,12 +6,6 @@ export function interiorNodes(view: PipelineView | null | undefined): PipelineVi
   return (view?.nodes ?? []).filter((n) => n.kind !== "io");
 }
 
-// The server names this per campaign (`nests.node`); the optimizer manifest has no parent to
-// name it, so it is derived as the server does — the measurement node runs another pipeline.
-export function measurementNode(doc: PipelineDoc | null | undefined): string | null {
-  return interiorNodes(doc?.view).find((n) => n.kind === "measurement")?.id ?? null;
-}
-
 export interface OriginPrompt {
   fields: Record<string, unknown>;
   version: string;

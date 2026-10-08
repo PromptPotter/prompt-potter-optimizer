@@ -65,14 +65,4 @@ describe("degradedRoundNotices", () => {
     expect(out[0]!.round).toBe(2);
     expect(out[0]!.detail).toBe(health("degraded").suggested_action);
   });
-
-  it("sorts by round", () => {
-    const out = degradedRoundNotices(
-      dash([
-        { round: 2, health: health("degraded") },
-        { round: 0, health: health("degraded") },
-      ]),
-    );
-    expect(out.map((d) => d.round)).toEqual([0, 2]);
-  });
 });

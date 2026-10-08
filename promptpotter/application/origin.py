@@ -6,6 +6,8 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
+from pydantic import Field
+
 from promptpotter.application.bench.task_context import campaign_framing
 from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.datasets.authored import (
@@ -27,7 +29,6 @@ from promptpotter.application.pipeline_resolve import (
 )
 from promptpotter.application.runner.campaign_ids import build_origin_cycle_id
 from promptpotter.application.scoring.candidate_report import (
-    INVALID_SCORES,
     build_score_report,
     is_transient_scoring_abort,
     walk_outcome,
@@ -39,9 +40,10 @@ from promptpotter.application.scoring.formula import (
     realize_dials,
     rescore_results,
 )
-from promptpotter.application.scoring.metrics import compute_composite_fitness
+from promptpotter.application.scoring.metrics import INVALID_SCORES, compute_composite_fitness
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.bench import partition_bank
+from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.opt_search_point import OptSearchPoint
@@ -54,9 +56,22 @@ from promptpotter.domain.results import (
     ScoredCandidate,
     candidate_label,
 )
-from promptpotter.domain.run_records import CandidateMintedRecord, CycleSeed
+from promptpotter.domain.run_records import (
+    OPERATOR_ORIGIN_SOURCES,
+    CandidateMintedRecord,
+    CycleSeed,
+    OriginSource,
+)
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
+from promptpotter.domain.strict_model import StrictModel
+from promptpotter.infrastructure.store.campaign_store.store import origin_accuracy_of
+from promptpotter.infrastructure.store.dataset_access import (
+    DatasetAccessError,
+    is_dataset_dir,
+    list_readable_datasets,
+    readable_dataset_dir,
+)
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import (
     NotFoundError,
@@ -78,7 +93,11 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "CampaignOrigin",
+    "OriginEntry",
+    "canonical_origin_campaign",
     "establish_campaign_origin",
+    "list_origins",
+    "prospective_origin_id",
     "rescore_parent",
     "resolve_origin_opt_search_point",
     "try_inherit_fork_origin",
@@ -277,9 +296,10 @@ def try_inherit_fork_origin(
 
 # The seed declares its own provenance; the resolver stamps it.
 _SEED_ORIGIN_LINEAGE = {
-    "fork_seed": "Operator-steered fork — edited searchpoint as origin",
-    "campaign_origin": "Fresh campaign minted from a chosen prior origin",
+    OriginSource.FORK_SEED: "Operator-steered fork — edited searchpoint as origin",
+    OriginSource.CAMPAIGN_ORIGIN: "Fresh campaign minted from a chosen prior origin",
 }
+assert set(_SEED_ORIGIN_LINEAGE) == OPERATOR_ORIGIN_SOURCES
 
 
 def resolve_origin_opt_search_point(
@@ -544,3 +564,112 @@ def prospective_origin_id(stores: Stores, dataset_dir: Path, dataset_name: str) 
         # benchmark does not resolve, drops itself, never the list. Direct reads still raise.
         logger.exception("origins: prospective origin id failed for %s", dataset_name)
         return None
+
+
+class OriginEntry(StrictModel):
+    origin_id: str = Field(
+        description="Origin content identity — a campaign's root_content_hash (or the "
+        "dataset's prospective origin hash for a prepared origin)"
+    )
+    dataset_name: str = Field(description="Dataset this origin starts from")
+    label: str = Field(default="", description="Operator-supplied label, if any")
+    n_samples: int | None = Field(
+        default=None, description="Dataset sample count; ``null`` if unmaterialized"
+    )
+    n_campaigns: int = Field(
+        default=0,
+        description="Active campaigns minted from this origin (0 = prepared, not yet run)",
+    )
+    origin_accuracy: float | None = Field(
+        default=None, description="The origin's C0 score, from the canonical campaign's index.json"
+    )
+    prepared: bool = Field(
+        default=False, description="True = a ready dataset config with no campaign yet"
+    )
+    created_at: str = Field(default="", description="ISO 8601 — earliest campaign on this origin")
+
+
+def _campaigns_by_origin(stores: Stores) -> dict[str, list[Campaign]]:
+    """Every active campaign in the tenant, grouped by origin. Tenant-scoped and NOT owner-filtered:
+    a CLI-minted campaign's owner id differs from a browser OIDC session's within the SAME tenant."""
+    by_origin: dict[str, list[Campaign]] = {}
+    for campaign in stores.campaigns.list_campaigns(None, lifecycle="active", owner_user_id=None):
+        by_origin.setdefault(campaign.origin_id, []).append(campaign)
+    return by_origin
+
+
+def _canonical(group: list[Campaign]) -> Campaign:
+    return min(group, key=lambda c: c.created_at)
+
+
+def canonical_origin_campaign(stores: Stores, origin_id: str) -> Campaign | None:
+    """The earliest active campaign on *origin_id* — the one a reuse reads its config and seed
+    from. ``None`` for a *prepared* origin, which has no campaign yet."""
+    group = _campaigns_by_origin(stores).get(origin_id)
+    return _canonical(group) if group else None
+
+
+def _campaign_backed_origins(stores: Stores, n_samples: dict[str, int | None]) -> list[OriginEntry]:
+    out: list[OriginEntry] = []
+    for origin_id, group in _campaigns_by_origin(stores).items():
+        canonical = _canonical(group)
+        # A campaign outlives its dataset, and reuse has nothing to run without one. The SAME
+        # resolver the reuse asks, so the list and the action cannot disagree.
+        try:
+            readable_dataset_dir(stores, canonical.dataset_name)
+        except DatasetAccessError:
+            logger.info(
+                "origins: skipping origin %s — dataset %r no longer resolves",
+                origin_id,
+                canonical.dataset_name,
+            )
+            continue
+        # The best origin score across the origin's campaigns: origin scoring is
+        # nondeterministic at the backend, so runs of one origin vary.
+        scores = [
+            score
+            for c in group
+            if (score := origin_accuracy_of(stores.campaigns.load(c.root_hop) or {})) is not None
+        ]
+        out.append(
+            OriginEntry(
+                origin_id=origin_id,
+                dataset_name=canonical.dataset_name,
+                label=canonical.label,
+                n_samples=n_samples.get(canonical.dataset_name),
+                n_campaigns=len(group),
+                origin_accuracy=max(scores) if scores else None,
+                created_at=canonical.created_at,
+            )
+        )
+    return sorted(out, key=lambda o: o.created_at, reverse=True)
+
+
+def list_origins(stores: Stores) -> list[OriginEntry]:
+    """Every runnable origin in the tenant: each ready dataset's CURRENT config-aware origin while
+    that exact config has no campaign yet, then the campaign-backed ones, newest first."""
+    datasets = list_readable_datasets(stores)
+    campaign_backed = _campaign_backed_origins(stores, {r.name: r.n_samples for r in datasets})
+    taken = {o.origin_id for o in campaign_backed}
+    prepared: list[OriginEntry] = []
+    for ref in datasets:
+        if ref.tier != "yours" or not ref.n_samples:
+            continue
+        dataset_dir = stores.tenant_datasets.dataset_dir(ref.name)
+        # Ready = a prompts/ dir (any node-named or `default.yaml` prompt, resolved as the mint
+        # resolves it) beside a pipeline.yaml — never one filename.
+        if not has_dataset_prompts(dataset_dir) or not is_dataset_dir(dataset_dir):
+            continue
+        origin_id = prospective_origin_id(stores, dataset_dir, ref.name)
+        if origin_id is None or origin_id in taken:
+            continue
+        prepared.append(
+            OriginEntry(
+                origin_id=origin_id,
+                dataset_name=ref.name,
+                label=ref.title or "",
+                n_samples=ref.n_samples,
+                prepared=True,
+            )
+        )
+    return [*prepared, *campaign_backed]

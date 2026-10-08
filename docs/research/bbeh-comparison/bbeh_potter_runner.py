@@ -14,6 +14,7 @@ from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.datasets.authored import load_dataset_campaign_config
 from promptpotter.application.datasets.loaders import samples_from_dicts
 from promptpotter.application.embedded_run import open_session, run_campaign
+from promptpotter.application.jobs.launcher.mint_and_start import with_optimization
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
 from promptpotter.application.runner.entry import RunMode
@@ -58,8 +59,7 @@ def build_campaign_config(
     if sp_budget_round is not None:
         nodes["adaptive_queue"] = {"config": {"sp_budget_round": sp_budget_round}}
     optimization: dict[str, Any] = {"max_rounds": max_rounds or 5, "nodes": nodes}
-    overrides: dict[str, Any] = {"optimization": optimization}
-    return load_dataset_campaign_config(_BBEH_CAMPAIGN_YAML, overrides=overrides)
+    return with_optimization(load_dataset_campaign_config(_BBEH_CAMPAIGN_YAML), optimization)
 
 
 async def run_bbeh_campaign(
@@ -142,7 +142,7 @@ async def run_bbeh_campaign(
                 hits = 0
                 for ex in test_items:
                     resp = await session.backend_client.run_query(
-                        ex.query, pipeline_params=result_pipeline_params, bound=bound, billed=billed
+                        ex, pipeline_params=result_pipeline_params, bound=bound, billed=billed
                     )
                     ranking = resp.get("data", {}).get("final_ranking") or []
                     predicted = ranking[0].get("candidate", "") if ranking else ""

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.commands.dispatcher import Applier, CommandCall, CommandDispatcher
 from promptpotter.application.commands.payloads import (
@@ -76,18 +76,18 @@ async def dispatch_draft_patch(
         call,
         Applier(
             _apply,
-            on_replay=lambda: reread_draft_wire(stores, draft_id),
+            replay=lambda: reread_draft_wire(stores, draft_id),
             effect_fn=lambda: origin_effect(stores, draft_id, before),
         ),
     )
-    return cast("dict[str, Any]", outcome.result)
+    return outcome.result
 
 
 async def dispatch_origin_resolution(
     stores: Stores, call: CommandCall[ResolveOriginPayload]
 ) -> dict[str, Any]:
     """One origin-resolver turn, recorded. Calling ``resolve_origin_turn`` bare puts the turn on no
-    ledger AND re-spends the LLM call that ``on_replay`` serves from ``cache.json``."""
+    ledger AND re-spends the LLM call that the replay serves from ``cache.json``."""
     draft_id, message = call.payload.draft_id, call.payload.message
     draft = _reread_draft(stores, draft_id)
 
@@ -119,11 +119,11 @@ async def dispatch_origin_resolution(
         call,
         Applier(
             _apply,
-            on_replay=_on_replay,
+            replay=_on_replay,
             effect_fn=lambda: origin_effect(stores, draft_id, before),
         ),
     )
-    return cast("dict[str, Any]", outcome.result)
+    return outcome.result
 
 
 async def dispatch_start_checkin[T](
@@ -153,6 +153,6 @@ async def dispatch_start_checkin[T](
     outcome = await CommandDispatcher(stores).dispatch_checkin_command(
         # The flip from `checkin` to `active` is the retry guard: a second Start is a `LaunchError`.
         call,
-        Applier(_apply, dedupe=False),
+        Applier[T](_apply, replay=None),
     )
-    return cast("T", outcome.result)
+    return outcome.result

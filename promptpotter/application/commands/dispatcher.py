@@ -4,6 +4,7 @@ append the record, apply inline, append the ``CommandAckRecord``."""
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import re
 import uuid
@@ -30,6 +31,7 @@ from promptpotter.application.commands.payloads import (
     CommandPayload,
     CompactArchivePayload,
     CyclePayload,
+    DatasetReplaced,
     DeleteCampaignPayload,
     DeleteCyclePayload,
     ForkCyclePayload,
@@ -47,10 +49,6 @@ from promptpotter.application.commands.payloads import (
     StepCyclePayload,
     UnarchiveCampaignPayload,
     VerifyCandidatePayload,
-)
-from promptpotter.application.datasets.dataset_replace import (
-    NothingToReplaceError,
-    version_and_repoint,
 )
 from promptpotter.application.diagnostics.verify import verify_candidate
 from promptpotter.application.jobs.launcher.admission import launch
@@ -81,7 +79,12 @@ from promptpotter.domain.command_kinds import ALL_DISPATCHED_KINDS
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.launch_limits import LaunchLimits, RoundsCap
 from promptpotter.domain.pipeline_overlay import steers_disallowed_model
-from promptpotter.domain.run_records import CommandAckRecord, CommandRecord, CycleSeed
+from promptpotter.domain.run_records import (
+    CommandAckRecord,
+    CommandRecord,
+    CycleSeed,
+    OriginSource,
+)
 from promptpotter.domain.spend import BudgetChange
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.ledger import CycleEventLog
@@ -94,6 +97,10 @@ from promptpotter.infrastructure.llm.telemetry import (
 )
 from promptpotter.infrastructure.runtime_flags import write_sample_lookahead
 from promptpotter.infrastructure.store.dataset_access import readable_dataset_dir
+from promptpotter.infrastructure.store.dataset_replace import (
+    NothingToReplaceError,
+    replace_dataset,
+)
 from promptpotter.infrastructure.store.layout import (
     CycleLayout,
     inner_sandboxes_dir,
@@ -106,7 +113,6 @@ from promptpotter.shared.errors import (
     ConflictError,
     NotFoundError,
     PayloadInvalidError,
-    ServiceUnavailableError,
 )
 from promptpotter.shared.identity import (
     CAMPAIGN_BABYSIT_CAP,
@@ -137,13 +143,13 @@ class _IdempotentMatch(StrictModel):
 
 
 def _parse_cycle_seed(raw: object, campaign: CampaignConfig) -> CycleSeed:
-    """Stamps the C0 lineage provenance ``origin_source="fork_seed"``: every operator fork
+    """Stamps the C0 lineage provenance ``OriginSource.FORK_SEED``: every operator fork
     carries a seed, and the wire schema does not carry the tag. Its node knobs resolve against
     the campaign's manifest here, so a refused one is refused before a fork is minted."""
     if not isinstance(raw, dict):
         raise PayloadInvalidError("payload.seed (object) is required.")
     try:
-        seed = CycleSeed.model_validate({**raw, "origin_source": "fork_seed"})
+        seed = CycleSeed.model_validate({**raw, "origin_source": OriginSource.FORK_SEED})
     except ValidationError as exc:
         raise PayloadInvalidError(f"payload.seed invalid: {exc}") from exc
     select_optimizer(apply_cycle_seed(campaign, seed).optimization)
@@ -186,7 +192,14 @@ def _find_idempotent_command(
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["CAP_FOR_KIND", "Applier", "CommandCall", "CommandDispatcher", "CommandOutcome"]
+__all__ = [
+    "CAP_FOR_KIND",
+    "Applier",
+    "CommandCall",
+    "CommandDispatcher",
+    "CommandOutcome",
+    "ForkStart",
+]
 
 
 # The one cap→verb ladder (ADR-0005 §3): every command kind that funnels through
@@ -256,44 +269,67 @@ class CommandCall[P: CommandPayload]:
         return KIND_OF_PAYLOAD[type(self.payload)]
 
 
-@dataclass(frozen=True, slots=True)
-class Applier:
-    """How one command applies and answers for itself. A deduped retry answers ``on_replay``, never
-    ``run``; ``dedupe=False`` leaves retries to the domain's guard; ``effect_fn`` lands on the ack."""
+def _no_body() -> None:
+    """What a deduped retry answers for a command whose applied form answers nothing either."""
 
-    run: Callable[[], Awaitable[Any]] | Callable[[], Any]
-    on_replay: Callable[[], Any] | None = None
-    dedupe: bool = True
+
+@dataclass(frozen=True, slots=True)
+class Applier[R]:
+    """How one command applies and answers for itself. ``replay`` is what a deduped retry answers
+    in place of ``run``, the same type; ``None`` dedupes nothing, leaving retries to the domain's guard."""
+
+    run: Callable[[], Awaitable[R]] | Callable[[], R]
+    replay: Callable[[], R] | None
     effect_fn: Callable[[], dict[str, Any]] | None = None
 
+    @staticmethod
+    def silent(
+        run: Callable[[], Awaitable[object]] | Callable[[], object],
+    ) -> Applier[object]:
+        """A deduped command with no body to answer: nothing reads what ``run`` returns."""
+        return Applier(run, _no_body)
+
+
+type ForkStart = Callable[[CycleHop], Awaitable[None]]
+
 
 @dataclass(frozen=True, slots=True)
-class CommandOutcome:
+class CommandOutcome[R]:
     accepted: CommandAcceptedBody
-    result: Any = None
+    result: R
 
 
 class CommandDispatcher:
-    """One per request, carrying the request-scoped ``Stores``. ``job_registry`` is the
-    process-wide singleton stashed on ``app.state.job_registry`` at startup."""
+    """One per request, carrying the request-scoped ``Stores``. The server hands in its reaping
+    ``job_registry``; every other process attaches to the machine's jobs dir at its first launch verb."""
 
     def __init__(self, stores: Stores, job_registry: JobRegistry | None = None) -> None:
         self._stores = stores
-        self._job_registry = job_registry
+        self._attached = job_registry
+
+    @property
+    def _job_registry(self) -> JobRegistry:
+        if self._attached is None:
+            self._attached = JobRegistry.attach()
+        return self._attached
 
     # ------------------------------------------------------------------
     # Lifecycle (campaign-scoped, workspace-style)
     # ------------------------------------------------------------------
-    async def dispatch_lifecycle(self, call: CommandCall[LifecyclePayload]) -> CommandOutcome:
+    async def dispatch_lifecycle(
+        self, call: CommandCall[LifecyclePayload]
+    ) -> CommandOutcome[object]:
         """The ``CommandRecord`` lands on the WORKSPACE ledger because ``archive`` MOVES the
         campaign tree and ``delete`` REMOVES it — its own ledger cannot be the audit home."""
         self._load_owned_campaign(call.payload.campaign_id)
         ledger = CycleEventLog.open_workspace(self._stores.base_dir)
         return await self._record_and_apply(
-            ledger, call, Applier(lambda: self._apply_lifecycle(call.payload))
+            ledger, call, Applier.silent(lambda: self._apply_lifecycle(call.payload))
         )
 
-    async def dispatch_campaign_config(self, call: CommandCall[CampaignPayload]) -> CommandOutcome:
+    async def dispatch_campaign_config(
+        self, call: CommandCall[CampaignPayload]
+    ) -> CommandOutcome[object]:
         """An in-place edit of ``campaign.json`` — the campaign persists, so the record is an
         ordinary workspace-ledger admin edit rather than the lifecycle move beside it."""
         self._load_owned_campaign(call.payload.campaign_id)
@@ -302,11 +338,11 @@ class CommandDispatcher:
             ledger, call, self._build_campaign_config_applier(call.payload)
         )
 
-    def _build_campaign_config_applier(self, payload: CampaignPayload) -> Applier:
+    def _build_campaign_config_applier(self, payload: CampaignPayload) -> Applier[object]:
         cid = payload.campaign_id
         if isinstance(payload, SetCampaignLabelPayload):
             label = payload.label
-            return Applier(lambda: self._apply_set_campaign_label(cid, label))
+            return Applier.silent(lambda: self._apply_set_campaign_label(cid, label))
         raise PayloadInvalidError(  # pragma: no cover — the registry pairs every kind with a type
             f"no applier wired for campaign-config payload {type(payload).__name__}"
         )
@@ -322,10 +358,18 @@ class CommandDispatcher:
     # Cycle-scoped (migrated sanctioned POSTs)
     # ------------------------------------------------------------------
     async def dispatch_cycle_command(
-        self, call: CommandCall[CyclePayload], *, expected_version: int | None
-    ) -> CommandOutcome:
+        self,
+        call: CommandCall[CyclePayload],
+        *,
+        expected_version: int | None,
+        start_fork: ForkStart | None = None,
+    ) -> CommandOutcome[object]:
         """The payload arrives TYPED, which is the whole validation — the CLI and the API build the
         same model, so neither entry point can validate a field the other spells differently.
+
+        ``start_fork`` is a ``fork-cycle``'s run-invocation, the one thing an entry point owns of
+        it (as ``dispatch_start_checkin``'s ``start`` is): unset, the fork launches detached; a
+        terminal hands in its own and drives the loop inline.
 
         ``Expected-Version`` is checked only when the header is present — the v0 relaxation of
         ADR-0001, which mandates it."""
@@ -355,7 +399,7 @@ class CommandDispatcher:
             return await self._dispatch_delete_cycle(campaign=campaign, hop=hop, call=call)
 
         return await self._record_and_apply(
-            ledger, call, self._build_cycle_applier(campaign, hop, call.payload)
+            ledger, call, self._build_cycle_applier(campaign, hop, call.payload, start_fork)
         )
 
     async def _dispatch_delete_cycle(
@@ -364,7 +408,7 @@ class CommandDispatcher:
         campaign: Campaign,
         hop: CycleHop,
         call: CommandCall[CyclePayload],
-    ) -> CommandOutcome:
+    ) -> CommandOutcome[object]:
         """Liveness, not activeness — and gated HERE rather than in the store, because the runner
         calls the same helper as the OWNER, inside ``RUN_FRESH_S`` of its own index write."""
         if hop.cycle_id in self._stores.campaigns.live_cycle_ids(hop.campaign_id):
@@ -387,49 +431,64 @@ class CommandDispatcher:
             if not deleted:
                 raise _RejectedError(reason)
 
-        return await self._record_and_apply(root_ledger, call, Applier(_apply))
+        return await self._record_and_apply(root_ledger, call, Applier.silent(_apply))
 
     # ------------------------------------------------------------------
     # Workspace-scoped (no cycle target — backend registry mutations)
     # ------------------------------------------------------------------
-    async def dispatch_workspace_command(self, call: CommandCall[CommandPayload]) -> CommandOutcome:
+    async def dispatch_replace_dataset(
+        self, call: CommandCall[ReplaceDatasetPayload]
+    ) -> CommandOutcome[DatasetReplaced]:
+        slug = call.payload.slug
+        # A deduped retry must not re-run the migration — it would version the slug a second
+        # time — and the body echoes the subject, so it replays without touching disk.
+        return await self._record_and_apply(
+            CycleEventLog.open_workspace(self._stores.base_dir),
+            call,
+            Applier(
+                lambda: self._apply_replace_dataset(slug),
+                replay=lambda: DatasetReplaced(slug=slug),
+            ),
+        )
+
+    async def dispatch_compact_archive(
+        self, call: CommandCall[CompactArchivePayload]
+    ) -> CommandOutcome[ArchiveReport]:
+        job = call.payload
+        # A deduped retry must not re-run the pass: `purge-cold` would report a second deletion
+        # of bytes already gone. It replays an EMPTY report: this attempt moved nothing.
+        return await self._record_and_apply(
+            CycleEventLog.open_workspace(self._stores.base_dir),
+            call,
+            Applier(lambda: self._apply_compact_archive(job), replay=ArchiveReport),
+        )
+
+    async def dispatch_workspace_command(
+        self, call: CommandCall[CommandPayload]
+    ) -> CommandOutcome[object]:
+        """The workspace kinds that answer no body. The two that answer one have a typed door each
+        (``dispatch_replace_dataset``, ``dispatch_compact_archive``)."""
         ledger = CycleEventLog.open_workspace(self._stores.base_dir)
         payload = call.payload
-        applier: Applier
+        applier: Applier[object]
         if isinstance(payload, RegisterBackendPayload):
             backend = payload
-            applier = Applier(lambda: self._apply_register_backend(backend))
-        elif isinstance(payload, ReplaceDatasetPayload):
-            slug = payload.slug
-            # A deduped retry must not re-run the migration — it would version the slug a second
-            # time — and the body echoes the subject, so it replays without touching disk.
-            applier = Applier(
-                lambda: self._apply_replace_dataset(slug), on_replay=lambda: {"slug": slug}
-            )
-        elif isinstance(payload, CompactArchivePayload):
-            job = payload
-            # A deduped retry must not re-run the pass: `purge-cold` would report a second deletion
-            # of bytes already gone. It replays an EMPTY report — the same model the applier
-            # answers with, because the route validates this body too, and a bespoke
-            # `{"replayed": true}` shape 500s the retry that an Idempotency-Key exists to make safe.
-            # All-zero is also the true answer: this attempt moved nothing.
-            applier = Applier(
-                lambda: self._apply_compact_archive(job),
-                on_replay=lambda: ArchiveReport().model_dump(mode="json"),
-            )
+            applier = Applier.silent(lambda: self._apply_register_backend(backend))
         elif isinstance(payload, CancelQueuedRunPayload):
             job_id = payload.job_id
-            applier = Applier(lambda: self._apply_cancel_queued_run(job_id))
+            applier = Applier.silent(lambda: self._apply_cancel_queued_run(job_id))
         elif isinstance(payload, SetConcurrentCyclesPayload):
             limit = payload.max_concurrent_cycles
-            applier = Applier(lambda: set_concurrent_cycles(stores=self._stores, limit=limit))
+            applier = Applier.silent(
+                lambda: set_concurrent_cycles(stores=self._stores, limit=limit)
+            )
         elif isinstance(payload, MintCampaignPayload):
             mint = payload
 
             async def _mint() -> None:
                 await self._apply_mint_campaign(mint)
 
-            applier = Applier(_mint)
+            applier = Applier.silent(_mint)
         else:  # pragma: no cover — the registry pairs every kind with a type
             raise PayloadInvalidError(
                 f"no applier wired for workspace payload {type(payload).__name__}"
@@ -440,11 +499,11 @@ class CommandDispatcher:
     # ------------------------------------------------------------------
     # Check-in scoped (origin authoring — the draft-mutating commands)
     # ------------------------------------------------------------------
-    async def dispatch_checkin_command[P: CheckinPayload](
-        self, call: CommandCall[P], applier: Applier
-    ) -> CommandOutcome:
+    async def dispatch_checkin_command[P: CheckinPayload, R](
+        self, call: CommandCall[P], applier: Applier[R]
+    ) -> CommandOutcome[R]:
         """The one family whose ``Applier`` is authored outside this class (``checkin_dispatch.py``).
-        ``start-checkin`` alone sets ``dedupe=False`` — its ``job_id`` has no disk home."""
+        ``start-checkin`` alone dedupes nothing — its ``job_id`` has no disk home."""
         campaign_id = call.payload.checkin_campaign_id
         campaign = self._load_owned_campaign(campaign_id)
         cycle_dir = self._stores.campaigns.cycle_dir(campaign.root_hop)
@@ -458,12 +517,12 @@ class CommandDispatcher:
     # ------------------------------------------------------------------
     # Shared record / apply / ack pipeline
     # ------------------------------------------------------------------
-    async def _record_and_apply[P: CommandPayload](
-        self, ledger: CycleEventLog, call: CommandCall[P], applier: Applier
-    ) -> CommandOutcome:
+    async def _record_and_apply[P: CommandPayload, R](
+        self, ledger: CycleEventLog, call: CommandCall[P], applier: Applier[R]
+    ) -> CommandOutcome[R]:
         kind, idempotency_key = call.kind, call.idempotency_key
         self._require_capability_for(kind)
-        if applier.dedupe:
+        if applier.replay is not None:
             existing = _find_idempotent_command(ledger, idempotency_key)
             if existing is not None:
                 return CommandOutcome(
@@ -472,12 +531,12 @@ class CommandDispatcher:
                         correlation_id=idempotency_key,
                         ledger_sequence=existing.offset,
                     ),
-                    result=applier.on_replay() if applier.on_replay is not None else None,
+                    result=applier.replay(),
                 )
 
         command_id = str(uuid.uuid4())
         token = set_cycle_ledger(ledger)
-        applied_value: Any = None
+        applied: list[R] = []
         try:
             offset = emit_command(
                 command_id=command_id,
@@ -489,10 +548,8 @@ class CommandDispatcher:
             ack_status: Literal["applied", "rejected"] = "applied"
             ack_detail = ""
             try:
-                result = applier.run()
-                if asyncio.iscoroutine(result):
-                    result = await result
-                applied_value = result
+                ran = applier.run()
+                applied.append(await ran if inspect.isawaitable(ran) else ran)
             except _RejectedError as exc:
                 ack_status = "rejected"
                 ack_detail = exc.reason
@@ -512,7 +569,7 @@ class CommandDispatcher:
         finally:
             reset_cycle_ledger(token)
 
-        if ack_status == "rejected":
+        if not applied:
             # Rejected by a domain guard: 409 with the guard's reason, while the audit trail
             # stays on the ledger.
             raise ConflictError(
@@ -526,7 +583,7 @@ class CommandDispatcher:
                 correlation_id=idempotency_key,
                 ledger_sequence=offset if offset is not None else 0,
             ),
-            result=applied_value,
+            result=applied[0],
         )
 
     # ------------------------------------------------------------------
@@ -537,7 +594,8 @@ class CommandDispatcher:
         campaign: Campaign,
         hop: CycleHop,
         payload: CyclePayload,
-    ) -> Applier:
+        start_fork: ForkStart | None,
+    ) -> Applier[object]:
         """Dispatched on the payload's TYPE, not on ``kind`` — every cycle-scoped verb owns one
         model, so the branch that reads a field is the branch its type reached. Nothing here
         re-validates: the model is the only validation, and a second lenient pass over an
@@ -556,7 +614,7 @@ class CommandDispatcher:
             def _refuse() -> None:
                 raise _RejectedError(reason)
 
-            return Applier(_refuse, dedupe=False)
+            return Applier(_refuse, replay=None)
         if isinstance(payload, VerifyCandidatePayload):
 
             async def _apply_verify() -> None:
@@ -566,7 +624,6 @@ class CommandDispatcher:
                 with spending_under(book):
                     await verify_candidate(
                         stores=self._stores,
-                        identity=self._stores.identity,
                         hop=hop,
                         candidate_id=payload.candidate_id,
                         samples=payload.samples,
@@ -574,7 +631,7 @@ class CommandDispatcher:
                         seed=payload.seed,
                     )
 
-            return Applier(_apply_verify)
+            return Applier.silent(_apply_verify)
         if isinstance(payload, ForkCyclePayload):
             seed = _parse_cycle_seed(
                 payload.seed, resolve_campaign_config(self._stores, campaign, None)
@@ -593,10 +650,17 @@ class CommandDispatcher:
                 )
                 raise NotFoundError("Not found", code="not_found")
 
+            async def _launch(fork: CycleHop) -> None:
+                # Declare no limits — the seed's reconciled ones govern at the runner seam.
+                await self._apply_start_run(
+                    hop=fork, dataset_name=dataset_name, limits=LaunchLimits()
+                )
+
+            start = start_fork or _launch
+
             async def _apply_fork() -> None:
-                # Mint THEN launch: minting alone is disk I/O, and the fork would sit
-                # seeded-but-idle awaiting a CLI `resume` that never comes from the web. Declare
-                # no limits — the seed's reconciled ones govern at the runner seam.
+                # Mint THEN start: minting alone is disk I/O, and the fork would sit
+                # seeded-but-idle awaiting a `resume` nobody was told to type.
                 new_cycle_id = mint_operator_fork(
                     stores=self._stores,
                     hop=hop,
@@ -605,62 +669,54 @@ class CommandDispatcher:
                     seed=seed,
                     steered_by=payload.steered_by,
                     keep_rounds=payload.keep_rounds,
+                    reason=payload.reason,
                 )
                 try:
-                    await self._apply_start_run(
-                        hop=CycleHop(campaign_id=hop.campaign_id, cycle_id=new_cycle_id),
-                        kind="resume",
-                        dataset_name=dataset_name,
-                        limits=LaunchLimits(),
-                    )
+                    await start(CycleHop(campaign_id=hop.campaign_id, cycle_id=new_cycle_id))
                 except BaseException:
-                    # ONE act, landing whole or not at all: a launch refused after the mint (full
-                    # machine, empty wallet, dark backend) leaves no seeded fork that never starts.
-                    # `_apply_start_run` raises only from BEFORE the run's process exists, so the
-                    # stub is provably idle and the shared cleanup's own emptiness test is the
-                    # backstop.
+                    # ONE act, landing whole or not at all: a start refused after the mint leaves no
+                    # seeded fork. A start raises only BEFORE the run exists, so the stub is idle.
                     self._cleanup_failed_fork(hop, new_cycle_id)
                     raise
 
-            return Applier(_apply_fork)
+            return Applier.silent(_apply_fork)
         if isinstance(payload, StepCyclePayload):
             # Advance N rounds in place then auto-pause, on the resume machinery + RunMode's
             # run-scoped stop — the `campaign.step` capability for a delegate without run.
             steps = payload.rounds
-            return Applier(
+            return Applier.silent(
                 lambda: self._apply_start_run(
                     hop=hop,
-                    kind="resume",
                     dataset_name=dataset_name,
                     limits=LaunchLimits(),
                     stop_after_rounds=steps,
                 )
             )
         if isinstance(payload, SkipSearchpointPayload):
-            return Applier(lambda: self._apply_skip_searchpoint(hop))
+            return Applier.silent(lambda: self._apply_skip_searchpoint(hop))
         if isinstance(payload, CleanupEmptyCyclesPayload):
-            return Applier(lambda: self._apply_cleanup_empty(hop))
+            return Applier.silent(lambda: self._apply_cleanup_empty(hop))
         if isinstance(payload, PauseCyclePayload):
-            return Applier(lambda: self._apply_pause_cycle(hop))
+            return Applier.silent(lambda: self._apply_pause_cycle(hop))
         if isinstance(payload, SetSampleLookaheadPayload):
             cells, auto = payload.cells, payload.auto
-            return Applier(lambda: self._apply_set_sample_lookahead(hop, cells=cells, auto=auto))
+            return Applier.silent(
+                lambda: self._apply_set_sample_lookahead(hop, cells=cells, auto=auto)
+            )
         if isinstance(payload, OriginGateDecisionPayload):
             decision = payload.decision
-            return Applier(lambda: self._apply_origin_gate_decision(hop, decision))
+            return Applier.silent(lambda: self._apply_origin_gate_decision(hop, decision))
         if isinstance(payload, ChangeRunLimitsPayload):
             change = BudgetChange(payload.max_usd, payload.max_tokens)
             rounds = payload.rounds_cap
-            return Applier(lambda: self._apply_change_run_limits(hop, change, rounds))
+            return Applier.silent(lambda: self._apply_change_run_limits(hop, change, rounds))
         if isinstance(payload, StartRunPayload):
             run = payload
 
             async def _apply() -> None:
-                await self._apply_start_run(
-                    hop=hop, kind=run.kind, dataset_name=dataset_name, limits=run
-                )
+                await self._apply_start_run(hop=hop, dataset_name=dataset_name, limits=run)
 
-            return Applier(_apply)
+            return Applier.silent(_apply)
         raise PayloadInvalidError(  # pragma: no cover — the registry pairs every kind with a type
             f"no applier wired for cycle-scoped payload {type(payload).__name__}"
         )
@@ -685,16 +741,16 @@ class CommandDispatcher:
         else:
             assert_never(payload)
 
-    def _apply_replace_dataset(self, slug: str) -> dict[str, str]:
+    def _apply_replace_dataset(self, slug: str) -> DatasetReplaced:
         try:
-            result = version_and_repoint(stores=self._stores, slug=slug)
+            result = replace_dataset(stores=self._stores, slug=slug)
         except NothingToReplaceError as exc:
             raise ConflictError(
                 str(exc), code="nothing_to_replace", details={"slug": exc.slug}
             ) from exc
-        return {"slug": result.slug}
+        return DatasetReplaced(slug=result.slug)
 
-    def _apply_compact_archive(self, payload: CompactArchivePayload) -> dict[str, Any]:
+    def _apply_compact_archive(self, payload: CompactArchivePayload) -> ArchiveReport:
         """The three WRITE modes, one application-layer function each — this arm only picks and
         reports. The verb's fourth mode, ``inventory``, is a census and reaches the terminal alone:
         this highway records a `CommandRecord` per call, which would bill an act changing nothing.
@@ -715,7 +771,7 @@ class CommandDispatcher:
                 report = purge_cold_store(
                     self._stores, dataset=payload.dataset, apply=payload.apply
                 )
-        return report.model_dump(mode="json")
+        return report
 
     def _apply_register_backend(self, payload: RegisterBackendPayload) -> None:
         backend_id = payload.id or _slugify_backend_id(payload.name)
@@ -784,7 +840,7 @@ class CommandDispatcher:
         the launch admitted — unclamped, raising one here is the way around the host-wallet gate.
         The next launch declares the standing ceiling again and re-admits it. A round cap is no
         money, so a rounds-only change skips the wallet read, whose contention would refuse it."""
-        registry = self._require_job_registry()
+        registry = self._job_registry
         reserve = BudgetChange(None, None)
         if change != BudgetChange(None, None):
             change, reserve = await asyncio.to_thread(
@@ -804,7 +860,7 @@ class CommandDispatcher:
         full, the moment the launch takes its place in line and the mint moves behind the wait. The
         webapp discovers the new ids by polling ``/api/v1/active`` either way."""
 
-        registry = self._require_job_registry()
+        registry = self._job_registry
         # Refused here, before a slot is asked for: a queued mint would refuse it only later.
         dataset_campaign_config(
             readable_dataset_dir(self._stores, payload.dataset_name),
@@ -831,7 +887,6 @@ class CommandDispatcher:
         self,
         *,
         hop: CycleHop,
-        kind: str,
         dataset_name: str,
         limits: LaunchLimits,
         stop_after_rounds: int | None = None,
@@ -842,7 +897,7 @@ class CommandDispatcher:
         to name what it will run from the moment it joins, and re-reading the manifest here would
         be a second answer to a question one caller up already has."""
 
-        registry = self._require_job_registry()
+        registry = self._job_registry
         # Quota / Launch / BackendUnreachable are PotterErrors mapped centrally
         # by _record_and_apply — no per-applier arm here.
         await launch(
@@ -858,7 +913,6 @@ class CommandDispatcher:
                 job_registry=registry,
                 job=job,
                 hop=hop,
-                kind=kind,
                 limits=limits,
                 stop_after_rounds=stop_after_rounds,
             ),
@@ -873,17 +927,9 @@ class CommandDispatcher:
         silently doing nothing. Cancelling a queued FORK leaves its stub behind for
         ``cleanup-empty-cycles``; the fork was minted before it queued and deleting a cycle is that
         verb's authority, not this one's."""
-        registry = self._require_job_registry()
+        registry = self._job_registry
         if not registry.cancel_queued(job_id, user_id=str(self._stores.identity.user_id)):
             raise NotFoundError("Not found", code="not_found")
-
-    def _require_job_registry(self) -> JobRegistry:
-        """The registry every launch verb needs, or the 503 that says why not."""
-        if self._job_registry is None:
-            raise ServiceUnavailableError(
-                "job registry not initialised", code="job_registry_unavailable"
-            )
-        return self._job_registry
 
     def _cleanup_failed_fork(self, parent_hop: CycleHop, new_cycle_id: str) -> None:
         """Undo a fork whose launch never started. Best-effort and never masks the launch failure —
@@ -914,11 +960,11 @@ class CommandDispatcher:
             progress = False
             entries = self._stores.campaigns.enumerate_cycles()
             family_ids = [
-                e["cycle_id"]
+                e.cycle_id
                 for e in entries
-                if e["campaign_id"] == hop.campaign_id
-                and e["cycle_id"] != root_id
-                and e["parent_cycle_id"] == root_id
+                if e.campaign_id == hop.campaign_id
+                and e.cycle_id != root_id
+                and e.parent_cycle_id == root_id
             ]
             for cid in family_ids:
                 if cid in deleted_ids:

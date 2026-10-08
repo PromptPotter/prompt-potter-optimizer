@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from promptpotter.domain.results import ArmOutcome
+    from promptpotter.domain.results import ArmOutcome, DegradationContext
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import QueryMeasurement
 
@@ -27,9 +27,6 @@ class LLMOutputValidator:
     id: str
     check: Callable[..., ValidatorOutcome | None]
 
-    def run(self, source_output: Mapping[str, Any], **context: Any) -> ValidatorOutcome | None:
-        return self.check(source_output, **context)
-
 
 def run_validators(
     validators: tuple[LLMOutputValidator, ...],
@@ -38,7 +35,7 @@ def run_validators(
 ) -> list[ValidatorOutcome]:
     outcomes: list[ValidatorOutcome] = []
     for validator in validators:
-        outcome = validator.run(source_output, **context)
+        outcome = validator.check(source_output, **context)
         if outcome is not None:
             outcomes.append(outcome)
     return outcomes
@@ -51,7 +48,15 @@ class StopSignal:
 
     check_name: str
     outcome: ArmOutcome
-    check_result: dict[str, Any]
+    check_result: Mapping[str, Any]
+
+
+@dataclass(frozen=True)
+class BrokenSignal(StopSignal):
+    """A walk the BENCH stopped — its run-health rule or the gateway's own abort — as opposed to an
+    eliminator's cut. Its reading is built by ``results.py::degradation_reading``."""
+
+    check_result: DegradationContext
 
 
 @runtime_checkable
@@ -77,6 +82,7 @@ class StopRule(Protocol):
 
 
 __all__ = [
+    "BrokenSignal",
     "LLMOutputValidator",
     "StopRule",
     "StopSignal",

@@ -195,7 +195,20 @@ LEDGER_BASELINE = {
     # `config/prompt_blocks.py` so a provenance field added to it re-keys no banked cell.
     # +1: `infrastructure/docker_host.py` — the docker CLI, daemon probe, package cache and
     # dead-producer sweep `harbor` and `dbllmbench` each carried a copy of.
-    "modules": 392,
+    # +1: `application/served_dashboard.py` — the one dashboard body the poll route and the SSE
+    # snapshot both serve. It replaces a composer in a router and a narrower copy in the ledger
+    # tail, which served different ceilings and no metered spend; no application module read both
+    # the campaign's config and the cycle's file.
+    # +6: each takes a fold out of a router or CLI shell so every entry point reads one copy, or
+    # types a shape a router owned. `application/config_map.py` (the config map; `knobs.py` is
+    # hashed into optimizer identity and takes no display label), `jobs/account_activity.py`,
+    # `maintenance/reset.py`, `maintenance/storage_report.py`, `mask/tree_lens.py` (the lens fold
+    # over the served tree) and `domain/cycle_listing.py` (`CycleListEntry`, which the store now
+    # returns typed). `datasets/dataset_replace.py` moved to `infrastructure/store/` and
+    # `routers/verify.py` was renamed `diagnostics.py`; neither moves the count.
+    # -1: `infrastructure/projections/live_state.py` — a second race accumulator beside
+    # `RoundBuffer`, which now holds the one standing the racing block is built from.
+    "modules": 398,
     # +1: `application/commands/__init__.py`, empty — importers name the submodule.
     # +3: `application/{evidence,diagnostics,maintenance}/__init__.py`, empty for the same reason.
     # +2: `application/optimizers/__init__.py` (the member registry) and its `potter/`, empty.
@@ -419,7 +432,8 @@ LEDGER_BASELINE = {
     # its dict arm had no caller, so the one decomposition input is a description's text.
     # -1: `head_to_head.py::_ran_to_completion(raw_stop_reason: Any)` is gone: a cycle's ending is
     # read through `campaign_store::cycle_ending`, which hands back a `StopReason`.
-    "any_params": 44,
+    # -1: `live_state.py::apply_phase(view: Any)` left with its module.
+    "any_params": 43,
     # +1: `results.py::is_floor_pinned(rows: Sequence[Mapping[str, Any]])`, the same signature as
     # `measured_cells` and `is_answer_collapsed` beside it — a round row read off disk is a plain
     # mapping, so a narrower annotation here would be a claim the callers cannot honour.
@@ -435,8 +449,8 @@ LEDGER_BASELINE = {
     # a row signature could only ever serve one of them and the other would have re-derived it.
     # Its set arity `all_verifier_graded` takes labels for the same reason and adds none back.
     # +1: `connector.py::CellEnvelopeSeconds.__call__(…, pipeline_params: dict[str, Any] | None)` —
-    # the SAME pair `WireAdapter` beside it takes, and deliberately so: what a cell may spend is
-    # decided by the query and the candidate's params, which is exactly what the request is built
+    # the params `WireAdapter` beside it takes, and deliberately so: what a cell may spend is
+    # decided by the sample and the candidate's params, which is exactly what the request is built
     # from. A narrower annotation here would be one the connector's own adapter cannot honour.
     # +2: `pipeline_overlay.py::steers_disallowed_model` — the frozen campaign config and the
     # overlay, which is the pair the babysit verdict is a function of. Both are genuinely
@@ -465,7 +479,13 @@ LEDGER_BASELINE = {
     # +2: `row_failure` / `is_degraded` — the round grade's reading of one row, lifted out of its
     # loop so the `degraded` count, rate and formula term read it too; `shared/errors.py`'s
     # warning-only twin, which no domain row counted, is gone.
-    "domain_any_maps": 90,
+    # -1 net: `LLMOutputValidator.run` (a pass-through over `check`) and `variant_prose_written`
+    # (potter's L1 wire shape, now in its validators) left; `is_deprecated` arrived — the one
+    # reading of a deprecated row, which `scoring/` and the replay feed had each wrapped.
+    # -1: `best_round_on_shared_cells` reads typed `SharedCellPoint`s, never dict rows it filled.
+    # +1: `RoundResult.rows_of(individual_id)` — one accessor over the arm and reference row
+    # maps, where capo, gepa and levi each wrote the union inline.
+    "domain_any_maps": 89,
     "models_lax": 3,
     "prompt_string_fields": 6,
     # +1: `demo_pool` — the value space of the `shot_ids` slot and the one carrier of the parent's
@@ -776,6 +796,8 @@ LEDGER_BASELINE = {
     # it ends, and the origin's reading lands before the round row it belongs on (test_integrity).
     # +1: a block's provenance moves nothing potter's treatment hashes, while its text, its source
     # and its place each do (test_integrity § 1).
+    # +1: a decision an arm proposed nothing valid for dropped from the pair, so the bank reads
+    # the variant on the decisions it survived and a collapse scores as a gain (test_numerics § 7).
     # +1: a dial on an unbounded term summed raw, so the clamp floors every candidate at 0.000 and
     # the election falls to its tie-break (test_numerics § 1).
     # +1: a fire zeroing the stall depth `exploration_budget` widens on tells L1 `tight` on every
@@ -791,7 +813,9 @@ LEDGER_BASELINE = {
     # and a lift left unpaired differences two exams (test_numerics § 1).
     # +1: a running cycle's ceiling clamped below what the account can fund, its own spend counted
     # against it twice (test_security).
-    "test_functions": 250,
+    # +1: a cut made past an errored cell replaying on the walk instead of the cells it was fit
+    # on, so the replayed decision is not the one that was taken (test_resume).
+    "test_functions": 251,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.
@@ -969,7 +993,25 @@ LEDGER_BASELINE = {
     # +7: `MeteredSpend.kinds` (`KindSpend`) folds its four parallel per-bucket maps into one
     # reading per kind, with `billed_tokens` / `unpriced_tokens` and `spend_metered_by_round` beside
     # it, so no surface sums, zero-fills or index-joins spend in the browser.
-    "served_fields": 786,
+    # +41: `CampaignDetailResponse.config` is the `CampaignConfig` it always carried, declared —
+    # `CampaignConfig`, `OptimizationConfig`, `DeterminismClamp`, `JudgeSpec`, `JudgeStage`,
+    # `ManifestNodeOverlay` and `NodeSearchNarrowing` were served as an untyped object.
+    # +4: `HealthResponse` — `/health` declared its body nowhere and the browser hand-wrote it.
+    # +4: `Evidence.config_keys` over `ConfigKeys` — which resolved keys differ, are one-sided or
+    # agree across the read's subjects, classified once where the CLI and the browser each did.
+    # +3: `CampaignRunsWith.vendors` over `VendorModels` — the vendor beside each model, where the
+    # browser cut one from the model id and read a gateway-prefixed id as the wrong vendor.
+    # +1: `DatasetReplaced.slug` — the replace-dataset route's body, typed.
+    # -5: `DatasetPipelineResponse` drops `name`, `backend_type`, `pipeline`, `node_output_schema`
+    # and `model_capabilities`, which no reader of the dataset-scoped route took.
+    # +5: `LineageNode.crown`, `.origin_id`, `.reference_lift_side`, `.panel_cut` and
+    # `.headline_accuracy` — the election state, the origin, the side of zero a lift's interval
+    # sits on, a panel cut short and a course's headline, each of which the browser derived.
+    # +3: `self_optimization` on `CampaignSummary`, `CampaignDetailResponse` and
+    # `CampaignPipelineResponse` — the connector registry's answer, where the browser matched
+    # `backend_type` against a name.
+    # +1: `OptimizerPipelineResponse.measurement_node`, which the browser searched the view for.
+    "served_fields": 843,
 }
 
 

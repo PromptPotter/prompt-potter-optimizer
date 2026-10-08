@@ -12,10 +12,10 @@ from pydantic import ConfigDict, Field
 from promptpotter.domain.bench import BenchPasses, DatasetSplit
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.pipeline_overlay import node_config_items
-from promptpotter.domain.pipeline_schema import stable_hash
 from promptpotter.domain.run_records import WallClock
 from promptpotter.domain.spend import CeilingMeter
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.shared.hashing import stable_hash
 
 
 class Treatment(StrictModel):
@@ -177,6 +177,12 @@ class CampaignResult(StrictModel):
     cost: ArmCost
 
 
+type LifecycleStatus = Literal["active", "archived", "deleted"]
+# What a campaign LIST may be asked for: a status, the `checkin` phase (a narrowing of `active`,
+# asked of the root cycle's flag), or `all`.
+type LifecycleFilter = Literal["active", "archived", "deleted", "checkin", "all"]
+
+
 class Campaign(StrictModel):
     """Frozen manifest — identity, config and operator VISIBILITY INTENT only, never run state: that
     is per-cycle, or the line's :class:`CampaignResult`."""
@@ -188,8 +194,8 @@ class Campaign(StrictModel):
     label: str = ""
     created_at: str
     root_cycle_id: str
-    root_content_hash: str = ""
-    # `None` only on an unstarted check-in, which has not chosen what it runs.
+    # Both `None` only on an unstarted check-in, which has not chosen what it runs.
+    root_content_hash: str | None = None
     treatment: Treatment | None = None
     arm: Arm | None = None
     backend_id: str = ""
@@ -199,7 +205,7 @@ class Campaign(StrictModel):
     owner_user_id: str = "default"
     # VISIBILITY only — the authoring phase is NOT here. `.runtime/checkin.flag` on the root cycle
     # owns it (`runtime_flags.py::is_checkin`), which is also what `derive_run_phase` serves.
-    lifecycle_status: Literal["active", "archived", "deleted"] = "active"
+    lifecycle_status: LifecycleStatus = "active"
     lifecycle_changed_at: str = ""
     lifecycle_reason: str = ""
     config: dict[str, Any] = Field(default_factory=dict)
@@ -209,6 +215,12 @@ class Campaign(StrictModel):
         """This campaign's root cycle as the pair that addresses it. Re-pairing at a call site risks one campaign's id with
         another's root cycle — easy, because a content-addressed ``root_cycle_id`` is shared by siblings."""
         return CycleHop(campaign_id=self.campaign_id, cycle_id=self.root_cycle_id)
+
+    @property
+    def origin_id(self) -> str:
+        """The origin this campaign is a run of — its content hash. A campaign still authoring its
+        origin stands as an origin of its own, never grouped with every other unstamped one."""
+        return self.root_content_hash or self.campaign_id
 
 
 __all__ = [
@@ -221,6 +233,8 @@ __all__ = [
     "HeadToHeadRecord",
     "Instrument",
     "Launch",
+    "LifecycleFilter",
+    "LifecycleStatus",
     "Treatment",
     "bench_instrument",
     "ceiling_meter",

@@ -22,6 +22,7 @@ function spine(
         label: r.round === 0 ? "C0" : `C${r.round}.${i + 1}`,
         candidate_id: `r${r.round}_${i}`,
         is_selected: r.winner === i,
+        crown: r.winner !== i ? null : r.n > 1 ? "elected" : "uncontested",
         is_fork: false,
       });
     }
@@ -170,6 +171,7 @@ describe("dendrogram", () => {
         label: "f·ab",
         candidate_id: "cy_ab",
         is_selected: false,
+        crown: null,
         is_fork: true,
       },
     ];

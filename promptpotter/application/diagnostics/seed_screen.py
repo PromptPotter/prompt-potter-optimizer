@@ -15,7 +15,7 @@ import random
 import statistics
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from promptpotter.application.bench.task_context import campaign_framing
 from promptpotter.application.campaign_config import load_campaign_config
@@ -49,6 +49,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = ["SeedScreenError", "class_floor", "draw_bank", "screen_inner_seeds"]
+
+
+SeedVerdict = Literal["reject", "suspect", "unsettled", "pass", "no_floor"]
 
 
 class SeedScreenError(Exception):
@@ -145,6 +148,28 @@ class SeedReading:
         Compare banks on this, never on accuracy."""
         return None if self.class_floor is None else self.origin_accuracy - self.class_floor
 
+    @property
+    def verdict(self) -> SeedVerdict:
+        """What to DO with this bank. A rejection requires a settled margin: the floor is exact and
+        the origin is not, so near the line the margin's sign is the sign of one noisy read."""
+        collapse, settled = self.rewards_collapse, self.verdict_settled
+        if collapse is None or settled is None:
+            return "no_floor"
+        if collapse:
+            return "reject" if settled else "suspect"
+        return "pass" if settled else "unsettled"
+
+    @property
+    def rank_key(self) -> tuple[bool, bool, float]:
+        """Banks that reward collapse first whatever their margin — those are to reject, not weak
+        cells to rank — then by reasoning margin; a bank with no floor sorts last, never at zero."""
+        margin = self.reasoning_margin
+        return (
+            self.rewards_collapse is not True,
+            margin is None,
+            0.0 if margin is None else -margin,
+        )
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "seed": self.seed,
@@ -158,6 +183,7 @@ class SeedReading:
             "answer_modal_share": self.answer_modal_share,
             "rewards_collapse": self.rewards_collapse,
             "verdict_settled": self.verdict_settled,
+            "verdict": self.verdict,
             "latency_median": self.latency_median,
             "latency_mean": self.latency_mean,
             "cost_usd": self.cost_usd,
@@ -167,6 +193,8 @@ class SeedReading:
 
 @dataclass(frozen=True)
 class SeedScreenOutcome:
+    """``readings`` is RANKED (:attr:`SeedReading.rank_key`), on disk and here alike."""
+
     dataset_name: str
     readings: list[SeedReading]
     artifact_path: str
@@ -358,6 +386,7 @@ async def screen_inner_seeds(
     # ledger event, because a screen is not a run. Its own file rather than a
     # `DiagnosticRunRecord`: that model is shaped for a re-scored campaign origin (k, CI, a
     # source cycle), and bending seed readings into those fields would name them wrongly.
+    readings.sort(key=lambda r: r.rank_key)
     path = stores.diagnostic_runs.sidecar_path(
         f"seed-screen-{dataset_name}-{utcnow_iso()[:10]}.json"
     )

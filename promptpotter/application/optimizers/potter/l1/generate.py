@@ -18,6 +18,7 @@ Contract: ``application/optimizers/potter/CLAUDE.md``.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from promptpotter.application.bench.llm_call import (
@@ -79,6 +80,17 @@ def _parse_evidence_grounding(raw: VariantEvidenceGrounding | None) -> EvidenceG
     return EvidenceGrounding(field=raw.field, citation=raw.citation.strip())
 
 
+@dataclass(frozen=True)
+class L1Generation:
+    """One round's proposals and what the call that made them offered — both ``None`` where the
+    proposals came back off disk. ``parse_failure`` is the ROUND's reason, never a candidate's."""
+
+    proposals: list[CandidateProposal]
+    parse_failure: str | None = None
+    citable: tuple[str, ...] | None = None
+    exploration_budget: str | None = None
+
+
 async def l1_generate(
     cycle: Cycle,
     state: PotterState,
@@ -86,9 +98,7 @@ async def l1_generate(
     n_variants: int,
     creativity: float,
     round_num: int = 0,
-) -> tuple[list[CandidateProposal], str | None]:
-    """Generate candidate variants. ``parse_failure`` names why the optimizer prompt produced unparseable output — the
-    round then carries zero candidates and the REASON travels with it, charged to the round, never to a candidate."""
+) -> L1Generation:
     if n_variants <= 0:
         raise ValueError(f"n_variants must be >0, got {n_variants}")
 
@@ -104,11 +114,8 @@ async def l1_generate(
     )
     # What L1 may cite IS what L1 was shown. The wire schema's enum is the one place the menu is
     # stated, so the prompt and the check cannot disagree about which panels exist this round.
-    citable = citable_fields(
-        state.memory.l1_layout,
-        exploration_budget=bundle.cycle_slice.exploration_budget,
-        rendered=rendered,
-    )
+    budget = bundle.cycle_slice.exploration_budget
+    citable = citable_fields(state.memory.l1_layout, exploration_budget=budget, rendered=rendered)
     prompt_vars: dict[str, str] = {"n_variants": str(n_variants), **injection_vars}
 
     schema_field_rename = potter_knobs(cycle.optimizer).l1_generate.schema_field_rename
@@ -205,7 +212,7 @@ async def l1_generate(
             ),
             detail={"reason": reason, "model": model, **parse_err.warning_detail()},
         )
-        return [], reason
+        return L1Generation([], reason, citable, budget)
     # The repair-retry path can leak a raw str/dict/list past validation when JSON parses but
     # doesn't bind. Route unexpected types to the wound channel so the round completes cleanly
     # (zero candidates → L2 heals next round) instead of crashing on `.variants`.
@@ -234,7 +241,7 @@ async def l1_generate(
             ),
             detail={"reason": PARSE_FAILURE_WRONG_TYPE, "model": model},
         )
-        return [], PARSE_FAILURE_WRONG_TYPE
+        return L1Generation([], PARSE_FAILURE_WRONG_TYPE, citable, budget)
 
     variants_list = generated.variants
 
@@ -254,7 +261,7 @@ async def l1_generate(
         )
         population.append(CandidateProposal(opt_sp=child, pipeline_overlay=v.pipeline_overlay))
 
-    return population, None
+    return L1Generation(population, None, citable, budget)
 
 
-__all__ = ["l1_generate"]
+__all__ = ["L1Generation", "l1_generate"]

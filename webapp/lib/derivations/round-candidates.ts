@@ -18,11 +18,8 @@ export function roundHasCandidates(r: RoundSummary): boolean {
   return r.candidates.length > 0;
 }
 
-export function sortedRounds(dash: DashboardSnapshot | null): RoundSummary[] {
-  return (dash?.rounds ?? []).slice().sort((a, b) => a.round - b.round);
-}
-
-// The one definition of "no longer live"; every liveness gate reads it so none can disagree.
+// The rounds that closed WITH measurements, in served order. Not "has a round file": a round
+// that closed empty has one too, and `useRoundSource::isLiveRound` asks that instead.
 export function closedRoundNumbers(dash: DashboardSnapshot | null): Set<number> {
   const closed = new Set<number>();
   for (const r of dash?.rounds ?? []) {
@@ -31,22 +28,68 @@ export function closedRoundNumbers(dash: DashboardSnapshot | null): Set<number> 
   return closed;
 }
 
-// One mapping for both halves: θ and the lift land at the ELECTION, before the round closes, so a
-// live row carries them too. `candidateId` is the caller's: the halves use different id spaces.
-function rowOf(
-  c: DashboardCandidate,
-  round: number,
-  idx: number,
-  candidateId: string,
-  source: CandidateSource,
-  stampsTheta: boolean,
-): ElectedRow {
+// What a dashboard row and a round file's scoreboard row both serve about one scored candidate.
+type ServedScore = Pick<
+  DashboardCandidate,
+  | "accuracy"
+  | "composite_fitness"
+  | "theta"
+  | "theta_se"
+  | "theta_caveat"
+  | "mean_fitness_ci_lo"
+  | "mean_fitness_ci_hi"
+  | "reference_accuracy"
+  | "reference_composite"
+  | "reference_lift"
+  | "reference_lift_ci_lo"
+  | "reference_lift_ci_hi"
+  | "is_selected"
+  | "outcome"
+>;
+
+// Where the row sits, which only its caller knows: the halves use different id spaces, and a
+// scoreboard row carries no label.
+interface RowSlot {
+  round: number;
+  idx: number;
+  candidateId: string;
+  label: string;
+  source: CandidateSource;
+  stampsTheta: boolean;
+}
+
+// The panel and token account, which the scoreboard does not serve: what it lacks is `null`.
+type RowCounts = Pick<
+  ElectedRow,
+  | "n_samples"
+  | "n_expected"
+  | "cached_samples"
+  | "input_tokens"
+  | "output_tokens"
+  | "cache_read_tokens"
+>;
+
+function countsOf(c: DashboardCandidate): RowCounts {
+  return {
+    n_samples: c.scored_samples,
+    n_expected: c.expected_samples,
+    cached_samples: c.cached_samples,
+    input_tokens: c.input_tokens,
+    output_tokens: c.output_tokens,
+    cache_read_tokens: c.cache_read_tokens,
+  };
+}
+
+// The ONE mapping onto `ElectedRow`: θ and the lift land at the ELECTION, before the round closes,
+// so a live row carries them too.
+function rowOf(c: ServedScore, slot: RowSlot, counts: RowCounts): ElectedRow {
+  const { round, idx, stampsTheta } = slot;
   return {
     key: `R${round}.${idx}`,
     round,
     idx,
-    candidate_id: candidateId,
-    label: c.label,
+    candidate_id: slot.candidateId,
+    label: slot.label,
     accuracy: c.accuracy,
     composite: c.composite_fitness,
     // `null` outright where this campaign's selector never fits one — never a blank cell beside
@@ -61,21 +104,16 @@ function rowOf(
     referenceLift: c.reference_lift,
     referenceLiftCiLo: c.reference_lift_ci_lo,
     referenceLiftCiHi: c.reference_lift_ci_hi,
-    // `false` may mean nothing is crowned yet, never "lost" — `election.ts::crownState` reads it.
+    // `false` may mean nothing is crowned yet, never "lost" — ask `election_held`.
     is_selected: c.is_selected,
     outcome: c.outcome,
-    n_samples: c.scored_samples,
-    n_expected: c.expected_samples,
-    cached_samples: c.cached_samples,
-    input_tokens: c.input_tokens,
-    output_tokens: c.output_tokens,
-    cache_read_tokens: c.cache_read_tokens,
-    source,
+    ...counts,
+    source: slot.source,
   };
 }
 
 // For a cycle this browser holds no stream for. Reads the scoreboard WHOLE, never filled from the
-// live half; what it lacks stays null. `total` IS the scored count there.
+// live half. `total` IS the scored count there.
 export function scoreboardRow(
   doc: RoundResult | null,
   candidateId: string,
@@ -84,47 +122,42 @@ export function scoreboardRow(
   idx: number,
 ): ElectedRow | null {
   const c = doc?.scoreboard.find((r) => r.candidate_id === candidateId);
-  if (!c) return null;
-  const stampsTheta = doc?.stamps_theta ?? false;
-  return {
-    key: `R${round}.${idx}`,
-    round,
-    idx,
-    candidate_id: candidateId,
-    label,
-    accuracy: c.accuracy,
-    composite: c.composite_fitness,
-    theta: stampsTheta ? c.theta : null,
-    theta_se: stampsTheta ? c.theta_se : null,
-    thetaCaveat: stampsTheta ? c.theta_caveat : null,
-    meanFitnessCiLo: c.mean_fitness_ci_lo,
-    meanFitnessCiHi: c.mean_fitness_ci_hi,
-    referenceAccuracy: c.reference_accuracy,
-    referenceComposite: c.reference_composite,
-    referenceLift: c.reference_lift,
-    referenceLiftCiLo: c.reference_lift_ci_lo,
-    referenceLiftCiHi: c.reference_lift_ci_hi,
-    is_selected: c.is_selected,
-    outcome: c.outcome,
-    n_samples: c.total,
-    n_expected: null,
-    cached_samples: null,
-    input_tokens: null,
-    output_tokens: null,
-    cache_read_tokens: null,
-    source: "history",
-  };
+  if (!doc || !c) return null;
+  return rowOf(
+    c,
+    { round, idx, candidateId, label, source: "history", stampsTheta: doc.stamps_theta },
+    {
+      n_samples: c.total,
+      n_expected: null,
+      cached_samples: null,
+      input_tokens: null,
+      output_tokens: null,
+      cache_read_tokens: null,
+    },
+  );
 }
 
 export function roundCandidates(dash: DashboardSnapshot | null): ElectedRow[] {
   const out: ElectedRow[] = [];
 
-  for (const r of sortedRounds(dash)) {
+  // `rounds[]` is served in round order.
+  for (const r of dash?.rounds ?? []) {
     if (!roundHasCandidates(r)) continue;
-    // A closed row keys on its LINEAGE id; positional only where the summary never stamped one.
-    r.candidates.forEach((c, i) =>
+    // A closed row keys on its LINEAGE id, which the summary always stamps.
+    r.candidates.forEach((c, idx) =>
       out.push(
-        rowOf(c, r.round, i, c.candidate_id || liveCandidateId(r.round, i), "history", r.stamps_theta),
+        rowOf(
+          c,
+          {
+            round: r.round,
+            idx,
+            candidateId: c.candidate_id,
+            label: c.label,
+            source: "history",
+            stampsTheta: r.stamps_theta,
+          },
+          countsOf(c),
+        ),
       ),
     );
   }
@@ -134,9 +167,20 @@ export function roundCandidates(dash: DashboardSnapshot | null): ElectedRow[] {
     // Positional: a row key, never a join key — live readers join on `label`. `stamps_theta` is
     // campaign-constant (`LiveDashboardState.stamps_theta`), so the live round reads the same
     // flag a closed one would.
-    liveCandidates(dash).forEach((c, i) =>
+    liveCandidates(dash).forEach((c, idx) =>
       out.push(
-        rowOf(c, liveRound, i, liveCandidateId(liveRound, i), "inflight", dash?.stamps_theta ?? false),
+        rowOf(
+          c,
+          {
+            round: liveRound,
+            idx,
+            candidateId: liveCandidateId(liveRound, idx),
+            label: c.label,
+            source: "inflight",
+            stampsTheta: dash?.stamps_theta ?? false,
+          },
+          countsOf(c),
+        ),
       ),
     );
   }

@@ -14,7 +14,8 @@ from promptpotter.domain.connector import (
     SessionProtocol,
     WireAdapter,
 )
-from promptpotter.domain.pipeline_schema import NodeSpendBound, NodeType
+from promptpotter.domain.pipeline_schema import NodeRole, NodeSpendBound
+from promptpotter.domain.sample import Sample
 from promptpotter.domain.value_tree import Delivery
 
 if TYPE_CHECKING:
@@ -45,16 +46,19 @@ class NoopSession:
     ) -> dict[str, Any]:
         return {"status": "noop", "terms_count": len(terms)}
 
-    async def recover(self, http: httpx.AsyncClient, base_url: str) -> bool:
-        return True
+    async def recover(self, http: httpx.AsyncClient, base_url: str, reply: httpx.Response) -> bool:
+        return False
+
+    def resend_refused(self, reply: httpx.Response) -> str | None:
+        return None
 
 
-# The in-process execution arm: ``(workload, query, payload) -> resp`` where ``payload`` is
+# The in-process execution arm: ``(workload, sample, payload) -> resp`` where ``payload`` is
 # the connector's ``wire_adapter`` output and ``resp`` is the same ``{"data": {…}}``
 # shape ``measure_sample`` parses from an HTTP ``/matches`` body (so the scorer
 # reads an in-process result identically to a remote one). Required on (and only
 # on) an ``in_process`` connector — the registry guard enforces the pairing.
-InProcessRun = Callable[[InProcessWorkload, str, dict[str, Any]], Awaitable[dict[str, Any]]]
+InProcessRun = Callable[[InProcessWorkload, Sample, dict[str, Any]], Awaitable[dict[str, Any]]]
 
 # Parsed ``experiment_file`` → the document every reader sees, with anything it only NAMES (a
 # published roster) resolved to what it names.
@@ -67,9 +71,8 @@ VersionCheck = Callable[["httpx.AsyncClient", str], Awaitable[str | None]]
 
 # R2: reachability probe — called from the launcher's three command paths
 # (mint-campaign, start-checkin, start-run) before the applier touches the
-# backend. Raises :class:`BackendUnreachableError` when the connector reports
-# its backend is down.
-PreflightFn = Callable[[str], Awaitable[None]]
+# backend. ``backend_url → why the backend is down``, ``None`` where it is up.
+PreflightFn = Callable[[str], Awaitable[str | None]]
 
 # The connector's wire credential, read at client-construction time (not at import,
 # so an env change lands without a reimport). ``None`` return = send no auth header.
@@ -100,20 +103,22 @@ class Connector:
     session_factory: Callable[[], SessionProtocol]
     """Fresh session instance per ``BackendClient`` — sessions hold per-client state."""
 
-    extract_experiment: Callable[[dict[str, Any]], tuple[list[dict[str, Any]], list[str]]]
-    """Backend experiment data → ``(queries, index_terms)``, each a ``{"query", "ground_truth"}``,
-    plus ``source_pin`` where the query text does not say everything the cell was measured on (a
-    task's resolved commit) — it is part of the sample's content address, ``Sample.key``.
-
-    **The answer shape — owned by** ``connectors/CLAUDE.md`` § The answer shape: a query yielding
-    ``ground_truth: None`` declares it here, and never a second time anywhere else."""
-
     experiment_file: str = ""
     """Filename of an on-disk experiment doc in the dataset's config dir, read +
     passed to :attr:`extract_experiment` when the dataset ships no CSV/loader
     samples. The in-process ``promptpotter`` connector sets ``inner_tasks.yaml`` —
     its outer "samples" ARE the inner tasks declared there, not a sample table.
     Empty (default) = samples come from the loader registry / tenant upload only."""
+
+    extract_experiment: Callable[[dict[str, Any]], list[dict[str, Any]]] | None = None
+    """The resolved :attr:`experiment_file` → its rows in panel order, each a
+    ``{"query", "ground_truth"}``, plus ``source_pin`` where the query text does not say everything
+    the cell was measured on (a task's resolved commit) — it is part of the sample's content
+    address, ``Sample.key``. Set exactly where :attr:`experiment_file` is; the registry guard
+    enforces the pairing.
+
+    **The answer shape — owned by** ``connectors/CLAUDE.md`` § The answer shape: a query yielding
+    ``ground_truth: None`` declares it here, and never a second time anywhere else."""
 
     resolve_experiment: ExperimentResolver | None = None
     """Applied by ``dataset_access.py::dataset_experiment`` to every read of the file."""
@@ -142,6 +147,12 @@ class Connector:
     of that many slots (``infrastructure/backend.py::MachineSlots``), so two runs each at their own
     depth cannot together outrun the box. ``False`` (default): a cell's cost is the provider's or
     the backend's, and each run answers for its own depth."""
+
+    compose_overlay: Path | None = None
+    """The compose file this backend's containers are built from, where its harness starts them
+    through compose: taking a machine slot sweeps what a killed run left under it
+    (``infrastructure/docker_host.py::claim_machine``). ``None``: every container is started
+    labelled, by ``docker_host.run_cell_container``."""
 
     holds_own_sends: bool = False
     """Whether every paid send a cell makes is admitted and billed on its own, where it is made —
@@ -221,9 +232,9 @@ class Connector:
     version_check: VersionCheck | None = None
 
     preflight: PreflightFn | None = None
-    """Async ``(backend_url) -> None`` — reachability probe. Raises
-    :class:`BackendUnreachableError` when the connector reports the backend
-    is down. ``None`` opts the connector out (in-process backends like
+    """Async ``(backend_url) -> str | None`` — reachability probe, answering why the backend is
+    down; ``launcher/admission.py::probe_backend`` raises that as the connector's
+    :class:`BackendUnreachableError`. ``None`` opts the connector out (in-process backends like
     ``promptpotter`` have nothing to probe)."""
 
     auth_token: AuthTokenFn | None = None
@@ -249,10 +260,10 @@ class Connector:
     in-process ``promptpotter`` connector: its backend IS the inner optimizer (optimizer
     prompt origin + the code shaping its prompts + engine + the inner benchmark's config), so
     without this an origin edit silently reuses stale measurements recorded
-    under the old behavior. The connector's ``wire_adapter`` must strip these
-    reserved keys from the outbound payload. ``None`` = the backend's revision
-    is not part of identity (remote backends use the advisory ``version_check``
-    instead).
+    under the old behavior. These keys never reach ``wire_adapter``
+    (``sample_measurement.py::measure_sample`` sends the params without their identity layer).
+    ``None`` = the backend's revision is not part of identity (remote backends use the
+    advisory ``version_check`` instead).
 
     **What the whole panel is measured WITH, never which cells it holds.** A cell's own identity
     rides its row from :attr:`extract_experiment` as ``source_pin`` (``Sample.source_pin``);
@@ -268,8 +279,6 @@ class Connector:
     ``token_matching``, ``llm_ranking``) — those are the right default
     for the production benchmark but wrong for a tenant's first run."""
 
-    default_exclude_nodes: tuple[str, ...] = ()
-
     default_optimization: tuple[tuple[str, Any], ...] = ()
     """Frozen ``(key, value)`` overrides slotted into the seed
     ``campaign.json::optimization`` block. Lets a connector ship
@@ -279,14 +288,14 @@ class Connector:
     field (``degradation_threshold``) MUST be present here when the connector
     intends to seed it — there is no silent schema default."""
 
-    node_types: Mapping[str, NodeType] = field(default_factory=dict)
-    """Static node→:class:`NodeType` classification, mirroring what the live
+    node_roles: Mapping[str, NodeRole] = field(default_factory=dict)
+    """Static node→:class:`NodeRole` classification, mirroring what the live
     backend's ``GET /pipeline`` reports — declared here so the ingest UI can
     detect a pipeline's required inputs *before* the backend is reached
     (``launcher.draft_pipeline_dependencies`` reads it for the active steps). A
     ``CANDIDATE_SOURCE`` node raises a ``candidate_library`` dependency the
-    operator drops in place. Only nodes that carry a dependency-bearing type need
-    an entry; unlisted nodes are untyped (no dependency)."""
+    operator drops in place. Only nodes that carry a dependency-bearing role need
+    an entry; unlisted nodes have none (no dependency)."""
 
     default_node_config: Mapping[str, Any] = field(default_factory=dict)
     """Per-node ``pipeline.yaml::nodes.{name}`` overlay the chat-first ingest

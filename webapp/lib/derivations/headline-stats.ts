@@ -2,7 +2,7 @@
 
 import type { LiveDashboardState, RoundSummary } from "@/lib/api/types";
 import type { DashboardSnapshot } from "@/lib/poll";
-import { fmtPct0 } from "@/lib/format";
+import { fmtPct0, fmtTheta } from "@/lib/format";
 
 // DISPLAY only: the selector decides on its own objective (θ where it stamps one), whatever is read.
 export type DisplayMetric = LiveDashboardState["display_metric"];
@@ -54,7 +54,7 @@ export function fmtDisplayValue(
   theta: number | null,
 ): string {
   if (metric === "ability") {
-    return typeof theta === "number" && Number.isFinite(theta) ? `θ ${theta.toFixed(2)}` : "—";
+    return typeof theta === "number" && Number.isFinite(theta) ? `θ ${fmtTheta(theta)}` : "—";
   }
   return fmtPct0(pct);
 }
@@ -107,21 +107,18 @@ export interface FitnessTrend {
 // Never `cumulative_accuracy`: it pools rows measured by different configurations, so the line can
 // sit above everything the cycle measured. Takes `rounds` so callers memo on `dash?.rounds`.
 export function fitnessTrend(rounds: readonly RoundSummary[] | undefined): FitnessTrend {
-  const sorted = [...(rounds ?? [])].sort((a, b) => a.round - b.round);
-  // θ on a different δ ruler than the first stamped is a different quantity: dropped, not plotted.
-  const seriesRuler = sorted.find((r) => r.ability?.ruler_id != null)?.ability?.ruler_id ?? null;
-  const points = sorted.map((r) => ({
+  const served = rounds ?? [];
+  const points = served.map((r) => ({
     round: r.round,
     accuracy: r.accuracy,
     // A round with nothing readable serves `accuracy: null`; its composite is no reading either.
     composite: r.accuracy === null ? null : r.composite_fitness,
-    theta:
-      r.ability != null && r.ability.ruler_id != null && r.ability.ruler_id === seriesRuler
-        ? r.ability.theta
-        : null,
+    // θ on another δ ruler than the series' is a different quantity: dropped, not plotted. Which
+    // rounds share that ruler is served (`ability_on_series_ruler`).
+    theta: r.ability != null && r.ability_on_series_ruler ? r.ability.theta : null,
     bench: r.bench?.headline ? (r.bench[r.bench.headline]?.value ?? null) : null,
     // The rows the plotted value is a mean over, a held round's included.
     n: r.total,
   }));
-  return { points, best: sorted.map((r) => r.best_so_far) };
+  return { points, best: served.map((r) => r.best_so_far) };
 }

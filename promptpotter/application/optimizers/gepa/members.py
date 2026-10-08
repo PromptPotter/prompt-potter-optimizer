@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import random
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, cast
 
 from pydantic import Field
@@ -14,42 +15,32 @@ from promptpotter.application.bench.resume_and_fork.decisions import (
     record_decision,
 )
 from promptpotter.application.campaign_config import Estimand, Knob, Scope
-from promptpotter.application.optimizers import nodes, paper_templates
+from promptpotter.application.optimizers import nodes
 from promptpotter.application.optimizers.descriptors import cell_objectives
 from promptpotter.application.optimizers.gepa import operators
 from promptpotter.application.optimizers.gepa.state import (
     GEPA_MANIFEST,
     GepaCandidate,
     GepaRoundState,
-    GepaState,
-    gepa_state,
 )
 from promptpotter.application.optimizers.paper_templates import (
+    PaperRuntime,
     ask,
-    prompt_text,
-    rewritten,
-    unmarked,
+    child,
     walk_rng,
 )
 from promptpotter.application.runner.measurement import measure_as_parent
 from promptpotter.config.paths import optimizers_root
-from promptpotter.domain.opt_search_point import OptSearchPoint, node_source
+from promptpotter.domain.opt_search_point import node_source
 from promptpotter.domain.pipeline_schema import NodeKind
-from promptpotter.domain.results import (
-    ArmOutcome,
-    CandidateProposal,
-    OptimizerFact,
-    candidate_label,
-)
-from promptpotter.domain.run_records import CandidateMintedRecord, CheckpointKind
+from promptpotter.domain.results import ArmOutcome, OptimizerFact
+from promptpotter.domain.run_records import CheckpointKind
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.validators import StopSignal
 
 if TYPE_CHECKING:
     from pathlib import Path
     from types import ModuleType
-
-    from pydantic import BaseModel
 
     from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.bench.resume_and_fork.replayers import (
@@ -60,22 +51,20 @@ if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.optimizers.nodes import (
+        BankedState,
         CatchUpFn,
         Measured,
         Panel,
         Population,
-        ReviewReading,
         RoundContext,
         Selection,
     )
     from promptpotter.application.scoring.query_loop import Walk
-    from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.results import RoundResult
     from promptpotter.domain.run_records import ResumeCheckpointRecord
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import QueryMeasurement
     from promptpotter.domain.search_point import JobSearchPoint
-    from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 
 __all__ = [
     "MEMBERS",
@@ -122,11 +111,15 @@ class Minibatch:
 
     def draws(self, selected: SelectedOptimizer, pool: int) -> int:
         knobs = cast("MinibatchKnobs", selected.knobs(self.name))
+        # The Pareto set comes off the pool first; what is left must hold a minibatch.
+        if pool - knobs.pareto_size < knobs.size:
+            return 0
         return knobs.size + knobs.pareto_size
 
     def draw(self, ctx: RoundContext, pool: list[Sample]) -> Panel:
         knobs = cast("MinibatchKnobs", ctx.cycle.optimizer.knobs(self.name))
-        banked = gepa_state(ctx.state).pareto_set
+        state = nodes.state_as(ctx, GepaRoundState).payload
+        banked = state.pareto_set
         by_key = {s.key: s for s in pool}
         if missing := [key for key in banked if key not in by_key]:
             raise ValueError(f"minibatch: {len(missing)} Pareto-set cells left the search pool")
@@ -139,6 +132,7 @@ class Minibatch:
                 f"{len(pareto)} and a feedback set of {len(feedback)}, which holds no minibatch "
                 f"of {knobs.size}"
             )
+        state.pareto_set = [s.key for s in pareto]
         batch = walk_rng(ctx.cycle, ctx.round_num, self.name).sample(feedback, knobs.size)
         cells = [*batch, *pareto]
         return nodes.Panel(cells=cells, order=list(cells), block_size=knobs.size)
@@ -148,25 +142,27 @@ class GepaReflectKnobs(StrictModel):
     """The reflection's call config is all it has; it takes no knob of its own."""
 
 
+@dataclass(frozen=True)
+class Reflected(nodes.Population):
+    """GEPA's population, with what its gate tests each child against: the child's parent, and
+    that parent's objective on each minibatch cell."""
+
+    bars: Mapping[str, tuple[str, dict[str, float]]]
+
+
 class GepaReflect:
     """Alg. 1 lines 7-12, on a one-prompt individual whose round-robin module is always its
-    instruction. The only proposer, so it mints the child onto the ledger."""
+    instruction."""
 
     name: ClassVar[str] = "gepa_reflect"
     kind: ClassVar[NodeKind] = NodeKind.LLM
+    opens: ClassVar[bool] = True
     knobs: ClassVar[type[StrictModel]] = GepaReflectKnobs
     couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = ()
 
-    async def propose(
-        self, ctx: RoundContext, panel: Panel, population: Population | None
-    ) -> Population:
-        if population is not None:
-            raise ValueError(
-                "gepa_reflect opens GEPA's walk; a manifest walking it after another proposer "
-                "hands it offspring it would discard"
-            )
+    async def propose(self, ctx: RoundContext, panel: Panel, population: Population) -> Reflected:
         cycle = ctx.cycle
-        state = gepa_state(ctx.state)
+        state = nodes.state_as(ctx, GepaRoundState).payload
         # Round 1's pool is the individual the run starts from alone (Alg. 1 line 2).
         parent = (
             cycle.opt_sp
@@ -175,61 +171,29 @@ class GepaReflect:
                 c.individual for c in state.pool if c.individual.lineage.id == state.parent_id
             )
         )
-        assert cycle.tracking.current_sp is not None
-        base = cycle.tracking.current_sp.pipeline_params
-        session = cycle.session
         # Alg. 1 line 10: the parent's reading of the minibatch.
         rows = await measure_as_parent(
             ctx,
-            parent.to_job_search_point(
-                base_pipeline_params=base,
-                schema=session.pipeline_schema,
-                framing=cycle.framing,
-                demo=session.scoring.require_partition().demo,
-            ),
+            cycle.searchpoint(parent.lineage.id),
             parent.lineage.id,
             panel.order[: panel.block_size],
         )
         prompt = operators.reflection_prompt(
-            cycle, self.name, instruction=prompt_text(parent), rows=rows
+            cycle, self.name, instruction=parent.render(), rows=rows
         )
-        raw = await ask(ctx, self.name, 0, prompt)
-        text = operators.fenced(raw)
-        child = OptSearchPoint.derive(
+        proposal = child(
+            node_source(GEPA_MANIFEST, self.name),
+            self.name,
             [parent],
-            source=node_source(GEPA_MANIFEST, self.name),
-            changes_description=f"reflect on {parent.lineage.id[:6]}",
-            **({} if text is None else rewritten(text)),
+            await ask(ctx, self.name, 0, prompt),
+            f"reflect on {parent.lineage.id[:6]}",
+            parse=operators.fenced,
         )
-        state.bars = {child.lineage.id: (parent.lineage.id, cell_objectives(rows))}
-        if (ledger := cycle.session.state.ledger) is not None:
-            ledger.append(
-                CandidateMintedRecord(
-                    round=ctx.round_num,
-                    idx=0,
-                    candidate_id=child.lineage.id,
-                    parent_ids=list(child.lineage.parent_ids),
-                    label=candidate_label(ctx.round_num, 0),
-                    changes_description=child.lineage.changes_description,
-                    source=child.lineage.source,
-                )
-            )
-        return nodes.Population(
-            proposals=[
-                CandidateProposal(
-                    opt_sp=child,
-                    validation_failures=[] if text is not None else [unmarked(self.name, raw)],
-                )
-            ],
-            individuals=[child],
-            pipeline_params=[base],
-            optimizer_state=state.snapshot(
-                cycle.optimizer.prompt_hashes(),
-                pareto_set=[s.key for s in panel.cells[panel.block_size :]],
-                pool=state.pool,
-                parent_id=state.parent_id,
-                rounds_without_advance=state.rounds_without_advance,
-            ),
+        return Reflected(
+            proposals=[proposal],
+            individuals=[proposal.opt_sp],
+            pipeline_params=[None],
+            bars={proposal.opt_sp.lineage.id: (parent.lineage.id, cell_objectives(rows))},
         )
 
 
@@ -372,11 +336,14 @@ class MinibatchGate:
     knobs: ClassVar[type[StrictModel]] = MinibatchGateKnobs
     couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = ()
     abort_lenses: ClassVar[Mapping[str, frozenset[str]]] = {}
+    stop_disqualifies: ClassVar[bool] = True
 
-    def race(self, ctx: RoundContext, panel: Panel, catch_up: CatchUpFn) -> _GateRace:
+    def race(
+        self, ctx: RoundContext, panel: Panel, population: Population, catch_up: CatchUpFn
+    ) -> _GateRace:
         return _GateRace(
             node=self.name,
-            bars=gepa_state(ctx.state).bars,
+            bars=nodes.population_as(population, Reflected).bars,
             block_size=panel.block_size,
             n_cells=len(panel.order),
             round_num=ctx.round_num,
@@ -448,15 +415,10 @@ class Pareto:
 
     def select(self, ctx: RoundContext, measured: Measured, population: Population) -> Selection:
         cycle = ctx.cycle
-        state = gepa_state(ctx.state)
-        pareto_set = population.optimizer_state.payload_as(GepaRoundState).pareto_set
-        pool = [c.model_copy(deep=True) for c in state.pool]
-        cut = {cs.candidate_id for cs in measured.scores if cs.outcome is ArmOutcome.ELIMINATED}
-        offered = [
-            (ind, measured.rows[ind.lineage.id])
-            for ind in measured.electable
-            if ind.lineage.id not in cut
-        ]
+        state = nodes.state_as(ctx, GepaRoundState).payload
+        pareto_set = state.pareto_set
+        pool = list(state.pool)
+        offered = [(ind, measured.rows[ind.lineage.id]) for ind in measured.electable]
         if not pool:
             # Alg. 1 lines 3-5: the incumbent, re-scored on the Pareto set, seats the pool.
             offered.insert(0, (measured.parent.opt_sp, measured.parent_rows))
@@ -478,10 +440,7 @@ class Pareto:
             if ind.lineage.id != measured.parent.opt_sp.lineage.id:
                 admitted.append(ind.lineage.id)
             pool.append(
-                GepaCandidate(
-                    individual=ind.model_copy(deep=True),
-                    scores={key: graded[key] for key in pareto_set},
-                )
+                GepaCandidate(individual=ind, scores={key: graded[key] for key in pareto_set})
             )
         if not pool:
             return nodes.Selection(
@@ -489,13 +448,7 @@ class Pareto:
                 scores=list(measured.scores),
                 verdict_reason="no candidate carries a verdict on every Pareto-set cell; the "
                 "pool stays unseated",
-                optimizer_state=state.snapshot(
-                    population.optimizer_state.prompt_hashes,
-                    pareto_set=pareto_set,
-                    pool=[],
-                    parent_id=None,
-                    rounds_without_advance=state.rounds_without_advance + 1,
-                ),
+                payload=GepaRoundState(pareto_set=pareto_set, pool=[], parent_id=None),
             )
         top = max(_aggregate(c) for c in pool)
         leaders = [c.individual.lineage.id for c in pool if _aggregate(c) == top]
@@ -514,13 +467,7 @@ class Pareto:
             selected_id=selected_id,
             scores=list(measured.scores),
             verdict_reason=verdict,
-            optimizer_state=state.snapshot(
-                population.optimizer_state.prompt_hashes,
-                pareto_set=pareto_set,
-                pool=pool,
-                parent_id=parent_id,
-                rounds_without_advance=0 if selected_id else state.rounds_without_advance + 1,
-            ),
+            payload=GepaRoundState(pareto_set=pareto_set, pool=pool, parent_id=parent_id),
         )
 
 
@@ -542,79 +489,31 @@ GEPA_REPLAYERS: dict[str, Replayer] = {
 }
 
 
-class GepaRuntime:
-    """GEPA beyond its nodes: its pool state, its prompt identity and its replayed gate."""
+class GepaRuntime(PaperRuntime):
+    """GEPA beyond its nodes: its pool state and its replayed gate."""
 
     name: ClassVar[str] = GEPA_MANIFEST
     manifest_dir: ClassVar[Path] = optimizers_root() / GEPA_MANIFEST
-    own_axes: ClassVar[dict[str, set[str]]] = {}
-    priced_surface: ClassVar[Mapping[str, int]] = {}
-    phases: ClassVar[tuple[nodes.OptimizerPhase, ...]] = ()
-    response_models: ClassVar[Mapping[str, type[BaseModel]]] = {}
+    operators: ClassVar[ModuleType] = operators
+    checkpoint_gating: ClassVar[Mapping[CheckpointKind, GatingMode]] = GEPA_CHECKPOINT_GATING
+    replayers: ClassVar[Mapping[str, Replayer]] = GEPA_REPLAYERS
 
     def start(
         self, session: Session, config: CampaignConfig, origin_results: list[dict[str, Any]]
-    ) -> GepaState:
-        return GepaState()
-
-    def complete(self) -> None:
-        return None
-
-    def source_digest(self, *covered: ModuleType) -> str:
-        return paper_templates.preset_source_digest(operators, *covered)
-
-    def override_param_types(self, node: str) -> dict[str, str]:
-        return {}
-
-    def override_levers(self, node: str, declared: Mapping[str, Any]) -> dict[str, Any]:
-        return {}
-
-    @property
-    def checkpoint_gating(self) -> Mapping[CheckpointKind, GatingMode]:
-        return GEPA_CHECKPOINT_GATING
-
-    @property
-    def replayers(self) -> Mapping[str, Replayer]:
-        return GEPA_REPLAYERS
+    ) -> BankedState[GepaRoundState]:
+        return nodes.BankedState(GepaRoundState(pareto_set=[], pool=[], parent_id=None))
 
     def round_packages(self, cycle: Cycle, rounds: list[RoundResult]) -> dict[int, dict[str, str]]:
         # The parent a round reflects on is drawn off every earlier round's Pareto-set scores.
         return nodes.rows_read_packages(rounds, [GepaReflect.name])
 
-    async def rederive(
-        self,
-        campaign_store: CampaignStore,
-        hop: CycleHop,
-        session: Session,
-        cycle: Cycle,
-        drifted: list[RoundResult],
-    ) -> None:
-        return None
-
-    def review(
-        self,
-        selected: SelectedOptimizer,
-        rounds: list[RoundResult],
-        audits: list[dict[str, Any] | None],
-        *,
-        context_object: list[str],
-        origin_composite_fitness: float | None,
-    ) -> ReviewReading | None:
-        return None
-
-    def pacing(self, selected: SelectedOptimizer) -> nodes.OptimizerPacing:
+    def arms(self, selected: SelectedOptimizer) -> int:
         # One reflective child a round (`GepaReflect`).
-        return nodes.OptimizerPacing(patience=None, stalls_left=None, arms_per_round=1, limits=())
+        return 1
 
     def round_cells_ceiling(self, selected: SelectedOptimizer, pool: int) -> int:
-        knobs = cast("MinibatchKnobs", selected.knobs(Minibatch.name))
-        if pool - knobs.pareto_size < knobs.size:
-            return 0
         # Parent and child each read the minibatch, then the Pareto set.
-        return 2 * (knobs.size + knobs.pareto_size)
-
-    def opening(self, ctx: RoundContext) -> nodes.RoundOpening:
-        return nodes.standing_opening(ctx)
+        return 2 * selected.round_cells(pool)
 
     def round_facts(
         self, selected: SelectedOptimizer, round_result: RoundResult

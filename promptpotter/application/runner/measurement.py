@@ -12,14 +12,13 @@ from typing import TYPE_CHECKING, Any, cast
 from promptpotter.application.optimizers.nodes import Measured
 from promptpotter.application.origin import rescore_parent
 from promptpotter.application.scoring.candidate_report import (
-    INVALID_SCORES,
     build_score_report,
     fatal_validation_failures,
     read_breakage,
     walk_outcome,
 )
 from promptpotter.application.scoring.classification import scoreable_rows
-from promptpotter.application.scoring.metrics import matched_parent_stats
+from promptpotter.application.scoring.metrics import INVALID_SCORES, matched_parent_stats
 from promptpotter.application.scoring.query_loop import Walk, run_walks
 from promptpotter.application.scoring.search_point_scorer import (
     SCORING_ERROR_ABORT,
@@ -45,6 +44,7 @@ from promptpotter.domain.results import (
 )
 from promptpotter.domain.ruler import ThetaCaveat
 from promptpotter.domain.run_records import SnapshotRecord
+from promptpotter.domain.validators import BrokenSignal
 from promptpotter.shared.instrument import NO_ROUND_SLOT, MeasuredCandidate, MeasurementRole
 
 if TYPE_CHECKING:
@@ -120,6 +120,7 @@ async def measure_population(
     parent_rows = list(cast("list[QueryMeasurement]", parent.results))
     read_against, references = await _lift_references(ctx, population, panel, rows, scored, parent)
     cs_by_id = {cs.candidate_id: i for i, cs in enumerate(scores)}
+    rejects = eliminator is not None and eliminator.stop_disqualifies
     electable: list[OptSearchPoint] = []
     for ind in scored:
         cs_idx = cs_by_id.get(ind.lineage.id)
@@ -128,7 +129,7 @@ async def measure_population(
         cand_rows = rows[ind.lineage.id]
         if ind.lineage.id in read_against:
             reference_id, reference_rows = read_against[ind.lineage.id]
-            matched = matched_parent_stats(reference_rows, cand_rows, schema)
+            matched = matched_parent_stats(reference_rows, cand_rows)
             # Unconditional on ``matched``: the lift is defined on the cells both reached, so a
             # truncated arm gets an honest (wider) interval instead of nothing.
             lift = matched_parent_lift(cand_rows, reference_rows, grade="fitness")
@@ -137,13 +138,15 @@ async def measure_population(
                     "reference_id": reference_id,
                     "reference_accuracy": matched["accuracy"] if matched else None,
                     "reference_composite": matched["composite_fitness"] if matched else None,
-                    "reference_lift": lift[0] if lift else None,
-                    "reference_lift_ci_lo": lift[1] if lift else None,
-                    "reference_lift_ci_hi": lift[2] if lift else None,
+                    "reference_lift": lift.lift if lift else None,
+                    "reference_lift_ci_lo": lift.ci_lo if lift else None,
+                    "reference_lift_ci_hi": lift.ci_hi if lift else None,
                 }
             )
         # A collapsed arm is read here and still refused entry — it keeps its matched stamp.
         if not is_electable(scores[cs_idx], cand_rows):
+            continue
+        if rejects and scores[cs_idx].outcome is ArmOutcome.ELIMINATED:
             continue
         # The COVERAGE half: an arm under the floor cannot be selected. It catches an arm thin for
         # a reason other than elimination, an operator skip.
@@ -202,7 +205,7 @@ async def _lift_references(
     # This round's individuals are not banked yet; every earlier one is, in a closed round.
     populated = {
         ind.lineage.id: (ind, params)
-        for ind, params in zip(population.individuals, population.pipeline_params, strict=True)
+        for ind, params in zip(population.individuals, _arm_params(cycle, population), strict=True)
     }
     demo = cycle.session.scoring.require_partition().demo
     references: dict[str, list[QueryMeasurement]] = {bar_id: parent_rows}
@@ -261,6 +264,11 @@ async def measure_as_parent(
     return walked.results
 
 
+def _arm_params(cycle: Cycle, population: Population) -> list[dict[str, Any] | None]:
+    assert cycle.tracking.current_sp is not None
+    return population.params_under(cycle.tracking.current_sp.pipeline_params)
+
+
 def _mean_on(arm_rows: list[QueryMeasurement], parent_rows: list[QueryMeasurement]) -> float:
     _, parent_fit = paired_fitness(
         scoreable_rows(arm_rows), scoreable_rows(parent_rows), grade="fitness"
@@ -285,7 +293,9 @@ async def _walk_population(
     reports: dict[int, ScoredCandidate] = {}
 
     race: Race | None = (
-        eliminator.race(ctx, panel, partial(_catch_up, cycle)) if eliminator is not None else None
+        eliminator.race(ctx, panel, population, partial(_catch_up, cycle))
+        if eliminator is not None
+        else None
     )
     ids = [ind.lineage.id for ind in population.individuals]
     labels = {cid: candidate_label(round_num, idx) for idx, cid in enumerate(ids)}
@@ -293,9 +303,10 @@ async def _walk_population(
     # Single merge site: each candidate's frozen searchpoint, shared by the in-flight dashboard
     # seed (resolved config-only) and the candidate's walk and report.
     demo = cycle.session.scoring.require_partition().demo
+    params = _arm_params(cycle, population)
     sps = [
         ind.to_job_search_point(
-            base_pipeline_params=population.pipeline_params[idx],
+            base_pipeline_params=params[idx],
             schema=cycle.session.pipeline_schema,
             framing=cycle.framing,
             demo=demo,
@@ -350,7 +361,7 @@ async def _walk_population(
             sps[idx],
             walks[idx],
             panel.order,
-            population.pipeline_params[idx],
+            params[idx],
             race,
             labels,
         )
@@ -485,12 +496,11 @@ def _conclude_candidate(
     breakage = (
         read_breakage(
             signal,
-            results=results,
             effective_pipeline_params=effective_pipeline_params,
             round_num=ctx.round_num,
             candidate_label=opt_sp_c.lineage.changes_description or "",
         )
-        if signal is not None and signal.outcome is ArmOutcome.BROKEN
+        if isinstance(signal, BrokenSignal)
         else None
     )
     # Every cell taken, and not a walk the gateway gave up on, whose rows are synthetic.

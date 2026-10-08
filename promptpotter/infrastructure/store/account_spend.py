@@ -31,13 +31,23 @@ def account_ledgers(campaigns: CampaignStore) -> list[Path]:
     return [*campaigns.iter_cycle_ledgers(), CycleEventLog.workspace_path(campaigns.workspace)]
 
 
-def iter_user_token_usage(
-    *, ledgers: Iterable[Path], since: float, until: float
-) -> list[dict[str, Any]]:
-    """Every ``TokenUsageRecord`` in ``[since, until)``, shaped for :func:`record_cost_usd` and the
-    activity chart. A torn line degrades to "not there"; an unreadable FILE still raises."""
+class UsageRow(NamedTuple):
+    """One dated ``TokenUsageRecord``, cut to what a reading over time needs."""
+
+    ts: float
+    billed_usd: float | None
+    """:func:`record_cost_usd`'s answer: ``None`` is unpriced, and a replay is ``0.0``."""
+    tokens: int
+    model: str | None
+    provider: str | None
+    kind: str
+
+
+def iter_user_token_usage(*, ledgers: Iterable[Path], since: float, until: float) -> list[UsageRow]:
+    """Every ``TokenUsageRecord`` in ``[since, until)``. A torn line degrades to "not there"; an
+    unreadable FILE still raises."""
     return [
-        row._asdict()
+        row
         for ledger in ledgers
         for row in LedgerIndex.of(ledger, _SPEND_FOLDS).view(_Usage)
         if since <= row.ts < until
@@ -158,45 +168,38 @@ class _Tombstones:
         return dict(self._by_campaign), frozenset(self._subjects)
 
 
-class _UsageRow(NamedTuple):
-    ts: float
-    cost_usd: object
-    tokens: int
-    model: object
-    kind: object
-    cached: bool
-
-
-def _interned(value: object) -> object:
-    return sys.intern(value) if isinstance(value, str) else value
+def _interned(value: object) -> str | None:
+    return sys.intern(value) if isinstance(value, str) else None
 
 
 class _Usage:
-    """Every dated ``token_usage`` row, whatever the window a reader then cuts from it."""
+    """Every dated ``token_usage`` row, whatever the window a reader then cuts from it. A row
+    naming no ``kind`` is not there: this fold shares its index with the bills, so it never raises."""
 
     probes: ClassVar[frozenset[str]] = frozenset({"token_usage"})
 
     def __init__(self) -> None:
-        self._rows: list[_UsageRow] = []
-        self._held: tuple[_UsageRow, ...] | None = None
+        self._rows: list[UsageRow] = []
+        self._held: tuple[UsageRow, ...] | None = None
 
     def feed(self, offset: int, rec: dict[str, Any]) -> None:
         ts = epoch_seconds(rec.get("timestamp"))
-        if rec.get("record_type") != "token_usage" or ts is None:
+        kind = _interned(rec.get("kind"))
+        if rec.get("record_type") != "token_usage" or ts is None or kind is None:
             return
         self._rows.append(
-            _UsageRow(
+            UsageRow(
                 ts=ts,
-                cost_usd=rec.get("cost_usd"),
+                billed_usd=record_cost_usd(rec),
                 tokens=int(rec.get("input_tokens", 0)) + int(rec.get("output_tokens", 0)),
                 model=_interned(rec.get("model")),
-                kind=_interned(rec.get("kind")),
-                cached=bool(rec.get("cached", False)),
+                provider=_interned(rec.get("provider")),
+                kind=kind,
             )
         )
         self._held = None
 
-    def value(self) -> tuple[_UsageRow, ...]:
+    def value(self) -> tuple[UsageRow, ...]:
         if self._held is None:
             self._held = tuple(self._rows)
         return self._held
@@ -323,6 +326,7 @@ def _already_banked(workspace_ledger: Path, *, campaign_id: str, cycle_id: str) 
 
 __all__ = [
     "ZERO_SPEND",
+    "UsageRow",
     "UserSpend",
     "account_ledgers",
     "bank_spend",

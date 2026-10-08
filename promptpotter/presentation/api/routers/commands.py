@@ -23,6 +23,7 @@ from promptpotter.application.commands.payloads import (
     CommandPayload,
     CompactArchivePayload,
     CyclePayload,
+    DatasetReplaced,
     DescendableCyclePayload,
     EditDraftCampaignPayload,
     LifecyclePayload,
@@ -31,7 +32,6 @@ from promptpotter.application.commands.payloads import (
     StartCheckinPayload,
 )
 from promptpotter.application.jobs.launcher.checkin import start_checkin_campaign
-from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.maintenance.archive_maintenance import ArchiveReport
 from promptpotter.domain.command_kinds import (
     ALL_DISPATCHED_KINDS,
@@ -44,12 +44,11 @@ from promptpotter.domain.command_kinds import (
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.stores import resolve_cycle_path
-from promptpotter.presentation.api.deps import StoresDep, decode_descend
+from promptpotter.presentation.api.deps import JobRegistryDep, StoresDep, decode_descend
 from promptpotter.shared.errors import (
     BadRequestError,
     NotFoundError,
     PayloadInvalidError,
-    ServiceUnavailableError,
 )
 
 logger = logging.getLogger(__name__)
@@ -151,7 +150,7 @@ async def resolve_origin(
 
 @commands_router.post("/start-checkin")
 async def start_checkin(
-    request: Request,
+    job_registry: JobRegistryDep,
     stores: StoresDep,
     envelope: CommandEnvelope,
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
@@ -167,11 +166,6 @@ async def start_checkin(
     _require_kind(envelope, "start-checkin")
     idemp = ensure_idempotency_key(idempotency_key)
     payload = cast(StartCheckinPayload, _validated_payload("start-checkin", envelope.payload))
-    job_registry: JobRegistry | None = getattr(request.app.state, "job_registry", None)
-    if job_registry is None:
-        raise ServiceUnavailableError(
-            "job registry not initialised", code="job_registry_unavailable"
-        )
     return await dispatch_start_checkin(
         stores,
         CommandCall(payload, idemp),
@@ -197,15 +191,8 @@ async def compact_archive(
     _require_kind(envelope, "compact-archive")
     idemp = ensure_idempotency_key(idempotency_key)
     payload = cast(CompactArchivePayload, _validated_payload("compact-archive", envelope.payload))
-    dispatcher = CommandDispatcher(stores)
-    outcome = await dispatcher.dispatch_workspace_command(CommandCall(payload, idemp))
-    result = cast("dict[str, Any]", outcome.result)
-    # The applier hands back a dump so the dispatcher can carry it like every other payload, and a
-    # dump carries COMPUTED fields. `ArchiveReport` is a `StrictModel`, so feeding one straight back
-    # in trips `extra_forbidden` on `bytes_freed` and the route 500s on every call — invisible to
-    # mypy and to any test that does not cross the serializer.
-    computed = set(ArchiveReport.model_computed_fields)
-    return ArchiveReport.model_validate({k: v for k, v in result.items() if k not in computed})
+    outcome = await CommandDispatcher(stores).dispatch_compact_archive(CommandCall(payload, idemp))
+    return outcome.result
 
 
 @commands_router.post("/replace-dataset")
@@ -214,7 +201,7 @@ async def replace_dataset(
     stores: StoresDep,
     envelope: CommandEnvelope,
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
-) -> dict[str, Any]:
+) -> DatasetReplaced:
     """Version-and-repoint a colliding dataset so its name frees for new data.
 
     Per ``docs/specs/api-openapi.yaml::replaceDataset``. Data-safe: never overwrites — the
@@ -225,16 +212,13 @@ async def replace_dataset(
     _require_kind(envelope, "replace-dataset")
     idemp = ensure_idempotency_key(idempotency_key)
     payload = cast(ReplaceDatasetPayload, _validated_payload("replace-dataset", envelope.payload))
-    dispatcher = CommandDispatcher(stores)
-    outcome = await dispatcher.dispatch_workspace_command(CommandCall(payload, idemp))
-    # Echo the subject, nothing more — `version_and_repoint` records the counts + the
-    # versioned slug itself, and no caller reads them off the wire.
-    return cast("dict[str, Any]", outcome.result)
+    outcome = await CommandDispatcher(stores).dispatch_replace_dataset(CommandCall(payload, idemp))
+    return outcome.result
 
 
 @commands_router.post("/{kind}", response_model=CommandAcceptedBody, status_code=202)
 async def post_command(
-    request: Request,
+    job_registry: JobRegistryDep,
     stores: StoresDep,
     envelope: CommandEnvelope,
     kind: Annotated[str, Path(pattern=r"^[a-z][a-z0-9-]*$", max_length=64)],
@@ -257,7 +241,6 @@ async def post_command(
         )
 
     payload = _validated_payload(kind, envelope.payload)
-    job_registry: JobRegistry | None = getattr(request.app.state, "job_registry", None)
     dispatcher = CommandDispatcher(stores, job_registry=job_registry)
 
     if kind in _WORKSPACE_SCOPED_KINDS:

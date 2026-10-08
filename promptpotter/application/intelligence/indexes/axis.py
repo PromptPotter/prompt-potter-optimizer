@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from itertools import combinations, pairwise
 from typing import TYPE_CHECKING, Annotated, Any
 
-from promptpotter.domain.results import resolved_fitness
+from promptpotter.application.scoring.metrics import CellFold
 from promptpotter.domain.scoring import is_hit
 from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
 from promptpotter.shared.hashing import shapes_optimizer_prompt
@@ -343,7 +343,7 @@ class AxisIndex:
         self._folded = self.sample_index.generation
 
     def _refresh_top_runs(
-        self, entries: list[tuple[dict[str, Any], dict[str, Any]]], k: int = 10
+        self, entries: list[tuple[dict[str, Any], CellFold]], k: int = 10
     ) -> None:
         """Top-K by (composite_fitness, accuracy) desc. Only the modal ``total`` count is kept: an 8/20
         composite is not comparable with a 20/20 one, and mixing them inflates the leaderboard. A
@@ -363,17 +363,17 @@ class AxisIndex:
             total = scores["total"]
             if total != modal_total:
                 continue
-            # An absence is not a measurement: a row that recorded no accuracy must not
-            # enter the leaderboard as a 0% run (the rule `noise_floor.py` already states).
-            if scores.get("accuracy") is None:
+            # An absence is not a measurement: a run that read no cell must not enter the
+            # leaderboard as a 0% run (the rule `noise_floor.py` already states).
+            accuracy, composite = scores["accuracy"], scores["composite_fitness"]
+            if accuracy is None or composite is None:
                 continue
-            accuracy = float(scores["accuracy"])
             run_id = entry.get("run_id", "")
             rec = RunRecord(
                 run_id=run_id,
                 name=entry.get("name", ""),
                 accuracy=accuracy,
-                composite=resolved_fitness(scores["composite_fitness"], accuracy),
+                composite=composite,
                 total=total,
             )
             prev = best_by_run.get(run_id)
@@ -427,7 +427,7 @@ class AxisIndex:
     def _fold_entry(
         axis_values: dict[str, dict[str, list[float]]],
         entry: dict[str, Any],
-        scores: dict[str, Any],
+        scores: CellFold,
     ) -> None:
         """An entry with no accuracy — an outer L4 cell, whose measurand is ``mean_round_delta`` — is
         skipped, never folded as 0.0, which manufactures ``effect_size`` against every real arm."""

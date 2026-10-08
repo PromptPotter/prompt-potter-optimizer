@@ -1,6 +1,5 @@
 "use client";
-// Joins `/backends`, `/campaigns/{id}/pipeline?at=` and the live `dash` nodes into one
-// `ConnectorView`. Mount `ConnectorProvider` ONCE above its consumers: one health poll per app.
+// Joins `/backends` and `/campaigns/{id}/pipeline?at=` into one `ConnectorView`. Mount `ConnectorProvider` ONCE above its consumers: one health poll per app.
 
 import {
   createContext,
@@ -16,14 +15,14 @@ import {
   type BackendResponse,
   type CampaignPipelineResponse,
 } from "@/lib/api";
-import { useDashboard } from "@/lib/hooks/useDashboard";
 import { readyData, useRead, type ReadResult } from "@/lib/hooks/useRead";
+import { useCycleStream } from "@/lib/poll";
 import type { ConnectorView, PipelineStatus } from "@/lib/types";
-import type { NodeDataLike } from "@/lib/types";
 
 const EMPTY: ConnectorView = {
   connector: null,
   backendType: null,
+  selfOptimization: false,
   optimizer: null,
   optimizerKnobs: null,
   view: null,
@@ -32,7 +31,6 @@ const EMPTY: ConnectorView = {
   others: [],
   baseUrl: null,
   isTls: null,
-  currentNodes: {},
   isLive: false,
   health: null,
   nodeConfigSchema: null,
@@ -40,7 +38,6 @@ const EMPTY: ConnectorView = {
   modelCapabilities: {},
   reach: null,
   isSingleNode: false,
-  phase: null,
   nests: null,
 };
 
@@ -89,12 +86,7 @@ function useConnectorViewEngine(campaignId: string | null, at: string | null): C
           ? "loading"
           : "error";
 
-  const { dash, isLive } = useDashboard();
-  const currentNodes = useMemo(
-    () => (dash?.current_round.nodes as Record<string, NodeDataLike> | undefined) ?? {},
-    [dash],
-  );
-  const phase = typeof dash?.state === "string" ? dash.state : null;
+  const { isLive } = useCycleStream();
 
   const connector = resp?.connector ?? null;
   const activeId = useMemo(
@@ -113,7 +105,7 @@ function useConnectorViewEngine(campaignId: string | null, at: string | null): C
   return useMemo<ConnectorView>(() => {
     if (!resp) {
       const others = pipelineStatus === "error" ? backends : [];
-      return { ...EMPTY, pipelineStatus, others, isLive, currentNodes, phase };
+      return { ...EMPTY, pipelineStatus, others, isLive };
     }
     const active = resp.connector ? backends.find((b) => b.name === resp.connector) ?? null : null;
     const baseUrl = active?.base_url ?? null;
@@ -121,6 +113,7 @@ function useConnectorViewEngine(campaignId: string | null, at: string | null): C
       connector: resp.connector,
       // Top-level, never in `view`: the parsed `PipelineSchema` drops it.
       backendType: resp.backend_type,
+      selfOptimization: resp.self_optimization,
       optimizer: resp.optimizer,
       optimizerKnobs: resp.optimizer_knobs,
       view: resp.view,
@@ -129,7 +122,6 @@ function useConnectorViewEngine(campaignId: string | null, at: string | null): C
       others: active ? backends.filter((b) => b !== active) : backends,
       baseUrl,
       isTls: baseUrl ? baseUrl.startsWith("https://") : null,
-      currentNodes,
       isLive,
       health,
       nodeConfigSchema: resp.node_config_schema,
@@ -137,10 +129,9 @@ function useConnectorViewEngine(campaignId: string | null, at: string | null): C
       modelCapabilities: resp.model_capabilities,
       reach: resp.reach,
       isSingleNode: resp.is_single_node,
-      phase,
       nests: resp.nests,
     };
-  }, [resp, pipelineStatus, backends, currentNodes, isLive, health, phase]);
+  }, [resp, pipelineStatus, backends, isLive, health]);
 }
 
 const ConnectorContext = createContext<ConnectorView | null>(null);

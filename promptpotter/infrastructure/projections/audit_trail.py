@@ -11,24 +11,18 @@ from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.run_records import LLMCallRecord, PhaseRecord, RoundWarningRecord
 from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.store.io import read_json_tolerant, write_json
-from promptpotter.infrastructure.store.layout import CycleLayout, round_basename, round_number
+from promptpotter.infrastructure.store.layout import CycleLayout, round_basename
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "AuditTrailProjection",
-    "audit_rounds_dir",
     "build_node_block",
     "load_round_audits",
-    "read_most_recent_round_nodes",
 ]
 
 
 _ROUNDS_SUBPATH = (".runtime", "cache", "rounds")
-
-
-def audit_rounds_dir(cycle_dir: Path) -> Path:
-    return CycleLayout(cycle_dir).audit_rounds
 
 
 def load_round_audits(cycle_dir: Path, round_nums: list[int]) -> list[dict[str, Any] | None]:
@@ -48,25 +42,6 @@ def build_node_block(record: LLMCallRecord) -> dict[str, Any]:
             "timestamp": record.timestamp,
         }
     return _action_to_node_block({**record.payload, "timestamp": record.timestamp})
-
-
-def read_most_recent_round_nodes(rounds_dir: Path) -> dict[str, dict[str, Any]]:
-    """The latest round file's ``nodes`` block — the live dashboard seeds its sticky LLM-call mirror from this on resume
-    without re-issuing the calls."""
-    if not rounds_dir.is_dir():
-        return {}
-    candidates: list[tuple[int, Path]] = [
-        (n, path) for path in rounds_dir.iterdir() if (n := round_number(path)) is not None
-    ]
-    if not candidates:
-        return {}
-    round_num, path = max(candidates, key=lambda c: c[0])
-    payload = read_json_tolerant(path, {})
-    out: dict[str, dict[str, Any]] = {}
-    for key, block in (payload.get("nodes") or {}).items():
-        if isinstance(block, dict):
-            out[key] = {**block, "round": round_num}
-    return out
 
 
 def _action_to_node_block(action: dict[str, Any]) -> dict[str, Any]:
@@ -133,9 +108,6 @@ class AuditTrailProjection(Projection):
         # Boundary timestamps from `PhaseRecord.timestamp` — no wall-clock observation here.
         self._started_at: str = ""
         self._finished_at: str = ""
-        # Set by the runner pre-`drain()` on teardown; threads `"interrupted": True` onto rounds
-        # that never received a `round:complete`.
-        self._halted_mid_round: bool = False
 
     @classmethod
     def from_cycle_dir(cls, cycle_dir: CycleDir) -> AuditTrailProjection:
@@ -181,9 +153,10 @@ class AuditTrailProjection(Projection):
             }
         )
 
-    def flush(self) -> Path | None:
+    def flush(self, *, interrupted: bool = False) -> Path | None:
         """Write `round_NNNN.json` and reset. Idempotent — second flush merges new nodes into the
-        existing file rather than overwriting (so late L2/L3 records aren't lost).
+        existing file rather than overwriting (so late L2/L3 records aren't lost). ``interrupted``
+        marks a round that never received a `round:complete`.
         """
         if not self._nodes and not self._warnings:
             return None
@@ -206,7 +179,7 @@ class AuditTrailProjection(Projection):
         merged_warnings = existing_warnings + self._warnings
         if merged_warnings:
             payload["warnings"] = merged_warnings
-        if self._halted_mid_round:
+        if interrupted:
             payload["interrupted"] = True
 
         write_json(path, payload, default=str)
@@ -221,9 +194,9 @@ class AuditTrailProjection(Projection):
         self._warnings = []
         return path
 
-    def drain(self) -> None:
+    def drain(self, *, interrupted: bool = False) -> None:
         """Runner's teardown seam — flush buffered state since a mid-candidate interrupt never
-        emits `round:complete`. `_halted_mid_round` threads `"interrupted": true` on the partial.
+        emits `round:complete`; ``interrupted`` says the stop left that round open.
         """
         if self._nodes or self._warnings:
-            self.flush()
+            self.flush(interrupted=interrupted)

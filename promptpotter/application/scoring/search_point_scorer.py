@@ -8,25 +8,24 @@ import asyncio
 import functools
 import logging
 import time
+from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application.datasets.loaders import build_dataset_run_data
 from promptpotter.application.run_phase_control import pause_requested
-from promptpotter.application.scoring.classification import is_deprecated
-from promptpotter.application.scoring.metrics import compute_composite_fitness
+from promptpotter.application.scoring.metrics import ScoreSummary, compute_composite_fitness
 from promptpotter.application.scoring.query_loop import QueryLoopState, Walk, WalkEnd, run_walks
-from promptpotter.application.scoring.selection import mean_fitness_ci
 from promptpotter.domain.measurement_provenance import REUSABLE_MIN_GRADE, grade_run, meets_grade
-from promptpotter.domain.results import ArmOutcome
+from promptpotter.domain.results import ArmOutcome, degradation_reading
+from promptpotter.domain.results_health import is_deprecated
 from promptpotter.domain.scoring import QueryMeasurement
 from promptpotter.domain.spend import ROLE_SPEND_KIND
-from promptpotter.domain.validators import StopRule, StopSignal
+from promptpotter.domain.validators import BrokenSignal, StopRule, StopSignal
 from promptpotter.infrastructure.llm.heartbeat import heartbeat
 from promptpotter.infrastructure.llm.telemetry import _CURRENT_ROUND, filed_as
 from promptpotter.infrastructure.store import archive_queries
-from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
 from promptpotter.infrastructure.tracing.events import DatasetRun
 from promptpotter.shared.errors import (
     DatasetIdentityError,
@@ -40,7 +39,7 @@ if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.intelligence.indexes.sample import SampleIndex
     from promptpotter.application.scoring.query_loop import QueryLoopResult
-    from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.domain.measurement_provenance import RunSource
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.infrastructure.store.measurement_archive import (
@@ -54,7 +53,6 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "SCORING_ERROR_ABORT",
     "ScoredWalk",
-    "archivable_priors",
     "close_walk",
     "merge_with_unprocessed_priors",
     "open_walk",
@@ -70,26 +68,12 @@ class ScoredWalk:
     to each caller, so each one says what."""
 
     results: list[QueryMeasurement]
-    scores: dict[str, Any]
+    scores: ScoreSummary
     signal: StopSignal | None
     stopped: WalkEnd | None
     # The archive run the rows were filed under — what a score report carries so each of its cells
     # is addressable as ``(run_id, sample_id)``.
     run_id: str
-
-
-def archivable_priors(
-    *,
-    cached_sample_results: dict[int, QueryMeasurement],
-    dataset_sample_ids: set[int],
-    deprecated_samples: dict[int, QueryMeasurement],
-) -> dict[int, QueryMeasurement]:
-    """The cache priors this run may archive without re-measuring."""
-    return {
-        sid: cast(QueryMeasurement, dict(prior))
-        for sid, prior in cached_sample_results.items()
-        if sid in dataset_sample_ids and sid not in deprecated_samples
-    }
 
 
 def merge_with_unprocessed_priors(
@@ -113,26 +97,22 @@ _UNSIGNALLED_ENDS = frozenset({WalkEnd.SKIP, WalkEnd.BUDGET})
 
 def _build_scoring_error_signal(
     *, results: list[QueryMeasurement], ended_on: WalkEnd
-) -> StopSignal:
+) -> BrokenSignal:
     # Every error row here is a cell that was actually SENT: an abort pads no synthetic tail.
     real_errors = [r for r in results if is_error_result(r)]
-    warning_types: dict[str, int] = {}
-    for r in real_errors:
-        key = str(error_category(r) or "unknown")
-        warning_types[key] = warning_types.get(key, 0) + 1
-    # Every ``real_error`` is an error row, so ``error`` is present + non-empty.
-    last_error = str(real_errors[-1]["error"]) if real_errors else ""
-    return StopSignal(
+    warning_types = Counter(str(error_category(r) or "unknown") for r in real_errors)
+    return BrokenSignal(
         check_name=SCORING_ERROR_ABORT,
         outcome=ArmOutcome.BROKEN,
-        check_result={
-            "walk_end": ended_on.value,
-            "dominant_warning": last_error or ended_on.value,
-            "warning_types": warning_types,
-            "degraded_count": len(real_errors),
-            "total_scored": len(results),
-            "last_error": last_error,
-        },
+        check_result=degradation_reading(
+            source=SCORING_ERROR_ABORT,
+            degraded_count=len(real_errors),
+            total_scored=len(results),
+            warning_types=warning_types,
+            # The last error the walk saw, or the end it stopped on where it saw none. Every
+            # ``real_error`` is an error row, so ``error`` is present + non-empty.
+            dominant_warning=str(real_errors[-1]["error"]) if real_errors else ended_on.value,
+        ),
     )
 
 
@@ -183,9 +163,9 @@ def _resolve_prior_cache(
     *,
     feed: ReplayFeed | None,
     label: str,
-) -> tuple[dict[int, QueryMeasurement], dict[int, QueryMeasurement], set[int]]:
+) -> tuple[dict[int, QueryMeasurement], dict[int, QueryMeasurement]]:
     """Load-side cache resolution — reusable-archive lookup, deprecated-row split, preamble log.
-    No ``feed`` ⇒ no reuse."""
+    No ``feed`` ⇒ no reuse. Cached rows are already this dataset's cells alone (``_replayable_on``)."""
     cached_sample_results: dict[int, QueryMeasurement] = {}
     if feed is not None:
         cached_sample_results = _replayable_on(dataset, feed.advance(), session.dataset_name)
@@ -197,26 +177,20 @@ def _resolve_prior_cache(
             len(deprecated_samples),
         )
 
-    dataset_sample_ids = {s.id for s in dataset}
     # Preamble: when the JSP-keyed archive already covers some/all of this dataset's
     # samples, announce the split so the operator sees inline whether the upcoming
     # per-sample lines are cache replays vs fresh. Suppressed when no priors match.
-    cached_in_dataset = sum(
-        1
-        for sid in cached_sample_results
-        if sid in dataset_sample_ids and sid not in deprecated_samples
-    )
-    if cached_in_dataset:
+    if replays := len(cached_sample_results):
         total = len(dataset)
         logger.debug(
             "%s cache: %d/%d already measured for this JSP — will replay %d, measure %d fresh.",
             label,
-            cached_in_dataset,
+            replays,
             total,
-            cached_in_dataset,
-            total - cached_in_dataset,
+            replays,
+            total - replays,
         )
-    return cached_sample_results, deprecated_samples, dataset_sample_ids
+    return cached_sample_results, deprecated_samples
 
 
 _CLAIM_POLL_S = 0.5
@@ -282,33 +256,99 @@ def _walk_stop_signal(batch: QueryLoopResult) -> StopSignal | None:
     return _build_scoring_error_signal(results=batch.results, ended_on=ended_on)
 
 
-def _emit_dataset_run(
-    session: Session,
-    *,
-    run_id: str,
-    content_hash: str,
-    search_point: JobSearchPoint,
-    pipeline_schema: PipelineSchema,
-    scores: dict[str, Any],
-) -> None:
-    """Emit the ``DatasetRun`` observability trace for a completed score (best-effort)."""
-    store = session.store
-    backend_id = session.backend_id
-    if not (store and backend_id):
-        return
+@dataclass
+class _ArchiveRecorder:
+    """One walk's run in the archive — the gateway's half of ``query_loop.py::RunRecorder``. The
+    log opens at the first row saved, so a walk never taken leaves no trace, and is append-only."""
 
-    with graceful("DatasetRun emit failed"):
-        obs = session.state.obs or ObservabilityBridge.file_only(store.base_dir)
-        obs.emit(
-            DatasetRun(
-                campaign_id="",
-                round_num=-1,
-                run_id=run_id,
-                content_hash=content_hash,
-                prompt_fields_id=search_point.sp_hash(pipeline_schema),
-                accuracy=scores["accuracy"],
-                total=scores["total"],
+    session: Session
+    source: RunSource
+    search_point: JobSearchPoint
+    run_id: str
+    run_label: str
+    content_hash: str
+    force_fresh: bool
+    # The cache priors this run archives without re-measuring, plus what a stop banked.
+    prior_tail: dict[int, QueryMeasurement]
+    _opened: bool = False
+    # How many of the walk's ``results`` are already down, and whether the priors are.
+    _appended: int = 0
+    _priors_appended: bool = False
+
+    def scores(self, results: list[QueryMeasurement]) -> ScoreSummary:
+        """The walk's close and the loop's running number alike, so what a live surface shows
+        converging is what the round banks — never a second fold."""
+        return compute_composite_fitness(results, pipeline_schema=self.session.pipeline_schema)
+
+    def persist(self, results: list[QueryMeasurement]) -> ScoreSummary:
+        self._save(results)
+        return self.scores(results)
+
+    def bank(self, results: list[QueryMeasurement], rows: list[QueryMeasurement]) -> None:
+        for row in rows:
+            self.prior_tail[row["sample_id"]] = row
+        self._save(results, rows)
+
+    def close(self, results: list[QueryMeasurement], scores: ScoreSummary) -> None:
+        self._save(results)
+        if not self.session.backend_id:
+            return
+        archive_queries.compact_measurement_run(self.session.store, self.run_id)
+        state = self.session.state
+        if state.obs is None:
+            return
+        with graceful("DatasetRun emit failed"):
+            state.obs.emit(
+                DatasetRun(
+                    campaign_id=state.tracing_campaign_id,
+                    round_num=_CURRENT_ROUND.get(),
+                    run_id=self.run_id,
+                    content_hash=self.content_hash,
+                    prompt_fields_id=self.search_point.sp_hash(self.session.pipeline_schema),
+                    accuracy=scores["accuracy"],
+                    total=scores["total"],
+                )
             )
+
+    def _save(
+        self, results: list[QueryMeasurement], banked: Sequence[QueryMeasurement] = ()
+    ) -> None:
+        store = self.session.store
+        if not self.session.backend_id:
+            return
+        if not self._opened:
+            self._opened = True
+            if self.force_fresh:
+                # An append-only log does not overwrite: force_fresh means REPLACE these rows.
+                archive_queries.reset_measurement_run(store, self.run_id)
+            else:
+                # Drop a previous walk's dead header rows before appending more (a no-op on a log
+                # that closed cleanly — the end-of-walk compaction already tightened it).
+                archive_queries.compact_measurement_run(store, self.run_id)
+        merged = merge_with_unprocessed_priors(results, self.prior_tail)
+        run_data = build_dataset_run_data(
+            self.run_id,
+            self.run_label,
+            self.content_hash,
+            self.search_point,
+            merged,
+            dataset_name=self.session.dataset_name,
+            source=self.source,
+            pipeline_schema=self.session.pipeline_schema,
+            human_intervened=self.session.human_intervened,
+        )
+        # The cursor is over ``results``, not "the last row": a cache hit appends a MATERIALIZED
+        # row without persisting. Priors go down once; a row walked later supersedes its own prior.
+        new_rows: list[QueryMeasurement] = []
+        if not self._priors_appended:
+            new_rows.extend(merged[len(results) :])
+            self._priors_appended = True
+        else:
+            new_rows.extend(banked)
+        new_rows.extend(results[self._appended :])
+        self._appended = len(results)
+        archive_queries.record_measurement_run(
+            store, self.run_id, run_data, cast("list[dict[str, Any]]", new_rows)
         )
 
 
@@ -377,9 +417,7 @@ def open_walk(
     """A walk ready to be driven by :func:`run_walks` and closed by :func:`close_walk`. Writes
     nothing: the run's log opens at its first row, so a walk that is never taken leaves no trace."""
     source = session.source
-    assert session.scoring.scorer is not None and source is not None, (
-        "populate_session_scoring arms the scorer and the run source before any scoring"
-    )
+    assert source is not None, "populate_session_scoring arms the run source before any scoring"
     store = session.store
     backend_id = session.backend_id
     pipeline_schema = session.pipeline_schema
@@ -393,15 +431,11 @@ def open_walk(
     # that did not produce them.
     run_id = f"{run_label}_{content_hash}"
 
-    replaying = bool(store and backend_id) and not force_fresh
+    replaying = bool(backend_id) and not force_fresh
     node_configs = pipeline_schema.node_configs(search_point.pipeline_params) if replaying else []
     # No node configs, no cell identity: every such searchpoint would share one claim per sample.
-    feed = (
-        archive_queries.replay_feed(store, node_configs, is_fatal=is_deprecated)
-        if store and node_configs
-        else None
-    )
-    cached_sample_results, deprecated_samples, dataset_sample_ids = _resolve_prior_cache(
+    feed = archive_queries.replay_feed(store, node_configs) if node_configs else None
+    cached_sample_results, deprecated_samples = _resolve_prior_cache(
         dataset, session, feed=feed, label=label
     )
     cell_keys = {} if feed is None else {s.id: feed.cell_key(s.key) for s in dataset}
@@ -417,100 +451,6 @@ def open_walk(
         )
         return meets_grade(graded.grade, REUSABLE_MIN_GRADE)
 
-    prior_tail = archivable_priors(
-        cached_sample_results=cached_sample_results,
-        dataset_sample_ids=dataset_sample_ids,
-        deprecated_samples=deprecated_samples,
-    )
-
-    # Whether the run's log is open, how many of ``results`` are already appended to it, and
-    # whether the priors have been. The log is append-only, so each save writes only what is new.
-    opened = False
-    appended = 0
-    priors_appended = not prior_tail
-
-    def _composite(rows: list[QueryMeasurement]) -> dict[str, Any]:
-        """This candidate's fitness over *rows*, and accuracy's band over the same rows. Also the
-        loop's `running_scores`, so the number a live surface shows converging is the one the round
-        banks — never a second fold. `build_score_report` READS the band from here rather than
-        re-deriving it: one estimator, so the whisker converges with the accuracy bar it brackets."""
-        scores = compute_composite_fitness(rows, pipeline_schema)
-        ci_lo, ci_hi = mean_fitness_ci(rows, grade="fitness")
-        return {**scores, "mean_fitness_ci_lo": ci_lo, "mean_fitness_ci_hi": ci_hi}
-
-    def _save_run(results: list[QueryMeasurement], banked: Sequence[QueryMeasurement] = ()) -> None:
-        nonlocal opened, appended, priors_appended
-        if not (store and backend_id):
-            return
-        if not opened:
-            opened = True
-            if force_fresh:
-                # An append-only log does not overwrite: force_fresh means REPLACE these rows.
-                archive_queries.reset_measurement_run(store, run_id)
-            else:
-                # Drop a previous walk's dead header rows before appending more (a no-op on a log
-                # that closed cleanly — the end-of-walk compaction already tightened it).
-                archive_queries.compact_measurement_run(store, run_id)
-        merged = merge_with_unprocessed_priors(results, prior_tail)
-        run_data = build_dataset_run_data(
-            run_id,
-            run_label,
-            content_hash,
-            search_point,
-            merged,
-            dataset_name=session.dataset_name,
-            source=source,
-            pipeline_schema=pipeline_schema,
-            human_intervened=session.human_intervened,
-        )
-        # The cursor is over ``results``, not "the last row": a cache hit appends a
-        # MATERIALIZED row (graded, recovered — which can cost real backend calls) without
-        # persisting, so a save has to sweep up everything the walk has produced since the
-        # last one. The priors go down once — ``merged[len(results):]`` is exactly the ones
-        # the walk has not reached; a sample walked later supersedes its own prior by
-        # ``sample_id``, which is what makes an append-only log safe to re-walk.
-        # A banked row is a prior this walk made itself, so it rides the tail: with it when the tail
-        # has yet to go down, on its own once it has.
-        new_rows: list[QueryMeasurement] = []
-        if not priors_appended:
-            new_rows.extend(merged[len(results) :])
-            priors_appended = True
-        else:
-            new_rows.extend(banked)
-        new_rows.extend(results[appended:])
-        appended = len(results)
-        archive_queries.record_measurement_run(
-            store, run_id, run_data, cast("list[dict[str, Any]]", new_rows)
-        )
-
-    def _persist_fresh(results: list[QueryMeasurement]) -> dict[str, Any]:
-        """Persist the walk's new rows; return the candidate's running fitness over ``results``
-        alone — the candidate's own, what PoBB reads."""
-        _save_run(results)
-        return _composite(results)
-
-    def _bank(results: list[QueryMeasurement], rows: list[QueryMeasurement]) -> None:
-        """Rows back and not yet taken, kept as priors of this run: the walk resumed from a stop
-        replays each when it reaches it, as it replays any archived row for its configuration."""
-        if not (store and backend_id):
-            return
-        for row in rows:
-            prior_tail[row["sample_id"]] = row
-        _save_run(results, rows)
-
-    def _record_run(results: list[QueryMeasurement], scores: dict[str, Any]) -> None:
-        _save_run(results)
-        if store:
-            archive_queries.compact_measurement_run(store, run_id)
-        _emit_dataset_run(
-            session,
-            run_id=run_id,
-            content_hash=content_hash,
-            search_point=search_point,
-            pipeline_schema=pipeline_schema,
-            scores=scores,
-        )
-
     ctx = QueryLoopState(
         search_point=search_point,
         session=session,
@@ -518,12 +458,22 @@ def open_walk(
         cached_sample_results=cached_sample_results,
         on_sample_scored=on_sample_scored,
         sample_index=sample_index,
-        scorer=session.scoring.scorer,
         deprecated_samples=deprecated_samples,
-        persist_fresh=_persist_fresh,
-        running_scores=_composite,
-        record_run=_record_run,
-        bank=_bank,
+        recorder=_ArchiveRecorder(
+            session=session,
+            source=source,
+            search_point=search_point,
+            run_id=run_id,
+            run_label=run_label,
+            content_hash=content_hash,
+            force_fresh=force_fresh,
+            # As the priors stood when the walk opened: a replay re-grades its row in place, and
+            # a concurrent walk's rows join the cache later.
+            prior_tail={
+                sid: cast(QueryMeasurement, dict(prior))
+                for sid, prior in cached_sample_results.items()
+            },
+        ),
         claim_cell=None
         if feed is None
         else functools.partial(
@@ -553,11 +503,7 @@ def close_walk(walk: Walk) -> ScoredWalk:
     outcome = walk.outcome
     assert outcome is not None, "close_walk needs a decided walk"
     results = outcome.results
-    scores = walk.ctx.running_scores(results)
-    if outcome.ended_on is WalkEnd.SKIP:
-        # Mark the partial as an operator early-abort so the candidate report carries the
-        # provenance (the cycle is babysat).
-        scores["partial_reason"] = WalkEnd.SKIP.value
-    walk.ctx.record_run(results, scores)
+    scores = walk.ctx.recorder.scores(results)
+    walk.ctx.recorder.close(results, scores)
     stopped = None if len(results) == walk.n else outcome.ended_on
     return ScoredWalk(results, scores, _walk_stop_signal(outcome), stopped, walk.ctx.run_id)

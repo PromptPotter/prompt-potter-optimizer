@@ -19,11 +19,14 @@ from typing import Literal, cast, get_args
 
 from filelock import Timeout
 
+from promptpotter.application.jobs.capacity import resolve_run_capacity
 from promptpotter.application.jobs.interlock import (
     admission_lock,
     producer_alive,
     this_producer,
 )
+from promptpotter.application.jobs.reaper import reap_cycle_by_id
+from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, default_jobs_dir
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import StopReason
 from promptpotter.infrastructure.store.io import read_json, write_json
@@ -101,15 +104,26 @@ class JobRegistry:
     that everything it did not start must be stale — which is what a boot-time sweep amounts to
     once a terminal run holds a slot in the same dir."""
 
+    @classmethod
+    def attach(cls) -> JobRegistry:
+        """The machine's jobs dir and the projects tree beside it, as any process on the box sees
+        them — the server, a terminal verb, a launch outside either."""
+        return cls(
+            default_jobs_dir(), capacity=resolve_run_capacity, projects_root=DEFAULT_PROJECTS_ROOT
+        )
+
     def __init__(
         self,
         jobs_dir: Path,
         *,
         capacity: Callable[[int], int],
-        on_reap: Callable[[Job], None] | None = None,
+        projects_root: Path,
     ) -> None:
         self._dir = jobs_dir
         self._dir.mkdir(parents=True, exist_ok=True)
+        # Where the cycles these jobs run live: whichever process proves a job dead stamps its
+        # cycle terminal too, since the producer lock answers the same for all of them.
+        self._projects_root = projects_root
         # Reentrant on purpose: `reserve` holds it across `list_running` →
         # `_reap_if_orphaned` → `mark_finished`, each of which takes it again.
         # A plain Lock deadlocks the event-loop thread on the SECOND launch.
@@ -118,19 +132,13 @@ class JobRegistry:
         self._gate = admission_lock(jobs_dir)
         self._capacity = capacity
         self._tasks: dict[str, asyncio.Task[None]] = {}
-        # Fired whenever a job is proven dead so the same liveness owner can stamp the cycle
-        # terminal — the second half of reconciling the two owners this class's docstring names.
-        # Store-free: the wiring in main.py resolves the cycle and writes it.
-        self._on_reap = on_reap
 
-    def _fire_reap(self, job: Job) -> None:
-        """Invoke the reap callback, never letting its failure break job tracking."""
-        if self._on_reap is None:
-            return
+    def _reap_cycle(self, job: Job) -> None:
+        """Stamp a proven-dead job's cycle terminal, never letting a failure break job tracking."""
         try:
-            self._on_reap(job)
+            reap_cycle_by_id(self._projects_root, job.hop)
         except Exception:
-            logger.exception("on_reap callback failed for job %s", job.job_id)
+            logger.exception("could not reap the cycle of dead job %s", job.job_id)
 
     def create(
         self,
@@ -392,7 +400,7 @@ class JobRegistry:
             "job %s claims %s but its producer is gone — reaping", job.job_id, job.status
         )
         self.mark_finished(job.job_id, status="stopped", stop_reason=StopReason.PRODUCER_VANISHED)
-        self._fire_reap(job)
+        self._reap_cycle(job)
         return self.get(job.job_id) or job
 
     def list_running(self, *, user_id: str | None = None) -> list[Job]:

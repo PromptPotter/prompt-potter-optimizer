@@ -10,8 +10,8 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from promptpotter.domain.pipeline_schema import stable_hash
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.shared.hashing import stable_hash
 
 if TYPE_CHECKING:
     from promptpotter.domain.scoring import QueryMeasurement

@@ -46,10 +46,6 @@ class SessionCtx:
             raise SystemExit(f"ERROR: campaign {self.campaign_id!r} has no manifest on disk.")
         return resolve_campaign_config(self.store, campaign, self.hop)
 
-    @property
-    def task_context(self) -> dict[str, Any] | None:
-        return self.state.get("task_context")
-
 
 def no_dataset_hint() -> str:
     root = benchmark_datasets_root()
@@ -60,12 +56,9 @@ def no_dataset_hint() -> str:
 
 
 def load_session(store: Stores, hop: CycleHop) -> SessionCtx:
-    """The session *hop* was minted under (``index.json::parent_session_id``), the same read the web
-    launch makes. A verb that minted passes its own hop: the pointer is rewritten by every mint."""
-    session_id = str((store.campaigns.load(hop) or {}).get("parent_session_id") or "")
-    if not session_id:
-        raise SystemExit(f"ERROR: cycle {hop.cycle_id!r} in {hop.campaign_id!r} names no session.")
-
+    """The session *hop* was minted under, the same read the web launch makes. A verb that minted
+    passes its own hop: the pointer is rewritten by every mint."""
+    session_id = store.campaigns.session_id_of(hop)
     state = store.sessions.read(session_id)
     if not state:
         raise SystemExit(f"ERROR: Session '{session_id}' not found.")

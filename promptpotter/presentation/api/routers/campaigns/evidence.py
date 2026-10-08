@@ -12,12 +12,7 @@ from typing import Annotated
 from fastapi import Query, Request, Response
 
 from promptpotter.application.evidence.metric_catalogue import MEASURAND
-from promptpotter.application.evidence.read import (
-    Evidence,
-    campaigns_on_dataset,
-    subject_evidence,
-)
-from promptpotter.application.evidence.subjects import SubjectSpec, parse_subject
+from promptpotter.application.evidence.read import Evidence, select_evidence
 from promptpotter.presentation.api.deps import StoresDep
 from promptpotter.presentation.api.routers.campaigns._conditional import conditional_json
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
@@ -132,36 +127,18 @@ def get_evidence(
     interval per subject with every pairwise test. Reduced on each fetch (on-demand, not the 2 s
     poll) from per-subject reads held until a file they read moves; zero LLM, nothing persisted."""
     try:
-        specs = [parse_subject(raw) for raw in subject]
-    except ValueError as exc:
-        # The `?lens=` contract: a subject this layer cannot address is the caller's mistake, and
-        # it names what went wrong rather than 404-ing on a shape someone typed.
-        raise BadRequestError(str(exc)) from exc
-    if dataset:
-        named = {s.key for s in specs}
-        specs += [
-            spec
-            for cid in campaigns_on_dataset(stores, dataset)
-            if (spec := SubjectSpec("campaign", cid)).key not in named
-        ]
-    axes = [a.strip() for a in grid.split(",") if a.strip()]
-    if grid and len(axes) != 2:
-        raise BadRequestError(
-            f"`grid` takes exactly two factor names separated by a comma, got {grid!r}. A grid has "
-            "two axes at any number of factors — the rest are marginalised into the cells."
-        )
-    try:
-        evidence = subject_evidence(
+        evidence = select_evidence(
             stores,
-            specs,
+            subjects=subject,
+            dataset=dataset,
+            grid=grid,
             include_ranking=ranking,
             include_winner_chain=winner_chain,
             include_config=config,
             metric=metric,
-            grid=(axes[0], axes[1]) if axes else None,
         )
     except (ValueError, SyntaxError) as exc:
-        # Passed through unprefixed — the read says whether the METRIC or the SELECTION was the
-        # problem, and an "Invalid metric:" stamp read every unmeasured campaign as a bad formula.
+        # Passed through unprefixed — the read says whether an ADDRESS, the METRIC or the
+        # SELECTION was the problem.
         raise BadRequestError(str(exc)) from exc
     return conditional_json(request, evidence, stamp="generated_at")

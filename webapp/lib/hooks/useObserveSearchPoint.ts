@@ -12,7 +12,7 @@ import {
   type ObserveState,
   type ObserveTarget,
 } from "@/lib/derivations";
-import { useDashboard } from "./useDashboard";
+import { useCycleStream } from "@/lib/poll";
 import { useRoundFile } from "./useRoundFile";
 import { useSelection } from "@/lib/SelectionContext";
 import { useWorkspace } from "@/lib/workspace";
@@ -34,7 +34,7 @@ export function useObserveSearchPoint(
   nodeId?: string | null,
   enabled = true,
 ): ObserveSearchPoint {
-  const { dash, isLive } = useDashboard();
+  const { dash, isLive } = useCycleStream();
   const { candidate: selCand } = useSelection();
   // From the workspace, NOT `dash`: `dash` nulls on a unit switch and while `warming_up`,
   // which would starve the round-file fetch.

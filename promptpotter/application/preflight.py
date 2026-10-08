@@ -9,7 +9,7 @@ from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.knobs import check_couplings
 from promptpotter.application.optimizer_manifest import checkin_manifest, select_optimizer
 from promptpotter.domain.pipeline_overlay import node_config_items
-from promptpotter.domain.search_point import has_framing
+from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.llm.registry import model_profile
 from promptpotter.shared.errors import PayloadInvalidError
 
@@ -108,7 +108,7 @@ def _check_config_couplings(config: CampaignConfig) -> list[PreflightWarning]:
 
 
 def _check_task_context_present(
-    config: CampaignConfig, framing: Mapping[str, Any] | None
+    config: CampaignConfig, framing: TaskDecomposition
 ) -> PreflightWarning | None:
     """The operator's frozen framing is the SOLE source of l1_generate's ``task_intent`` slot, and
     an empty one renders as nothing at all — no header, no placeholder — so the slot falls back to
@@ -124,7 +124,7 @@ def _check_task_context_present(
                 "this run only against framed runs of the same dataset, never pool with them."
             ),
         )
-    if has_framing(framing):
+    if framing:
         return None
     return PreflightWarning(
         code="task_context_empty",
@@ -200,8 +200,8 @@ def run_preflight_checks(
     config: CampaignConfig,
     dataset: list[Sample],
     target_models: tuple[str, ...] = (),
-    task_context: Mapping[str, Any] | None = None,
     *,
+    framing: TaskDecomposition,
     cell_usd: float | None,
     measured_cell_usd: float | None,
 ) -> list[PreflightWarning]:
@@ -217,7 +217,7 @@ def run_preflight_checks(
     opt_model = select_optimizer(config.optimization).model()
     if (w := _check_optimizer_below_target(opt_model, target_models)) is not None:
         warnings.append(w)
-    if (w := _check_task_context_present(config, task_context)) is not None:
+    if (w := _check_task_context_present(config, framing)) is not None:
         warnings.append(w)
     warnings.extend(_check_config_couplings(config))
     return warnings
@@ -251,7 +251,7 @@ def refuse_below_reasoning_floor(
         # Every llm node the optimizer DECLARES, off its `default` chain too, or an escalation
         # node escapes.
         *((n, selected.node_config(n)) for n in selected.llm_nodes),
-        *((n.name, n.current_config) for n in checkin_manifest().schema.config_nodes),
+        *((n.name, n.current_config) for n in checkin_manifest().schema.declared_nodes),
     ]
     violations: list[str] = []
     for node, cfg in node_configs:

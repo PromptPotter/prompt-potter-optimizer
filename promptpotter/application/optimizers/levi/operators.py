@@ -9,11 +9,7 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.optimizers.fence import fence_untrusted
-from promptpotter.application.optimizers.paper_templates import (
-    fill,
-    prompt_text,
-    task_description,
-)
+from promptpotter.application.optimizers.paper_templates import fill, task_description
 from promptpotter.domain.scoring import is_graded
 
 if TYPE_CHECKING:
@@ -24,7 +20,7 @@ __all__ = ["paradigm_shift_prompt", "refine_prompt"]
 
 
 def _prompt(individual: OptSearchPoint) -> str:
-    return f"--- PROMPT START ---\n{prompt_text(individual)}\n--- PROMPT END ---"
+    return f"--- PROMPT START ---\n{individual.render()}\n--- PROMPT END ---"
 
 
 def _score(score: float) -> str:
@@ -87,7 +83,7 @@ def refine_prompt(
         node,
         problem_description=task_description(cycle),
         parent_score=_score(score),
-        parent_prompt=prompt_text(individual),
+        parent_prompt=individual.render(),
         feedback_section=_failures(parent_rows, n_failures, rng),
         inspirations_section=_inspirations(inspirations),
         meta_advice_section="",

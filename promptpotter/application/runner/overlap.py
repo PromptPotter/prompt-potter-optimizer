@@ -6,9 +6,9 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, cast
 
-from promptpotter.application.scoring.metrics import _compute_accuracy
+from promptpotter.application.scoring.metrics import fold_cells
 from promptpotter.application.scoring.search_point_scorer import score_search_point
-from promptpotter.application.scoring.selection import paired_fitness
+from promptpotter.application.scoring.selection import matched_parent_lift
 from promptpotter.domain.results import (
     LineStep,
     OverlapMember,
@@ -19,7 +19,6 @@ from promptpotter.domain.results import (
     origin_panel,
 )
 from promptpotter.shared.instrument import MeasuredCandidate, MeasurementRole
-from promptpotter.shared.statistics import paired_reading
 
 if TYPE_CHECKING:
     from promptpotter.application.bench.cycle import Cycle
@@ -84,19 +83,22 @@ async def measure_overlap(
         bought[step.candidate_id] = fresh
         rows_by_key[step.key] = merge_known_outcomes(step.rows, fresh)
 
-    members = [_member(s, rows_by_key[s.key], keep) for s in ordered]
-    newest, first = paired_fitness(
+    members = [m for s in ordered if (m := _member(s, rows_by_key[s.key], keep)) is not None]
+    if len(members) < len(ordered):
+        # A member whose every cell of the set came back unscoreable has no rate on it, and a
+        # line missing a member is not the 1-to-1 reading.
+        return
+    lead = matched_parent_lift(
         _on_set(rows_by_key[ordered[-1].key], keep),
         _on_set(rows_by_key[origin.key], keep),
         grade="fitness",
     )
-    _lead, lead_lo, lead_hi, _p, _n = paired_reading(newest, first)
     round_result.overlap_results = bought
     round_result.overlap = OverlapReading(
         sample_ids=panel,
         members=members,
         measured=sum(len(r) for r in bought.values()),
-        lead_interval=(lead_lo, lead_hi) if lead_lo is not None and lead_hi is not None else None,
+        lead_interval=(lead.ci_lo, lead.ci_hi) if lead else None,
     )
 
 
@@ -107,14 +109,16 @@ def _on_set(rows: list[dict[str, Any]], keep: set[int]) -> list[QueryMeasurement
     )
 
 
-def _member(step: LineStep, rows: list[dict[str, Any]], keep: set[int]) -> OverlapMember:
-    stats = _compute_accuracy(_on_set(rows, keep))
+def _member(step: LineStep, rows: list[dict[str, Any]], keep: set[int]) -> OverlapMember | None:
+    stats = fold_cells(_on_set(rows, keep))
+    if stats["accuracy"] is None:
+        return None
     return OverlapMember(
         round=step.round,
         candidate_id=step.candidate_id,
         label=step.label,
-        accuracy=float(stats["accuracy"]),
-        total=int(stats["total"]),
+        accuracy=stats["accuracy"],
+        total=stats["total"],
     )
 
 

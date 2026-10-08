@@ -1,13 +1,11 @@
 "use client";
 // Put the ORIGIN and the point being looked at on the Compare board, alone, and go there. The
-// origin is found by walking `parent_ids[0]` on the one served tree, so a fork's point reads
-// against the campaign root it descends from rather than against its own first round.
+// origin is the one the served tree names for the point's timeline (`origin_id`).
 
 import { useCallback, useMemo } from "react";
 import { candidateSubject, subjectKey } from "@/lib/api/reads";
 import { useCompareSelection, type CompareChannel } from "@/lib/compare-selection";
-import { indexLineage, pathOf } from "@/lib/derivations";
-import type { LineageNode } from "@/lib/api";
+import { candidateById, indexLineage, originOf, pathOf } from "@/lib/derivations";
 import { encodeCyclePath, type CyclePath } from "@/lib/ids";
 import { useLineageTree } from "@/lib/lineage";
 import { useWorkspace } from "@/lib/workspace";
@@ -37,20 +35,12 @@ export function useCompareWithOrigin(
     const top = path?.[0];
     const leaf = path?.at(-1);
     if (!path || !top || !leaf) return null;
-    const nodes = new Map<string, LineageNode>();
-    for (const { candidates } of index.values()) for (const c of candidates) nodes.set(c.id, c);
-    const here = index.get(encodeCyclePath(path))?.candidates ?? [];
-    const start = candidateId === null ? here[0] : nodes.get(candidateId);
-    if (!start) return null;
-    const seen = new Set<string>();
-    let origin = start;
-    for (;;) {
-      seen.add(origin.id);
-      const parentId = origin.parent_ids[0];
-      const parent = parentId === undefined ? undefined : nodes.get(parentId);
-      if (!parent || seen.has(parent.id)) break;
-      origin = parent;
-    }
+    const start =
+      candidateId === null
+        ? index.get(encodeCyclePath(path))?.candidates[0]
+        : candidateById(index, candidateId);
+    const origin = originOf(index, start ?? undefined);
+    if (!start || !origin) return null;
     const originKey = candidateSubject(pathOf(origin), origin.id);
     const second =
       candidateId === null

@@ -111,7 +111,6 @@ test.describe("the recursion, end to end", () => {
     const started = await command(request, "start-run", {
       campaign_id: outer!.id,
       cycle_id: outer!.cycleId,
-      kind: "new",
       spend_budget_usd: BUDGET_USD,
     });
     expect(started.status, `start-run: ${started.body}`).toBeLessThan(300);

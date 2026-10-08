@@ -21,7 +21,7 @@ export interface RawResultRow {
 }
 
 // `.runtime/cache/rounds/round_NNNN.json`: the only home of per-node LLM I/O. Hand-written because
-// `AuditTrailProjection` writes a plain dict with no Pydantic model.
+// `AuditTrailProjection` writes a plain dict; `NodeBlock` also shapes the live `current_round.nodes`.
 export interface RoundAuditDoc {
   round?: number;
   nodes?: Record<string, NodeBlock>;

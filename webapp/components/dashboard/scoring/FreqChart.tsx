@@ -3,8 +3,7 @@ import { useMemo, useRef } from "react";
 import { Bar } from "react-chartjs-2";
 import { barChartDefaults, ensureChartRegistered, getCss, useThemeVersion } from "@/lib/theme";
 import { TERMS } from "@/lib/terms";
-import { liveCandidates, type DashboardSnapshot } from "@/lib/poll";
-import { useDashboard } from "@/lib/hooks/useDashboard";
+import { liveCandidates, useCycleStream, type DashboardSnapshot } from "@/lib/poll";
 import { useEffectiveRound } from "@/lib/hooks/useEffectiveRound";
 import { useRoundRows } from "@/lib/hooks/useRoundRows";
 import { Badge, CardFrame, Term } from "@/components/ui";
@@ -42,7 +41,7 @@ function liveResultsFrom(dash: DashboardSnapshot | null): ResultRow[] {
 export function FreqChart() {
   useThemeVersion();
   const chartRef = useRef(null);
-  const { dash } = useDashboard();
+  const { dash } = useCycleStream();
   const { round: effectiveRound, isLiveView } = useEffectiveRound();
 
   // No stitch: `useRoundRows` idles the round-file fetch on the live round.

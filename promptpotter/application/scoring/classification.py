@@ -8,10 +8,10 @@ from collections import Counter
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.domain.results import ArmOutcome
-from promptpotter.domain.results_health import classify_result
+from promptpotter.domain.results import ArmOutcome, degradation_reading
+from promptpotter.domain.results_health import classify_result, is_deprecated
 from promptpotter.domain.scoring import is_graded
-from promptpotter.domain.validators import StopRule, StopSignal
+from promptpotter.domain.validators import BrokenSignal, StopRule, StopSignal
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
@@ -21,27 +21,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.scoring import QueryMeasurement
 
 
-@shapes_optimizer_prompt
-def ranked_item_keys_from_schema(schema: PipelineSchema | None) -> list[str]:
-    if not schema:
-        return []
-    keys: list[str] = []
-    for node in schema.nodes:
-        if node.emits_ranking:
-            keys.extend(node.output_keys)
-    return keys
-
-
-@shapes_optimizer_prompt
-def get_ranked_items(r: Mapping[str, Any], ranked_item_keys: list[str] | None = None) -> list[Any]:
-    pd = r.get("pipeline_data") or {}
-    for key in ranked_item_keys or []:
-        val: list[Any] | None = pd.get(key)
-        if val:
-            return val
-    return []
-
-
 def terminal_ranking(r: Mapping[str, Any], schema: PipelineSchema | None) -> list[Any]:
     """The ranked list from the LAST ranker that emitted its key — decided by key PRESENCE, so an empty terminal list is a legitimate
     NO_RESULT and never a fall-through to an earlier node's candidate pool."""
@@ -49,11 +28,8 @@ def terminal_ranking(r: Mapping[str, Any], schema: PipelineSchema | None) -> lis
     if not schema:
         return []
     for node in reversed(schema.nodes):
-        if node.emits_ranking:
-            for key in node.output_keys:
-                if key in pd:
-                    val = pd[key]
-                    return val if isinstance(val, list) else []
+        if node.emits_ranking and (ranking := node.ranking_in(pd)) is not None:
+            return ranking
     return []
 
 
@@ -61,13 +37,6 @@ def extract_warning_types(result: Mapping[str, Any]) -> list[str]:
     """Every advisory + fatal code seen on this result, for display and tracking. Classification itself is
     :func:`classify_result`'s."""
     return classify_result(result).all_codes
-
-
-@shapes_optimizer_prompt
-def is_deprecated(result: Mapping[str, Any]) -> bool:
-    """True iff the classifier flagged the sample fatal or infra-truncated. Both deprecate it for accounting, but only
-    ``fatal_codes`` participate in one-sighting fast-path elimination."""
-    return classify_result(result).is_fatal
 
 
 @shapes_optimizer_prompt
@@ -109,17 +78,17 @@ class DegradationCheck:
             fatal = classification.dominant_fatal
             if fatal is not None:
                 n = len(results)
-                return StopSignal(
+                return BrokenSignal(
                     self.name,
                     ArmOutcome.BROKEN,
-                    {
-                        "degraded_rate": 1.0,
-                        "degraded_count": n,
-                        "total_scored": n,
-                        "warning_types": dict.fromkeys(classification.fatal_codes, 1),
-                        "dominant_warning": fatal,
-                        "fatal": True,
-                    },
+                    degradation_reading(
+                        source=self.name,
+                        degraded_count=n,
+                        total_scored=n,
+                        warning_types=dict.fromkeys(classification.fatal_codes, 1),
+                        dominant_warning=fatal,
+                        fatal=True,
+                    ),
                 )
 
         n = len(results)
@@ -130,24 +99,23 @@ class DegradationCheck:
         # web_search:low_document_count, which fires whenever fewer than max_sites docs
         # are gathered) must not eliminate a candidate that is otherwise scoring well.
         degraded = sum(1 for r in results if is_deprecated(r))
-        rate = degraded / n
-        if rate < self.threshold:
+        if degraded / n < self.threshold:
             return None
 
         wtypes: Counter[str] = Counter()
         for r in results:
             wtypes.update(extract_warning_types(r))
         dominant = max(wtypes, key=wtypes.get) if wtypes else "unknown"  # type: ignore[arg-type]
-        return StopSignal(
+        return BrokenSignal(
             self.name,
             ArmOutcome.BROKEN,
-            {
-                "degraded_rate": rate,
-                "degraded_count": degraded,
-                "total_scored": n,
-                "warning_types": dict(wtypes),
-                "dominant_warning": dominant,
-            },
+            degradation_reading(
+                source=self.name,
+                degraded_count=degraded,
+                total_scored=n,
+                warning_types=wtypes,
+                dominant_warning=dominant,
+            ),
         )
 
     def earliest_stop(
@@ -181,9 +149,7 @@ __all__ = [
     "DegradationCheck",
     "build_degradation_checks",
     "extract_warning_types",
-    "get_ranked_items",
     "is_deprecated",
-    "ranked_item_keys_from_schema",
     "scoreable_rows",
     "terminal_ranking",
 ]

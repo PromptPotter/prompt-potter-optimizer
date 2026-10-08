@@ -18,7 +18,6 @@ from promptpotter.shared.composite import inline_short_formula_values
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.projections.live_dashboard.round_buffer import RoundBuffer
-    from promptpotter.infrastructure.projections.live_state import LiveStateCore
 
 
 def _trim(text: str, n: int) -> str:
@@ -47,7 +46,7 @@ def sample_row(s: dict[str, Any]) -> DashboardSample:
         # Off the same row `status` was decided from — an errored row carries none, which is
         # what `status == "ERR"` already says.
         fitness=float(fitness) if isinstance(fitness, int | float) else None,
-        terminal_node=str(s.get("terminal_node") or ""),
+        terminal_node=s.get("terminal_node"),
         cached=bool(s.get("cached", False)),
         time_s=float(time_s) if isinstance(time_s, int | float) else None,
         cost_s=float(cost_s) if isinstance(cost_s, int | float) else None,
@@ -140,21 +139,20 @@ def build_candidate_rows(
     return rows
 
 
-def build_racing_block(core: LiveStateCore, p_best_top: list[dict[str, Any]]) -> RacingBlock | None:
+def build_racing_block(buffer: RoundBuffer) -> RacingBlock | None:
     """The round's race standing. ``leader_prob`` is the best standing among CANDIDATES — never a max over one
     snapshot's dict, whose other entries are that same candidate's odds against each prior."""
-    if not core.current_p_best_id:
+    if not buffer.race_standings:
         return None
-    leader_prob = max(
-        [float(row["p_best"]) for row in p_best_top] or list(core.round_p_best.values()) or [0.0]
-    )
+    ranked = sorted(buffer.race_standings.items(), key=lambda kv: -kv[1])
+    leader_prob = ranked[0][1]
     return RacingBlock(
-        member=core.race_member,
-        current_id=core.current_p_best_id,
-        n_samples=core.current_p_best_n,
-        leader_prob=float(leader_prob),
-        posterior_width=float(1.0 - leader_prob),
-        top=list(p_best_top),
+        member=buffer.race_member,
+        current_id=buffer.race_current_id,
+        n_samples=buffer.race_n_samples,
+        leader_prob=leader_prob,
+        posterior_width=1.0 - leader_prob,
+        top=[{"id": cid, "p_best": p} for cid, p in ranked[:5]],
     )
 
 

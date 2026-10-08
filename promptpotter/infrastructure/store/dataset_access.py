@@ -8,12 +8,13 @@ from pathlib import Path
 from typing import Any, Literal
 
 from promptpotter import connectors
+from promptpotter.connectors.protocol import Connector
 from promptpotter.domain.connector import BackendUnreachableError
-from promptpotter.domain.search_point import has_framing
+from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.store.io import read_json_tolerant, read_yaml_optional
 from promptpotter.infrastructure.store.layout import validate_dataset_name
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.shared.errors import NotFoundError
+from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
 
 
 class DatasetAccessError(NotFoundError):
@@ -67,10 +68,32 @@ def readable_dataset_dir(stores: Stores, name: str) -> Path:
     raise DatasetAccessError(name)
 
 
+def declared_backend_type(dataset_dir: Path) -> str:
+    """The connector *dataset_dir*'s ``pipeline.yaml`` declares, for a caller about to RUN on it.
+    Raises typed: a bare ``ValueError`` becomes a 500 the webapp retries forever."""
+    path = dataset_pipeline_path(dataset_dir)
+    try:
+        raw = read_yaml_optional(path)
+    except ValueError as exc:
+        raise PayloadInvalidError(
+            f"{path} is malformed: {exc}",
+            code="pipeline_config_invalid",
+            details={"dataset_config_dir": str(dataset_dir)},
+        ) from exc
+    bt = (raw or {}).get("backend_type")
+    if not isinstance(bt, str) or not bt:
+        raise PayloadInvalidError(
+            f"backend_type missing or empty in {path}",
+            code="pipeline_config_invalid",
+            details={"dataset_config_dir": str(dataset_dir)},
+        )
+    return bt.lower()
+
+
 def backend_type_of_dataset(stores: Stores, dataset_name: str) -> str:
     """THE predicate for "which connector does this dataset use?", so no reader hand-maintains a
-    list of dataset NAMES. Tolerant, unlike its strict init twin (``initialization/wiring.py``):
-    a campaign outlives its dataset dir."""
+    list of dataset NAMES. Tolerant, unlike :func:`declared_backend_type`: a campaign outlives its
+    dataset dir."""
     try:
         raw = read_yaml_optional(dataset_pipeline_path(readable_dataset_dir(stores, dataset_name)))
     except (OSError, ValueError, DatasetAccessError):
@@ -79,7 +102,7 @@ def backend_type_of_dataset(stores: Stores, dataset_name: str) -> str:
     return bt.lower() if isinstance(bt, str) else ""
 
 
-def dataset_experiment(config_dir: Path, connector: connectors.Connector) -> dict[str, Any] | None:
+def dataset_experiment(config_dir: Path, connector: Connector) -> dict[str, Any] | None:
     """*connector*'s ``experiment_file`` in *config_dir*, parsed and resolved, or ``None`` where
     this box has none — a gitignored panel absent on a fresh clone is not an error; a malformed one is."""
     if not connector.experiment_file:
@@ -97,10 +120,11 @@ def dataset_experiment(config_dir: Path, connector: connectors.Connector) -> dic
 
 
 def extract_panel_rows(
-    connector: connectors.Connector, dataset_name: str, experiment: dict[str, Any]
-) -> tuple[list[dict[str, Any]], list[str]]:
-    """``(rows, index_terms)`` out of a document :func:`dataset_experiment` read, in panel ORDER —
-    the ``sample_id``, so a second ordering would misfile every row against ``measurements/``."""
+    connector: Connector, dataset_name: str, experiment: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """The rows of a document :func:`dataset_experiment` read, in panel ORDER — the ``sample_id``,
+    so a second ordering would misfile every row against ``measurements/``."""
+    assert connector.extract_experiment is not None, "paired with experiment_file at registration"
     try:
         return connector.extract_experiment(experiment)
     except (KeyError, TypeError, AttributeError, IndexError) as exc:
@@ -115,8 +139,8 @@ def extract_panel_rows(
 
 def dataset_panel_rows(
     stores: Stores, dataset_name: str, *, experiment: dict[str, Any] | None = None
-) -> tuple[list[dict[str, Any]], list[str]] | None:
-    """The panel a CONNECTOR owns — ``(rows, index_terms)`` — or ``None`` where this box has no
+) -> list[dict[str, Any]] | None:
+    """The rows of the panel a CONNECTOR owns, or ``None`` where this box has no
     connector-owned panel to read. It sits beside :func:`readable_dataset_rows` because the two ARE
     the one ladder this module promises: a resolver that knows only materialized banks answers
     EMPTY for a connector-owned one, which is not a fact about the dataset.
@@ -157,23 +181,21 @@ def readable_dataset_rows(stores: Stores, name: str) -> dict[str, Any] | None:
     return shipped if isinstance(shipped, dict) and shipped.get("items") else None
 
 
-def readable_task_context(stores: Stores, name: str) -> dict[str, Any] | None:
-    """The task framing for *name*, or ``None`` — resolved like the rows and for the same reason:
-    an LLM decomposition the operator paid for is theirs, so it never lands beside a definition."""
+def readable_task_context(stores: Stores, name: str) -> TaskDecomposition:
+    """The task framing for *name*, empty where no tier says anything, resolved like the rows. A
+    record blank in every field is skipped: at a higher tier it would shadow the shipped file."""
     try:
         tenant_dir = stores.tenant_datasets.dataset_dir(name)  # validates the slug
     except ValueError as exc:
         raise DatasetAccessError(name) from exc
-    for candidate in (
-        read_yaml_optional(dataset_task_context_path(tenant_dir)),
+    tiers = (
+        TaskDecomposition.from_dict(read_yaml_optional(dataset_task_context_path(tenant_dir))),
         stores.tenant_datasets.load_task_context(name),
-        read_yaml_optional(dataset_task_context_path(stores.benchmarks_root / name)),
-    ):
-        # The VALUES, never the dict: an all-empty record at a higher tier shadows the shipped
-        # file under it permanently. One predicate for that, shared with both writers.
-        if isinstance(candidate, dict) and has_framing(candidate):
-            return candidate
-    return None
+        TaskDecomposition.from_dict(
+            read_yaml_optional(dataset_task_context_path(stores.benchmarks_root / name))
+        ),
+    )
+    return next((framing for framing in tiers if framing), TaskDecomposition())
 
 
 def list_readable_datasets(stores: Stores) -> list[DatasetRef]:
@@ -224,7 +246,7 @@ def _read_n_samples(stores: Stores, name: str) -> int | None:
     own declaration, so a harbor dataset counts here rather than reading as unmaterialized."""
     try:
         if (panel := dataset_panel_rows(stores, name)) is not None:
-            return len(panel[0])
+            return len(panel)
     except (ValueError, OSError, ImportError, BackendUnreachableError):
         return None
     raw = readable_dataset_rows(stores, name)
@@ -243,6 +265,7 @@ __all__ = [
     "dataset_experiment",
     "dataset_panel_rows",
     "dataset_pipeline_path",
+    "declared_backend_type",
     "extract_panel_rows",
     "is_dataset_dir",
     "list_readable_datasets",

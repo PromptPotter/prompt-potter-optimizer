@@ -985,9 +985,9 @@ the PR description.
     to the cell.
   - **One writer, one resolver.** `compute_composite_fitness`
     (`application/scoring/metrics.py`) is the sole writer of `composite_fitness`;
-    `resolved_fitness` (`domain/results.py`) is the one canonical resolved value
-    every display and ranking site reads. Don't add a second
-    composite-or-accuracy resolution. `scoreboard_rank_key` is its argmax form and
+    an arm that read no cell has `None`, never a 0.0 and never its accuracy
+    standing in. `order_floor` (`domain/results.py`) is the one place that absence
+    becomes a number, and only inside an ordering. `scoreboard_rank_key` is its argmax form and
     **is not a selection** — selection is the optimizer's `selector` node (potter's is
     `elect_round_winner`'s Rasch θ-lift, which no aggregate reproduces).
   - **Every score is served, never recomputed in the consumer — and a mask is scored the way

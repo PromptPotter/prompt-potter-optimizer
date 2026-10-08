@@ -9,7 +9,7 @@ import { cacheShare, prefixReading, type ObserveConfig } from "@/lib/derivations
 import { TERMS } from "@/lib/terms";
 import { NOT_SEPARABLE, liftSeparates } from "@/lib/fitness";
 import { Term } from "@/components/ui";
-import { fmtPct1, fmtSigned, fmtTokens } from "@/lib/format";
+import { fmtPct1, fmtSigned, fmtThetaSe, fmtTokens } from "@/lib/format";
 import { NodeSurface } from "@/components/shell/node-surface/NodeSurface";
 
 export function SearchpointDrillIn({
@@ -127,9 +127,7 @@ export function SearchpointDrillIn({
               <Fact
                 k="ability θ"
                 hint="Difficulty-adjusted Rasch ability — the metric the round winner is elected on. Clearing harder samples is worth more than more wins on easy ones, so a higher θ can beat a higher accuracy."
-                v={`${row.theta.toFixed(2)}${
-                  typeof row.theta_se === "number" ? ` ± ${row.theta_se.toFixed(2)}` : ""
-                }`}
+                v={fmtThetaSe(row.theta, row.theta_se)}
               />
             )}
             {typeof row.composite === "number" && (

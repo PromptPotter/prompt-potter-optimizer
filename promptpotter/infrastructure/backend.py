@@ -18,6 +18,7 @@ import httpx
 from filelock import BaseFileLock, FileLock, Timeout
 
 from promptpotter.config.paths import default_jobs_dir
+from promptpotter.infrastructure.docker_host import claim_machine, machine_step
 from promptpotter.infrastructure.llm.rate_limit import (
     MAX_SEND_ATTEMPTS,
     Backpressure,
@@ -69,6 +70,7 @@ if TYPE_CHECKING:
         WireAdapter,
     )
     from promptpotter.domain.pipeline_schema import NodeSpendBound, PipelineNode
+    from promptpotter.domain.sample import Sample
     from promptpotter.domain.value_tree import Delivery
 
 logger = logging.getLogger(__name__)
@@ -102,42 +104,14 @@ def build_backend_client(
         auth_token=connector.auth_token() if connector.auth_token else None,
         machine_slots=(
             MachineSlots(
-                default_jobs_dir() / "machine" / connector.name, connector.max_cells_in_flight
+                default_jobs_dir() / "machine" / connector.name,
+                connector.max_cells_in_flight,
+                compose_overlay=connector.compose_overlay,
             )
             if connector.cells_hold_the_machine
             else None
         ),
     )
-
-
-def _is_session_error(resp: httpx.Response) -> bool:
-    """True when a 400 body signals a missing session (→ recover + retry). Accepts either the machine-readable ``no_session`` code or the
-    word in the message, across BOTH error envelopes, so a backend reload self-heals instead of aborting the round."""
-    try:
-        body = resp.json()
-    except (KeyboardInterrupt, asyncio.CancelledError):
-        raise
-    except Exception:
-        return False
-    if not isinstance(body, dict):
-        return False
-    if body.get("code") == "no_session":
-        return True
-    text = " ".join(str(body.get(k, "")) for k in ("message", "detail", "error"))
-    return "session" in text.lower()
-
-
-def _resend_refused(resp: httpx.Response) -> str | None:
-    """The backend's reason where its error body says a resend ends the same way
-    (``detail.retryable: false`` — TermNorm's deadline on a provider request), else ``None``."""
-    try:
-        body = resp.json()
-    except ValueError:
-        return None
-    detail = body.get("detail") if isinstance(body, dict) else None
-    if not isinstance(detail, dict) or detail.get("retryable") is not False:
-        return None
-    return f"{detail.get('error_code')}: {detail.get('message')}"
 
 
 def _reply_data(resp: httpx.Response) -> dict[str, Any]:
@@ -216,11 +190,15 @@ class MachineSlots:
     **A slot is taken only by the cell holding the TURN**, one more lock every cell passes through
     and a waiting cell keeps until a slot is its own. Without it the pool belongs to whichever run
     filled it: that run's next cell asks the instant one lands, a waiting run asks on its next tick,
-    so a run armed to the pool's depth holds every slot until its round ends."""
+    so a run armed to the pool's depth holds every slot until its round ends.
 
-    def __init__(self, root: Path, capacity: int) -> None:
+    **Holding a slot is what claims the machine** (``docker_host.claim_machine``), so no connector
+    can run a container cell this process has not put its producer lock and sweep behind."""
+
+    def __init__(self, root: Path, capacity: int, *, compose_overlay: Path | None) -> None:
         self._root = root
         self._capacity = capacity
+        self._compose_overlay = compose_overlay
 
     def _lock(self, name: str) -> BaseFileLock | None:
         held = FileLock(str(self._root / f"{name}.lock"), timeout=0)
@@ -249,6 +227,8 @@ class MachineSlots:
     @asynccontextmanager
     async def hold(self) -> AsyncIterator[None]:
         self._root.mkdir(parents=True, exist_ok=True)
+        with machine_step():
+            await claim_machine(compose_overlay=self._compose_overlay)
         turn = await self._wait(lambda: self._lock("turn"))
         try:
             slot = await self._wait(self._take)
@@ -349,10 +329,12 @@ class BackendClient:
     def max_cells_in_flight(self) -> int:
         return self._max_cells_in_flight
 
-    def cell_envelope_s(self, query: str, pipeline_params: dict[str, Any] | None) -> float | None:
+    def cell_envelope_s(
+        self, sample: Sample, pipeline_params: dict[str, Any] | None
+    ) -> float | None:
         """Seconds this cell may spend, or ``None`` where the backend declares no bound — see
         :attr:`Connector.cell_envelope_s`. A method, not a property: it is resolved per cell."""
-        return None if self._cell_envelope is None else self._cell_envelope(query, pipeline_params)
+        return None if self._cell_envelope is None else self._cell_envelope(sample, pipeline_params)
 
     def prompt_delivery(self, pipeline_params: dict[str, Any] | None) -> Delivery:
         """The channel the candidate's prompt travels under these params, so
@@ -439,7 +421,7 @@ class BackendClient:
 
     async def run_query(
         self,
-        query: str,
+        sample: Sample,
         pipeline_params: dict[str, Any] | None = None,
         *,
         bound: SendBound | None,
@@ -456,10 +438,13 @@ class BackendClient:
         answers within :data:`BACKEND_OUTAGE_S`, the rest a bounded number of times, each landing
         on the ledger through :func:`emit_backend_warning`. A 5xx whose body says a resend ends the
         same way is never sent again either: the cell is HALTED (:class:`CellHaltedError`)."""
+        query = sample.query
         payload = self._wire_adapter(query, pipeline_params)
 
         if self._execution != "remote_http":
-            return await self._in_process_until_admitted(query, payload, bound=bound, billed=billed)
+            return await self._in_process_until_admitted(
+                sample, payload, bound=bound, billed=billed
+            )
         if bound is None:
             raise RuntimeError("a remote cell is held whole, so it needs the bound its nodes serve")
         resp = await self._post_until_answered(query, payload, bound=bound, billed=billed)
@@ -469,7 +454,7 @@ class BackendClient:
 
     async def _in_process_until_admitted(
         self,
-        query: str,
+        sample: Sample,
         payload: dict[str, Any],
         *,
         bound: SendBound | None,
@@ -490,7 +475,7 @@ class BackendClient:
             async with self.backpressure.send() as ticket, machine:
                 try:
                     result = await self._in_process_cell(
-                        self._in_process_run, query, payload, bound=bound, billed=billed
+                        self._in_process_run, sample, payload, bound=bound, billed=billed
                     )
                 except CellThrottledError as exc:
                     self.backpressure.throttled(ticket, headers=None, body=str(exc))
@@ -554,7 +539,7 @@ class BackendClient:
     ) -> float | None:
         wait: float | None = None
         code = resp.status_code
-        if 500 <= code < 600 and (refused := _resend_refused(resp)) is not None:
+        if 500 <= code < 600 and (refused := self._guard.resend_refused(resp)) is not None:
             raise CellHaltedError(f"HTTP {code} {refused}", spent={}, step_timings={})
         if 500 <= code < 600 and sends.attempt + 1 < MAX_SEND_ATTEMPTS:
             wait = float(2**sends.attempt)
@@ -569,8 +554,7 @@ class BackendClient:
         elif (
             code == 400
             and not sends.recovered
-            and _is_session_error(resp)
-            and await self._guard.recover(client, self.base_url)
+            and await self._guard.recover(client, self.base_url, resp)
         ):
             sends.recovered = True
             wait = 0.0
@@ -593,24 +577,41 @@ class BackendClient:
     async def _in_process_cell(
         self,
         run: InProcessRun,
-        query: str,
+        sample: Sample,
         payload: dict[str, Any],
         *,
         bound: SendBound | None,
         billed: CellBilling,
     ) -> dict[str, Any]:
         if bound is None:
-            return await run(self.workload, query, payload)
+            return await self._clocked(run, sample, payload)
         if self.holds_own_sends:
             # Every send it makes is billed where it is made, so the cell is no send of its own.
             with reserved(CELL, bound):
-                return await run(self.workload, query, payload)
+                return await self._clocked(run, sample, payload)
         with admitted(CELL, bound, model=None, provider=None) as admission:
             try:
-                result = await run(self.workload, query, payload)
+                result = await self._clocked(run, sample, payload)
             except CellUnscoreableError as exc:
                 # It ran to no verdict — a throttle included — and says what it paid for doing so.
                 _settle(admission, billed(_spent_data(exc)))
                 raise
-            _settle(admission, billed(result.get("data") or {}))
+            _settle(admission, billed(result["data"]))
             return result
+
+    async def _clocked(
+        self, run: InProcessRun, sample: Sample, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        """The arm's reply with the cell's clock on it: every second ``run`` took, retries it made
+        on its own included, on a reply and on a cell that reached no verdict alike."""
+        started = time.monotonic()
+        try:
+            result = await run(self.workload, sample, payload)
+        except CellUnscoreableError as exc:
+            exc.step_timings = dict.fromkeys(exc.spent, time.monotonic() - started)
+            raise
+        spent_s = time.monotonic() - started
+        data = result["data"]
+        data["total_time"] = spent_s
+        data["step_timings"] = {data["terminal_node"]: spent_s}
+        return result

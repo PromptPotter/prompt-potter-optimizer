@@ -2,18 +2,11 @@
 // bounds the pixels. Curation rides `projectionToActivity`, the chat's own translator.
 
 import type { RayItem } from "@/lib/api/types";
+import { RECENT_STEP_S, WEDGED_AFTER_S } from "@/lib/api/types.generated";
 import { projectionToActivity, type ActivityItem } from "@/lib/chat/activity";
 import { candidateLabel } from "@/lib/candidate-label";
 import { fmtDuration } from "@/lib/format";
 import { encodeCyclePath, type CyclePath } from "@/lib/ids";
-
-// 2.5× the longest legitimately silent-but-progressing wait, `measure_sample`'s 120 s
-// QUERY_TIMEOUT. `gate` is excluded (see `rayHead`), and so is a cell the dashboard serves as
-// open: a harness or agent cell runs for minutes and is no step until it lands.
-export const WEDGED_AFTER_S = 300;
-
-// Nine missed 10 s heartbeats.
-const RECENT_S = 90;
 
 export interface RayStep {
   // Never a window index, which shifts when a new cycle is discovered.
@@ -178,7 +171,7 @@ export interface RayHead {
 }
 
 /** Every long await heartbeats (`infrastructure/llm/heartbeat.py`), so a wedged run reads `running`
- *  forever. `wedged` is display-only (I6); a held `gate` heartbeats with no progress legitimately. */
+ *  forever. `wedged` is display-only (I6); a held `gate` and a served-open cell are silent legitimately. */
 export function rayHead(
   steps: readonly RayStep[],
   items: readonly RayItem[],
@@ -209,7 +202,7 @@ export function rayHead(
   }
 
   const sinceProgressS = newestStep ? (nowMs - newestStep.at) / 1000 : Infinity;
-  if (openCell && sinceProgressS > RECENT_S) {
+  if (openCell && sinceProgressS > RECENT_STEP_S) {
     return {
       state: "running",
       label: "Measuring",
@@ -250,7 +243,7 @@ export function rayHead(
     state: "running",
     label: "Running",
     detail:
-      newestStep && sinceProgressS <= RECENT_S ? newestStep.activity.label : "no recent step",
+      newestStep && sinceProgressS <= RECENT_STEP_S ? newestStep.activity.label : "no recent step",
     target,
   };
 }

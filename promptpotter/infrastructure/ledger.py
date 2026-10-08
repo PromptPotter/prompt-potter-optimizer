@@ -16,7 +16,6 @@ must preserve the line count, because the line index IS ``sequence``.
 
 from __future__ import annotations
 
-import json
 import logging
 from collections.abc import Iterator
 from pathlib import Path
@@ -26,6 +25,7 @@ from pydantic import TypeAdapter, ValidationError
 from promptpotter.domain.cycle_paths import CycleDir, WorkspaceDir
 from promptpotter.domain.run_records import CycleRecord
 from promptpotter.infrastructure.projections.base import Projection
+from promptpotter.infrastructure.store.io import read_json_optional
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import LedgerSpan
 
@@ -38,9 +38,9 @@ def _fork_link(cycle_dir: Path) -> tuple[str, int] | None:
     """``(parent_cycle_id, index.json::forked_at_offset)``, or ``None`` for a root. An unstamped
     fork raises: a default ``0`` reads as a real, much shorter history."""
     index = CycleLayout(cycle_dir).manifest
-    if not index.is_file():
-        return None
-    data = json.loads(index.read_text(encoding="utf-8"))
+    # Optional, not tolerant: an absent manifest is a root, a corrupt one is a history we cannot
+    # vouch for and must not shorten to a root's.
+    data = read_json_optional(index)
     if not isinstance(data, dict):
         return None
     parent = data.get("parent_cycle_id")

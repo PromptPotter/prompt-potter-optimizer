@@ -25,7 +25,7 @@ from promptpotter.application.datasets.authored import (
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, resolve_optimizer
 from promptpotter.config.settings import DEFAULT_ORIGIN_BUDGET
 from promptpotter.domain.l4.proxies import INNER_RESULT_KEY, OUTER_PROXY_KEYS
-from promptpotter.domain.pipeline_schema import ManifestNodeOverlay, NodeKind, NodeType
+from promptpotter.domain.pipeline_schema import ManifestNodeOverlay, NodeKind, NodeRole
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.dataset_access import (
     dataset_pipeline_path,
@@ -37,7 +37,8 @@ from promptpotter.shared.errors import CellUnscoreableError
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from promptpotter.application.runner.inner.spawn_context import InnerSpawnContext
+    from promptpotter.connectors.protocol import Connector
+    from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.store.stores import Stores
 
 
@@ -246,11 +247,22 @@ class InnerTaskSpec(StrictModel):
 assert set(InnerTaskSpec.model_fields) >= _DEPTH_FIELDS
 
 
+def _recursion_connector() -> Connector:
+    """The connector whose cells are inner campaigns — the one object both L4 probes ask."""
+    return connectors.get("promptpotter")
+
+
 def inner_tasks_path(dataset_dir: Path) -> Path:
     """The dataset's inner-task panel. ONE spelling, so the is-this-L4 probe and the loader cannot drift
     apart — a drift that skips the observation contract rather than raising."""
 
-    return dataset_dir / connectors.get("promptpotter").experiment_file
+    return dataset_dir / _recursion_connector().experiment_file
+
+
+def is_self_optimization(backend_type: str) -> bool:
+    """Whether a campaign on *backend_type* optimizes the optimizer: its connector IS the recursion's.
+    Asked of the registry, so every surface serves this answer and none compares a name."""
+    return connectors.registered().get(backend_type) is _recursion_connector()
 
 
 def load_inner_tasks(path: Path) -> InnerTasks:
@@ -346,15 +358,13 @@ class InnerCells:
     def chain(self) -> list[str]:
         """The outer's backend chain: the llm and measurement nodes of the inner round."""
         inner = self.optimizer
-        return [
-            n for n in inner.schema.pipelines["default"] if inner.node(n).wire_type in _OUTER_KINDS
-        ]
+        return [n for n in inner.schema.pipelines["default"] if inner.node(n).kind in _OUTER_KINDS]
 
     @property
     def terminal(self) -> str:
         """Where an outer cell's row is stamped: the chain's last llm node, after which only
         measurement nodes, which carry no config, follow — so only a FULL match replays a row."""
-        return [n for n in self.chain if self.optimizer.node(n).wire_type is NodeKind.LLM][-1]
+        return [n for n in self.chain if self.optimizer.node(n).kind is NodeKind.LLM][-1]
 
     def pipeline(self) -> dict[str, Any]:
         """The outer's graph, as a backend's ``GET /pipeline`` answers it: every inner llm node, tunable
@@ -362,15 +372,15 @@ class InnerCells:
         inner = self.optimizer
         observed = [{"pipeline_key": key} for key in (INNER_RESULT_KEY, *OUTER_PROXY_KEYS)]
         nodes: dict[str, dict[str, Any]] = {}
-        for node in inner.schema.config_nodes:
-            if node.wire_type is NodeKind.GATEWAY:
-                nodes[node.name] = {"type": node.wire_type.value, "config": {}}
-            elif node.wire_type is NodeKind.LLM:
+        for node in inner.schema.declared_nodes:
+            if node.kind is NodeKind.GATEWAY:
+                nodes[node.name] = {"type": node.kind.value, "config": {}}
+            elif node.kind is NodeKind.LLM:
                 levers = inner.runtime.override_param_types(node.name)
                 terminal = node.name == self.terminal
                 nodes[node.name] = {
-                    "type": node.wire_type.value,
-                    "node_role": NodeType.RANKER.value if terminal else NodeType.NONE.value,
+                    "type": node.kind.value,
+                    "node_role": NodeRole.RANKER.value if terminal else "",
                     "config": {},
                     "optimizer": {
                         "param_keys": [*OUTER_PROMPT_FIELDS, *levers],
@@ -421,29 +431,20 @@ def resolve_inner_cells(stores: Stores, panel: InnerTasks) -> InnerCells:
     return InnerCells(panel=panel, by_dataset=by_dataset, treatment=runs[min(runs)])
 
 
-def resolve_inner_task(ctx: InnerSpawnContext, query: str) -> InnerTaskSpec:
-    """Map an outer query to its inner-campaign spec — the top-level benchmark + budget, overlaid by the
-    cell the query names.
-
-    Off the panel the CONTEXT carries, so every cell of one run resolves against the panel that
-    run opened with."""
-    if ctx.cells is None:
-        raise CellUnscoreableError(
-            f"{inner_tasks_path(ctx.dataset_config_dir)} is missing — the inner benchmark, its "
-            "sample count and its round cap are all declared there. There is no default to run.",
-            spent={},
-            step_timings={},
-        )
-    panel = ctx.cells.panel
+def resolve_inner_task(cells: InnerCells, sample: Sample) -> InnerTaskSpec:
+    """Map an outer sample to its inner-campaign spec — the top-level benchmark + budget, overlaid
+    by the cell the sample IS: its ``source_pin`` is the panel task run init resolved for it."""
+    panel = cells.panel
     cfg = panel.inner_benchmark_config
-    cell = next((t for t in panel.tasks if t.id == query), None)
-    if cell is None:
+    try:
+        cell = InnerTask.model_validate(sample.source_pin)
+    except ValidationError as exc:
         raise CellUnscoreableError(
-            f"{query!r} is no cell of the panel this run opened with", spent={}, step_timings={}
-        )
+            f"{sample.query!r} is no cell of an inner panel: {exc}", spent={}, step_timings={}
+        ) from exc
     return InnerTaskSpec(
         inner_dataset=panel.dataset_for(cell),
-        optimizer_treatment=ctx.cells.treatment,
+        optimizer_treatment=cells.treatment,
         seed=cell.inner_dataset_seed,
         n_samples=cfg.n_samples_per_inner_round,
         n_samples_origin=cfg.n_samples_origin,
@@ -526,6 +527,7 @@ __all__ = [
     "InnerCells",
     "InnerTaskSpec",
     "inner_instrument_config",
+    "is_self_optimization",
     "load_inner_tasks",
     "resolve_inner_cells",
     "resolve_inner_task",

@@ -1,7 +1,6 @@
 "use client";
 import { useMemo, useState, type ReactNode } from "react";
 import { useSelection } from "@/lib/SelectionContext";
-import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useWorkspace } from "@/lib/workspace";
 import { useRoundRows } from "@/lib/hooks/useRoundRows";
 import { useViewedLineage } from "@/lib/lineage";
@@ -16,9 +15,10 @@ import {
 import { useConnector } from "@/lib/hooks/useConnector";
 import type { LineageNode } from "@/lib/api";
 import { ARM_OUTCOMES_ENDED_EARLY } from "@/lib/api/types.generated";
-import { liveCandidates } from "@/lib/poll";
+import { liveCandidates, useCycleStream } from "@/lib/poll";
 import {
   isSelectedCandidate,
+  selectedCandidateOf,
   type CandidateRow,
   type ElectedRow,
   type SampleRow,
@@ -40,7 +40,7 @@ export function MeasurementRun({
   // Threaded from the panel, never re-resolved: a second `useEffectiveRound` can disagree for a tick.
   round: number;
 }) {
-  const { dash, status } = useDashboard();
+  const { dash, status } = useCycleStream();
   // The TARGET pipeline's schema: the scoring node is the optimizer's, what it scored is not.
   const cv = useConnector();
   // `leafIsL4` is the DECLARED backend type, never "did the tree find inner runs": cells still
@@ -61,14 +61,7 @@ export function MeasurementRun({
   const onSelectCandidate = (c: CandidateRow | null): void =>
     setSelectionForCandidate(
       c && leafCycleId
-        ? {
-            cycle_id: leafCycleId,
-            round: c.round,
-            candidate_id: c.candidate_id,
-            label: c.label,
-            accuracy: c.accuracy,
-            is_selected: c.is_selected,
-          }
+        ? selectedCandidateOf(leafCycleId, c.round, c.candidate_id, c.label)
         : null,
     );
   const {

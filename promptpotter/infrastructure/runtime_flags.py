@@ -14,11 +14,12 @@ from promptpotter.domain.launch_limits import RoundsCap
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.run_records import RunLimitsRecord
 from promptpotter.domain.spend import BudgetChange
+from promptpotter.infrastructure.llm.heartbeat import HEARTBEAT_INTERVAL_S
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_declared_phase,
 )
 from promptpotter.infrastructure.store.io import read_json_tolerant, write_json
-from promptpotter.infrastructure.store.layout import CycleLayout
+from promptpotter.infrastructure.store.layout import CampaignLayout, CycleLayout
 from promptpotter.infrastructure.store.read_model import derived, file_sig
 
 
@@ -264,6 +265,11 @@ def overlay_armed_controls(body: dict[str, Any], cycle_dir: Path) -> None:
 # it splits running from detached, it does not define "running".
 RUN_FRESH_S = 30.0
 
+# Freshness proves ATTACHMENT, never progress, so these two windows are the time-ray head's other
+# half, over the gap since the last NON-heartbeat append. A held gate and an open cell are exempt.
+RECENT_STEP_S = 9 * HEARTBEAT_INTERVAL_S
+WEDGED_AFTER_S = 30 * HEARTBEAT_INTERVAL_S
+
 
 def _heartbeat_mtime(cycle_dir: Path) -> float | None:
     """The producer's last sign of life. ``dashboard.json`` is canonical whenever it exists — never
@@ -359,7 +365,7 @@ def run_phase_validator_epoch(cycle_dir: Path, *, fresh_s: float = RUN_FRESH_S) 
     which a verify writes from a process that moves no other path here, with its own clock edge
     (:func:`verify_stale_after`)."""
     layout = CycleLayout(cycle_dir)
-    campaign_manifest = cycle_dir.parent.parent / "campaign.json"
+    campaign_manifest = CampaignLayout(cycle_dir.parent.parent).manifest
     stamps: list[float] = []
     for path in (
         layout.cycle_dir,
@@ -380,7 +386,9 @@ def run_phase_validator_epoch(cycle_dir: Path, *, fresh_s: float = RUN_FRESH_S) 
 
 
 __all__ = [
+    "RECENT_STEP_S",
     "RUN_FRESH_S",
+    "WEDGED_AFTER_S",
     "armed_run_limits",
     "clear_run_control_flags",
     "derive_run_phase",

@@ -10,11 +10,11 @@ import {
   ToolbarSpacer,
 } from "@/components/ui";
 import { RotatePrompt } from "@/components/shell/RotatePrompt";
-import { useDashboard } from "@/lib/hooks/useDashboard";
+import { useCycleStream } from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";
 import { useSelection } from "@/lib/SelectionContext";
 import { isSelectedCandidate } from "@/lib/types";
-import { selectedCandidateOf } from "@/lib/derivations";
+import { selectedNodeOf } from "@/lib/derivations";
 import { encodeCyclePath, pathLeaf, shortFamilyTail } from "@/lib/ids";
 import { fmtPct0 } from "@/lib/format";
 import { CleanupConfirmModal } from "./CleanupConfirmModal";
@@ -25,7 +25,7 @@ import { useLineage } from "@/lib/hooks/useLineage";
 // The lineage forest card: a cladogram of cycles, sharing no axis with the candidates card's bars.
 // The toggle opening it lives beside the dendrogram and writes `showForest`.
 export function ForestCard() {
-  const { dash } = useDashboard();
+  const { dash } = useCycleStream();
   const {
     campaignId,
     cycleId,
@@ -63,7 +63,7 @@ export function ForestCard() {
       clip: null,
       isPicked: (n) =>
         isSelectedCandidate(candidate, pathLeaf(n.coursePath).cycleId, n.round, n.candidateId),
-      onPickCandidate: (n, value) => {
+      onPickCandidate: (n) => {
         const nodeCycleId = pathLeaf(n.coursePath).cycleId;
         if (n.coursePathKey !== (viewedPath ? encodeCyclePath(viewedPath) : null)) {
           selectCyclePath(n.coursePath, null);
@@ -71,7 +71,7 @@ export function ForestCard() {
         setSelectionForCandidate(
           isSelectedCandidate(candidate, nodeCycleId, n.round, n.candidateId)
             ? null
-            : selectedCandidateOf(n.node, nodeCycleId, value),
+            : selectedNodeOf(n.node, nodeCycleId),
         );
       },
     }),

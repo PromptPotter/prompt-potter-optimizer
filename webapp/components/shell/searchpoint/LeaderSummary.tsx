@@ -3,7 +3,7 @@
 // then spend, lift, the diff and the rows that changed hands. The Dashboard mounts it at size and
 // the chat's run card mounts the same component, so the two cannot disagree.
 import { useMemo } from "react";
-import { useDashboard } from "@/lib/hooks/useDashboard";
+import { useCycleStream } from "@/lib/poll";
 import { useCompareWithOrigin } from "@/lib/hooks/useCompareWithOrigin";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { useEvidence } from "@/lib/hooks/useEvidence";
@@ -13,6 +13,7 @@ import {
   METER_WORD,
   candidateObserveConfig,
   observeOptions,
+  originAt,
   runSummary,
   sampleFlips,
   searchPointDiff,
@@ -28,6 +29,7 @@ import { CELL_MEAN_ROWS } from "@/lib/cell-means";
 import { PROMPT_STRING_FIELDS } from "@/lib/prompt-fields";
 import { fmtPct0, fmtSigned, fmtUsd } from "@/lib/format";
 import { cx } from "@/lib/cx";
+import { useViewedLineage } from "@/lib/lineage";
 import { useWorkspace } from "@/lib/workspace";
 import { Button, CopyButton, HoverCard, SegmentedControl, Term } from "@/components/ui";
 import { NodeSurface } from "@/components/shell/node-surface/NodeSurface";
@@ -37,7 +39,7 @@ import { SpendBuckets } from "@/components/shell/SpendBuckets";
 const LIVE_SIGNALS_MS = 30000;
 
 export function LeaderSummary() {
-  const { dash } = useDashboard();
+  const { dash } = useCycleStream();
   const cv = useConnector();
   // No node selected: the WHOLE-pipeline view.
   const observe = useObserveSearchPoint(null);
@@ -45,7 +47,14 @@ export function LeaderSummary() {
 
   // ROUND 0, read ONCE for the box: the origin diff and the flipped rows both ask about it.
   const origin = useRoundRows(dash ? 0 : null);
-  const originCfg = candidateObserveConfig(origin.doc, "C0", "origin · C0", null);
+  // Which row of it is the origin is the tree's to say; the round document is joined on its label.
+  const { viewedPath } = useWorkspace();
+  const { index } = useViewedLineage();
+  const originLabel = originAt(index, viewedPath)?.course_label ?? null;
+  const originCfg =
+    originLabel === null
+      ? null
+      : candidateObserveConfig(origin.doc, originLabel, `origin · ${originLabel}`, null);
 
   if (!summary) return null;
   return (
@@ -53,6 +62,7 @@ export function LeaderSummary() {
       observe={observe}
       summary={summary}
       originCfg={originCfg}
+      originPending={origin.loading || originLabel === null}
       origin={origin}
       schema={cv.nodeConfigSchema}
       schemaStatus={cv.pipelineStatus}
@@ -67,7 +77,7 @@ export function LeaderSummary() {
 // never a difference taken here.
 function LeadSignals() {
   const { viewedPath } = useWorkspace();
-  const { dash, isLive } = useDashboard();
+  const { dash, isLive } = useCycleStream();
   const pair = useCompareWithOrigin(viewedPath, null);
   const { evidence } = useEvidence(
     pair.subjects,
@@ -201,6 +211,7 @@ function ConfigBox({
   observe,
   summary,
   originCfg,
+  originPending,
   origin,
   schema,
   schemaStatus,
@@ -209,6 +220,8 @@ function ConfigBox({
   observe: ReturnType<typeof useObserveSearchPoint>;
   summary: RunSummary;
   originCfg: ReturnType<typeof candidateObserveConfig>;
+  // The round document or the tree naming its origin row has not landed: no diff can be claimed.
+  originPending: boolean;
   origin: RoundRows;
   schema: Parameters<typeof NodeSurface>[0]["schema"];
   schemaStatus: Parameters<typeof NodeSurface>[0]["schemaStatus"];
@@ -277,7 +290,7 @@ function ConfigBox({
         <details className="run-diff">
           <summary>
             <span className="run-diff-label">{cfg.label}</span>
-            {origin.loading ? (
+            {originPending ? (
               <span className="run-diff-changes">comparing to origin…</span>
             ) : diff.length === 0 ? (
               <span className="run-diff-changes">identical to the origin you submitted</span>
@@ -352,8 +365,8 @@ function DiffChip({ group }: { group: DiffGroup }) {
   );
 }
 
-// Why best is still the origin — only on `best`, only when the last round elected nobody. The verdict is
-// the served `RoundSummary.improved`: a challenger's subset rate is not comparable to the origin's.
+// Why best did not move — only on `best`, only when the last round elected nobody. Both the verdict
+// (`RoundSummary.improved`) and its sentence (`verdict_reason`) are served, never composed here.
 function ChallengerVerdict({
   summary,
   state,
@@ -362,11 +375,10 @@ function ChallengerVerdict({
   state: ObserveState;
 }) {
   const last = summary.lastRound;
-  if (state !== "best" || !last || last.improved !== false || last.candidates === 0) return null;
+  if (state !== "best" || !last || last.improved !== false || !last.verdictReason) return null;
   return (
-    <span className="run-diff-verdict" title={last.verdictReason ?? undefined}>
-      round {last.round}: {last.candidates} candidate{last.candidates === 1 ? "" : "s"} ran, none
-      beat the origin
+    <span className="run-diff-verdict" title={last.verdictReason}>
+      round {last.round}: {last.verdictReason}
     </span>
   );
 }

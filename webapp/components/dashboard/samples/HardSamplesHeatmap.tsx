@@ -3,7 +3,7 @@ import { useState } from "react";
 import { fmtPct0 } from "@/lib/format";
 import { fitnessStyle } from "@/lib/derivations";
 import { useHardSamples } from "@/lib/hard-samples";
-import { useDashboard } from "@/lib/hooks/useDashboard";
+import { useCycleStream } from "@/lib/poll";
 import { MeasurementsPane } from "@/components/shell/measurements/MeasurementsPane";
 import { SampleTrajectory, SampleTrajectoryMiniButton } from "./SampleTrajectory";
 import { RotatePrompt } from "@/components/shell/RotatePrompt";
@@ -19,7 +19,7 @@ export function HardSamplesHeatmap() {
     stale: datasetStale,
     error: datasetError,
   } = useHardSamples();
-  const { dash } = useDashboard();
+  const { dash } = useCycleStream();
   const [heatExpanded, setHeatExpanded] = useState(false);
   const [bankExpanded, setBankExpanded] = useState(false);
 

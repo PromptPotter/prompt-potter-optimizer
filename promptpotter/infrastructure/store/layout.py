@@ -5,15 +5,22 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Literal
+from typing import Literal, NamedTuple
 
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
-from promptpotter.infrastructure.store.io import newest_mtime_ns, validate_path_component
+from promptpotter.infrastructure.store.io import (
+    newest_mtime_ns,
+    read_json_optional,
+    validate_path_component,
+)
+
+logger = logging.getLogger(__name__)
 
 _SIBLING_SEP_RE = re.compile(r"_(fork|diag)_")
 _SIBLING_LAST_SEP_RE = re.compile(r"_(fork|diag)_(?!.*_(fork|diag)_)")
@@ -59,7 +66,7 @@ def campaigns_root_dir_for(tenant_root: WorkspaceDir) -> Path:
 
 
 def campaign_root_dir_for(tenant_root: WorkspaceDir, campaign_id: str) -> Path:
-    """Campaign dir — ``campaign.json`` + ``result.json`` + ``log.md`` + ``hard_samples.json`` + ``cycles/``. Per-session telemetry binds one level down."""
+    """Campaign dir — the files ``CampaignLayout`` declares + ``cycles/``. Per-session telemetry binds one level down."""
     return campaigns_root_dir_for(tenant_root) / validate_path_component(campaign_id)
 
 
@@ -98,9 +105,9 @@ OPTIMIZER_REUSE_DIR = "optimizer_reuse"
 JUDGE_REUSE_DIR = "judge_reuse"
 
 SHARED_CACHE_DIRS: tuple[str, ...] = (MEASUREMENTS_DIR, OPTIMIZER_REUSE_DIR, JUDGE_REUSE_DIR)
-"""Every cache holding real LLM spend, in one place. Consumers: ``cli/commands/reset.py``
-(preserves them), ``api/routers/campaigns/storage.py`` (counts them as shared, and skips them when
-summing the residual)."""
+"""Every cache holding real LLM spend, in one place. Consumers: ``application/maintenance/reset.py``
+(preserves them), ``application/maintenance/storage_report.py`` (counts them as shared, and skips
+them when summing the residual)."""
 
 
 # -- L4 inner sandboxes -------------------------------------------------------
@@ -140,6 +147,30 @@ def sandbox_owner_path(sandbox_dir: Path) -> Path:
     """A material fact, so it lands on disk in readable form rather than only in the directory
     name. It is what makes the orphan reaper's ownership test exact."""
     return sandbox_dir / "owner.json"
+
+
+class SandboxOwner(NamedTuple):
+    """The ``(tenant, campaign, cycle)`` a sandbox belongs to, as its ``owner.json`` records it."""
+
+    tenant_id: str
+    campaign_id: str
+    cycle_id: str
+
+
+def read_sandbox_owner(sandbox_dir: Path) -> SandboxOwner | None:
+    """``None`` where the record is absent or names a segment no path can hold. The directory
+    name is a hash, so nothing else says who owns a sandbox: a caller KEEPS what this cannot name.
+    """
+    record = read_json_optional(sandbox_owner_path(sandbox_dir))
+    if not isinstance(record, dict):
+        return None
+    try:
+        return SandboxOwner(
+            *(validate_path_component(str(record.get(name, ""))) for name in SandboxOwner._fields)
+        )
+    except ValueError as exc:
+        logger.warning("inner sandbox %s names an unusable owner: %s", sandbox_dir, exc)
+        return None
 
 
 def round_basename(round_num: int) -> str:
@@ -314,29 +345,55 @@ class CycleLayout:
         return self.runtime / "run_limits.json"
 
 
-def _cycle_report_names() -> frozenset[str]:
-    """Every file ``CycleLayout`` declares DIRECTLY in a cycle dir — its human-readable tier, as
-    against everything nested under ``.runtime/`` or ``rounds/``. Derived rather than re-authored:
-    a hand-copy of these names drifted the moment ``export.json`` was added, so
-    ``delete --keep-results`` deleted the campaign's own answer while sparing ``dashboard.json``."""
-    probe = CycleLayout(Path("."))
-    return frozenset(
-        p.name
-        for name, attr in vars(CycleLayout).items()
+@dataclass(frozen=True, slots=True)
+class CampaignLayout:
+    """Sole owner of the files directly in ``campaigns/{c}/``, one level ABOVE any cycle — the
+    Files tree and the ``reports`` keepsake both read :meth:`files`, so neither authors the set."""
+
+    campaign_dir: Path
+
+    @property
+    def manifest(self) -> Path:
+        return self.campaign_dir / "campaign.json"
+
+    @property
+    def result(self) -> Path:
+        """The campaign's result — ``domain/campaign.py::CampaignResult``."""
+        return self.campaign_dir / "result.json"
+
+    @property
+    def log_md(self) -> Path:
+        return self.campaign_dir / "log.md"
+
+    @property
+    def hard_samples(self) -> Path:
+        return self.campaign_dir / "hard_samples.json"
+
+    def files(self) -> list[Path]:
+        return _declared_files(self, self.campaign_dir)
+
+
+def _declared_files(layout: CycleLayout | CampaignLayout, root: Path) -> list[Path]:
+    """Every file *layout* declares DIRECTLY in *root*, in declaration order. Derived: a hand-copy
+    skips the next file declared, and ``delete --keep-results`` then deletes it."""
+    return [
+        p
+        for name, attr in vars(type(layout)).items()
         if isinstance(attr, property)
-        and isinstance(p := getattr(probe, name), Path)
-        and p.parent == probe.cycle_dir
+        and isinstance(p := getattr(layout, name), Path)
+        and p.parent == root
         and p.suffix
-    )
+    ]
 
 
-# The campaign's result (`domain/campaign.py::CampaignResult`), beside its manifest.
-CAMPAIGN_RESULT = "result.json"
+_PROBE = Path(".")
 
-# Readable-output files (anywhere in a campaign tree) → the ``reports`` keepsake. The manifest and
-# the result sit at the campaign root, one level ABOVE any cycle, so no `CycleLayout` property finds
-# them.
-_REPORT_NAMES = _cycle_report_names() | {"campaign.json", CAMPAIGN_RESULT}
+# Readable-output files (anywhere in a campaign tree) → the ``reports`` keepsake.
+_REPORT_NAMES = frozenset(
+    p.name
+    for layout in (CycleLayout(_PROBE), CampaignLayout(_PROBE))
+    for p in _declared_files(layout, _PROBE)
+)
 
 
 class FileKind(Enum):
@@ -396,13 +453,14 @@ def course_validator_ns(cycle_dir: Path) -> int | None:
 
 
 __all__ = [
-    "CAMPAIGN_RESULT",
     "JUDGE_REUSE_DIR",
     "MEASUREMENTS_DIR",
     "OPTIMIZER_REUSE_DIR",
     "SHARED_CACHE_DIRS",
+    "CampaignLayout",
     "CycleLayout",
     "FileKind",
+    "SandboxOwner",
     "campaign_root_dir_for",
     "campaigns_root_dir_for",
     "classify",
@@ -411,6 +469,7 @@ __all__ = [
     "inner_sandbox_dir",
     "inner_sandbox_key",
     "inner_sandboxes_dir",
+    "read_sandbox_owner",
     "root_cycle_id",
     "round_basename",
     "sandbox_owner_path",

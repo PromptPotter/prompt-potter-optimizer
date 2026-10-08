@@ -1,12 +1,12 @@
 "use client";
 import { availableRounds } from "@/lib/derivations";
 import { useSelection } from "@/lib/SelectionContext";
-import { useDashboard } from "@/lib/hooks/useDashboard";
+import { useCycleStream } from "@/lib/poll";
 
 // The round axis, in the optimizer card because its canvas depicts one round. Writes
 // `selection.round`: `null` and `liveRound` both follow live.
 export function RoundAxis() {
-  const { dash, isLive } = useDashboard();
+  const { dash, isLive } = useCycleStream();
   const { round: selectedRound, setSelectionForRound } = useSelection();
   const { completed, live: liveRound } = availableRounds(dash, isLive);
   const liveActive = liveRound != null;

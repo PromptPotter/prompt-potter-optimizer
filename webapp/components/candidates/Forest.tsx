@@ -1,6 +1,6 @@
 "use client";
 import { memo, useCallback, useMemo } from "react";
-import { fmtPct0 } from "@/lib/format";
+import { fmtPct0, fmtTheta } from "@/lib/format";
 import {
   fmtDisplayValue,
   displayMetricLabel,
@@ -39,7 +39,7 @@ export interface CladogramChannel extends CladogramAnchor {
 export interface CladogramCtx {
   viewedKey: string | null;
   isPicked: (n: RoundNodePos) => boolean;
-  onPickCandidate: (n: RoundNodePos, value: number | null) => void;
+  onPickCandidate: (n: RoundNodePos) => void;
   channels: readonly CladogramChannel[];
   // The family is cut to this channel's extent; `null` draws the whole family.
   clip: CladogramAnchor | null;
@@ -97,7 +97,7 @@ const CandidateNode = memo(function CandidateNode({
       )}
       {...pressable(() => onPick(n))}
       aria-pressed={selected}
-      aria-label={`Round ${n.round} candidate ${n.candidateLabel}, ${invalidated ? "unknown — a setting was changed at or above this point" : `${displayMetricLabel(shown)} ${fmtDisplayValue(shown, accuracy, theta)}`}${n.isElected ? ", round winner" : ""}${ink ? ", a channel of the comparison" : ""}${retiredBy ? ", retired — the run branched away and continued elsewhere" : ""}${divergence ? ", divergence point under the lens" : ""}${alt ? ", would be elected under the scoring lens" : ""}${dimmed ? ", counterfactual under the scoring lens" : ""}`}
+      aria-label={`Round ${n.round} candidate ${n.candidateLabel}, ${invalidated ? "unknown — a setting was changed at or above this point" : `${displayMetricLabel(shown)} ${fmtDisplayValue(shown, accuracy, theta)}`}${n.crown === "elected" ? ", round winner" : ""}${ink ? ", a channel of the comparison" : ""}${retiredBy ? ", retired — the run branched away and continued elsewhere" : ""}${divergence ? ", divergence point under the lens" : ""}${alt ? ", would be elected under the scoring lens" : ""}${dimmed ? ", counterfactual under the scoring lens" : ""}`}
       style={{ cursor: "pointer" }}
     >
       <title>
@@ -106,16 +106,18 @@ const CandidateNode = memo(function CandidateNode({
           ? "unknown"
           : fmtDisplayValue(shown, accuracy, theta)}
         {!invalidated && shown !== "ability" && typeof theta === "number"
-          ? ` · ability θ ${theta.toFixed(2)}`
+          ? ` · ability θ ${fmtTheta(theta)}`
           : ""}
         {invalidated
           ? "\na setting was changed here or above — nothing ran at that value, so this point's numbers describe a searchpoint it no longer is"
           : ""}
-        {n.isElected
+        {n.crown === "elected"
           ? `\nround winner${stampsTheta ? " — elected on difficulty-adjusted ability θ, not raw accuracy" : ""}`
-          : n.isWinner
+          : n.crown === "uncontested"
             ? "\nthe round's only arm — it advances without an election"
-            : ""}
+            : n.isWinner
+              ? "\nselected — its round has not closed yet"
+              : ""}
         {retiredBy
           ? `\nretired — the run branched to ${shortFamilyTail(retiredBy)} and continued there; kept as the record of what ran`
           : ""}
@@ -189,10 +191,6 @@ export function Forest({
     valueByKey.get(n.candKey) ?? null;
   const thetaOf = (n: RoundNodePos): number | null =>
     thetaByKey.get(n.candKey) ?? null;
-  const onPick = useCallback(
-    (n: RoundNodePos) => onPickCandidate(n, valueByKey.get(n.candKey) ?? null),
-    [onPickCandidate, valueByKey],
-  );
   const { laneByKey, totalLaneRows, maxCol } = useMemo(
     () => layout(tree, expanded, clip && extentKeys(tree, clip)),
     [tree, expanded, clip],
@@ -412,7 +410,7 @@ export function Forest({
                   <title>
                     {nodeCycleId} · R{n.round} · {fmtDisplayValue(shown, valOf(n), thetaOf(n))}
                     {shown !== "ability" && typeof thetaOf(n) === "number"
-                      ? ` · ability θ ${thetaOf(n)!.toFixed(2)}`
+                      ? ` · ability θ ${fmtTheta(thetaOf(n))}`
                       : ""}
                     {n.candidateLabel ? `\n${n.candidateLabel}` : ""}
                     {isDivergence ? "\ndivergence under the scoring lens" : ""}
@@ -433,7 +431,7 @@ export function Forest({
                 theta={thetaOf(n)}
                 metric={metric}
                 selected={isPicked(n)}
-                onPick={onPick}
+                onPick={onPickCandidate}
                 dimmed={n.divergent}
                 alt={altIds.has(n.candidateId)}
                 divergence={n.divergence !== null}

@@ -4,13 +4,8 @@ I/O, no mutation (errors log, never abort the live readout)."""
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-from promptpotter.application.scoring.classification import (
-    get_ranked_items,
-    ranked_item_keys_from_schema,
-)
-from promptpotter.application.scoring.row_diagnostics import find_rank
 from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
 from promptpotter.application.views.render.primitives import (
     BOLD,
@@ -19,17 +14,19 @@ from promptpotter.application.views.render.primitives import (
     RESET,
     YELLOW,
     _node_line,
+    fmt_fitness,
 )
 from promptpotter.domain.connector import MeasuredUnit, unit_count
 from promptpotter.domain.results import (
     ArmOutcome,
     overlap_series,
-    resolved_fitness,
     scoreboard_rank_key,
 )
 from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.results import RoundResult
 
@@ -52,7 +49,7 @@ def fmt_elapsed(seconds: float) -> str:
 _PLATEAU_THETA_BAND = 0.05
 
 
-def render_progress_table(rounds: list[dict[str, Any]], *, stamps_theta: bool) -> str:
+def render_progress_table(rounds: Sequence[RoundResult], *, stamps_theta: bool) -> str:
     """``stamps_theta`` is the selector's own declaration: one that elects on no θ gets no θ
     column, trend or plateau advice, since its rounds were never decided on one."""
     if not rounds:
@@ -71,10 +68,8 @@ def render_progress_table(rounds: list[dict[str, Any]], *, stamps_theta: bool) -
     # nothing here may average it across rounds: that mean names a number no configuration scored.
     thetas: list[float] = []
     prev: float | None = None
-    for rd in rounds:
-        acc = rd.get("accuracy") or 0
-        theta = rd.get("theta")
-        theta = float(theta) if isinstance(theta, int | float) else None
+    for rr in rounds:
+        theta = rr.ability.theta if rr.ability is not None else None
         if theta is None:
             th_str, trend = "---", "-"
         else:
@@ -82,13 +77,12 @@ def render_progress_table(rounds: list[dict[str, Any]], *, stamps_theta: bool) -
             th_str = f"{theta:+.3f}"
             trend = "-" if prev is None else f"{theta - prev:+.3f}"
             prev = theta
-        rl = "G" if rd.get("round") == "grid" else str(rd.get("round", "?"))
-        comp = resolved_fitness(rd.get("composite_fitness"), acc)
-        # `28+33` when the origin panel is carried: the band this round chose to learn from,
-        # then the fixed yardstick every round shares. One number would hide that two rounds
-        # with the same `n` can have bought entirely different cells.
-        n = int(rd.get("total") or 0)
-        row = f"  {rl:<5s} {acc:>8.1%} {n:>5d} {comp:>9.4f}"
+        # A round that read no cell prints no rate and no composite — never the 0.0% of one that
+        # failed every cell.
+        row = (
+            f"  {rr.round!s:<5s} {fmt_pct(rr.accuracy):>8s} {rr.total:>5d} "
+            f"{fmt_fitness(rr.composite_fitness):>9s}"
+        )
         if stamps_theta:
             row += f" {th_str:>10s} {trend:>9s}"
         lines.append(_node_line(row))
@@ -187,7 +181,6 @@ def render_round_stats(
         return "\n".join(lines)
 
     try:
-        ranked_item_keys = ranked_item_keys_from_schema(pipeline_schema)
         results = round_result.results
         n_results = len(results)
         degraded = 0
@@ -204,14 +197,8 @@ def render_round_stats(
 
         # Skip recall@k for llm_only-style pipelines — no ranked_items to match against ground_truth.
         valid = [r for r in results if not is_error_result(r)]
-        if valid and ranked_item_keys:
-            ranks = [
-                find_rank(
-                    get_ranked_items(r, ranked_item_keys),
-                    r.get("ground_truth", ""),
-                )
-                for r in valid
-            ]
+        if valid:
+            ranks = [r.get("ground_truth_rank") for r in valid]
             if any(rk is not None for rk in ranks):
 
                 def recall_at_k(k: int) -> float:

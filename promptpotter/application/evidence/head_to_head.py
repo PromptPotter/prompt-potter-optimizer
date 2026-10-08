@@ -13,6 +13,7 @@ from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
 from promptpotter.application.runner.bench import bench_rows
 from promptpotter.application.runner.campaign_result import headline_under, read_line_spend
+from promptpotter.application.scoring.classification import scoreable_rows
 from promptpotter.application.scoring.selection import paired_fitness
 from promptpotter.domain.bench import (
     BENCH_HEADLINE,
@@ -361,7 +362,11 @@ def _read_alike(a: _Graded, b: _Graded) -> bool:
 def _paired(
     a_rows: list[QueryMeasurement], b_rows: list[QueryMeasurement]
 ) -> tuple[float, float | None, float | None, float | None, int]:
-    b_grades, a_grades = paired_fitness(b_rows, a_rows, grade=COLUMN_GRADE[BENCH_HEADLINE])
+    # The rows both SCORED, as `BenchScore.lift` reads them: paired raw, a cell either campaign
+    # left ungraded would enter as a 0.0 and shift the pair on an outage.
+    b_grades, a_grades = paired_fitness(
+        scoreable_rows(b_rows), scoreable_rows(a_rows), grade=COLUMN_GRADE[BENCH_HEADLINE]
+    )
     return paired_reading(b_grades, a_grades)
 
 
@@ -434,9 +439,12 @@ def _read(
             bench_ids=bench_ids,
             scorer_id=scorer_id,
             origin_params=origin_params,
-            origin=campaign.root_content_hash,
+            origin=origin,
         )
-        if partition and bench is not None and bench.selected is not None
+        if (origin := campaign.root_content_hash) is not None
+        and partition
+        and bench is not None
+        and bench.selected is not None
         else None
     )
     cost = None if result is None else result.cost

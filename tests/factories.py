@@ -17,6 +17,7 @@ from promptpotter.application.optimizers.potter.records import (
 )
 from promptpotter.domain.optimizer_state import OptimizerState
 from promptpotter.domain.phases import StopReason
+from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
 from promptpotter.domain.results import (
     ArmOutcome,
     CycleResult,
@@ -31,6 +32,14 @@ from promptpotter.domain.wounds import ValidationFailure
 # only two labels: with as many distinct truths as rows the answer space reads as
 # identity-keyed and no constant answerer is detectable.
 _TRUTH = ["TRUE", "FALSE", "TRUE", "FALSE"]
+
+
+def pipeline_schema(nodes: Sequence[PipelineNode], **fields: Any) -> PipelineSchema:
+    """A schema whose chain is ``nodes``, in order — every one declared and run, which is what a
+    target pipeline with no alternative is."""
+    return PipelineSchema(
+        declared_nodes=list(nodes), pipelines={"default": [n.name for n in nodes]}, **fields
+    )
 
 
 def measurement(
@@ -134,6 +143,7 @@ def optimizer_state(
 ) -> OptimizerState:
     return OptimizerState(
         manifest=POTTER_MANIFEST,
+        prompt_hashes={},
         payload=PotterRoundState(
             memory=memory or L2L3Memory(l1_layout=default_l1_layout()),
             l1_parse_failure=parse_failure,
@@ -191,6 +201,7 @@ def round_result(
         "round": rnd,
         "label": f"round_{rnd}",
         "accuracy": 0.5,
+        "composite_fitness": 0.5,
         "total": 4,
         "improved": improved,
         "prompt_fields": {},
@@ -259,19 +270,23 @@ def lost_history(
     *,
     total: int = 20,
     acc: float = 0.3,
+    lift_ci: tuple[float, float] | None = (-0.35, -0.05),
     elimination_context: dict[str, Any] | None = None,
 ) -> list[RoundResult]:
     """The history the repeat detector reads: the parent's round, then one holding a candidate
     that was MEASURED and LOST against it — a candidate is read against the round BEFORE its own.
-    ``reference_accuracy`` is the bar ``acc`` is judged against.
+    ``lift_ci`` is the interval of its paired lift over that parent, wholly below zero for a
+    loss; ``None`` is an arm that carries no interval.
 
     Pass ``elimination_context`` to make the loss a CUT instead: the gate inside it decides
     whether the arm was measured at all, and an empty one is a BROKEN arm, which names none."""
+    lo, hi = lift_ci or (None, None)
     lost = RoundResult(
         optimizer_state=optimizer_state(),
         round=round_num,
         label=f"round_{round_num}",
         accuracy=acc,
+        composite_fitness=acc,
         total=total,
         improved=False,
         prompt_fields={},
@@ -283,6 +298,9 @@ def lost_history(
                 accuracy=acc,
                 total=total,
                 reference_accuracy=0.5,
+                reference_lift=None if lift_ci is None else (lift_ci[0] + lift_ci[1]) / 2,
+                reference_lift_ci_lo=lo,
+                reference_lift_ci_hi=hi,
                 prompt_fields={field: value},
                 outcome=(
                     ArmOutcome.MEASURED

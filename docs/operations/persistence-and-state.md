@@ -90,7 +90,7 @@ Reads happen by opening the on-disk artifact tree. `evidence` is the one read VE
       seed-screen-{dataset}-{date}.json #   seed-screen's own shape — it screens SEATS, before a campaign
                                         #   exists, so the record's source-campaign fields would name
                                         #   nothing (`seed_screen.py` argues it). Only `runs/` is served.
-    traces/obs|mlruns/                  # observability sinks (regenerable; mlruns is settings-gated)
+    traces/mlruns/                      # the MLflow sink (regenerable, settings-gated)
     backends/{backend_id}/backend.json  # backend registration + synced API responses
     datasets/  benchmark-rows/  task-context/   # dataset tier — definition, materialized rows, decomposed context
 ```
@@ -206,9 +206,9 @@ Three things a fork owns rather than shares: its own `dashboard.json` (seeded fr
 
 Every cut serializes ONE typed `ForkSpec` to `FORK_CUT.data.fork` + `index.json::fork`, and its callers differ only in what they fill: **scoring divergence** (trigger/reason/issued_by only) and an **operator-steered fork** (`seed: CycleSeed` + `from_candidate_id`). The primitive does not know which fired — a new caller adds a `ForkTrigger` member and nothing else.
 
-**`from_round` is provenance; `_mint_fork(fork_from_round=…)` is mechanics.** The arg says how many parent rounds this cut LIFTS (`0` = a clean offshoot lifting none); the spec field says which round it was CUT FROM. A rebase makes them equal, so the seam back-fills the spec when its author left it unset — but only then. Only a steered cut names `from_candidate_id`, so only it can be labelled by the candidate it came from.
+**`from_round` is provenance; `mint_fork(fork_from_round=…)` is mechanics.** The arg says how many parent rounds this cut LIFTS (`0` = a clean offshoot lifting none); the spec field says which round it was CUT FROM. A rebase makes them equal, so the seam back-fills the spec when its author left it unset — but only then. Only a steered cut names `from_candidate_id`, so only it can be labelled by the candidate it came from.
 
-**Three checks for a new fork driver.** If any fails, the primitive has reached its scope and the feature wants its own layer: the driver must be **trigger-agnostic** (a new `ForkTrigger` member and a filled `ForkSpec`, no edits to `_mint_fork`'s body); its override must be **OSP-carriable** (a different pipeline shape or scoring formula is a layer above); and it must cause **no data fracture** (no parallel persistence directory, no duplicate of something already in `measurements/`, `rounds/` or the ledger). Library measurements are deliberately not on the tree — content-addressed by `JobSearchPoint.content_hash`, two forks see identical hashes and read the same `measurements/` row, which is why a second fork's origin costs zero LLM calls.
+**Three checks for a new fork driver.** If any fails, the primitive has reached its scope and the feature wants its own layer: the driver must be **trigger-agnostic** (a new `ForkTrigger` member and a filled `ForkSpec`, no edits to `mint_fork`'s body); its override must be **OSP-carriable** (a different pipeline shape or scoring formula is a layer above); and it must cause **no data fracture** (no parallel persistence directory, no duplicate of something already in `measurements/`, `rounds/` or the ledger). Library measurements are deliberately not on the tree — content-addressed by `JobSearchPoint.content_hash`, two forks see identical hashes and read the same `measurements/` row, which is why a second fork's origin costs zero LLM calls.
 
 ### Rewind — `resume --from N`
 
@@ -224,7 +224,7 @@ Use when a **data-affecting** edit (scoring formula, `pipeline_overlay`, `exclud
 
 **A cut retires only as far as the branch actually got** — owned by [`infrastructure/CLAUDE.md`](../../promptpotter/infrastructure/CLAUDE.md) § The lineage tree; the write side hands the branch exactly the candidates it retires (`repair.py::_rebank_on_branch`), and the reach is read back off the last round the branch's own ledger minted a candidate for, so the two sides cannot drift.
 
-**A supersede retires the parent, on disk, at the cut** — `_mint_fork` stamps it terminal with `StopReason.REBASED` (`campaigns.mark_superseded`, idempotent). The parent stops writing *by design*, and an unstamped deliberate silence is indistinguishable from a crash: cold dashboard ⇒ `detached` ⇒ the reaper stamps `producer_vanished` fifteen minutes later. Resumability is untouched — `finished_at` is a latch and `reopen_for_continuation` clears it. An **`equivalent`** cut moves the pointer the same way and retires nothing.
+**A supersede retires the parent, on disk, at the cut** — `mint_fork` stamps it terminal with `StopReason.REBASED` (`campaigns.mark_superseded`, idempotent). The parent stops writing *by design*, and an unstamped deliberate silence is indistinguishable from a crash: cold dashboard ⇒ `detached` ⇒ the reaper stamps `producer_vanished` fifteen minutes later. Resumability is untouched — `finished_at` is a latch and `reopen_for_continuation` clears it. An **`equivalent`** cut moves the pointer the same way and retires nothing.
 
 **After a REPAIR both sides carry the same `candidate_id`** — owned by [`infrastructure/CLAUDE.md`](../../promptpotter/infrastructure/CLAUDE.md) § The lineage tree (*identity outranks direction*); the withdrawn measurement is the one the round was actually steered by. A retired candidate wears **no crown**: it was elected over rows the cut replaced, so `is_selected` is withdrawn until the branch re-elects.
 
@@ -343,7 +343,7 @@ Each is idempotent, and each — from the terminal exactly as from the web — d
 
 ## The storage taxonomy — Connector / Loop / Dataset
 
-There is **one** storage vocabulary, the operator's mental model. Every byte in a campaign tree lands in exactly one of six leaves — mutually exclusive and exhaustive, summing to the on-disk total. The top-level axis is **Connector vs Loop vs Dataset**; **Loop** breaks into four. Classifier + endpoints: `presentation/api/routers/campaigns/storage.py` (`_leaf` / `_campaign_split`).
+There is **one** storage vocabulary, the operator's mental model. Every byte in a campaign tree lands in exactly one of six leaves — mutually exclusive and exhaustive, summing to the on-disk total. The top-level axis is **Connector vs Loop vs Dataset**; **Loop** breaks into four. Classifier: `store/layout.py::classify`; the report: `application/maintenance/storage_report.py`.
 
 | Leaf | Parent | Contents |
 |---|---|---|

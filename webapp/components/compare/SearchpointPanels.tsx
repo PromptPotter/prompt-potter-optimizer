@@ -31,23 +31,11 @@ export function ConfigPanels({
   const rows = configured(evidence);
   const [showSame, setShowSame] = useState(false);
 
-  // THREE bands: a key only one side carries is a different finding from a key set differently —
-  // two pipelines sharing no key would otherwise read as "17 keys differ".
-  const { differs, oneSided, same } = useMemo(() => {
-    const keys = [...new Set(rows.flatMap((r) => Object.keys(r.config ?? {})))].sort();
-    const split: { differs: string[]; oneSided: string[]; same: string[] } = {
-      differs: [],
-      oneSided: [],
-      same: [],
-    };
-    for (const key of keys) {
-      const present = rows.filter((r) => r.config?.[key] !== undefined);
-      if (present.length < rows.length) split.oneSided.push(key);
-      else if (new Set(present.map((r) => r.config?.[key])).size > 1) split.differs.push(key);
-      else split.same.push(key);
-    }
-    return split;
-  }, [rows]);
+  // THREE served bands: a key only one side carries is a different finding from a key set
+  // differently — two pipelines sharing no key would otherwise read as "17 keys differ".
+  const differs = evidence.config_keys?.differs ?? [];
+  const oneSided = evidence.config_keys?.one_sided ?? [];
+  const same = evidence.config_keys?.same ?? [];
 
   // Named rather than silently absent, so "records no config" is not read as "the panel dropped it".
   const withoutConfig = evidence.subjects.filter((s) => s.config === null);

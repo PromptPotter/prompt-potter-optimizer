@@ -5,7 +5,7 @@ import type { OptimizerLimit, RunLimitOverrides } from "@/lib/api";
 import { forkReconcileDefaults } from "@/lib/derivations";
 import { fmtUsd, fmtTokens } from "@/lib/format";
 import { parseCap } from "@/lib/run-limits";
-import { useDashboard } from "@/lib/hooks/useDashboard";
+import { useCycleStream } from "@/lib/poll";
 
 // The steer flow's run-limit reconcile. A fork numbers its rounds from 1, so rounds + spend default
 // to the parent's REMAINING; every other blank field inherits the parent's value.
@@ -25,7 +25,7 @@ export function LimitReconcile({
 }: {
   onChange: (limits: RunLimitOverrides) => void;
 }) {
-  const { dash } = useDashboard();
+  const { dash } = useCycleStream();
   // Snapshot once at open: the 2 s poll keeps mutating `dash` and must not clobber typed values.
   const [defaults] = useState(() => forkReconcileDefaults(dash));
   const [rl] = useState(() => dash?.run_limits ?? null);

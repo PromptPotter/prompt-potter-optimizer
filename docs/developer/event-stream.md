@@ -21,17 +21,16 @@ Response: `text/event-stream` (set by `EventSourceResponse`). The handler adds `
 Every non-heartbeat frame is one of these:
 
 ```json
-data: {"kind": "phase", "version": 1, "cycle_id": "cycle_abc123",
+data: {"kind": "phase", "cycle_id": "cycle_abc123",
        "sequence": 42, "payload": {...}}
 ```
 
 | Field | Type | Notes |
 |---|---|---|
 | `kind` | string | Closed enum covering the **whole** `CycleRecord` union — `domain/projection_envelope.py::ProjectionKind`, which raises at import on drift in either direction — plus the projection-only `stream_snapshot` synthesized by the tail. Coverage is not optional: see § Sequence semantics. |
-| `version` | integer | Envelope shape version. Bumps only on a breaking restructure (which requires a §0 amendment). Profile A ships v1. |
 | `cycle_id` | string | Target cycle. Redundant with the URL path, stamped per-frame so multi-cycle clients can demultiplex a fan-in subscription. |
 | `sequence` | integer | Ledger offset. Snapshot frame carries the high-water mark the snapshot reflects; live tail strictly greater. Gap = missed frames. |
-| `payload` | object | Per-kind body. For record-derived kinds, the record's `model_dump` content; for `stream_snapshot`, `dashboard.json` + `snapshot_at_offset`. |
+| `payload` | object | Per-kind body. For record-derived kinds, the record's `model_dump` content; for `stream_snapshot`, the cycle's served dashboard. |
 
 Adding a new kind requires updating [`events-asyncapi.yaml`](../specs/events-asyncapi.yaml) **first** (closed-set policy — security box 1), then `ProjectionKind` in [`promptpotter/domain/projection_envelope.py`](../../promptpotter/domain/projection_envelope.py), then the record class on `CycleRecord` (or `_PROJECTION_ONLY`, for a kind the tail synthesizes rather than reads), then its `RENDERS_AS_ACTIVITY` answer beside it — can a feed item ever be made of this? — which is what `/ray` drops on. The last two raise at import if skipped; the YAML enum is synced by hand (§ Testing).
 
@@ -39,11 +38,11 @@ Adding a new kind requires updating [`events-asyncapi.yaml`](../specs/events-asy
 
 The runtime guarantees, in order:
 
-1. **Snapshot frame first.** The first message is a `stream_snapshot` envelope whose `payload` is the subscribed cycle's current `dashboard.json` content plus `snapshot_at_offset` — the ledger offset the snapshot reflects. The envelope's `sequence` equals `snapshot_at_offset`.
+1. **Snapshot frame first.** The first message is a `stream_snapshot` envelope whose `payload` is the subscribed cycle's served dashboard — the body the dashboard route returns (`application/served_dashboard.py`). The envelope's `sequence` is the ledger offset the tail picks up at, and nothing in the payload repeats it.
 
-   When `dashboard.json` doesn't exist yet (fresh campaign before origin's first flush), the payload is `{"warming_up": true, "snapshot_at_offset": N}` and the client renders a "campaign initialising" placeholder.
+   When `dashboard.json` doesn't exist yet (fresh campaign before origin's first flush), the payload is the warming shape (`"warming_up": true`) and the client renders a "campaign initialising" placeholder.
 
-2. **Live tail.** Every subsequent `CycleRecord` appended to the ledger is broadcast as one envelope. `sequence` matches the record's ledger offset; envelopes for `offset > snapshot_at_offset` arrive in append order.
+2. **Live tail.** Every subsequent `CycleRecord` appended to the ledger is broadcast as one envelope. `sequence` matches the record's ledger offset; envelopes from the snapshot's `sequence` onward arrive in append order.
 
 3. **Heartbeat.** Every 15 s the server emits an SSE **comment** line (`EventSourceResponse`'s ping — currently `: ping - <timestamp>`). The exact text is not consumed: browsers' `EventSource` and proxies key on its *arrival*, not its content, so they can tell "no events" from "stream broken." Heartbeats do not advance `sequence`.
 

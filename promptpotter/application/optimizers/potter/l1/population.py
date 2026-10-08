@@ -57,7 +57,7 @@ def parse_population(
         merged_pp = merge_pipeline_params(pipeline_params, pipeline_overlay, schema)
         failures: list[ValidationFailure] = []
         if opt_sp.shot_ids != parent.shot_ids:
-            shots_outcome = L1_SHOTS_IN_DEMO_POOL.run(
+            shots_outcome = L1_SHOTS_IN_DEMO_POOL.check(
                 {"shot_ids": opt_sp.shot_ids}, demo_ids=demo_ids, k_max=shot_k_max
             )
             if shots_outcome is not None:
@@ -65,17 +65,17 @@ def parse_population(
         if schema:
             # The DELTA, never the child's whole prompt: an inherited field was not proposed.
             prompt_edit = candidate_delta(opt_sp.prompt_fields(), parent_fields, None, None).prompt
-            block_outcome = L1_PROMPT_BLOCKS_IN_LIBRARY.run(
+            block_outcome = L1_PROMPT_BLOCKS_IN_LIBRARY.check(
                 prompt_edit,
                 prompt_block_catalogue=prompt_block_catalogue,
             )
             if block_outcome is not None:
                 failures.extend(block_outcome.evidence["failures"])
-            held_outcome = L1_PROMPT_FIELDS_OPEN.run(prompt_edit, pipeline_schema=schema)
+            held_outcome = L1_PROMPT_FIELDS_OPEN.check(prompt_edit, pipeline_schema=schema)
             if held_outcome is not None:
                 failures.extend(held_outcome.evidence["failures"])
             if pipeline_overlay:
-                outcome = L1_SCHEMA_COMPLIANCE.run(
+                outcome = L1_SCHEMA_COMPLIANCE.check(
                     pipeline_overlay,
                     pipeline_schema=schema,
                 )
@@ -83,7 +83,7 @@ def parse_population(
                     failures.extend(outcome.evidence["failures"])
                 # Re-propose check: rejects (param, value) already in the cycle's runtime
                 # wounds; runs even when schema-compliance passes.
-                rf_outcome = L1_CONFIG_NOT_IN_RUNTIME_FAILURES.run(
+                rf_outcome = L1_CONFIG_NOT_IN_RUNTIME_FAILURES.check(
                     pipeline_overlay,
                     runtime_failures=runtime_failures,
                     pipeline_params=merged_pp,
@@ -95,9 +95,11 @@ def parse_population(
                 # prose proposed nothing. The gutting check takes the parent's params because the
                 # length it judges is a COMPARISON — the delta alone cannot say what it replaced.
                 for outcome in (
-                    L1_INNER_STEER_IS_LEGAL.run(pipeline_overlay, inner_optimizer=inner_optimizer),
-                    L1_INNER_LAYOUT_APPLIES.run(pipeline_overlay),
-                    L1_PROMPT_FIELD_NOT_GUTTED.run(
+                    L1_INNER_STEER_IS_LEGAL.check(
+                        pipeline_overlay, inner_optimizer=inner_optimizer
+                    ),
+                    L1_INNER_LAYOUT_APPLIES.check(pipeline_overlay),
+                    L1_PROMPT_FIELD_NOT_GUTTED.check(
                         pipeline_overlay,
                         inner_optimizer=inner_optimizer,
                         pipeline_params=pipeline_params,
@@ -109,7 +111,7 @@ def parse_population(
             # mutation is prompt-fields-only, the exact case that drops {{combined_text}})
             # AND, on an L4 campaign, the MERGED inner optimizer prompts (a child of a broken
             # parent inherits a severed port without re-proposing it).
-            ph_outcome = L1_PROMPT_PLACEHOLDERS_INTACT.run(
+            ph_outcome = L1_PROMPT_PLACEHOLDERS_INTACT.check(
                 merged_pp or {},
                 inner_optimizer=inner_optimizer,
                 opt_sp=opt_sp,

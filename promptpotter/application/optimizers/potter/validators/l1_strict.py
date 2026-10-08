@@ -43,10 +43,8 @@ __all__ = [
     "validate_overrides",
 ]
 
-# A dropped mandatory backend placeholder is structural, not a tunable miss: the round
-# loop reads this reason off the candidate reports to fire L2 immediately (patience 0),
-# rather than burning l1_patience rounds re-dropping it. Single-sourced so the producer
-# (the validator below) and the consumer (`runner/round.py`) never drift.
+# A dropped mandatory backend placeholder is structural, not a tunable miss, so it fires L2 at
+# patience 0. One name for the validator below and `members.py::Escalation.observe`, which reads it.
 DROPPED_MANDATORY_PLACEHOLDER = "dropped_mandatory_placeholder"
 
 

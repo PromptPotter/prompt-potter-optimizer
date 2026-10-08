@@ -10,13 +10,15 @@ function node(
     course_label: over.label,
     path: [],
     children: [],
+    origin_id: "",
     round: null,
     accuracy: null,
     composite_fitness: null,
-    status: "",
+    status: null,
     stop_reason: null,
     election_held: true,
     is_selected: false,
+    crown: null,
     theta: null,
     theta_se: null,
     mean_fitness_ci_lo: null,
@@ -39,6 +41,9 @@ function node(
     task: null,
     best_accuracy: null,
     origin_accuracy: null,
+    headline_accuracy: null,
+    reference_lift_side: null,
+    panel_cut: false,
     run_standing: null,
     ...over,
   } as unknown as LineageNode;
@@ -147,12 +152,12 @@ describe("the half choice — tree unless it holds no measurement", () => {
 
 describe("course bars carry no verdict", () => {
   const runs = course([
-    node({ kind: "course", id: "r1", label: "run-1", dataset_name: "justlogic", best_accuracy: 0.6, origin_accuracy: 0.3, composite_fitness: 0.9, composite_rank: 1 }),
-    node({ kind: "course", id: "r2", label: "run-2", dataset_name: "justlogic", origin_accuracy: 0.3 }),
+    node({ kind: "course", id: "r1", label: "run-1", dataset_name: "justlogic", headline_accuracy: 0.6, composite_fitness: 0.9, composite_rank: 1 }),
+    node({ kind: "course", id: "r2", label: "run-2", dataset_name: "justlogic", headline_accuracy: 0.3 }),
     node({ kind: "course", id: "r3", label: "run-3", dataset_name: "justlogic" }),
   ]);
 
-  it("shows what a run reached, else what it started from, else blank", () => {
+  it("draws a run at its served headline, blank where it has none", () => {
     const views = candidateViews({ ...EMPTY, viewedNode: runs });
     expect(views.map((v) => v.accuracy)).toEqual([0.6, 0.3, null]);
     // A cut that broke before measuring anything must render blank, never as its origin's.
@@ -251,7 +256,7 @@ describe("a picked sample set moves the overlap bars, and nothing else", () => {
   });
 
   it("gives a run no basis at all — the server decorates candidates only", () => {
-    const runs = course([node({ kind: "course", id: "r1", label: "run-1", best_accuracy: 0.6 })]);
+    const runs = course([node({ kind: "course", id: "r1", label: "run-1", headline_accuracy: 0.6 })]);
     const views = candidateViews({ ...EMPTY, viewedNode: runs, sampleSet: [1, 2] });
     expect(views[0]?.accuracy).toBe(0.6);
     expect(views[0]?.started).toBe(true);

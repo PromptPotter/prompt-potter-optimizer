@@ -1,5 +1,4 @@
-import type { DashboardSnapshot } from "@/lib/poll";
-import { useDashboard } from "@/lib/hooks/useDashboard";
+import { useCycleStream, type DashboardSnapshot } from "@/lib/poll";
 import { headlineStats } from "@/lib/derivations";
 import { fmtNum, fmtClock } from "@/lib/format";
 import { cx } from "@/lib/cx";
@@ -39,7 +38,7 @@ const FORMATTERS: Record<string, (v: unknown) => string> = {
 };
 
 export function LiveStateCard() {
-  const { dash } = useDashboard();
+  const { dash } = useCycleStream();
   const served = useServedCriterion();
 
   const items: [string, unknown][] = [];

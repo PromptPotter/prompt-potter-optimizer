@@ -6,7 +6,6 @@ export * from "./compare-items";
 export * from "./connector-state";
 export * from "./critical-alert";
 export * from "./draft-for-campaign";
-export * from "./election";
 export * from "./flipped-samples";
 export * from "./forkReconcile";
 export * from "./headline-stats";

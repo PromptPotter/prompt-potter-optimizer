@@ -7,8 +7,9 @@ from typing import TYPE_CHECKING
 
 from promptpotter.application.bench.resume_and_fork.decisions import record_decision
 from promptpotter.application.intelligence.exploration import PARENT_ABILITY_ID
-from promptpotter.application.optimizers.nodes import Selection
+from promptpotter.application.optimizers.nodes import Selection, population_as
 from promptpotter.application.optimizers.potter.records import PotterCheckpointKind
+from promptpotter.application.optimizers.potter.state import L1Population
 from promptpotter.application.scoring.selection import (
     elect_round_winner,
     lift_over_bar,
@@ -161,5 +162,5 @@ def elect_on_theta(
             n_scored=len(measured.scored),
             ruler_n=len(ruler.delta) if ruler is not None else 0,
         ),
-        optimizer_state=population.optimizer_state,
+        payload=population_as(population, L1Population).payload,
     )

@@ -117,7 +117,7 @@ export async function postDeleteCampaign(
   if (reason) payload.reason = reason;
   return postCommand("delete-campaign", payload);
 }
-// The one interrupt verb, idempotent: there is no stop, and resuming is `postStartRun(…, "resume")`.
+// The one interrupt verb, idempotent: there is no stop, and resuming is `postStartRun`.
 // Pause state reads back from `infrastructure/runtime_flags.py::is_paused`.
 export async function postPauseCycle(
   campaignId: string,
@@ -208,9 +208,8 @@ export async function postSetConcurrentCycles(limit: number): Promise<CommandAcc
 export async function postStartRun(
   campaignId: string,
   cycleId: string,
-  kind: "new" | "resume",
 ): Promise<CommandAcceptedBody> {
-  return postCommand("start-run", { campaign_id: campaignId, cycle_id: cycleId, kind });
+  return postCommand("start-run", { campaign_id: campaignId, cycle_id: cycleId });
 }
 
 // A dry run unless `apply`; `purge-cold` with `apply` destroys paid measurement. Preview and apply

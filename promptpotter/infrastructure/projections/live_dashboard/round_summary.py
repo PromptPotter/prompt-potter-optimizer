@@ -15,6 +15,7 @@ from promptpotter.domain.results import (
     RoundResult,
     ScoredCandidate,
     is_electable,
+    order_floor,
 )
 from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import CycleLayout
@@ -105,7 +106,7 @@ def _leading_arm(rr: RoundResult) -> ScoredCandidate | None:
         return None
     return next(
         (c for c in electable if c.label in rr.selected_labels),
-        max(electable, key=lambda c: c.composite_fitness),
+        max(electable, key=lambda c: order_floor(c.composite_fitness)),
     )
 
 
@@ -132,7 +133,7 @@ def build_round_summary(
     return RoundSummary(
         round=rr.round,
         accuracy=rr.accuracy,
-        composite_fitness=float(rr.composite_fitness),
+        composite_fitness=rr.composite_fitness,
         total=rr.total,
         ability=rr.ability if rr.stamps_theta else None,
         best_so_far=best_so_far,

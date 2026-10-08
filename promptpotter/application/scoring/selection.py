@@ -15,17 +15,19 @@ replayers read it; none of them may reconstruct one.
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from promptpotter.application.intelligence.exploration import (
     PARENT_ABILITY_ID,
     Observation,
     candidate_abilities,
     fit_theta_given_delta,
+    graded_response,
     theta_bounds_given_delta,
     theta_lift_over_parent,
 )
 from promptpotter.application.scoring.classification import scoreable_rows
+from promptpotter.domain.scoring import is_graded
 from promptpotter.shared.statistics import (
     discordant_counts,
     mean_ci,
@@ -41,6 +43,8 @@ if TYPE_CHECKING:
     from promptpotter.domain.scoring import CellGrade, QueryMeasurement
 
 __all__ = [
+    "PairedLift",
+    "PairedPosterior",
     "distinct_valid_cells",
     "elect_round_winner",
     "elimination_p_best",
@@ -49,8 +53,10 @@ __all__ = [
     "matched_parent_lift",
     "mean_fitness_ci",
     "paired_fitness",
+    "paired_p_best",
     "parent_cells",
     "parent_selection_bias",
+    "priors_covering",
 ]
 
 
@@ -119,15 +125,25 @@ def paired_fitness(
     return cand_fit, parent_fit
 
 
+class PairedLift(NamedTuple):
+    """One arm over its reference on the cells both graded: the lift, its interval and its
+    two-sided p from ONE posterior over ONE population."""
+
+    lift: float
+    ci_lo: float
+    ci_hi: float
+    p_value: float
+    n_cells: int
+
+
 def matched_parent_lift(
     candidate_results: list[QueryMeasurement],
     parent_results: list[QueryMeasurement],
     *,
     grade: CellGrade,
-) -> tuple[float, float, float] | None:
-    """``(lift, ci_lo, ci_hi)`` against the PARENT ON THE CELLS BOTH MEASURED — the blocked comparison,
-    sharper than ``mean_fitness_ci`` on the same rows. The parent is the origin only at round 0 and the
-    prior winner after it, which is what the name states. ``None`` below two shared cells."""
+) -> PairedLift | None:
+    """The reading against the PARENT ON THE CELLS BOTH MEASURED; ``None`` below two shared cells.
+    Every surface quoting one arm's lift, interval or significance reads THIS, never a second pairing."""
     # One pair has no spread, and an interval drawn from it claims a precision nobody bought.
     # ``scoreable_rows`` on both arms, matching ``mean_fitness_ci`` — the two intervals sit on one
     # row and must bracket one population. A cell either arm errored on drops the PAIR, which is what
@@ -136,8 +152,10 @@ def matched_parent_lift(
     cand_fit, parent_fit = paired_fitness(
         scoreable_rows(candidate_results), scoreable_rows(parent_results), grade=grade
     )
-    lift, ci_lo, ci_hi, _p, _n = paired_reading(cand_fit, parent_fit)
-    return None if ci_lo is None or ci_hi is None else (lift, ci_lo, ci_hi)
+    lift, ci_lo, ci_hi, p_value, n_cells = paired_reading(cand_fit, parent_fit)
+    if ci_lo is None or ci_hi is None or p_value is None:
+        return None
+    return PairedLift(lift, ci_lo, ci_hi, p_value, n_cells)
 
 
 def parent_cells(parent_results: list[QueryMeasurement]) -> list[dict[str, Any]]:
@@ -313,6 +331,44 @@ def elimination_p_best(
         p = p_exceeds(theta_c, se_c, theta_p, se_p)
         per_prior[pid] = _capped(p, sign_posterior(*discordant_counts(candidate_grades, grades)))
     return min(per_prior.values()), per_prior
+
+
+def priors_covering[P: Mapping[Any, float]](
+    priors: Mapping[str, P], cells: Collection[Any]
+) -> dict[str, P]:
+    """The priors PoBB may pair an arm with on ``cells``: those holding every one — a prior short
+    of a cell stays out rather than being read on a substituted grade."""
+    return {pid: grades for pid, grades in priors.items() if all(c in grades for c in cells)}
+
+
+class PairedPosterior(NamedTuple):
+    """An arm's posterior of being best beside the pairing it was fit on: the graded cells in walk
+    order, the arm's grade on each, and every covering prior's on the same cells."""
+
+    cells: list[str]
+    grades: list[float]
+    priors: dict[str, list[float]]
+    p_best: float
+    p_better: dict[str, float]
+
+
+def paired_p_best(
+    rows: Sequence[QueryMeasurement],
+    priors: Mapping[str, Mapping[str, float]],
+    ruler: DeltaRuler | None,
+) -> PairedPosterior | None:
+    """:func:`elimination_p_best` over the rows that carry a verdict — a backend error is no
+    evidence of inability — against :func:`priors_covering` them; ``None`` where either is empty."""
+    graded = [r for r in rows if is_graded(r)]
+    cells = [str(r["sample_id"]) for r in graded]
+    paired = {
+        pid: [grades[c] for c in cells] for pid, grades in priors_covering(priors, cells).items()
+    }
+    if not graded or not paired:
+        return None
+    own = [graded_response(r) for r in graded]
+    p_best, p_better = elimination_p_best(own, paired, [int(c) for c in cells], ruler)
+    return PairedPosterior(cells, own, paired, p_best, p_better)
 
 
 def _capped(p: float, bound: float) -> float:

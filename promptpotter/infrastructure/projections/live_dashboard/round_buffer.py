@@ -8,17 +8,22 @@ from dataclasses import dataclass, field
 from typing import Any, cast
 
 from promptpotter.domain.results import OverlapReading
+from promptpotter.domain.results_health import terminal_node
 from promptpotter.domain.run_records import LedgerFit
 from promptpotter.domain.scoring import QueryMeasurement, recorded_cost_s, recorded_elapsed_s
 from promptpotter.domain.spend import TokenAccount
-from promptpotter.infrastructure.projections.live_state import top_n_p_best
 
 
 @dataclass
 class RoundBuffer:
     round_num: int = 0
     candidates: dict[int, dict[str, Any]] = field(default_factory=dict)
-    p_best_top: list[dict[str, Any]] = field(default_factory=list)
+    # The round's race: each candidate's latest P(best) by id, and the eliminator's last reading.
+    # Candidate ids are round-scoped, so the map never outlives the round number.
+    race_standings: dict[str, float] = field(default_factory=dict)
+    race_member: str = ""
+    race_current_id: str = ""
+    race_n_samples: int = 0
     # The round's own reading, as opposed to what its candidates measured — bought at the
     # election, so it arrives in one stamp rather than converging.
     overlap: OverlapReading | None = None
@@ -27,7 +32,10 @@ class RoundBuffer:
         """A new round number clears the candidate buffer; historical rounds[] is untouched."""
         self.round_num = round_num
         self.candidates = {}
-        self.p_best_top = []
+        self.race_standings = {}
+        self.race_member = ""
+        self.race_current_id = ""
+        self.race_n_samples = 0
         self.overlap = None
 
     def stamp_overlap(self, overlap: OverlapReading | None) -> None:
@@ -37,7 +45,7 @@ class RoundBuffer:
         self.overlap = overlap
 
     def slot(self, idx: int, total: int = 0) -> dict[str, Any]:
-        """Lazy-init a candidate slot: sample / score / p_best callbacks may fire BEFORE ``candidate_started`` seeds it, so all
+        """Lazy-init a candidate slot: sample / score callbacks may fire BEFORE ``candidate_started`` seeds it, so all
         mutators funnel here. The canonical display ``label`` is composed downstream, not stored here."""
         return self.candidates.setdefault(
             idx,
@@ -119,7 +127,7 @@ class RoundBuffer:
                 # MISS — the browser then reporting the formula's silence as the arm's failure,
                 # while the CLI tape beside it reads UNSC off the same row.
                 "unscored": result.get("unscored"),
-                "terminal_node": pd.get("terminal_node") or "",
+                "terminal_node": terminal_node(result),
                 "input_tokens": account.input if account else None,
                 "output_tokens": account.output if account else None,
                 "cache_read_tokens": account.cache_read if account else None,
@@ -164,38 +172,14 @@ class RoundBuffer:
             label = str((entry.get("scores") or {}).get("label") or "")
             entry["is_selected"] = label in chosen
 
-    def update_p_best(
-        self,
-        idx: int,
-        total: int,
-        current_id: str,
-        n_samples: int,
-        p_best: float,
+    def record_race_standing(
+        self, member: str, current_id: str, n_samples: int, p_best: float
     ) -> None:
-        """Merge one candidate's P(best), then rebuild the top-5 **by aggregating across the round's slots**. Reading it off this
-        one candidate's snapshot lists the priors it was measured against as rivals, and the last to score decides it."""
-        cand = self.slot(idx, total)
-        current = float(p_best)
-        prev = float(cand.get("p_best", current))
-        history: list[float] = list(cand.get("p_best_history") or [])
-        history.append(current)
-        # Cap history at 64 entries — round size rarely exceeds 40.
-        if len(history) > 64:
-            history = history[-64:]
-        cand["p_best"] = current
-        cand["p_best_id"] = current_id
-        cand["p_best_delta"] = current - prev
-        cand["p_best_history"] = history
-        cand["p_best_n_samples"] = n_samples
-
-        # Round-wide leaderboard (top-5 by P(best)) — over the candidates this round has
-        # readings for, which is the only population the question is about.
-        standings = {
-            str(c["p_best_id"]): float(c["p_best"])
-            for c in self.candidates.values()
-            if c.get("p_best_id")
-        }
-        self.p_best_top = [{"id": cid, "p_best": p} for cid, p in top_n_p_best(standings)]
+        """One candidate's P(best) reading from eliminator ``member``."""
+        self.race_standings[current_id] = p_best
+        self.race_member = member
+        self.race_current_id = current_id
+        self.race_n_samples = n_samples
 
 
 __all__ = ["RoundBuffer"]

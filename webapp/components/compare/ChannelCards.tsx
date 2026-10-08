@@ -47,7 +47,7 @@ import {
   pipelineReadStatus,
   scoreboardRow,
   searchpointCopyChoices,
-  selectedCandidateOf,
+  selectedNodeOf,
   sharedComparableNote,
   spendStat,
   walkCourses,
@@ -891,11 +891,11 @@ function ChannelCard({
                   pickedPath && (
                     <>
                     <VerifyAction
-                      candidate={selectedCandidateOf(selected, pickedPath.at(-1)?.cycleId ?? "")}
+                      candidate={selectedNodeOf(selected, pickedPath.at(-1)?.cycleId ?? "")}
                       path={pickedPath}
                     />
                     <SteerForkAction
-                      candidate={selectedCandidateOf(selected, pickedPath.at(-1)?.cycleId ?? "")}
+                      candidate={selectedNodeOf(selected, pickedPath.at(-1)?.cycleId ?? "")}
                       path={pickedPath}
                       // Exactly one cycle streams — whichever the dashboard is parked on — so no stream here.
                       dash={null}

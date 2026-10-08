@@ -1,13 +1,13 @@
 "use client";
 import { memo } from "react";
-import { useDashboard } from "@/lib/hooks/useDashboard";
+import { useCycleStream } from "@/lib/poll";
 import { fmtSecs } from "@/lib/format";
 import { Hearts } from "@/components/ui";
 
 // Frameless one-line run summary. Run state is NOT repeated here — the masthead owns it.
 
 export const TopStrip = memo(function TopStrip() {
-  const { dash } = useDashboard();
+  const { dash } = useCycleStream();
   const lastQuery = dash?.last_query_elapsed_s ?? null;
   // Only where the optimizer banks stalls; the cap is the denominator (3-of-4 vs 3-of-7).
   const hearts = dash?.run_standing?.stalls_left ?? null;

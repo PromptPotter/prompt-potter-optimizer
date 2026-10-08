@@ -17,10 +17,9 @@ import {
   readSpend,
 } from "@/lib/derivations";
 import { fmtPct0, fmtUsdCents, shortModel } from "@/lib/format";
-import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useServedCriterion } from "@/lib/hooks/useServedCriterion";
 import { pathLeaf } from "@/lib/ids";
-import { isMeasuring } from "@/lib/poll";
+import { isMeasuring, roundOf, useCycleStream } from "@/lib/poll";
 import { cx } from "@/lib/cx";
 import { runPhaseLabel } from "@/lib/run-phase";
 import { TERMS } from "@/lib/terms";
@@ -31,7 +30,8 @@ import { useWorkspace } from "@/lib/workspace";
 export function RunMasthead({ onFollowed }: { onFollowed: () => void }) {
   const { campaignId, leafCycleId, viewedPath, campaigns, cycles, following, followActive } =
     useWorkspace();
-  const { dash, dashRound } = useDashboard();
+  const { dash } = useCycleStream();
+  const dashRound = roundOf(dash);
   const served = useServedCriterion();
 
   const origins = useMemo(() => buildForest(campaigns, cycles), [campaigns, cycles]);

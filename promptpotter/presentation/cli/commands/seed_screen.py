@@ -41,18 +41,7 @@ async def cmd_seed_screen(args: argparse.Namespace) -> CommandResult:
     except SeedScreenError as exc:
         raise SystemExit(f"ERROR: {exc}") from exc
 
-    # Sorted by reasoning margin, and DISQUALIFIED banks first regardless of it: a bank where
-    # collapse outscores the origin is not a weak cell to rank, it is one to reject. A bank with
-    # no floor to rank against sorts last rather than at a margin of zero, which would read as a
-    # bank measured to sit exactly on its floor.
-    rows = sorted(
-        outcome.readings,
-        key=lambda r: (
-            r.rewards_collapse is not True,
-            r.reasoning_margin is None,
-            -(r.reasoning_margin or 0.0),
-        ),
-    )
+    rows = outcome.readings
     # Speed and cost ride the same row as the margin, because choosing a target model is one
     # decision over all three and reading them from separate places is how a model gets picked
     # on quality it cannot afford. Median and mean are both shown: a gap between them is a
@@ -74,15 +63,11 @@ async def cmd_seed_screen(args: argparse.Namespace) -> CommandResult:
         f"  {'--' if r.cost_per_pass is None else f'${r.cost_per_pass:.4f}'}/pass"
         for r in rows
     )
-    # A rejection requires a SETTLED margin. The floor is exact; the origin is not, so near the
-    # line the sign of the margin is just the sign of one noisy read — and printing REJECT off
-    # that is how this tool condemned seed-5 on a margin its own second read reversed. A
-    # suspected bank is NAMED, never rejected.
-    bad = [r.seed for r in rows if r.rewards_collapse and r.verdict_settled]
-    suspect = [r.seed for r in rows if r.rewards_collapse and r.verdict_settled is False]
-    # `is False`, never falsy: a bank with no floor took no verdict, so telling the operator to
-    # raise `--repeat` on it advises a spend that cannot settle anything.
-    unsettled = [r.seed for r in rows if r.verdict_settled is False]
+    bad = [r.seed for r in rows if r.verdict == "reject"]
+    suspect = [r.seed for r in rows if r.verdict == "suspect"]
+    # A suspect is unsettled too; a bank with no floor took no verdict, so it is in neither list
+    # and nothing advises a `--repeat` that could not settle anything.
+    unsettled = [r.seed for r in rows if r.verdict in ("suspect", "unsettled")]
     verdict = (
         f"REJECT {bad} — a candidate that stops reasoning and answers one label outscores the "
         f"origin there, by more than the measurement's own error bar.\n"

@@ -583,10 +583,9 @@ def text_templates(config: CampaignConfig) -> dict[str, str]:
 
 async def rebound_session(stores: Stores, hop: CycleHop) -> tuple[Session, CampaignConfig]:
     """A fresh session bound to the cycle at *hop* off disk alone, as a launch of an existing cycle
-    binds one (`jobs/launcher/run_job.py::_bind_session`)."""
+    binds one (`initialization/wiring.py::bind_cycle_session`)."""
     campaign = stores.campaigns.load_campaign(hop.campaign_id)
-    index = stores.campaigns.load(hop)
-    assert campaign is not None and index is not None
+    assert campaign is not None
     session = await open_session(
         DATASET, backend_url=BACKEND_URL, backend_id=DATASET, stores=stores, on_status=print
     )
@@ -594,7 +593,7 @@ async def rebound_session(stores: Stores, hop: CycleHop) -> tuple[Session, Campa
     configure_and_apply_pipeline(session, config, log=print)
     session.campaign_id = hop.campaign_id
     session.state.cycle_id = hop.cycle_id
-    session.session_id = str(index["parent_session_id"])
+    session.session_id = stores.campaigns.session_id_of(hop)
     return session, config
 
 
@@ -652,7 +651,7 @@ async def run_one(
             mode=RunMode(),
         )
         await session.backend_client.aclose()
-    searched = {key for node in session.pipeline_schema.config_nodes for key in node.param_keys}
+    searched = {key for node in session.pipeline_schema.declared_nodes for key in node.param_keys}
     if arm is not None and (beside := sorted(searched - set(PROMPT_STRING_FIELDS))):
         raise SystemExit(f"offline run: arm {arm.arm_key} searched {beside} beside its prompt")
     stores.campaigns.update_campaign(session.campaign_id, {"label": LABEL})

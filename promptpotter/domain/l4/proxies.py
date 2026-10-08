@@ -95,7 +95,7 @@ def inner_cell_facts(result: CycleResult, campaign_id: str) -> InnerCellFacts | 
         inner_final_lift=levels[-1] - origin,
         inner_peak_lift=max(levels) - origin,
         inner_rounds_ran=result.n_rounds_after_origin,
-        inner_round_budget=len(parent_level_series(result)),
+        inner_round_budget=effective_round_budget(result),
         inner_stop_reason=result.stop_reason,
         inner_spend_usd=result.spend.total_used_usd if result.spend else None,
         inner_tokens=result.spend.total_tokens_used if result.spend else None,
@@ -103,16 +103,19 @@ def inner_cell_facts(result: CycleResult, campaign_id: str) -> InnerCellFacts | 
     )
 
 
-def parent_level_series(result: CycleResult) -> list[float]:
-    """The parent's level per round, padded forward to the ROUND BUDGET.
+def effective_round_budget(result: CycleResult) -> int:
+    """The rounds this cell was ALLOWED — the panel's ONE denominator: the declared cap, never fewer
+    than the rounds that ran; the rounds that ran alone where the config declared none."""
+    return max(result.round_budget or 0, len(result.round_levels))
 
-    That denominator is ONE for every cell on a panel: dividing by the series length instead makes
-    it a per-cell quantity, and the panel then compares two estimands rather than one."""
+
+def parent_level_series(result: CycleResult) -> list[float]:
+    """The parent's level per round, padded forward to the ROUND BUDGET: dividing by the series
+    length instead makes it a per-cell quantity, and the panel then compares two estimands."""
     levels = result.round_levels
     if not levels:
         return []
-    n = max(result.round_budget, len(levels))
-    return levels + [levels[-1]] * (n - len(levels))
+    return levels + [levels[-1]] * (effective_round_budget(result) - len(levels))
 
 
 def mean_parent_level_se(result: CycleResult) -> float | None:
@@ -261,8 +264,7 @@ def panel_precision(
     if len(cells) < 2:
         return None
     observed = sample_sd([v_level[c] - o_level[c] for c in cells])
-    if observed is None:  # unreachable: `cells` is guarded >= 2 above
-        return None
+    assert observed is not None  # two cells or more, guarded above
     estimation = (sum(v_se[c] ** 2 + o_se[c] ** 2 for c in cells) / len(cells)) ** 0.5
     return PanelPrecision(estimation_sd=float(estimation), observed_sd=observed, n_cells=len(cells))
 

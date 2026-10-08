@@ -3,20 +3,11 @@ document banks it whole, so a resume or a fork re-seats the archive off the roun
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
 from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.optimizer_state import OptimizerState, RoundPayload
+from promptpotter.domain.optimizer_state import RoundPayload
 from promptpotter.domain.strict_model import StrictModel
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
-
-    from promptpotter.application.optimizer_manifest import SelectedOptimizer
-    from promptpotter.application.optimizers.nodes import WorkingState
-    from promptpotter.domain.results import RoundResult
-    from promptpotter.infrastructure.ledger import CycleEventLog
 
 __all__ = [
     "LEVI_MANIFEST",
@@ -24,8 +15,6 @@ __all__ = [
     "LeviCalibration",
     "LeviElite",
     "LeviRoundState",
-    "LeviState",
-    "levi_state",
 ]
 
 LeviManifest = Literal["levi"]
@@ -66,66 +55,3 @@ class LeviRoundState(RoundPayload, manifest=LEVI_MANIFEST):
     # ``None`` on the origin's document: round 1 is the calibration round that sets it.
     calibration: LeviCalibration | None
     elites: list[LeviElite]
-    rounds_without_advance: int
-
-
-@dataclass
-class LeviState:
-    """Empty until round 1, the calibration round, seeds the archive."""
-
-    calibration: LeviCalibration | None = None
-    elites: list[LeviElite] = field(default_factory=list)
-    rounds_without_advance: int = 0
-
-    def snapshot(
-        self,
-        prompt_hashes: dict[str, str],
-        *,
-        calibration: LeviCalibration | None,
-        elites: list[LeviElite],
-        rounds_without_advance: int,
-    ) -> OptimizerState:
-        return OptimizerState(
-            manifest=LEVI_MANIFEST,
-            prompt_hashes=prompt_hashes,
-            payload=LeviRoundState(
-                calibration=calibration.model_copy(deep=True) if calibration else None,
-                elites=[e.model_copy(deep=True) for e in elites],
-                rounds_without_advance=rounds_without_advance,
-            ),
-        )
-
-    def origin_state(self, selected: SelectedOptimizer) -> OptimizerState:
-        return self.snapshot(
-            selected.prompt_hashes(),
-            calibration=self.calibration,
-            elites=self.elites,
-            rounds_without_advance=self.rounds_without_advance,
-        )
-
-    def replay(self, last: RoundResult) -> None:
-        self._take_up(last.optimizer_state.payload_as(LeviRoundState))
-
-    def resume(
-        self, ledger: CycleEventLog | None, selected: SelectedOptimizer, *, before_round: int
-    ) -> None:
-        return None
-
-    def absorb(self, round_result: RoundResult) -> None:
-        self._take_up(round_result.optimizer_state.payload_as(LeviRoundState))
-
-    def standing(self, rounds: Sequence[RoundResult]) -> tuple[int, int | None]:
-        return self.rounds_without_advance, None
-
-    def _take_up(self, payload: LeviRoundState) -> None:
-        self.calibration = (
-            payload.calibration.model_copy(deep=True) if payload.calibration else None
-        )
-        self.elites = [e.model_copy(deep=True) for e in payload.elites]
-        self.rounds_without_advance = payload.rounds_without_advance
-
-
-def levi_state(state: WorkingState) -> LeviState:
-    if not isinstance(state, LeviState):
-        raise TypeError(f"a LEVI member was handed {type(state).__name__}, not LEVI's state")
-    return state

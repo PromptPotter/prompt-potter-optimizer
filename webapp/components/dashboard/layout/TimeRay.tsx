@@ -8,8 +8,7 @@ import { fmtGap } from "@/lib/format";
 import { runPhaseLabel } from "@/lib/run-phase";
 import { useWorkspace } from "@/lib/workspace";
 import { useSelection } from "@/lib/SelectionContext";
-import { useDashboard } from "@/lib/hooks/useDashboard";
-import { useTimeRay } from "@/lib/poll";
+import { useCycleStream, useTimeRay } from "@/lib/poll";
 import { useSelectNode } from "@/lib/hooks/useSelectNode";
 import { useViewedLineage } from "@/lib/lineage";
 import { rayHead, raySteps, type RayStep } from "@/lib/derivations";
@@ -19,7 +18,7 @@ export const TimeRay = memo(function TimeRay() {
   const { viewedPath, selectCyclePath } = useWorkspace();
   const { setSelectionForRound } = useSelection();
   const { index } = useViewedLineage();
-  const { dash, at } = useDashboard();
+  const { dash, at } = useCycleStream();
   const { pick } = useSelectNode(selectCyclePath);
   const { items, loaded, failed, hasMore, loadOlder, nowMs, setAt } = useTimeRay();
 

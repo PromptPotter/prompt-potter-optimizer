@@ -2,10 +2,9 @@
 import { cx } from "@/lib/cx";
 import { connectorReachability, criticalAlert } from "@/lib/derivations";
 import { useConnector } from "@/lib/hooks/useConnector";
-import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useMachineStatus } from "@/lib/hooks/useMachineStatus";
 import { readyData } from "@/lib/hooks/useRead";
-import type { StatusKind } from "@/lib/poll";
+import { useCycleStream, type StatusKind } from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";
 
 // The sticky failure bar on every tab, presenting the pure `criticalAlert` verdict. It reads the
@@ -18,7 +17,7 @@ interface Props {
 }
 
 export function CriticalAlertBanner({ onOpenFiles, onPauseCampaign }: Props) {
-  const { dash, status, statusText, statusHint } = useDashboard();
+  const { dash, status, statusText, statusHint } = useCycleStream();
   const { cycleId, cycles, cyclesLoaded, activeError, cyclesError, goneAddress } = useWorkspace();
 
   const noUnit = !cycleId;

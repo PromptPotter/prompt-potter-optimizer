@@ -1,24 +1,57 @@
-"""The **record** — the realized lineage as the mask fold reads it: every arm's rows already read
-under ONE scorer (the lens, or each cycle's own) — and the sample-set mask's parser. No I/O."""
+"""The **record** — the realized lineage as the mask fold reads it, every arm's rows under ONE scorer
+— and the two parsers of a mask's address, which the lineage tree and evidence share. No I/O."""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal, NamedTuple, get_args
 
 from pydantic import ConfigDict, Field
 
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.strict_model import StrictModel
 
+LensKind = Literal["score", "dials", "abort"]
+_LENS_KINDS: dict[str, LensKind] = {kind: kind for kind in get_args(LensKind)}
+
+
+class Lens(NamedTuple):
+    """The selector that picks a mask: ``score:<per_cell formula>``, ``dials:<term=weight,…>`` (the
+    same criterion as weights on each campaign's anchors) or ``abort:<variant>``, a gate switched off."""
+
+    kind: LensKind
+    body: str
+
+    @property
+    def spelling(self) -> str:
+        return f"{self.kind}:{self.body}"
+
+
+def parse_lens(value: str, *, allow_abort: bool) -> Lens:
+    """Raises ``ValueError`` for the entry point to turn into its own refusal. A comparable LEVEL
+    passes ``allow_abort=False``: a gate switched off changes which candidates ran, not a score."""
+    name, sep, body = value.partition(":")
+    kind = _LENS_KINDS.get(name) if sep else None
+    if kind is None or (kind == "abort" and not allow_abort):
+        expected = (
+            "'score:<formula>', 'dials:<term=weight,…>' or 'abort:<variant>'"
+            if allow_abort
+            else "'score:<formula>' or 'dials:<term=weight,…>'; an abort lens is a lineage-tree "
+            "question, not a comparable level"
+        )
+        raise ValueError(f"Unknown lens: {value!r} (expected {expected})")
+    return Lens(kind, body)
+
 
 def parse_sample_ids(text: str | None) -> frozenset[int] | None:
     """The sample-set mask as a CALLER names it — a comma-separated id list. Empty / unset ⇒
     ``None``, the full-set mask; a non-integer token raises ``ValueError`` for the entry point to
-    turn into its own refusal. Here rather than at either edge, because both the lineage-tree
-    route and an evidence subject address the same mask and may not spell it two ways."""
+    turn into its own refusal."""
     if not text or not text.strip():
         return None
-    ids = frozenset(int(tok) for tok in text.split(",") if tok.strip())
+    try:
+        ids = frozenset(int(tok) for tok in text.split(",") if tok.strip())
+    except ValueError as exc:
+        raise ValueError(f"Invalid samples list: {text!r} ({exc})") from exc
     return ids or None
 
 
@@ -114,11 +147,13 @@ class SpineCycle(StrictModel):
 
 
 __all__ = [
+    "Lens",
     "MaskCandidate",
     "MaskCycle",
     "MaskReading",
     "MaskRecord",
     "MaskRound",
     "SpineCycle",
+    "parse_lens",
     "parse_sample_ids",
 ]

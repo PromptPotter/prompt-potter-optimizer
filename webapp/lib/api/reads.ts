@@ -7,6 +7,8 @@ import type {
   ActiveSessionResponse,
   ActivityResponse,
   BackendHealthResponse,
+  HealthResponse,
+  LifecycleFilter,
   BackendResponse,
   CampaignListResponse,
   CampaignPipelineResponse,
@@ -44,15 +46,6 @@ export type CellStatus = CellsResponse["cells"][number]["status"];
 
 export function fetchActive(signal?: AbortSignal): Promise<ActiveSessionResponse> {
   return jget<ActiveSessionResponse>(`${API}/sessions/active`, signal);
-}
-
-// Hand-written: `/health` (`main.py`) declares no response model. `version` is the one source of
-// `APP_VERSION` in the browser.
-export interface HealthResponse {
-  status: string;
-  service: string;
-  timestamp: string;
-  version: string;
 }
 
 export function fetchHealth(signal?: AbortSignal): Promise<HealthResponse> {
@@ -279,10 +272,6 @@ export function fetchDashboardByPath(
     signal,
   );
 }
-
-// Hand-written query-param set: must match `manifests.py::_LIFECYCLE_FILTERS` member for member.
-// Absent = "active"; "checkin" is the authoring PHASE, a narrowing of "active", not a status.
-export type LifecycleFilter = "active" | "archived" | "deleted" | "checkin" | "all";
 
 // `encodeCyclePath`, not `encodeDescend`: a forest names a STORE, so every hop in `at` is a
 // descent, while a leaf ENTITY's descend drops the root hop.

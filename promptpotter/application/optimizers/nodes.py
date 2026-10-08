@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from promptpotter.application.campaign_config import Estimand
 from promptpotter.application.scoring.query_loop import CatchUps
+from promptpotter.domain.optimizer_state import OptimizerState, RoundPayload
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.strict_model import StrictModel
 
@@ -32,7 +33,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.dashboard_rows import OptimizerLimit
     from promptpotter.domain.opt_search_point import OptSearchPoint
-    from promptpotter.domain.optimizer_state import OptimizerState
     from promptpotter.domain.phases import StopReason
     from promptpotter.domain.results import (
         CandidateProposal,
@@ -57,6 +57,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "Adapter",
+    "BankedState",
     "Boundary",
     "CheckResult",
     "Controller",
@@ -82,8 +83,11 @@ __all__ = [
     "Selection",
     "Selector",
     "WorkingState",
+    "population_as",
+    "round_state",
     "rows_read_packages",
     "standing_opening",
+    "state_as",
 ]
 
 
@@ -154,7 +158,7 @@ class WorkingState(Protocol):
     """An optimizer's own state between rounds, minted by its ``OptimizerRuntime``. The bench
     carries it on ``Cycle.working_state``, asks it only these, and reads nothing inside it."""
 
-    def origin_state(self, selected: SelectedOptimizer) -> OptimizerState:
+    def origin_payload(self) -> RoundPayload:
         """What round 0's document banks."""
         ...
 
@@ -175,9 +179,58 @@ class WorkingState(Protocol):
         ...
 
     def standing(self, rounds: Sequence[RoundResult]) -> tuple[int, int | None]:
-        """``RunStanding``'s two numbers: rounds without advance, which ``rounds`` — the cycle's
-        closed ones — answer where the optimizer derives it, and the stalls it may still absorb."""
+        """``RunStanding``'s two numbers, off ``rounds`` — the cycle's closed ones: how many it
+        has gone without advance, and the stalls it may still absorb."""
         ...
+
+
+class BankedState[P: RoundPayload]:
+    """The working state of an optimizer whose state IS its payload: every round banks it whole, so
+    a resume or a fork re-seats it. A member edits ``payload`` in place; its selector returns the next."""
+
+    def __init__(self, payload: P) -> None:
+        self.payload = payload
+
+    def origin_payload(self) -> P:
+        return self.payload
+
+    def replay(self, last: RoundResult) -> None:
+        self.absorb(last)
+
+    def resume(
+        self, ledger: CycleEventLog | None, selected: SelectedOptimizer, *, before_round: int
+    ) -> None:
+        return None
+
+    def absorb(self, round_result: RoundResult) -> None:
+        banked = round_result.optimizer_state.payload_as(type(self.payload))
+        self.payload = banked.model_copy(deep=True)
+
+    def standing(self, rounds: Sequence[RoundResult]) -> tuple[int, int | None]:
+        # Round 0 measures the origin and advances nothing, so it opens no stall.
+        held = 0
+        for rr in reversed(rounds[1:]):
+            if rr.improved:
+                break
+            held += 1
+        return held, None
+
+
+def state_as[P: RoundPayload](ctx: RoundContext, kind: type[P]) -> BankedState[P]:
+    state = ctx.state
+    if not isinstance(state, BankedState) or not isinstance(state.payload, kind):
+        raise TypeError(f"a member banking {kind.__name__} was handed {type(state).__name__}")
+    return state
+
+
+def round_state(selected: SelectedOptimizer, payload: RoundPayload) -> OptimizerState:
+    """The envelope a round document banks: *payload*, copied so nothing later rewrites a closed
+    round, under the prompts that produced it — stamped as the round is built, never at a re-save."""
+    return OptimizerState(
+        manifest=selected.name,
+        prompt_hashes=selected.prompt_hashes(),
+        payload=payload.model_copy(deep=True),
+    )
 
 
 @dataclass(frozen=True)
@@ -317,7 +370,6 @@ class OptimizerRuntime(Protocol):
         self,
         campaign_store: CampaignStore,
         hop: CycleHop,
-        session: Session,
         cycle: Cycle,
         drifted: list[RoundResult],
     ) -> None:
@@ -331,7 +383,6 @@ class OptimizerRuntime(Protocol):
         audits: list[dict[str, Any] | None],
         *,
         context_object: list[str],
-        origin_composite_fitness: float | None,
     ) -> ReviewReading | None:
         """``None`` where the optimizer keeps no reading of its own; ``review.md`` then says N/A."""
         ...
@@ -389,22 +440,40 @@ class Panel:
 
 @dataclass(frozen=True)
 class Population:
-    """The round's individuals with the configuration each is measured under, one per proposal,
-    and the optimizer state proposing them left behind — what the round document banks."""
+    """The round's individuals with the configuration each is measured under (``None`` is the round's
+    parent's). An optimizer subclasses it to hand its eliminator or selector more: the bench passes it whole."""
 
     proposals: list[CandidateProposal]
     individuals: list[OptSearchPoint]
     pipeline_params: list[dict[str, Any] | None]
-    optimizer_state: OptimizerState
+
+    @classmethod
+    def of(cls, proposals: Sequence[CandidateProposal]) -> Population:
+        """*proposals* as they stand, each measured under the parent's configuration."""
+        return cls(
+            proposals=list(proposals),
+            individuals=[p.opt_sp for p in proposals],
+            pipeline_params=[None] * len(proposals),
+        )
+
+    def params_under(self, parent: dict[str, Any] | None) -> list[dict[str, Any] | None]:
+        return [parent if own is None else own for own in self.pipeline_params]
+
+
+def population_as[T: Population](population: Population, kind: type[T]) -> T:
+    if not isinstance(population, kind):
+        raise TypeError(f"a member reading {kind.__name__} was handed {type(population).__name__}")
+    return population
 
 
 @dataclass(frozen=True)
 class Measured:
     """The measurement's output. ``parent`` is the round's best-so-far re-scored on
     :meth:`Selector.parent_cells`; ``scores`` carry each arm's lift against its ``reference_id``,
-    whose rows ``references`` holds; ``electable`` is the arms the round can read, coverage floor applied, in walk order —
-    the only arms a selector may keep. ``cut`` is the budget stop that ended the walks short, on
-    whose panels the round still elects."""
+    whose rows ``references`` holds; ``electable`` is the arms the round can read, coverage floor
+    applied and less any its eliminator's stop disqualified, in walk order — the only arms a
+    selector may keep. ``cut`` is the budget stop that ended the walks short, on whose panels the
+    round still elects."""
 
     rows: dict[str, list[QueryMeasurement]]
     scores: list[ScoredCandidate]
@@ -420,12 +489,13 @@ class Measured:
 @dataclass(frozen=True)
 class Selection:
     """What the selector keeps. ``selected_id`` is empty when the round holds its parent, and
-    otherwise names one of ``Measured.electable``."""
+    otherwise names one of ``Measured.electable``; ``payload`` is the optimizer's state as the
+    round ends on it, which the bench banks under ``round_state``."""
 
     selected_id: str
     scores: list[ScoredCandidate]
     verdict_reason: str
-    optimizer_state: OptimizerState
+    payload: RoundPayload
 
 
 @dataclass(frozen=True)
@@ -445,18 +515,25 @@ class Sampler(NodeMember, Protocol):
 
     def draws(self, selected: SelectedOptimizer, pool: int) -> int:
         """The cells a round after the first asks for off a search pool of ``pool`` rows, read
-        before any round runs — an L4 census, a verify budget, a dashboard's look-ahead."""
+        before any round runs — an L4 census, a verify budget, a dashboard's look-ahead. 0 where
+        the pool holds no round's panel: the one statement every cells ceiling reads."""
         ...
 
     def draw(self, ctx: RoundContext, pool: list[Sample]) -> Panel: ...
 
 
 class Proposer(NodeMember, Protocol):
-    """An ``llm`` or ``algorithm`` node before the measurement. The first proposer of a walk is
-    handed no population; each later one takes the one before it."""
+    """An ``llm`` or ``algorithm`` node before the measurement. Each takes the population the one
+    before it returned; the walk's first is handed an empty one."""
+
+    @property
+    def opens(self) -> bool:
+        """Whether it makes the round's population rather than editing one — true of a walk's
+        first proposer and of no other, which ``round_plan`` refuses a manifest on."""
+        ...
 
     async def propose(
-        self, ctx: RoundContext, panel: Panel, population: Population | None
+        self, ctx: RoundContext, panel: Panel, population: Population
     ) -> Population: ...
 
 
@@ -546,7 +623,15 @@ class Eliminator(NodeMember, Protocol):
         values this eliminator stamps on ``elimination_context["gate"]``."""
         ...
 
-    def race(self, ctx: RoundContext, panel: Panel, catch_up: CatchUpFn) -> Race: ...
+    @property
+    def stop_disqualifies(self) -> bool:
+        """Whether an arm it stops as ``ELIMINATED`` is rejected, and so leaves ``Measured.electable``
+        — false where the stop only ends the buying of an arm the selector still reads."""
+        ...
+
+    def race(
+        self, ctx: RoundContext, panel: Panel, population: Population, catch_up: CatchUpFn
+    ) -> Race: ...
 
 
 class Selector(NodeMember, Protocol):

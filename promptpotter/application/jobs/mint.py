@@ -8,7 +8,7 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from promptpotter.application.bench.task_context import (
     campaign_framing,
@@ -31,7 +31,7 @@ from promptpotter.application.preflight import (
 )
 from promptpotter.application.runner.campaign_ids import build_origin_cycle_id, mint_campaign_id
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
-from promptpotter.domain.bench import partition_bank
+from promptpotter.domain.bench import BankPartition, partition_bank
 from promptpotter.domain.campaign import (
     Arm,
     ArmRequest,
@@ -44,7 +44,7 @@ from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.l4.inner_origin import instrument_of
 from promptpotter.domain.launch_limits import LaunchLimits, refuse_arm_halt
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
-from promptpotter.domain.run_records import CycleSeed
+from promptpotter.domain.run_records import CycleSeed, OriginSource
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import CycleLayout, campaign_cycles_dir
@@ -59,6 +59,7 @@ if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.sample import Sample
+    from promptpotter.infrastructure.store.stores import Stores
 
 
 logger = logging.getLogger(__name__)
@@ -68,12 +69,20 @@ def _noop_log(*_args: Any, **_kwargs: Any) -> None:
     pass
 
 
-def _campaign_origin_seed(origin_override: dict[str, Any] | None) -> CycleSeed | None:
-    """A campaign-from-origin seed — a chosen prior origin's prompt fields as C0, or ``None`` for the
-    dataset's authored one. The same :class:`CycleSeed` an operator-steered fork rides."""
-    if not origin_override:
-        return None
-    return CycleSeed(origin_prompt_fields=origin_override, origin_source="campaign_origin")
+class _Runnable(NamedTuple):
+    treatment: Treatment
+    partition: BankPartition
+
+
+def _runnable(campaign_config: CampaignConfig, dataset: list[Sample]) -> _Runnable:
+    """What the config and the bank alone decide — no session, no framing — so it is asked before
+    a mint writes or a check-in bills."""
+    treatment = select_optimizer(campaign_config.optimization).treatment()
+    partition = partition_bank(dataset, campaign_config.dataset_split)
+    refusal = check_search_pool_holds_round(campaign_config, len(partition.search))
+    if refusal is not None:
+        raise PayloadInvalidError(refusal, code="search_pool_below_round")
+    return _Runnable(treatment, partition)
 
 
 @dataclass(frozen=True)
@@ -82,14 +91,10 @@ class CyclePlan:
     origin: OptSearchPoint
     cycle_id: str
     treatment: Treatment
-
-
-def _refuse_unrunnable(campaign_config: CampaignConfig, dataset: list[Sample]) -> None:
-    """What the config and the bank alone decide, refused before a mint writes or a check-in bills:
-    an overlay the optimizer refuses (``select_optimizer``), a pool holding no round."""
-    search = partition_bank(dataset, campaign_config.dataset_split).search
-    if (refusal := check_search_pool_holds_round(campaign_config, len(search))) is not None:
-        raise PayloadInvalidError(refusal, code="search_pool_below_round")
+    partition: BankPartition
+    # A chosen prior origin's prompt fields as C0 — the same :class:`CycleSeed` an operator-steered
+    # fork rides — or ``None`` for the dataset's authored one.
+    seed: CycleSeed | None
 
 
 @dataclass(frozen=True)
@@ -101,27 +106,28 @@ class MintedCycle:
     campaign_config: CampaignConfig
 
 
-def resolve_cycle_plan(
+def _plan(
     session: Session,
     campaign_config: CampaignConfig,
-    dataset: list[Sample],
+    runnable: _Runnable,
     *,
-    origin_override: dict[str, Any] | None = None,
-    log: Callable[..., None] | None = None,
+    origin_override: dict[str, Any] | None,
+    log: Callable[..., None] | None,
 ) -> CyclePlan:
-    """``origin_override`` IS the origin when set, so the cycle_id derives from it. No disk mint:
-    ``resume`` calls this to recompute the expected id and compare it for drift."""
-    _refuse_unrunnable(campaign_config, dataset)
-    treatment = select_optimizer(campaign_config.optimization).treatment()
     schema = session.pipeline_schema
     pipeline_params = configure_and_apply_pipeline(session, campaign_config, log=log or _noop_log)
     refuse_below_reasoning_floor(campaign_config, pipeline_params)
+    seed = (
+        CycleSeed(origin_prompt_fields=origin_override, origin_source=OriginSource.CAMPAIGN_ORIGIN)
+        if origin_override
+        else None
+    )
     origin = resolve_origin_opt_search_point(
         prompt_node_names=schema.prompt_node_names(),
         dataset_dir=session.dataset_config_dir,
-        seed=_campaign_origin_seed(origin_override),
+        seed=seed,
     )
-    partition = partition_bank(dataset, campaign_config.dataset_split)
+    partition = runnable.partition
     return CyclePlan(
         pipeline_params=pipeline_params,
         origin=origin,
@@ -139,8 +145,36 @@ def resolve_cycle_plan(
             framing=campaign_framing(session.store, campaign_config, session.dataset_name),
             demo=partition.demo,
         ),
-        treatment=treatment,
+        treatment=runnable.treatment,
+        partition=partition,
+        seed=seed,
     )
+
+
+def resolve_cycle_plan(
+    session: Session,
+    campaign_config: CampaignConfig,
+    dataset: list[Sample],
+    *,
+    origin_override: dict[str, Any] | None = None,
+    log: Callable[..., None] | None = None,
+) -> CyclePlan:
+    """``origin_override`` IS the origin when set, so the cycle_id derives from it. No disk mint:
+    ``resume`` calls this to recompute the expected id and compare it for drift."""
+    return _plan(
+        session,
+        campaign_config,
+        _runnable(campaign_config, dataset),
+        origin_override=origin_override,
+        log=log,
+    )
+
+
+def write_plan_seed(stores: Stores, hop: CycleHop, plan: CyclePlan) -> None:
+    """Put *plan*'s chosen origin on the cycle it was planned for — the one writer of a
+    campaign-from-origin seed, for a fresh mint and a check-in's Start alike."""
+    if plan.seed is not None:
+        stores.campaigns.write_cycle_seed(hop, plan.seed)
 
 
 def _warn_on_duplicate_origin(
@@ -153,9 +187,9 @@ def _warn_on_duplicate_origin(
     content-addressed, so a second ``new`` re-runs the identical seed under a fresh campaign."""
     prior = sorted(
         {
-            str(entry.get("campaign_id") or "")
+            entry.campaign_id
             for entry in session.store.campaigns.enumerate_cycles()
-            if entry.get("cycle_id") == cycle_id and entry.get("campaign_id")
+            if entry.cycle_id == cycle_id
         }
     )
     if not prior:
@@ -223,7 +257,7 @@ def _join_head_to_head(
     """Declare the head-to-head off this arm's own instrument and budget when none is recorded,
     else refuse an arm off its instrument — or re-use a key another arm holds."""
     optimization = campaign_config.optimization
-    partition = partition_bank(dataset, campaign_config.dataset_split)
+    partition = plan.partition
     instrument = bench_instrument(
         dataset_name=resolved_dataset_name(session, campaign_config),
         dataset_hash=dataset_hash(dataset),
@@ -284,7 +318,7 @@ def _prompt_axes_only(
     """Every node's search space closed to the prompt's own fields: an optimizer that also moved
     a call's sampling or its reasoning rung would be graded on more than the prompt it wrote."""
     narrowing: dict[str, NodeSearchNarrowing] = {}
-    for node in session.pipeline_schema.config_nodes:
+    for node in session.pipeline_schema.declared_nodes:
         held = campaign_config.optimizer_narrowing.get(node.name, NodeSearchNarrowing())
         still_open = PROMPT_STRING_FIELDS if held.param_keys is None else held.param_keys
         narrowing[node.name] = held.model_copy(
@@ -293,25 +327,73 @@ def _prompt_axes_only(
     return narrowing
 
 
+def under_declared_record(
+    stores: Stores, campaign_config: CampaignConfig, arm: ArmRequest | None
+) -> CampaignConfig:
+    """*campaign_config* under the split and budget *arm*'s head-to-head has declared
+    (``under_record``). Sessionless, so admission asks it: a launch is admitted on the ceiling it holds."""
+    if arm is None:
+        return campaign_config
+    declared = stores.campaigns.load_head_to_head(arm.head_to_head_id)
+    return campaign_config if declared is None else under_record(campaign_config, declared)
+
+
 def _under_declaration(
     session: Session, campaign_config: CampaignConfig, arm: ArmRequest | None
 ) -> CampaignConfig:
-    """The config an arm runs. It searches the prompt alone; and a later arm runs under the split
-    and budget its head-to-head's record owns (``under_record``) — before its origin resolves,
-    whose id the split moves."""
+    """The config an arm runs. It searches the prompt alone, and runs under its head-to-head's
+    record — before its origin resolves, whose id the split moves."""
     if arm is None:
         return campaign_config
-    campaign_config = campaign_config.model_copy(
+    narrowed = campaign_config.model_copy(
         update={"optimizer_narrowing": _prompt_axes_only(session, campaign_config)}
     )
-    declared = session.store.campaigns.load_head_to_head(arm.head_to_head_id)
-    return campaign_config if declared is None else under_record(campaign_config, declared)
+    return under_declared_record(session.store, narrowed, arm)
 
 
 def fresh_campaign_id(session: Session, campaign_config: CampaignConfig) -> str:
     """A brand-new random campaign id — what every mint that does NOT own its campaign's identity
     passes on. The L4 inner spawn is the one caller that does, deriving it from its cell."""
     return mint_campaign_id(resolved_dataset_name(session, campaign_config))
+
+
+def _mint_runnable(
+    session: Session,
+    campaign_config: CampaignConfig,
+    dataset: list[Sample],
+    runnable: _Runnable,
+    *,
+    campaign_id: str,
+    arm: ArmRequest | None,
+    origin_override: dict[str, Any] | None,
+    log: Callable[..., None] | None,
+) -> MintedCycle:
+    """The mint itself, over a config already under its declaration and a bank already found
+    runnable — each resolved once, by whichever entry below was asked."""
+    plan = _plan(session, campaign_config, runnable, origin_override=origin_override, log=log)
+    arm_of = (
+        None if arm is None else _join_head_to_head(session, campaign_config, dataset, plan, arm)
+    )
+    # **Never sweep the inner sandbox here.** A fresh mint has a fresh ``campaign_id`` and the
+    # key carries it (``store/layout.py::inner_sandbox_key``), so an rmtree at this line can
+    # only destroy a DIFFERENT campaign's inner history. One did: 39 banked inner campaigns.
+    _warn_on_duplicate_origin(session, plan.cycle_id, log=log or _noop_log)
+    _warn_on_novel_instrument(session, plan, campaign_config, log=log or _noop_log)
+    session_id, campaign_id, cycle_id = auto_mint_session(
+        session,
+        campaign_config,
+        hop=CycleHop(campaign_id=campaign_id, cycle_id=plan.cycle_id),
+        dataset_size=len(dataset),
+        treatment=plan.treatment,
+        arm=arm_of,
+    )
+    write_plan_seed(session.store, CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), plan)
+    return MintedCycle(
+        cycle_id=cycle_id,
+        session_id=session_id,
+        campaign_id=campaign_id,
+        campaign_config=campaign_config,
+    )
 
 
 def prepare_fresh_cycle(
@@ -326,39 +408,16 @@ def prepare_fresh_cycle(
 ) -> MintedCycle:
     """Mint a fresh campaign + session + root cycle. ``campaign_id`` is a REQUIRED keyword with no
     default: who owns the campaign's identity is a decision, and a default picks it for you."""
-    seed = _campaign_origin_seed(origin_override)
     campaign_config = _under_declaration(session, campaign_config, arm)
-    plan = resolve_cycle_plan(
-        session, campaign_config, dataset, origin_override=origin_override, log=log
-    )
-    arm_of = (
-        None if arm is None else _join_head_to_head(session, campaign_config, dataset, plan, arm)
-    )
-    # **Never sweep the inner sandbox here.** A fresh mint has a fresh ``campaign_id`` and the
-    # key carries it (``store/layout.py::inner_sandbox_key``), so an rmtree at this line can
-    # only destroy a DIFFERENT campaign's inner history. One did: 39 banked inner campaigns.
-    _warn_on_duplicate_origin(session, plan.cycle_id, log=log or _noop_log)
-    _warn_on_novel_instrument(session, plan, campaign_config, log=log or _noop_log)
-    session_id, campaign_id, cycle_id = auto_mint_session(
+    return _mint_runnable(
         session,
         campaign_config,
-        hop=CycleHop(campaign_id=campaign_id, cycle_id=plan.cycle_id),
-        origin_prompt_fields=plan.origin.prompt_field_dict(),
-        dataset_size=len(dataset),
-        pipeline_params=plan.pipeline_params,
-        active_steps=list(plan.pipeline_params.get("steps", [])),
-        treatment=plan.treatment,
-        arm=arm_of,
-    )
-    if seed is not None:
-        session.store.campaigns.write_cycle_seed(
-            CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), seed
-        )
-    return MintedCycle(
-        cycle_id=cycle_id,
-        session_id=session_id,
+        dataset,
+        _runnable(campaign_config, dataset),
         campaign_id=campaign_id,
-        campaign_config=campaign_config,
+        arm=arm,
+        origin_override=origin_override,
+        log=log,
     )
 
 
@@ -389,18 +448,17 @@ async def mint_framed_cycle(
     origin_override: dict[str, Any] | None = None,
     log: Callable[..., None] | None = None,
 ) -> MintedCycle:
-    """:func:`prepare_fresh_cycle` behind the dataset's framing — the mint of every entry point
-    that starts a campaign. An L4 inner cell mints through ``prepare_fresh_cycle`` alone, so a
-    round's cells never race to decompose. ``task_text`` is an operator's own description, and
-    ``limits`` what the launch asked for, which an arm may not."""
+    """The fresh mint behind the dataset's framing, for every entry point that starts a campaign. An
+    L4 inner cell mints through :func:`prepare_fresh_cycle`, so a round's cells never race to decompose."""
     if arm is not None:
         if task_text or origin_override:
             raise PayloadInvalidError(
                 "an arm runs the head-to-head's origin and framing: no task text, no origin override"
             )
         refuse_arm_halt(limits.halt_at_accuracy)
-    # Before the check-in below bills: the plan that refuses the same things needs its framing.
-    _refuse_unrunnable(_under_declaration(session, campaign_config, arm), dataset)
+    campaign_config = _under_declaration(session, campaign_config, arm)
+    # Before the check-in below bills. The rest of the plan waits on the framing it commits.
+    runnable = _runnable(campaign_config, dataset)
     description = _description_to_decompose(session, campaign_config, task_text)
     # The cycle id hashes the framing this commits, so the check-in bills a scratch ledger first
     # and its records are carried onto the minted cycle — the run's own meter.
@@ -417,10 +475,11 @@ async def mint_framed_cycle(
                 book=await asyncio.to_thread(admit_spend, stores=session.store, bucket="checkin"),
             )
             logger.info("Committed task framing for %s from its check-in", session.dataset_name)
-        minted = prepare_fresh_cycle(
+        minted = _mint_runnable(
             session,
             campaign_config,
             dataset,
+            runnable,
             campaign_id=campaign_id,
             arm=arm,
             origin_override=origin_override,
@@ -444,4 +503,6 @@ __all__ = [
     "mint_framed_cycle",
     "prepare_fresh_cycle",
     "resolve_cycle_plan",
+    "under_declared_record",
+    "write_plan_seed",
 ]

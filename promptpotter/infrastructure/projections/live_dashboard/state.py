@@ -3,11 +3,13 @@ through this model at every ``_persist()``, so writer/schema drift raises at wri
 
 from __future__ import annotations
 
+import logging
 import time
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, ClassVar
 
-from pydantic import ConfigDict, Field, ValidationError, computed_field
+from pydantic import ConfigDict, Field, TypeAdapter, ValidationError, computed_field
 
 from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.bench import BenchScore, BenchSubject, bench_missing_reason
@@ -18,9 +20,14 @@ from promptpotter.domain.dashboard_rows import (
     OptimizerLimit,
     RoundSummary,
     RunStanding,
+    lift_side,
+    panel_cuts,
+    precision_verdict,
 )
+from promptpotter.domain.l4.proxies import PanelPrecision
 from promptpotter.domain.phases import DashboardState, RunPhase, StopReason
 from promptpotter.domain.results import DisplayMetric, OverlapReading, VerifyStrategy
+from promptpotter.domain.ruler import AbilityReading
 from promptpotter.domain.scoring import anchored_criterion_dials
 from promptpotter.domain.spend import CeilingMeter, MeteredSpend, SpendRollup
 from promptpotter.domain.strict_model import StrictModel
@@ -28,6 +35,8 @@ from promptpotter.infrastructure.runtime_flags import verify_stale_after
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_verify
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.shared.clock import utcnow_iso
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "BackendWarning",
@@ -41,8 +50,10 @@ __all__ = [
     "RunLimits",
     "VerifyPassProgress",
     "overlay_criterion_dials",
+    "overlay_round_readings",
     "overlay_spend_metered",
     "overlay_verify",
+    "served_spend",
     "warming_payload",
 ]
 
@@ -64,16 +75,27 @@ def warming_payload(hop: CycleHop, *, run_phase: str) -> dict[str, Any]:
     }
 
 
-def overlay_spend_metered(body: dict[str, Any], meter: CeilingMeter) -> None:
-    """A ``spend`` block this build cannot parse serves none, rather than failing the poll."""
+def served_spend(body: Mapping[str, Any]) -> tuple[SpendRollup, dict[str, SpendRollup]] | None:
+    """The cycle's spend and its per-round split off a ``dashboard.json`` body — the ONE reading of
+    them. Read WHOLE: a body without the pair, or one this build cannot parse, answers ``None``."""
     try:
         spend = SpendRollup.model_validate(body["spend"])
         by_round = {k: SpendRollup.model_validate(v) for k, v in body["spend_by_round"].items()}
-    except ValidationError:
+    except (KeyError, ValidationError):
+        return None
+    return spend, by_round
+
+
+def overlay_spend_metered(body: dict[str, Any], meter: CeilingMeter) -> None:
+    """A ``spend`` block this build cannot parse serves none, rather than failing the poll. The
+    per-round split is served in round order, its keys being the writer's ``str(round)``."""
+    if (served := served_spend(body)) is None:
         return
+    spend, by_round = served
     body["spend_metered"] = MeteredSpend.of(spend, meter).model_dump()
     body["spend_metered_by_round"] = {
-        k: MeteredSpend.of(r, meter).model_dump() for k, r in by_round.items()
+        k: MeteredSpend.of(r, meter).model_dump()
+        for k, r in sorted(by_round.items(), key=lambda kv: int(kv[0]))
     }
 
 
@@ -91,6 +113,61 @@ def overlay_criterion_dials(body: dict[str, Any]) -> None:
         if dials is None
         else {name: d.anchor for name, d in dials.items() if d.anchor is not None}
     )
+
+
+def _read[M: StrictModel](model: type[M], value: object) -> M | None:
+    """A served block as its model, or ``None`` where it is absent or this build cannot parse it."""
+    try:
+        return None if value is None else model.model_validate(value)
+    except ValidationError:
+        return None
+
+
+def _count(value: object) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _bound(value: object) -> float | None:
+    return float(value) if isinstance(value, int | float) and not isinstance(value, bool) else None
+
+
+def _stamp_arm_readings(rows: object) -> None:
+    """One round's candidate rows: each arm's lift side, and whether its panel was cut."""
+    arms = [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
+    cuts = panel_cuts(
+        [(_count(arm.get("scored_samples")), _count(arm.get("expected_samples"))) for arm in arms]
+    )
+    for arm, cut in zip(arms, cuts, strict=True):
+        arm["reference_lift_side"] = lift_side(
+            _bound(arm.get("reference_lift_ci_lo")), _bound(arm.get("reference_lift_ci_hi"))
+        )
+        arm["panel_cut"] = cut
+
+
+def overlay_round_readings(body: dict[str, Any]) -> None:
+    """Every reading a surface would otherwise decide for itself off the served rounds, laid on
+    once — all pure functions of the rows beside them, so none is stored. Mutates in place."""
+    rounds = sorted(
+        (r for r in body.get("rounds") or [] if isinstance(r, dict)),
+        key=lambda r: r["round"] if isinstance(r.get("round"), int) else 0,
+    )
+    body["rounds"] = rounds
+    series: AbilityReading | None = None
+    for closed in rounds:
+        ability = _read(AbilityReading, closed.get("ability"))
+        if series is None and ability is not None and ability.ruler_id is not None:
+            series = ability
+        closed["ability_on_series_ruler"] = (
+            ability is not None and series is not None and ability.comparable_to(series)
+        )
+        precision = _read(PanelPrecision, closed.get("panel_precision"))
+        closed["panel_precision_verdict"] = (
+            None if precision is None else precision_verdict(precision)
+        )
+        _stamp_arm_readings(closed.get("candidates"))
+    current = body.get("current_round")
+    if isinstance(current, dict):
+        _stamp_arm_readings(current.get("candidates"))
 
 
 class CatchUpLogEntry(StrictModel):
@@ -155,7 +232,7 @@ class RunLimits(StrictModel):
 
     **The two spend arms and ``max_rounds`` are the ARMED ceilings, not the declared ones**,
     re-read from ``run_limits.json``, the standing ceiling's polled mirror, at every persist
-    (``projection.py::_persist``). Held static, every surface reading them — the control's own
+    (``projection.py::_stamp_armed_controls``). Held static, every surface reading them — the control's own
     prefill, the run strip — reports a number the run stops using the moment
     ``change-run-limits`` lands."""
 
@@ -443,8 +520,8 @@ class LiveDashboardState(StrictModel):
     error: DashboardError | None = None
 
     # Stamped at run start and riding no ledger record, so a fold off disk cannot answer for them
-    # and the serving route stamps the head file's over the replay. Everything NOT in here moves
-    # over a run and is folded.
+    # and takes the head file's as an input (``projection.py::fold_at``). Everything NOT in here
+    # moves over a run and is folded.
     WIRING_FIELDS: ClassVar[tuple[str, ...]] = (
         "session_id",
         "arms_per_round",
@@ -455,6 +532,21 @@ class LiveDashboardState(StrictModel):
         "measured_unit",
         "run_limits",
     )
+
+    @classmethod
+    def wiring_of(cls, head: object) -> dict[str, Any] | None:
+        """The wiring constants off a stored ``dashboard.json`` body. ONLY these: the rest of *head*
+        may be a shape this build cannot parse. ``None`` where the file does not carry them whole."""
+        if not isinstance(head, dict):
+            return None
+        try:
+            return {
+                name: TypeAdapter(cls.model_fields[name].annotation).validate_python(head[name])
+                for name in cls.WIRING_FIELDS
+            }
+        except (KeyError, ValidationError) as exc:
+            logger.warning("dashboard wiring unreadable — a replay folds at defaults: %s", exc)
+            return None
 
     @computed_field  # type: ignore[prop-decorator]
     @property

@@ -7,7 +7,6 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.datasets.dataset_replace import recover_pending_replacements
 from promptpotter.application.datasets.draft_campaign import (
     DraftCampaign,
     dataset_source_of,
@@ -27,18 +26,17 @@ from promptpotter.application.jobs.launcher.admission import (
 )
 from promptpotter.application.jobs.launcher.mint_and_start import (
     LaunchError,
-    _assert_origin_ready,
+    assert_origin_ready,
     build_cycle_config,
     dataset_campaign_config,
     materialize_and_write_origin,
     persist_origin_candidate_library,
 )
-from promptpotter.application.jobs.launcher.run_job import JobSpec, record_launch_stop, spawn_job
-from promptpotter.application.jobs.mint import resolve_cycle_plan
+from promptpotter.application.jobs.launcher.run_job import JobSpec, spawn_job
+from promptpotter.application.jobs.mint import resolve_cycle_plan, write_plan_seed
 from promptpotter.config.settings import DEFAULT_BACKEND_URL
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.launch_limits import LaunchLimits
-from promptpotter.domain.run_records import CycleSeed
 from promptpotter.infrastructure.runtime_flags import is_checkin
 from promptpotter.infrastructure.store.dataset_access import readable_dataset_dir
 from promptpotter.infrastructure.store.stores import Stores
@@ -100,7 +98,6 @@ class PreparedCheckinRun:
 def load_checkin_for_start(stores: Stores, campaign_id: str) -> tuple[CycleHop, DraftCampaign]:
     """Load + gate a check-in for Start. An incomplete origin raises ``OriginIncompleteError`` → 422
     with the open gaps, leaving the campaign in check-in."""
-    recover_pending_replacements(stores=stores)
     campaign = stores.campaigns.load_campaign(campaign_id)
     if campaign is None or campaign.owner_user_id != str(stores.identity.user_id):
         raise LaunchError(f"campaign not found or not owned: {campaign_id}")
@@ -109,7 +106,7 @@ def load_checkin_for_start(stores: Stores, campaign_id: str) -> tuple[CycleHop, 
     draft = load_checkin_draft(stores, campaign_id)
     if draft is None:
         raise LaunchError(f"campaign {campaign_id} has no check-in working state to start")
-    _assert_origin_ready(draft)
+    assert_origin_ready(draft)
     return campaign.root_hop, draft
 
 
@@ -169,26 +166,15 @@ async def prepare_checkin_run(
     train_data = session.samples
     plan = resolve_cycle_plan(session, campaign_config, train_data, origin_override=origin_override)
 
-    index = stores.campaigns.load(hop) or {}
-    session_id = str(index.get("parent_session_id") or "")
-    if not session_id:
-        raise LaunchError(
-            f"checkin cycle {hop.cycle_id} in {hop.campaign_id} has no parent_session_id"
-        )
-
     finalize_checkin_to_active(
         session,
         campaign_config,
         hop=hop,
-        session_id=session_id,
+        session_id=stores.campaigns.session_id_of(hop),
         cycle_plan=plan,
         dataset_size=len(train_data),
     )
-    if origin_override:
-        stores.campaigns.write_cycle_seed(
-            hop,
-            CycleSeed(origin_prompt_fields=origin_override, origin_source="campaign_origin"),
-        )
+    write_plan_seed(stores, hop, plan)
 
     return PreparedCheckinRun(
         session=session,
@@ -200,7 +186,7 @@ async def prepare_checkin_run(
 def _checkin_campaign_config(stores: Stores, draft: DraftCampaign) -> CampaignConfig:
     """The campaign declaration Start is about to commit, read BEFORE it commits, so admission sees
     the ceiling the run will hold: a reused dataset's own file, or the draft's floor that
-    ``_build_default_campaign_json`` writes for a fresh upload. The overlay ``build_cycle_config``
+    ``default_campaign_json`` writes for a fresh upload. The overlay ``build_cycle_config``
     adds later moves no budget arm."""
     canonical = dataset_source_of(draft.source_file)
     if canonical is None:
@@ -282,13 +268,7 @@ async def _start_checkin_run(
         # `prepare_checkin_run` flips checkin → active before its last await, so an interrupt
         # there leaves an `active` campaign with no producer. The CYCLE needs stamping too, or
         # it derives `detached` and `load_checkin_for_start` can no longer re-start it.
-        release_slot(job_registry, job.job_id, exc)
-        record_launch_stop(
-            stores=stores,
-            hop=hop,
-            session_id="",
-            exc=exc,
-        )
+        release_slot(job_registry, job.job_id, exc, stores=stores, hop=hop)
         raise
 
     spawn_job(
@@ -302,6 +282,7 @@ async def _start_checkin_run(
             limits=held,
             backend_url=backend_url,
         ),
+        stores=stores,
     )
     logger.info("start-checkin: started %s/%s (job %s)", hop.campaign_id, hop.cycle_id, job.job_id)
 

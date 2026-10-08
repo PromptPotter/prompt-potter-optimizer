@@ -4,7 +4,12 @@
 import { candidateLabel } from "@/lib/candidate-label";
 import { cacheShare, prefixReading } from "@/lib/derivations";
 import { fmtDuration, fmtPct0 } from "@/lib/format";
-import type { BenchPassProgress, NonActivityKind, ProjectionEnvelope } from "@/lib/api/types";
+import type {
+  BenchPassProgress,
+  LiveDashboardState,
+  NonActivityKind,
+  ProjectionEnvelope,
+} from "@/lib/api/types";
 import { STOP_REASON_LABELS } from "@/lib/api/types.generated";
 import { isStopReason } from "@/lib/run-phase";
 
@@ -82,47 +87,34 @@ function candidateItem(label: string, detail: string | undefined): ActivityItem 
   return { id: `cand-${label}`, kind: "candidate", icon: "◆", label, detail, tone: "good" };
 }
 
+// The stream's opening snapshot IS `dashboard.json`, served verbatim — or the warming stand-in,
+// which carries none of it. `Partial`, so every block is read through a guard.
 export function snapshotToActivity(payload: Record<string, unknown>): ActivityItem[] {
+  const dash = payload as Partial<LiveDashboardState>;
   const out: ActivityItem[] = [];
 
-  const rounds = Array.isArray(payload.rounds) ? payload.rounds : [];
-  for (const rr of rounds) {
-    const r = asRec(rr);
-    const round = num(r.round);
-    if (round == null) continue;
-    out.push(roundItem(round, pct0(num(r.accuracy))));
+  for (const r of dash.rounds ?? []) out.push(roundItem(r.round, pct0(r.accuracy)));
+
+  // Round 0 enumerates nothing: the engine scores the origin without firing `candidate_started`.
+  // A row is seeded at mint, so a candidate appears here before it has a number.
+  for (const c of dash.current_round?.candidates ?? []) {
+    out.push(candidateItem(c.label, pct0(c.composite_fitness)));
   }
 
-  // Round 0 enumerates nothing only because the engine scores the origin without firing
-  // `candidate_started`: an engine gap, not a rule of this reader.
-  const cr = asRec(payload.current_round);
-  const crRound = num(cr.round);
-  if (crRound != null && crRound >= 0) {
-    // A row is seeded at mint, so a candidate appears here before it has a number.
-    const rows = Array.isArray(cr.candidates) ? (cr.candidates as unknown[]) : [];
-    rows.forEach((c, i) => {
-      const row = asRec(c);
-      out.push(candidateItem(str(row.label) ?? candidateLabel(crRound, i), fitPct(row)));
-    });
-  }
-
-  const warnings = Array.isArray(payload.recent_loop_warnings) ? payload.recent_loop_warnings : [];
-  warnings.forEach((w, i) => {
-    const rec = asRec(w);
-    const error = str(rec.severity) === "error";
+  (dash.recent_loop_warnings ?? []).forEach((w, i) => {
+    const error = w.severity === "error";
     out.push({
       id: `warn-${i}`,
       kind: "warning",
       icon: error ? "✗" : "⚠",
-      label: str(rec.message) ?? "round degraded",
+      label: w.message,
       tone: error ? "bad" : "warn",
     });
   });
 
-  const err = asRec(payload.error);
-  const errMsg = str(err.message);
-  if (errMsg) {
-    out.push({ id: "error", kind: "error", icon: "✗", label: errMsg, detail: stopLabel(err.stop_reason), tone: "bad" });
+  const err = dash.error;
+  if (err?.message) {
+    out.push({ id: "error", kind: "error", icon: "✗", label: err.message, detail: stopLabel(err.stop_reason), tone: "bad" });
   }
   return out;
 }
@@ -147,7 +139,7 @@ export function benchPassActivity(pass: BenchPassProgress | null | undefined): A
     kind: "progress",
     icon: "·",
     label: `${benchPassOf(pass.label, pass.subject, pass.round)} · ${pass.scored}/${pass.rows} held-out rows`,
-    detail: pass.accuracy == null ? undefined : `${Math.round(pass.accuracy * 100)}% so far`,
+    detail: pass.accuracy == null ? undefined : `${fmtPct0(pass.accuracy)} so far`,
     tone: "muted",
   };
 }
@@ -164,7 +156,7 @@ function benchPassOf(label: unknown, subject: unknown, round: unknown): string {
   return name ? `${name} · bench pass (${who})` : `bench pass · ${who}`;
 }
 
-// Narrower than `ProjectionEnvelope`: a `RayItem` carries no `version` and no `cycle_id`.
+// Narrower than `ProjectionEnvelope`: a `RayItem` carries no `cycle_id`.
 export type ActivitySource = Pick<ProjectionEnvelope, "kind" | "sequence" | "payload">;
 
 export function projectionToActivity(env: ActivitySource): ActivityItem | null {
@@ -188,7 +180,7 @@ export function projectionToActivity(env: ActivitySource): ActivityItem | null {
         !!inner.cached,
       );
       if (prefix.state === "unreported") bits.push("prefix not reported");
-      else if (prefix.share != null) bits.push(`${Math.round(prefix.share * 100)}% prefix cached`);
+      else if (prefix.share != null) bits.push(`${fmtPct0(prefix.share)} prefix cached`);
       // "replayed", not "cached": OUR archive served it, and `cached` names the provider discount.
       // The terminal (`live/display.py`) uses the same two words.
       if (inner.cached) bits.push("replayed");

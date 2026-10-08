@@ -16,7 +16,12 @@ from promptpotter.application.bench.resume_and_fork.decisions import record_deci
 from promptpotter.application.bench.round_analysis import compute_round_diagnostics
 from promptpotter.application.diagnostics.verify import verify_on_saturation
 from promptpotter.application.initialization.session import Session
-from promptpotter.application.optimizers.nodes import RoundContext, RoundOpening
+from promptpotter.application.optimizers.nodes import (
+    Population,
+    RoundContext,
+    RoundOpening,
+    round_state,
+)
 from promptpotter.application.run_observers import RunCallbacks
 from promptpotter.application.runner.bench import grade_round_selection, reserve_selection_pass
 from promptpotter.application.runner.measurement import measure_population
@@ -27,9 +32,8 @@ from promptpotter.application.runner.output import (
 )
 from promptpotter.application.runner.overlap import measure_overlap
 from promptpotter.application.runner.termination import BudgetGate, panel_gate_tripped
-from promptpotter.application.scoring.metrics import _compute_accuracy
 from promptpotter.application.scoring.row_diagnostics import count_degraded_samples
-from promptpotter.application.scoring.selection import paired_fitness
+from promptpotter.application.scoring.selection import matched_parent_lift
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.dashboard_rows import RunStanding
@@ -44,21 +48,29 @@ from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.results import (
     CandidateProposal,
     RoundResult,
+    ScoredCandidate,
     candidate_label,
     is_leader_eligible,
     overlap_series,
     proposal_collapses,
     unscoreable_cells,
 )
-from promptpotter.domain.results_health import assemble_prior_healths, compute_round_health
-from promptpotter.domain.run_records import BenchCheckpointKind, ResumeCheckpointRecord
+from promptpotter.domain.results_health import (
+    assemble_prior_healths,
+    compute_round_health,
+    is_deprecated,
+)
+from promptpotter.domain.run_records import (
+    BenchCheckpointKind,
+    CandidateMintedRecord,
+    ResumeCheckpointRecord,
+)
 from promptpotter.domain.scoring import is_unscored
 from promptpotter.domain.search_point import strip_rendered_prompt
 from promptpotter.infrastructure.llm.telemetry import emit_round_warning
 from promptpotter.infrastructure.tracing.bridge import observed_node
 from promptpotter.infrastructure.tracing.events import PromptVersion, RoundEnd, RoundStart
 from promptpotter.shared.errors import graceful, is_error_result
-from promptpotter.shared.statistics import paired_reading
 
 if TYPE_CHECKING:
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
@@ -67,7 +79,7 @@ if TYPE_CHECKING:
         Controller,
         Eliminator,
         Measured,
-        Population,
+        Panel,
         Proposer,
         Sampler,
         Selection,
@@ -90,6 +102,7 @@ __all__ = [
     "persist_round",
     "post_round",
     "proposal_summaries",
+    "propose_population",
     "round_plan",
 ]
 
@@ -115,7 +128,7 @@ class RoundPlan:
 def round_plan(selected: SelectedOptimizer) -> RoundPlan:
     """Refuses a walk the bench cannot run rather than skipping the node it cannot place."""
     walk = selected.schema.pipelines["default"]
-    kinds = [selected.node(name).wire_type for name in walk]
+    kinds = [selected.node(name).kind for name in walk]
     measured_at = kinds.index(NodeKind.GATEWAY)
     selected_at = next((i for i, kind in enumerate(kinds) if kind is NodeKind.SELECTOR), len(kinds))
     samplers: list[Sampler] = []
@@ -150,6 +163,12 @@ def round_plan(selected: SelectedOptimizer) -> RoundPlan:
             f"optimizer {selected.name!r}: `default` must walk one sampler, at least one "
             "proposer and at most one eliminator before its measurement, and one selector after "
             f"it — it walks {walk}."
+        )
+    if misplaced := [p.name for at, p in enumerate(proposers) if p.opens is not (at == 0)]:
+        raise ValueError(
+            f"optimizer {selected.name!r}: `default` must walk a proposer that makes the round's "
+            f"population first and only ones editing it after — {misplaced} of "
+            f"{[p.name for p in proposers]} are out of place."
         )
     return RoundPlan(
         measurement=walk[measured_at],
@@ -212,45 +231,40 @@ def _round_result(
     cs_by_id = {cs.candidate_id: cs for cs in scores}
     params_by_id = {
         ind.lineage.id: pp
-        for ind, pp in zip(population.individuals, population.pipeline_params, strict=True)
+        for ind, pp in zip(
+            population.individuals, population.params_under(pipeline_params), strict=True
+        )
     }
+    # The arm the round ended on, and every headline off ITS report: the label, the rates and the
+    # sample count are one individual's, so the round header and the per-candidate table agree.
+    elected: ScoredCandidate = parent.report
     best_opt_sp: OptSearchPoint = parent.opt_sp
     best_results: list[QueryMeasurement] = list(measured.parent_rows)
-    best_acc, best_comp = parent.report.accuracy, parent.report.composite_fitness
-    best_label = parent.report.label
-    best_scores: dict[str, float] = dict(parent.report.evaluators)
+    best_params = pipeline_params
     if winner_id:
-        winner_ind = next(ind for ind in measured.electable if ind.lineage.id == winner_id)
-        winner_cs = cs_by_id[winner_id]
-        best_acc, best_comp = winner_cs.accuracy, winner_cs.composite_fitness
-        best_opt_sp = winner_ind
+        elected = cs_by_id[winner_id]
+        best_opt_sp = next(ind for ind in measured.electable if ind.lineage.id == winner_id)
         best_results = list(measured.rows[winner_id])
-        best_label = winner_ind.lineage.changes_description or winner_ind.lineage.id[:12]
-        best_scores = dict(winner_cs.evaluators)
-    base = _compute_accuracy(best_results)
+        best_params = params_by_id[winner_id]
     p_value: float | None = None
-    winner_reference = cs_by_id[winner_id].reference_id if winner_id else None
-    if base["total"] > 0 and winner_reference is not None:
-        # A recorded diagnostic; it gates nothing. Significance runs on the per-sample FITNESS
-        # rather than binary hits, TWO-SIDED to match the winner's `reference_lift_ci_*` beside it.
-        cand_fit, parent_fit = paired_fitness(
+    winner_reference = elected.reference_id if winner_id else None
+    if elected.total > 0 and winner_reference is not None:
+        # A recorded diagnostic; it gates nothing. The p of the SAME reading the winner's
+        # `reference_lift_ci_*` came from, so the interval and the test agree about zero.
+        paired = matched_parent_lift(
             best_results, measured.references[winner_reference], grade="fitness"
         )
-        _d, _lo, _hi, p_value, _n = paired_reading(cand_fit, parent_fit)
+        p_value = paired.p_value if paired else None
     return RoundResult(
         round=ctx.round_num,
-        label=best_label,
-        accuracy=best_acc,
-        composite_fitness=best_comp,
-        # The headline sample count rides the winner's row, so the round header and the
-        # per-candidate table cannot disagree.
-        total=cs_by_id[winner_id].total if winner_id else base["total"],
+        label=elected.label,
+        accuracy=elected.accuracy,
+        composite_fitness=elected.composite_fitness,
+        total=elected.total,
         # Cells of the winner's panel never sent. An eliminator stop is one legitimate reason for
         # it, so this is REPORTED here and graded only on the origin.
         not_attempted=(
-            max(0, cs_by_id[winner_id].expected_samples - cs_by_id[winner_id].scored_samples)
-            if winner_id
-            else 0
+            max(0, elected.expected_samples - elected.scored_samples) if winner_id else 0
         ),
         # Counted off the rows: an ungraded cell WAS sent and WAS measured, so it is already
         # inside `scored_samples` and no subtraction can find it.
@@ -262,9 +276,7 @@ def _round_result(
         prompt_fields=best_opt_sp.prompt_field_dict(),
         # Stripped, because the round's incoming params carry the PREVIOUS winner's render and
         # nothing re-renders at this write; every reader rebuilds the render from `prompt_fields`.
-        pipeline_params=strip_rendered_prompt(
-            params_by_id.get(winner_id, pipeline_params) if winner_id else pipeline_params
-        ),
+        pipeline_params=strip_rendered_prompt(best_params),
         results=cast("list[dict[str, Any]]", best_results),
         all_candidate_results=cast("dict[str, list[dict[str, Any]]]", dict(measured.rows)),
         # Banked with the arms read against them: every scalar this round stamps about a
@@ -276,12 +288,12 @@ def _round_result(
         candidates_scored=len(measured.scored),
         electable_count=len(measured.electable),
         candidate_scores=scores,
-        selected_labels=[cs_by_id[winner_id].label] if winner_id else [],
+        selected_labels=[elected.label] if winner_id else [],
         degraded_samples=count_degraded_samples(best_results),
-        deprecated=base["deprecated"],
-        evaluators=best_scores,
+        deprecated=sum(1 for r in best_results if is_deprecated(r)),
+        evaluators=dict(elected.evaluators),
         opt_sp=best_opt_sp,
-        optimizer_state=selection.optimizer_state,
+        optimizer_state=round_state(ctx.cycle.optimizer, selection.payload),
     )
 
 
@@ -392,7 +404,27 @@ def announce_opening(ctx: RoundContext, node: str) -> RoundOpening:
 def announce_population(
     ctx: RoundContext, opening: RoundOpening, proposals: list[CandidateProposal], n_cells: int
 ) -> None:
-    """Close the round's proposing on the ledger: what was proposed, and what collapsed."""
+    """Close the round's proposing on the ledger: each new individual's identity, minted before a
+    cell is bought so a round that never closes still names its arms. A carried id is minted once."""
+    if (ledger := ctx.cycle.session.state.ledger) is not None:
+        minted = {
+            rec.candidate_id for _, rec in ledger.iter() if isinstance(rec, CandidateMintedRecord)
+        }
+        for idx, proposal in enumerate(proposals):
+            lineage = proposal.opt_sp.lineage
+            if lineage.id in minted:
+                continue
+            ledger.append(
+                CandidateMintedRecord(
+                    round=ctx.round_num,
+                    idx=idx,
+                    candidate_id=lineage.id,
+                    parent_ids=list(lineage.parent_ids),
+                    label=candidate_label(ctx.round_num, idx),
+                    changes_description=lineage.changes_description,
+                    source=lineage.source,
+                )
+            )
     emit_phase(
         ctx.callbacks.on_phase,
         CampaignPhase.PROPOSE,
@@ -403,6 +435,13 @@ def announce_population(
         candidates=proposal_summaries(proposals, ctx.round_num),
         collapses=proposal_collapses(proposals),
     )
+
+
+async def propose_population(ctx: RoundContext, plan: RoundPlan, panel: Panel) -> Population:
+    population = Population.of([])
+    for proposer in plan.proposers:
+        population = await proposer.propose(ctx, panel, population)
+    return population
 
 
 async def _adapt(ctx: RoundContext, plan: RoundPlan, round_result: RoundResult) -> None:
@@ -437,10 +476,8 @@ async def execute_round(
 
     panel = plan.sampler.draw(ctx, pool)
     opening = announce_opening(ctx, plan.proposers[0].name)
-    population: Population | None = None
-    for proposer in plan.proposers:
-        population = await proposer.propose(ctx, panel, population)
-    assert population is not None and cycle.tracking.current_sp is not None
+    population = await propose_population(ctx, plan, panel)
+    assert cycle.tracking.current_sp is not None
     announce_population(ctx, opening, population.proposals, len(panel.cells))
 
     emit_phase(
@@ -684,7 +721,7 @@ async def close_round(
     )
     cb.on_round_complete(round_result, standing)
     persist_round(cycle, round_result, session, cb)
-    if cycle.sample_index is not None and session.store:
+    if cycle.sample_index is not None:
         cycle.sample_index.refresh(
             session.store,
             scorer=session.scoring.require_scorer(),
@@ -718,18 +755,10 @@ async def post_round(
     # still gets its check. Bounded and never fatal — the model is in ``verify_on_saturation``.
     await verify_on_saturation(
         stores=session.store,
-        identity=session.identity,
         hop=CycleHop(campaign_id=session.campaign_id, cycle_id=session.state.cycle_id),
         round_num=round_num,
         accuracy=round_result.accuracy,
-        winner_id=next(
-            (
-                c.candidate_id
-                for c in round_result.candidate_scores
-                if c.label in round_result.selected_labels[:1]
-            ),
-            None,
-        ),
+        winner_id=next((c.candidate_id for c in round_result.selected_scores), None),
         budget=budget_gate,
         log=logger.info,
     )

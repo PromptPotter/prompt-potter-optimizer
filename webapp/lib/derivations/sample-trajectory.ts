@@ -29,9 +29,7 @@ export function unionFirstAppearance(rounds: RoundSummary[]): number[] {
 }
 
 export function buildSorted(rounds: RoundSummary[]): SortedRounds {
-  const sorted = [...rounds]
-    .filter((r) => Array.isArray(r.selection) && r.selection.length > 0)
-    .sort((a, b) => a.round - b.round);
+  const sorted = rounds.filter((r) => Array.isArray(r.selection) && r.selection.length > 0);
   return {
     rounds: sorted,
     positions: sorted.map((r) => positionMap(r.selection)),

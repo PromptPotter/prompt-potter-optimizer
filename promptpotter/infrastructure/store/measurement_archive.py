@@ -26,6 +26,7 @@ from promptpotter.domain.measurement_provenance import (
     entry_grade,
     meets_grade,
 )
+from promptpotter.domain.results_health import is_deprecated
 from promptpotter.domain.sample import Measurement
 from promptpotter.domain.scoring import measured_facts
 from promptpotter.infrastructure.store.io import (
@@ -216,7 +217,7 @@ class MeasurementArchive:
         # the runs banked since its own mark.
         self._ticks: dict[str, int] = {}
         self._clock = 0
-        self._replays: OrderedDict[tuple[str, Any], _ConfigReplay] = OrderedDict()
+        self._replays: OrderedDict[str, _ConfigReplay] = OrderedDict()
         # run_id -> (inode, start, [(end, rows)]): the unbroken span of a run's log THIS process
         # appended, so a feed whose cursor sits inside it reads the rows here, not off disk.
         self._appended: OrderedDict[str, tuple[int, int, list[tuple[int, list[Any]]]]] = (
@@ -298,16 +299,12 @@ class MeasurementArchive:
                     changed.append(rows[run_id])
             return changed, self._clock
 
-    def _replay(
-        self,
-        node_configs: list[tuple[str, dict[str, Any]]],
-        is_fatal: Callable[[dict[str, Any]], bool] | None,
-    ) -> _ConfigReplay:
-        key = (_cell_key(node_configs, ""), is_fatal)
+    def _replay(self, node_configs: list[tuple[str, dict[str, Any]]]) -> _ConfigReplay:
+        key = _cell_key(node_configs, "")
         with self._lock:
             replay = self._replays.get(key)
             if replay is None:
-                replay = self._replays[key] = _ConfigReplay(self, node_configs, is_fatal)
+                replay = self._replays[key] = _ConfigReplay(self, node_configs)
                 while len(self._replays) > _REPLAYS_MAX:
                     self._replays.popitem(last=False)
             else:
@@ -691,23 +688,22 @@ _REPLAYS_MAX = 64
 class _ConfigReplay:
     """The rows one configuration may replay, read off disk ONCE per process: every walk on that
     configuration reads the same runs, and a feed per walk re-parsed all of them at each opening.
-    ``served`` is append-only — a later entry for a key is the one upgrade, a fatal row for a live
-    one — so each feed keeps only how far into it it has read."""
+    ``served`` is append-only — a later entry for a key is the one upgrade, a deprecated row for a
+    live one — so each feed keeps only how far into it it has read."""
 
     def __init__(
         self,
         archive: MeasurementArchive,
         node_configs: list[tuple[str, dict[str, Any]]],
-        is_fatal: Callable[[dict[str, Any]], bool] | None,
     ) -> None:
         self._archive = archive
         self._node_configs = node_configs
-        self._is_fatal = is_fatal
         self._mark = 0
         # run_id -> (inode, bytes folded), the cursor `_tail_from` resumes a run's log at.
         self._read: dict[str, tuple[int, int]] = {}
-        # sample_key -> whether the row already served is fatal, the one row an upgrade replaces.
-        self._fatal: dict[str, bool] = {}
+        # sample_key -> whether the row already served is deprecated, the one row an upgrade
+        # replaces.
+        self._deprecated: dict[str, bool] = {}
         self.served: list[tuple[str, ReplayableRow]] = []
 
     def refresh(self) -> None:
@@ -740,13 +736,13 @@ class _ConfigReplay:
                         "say which sample it measured. Every row the scoring walk writes carries "
                         "one; this archive holds rows written before it did."
                     )
-                fatal = self._is_fatal is not None and self._is_fatal(item)
-                # The one upgrade allowed: a fatal row, which is not an answer, for a live one.
-                if (served_fatal := self._fatal.get(key)) is not None and not (
-                    served_fatal and not fatal
+                deprecated = is_deprecated(item)
+                # The one upgrade allowed: a deprecated row, which is not an answer, for a live one.
+                if (served := self._deprecated.get(key)) is not None and not (
+                    served and not deprecated
                 ):
                     continue
-                self._fatal[key] = fatal
+                self._deprecated[key] = deprecated
                 self.served.append((key, ReplayableRow(_entry_dataset(entry), item)))
 
     def _banked_since(self, run_id: str) -> list[dict[str, Any]]:
@@ -787,11 +783,10 @@ class ReplayFeed:
         self,
         archive: MeasurementArchive,
         node_configs: list[tuple[str, dict[str, Any]]],
-        is_fatal: Callable[[dict[str, Any]], bool] | None = None,
     ) -> None:
         self._archive = archive
         self._node_configs = node_configs
-        self._replay = archive._replay(node_configs, is_fatal)
+        self._replay = archive._replay(node_configs)
         self._seen = 0
 
     def advance(self) -> dict[str, ReplayableRow]:

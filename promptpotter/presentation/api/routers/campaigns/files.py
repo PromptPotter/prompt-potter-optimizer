@@ -13,17 +13,17 @@ from pydantic import Field
 
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.store.layout import campaign_root_dir_for, cycle_dir_for
+from promptpotter.infrastructure.store.layout import (
+    CampaignLayout,
+    campaign_root_dir_for,
+    cycle_dir_for,
+)
 from promptpotter.infrastructure.store.stores import resolve_cycle_path
 from promptpotter.presentation.api.deps import StoresDep, decode_descend
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 from promptpotter.shared.clock import iso_z
 from promptpotter.shared.errors import BadRequestError, ContentTooLargeError, NotFoundError
 
-# Campaign-level file artifacts that live at the campaign dir, not a cycle dir.
-# ``dashboard.json`` is NOT here — it is session-scoped and lives in the
-# session's root cycle dir under ``cycles/``.
-_CAMPAIGN_FILE_LEVEL_ARTIFACTS = ("campaign.json", "log.md", "hard_samples.json")
 _MAX_PREVIEW_BYTES = 2 * 1024 * 1024  # 2 MiB
 _MAX_FILE_ENTRIES = 5000
 
@@ -137,12 +137,11 @@ def list_cycle_files(
         if len(entries) > _MAX_FILE_ENTRIES:
             raise ContentTooLargeError(f"Too many entries in cycle dir (>{_MAX_FILE_ENTRIES})")
 
-    for name in _CAMPAIGN_FILE_LEVEL_ARTIFACTS:
-        f = campaign_dir / name
+    for f in CampaignLayout(campaign_dir).files():
         if f.is_file():
             entries.append(
                 FileEntry(
-                    path=name,
+                    path=f.name,
                     scope="campaign",
                     size=f.stat().st_size,
                     mtime=_iso_mtime(f),

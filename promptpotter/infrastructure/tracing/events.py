@@ -31,7 +31,8 @@ class DatasetRegistered:
 
     dataset_name: str
     items: tuple[tuple[str, str], ...]
-    """Frozen ``(query, ground_truth)`` pairs in registration order."""
+    """Frozen ``(query, ground_truth)`` pairs in registration order — each query non-empty and
+    distinct, which ``ObservabilityBridge.register_dataset`` settles so no sink repeats it."""
 
 
 # --- Optimization (Topology A) ---
@@ -42,7 +43,10 @@ class CampaignStart:
     campaign_id: str
     config: dict[str, Any]
     origin_accuracy: float | None
-    session_id: str | None = None
+    cycle_id: str
+    """The cycle whose directory the sinks write under."""
+    session_id: str | None
+    """The Langfuse session the trace is grouped in, which an embedded host may name itself."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,12 +105,13 @@ class DatasetRun:
     optimizer-layer parent, so the campaign trace shows which scoring run each round used."""
 
     campaign_id: str
-    round_num: int
+    round_num: int | None
+    """``None`` for a run scored outside a round, which hangs off the campaign trace itself."""
     run_id: str
     content_hash: str
     prompt_fields_id: str
     """``sp_hash`` — the archive's own spelling, and the one id that joins a trace to a row."""
-    accuracy: float
+    accuracy: float | None
     total: int
 
 

@@ -128,6 +128,9 @@ class Session:
     dataset_config_dir: Path | None = None
     tenant_root: str = ""
     pipeline_params: dict[str, Any] = field(default_factory=dict)
+    # Per node, the keys of `pipeline_params` its identity layer wrote: hashed with the rest, and
+    # never sent to a backend (`sample_measurement.py::measure_sample`).
+    identity_keys: dict[str, frozenset[str]] = field(default_factory=dict)
     langfuse: LangfuseLogger | None = None
 
     session_id: str = ""
@@ -207,20 +210,14 @@ class Session:
     reserve: SpendCeilings = field(default_factory=lambda: SpendCeilings(None, None))
 
 
-def new_session_state(
-    *,
-    init_params: dict[str, Any],
-    pipeline_params: dict[str, Any],
-    active_steps: list[str],
-) -> dict[str, Any]:
+def _session_row(session: Session) -> dict[str, Any]:
+    """The session-store row: where a terminal verb finds the backend its cycle was minted on."""
     return {
-        "init_params": init_params,
-        "pipeline_params": pipeline_params,
-        "active_steps": active_steps,
-        "origin_prompt_fields": {},
-        "dataset_count": 0,
-        "origin_accuracy": 0.0,
-        "task_context": None,
+        "init_params": {
+            "backend_url": session.backend_client.base_url,
+            "backend_id": session.backend_id,
+            "dataset_name": session.dataset_name,
+        }
     }
 
 
@@ -245,11 +242,7 @@ def auto_mint_session(
     campaign_config: CampaignConfig,
     *,
     hop: CycleHop,
-    origin_acc: float = 0.0,
-    origin_prompt_fields: dict[str, Any] | None = None,
     dataset_size: int = 0,
-    pipeline_params: dict[str, Any] | None = None,
-    active_steps: list[str] | None = None,
     label: str = "",
     treatment: Treatment,
     arm: Arm | None,
@@ -265,21 +258,7 @@ def auto_mint_session(
     validate_path_component(hop.campaign_id)
     root_cycle = hop.cycle_id
 
-    state = new_session_state(
-        init_params={
-            "backend_url": session.backend_client.base_url,
-            "backend_id": session.backend_id,
-            "dataset_name": session.dataset_name,
-        },
-        pipeline_params=pipeline_params or {},
-        active_steps=list(active_steps or []),
-    )
-    state["origin_accuracy"] = origin_acc
-    state["dataset_count"] = dataset_size
-    state["origin_prompt_fields"] = origin_prompt_fields or {}
-
-    sessions = session.store.sessions
-    sessions.create(session_id, state)
+    session.store.sessions.create(session_id, _session_row(session))
 
     campaigns = session.store.campaigns
     campaigns.create_campaign(
@@ -317,7 +296,7 @@ def auto_mint_session(
     save_active_pointer(session.store.base_dir, session_id, root_hop)
 
     # Pre-seed dashboard.json so the webapp doesn't 404 in the mint→loop-start window.
-    build_campaign_emitter(session, campaign_config, origin_accuracy=origin_acc)
+    build_campaign_emitter(session, campaign_config)
 
     logger.info(
         "Minted fresh campaign %s — session %s, cycle %s",
@@ -345,7 +324,6 @@ def mint_checkin_skeleton(stores: Stores, *, slug: str, backend_type: str) -> tu
             dataset_name=slug,
             created_at=now,
             root_cycle_id=cycle_id,
-            root_content_hash="",
             backend_id="",
             backend_type=backend_type,
             owner_user_id=str(stores.identity.user_id),
@@ -394,20 +372,7 @@ def finalize_checkin_to_active(
     ``cycle_chk_*``, since drift reads ``root_content_hash`` and not the parsed id. This mints nothing new."""
 
     target_hash = cycle_plan.cycle_id.removeprefix("cycle_")
-    plan_origin_fields = cycle_plan.origin.prompt_field_dict()
-
-    state = new_session_state(
-        init_params={
-            "backend_url": session.backend_client.base_url,
-            "backend_id": session.backend_id,
-            "dataset_name": session.dataset_name,
-        },
-        pipeline_params=cycle_plan.pipeline_params,
-        active_steps=list(cycle_plan.pipeline_params.get("steps", [])),
-    )
-    state["dataset_count"] = dataset_size
-    state["origin_prompt_fields"] = plan_origin_fields
-    session.store.sessions.create(session_id, state)
+    session.store.sessions.create(session_id, _session_row(session))
 
     session.store.campaigns.update_campaign(
         hop.campaign_id,
@@ -447,7 +412,7 @@ def finalize_checkin_to_active(
     cycle_dir = session.store.campaigns.cycle_dir(hop)
     CycleLayout(cycle_dir).checkin_flag.unlink(missing_ok=True)
 
-    build_campaign_emitter(session, campaign_config, origin_accuracy=0.0)
+    build_campaign_emitter(session, campaign_config)
 
     logger.info(
         "Check-in campaign %s started — session %s, cycle %s",
@@ -457,10 +422,7 @@ def finalize_checkin_to_active(
     )
 
 
-def open_cycle_ledger(session: Session, cycle_id: str) -> CycleEventLog | None:
-
-    if session.store is None:
-        return None
+def open_cycle_ledger(session: Session, cycle_id: str) -> CycleEventLog:
     cycle_dir = CycleDir(
         session.store.campaigns.cycle_dir(
             CycleHop(campaign_id=session.campaign_id, cycle_id=cycle_id)

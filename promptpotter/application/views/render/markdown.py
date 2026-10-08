@@ -9,6 +9,7 @@ from typing import Any
 from promptpotter.application.views.render.heatmap import render_hard_sample_heatmap
 from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct as _fmt_pct
 from promptpotter.application.views.render.prefix_reading import prefix_reading
+from promptpotter.application.views.render.primitives import fmt_fitness
 from promptpotter.application.views.view_models import (
     ForkSummaryView,
     HardSamplesView,
@@ -16,7 +17,7 @@ from promptpotter.application.views.view_models import (
     RoundDigestView,
 )
 from promptpotter.domain.phases import STOP_REASON_INFO, StopReason
-from promptpotter.domain.results import overlap_series
+from promptpotter.domain.results import order_floor, overlap_series
 from promptpotter.shared.composite import render_composite_fitness_block
 
 
@@ -123,7 +124,7 @@ def _render_round(rd: RoundDigestView, *, formula: str | None) -> list[str]:
         "",
         f"- improved: **{'yes' if rd.improved else 'no'}**",
         f"- samples: {rd.total}",
-        f"- composite_fitness: `{rd.composite_fitness:.4f}`",
+        f"- composite_fitness: `{fmt_fitness(rd.composite_fitness)}`",
     ]
     if rd.ability is not None and rd.stamps_theta:
         # The cross-round series, with the ruler it was read on beside it: accuracy above is
@@ -140,16 +141,15 @@ def _render_round(rd: RoundDigestView, *, formula: str | None) -> list[str]:
     if rd.changes_description:
         parts.append(f"- changes: {rd.changes_description}")
     parts += [f"- {f.label}: {f.text}" for f in rd.facts if f.kind == "stat"]
-    composite_fitness_block = render_composite_fitness_block(
-        rd.composite_fitness,
-        rd.evaluators,
-        formula,
-        # THIS round's matched floor, the same one the terminal compares against — the two
-        # printed different Δ for one round while this read the whole-cycle origin composite.
-        reference=rd.reference_composite,
-        use_short_names=False,
-    )
-    if composite_fitness_block:
+    if rd.composite_fitness is not None:
+        composite_fitness_block = render_composite_fitness_block(
+            rd.composite_fitness,
+            rd.evaluators,
+            formula,
+            # THIS round's matched floor, the same one the terminal compares against.
+            reference=rd.reference_composite,
+            use_short_names=False,
+        )
         parts += ["", "```", *composite_fitness_block, "```"]
     for note in (f for f in rd.facts if f.kind == "note"):
         parts += ["", "> " + note.text.replace("\n", "\n> ")]
@@ -179,7 +179,7 @@ def _render_forks(forks: tuple[ForkSummaryView, ...]) -> list[str]:
         short = f.cycle_id.split("_", 1)[-1] if "_" in f.cycle_id else f.cycle_id
         rounds_word = "round" if f.n_rounds == 1 else "rounds"
         line = (
-            f"- `{short}` — {f.mode or '(unknown)'} · "
+            f"- `{short}` — {f.kind} · "
             f"best {_fmt_pct(f.best_accuracy)} "
             f"(origin {_fmt_pct(f.origin_accuracy)}, {f.n_rounds} {rounds_word})"
         )
@@ -210,11 +210,10 @@ def to_markdown(view: LogMdView) -> str:
             + (f" (round {status.best_round})" if status.best_round is not None else "")
         ),
     ]
-    if view.family_best is not None:
-        fb_acc, fb_holder = view.family_best
-        if fb_acc > status.best_accuracy and fb_holder != status.campaign_id:
-            short = fb_holder.split("_", 1)[-1] if "_" in fb_holder else fb_holder
-            parts.append(f"- family best: {_fmt_pct(fb_acc)} (in fork `{short}`)")
+    top = view.forks[0] if view.forks else None
+    if top is not None and order_floor(top.best_accuracy) > order_floor(status.best_accuracy):
+        short = top.cycle_id.split("_", 1)[-1] if "_" in top.cycle_id else top.cycle_id
+        parts.append(f"- family best: {_fmt_pct(top.best_accuracy)} (in fork `{short}`)")
     scored_rounds = status.rounds_completed - status.gen_only_rounds
     if status.gen_only_rounds:
         parts.append(

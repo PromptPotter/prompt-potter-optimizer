@@ -14,8 +14,7 @@ from promptpotter.application.initialization.loop_start import (
     diagnostic_pass,
     diagnostic_trace,
 )
-from promptpotter.application.initialization.wiring import init_services
-from promptpotter.application.pipeline_resolve import resolve_campaign_config
+from promptpotter.application.initialization.wiring import bind_cycle_session
 from promptpotter.application.runner.inner.spawn_context import publish_inner_spawn_context
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.cycle_paths import CycleHop
@@ -24,14 +23,12 @@ from promptpotter.domain.results import (
     DiagnosticRunRecord,
     candidate_label,
     diagnostic_held,
-    resolved_fitness,
 )
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.statistics import mean_ci
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.store.stores import Stores
-    from promptpotter.shared.identity import IdentityContext
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +49,6 @@ class NoiseFloorOutcome:
 async def measure_noise_floor(
     *,
     stores: Stores,
-    identity: IdentityContext,
     hop: CycleHop,
     k: int,
     log: Callable[[str], None] | None = None,
@@ -81,19 +77,11 @@ async def measure_noise_floor(
             f"origin arm in {hop.campaign_id}/{hop.cycle_id} round 0 carries no scored samples."
         )
 
-    session = await init_services(
-        backend_id=campaign.backend_id,
-        dataset_name=campaign.dataset_name,
-        identity=identity,
-        stores=stores,
-    )
-    session.campaign_id = hop.campaign_id
-    session.state.cycle_id = hop.cycle_id
+    session, campaign_config = await bind_cycle_session(stores, campaign, hop)
     # A pp-self origin's backend IS the inner recursion — the `promptpotter` connector
     # needs this cycle published as the spawn context before it can dispatch an inner
     # campaign per sample. Normally done once by `run_optimization`; this use-case
     # bypasses that runner, so it publishes for itself (no-op on a non-recursive cycle).
-    campaign_config = resolve_campaign_config(stores, campaign, hop)
     publish_inner_spawn_context(session, campaign_config)
 
     log_fn = log or (lambda *_a, **_k: None)
@@ -112,6 +100,11 @@ async def measure_noise_floor(
             f"the current {campaign.dataset_name} bank."
         )
     config_hash = jsp.sp_hash(schema)
+    if (source_composite := round_file.composite_fitness) is None:
+        raise NoiseFloorError(
+            f"round 0 of {hop.campaign_id}/{hop.cycle_id} read no cell, so there is no recorded "
+            "composite for the band to stand beside."
+        )
 
     logger.info(
         "noise-floor %s/%s: re-scoring origin C0 %dx (force_fresh) on %d samples",
@@ -137,14 +130,13 @@ async def measure_noise_floor(
                     force_fresh=True,
                 ),
             )
-        scores = scored.scores
-        if (measured := scores.get("accuracy")) is None:
+        accuracy, composite = scored.scores["accuracy"], scored.scores["composite_fitness"]
+        if accuracy is None or composite is None:
             raise NoiseFloorError(
                 f"noise-floor rescore {i + 1}/{k} of {hop.campaign_id}/{hop.cycle_id} measured no "
                 f"cell — the band would describe the outage, not the backend."
             )
-        accuracy = float(measured)
-        composites.append(resolved_fitness(scores.get("composite_fitness"), accuracy))
+        composites.append(composite)
         accuracies.append(accuracy)
         log_fn(f"noise-floor rescore {i + 1}/{k}: composite={composites[-1]:.4f}")
 
@@ -167,7 +159,7 @@ async def measure_noise_floor(
         workspace_accuracy=workspace_accuracy,
         workspace_composite=mean_composite,
         source_campaign_accuracy=source_accuracy,
-        source_campaign_composite=round_file.composite_fitness,
+        source_campaign_composite=source_composite,
         source_campaign_n=round_file.total,
         held=diagnostic_held(workspace_accuracy, source_accuracy),
         noise_floor_k=k,

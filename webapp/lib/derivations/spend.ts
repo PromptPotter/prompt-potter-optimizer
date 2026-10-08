@@ -79,6 +79,7 @@ export interface RoundCost {
   metered: MeteredSpend;
 }
 
+// Served in round order, and an object's integer keys enumerate ascending besides.
 export function roundCosts(dash: DashboardSnapshot | null): RoundCost[] {
   const by = dash?.spend_metered_by_round;
   if (!by) return [];
@@ -87,7 +88,7 @@ export function roundCosts(dash: DashboardSnapshot | null): RoundCost[] {
     const round = Number(key);
     if (Number.isInteger(round)) out.push({ round, metered });
   }
-  return out.sort((a, b) => a.round - b.round);
+  return out;
 }
 
 // One bill series per kind, KEYED by kind across rounds: a round lacking a kind is a gap (`null`),

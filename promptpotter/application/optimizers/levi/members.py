@@ -6,7 +6,6 @@ from __future__ import annotations
 import math
 import random
 from collections.abc import Mapping, Sequence
-from dataclasses import replace
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, cast
 
 import numpy as np
@@ -17,7 +16,7 @@ from promptpotter.application.bench.resume_and_fork.decisions import (
     record_decision,
 )
 from promptpotter.application.campaign_config import Estimand, Knob, Scope
-from promptpotter.application.optimizers import nodes, paper_templates
+from promptpotter.application.optimizers import nodes
 from promptpotter.application.optimizers.descriptors import (
     DescriptorFeature,
     behaviour_descriptor,
@@ -30,30 +29,25 @@ from promptpotter.application.optimizers.levi.state import (
     LeviCalibration,
     LeviElite,
     LeviRoundState,
-    LeviState,
-    levi_state,
 )
 from promptpotter.application.optimizers.paper_templates import (
+    PaperRuntime,
     ask,
     ask_each,
-    marked,
-    rewritten,
-    unmarked,
+    child,
     walk_rng,
 )
 from promptpotter.config.paths import optimizers_root
-from promptpotter.domain.opt_search_point import OptSearchPoint, node_source
+from promptpotter.domain.opt_search_point import node_source
 from promptpotter.domain.pipeline_schema import NodeKind
-from promptpotter.domain.results import CandidateProposal, OptimizerFact, candidate_label
-from promptpotter.domain.run_records import CandidateMintedRecord, CheckpointKind
+from promptpotter.domain.results import OptimizerFact
+from promptpotter.domain.run_records import CheckpointKind
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.statistics import greedy_column_subset
 
 if TYPE_CHECKING:
     from pathlib import Path
     from types import ModuleType
-
-    from pydantic import BaseModel
 
     from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.bench.resume_and_fork.replayers import (
@@ -64,18 +58,17 @@ if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.optimizers.nodes import (
+        BankedState,
         Measured,
         Panel,
         Population,
-        ReviewReading,
         RoundContext,
         Selection,
     )
-    from promptpotter.domain.cycle_paths import CycleHop
-    from promptpotter.domain.results import RoundResult
+    from promptpotter.domain.opt_search_point import OptSearchPoint
+    from promptpotter.domain.results import CandidateProposal, RoundResult
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import QueryMeasurement
-    from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 
 __all__ = [
     "MEMBERS",
@@ -164,10 +157,12 @@ class ProxyCss:
     size_knob: ClassVar[str | None] = None
 
     def draws(self, selected: SelectedOptimizer, pool: int) -> int:
-        return min(cast("ProxyCssKnobs", selected.knobs(self.name)).size, pool)
+        knobs = cast("ProxyCssKnobs", selected.knobs(self.name))
+        # The proxy is chosen among the discovery set, which the pool must hold whole.
+        return knobs.size if knobs.discovery <= pool else 0
 
     def draw(self, ctx: RoundContext, pool: list[Sample]) -> Panel:
-        calibration = levi_state(ctx.state).calibration
+        calibration = nodes.state_as(ctx, LeviRoundState).payload.calibration
         if calibration is None:
             knobs = cast("ProxyCssKnobs", ctx.cycle.optimizer.knobs(self.name))
             if knobs.discovery > len(pool):
@@ -319,7 +314,7 @@ class MapElites:
 
     def select(self, ctx: RoundContext, measured: Measured, population: Population) -> Selection:
         cycle = ctx.cycle
-        state = levi_state(ctx.state)
+        state = nodes.state_as(ctx, LeviRoundState).payload
         knobs = cast("MapElitesKnobs", cycle.optimizer.knobs(self.name))
         offered: list[tuple[OptSearchPoint, Sequence[Mapping[str, Any]]]] = [
             (ind, measured.rows[ind.lineage.id]) for ind in measured.electable
@@ -347,10 +342,7 @@ class MapElites:
             if cell not in elites or score > elites[cell].score:
                 kept += 1
                 elites[cell] = LeviElite(
-                    cell=cell,
-                    score=score,
-                    round=ctx.round_num,
-                    individual=ind.model_copy(deep=True),
+                    cell=cell, score=score, round=ctx.round_num, individual=ind
                 )
         calibration = calibration.model_copy(update={"stats": stats})
         archive = sorted(elites.values(), key=lambda e: e.cell)
@@ -371,12 +363,7 @@ class MapElites:
             selected_id=selected_id,
             scores=list(measured.scores),
             verdict_reason=verdict,
-            optimizer_state=state.snapshot(
-                population.optimizer_state.prompt_hashes,
-                calibration=calibration,
-                elites=archive,
-                rounds_without_advance=0 if selected_id else state.rounds_without_advance + 1,
-            ),
+            payload=LeviRoundState(calibration=calibration, elites=archive),
         )
 
 
@@ -397,69 +384,25 @@ class LeviParadigmShiftKnobs(StrictModel):
     )
 
 
-def _proposal(
-    node: str, parents: list[OptSearchPoint], raw: str, changes: str
-) -> CandidateProposal:
-    text = marked(raw)
-    child = OptSearchPoint.derive(
-        parents,
-        source=node_source(LEVI_MANIFEST, node),
-        changes_description=changes,
-        **({} if text is None else rewritten(text)),
-    )
-    return CandidateProposal(
-        opt_sp=child, validation_failures=[] if text is not None else [unmarked(node, raw)]
-    )
-
-
 class LeviParadigmShift:
     """The large model's route (§3.2, App. F): in the calibration round, the diverse seeds, each
-    shown the ones before it; after it, one prompt unlike the best elite of each cluster of cells.
-    The last proposer, so it mints the round's individuals onto the ledger."""
+    shown the ones before it; after it, one prompt unlike the best elite of each cluster of cells."""
 
     name: ClassVar[str] = "levi_paradigm_shift"
     kind: ClassVar[NodeKind] = NodeKind.LLM
+    opens: ClassVar[bool] = False
     knobs: ClassVar[type[StrictModel]] = LeviParadigmShiftKnobs
     couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = ()
 
-    async def propose(
-        self, ctx: RoundContext, panel: Panel, population: Population | None
-    ) -> Population:
-        if population is None:
-            raise ValueError(
-                "levi_paradigm_shift follows the refinements in LEVI's walk; a manifest walking "
-                "it first hands it no population"
-            )
-        cycle = ctx.cycle
-        state = levi_state(ctx.state)
-        knobs = cast("LeviParadigmShiftKnobs", cycle.optimizer.knobs(self.name))
+    async def propose(self, ctx: RoundContext, panel: Panel, population: Population) -> Population:
+        state = nodes.state_as(ctx, LeviRoundState).payload
+        knobs = cast("LeviParadigmShiftKnobs", ctx.cycle.optimizer.knobs(self.name))
         offset = len(population.proposals)
         if state.calibration is None:
             added = await self._seeds(ctx, knobs.n_diverse_seeds, offset)
         else:
             added = [await self._shift(ctx, state, knobs.n_clusters, offset)]
-        assert cycle.tracking.current_sp is not None
-        base = cycle.tracking.current_sp.pipeline_params
-        walked = replace(
-            population,
-            proposals=[*population.proposals, *added],
-            individuals=[*population.individuals, *(p.opt_sp for p in added)],
-            pipeline_params=[*population.pipeline_params, *([base] * len(added))],
-        )
-        if (ledger := cycle.session.state.ledger) is not None:
-            for idx, ind in enumerate(walked.individuals):
-                ledger.append(
-                    CandidateMintedRecord(
-                        round=ctx.round_num,
-                        idx=idx,
-                        candidate_id=ind.lineage.id,
-                        parent_ids=list(ind.lineage.parent_ids),
-                        label=candidate_label(ctx.round_num, idx),
-                        changes_description=ind.lineage.changes_description,
-                        source=ind.lineage.source,
-                    )
-                )
-        return walked
+        return nodes.Population.of([*population.proposals, *added])
 
     async def _seeds(self, ctx: RoundContext, n: int, offset: int) -> list[CandidateProposal]:
         cycle = ctx.cycle
@@ -470,14 +413,15 @@ class LeviParadigmShift:
         for i in range(n):
             prompt = operators.paradigm_shift_prompt(cycle, self.name, shown)
             raw = await ask(ctx, self.name, offset + i, prompt)
-            proposal = _proposal(self.name, [origin], raw, f"diverse seed {i + 1}")
+            source = node_source(LEVI_MANIFEST, self.name)
+            proposal = child(source, self.name, [origin], raw, f"diverse seed {i + 1}")
             proposals.append(proposal)
             if not proposal.validation_failures:
                 shown.append((proposal.opt_sp, None))
         return proposals
 
     async def _shift(
-        self, ctx: RoundContext, state: LeviState, n_clusters: int, idx: int
+        self, ctx: RoundContext, state: LeviRoundState, n_clusters: int, idx: int
     ) -> CandidateProposal:
         cycle = ctx.cycle
         assert state.calibration is not None
@@ -495,7 +439,8 @@ class LeviParadigmShift:
         prompt = operators.paradigm_shift_prompt(
             cycle, self.name, [(e.individual, e.score) for e in representatives]
         )
-        return _proposal(
+        return child(
+            node_source(LEVI_MANIFEST, self.name),
             self.name,
             [e.individual for e in representatives],
             await ask(ctx, self.name, idx, prompt),
@@ -527,59 +472,33 @@ def _softmax_pick(elites: Sequence[LeviElite], temperature: float, rng: random.R
     return rng.choices(list(elites), weights=weights)[0]
 
 
-def _elite_rows(cycle: Cycle, elite: LeviElite) -> list[dict[str, Any]]:
-    rr = next(rr for rr in cycle.rounds if rr.round == elite.round)
-    cid = elite.individual.lineage.id
-    return (
-        rr.all_candidate_results[cid]
-        if cid in rr.all_candidate_results
-        else (rr.reference_results[cid])
-    )
-
-
 class LeviRefine:
     """The small model's route (§3.2, Alg. 2 lines 9-10): `interval - 1` single-parent rewrites
     a round, each parent drawn from the elites by softmax."""
 
     name: ClassVar[str] = "levi_refine"
     kind: ClassVar[NodeKind] = NodeKind.LLM
+    opens: ClassVar[bool] = True
     knobs: ClassVar[type[StrictModel]] = LeviRefineKnobs
     couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = ()
 
-    async def propose(
-        self, ctx: RoundContext, panel: Panel, population: Population | None
-    ) -> Population:
-        if population is not None:
-            raise ValueError(
-                "levi_refine opens LEVI's walk; a manifest walking it after another proposer "
-                "hands it offspring it would discard"
-            )
-        cycle = ctx.cycle
-        state = levi_state(ctx.state)
-        shift = cast("LeviParadigmShiftKnobs", cycle.optimizer.knobs(LeviParadigmShift.name))
+    async def propose(self, ctx: RoundContext, panel: Panel, population: Population) -> Population:
+        state = nodes.state_as(ctx, LeviRoundState).payload
+        shift = cast("LeviParadigmShiftKnobs", ctx.cycle.optimizer.knobs(LeviParadigmShift.name))
         # The calibration round refines nothing: its seeds are the evaluations it spends.
         n = 0 if state.calibration is None else shift.interval - 1
         asked = [self._refinement(ctx, state, i) for i in range(n)]
         replies = await ask_each(ctx, self.name, {i: p for i, (_, p) in enumerate(asked)})
-        children = [
-            _proposal(self.name, [parent], raw, f"refine {parent.lineage.id[:6]}")
-            for (parent, _), raw in zip(asked, replies, strict=True)
-        ]
-        assert cycle.tracking.current_sp is not None
-        return nodes.Population(
-            proposals=children,
-            individuals=[c.opt_sp for c in children],
-            pipeline_params=[cycle.tracking.current_sp.pipeline_params] * len(children),
-            optimizer_state=state.snapshot(
-                cycle.optimizer.prompt_hashes(),
-                calibration=state.calibration,
-                elites=state.elites,
-                rounds_without_advance=state.rounds_without_advance,
-            ),
+        source = node_source(LEVI_MANIFEST, self.name)
+        return nodes.Population.of(
+            [
+                child(source, self.name, [parent], raw, f"refine {parent.lineage.id[:6]}")
+                for (parent, _), raw in zip(asked, replies, strict=True)
+            ]
         )
 
     def _refinement(
-        self, ctx: RoundContext, state: LeviState, idx: int
+        self, ctx: RoundContext, state: LeviRoundState, idx: int
     ) -> tuple[OptSearchPoint, str]:
         """The parent one rewrite descends from, and the prompt that asks for it."""
         cycle = ctx.cycle
@@ -594,11 +513,13 @@ class LeviRefine:
             else rng.sample(others, min(knobs.n_inspirations, len(others)))
         )
         proxy = set(state.calibration.proxy)
+        measured_in = next(rr for rr in cycle.rounds if rr.round == parent.round)
+        rows = measured_in.rows_of(parent.individual.lineage.id)
         prompt = operators.refine_prompt(
             cycle,
             self.name,
             parent=(parent.individual, parent.score),
-            parent_rows=[r for r in _elite_rows(cycle, parent) if r["sample_key"] in proxy],
+            parent_rows=[r for r in rows if r["sample_key"] in proxy],
             inspirations=[(e.individual, e.score) for e in inspirations],
             n_failures=knobs.feedback_failures,
             rng=rng,
@@ -609,11 +530,9 @@ class LeviRefine:
 def _replay_proxy_selected(
     ctx: ReplayContext, inputs_ref: dict[str, Any], data: dict[str, Any]
 ) -> list[str]:
-    round_data = ctx.round_data
-    rows = {**round_data.reference_results, **round_data.all_candidate_results}
     return choose_proxy(
         ProxyCssKnobs.model_validate({k: inputs_ref[k] for k in ProxyCssKnobs.model_fields}),
-        {cid: rows[cid] for cid in inputs_ref["calibration_ids"]},
+        {cid: ctx.round_data.rows_of(cid) for cid in inputs_ref["calibration_ids"]},
         list(inputs_ref["order"]),
     )
 
@@ -628,89 +547,37 @@ LEVI_REPLAYERS: dict[str, Replayer] = {
 }
 
 
-class LeviRuntime:
-    """LEVI beyond its nodes: its archive state, its prompt identity and its replayed proxy."""
+class LeviRuntime(PaperRuntime):
+    """LEVI beyond its nodes: its archive state and its replayed proxy."""
 
     name: ClassVar[str] = LEVI_MANIFEST
     manifest_dir: ClassVar[Path] = optimizers_root() / LEVI_MANIFEST
-    own_axes: ClassVar[dict[str, set[str]]] = {}
-    priced_surface: ClassVar[Mapping[str, int]] = {}
-    phases: ClassVar[tuple[nodes.OptimizerPhase, ...]] = ()
-    response_models: ClassVar[Mapping[str, type[BaseModel]]] = {}
+    operators: ClassVar[ModuleType] = operators
+    checkpoint_gating: ClassVar[Mapping[CheckpointKind, GatingMode]] = LEVI_CHECKPOINT_GATING
+    replayers: ClassVar[Mapping[str, Replayer]] = LEVI_REPLAYERS
 
     def start(
         self, session: Session, config: CampaignConfig, origin_results: list[dict[str, Any]]
-    ) -> LeviState:
-        return LeviState()
-
-    def complete(self) -> None:
-        return None
-
-    def source_digest(self, *covered: ModuleType) -> str:
-        return paper_templates.preset_source_digest(operators, *covered)
-
-    def override_param_types(self, node: str) -> dict[str, str]:
-        return {}
-
-    def override_levers(self, node: str, declared: Mapping[str, Any]) -> dict[str, Any]:
-        return {}
-
-    @property
-    def checkpoint_gating(self) -> Mapping[CheckpointKind, GatingMode]:
-        return LEVI_CHECKPOINT_GATING
-
-    @property
-    def replayers(self) -> Mapping[str, Replayer]:
-        return LEVI_REPLAYERS
+    ) -> BankedState[LeviRoundState]:
+        return nodes.BankedState(LeviRoundState(calibration=None, elites=[]))
 
     def round_packages(self, cycle: Cycle, rounds: list[RoundResult]) -> dict[int, dict[str, str]]:
         # Through the archive's scores and the failures a refinement is shown.
         return nodes.rows_read_packages(rounds, _PROPOSERS)
 
-    async def rederive(
-        self,
-        campaign_store: CampaignStore,
-        hop: CycleHop,
-        session: Session,
-        cycle: Cycle,
-        drifted: list[RoundResult],
-    ) -> None:
-        return None
-
-    def review(
-        self,
-        selected: SelectedOptimizer,
-        rounds: list[RoundResult],
-        audits: list[dict[str, Any] | None],
-        *,
-        context_object: list[str],
-        origin_composite_fitness: float | None,
-    ) -> ReviewReading | None:
-        return None
-
-    def pacing(self, selected: SelectedOptimizer) -> nodes.OptimizerPacing:
+    def arms(self, selected: SelectedOptimizer) -> int:
         # Calibration races the diverse seeds; every later round, `interval` evaluations.
         shift = cast("LeviParadigmShiftKnobs", selected.knobs(LeviParadigmShift.name))
-        return nodes.OptimizerPacing(
-            patience=None,
-            stalls_left=None,
-            arms_per_round=max(shift.n_diverse_seeds, shift.interval),
-            limits=(),
-        )
+        return max(shift.n_diverse_seeds, shift.interval)
 
     def round_cells_ceiling(self, selected: SelectedOptimizer, pool: int) -> int:
         # Calibration walks the discovery set, every later round the proxy; the parent walks each.
         shift = cast("LeviParadigmShiftKnobs", selected.knobs(LeviParadigmShift.name))
         discovery = cast("ProxyCssKnobs", selected.knobs(ProxyCss.name)).discovery
-        if discovery > pool:
+        proxy = selected.round_cells(pool)
+        if not proxy:
             return 0
-        return max(
-            (shift.n_diverse_seeds + 1) * discovery,
-            (shift.interval + 1) * selected.round_cells(pool),
-        )
-
-    def opening(self, ctx: RoundContext) -> nodes.RoundOpening:
-        return nodes.standing_opening(ctx)
+        return max((shift.n_diverse_seeds + 1) * discovery, (shift.interval + 1) * proxy)
 
     def round_facts(
         self, selected: SelectedOptimizer, round_result: RoundResult

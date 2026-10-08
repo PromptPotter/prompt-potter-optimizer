@@ -4,7 +4,7 @@ import type { SelectedNode } from "@/lib/SelectionContext";
 import { cx } from "@/lib/cx";
 import type { NodeBlock } from "@/lib/types";
 import { useConnector } from "@/lib/hooks/useConnector";
-import { useDashboard } from "@/lib/hooks/useDashboard";
+import { roundOf, useCycleStream } from "@/lib/poll";
 import { useObserveSearchPoint } from "@/lib/hooks/useObserveSearchPoint";
 import { useOptimizerPipeline } from "@/lib/hooks/useOptimizerPipeline";
 import { useRoundNodes } from "@/lib/hooks/useRoundNodes";
@@ -47,7 +47,8 @@ export function NodeDetail({ node: selected, authoring, onClose, onPromptApply }
   const isOptimizer = scope === "optimizer";
 
   const cv = useConnector();
-  const { dash, isLive, dashRound: liveRound } = useDashboard();
+  const { dash, isLive } = useCycleStream();
+  const liveRound = roundOf(dash);
   const { doc: optimizer, loading: pipelineLoading } = useOptimizerPipeline(
     isOptimizer ? cv.optimizer : null,
   );
@@ -55,10 +56,10 @@ export function NodeDetail({ node: selected, authoring, onClose, onPromptApply }
 
   const view = isOptimizer ? optimizer?.view : cv.view;
   const node = interiorNodes(view).find((n) => n.id === id) ?? null;
-  // Not defaulted: the run half dispatches on it. The header caption takes `nodeKind`'s fallback,
-  // which mirrors `pipeline_parsing.py::_derive_node_kind`.
+  // Not defaulted: the run half dispatches on it, and the header captions a kind only once the
+  // view names one.
   const servedKind = node?.kind ?? null;
-  const kindInfo = nodeKind(servedKind ?? undefined);
+  const kindInfo = servedKind ? nodeKind(servedKind) : null;
   const schema = isOptimizer ? (optimizer?.node_config_schema ?? null) : cv.nodeConfigSchema;
   // Two fetches back this panel; `cv.pipelineStatus` answers for the campaign's alone.
   const schemaStatus = isOptimizer
@@ -118,7 +119,7 @@ export function NodeDetail({ node: selected, authoring, onClose, onPromptApply }
       <section className="setup-preview">
         <header className="setup-preview-head">
           <span className="setup-preview-title">
-            <span className={cx("bnode-kind", kindInfo.cls)}>{kindInfo.label}</span>
+            {kindInfo && <span className={cx("bnode-kind", kindInfo.cls)}>{kindInfo.label}</span>}
             {node?.label ?? id}
             <code className="opt-detail-id">{id}</code>
           </span>
@@ -149,7 +150,7 @@ export function NodeDetail({ node: selected, authoring, onClose, onPromptApply }
           </div>
         </header>
 
-        <p className="bnode-role">{kindInfo.role}</p>
+        {kindInfo && <p className="bnode-role">{kindInfo.role}</p>}
 
         {isOptimizer ? (
           <OptimizerProgram

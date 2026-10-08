@@ -27,6 +27,7 @@ __all__ = [
     "module_source_digest",
     "optimizer_prompt_shapers",
     "shapes_optimizer_prompt",
+    "stable_hash",
 ]
 
 
@@ -316,6 +317,12 @@ def module_source_digest(*sources: ModuleType | ast.AST) -> str:
         for s in sources
     ]
     return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()[:12]
+
+
+def stable_hash(value: Any) -> str:
+    """The identity of any JSON-shaped value, key order aside."""
+    blob = json.dumps(value, sort_keys=True, default=str).encode()
+    return hashlib.sha256(blob).hexdigest()[:16]
 
 
 def _sorted_pairs(dataset: list[Any]) -> list[tuple[str, str]]:

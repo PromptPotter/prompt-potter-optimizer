@@ -6,7 +6,7 @@ What downstream forks build on without breaking on the next refactor. Anything n
 
 ## 1. Connector protocol
 
-The frozen dataclass `promptpotter/connectors/protocol.py::Connector`. **The dataclass is the roster and its field docstrings are the contract** — the signature, the default, and what each field costs to get wrong. Four fields are required (`name`, `wire_adapter`, `session_factory`, `extract_experiment`); every other one defaults, and `connectors/__init__.py::_validate` raises on a combination that cannot run.
+The frozen dataclass `promptpotter/connectors/protocol.py::Connector`. **The dataclass is the roster and its field docstrings are the contract** — the signature, the default, and what each field costs to get wrong. Three fields are required (`name`, `wire_adapter`, `session_factory`); every other one defaults — `extract_experiment` is set exactly where `experiment_file` is — and `connectors/__init__.py::_validate` raises on a combination that cannot run.
 
 Four declarations are named on this page because omitting one produces WRONG NUMBERS rather than a missing feature, silently:
 
@@ -15,9 +15,9 @@ Four declarations are named on this page because omitting one produces WRONG NUM
 - **`sent_spend_bound`** — without one the cell is unbounded, and an unbounded cell cannot run under a ceiling at all. Declare the run it declares, never every retry it might need at once: the ceiling admits what the reservation does not cover, so an over-large bound buys nothing and silently holds the walk to one cell in flight.
 - **The answer shape** — owned by [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md) § The answer shape — a query yielding `ground_truth: None` declares it, and `extract_experiment` is the only place a connector may.
 
-`SessionProtocol` (`promptpotter/domain/connector.py`): `async set_terms(http, base_url, terms)` (backend handshake; noop ok) · `async recover(http, base_url)` (re-establish after transport error).
+`SessionProtocol` (`promptpotter/domain/connector.py`): `async set_terms(http, base_url, terms)` (backend handshake; noop ok) · `async recover(http, base_url, reply)` (whether a 400 `reply` reported a lost session, now re-established) · `resend_refused(reply)` (the backend's reason where a 5xx `reply` says a resend ends the same way, else `None`).
 
-`InProcessWorkload` (`protocol.py`) is handed to every `in_process_run` call: `experiment` (the resolved `experiment_file` the samples came from, `None` without one) · `program` (what an embedded host passed to `open_session`, §5b; `None` otherwise). **Per-run state rides it** — owned by [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md) § Execution mode — a plugin keeps none in a ContextVar or a module cache.
+`in_process_run(workload, sample, payload)` is handed the measured `Sample` itself — its `source_pin` is the row `extract_experiment` yielded, so a connector searches no panel for it — and returns `{"data": {…}}` naming its `terminal_node`; core clocks the call and stamps `total_time` / `step_timings`. `InProcessWorkload` (`protocol.py`) rides every call: `experiment` (the resolved `experiment_file` the samples came from, `None` without one) · `program` (what an embedded host passed to `open_session`, §5b; `None` otherwise). **Per-run state rides it** — owned by [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md) § Execution mode — a plugin keeps none in a ContextVar or a module cache.
 
 **Registering one, from your own package — no fork.** `promptpotter.connectors` is a published entry-point group:
 
@@ -40,7 +40,7 @@ python -c "from promptpotter.connectors import connector_origins as o; print(*o(
 
 Adding one *to this repo* is one new file under `promptpotter/connectors/` defining `CONNECTOR`; built-ins are deliberately **not** entry points ([`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md) § A connector is trusted code).
 
-**Contracts beyond `protocol.py`:** wire adapters MUST be pure `(query, pipeline_params) → dict` — no I/O, no logging above debug · `extract_experiment` MUST return `(queries, index_terms)` (the latter may be empty).
+**Contracts beyond `protocol.py`:** wire adapters MUST be pure `(query, pipeline_params) → dict` — no I/O, no logging above debug; the `identity_config` layer is removed before the adapter is called, so none strips it · `extract_experiment` MUST return the panel's rows in panel order.
 
 ---
 
@@ -82,7 +82,7 @@ Connector-described pipeline (the shape `GET /pipeline` exposes, plus an operato
 - `name`, `version` — pipeline identity.
 - `backend_type` — connector name; must match a registered connector.
 - `backend_name` — display name for operator surfaces.
-- `nodes` — node graph. Per-node: `runtime` (`backend`/`frontend`/`in_process`) · `node_role` (`candidate_source`/`ranker`/`enricher`/`cache`/`""` — the WIRE key; it maps to `PipelineNode.node_type`, which is the model field, not the key you publish) · `optimizer.param_keys` (list — the SEARCH AXES this node opens to the optimizer; `provider`/`route_order` are stripped whatever it says, `model` is opened by listing it, and a campaign narrows the rest) · `optimizer.observation_mappings` (wire-name → optimizer-name) · `config` (per-dataset overlay merged onto the wire payload).
+- `nodes` — node graph. Per-node: `runtime` (`backend`/`frontend`/`in_process`) · `node_role` (`candidate_source`/`ranker`/`enricher`/`cache`/`""` — the WIRE key; it maps to `PipelineNode.role`, which is the model field, not the key you publish) · `optimizer.param_keys` (list — the SEARCH AXES this node opens to the optimizer; `provider`/`route_order` are stripped whatever it says, `model` is opened by listing it, and a campaign narrows the rest) · `optimizer.observation_mappings` (wire-name → optimizer-name) · `config` (per-dataset overlay merged onto the wire payload).
 - `pipelines` — named pipeline variants.
 - `available_models` — the model MENU: what the check-in offers, and the fallback bound on `model` for a node declaring no `optimizer.param_allowed_values.model`. That per-node list is the PERMITTED set — what the optimizer may pick where the axis is open, and what a human fork may steer to un-tainted. A check-in dataset gets the menu from `Connector.available_models`.
 - `resolved_prompts` — prompt-template map keyed by version. (`resolved_schemas` is a
@@ -172,7 +172,7 @@ one campaign inside its own event loop:
 
 ```python
 session = await open_session(dataset_name, *, backend_url=…, backend_id=…, on_status=None,
-                             identity=None, stores=None, program=None)
+                             stores=None, program=None)
 result = await run_campaign(session, train_data, campaign_config, *, readout_sink=None,
                             langfuse_session_id=None, limits, mode)
 ```
@@ -184,12 +184,11 @@ slot), and `LaunchLimits()` declares none. `mode`
 is `runner/entry.py::RunMode`, and `RunMode()` is a plain run.
 
 Two steps rather than one because every caller does its own work between them. It mints through
-the same `prepare_fresh_cycle` prologue `new` and the web mint run, and scores the origin inside
+the same `mint_framed_cycle` prologue `new` and the web mint run, and scores the origin inside
 `run_optimization` like every other entry point, so the cycle it produces is resumable, forkable
 and diagnosable by the §5 verbs and a stop during origin scoring closes it — that is what this seam
-buys over a private loop. The origin's accuracy is `result.origin_accuracy`. `identity` /
-`stores` pass through to `init_services`; without them a host writes into the anonymous
-`projects/default/` tenant. `program` rides the backend client as
+buys over a private loop. The origin's accuracy is `result.origin_accuracy`. `stores` names the workspace and whose it is; without it a host runs in the local operator's own,
+the one the terminal and an auth-off web session resolve. `program` rides the backend client as
 `InProcessWorkload.program` (§1) — the host's own code, for an in-process backend with no service.
 **`origin_gate` defaults to `strict` and a host has no TTY**, so `run_campaign` blocks at round 0
 until something answers — call
@@ -202,10 +201,11 @@ Nothing on this path imports a server, and the dependency list says so: `pip ins
 promptpotter` is the engine, `[api]` is what a host adds if it also wants to serve the API and
 the dashboard.
 
-`load_dataset_campaign_config(path, overrides=…)` (`application/datasets/authored.py`) is the
+`with_optimization(load_dataset_campaign_config(path), {…})`
+(`application/jobs/launcher/mint_and_start.py`, `application/datasets/authored.py`) is the
 supported way to shape a dataset's `campaign.yaml` for one launch without editing the shared file:
-a nested mapping merged depth-first **before** validation, so an unknown knob raises here instead
-of being silently dropped.
+a sparse `optimization` mapping merged depth-first **before** validation, so an unknown knob raises
+here instead of being silently dropped — the same call a web mint, a check-in and the terminal make.
 
 ## 5c. The export artifact
 
@@ -282,7 +282,7 @@ Sibling cycles (forks, diag) live flat under `cycles/` alongside the root, each 
 - **Internal module structure** beyond §1–§7. The dispatch hub split into `dispatch/{bundle, compose, injections, facade}` is internal — only the public symbols (`DispatchHub`, `injections`, `build_bundle`, `validate_template`) are stable.
 - **Private types** (`_Injection`, `_TEMPLATE_EXTRAS`, etc., plus any `_`-prefixed name). Package `__init__` files are namespace markers that re-export nothing — §1–§7 is the whole public surface, not whatever a package surfaces.
 - **`__all__`** — this document is the public surface; `__all__` is a reader's hint and nothing more. It is mechanically inert here (`implicit_reexport = true`, no `import *` anywhere), so neither runtime nor mypy consults it, and a name listed there is not thereby promised. Prune an entry nothing imports rather than reading it as a contract.
-- **Runtime dataclass shapes** not in §1–§7 (`CycleSlice`, `RoundDigest`, `InjectionBundle`, `LiveStateCore`, etc.).
+- **Runtime dataclass shapes** not in §1–§7 (`CycleSlice`, `RoundDigest`, `InjectionBundle`, `RoundBuffer`, etc.).
 - **In-memory caches** and their invalidation strategies (optimizer LRU caches, the dispatch hub's pipeline-param-catalogue cache, etc.).
 - **Prompt templates** at `promptpotter/assets/optimizers/potter/pipeline.yaml::resolved_prompts` — data, intentionally tunable. Forks may edit; we may also edit on any release.
 - **The optimizer node types** (`application/optimizers/nodes.py`, registered under `promptpotter.optimizer_nodes`). They hand a member the live `Cycle`, so a member built on them builds on internal state.

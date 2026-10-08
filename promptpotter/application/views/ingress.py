@@ -33,7 +33,6 @@ from promptpotter.domain.candidate_diff import build_candidate_flat, flatten_sp_
 from promptpotter.domain.dashboard_rows import RunStanding
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
 from promptpotter.domain.results import ScoredCandidate
-from promptpotter.domain.ruler import is_flat_ruler_id
 from promptpotter.domain.spend import MeteredSpend
 from promptpotter.domain.wounds import collapse_reason
 from promptpotter.shared import truncate
@@ -67,7 +66,6 @@ def _init_enter(d: dict[str, Any], ctx: ViewContext) -> InitEnterView:
     ctx.run_standing = RunStanding(
         rounds_without_advance=0, stalls_left=opening, stalls_left_cap=cap
     )
-    ctx.parent_accuracy = 0.0
 
     # Resolve the per-round composite formula at INIT.enter so the live
     # dashboard can stamp it before origin scoring fires (matches _init_exit
@@ -93,8 +91,6 @@ def _init_enter(d: dict[str, Any], ctx: ViewContext) -> InitEnterView:
 def _init_exit(d: dict[str, Any], ctx: ViewContext) -> InitExitView:
     cycle = d["state"]
     session = d["env"]
-    ctx.parent_accuracy = cycle.tracking.current_accuracy
-    ctx.parent_composite_fitness = cycle.tracking.current_composite_fitness
     schema = session.pipeline_schema
     full, short = resolve_cell_formula(session.scoring.scorer_cell_formula, schema)
     ctx.composite_fitness_formula = full
@@ -142,7 +138,7 @@ def _propose_enter(d: dict[str, Any], ctx: ViewContext) -> RoundStartView:
         round=ctx.round_num,
         max_rounds=ctx.max_rounds,
         standing=opening.standing,
-        current_acc=d.get("current_accuracy", 0.0),
+        current_acc=d["current_accuracy"],
         prompt_preview=preview,
         arms=opening.arms,
         note=opening.note,
@@ -252,65 +248,31 @@ def _select_exit(d: dict[str, Any], ctx: ViewContext) -> RoundCompleteView:
     # here — that could name a different candidate than the one the selector kept, so the verdict
     # line / SCOREBOARD `*` would disagree with the dashboard. ``""`` on a held round.
     winner_label = str(d["winner_label"])
-    winner_total = int(d.get("winner_total", 0))
-
-    # Read exactly as ``winner_reference_accuracy`` is read four lines down — the file
-    # already knew an accuracy can be absent and applied it to the parent's but not the winner's.
-    raw_winner = d.get("winner_accuracy")
-    w_acc = None if raw_winner is None else float(raw_winner)
-    improved = bool(d.get("improved"))
-    parent_acc = ctx.parent_accuracy
-    # Matched-pair parent (winner-measured samples). Δ uses this so operator-visible Δ
-    # matches the ``improved`` gate, not the full-set comparison that punishes PoBB-locked
-    # winners. Absent when the winner did not cover the parent's panel, and it stays absent —
-    # falling back to ``parent_acc`` publishes a prefix accuracy minus a full-panel rate.
-    raw_matched = d.get("winner_reference_accuracy")
-    reference_acc = None if raw_matched is None else float(raw_matched)
-    reference_composite = d.get("winner_reference_composite")
-    # No Δ without BOTH ends of it. The winner's own rate is the new half of that condition.
+    w_acc: float | None = d["winner_accuracy"]
+    # Matched-pair reference (winner-measured samples), so the operator-visible Δ matches the
+    # ``improved`` gate. Absent when the winner did not cover its reference's panel, never filled.
+    reference_acc: float | None = d["winner_reference_accuracy"]
+    # No Δ without BOTH ends of it.
     delta = None if reference_acc is None or w_acc is None else w_acc - reference_acc
-    p_value: float | None = d.get("p_value")  # computed by l1_score; not recomputed here.
-    # The WHOLE reading is emitted, so a cold scale is legible here rather than arriving as a
-    # bare float indistinguishable from a warm one — headline `ability` declines the cold case.
-    raw_ability = d.get("ability")
-    ability_theta = (
-        float(t)
-        if isinstance(raw_ability, dict)
-        and not is_flat_ruler_id(str(raw_ability.get("ruler_id") or ""))
-        and isinstance(t := raw_ability.get("theta"), int | float)
-        else None
-    )
-    # An ungraded winner re-anchors NEITHER, which is the same "BOTH move" rule read through its
-    # own condition: there is no accuracy to anchor to, so moving the composite alone would put
-    # an accuracy Δ against the old parent above a composite Δ against the new one.
-    if improved and w_acc is not None:
-        # BOTH move, or the candidate box renders an accuracy Δ against the new parent
-        # above a composite Δ against C0, under one word and with nothing to tell them apart.
-        ctx.parent_accuracy = w_acc
-        w_comp = d.get("winner_composite_fitness")
-        if isinstance(w_comp, int | float):
-            ctx.parent_composite_fitness = float(w_comp)
 
     return RoundCompleteView(
         round=ctx.round_num,
-        parent_acc=parent_acc,
         scores=tuple(score_entries),
         winner_label=winner_label,
         stamps_theta=bool(d["stamps_theta"]),
         winner_accuracy=w_acc,
-        winner_composite_fitness=d.get("winner_composite_fitness"),
+        winner_composite_fitness=d["winner_composite_fitness"],
         winner_evaluators=dict(d["winner_evaluators"]),
-        winner_total=winner_total,
-        improved=improved,
+        winner_total=int(d["winner_total"]),
+        improved=bool(d["improved"]),
         delta=delta,
-        p_value=p_value,
-        verdict_reason=d.get("verdict_reason"),
+        p_value=d["p_value"],
+        verdict_reason=d["verdict_reason"],
         composite_fitness_formula=ctx.composite_fitness_formula,
         composite_fitness_formula_short=ctx.composite_fitness_formula_short,
         reference_accuracy=reference_acc,
-        reference_composite=reference_composite,
+        reference_composite=d["winner_reference_composite"],
         display_metric=ctx.display_metric,
-        ability_theta=ability_theta,
     )
 
 

@@ -99,6 +99,16 @@ class CellSendRefusedError(CellInfrastructureError):
         self.category = category
 
 
+def cell_failure(
+    message: str, category: ErrorCategory, *, spent: Mapping[str, StepTokenUsage]
+) -> CellInfrastructureError:
+    """The hole for a cell that measured the machine or a refusal instead of the prompt — the one
+    mapping every in-process backend raises through. A waitable throttle is ``CellThrottledError``."""
+    if category is ErrorCategory.CONNECTION:
+        return CellInfrastructureError(message, spent=spent, step_timings={})
+    return CellSendRefusedError(message, category=category, spent=spent, step_timings={})
+
+
 # The refusals once an account's credit or a key's limit is spent: OpenRouter's three (HTTP 402 /
 # 403) and Anthropic's, which arrives as an HTTP 400 `invalid_request_error`.
 _PROVIDER_CREDIT_REFUSAL = re.compile(
@@ -484,6 +494,7 @@ __all__ = [
     "ServiceUnavailableError",
     "StoredConfigInvalidError",
     "UnauthorizedError",
+    "cell_failure",
     "error_category",
     "graceful",
     "is_charged_error",

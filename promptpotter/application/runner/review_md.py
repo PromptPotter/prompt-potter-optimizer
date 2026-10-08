@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, get_args
 from promptpotter.application.optimizers.nodes import CheckResult, ReviewReading, ReviewStat
 from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
 from promptpotter.application.views.render.prefix_reading import prefix_reading
+from promptpotter.application.views.render.primitives import fmt_fitness
 from promptpotter.domain.bench import BenchColumn, BenchColumns, BenchReading, BenchScore
 from promptpotter.domain.phases import STOP_REASON_INFO, StopReason
 from promptpotter.domain.results import (
@@ -25,10 +26,12 @@ from promptpotter.domain.results import (
     round_clocks,
 )
 from promptpotter.domain.spend import SpendBucket, SpendRollup
-from promptpotter.infrastructure.store.campaign_store.store import cycle_ending
+from promptpotter.infrastructure.store.campaign_store.store import cycle_ending, cycle_final
 
 if TYPE_CHECKING:
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
+    from promptpotter.domain.opt_search_point import OptSearchPoint
+    from promptpotter.domain.run_records import CycleFinal, WallClock
 
 __all__ = ["render_review_md"]
 
@@ -51,10 +54,7 @@ def render_review_md(
         audits.extend([None] * (len(rounds) - len(audits)))
     ctx_items = [c for c in (context_object or []) if isinstance(c, str) and c.strip()]
 
-    final = index.get("final") or {}
-    # Absent means the origin was never scored, which is not the same as scoring 0.0 — `_top_lifts`
-    # drops round 0's lift rather than measuring it against a bar nothing established.
-    origin_cf = final.get("origin_composite_fitness")
+    final = cycle_final(index)
     # An optimizer's own readings — its statistics, behaviour scorers and feedback — exist only
     # where its runtime keeps them; any other optimizer's review says so rather than printing 0%.
     review = optimizer.runtime.review(
@@ -62,9 +62,8 @@ def render_review_md(
         list(rounds),
         audits,
         context_object=ctx_items,
-        origin_composite_fitness=float(origin_cf) if isinstance(origin_cf, int | float) else None,
     )
-    clock = final.get("wall_clock") or {}
+    clock = final.wall_clock if final else None
     stats = review.stats if review is not None else None
 
     repairs_per_round = [_schema_repair_count(a) for a in audits]
@@ -76,9 +75,14 @@ def render_review_md(
     # Counted here and not read off `final`: this renders at every round close, long before
     # finalize banks a `final` block. Only the minutes need the banked clock.
     clocks = round_clocks(rounds, accuracy_ceiling=accuracy_ceiling)
-    round_ended_s = _float_map(clock.get("round_ended_s"))
     parts += _render_stats_block(
-        clocks, round_ended_s, stats, repairs_per_round, calls_per_round, halt, optimizer.name
+        clocks,
+        clock.round_ended_s if clock else {},
+        stats,
+        repairs_per_round,
+        calls_per_round,
+        halt,
+        optimizer.name,
     )
     parts += _render_wall_clock(clock)
     parts += _render_spend(spend)
@@ -87,7 +91,7 @@ def render_review_md(
 
     last_idx = len(rounds) - 1
     for i, round_data in enumerate(rounds):
-        is_peek = i == last_idx and _is_generation_only(round_data)
+        is_peek = i == last_idx and round_data.generation_only
         parts += _render_round(
             round_data,
             review,
@@ -167,18 +171,19 @@ def _stop_next_step(index: dict[str, Any]) -> str:
 
 def _render_header(
     index: dict[str, Any],
-    final: dict[str, Any],
+    final: CycleFinal | None,
     verdict: ReviewStat | None,
     halt: dict[str, str] | None,
 ) -> list[str]:
-    cycle_id = index.get("cycle_id") or "(unknown cycle)"
-    mode = (final.get("mode") or "full").strip() or "full"
-    said = "" if verdict is None else f" · {verdict.name}: **{_stat(verdict)}**"
+    # The mode is banked when the cycle stops; a review rendered before then has none to name.
+    said = [
+        *([f"mode: **{final.mode}**"] if final else []),
+        *([f"{verdict.name}: **{_stat(verdict)}**"] if verdict else []),
+    ]
     parts: list[str] = [
-        f"# Review — {cycle_id}",
+        f"# Review — {index['cycle_id']}",
         "",
-        f"_mode: **{mode}**{said}_",
-        "",
+        *([f"_{' · '.join(said)}_", ""] if said else []),
     ]
     if halt is not None:
         where = f" — node `{halt['node']}`" if halt["node"] else ""
@@ -192,16 +197,14 @@ def _render_header(
     if next_step := _stop_next_step(index):
         parts.append(f"> **NEXT** — {next_step}")
         parts.append("")
-    hashes = final.get("prompt_hashes") or {}
-    if hashes:
+    if final and final.prompt_hashes:
         parts.append("**Prompt hashes**")
         parts.append("")
         # Walk what the stamp CONTAINS, never a hand-listed subset: a name missing from the list
         # renders two cycles under different optimizer prompts as identical hash blocks.
-        for name in sorted(hashes):
-            short = (hashes.get(name) or "")[:8]
-            if short:
-                parts.append(f"- `{name}`: `{short}`")
+        parts += [
+            f"- `{name}`: `{digest[:8]}`" for name, digest in sorted(final.prompt_hashes.items())
+        ]
         parts.append("")
     return parts
 
@@ -233,10 +236,10 @@ def _bench_columns(columns: BenchColumns, headline: BenchColumn, spec: str) -> s
     return " · ".join(cell(c) for c in sorted(get_args(BenchColumn), key=lambda c: c != headline))
 
 
-def _render_bench(final: dict[str, Any], bench: BenchScore | None) -> list[str]:
+def _render_bench(final: CycleFinal | None, bench: BenchScore | None) -> list[str]:
     """The headline, above everything the optimizer measured on the rows that chose its winner.
     Silent while the cycle runs; once it ends, an absent score is said rather than left blank."""
-    if not final:
+    if final is None:
         return []
     if bench is None:
         return [
@@ -300,7 +303,7 @@ def _node_spend(header: str, by_node: Mapping[str, SpendBucket]) -> list[str]:
 
 def _render_stats_block(
     clocks: RoundClocks,
-    round_ended_s: dict[str, float],
+    round_ended_s: Mapping[str, float],
     stats: tuple[ReviewStat, ...] | None,
     repairs_per_round: list[int],
     calls_per_round: list[int],
@@ -350,27 +353,15 @@ def _render_stats_block(
     return lines
 
 
-def _float_map(raw: object) -> dict[str, float]:
-    if not isinstance(raw, dict):
-        return {}
-    return {
-        str(k): float(v)
-        for k, v in raw.items()
-        if isinstance(v, int | float) and not isinstance(v, bool)
-    }
-
-
-def _minutes(seconds: object) -> str:
+def _minutes(seconds: float | None) -> str:
     """``—`` where the number is absent, which is a different fact from zero minutes."""
-    if not isinstance(seconds, int | float) or isinstance(seconds, bool):
-        return "—"
-    return f"{float(seconds) / 60.0:.1f} min"
+    return "—" if seconds is None else f"{seconds / 60.0:.1f} min"
 
 
-def _render_wall_clock(clock: dict[str, Any]) -> list[str]:
+def _render_wall_clock(clock: WallClock | None) -> list[str]:
     """**Where this block's claim stops — owned by** ``docs/operations/observability.md`` § The wall
     clock, and where the claim stops. Render the two denominators APART; they are not one number."""
-    if not clock:
+    if clock is None:
         return []
     lines = [
         "## Wall clock",
@@ -378,25 +369,23 @@ def _render_wall_clock(clock: dict[str, Any]) -> list[str]:
         "_From the ledger's first record, never from a clean machine: install, image pull and row"
         " materialization are observed by nothing, so `init` below is preflight, not setup._",
         "",
-        f"- elapsed (ledger open → finish): {_minutes(clock['elapsed_s'])}",
+        f"- elapsed (ledger open → finish): {_minutes(clock.elapsed_s)}",
     ]
-    for phase, seconds in sorted(_float_map(clock.get("phase_s")).items(), key=lambda kv: -kv[1]):
+    for phase, seconds in sorted(clock.phase_s.items(), key=lambda kv: -kv[1]):
         lines.append(f"- {phase}: {_minutes(seconds)}")
-    lines.append(f"- origin gate (a human waiting): {_minutes(clock['gate_s'])}")
-    for bucket, node, seconds in _node_rows(clock.get("unbracketed_call_s")):
+    lines.append(f"- origin gate (a human waiting): {_minutes(clock.gate_s)}")
+    for bucket, node, seconds in _node_rows(clock.unbracketed_call_s):
         lines.append(f"- `{node}` calls outside every phase ({bucket}): {_minutes(seconds)}")
     lines.append(
-        f"- unattributed — no phase, gate or fresh call held it: "
-        f"{_minutes(clock['unattributed_s'])}"
+        f"- unattributed — no phase, gate or fresh call held it: {_minutes(clock.unattributed_s)}"
     )
     # Rendered as a state, never suppressed on truthiness: no envelope observed a wait and every
     # enveloped cell waited for nothing are opposite readings, and only one of them is 0.0.
-    unworked = clock.get("unworked_s")
     lines.append(
         f"- cells not ALLOWED to spend: "
-        f"{'no envelope observed one' if unworked is None else _minutes(unworked)}"
+        f"{'no envelope observed one' if clock.unworked_s is None else _minutes(clock.unworked_s)}"
     )
-    worked = _node_rows(clock.get("worked_s"))
+    worked = _node_rows(clock.worked_s)
     if worked:
         lines += [
             "",
@@ -410,13 +399,11 @@ def _render_wall_clock(clock: dict[str, Any]) -> list[str]:
     return lines
 
 
-def _node_rows(raw: object) -> list[tuple[str, str, float]]:
-    if not isinstance(raw, dict):
-        return []
+def _node_rows(by_kind: Mapping[str, Mapping[str, float]]) -> list[tuple[str, str, float]]:
     rows = [
-        (str(bucket), node, seconds)
-        for bucket, by_node in raw.items()
-        for node, seconds in _float_map(by_node).items()
+        (kind, node, seconds)
+        for kind, by_node in by_kind.items()
+        for node, seconds in by_node.items()
     ]
     return sorted(rows, key=lambda row: -row[2])
 
@@ -453,8 +440,6 @@ def _render_round(
 ) -> list[str]:
     """``review`` is ``None`` on a cycle whose optimizer keeps no reading of its own: its behaviour
     checks, variant table and critique do not exist."""
-    opt_sp = round_data.opt_sp.model_dump() if round_data.opt_sp else {}
-    lineage = opt_sp.get("lineage") or {}
     suffix = " (next-gen peek)" if is_peek else ""
     parts: list[str] = [
         f"### Round {round_data.round}{suffix}",
@@ -463,7 +448,7 @@ def _render_round(
     if not is_peek:
         parts += [
             f"- accuracy: {fmt_pct(round_data.accuracy)}",
-            f"- composite_fitness: `{round_data.composite_fitness:.4f}`",
+            f"- composite_fitness: `{fmt_fitness(round_data.composite_fitness)}`",
             f"- improved: **{'yes' if round_data.improved else 'no'}**",
         ]
         if series := overlap_series(round_data.overlap):
@@ -473,7 +458,7 @@ def _render_round(
             parts.append(f"- verdict: {round_data.verdict_reason}")
     if schema_repair_retries:
         parts.append(f"- schema_repair_retries: {schema_repair_retries}")
-    parts += _render_lineage(lineage)
+    parts += _render_lineage(round_data.opt_sp)
     if review is None:
         return parts
     parts += _render_check_checklist(review.checks[index])
@@ -482,14 +467,13 @@ def _render_round(
     return parts
 
 
-def _render_lineage(lineage: dict[str, Any]) -> list[str]:
+def _render_lineage(opt_sp: OptSearchPoint | None) -> list[str]:
+    """Where the individual the round ended on came from; a round that banked none names nothing."""
     parts: list[str] = ["", "**Lineage**", ""]
-    src = (lineage.get("source") or "").strip()
-    if src:
-        parts.append(f"- lineage source: `{src}`")
-    changes = (lineage.get("changes_description") or "").strip()
-    if changes:
-        parts.append(f"- parent changes: {changes}")
+    if opt_sp is not None:
+        parts.append(f"- lineage source: `{opt_sp.lineage.source}`")
+        if changes := opt_sp.lineage.changes_description.strip():
+            parts.append(f"- parent changes: {changes}")
     parts.append("")
     return parts
 
@@ -557,7 +541,8 @@ def _score_cells(c: ScoredCandidate | None, selected_labels: Sequence[str]) -> s
         else "—"
     )
     won = "✓" if c.label in selected_labels else "·"
-    return f"`{c.composite_fitness:.4f}` | {fmt_pct(c.accuracy)} | {theta} | {lift} | {won}"
+    fitness = fmt_fitness(c.composite_fitness)
+    return f"`{fitness}` | {fmt_pct(c.accuracy)} | {theta} | {lift} | {won}"
 
 
 def _fmt_evidence_cell(raw: object) -> str:
@@ -577,7 +562,3 @@ def _render_critique(critique: str) -> list[str]:
         return []
     quoted = critique.replace("\n", "\n> ")
     return ["**Critique**", "", f"> {quoted}", ""]
-
-
-def _is_generation_only(round_data: RoundResult) -> bool:
-    return round_data.status == "generation_only"

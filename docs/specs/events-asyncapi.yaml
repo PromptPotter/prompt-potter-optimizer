@@ -74,12 +74,12 @@ channels:
     description: |
       Subscription contract (security boxes 13-15):
         1. Snapshot frame first. The first message on the stream is a
-           `stream_snapshot` envelope whose payload mirrors the current
-           `dashboard.json` content plus `snapshot_at_offset` indicating
-           the ledger high-water mark the snapshot reflects.
+           `stream_snapshot` envelope whose payload is the cycle's served
+           dashboard; its `sequence` is the ledger offset the tail picks
+           up at.
         2. Then the live tail. Subsequent messages are individual record
            projections with strictly-increasing `sequence` (starting at
-           `snapshot_at_offset + 1`).
+           the snapshot's).
         3. Heartbeat every 15 s during idle so proxies and clients can
            distinguish "no events" from "stream broken." It is an **SSE
            comment line** (`: ping`), emitted by `EventSourceResponse`
@@ -92,8 +92,8 @@ channels:
            cannot map, so an unlisted kind would read as a gap and drive a
            spurious reconnect. A gap now means a genuinely malformed line.
         5. **This channel is the live tail only — it has no replay.**
-           `snapshot_frame` unconditionally seeks to EOF, so a subscriber
-           never receives history through it. History is served by
+           `snapshot_frame` parks one past the offset its dashboard is a fold
+           of, so a subscriber never receives history through it. History is served by
            `GET /campaigns/{c}/cycles/{cy}/ray` (the family-wide, windowed,
            paged chronology), which is the replay endpoint referenced by
            `domain/projection_envelope.py`. Do not add a `since=` parameter
@@ -160,7 +160,7 @@ components:
       description: |
         Closed envelope shape. Every SSE frame outside of heartbeats has
         this exact shape - no raw payload variants, no envelope variation.
-      required: [kind, version, cycle_id, sequence, payload]
+      required: [kind, cycle_id, sequence, payload]
       additionalProperties: false
       properties:
         kind:
@@ -231,12 +231,6 @@ components:
             # billed fresh or metered as a replay (``PricedKeyRecord``), so a
             # resumed launch prices it once.
             - priced_key
-        version:
-          type: integer
-          minimum: 1
-          description: |
-            Schema version of this envelope. Bumped only when the envelope
-            shape itself changes (which requires a §0 amendment).
         cycle_id:
           type: string
           description: |
@@ -284,20 +278,11 @@ components:
       type: object
       description: |
         Payload of the `stream_snapshot` frame — the first message on the
-        stream. Mirrors the current `dashboard.json` content for the cycle
-        at subscribe time. The `snapshot_at_offset` field carries the
-        ledger high-water mark the snapshot reflects; subsequent live-tail
-        frames carry strictly-greater `sequence` values.
-      required: [snapshot_at_offset]
+        stream. The cycle's served dashboard at subscribe time. The
+        envelope's `sequence` carries the ledger offset the tail picks up
+        at; the payload does not repeat it.
       additionalProperties: true
       properties:
-        snapshot_at_offset:
-          type: integer
-          minimum: 0
-          description: |
-            Ledger offset the snapshot reflects. Equals the envelope's
-            `sequence` for the snapshot frame; live tail starts at
-            `snapshot_at_offset + 1`.
         warming_up:
           type: boolean
           description: |

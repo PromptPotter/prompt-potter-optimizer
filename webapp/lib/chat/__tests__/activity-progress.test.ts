@@ -5,7 +5,6 @@ import type { ProjectionEnvelope } from "@/lib/api/types";
 function progressEnv(detail: unknown): ProjectionEnvelope {
   return {
     kind: "llm_call_progress",
-    version: 1,
     cycle_id: "c1",
     sequence: 7,
     payload: { call_id: "inner:justlogic-d67/seed-0", node: "l1_critique", elapsed_s: 30, detail },

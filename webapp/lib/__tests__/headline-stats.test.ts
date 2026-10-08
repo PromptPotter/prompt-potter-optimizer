@@ -9,6 +9,7 @@ const round = (r: number, accuracy: number, composite_fitness: number, total = 2
     composite_fitness,
     total,
     ability: null,
+    ability_on_series_ruler: false,
     best_so_far: null,
     bench: null,
     improved: null,
@@ -18,6 +19,7 @@ const round = (r: number, accuracy: number, composite_fitness: number, total = 2
     stamps_theta: true,
     overlap: null,
     panel_precision: null,
+    panel_precision_verdict: null,
     optimizer_facts: [],
     candidates: [],
     selection: [],
@@ -48,21 +50,6 @@ describe("fitnessTrend", () => {
     expect(points.map((p) => p.composite)).toEqual([0.4, 0.6, null]);
   });
 
-  it("drops θ read on a ruler other than the series'", () => {
-    const ability = (ruler_id: string) => ({
-      theta: 0.3,
-      se: null,
-      ruler_id,
-      ruler_n: 20,
-      ruler_span: null,
-      round_span: null,
-      calibration_model: null,
-      caveat: null,
-    });
-    const first = { ...round(0, 0.5, 0.5), ability: ability("r1") } as RoundSummary;
-    const moved = { ...round(1, 0.6, 0.6), ability: ability("r2") } as RoundSummary;
-    expect(fitnessTrend([first, moved]).points.map((p) => p.theta)).toEqual([0.3, null]);
-  });
 });
 
 describe("primaryMetric", () => {

@@ -1,5 +1,6 @@
 "use client";
 import { VendorLogo } from "@/components/ui";
+import type { VendorModels } from "@/lib/api";
 import { cx } from "@/lib/cx";
 import type { RowStatus } from "@/lib/derivations";
 
@@ -30,7 +31,7 @@ export function CampaignRowLabel({
   status: RowStatus | null;
   spend: string;
   parts: string[];
-  vendors: readonly { vendor: string; models: string[] }[];
+  vendors: readonly VendorModels[];
 }) {
   const line = parts.join(" · ");
   return (

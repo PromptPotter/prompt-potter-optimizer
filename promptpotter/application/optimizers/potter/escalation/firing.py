@@ -75,7 +75,7 @@ from promptpotter.application.views.view_models import (
 )
 from promptpotter.domain.phases import PhaseEvent, StopLoop, StopReason, emit_phase
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay
-from promptpotter.domain.results import merge_known_outcomes
+from promptpotter.domain.results import merge_known_outcomes, order_floor
 from promptpotter.domain.run_records import (
     ConfigOverrides,
     ForkTrigger,
@@ -130,7 +130,7 @@ class _HighWater:
     """The best the cycle's closed rounds reached — the peak the stall ladder differences against.
     The θ pair carries its SE, because a θ advance is only one relative to its own error."""
 
-    composite_fitness: float
+    composite_fitness: float | None
     accuracy: float | None
     theta: float | None
     theta_se: float | None
@@ -139,10 +139,8 @@ class _HighWater:
 def _high_water(cycle: Cycle) -> _HighWater:
     """Derived off the round documents, never banked beside them. A round stamped on another δ scale
     than the cycle's (a round file written before the ruler warmed) is re-read on the cycle's."""
-    best = cycle.rounds[0]
-    for rr in cycle.rounds[1:]:
-        if rr.composite_fitness > best.composite_fitness:
-            best = rr
+    # `max` keeps the first of equals, so a later round takes the peak only by beating it.
+    best = max(cycle.rounds, key=lambda rr: order_floor(rr.composite_fitness))
     view = cycle.difficulty
     peak: AbilityReading | None = None
     frontier: list[dict[str, Any]] = []

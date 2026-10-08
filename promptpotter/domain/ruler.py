@@ -14,8 +14,8 @@ from typing import Literal
 
 from pydantic import ConfigDict, Field
 
-from promptpotter.domain.pipeline_schema import stable_hash
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.shared.hashing import stable_hash
 
 # A difficulty-ruler entry is either a bare δ (1PL — discrimination ≡ 1) or a ``(δ, a)`` pair
 # (2PL — per-sample discrimination ``a``). The richer 2PL value rides *inside* the same ruler

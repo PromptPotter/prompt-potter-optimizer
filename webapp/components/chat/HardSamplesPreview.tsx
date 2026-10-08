@@ -2,7 +2,7 @@
 import { useMemo, useState } from "react";
 import type { DatasetItem } from "@/lib/api";
 import { useHardSamples } from "@/lib/hard-samples";
-import { useDashboard } from "@/lib/hooks/useDashboard";
+import { useCycleStream } from "@/lib/poll";
 import { MeasurementsPane } from "@/components/shell/measurements/MeasurementsPane";
 import { sampleBucket, sampleSpread, sampleWalk, type SampleBucket } from "@/lib/derivations";
 import { fmtDuration, fmtPct0 } from "@/lib/format";
@@ -20,7 +20,7 @@ const ROWS = 3;
 
 export function HardSamplesPreview({ sampleOrder = null }: Props) {
   const { datasetName, items, totals, stale, error } = useHardSamples();
-  const { dash, isLive } = useDashboard();
+  const { dash, isLive } = useCycleStream();
   const [showAll, setShowAll] = useState(false);
   // `/cells` serves rank order — never sort here; an ordering IS a score.
   const ranked = useMemo(() => items.map((it) => it.sample_id), [items]);

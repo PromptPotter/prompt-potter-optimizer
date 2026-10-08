@@ -187,10 +187,7 @@ def committed_task_context(stores: Stores, dataset_name: str | None) -> TaskDeco
     decomposition needs a cycle to bill to and a mint is computing that cycle."""
     if dataset_name is None:
         return TaskDecomposition()
-    existing = readable_task_context(stores, dataset_name)
-    if not existing:
-        return TaskDecomposition()
-    task_context = TaskDecomposition.from_dict(existing)
+    task_context = readable_task_context(stores, dataset_name)
     # The budget is enforced HERE too, not only on the async path: whichever seam reads the
     # framing first is the one that must refuse an over-budget field, or the clip lands on
     # every render for the run's whole life.
@@ -279,5 +276,8 @@ async def commit_task_framing(
     finally:
         reset_cycle_ledger(token)
     stores.tenant_datasets.save_task_context(
-        dataset_name, {**result.task_context.model_dump(), "raw_description": description}
+        dataset_name,
+        TaskDecomposition.from_dict(
+            {**result.task_context.model_dump(), "raw_description": description}
+        ),
     )

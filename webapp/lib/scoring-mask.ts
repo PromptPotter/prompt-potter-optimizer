@@ -2,8 +2,8 @@
 // The SCORING MASK — the browser's half of `docs/operations/mask-projection.md`, bound by
 // `webapp/CLAUDE.md` § Scoring authority.
 
-import { useSyncExternalStore } from "react";
 import { CELL_TERM_META, type CellTermMeta } from "@/lib/api/types.generated";
+import { createModuleStore } from "@/lib/module-store";
 
 // A dial at weight 0 is off, so the weights ARE the selection.
 export type ScoringMask =
@@ -66,27 +66,10 @@ interface MaskState {
   seededForCycle: string | null;
 }
 
-let state: MaskState = { open: false, mask: NO_DIALS, seededForCycle: null };
-const listeners = new Set<() => void>();
+const store = createModuleStore<MaskState>({ open: false, mask: NO_DIALS, seededForCycle: null });
 
-export function setScoringMask(patch: Partial<MaskState>): void {
-  state = { ...state, ...patch };
-  // Deferred: the cycle seed writes during render, and a subscriber told mid-render is an update
-  // to a component React is still rendering.
-  queueMicrotask(() => {
-    for (const l of listeners) l();
-  });
-}
+export const setScoringMask = store.set;
 
 export function useScoringMask(): MaskState {
-  return useSyncExternalStore(
-    (l) => {
-      listeners.add(l);
-      return () => {
-        listeners.delete(l);
-      };
-    },
-    () => state,
-    () => state,
-  );
+  return store.useStore();
 }

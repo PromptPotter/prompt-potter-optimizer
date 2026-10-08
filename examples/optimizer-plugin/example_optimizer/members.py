@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, cast
 
@@ -16,44 +15,36 @@ from promptpotter.application.bench.resume_and_fork.decisions import GatingMode,
 from promptpotter.application.campaign_config import Estimand, Knob, Scope
 from promptpotter.application.optimizers import nodes
 from promptpotter.application.optimizers.paper_templates import (
+    PaperRuntime,
     ask,
-    marked,
-    preset_source_digest,
-    unmarked,
+    child,
     walk_rng,
 )
-from promptpotter.domain.opt_search_point import OptSearchPoint, node_source
-from promptpotter.domain.optimizer_state import OptimizerState, RoundPayload
+from promptpotter.domain.opt_search_point import node_source
+from promptpotter.domain.optimizer_state import RoundPayload
 from promptpotter.domain.pipeline_schema import NodeKind
-from promptpotter.domain.results import CandidateProposal, OptimizerFact, candidate_label
-from promptpotter.domain.run_records import CandidateMintedRecord, CheckpointKind
+from promptpotter.domain.results import OptimizerFact
+from promptpotter.domain.run_records import CheckpointKind
 from promptpotter.domain.strict_model import StrictModel
 
 if TYPE_CHECKING:
     from types import ModuleType
 
-    from pydantic import BaseModel
-
-    from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.bench.resume_and_fork.replayers import Replayer
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.optimizers.nodes import (
+        BankedState,
         Measured,
         Panel,
         Population,
-        ReviewReading,
         RoundContext,
         Selection,
-        WorkingState,
     )
-    from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.results import RoundResult
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import QueryMeasurement
-    from promptpotter.infrastructure.ledger import CycleEventLog
-    from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 
 MANIFEST = "example"
 
@@ -63,42 +54,7 @@ class ExampleCheckpointKind(CheckpointKind):
 
 
 class ExampleRoundState(RoundPayload, manifest=MANIFEST):
-    rounds_without_advance: int
-
-
-@dataclass
-class ExampleState:
-    rounds_without_advance: int = 0
-
-    def snapshot(self, prompt_hashes: dict[str, str], stall: int) -> OptimizerState:
-        return OptimizerState(
-            manifest=MANIFEST,
-            prompt_hashes=prompt_hashes,
-            payload=ExampleRoundState(rounds_without_advance=stall),
-        )
-
-    def origin_state(self, selected: SelectedOptimizer) -> OptimizerState:
-        return self.snapshot(selected.prompt_hashes(), self.rounds_without_advance)
-
-    def replay(self, last: RoundResult) -> None:
-        self.absorb(last)
-
-    def resume(
-        self, ledger: CycleEventLog | None, selected: SelectedOptimizer, *, before_round: int
-    ) -> None:
-        return None
-
-    def absorb(self, round_result: RoundResult) -> None:
-        payload = round_result.optimizer_state.payload_as(ExampleRoundState)
-        self.rounds_without_advance = payload.rounds_without_advance
-
-    def standing(self, rounds: Sequence[RoundResult]) -> tuple[int, int | None]:
-        return self.rounds_without_advance, None
-
-
-def _state(state: WorkingState) -> ExampleState:
-    assert isinstance(state, ExampleState)
-    return state
+    """Empty: the round's parent is all this optimizer carries, and the bench holds that."""
 
 
 class DrawKnobs(StrictModel):
@@ -132,49 +88,22 @@ class ProposeKnobs(StrictModel):
 class Propose:
     name: ClassVar[str] = "propose"
     kind: ClassVar[NodeKind] = NodeKind.LLM
+    opens: ClassVar[bool] = True
     knobs: ClassVar[type[StrictModel]] = ProposeKnobs
     couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = ()
 
-    async def propose(
-        self, ctx: RoundContext, panel: Panel, population: Population | None
-    ) -> Population:
+    async def propose(self, ctx: RoundContext, panel: Panel, population: Population) -> Population:
         cycle = ctx.cycle
         n = cast("ProposeKnobs", cycle.optimizer.knobs(self.name)).variants
         parent = cycle.opt_sp
         prompt = operators.rephrase_prompt(cycle, self.name, instruction=parent.instruction)
         answers = await asyncio.gather(*(ask(ctx, self.name, i, prompt) for i in range(n)))
-        proposals = []
-        for i, raw in enumerate(answers):
-            text = marked(raw)
-            child = OptSearchPoint.derive(
-                [parent],
-                source=node_source(MANIFEST, self.name),
-                changes_description=f"rephrase {i}",
-                instruction=parent.instruction if text is None else text,
-            )
-            failures = [] if text is not None else [unmarked(self.name, raw)]
-            proposals.append(CandidateProposal(opt_sp=child, validation_failures=failures))
-            if (ledger := cycle.session.state.ledger) is not None:
-                ledger.append(
-                    CandidateMintedRecord(
-                        round=ctx.round_num,
-                        idx=i,
-                        candidate_id=child.lineage.id,
-                        parent_ids=list(child.lineage.parent_ids),
-                        label=candidate_label(ctx.round_num, i),
-                        changes_description=child.lineage.changes_description,
-                        source=child.lineage.source,
-                    )
-                )
-        assert cycle.tracking.current_sp is not None
-        state = _state(ctx.state)
-        return nodes.Population(
-            proposals=proposals,
-            individuals=[p.opt_sp for p in proposals],
-            pipeline_params=[cycle.tracking.current_sp.pipeline_params] * n,
-            optimizer_state=state.snapshot(
-                cycle.optimizer.prompt_hashes(), state.rounds_without_advance
-            ),
+        source = node_source(MANIFEST, self.name)
+        return nodes.Population.of(
+            [
+                child(source, self.name, [parent], raw, f"rephrase {i}")
+                for i, raw in enumerate(answers)
+            ]
         )
 
 
@@ -196,7 +125,6 @@ class Keep:
         return panel.cells
 
     def select(self, ctx: RoundContext, measured: Measured, population: Population) -> Selection:
-        state = _state(ctx.state)
         fitness = {cs.candidate_id: cs.composite_fitness or 0.0 for cs in measured.scores}
         ranked = sorted((ind.lineage.id for ind in measured.electable), key=lambda c: -fitness[c])
         bar = measured.parent.report.composite_fitness or 0.0
@@ -213,20 +141,14 @@ class Keep:
             selected_id=selected_id,
             scores=list(measured.scores),
             verdict_reason=f"kept {selected_id[:8] or 'the parent'}",
-            optimizer_state=state.snapshot(
-                population.optimizer_state.prompt_hashes,
-                0 if selected_id else state.rounds_without_advance + 1,
-            ),
+            payload=nodes.state_as(ctx, ExampleRoundState).payload,
         )
 
 
-class ExampleRuntime:
+class ExampleRuntime(PaperRuntime):
     name: ClassVar[str] = MANIFEST
     manifest_dir: ClassVar[Path] = Path(__file__).parent
-    own_axes: ClassVar[dict[str, set[str]]] = {}
-    priced_surface: ClassVar[Mapping[str, int]] = {}
-    phases: ClassVar[tuple[nodes.OptimizerPhase, ...]] = ()
-    response_models: ClassVar[Mapping[str, type[BaseModel]]] = {}
+    operators: ClassVar[ModuleType] = operators
     checkpoint_gating: ClassVar[Mapping[CheckpointKind, GatingMode]] = {
         ExampleCheckpointKind.KEPT: GatingMode.ARCHIVAL
     }
@@ -234,55 +156,14 @@ class ExampleRuntime:
 
     def start(
         self, session: Session, config: CampaignConfig, origin_results: list[dict[str, Any]]
-    ) -> ExampleState:
-        return ExampleState()
+    ) -> BankedState[ExampleRoundState]:
+        return nodes.BankedState(ExampleRoundState())
 
-    def complete(self) -> None:
-        return None
-
-    def source_digest(self, *covered: ModuleType) -> str:
-        return preset_source_digest(operators, *covered)
-
-    def override_param_types(self, node: str) -> dict[str, str]:
-        return {}
-
-    def override_levers(self, node: str, declared: Mapping[str, Any]) -> dict[str, Any]:
-        return {}
-
-    def round_packages(self, cycle: Cycle, rounds: list[RoundResult]) -> dict[int, dict[str, str]]:
-        return {}
-
-    async def rederive(
-        self,
-        campaign_store: CampaignStore,
-        hop: CycleHop,
-        session: Session,
-        cycle: Cycle,
-        drifted: list[RoundResult],
-    ) -> None:
-        return None
-
-    def review(
-        self,
-        selected: SelectedOptimizer,
-        rounds: list[RoundResult],
-        audits: list[dict[str, Any] | None],
-        *,
-        context_object: list[str],
-        origin_composite_fitness: float | None,
-    ) -> ReviewReading | None:
-        return None
-
-    def pacing(self, selected: SelectedOptimizer) -> nodes.OptimizerPacing:
-        n = cast("ProposeKnobs", selected.knobs(Propose.name)).variants
-        return nodes.OptimizerPacing(patience=None, stalls_left=None, arms_per_round=n, limits=())
+    def arms(self, selected: SelectedOptimizer) -> int:
+        return cast("ProposeKnobs", selected.knobs(Propose.name)).variants
 
     def round_cells_ceiling(self, selected: SelectedOptimizer, pool: int) -> int:
-        n = cast("ProposeKnobs", selected.knobs(Propose.name)).variants
-        return (n + 1) * selected.round_cells(pool)
-
-    def opening(self, ctx: RoundContext) -> nodes.RoundOpening:
-        return nodes.standing_opening(ctx)
+        return (self.arms(selected) + 1) * selected.round_cells(pool)
 
     def round_facts(
         self, selected: SelectedOptimizer, round_result: RoundResult
