@@ -69,7 +69,8 @@ loader.
 OpenAI/Anthropic/OpenRouter only if named. `.env.example` is the full template.
 
 **Backend `/status` unreachable.** TermNorm is the canonical test backend. If absent,
-`git clone https://github.com/runfish5/TermNorm-excel` to `../TermNorm-excel`. Start
+`git clone https://github.com/runfish5/TermNorm-excel` to where
+`promptpotter/connectors/CLAUDE.md` § TermNorm is not a third party says its checkout sits. Start
 `start-server-py-LLMs.bat` (who starts it: the autonomy mode, root `CLAUDE.md`); wait for `/status` 200.
 
 **Dataset has no loader.** Two paths:

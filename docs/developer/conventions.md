@@ -49,7 +49,7 @@ collects everything else.
 - **A `CLAUDE.md` is billed to every session beneath it, so it holds rules binding a set of
   symbols** — mechanism goes to the module docstring, an incident to the commit body, and the
   Recompute Test in [`../CLAUDE.md`](../CLAUDE.md) § Editing a doc applies to these files too. No
-  page grows past `scripts/gate.py::_CLAUDE_MD_MAX_WORDS`; one that reaches it is trimmed or split.
+  page grows past `scripts/gate.py::_INSTRUCTION_MAX_WORDS`; one that reaches it is trimmed or split.
 - **A cut fact has a DESTINATION, and the ladder is priced by who pays.** A line
   in a hot module is billed to every future session that opens it, needed or
   not, so a fact goes to the cheapest rung that still reaches the reader who

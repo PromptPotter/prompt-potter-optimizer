@@ -15,7 +15,7 @@ A thin index over the per-layer `CLAUDE.md` tree for the `promptpotter/` Python 
 | `application/evidence/` | The cross-subject read (`GET /evidence`, CLI `evidence`): what a subject is, what a cell can be asked for, and what the roster jointly says. | [`application/evidence/CLAUDE.md`](application/evidence/CLAUDE.md) |
 | `infrastructure/` | I/O contracts: persistence (`CycleEventLog`), projections (`LiveDashboardProjection` / `AuditTrailProjection` / `RacingStreamProjection`), stores, LLM clients, backend wire, tracing. | [`infrastructure/CLAUDE.md`](infrastructure/CLAUDE.md) |
 | `presentation/` | Entry-point adapters: CLI, FastAPI, view formatters. Read-only over `application/`. | [`presentation/CLAUDE.md`](presentation/CLAUDE.md) |
-| `connectors/` | Backend-specific hook bundles: `termnorm`, `promptpotter` (self-recursion / L4). Adding a connector = one new file under this package. | [`connectors/CLAUDE.md`](connectors/CLAUDE.md) |
+| `connectors/` | Backend-specific hook bundles, one file per backend; `promptpotter` is the self-recursion (L4). Adding a connector = one new file under this package. | [`connectors/CLAUDE.md`](connectors/CLAUDE.md) |
 | `judges/` | LLM-as-judge graders for SCORING — where no deterministic matcher can grade a cell. A judge is a measurement banked into the row, never a formula term, and is declared apart from every model the loop uses. | [`judges/CLAUDE.md`](judges/CLAUDE.md) |
 
 ## What the chain costs
@@ -24,7 +24,7 @@ Each subpackage's `CLAUDE.md` auto-loads by directory proximity and **deepest wi
 
 **A page you add to a layer is paid by everyone who edits there**, not just the reader who wanted it. So a fact belongs in the layer's `CLAUDE.md` only if it is a RULE binding a set of symbols; mechanism belongs at its definition site, in the module's own docstring, where it costs nothing until someone opens the file.
 
-**Every page is capped** — `scripts/gate.py::_CLAUDE_MD_MAX_WORDS`; one that reaches it is trimmed or split.
+**Every page is capped** — `scripts/gate.py::_INSTRUCTION_MAX_WORDS`; one that reaches it is trimmed or split.
 
 ## Where L4 lives
 

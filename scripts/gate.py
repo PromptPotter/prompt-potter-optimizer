@@ -205,21 +205,98 @@ def _undiffable(_: Sel) -> Outcome:
     )
 
 
-# A CLAUDE.md loads into every session beneath it. A CAP, not a ratchet: prose moves freely under
-# it, and only a page grown past it has to be trimmed or split.
-_CLAUDE_MD_MAX_WORDS = 7000
+# An instruction file loads into every session beneath it. A CAP, not a ratchet: prose moves
+# freely under it, and only a page grown past it has to be trimmed or split.
+_INSTRUCTION_MAX_WORDS = 7000
+_INSTRUCTION_FILES = ("*CLAUDE.md", ".claude/skills/*.md")
+
+_FENCE = re.compile(r"^(```|~~~).*?^\1[^\n]*$", re.DOTALL | re.MULTILINE)
+_BACKTICKED = re.compile(r"`([^`\n]+)`")
+_LINK_TARGET = re.compile(r"\]\(([^)\s]+)\)")
+# A path CLAIM: slash-separated segments ending in a file extension or a slash. A glob, a URL, an
+# absolute or home path and a route are none of these, and neither is a path with a placeholder
+# in it, in either spelling the pages use: `{name}` / `<name>`, or a run of N (`round_NNNN.json`).
+_PATH_CLAIM = re.compile(r"(?:\.{1,2}/)*[\w.@-]+(?:/[\w.@-]+)*(?:/|\.[A-Za-z]\w{0,4})")
+_PATH_TAIL = re.compile(r"(::|#|:\d).*$")
+_NUMBER_PLACEHOLDER = re.compile(r"N{3,}")
 
 
-def _claude_md_size(_: Sel) -> Outcome:
-    code, listed = _run(["git", "ls-files", "*CLAUDE.md"], _REPO)
+def _path_claims(text: str) -> set[str]:
+    prose = _FENCE.sub("", text)
+    spans = _BACKTICKED.findall(prose) + _LINK_TARGET.findall(prose)
+    claims = {_PATH_TAIL.sub("", span) for span in spans}
+    return {
+        c
+        for c in claims
+        if "/" in c and _PATH_CLAIM.fullmatch(c) and not _NUMBER_PLACEHOLDER.search(c)
+    }
+
+
+def _instruction_files(_: Sel) -> Outcome:
+    """The word cap, and every path an instruction file names resolves.
+
+    A path resolves on disk beside the file or at the repo root, or as the tail of a tracked
+    path: a layer page names its own modules from where it sits (`store/stores.py`). One git
+    ignores is the operator's own tree and is not ours to check.
+    """
+    code, listed = _run(["git", "ls-files", "-z", *_INSTRUCTION_FILES], _REPO)
     if code:
         return code, listed
-    over = [
-        f"{rel}: {n} words"
-        for rel in listed.splitlines()
-        if (n := len((_REPO / rel).read_text(encoding="utf-8").split())) > _CLAUDE_MD_MAX_WORDS
-    ]
-    return (1, f"over {_CLAUDE_MD_MAX_WORDS} words:\n" + "\n".join(over)) if over else (0, "")
+    code, tracked = _run(["git", "ls-files", "-z"], _REPO)
+    if code:
+        return code, tracked
+    tails: set[str] = set()
+    for path in tracked.split("\0"):
+        parts = path.split("/")
+        for end in range(1, len(parts) + 1):
+            tails.update("/".join(parts[start:end]) for start in range(end))
+
+    over: list[str] = []
+    # Each unresolved claim, under both spellings git may know it by: from the root, and from
+    # the file's own directory (`webapp/.gitignore` ignores `out/` there).
+    unresolved: dict[tuple[str, str], set[str]] = {}
+    for rel in filter(None, listed.split("\0")):
+        text = (_REPO / rel).read_text(encoding="utf-8")
+        if (words := len(text.split())) > _INSTRUCTION_MAX_WORDS:
+            over.append(f"{rel}: {words} words")
+        here = (_REPO / rel).parent
+        for claim in _path_claims(text):
+            if claim.startswith("../"):
+                # The file's own link: it resolves from where the file sits or not at all, and
+                # one that climbs out of the repo names a sibling checkout no clone can vouch for.
+                target = Path(os.path.normpath(here / claim))
+                if target.is_relative_to(_REPO) and not target.exists():
+                    unresolved[rel, claim] = set()
+                continue
+            on_disk = any((base / claim).exists() for base in (here, _REPO))
+            if not on_disk and claim.strip("/") not in tails:
+                beside = f"{here.relative_to(_REPO).as_posix()}/{claim}".removeprefix("./")
+                unresolved[rel, claim] = {claim, beside}
+    if asked := sorted(set().union(*unresolved.values())):
+        answer = subprocess.run(
+            ["git", "check-ignore", "--stdin", "-z", "--verbose"],
+            cwd=_REPO,
+            input="\0".join(asked).encode(),
+            capture_output=True,
+        )
+        if answer.returncode not in (0, 1):  # 1 is "none of them is ignored"
+            return answer.returncode, answer.stderr.decode(errors="replace")
+        # Verbose, for the PATTERN: git on Windows reports a directory that does not exist as
+        # matched by an empty one, which would exempt exactly the claims this check is for.
+        fields = answer.stdout.decode().split("\0")  # source, line, pattern, path — per path
+        ignored = {
+            path for pattern, path in zip(fields[2::4], fields[3::4], strict=False) if pattern
+        }
+        unresolved = {key: paths for key, paths in unresolved.items() if not paths & ignored}
+    failures = []
+    if over:
+        failures.append(f"over {_INSTRUCTION_MAX_WORDS} words:\n" + "\n".join(over))
+    if unresolved:
+        failures.append(
+            "names a path that resolves nowhere in the repo:\n"
+            + "\n".join(f"  {rel}: {claim}" for rel, claim in sorted(unresolved))
+        )
+    return (1, "\n".join(failures)) if failures else (0, "")
 
 
 # What ruff lints when the run is not scoped to staged files. ``scripts/`` is here for the
@@ -503,7 +580,7 @@ CHECKS: tuple[Check, ...] = (
     Check("mypy", "py", _mypy),
     Check("extras", "py", _extras, staged=True),
     Check("layering", "py", _layering, staged=True),
-    Check("claude-md-size", "py", _claude_md_size, staged=True),
+    Check("instruction-files", "py", _instruction_files, staged=True),
     # "py" so it runs without `webapp/node_modules`, which is routinely absent — a guard that
     # cannot run on the machine that would trip it is not a guard.
     Check("undiffable", "py", _undiffable, staged=True),

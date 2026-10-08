@@ -6,7 +6,7 @@ or talks to a network without going through one of these seams.
 
 ## Persistence — one ingress, two projections
 
-**Sole ingress:** the per-cycle `CycleEventLog` (`ledger.py`, `.runtime/ledger.jsonl`). The ledger is the only thing that touches disk for the campaign event stream, and **there is no second ingress, ever.** The writer-side API above it is `RunCallbacks` (`application/run_observers.py`), a typed event constructor over `CycleEventLog.append`; fork mechanics and the crash-atomicity rule are that module's own header.
+**Sole ingress:** the per-cycle `CycleEventLog` (`ledger.py`, `cycles/{cycle_id}/.runtime/ledger.jsonl`). The ledger is the only thing that touches disk for the campaign event stream, and **there is no second ingress, ever.** The writer-side API above it is `RunCallbacks` (`application/run_observers.py`), a typed event constructor over `CycleEventLog.append`; fork mechanics and the crash-atomicity rule are that module's own header.
 
 Per-call telemetry firing from deep inside the dispatch chain uses the `emit_*` shape instead (`llm/telemetry.py`) — same canonical ledger. **Which shape a new surface takes** — owned by [`../application/CLAUDE.md`](../application/CLAUDE.md) § Conventions.
 
@@ -27,7 +27,7 @@ the election) so nothing decides per-key at the seam what serializes.
 | Projection | Scope | Writes | Role |
 |---|---|---|---|
 | `LiveDashboardProjection` (`projections/live_dashboard/projection.py`) | per cycle | `dashboard.json` | **Display surface** — completed-round summaries (`dash.rounds[]`; **round 0 = the origin's round-0 score**, a one-candidate round emitted via the standard `close_round` path, no separate origin block) + in-flight `current_round` block + `spend` rollup (sole writer for every bucket via `_handle_token_usage` → `SpendRollup.bank`, which keys one by the record's kind and folds the totals over `SpendRollup.by_kind` — never a hand-named pair, or a new spend kind is money the cap cannot see; a run's spend book is seeded off the `spend_metered` accessor, in the units its ceiling meters, when it is armed). Sole webapp source for the chart and trend sparkline; the lineage tree reads the ledger instead. |
-| `AuditTrailProjection` (`projections/audit_trail.py`) | per cycle / fork | `.runtime/cache/rounds/round_NNNN.json` | **Deep audit** — full LLM I/O, per-sample results, scoreboard with `per_sample`. Fetched lazily by the webapp (`useRoundAudit`) only when an operator drills into a specific round; `useRoundFile` is the peer hook for the PUBLIC `rounds/` tree. |
+| `AuditTrailProjection` (`projections/audit_trail.py`) | per cycle / fork | `.runtime/cache/rounds/round_NNNN.json` | **Deep audit** — full LLM I/O, per-sample results, scoreboard with `per_sample`. Fetched lazily by the webapp (`useRoundAudit`) only when an operator drills into a specific round; `useRoundFile` is the peer hook for the PUBLIC `cycles/{cycle_id}/rounds/` tree. |
 | `RacingStreamProjection` (`projections/racing_stream.py`) | per cycle | `.runtime/streams/round_NNNN_{member}.jsonl` | Per-sample race standing under the eliminator `member` names, for post-hoc posterior analysis. Operator-tailable; webapp does not consume it. |
 | `ReadoutProjection` (`application/views/readout.py` — it renders through `views/render/`, so it sits a layer up) | per cycle / fork | `readout.log` | **The run readout** — the ledger stream as lines, ANSI-stripped, appended per launch. Bound at every entry point; one with a terminal hands in a line sink and sees the styled line too. |
 
@@ -53,7 +53,7 @@ sole writer, persisting `RoundResult.model_dump()` — the model **is** the roun
 
 The **outbound SSE highway is NOT a projection/subscriber** — it *tails* the on-disk
 ledger (`projections/event_stream.py::CycleLedgerTail`), **cross-process**: any reader
-(API server, CLI, a future MCP client) tails the cycle's `.runtime/ledger.jsonl`
+(API server, CLI, a future MCP client) tails `cycles/{cycle_id}/.runtime/ledger.jsonl`
 directly, so the stream does not depend on the run living in the reader's own process.
 Certified contract:
 [`docs/developer/event-stream.md`](../../docs/developer/event-stream.md).
@@ -79,7 +79,7 @@ snapshot answers exactly that way: `dashboard_unreadable` is a served reason, no
 
 `Projection.on_record` (`projections/base.py`) owns the dispatch, and that file's header states how. **Subscribers MUST NOT write campaign artifacts beyond their declared allowlist** — it fails loud, since an out-of-allowlist write shows up in the file tree ([`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)).
 
-**`--from N` admissibility is a LEDGER question, not a `rounds/` tree question** — and round 0 closes twice, so the scan must take a max. Both rules, and why, are `store/campaign_store/ledger_scan.py`'s header.
+**`--from N` admissibility is a LEDGER question, not a `cycles/{cycle_id}/rounds/` tree question** — and round 0 closes twice, so the scan must take a max. Both rules, and why, are `store/campaign_store/ledger_scan.py`'s header.
 
 ## The lineage tree — one timeline per campaign
 
@@ -141,7 +141,7 @@ The `CycleDir` / `WorkspaceDir` write-target newtypes live in `domain/cycle_path
 
 `write_ruler`/`read_ruler` ride the same shape for a δ ruler (`RulerRecord`, last-wins PER `dataset_name`) — **WHOLE each time rather than as a delta**, because `append` is not crash-atomic and a torn line must fall back to a smaller-but-valid scale, and appended BEFORE the round document naming it. **One ledger carries more than one** (δ keys name a sample only within one dataset, and an L4 outer cycle also carries the shared inner scale — `application/runner/inner/ruler.py`), so `copy_rulers` is what a fork lifts, never one of them.
 
-`write_run_limits`/`read_run_limits` carry the operator's standing ceiling (`RunLimitsRecord`, last-wins), scanned physically so a fork never inherits it; its polled mirror is `.runtime/run_limits.json`. All three differ from `.runtime/{skip,pause,run_limits}`, the transient **polled** flags read at the next sample boundary.
+`write_run_limits`/`read_run_limits` carry the operator's standing ceiling (`RunLimitsRecord`, last-wins), scanned physically so a fork never inherits it; its polled mirror is `cycles/{cycle_id}/.runtime/run_limits.json`. All three differ from `.runtime/{skip,pause,run_limits}`, the transient **polled** flags read at the next sample boundary.
 
 ## One deleter — `rmtree_robust`
 
@@ -157,7 +157,7 @@ half-deleted cycle that later reads as a real one.
 
 - **A row is filed under the dataset it MEASURED, never under the campaign that paid for it.** On the recursion that is the *inner* benchmark (`datasets/{name}/inner_tasks.yaml::inner_benchmark`) — an inner sandbox isolates campaign state but deliberately shares `shared_root`, so **`promptpotter-self`'s bytes are almost all filed under the inner dataset's name.** Scoping anything by `--dataset promptpotter-self` reaches the outer cells and essentially nothing L4 actually cost. Count before concluding: `compact-archive inventory --dataset <name>` prints runs, cells, bytes and replay rate by dataset, label and age.
 - **Nothing on a run names a campaign.** The index entry is content, provenance and a label — no `campaign_id`, no `cycle_id`, because a cache hit is supposed to cross campaigns. So "what did this campaign cost on disk" is not a question the archive answers, and the join a surface needs is `LineageNode.sp_hash` → the row's `prompt_fields_id` (`docs/developer/README.md` § Cross-run memory).
-- **Cycle state is disposable and the rows are not**, so the rows routinely outlive every campaign that could select them: an emptied `.inner/` leaves its measurements addressable only by dataset. Selecting a family and acting on "what it produced" is therefore a claim about *surviving* state — say so, rather than reporting a smaller number as if it were the whole.
+- **Cycle state is disposable and the rows are not**, so the rows routinely outlive every campaign that could select them: an emptied `.promptpotter/.inner/` leaves its measurements addressable only by dataset. Selecting a family and acting on "what it produced" is therefore a claim about *surviving* state — say so, rather than reporting a smaller number as if it were the whole.
 
 Reversibility is what makes the first two survivable: `compact` keeps every field the δ ruler re-grades from and the replay cache needs, so compacting rows another campaign replays from costs it nothing. Only `purge-cold` needs the attribution, and only it is irreversible.
 
@@ -241,7 +241,7 @@ ledger; tracing is fan-out only.
 ## Identity — the OIDC foundation
 
 `identity/` holds the sign-in machinery (`migration.py`: the first web sign-in RENAMES
-`projects/default/` to `projects/{user_id}/`). It builds the Stage-0 `IdentityContext`
+`.promptpotter/projects/default/` to `.promptpotter/projects/{user_id}/`). It builds the Stage-0 `IdentityContext`
 that `build_stores` takes; the capability vocabulary that reads it lives one layer out
 in `shared/identity.py`. **The access model itself is a constitution, not a layer
 note** — boundaries, capabilities and enforcement are owned by
