@@ -1,20 +1,19 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.pipeline_resolve import resolved_dataset_name
 from promptpotter.application.run_observers import build_campaign_emitter
+from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.campaign_ids import mint_campaign_id, mint_checkin_cycle_id
 from promptpotter.config.settings import APP_VERSION
 from promptpotter.domain.bench import BankPartition
 from promptpotter.domain.campaign import Arm, Campaign, Treatment
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.measurement_provenance import RunSource
-from promptpotter.domain.phases import StopReason
 from promptpotter.domain.results import DisplayMetric
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import CellScorer
@@ -170,41 +169,12 @@ class Session:
             )
         return names[0]
 
-    # `pause_check` returns True while the operator has requested a pause
-    # (`.runtime/pause.flag` present — the single operator-interrupt flag). The
-    # loop checkpoints poll it and, when set, declare PAUSED and exit cleanly:
-    # the worker ends, the cycle stays resumable. Bound at the runner seam and
-    # also fed to `set_abort_check` so a pause breaks a long rate-limit wait.
-    pause_check: Callable[[], bool] | None = None
-    # The ENCLOSING run's `pause_check`, so an L4 outer cycle's stop reaches the inner cycle
-    # instrumenting it. Captured once at the runner seam; `None` for a top-level run.
-    inherited_pause_check: Callable[[], bool] | None = None
-    # `skip_check` returns True while a one-shot `.runtime/skip.flag` is present
-    # (operator early-abort of the searchpoint scoring now). Unlike pause it
-    # does NOT end the cycle — the per-sample checkpoint accepts the partial and
-    # continues. `skip_consume` removes the flag the instant it fires so exactly
-    # one searchpoint is cut, not the whole round.
-    skip_check: Callable[[], bool] | None = None
-    skip_consume: Callable[[], None] | None = None
-    # `sample_lookahead_check`: the depth in force — how many samples the walk holds in flight, 1
-    # when unset. Same read-and-consume pair as skip, spent a phase later — by the ROUND that
-    # scored under it, which is the one control loop every armable walk sits inside. An `auto`
-    # arming is left standing by the spend.
-    sample_lookahead_check: Callable[[], int] | None = None
-    sample_lookahead_consume: Callable[[], None] | None = None
+    # Pause, skip, look-ahead and the ceiling, as every checkpoint polls them: one object, so the
+    # per-sample and round-boundary cadences cannot disagree. Unbound outside a run.
+    control: RunControl = field(default_factory=RunControl)
     # What the scoring phase has out and what its stop rules allow, summed over every walk and
     # published to the ledger. ``None`` outside a run, where there is nobody to show it to.
     flight: FlightGauge | None = None
-    # `budget_tripped` returns the `StopReason` once a spend/token ceiling is met, else None.
-    # Bound at the runner seam to the SAME `BudgetGate.tripped` the round loop consults — one
-    # object, so the two cadences can't disagree and a mid-flight ceiling change moves both.
-    # Whether a call may be SENT is the spend book's to answer, at the send; this is the stop a
-    # phase reads between samples once a ceiling is reached.
-    budget_tripped: Callable[[], StopReason | None] | None = None
-    # What has been spent so far, for the panel that tells an optimizer how much run is left —
-    # the spend book's own total, bound at the same seam. A FLOOR while unpriced tokens are
-    # outstanding.
-    spend_used: Callable[[], float] | None = None
     # What the account reserved for this run (``HeldLimits.reserve``), set at the runner seam
     # before the book is armed.
     reserve: SpendCeilings = field(default_factory=lambda: SpendCeilings(None, None))

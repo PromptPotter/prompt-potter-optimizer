@@ -43,6 +43,8 @@ from promptpotter.infrastructure.docker_host import (
     machine_step,
 )
 from promptpotter.infrastructure.llm.litellm_sends import litellm_route, litellm_sends_billed_as
+from promptpotter.infrastructure.llm.openai_compat import cell_gateway_body, sent_effort
+from promptpotter.infrastructure.llm.registry import openai_compat_spec
 from promptpotter.infrastructure.llm.spend_book import (
     Billed,
     CallLabel,
@@ -365,9 +367,8 @@ def _extract_experiment(experiment_data: Mapping[str, Any]) -> list[dict[str, An
     return out
 
 
-# The gateway whose request body carries reasoning effort as `reasoning.effort`. Any other gateway
-# keeps litellm's own `reasoning_effort` kwarg, which litellm maps where it knows the model.
-_OPENROUTER = "openrouter"
+# Hashed into every cell's identity (`_identity_config`), so its bytes are a KEY and not a
+# description of one gateway: respelling it re-keys every banked harbor cell.
 _REASONING_CHANNEL = "openrouter:extra_body.reasoning"
 
 
@@ -395,21 +396,22 @@ def harbor_wire_adapter(
                 else model
             )
         kwargs = {k: v for k, v in cfg.items() if k in AGENT_KWARG_KEYS}
-        # terminus-2 forwards `llm_call_kwargs` into every litellm completion, and `extra_body`
-        # reaches the gateway verbatim.
-        extra_body: dict[str, Any] = {}
-        if route := cfg.get("route_order"):
-            # The hosts the gateway may serve the agent from, in order and with no fallback — the
-            # same pin `CampaignConfig.route_order` gives optimizer calls.
-            extra_body["provider"] = {"order": list(route), "allow_fallbacks": False}
-        if (
-            str(payload.get("model_name") or "").startswith(f"{_OPENROUTER}/")
-            and (effort := kwargs.pop("reasoning_effort", None)) is not None
-        ):
-            # Harbor calls litellm with `drop_params`, and litellm keeps `reasoning_effort` only for
-            # OpenRouter models it lists — a `:nitro` name lost the knob with no error.
-            extra_body["reasoning"] = {"effort": effort}
-        call_kwargs: dict[str, Any] = {"extra_body": extra_body} if extra_body else {}
+        effort = sent_effort(kwargs.pop("reasoning_effort", None))
+        # Harbor's model name leads with the provider, as litellm's does.
+        via = str(payload.get("model_name") or "").partition("/")[0]
+        body = cell_gateway_body(
+            openai_compat_spec(via),
+            via,
+            route_order=cfg.get("route_order"),
+            reasoning_effort=effort,
+        )
+        call_kwargs: dict[str, Any] = {}
+        if body is not None:
+            # terminus-2 forwards `llm_call_kwargs` into every litellm completion, whose
+            # `drop_params` drops `reasoning_effort` on a model it does not list; the body rides.
+            call_kwargs["extra_body"] = body
+        elif effort is not None:
+            kwargs["reasoning_effort"] = effort
         if (reply := cfg.get("max_tokens")) is not None:
             call_kwargs["max_tokens"] = int(reply)
         if call_kwargs:
@@ -498,8 +500,8 @@ def _identity_config(
         [
             experiment.get("agent") or {},
             experiment.get("reward_key") or DEFAULT_TASK_REWARD_KEY,
-            # Where an OpenRouter agent's `reasoning_effort` travels: a cell banked while litellm
-            # dropped it ran at the model's default effort, whatever its node config says.
+            # Where a gateway agent's `reasoning_effort` travels (`cell_gateway_body`): a cell banked
+            # while litellm dropped it ran at the model's default effort, whatever its config says.
             _REASONING_CHANNEL,
         ]
     )[:12]

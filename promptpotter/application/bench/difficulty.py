@@ -6,7 +6,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
 from promptpotter.application.intelligence.exploration import (
     ORIGIN_ABILITY_ID,
@@ -39,11 +39,20 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["DifficultyView", "RulerScope", "calibrate_delta_ruler"]
+__all__ = ["DifficultyView", "RulerScope", "StampedReading", "calibrate_delta_ruler"]
 
 # Which archive rows a fit reads — `dataset`: every campaign's on the cycle's dataset
 # (`docs/architecture.md` § Three data scopes); `campaign`: a controlled arm's own line alone.
 RulerScope = Literal["dataset", "campaign"]
+
+
+class StampedReading(NamedTuple):
+    """A reading beside the two counts its caveat was decided on, so a surface stating them reads
+    the stamp's own operands. In memory only: a round banks the reading alone."""
+
+    ability: AbilityReading | None
+    unlinked: int
+    pinned_share: float | None
 
 
 def _reading(
@@ -52,7 +61,7 @@ def _reading(
     *,
     objective_id: str,
     results: Sequence[Mapping[str, Any]],
-) -> AbilityReading | None:
+) -> StampedReading:
     """The SOLE stamping site: a θ pair, the scale it was read on, and whether that scale makes it
     ability at all — minted together, so no round can carry an ability whose scale disagrees with
     the ruler that produced it, or a caveat that disagrees with either.
@@ -61,14 +70,15 @@ def _reading(
     objective is the whole of what separates two readings. ``results`` are the rows THIS θ was fit
     on; their cells decide the round's own δ span, which is half of the collapsed-band reading."""
     if theta is None:
-        return None
+        return StampedReading(None, 0, None)
     cells = list(measured_cells(results))
     band = ruler.band_span(cells) if ruler is not None else None
     round_span = band[0] if band is not None else None
     ruler_span = ruler.delta_span if ruler is not None else None
     calibration = ruler.calibration_model if ruler is not None else None
+    unlinked = ruler.unlinked(cells) if ruler is not None else 0
     pinned = ruler.pinned_share(cells) if ruler is not None else None
-    return AbilityReading(
+    ability = AbilityReading(
         theta=theta[0],
         se=theta[1],
         ruler_id=ruler.anchor_id if ruler is not None else flat_ruler_id(objective_id),
@@ -80,10 +90,11 @@ def _reading(
             calibration_model=calibration,
             round_span=round_span,
             ruler_span=ruler_span,
-            unlinked=ruler.unlinked(cells) if ruler is not None else 0,
+            unlinked=unlinked,
             pinned_share=pinned,
         ),
     )
+    return StampedReading(ability, unlinked, pinned)
 
 
 def _cycle_history(rounds: list[RoundResult]) -> list[Observation]:
@@ -281,14 +292,19 @@ class DifficultyView:
     def reading(
         self, theta: tuple[float, float] | None, *, results: Sequence[Mapping[str, Any]]
     ) -> AbilityReading | None:
+        return self._stamp(theta, results).ability
+
+    def _stamp(
+        self, theta: tuple[float, float] | None, results: Sequence[Mapping[str, Any]]
+    ) -> StampedReading:
         return _reading(
             theta, self.ruler, objective_id=self.session.scoring.scorer_id, results=results
         )
 
-    def frontier(self, results: list[dict[str, Any]]) -> AbilityReading | None:
+    def frontier(self, results: list[dict[str, Any]]) -> StampedReading:
         """The frontier's reading on this scale. A caller reading ability before its round is
         absorbed computes what absorb will stamp, rather than a second one."""
-        return self.reading(_cumulative_theta(results, self.ruler), results=results)
+        return self._stamp(_cumulative_theta(results, self.ruler), results)
 
     def calibrate(
         self, measured: Mapping[str, Sequence[Mapping[str, Any]]], rounds: list[RoundResult]
@@ -357,7 +373,7 @@ class DifficultyView:
                 # Only the cells the freshly-locked ruler carries: it was anchored on the origin
                 # and the archive, and a round that already walked past that is not on this scale.
                 on_ruler = [r for r in frontier if int(r.get("sample_id", -1)) in cells]
-                rr.ability = self.frontier(on_ruler)
+                rr.ability = self.frontier(on_ruler).ability
 
     def persist(self, *, round_num: int) -> None:
         """The ruler lands on the cycle ledger BEFORE the round document that names it. A crash

@@ -227,10 +227,7 @@ through every nested loop.
   typed cell errors harbor raises, so a 429 or an empty account becomes UNKNOWN rows (the spend
   half is the DSPy entry above). `grep -c "CellThrottledError\|CellSendRefusedError"
   promptpotter/connectors/dspy_module.py` (0).
-- Smaller, same shape: `infrastructure/llm/base.py::_admitted_send` runs `acquire_reservation`
-  inside `admitted` but before its `try`, so a `RequestTooLargeError` or a cancel while queued
-  charges an unsent request its whole bound (only with `RATE_LIMITS` set);
-  `diagnostics/probe_reasoning.py` reads every exception as "refuses this effort";
+- Smaller, same shape: `diagnostics/probe_reasoning.py` reads every exception as "refuses this effort";
   `tracing/langfuse_client.py` runs a second private 429 loop beside `decide_429_wait`.
 
 **Shape 2 — an act or a reading lives in ONE adapter, so the entry points disagree.** The
@@ -270,7 +267,7 @@ an untyped dict.
   Claude model and this is one pass.
 
 - **Concurrent sibling cycles of one campaign each spend up to the whole ceiling.**
-  `spend_budget_usd` binds a CYCLE (`runner/entry.py::_build_budget_gate` seeds its book off that
+  `spend_budget_usd` binds a CYCLE (`runner/entry.py::_arm_spend_book` seeds its book off that
   cycle's folded history), so two forks launched side by side are each admitted the full ceiling
   and the campaign can spend twice it. **Blocker:** a decision only the operator can make — whether
   the ceiling is the campaign's or the cycle's. The campaign's answer is one book per campaign,

@@ -1157,7 +1157,7 @@ class CampaignStore:
         reserve: BudgetChange,
     ) -> None:
         """Land the cycle's standing operator ceiling — the record, then its polled mirror. The ONE
-        writer of both, so the mirror a running gate reads can never name a ceiling the ledger does
+        writer of both, so the mirror a running book reads can never name a ceiling the ledger does
         not. WHOLE: the last record wins, so ``rounds=None`` drops a standing round cap."""
         cycle_dir = self.cycle_dir(hop)
         CycleEventLog.open(CycleDir(cycle_dir)).append(

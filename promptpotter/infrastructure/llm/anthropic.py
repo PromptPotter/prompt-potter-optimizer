@@ -3,8 +3,6 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-import httpx
-
 from promptpotter.config.settings import settings
 from promptpotter.domain.spend import TokenAccount
 from promptpotter.infrastructure.llm.base import LLMClientBase
@@ -13,16 +11,10 @@ from promptpotter.infrastructure.llm.rate_limit import (
     ANTHROPIC_RPM_HEADER,
     ANTHROPIC_TPM_HEADER,
     RateLimiter,
-    apply_discovered_caps,
 )
 from promptpotter.infrastructure.llm.request import ChatRequest
 from promptpotter.infrastructure.llm.response import LLMResponse
 from promptpotter.infrastructure.llm.spend_book import Billed, CallLabel
-from promptpotter.shared.errors import (
-    ErrorCategory,
-    SendRefusedError,
-    is_provider_credit_refusal,
-)
 
 if TYPE_CHECKING:
     from anthropic import AsyncAnthropic
@@ -68,6 +60,8 @@ class AnthropicClient(LLMClientBase):
             "response_schema",
         }
     )
+    CREDIT_REFUSAL_STATUSES = frozenset({400})
+    RATE_CAP_HEADERS = (ANTHROPIC_RPM_HEADER, ANTHROPIC_TPM_HEADER)
     _schema_warned = False
 
     def __init__(
@@ -133,41 +127,21 @@ class AnthropicClient(LLMClientBase):
         if request.top_p is not None:
             request_params["top_p"] = request.top_p
 
-        async def send() -> tuple[httpx.Headers, Message]:
-            try:
-                raw = await client.messages.with_raw_response.create(**request_params)
-            except Exception as exc:
-                if getattr(exc, "status_code", None) == 400 and is_provider_credit_refusal(
-                    str(exc)
-                ):
-                    raise SendRefusedError(
-                        f"Anthropic refused the call for lack of credit: {str(exc)[:300]}",
-                        category=ErrorCategory.PROVIDER_CREDIT,
-                    ) from exc
-                raise
-            return raw.headers, raw.parse()
-
-        def billed(reply: tuple[httpx.Headers, Message]) -> Billed:
-            response = reply[1]
-            return Billed(_usage(response), None, None, response.model)
+        async def send() -> tuple[object, tuple[Message, TokenAccount]]:
+            raw = await client.messages.with_raw_response.create(**request_params)
+            reply = raw.parse()
+            return raw.headers, (reply, _usage(reply))
 
         # Held and throttled against the number we are ABOUT TO SEND, not the caller's raw one:
         # with `max_tokens=None` the request still asks for 8192.
-        headers, response = await self._admitted_send(
+        response, usage = await self._admitted_send(
             label,
             model=model,
             messages=messages,
             sent={"system": system_message, "messages": anthropic_messages},
             max_tokens=anthropic_max_tokens,
             send=send,
-            billed=billed,
-        )
-        usage = _usage(response)
-        apply_discovered_caps(
-            self._rate_limiter,
-            headers,
-            rpm_header=ANTHROPIC_RPM_HEADER,
-            tpm_header=ANTHROPIC_TPM_HEADER,
+            billed=lambda reply: Billed(reply[1], None, None, reply[0].model),
         )
 
         content = "".join(block.text for block in response.content if hasattr(block, "text"))

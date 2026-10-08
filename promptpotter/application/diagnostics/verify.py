@@ -20,8 +20,8 @@ from promptpotter.application.initialization.loop_start import (
 from promptpotter.application.initialization.wiring import bind_cycle_session
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.run_observers import RunCallbacks
+from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.bench import level_columns, paired_lift
-from promptpotter.application.runner.termination import BudgetGate
 from promptpotter.application.scoring.classification import scoreable_rows
 from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.application.scoring.search_point_scorer import score_search_point
@@ -375,7 +375,7 @@ async def verify_on_saturation(
     round_num: int,
     accuracy: float | None,
     winner_id: str | None,
-    budget: BudgetGate,
+    control: RunControl,
     log: Callable[[str], None] | None = None,
 ) -> VerifyOutcome | None:
     """A round that reads 100% gets checked, automatically, on cells it has never seen — the one
@@ -388,14 +388,14 @@ async def verify_on_saturation(
     own earlier check. Never fatal: a ``VerifyError`` means the candidate would not resolve off
     disk, which is a reason to say nothing, not to end a healthy run.
 
-    ``budget`` is the SAME ceiling the round loop halts on, and it is required rather than optional
+    ``control`` holds the SAME ceiling the round loop halts on, and is required rather than optional
     because this is the loop spending, not an operator: a discretionary check that could start on an
     exhausted budget would make ``max_usd`` mean whatever the checks happened to cost. The loop's own
     ceiling is consulted at the next round boundary, which is AFTER this runs.
     """
     if accuracy is None or accuracy < 1.0 or not winner_id:
         return None
-    if budget.tripped() is not None:
+    if control.budget_tripped() is not None:
         return None
     ledger_path = CycleLayout(stores.campaigns.cycle_dir(hop)).ledger
     mine = [banked.round for banked, _ in scan_ledger_verify(ledger_path).graded.values()]

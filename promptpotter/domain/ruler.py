@@ -88,8 +88,8 @@ def theta_caveat(
     unlinked: int,
     pinned_share: float | None = None,
 ) -> ThetaCaveat | None:
-    """The SOLE decision for the SCALE states, which the served reading and the optimizer's
-    ``confounds`` panel both call. A ``None`` span or share is no verdict; order is severity."""
+    """The SOLE decision for the SCALE states, stamped once (``bench/difficulty.py::_reading``) for
+    screen and ``confounds`` panel alike. A ``None`` span or share is no verdict; order is severity."""
     if calibration_model is None:
         return ThetaCaveat.COLD_RULER
     if round_span is not None and ruler_span is not None:

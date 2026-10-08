@@ -324,7 +324,7 @@ class Cycle:
         # pool above. On a held round `rr` already carries the parent's re-score for this
         # round's subset, so this stays a real measurement either way.
         tr.current_accuracy, tr.current_composite_fitness = rr.accuracy, rr.composite_fitness
-        rr.ability = self.difficulty.frontier(tr.current_results)
+        rr.ability = self.difficulty.frontier(tr.current_results).ability
         rr.opt_sp = self.opt_sp
         self.working_state.absorb(rr)
         return rr

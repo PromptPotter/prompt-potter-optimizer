@@ -12,13 +12,12 @@ import sys
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, NamedTuple
 
-from promptpotter.application.knobs import check_couplings
 from promptpotter.application.optimizer_manifest import bound_inner_optimizer
 from promptpotter.application.optimizers import other_optimizer_packages
 from promptpotter.application.optimizers.potter.dispatch import compose
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     OPTIMIZER_DISCRETIONARY_CHARS,
-    ArmReading,
+    ArmDigest,
     CycleSlice,
     InjectionBundle,
     Item,
@@ -282,16 +281,14 @@ def node_packages(bundle: InjectionBundle) -> dict[str, str]:
     return out
 
 
-def _arm_readings(latest_round: RoundResult | None) -> tuple[ArmReading, ...]:
+def _arm_digests(latest_round: RoundResult | None) -> tuple[ArmDigest, ...]:
     """This round's arms, narrowed. Ranked as the round ranked them, so a panel quoting "the
     leader" and the election never disagree about which arm that was."""
     if latest_round is None:
         return ()
     return tuple(
-        ArmReading(
+        ArmDigest(
             label=c.label,
-            theta=c.theta,
-            theta_se=c.theta_se,
             mean_fitness_ci_lo=c.mean_fitness_ci_lo,
             mean_fitness_ci_hi=c.mean_fitness_ci_hi,
             scored_samples=c.scored_samples,
@@ -323,10 +320,9 @@ def build_bundle(
     current_sp = cycle.tracking.current_sp
     current_pp = current_sp.pipeline_params if current_sp is not None else None
     opt = cycle.config.optimization
-    formula, formula_short = resolve_cell_formula(
+    formula, _ = resolve_cell_formula(
         cycle.session.scoring.scorer_cell_formula, cycle.session.pipeline_schema
     )
-    spend_used = cycle.session.spend_used
     knobs = potter_knobs(cycle.optimizer)
     esc = state.escalation
     closed = list(cycle.rounds)
@@ -343,7 +339,6 @@ def build_bundle(
         exploration_budget=exploration_budget(stall_depth, knobs.escalation.l1_patience).value,
         pipeline_params=dict(current_pp) if current_pp else {},
         composite_formula=formula,
-        composite_formula_short=formula_short,
         # The SAME predicate the sampler branches on, evaluated once. A cold ruler forces the
         # frozen prefix however the knob is set, so the knob alone would misreport round 0.
         subset_mode=(
@@ -351,12 +346,10 @@ def build_bundle(
             if knobs.adaptive_queue.per_round_resubset and cycle.difficulty.ruler is not None
             else "frozen"
         ),
-        elimination_n_min=opt.elimination_n_min,
         sp_budget_round=knobs.adaptive_queue.sp_budget_round,
         max_rounds=opt.max_rounds,
         spend_budget_usd=opt.spend_budget_usd,
-        spend_used_usd=spend_used() if spend_used is not None else None,
-        couplings=tuple((c.name, c.severity, c.consequence) for c in check_couplings(cycle.config)),
+        spend_used_usd=cycle.session.control.spend_used_usd(),
     )
 
     # Trajectory pair: frozen origin hits + the live cumulative frontier. The frontier ships
@@ -371,7 +364,7 @@ def build_bundle(
     trajectory_results = merge_known_outcomes(list(cycle.tracking.current_results), latest_results)
     # The frontier absorb is about to fit, fit here over the same merge — so the ability the
     # prompt states and the ability the round document banks are one computation.
-    ability = cycle.difficulty.frontier(trajectory_results)
+    frontier = cycle.difficulty.frontier(trajectory_results)
     # The round before *latest_round*, whichever path we are on: `cycle.rounds[-1]` IS
     # `latest_round` on the generate/L2/L3 path and the round before it on critique. Resolved
     # once here so "did the subset move?" cannot be right on one path and wrong on the other.
@@ -405,8 +398,10 @@ def build_bundle(
             # round document only AFTER the critique call, so on that path the round still reads
             # cold. The cycle owns the ruler and absorb copies from it, so this is the same number
             # one step earlier and cannot be right on one path and wrong on the other.
-            ability=ability,
-            arms=_arm_readings(latest_round),
+            ability=frontier.ability,
+            unlinked=frontier.unlinked,
+            pinned_share=frontier.pinned_share,
+            arms=_arm_digests(latest_round),
         ),
         axes=state.axes(cycle),
         origin_per_sample=origin_per_sample,

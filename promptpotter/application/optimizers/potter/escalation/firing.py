@@ -61,6 +61,7 @@ from promptpotter.application.optimizers.potter.escalation.state import (
     LayerReading,
     NextAction,
     PotterPhase,
+    l1_stall_depth,
 )
 from promptpotter.application.optimizers.potter.knobs import potter_knobs
 from promptpotter.application.optimizers.potter.records import (
@@ -69,6 +70,8 @@ from promptpotter.application.optimizers.potter.records import (
     PotterCheckpointKind,
 )
 from promptpotter.application.optimizers.potter.validators.l3_output import run_l3_output_validators
+from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
+from promptpotter.application.views.render.primitives import fmt_fitness
 from promptpotter.application.views.view_models import (
     OptimizerStepEnterView,
     OptimizerStepExitView,
@@ -131,7 +134,6 @@ class _HighWater:
     The θ pair carries its SE, because a θ advance is only one relative to its own error."""
 
     composite_fitness: float | None
-    accuracy: float | None
     theta: float | None
     theta_se: float | None
 
@@ -149,13 +151,12 @@ def _high_water(cycle: Cycle) -> _HighWater:
         reading = (
             rr.ability
             if rr.ability is not None and rr.ability.ruler_id == view.scale_id
-            else view.frontier(frontier)
+            else view.frontier(frontier).ability
         )
         if reading is not None and (peak is None or reading.theta > peak.theta):
             peak = reading
     return _HighWater(
         composite_fitness=best.composite_fitness,
-        accuracy=best.accuracy,
         theta=None if peak is None else peak.theta,
         theta_se=None if peak is None else peak.se,
     )
@@ -170,15 +171,16 @@ L1_LAYOUT_REFUSED = "l1_layout_refused"
 
 @dataclass(frozen=True)
 class _Fire:
-    """Why a layer fires, and the ask whose reading its landing commits."""
+    """Why a layer fires, the ask whose reading its landing commits, and the peak that ask read."""
 
     cause: str
     # ``None`` is a heal: L3 answering a refused L2 edit, adopted without spending `l3_patience`.
     ask: LadderAsk | None
+    best: _HighWater
 
 
 ParseFn = Callable[[Any, L2L3Memory], TransitionResult]
-ApplyFn = Callable[["Cycle", "PotterState", TransitionResult, _Fire], None]
+ApplyFn = Callable[["PotterState", TransitionResult, _Fire], None]
 EnterFn = Callable[["Cycle", "PotterState", _Fire], OptimizerStepEnterView]
 ExitFn = Callable[["PotterState", TransitionResult], OptimizerStepExitView]
 
@@ -247,7 +249,7 @@ def _parse_l2(raw: L2ContextOutput, memory: L2L3Memory) -> TransitionResult:
     )
 
 
-def _apply_l2(cycle: Cycle, state: PotterState, result: TransitionResult, fire: _Fire) -> None:
+def _apply_l2(state: PotterState, result: TransitionResult, fire: _Fire) -> None:
     memory = state.memory
     if result.l1_overrides is not None:
         memory.l1_overrides = result.l1_overrides
@@ -255,10 +257,7 @@ def _apply_l2(cycle: Cycle, state: PotterState, result: TransitionResult, fire: 
         memory.l1_layout = result.l1_layout
     memory.wounds.l2_guard_breaches = list(result.l2_guard_breaches)
     assert fire.ask is not None, "only L3 heals"
-    best = _high_water(cycle)
-    state.escalation.record_l2_fired(
-        fire.ask.l2, best_composite_fitness=best.composite_fitness, best_theta=best.theta
-    )
+    state.escalation.record_l2_fired(fire.ask.l2)
 
 
 def _l2_enter(cycle: Cycle, state: PotterState, fire: _Fire) -> OptimizerStepEnterView:
@@ -277,8 +276,9 @@ def _l2_enter(cycle: Cycle, state: PotterState, fire: _Fire) -> OptimizerStepEnt
         tag=f"L2 fire {esc.l2_round + 1}",
         lines=(
             f"rule={fire.cause}  |  "
-            f"L1 stalled {esc.l1_stall_count} rounds  |  "
-            f"acc={cycle.tracking.current_accuracy:.1%}  best={_high_water(cycle).accuracy:.1%}",
+            f"L1 stalled {l1_stall_depth(cycle.rounds)} rounds  |  "
+            f"acc={fmt_pct(cycle.tracking.current_accuracy)}  "
+            f"peak fitness={fmt_fitness(fire.best.composite_fitness)}",
             overrides,
             "LLM analyzing failure patterns...",
         ),
@@ -338,17 +338,12 @@ def _parse_l3(raw: L3PlanOutput, memory: L2L3Memory) -> TransitionResult:
     )
 
 
-def _apply_l3(cycle: Cycle, state: PotterState, result: TransitionResult, fire: _Fire) -> None:
+def _apply_l3(state: PotterState, result: TransitionResult, fire: _Fire) -> None:
     state.memory.plan = result.plan
     # The overwrite, possibly with ``""``, is the "cleared only when L3 fires again" contract.
     state.memory.wounds.l3_note = result.l3_note
     state.memory.wounds.l3_guard_breaches = list(result.l3_guard_breaches)
-    best = _high_water(cycle)
-    state.escalation.record_l3_fired(
-        None if fire.ask is None else fire.ask.l3,
-        best_composite_fitness=best.composite_fitness,
-        best_theta=best.theta,
-    )
+    state.escalation.record_l3_fired(None if fire.ask is None else fire.ask.l3)
 
 
 def _l3_enter(cycle: Cycle, state: PotterState, fire: _Fire) -> OptimizerStepEnterView:
@@ -485,7 +480,7 @@ async def _run_transition(
             )
             return None
 
-    transition.apply(cycle, state, result, fire)
+    transition.apply(state, result, fire)
     emit_phase(
         on_phase,
         transition.phase,
@@ -612,6 +607,7 @@ def _record_trigger(
     round_num: int,
     patience: int | None,
     reading: LayerReading,
+    best: _HighWater,
     *,
     kind: PotterCheckpointKind,
     layer: Literal["l2", "l3"],
@@ -622,7 +618,6 @@ def _record_trigger(
     heal: bool | None = None,
     l2_guard_breaches: list[str] | None = None,
 ) -> None:
-    best = _high_water(cycle)
     asked: dict[str, Any] = {"rule": rule}
     if heal is not None:
         asked["heal"] = heal
@@ -684,6 +679,7 @@ async def escalate_l2(
         round_num,
         opt.l2_patience,
         ask.l2,
+        best,
         kind=PotterCheckpointKind.L2_ESCALATION_TRIGGER,
         layer="l2",
         counter_round=esc.l2_round,
@@ -699,7 +695,7 @@ async def escalate_l2(
             state,
             round_num,
             on_phase,
-            _Fire(cause, ask),
+            _Fire(cause, ask, best),
             obs=obs,
             tracing_campaign_id=tracing_campaign_id,
         )
@@ -723,6 +719,7 @@ async def escalate_l2(
                 round_num,
                 opt.l3_patience,
                 held,
+                best,
                 kind=PotterCheckpointKind.L3_ESCALATION_TRIGGER,
                 layer="l3",
                 counter_round=esc.l3_round,
@@ -738,7 +735,7 @@ async def escalate_l2(
                 state,
                 round_num,
                 on_phase,
-                _Fire(L1_LAYOUT_REFUSED, None),
+                _Fire(L1_LAYOUT_REFUSED, None, best),
                 obs=obs,
                 tracing_campaign_id=tracing_campaign_id,
             )
@@ -750,6 +747,7 @@ async def escalate_l2(
         round_num,
         opt.l3_patience,
         ask.l3,
+        best,
         kind=PotterCheckpointKind.L3_ESCALATION_TRIGGER,
         layer="l3",
         counter_round=esc.l3_round,
@@ -767,7 +765,7 @@ async def escalate_l2(
             state,
             round_num,
             on_phase,
-            _Fire(L2_PATIENCE_SPENT, ask),
+            _Fire(L2_PATIENCE_SPENT, ask, best),
             obs=obs,
             tracing_campaign_id=tracing_campaign_id,
         )

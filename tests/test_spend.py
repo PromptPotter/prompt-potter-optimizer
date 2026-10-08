@@ -18,6 +18,7 @@ from unittest import mock
 import pytest
 
 from promptpotter.application.jobs.reaper import reclaim_orphan_sandboxes
+from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.scoring import query_loop
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.results import ArmOutcome
@@ -255,7 +256,7 @@ def _counting_client(reply: str) -> tuple[Any, list[int]]:
     the round-trips it took."""
     from openai.types.chat import ChatCompletion
 
-    from promptpotter.infrastructure.llm.openai_compat import OpenAICompatibleClient
+    from promptpotter.infrastructure.llm.openai_compat import OpenAICompatibleClient, ProviderSpec
 
     calls: list[int] = []
 
@@ -287,7 +288,7 @@ def _counting_client(reply: str) -> tuple[Any, list[int]]:
         )
         return types.SimpleNamespace(headers={}, parse=lambda: completion)
 
-    client = OpenAICompatibleClient(api_key="k", provider="p", display_name="P")
+    client = OpenAICompatibleClient(api_key="k", provider="p", spec=ProviderSpec("P", ""))
     client._client = types.SimpleNamespace(  # type: ignore[assignment]
         chat=types.SimpleNamespace(
             completions=types.SimpleNamespace(
@@ -423,8 +424,20 @@ def test_a_field_a_client_cannot_send_is_refused_and_the_gateway_wire_holds(
             send(claude, ChatRequest(messages, "m", **unsendable))
     assert len(wire) == 1, "a refused request reached the provider"
 
+    own_host = openai_compat.OpenAICompatibleClient(
+        api_key="k", provider="groq", spec=openai_compat.ProviderSpec("Groq", "")
+    )
+    own_host._client = types.SimpleNamespace(  # type: ignore[assignment]
+        chat=types.SimpleNamespace(completions=raw)
+    )
+    with pytest.raises(ValueError, match="route_order"):
+        send(own_host, ChatRequest(messages, "m", route_order=["Alibaba"]))
+    assert len(wire) == 1, "a route reached a provider that is its own host"
+
     gateway = openai_compat.OpenAICompatibleClient(
-        api_key="k", provider="openrouter", display_name="OpenRouter", gateway=True
+        api_key="k",
+        provider="openrouter",
+        spec=openai_compat.ProviderSpec("OpenRouter", "", gateway=True),
     )
     gateway._client = types.SimpleNamespace(  # type: ignore[assignment]
         chat=types.SimpleNamespace(completions=raw)
@@ -461,12 +474,12 @@ def test_a_field_a_client_cannot_send_is_refused_and_the_gateway_wire_holds(
             "messages": messages,
             "temperature": 0.3,
             "max_tokens": 64,
-            "reasoning_effort": "low",
             "seed": 7,
             "top_p": 0.9,
             "extra_body": {
                 "usage": {"include": True},
                 "provider": {**priced, "order": ["Alibaba"], "allow_fallbacks": True},
+                "reasoning": {"effort": "low"},
             },
             "response_format": {
                 "type": "json_schema",
@@ -646,7 +659,6 @@ async def _walk(
 
     from promptpotter.application.optimizers.potter.pobb.checks import PoBBCheck
     from promptpotter.application.optimizers.potter.race import CatchUpPool
-    from promptpotter.application.runner.termination import BudgetGate
     from promptpotter.domain.pipeline_schema import WebSpendBound
     from promptpotter.domain.spend import TokenAccount
     from promptpotter.infrastructure.llm.spend_book import (
@@ -681,8 +693,6 @@ async def _walk(
             bill.settle(Billed(TokenAccount(), 1.0))
         return row
 
-    gate = BudgetGate(book=book)
-
     def _backfill(sp: Any, sample: Sample, prior_id: str) -> Any:
         call = asyncio.ensure_future(backend.hold(sample, backfill_pace))
 
@@ -702,12 +712,13 @@ async def _walk(
         session = types.SimpleNamespace(
             scoring=_row_scoring(),
             state=types.SimpleNamespace(ledger=None),
-            pause_check=lambda: pause_after_call is not None and len(returned) >= pause_after_call,
-            skip_check=None,
-            skip_consume=None,
-            budget_tripped=gate.tripped,
-            spend_used=lambda: book.usd_spent,
-            sample_lookahead_check=lambda: armed,
+            control=RunControl(
+                held_lookahead=armed,
+                enclosing_pause=lambda: (
+                    pause_after_call is not None and len(returned) >= pause_after_call
+                ),
+                book=book,
+            ),
             backend_client=types.SimpleNamespace(
                 max_cells_in_flight=max_cells,
                 cancel_stops_billing=False,
@@ -790,12 +801,7 @@ async def _round(
     session = types.SimpleNamespace(
         scoring=_row_scoring(),
         state=types.SimpleNamespace(ledger=None),
-        pause_check=lambda: flag["pause"],
-        skip_check=None,
-        skip_consume=None,
-        budget_tripped=None,
-        spend_used=None,
-        sample_lookahead_check=lambda: armed,
+        control=RunControl(held_lookahead=armed, enclosing_pause=lambda: flag["pause"]),
         backend_client=types.SimpleNamespace(
             max_cells_in_flight=armed,
             cancel_stops_billing=False,
@@ -989,7 +995,6 @@ async def test_a_resumed_arm_re_reads_its_cells_and_still_reaches_its_bench(
     Silent: the halt reads as the arm's budget, and the headline is simply missing. The stopped
     round's optimizer and judge calls replay too, and are priced once per campaign the same way."""
     from promptpotter.application.bench import llm_call as call_mod
-    from promptpotter.application.runner.termination import BudgetGate
     from promptpotter.domain.pipeline_schema import WebSpendBound
     from promptpotter.domain.run_records import TokenUsageRecord
     from promptpotter.infrastructure.ledger import CycleEventLog
@@ -1038,7 +1043,7 @@ async def test_a_resumed_arm_re_reads_its_cells_and_still_reaches_its_bench(
         }
         for s in dataset
     }
-    # The ceiling already spent: no cell fits, and the gate reads it as reached.
+    # The ceiling already spent: no cell fits, and the control reads it as reached.
     book = SpendBook(
         usd_cap=lambda: 0.02,
         tokens_cap=lambda: None,
@@ -1052,11 +1057,7 @@ async def test_a_resumed_arm_re_reads_its_cells_and_still_reaches_its_bench(
     session = types.SimpleNamespace(
         scoring=_row_scoring(),
         state=types.SimpleNamespace(ledger=None),
-        pause_check=lambda: False,
-        skip_check=None,
-        skip_consume=None,
-        budget_tripped=BudgetGate(book=book).tripped,
-        sample_lookahead_check=lambda: 1,
+        control=RunControl(book=book),
         backend_client=types.SimpleNamespace(
             max_cells_in_flight=1,
             cancel_stops_billing=False,
@@ -1370,18 +1371,18 @@ def test_a_ceiling_the_operator_set_is_never_silently_unenforced(tmp_path: Path)
     """``change-run-limits`` acks ``applied`` the moment the ledger takes the record — it cannot
     see whether anything will ever READ the ceiling it wrote, so every way of writing one nothing
     polls is a lie the operator has no way to catch. Two existed. A run launched declaring nothing
-    got no ``BudgetGate`` at all, so the file was written and read by no one for the life of the
+    got no spend book at all, so the file was written and read by no one for the life of the
     campaign. And a ceiling set while a cycle was PAUSED was swept with the other polled flags at
     the next launch, before the resume could read it. Both end the same way: the number is on the
     dashboard, the command returned 202, and the run spends past it to completion.
 
     What the operator declared lives on the ledger (``RunLimitsRecord``), which every launch
-    re-declares; the file the gate polls is only its mirror, so a launch may sweep it.
+    re-declares; the file the book polls is only its mirror, so a launch may sweep it.
     """
     import types
 
     from promptpotter.application.campaign_config import load_campaign_config
-    from promptpotter.application.runner.entry import _build_budget_gate
+    from promptpotter.application.runner.entry import _arm_spend_book
     from promptpotter.application.runner.loop import _armed_round_cap
     from promptpotter.domain.launch_limits import RoundsCap
     from promptpotter.domain.phases import StopReason
@@ -1410,25 +1411,27 @@ def test_a_ceiling_the_operator_set_is_never_silently_unenforced(tmp_path: Path)
         arm_spend_book=lambda _book: None,
     )
 
-    # A run that declared NOTHING is still gated, and the gate stays silent until a ceiling exists.
-    gate = _build_budget_gate(
-        observers,
-        cycle_dir,
-        declared=SpendCeilings(None, None),
-        meters="bill",
-        reserve=SpendCeilings(None, None),
+    # A run that declared NOTHING still holds a book, which stays silent until a ceiling exists.
+    control = RunControl(
+        book=_arm_spend_book(
+            observers,
+            cycle_dir,
+            declared=SpendCeilings(None, None),
+            meters="bill",
+            reserve=SpendCeilings(None, None),
+        )
     )
-    assert gate.tripped() is None
+    assert control.budget_tripped() is None
     write_run_limits_mirror(
         cycle_dir, BudgetChange(0.50, None), rounds=None, reserve=BudgetChange(None, None)
     )
-    assert gate.tripped() == StopReason.SPEND_BUDGET, "a mid-run ceiling reached no gate"
+    assert control.budget_tripped() == StopReason.SPEND_BUDGET, "a mid-run ceiling reached no book"
 
     # The token arm binds on its own, in the unit that survives an unpriced model.
     write_run_limits_mirror(
         cycle_dir, BudgetChange(None, 5_000), rounds=None, reserve=BudgetChange(None, None)
     )
-    assert gate.tripped() == StopReason.TOKEN_BUDGET
+    assert control.budget_tripped() == StopReason.TOKEN_BUDGET
 
     # The round cap rides the same mirror into the loop's boundary: lowered mid-run it binds over
     # the config's, and a LIFT reads as no cap rather than falling back to the config's.
@@ -1459,7 +1462,7 @@ def test_a_ceiling_the_operator_set_is_never_silently_unenforced(tmp_path: Path)
 
     # The launch sweep drops the mirror; the standing ceiling itself is the ledger's to carry.
     clear_run_control_flags(cycle_dir)
-    assert gate.tripped() is None, "a swept mirror still governed the next run"
+    assert control.budget_tripped() is None, "a swept mirror still governed the next run"
 
 
 def test_no_burst_of_sends_records_spend_past_its_ceiling(
@@ -1485,11 +1488,13 @@ def test_no_burst_of_sends_records_spend_past_its_ceiling(
 
     from promptpotter.domain.run_records import SpendHoldRecord, TokenUsageRecord
     from promptpotter.domain.sample import Sample
+    from promptpotter.domain.spend import TokenAccount
     from promptpotter.infrastructure.ledger import CycleEventLog
-    from promptpotter.infrastructure.llm.openai_compat import OpenAICompatibleClient
+    from promptpotter.infrastructure.llm.openai_compat import OpenAICompatibleClient, ProviderSpec
     from promptpotter.infrastructure.llm.pricing import Rate
     from promptpotter.infrastructure.llm.spend_book import (
         Admission,
+        Billed,
         CallLabel,
         SendBound,
         SpendBook,
@@ -1538,7 +1543,7 @@ def test_no_burst_of_sends_records_spend_past_its_ceiling(
         )
         return types.SimpleNamespace(headers={}, parse=lambda: reply)
 
-    client = OpenAICompatibleClient(api_key="k", provider="openai", display_name="OpenAI")
+    client = OpenAICompatibleClient(api_key="k", provider="openai", spec=ProviderSpec("OpenAI", ""))
     client._client = types.SimpleNamespace(  # type: ignore[assignment]
         chat=types.SimpleNamespace(
             completions=types.SimpleNamespace(
@@ -1643,6 +1648,27 @@ def test_no_burst_of_sends_records_spend_past_its_ceiling(
     assert account.unreported_usd == pytest.approx(left.usd + 0.0036)
     assert unreported_on(ledger).sends == unreported + 1
 
+    # A bill naming no price closes its hold in tokens alone: the account and a resumed book both
+    # keep the money at the hold's bound, off the one fold.
+    bare = CycleEventLog(tmp_path / "bare" / "ledger.jsonl")
+    bare.append(
+        SpendHoldRecord(
+            hold_id="bare",
+            kind="optimizer",
+            node="bare",
+            input_tokens=600,
+            output_tokens=1500,
+            cost_usd=0.0036,
+        )
+    )
+    bare.append(
+        TokenUsageRecord(
+            kind="optimizer", node="bare", input_tokens=40, output_tokens=9, hold_id="bare"
+        )
+    )
+    assert unreported_on(bare).usd == pytest.approx(0.0036)
+    assert billed_spend([bare.path]).unreported_usd == pytest.approx(0.0036)
+
     # A nested run (an L4 cell) spends under its ROOT's book: the call is held on the root ledger
     # and carried there as it settles, while the inner ledger keeps its own view — which no sum of
     # money counts a second time.
@@ -1710,6 +1736,48 @@ def test_no_burst_of_sends_records_spend_past_its_ceiling(
     finally:
         reset_cycle_ledger(token)
     assert unreported_on(ledger).sends == unreported + 3
+
+    # A reply reporting no usage is a bill that never came: the send stays held, never settled at 0.
+    async def create_unbilled(**params: Any) -> Any:
+        reply = (await create(**params)).parse().model_copy(update={"usage": None})
+        return types.SimpleNamespace(headers={}, parse=lambda: reply)
+
+    client._client.chat.completions.with_raw_response.create = create_unbilled  # type: ignore[union-attr]
+    bills = sum(isinstance(r, TokenUsageRecord) for _, r in ledger.iter())
+    spent_usd = book.usd_spent
+    token = set_cycle_ledger(ledger)
+    try:
+        with spending_under(book):
+            asyncio.run(
+                client.chat(
+                    ChatRequest([{"role": "user", "content": "x"}], "gpt-x", max_tokens=10),
+                    label=CallLabel("unbilled", "optimizer"),
+                )
+            )
+    finally:
+        reset_cycle_ledger(token)
+        client._client.chat.completions.with_raw_response.create = create  # type: ignore[union-attr]
+    assert unreported_on(ledger).sends == unreported + 4
+    assert book.usd_spent == spent_usd
+    assert sum(isinstance(r, TokenUsageRecord) for _, r in ledger.iter()) == bills
+
+    # A bill naming tokens and no price (a route no rate lists) is not a free one: its money stays
+    # held at the bound, it teaches the book nothing, and a resumed book reads it off the ledger.
+    nitro = CallLabel("nitro", "optimizer")
+    before, held_usd, spent_usd = unreported_on(ledger), book.usd_unreported, book.usd_spent
+    token = set_cycle_ledger(ledger)
+    try:
+        Admission(book, nitro, cut, cut, model="m:nitro", provider="openrouter").settle(
+            Billed(TokenAccount(input=600, output=100), None)
+        )
+    finally:
+        reset_cycle_ledger(token)
+    assert book.usd_spent == spent_usd
+    assert book.usd_unreported == pytest.approx(held_usd + 0.0036)
+    assert book.held_at(nitro, cut) == cut
+    after = unreported_on(ledger)
+    assert (after.sends, after.tokens) == (before.sends + 1, before.tokens)
+    assert after.usd == pytest.approx(before.usd + 0.0036)
 
     # A backend cell: a connection never made is retried free once `/status` answers; a 5xx that
     # billed is settled off its error envelope and retried; a read timeout is left unreported and
@@ -1924,7 +1992,7 @@ async def test_a_budget_change_leaves_the_arm_it_did_not_touch_alone(
 ) -> None:
     """``change-run-limits`` takes each ceiling independently, and both halves of "leave it alone"
     are silent when they break. Down at the clamp, a delegate's grant composed into an ABSENT arm
-    writes a USD ceiling the caller never asked for, and `BudgetGate` then halts a run nobody
+    writes a USD ceiling the caller never asked for, and the spend book then halts a run nobody
     capped. Up in the job's reservation, an absent arm has to stay at the JOB's prior: merged
     against the file's, which starts empty, it reads released, so the account quotes headroom this
     cycle is still holding and the next launch spends it twice.
@@ -1978,7 +2046,7 @@ async def test_a_budget_change_leaves_the_arm_it_did_not_touch_alone(
     held = registry.get(job.job_id)
     assert held is not None
     # The reservation moves with the ceiling under the launch's own rule — as much again for the
-    # calls out — and reaches the running gate through the mirror the ceiling rides.
+    # calls out — and reaches the running book through the mirror the ceiling rides.
     assert held.cap_tokens == 2_000
     assert held.cap_usd == pytest.approx(0.30), "the untouched USD reservation was released"
     assert read_reserve_mirror(stores.campaigns.cycle_dir(hop)) == (pytest.approx(0.30), 2_000)
@@ -2020,12 +2088,12 @@ async def test_moving_one_ceiling_leaves_the_other_at_its_launch_cap(
 ) -> None:
     """A run declaring nothing reserves the account's headroom while the wallet bound composes its
     ceiling far lower. Moving one arm must leave the other at that composed cap: pinned at the
-    reservation in ``run_limits.json``, which the gate prefers, it lets the run spend past it."""
+    reservation in ``run_limits.json``, which the book prefers, it lets the run spend past it."""
     import types
 
     from promptpotter.application.commands.dispatcher import CommandDispatcher
     from promptpotter.application.jobs.registry import JobRegistry
-    from promptpotter.application.runner.entry import _build_budget_gate
+    from promptpotter.application.runner.entry import _arm_spend_book
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.phases import StopReason
     from promptpotter.domain.spend import BudgetChange, MeteredSpend, SpendCeilings
@@ -2053,19 +2121,23 @@ async def test_moving_one_ceiling_leaves_the_other_at_its_launch_cap(
         dashboard=types.SimpleNamespace(spend_metered=lambda _meters: spent),
         arm_spend_book=lambda _book: None,
     )
-    gate = _build_budget_gate(
-        observers,
-        built_stores.campaigns.cycle_dir(hop),
-        declared=SpendCeilings(0.30, 210_000),
-        meters="bill",
-        reserve=SpendCeilings(None, None),
+    control = RunControl(
+        book=_arm_spend_book(
+            observers,
+            built_stores.campaigns.cycle_dir(hop),
+            declared=SpendCeilings(0.30, 210_000),
+            meters="bill",
+            reserve=SpendCeilings(None, None),
+        )
     )
-    assert gate.tripped() == StopReason.TOKEN_BUDGET
+    assert control.budget_tripped() == StopReason.TOKEN_BUDGET
 
     await CommandDispatcher(built_stores, registry)._apply_change_run_limits(
         hop, BudgetChange(0.50, None), None
     )
-    assert gate.tripped() == StopReason.TOKEN_BUDGET, "a USD raise lifted the token ceiling"
+    assert control.budget_tripped() == StopReason.TOKEN_BUDGET, (
+        "a USD raise lifted the token ceiling"
+    )
 
 
 def test_a_moved_ceiling_counts_the_cycles_own_spend_once(
@@ -2355,7 +2427,7 @@ def test_host_wallet_ceilings_hold_in_both_units(
     assert _delegated(thin, None, 2.0) == 1.0
 
     # The origin resolver is the one optimizer call reachable BEFORE a campaign, so no launch
-    # admission has run and no ``BudgetGate`` is watching. Unchecked, an account already at its
+    # admission has run and no spend book is watching. Unchecked, an account already at its
     # ceiling keeps firing turns on the host's key for as long as it sends HTTP requests.
     monkeypatch.setattr("promptpotter.application.jobs.registry.default_jobs_dir", lambda: tmp_path)
     spent = tmp_path / "spent.jsonl"

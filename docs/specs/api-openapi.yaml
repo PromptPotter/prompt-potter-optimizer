@@ -3848,7 +3848,7 @@ components:
           description: |
             USD ceiling for this run. One the account cannot cover is refused
             whole (ADR-0003 § D1); one it can may lower the campaign's ceiling,
-            never raise it. Must be FINITE, for the reason above: the `BudgetGate`
+            never raise it. Must be FINITE, for the reason above: the spend book's
             probe is `spent >= cap`.
         token_budget:
           type: integer
@@ -3926,7 +3926,7 @@ components:
               description: |
                 USD ceiling for this run. One the account cannot cover is refused
                 whole (ADR-0003 § D1); one it can may lower the campaign's ceiling,
-                never raise it. Must be FINITE: the `BudgetGate` probe is `spent >= cap`.
+                never raise it. Must be FINITE: the spend book's probe is `spent >= cap`.
             token_budget:
               type: integer
               minimum: 0
@@ -5198,7 +5198,7 @@ components:
           description: |
             USD ceiling for this run. One the account cannot cover is refused
             whole (ADR-0003 § D1); one it can may lower the campaign's ceiling,
-            never raise it. Must be FINITE: the `BudgetGate` probe is `spent >= cap`.
+            never raise it. Must be FINITE: the spend book's probe is `spent >= cap`.
         token_budget:
           type: integer
           minimum: 0

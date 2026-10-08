@@ -22,8 +22,7 @@ from promptpotter.infrastructure.llm.registry import get_llm_client, normalize_m
 from promptpotter.infrastructure.llm.request import ChatRequest
 from promptpotter.infrastructure.llm.spend_book import (
     CallLabel,
-    bind_spend_book,
-    reset_spend_book,
+    spending_under,
     unbounded_spend_book,
 )
 
@@ -91,14 +90,10 @@ async def probe_reasoning(
     The bills land on the workspace's ledger: the probe answers for no campaign."""
     client = get_llm_client(provider)
     # Bound by `_MAX_TOKENS` per rung, not by a ceiling; the book still admits each send.
-    token = bind_spend_book(unbounded_spend_book())
-    try:
-        with diagnostic_trace(stores, None):
-            readings = [await _one(client, model, None)]
-            for rung in rungs:
-                readings.append(await _one(client, model, rung))
-    finally:
-        reset_spend_book(token)
+    with spending_under(unbounded_spend_book()), diagnostic_trace(stores, None):
+        readings = [await _one(client, model, None)]
+        for rung in rungs:
+            readings.append(await _one(client, model, rung))
     return readings
 
 

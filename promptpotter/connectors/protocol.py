@@ -137,7 +137,7 @@ class Connector:
 
     **This is the whole of what a connector may say about concurrency — never how long an operator
     arming lasts.** A connector cannot see whether the walk in front of it sits inside a round;
-    ``_bind_run_controls`` binds an arming only under ``run_optimization``, so the round spends
+    ``_arm_run_controls`` binds an arming only under ``run_optimization``, so the round spends
     every press, and a screen declares its depth at launch instead
     (``application/diagnostics/seed_screen.py``)."""
 

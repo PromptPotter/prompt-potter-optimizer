@@ -82,10 +82,11 @@ def reset_current_round(token: Token[int | None]) -> None:
     _CURRENT_ROUND.reset(token)
 
 
-def _append_record(record: CycleRecord) -> int | None:
-    """Append *record* to the active cycle ledger, or ``None``. A missing ledger keeps pure/test paths
-    side-effect-free; a raising append is logged and swallowed — telemetry must not break its call site."""
-    ledger = _CYCLE_LEDGER.get()
+def _append_record(record: CycleRecord, ledger: CycleEventLog | None = None) -> int | None:
+    """Append *record* to ``ledger``, else the active cycle ledger, or ``None``. A missing ledger keeps pure/test
+    paths side-effect-free; a raising append is logged and swallowed — telemetry must not break its call site."""
+    if ledger is None:
+        ledger = _CYCLE_LEDGER.get()
     if ledger is None:
         return None
     try:
@@ -237,25 +238,21 @@ def emit_spend_hold(
     ledger: CycleEventLog | None,
 ) -> None:
     """Write a paid call's admission ahead of the call — onto ``ledger`` where the admitting book
-    keeps one, else the active ledger — in the bucket :func:`emit_token_usage` would file it in."""
-    record = SpendHoldRecord(
-        hold_id=hold_id,
-        kind=filed_kind(kind),
-        node=node,
-        model=model,
-        provider=provider,
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-        cost_usd=cost_usd,
-        round=_CURRENT_ROUND.get(),
+    keeps one, else the active ledger. ``kind`` arrives filed (``spend_book.py::filed``)."""
+    _append_record(
+        SpendHoldRecord(
+            hold_id=hold_id,
+            kind=kind,
+            node=node,
+            model=model,
+            provider=provider,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cost_usd=cost_usd,
+            round=_CURRENT_ROUND.get(),
+        ),
+        ledger,
     )
-    if ledger is None:
-        _append_record(record)
-        return
-    try:
-        ledger.append(record)
-    except Exception:
-        logger.exception("ledger append failed for %s", type(record).__name__)
 
 
 def emit_command(

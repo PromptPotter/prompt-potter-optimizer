@@ -113,8 +113,7 @@ async def measure_population(
     parent = await rescore_parent(cycle, cells, callbacks=ctx.callbacks)
     # Spent where the round's scoring ends, never in a `finally` (an unwound round did not score);
     # round 0 spends it in `round.py::emit_origin_round`, and the two cannot fire for one round.
-    if cycle.session.sample_lookahead_consume is not None:
-        cycle.session.sample_lookahead_consume()
+    cycle.session.control.spend_sample_lookahead()
     # The shared comparison anchor. Its single-draw noise is correlated across arms, so it floods
     # every comparison equally rather than favouring one.
     parent_rows = list(cast("list[QueryMeasurement]", parent.results))

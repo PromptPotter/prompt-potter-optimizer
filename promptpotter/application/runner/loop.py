@@ -13,7 +13,6 @@ from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizers.nodes import RoundContext
 from promptpotter.application.run_observers import RunCallbacks
-from promptpotter.application.run_phase_control import pause_requested
 from promptpotter.application.runner.inner.ruler import refresh_inner_rulers
 from promptpotter.application.runner.origin_gate import run_origin_gate
 from promptpotter.application.runner.round import (
@@ -24,7 +23,6 @@ from promptpotter.application.runner.round import (
 )
 from promptpotter.application.runner.termination import (
     RUN_ENDS,
-    BudgetGate,
     end_run_on,
     origin_gate_tripped,
     target_tripped,
@@ -79,9 +77,8 @@ async def run_round_loop(
     diag: bool = False,
     halt_at_accuracy: float | None = None,
     stop_after_rounds: int | None = None,
-    budget_gate: BudgetGate,
 ) -> LoopEnd:
-    """The round loop. The budget gate and the round cap are re-read every clean round, so
+    """The round loop. The spend ceiling and the round cap are re-read every clean round, so
     ``change-run-limits`` moves either mid-flight."""
     opt = config.optimization
     # resumed_from_round = next L1 round (fresh=1); clean_rounds = lifetime L1 completed (origin not counted).
@@ -125,7 +122,7 @@ async def run_round_loop(
             # calls already sent have; this boundary check covers the single-LLM-call phases
             # (generate / L2 / L3) that have no inner loop. The cycle stays
             # resumable — `_finalize_run` skips terminal marking on PAUSED.
-            if pause_requested(session):
+            if session.control.pause_requested():
                 return LoopEnd(StopReason.PAUSED)
 
             # `step-cycle` boundary: once this invocation has advanced its allotted
@@ -170,7 +167,6 @@ async def run_round_loop(
                 round_num,
                 session,
                 cb,
-                budget_gate,
                 is_final_round=is_final_round or cut is not None,
             )
             round_num += 1
@@ -179,8 +175,8 @@ async def run_round_loop(
             target_stop = target_tripped(cycle, halt_at_accuracy)
             if target_stop is not None:
                 return LoopEnd(target_stop)
-            # A hold refusal cuts a round while the gate still reads clear, so the cut speaks first.
-            budget_stop = cut or budget_gate.tripped()
+            # A hold refusal cuts a round while the ceiling still reads clear, so the cut speaks first.
+            budget_stop = cut or session.control.budget_tripped()
             if budget_stop is not None:
                 return LoopEnd(budget_stop)
 

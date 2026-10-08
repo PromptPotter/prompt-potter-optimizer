@@ -18,15 +18,9 @@ from contextvars import ContextVar
 from typing import Any
 
 from promptpotter.infrastructure.llm.base import send_bound
-from promptpotter.infrastructure.llm.openai_compat import reply_cost, reply_served_by, reply_usage
+from promptpotter.infrastructure.llm.openai_compat import reply_bill
 from promptpotter.infrastructure.llm.pricing import rate_ceiling
-from promptpotter.infrastructure.llm.spend_book import (
-    Billed,
-    CallLabel,
-    admitted,
-    may_have_billed,
-    never_sent,
-)
+from promptpotter.infrastructure.llm.spend_book import CallLabel, admitted, may_have_billed
 
 _LABEL: ContextVar[CallLabel | None] = ContextVar("litellm_send_label", default=None)
 _UNMETERED: dict[str, Callable[..., Awaitable[Any]]] = {}
@@ -85,12 +79,11 @@ async def _billed_acompletion(*args: Any, **kwargs: Any) -> Any:
         try:
             reply = await send(*args, **kwargs)
         except Exception as exc:
-            if never_sent(exc) or not may_have_billed(getattr(exc, "status_code", None), exc):
+            if not may_have_billed(exc):
                 admission.release()
             raise
-        admission.settle(
-            Billed(reply_usage(reply), reply_cost(reply), served_by=reply_served_by(reply))
-        )
+        if (bill := reply_bill(reply, model=None)) is not None:
+            admission.settle(bill)
         return reply
 
 

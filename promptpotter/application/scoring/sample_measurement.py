@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 
-from promptpotter.application.run_phase_control import pause_requested
 from promptpotter.application.scoring.cell_envelope import CellEnvelope
 from promptpotter.application.scoring.classification import terminal_ranking
 from promptpotter.application.scoring.evaluators import materialize_sample_values
@@ -784,7 +783,7 @@ async def execute_stale_data_protocol(
     result = cached_result
 
     for step in STALE_DATA_LOAD_PROTOCOL:
-        if pause_requested(session):
+        if session.control.pause_requested():
             return result, "paused"
         if step == "rerun":
             historical = sample_index.degradation_count(sample.id) if sample_index else 0

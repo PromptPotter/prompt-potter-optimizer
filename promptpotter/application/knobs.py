@@ -11,7 +11,7 @@ import typing
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
@@ -33,6 +33,7 @@ __all__ = [
     "COUPLINGS",
     "KNOBS",
     "Coupling",
+    "CouplingSeverity",
     "DiffScope",
     "check_couplings",
     "classify_config_diff",
@@ -205,17 +206,22 @@ def classify_config_diff(
     return DiffScope.POLICY_ONLY, diff_strs
 
 
+# Gravest first — the order a reader meets the couplings in: an ill-defined statistic, a silent
+# waste, knobs that co-move.
+CouplingSeverity = Literal["collision", "inert", "info"]
+
+
 @dataclass(frozen=True)
 class Coupling:
     """A declared relationship between knobs sharing an estimand; ``predicate`` is True in the violating
-    combination. ``collision`` = ill-defined statistic, ``inert`` = silent waste, ``info`` = co-moves."""
+    combination."""
 
     name: str
     knobs: tuple[str, ...]
     estimand: Estimand
     relation: str
     consequence: str
-    severity: str
+    severity: CouplingSeverity
     predicate: Callable[[CampaignConfig], bool]
 
 

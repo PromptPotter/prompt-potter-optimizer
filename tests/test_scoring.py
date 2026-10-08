@@ -25,6 +25,7 @@ from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizer_manifest import bind_optimizer
 from promptpotter.application.optimizers import paper_templates
 from promptpotter.application.optimizers.potter.pobb.checks import EliminationGate, PoBBCheck
+from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.bench import bench_selection, headline, score_on_bench
 from promptpotter.application.runner.campaign_result import bank_campaign_result
 from promptpotter.application.runner.entry import _build_cycle_result
@@ -70,6 +71,7 @@ from promptpotter.domain.scoring import is_graded, is_unscored
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.spend import BudgetChange
 from promptpotter.infrastructure.ledger import CycleEventLog
+from promptpotter.infrastructure.llm.spend_book import SpendBook
 from promptpotter.infrastructure.store.archive_queries import record_measurement_run
 from promptpotter.shared import extract_gsm8k_number
 from promptpotter.shared.errors import error_category, is_error_result
@@ -1100,7 +1102,17 @@ def test_a_round_the_budget_cuts_elects_on_the_cells_it_paid_for(
         cycle.absorb_round(first)
 
     paid.clear()
-    session.budget_tripped = lambda: StopReason.SPEND_BUDGET if len(paid) >= budget else None
+
+    # The shipping control over a book whose ceiling is reached once `budget` cells are paid.
+    session.control = RunControl(
+        book=SpendBook(
+            usd_cap=lambda: 0.0 if len(paid) >= budget else None,
+            tokens_cap=lambda: None,
+            usd_reserve=lambda: None,
+            tokens_reserve=lambda: None,
+            meters="bill",
+        )
+    )
     closed, cut = asyncio.run(execute_round(cycle, cut_round, search, _QUIET_CALLBACKS))  # type: ignore[arg-type]
     assert cut is StopReason.SPEND_BUDGET
     # The controller routes on this round before anything closes it, so the verdict rides the
@@ -1624,7 +1636,7 @@ def test_a_theta_stall_verdict_must_clear_its_own_error() -> None:
             actions.append(str(ask.next_action))
             if ask.next_action != NextAction.FIRE_L2:
                 break
-            fsm.record_l2_fired(ask.l2, best_composite_fitness=comp, best_theta=theta)
+            fsm.record_l2_fired(ask.l2)
         return actions
 
     # The real +0.467 move at round 2 still counts — the bar rejects noise, not signal.
@@ -1770,21 +1782,21 @@ def test_a_heal_fire_spends_no_l3_patience() -> None:
             )
             asks.append(ask)
             if ask.next_action is NextAction.FIRE_L2:
-                fsm.record_l2_fired(ask.l2, best_composite_fitness=0.5, best_theta=theta)
+                fsm.record_l2_fired(ask.l2)
                 if heal_first and len(asks) == 1:
-                    fsm.record_l3_fired(None, best_composite_fitness=0.5, best_theta=theta)
+                    fsm.record_l3_fired(None)
         return asks[-1]
 
     # The heal wipes L2's counters, so L2 takes its grace ask again; the gate it then reaches is
     # L3's FIRST patience ask, with nothing to compare against.
     gate = stretch(0.3, heal_first=True)
     assert gate.next_action is NextAction.FIRE_L3
-    fsm.record_l3_fired(gate.l3, best_composite_fitness=0.5, best_theta=0.3)
+    fsm.record_l3_fired(gate.l3)
     # A later heal at a higher reading must not re-base the comparison either: the advance since
     # the patience fire is still there to be seen.
     gate = stretch(0.6, heal_first=True)
     assert gate.next_action is NextAction.FIRE_L3
-    fsm.record_l3_fired(gate.l3, best_composite_fitness=0.5, best_theta=0.6)
+    fsm.record_l3_fired(gate.l3)
     # And the patience it did not spend still binds a flat run.
     assert stretch(0.6, heal_first=False).next_action is NextAction.STOP_L3_PATIENCE
 
@@ -1999,10 +2011,10 @@ def test_l2_l3_escalation_state_survives_resume() -> None:
             l3_patience=2,
         )
 
-    live.record_l2_fired(ask(0.60).l2, best_composite_fitness=0.60)
+    live.record_l2_fired(ask(0.60).l2)
     fired(L2)
     # A second ask at an unimproved fitness reads a stall, which the fire that lands commits.
-    live.record_l2_fired(ask(0.60).l2, best_composite_fitness=0.60)
+    live.record_l2_fired(ask(0.60).l2)
     fired(L2)
     # An unparseable fire closes its bracket and adopts nothing — the stall its ask read
     # included, or the live counters run ahead of the only record a resume can fold.
@@ -2016,9 +2028,9 @@ def test_l2_l3_escalation_state_survives_resume() -> None:
     # L3 firing wipes L2's progress — a new plan invalidates it. Checked BEFORE the wipe above,
     # or the L2 half of this test would assert zeros and pass against the bug it exists for.
     # A heal first: it bumps L3 and leaves the patience ratchet unset, which must fold as unset.
-    live.record_l3_fired(None, best_composite_fitness=0.60)
+    live.record_l3_fired(None)
     fired(L3)
-    live.record_l3_fired(ask(0.75).l3, best_composite_fitness=0.75)
+    live.record_l3_fired(ask(0.75).l3)
     fired(L3)
 
     replay = EscalationFSM()
@@ -2077,10 +2089,10 @@ def test_a_fire_after_the_round_closed_survives_a_pause(tmp_path: Path) -> None:
     assert moved is not None and moved != live.memory.l1_layout
     live.memory.l1_layout = moved
     live.memory.l1_overrides = {"n_variants": 5}
-    live.escalation.record_l2_fired(LayerReading(0, None, None, None), best_composite_fitness=0.5)
+    live.escalation.record_l2_fired(LayerReading(0, 0.5, None, None))
     fire(L2)
     live.memory.plan = "attack the default label"
-    live.escalation.record_l3_fired(None, best_composite_fitness=0.5)
+    live.escalation.record_l3_fired(None)
     fire(L3)
 
     def resumed(before_round: int) -> PotterState:

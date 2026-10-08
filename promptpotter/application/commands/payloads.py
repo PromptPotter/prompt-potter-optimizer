@@ -35,7 +35,7 @@ class DescendableCyclePayload(CyclePayload):
     """Carries an address that may descend into an inner sandbox. Declaring it by INHERITANCE is
     what makes "which kinds accept a descent" a type question — every other payload forbids the key
     already. Narrow on purpose: an inner cycle inherits the outer's pause
-    (``runner/entry.py::_bind_run_controls``), so a second address for pause/skip would contradict a
+    (``run_phase_control.py::RunControl``), so a second address for pause/skip would contradict a
     working channel; throughput is what an inner run answers for itself."""
 
     # Excluded from the dump: the router spends it resolving the leaf, after which `campaign_id` /

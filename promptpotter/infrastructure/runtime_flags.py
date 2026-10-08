@@ -145,7 +145,7 @@ def write_run_limits_mirror(
     ``max_rounds: null`` (a lifted round cap) and no ``max_rounds`` key are two answers.
 
     The mirror has one job: carrying a ceiling moved in another process to a run already in
-    flight, read on every paid call (`runner/entry.py::_build_budget_gate`), every round boundary
+    flight, read on every paid call (`runner/entry.py::_arm_spend_book`), every round boundary
     (`runner/loop.py`) and every served dashboard (:func:`overlay_armed_controls`), where
     rescanning the ledger each time costs the whole log. What the operator DECLARED is the ledger's
     ``RunLimitsRecord`` alone — `CampaignStore.write_run_limits` writes both, and nothing

@@ -23,7 +23,7 @@ def _reject_bool(v: object) -> object:
 
 
 # The two wire scalar types. `strict` is what refuses `true` where an int is meant; `allow_inf_nan`
-# is what refuses `+inf`, which PASSES a bare `ge=` bound and then disarms the `BudgetGate` whose
+# is what refuses `+inf`, which PASSES a bare `ge=` bound and then disarms the spend ceiling whose
 # probe is `spent >= cap`. Neither is a default — both were bought.
 WireInt = Annotated[int, Field(strict=True)]
 WireFloat = Annotated[float, BeforeValidator(_reject_bool), Field(allow_inf_nan=False)]

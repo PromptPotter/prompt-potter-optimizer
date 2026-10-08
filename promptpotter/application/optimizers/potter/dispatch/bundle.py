@@ -200,33 +200,25 @@ class CycleSlice:
     # The ACTIVE composite-fitness formula, so a node can state what it is optimizing rather than
     # infer it from a column. Resolved once here because the resolution chain reads `Session`.
     composite_formula: str | None = None
-    composite_formula_short: str | None = None
     # `frozen` (campaign-start prefix) or `adaptive` (acquisition re-picks per round). The real
     # predicate is `per_round_resubset and ruler is not None`, and a renderer deriving that for
     # itself is how a panel and the sampler come to disagree about what chose the rows.
     subset_mode: str | None = None
-    elimination_n_min: int | None = None
     sp_budget_round: int | None = None
     max_rounds: int | None = None
     spend_budget_usd: float | None = None
     # A FLOOR while unpriced tokens are outstanding — `SpendRollup` says so, and a panel quoting
     # it must not round the word "spent" into a certainty the rollup does not carry.
     spend_used_usd: float | None = None
-    # `(name, severity, consequence)` from `knobs.py::check_couplings` — the SAME text preflight
-    # shows the operator at INIT, so the one statement of when θ is not ability reaches the
-    # optimizer that reasons from θ and not only the terminal.
-    couplings: tuple[tuple[str, str, str], ...] = ()
 
 
 @dataclass(frozen=True)
-class ArmReading:
+class ArmDigest:
     """One scored arm, narrowed to what a panel may quote. Deliberately not `ScoredCandidate`, which
     carries `prompt_fields` and `resolved_pipeline_params` — a panel that can reach a rival's whole
     prompt will eventually quote it, and ``bundle.py`` is contractually light."""
 
     label: str
-    theta: float | None
-    theta_se: float | None
     mean_fitness_ci_lo: float | None
     mean_fitness_ci_hi: float | None
     scored_samples: int
@@ -244,8 +236,7 @@ class RoundDigest:
     diagnostics: RoundDiagnostics | None
     critique: CritiqueReadout | None
     l1_yield: float = 1.0
-    # The same aggregate the degradation grade reads, computed BEFORE ``health`` is stamped —
-    # so the critique cannot read the grade.
+    # The round's stamped ``health.node_failure_rates``, and nothing else of the grade.
     node_failure_rates: dict[str, float] = field(default_factory=dict)
     # Which samples THIS round scored — the freshness key for ``sample_transcripts``.
     latest_sample_ids: frozenset[Any] = field(default_factory=frozenset)
@@ -258,7 +249,10 @@ class RoundDigest:
     composite_fitness: float | None = None
     evaluators: dict[str, float] = field(default_factory=dict)
     ability: AbilityReading | None = None
-    arms: tuple[ArmReading, ...] = ()
+    # The two counts `ability.caveat` was decided on (`bench/difficulty.py::StampedReading`).
+    unlinked: int = 0
+    pinned_share: float | None = None
+    arms: tuple[ArmDigest, ...] = ()
 
 
 @dataclass(frozen=True)

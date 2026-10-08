@@ -102,7 +102,7 @@ class LayerReading:
     stall_count: int
     best_composite_fitness_at_entry: float | None
     best_theta_at_entry: float | None
-    # Which scale `_improved` read; ``None`` where the layer has no entry reading to compare.
+    # Which scale `_improved` read; ``None`` where the layer held no entry reading to compare.
     comparator: str | None
 
 
@@ -279,17 +279,18 @@ class EscalationFSM:
         current_theta: float | None,
         current_theta_se: float | None,
     ) -> LayerReading:
-        """First-ask grace: a layer that has not fired has no entry reading and stalls on nothing —
-        nor does a cycle whose rounds read no cell, which has no peak to stall against.
-        A cleared advance moves the ratchet, so steps too small to clear it singly accumulate."""
+        """A layer that has not fired, or a cycle with no peak, stalls on nothing. A cleared advance
+        moves the ratchet, and each scale's is seeded by its first reading: a ruler may warm late."""
+        comp = current_comp if entry_comp is None else entry_comp
+        theta = current_theta if entry_theta is None else entry_theta
         if entry_comp is None or current_comp is None:
-            return LayerReading(stall_count, None, entry_theta, None)
+            return LayerReading(stall_count, comp, theta, None)
         improved, comparator = self._improved(
             current_comp, entry_comp, current_theta, entry_theta, current_theta_se
         )
         if improved:
             return LayerReading(0, current_comp, current_theta, comparator)
-        return LayerReading(stall_count + 1, entry_comp, entry_theta, comparator)
+        return LayerReading(stall_count + 1, entry_comp, theta, comparator)
 
     def ask_l2_escalation(
         self,
@@ -387,52 +388,22 @@ class EscalationFSM:
             return EscalationEvent(next_action=NextAction.STOP_LIVES)
         return event
 
-    @staticmethod
-    def _landed(
-        reading: LayerReading, best_composite_fitness: float | None, best_theta: float | None
-    ) -> tuple[int, float | None, float | None]:
-        """Each scale's ratchet is seeded by the first reading it has, so a ruler that warms after
-        the layer's first fire still gives it a θ to compare against."""
-        comp = reading.best_composite_fitness_at_entry
-        theta = reading.best_theta_at_entry
-        return (
-            reading.stall_count,
-            best_composite_fitness if comp is None else comp,
-            best_theta if theta is None else theta,
-        )
-
-    def record_l2_fired(
-        self,
-        reading: LayerReading,
-        *,
-        best_composite_fitness: float | None,
-        best_theta: float | None = None,
-    ) -> None:
+    def record_l2_fired(self, reading: LayerReading) -> None:
         self._l1_stall_count = 0
         self._l2_round += 1
-        (
-            self._l2_stall_count,
-            self._l2_best_composite_fitness_at_entry,
-            self._l2_best_theta_at_entry,
-        ) = self._landed(reading, best_composite_fitness, best_theta)
+        self._l2_stall_count = reading.stall_count
+        self._l2_best_composite_fitness_at_entry = reading.best_composite_fitness_at_entry
+        self._l2_best_theta_at_entry = reading.best_theta_at_entry
 
-    def record_l3_fired(
-        self,
-        reading: LayerReading | None,
-        *,
-        best_composite_fitness: float | None,
-        best_theta: float | None = None,
-    ) -> None:
+    def record_l3_fired(self, reading: LayerReading | None) -> None:
         """A new plan invalidates L2's progress, so L2's counters clear. ``None`` is a heal: it
         answers a refused L2 edit, not a stall, and leaves L3's ratchet alone."""
         self._l1_stall_count = 0
         self._l3_round += 1
         if reading is not None:
-            (
-                self._l3_stall_count,
-                self._l3_best_composite_fitness_at_entry,
-                self._l3_best_theta_at_entry,
-            ) = self._landed(reading, best_composite_fitness, best_theta)
+            self._l3_stall_count = reading.stall_count
+            self._l3_best_composite_fitness_at_entry = reading.best_composite_fitness_at_entry
+            self._l3_best_theta_at_entry = reading.best_theta_at_entry
         self._l2_round = 0
         self._l2_stall_count = 0
         self._l2_best_composite_fitness_at_entry = None

@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from promptpotter.application.bench.resume_and_fork.replayers import Replayer
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
+    from promptpotter.application.knobs import CouplingSeverity
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.run_observers import RunCallbacks
     from promptpotter.application.scoring.query_loop import BlockRace, Walk
@@ -103,7 +104,7 @@ class MemberCoupling:
     estimand: Estimand
     relation: str
     consequence: str
-    severity: str
+    severity: CouplingSeverity
     predicate: Callable[[CampaignConfig, Any, Any], bool]
 
 

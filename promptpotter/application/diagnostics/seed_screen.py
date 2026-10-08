@@ -14,7 +14,7 @@ import logging
 import random
 import statistics
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Literal
 
 from promptpotter.application.bench.task_context import campaign_framing
@@ -279,9 +279,7 @@ async def screen_inner_seeds(
     # The screen's whole concurrency story, and it reuses the shipped window rather than adding a
     # second way to run things at once: `run_walks` re-reads this at every launch boundary and
     # clamps it to the backend's ceiling, so a constant holds the depth for the entire screen.
-    # `sample_lookahead_consume` stays `None` DELIBERATELY — a depth is spent by the round that
-    # scored under it, and a screen has no round.
-    session.sample_lookahead_check = lambda: parallel
+    session.control = replace(session.control, held_lookahead=parallel)
     ceiling = session.backend_client.max_cells_in_flight
     if parallel > ceiling:
         # `logger.warning`, not `log_fn`: this says the screen is NOT running at the depth it was

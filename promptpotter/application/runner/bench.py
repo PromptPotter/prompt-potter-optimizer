@@ -41,7 +41,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.results import RoundResult
     from promptpotter.domain.scoring import CellScorer, QueryMeasurement
     from promptpotter.domain.search_point import JobSearchPoint
-    from promptpotter.infrastructure.llm.spend_book import SpendBook
     from promptpotter.infrastructure.store.stores import Stores
 
 __all__ = [
@@ -329,10 +328,11 @@ async def grade_round_selection(
     )
 
 
-def reserve_selection_pass(cycle: Cycle, session: Session, book: SpendBook) -> None:
-    """Restate what *book* sets aside for the bench at the SELECTION's price. It opens at the
-    origin's, and an individual that makes the solver write more ends its pass short under that.
+def reserve_selection_pass(cycle: Cycle, session: Session) -> None:
+    """Restate what the run's book sets aside for the bench at the SELECTION's price. It opens at
+    the origin's, and an individual that makes the solver write more ends its pass short under that.
     Nothing set aside means nothing to restate: no line, or a ceiling the bench is metered beside."""
+    book = session.control.book
     if not book.set_aside_usd:
         return
     costs = [

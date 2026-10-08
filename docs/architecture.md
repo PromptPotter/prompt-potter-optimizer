@@ -524,7 +524,7 @@ resume. An authoritative "done" is a human mark — deliberately not built.
 
 #### Control-local
 
-`pause_check` on `Session` — signals the loop to exit, writes nothing. The webapp's Pause button
+`RunControl.pause_requested` on `Session.control` — signals the loop to exit, writes nothing. The webapp's Pause button
 rides this kind by writing a flag the loop polls; the route writing it is an explicitly-sanctioned
 mutation listed in [`../promptpotter/presentation/CLAUDE.md`](../promptpotter/presentation/CLAUDE.md).
 Its siblings are the other polled flags `store/layout.py::CycleLayout` names — same shape (write,
@@ -1044,7 +1044,7 @@ the PR description.
     it holds the most it may cost: bills never pass it. A call that ends without
     reporting stays UNREPORTED at the most it may have cost — binding the
     ceiling, never counted as spent, since only a provider's bill is.
-    `termination.py::BudgetGate` reads the same book at the round boundary; the
+    `RunControl.budget_tripped` reads the same book at the round boundary; the
     account tier admits or refuses and never interrupts a campaign in flight.
   - **An L4 inner cycle needs no fourth source** — it spends under its ROOT's
     book, and each call is carried onto the OUTER cycle's ledger as it settles

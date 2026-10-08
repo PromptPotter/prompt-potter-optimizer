@@ -788,7 +788,7 @@ class CommandDispatcher:
         )
 
     def _apply_skip_searchpoint(self, hop: CycleHop) -> None:
-        """``Session.skip_check`` consumes the flag at the next per-sample checkpoint and the cycle
+        """``RunControl.spend_skip`` consumes the flag at the next per-sample checkpoint and the cycle
         keeps running, marked ``human_intervened`` — no longer purely reproducible."""
         flag = CycleLayout(self._stores.campaigns.cycle_dir(hop)).skip_flag
         flag.parent.mkdir(parents=True, exist_ok=True)

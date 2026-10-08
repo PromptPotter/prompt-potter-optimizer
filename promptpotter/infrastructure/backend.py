@@ -33,9 +33,9 @@ from promptpotter.infrastructure.llm.spend_book import (
     SendBound,
     admitted,
     connection_broke,
-    may_have_billed,
     never_sent,
     reserved,
+    status_may_have_billed,
 )
 from promptpotter.infrastructure.llm.telemetry import emit_backend_warning
 from promptpotter.shared.errors import CellHaltedError, CellThrottledError, CellUnscoreableError
@@ -136,7 +136,7 @@ def _settle_reply(admission: Admission, resp: httpx.Response, billed: CellBillin
     reported = billed(_reply_data(resp))
     if reported is not None:
         admission.settle(*reported)
-    elif resp.is_success or may_have_billed(resp.status_code):
+    elif resp.is_success or status_may_have_billed(resp.status_code):
         admission.unreported()
     else:
         admission.release()

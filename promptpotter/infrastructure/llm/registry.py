@@ -10,21 +10,8 @@ from dataclasses import dataclass
 from promptpotter.config.settings import settings
 from promptpotter.infrastructure.llm.anthropic import AnthropicClient
 from promptpotter.infrastructure.llm.base import LLMClientBase
-from promptpotter.infrastructure.llm.openai_compat import OpenAICompatibleClient
+from promptpotter.infrastructure.llm.openai_compat import OpenAICompatibleClient, ProviderSpec
 from promptpotter.infrastructure.llm.rate_limit import build_rate_limiter
-
-
-@dataclass(frozen=True)
-class ProviderSpec:
-    display_name: str  # e.g. "Groq" — used in error messages + logs
-    api_key_attr: str  # settings field holding the API key
-    base_url: str | None = None  # None ⇒ SDK default (OpenAI)
-    timeout: float | None = None
-    # Whether this provider is OpenRouter's gateway, answering its body extensions: `usage:
-    # {include: true}`, which itemizes what the call cost and how much of the prompt its cache
-    # served, and `provider.max_price`, which caps what any host may charge. False by default: an
-    # unknown body key is a 400 on the providers that lack the extensions.
-    gateway: bool = False
 
 
 @dataclass(frozen=True)
@@ -122,11 +109,8 @@ def _make_openai_compat(provider: str, spec: ProviderSpec) -> OpenAICompatibleCl
     return OpenAICompatibleClient(
         api_key=getattr(settings, spec.api_key_attr),
         provider=provider,
-        display_name=spec.display_name,
-        base_url=spec.base_url,
-        timeout=spec.timeout,
+        spec=spec,
         rate_limiter=build_rate_limiter(rpm, tpm),
-        gateway=spec.gateway,
     )
 
 
@@ -157,7 +141,6 @@ def get_llm_client(provider: str) -> LLMClientBase:
 
 __all__ = [
     "ModelProfile",
-    "ProviderSpec",
     "get_llm_client",
     "model_profile",
     "openai_compat_spec",

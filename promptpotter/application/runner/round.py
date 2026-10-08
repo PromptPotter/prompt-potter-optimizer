@@ -31,7 +31,7 @@ from promptpotter.application.runner.output import (
     write_review_md,
 )
 from promptpotter.application.runner.overlap import measure_overlap
-from promptpotter.application.runner.termination import BudgetGate, panel_gate_tripped
+from promptpotter.application.runner.termination import panel_gate_tripped
 from promptpotter.application.scoring.row_diagnostics import count_degraded_samples
 from promptpotter.application.scoring.selection import matched_parent_lift
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
@@ -633,8 +633,7 @@ async def emit_origin_round(cycle: Cycle, session: Session, cb: RunCallbacks) ->
     # And it spends the look-ahead arming, exactly as round N's measurement does — one rule, at
     # the two places a round elects. Unspent here, a press during the origin's scoring outlives
     # the round it paid for and silently widens round 1 too.
-    if session.sample_lookahead_consume is not None:
-        session.sample_lookahead_consume()
+    session.control.spend_sample_lookahead()
     await close_round(cycle, round_result, 0, session, cb)
 
 
@@ -735,7 +734,6 @@ async def post_round(
     round_num: int,
     session: Session,
     cb: RunCallbacks,
-    budget_gate: BudgetGate,
     *,
     is_final_round: bool = False,
 ) -> None:
@@ -758,11 +756,11 @@ async def post_round(
         round_num=round_num,
         accuracy=round_result.accuracy,
         winner_id=next((c.candidate_id for c in round_result.selected_scores), None),
-        budget=budget_gate,
+        control=session.control,
         log=logger.info,
     )
     await grade_round_selection(cycle, session, round_result, cb=cb)
-    reserve_selection_pass(cycle, session, budget_gate.book)
+    reserve_selection_pass(cycle, session)
 
     if boundary is None:
         return

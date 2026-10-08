@@ -73,7 +73,7 @@ _ROUTES: dict[type, str | None] = {
     CycleSeedRecord: None,
     RulerRecord: None,
     # The standing operator ceiling, read by a scan at launch (`scan_ledger_run_limits`); the
-    # running gate polls its mirror, `.runtime/run_limits.json`, written beside it.
+    # running book polls its mirror, `.runtime/run_limits.json`, written beside it.
     RunLimitsRecord: None,
     # Banked by `store/account_spend.py` before a delete takes the rows it stands for — a fact
     # about a cycle that no longer exists, so no live view of one can hold it.

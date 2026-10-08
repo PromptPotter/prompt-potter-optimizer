@@ -1,5 +1,5 @@
 """Rolling-window RPM/TPM throttle (blocks before sending when a cap we set would be exceeded; the
-``chars//4`` estimate reconciles via the reservation's ``close()``) and :class:`Backpressure`, the
+``chars//4`` estimate reconciles via :meth:`WindowSlot.billed`) and :class:`Backpressure`, the
 answer to a provider's 429 (``Retry-After``, RFC 7231 §7.1.3)."""
 
 from __future__ import annotations
@@ -29,12 +29,8 @@ MAX_SEND_ATTEMPTS: int = 5
 _YELLOW = "\033[93m"
 _RESET = "\033[0m"
 
-# Cooperative-abort predicate the countdown waits poll. Per-asyncio-task
-# (ContextVar) so concurrent cycles in one process — the API server runs each
-# run as its own task — never cross predicates, and a task that ends drops its
-# copy (no reset needed). Bound once at the runner seam to ``session.pause_check``
-# (reads ``.runtime/pause.flag``). ``None`` (the default — CLI/tests) leaves the
-# wait a plain sleep, broken only by a propagating ``KeyboardInterrupt``.
+# The predicate the countdown waits poll, per asyncio task so concurrent cycles never cross. The
+# runner binds ``RunControl.pause_requested``; ``None`` leaves the wait a plain sleep.
 _ABORT_CHECK: ContextVar[Callable[[], bool] | None] = ContextVar(
     "rate_limit_abort_check", default=None
 )
@@ -538,20 +534,6 @@ def raise_if_request_too_large(exc: Exception, provider_name: str) -> None:
     ) from exc
 
 
-async def acquire_reservation(
-    rate_limiter: RateLimiter | None,
-    messages: list[dict[str, str]],
-    max_tokens: int | None,
-    provider_name: str,
-) -> RateLimitReservation | None:
-    """Block until ``messages`` fits the rolling window; returns ``None`` when no limiter is set."""
-    if rate_limiter is None:
-        return None
-    return await rate_limiter.acquire_with_estimation(
-        messages, max_tokens, provider_name=provider_name
-    )
-
-
 def apply_discovered_caps(
     rate_limiter: RateLimiter | None,
     headers: object | None,
@@ -574,6 +556,47 @@ class _TokenReservation:
     ts: float
     tokens: int
     tenant: str = ""
+
+
+class WindowSlot:
+    """One send's place in a provider's rolling window, held at its estimate until
+    :meth:`billed`. A slot of no limiter holds nothing."""
+
+    def __init__(self, entry: _TokenReservation | None) -> None:
+        self._entry = entry
+        self.left = False
+
+    def leaves(self) -> None:
+        """The request is going out: from here the provider counts it, whatever comes back."""
+        self.left = True
+
+    def billed(self, actual: int) -> None:
+        if self._entry is not None:
+            self._entry.tokens = actual
+
+
+@asynccontextmanager
+async def window_slot(
+    rate_limiter: RateLimiter | None,
+    messages: list[dict[str, str]],
+    max_output: int | None,
+    *,
+    provider_name: str,
+) -> AsyncIterator[WindowSlot]:
+    """Wait for the provider's window and hold one send's place in it. A slot the block ends
+    without :meth:`WindowSlot.leaves` is given back: a send refused before it left was counted by
+    no provider, and its estimate would shut the window on every tenant behind it."""
+    entry = (
+        None
+        if rate_limiter is None
+        else await rate_limiter._reserve(messages, max_output, provider_name=provider_name)
+    )
+    slot = WindowSlot(entry)
+    try:
+        yield slot
+    finally:
+        if rate_limiter is not None and entry is not None and not slot.left:
+            rate_limiter._give_back(entry)
 
 
 @dataclass(eq=False)
@@ -621,7 +644,7 @@ class RateLimiter:
         if tpm is not None and not self.tpm_pinned:
             self.tpm = tpm
 
-    async def acquire(self, estimated_tokens: int) -> _TokenReservation:
+    async def _acquire(self, estimated_tokens: int) -> _TokenReservation:
         """Block until the request fits RPM+TPM **and this tenant's turn comes**; reserves both.
 
         The lock guards state mutation only and is never held across a sleep: held there,
@@ -669,14 +692,15 @@ class RateLimiter:
             return None
         return min(ready, key=lambda w: self._served(w.tenant))
 
-    async def acquire_with_estimation(
+    async def _reserve(
         self,
         messages: list[dict[str, str]],
         max_output: int | None,
         *,
         provider_name: str,
-    ) -> RateLimitReservation:
-        """Estimate → fail-fast on over-cap → throttle → reservation. Must ``close()`` with actual tokens."""
+    ) -> _TokenReservation:
+        """Estimate → fail-fast on over-cap → throttle → reservation, which :func:`window_slot`
+        reconciles or gives back."""
         estimated = estimate_tokens(messages, max_output)
         if self.tpm is not None and estimated > self.tpm:
             raise RequestTooLargeError(
@@ -684,8 +708,13 @@ class RateLimiter:
                 limit=self.tpm,
                 requested=estimated,
             )
-        entry = await self.acquire(estimated)
-        return RateLimitReservation(entry=entry)
+        return await self._acquire(estimated)
+
+    def _give_back(self, entry: _TokenReservation) -> None:
+        """Take a reservation whose request never left out of both windows."""
+        self._tokens = deque(e for e in self._tokens if e is not entry)
+        if (stamp := (entry.ts, entry.tenant)) in self._requests:
+            self._requests.remove(stamp)
 
     def _prune(self, now: float) -> None:
         cutoff = now - self.window_s
@@ -717,16 +746,6 @@ class RateLimiter:
         return max(self._rpm_wait(now), self._tpm_wait(now, estimated_tokens))
 
 
-@dataclass(frozen=True)
-class RateLimitReservation:
-    """One outstanding throttle reservation — call ``close()`` after the response."""
-
-    entry: _TokenReservation
-
-    def close(self, actual: int) -> None:
-        self.entry.tokens = actual
-
-
 def build_rate_limiter(rpm: int | None, tpm: int | None) -> RateLimiter:
     return RateLimiter(
         rpm=rpm,
@@ -744,7 +763,6 @@ __all__ = [
     "OPENAI_TPM_HEADER",
     "Backpressure",
     "RateLimiter",
-    "acquire_reservation",
     "apply_discovered_caps",
     "build_rate_limiter",
     "decide_429_wait",
@@ -758,4 +776,5 @@ __all__ = [
     "throttle_stall_given_to",
     "throttle_stall_seconds",
     "wait_with_countdown",
+    "window_slot",
 ]

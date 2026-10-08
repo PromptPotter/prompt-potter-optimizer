@@ -14,7 +14,7 @@ import os
 import re
 import threading
 from collections import OrderedDict
-from collections.abc import Callable, Hashable, Iterable, Iterator, Sequence
+from collections.abc import Callable, Hashable, Iterator, Sequence
 from itertools import islice
 from pathlib import Path
 from typing import Any, ClassVar, NamedTuple, Protocol, cast
@@ -314,26 +314,29 @@ HOLD_TRAIL = frozenset({"spend_hold", "token_usage"})
 """The record types an open-hold walk reads: a hold opens one, the bill naming it closes it."""
 
 
-def open_holds(records: Iterable[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    """Every hold on this trail that no bill closed, by hold id — the ONE fold of it.
+class HeldSends:
+    """The ONE fold of a trail's holds, by hold id: an account sums what its ledgers may still
+    owe, a run's book what IT left held. A bill closes its hold, and one naming no price closes it
+    in tokens alone — the money stays at the hold's bound. Liveness after it is the caller's."""
 
-    Two readers ask it, and they ask for different reasons: an account sums what its ledgers may
-    still owe, a run's book asks what IT left open. Folded twice, the two could come to disagree
-    about what "still open" means while both keep reporting money. What they may legitimately
-    differ on is the LIVENESS question afterwards — whether an open hold is a send still out or
-    one whose bill will never come — and that one is the caller's, asked at its own scope."""
-    open_: dict[str, dict[str, Any]] = {}
-    for rec in records:
-        track_hold(open_, rec)
-    return open_
+    def __init__(self) -> None:
+        self.open: dict[str, dict[str, Any]] = {}
+        # The USD bound of each hold a bill closed without a price; ``None`` where it had none.
+        self.unpriced: dict[str, Any] = {}
+        self._bounds: dict[str, Any] = {}
 
-
-def track_hold(open_: dict[str, dict[str, Any]], rec: dict[str, Any]) -> None:
-    """One step of :func:`open_holds`, for a reader that folds the trail a record at a time."""
-    if rec.get("record_type") == "spend_hold":
-        open_[str(rec.get("hold_id"))] = rec
-    elif (hold_id := rec.get("hold_id")) is not None:
-        open_.pop(str(hold_id), None)
+    def track(self, rec: dict[str, Any]) -> None:
+        if (hold_id := rec.get("hold_id")) is None:
+            return
+        hold_id = str(hold_id)
+        if rec.get("record_type") == "spend_hold":
+            self.open[hold_id] = rec
+            self._bounds[hold_id] = rec.get("cost_usd")
+            return
+        self.open.pop(hold_id, None)
+        # A bill names a hold of another trail where a nested run's copy is carried onto its root.
+        if hold_id in self._bounds and rec.get("cost_usd") is None:
+            self.unpriced[hold_id] = self._bounds[hold_id]
 
 
 def compact(path: Path, key: str, *, factor: int = 2) -> bool:
@@ -354,6 +357,7 @@ def compact(path: Path, key: str, *, factor: int = 2) -> bool:
 
 __all__ = [
     "HOLD_TRAIL",
+    "HeldSends",
     "LedgerFold",
     "LedgerIndex",
     "LedgerSpan",
@@ -365,6 +369,4 @@ __all__ = [
     "fold_jsonl",
     "fold_jsonl_from",
     "iter_jsonl",
-    "open_holds",
-    "track_hold",
 ]

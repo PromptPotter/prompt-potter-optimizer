@@ -105,7 +105,7 @@ def build_campaign_emitter(
 
 
 def run_limits_from(config: CampaignConfig) -> RunLimits:
-    """The declared ceilings, read off ONE config — the same object ``_build_budget_gate`` takes
+    """The declared ceilings, read off ONE config — the same object ``_arm_spend_book`` takes
     its arms from, so the number on screen is the number that halts. Stamped by ``_prepare_run``
     once the held ceiling is set on it: earlier is the unadmitted config, and the ledger's own
     INIT record lands after the entire origin has scored."""
@@ -552,7 +552,7 @@ class RunObservers:
         book.usd_unreported, book.tokens_unreported = unreported.usd, unreported.tokens
         if unreported.sends:
             logger.warning(
-                "%d paid send(s) on this run ended without a bill; the ceiling holds up to $%.4f "
+                "%d paid send(s) on this run ended unpriced; the ceiling holds up to $%.4f "
                 "for them, and no surface counts it as spent.",
                 unreported.sends,
                 unreported.usd,

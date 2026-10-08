@@ -572,6 +572,7 @@ def overlap_series(overlap: OverlapReading | None) -> str:
     return f"{len(overlap.sample_ids)} shared cells{paid}: {arms}"
 
 
+@shapes_optimizer_prompt
 def measured_cells(rows: Sequence[Mapping[str, Any]]) -> set[int]:
     """Which samples a row set carries a verdict for (``is_graded``). A row carrying none is not
     coverage — counting it would put a member on the overlap set holding a hole."""

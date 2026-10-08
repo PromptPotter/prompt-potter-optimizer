@@ -1,13 +1,11 @@
-"""Two budget ceilings, one gate, halting at the next clean round boundary — twins because a free
-backend reports $0 while tokens count the work it misses. Caps re-read every tick, never cached;
-what enforces them is the admission of each call, ahead of any boundary."""
+"""What a run ends on: the stop each exception names, and the origin, panel and target gates the
+round loop asks at a boundary. The spend ceiling's stop is ``RunControl.budget_tripped``."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
 import traceback
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 from promptpotter.domain.phases import (
@@ -34,7 +32,6 @@ if TYPE_CHECKING:
     from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.initialization.session import Session
     from promptpotter.domain.results import DegradationHealth
-    from promptpotter.infrastructure.llm.spend_book import SpendBook
 
 logger = logging.getLogger(__name__)
 
@@ -105,18 +102,6 @@ def end_run_on(
     )
 
 
-@dataclass(frozen=True)
-class BudgetGate:
-    """The run's ceilings as the round loop asks them: whether one is already reached. Whether a
-    call may be SENT is the spend book's to answer (``infrastructure/llm/spend_book.py``)."""
-
-    book: SpendBook
-
-    def tripped(self) -> StopReason | None:
-        refused = self.book.exhausted()
-        return None if refused is None else REFUSAL_STOPS[refused]
-
-
 def origin_gate_tripped(
     health: DegradationHealth | None, mode: OriginGateMode
 ) -> StopReason | None:
@@ -162,7 +147,6 @@ def target_tripped(cycle: Cycle, target: float | None) -> StopReason | None:
 __all__ = [
     "RUN_ENDS",
     "RUN_STOPS",
-    "BudgetGate",
     "OriginGateMode",
     "end_run_on",
     "origin_gate_tripped",

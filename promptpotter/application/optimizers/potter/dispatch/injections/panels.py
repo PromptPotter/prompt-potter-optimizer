@@ -54,7 +54,7 @@ from promptpotter.domain.l4.proxies import OUTER_PROXY_KEYS, PARENT_LEVEL_SE_KEY
 from promptpotter.domain.optimizer_state import CritiqueReadout
 from promptpotter.domain.results import ArmOutcome, RoundResult, ScoredCandidate
 from promptpotter.domain.results_health import evidence_starved_node
-from promptpotter.domain.ruler import ThetaCaveat, theta_caveat
+from promptpotter.domain.ruler import ThetaCaveat
 from promptpotter.domain.scoring import (
     QueryMeasurement,
     all_verifier_graded,
@@ -65,7 +65,7 @@ from promptpotter.domain.scoring import (
 from promptpotter.domain.spend import TokenAccount
 from promptpotter.shared.composite import render_composite_fitness_block
 from promptpotter.shared.errors import is_error_result
-from promptpotter.shared.statistics import min_detectable_effect, paired_diff_posterior
+from promptpotter.shared.statistics import min_detectable_effect, paired_reading
 
 
 @signal(
@@ -474,9 +474,8 @@ def _judge_verdict(row: dict[str, Any]) -> str:
     return f"JUDGE ({name}): {label} — {why[:200]}"
 
 
-# A cell is called WORSE only when its paired difference clears this many of its own SEs. Two —
-# the two-sided ~95% bound, and the same bar `round_not_separable` applies one level up, so this
-# panel cannot rank a cell as beaten that the loop itself would refuse to call separable.
+# A cell is called WORSE only when its paired difference clears this many of its own SEs — the
+# normal two-sided ~95% bound over one cell's two level SEs, which carry no n to take a t from.
 _CELL_SEPARATION_SIGMAS = 2.0
 
 
@@ -1052,8 +1051,10 @@ def _r_origin_strengths(b: InjectionBundle) -> list[Item]:
     if (truth := _truth_labels(b.origin_per_sample)) is not None:
         fits = [r.get("fitness", 0.0) for r in scoreable_rows(rows)]
         _, floor = _constant_answer(truth)
-        lead, se, _ = paired_diff_posterior(fits, [floor] * len(fits))
-        if lead <= _CELL_SEPARATION_SIGMAS * se:
+        # The loop's own separability bar (`runner/round.py::_separability`): a Student-t bracket
+        # clear of zero, so this panel calls no lead the loop would refuse.
+        ci_lo = paired_reading(fits, [floor] * len(fits))[1]
+        if ci_lo is None or ci_lo <= 0.0:
             return []
     return [
         Item(
@@ -1233,62 +1234,50 @@ def _r_sample_provenance(b: InjectionBundle) -> list[Item]:
 
 @signal("confounds", kind=InjectionKind.DERIVED, char_cap=None, citable=True)
 def _r_confounds(b: InjectionBundle) -> list[Item]:
-    """The states in which the numbers above are NOT what they look like — MEASURED here, rather
-    than warned about in advance. Silent when none is live, which is the point: a caveat that
+    """The states in which the numbers above are NOT what they look like — each one measured,
+    never warned about in advance. Silent when none is live, which is the point: a caveat that
     renders every round is read as boilerplate by the third one."""
-    d, cs = b.digest, b.cycle_slice
+    d = b.digest
     rows: list[str] = []
+    # The STAMPED verdict (`bench/difficulty.py::_reading`), which the operator's screen reads
+    # too; the two counts below are the ones it was decided on.
+    a = d.ability
+    caveat = a.caveat if a is not None else None
+    # The ruler itself: a cold cycle with no graded cell stamps no reading to carry the caveat.
     if b.ruler is None:
         rows.append(
             "COLD RULER — θ is logit-accuracy on each arm's OWN subset, not a shared scale. Two θ "
             "here are comparable to each other and to nothing else."
         )
-    else:
-        cells = [s for s in d.latest_sample_ids if isinstance(s, int)]
-        span = b.ruler.band_span(cells)
-        pinned = b.ruler.pinned_share(cells)
-        round_span, ruler_span = span if span is not None else (None, None)
-        # The verdict is the SERVED one (`domain/ruler.py::theta_caveat`), never a second reading
-        # of the same inputs: the operator's screen and this panel must not be able to disagree
-        # about whether a number means anything. Naming WHICH arm fired is the value — the
-        # instrument, the acquisition and the prior need different fixes and the round looks
-        # identical under all three.
-        caveat = theta_caveat(
-            calibration_model=b.ruler.calibration_model,
-            round_span=round_span,
-            ruler_span=ruler_span,
-            unlinked=(unlinked := b.ruler.unlinked(cells)),
-            pinned_share=pinned,
+    elif a is not None and caveat in (ThetaCaveat.FLAT_RULER, ThetaCaveat.COLLAPSED_BAND):
+        cause = (
+            "the ruler itself spans almost nothing, so no draw could have been wider"
+            if caveat is ThetaCaveat.FLAT_RULER
+            else "the draw took a thin slice of a wider ruler"
         )
-        if caveat in (ThetaCaveat.FLAT_RULER, ThetaCaveat.COLLAPSED_BAND):
-            cause = (
-                "the ruler itself spans almost nothing, so no draw could have been wider"
-                if caveat is ThetaCaveat.FLAT_RULER
-                else "the draw took a thin slice of a wider ruler"
-            )
-            rows.append(
-                f"COLLAPSED BAND — this round's {unit_plural(b.measured_unit)} span "
-                f"{round_span:.2f} logits on a ruler spanning {ruler_span:.2f}; {cause}. Inside a "
-                f"band that narrow every {b.measured_unit} is equally hard, "
-                "so θ is logit-accuracy plus a constant and ranking on it ranks on accuracy."
-            )
-        elif caveat is ThetaCaveat.UNMEASURED_DELTA:
-            rows.append(
-                f"UNMEASURED DIFFICULTY — {unlinked} of this round's "
-                f"{unit_plural(b.measured_unit)} carry no δ: no arm already on the ruler answered "
-                "them, so θ leaves them out and each arm's θ is read on the rest. Read the lift, "
-                "never the level."
-            )
-        elif caveat is ThetaCaveat.PRIOR_PINNED and pinned is not None:
-            rows.append(
-                f"PRIOR-PINNED DIFFICULTY — {pinned:.0%} of this round's "
-                f"{unit_plural(b.measured_unit)} sit on a δ the ruler hands to several cells at "
-                "once. That is the prior, not a reading: every arm that ever saw them answered "
-                "the same way, so nothing measured how hard they are. θ still counts them, and "
-                "the value they are pinned to moves as the ruler grows — so a θ that rose since "
-                "last round may be the scale shifting under an unchanged prompt rather than an "
-                "arm improving. Read the lift, never the level."
-            )
+        rows.append(
+            f"COLLAPSED BAND — the {unit_plural(b.measured_unit)} this round's θ was read on span "
+            f"{a.round_span:.2f} logits on a ruler spanning {a.ruler_span:.2f}; {cause}. Inside a "
+            f"band that narrow every {b.measured_unit} is equally hard, "
+            "so θ is logit-accuracy plus a constant and ranking on it ranks on accuracy."
+        )
+    elif caveat is ThetaCaveat.UNMEASURED_DELTA:
+        rows.append(
+            f"UNMEASURED DIFFICULTY — {d.unlinked} of this round's "
+            f"{unit_plural(b.measured_unit)} carry no δ: no arm already on the ruler answered "
+            "them, so θ leaves them out and each arm's θ is read on the rest. Read the lift, "
+            "never the level."
+        )
+    elif caveat is ThetaCaveat.PRIOR_PINNED and d.pinned_share is not None:
+        rows.append(
+            f"PRIOR-PINNED DIFFICULTY — {d.pinned_share:.0%} of this round's "
+            f"{unit_plural(b.measured_unit)} sit on a δ the ruler hands to several cells at "
+            "once. That is the prior, not a reading: every arm that ever saw them answered "
+            "the same way, so nothing measured how hard they are. θ still counts them, and "
+            "the value they are pinned to moves as the ruler grows — so a θ that rose since "
+            "last round may be the scale shifting under an unchanged prompt rather than an "
+            "arm improving. Read the lift, never the level."
+        )
     if d.prev_sample_ids and not (d.latest_sample_ids & d.prev_sample_ids):
         rows.append(
             f"SUBSET MOVED WHOLE — this round shares no {b.measured_unit} with the one before it, "
@@ -1296,13 +1285,10 @@ def _r_confounds(b: InjectionBundle) -> list[Item]:
         )
     if not rows:
         return []
-    live = sorted(name for name, sev, _ in cs.couplings if sev == "collision")
-    tail = f"\n  config couplings live: {', '.join(live)}" if live else ""
     return [
         Item(
             "LIVE CAVEATS — states where the numbers above are not what they look like:\n"
             + "\n".join(f"  {r}" for r in rows)
-            + tail
         )
     ]
 

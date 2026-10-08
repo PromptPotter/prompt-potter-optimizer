@@ -15,7 +15,6 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
-from promptpotter.application.run_phase_control import pause_requested
 from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.application.scoring.sample_measurement import (
     cell_bound,
@@ -358,9 +357,9 @@ def _armed_cells(session: Session) -> int:
     ``human_intervened`` stamp and devaluing the campaign; that discard is the design. A STOP is
     not a cut: it banks what each walk was sure to take (:meth:`Walk.bank`). Why it is
     browser-only with no CLI verb: ``docs/operations/access-model.md`` § host-admin ↔ user."""
-    check = session.sample_lookahead_check
-    requested = check() if check is not None else 1
-    return effective_lookahead(requested, session.backend_client.max_cells_in_flight)
+    return effective_lookahead(
+        session.control.sample_lookahead(), session.backend_client.max_cells_in_flight
+    )
 
 
 async def _maybe_recover_degraded(
@@ -965,11 +964,11 @@ class _ScoringPhase:
         # Answered only by the walk whose turn it is — the skip names the candidate on screen —
         # so nothing measuring for it can spend the press. A cancelled call is the pause's own
         # doing: the throttle wait polls the same flag.
-        skip = bool(session.skip_check and session.skip_check())
-        pause = cut or pause_requested(session)
+        skip = session.control.skip_requested()
+        pause = cut or session.control.pause_requested()
         # Same cadence as the pause, because the round-boundary gate cannot fire until the round
         # closes — and for an L4 outer round every sample is an entire inner CAMPAIGN.
-        tripped = session.budget_tripped() if session.budget_tripped is not None else None
+        tripped = session.control.budget_tripped()
         if self.unbounded or walk.rereads_ahead(len(walk.results)):
             tripped = None
         return _TurnState(
@@ -988,8 +987,7 @@ class _ScoringPhase:
 
     def honour_stop(self, walk: Walk, now: _TurnState) -> bool:
         if now.skip:
-            if self.session.skip_consume:
-                self.session.skip_consume()
+            self.session.control.spend_skip()
             logger.info(
                 "Operator skip after query %d/%d; accepting partial searchpoint.",
                 len(walk.results),

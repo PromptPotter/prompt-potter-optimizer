@@ -11,8 +11,9 @@ from promptpotter.infrastructure.llm.rate_limit import (
     MAX_SEND_ATTEMPTS,
     Backpressure,
     RateLimiter,
-    acquire_reservation,
+    apply_discovered_caps,
     wait_with_countdown,
+    window_slot,
 )
 from promptpotter.infrastructure.llm.request import ChatRequest
 from promptpotter.infrastructure.llm.response import LLMResponse
@@ -23,10 +24,16 @@ from promptpotter.infrastructure.llm.spend_book import (
     SendBound,
     admitted,
     connection_broke,
+    failed_status,
     may_have_billed,
     never_sent,
 )
-from promptpotter.shared.errors import RequestTooLargeError, SendRefusedError
+from promptpotter.shared.errors import (
+    ErrorCategory,
+    RequestTooLargeError,
+    SendRefusedError,
+    is_provider_credit_refusal,
+)
 
 if TYPE_CHECKING:
     from promptpotter.domain.backend import BackpressureReading
@@ -51,23 +58,13 @@ def send_bound(ceiling: RateCeiling | None, *, sent: object, max_tokens: int | N
     return SendBound(input_tokens=input_tokens, output_tokens=output, usd=usd)
 
 
-def _status(exc: BaseException) -> int | None:
-    """The HTTP status a failed send came back with, read through the errors raised FROM it."""
-    seen: BaseException | None = exc
-    while seen is not None:
-        if isinstance(status := getattr(seen, "status_code", None), int):
-            return status
-        seen = seen.__cause__
-    return None
-
-
 def _retry_wait(exc: BaseException, attempt: int) -> float | None:
     """How long to wait before sending again after a failure that is not a throttle, or ``None``
     to give up. A read timeout is never retried: the provider may still be generating, and a
     second send is a second bill. A broken connection is, like a 5xx: its send stays held."""
     if attempt + 1 >= MAX_SEND_ATTEMPTS:
         return None
-    status = _status(exc)
+    status = failed_status(exc)
     if (status is not None and status >= 500) or never_sent(exc) or connection_broke(exc):
         return float(2**attempt)
     return None
@@ -77,7 +74,7 @@ def _throttle(exc: BaseException) -> tuple[object | None, str] | None:
     """The headers and body of a 429, or ``None`` for any other failure. An over-cap request
     carries its 429 as the cause and is terminal (``RequestTooLargeError``), and a refusal is
     already decided."""
-    if isinstance(exc, (RequestTooLargeError, SendRefusedError)) or _status(exc) != 429:
+    if isinstance(exc, (RequestTooLargeError, SendRefusedError)) or failed_status(exc) != 429:
         return None
     resp = getattr(exc, "response", None)
     body = getattr(resp, "text", None) if resp is not None else None
@@ -91,6 +88,10 @@ class LLMClientBase(ABC):
 
     SENDS: ClassVar[frozenset[str]]
     """The ``ChatRequest`` fields this client carries to its provider."""
+    CREDIT_REFUSAL_STATUSES: ClassVar[frozenset[int]]
+    """The HTTP statuses its provider answers a spent account with."""
+    RATE_CAP_HEADERS: ClassVar[tuple[str, str]]
+    """The reply headers naming its provider's requests- and tokens-per-minute caps."""
 
     def __init__(self, *, provider: str, display_name: str, rate_limiter: RateLimiter | None):
         self._provider = provider
@@ -128,14 +129,14 @@ class LLMClientBase(ABC):
         messages: list[dict[str, str]],
         sent: object,
         max_tokens: int | None,
-        send: Callable[[], Awaitable[_R]],
+        send: Callable[[], Awaitable[tuple[object | None, _R]]],
         billed: Callable[[_R], Billed | None],
     ) -> _R:
         """One provider round-trip. Retried only where the failed send billed nothing or the
         provider asked for a later one — a throttle whenever this model's backpressure lets it, a
         5xx or a connection never made a bounded number of times; each retry is admitted on its
-        own. ``billed`` reads what a reply used — ``None`` for a reply that reports none, which
-        leaves the send unreported."""
+        own. ``send`` answers the reply's headers and the reply; ``billed`` reads what a reply
+        used — ``None`` for a reply that reports none, which leaves the send unreported."""
         bound = send_bound(
             await rate_ceiling(model, self._provider), sent=sent, max_tokens=max_tokens
         )
@@ -144,16 +145,29 @@ class LLMClientBase(ABC):
         )
         attempt = 0
         while True:
-            async with backpressure.send() as ticket:
+            # Queued for the window BEFORE it is held: a request cancelled or refused while it
+            # waits never left, and holds nothing — in the book or, once refused, in the window.
+            async with (
+                backpressure.send() as ticket,
+                window_slot(
+                    self._rate_limiter, messages, max_tokens, provider_name=self._provider_name
+                ) as slot,
+            ):
                 with admitted(label, bound, model=model, provider=self._provider) as admission:
-                    reservation = await acquire_reservation(
-                        self._rate_limiter, messages, max_tokens, self._provider_name
-                    )
+                    slot.leaves()
                     try:
-                        reply = await send()
+                        headers, reply = await send()
                     except Exception as exc:
-                        if not may_have_billed(_status(exc), exc):
+                        if not may_have_billed(exc):
                             admission.release()
+                        if failed_status(
+                            exc
+                        ) in self.CREDIT_REFUSAL_STATUSES and is_provider_credit_refusal(str(exc)):
+                            raise SendRefusedError(
+                                f"{self._provider_name} refused the call for lack of credit: "
+                                f"{str(exc)[:300]}",
+                                category=ErrorCategory.PROVIDER_CREDIT,
+                            ) from exc
                         if (throttle := _throttle(exc)) is not None:
                             headers, body = throttle
                             backpressure.throttled(ticket, headers=headers, body=body)
@@ -171,12 +185,18 @@ class LLMClientBase(ABC):
                         )
                     else:
                         backpressure.eased(ticket)
+                        rpm_header, tpm_header = self.RATE_CAP_HEADERS
+                        apply_discovered_caps(
+                            self._rate_limiter,
+                            headers,
+                            rpm_header=rpm_header,
+                            tpm_header=tpm_header,
+                        )
                         if (spent := billed(reply)) is None:
                             admission.unreported()
                             return reply
                         admission.settle(spent)
-                        if reservation is not None:
-                            reservation.close(spent.usage.total)
+                        slot.billed(spent.usage.total)
                         return reply
             attempt += 1
             await wait_with_countdown(wait, f"{label.node} {self._provider_name}")

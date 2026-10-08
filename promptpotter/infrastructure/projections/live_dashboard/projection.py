@@ -873,7 +873,7 @@ class LiveDashboardProjection(Projection):
         """What the operator has ARMED right now, onto the file being written — never ``compose``'s:
         a fold of a past moment must not carry the present's controls. No SERVED read depends on it."""
         s = self.state
-        # `_build_budget_gate` prefers `run_limits.json` over the admitted cap, so the stamped
+        # `_arm_spend_book` prefers `run_limits.json` over the admitted cap, so the stamped
         # value alone would quote a ceiling nothing enforces.
         if s.run_limits is not None:
             armed = armed_run_limits(self.cycle_dir)

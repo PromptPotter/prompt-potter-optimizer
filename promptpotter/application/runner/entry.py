@@ -6,7 +6,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, replace
-from functools import partial
 from pathlib import Path
 
 from promptpotter.application.bench.cycle import Cycle
@@ -41,7 +40,7 @@ from promptpotter.application.run_observers import (
     build_run_observers,
     run_limits_from,
 )
-from promptpotter.application.run_phase_control import declare_run_phase
+from promptpotter.application.run_phase_control import RunControl, declare_run_phase
 from promptpotter.application.runner.bench import (
     bench_selection,
     headline,
@@ -56,7 +55,6 @@ from promptpotter.application.runner.round import flush_pending_decisions
 from promptpotter.application.runner.termination import (
     RUN_ENDS,
     RUN_STOPS,
-    BudgetGate,
     end_run_on,
     run_stop_reason,
 )
@@ -100,8 +98,6 @@ from promptpotter.infrastructure.runtime_flags import (
     clear_run_control_flags,
     read_reserve_mirror,
     read_run_limits_mirror,
-    read_sample_lookahead,
-    spend_sample_lookahead,
     write_run_limits_mirror,
 )
 from promptpotter.infrastructure.store.archive_queries import scope_memory_to_own_runs
@@ -136,17 +132,17 @@ class RunMode:
     stop_after_rounds: int | None = None
 
 
-def _build_budget_gate(
+def _arm_spend_book(
     observers: RunObservers,
-    cycle_dir: Path,
+    cycle_dir: Path | None,
     *,
     declared: SpendCeilings,
     meters: CeilingMeter,
     reserve: SpendCeilings,
-) -> BudgetGate:
+) -> SpendBook:
     """**Always armed**, because a run's ceiling is not settled at launch: the probes re-read
     ``.runtime/run_limits.json`` each tick, so ``change-run-limits`` can bind a run that declared
-    nothing. Returning no gate for a launch with no starting caps is what let that command ack
+    nothing. Returning no book for a launch with no starting caps is what let that command ack
     ``applied`` against a ceiling that could never trip — set by the operator, served to the
     webapp, enforced by nothing. An unset arm still costs nothing: the book skips a ``None`` cap.
     The book it arms is what admits every call the run sends."""
@@ -154,11 +150,16 @@ def _build_budget_gate(
     spent = dashboard.spend_metered(meters)
 
     # The mirror carries only the arms moved since launch, so each reading is the launch's own
-    # with those laid over it — one layering, the one admission composed the ceiling with.
+    # with those laid over it — one layering, the one admission composed the ceiling with. No
+    # cycle is no mirror: nothing can have moved an arm.
     def _ceiling() -> SpendCeilings:
+        if cycle_dir is None:
+            return declared
         return declare_ceiling(declared, read_run_limits_mirror(cycle_dir).ceiling)
 
     def _reserve() -> SpendCeilings:
+        if cycle_dir is None:
+            return reserve
         return declare_ceiling(reserve, read_reserve_mirror(cycle_dir))
 
     # Seeded from the rollup the resume folded, then fed by the ledger itself.
@@ -172,27 +173,23 @@ def _build_budget_gate(
         tokens_spent=spent.metered_tokens,
     )
     observers.arm_spend_book(book)
-    return BudgetGate(book=book)
+    return book
 
 
 def _arm_run_controls(
     session: Session,
     observers: RunObservers,
     campaign_config: CampaignConfig,
-) -> BudgetGate:
-    """The one place the ceiling and the pause/budget flags are ARMED, over the cycle dir the run is
-    actually in — re-called per rebase/fork, which mints a different one. Both gate cadences (round
-    boundary, and the per-sample checkpoint `query_loop` no-ops on a `None`) ride one gate, so a
-    ceiling moved mid-flight moves both. Must precede round 0, which spends before any round loop.
-    """
-    # `Path()` where no cycle exists yet keeps the pollers total rather than optional.
-    cycle_dir = session.store.campaigns.cycle_dir(session.hop) if session.state.cycle_id else Path()
-    _bind_run_controls(session, cycle_dir)
+) -> None:
+    """The one place the ceiling and the operator's flags are ARMED, over the cycle dir the run is
+    actually in — re-called per rebase/fork, which mints a different one. It precedes origin
+    scoring, the longest interruptible phase and one that spends before any round loop."""
+    cycle_dir = session.store.campaigns.cycle_dir(session.hop) if session.state.cycle_id else None
     session.flight = FlightGauge(observers.callbacks.on_flight)
     # A provider's pushback moves inside a cell, where the phase's loop may be blocked on the
     # cells out — so the backpressure itself says when the reading moved.
     session.backend_client.backpressure.on_change = session.flight.touch
-    gate = _build_budget_gate(
+    book = _arm_spend_book(
         observers,
         cycle_dir,
         declared=SpendCeilings(
@@ -202,9 +199,9 @@ def _arm_run_controls(
         meters=ceiling_meter(session.arm),
         reserve=session.reserve,
     )
-    session.budget_tripped = gate.tripped
-    session.spend_used = lambda: gate.book.usd_spent
-    return gate
+    session.control = replace(session.control, cycle_dir=cycle_dir, book=book)
+    # The rate-limit countdown polls it too — the one blocking seam that otherwise ignores a pause.
+    set_abort_check(session.control.pause_requested)
 
 
 def _read_cycle_seed(session: Session) -> CycleSeed | None:
@@ -229,42 +226,6 @@ class _PreparedRun:
     origin: CampaignOrigin
     campaign_config: CampaignConfig
     halt_at_accuracy: float | None
-
-
-def _bind_run_controls(session: Session, cycle_dir: Path) -> None:
-    """The ONE binding seam for run control, called per cycle the run touches. It binds BEFORE origin
-    scoring — the longest interruptible phase — or the operator's only way out is killing the process."""
-    if not session.state.cycle_id:
-        return
-    layout = CycleLayout(cycle_dir)
-    skip_flag = layout.skip_flag
-    own_pause = layout.pause_flag.is_file
-    # An inner cycle is an INSTRUMENT of its spawner and must not outlive a stop request on it.
-    # It gets its own sandbox dir, whose pause flag nobody writes, so alone it would run to
-    # completion while the outer sat "pausing" — COMPOSE the inherited predicate, never
-    # overwrite it. Top-level cycles inherit nothing, so this is exactly `own_pause` for them.
-    # The parent comes off the SESSION, never `get_abort_check()`: this runs again per rebase
-    # in the SAME task, so the ContextVar holds the predicate this task bound last time round —
-    # composing against that chains one per rebase, keeping retired forks' flags live in it.
-    inherited = session.inherited_pause_check
-    if inherited is None:
-        session.pause_check = own_pause
-    else:
-        # Bound to a local: a closure captures the NAME, so the narrowing above does not reach
-        # inside the lambda and the composed predicate would read as possibly-``None``.
-        parent_abort = inherited
-        session.pause_check = lambda: own_pause() or parent_abort()
-    # Also bound into the ContextVar the rate-limit countdown polls — the one blocking seam
-    # that otherwise ignores the pause channel.
-    set_abort_check(session.pause_check)
-    # One-shot: the loop deletes the flag the instant it fires, so exactly one searchpoint is cut.
-    session.skip_check = skip_flag.is_file
-    session.skip_consume = partial(skip_flag.unlink, missing_ok=True)
-    # Deliberately NOT composed with the inherited predicate the way `pause_check` is: a stop
-    # must reach the instrument, but inheriting a THROUGHPUT setting would let one arming
-    # multiply concurrency at every nested level at once.
-    session.sample_lookahead_check = partial(read_sample_lookahead, cycle_dir)
-    session.sample_lookahead_consume = partial(spend_sample_lookahead, cycle_dir)
 
 
 def _set_held_ceiling(config: CampaignConfig, ceiling: SpendCeilings) -> CampaignConfig:
@@ -359,7 +320,7 @@ async def _prepare_run(
                 launch_cycle_dir, limits.operator, rounds=rounds, reserve=unmoved
             )
 
-    # After the mirror, so the gate's probes read the same ceiling the config carries, and
+    # After the mirror, so the book's probes read the same ceiling the config carries, and
     # before the origin pass, which spends without one otherwise.
     _arm_run_controls(session, observers, campaign_config)
 
@@ -582,7 +543,7 @@ async def _run_single_cycle(
 
     cycle: Cycle | None = None
     cancel_exc: asyncio.CancelledError | None = None
-    budget_gate: BudgetGate | None = None
+    book: SpendBook | None = None
     banked: BenchPasses | None = None
     unheld: BenchScore | None = None
     fork: RebaseRequest | None = None
@@ -612,10 +573,11 @@ async def _run_single_cycle(
             )
             cb = observers.callbacks
 
-        # The gate probes go through the dashboard, which already owns the spend rollup, rather
+        # The book is seeded off the dashboard, which already owns the spend rollup, rather
         # than a parallel reader; `observers` is bound in the builder so the rebase loop's
         # rebuild cannot leave it on a stale ref.
-        budget_gate = _arm_run_controls(session, observers, campaign_config)
+        _arm_run_controls(session, observers, campaign_config)
+        book = session.control.book
         if session.scoring.require_partition().bench and origin.resolved_origin is not None:
             # The reference, sent once per line however many launches resume it; its price is set
             # aside so the selection's pass still fits under the ceiling the search spends against.
@@ -632,8 +594,8 @@ async def _run_single_cycle(
                 spend=observers.dashboard.state.spend,
                 cb=cb,
             )
-            if banked is not None and budget_gate.book.binds("bench"):
-                budget_gate.book.set_aside(banked.reserve_usd, banked.reserve_tokens)
+            if banked is not None and book.binds("bench"):
+                book.set_aside(banked.reserve_usd, banked.reserve_tokens)
         elif not session.scoring.require_partition().bench:
             unheld = nothing_held_out(cb, scorer_id=session.scoring.scorer_id)
         stop_reason, cycle_error, fork, open_round, cancel_exc = await run_round_loop(
@@ -645,7 +607,6 @@ async def _run_single_cycle(
             diag=mode.diag,
             halt_at_accuracy=prep.halt_at_accuracy,
             stop_after_rounds=mode.stop_after_rounds,
-            budget_gate=budget_gate,
         )
     except RUN_ENDS as exc:
         stop_reason, cycle_error = end_run_on(exc, session, where="before the round loop")
@@ -661,11 +622,11 @@ async def _run_single_cycle(
     bench: BenchScore | None = unheld
     if (
         cycle is not None
-        and budget_gate is not None
+        and book is not None
         and banked is not None
         and STOP_REASON_INFO[stop_reason].grades_selection
     ):
-        budget_gate.book.set_aside(0.0, 0)
+        book.set_aside(0.0, 0)
         try:
             banked = await bench_selection(cycle, session, banked=banked, cb=cb)
             bench = headline(cb, session, banked)
@@ -800,8 +761,9 @@ async def run_optimization(
     # Round 0's cells need it too: their origin level is the baseline every candidate is
     # differenced against.
     refresh_inner_rulers(session, campaign_config, round_num=0)
-    # Read here, before anything binds, so it is still a parent's and not our own.
-    session.inherited_pause_check = get_abort_check()
+    # An L4 spawner's stop, read ONCE and before anything binds: each rebase re-arms in this same
+    # task, where the ContextVar by then holds the predicate the last cycle bound.
+    session.control = RunControl(enclosing_pause=get_abort_check())
     # Both per task, so an inner cell binds its own optimizer and clamp over the outer
     # campaign's copies in its context — a cell measures under its own panel's or none.
     bind_optimizer(select_optimizer(campaign_config.optimization))
@@ -815,7 +777,7 @@ async def run_optimization(
             limits=limits,
         )
     except RUN_STOPS as stop:
-        # Origin scoring stops on the round loop's channel — the budget gate, an unreachable
+        # Origin scoring stops on the round loop's channel — the spend ceiling, an unreachable
         # backend, a spent provider account — so it ends on the round loop's path, never a crash.
         stop_reason, cycle_error = end_run_on(stop, session, where="in run prep")
         return _close_cycle(

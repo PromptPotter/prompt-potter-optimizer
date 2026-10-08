@@ -31,6 +31,7 @@ from promptpotter.infrastructure.docker_host import (
     machine_step,
     run_cell_container,
 )
+from promptpotter.infrastructure.llm.openai_compat import cell_gateway_body, sent_effort
 from promptpotter.infrastructure.llm.registry import openai_compat_spec
 from promptpotter.infrastructure.store.io import rmtree_robust
 from promptpotter.shared.errors import (
@@ -192,7 +193,7 @@ def _sent_spend_bound(node: str, cfg: Mapping[str, Any]) -> LLMSpendBound | None
     )
 
 
-def _model_entry(cfg: Mapping[str, Any], prompt: str) -> tuple[dict[str, Any], dict[str, str]]:
+def _model_entry(cfg: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:
     """The harness's ``models`` entry for this node's model, and the environment its key rides.
     The key is named to the container and never written into the config file, which is scratch on
     disk for the length of the cell."""
@@ -203,13 +204,16 @@ def _model_entry(cfg: Mapping[str, Any], prompt: str) -> tuple[dict[str, Any], d
             "`provider`."
         )
     reply = int(cfg.get("max_tokens") or 8192)
-    effort = cfg.get("reasoning_effort")
+    effort = sent_effort(cfg.get("reasoning_effort"))
+    spec = openai_compat_spec(provider)
+    body = cell_gateway_body(
+        spec, provider, route_order=cfg.get("route_order"), reasoning_effort=effort
+    )
     if provider == _ANTHROPIC:
         claude: dict[str, Any] = {"model": model, "max_tokens": reply}
         if effort is not None:
             claude["effort"] = effort
         return {"claude": claude}, {"ANTHROPIC_API_KEY": settings.ANTHROPIC_API_KEY}
-    spec = openai_compat_spec(provider)
     if spec is None:
         raise RuntimeError(
             f"dbllmbench connector: provider {provider!r} is neither {_ANTHROPIC!r} nor an "
@@ -218,17 +222,10 @@ def _model_entry(cfg: Mapping[str, Any], prompt: str) -> tuple[dict[str, Any], d
     extra: dict[str, Any] = {}
     if (temperature := cfg.get("temperature")) is not None:
         extra["temperature"] = temperature
-    if route := cfg.get("route_order"):
-        extra["provider"] = {"order": list(route), "allow_fallbacks": False}
-    if spec.gateway:
-        # Asked for, as our own client asks: the cache breakdown `_spent` bills the cell off.
-        extra["usage"] = {"include": True}
-    if effort is not None:
-        # The gateway's body extension where it is one, the OpenAI spelling everywhere else.
-        if spec.gateway:
-            extra["reasoning"] = {"effort": effort}
-        else:
-            extra["reasoning_effort"] = effort
+    if body is not None:
+        extra |= body
+    elif effort is not None:
+        extra["reasoning_effort"] = effort
     entry: dict[str, Any] = {
         "model": model,
         "base_url": spec.base_url or _OPENAI_BASE_URL,
@@ -273,7 +270,7 @@ def harness_config(cfg: Mapping[str, Any], prompt: str) -> tuple[dict[str, Any],
         entry["examples"] = _asset(cfg, "examples_dir")
     if prompt:
         entry["skills"] = f"{_WORK}/skills"
-    model, env = _model_entry(cfg, prompt)
+    model, env = _model_entry(cfg)
     return {
         "dbs": [{db: entry}],
         "models": [model],

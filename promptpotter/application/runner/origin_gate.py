@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Literal, get_args
 
 from promptpotter.application.datasets.loaders import sample_dataset
 from promptpotter.application.origin import rescore_parent
-from promptpotter.application.run_phase_control import declare_run_phase, pause_requested
+from promptpotter.application.run_phase_control import declare_run_phase
 from promptpotter.application.runner.round import emit_origin_round
 from promptpotter.application.runner.termination import OriginGateMode, origin_gate_tripped
 from promptpotter.domain.phases import RunPhase, StopReason
@@ -137,7 +137,7 @@ async def _await_gate_decision(
     )
     try:
         while True:
-            if pause_requested(session):
+            if session.control.pause_requested():
                 return "pause"
             from_file = _read_decision_file(decision_path)
             if from_file is not None:

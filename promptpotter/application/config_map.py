@@ -3,7 +3,7 @@ A READING of ``knobs.py``, kept out of it: that source is hashed into the optimi
 
 from __future__ import annotations
 
-from typing import Any, Literal, get_args
+from typing import Any, get_args
 
 from pydantic import Field
 
@@ -14,6 +14,7 @@ from promptpotter.application.campaign_config import (
     knob_label,
 )
 from promptpotter.application.knobs import (
+    CouplingSeverity,
     check_couplings,
     declared_couplings,
     resolve_knob_states,
@@ -48,19 +49,7 @@ class ConfigEstimandGroup(StrictModel):
     knobs: list[ConfigKnob] = Field(description="Knobs that move this estimand, in declared order")
 
 
-CouplingSeverity = Literal["collision", "inert", "info"]
-"""Gravest first — the order a reader meets the couplings in."""
-
 _SEVERITIES: tuple[CouplingSeverity, ...] = get_args(CouplingSeverity)
-
-
-def _severity(declared: str) -> CouplingSeverity:
-    """A coupling's declared severity as the closed set a surface tones on. A fourth is refused
-    here, where it would otherwise reach the screen untoned and unplaced."""
-    for known in _SEVERITIES:
-        if known == declared:
-            return known
-    raise ValueError(f"coupling severity {declared!r} is none of {', '.join(_SEVERITIES)}")
 
 
 class ConfigCoupling(StrictModel):
@@ -110,7 +99,7 @@ def config_map(config: CampaignConfig) -> ConfigMapResponse:
             labels=[knob_label(k) for k in c.knobs],
             relation=c.relation,
             consequence=c.consequence,
-            severity=_severity(c.severity),
+            severity=c.severity,
             active=c.name in active,
         )
         for c in declared_couplings(config)

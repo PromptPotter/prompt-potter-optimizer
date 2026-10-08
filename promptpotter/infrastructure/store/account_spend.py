@@ -18,7 +18,7 @@ from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.ledger import CycleEventLog, ledger_chain
 from promptpotter.infrastructure.runtime_flags import derive_run_phase
 from promptpotter.infrastructure.store.layout import CycleLayout
-from promptpotter.infrastructure.store.read_model import HOLD_TRAIL, LedgerIndex, track_hold
+from promptpotter.infrastructure.store.read_model import HOLD_TRAIL, HeldSends, LedgerIndex
 from promptpotter.shared.clock import epoch_seconds
 
 if TYPE_CHECKING:
@@ -151,16 +151,16 @@ def _unreported_of(hold: dict[str, Any]) -> UserSpend:
 
 
 class _Billed:
-    """The bills over the usage rows, and apart from them every hold no bill closed, at its bound —
-    whether that is a send still out or one unreported, only the run's liveness says
-    (:func:`_unreported_once_stopped`). A nested run's bill that was carried onto its outer run's
-    ledger is summed there, never here."""
+    """The bills over the usage rows, and apart from them what the trail still holds at its bounds
+    (``read_model.py::HeldSends``) — whether a hold no bill closed is a send still out or one
+    unreported, only the run's liveness says (:func:`_unreported_once_stopped`). A nested run's
+    bill that was carried onto its outer run's ledger is summed there, never here."""
 
     probes: ClassVar[frozenset[str]] = HOLD_TRAIL
 
     def __init__(self) -> None:
         self._total = ZERO_SPEND
-        self._open: dict[str, dict[str, Any]] = {}
+        self._held = HeldSends()
 
     def feed(self, offset: int, rec: dict[str, Any]) -> None:
         kind = rec.get("record_type")
@@ -168,13 +168,17 @@ class _Billed:
             return
         if kind == "token_usage" and not (rec.get("cached") or rec.get("mirrored")):
             self._total = self._total.plus(_billed_of(rec))
-        track_hold(self._open, rec)
+        self._held.track(rec)
 
     def value(self) -> tuple[UserSpend, UserSpend]:
-        open_ = ZERO_SPEND
-        for rec in self._open.values():
-            open_ = open_.plus(_unreported_of(rec))
-        return self._total, open_
+        held = ZERO_SPEND
+        for rec in self._held.open.values():
+            held = held.plus(_unreported_of(rec))
+        # Its bill already filed the tokens, as residue (:func:`_billed_of`); only the money is kept.
+        for bound in self._held.unpriced.values():
+            if isinstance(bound, int | float):
+                held = held.plus(UserSpend(0.0, 0, 0, float(bound), 0))
+        return self._total, held
 
 
 class _Tombstones:
@@ -241,15 +245,15 @@ class _Usage:
 _SPEND_FOLDS = (_Billed, _Tombstones, _Usage)
 
 
-def _unreported_once_stopped(ledger: Path, open_: UserSpend) -> UserSpend:
-    """A hold no bill closed on a LIVE run is a send still out, and the account wallet already
-    reserves that run's whole ceiling, so counting it too would read a running cell's worst case
-    twice. On a run that is not live (killed, paused, finished) nobody will close it: it is
-    unreported, at its bound."""
-    if open_ == ZERO_SPEND:
-        return open_
+def _unreported_once_stopped(ledger: Path, held: UserSpend) -> UserSpend:
+    """A hold no bill closed on a LIVE run is a send still out, and one a bill closed without a
+    price is held by that run's book: the account wallet already reserves the run's whole ceiling,
+    so counting either too would read it twice. On a run that is not live (killed, paused,
+    finished) nobody will close them: they are unreported, at their bounds."""
+    if held == ZERO_SPEND:
+        return held
     phase = derive_run_phase(CycleLayout.of_ledger(ledger).cycle_dir)
-    return ZERO_SPEND if phase in (RunPhase.RUNNING, RunPhase.GATE) else open_
+    return ZERO_SPEND if phase in (RunPhase.RUNNING, RunPhase.GATE) else held
 
 
 def billed_spend(ledgers: Iterable[Path]) -> UserSpend:
@@ -258,9 +262,9 @@ def billed_spend(ledgers: Iterable[Path]) -> UserSpend:
     cycle ledger can carry one to double-count."""
     total = ZERO_SPEND
     for ledger in ledgers:
-        billed, open_ = LedgerIndex.of(ledger, _SPEND_FOLDS).view(_Billed)
-        # Whether an open hold is unreported moves with the run, not the file: asked per read.
-        total = total.plus(billed).plus(_unreported_once_stopped(ledger, open_))
+        billed, held = LedgerIndex.of(ledger, _SPEND_FOLDS).view(_Billed)
+        # Whether what is held is unreported moves with the run, not the file: asked per read.
+        total = total.plus(billed).plus(_unreported_once_stopped(ledger, held))
     return total
 
 

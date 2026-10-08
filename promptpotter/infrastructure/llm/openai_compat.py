@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import logging
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
-import httpx
 from pydantic import BaseModel, ValidationError
 
 from promptpotter.domain.search_point import PARAM_SCOPE_KEYS
@@ -21,23 +21,17 @@ from promptpotter.infrastructure.llm.json_parse import (
     parse_response_content,
     try_groq_json_validate_repair,
 )
-from promptpotter.infrastructure.llm.pricing import rate_ceiling
+from promptpotter.infrastructure.llm.pricing import PriceTier, rate_ceiling
 from promptpotter.infrastructure.llm.rate_limit import (
     OPENAI_RPM_HEADER,
     OPENAI_TPM_HEADER,
     RateLimiter,
-    apply_discovered_caps,
     raise_if_request_too_large,
 )
 from promptpotter.infrastructure.llm.request import ChatRequest
 from promptpotter.infrastructure.llm.response import LLMResponse
 from promptpotter.infrastructure.llm.spend_book import Billed, CallLabel
 from promptpotter.shared import truncate
-from promptpotter.shared.errors import (
-    ErrorCategory,
-    SendRefusedError,
-    is_provider_credit_refusal,
-)
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
@@ -101,6 +95,14 @@ def reply_served_by(response: ChatCompletion) -> str | None:
     return str(served) if served else None
 
 
+def reply_bill(response: ChatCompletion, *, model: str | None) -> Billed | None:
+    """The bill ONE round-trip's reply reports, or ``None`` where it reports no usage — a send
+    whose bill never came, never one that used nothing."""
+    if getattr(response, "usage", None) is None:
+        return None
+    return Billed(reply_usage(response), reply_cost(response), reply_served_by(response), model)
+
+
 def _finish_reason(response: ChatCompletion) -> str | None:
     return response.choices[0].finish_reason if getattr(response, "choices", None) else None
 
@@ -141,6 +143,104 @@ PROVIDER_DEFAULT_EFFORT = "default"
 """The rung that OMITS the field — ours, and the only one. Every other rung is a value the provider
 defines, ``none`` included, which means reasoning genuinely OFF rather than absent. Declared beside
 the sender because it is a wire fact: stated anywhere else, it goes out as a literal string."""
+
+
+def sent_effort(effort: str | None) -> str | None:
+    """The rung a request carries, in any spelling: none where the node set none or the rung that
+    omits the field."""
+    return None if effort == PROVIDER_DEFAULT_EFFORT else effort
+
+
+@dataclass(frozen=True)
+class ProviderSpec:
+    display_name: str  # e.g. "Groq" — used in error messages + logs
+    api_key_attr: str  # settings field holding the API key
+    base_url: str | None = None  # None ⇒ SDK default (OpenAI)
+    timeout: float | None = None
+    # Whether this provider is OpenRouter's gateway, answering its body extensions: `usage:
+    # {include: true}`, which itemizes what the call cost and how much of the prompt its cache
+    # served, and `provider.max_price`, which caps what any host may charge. False by default: an
+    # unknown body key is a 400 on the providers that lack the extensions.
+    gateway: bool = False
+
+
+def _gateway_body(
+    spec: ProviderSpec | None,
+    provider: str,
+    *,
+    route_order: Sequence[str] | None,
+    allow_fallbacks: bool,
+    max_price: PriceTier | None,
+    reasoning_effort: str | None,
+) -> dict[str, Any] | None:
+    """``None`` where ``provider`` is no gateway — the ONE place a route is refused there, for
+    every sender: a field that reaches no wire would still read as searched."""
+    if spec is None or not spec.gateway:
+        if route_order:
+            raise ValueError(
+                f"route_order names a gateway's hosts, and {provider!r} is not a gateway. Unset "
+                "it on the node, or name a gateway as its `provider`."
+            )
+        return None
+    body: dict[str, Any] = {"usage": {"include": True}}
+    route: dict[str, Any] = {}
+    if max_price is not None:
+        route["max_price"] = {
+            "prompt": max_price.input * 1_000_000,
+            "completion": max_price.output * 1_000_000,
+        }
+    # Hosts are the gateway's own `provider_name`, read off `served_by` on the ledger — never its
+    # catalogue, whose `supports_implicit_caching` misreports the hosts that do cache.
+    if route_order:
+        route |= {"order": list(route_order), "allow_fallbacks": allow_fallbacks}
+    if route:
+        body["provider"] = route
+    # The gateway's own spelling: a third party's sender drops the OpenAI-compatible top-level
+    # field for a model it does not list, and one rung may not travel two ways.
+    if (effort := sent_effort(reasoning_effort)) is not None:
+        body["reasoning"] = {"effort": effort}
+    return body
+
+
+def gateway_body(
+    spec: ProviderSpec | None,
+    provider: str,
+    *,
+    route_order: Sequence[str] | None,
+    reasoning_effort: str | None,
+    max_price: PriceTier | None,
+) -> dict[str, Any] | None:
+    """The body a send of OURS carries to a gateway. It is admitted at the dearest host its model
+    routes to, so a route keeps its fallbacks — a dead host degrades the route, not the run — and
+    ``max_price``, the price that hold was taken at, caps whichever host answers."""
+    return _gateway_body(
+        spec,
+        provider,
+        route_order=route_order,
+        allow_fallbacks=True,
+        max_price=max_price,
+        reasoning_effort=reasoning_effort,
+    )
+
+
+def cell_gateway_body(
+    spec: ProviderSpec | None,
+    provider: str,
+    *,
+    route_order: Sequence[str] | None,
+    reasoning_effort: str | None,
+) -> dict[str, Any] | None:
+    """The body a THIRD PARTY's sender carries inside a cell of ours. The cell is held at the
+    dearest of the hosts its route names (``LLMSpendBound.hosts``) and nothing here caps a host,
+    so no other may answer."""
+    return _gateway_body(
+        spec,
+        provider,
+        route_order=route_order,
+        allow_fallbacks=False,
+        max_price=None,
+        reasoning_effort=reasoning_effort,
+    )
 
 
 def _validation_summary(err: ValidationError, content: str, finish_reason: str | None) -> str:
@@ -200,23 +300,22 @@ class OpenAICompatibleClient(LLMClientBase):
             "route_order",
         }
     )
+    CREDIT_REFUSAL_STATUSES = frozenset({402, 403})
+    RATE_CAP_HEADERS = (OPENAI_RPM_HEADER, OPENAI_TPM_HEADER)
 
     def __init__(
         self,
         api_key: str,
         *,
         provider: str,
-        display_name: str,
-        base_url: str | None = None,
-        timeout: float | None = None,
+        spec: ProviderSpec,
         rate_limiter: RateLimiter | None = None,
-        gateway: bool = False,
     ):
-        super().__init__(provider=provider, display_name=display_name, rate_limiter=rate_limiter)
+        super().__init__(
+            provider=provider, display_name=spec.display_name, rate_limiter=rate_limiter
+        )
         self._api_key = api_key
-        self._base_url = base_url
-        self._timeout = timeout
-        self._gateway = gateway
+        self._spec = spec
         self._client: AsyncOpenAI | None = None
 
     def _ensure_client(self) -> AsyncOpenAI:
@@ -233,10 +332,10 @@ class OpenAICompatibleClient(LLMClientBase):
             # No SDK retries: a retried send is a second bill, so the one retry loop is the
             # admitted one (`LLMClientBase._admitted_send`), which knows which failures billed.
             kwargs: dict[str, Any] = {"api_key": self._api_key, "max_retries": 0}
-            if self._base_url:
-                kwargs["base_url"] = self._base_url
-            if self._timeout:
-                kwargs["timeout"] = self._timeout
+            if self._spec.base_url:
+                kwargs["base_url"] = self._spec.base_url
+            if self._spec.timeout:
+                kwargs["timeout"] = self._spec.timeout
             self._client = AsyncOpenAI(**kwargs)
         return self._client
 
@@ -266,7 +365,7 @@ class OpenAICompatibleClient(LLMClientBase):
         return landed if isinstance(landed, LLMResponse) else _llm_response(landed)
 
     async def _request_params(self, request: ChatRequest) -> dict[str, Any]:
-        reasoning_effort, seed, top_p = request.reasoning_effort, request.seed, request.top_p
+        seed, top_p = request.seed, request.top_p
         response_model, response_schema = request.response_model, request.response_schema
         request_params: dict[str, Any] = {
             "model": request.model,
@@ -275,21 +374,29 @@ class OpenAICompatibleClient(LLMClientBase):
         }
         if request.max_tokens is not None:
             request_params["max_tokens"] = request.max_tokens
+        # The price the call is admitted on (`base.py::_admitted_send`), so no host bills past it.
+        ceiling = await rate_ceiling(request.model, self._provider)
+        body = gateway_body(
+            self._spec,
+            self._provider,
+            route_order=request.route_order,
+            reasoning_effort=request.reasoning_effort,
+            max_price=None if ceiling is None else ceiling.dearest(),
+        )
         # Bounded reasoning is a survival guard (the openrouter/gpt-oss optimizer nodes blow the
-        # call deadline at unbounded effort); the OpenAI-compatible field is top-level. Omitted
-        # when unset so a provider that doesn't accept it never sees a null — and on
-        # `PROVIDER_DEFAULT_EFFORT`, the rung that MEANS omission.
-        if reasoning_effort is not None and reasoning_effort != PROVIDER_DEFAULT_EFFORT:
-            request_params["reasoning_effort"] = reasoning_effort
+        # call deadline at unbounded effort). Off a gateway the OpenAI-compatible field is
+        # top-level, omitted when unset so a provider that doesn't accept it never sees a null —
+        # and on `PROVIDER_DEFAULT_EFFORT`, the rung that MEANS omission.
+        if body is None and (effort := sent_effort(request.reasoning_effort)) is not None:
+            request_params["reasoning_effort"] = effort
         # Temperature 0 pins the distribution, not the draw — without a seed the provider is
         # still free to sample differently on identical input. Omitted when unset, same as above.
         if seed is not None:
             request_params["seed"] = seed
         if top_p is not None:
             request_params["top_p"] = top_p
-        extra_body = await self._extra_body(request.model, request.route_order)
-        if extra_body:
-            request_params["extra_body"] = extra_body
+        if body is not None:
+            request_params["extra_body"] = body
 
         wire_schema = response_schema or (
             response_model.model_json_schema() if response_model else None
@@ -307,39 +414,6 @@ class OpenAICompatibleClient(LLMClientBase):
                 },
             }
         return request_params
-
-    async def _extra_body(self, model: str, route_order: list[str] | None) -> dict[str, Any]:
-        # Ask for the cost + cache breakdown rather than hoping it rides along. Via `extra_body`
-        # because `create()` takes named params only: a bare `usage=` is a TypeError in the SDK,
-        # never a request the provider gets to answer.
-        extra_body: dict[str, Any] = {}
-        route: dict[str, Any] = {}
-        if self._gateway:
-            extra_body["usage"] = {"include": True}
-            # The price the call is admitted on (`pricing.py::rate_ceiling`), as the most any host
-            # may charge — so a host listed after the ceiling was read cannot bill past the hold.
-            if (ceiling := await rate_ceiling(model, self._provider)) is not None:
-                dearest = ceiling.dearest()
-                route["max_price"] = {
-                    "prompt": dearest.input * 1_000_000,
-                    "completion": dearest.output * 1_000_000,
-                }
-        # A provider's implicit prefix cache is per-REPLICA, so it pays only where ONE route is hit
-        # repeatedly. A throughput sort (`:nitro`) re-ranks per call, which on `deepseek-v4-flash`
-        # put three of four live optimizer calls on Baidu — an endpoint that never caches, measured
-        # at 0% over four consecutive identical prompts. Naming the hosts IN ORDER is the only
-        # deterministic lever; `allow_fallbacks` keeps a dead endpoint degrading the route rather
-        # than failing the run. Measured on the real l1_generate prompt: a pinned Alibaba held
-        # 77.4% capture across 31.7 min — wider than the gap the loop leaves between optimizer
-        # calls — against 0% scattered. Names are OpenRouter's own `provider_name`; read them off
-        # `served_by` in the ledger, never from the catalogue, and never gate on
-        # `supports_implicit_caching`, which reads False on 14 of 15 deepseek endpoints including
-        # the one measured at 96.7%.
-        if route_order:
-            route |= {"order": list(route_order), "allow_fallbacks": True}
-        if route:
-            extra_body["provider"] = route
-        return extra_body
 
     async def _climb_retry_ladder(
         self,
@@ -486,29 +560,23 @@ class OpenAICompatibleClient(LLMClientBase):
         re-validated by the caller. Beyond the send seam's retries, this layer intercepts only
         request-too-large, 404 model-not-found, a spent account and Groq's 400 quirk."""
 
-        async def send() -> LLMResponse | tuple[httpx.Headers, ChatCompletion]:
+        async def send() -> tuple[object | None, LLMResponse | ChatCompletion]:
             try:
                 raw = await client.chat.completions.with_raw_response.create(**request_params)
             except Exception as exc:
                 recovered = self._try_recover_from_chat_error(exc, request_params, response_model)
                 if recovered is None:
                     raise
-                return recovered
+                return None, recovered
             return raw.headers, raw.parse()
 
-        def billed(reply: LLMResponse | tuple[httpx.Headers, ChatCompletion]) -> Billed | None:
+        def billed(reply: LLMResponse | ChatCompletion) -> Billed | None:
             if isinstance(reply, LLMResponse):
                 # A salvaged 400 was generated, and billed, but its body reports no usage.
                 return None
-            response = reply[1]
-            return Billed(
-                reply_usage(response),
-                reply_cost(response),
-                reply_served_by(response),
-                response.model,
-            )
+            return reply_bill(reply, model=reply.model)
 
-        reply = await self._admitted_send(
+        response = await self._admitted_send(
             label,
             model=request_params["model"],
             messages=request_params["messages"],
@@ -519,15 +587,8 @@ class OpenAICompatibleClient(LLMClientBase):
             send=send,
             billed=billed,
         )
-        if isinstance(reply, LLMResponse):
-            return reply
-        headers, response = reply
-        apply_discovered_caps(
-            self._rate_limiter,
-            headers,
-            rpm_header=OPENAI_RPM_HEADER,
-            tpm_header=OPENAI_TPM_HEADER,
-        )
+        if isinstance(response, LLMResponse):
+            return response
 
         if not response.choices:
             raise ValueError(f"{self._provider_name} returned empty choices")
@@ -547,16 +608,10 @@ class OpenAICompatibleClient(LLMClientBase):
         request_params: dict[str, Any],
         response_model: type[BaseModel] | None,
     ) -> LLMResponse | None:
-        """Known-error translation: too-large, 404 and a spent account raise clearer, Groq
-        json_validate_failed salvages, else ``None`` ⇒ re-raise."""
+        """Known-error translation: too-large and 404 raise clearer, Groq json_validate_failed
+        salvages, else ``None`` ⇒ re-raise."""
         raise_if_request_too_large(exc, self._provider_name)
-        status = getattr(exc, "status_code", None)
-        if status in (402, 403) and is_provider_credit_refusal(str(exc)):
-            raise SendRefusedError(
-                f"{self._provider_name} refused the call for lack of credit: {str(exc)[:300]}",
-                category=ErrorCategory.PROVIDER_CREDIT,
-            ) from exc
-        if status == 404:
+        if getattr(exc, "status_code", None) == 404:
             model_name = request_params.get("model", "unknown")
             raise ValueError(
                 f"Model '{model_name}' not found on {self._provider_name}. "
@@ -573,7 +628,10 @@ __all__ = [
     "PROVIDER_DEFAULT_EFFORT",
     "PROVIDER_REQUEST_PARAMS",
     "OpenAICompatibleClient",
+    "gateway_body",
+    "reply_bill",
     "reply_cost",
     "reply_served_by",
     "reply_usage",
+    "sent_effort",
 ]

@@ -14,7 +14,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application.datasets.loaders import build_dataset_run_data
-from promptpotter.application.run_phase_control import pause_requested
 from promptpotter.application.scoring.metrics import ScoreSummary, compute_composite_fitness
 from promptpotter.application.scoring.query_loop import QueryLoopState, Walk, WalkEnd, run_walks
 from promptpotter.domain.measurement_provenance import REUSABLE_MIN_GRADE, grade_run, meets_grade
@@ -233,7 +232,7 @@ async def _claim_cell(
                         detail_fn=lambda: "another run is measuring this cell",
                     )
                 )
-            if pause_requested(session):
+            if session.control.pause_requested():
                 raise asyncio.CancelledError("claim wait aborted by a pause")
             await asyncio.sleep(_CLAIM_POLL_S)
     finally:

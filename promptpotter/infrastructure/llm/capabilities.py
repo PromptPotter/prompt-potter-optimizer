@@ -115,17 +115,18 @@ def _card(model: str, entry: dict[str, Any], fetched_at: str) -> dict[str, Any]:
     """The provider's own description of a model, projected onto :class:`ModelCapability`'s card
     half. Every field optional: a catalogue that drops one must degrade the card, never raise
     inside a resolve the caller already committed to."""
-    pricing = entry.get("pricing") if isinstance(entry.get("pricing"), dict) else {}
-    top = entry.get("top_provider") if isinstance(entry.get("top_provider"), dict) else {}
-    arch = entry.get("architecture") if isinstance(entry.get("architecture"), dict) else {}
+    pricing, top, arch = (
+        part if isinstance(part := entry.get(key), dict) else {}
+        for key in ("pricing", "top_provider", "architecture")
+    )
     return {
         "display_name": str(entry.get("name") or ""),
         "context_length": _as_int(entry.get("context_length")),
-        "max_output_tokens": _as_int((top or {}).get("max_completion_tokens")),
-        "input_usd_per_mtok": _as_float((pricing or {}).get("prompt")),
-        "output_usd_per_mtok": _as_float((pricing or {}).get("completion")),
-        "modality": str((arch or {}).get("modality") or ""),
-        "moderated": (top or {}).get("is_moderated") if isinstance(top, dict) else None,
+        "max_output_tokens": _as_int(top.get("max_completion_tokens")),
+        "input_usd_per_mtok": _as_float(pricing.get("prompt")),
+        "output_usd_per_mtok": _as_float(pricing.get("completion")),
+        "modality": str(arch.get("modality") or ""),
+        "moderated": top.get("is_moderated"),
         "fetched_at": fetched_at,
     }
 
