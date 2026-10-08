@@ -256,6 +256,28 @@ an untyped dict.
 
 ## Blocked — named blocker
 
+- **The stored-shape batch — every item below changes what a round file, ledger record or cache
+  holds, and lands as ONE pass with the workspace wipe.** **Blocker:** the workspace must stay
+  loadable for the demo. **Re-test:** `ls .promptpotter/projects/*/campaigns` is empty.
+  - *Authorship.* The author's display name is stored beside `issued_by`, so "Steered by" stops
+    serving the issuer id; the authoring act and issuer ride the candidate's ledger record
+    (`authorship_of` reads every C0 as `origin`).
+  - *Round document.* `RoundResult.health` is required (`generation_only.py` writes `None`, and
+    `dispatch/facade.py` tolerates it); `RoundResult.subset_mode`; `RuntimeFailure.node`;
+    `ability.unlinked` / `pinned_share`; a ledger discriminator for restamped rounds;
+    `creativity` → `temperature` in stored `l1_overrides`.
+  - *Served rows that re-derive.* The crown on `DashboardCandidate` / `ScoreboardRow`;
+    `reference_lift_side` on `ScoreboardRow` (then `liftSeparates` goes); the headline pick on the
+    stored `BenchScore`; `LiveDashboardState.champion`; `electable_count` + `overlap` on
+    `ElectionRecord`; `verdict` on `PanelPrecision`; `RunSpendView` nests `MeteredSpend`.
+  - *Race lineage.* The race parent id `R{n}_winner` becomes the lineage id (the ELIMINATION_CUT /
+    LEADER_LOCK_IN records, `race_catch_up`, `elimination_context`).
+  - *Cell identity.* Harbor's `_REASONING_CHANNEL` still spells `openrouter:` and is hashed into
+    every harbor cell; `.cache/model_capabilities.json` stores a catalogue `pricing` nothing reads.
+  - *Seams.* `spawn.py`'s sixth site + `prepare_fresh_cycle(arm=)`; the identity follow-up seam;
+    the webapp's poll, fork-dialog and compare seams.
+  The per-item write-ups are `.scratch/root-hunt/*.md`.
+
 - **`infrastructure/llm/anthropic.py::AnthropicClient` cannot run an optimizer node on a current
   Claude model.** It refuses a set `reasoning_effort` (no mapping onto `output_config.effort`),
   sends `temperature` on every call (current Claude models reject sampling parameters), never

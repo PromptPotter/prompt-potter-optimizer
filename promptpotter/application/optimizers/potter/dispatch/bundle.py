@@ -244,12 +244,9 @@ class RoundDigest:
     node_failure_rates: dict[str, float] = field(default_factory=dict)
     # Which samples THIS round scored — the freshness key for ``sample_transcripts``.
     latest_sample_ids: frozenset[Any] = field(default_factory=frozenset)
-    # The round BEFORE this one, for "did the subset move?". Filled in `build_bundle`, the one
-    # place that knows which round is under render on each path.
+    # The round BEFORE this one, for "did the subset move?".
     prev_sample_ids: frozenset[Any] = field(default_factory=frozenset)
-    # THIS round's numbers. `build_bundle(cycle, latest_round=…)` runs before `absorb_round` folds
-    # the round into `cycle`, whose own tracking is therefore a round behind on the critique.
-    # Every panel that states an objective or a precision reads these.
+    # THIS round's numbers: every panel that states an objective or a precision reads these.
     composite_fitness: float | None = None
     evaluators: dict[str, float] = field(default_factory=dict)
     ability: AbilityReading | None = None
@@ -293,8 +290,7 @@ class InjectionBundle:
     # `hard_samples.json`'s δ is re-fitted and re-anchored on every regeneration, so it moves
     # under the reader. Empty while the ruler is still cold.
     ruler: DeltaRuler | None = None
-    # Every round measured so far, the one under render LAST on every path — the critique's own
-    # round included, which is the round it is asked about. Each carries its parent prompt, every
+    # Every round measured so far, the one under render LAST. Each carries its parent prompt, every
     # candidate's evolved one and both sides' rows, so "what was tried, how did it score and which
     # of the parent's solved cells did it break" is a diff away.
     measured_rounds: list[RoundResult] = field(default_factory=list)

@@ -236,7 +236,7 @@ class L1Critique:
                 campaign_id=session.state.tracing_campaign_id,
                 round_num=ctx.round_num,
             ):
-                critique = await run_l1_critique(ctx.cycle, potter_state(ctx.state), round_result)
+                critique = await run_l1_critique(ctx.cycle, potter_state(ctx.state))
             round_result.optimizer_state.payload_as(PotterRoundState).critique = critique
 
 

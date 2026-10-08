@@ -470,8 +470,8 @@ async def execute_round(
     is_final_round: bool = False,
 ) -> tuple[RoundResult, StopReason | None]:
     """The round, and the budget stop that cut its measurement short — a cut round is the run's
-    last. The runner folds the result in via ``absorb_round``; this never mutates ``Cycle``. On
-    the final round the adapters are skipped: they write for a NEXT round."""
+    last. The cycle absorbs the round once it has elected, so the adapters read the cycle it
+    left. On the final round they are skipped: they write for a NEXT round."""
     session = cycle.session
     obs = session.state.obs
     plan = round_plan(cycle.optimizer)
@@ -552,13 +552,14 @@ async def execute_round(
     # The election, banked AFTER the panel gate: a round halted on a holed panel is unwound and
     # re-run, so crowning it would put a winner on the timeline for a round that never stood.
     callbacks.on_election(round_result)
+    cycle.absorb_round(round_result)
 
     # The 1-to-1 series, measured WHILE the adapters run — every decision this round makes is
     # already made, and the fields it writes sit outside `results` / `all_candidate_results`.
     overlap = asyncio.create_task(measure_overlap(cycle, round_result, pool))
     try:
         round_result.diagnostics = compute_round_diagnostics(
-            round_result, [*cycle.rounds, round_result], session.pipeline_schema
+            round_result, cycle.rounds, session.pipeline_schema
         )
         # A zero-candidate round leaves `results` holding the parent's rows: there is nothing to
         # adapt to. And an adapter writes for the NEXT round, so none runs when no round follows —

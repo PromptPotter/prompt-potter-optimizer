@@ -159,7 +159,6 @@ async def run_round_loop(
             round_result, cut = await execute_round(
                 cycle, round_num, dataset, cb, is_final_round=is_final_round
             )
-            cycle.absorb_round(round_result)
             open_round = None
             await post_round(
                 cycle,

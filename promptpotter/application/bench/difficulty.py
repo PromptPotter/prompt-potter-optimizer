@@ -302,8 +302,7 @@ class DifficultyView:
         )
 
     def frontier(self, results: list[dict[str, Any]]) -> StampedReading:
-        """The frontier's reading on this scale. A caller reading ability before its round is
-        absorbed computes what absorb will stamp, rather than a second one."""
+        """The frontier's reading on this scale."""
         return self._stamp(_cumulative_theta(results, self.ruler), results)
 
     def calibrate(

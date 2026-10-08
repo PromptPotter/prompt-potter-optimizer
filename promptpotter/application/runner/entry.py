@@ -850,7 +850,7 @@ def _finalize_run(
 ) -> str | None:
     """Returns the Langfuse trace id from the terminal ``end_campaign`` emit (``None`` when
     no tracing bridge is active) so the caller can stamp it onto the returned ``CycleResult``.
-    *open_round* is the round the stop left unabsorbed, ``None`` for a stop at a boundary.
+    *open_round* is the round the stop left unclosed, ``None`` for a stop at a boundary.
     """
     stop_reason = cycle_result.stop_reason
     info = STOP_REASON_INFO[stop_reason]

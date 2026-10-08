@@ -1097,9 +1097,8 @@ def test_a_round_the_budget_cuts_elects_on_the_cells_it_paid_for(
             )
         )
     else:
-        first, cut = asyncio.run(execute_round(cycle, 1, search, _QUIET_CALLBACKS))  # type: ignore[arg-type]
+        _, cut = asyncio.run(execute_round(cycle, 1, search, _QUIET_CALLBACKS))  # type: ignore[arg-type]
         assert cut is None
-        cycle.absorb_round(first)
 
     paid.clear()
 
@@ -1155,7 +1154,7 @@ def test_the_bench_grades_the_pick_the_optimizer_declared_over_a_higher_composit
     monkeypatch.setattr(paper_templates, "llm_call", _llm)
     session = cycle.session
     search = list(session.scoring.require_partition().search)
-    picked = cycle.absorb_round(asyncio.run(execute_round(cycle, 1, search, _QUIET_CALLBACKS))[0])  # type: ignore[arg-type]
+    picked = asyncio.run(execute_round(cycle, 1, search, _QUIET_CALLBACKS))[0]  # type: ignore[arg-type]
     assert (
         picked.selected_labels and picked.composite_fitness < cycle.origin_round.composite_fitness
     )

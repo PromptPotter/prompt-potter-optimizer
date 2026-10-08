@@ -660,8 +660,8 @@ class Selector(NodeMember, Protocol):
 
 
 class Adapter(NodeMember, Protocol):
-    """An ``llm`` node after the selector: it reads the closed round and writes into its
-    ``optimizer_state`` for the next one."""
+    """An ``llm`` node after the selector: it reads the round the cycle just absorbed and writes
+    into its ``optimizer_state`` for the next one."""
 
     async def adapt(self, ctx: RoundContext, round_result: RoundResult) -> None: ...
 

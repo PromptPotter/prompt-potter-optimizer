@@ -25,7 +25,6 @@ from promptpotter.shared.errors import SendRefusedError, graceful
 if TYPE_CHECKING:
     from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.optimizers.potter.state import PotterState
-    from promptpotter.domain.results import RoundResult
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +68,7 @@ async def ensure_prior_critique(cycle: Cycle, state: PotterState) -> None:
     last: Exception | None = None
     for attempt in range(1, CRITIQUE_RESEND_ATTEMPTS + 1):
         try:
-            payload.critique = await run_l1_critique(cycle, state, prior)
+            payload.critique = await run_l1_critique(cycle, state)
             break
         # A refused send — an empty account, a quota, the ceiling — is decided: re-sent, it is
         # refused again, and swallowed it halts as a PAUSE that `resume` re-enters forever.
@@ -108,12 +107,10 @@ async def ensure_prior_critique(cycle: Cycle, state: PotterState) -> None:
     logger.info("Round %d critique distilled late; this round's generator reads it.", prior.round)
 
 
-async def run_l1_critique(
-    cycle: Cycle, state: PotterState, round_result: RoundResult
-) -> CritiqueReadout:
-    """Build the critique from pipeline stats + LLM analysis. The output is materialized to a dict so persistence does not
-    drag Pydantic into the domain serialization path."""
-    bundle = build_bundle(cycle, state, latest_round=round_result)
+async def run_l1_critique(cycle: Cycle, state: PotterState) -> CritiqueReadout:
+    """The critique of the cycle's last round. The output is materialized to a dict so persistence
+    does not drag Pydantic into the domain serialization path."""
+    bundle = build_bundle(cycle, state)
     filled = DispatchHub.fill(load_optimizer_prompt("l1_critique"), bundle, node="l1_critique")
 
     result, _prompt, _repairs = await run_optimizer_node(
@@ -123,7 +120,7 @@ async def run_l1_critique(
         response_model=L1CritiqueOutput,
         context=LLMCallContext(
             ledger=cycle.session.state.ledger,
-            round_num=round_result.round,
+            round_num=cycle.rounds[-1].round,
             cache=cycle.session.store.optimizer_reuse,
             injections=filled.breakdown,
         ),

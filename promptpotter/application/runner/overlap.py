@@ -37,8 +37,8 @@ async def measure_overlap(
     """Put the whole best-so-far line back on the origin panel, buying only the cells each member
     is missing, and stamp the reading onto *round_result*.
 
-    Called after the election, the ruler extension and the panel gate, so every pick this
-    round makes is already made before the first of these cells is bought. That ordering IS the
+    Called after the election, the ruler extension, the panel gate and the cycle's fold, so every
+    pick this round makes is already made before the first of these cells is bought. That ordering IS the
     quarantine; the fields it writes are outside `results` / `all_candidate_results` so the NEXT
     round's acquisition, ruler and floor cannot see them either.
 
@@ -48,7 +48,7 @@ async def measure_overlap(
     if round_result.opt_sp is None:
         return
     # The line INCLUDING this round, which may have made its own result the new best.
-    steps = best_line([*cycle.rounds, round_result])
+    steps = best_line(cycle.rounds)
     if len(steps) < 2:
         return  # C0 alone — there is nothing yet to read it against
     ordered = sorted(steps, key=lambda s: s.round)

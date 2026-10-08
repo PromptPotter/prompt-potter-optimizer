@@ -11,7 +11,7 @@ import logging
 import sys
 from collections.abc import Iterator
 from dataclasses import replace
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from promptpotter.application.bench.llm_call import InjectionBreakdown
 from promptpotter.application.optimizer_manifest import bound_inner_optimizer
@@ -55,7 +55,6 @@ from promptpotter.application.optimizers.potter.records import PotterRoundState
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
 from promptpotter.domain import ruler
 from promptpotter.domain.opt_search_point import TEMPLATE_TOKEN_RE, PromptTemplate
-from promptpotter.domain.results import merge_known_outcomes
 from promptpotter.infrastructure.llm.telemetry import (
     emit_round_warning,
     reset_cycle_ledger,
@@ -280,11 +279,9 @@ def node_packages(bundle: InjectionBundle) -> dict[str, str]:
     return out
 
 
-def _arm_digests(latest_round: RoundResult | None) -> tuple[ArmDigest, ...]:
+def _arm_digests(latest_round: RoundResult) -> tuple[ArmDigest, ...]:
     """This round's arms, narrowed. Ranked as the round ranked them, so a panel quoting "the
     leader" and the election never disagree about which arm that was."""
-    if latest_round is None:
-        return ()
     return tuple(
         ArmDigest(
             label=c.label,
@@ -299,22 +296,16 @@ def _arm_digests(latest_round: RoundResult | None) -> tuple[ArmDigest, ...]:
     )
 
 
-def build_bundle(
-    cycle: Cycle,
-    state: PotterState,
-    *,
-    latest_round: RoundResult | None = None,
-) -> InjectionBundle:
-    """Snapshot cycle state for one optimizer LLM call. Pass *latest_round* explicitly for L1_CRITIQUE
-    (the just-completed round isn't folded into ``cycle.rounds`` until critique fires); L2/L3 omit it."""
-    if latest_round is None and cycle.rounds:
-        latest_round = cycle.rounds[-1]
-    latest_diag = latest_round.diagnostics if latest_round else None
-    latest_state = (
-        latest_round.optimizer_state.payload_as(PotterRoundState) if latest_round else None
-    )
-    latest_crit = latest_state.critique if latest_state else None
-    round_num = latest_round.round + 1 if latest_round else 1
+def _sample_ids(round_result: RoundResult) -> frozenset[Any]:
+    return frozenset(sid for r in round_result.results if (sid := r.get("sample_id")) is not None)
+
+
+def build_bundle(cycle: Cycle, state: PotterState) -> InjectionBundle:
+    """Snapshot cycle state for one optimizer LLM call. The round under render is the cycle's last
+    on every node: the bench folds a round in before any node reads it."""
+    *prior, latest_round = cycle.rounds
+    latest_state = latest_round.optimizer_state.payload_as(PotterRoundState)
+    health = latest_round.health
 
     current_sp = cycle.tracking.current_sp
     current_pp = current_sp.pipeline_params if current_sp is not None else None
@@ -324,12 +315,9 @@ def build_bundle(
     )
     knobs = potter_knobs(cycle.optimizer)
     esc = state.escalation
-    closed = list(cycle.rounds)
-    if latest_round is not None and (not closed or closed[-1].round != latest_round.round):
-        closed.append(latest_round)
-    stall_depth = l1_stall_depth(closed)
+    stall_depth = l1_stall_depth(cycle.rounds)
     cs = CycleSlice(
-        round_num=round_num,
+        round_num=latest_round.round + 1,
         l1_stall_depth=stall_depth,
         l2_round=esc.l2_round,
         l2_stall_count=esc.l2_stall_count,
@@ -355,22 +343,10 @@ def build_bundle(
     # WHOLE — the failure panels take the misses out of it themselves, and `answer_distribution`
     # needs the hits to see a pipeline that has collapsed onto a single label.
     origin_per_sample = list(cycle.origin_round.results)
-    # `absorb_round` folds a round into `tracking.current_results` only AFTER the critique call,
-    # so a node whose prompt opens "Read the measurements above" was handed the pool as of the
-    # PREVIOUS round and never its own. Same merge absorb will apply, over a local snapshot —
-    # L2/L3 pass no round and re-merge one already absorbed, which replaces rows with themselves.
-    latest_results = list(latest_round.results) if latest_round else []
-    trajectory_results = merge_known_outcomes(list(cycle.tracking.current_results), latest_results)
-    # The frontier absorb is about to fit, fit here over the same merge — so the ability the
-    # prompt states and the ability the round document banks are one computation.
+    trajectory_results = list(cycle.tracking.current_results)
+    # Read off the view rather than `latest_round.ability`: the two counts beside the reading are
+    # the stamp's own operands, and no round banks them.
     frontier = cycle.difficulty.frontier(trajectory_results)
-    # The round before *latest_round*, whichever path we are on: `cycle.rounds[-1]` IS
-    # `latest_round` on the generate/L2/L3 path and the round before it on critique. Resolved
-    # once here so "did the subset move?" cannot be right on one path and wrong on the other.
-    prior = [r for r in cycle.rounds if r is not latest_round]
-    prev_sample_ids = frozenset(
-        sid for r in (prior[-1].results if prior else []) if (sid := r.get("sample_id")) is not None
-    )
 
     bundle = InjectionBundle(
         opt_sp=cycle.opt_sp,
@@ -379,24 +355,14 @@ def build_bundle(
         pipeline_schema=cycle.session.pipeline_schema,
         cycle_slice=cs,
         digest=RoundDigest(
-            diagnostics=latest_diag,
-            critique=latest_crit,
-            l1_yield=latest_state.l1_yield if latest_state else 1.0,
-            node_failure_rates=(
-                latest_round.health.node_failure_rates
-                if latest_round and latest_round.health
-                else {}
-            ),
-            latest_sample_ids=frozenset(
-                sid for r in latest_results if (sid := r.get("sample_id")) is not None
-            ),
-            prev_sample_ids=prev_sample_ids,
-            composite_fitness=latest_round.composite_fitness if latest_round else None,
-            evaluators=dict(latest_round.evaluators) if latest_round else {},
-            # From the CYCLE, never from *latest_round*: `absorb_round` stamps the reading onto the
-            # round document only AFTER the critique call, so on that path the round still reads
-            # cold. The cycle owns the ruler and absorb copies from it, so this is the same number
-            # one step earlier and cannot be right on one path and wrong on the other.
+            diagnostics=latest_round.diagnostics,
+            critique=latest_state.critique,
+            l1_yield=latest_state.l1_yield,
+            node_failure_rates=health.node_failure_rates if health else {},
+            latest_sample_ids=_sample_ids(latest_round),
+            prev_sample_ids=_sample_ids(prior[-1]) if prior else frozenset(),
+            composite_fitness=latest_round.composite_fitness,
+            evaluators=dict(latest_round.evaluators),
             ability=frontier.ability,
             unlinked=frontier.unlinked,
             pinned_share=frontier.pinned_share,
@@ -406,11 +372,7 @@ def build_bundle(
         origin_per_sample=origin_per_sample,
         trajectory_results=trajectory_results,
         ruler=cycle.difficulty.ruler,
-        # Every round that MEASURED, the one being critiqued included where there is one. Empty on
-        # the paths that pass none — `l1_generate`, L2 and L3 — would blank the ALREADY TRIED panel
-        # for the life of a cycle while `detect_invariants` went on rejecting a repeat off the same
-        # history: L1 punished for re-proposing an idea it was never shown had been tried.
-        measured_rounds=[*prior, latest_round] if latest_round is not None else prior,
+        measured_rounds=list(cycle.rounds),
         prompt_block_catalogue=knobs.l1_generate.prompt_block_catalogue,
         earned_blocks=state.earned_blocks,
         rebase_capability=knobs.escalation.rebase_capability,

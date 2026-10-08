@@ -139,10 +139,9 @@ POTTER_REPLAYERS: dict[str, Replayer] = {
 }
 
 
-def _seat_before(cycle: Cycle, rounds: list[RoundResult], rr: RoundResult) -> PotterState:
-    """Re-seat the cycle where *rr*'s nodes read it: on the rounds closed before it. Round 0 is
-    the origin's own measurement, which ``Cycle.start`` seats before any node runs."""
-    cycle.replay_priors([p for p in rounds if p.round < rr.round] or rounds[:1])
+def _seat_on(cycle: Cycle, rounds: list[RoundResult], rr: RoundResult) -> PotterState:
+    """Re-seat the cycle where *rr*'s critique read it: on the rounds up to *rr*, *rr* the last."""
+    cycle.replay_priors([*(p for p in rounds if p.round < rr.round), rr])
     return potter_state(cycle.working_state)
 
 
@@ -152,8 +151,7 @@ def round_packages(cycle: Cycle, rounds: list[RoundResult]) -> dict[int, dict[st
 
     out: dict[int, dict[str, str]] = {}
     for rr in rounds:
-        state = _seat_before(cycle, rounds, rr)
-        out[rr.round] = node_packages(build_bundle(cycle, state, latest_round=rr))
+        out[rr.round] = node_packages(build_bundle(cycle, _seat_on(cycle, rounds, rr)))
     cycle.replay_priors(rounds)  # leave the caller the full trajectory it walked in with
     return out
 
@@ -173,13 +171,13 @@ async def rederive_critiques(
             payload = rr.optimizer_state.payload_as(PotterRoundState)
             if not payload.critique or rr.round == 0:
                 continue
-            state = _seat_before(cycle, saved, rr)
+            state = _seat_on(cycle, saved, rr)
             # `emit_token_usage` stamps from this ContextVar, which outside the round loop
             # still holds whatever the last round set.
             token = set_current_round(rr.round)
             try:
                 with graceful(f"round {rr.round} critique re-derivation failed"):
-                    payload.critique = await run_l1_critique(cycle, state, rr)
+                    payload.critique = await run_l1_critique(cycle, state)
                     campaign_store.save_round_file(hop, rr)
                     logger.warning(
                         "Round %d critique re-distilled: its input package drifted when the "

@@ -250,6 +250,10 @@ class Cycle:
             optimizer_state=self.origin_round.optimizer_state,
             stamps_theta=self.origin_round.stamps_theta,
         )
+        tr = self.tracking
+        tr.current_results = list(parent.results)
+        tr.current_accuracy = parent.report.accuracy
+        tr.current_composite_fitness = parent.report.composite_fitness
 
     def replay_priors(self, priors: list[RoundResult]) -> None:
         """RE-RUNNABLE: rounds at or after *priors*' first number are REPLACED, and the frontier
@@ -297,8 +301,8 @@ class Cycle:
         if self.difficulty.calibrate(measured, self.rounds):
             self.origin_restamped = True
 
-    def absorb_round(self, rr: RoundResult) -> RoundResult:
-        """Sole sink for a finished round; returns the round, stamped for ``save_round_file``."""
+    def absorb_round(self, rr: RoundResult) -> None:
+        """Sole sink for an elected round, which it stamps for ``save_round_file``."""
         schema = self.session.pipeline_schema
         tr = self.tracking
 
@@ -327,4 +331,3 @@ class Cycle:
         rr.ability = self.difficulty.frontier(tr.current_results).ability
         rr.opt_sp = self.opt_sp
         self.working_state.absorb(rr)
-        return rr
