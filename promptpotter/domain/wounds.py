@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import enum
 import json
+from collections.abc import Iterable
 from typing import Annotated, Any
 
 from pydantic import ConfigDict, Field
@@ -93,6 +94,12 @@ class ValidationFailure(StrictModel):
     )
 
 
+def collapse_reason(failures: Iterable[ValidationFailure]) -> str | None:
+    """The ``INVARIANT_REASONS`` member that collapsed a proposal, ``None`` where none did. One
+    per proposal, or the collapse counts would sum past the population."""
+    return next((vf.reason for vf in failures if vf.reason in INVARIANT_REASONS), None)
+
+
 class RuntimeFailure(StrictModel):
     """Post-eval degradation evidence, per-candidate.
 
@@ -167,5 +174,6 @@ __all__ = [
     "NurseOwner",
     "RuntimeFailure",
     "ValidationFailure",
+    "collapse_reason",
     "rf_dedup_key",
 ]

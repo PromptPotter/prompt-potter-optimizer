@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.results import ArmOutcome, resolved_fitness, scoreboard_rank_key
-from promptpotter.domain.wounds import INVARIANT_REASONS
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -189,10 +188,8 @@ def _scoreboard(
 ) -> str:
     """Δ is blank where a row has no matched floor — the full-set rate is a different basis,
     not a fallback. ``theta`` is the selector's own declaration that it fits one per arm."""
-    # Filter synthetic-zeroed variants (no_op / duplicate) — they did not burn an LLM call
-    # and ranking them as 0.0% delta distorts the verdict. The set is imported, never
-    # re-spelled: it belongs to the validator that EMITS these reasons.
-    scored = [s for s in candidate_scores if s.invalid_reason not in INVARIANT_REASONS]
+    # A collapsed proposal burned no LLM call, and ranking it at 0.0% distorts the verdict.
+    scored = [s for s in candidate_scores if s.collapsed_by is None]
     if not scored:
         return ""
 

@@ -32,9 +32,10 @@ from promptpotter.application.views.view_models import (
 from promptpotter.domain.candidate_diff import build_candidate_flat, flatten_sp_summary
 from promptpotter.domain.dashboard_rows import RunStanding
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
-from promptpotter.domain.results import ArmOutcome, ScoredCandidate
+from promptpotter.domain.results import ScoredCandidate
 from promptpotter.domain.ruler import is_flat_ruler_id
 from promptpotter.domain.spend import MeteredSpend
+from promptpotter.domain.wounds import collapse_reason
 from promptpotter.shared import truncate
 
 __all__ = [
@@ -245,7 +246,7 @@ def run_spend_view(
 
 
 def _select_exit(d: dict[str, Any], ctx: ViewContext) -> RoundCompleteView:
-    score_entries = [score_entry_from_dict(s) for s in d.get("candidate_scores") or []]
+    score_entries = [score_entry(sc) for sc in d["candidate_scores"]]
 
     # The selected arm's label straight off the round result, never re-chosen by a point estimate
     # here — that could name a different candidate than the one the selector kept, so the verdict
@@ -347,15 +348,9 @@ def from_phase_event(event: PhaseEvent, ctx: ViewContext) -> AnyView | None:
 # --- score-entry helpers ---
 
 
-def score_entry_from_dict(s: dict[str, Any]) -> ScoreEntry:
-    """``ScoredCandidate`` dict → the narrow renderer row. The interval is the COMPOSITE CI, which brackets the number the
-    row reports — the old Wilson pair bracketed a binary hit rate nothing displayed."""
-    sc = ScoredCandidate.model_validate(s)
-    invalid_reason: str | None = None
-    if sc.outcome is ArmOutcome.INVALID and sc.validation_failures:
-        first = sc.validation_failures[0]
-        reason = first.get("reason") if isinstance(first, dict) else None
-        invalid_reason = str(reason) if reason else None
+def score_entry(sc: ScoredCandidate) -> ScoreEntry:
+    """The narrow renderer row of one arm. The interval is the COMPOSITE CI, which brackets the
+    number the row reports."""
     return ScoreEntry(
         label=sc.label,
         accuracy=sc.accuracy,
@@ -366,7 +361,7 @@ def score_entry_from_dict(s: dict[str, Any]) -> ScoreEntry:
         mean_fitness_ci_lo=sc.mean_fitness_ci_lo,
         mean_fitness_ci_hi=sc.mean_fitness_ci_hi,
         outcome=sc.outcome,
-        invalid_reason=invalid_reason,
+        collapsed_by=collapse_reason(sc.validation_failures),
         reference_accuracy=sc.reference_accuracy,
         reference_composite=sc.reference_composite,
         theta=sc.theta,

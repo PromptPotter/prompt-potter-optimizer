@@ -27,6 +27,7 @@ from promptpotter.domain.wounds import (
     INVARIANT_REASONS,
     RuntimeFailure,
     ValidationFailure,
+    collapse_reason,
 )
 from promptpotter.shared.errors import ConflictError, is_error_result
 from promptpotter.shared.hashing import shapes_optimizer_prompt
@@ -496,10 +497,7 @@ def proposal_collapses(proposals: Sequence[CandidateProposal]) -> dict[str, int]
     """``invariant_collapses`` as the round is proposed, off each proposal's own failures."""
     counts: dict[str, int] = {}
     for cp in proposals:
-        reason = next(
-            (vf.reason for vf in cp.validation_failures if vf.reason in INVARIANT_REASONS), None
-        )
-        if reason:
+        if reason := collapse_reason(cp.validation_failures):
             counts[reason] = counts.get(reason, 0) + 1
     return counts
 

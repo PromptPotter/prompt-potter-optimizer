@@ -495,7 +495,7 @@ async def execute_round(
         improved=round_result.improved,
         verdict_reason=round_result.verdict_reason,
         p_value=round_result.p_value,
-        candidate_scores=[c.model_dump() for c in round_result.candidate_scores],
+        candidate_scores=round_result.candidate_scores,
         winner_reference_accuracy=next(
             (s.reference_accuracy for s in round_result.selected_scores), None
         ),

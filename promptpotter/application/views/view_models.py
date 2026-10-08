@@ -246,9 +246,9 @@ class ScoreEntry:
     # Carried because the display RANKS on it (`domain/results.py::scoreboard_rank_key`) and a
     # view cannot demote what it was never told.
     outcome: ArmOutcome
-    # First-validation-failure reason for synthetic-zeroed variants (e.g. ``no_op_variant``);
-    # scoreboard suppresses these rows so ranking reflects mutated candidates only.
-    invalid_reason: str | None = None
+    # The invariant that collapsed this proposal (``wounds.py::collapse_reason``); the scoreboard
+    # drops such a row, which burned no call and would rank on a synthetic 0.0.
+    collapsed_by: str | None = None
     # The origin as this row's comparison floor. ``None`` unless the row covered the origin's
     # whole panel — a prefix rate is decided by where PoBB stopped the candidate, not by its
     # answers (`scoring/metrics.py::matched_parent_stats`) — which is NOT the same as 0.0.
