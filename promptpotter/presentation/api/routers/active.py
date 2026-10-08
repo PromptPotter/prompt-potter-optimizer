@@ -22,7 +22,7 @@ from promptpotter.application.pipeline_resolve import measurement_node
 from promptpotter.config.settings import settings
 from promptpotter.domain.cycle_listing import CycleListEntry
 from promptpotter.domain.pipeline_schema import (
-    ModelCapability,
+    CapabilityMenu,
     NodeConfigParam,
     NodeOutputSchema,
     NodeReach,
@@ -254,7 +254,7 @@ class OptimizerPipelineResponse(StrictModel):
         "knobs through the canonical config element rather than a chip and a JSON dump"
     )
     node_output_schema: dict[str, NodeOutputSchema | None]
-    model_capabilities: dict[str, ModelCapability] = Field(
+    model_capabilities: CapabilityMenu = Field(
         description="Optimizer-LOCKED is not unpriced: the model is fixed, but which effort rungs "
         "it accepts and what a round costs are the facts every other node's rows need too"
     )

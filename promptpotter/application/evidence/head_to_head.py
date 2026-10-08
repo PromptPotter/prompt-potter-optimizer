@@ -18,7 +18,6 @@ from promptpotter.application.scoring.selection import paired_fitness
 from promptpotter.domain.bench import (
     BENCH_HEADLINE,
     COLUMN_GRADE,
-    BandedValue,
     BenchColumn,
     BenchReading,
     BenchScore,
@@ -35,7 +34,7 @@ from promptpotter.domain.campaign import (
     ceiling_meter,
 )
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.dashboard_rows import LiftSide, lift_side
+from promptpotter.domain.dashboard_rows import SidedInterval
 from promptpotter.domain.launch_limits import LaunchLimits
 from promptpotter.domain.phases import StopOutcome, StopReason, stop_reason_outcome
 from promptpotter.domain.spend import MeteredSpend, SpendRollup
@@ -53,17 +52,17 @@ if TYPE_CHECKING:
     from promptpotter.infrastructure.store.stores import Stores
 
 
-class HeadlineLift(BandedValue):
+class HeadlineLift(SidedInterval):
     """A bench's lift in its headline column, with the side of 0 its band sits on: the one lift a
     surface leads with, so none picks the column or reads the sign."""
 
-    side: LiftSide | None
+    value: float
 
     @classmethod
     def of(cls, bench: BenchScore | None) -> HeadlineLift | None:
         if bench is None or (lift := bench.headline_lift) is None:
             return None
-        return cls(**lift.model_dump(), side=lift_side(lift.ci_lo, lift.ci_hi))
+        return cls(**lift.model_dump())
 
 
 class HeadToHeadRow(StrictModel):

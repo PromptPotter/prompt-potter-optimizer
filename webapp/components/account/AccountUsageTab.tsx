@@ -51,8 +51,7 @@ export function AccountUsageTab() {
   );
 }
 
-function Meter({ used, cap, tone }: { used: number; cap: number; tone?: "warn" }) {
-  const share = cap > 0 ? Math.min(1, used / cap) : 1;
+function Meter({ share, tone }: { share: number; tone?: "warn" }) {
   return (
     <div className={cx("account-meter", tone === "warn" && "warn")} aria-hidden="true">
       <div className="account-meter-fill" style={{ width: `${share * 100}%` }} />
@@ -66,6 +65,8 @@ function SpendSection({ quota }: { quota: QuotaStatus }) {
   const blind = lifetime.bill_is_floor;
   const usdCap = quota.spend_budget_usd_total;
   const tokenCap = quota.token_budget_total;
+  const usdShare = quota.spend_budget_used_share;
+  const tokenShare = quota.token_budget_used_share;
   const metered = usdCap !== null || tokenCap !== null;
   return (
     <AccountSection
@@ -85,16 +86,14 @@ function SpendSection({ quota }: { quota: QuotaStatus }) {
               {usdCap === null ? " no ceiling" : ` of ${fmtUsd(usdCap)}`}
             </span>
           </span>
-          {usdCap !== null ? (
-            <Meter used={lifetime.billed_usd} cap={usdCap} tone={blind ? "warn" : undefined} />
-          ) : null}
+          {usdShare !== null ? <Meter share={usdShare} tone={blind ? "warn" : undefined} /> : null}
           {blind ? (
             <span className="account-warn">
               ⚠ USD cap inactive — {fmtTokens(lifetime.unpriced_tokens)} billed with no
               resolvable rate, so this figure undercounts. The token ceiling is the one holding.
             </span>
           ) : null}
-          {lifetime.unreported_usd > 0 ? (
+          {lifetime.sends_unreported ? (
             <span className="account-warn">
               + up to {fmtUsd(lifetime.unreported_usd)} unreported — sends that ended with no
               bill. Not spent, unknown; the ceiling holds it beside what was billed.
@@ -109,7 +108,7 @@ function SpendSection({ quota }: { quota: QuotaStatus }) {
               {tokenCap === null ? " no ceiling" : ` of ${fmtTokens(tokenCap)}`}
             </span>
           </span>
-          {tokenCap !== null ? <Meter used={quota.tokens_used_total} cap={tokenCap} /> : null}
+          {tokenShare !== null ? <Meter share={tokenShare} /> : null}
         </div>
       </div>
     </AccountSection>

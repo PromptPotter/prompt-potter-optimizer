@@ -1,6 +1,6 @@
 "use client";
 import { useMemo, useState } from "react";
-import type { DraftPatch, ModelCapability, NodeConfigParam } from "@/lib/api";
+import type { CapabilityMenu, DraftPatch, ModelCapability, NodeConfigParam } from "@/lib/api";
 import type { NodeSearchNarrowing } from "@/lib/api/types";
 import { CommitInput, ValueList } from "@/components/ui";
 import { cx } from "@/lib/cx";
@@ -12,6 +12,7 @@ import {
   parseNested,
   nodeNarrowing,
   nodeOverlayPatch,
+  pickedRoute,
   seedOverlayFromRows,
   type ConfigMode,
   type ConfigRow,
@@ -37,7 +38,7 @@ export function NodeConfigEditor(props: {
   babysitEditable?: boolean;
   compact?: boolean;
   // Absent = UNKNOWN, never "no model supports it".
-  modelCapabilities?: Record<string, ModelCapability>;
+  modelCapabilities?: CapabilityMenu;
   // values mode only: an un-permitted steer is disabled rather than rejected on confirm.
   permittedModels?: Record<string, readonly string[]>;
   onApply?: (patch: DraftPatch) => void;
@@ -144,8 +145,7 @@ export function NodeConfigEditor(props: {
   };
 
   // The picked model qualifies the reasoning ladder on the MENU only; the ticks stay the campaign's.
-  const pickedModel = rows.find((r) => r.kind === "model")?.value ?? "";
-  const caps = modelCapabilities?.[pickedModel];
+  const { model: pickedModel, caps } = pickedRoute(rows, modelCapabilities);
 
   return (
     <div className={cx("config-editor", compact && "is-compact")}>
@@ -295,7 +295,7 @@ function ModelCard({ caps }: { caps: ModelCapability }) {
   const price =
     caps.input_usd_per_mtok === null && caps.output_usd_per_mtok === null
       ? null
-      : `${usd(caps.input_usd_per_mtok)} in / ${usd(caps.output_usd_per_mtok)} out per Mtok`;
+      : `${usd(caps.input_usd_per_mtok)} in / ${usd(caps.output_usd_per_mtok)} out per Mtok${caps.provider ? ` on ${caps.provider}` : ""}`;
   const facts: [string, string | null][] = [
     ["context", tok(caps.context_length)],
     ["max out", tok(caps.max_output_tokens)],

@@ -28,6 +28,7 @@ from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure
 
 if TYPE_CHECKING:
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
+    from promptpotter.application.optimizers.potter.knobs import PromptBlockCatalogue
 
 __all__ = [
     "DROPPED_MANDATORY_PLACEHOLDER",
@@ -193,7 +194,7 @@ L1_SCHEMA_COMPLIANCE: LLMOutputValidator = LLMOutputValidator(
 def _check_l1_prompt_blocks_in_library(
     source_output: Mapping[str, Any],
     *,
-    prompt_block_catalogue: str = "guidance",
+    prompt_block_catalogue: PromptBlockCatalogue,
     **_: Any,
 ) -> ValidatorOutcome | None:
     """Reads the candidate's prompt DELTA (``candidate_delta``), not the resulting OSP: the parent's

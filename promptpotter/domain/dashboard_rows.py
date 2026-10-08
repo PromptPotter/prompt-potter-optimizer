@@ -14,7 +14,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, computed_field
 
 from promptpotter.domain.bench import BenchReading
 from promptpotter.domain.l4.proxies import PanelPrecision
@@ -41,6 +41,7 @@ __all__ = [
     "RoundSummaryCandidate",
     "RunStanding",
     "SampleStatus",
+    "SidedInterval",
     "lift_side",
     "panel_cuts",
     "precision_verdict",
@@ -62,6 +63,19 @@ def lift_side(lo: float | None, hi: float | None) -> LiftSide | None:
     if lo is None or hi is None:
         return None
     return "above" if lo > 0 else "below" if hi < 0 else "spans"
+
+
+class SidedInterval(StrictModel):
+    """A 95% interval on a DIFFERENCE, and the side of 0 it sits on — derived, so no model stores
+    a side its own bounds could contradict. Served only: a derived key does not read back."""
+
+    ci_lo: float | None
+    ci_hi: float | None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def side(self) -> LiftSide | None:
+        return lift_side(self.ci_lo, self.ci_hi)
 
 
 def precision_verdict(precision: PanelPrecision) -> PrecisionVerdict:

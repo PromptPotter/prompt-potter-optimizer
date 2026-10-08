@@ -17,9 +17,6 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
     Item,
     signal,
 )
-from promptpotter.application.optimizers.potter.dispatch.injections.registry import (
-    injection_table,
-)
 from promptpotter.application.optimizers.potter.dispatch.layout import NODE_LAYOUTS
 from promptpotter.application.scoring.formula.matchers import extraction_note_for_scoring
 from promptpotter.config.prompt_blocks import general_reasoning_blocks, prompt_blocks
@@ -211,17 +208,6 @@ def _r_demo_pool(b: InjectionBundle) -> list[Item]:
     ]
 
 
-def withheld_l1_panels(b: InjectionBundle) -> frozenset[str]:
-    """The panels L2's layout menu leaves out: ones that render nothing for this bundle, so a move
-    of one changes no byte L1 reads and spends the fire."""
-    table = injection_table()
-    return frozenset(
-        name
-        for name in NODE_LAYOUTS["l1_generate"].possible
-        if not any(item.text for item in table[name].render(b))
-    )
-
-
 @signal(
     "l1_signal_catalogue",
     kind=InjectionKind.DERIVED,
@@ -241,7 +227,7 @@ def _r_l1_signal_catalogue(b: InjectionBundle) -> list[Item]:
     which is what ``validate_l1_layout`` is handed — so it is a rule about what an edit may take
     AWAY, and stating it as one an edit must satisfy by itself is what asked L2 to restate a layout
     it was not changing."""
-    mandatory = sorted(NODE_LAYOUTS["l1_generate"].mandatory - withheld_l1_panels(b))
+    mandatory = sorted(NODE_LAYOUTS["l1_generate"].mandatory - b.silent_l1_panels)
     return [
         Item(
             "L1 LAYOUT — the response schema's `l1_layout` carries the legal slots and the signal "

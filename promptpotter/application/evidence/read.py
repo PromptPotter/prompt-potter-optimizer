@@ -59,7 +59,7 @@ from promptpotter.application.mask.scenario import scenario_spine
 from promptpotter.application.scoring.formula.compiler import ScoringFormulaError
 from promptpotter.domain.candidate_diff import build_candidate_flat, flatten_sp_summary
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.dashboard_rows import LiftSide, lift_side
+from promptpotter.domain.dashboard_rows import SidedInterval
 from promptpotter.domain.l4.inner_origin import instrument_of
 from promptpotter.domain.ruler import AbilityReading
 from promptpotter.domain.spend import SpendRollup
@@ -106,7 +106,7 @@ class EffectProvenance(StrictModel):
     candidate_id: str
 
 
-class RankedEdit(StrictModel):
+class RankedEdit(SidedInterval):
     """One SEARCHPOINT measured against its own campaign's origin — a prompt edit, a node-config
     edit, an optimizer-prompt edit on the recursion; the arithmetic does not care which.
 
@@ -135,10 +135,6 @@ class RankedEdit(StrictModel):
     provenance: list[EffectProvenance]
     anchor_effect: float  # mean of the PER-CELL paired diffs — one point per cell, not per
     # occurrence, so an over-measured cell cannot outweigh uniform goodness (see _finalize)
-    ci_lo: float | None
-    ci_hi: float | None
-    # Which side of 0 that interval sits on; `None` beside a `None` interval.
-    effect_side: LiftSide | None
     n_cells: int
     n_measurements: int
 
@@ -1117,7 +1113,6 @@ def _finalize(campaign_id: str, sp_hash: str, acc: _Accum) -> RankedEdit:
         anchor_effect=anchor,
         ci_lo=ci_lo,
         ci_hi=ci_hi,
-        effect_side=lift_side(ci_lo, ci_hi),
         n_cells=len(per_cell),
         n_measurements=n_meas,
     )

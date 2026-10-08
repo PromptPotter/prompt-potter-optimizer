@@ -10,8 +10,10 @@ import json
 import logging
 import sys
 from collections.abc import Iterator
+from dataclasses import replace
 from typing import TYPE_CHECKING, NamedTuple
 
+from promptpotter.application.bench.llm_call import InjectionBreakdown
 from promptpotter.application.optimizer_manifest import bound_inner_optimizer
 from promptpotter.application.optimizers import other_optimizer_packages
 from promptpotter.application.optimizers.potter.dispatch import compose
@@ -133,6 +135,17 @@ class FilledPrompt(NamedTuple):
     rendered: dict[str, str]
     coverage: dict[str, ComposeCoverage]
 
+    @property
+    def breakdown(self) -> InjectionBreakdown:
+        """Both of ``fill``'s channels — the layout walk and the prose tokens — as the ledger's
+        start record carries them."""
+        shown = {**self.rendered, **self.injection_vars}
+        return InjectionBreakdown(
+            chars={name: len(text) for name, text in shown.items() if text},
+            dropped={name: c.dropped for name, c in self.coverage.items() if c.dropped > 0},
+            silent=tuple(sorted(name for name, c in self.coverage.items() if c.produced == 0)),
+        )
+
 
 class InjectionRenderError(PromptCompositionError):
     """Renderer raised — programmer mistake. Chains the original via ``raise … from``."""
@@ -232,28 +245,6 @@ class DispatchHub:
         return FilledPrompt(filled, injection_vars, rendered, coverage)
 
 
-def injection_char_counts(
-    rendered: dict[str, str], injection_vars: dict[str, str]
-) -> dict[str, int]:
-    """Per-signal rendered size, for the ledger's start record — the composition behind
-    ``prompt_chars``. Reads BOTH of ``fill``'s channels (the layout walk and the prose tokens)."""
-    return {name: len(text) for name, text in {**rendered, **injection_vars}.items() if text}
-
-
-def injection_coverage_counts(coverage: dict[str, ComposeCoverage]) -> dict[str, int]:
-    """Sections the budget REFUSED, per panel. The other half of ``injection_chars``, which can
-    only ever report what survived: a panel reading 300 chars says nothing about whether that was
-    all it had or the tail of it the ceiling could afford."""
-    return {name: c.dropped for name, c in coverage.items() if c.dropped > 0}
-
-
-def injection_silent_panels(coverage: dict[str, ComposeCoverage]) -> list[str]:
-    """Layout panels that produced NOTHING this call. `injection_chars` omits them by construction,
-    so without this a panel silent in every call of a campaign reads identically to one nobody put
-    in the layout."""
-    return sorted(name for name, c in coverage.items() if c.produced == 0)
-
-
 @contextlib.contextmanager
 def _no_round_warnings() -> Iterator[None]:
     """Unbind the cycle ledger for the duration — a probe render must not emit. Otherwise the
@@ -265,17 +256,25 @@ def _no_round_warnings() -> Iterator[None]:
         reset_cycle_ledger(token)
 
 
+def _silent_l1_panels(bundle: InjectionBundle) -> frozenset[str]:
+    with _no_round_warnings():
+        return frozenset(
+            name
+            for name in NODE_LAYOUTS["l1_generate"].possible
+            if not DispatchHub.render_items(name, bundle)
+        )
+
+
 def node_packages(bundle: InjectionBundle) -> dict[str, str]:
     """Fingerprint the information package every optimizer node would be handed. **Compare two of
     these, never one against a stored value** — an absolute fingerprint cannot be reproduced later."""
     out: dict[str, str] = {}
     with _no_round_warnings():
         for node in NODE_LAYOUTS:
-            filled, injection_vars, _, _ = DispatchHub.fill(
-                load_optimizer_prompt(node), bundle, node=node
-            )
+            filled = DispatchHub.fill(load_optimizer_prompt(node), bundle, node=node)
             payload = json.dumps(
-                [filled.render(), sorted(injection_vars.items())], ensure_ascii=False
+                [filled.template.render(), sorted(filled.injection_vars.items())],
+                ensure_ascii=False,
             )
             out[node] = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
     return out
@@ -373,7 +372,7 @@ def build_bundle(
         sid for r in (prior[-1].results if prior else []) if (sid := r.get("sample_id")) is not None
     )
 
-    return InjectionBundle(
+    bundle = InjectionBundle(
         opt_sp=cycle.opt_sp,
         memory=state.memory,
         framing=cycle.framing,
@@ -424,6 +423,7 @@ def build_bundle(
         shot_k_max=knobs.l1_generate.k_max,
         inner_optimizer=bound_inner_optimizer(),
     )
+    return replace(bundle, silent_l1_panels=_silent_l1_panels(bundle))
 
 
 def fingerprinted_modules() -> tuple[ModuleType, ...]:
@@ -466,7 +466,6 @@ __all__ = [
     "MandatoryPanelStarvedError",
     "build_bundle",
     "fingerprinted_modules",
-    "injection_char_counts",
     "injection_source_digest",
     "node_packages",
 ]

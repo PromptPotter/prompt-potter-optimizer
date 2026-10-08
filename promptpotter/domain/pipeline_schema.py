@@ -442,6 +442,13 @@ class PipelineNode(StrictModel):
         return [m.pipeline_key for m in self.observation_mappings]
 
     @property
+    def provider(self) -> str:
+        """The gateway this node's model is called through — who bills it. ``""`` where its
+        config names none, which prices only a model id no other vendor's list could hold."""
+        named = self.current_config.get("provider")
+        return named if isinstance(named, str) else ""
+
+    @property
     def emits_ranking(self) -> bool:
         """Does this node put a ranked list on the wire — the "a sample can be scored off it" signal.
         Asked as a predicate rather than spelled as a set of names at each site, so a new ranking
@@ -601,11 +608,12 @@ class NestedPipelineRef(StrictModel):
 
 
 class ModelCapability(StrictModel):
-    """What ONE model accepts and costs — resolved server-side, served per model id.
+    """What ONE model accepts, and what it costs on ONE provider — resolved server-side.
 
-    Keyed by MODEL rather than folded into the `reasoning_effort` param row, because the answer
-    changes the moment the operator picks a different model and a surface must be able to say so
-    with no round-trip.
+    Keyed by ``(provider, model)`` rather than folded into the `reasoning_effort` param row: the
+    answer changes the moment the operator picks a different model, which a surface must be able
+    to say with no round-trip, and a price belongs to the pair — one model id is billed at
+    different rates by each gateway that serves it.
 
     `reasoning_efforts` `None` is UNKNOWN and never "unsupported": a caller keeps the node's own
     declared ladder untouched. Rendering an absent answer as "no" silently deletes a real search
@@ -614,12 +622,15 @@ class ModelCapability(StrictModel):
     only sometimes is a state nothing can report.
 
     Every card field is optional and a surface renders only what is present. Populated from the
-    provider catalogue snapshot, which is a third party's claim and goes stale on their schedule.
+    provider catalogue snapshot, which is a third party's claim and goes stale on their schedule —
+    except the two prices, which are the rate table's for ``provider``
+    (``infrastructure/llm/pricing.py::lookup_rate``), the one a bill is computed from.
     """
 
     model_config = ConfigDict(frozen=True)
 
     model: str
+    provider: str
     reasoning_efforts: list[str] | None
     reasoning_note: str
     # The GENERAL case of the row above: which keys we would put on the request that this model
@@ -646,6 +657,10 @@ class ModelCapability(StrictModel):
     moderated: bool | None = None
     fetched_at: str = ""
 
+
+CapabilityMenu = dict[str, dict[str, ModelCapability]]
+"""``provider -> model -> capability``: every route a surface can put on screen, answered. The
+provider key is :attr:`PipelineNode.provider`, so ``""`` holds the nodes that name none."""
 
 CAPABILITY_ANSWERED_PARAMS: frozenset[str] = frozenset({"reasoning_effort"})
 """Params a :class:`ModelCapability` answers FOR — one member per answer field it carries. The
@@ -706,10 +721,10 @@ class PipelineSchema(StrictModel):
     pipelines: dict[str, list[str]] = Field(default_factory=lambda: {"default": list[str]()})
     available_models: list[str] = Field(default_factory=list)
     view: PipelineView | None = None
-    # What each selectable model answers for its own knobs (`infrastructure/llm/capabilities.py`),
+    # What each selectable route answers for its own knobs (`infrastructure/llm/capabilities.py`),
     # read through `param_options`. Rides the schema and NOT the identity — `sp_hash` folds node
     # configs — so a refreshed snapshot re-keys nothing. Empty is UNKNOWN, never "accepts nothing".
-    model_capabilities: dict[str, ModelCapability] = Field(default_factory=dict)
+    model_capabilities: CapabilityMenu = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _names_the_chain_a_round_runs(self) -> "PipelineSchema":
@@ -877,12 +892,10 @@ class PipelineSchema(StrictModel):
 
     def _capability(self, node: "PipelineNode", model: str | None) -> "ModelCapability | None":
         """The capability of the model that will RUN this node, whatever the param."""
-        if not self.model_capabilities:
-            return None
         picked = model if model is not None else node.current_config.get("model")
         if not isinstance(picked, str) or not picked:
             return None
-        return self.model_capabilities.get(picked)
+        return self.model_capabilities.get(node.provider, {}).get(picked)
 
     def _answering(
         self, node: "PipelineNode", param: str, model: str | None
@@ -919,6 +932,12 @@ class PipelineSchema(StrictModel):
             if isinstance(picked := node.current_config.get("model"), str) and picked:
                 models.add(picked)
         return sorted(models)
+
+    def selectable_routes(self) -> list[tuple[str, str]]:
+        """Every ``(provider, model)`` a surface here can put on screen: :meth:`selectable_models`
+        on each gateway a declared node runs through."""
+        providers = {node.provider for node in self.declared_nodes}
+        return sorted((p, m) for p in providers for m in self.selectable_models())
 
     def node_config_schema(
         self,

@@ -503,6 +503,7 @@ describe("permittedModels", () => {
 describe("effortLadder", () => {
   const caps = (over: Partial<ModelCapability>): ModelCapability => ({
     model: "m",
+    provider: "",
     reasoning_efforts: null,
     reasoning_note: "",
     unsupported_params: null,

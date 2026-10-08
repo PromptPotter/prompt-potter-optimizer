@@ -8,13 +8,11 @@ import json
 import logging
 
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
+    L3_PLAN_MAX_CHARS,
     InjectionBundle,
     InjectionKind,
     Item,
     signal,
-)
-from promptpotter.application.optimizers.potter.dispatch.injections.catalogues import (
-    withheld_l1_panels,
 )
 from promptpotter.application.optimizers.potter.dispatch.layout import (
     L1_LAYOUT_SLOTS,
@@ -32,6 +30,7 @@ from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.connector import unit_plural
 from promptpotter.domain.pipeline_schema import SCHEMA_RENAME_PARAM
 from promptpotter.domain.results_health import evidence_starved_node
+from promptpotter.domain.run_records import MAX_AUTO_REBASES
 from promptpotter.domain.value_tree import visibility_of
 
 logger = logging.getLogger(__name__)
@@ -43,12 +42,9 @@ _PLAN_HEADER = "PLAN:\n"
 @signal(
     "plan",
     kind=InjectionKind.TRACE,
-    # A RAIL, and it AGREES with the bound at production (`L3PlanOutput.plan`) — plus this
-    # renderer's own header, which production never bounded. Compared against the header too, the
-    # rail re-cut a plan already declared legal by exactly the header's width: a full-length plan
-    # rendered 806 against 800 and lost its tail to `text[:cap] + "…"` — unmarked, so downstream it
-    # read as a complete strategy, which is what production's own `_truncate_marked` exists to stop.
-    char_cap=800 + len(_PLAN_HEADER),
+    # A RAIL that agrees with production's bound: without the header's width it re-cuts a legal
+    # full-length plan UNMARKED, which then reads downstream as a complete strategy.
+    char_cap=L3_PLAN_MAX_CHARS + len(_PLAN_HEADER),
     citable=True,
 )
 def _r_plan(b: InjectionBundle) -> list[Item]:
@@ -167,14 +163,13 @@ def _r_l1_layout(b: InjectionBundle) -> list[Item]:
     A panel that renders nothing is listed in NEITHER half, as `l1_layout`'s own enum leaves it
     out: placed or not, it is nothing L1 reads today."""
     layout = b.memory.l1_layout
-    withheld = withheld_l1_panels(b)
     lines = [
         f'  "{panel}": "{slot}"'
         for slot in L1_LAYOUT_SLOTS
         for panel in layout.slot(slot)
-        if panel not in withheld
+        if panel not in b.silent_l1_panels
     ]
-    offered = NODE_LAYOUTS["l1_generate"].possible - withheld
+    offered = NODE_LAYOUTS["l1_generate"].possible - b.silent_l1_panels
     if unplaced := sorted(offered - set(layout.all_placeholders())):
         lines.append(f"  in no slot, available to place: {', '.join(unplaced)}")
     return [
@@ -255,8 +250,8 @@ _REBASE_CAPABILITY_TEXT = (
     "You judge WHETHER to rewind, not where to: the engine selects the ancestor "
     "round by UCB over the lineage statistics (each ancestor's mean ability against "
     "how little it has been explored), then mints a sibling cycle there and "
-    "auto-continues optimization. Capped at 10 rebases per session. Default: omit — "
-    "a fork costs a whole cycle."
+    f"auto-continues optimization. Capped at {MAX_AUTO_REBASES} rebases per session. "
+    "Default: omit — a fork costs a whole cycle."
 )
 
 # Rendered only where the unlock would change something — see `_r_rebase_capability`.

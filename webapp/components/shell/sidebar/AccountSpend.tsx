@@ -51,7 +51,7 @@ export function AccountSpend() {
   const floor = lifetime.bill_is_floor;
   const spent = fmtUsd(lifetime.billed_usd);
   const exhausted = data.allowance_spent;
-  const fill = cap === null || cap <= 0 ? null : Math.min(1, lifetime.billed_usd / cap);
+  const fill = data.spend_budget_used_share;
 
   const explain = (
     <div className="account-spend-explain">
@@ -70,7 +70,7 @@ export function AccountSpend() {
           the dollar figure undercounts and the token allowance is the one holding.
         </p>
       ) : null}
-      {lifetime.unreported_usd > 0 ? (
+      {lifetime.sends_unreported ? (
         <p>
           Up to {fmtUsd(lifetime.unreported_usd)} more is unreported — sends that ended with no
           bill (cancelled, timed out, killed). Not spent, unknown; the allowance holds it anyway.

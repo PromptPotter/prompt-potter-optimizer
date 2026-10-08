@@ -1168,8 +1168,12 @@
           },
           "model_capabilities": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/ModelCapability"
+              "additionalProperties": {
+                "$ref": "#/components/schemas/ModelCapability"
+              },
+              "type": "object"
             },
+            "description": "Keyed by the provider and model each node's rows carry AT this searchpoint",
             "title": "Model Capabilities",
             "type": "object"
           },
@@ -4302,7 +4306,6 @@
                 "type": "null"
               }
             ],
-            "description": "The 95% band on `value`, drawn from the same per-row values; `None` where one pass was read twice, which has no spread.",
             "title": "Ci Lo"
           },
           "side": {
@@ -4319,6 +4322,7 @@
                 "type": "null"
               }
             ],
+            "readOnly": true,
             "title": "Side"
           },
           "value": {
@@ -4327,9 +4331,9 @@
           }
         },
         "required": [
-          "value",
           "ci_lo",
           "ci_hi",
+          "value",
           "side"
         ],
         "title": "HeadlineLift",
@@ -4694,6 +4698,11 @@
             "title": "Billed Usd",
             "type": "number"
           },
+          "sends_unreported": {
+            "description": "Some send ended with no bill, so up to `unreported_usd` more may have left the account than `billed_usd` says.",
+            "title": "Sends Unreported",
+            "type": "boolean"
+          },
           "unpriced_tokens": {
             "description": "Billed tokens with no resolvable rate.",
             "title": "Unpriced Tokens",
@@ -4709,6 +4718,7 @@
           "billed_usd",
           "bill_is_floor",
           "unpriced_tokens",
+          "sends_unreported",
           "unreported_usd"
         ],
         "title": "LifetimeSpend",
@@ -5747,7 +5757,7 @@
       },
       "ModelCapability": {
         "additionalProperties": false,
-        "description": "What ONE model accepts and costs — resolved server-side, served per model id.\n\nKeyed by MODEL rather than folded into the `reasoning_effort` param row, because the answer\nchanges the moment the operator picks a different model and a surface must be able to say so\nwith no round-trip.\n\n`reasoning_efforts` `None` is UNKNOWN and never \"unsupported\": a caller keeps the node's own\ndeclared ladder untouched. Rendering an absent answer as \"no\" silently deletes a real search\naxis, which is the failure this type was written after. `reasoning_note` is populated in EVERY\narm — unknown, no effort knob, operator override, full ladder — because a reason that appears\nonly sometimes is a state nothing can report.\n\nEvery card field is optional and a surface renders only what is present. Populated from the\nprovider catalogue snapshot, which is a third party's claim and goes stale on their schedule.",
+        "description": "What ONE model accepts, and what it costs on ONE provider — resolved server-side.\n\nKeyed by ``(provider, model)`` rather than folded into the `reasoning_effort` param row: the\nanswer changes the moment the operator picks a different model, which a surface must be able\nto say with no round-trip, and a price belongs to the pair — one model id is billed at\ndifferent rates by each gateway that serves it.\n\n`reasoning_efforts` `None` is UNKNOWN and never \"unsupported\": a caller keeps the node's own\ndeclared ladder untouched. Rendering an absent answer as \"no\" silently deletes a real search\naxis, which is the failure this type was written after. `reasoning_note` is populated in EVERY\narm — unknown, no effort knob, operator override, full ladder — because a reason that appears\nonly sometimes is a state nothing can report.\n\nEvery card field is optional and a surface renders only what is present. Populated from the\nprovider catalogue snapshot, which is a third party's claim and goes stale on their schedule —\nexcept the two prices, which are the rate table's for ``provider``\n(``infrastructure/llm/pricing.py::lookup_rate``), the one a bill is computed from.",
         "properties": {
           "context_length": {
             "anyOf": [
@@ -5837,6 +5847,10 @@
             ],
             "title": "Output Usd Per Mtok"
           },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
           "reasoning_efforts": {
             "anyOf": [
               {
@@ -5876,6 +5890,7 @@
         },
         "required": [
           "model",
+          "provider",
           "reasoning_efforts",
           "reasoning_note",
           "source"
@@ -6365,7 +6380,10 @@
           },
           "model_capabilities": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/ModelCapability"
+              "additionalProperties": {
+                "$ref": "#/components/schemas/ModelCapability"
+              },
+              "type": "object"
             },
             "description": "Optimizer-LOCKED is not unpriced: the model is fixed, but which effort rungs it accepts and what a round costs are the facts every other node's rows need too",
             "title": "Model Capabilities",
@@ -6601,7 +6619,7 @@
       },
       "PairwiseComparison": {
         "additionalProperties": false,
-        "description": "One unordered pair, blocked on the cells BOTH subjects scored — pairing removes cell\ndifficulty instead of carrying it as noise, which is the same reason ``reference_lift``\npairs rather than differencing two means.\n\n``a`` precedes ``b`` in the roster's oldest-first order, so ``median_shift = b - a`` has one\nreading across the whole table. The interval and both p-values are ``None`` below two shared\ncells: nothing was tested there, which a ``1.0`` would misreport as a test that found nothing.\n\nThe test is EXACT (``exact_paired_reading``), never Student-t: at the widths a panel runs, a t\np can sit below what any exact test on that many pairs is able to return, which is resolution\ntaken from the assumed tail rather than from the cells. ``EvidencePower.exact_p_floor`` says\nwhich verdicts the width can reach at all, before a cell is spent.",
+        "description": "One unordered pair, blocked on the cells BOTH subjects scored — pairing removes cell\ndifficulty instead of carrying it as noise, which is the same reason ``reference_lift``\npairs rather than differencing two means.\n\n``a`` precedes ``b`` in the roster's oldest-first order, so ``median_shift = b - a`` has one\nreading across the whole table. Its interval and both p-values are ``None`` below two shared\ncells: nothing was tested there, which a ``1.0`` would misreport as a test that found nothing.\n\nThe test is EXACT (``exact_paired_reading``), never Student-t: at the widths a panel runs, a t\np can sit below what any exact test on that many pairs is able to return, which is resolution\ntaken from the assumed tail rather than from the cells. ``EvidencePower.exact_p_floor`` says\nwhich verdicts the width can reach at all, before a cell is spent.",
         "properties": {
           "ci_hi": {
             "anyOf": [
@@ -6655,7 +6673,7 @@
             ],
             "title": "P Value"
           },
-          "shift_side": {
+          "side": {
             "anyOf": [
               {
                 "enum": [
@@ -6669,7 +6687,8 @@
                 "type": "null"
               }
             ],
-            "title": "Shift Side"
+            "readOnly": true,
+            "title": "Side"
           },
           "subject_a": {
             "title": "Subject A",
@@ -6681,15 +6700,15 @@
           }
         },
         "required": [
+          "ci_lo",
+          "ci_hi",
           "subject_a",
           "subject_b",
           "median_shift",
-          "ci_lo",
-          "ci_hi",
-          "shift_side",
           "p_value",
           "p_adjusted",
-          "n_cells"
+          "n_cells",
+          "side"
         ],
         "title": "PairwiseComparison",
         "type": "object"
@@ -6840,6 +6859,18 @@
             ],
             "title": "Spend Budget Usd Total"
           },
+          "spend_budget_used_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How full the USD meter draws: `spend_lifetime.billed_usd` over `spend_budget_usd_total`, at most 1. `None` where no ceiling bounds the account.",
+            "title": "Spend Budget Used Share"
+          },
           "spend_lifetime": {
             "$ref": "#/components/schemas/LifetimeSpend"
           },
@@ -6854,6 +6885,18 @@
             ],
             "title": "Token Budget Total"
           },
+          "token_budget_used_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The token meter's twin of `spend_budget_used_share`.",
+            "title": "Token Budget Used Share"
+          },
           "tokens_used_total": {
             "title": "Tokens Used Total",
             "type": "integer"
@@ -6862,9 +6905,11 @@
         "required": [
           "spend_lifetime",
           "spend_budget_usd_total",
+          "spend_budget_used_share",
           "allowance_spent",
           "tokens_used_total",
           "token_budget_total",
+          "token_budget_used_share",
           "concurrent_running",
           "concurrent_queued",
           "max_concurrent_cycles",
@@ -6909,22 +6954,6 @@
             ],
             "title": "Ci Lo"
           },
-          "effect_side": {
-            "anyOf": [
-              {
-                "enum": [
-                  "above",
-                  "below",
-                  "spans"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Effect Side"
-          },
           "label": {
             "title": "Label",
             "type": "string"
@@ -6944,22 +6973,39 @@
             "title": "Provenance",
             "type": "array"
           },
+          "side": {
+            "anyOf": [
+              {
+                "enum": [
+                  "above",
+                  "below",
+                  "spans"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "readOnly": true,
+            "title": "Side"
+          },
           "sp_hash": {
             "title": "Sp Hash",
             "type": "string"
           }
         },
         "required": [
+          "ci_lo",
+          "ci_hi",
           "sp_hash",
           "campaign_id",
           "label",
           "provenance",
           "anchor_effect",
-          "ci_lo",
-          "ci_hi",
-          "effect_side",
           "n_cells",
-          "n_measurements"
+          "n_measurements",
+          "side"
         ],
         "title": "RankedEdit",
         "type": "object"

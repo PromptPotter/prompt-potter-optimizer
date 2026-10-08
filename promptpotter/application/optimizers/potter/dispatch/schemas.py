@@ -17,7 +17,10 @@ from pydantic import (
 )
 
 from promptpotter.application.bench.llm_call import OptimizerResponseModel
-from promptpotter.application.optimizers.potter.dispatch.bundle import LAYOUT_SCHEMA_INSTRUCTION
+from promptpotter.application.optimizers.potter.dispatch.bundle import (
+    L3_PLAN_MAX_CHARS,
+    LAYOUT_SCHEMA_INSTRUCTION,
+)
 from promptpotter.application.optimizers.potter.dispatch.layout import (
     NODE_LAYOUTS,
     layout_json_schema,
@@ -422,8 +425,8 @@ class L3PlanOutput(OptimizerResponseModel):
     # tax — and it was the only unbounded output. Asking for the budget in `answer_format`
     # cannot work (a model cannot count the characters it emits), so it is judged here and
     # MARKED: a plan cut mid-bullet must not read downstream as a complete strategy.
-    plan: Annotated[str, BeforeValidator(_truncate_marked(800))] = Field(
-        max_length=800,
+    plan: Annotated[str, BeforeValidator(_truncate_marked(L3_PLAN_MAX_CHARS))] = Field(
+        max_length=L3_PLAN_MAX_CHARS,
         description=(
             "The strategy every later prompt reads until the next replan. Say what L2 and L1 "
             "should DO with the levers they hold — L2 moves which panels L1 sees and how wide it "

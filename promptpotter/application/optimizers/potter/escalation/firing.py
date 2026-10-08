@@ -33,12 +33,6 @@ from promptpotter.application.optimizers.nodes import OptimizerPhase
 from promptpotter.application.optimizers.potter.dispatch.facade import (
     DispatchHub,
     build_bundle,
-    injection_char_counts,
-    injection_coverage_counts,
-    injection_silent_panels,
-)
-from promptpotter.application.optimizers.potter.dispatch.injections.catalogues import (
-    withheld_l1_panels,
 )
 from promptpotter.application.optimizers.potter.dispatch.layout import (
     NODE_LAYOUTS,
@@ -310,7 +304,7 @@ L2 = LayerStrategy(
     template_name="l2_context",
     phase=PotterPhase.REFINE_STRATEGY,
     activity="refining strategy",
-    response_model=lambda bundle: build_l2_response_model(withheld_l1_panels(bundle)),
+    response_model=lambda bundle: build_l2_response_model(bundle.silent_l1_panels),
     parse=_parse_l2,
     apply=_apply_l2,
     enter_view=_l2_enter,
@@ -427,22 +421,20 @@ async def _run_transition(
             else replace(state, escalation=state.escalation.as_read_by(fire.ask))
         )
         bundle = build_bundle(cycle, seen)
-        template, prompt_vars, rendered, coverage = DispatchHub.fill(
+        filled = DispatchHub.fill(
             load_optimizer_prompt(transition.template_name), bundle, node=transition.template_name
         )
         try:
             raw, _, _ = await run_optimizer_node(
                 template_name=transition.template_name,
-                prompt_vars=prompt_vars,
-                template=template,
+                prompt_vars=filled.injection_vars,
+                template=filled.template,
                 response_model=transition.response_model(bundle),
                 context=LLMCallContext(
                     ledger=cycle.session.state.ledger,
                     round_num=round_num,
                     cache=cycle.session.store.optimizer_reuse,
-                    injection_chars=injection_char_counts(rendered, prompt_vars),
-                    injection_dropped=injection_coverage_counts(coverage),
-                    injection_silent=tuple(injection_silent_panels(coverage)),
+                    injections=filled.breakdown,
                 ),
             )
             result = transition.parse(raw, state.memory)

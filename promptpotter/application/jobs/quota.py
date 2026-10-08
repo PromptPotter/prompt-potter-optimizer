@@ -217,6 +217,10 @@ class QuotaStatus(StrictModel):
 
     spend_lifetime: LifetimeSpend
     spend_budget_usd_total: float | None
+    spend_budget_used_share: float | None = Field(
+        description="How full the USD meter draws: `spend_lifetime.billed_usd` over "
+        "`spend_budget_usd_total`, at most 1. `None` where no ceiling bounds the account."
+    )
     allowance_spent: bool = Field(
         description="Admission's own answer: the next launch is refused for want of allowance. "
         "Headroom in either unit, after what running launches hold, the unreported sends and the "
@@ -224,6 +228,9 @@ class QuotaStatus(StrictModel):
     )
     tokens_used_total: int
     token_budget_total: int | None
+    token_budget_used_share: float | None = Field(
+        description="The token meter's twin of `spend_budget_used_share`."
+    )
     concurrent_running: int
     concurrent_queued: int = Field(
         description="This account's launches waiting for a machine slot. They count against "
@@ -236,6 +243,13 @@ class QuotaStatus(StrictModel):
     )
     campaigns_today: int
     max_campaigns_per_day: int
+
+
+def _used_share(used: float, ceiling: float | None) -> float | None:
+    """A ceiling of nothing is full: there is no room under it to draw."""
+    if ceiling is None:
+        return None
+    return min(1.0, used / ceiling) if ceiling > 0 else 1.0
 
 
 def quota_status(*, stores: Stores, job_registry: JobRegistry) -> QuotaStatus:
@@ -251,9 +265,11 @@ def quota_status(*, stores: Stores, job_registry: JobRegistry) -> QuotaStatus:
     return QuotaStatus(
         spend_lifetime=LifetimeSpend.of(spent),
         spend_budget_usd_total=ceilings.usd,
+        spend_budget_used_share=_used_share(spent.used_usd, ceilings.usd),
         allowance_spent=wallet.exhausted,
         tokens_used_total=spent.used_tokens,
         token_budget_total=ceilings.tokens,
+        token_budget_used_share=_used_share(spent.used_tokens, ceilings.tokens),
         concurrent_running=len(job_registry.list_running(user_id=user.user_id)),
         concurrent_queued=len(job_registry.list_queued(user_id=user.user_id)),
         max_concurrent_cycles=user.max_concurrent_cycles,
@@ -371,7 +387,7 @@ def admit_spend(*, stores: Stores, bucket: str) -> SpendBook:
     if wallet.exhausted:
         unreported = (
             f", up to ${wallet.spent.unreported_usd:.2f} more in sends whose bill never came"
-            if wallet.spent.unreported_usd
+            if wallet.spent.sends_unreported
             else ""
         )
         raise QuotaExceededError(

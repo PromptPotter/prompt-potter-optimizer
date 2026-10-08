@@ -6,7 +6,7 @@ from typing import Literal, NamedTuple, get_args
 
 from promptpotter.application.evidence.metric_catalogue import MetricSpec, catalogue_for
 from promptpotter.application.evidence.subjects import SubjectReading
-from promptpotter.domain.dashboard_rows import LiftSide, lift_side
+from promptpotter.domain.dashboard_rows import SidedInterval
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.statistics import (
     cells_for_exact_verdict,
@@ -24,13 +24,13 @@ _ORDER_CONFOUND_RHO = 0.9
 ComparabilityReason = Literal["one_ruler", "rulers_differ", "ruler_unstamped", "datasets_differ"]
 
 
-class PairwiseComparison(StrictModel):
+class PairwiseComparison(SidedInterval):
     """One unordered pair, blocked on the cells BOTH subjects scored — pairing removes cell
     difficulty instead of carrying it as noise, which is the same reason ``reference_lift``
     pairs rather than differencing two means.
 
     ``a`` precedes ``b`` in the roster's oldest-first order, so ``median_shift = b - a`` has one
-    reading across the whole table. The interval and both p-values are ``None`` below two shared
+    reading across the whole table. Its interval and both p-values are ``None`` below two shared
     cells: nothing was tested there, which a ``1.0`` would misreport as a test that found nothing.
 
     The test is EXACT (``exact_paired_reading``), never Student-t: at the widths a panel runs, a t
@@ -44,10 +44,6 @@ class PairwiseComparison(StrictModel):
     # Hodges-Lehmann: the median of the pairwise Walsh averages, not the mean of the differences.
     # One outlier cell moves the mean by 1/n of itself and moves this by nothing.
     median_shift: float
-    ci_lo: float | None
-    ci_hi: float | None
-    # Which side of 0 that interval sits on; `None` beside a `None` interval.
-    shift_side: LiftSide | None
     p_value: float | None
     # Holm-Bonferroni across every pair in THIS read that carries a p. Served beside the raw value
     # rather than replacing it, so the correction is visible instead of baked in.
@@ -207,7 +203,6 @@ def _pairwise(rows: list[SubjectReading]) -> list[PairwiseComparison]:
                     median_shift=shift,
                     ci_lo=lo,
                     ci_hi=hi,
-                    shift_side=lift_side(lo, hi),
                     p_value=p_value,
                     p_adjusted=None,
                     n_cells=n,

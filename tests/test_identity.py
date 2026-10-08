@@ -655,6 +655,11 @@ def test_rewriting_the_prompt_panel_cannot_accumulate_the_operator_framing() -> 
         ),
         digest=RoundDigest(diagnostics=RoundDiagnostics(n_valid=0, samples=[]), critique=None),
         axes=None,
+        prompt_block_catalogue="guidance",
+        rebase_capability=True,
+        terminate_capability=True,
+        schema_field_rename=False,
+        shot_k_max=0,
     )
     panel = "\n\n".join(i.text for i in _r_rendered_prompt(bundle))
     shown = {
@@ -882,10 +887,7 @@ def test_the_l4_generator_is_shown_the_optimizer_prompts_it_rewrites() -> None:
         InjectionBundle,
         RoundDigest,
     )
-    from promptpotter.application.optimizers.potter.dispatch.facade import (
-        DispatchHub,
-        injection_coverage_counts,
-    )
+    from promptpotter.application.optimizers.potter.dispatch.facade import DispatchHub
     from promptpotter.application.optimizers.potter.dispatch.prompts import (
         base_optimizer_template,
         load_optimizer_prompt,
@@ -932,6 +934,11 @@ def test_the_l4_generator_is_shown_the_optimizer_prompts_it_rewrites() -> None:
         ),
         digest=RoundDigest(diagnostics=RoundDiagnostics(n_valid=0, samples=[]), critique=None),
         axes=None,
+        prompt_block_catalogue="guidance",
+        rebase_capability=True,
+        terminate_capability=True,
+        schema_field_rename=False,
+        shot_k_max=0,
         inner_optimizer=resolve_optimizer("potter", {}),
     )
 
@@ -945,14 +952,12 @@ def test_the_l4_generator_is_shown_the_optimizer_prompts_it_rewrites() -> None:
         f"discretionary allowance ({allowance}c), so nothing is being kept against a budget"
     )
 
-    filled, _, rendered, coverage = DispatchHub.fill(
-        load_optimizer_prompt("l1_generate"), bundle, node="l1_generate"
-    )
-    assert "CURRENT INNER OPTIMIZER PROMPTS" in filled.render(), (
+    filled = DispatchHub.fill(load_optimizer_prompt("l1_generate"), bundle, node="l1_generate")
+    assert "CURRENT INNER OPTIMIZER PROMPTS" in filled.template.render(), (
         "the generator was handed no subject — it is rewriting text it cannot see"
     )
-    assert len(rendered["rendered_prompt"]) >= subject_chars
-    starved = set(injection_coverage_counts(coverage)) & NODE_LAYOUTS["l1_generate"].mandatory
+    assert len(filled.rendered["rendered_prompt"]) >= subject_chars
+    starved = set(filled.breakdown.dropped) & NODE_LAYOUTS["l1_generate"].mandatory
     assert not starved, f"mandatory panel(s) refused by the budget: {sorted(starved)}"
 
     capo = resolve_optimizer("capo", {})
@@ -981,6 +986,7 @@ def test_the_l4_generator_is_shown_the_optimizer_prompts_it_rewrites() -> None:
         demo_ids=frozenset(),
         shot_k_max=0,
         inner_optimizer=capo,
+        prompt_block_catalogue="guidance",
     )
     assert proposals[0].validation_failures == []
     assert [f.reason for f in proposals[1].validation_failures] == [

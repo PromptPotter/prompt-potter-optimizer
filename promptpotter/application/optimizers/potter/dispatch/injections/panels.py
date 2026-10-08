@@ -233,7 +233,7 @@ def _r_diagnostics(b: InjectionBundle) -> list[Item]:
         )
 
     if b.digest.l1_yield != 1.0:
-        sections.append(Item(f"POPULATION: diversity={b.digest.l1_yield:.2f}"))
+        sections.append(Item(f"POPULATION: yield={b.digest.l1_yield:.2f}"))
 
     # TREND + EVOLUTION last (least actionable: historical narrative, first to be tail-cut).
     # Skipped at R1 — "too few rounds to classify" is dead weight.

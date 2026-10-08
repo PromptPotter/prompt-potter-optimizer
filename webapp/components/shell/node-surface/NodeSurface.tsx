@@ -1,5 +1,5 @@
 "use client";
-import type { DraftPatch, ModelCapability, NodeConfigParam, NodeOutputSchema } from "@/lib/api";
+import type { CapabilityMenu, DraftPatch, NodeConfigParam, NodeOutputSchema } from "@/lib/api";
 import type { NodeSearchNarrowing } from "@/lib/api/types";
 import type { PipelineStatus } from "@/lib/types";
 import type { CandidateSearchPoint, ConfigMode } from "@/lib/derivations";
@@ -56,7 +56,7 @@ export function NodeSurface({
   // A density, never a subset: no width folds a param away.
   compact?: boolean;
   // Absent = UNKNOWN, never "no model supports it".
-  modelCapabilities?: Record<string, ModelCapability>;
+  modelCapabilities?: CapabilityMenu;
   // values mode only: an un-permitted steer is disabled rather than rejected on confirm.
   permittedModels?: Record<string, readonly string[]>;
   // Absence IS read-only — there is no second flag. Values-mode config rides `onConfigChange`.

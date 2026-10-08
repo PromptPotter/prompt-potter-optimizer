@@ -24,6 +24,7 @@ from promptpotter.shared.hashing import shapes_optimizer_prompt
 if TYPE_CHECKING:
     from promptpotter.application.intelligence.indexes.axis import AxisIndex
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
+    from promptpotter.application.optimizers.potter.knobs import PromptBlockCatalogue
     from promptpotter.application.optimizers.potter.pobb.checks import EliminationGate
 
 # Every constant below decides what a prompt RECEIVES, so every optimizer's source digest hashes
@@ -52,6 +53,9 @@ OPTIMIZER_PROMPT_FIELD_MAX_CHARS: dict[str, int] = {
 }
 
 SCHEMA_DESCRIPTION_MAX_CHARS = 400
+
+# `L3PlanOutput.plan`'s bound at production, and the body of the `plan` panel's rail at render.
+L3_PLAN_MAX_CHARS = 800
 
 SCHEMA_DESCRIPTIONS_INSTRUCTION = (
     "Each `output_schema_descriptions.<path>` key rewrites the JSON-Schema "
@@ -267,6 +271,19 @@ class InjectionBundle:
     cycle_slice: CycleSlice
     digest: RoundDigest
     axes: AxisIndex | None
+    # Picks the block-library header (guidance = reuse-or-invent, restrict = library-only) or
+    # renders nothing when off.
+    prompt_block_catalogue: PromptBlockCatalogue
+    # Gates its injection, so L2/L3 prompts are bit-for-bit identical to a no-rebase ablation.
+    rebase_capability: bool
+    # Same, for a no-terminate ablation.
+    terminate_capability: bool
+    # Already unlocked ⇒ the rebase_capability directive drops the unlock clause, since there
+    # is nothing left to ask for.
+    schema_field_rename: bool
+    # The most shots a variant may carry; 0 silences the shot menu as an empty `demo_pool` does,
+    # which withdraws the `shot_ids` slot with it.
+    shot_k_max: int
     origin_per_sample: list[dict[str, Any]] = field(default_factory=list)
     # EVERY scored sample, hits included, not just the misses: the failure panels filter it,
     # but ``answer_distribution`` needs the hits too, because a pipeline collapsed onto one
@@ -281,19 +298,12 @@ class InjectionBundle:
     # candidate's evolved one and both sides' rows, so "what was tried, how did it score and which
     # of the parent's solved cells did it break" is a diff away.
     measured_rounds: list[RoundResult] = field(default_factory=list)
-    # Picks the block-library header (guidance = reuse-or-invent, restrict = library-only) or
-    # renders nothing when off.
-    prompt_block_catalogue: str = "guidance"
     # Mined for this task's answer-space shape at cycle start. `guidance` renders these and
     # falls back to the task-agnostic PromptWizard set when empty.
     earned_blocks: dict[str, tuple[str, ...]] = field(default_factory=dict)
-    # Gates its injection, so L2/L3 prompts are bit-for-bit identical to a no-rebase ablation.
-    rebase_capability: bool = True
-    # Same, for a no-terminate ablation.
-    terminate_capability: bool = True
-    # Already unlocked ⇒ the rebase_capability directive drops the unlock clause, since there
-    # is nothing left to ask for.
-    schema_field_rename: bool = False
+    # The L1 panels that render nothing for this bundle, probed once by `build_bundle`. L2's layout
+    # menu and its wire enum leave them out: moving one changes no byte L1 reads.
+    silent_l1_panels: frozenset[str] = frozenset()
     # The round under render IS the origin, so `origin_per_sample` and `trajectory_results` are
     # the same rows. Any panel differencing the two would render a cell against itself.
     is_origin_round: bool = False
@@ -302,10 +312,8 @@ class InjectionBundle:
     # `Connector.prompt_delivery` under this campaign's params — the channel the candidate reaches
     # the model by, which is what makes it a skill body or a message.
     prompt_delivery: Delivery = "request"
-    # The campaign's demo pool and the most shots a variant may carry; either empty silences the
-    # shot menu, which withdraws the `shot_ids` slot with it.
+    # The campaign's demo pool.
     demo_pool: tuple[Sample, ...] = ()
-    shot_k_max: int = 0
     # The manifest whose prompts an L4 outer edits (`bound_inner_optimizer`); `None` off the recursion.
     inner_optimizer: SelectedOptimizer | None = None
 
@@ -370,6 +378,7 @@ __all__ = [
     "INNER_NARRATIVE_FULL_CELLS",
     "INNER_NARRATIVE_RENDER_CAP",
     "INNER_NARRATIVE_SUMMARY_CAP",
+    "L3_PLAN_MAX_CHARS",
     "LOST_CELL_MIN",
     "MEMORY_FIELD_CAP",
     "MEMORY_ROUND_CAP",

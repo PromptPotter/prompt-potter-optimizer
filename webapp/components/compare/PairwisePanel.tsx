@@ -86,7 +86,7 @@ function Row({
         <code title={row.subject_a}>{names.get(row.subject_a) ?? shortId(row.subject_a)}</code> →{" "}
         <code title={row.subject_b}>{names.get(row.subject_b) ?? shortId(row.subject_b)}</code>
       </td>
-      <td className={cx("l4-effect", sideTone(row.shift_side))}>
+      <td className={cx("l4-effect", sideTone(row.side))}>
         <span className="l4-effect-mean">{fmtMetricValue(unit, row.median_shift)}</span>
         <span className="l4-effect-ci">{fmtMetricInterval(unit, row.ci_lo, row.ci_hi)}</span>
       </td>

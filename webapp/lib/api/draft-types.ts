@@ -2,8 +2,8 @@
 // `lib/`'s one import from `components/`; that edge is tolerated here and nowhere else.
 
 import type {
+  CapabilityMenu,
   ManifestNodeOverlay,
-  ModelCapability,
   NodeConfigParam,
   NodeOutputSchema,
   NodeReach,
@@ -65,7 +65,7 @@ export interface DraftCampaignWire {
   schema_source: "backend" | "local" | "unreachable";
   // `reasoning_efforts: null` is UNKNOWN and must never render as unsupported: shown as "no", it
   // deletes a real search axis.
-  model_capabilities: Record<string, ModelCapability>;
+  model_capabilities: CapabilityMenu;
   dependencies: PipelineDependencyWire[];
   // The server's mint gate (`origin_readiness`); the client never re-derives it.
   readiness: { complete: boolean; gaps: OriginGap[] };

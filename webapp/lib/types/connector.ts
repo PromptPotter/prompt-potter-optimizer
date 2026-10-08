@@ -4,7 +4,7 @@
 import type {
   BackendHealthResponse,
   BackendResponse,
-  ModelCapability,
+  CapabilityMenu,
   NestedPipelineRef,
   NodeConfigParam,
   NodeOutputSchema,
@@ -42,7 +42,7 @@ export interface ConnectorView {
   isSingleNode: boolean;
   nodeOutputSchema: Record<string, NodeOutputSchema | null> | null;
   // Empty is UNKNOWN (an unresolved catalogue), never "this model supports nothing".
-  modelCapabilities: Record<string, ModelCapability>;
+  modelCapabilities: CapabilityMenu;
   // Served, never guessed from a node name.
   nests: NestedPipelineRef | null;
 }

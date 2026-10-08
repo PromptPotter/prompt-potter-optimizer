@@ -245,11 +245,11 @@ export function campaignCard(
       value: billText(lifetime.billed_usd, lifetime.bill_is_floor),
       sub: lifetime.bill_is_floor
         ? `floor — ${fmtTokens(lifetime.unpriced_tokens)} unpriced`
-        : lifetime.unreported_usd > 0
+        : lifetime.sends_unreported
           ? `billed · up to ${fmtUsd(lifetime.unreported_usd)} more unreported`
           : "lifetime, every cycle",
       className:
-        lifetime.bill_is_floor || lifetime.unreported_usd > 0 ? "summary-block-warn" : undefined,
+        lifetime.bill_is_floor || lifetime.sends_unreported ? "summary-block-warn" : undefined,
     },
     {
       label: "Rounds",

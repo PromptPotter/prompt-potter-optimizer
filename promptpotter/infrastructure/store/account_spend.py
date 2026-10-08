@@ -88,6 +88,11 @@ class UserSpend(NamedTuple):
     def at_most_tokens(self) -> int:
         return self.used_tokens + self.unreported_tokens
 
+    @property
+    def sends_unreported(self) -> bool:
+        """THE rule for "a send ended with no bill": every surface that says so asks here."""
+        return self.unreported_usd > 0
+
     def plus(self, other: UserSpend) -> UserSpend:
         return UserSpend(
             self.used_usd + other.used_usd,
@@ -114,6 +119,10 @@ class LifetimeSpend(StrictModel):
         "is then the binding one."
     )
     unpriced_tokens: int = Field(description="Billed tokens with no resolvable rate.")
+    sends_unreported: bool = Field(
+        description="Some send ended with no bill, so up to `unreported_usd` more may have left "
+        "the account than `billed_usd` says."
+    )
     unreported_usd: float = Field(
         description="The most that sends which ended with no bill (cancelled, timed out, killed "
         "with a run) may have cost, at the bounds they were admitted on. Not spent — unknown. It "
@@ -126,6 +135,7 @@ class LifetimeSpend(StrictModel):
             billed_usd=round(spent.used_usd, 6),
             bill_is_floor=bill_is_floor(spent.unpriced_tokens),
             unpriced_tokens=spent.unpriced_tokens,
+            sends_unreported=spent.sends_unreported,
             unreported_usd=round(spent.unreported_usd, 6),
         )
 

@@ -28,9 +28,6 @@ from promptpotter.application.bench.llm_call import (
 from promptpotter.application.optimizers.potter.dispatch.facade import (
     DispatchHub,
     build_bundle,
-    injection_char_counts,
-    injection_coverage_counts,
-    injection_silent_panels,
 )
 from promptpotter.application.optimizers.potter.dispatch.injections.registry import citable_fields
 from promptpotter.application.optimizers.potter.dispatch.l1_wire_schema import (
@@ -107,16 +104,15 @@ async def l1_generate(
     pipeline_schema = cycle.session.pipeline_schema
 
     bundle = build_bundle(cycle, state)
-    # L2-authored layout rides `state.memory`; `fill` resolves each slot's injections into
-    # `injection_vars`.
-    template, injection_vars, rendered, coverage = DispatchHub.fill(
-        load_optimizer_prompt("l1_generate"), bundle, node="l1_generate"
-    )
+    filled = DispatchHub.fill(load_optimizer_prompt("l1_generate"), bundle, node="l1_generate")
+    breakdown = filled.breakdown
     # What L1 may cite IS what L1 was shown. The wire schema's enum is the one place the menu is
     # stated, so the prompt and the check cannot disagree about which panels exist this round.
     budget = bundle.cycle_slice.exploration_budget
-    citable = citable_fields(state.memory.l1_layout, exploration_budget=budget, rendered=rendered)
-    prompt_vars: dict[str, str] = {"n_variants": str(n_variants), **injection_vars}
+    citable = citable_fields(
+        state.memory.l1_layout, exploration_budget=budget, rendered=filled.rendered
+    )
+    prompt_vars: dict[str, str] = {"n_variants": str(n_variants), **filled.injection_vars}
 
     schema_field_rename = potter_knobs(cycle.optimizer).l1_generate.schema_field_rename
     output_schema = (
@@ -126,7 +122,7 @@ async def l1_generate(
             inner_optimizer=bundle.inner_optimizer,
             # The write half of the same derivation `citable` is the read half of: a slot whose
             # panel produced nothing is not offered, so L1 cannot edit an axis it was never shown.
-            silent_panels=injection_silent_panels(coverage),
+            silent_panels=breakdown.silent,
             schema_field_rename=schema_field_rename,
             n_variants=n_variants,
         )
@@ -154,11 +150,9 @@ async def l1_generate(
                 ledger=cycle.session.state.ledger,
                 round_num=round_num,
                 cache=cycle.session.store.optimizer_reuse,
-                injection_chars=injection_char_counts(rendered, injection_vars),
-                injection_dropped=injection_coverage_counts(coverage),
-                injection_silent=tuple(injection_silent_panels(coverage)),
+                injections=breakdown,
             ),
-            template=template,
+            template=filled.template,
         )
     except OptimizerPromptParseError as parse_err:
         # Schema-noncompliant after one repair retry. Split provider-degraded (empty) vs

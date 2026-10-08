@@ -13,9 +13,11 @@ from promptpotter.domain.ruler import AbilityReading, DeltaRuler, ThetaCaveat
 from promptpotter.domain.spend import BudgetChange, TokenUsageKind
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.clock import utcnow_iso
+from promptpotter.shared.hashing import shapes_optimizer_prompt
 from promptpotter.shared.instrument import MeasurementRole
 
 __all__ = [
+    "MAX_AUTO_REBASES",
     "OPERATOR_ORIGIN_SOURCES",
     "BenchCheckpointKind",
     "CandidateMintedRecord",
@@ -914,3 +916,8 @@ class RebaseRequest(StrictModel):
     reason: str
     issued_by: str
     config_overrides: ConfigOverrides | None = None
+
+
+# Auto-rebases one invocation honours, so a `fork_proposal` on every fire cannot spiral. PER LEVEL:
+# an inner campaign gets its own, multiplying the envelope `OUTER_SAMPLE_WALL_S_PER_ROUND` bounds.
+MAX_AUTO_REBASES: Annotated[int, shapes_optimizer_prompt] = 10

@@ -4215,15 +4215,20 @@ components:
     ModelCapability:
       type: object
       additionalProperties: false
-      required: [model, reasoning_efforts, reasoning_note, source]
+      required: [model, provider, reasoning_efforts, reasoning_note, source]
       description: |
-        What ONE model accepts and costs, resolved server-side through the operator's
+        What ONE model accepts, resolved server-side through the operator's
         hand-authored `model_capabilities.yaml`, then our own MEASUREMENT of the live endpoint,
-        then the per-tenant provider snapshot, then unknown. Every card field is optional and a
-        surface renders only what is present — the catalogue is a third party's claim, so a field
-        it drops must shorten the card rather than blank it.
+        then the per-tenant provider snapshot, then unknown — and what ONE provider bills it at.
+        Every card field is optional and a surface renders only what is present — the catalogue
+        is a third party's claim, so a field it drops must shorten the card rather than blank it.
       properties:
         model: { type: string }
+        provider:
+          type: string
+          description: |
+            The gateway the two prices are billed by — the node's own `provider` value, `""`
+            where its config names none.
         reasoning_efforts:
           type: array
           nullable: true
@@ -4265,7 +4270,12 @@ components:
         display_name: { type: string }
         context_length: { type: integer, nullable: true }
         max_output_tokens: { type: integer, nullable: true }
-        input_usd_per_mtok: { type: number, nullable: true }
+        input_usd_per_mtok:
+          type: number
+          nullable: true
+          description: |
+            The rate table's price for the `(provider, model)` PAIR — the one a bill is computed
+            from, never the catalogue's. `null` where the table holds no rate for the pair.
         output_usd_per_mtok: { type: number, nullable: true }
         modality: { type: string }
         moderated: { type: boolean, nullable: true }
@@ -4483,8 +4493,12 @@ components:
             uses, so a candidate that moved it is read here as the run will read it.
         model_capabilities:
           type: object
-          additionalProperties: { $ref: '#/components/schemas/ModelCapability' }
-          description: Resolved over the model MENU, not the dataset's catalogue alone.
+          additionalProperties:
+            type: object
+            additionalProperties: { $ref: '#/components/schemas/ModelCapability' }
+          description: |
+            `provider -> model -> capability`, resolved over the model MENU, not the dataset's
+            catalogue alone, on each provider a node runs through AT `at`.
         reach:
           type: object
           additionalProperties: { $ref: '#/components/schemas/NodeReach' }
@@ -4741,11 +4755,13 @@ components:
         model_capabilities:
           type: object
           additionalProperties:
-            $ref: '#/components/schemas/ModelCapability'
+            type: object
+            additionalProperties:
+              $ref: '#/components/schemas/ModelCapability'
           description: |
-            What each model on the menu ACCEPTS and costs, keyed by model id. Keyed by MODEL
-            rather than folded into the `reasoning_effort` param row, so switching models
-            re-answers the ladder with no round-trip.
+            What each model on the menu ACCEPTS and costs, keyed `provider -> model`. Keyed by
+            the route rather than folded into the `reasoning_effort` param row, so switching
+            models re-answers the ladder with no round-trip.
         dependencies:
           type: array
           description: |

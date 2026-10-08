@@ -539,6 +539,9 @@ export interface LifetimeSpend {
   bill_is_floor: boolean;
   /** Billed tokens with no resolvable rate. */
   unpriced_tokens: number;
+  /** Some send ended with no bill, so up to `unreported_usd` more may have left the
+   * account than `billed_usd` says. */
+  sends_unreported: boolean;
   /** The most that sends which ended with no bill (cancelled, timed out, killed
    * with a run) may have cost, at the bounds they were admitted on. Not spent
    * — unknown. It binds the ceiling beside `billed_usd`. */
@@ -987,9 +990,10 @@ export interface Cell {
   other_outputs: Record<string, unknown>;
 }
 
-/** What ONE model accepts and costs — resolved server-side, served per model id. */
+/** What ONE model accepts, and what it costs on ONE provider — resolved server-side. */
 export interface ModelCapability {
   model: string;
+  provider: string;
   reasoning_efforts: string[] | null;
   reasoning_note: string;
   unsupported_params: string[] | null;
@@ -1384,7 +1388,8 @@ export interface CampaignPipelineResponse {
   node_config_schema: Record<string, NodeConfigParam[]>;
   view: PipelineView | null;
   node_output_schema: Record<string, NodeOutputSchema | null>;
-  model_capabilities: Record<string, ModelCapability>;
+  /** Keyed by the provider and model each node's rows carry AT this searchpoint */
+  model_capabilities: Record<string, Record<string, ModelCapability>>;
   reach: Record<string, NodeReach>;
   /** The inner pipeline this chain nests, if any — the L4 drill-in, on this read */
   nests: NestedPipelineRef | null;
@@ -1422,16 +1427,16 @@ export interface EditSpread {
 
 /** One SEARCHPOINT measured against its own campaign's origin — a prompt edit, a node-config */
 export interface RankedEdit {
+  ci_lo: number | null;
+  ci_hi: number | null;
   sp_hash: string;
   campaign_id: string;
   label: string;
   provenance: EffectProvenance[];
   anchor_effect: number;
-  ci_lo: number | null;
-  ci_hi: number | null;
-  effect_side: 'above' | 'below' | 'spans' | null;
   n_cells: number;
   n_measurements: number;
+  side: 'above' | 'below' | 'spans' | null;
 }
 
 /** Every configured key across the subjects that carry a config, in exactly one band. */
@@ -1614,15 +1619,15 @@ export interface SubjectReading {
 
 /** One unordered pair, blocked on the cells BOTH subjects scored — pairing removes cell */
 export interface PairwiseComparison {
+  ci_lo: number | null;
+  ci_hi: number | null;
   subject_a: string;
   subject_b: string;
   median_shift: number;
-  ci_lo: number | null;
-  ci_hi: number | null;
-  shift_side: 'above' | 'below' | 'spans' | null;
   p_value: number | null;
   p_adjusted: number | null;
   n_cells: number;
+  side: 'above' | 'below' | 'spans' | null;
 }
 
 /** The selection read under ONE metric, echoed back with the vocabulary it was chosen from — a */
@@ -1675,11 +1680,9 @@ export interface ArmBudget {
 
 /** A bench's lift in its headline column, with the side of 0 its band sits on: the one lift a */
 export interface HeadlineLift {
-  value: number;
-  /** The 95% band on `value`, drawn from the same per-row values; `None` where one
-   * pass was read twice, which has no spread. */
   ci_lo: number | null;
   ci_hi: number | null;
+  value: number;
   side: 'above' | 'below' | 'spans' | null;
 }
 
@@ -2093,12 +2096,18 @@ export interface MeResponse {
 export interface QuotaStatus {
   spend_lifetime: LifetimeSpend;
   spend_budget_usd_total: number | null;
+  /** How full the USD meter draws: `spend_lifetime.billed_usd` over
+   * `spend_budget_usd_total`, at most 1. `None` where no ceiling bounds the
+   * account. */
+  spend_budget_used_share: number | null;
   /** Admission's own answer: the next launch is refused for want of allowance.
    * Headroom in either unit, after what running launches hold, the unreported
    * sends and the unpriced grace. False on an account no ceiling bounds. */
   allowance_spent: boolean;
   tokens_used_total: number;
   token_budget_total: number | null;
+  /** The token meter's twin of `spend_budget_used_share`. */
+  token_budget_used_share: number | null;
   concurrent_running: number;
   /** This account's launches waiting for a machine slot. They count against
    * `max_concurrent_cycles` exactly as running ones do. */
@@ -2248,7 +2257,7 @@ export interface OptimizerPipelineResponse {
   /** Optimizer-LOCKED is not unpriced: the model is fixed, but which effort rungs
    * it accepts and what a round costs are the facts every other node's rows
    * need too */
-  model_capabilities: Record<string, ModelCapability>;
+  model_capabilities: Record<string, Record<string, ModelCapability>>;
   /** Where the search reaches per node, summed off the rows above rather than in
    * the browser — the same reading a campaign pipeline serves */
   reach: Record<string, NodeReach>;

@@ -1,5 +1,6 @@
-"""What a MODEL accepts and costs — resolved in four layers, hand-authored first, so a wrong or
-missing fetch is always correctable without a code change.
+"""What a MODEL accepts — resolved in four layers, hand-authored first, so a wrong or missing
+fetch is always correctable without a code change — beside what the PROVIDER running it bills,
+which is no layer of these: ``pricing.py::lookup_rate`` owns every price.
 
 Distinct from ``registry._MODEL_PROFILES``, deliberately, and the split is what keeps either
 usable. That table holds facts WE measured against the live endpoint — a reasoning model's
@@ -33,13 +34,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Sequence
+from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from pathlib import Path
 from typing import Any
 
-from promptpotter.domain.pipeline_schema import ModelCapability, PipelineSchema
+from promptpotter.domain.pipeline_schema import CapabilityMenu, ModelCapability, PipelineSchema
 from promptpotter.infrastructure.llm.openai_compat import PROVIDER_REQUEST_PARAMS
+from promptpotter.infrastructure.llm.pricing import lookup_rate
 from promptpotter.infrastructure.llm.registry import model_profile, normalize_model_id
 from promptpotter.infrastructure.store.io import (
     read_json_tolerant,
@@ -91,15 +94,9 @@ def _cache_path(workspace: Path) -> Path:
     return workspace / _CACHE_REL
 
 
-def _as_float(raw: object) -> float | None:
-    """Prices arrive as decimal STRINGS in USD per token. Per Mtok is the unit an operator reads a
-    bill in, so the conversion happens here — once — rather than in every surface."""
-    if not isinstance(raw, str | int | float) or isinstance(raw, bool):
-        return None
-    try:
-        return float(raw) * 1_000_000
-    except ValueError:
-        return None
+def _per_mtok(per_token: float | None) -> float | None:
+    """Per Mtok is the unit an operator reads a bill in, so the conversion happens here, once."""
+    return None if per_token is None else round(per_token * 1_000_000, 6)
 
 
 def _as_int(raw: object) -> int | None:
@@ -111,32 +108,40 @@ def _as_int(raw: object) -> int | None:
         return None
 
 
-def _card(model: str, entry: dict[str, Any], fetched_at: str) -> dict[str, Any]:
+def _card(entry: dict[str, Any], fetched_at: str) -> dict[str, Any]:
     """The provider's own description of a model, projected onto :class:`ModelCapability`'s card
     half. Every field optional: a catalogue that drops one must degrade the card, never raise
     inside a resolve the caller already committed to."""
-    pricing, top, arch = (
+    top, arch = (
         part if isinstance(part := entry.get(key), dict) else {}
-        for key in ("pricing", "top_provider", "architecture")
+        for key in ("top_provider", "architecture")
     )
     return {
         "display_name": str(entry.get("name") or ""),
         "context_length": _as_int(entry.get("context_length")),
         "max_output_tokens": _as_int(top.get("max_completion_tokens")),
-        "input_usd_per_mtok": _as_float(pricing.get("prompt")),
-        "output_usd_per_mtok": _as_float(pricing.get("completion")),
         "modality": str(arch.get("modality") or ""),
         "moderated": top.get("is_moderated"),
         "fetched_at": fetched_at,
     }
 
 
-def resolve_model_capabilities(model: str, *, workspace: Path) -> ModelCapability:
-    """The four-layer read for ONE model.
+def resolve_model_capabilities(model: str, provider: str, *, workspace: Path) -> ModelCapability:
+    """The four-layer read for ONE model, priced on ONE provider.
 
     Returns the ladder this model OFFERS, which is a fact about the model and not about any node.
-    A caller holding a node's declared ladder uses it only where the answer is ``None``."""
+    A caller holding a node's declared ladder uses it only where the answer is ``None``. The price
+    rides every arm: a model no catalogue lists is still billed by whoever serves it."""
     key = normalize_model_id(model)
+    # The table a bill is computed from, never the catalogue's own list — that is one gateway's.
+    rate = lookup_rate(model, provider or None)
+    answer = partial(
+        ModelCapability,
+        model=model,
+        provider=provider,
+        input_usd_per_mtok=_per_mtok(rate.input if rate else None),
+        output_usd_per_mtok=_per_mtok(rate.output if rate else None),
+    )
 
     override_path = _override_path(workspace)
     override = derived(
@@ -149,8 +154,7 @@ def resolve_model_capabilities(model: str, *, workspace: Path) -> ModelCapabilit
         raw = entry.get("reasoning_efforts")
         note = str(entry.get("note") or "")
         if isinstance(raw, list):
-            return ModelCapability(
-                model=model,
+            return answer(
                 reasoning_efforts=[str(v) for v in raw],
                 reasoning_note=note or f"Declared in {CAPABILITY_FILE} by the operator.",
                 source="override",
@@ -158,9 +162,7 @@ def resolve_model_capabilities(model: str, *, workspace: Path) -> ModelCapabilit
         if note:
             # A note with no list is still an override — it says something about this model
             # without claiming to know its ladder, so the answer stays unknown and carries it.
-            return ModelCapability(
-                model=model, reasoning_efforts=None, reasoning_note=note, source="override"
-            )
+            return answer(reasoning_efforts=None, reasoning_note=note, source="override")
 
     # The snapshot is hundreds of KB and a menu asks once per model, so it is parsed per write.
     path = _cache_path(workspace)
@@ -175,8 +177,7 @@ def resolve_model_capabilities(model: str, *, workspace: Path) -> ModelCapabilit
     models = cached.get("models") if isinstance(cached, dict) else None
     record = models.get(key) if isinstance(models, dict) else None
     if not isinstance(record, dict):
-        return ModelCapability(
-            model=model,
+        return answer(
             reasoning_efforts=None,
             reasoning_note=(
                 f"Not in this workspace's catalogue snapshot — every value the node declares is "
@@ -221,31 +222,33 @@ def resolve_model_capabilities(model: str, *, workspace: Path) -> ModelCapabilit
             if indistinct:
                 note += f" Measured INDISTINCT from each other: {', '.join(indistinct)}."
 
-    return ModelCapability(
-        model=model,
+    return answer(
         reasoning_efforts=offered,
         reasoning_note=note,
         indistinct_efforts=indistinct,
         source="openrouter",
         unsupported_params=unsupported,
-        **_card(model, record, str(cached.get("fetched_at") or "")),
+        **_card(record, str(cached.get("fetched_at") or "")),
     )
 
 
-def resolve_menu(models: Sequence[str], *, workspace: Path | None) -> dict[str, ModelCapability]:
-    """Every model on a menu, resolved once.
+def resolve_menu(routes: Iterable[tuple[str, str]], *, workspace: Path | None) -> CapabilityMenu:
+    """Every ``(provider, model)`` route on a menu, resolved once.
 
     *workspace* ``None`` yields an empty map, which every reader must render as UNKNOWN rather
     than as a menu of unsupported models."""
+    menu: CapabilityMenu = {}
     if workspace is None:
-        return {}
-    return {m: resolve_model_capabilities(m, workspace=workspace) for m in models}
+        return menu
+    for provider, model in routes:
+        menu.setdefault(provider, {})[model] = resolve_model_capabilities(
+            model, provider, workspace=workspace
+        )
+    return menu
 
 
-def resolve_schema_menu(
-    schema: PipelineSchema, *, workspace: Path | None
-) -> dict[str, ModelCapability]:
-    """Every model a SCHEMA can put on screen, resolved — the ONE call each wire producer makes.
+def resolve_schema_menu(schema: PipelineSchema, *, workspace: Path | None) -> CapabilityMenu:
+    """Every route a SCHEMA can put on screen, resolved — the ONE call each wire producer makes.
 
     The PAIRING is the rule, not the convenience. Ask ``available_models`` here instead — the
     obvious spelling, and the one that stood — and a model the OPERATOR typed resolves nothing at
@@ -253,7 +256,7 @@ def resolve_schema_menu(
     reaches the admin catalogue. The card carrying that model's context, price and modality then
     rendered blank, silently, on the surface where the spend is committed. Spelled once, so the
     next door to open cannot re-derive it wrongly."""
-    return resolve_menu(schema.selectable_models(), workspace=workspace)
+    return resolve_menu(schema.selectable_routes(), workspace=workspace)
 
 
 async def ensure_model_capabilities(

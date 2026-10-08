@@ -2,7 +2,13 @@
 // `pipeline_overlay` (split at mint by `launcher.split_overlay`); values → the fork seed's `pipeline_overlay`.
 // An OPTIMIZER node's knobs are the third reading: a served `KnobRow` typed in as text.
 
-import type { DraftPatch, KnobRow, ModelCapability, NodeConfigParam } from "@/lib/api";
+import type {
+  CapabilityMenu,
+  DraftPatch,
+  KnobRow,
+  ModelCapability,
+  NodeConfigParam,
+} from "@/lib/api";
 import type { ManifestNodeOverlay, NodeSearchNarrowing } from "@/lib/api/types";
 
 export type ConfigMode = "search-space" | "values";
@@ -31,6 +37,18 @@ export interface ConfigRow {
   // The dataset offered this axis and THIS campaign closed it — the only shut state a person caused.
   held: boolean;
   description: string;
+}
+
+/** The route the rows RUN — the model row's value on its own node's provider — and the served
+ *  capability at that address. An edited value re-addresses with no round-trip; a miss is UNKNOWN. */
+export function pickedRoute(
+  rows: ConfigRow[],
+  menu: CapabilityMenu | undefined,
+): { model: string; caps: ModelCapability | undefined } {
+  const picked = rows.find((r) => r.kind === "model");
+  const model = picked?.value ?? "";
+  const provider = rows.find((r) => r.key === "provider" && r.node === picked?.node)?.value ?? "";
+  return { model, caps: menu?.[provider]?.[model] };
 }
 
 /** Display only, never the engine's `param_options` resolve: the ticks stay the operator's, or a

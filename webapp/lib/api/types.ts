@@ -132,7 +132,11 @@ export type {
   WorkspaceStorageResponse,
 } from "./types.generated";
 
-import type { CycleListEntry, LiveDashboardState } from "./types.generated";
+import type {
+  CampaignPipelineResponse,
+  CycleListEntry,
+  LiveDashboardState,
+} from "./types.generated";
 
 // Hand-written: `HeatmapScope` reaches the wire only as a query param. No workspace scope, since
 // samples differ per dataset.
@@ -141,4 +145,7 @@ export type HardSamplesScope = "cycle" | "campaign" | "dataset";
 export type MintKind = CycleListEntry["mint_kind"];
 
 export type MeasuredUnit = LiveDashboardState["measured_unit"];
+
+// provider → model → capability; the provider key is the node's own `provider` value, "" for none.
+export type CapabilityMenu = CampaignPipelineResponse["model_capabilities"];
 

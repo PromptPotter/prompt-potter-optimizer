@@ -26,6 +26,7 @@ from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure
 
 if TYPE_CHECKING:
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
+    from promptpotter.application.optimizers.potter.knobs import PromptBlockCatalogue
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +43,7 @@ def parse_population(
     demo_ids: frozenset[int],
     shot_k_max: int,
     inner_optimizer: SelectedOptimizer | None,
-    prompt_block_catalogue: str = "guidance",
+    prompt_block_catalogue: PromptBlockCatalogue,
 ) -> tuple[list[OptSearchPoint], list[dict[str, Any] | None]]:
     """Project proposals into searchpoints. ``provider`` / ``route_order`` mutations are ALWAYS
     rejected — cost levers, never on L1's surface; ``model`` rides only where its node opened it,

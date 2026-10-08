@@ -54,7 +54,7 @@ from promptpotter.domain.pipeline_schema import (
     ANSWER_AS_TEXT,
     OUTPUT_SCHEMA_KEY,
     SCHEMA_TOGGLE_PARAM,
-    ModelCapability,
+    CapabilityMenu,
     NestedPipelineRef,
     NodeConfigParam,
     NodeOutputSchema,
@@ -291,40 +291,66 @@ def merge_declared_layers(
     return _apply_model_floors(pipeline_params, active, schema, workspace, provenance)
 
 
+def _routed_as_run(
+    schema: PipelineSchema, pipeline_params: dict[str, Any], active: list[str]
+) -> PipelineSchema:
+    """*schema* with each active node's ``current_config`` route — its provider and model — set
+    to the one it RUNS. An overlay swaps either half, so a schema read as declared answers every
+    route-dependent question for a route the run does not use."""
+    running = {
+        name: route
+        for name in active
+        if (
+            route := {
+                key: value
+                for key in ("provider", "model")
+                if isinstance(value := (pipeline_params.get(name) or {}).get(key), str) and value
+            }
+        )
+    }
+    if not running:
+        return schema
+    return schema.model_copy(
+        update={
+            "declared_nodes": [
+                n.model_copy(update={"current_config": {**n.current_config, **running[n.name]}})
+                if n.name in running
+                else n
+                for n in schema.declared_nodes
+            ]
+        }
+    )
+
+
 def schema_as_run(
     schema: PipelineSchema,
     pipeline_params: dict[str, Any],
     active: list[str],
     workspace: Path | None,
 ) -> PipelineSchema:
-    """*schema* with each active node's ``current_config.model`` set to the model it RUNS, and
-    that model's capabilities resolved. A campaign overlay swaps the model and
-    ``selectable_models`` never resolves the overlay's pick, so a schema read as declared answers
-    every model-dependent question — the floor, the search's value spaces, the pin — for a model
-    the run does not use."""
-    running = {
-        name: model
-        for name in active
-        if isinstance(model := (pipeline_params.get(name) or {}).get("model"), str) and model
-    }
-    if not running:
-        return schema
-    unanswered = sorted(set(running.values()) - set(schema.model_capabilities))
-
-    return schema.model_copy(
+    """*schema* on the routes it RUNS, each one's capabilities resolved — ``selectable_routes``
+    never resolves an overlay's pick, and the floor, the search's value spaces and the pin are
+    all asked of the running route."""
+    routed = _routed_as_run(schema, pipeline_params, active)
+    answered = schema.model_capabilities
+    fresh = resolve_menu(
+        sorted(
+            (n.provider, model)
+            for n in routed.declared_nodes
+            if n.name in active
+            and isinstance(model := n.current_config.get("model"), str)
+            and model not in answered.get(n.provider, {})
+        ),
+        workspace=workspace,
+    )
+    if not fresh:
+        return routed
+    return routed.model_copy(
         update={
-            "declared_nodes": [
-                n.model_copy(
-                    update={"current_config": {**n.current_config, "model": running[n.name]}}
-                )
-                if n.name in running
-                else n
-                for n in schema.declared_nodes
-            ],
             "model_capabilities": {
-                **schema.model_capabilities,
-                **resolve_menu(unanswered, workspace=workspace),
-            },
+                provider: {**answered.get(provider, {}), **fresh.get(provider, {})}
+                for provider in {*answered, *fresh}
+            }
         }
     )
 
@@ -491,7 +517,7 @@ def _resolve_active_schema(
     # snapshot may only narrow it.
     if narrowing:
         filtered = filtered.narrow(narrowing)
-    # LAST, over the narrowed schema, so `selectable_models` reads the nodes as the run holds them.
+    # LAST, over the narrowed schema, so `selectable_routes` reads the nodes as the run holds them.
     # This is what puts the model's answer in front of the SEARCH and not just the screen.
     if workspace is not None:
         filtered = filtered.model_copy(
@@ -637,7 +663,9 @@ class CampaignPipelineResponse(StrictModel):
     node_config_schema: dict[str, list[NodeConfigParam]]
     view: PipelineView | None
     node_output_schema: dict[str, NodeOutputSchema | None]
-    model_capabilities: dict[str, ModelCapability]
+    model_capabilities: CapabilityMenu = Field(
+        description="Keyed by the provider and model each node's rows carry AT this searchpoint"
+    )
     reach: dict[str, NodeReach]
     nests: NestedPipelineRef | None = Field(
         description="The inner pipeline this chain nests, if any — the L4 drill-in, on this read"
@@ -908,6 +936,12 @@ def _campaign_merge(stores: Stores, campaign: Campaign, at: SubjectSpec) -> _Cam
     )
 
 
+def _served_menu(m: _Merge, params: dict[str, Any], workspace: Path | None) -> CapabilityMenu:
+    """The menu under the routes *params* resolved, which is where the served rows' own
+    ``provider`` and ``model`` values point — a menu read off the declaration misses both."""
+    return resolve_schema_menu(_routed_as_run(m.filtered, params, m.active), workspace=workspace)
+
+
 def _optimizer_knobs(cfg: CampaignConfig) -> dict[str, dict[str, Any]]:
     selected = select_optimizer(cfg.optimization)
     return {n: selected.knobs(n).model_dump(mode="json") for n in selected.member_nodes}
@@ -956,7 +990,7 @@ def resolve_pipeline_for_draft(
         node_config_schema=rows,
         view=m.filtered.view,
         node_output_schema=resolved_output_schemas(m.filtered, params),
-        model_capabilities=resolve_schema_menu(m.filtered, workspace=workspace),
+        model_capabilities=_served_menu(m, params, workspace),
         reach=reach_map(rows),
         # A dataset dir is what declares an inner panel, and a check-in has none yet.
         nests=None,
@@ -1031,7 +1065,7 @@ def resolve_pipeline_for_campaign(
         node_config_schema=rows,
         view=m.filtered.view,
         node_output_schema=resolved_output_schemas(m.filtered, params),
-        model_capabilities=resolve_schema_menu(m.filtered, workspace=stores.base_dir),
+        model_capabilities=_served_menu(m, params, stores.base_dir),
         reach=reach_map(rows),
         # On this read so the L4 drill-in needs no second fetch to stitch against.
         nests=nested_pipeline_ref(m.dataset_dir, m.filtered.view) if m.dataset_dir else None,

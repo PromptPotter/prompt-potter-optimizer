@@ -596,7 +596,7 @@ function Ranking({ evidence, nSubjects }: { evidence: Evidence; nSubjects: numbe
                 <code>{row.sp_hash}</code> {row.label}
                 <span className="l4-dim"> {shortId(row.campaign_id)}</span>
               </td>
-              <td className={cx("l4-effect", sideTone(row.effect_side))}>
+              <td className={cx("l4-effect", sideTone(row.side))}>
                 <span className="l4-effect-mean">
                   {fmtMetricValue(m.spec.unit, row.anchor_effect)}
                 </span>

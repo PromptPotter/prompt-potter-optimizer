@@ -45,7 +45,7 @@ LEDGER_BASELINE = {
     # Test functions across them, each admitted through the charter's three axes.
     "test_functions": 100,
     # Every property of every schema the generated contract offers the browser.
-    "served_fields": 853,
+    "served_fields": 857,
 }
 
 

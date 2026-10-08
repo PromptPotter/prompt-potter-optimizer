@@ -76,6 +76,7 @@ from promptpotter.domain.pipeline_overlay import (
 from promptpotter.domain.results import CycleResult, RoundResult, round_clocks
 from promptpotter.domain.ruler import AbilityReading
 from promptpotter.domain.run_records import (
+    MAX_AUTO_REBASES,
     CycleFinal,
     CycleSeed,
     ErrorRecord,
@@ -111,11 +112,6 @@ from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.hashing import dataset_hash
 
 logger = logging.getLogger(__name__)
-
-# Cap on auto-rebases per CLI invocation, so L2/L3 emitting `fork_proposal` every fire cannot
-# spiral. PER LEVEL, not per run: an inner campaign gets its own budget, multiplying the
-# wall-time envelope `OUTER_SAMPLE_WALL_S_PER_ROUND` bounds — size either one by reading both.
-MAX_AUTO_REBASES = 10
 
 
 @dataclass(frozen=True)

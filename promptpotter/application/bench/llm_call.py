@@ -47,7 +47,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["LLMCallContext", "OptimizerResponseModel", "llm_call", "run_optimizer_node"]
+__all__ = [
+    "InjectionBreakdown",
+    "LLMCallContext",
+    "OptimizerResponseModel",
+    "llm_call",
+    "run_optimizer_node",
+]
 
 
 @shapes_optimizer_prompt
@@ -65,6 +71,16 @@ class OptimizerResponseModel(StrictModel):
 
 
 @dataclass(frozen=True)
+class InjectionBreakdown:
+    """The composition behind ``prompt_chars``, per panel: the chars it was SHOWN at, the sections
+    the ceiling refused, and the layout panels that produced nothing at all."""
+
+    chars: dict[str, int] = field(default_factory=dict)
+    dropped: dict[str, int] = field(default_factory=dict)
+    silent: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class LLMCallContext:
     """Audit + cache context for one optimizer LLM call — the kwargs that always travel
     together. ``cache`` is consulted only when non-``None``, so omitting it silently re-spends."""
@@ -73,17 +89,9 @@ class LLMCallContext:
     round_num: int | None = None
     candidate_idx: int | None = None
     cache: LLMReuseCache | None = None
-    # `DispatchHub.fill`'s third return value, measured — the composition behind `prompt_chars`.
-    # It rides the context rather than `trace_meta` because it belongs on the START record: the
-    # over-budget warning fires there, and a breakdown that lands only after the call cannot
-    # explain the warning the operator is reading.
-    injection_chars: dict[str, int] = field(default_factory=dict)
-    # The other half of that breakdown, and the half `injection_chars` can never carry: what the
-    # ceiling REFUSED (per panel, in sections) and which layout panels produced nothing at all.
-    # A panel reading 300 chars says nothing about whether that was all it had; a panel absent
-    # from the breakdown reads identically to one nobody put in the layout.
-    injection_dropped: dict[str, int] = field(default_factory=dict)
-    injection_silent: tuple[str, ...] = ()
+    # On the START record rather than `trace_meta`: the refused-panel alarm fires there, and a
+    # breakdown landing after the call cannot explain it.
+    injections: InjectionBreakdown = field(default_factory=InjectionBreakdown)
 
 
 _LLM_DEFAULTS: dict[str, Any] = {"temperature": 0.0}
@@ -231,6 +239,7 @@ def _reuse_key(
 
 def _announce(call: _Call) -> None:
     context, label = call.context, call.label
+    injections = context.injections
     prompt_chars = sum(len(m.get("content") or "") for m in call.messages)
     start_record = LLMCallStartRecord(
         call_id=call.call_id,
@@ -240,9 +249,9 @@ def _announce(call: _Call) -> None:
         model=call.merged.get("model"),
         started_at_ms=int(time.time() * 1000),
         prompt_chars=prompt_chars,
-        injection_chars=dict(context.injection_chars),
-        injection_dropped=dict(context.injection_dropped),
-        injection_silent=list(context.injection_silent),
+        injection_chars=dict(injections.chars),
+        injection_dropped=dict(injections.dropped),
+        injection_silent=list(injections.silent),
     )
     if context.ledger is not None:
         context.ledger.append(start_record)
@@ -256,18 +265,18 @@ def _announce(call: _Call) -> None:
         " · heaviest: "
         + ", ".join(
             f"{name} {chars:,}c"
-            for name, chars in sorted(context.injection_chars.items(), key=lambda kv: -kv[1])[:3]
+            for name, chars in sorted(injections.chars.items(), key=lambda kv: -kv[1])[:3]
         )
-        if no_room and context.injection_chars
+        if no_room and injections.chars
         else ""
     )
     # Never one line for both: a panel refused WHOLE is absent; a thinned one showed less and
     # says so, which is the normal, healthy way a budget reports what it cost.
-    by_size = sorted(context.injection_dropped.items(), key=lambda kv: -kv[1])
+    by_size = sorted(injections.dropped.items(), key=lambda kv: -kv[1])
     thinned = [f"{n} -{c}" for n, c in by_size if n not in no_room][:3]
     # `refused_panels` sorts by NAME, so truncating it reports the alphabet rather than the
     # loss. Re-ranked here, and the remainder counted, so a cut list reads as cut.
-    worst = sorted(no_room, key=lambda n: -context.injection_dropped.get(n, 0))
+    worst = sorted(no_room, key=lambda n: -injections.dropped.get(n, 0))
     more = f" (+{len(worst) - 4} more)" if len(worst) > 4 else ""
     dropped = (" · NO ROOM: " + ", ".join(worst[:4]) + more if worst else "") + (
         " · thinned: " + ", ".join(thinned) if thinned else ""
