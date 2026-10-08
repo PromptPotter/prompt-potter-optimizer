@@ -21,8 +21,8 @@ The rules a change here breaks most often. Each names the section that states it
 Each rule binds this layer but is stated by the file governing the artifact it constrains. Read the owner before changing anything it covers.
 
 - **Surface behavior contract** — owned by [`../docs/specs/frontend-surface-contract.md`](../docs/specs/frontend-surface-contract.md); every user-facing PR here is measured against its `I*` invariants, and this file owns only the implementation side.
-- **Scoring authority** — owned by [`../docs/architecture.md`](../docs/architecture.md) §0.5; here it lands as the three shapes below.
-- **Visual identity and copy register** — owned by [`promptpotter-web/BRAND.md`](../../promptpotter-web/BRAND.md) in the sibling site repo; never introduce a parallel design spec, tokens doc or theme-decision file, and read every value as `var(--…)`.
+- **Scoring authority** — owned by [`../docs/architecture.md`](../docs/architecture.md) §0.5; here it lands as § Scoring authority.
+- **Visual identity and copy register** — owned by [`BRAND.md`](../../promptpotter-web/BRAND.md) in the sibling site repo (`runfish5/promptpotter-web`); never introduce a parallel design spec, tokens doc or theme-decision file, and read every value as `var(--…)`.
 - **What `dashboard.json` guarantees its readers** — owned by [`../promptpotter/infrastructure/CLAUDE.md`](../promptpotter/infrastructure/CLAUDE.md) § Persistence; poll it and trust it, never reconstruct a served field from a second source.
 - **Which model a new field lands on to reach a panel** — owned by [`../docs/developer/adding-a-surface.md`](../docs/developer/adding-a-surface.md) § 3; a panel reading a field no writer sets is the half-wiring that recipe exists to prevent.
 - **The lineage tree — forks, crowns, θ** — owned by [`../promptpotter/infrastructure/CLAUDE.md`](../promptpotter/infrastructure/CLAUDE.md) § The lineage tree; this layer renders what `/tree` serves and derives no lineage of its own.
@@ -31,7 +31,7 @@ Each rule binds this layer but is stated by the file governing the artifact it c
 
 ## Scoring authority
 
-Three shapes this layer must not introduce, each of which arrives looking reasonable:
+Shapes this layer must not introduce, each of which arrives looking reasonable:
 
 - **A local re-sort.** An ordering *is* a score. `hard_samples.json` is a served ranking, not a list to `.sort()` on whichever field is in hand.
 - **A recomputed mask.** A scoring or sample-set masked value comes down as a served overlay, as do the realized criterion's dials and the levels they are anchored at (`composite_fitness_weights`, `composite_fitness_anchors`); deriving either here re-answers the question under the client's guess at the formula. A lens is a `per_cell` formula, so its vocabulary is the served `CELL_TERM_META` and its value is exact on any sample subset. **A criterion is ONE value and ONE rendering wherever scoring surfaces** (`components/shell/scoring/Criterion`) — the check-in, the masthead, the live-state card, the candidates card's mask, a Compare channel — in three rungs of one frame: the line, the dials, then the formula. A new scoring surface hosts that component at a rung; it never draws its own. The value is a discriminated union over the two ways to say a criterion, with `lensOf` the single place either `?lens=`/`;lens=` spelling is minted. **A dial is a weight and nothing else here**: the browser sends `dials:<term=weight,…>` and the server realizes it against the campaign's own anchors, so the formula a fork carries is the served `lens_criterion`, never a string assembled from the sliders. Say **mask** (the alternative criterion) and **lens** (the selector), never "what-if". A served lens is a string the wire already collapsed, so it re-opens in Expression mode — decomposing one back into weights is the formula parse this rule forbids. Ownership does not collapse with the form: the dashboard's mask is module state, a Compare channel's rides its own address.
@@ -52,7 +52,7 @@ State-class composition uses `cx()` (`lib/cx.ts`), not template strings: `cx("hs
 
 ## Display-data sources
 
-Five surfaces back the dashboard. **Read from the right one, and pick one source per data class** — each file's own header states what it holds.
+The surfaces in this table back the dashboard. **Read from the right one, and pick one source per data class** — each file's own header states what it holds.
 
 | Surface | Reached by | Holds |
 |---|---|---|
@@ -81,7 +81,7 @@ The rules, none of them derivable from the surfaces themselves:
 
 **Every response type comes from `lib/api/types.generated.ts`**, emitted by `scripts/build_ts_types.py` off the Pydantic model and held current by the gate's `ts-types` check; a hand-written interface drifts behind its model with every gate green. To add a shape: register the model in that script's `EXPORTED_MODELS`, regenerate, re-export it from `lib/api/types.ts`.
 
-**Two allowed escapes, both narrow.** A route with no `response_model` has nothing to generate from, so its shape stays hand-written *and says so* (`lib/types/pipeline.ts::PipelineDoc`, the `/optimizer-pipeline` envelope — its `view` half IS generated, never hand-mirrored). And a narrow alias is **derived**, never re-declared — `export type ActivityWindow = ActivityResponse["window"]` reads the closed set back off the generated interface. Re-typing the members is the thing this rule forbids.
+**The allowed escapes are narrow.** A route with no `response_model` has nothing to generate from, so its shape stays hand-written *and says so* (`lib/types/pipeline.ts::PipelineDoc`, the `/optimizer-pipeline` envelope — its `view` half IS generated, never hand-mirrored). And a narrow alias is **derived**, never re-declared — `export type ActivityWindow = ActivityResponse["window"]` reads the closed set back off the generated interface. Re-typing the members is the thing this rule forbids.
 
 **A closed set belongs on the server.** If you find a union declared only in TypeScript, that is the bug — the only named version of it lives here and nothing can catch a rename.
 
@@ -91,7 +91,7 @@ The rules, none of them derivable from the surfaces themselves:
 
 ## Viewed identity — one address (CyclePath)
 
-**"What am I looking at?" has ONE answer — `viewedPath`, and no surface may keep a second.** It is a **`CyclePath`** (`lib/ids.ts`): the chain of `(campaign, cycle)` hops from top-level root to leaf, mirroring the engine's re-entrant `.inner/` sandbox. `lib/workspace.tsx` owns it as `pinnedPath` + `following`, with `viewedPath` derived. Drilling in is `drillInto(campaignId, cycleId)` (the workspace appends the hop; callers just name a run), backing out `backToOuter()`.
+**"What am I looking at?" has ONE answer — `viewedPath`, and no surface may keep a second.** It is a **`CyclePath`** (`lib/ids.ts`): the chain of `(campaign, cycle)` hops from top-level root to leaf, mirroring the engine's re-entrant `.promptpotter/.inner/` sandbox. `lib/workspace.tsx` owns it as `pinnedPath` + `following`, with `viewedPath` derived. Drilling in is `drillInto(campaignId, cycleId)` (the workspace appends the hop; callers just name a run), backing out `backToOuter()`.
 
 **Everything that DISPLAYS re-roots to the LEAF hop; only conversation identity stays on the ROOT.** Leaf: the dashboard stream, connector/pipeline hero, hard-samples panes, chat activity feed, and the selection axes (`SelectionProvider` keyed on `leafCycleId`). Root: `sessionId`, ingest/compose-new-campaign, and Files — so drilling in never mints a thread or moves ingest off the outer conversation. Leaf ids derive at the consumer (`pathLeaf`); `leafIsL4` is likewise the workspace's single answer rather than a per-surface lookup.
 

@@ -138,6 +138,46 @@ campaign whose optimizer calls are individually slow. **`spend_budget_usd` is a 
 a cap too small to finish a round buys nothing, because an unclosed round scores no candidate. This page
 quotes no figure; re-measure before quoting a price to anyone.
 
+## What the banked corpus measured
+
+State, not rule: each figure carries its corpus and date and moves as the corpus grows, so recompute
+before citing one — `python -m promptpotter evidence promptpotter-self` answers the variance and
+power half on demand. How to act on them is the `potter-self` skill's.
+
+- **Panel precision is unresolved** (73 cells / 17 arms / 6 seeds, 2026-08-15, as are the next
+  seven). Split-half reliability of the arm-level mean is ~0.18 over 11 arms while the parametric
+  decomposition implies ~0.7; at that corpus size neither is resolvable, so no leader read off it
+  is falsifiable.
+- **Pairing is what makes a comparison possible.** Seed variance runs several times arm variance: a
+  typical two-arm gap resolved at ~10 paired cells (9.7) against 22.9 un-paired, on a panel that
+  runs 6. The arm effect roughly doubled as the corpus grew from 39 to 73 cells.
+- **The lift shape is broken early.** Cells lifting per inner round: `r1 3/6 · r2 1/5 · r3 2/3 ·
+  r4 1/3`. Round 1 lifts half the time and round 2 nearly flatlines, where a healthy search lifts
+  most cells in round 1 and thins after. It is an `l1_generate` defect.
+- **Semantic restatement is the defect behind it.** Ten edits each asked the target to reason
+  further before answering — one hypothesis, ten wordings, every one +0.000. The generator
+  re-proposed about a third of the time, and `idea_fingerprint` caught 0 of 15 of those pairs.
+- **Generator mechanics are clean.** Parse failures, no-ops and verbatim duplicates: zero over 6
+  inner campaigns / 17 L1 rounds, `l1_yield` 1.00.
+- **Round-1 truncation is a wrong proxy.** It is 2.2x cheaper per verdict and passes the per-cell
+  bar (correlation 0.663) while its arm-effect correlation is 0.371, ordering 13 of 21 pairs
+  against 10.5 for a coin.
+- **A win is small and granular.** A winning inner round buys 1–4 rows in 28: `+0.036 / +0.071 /
+  +0.107 / +0.143` are the only positive matched-parent lifts recorded.
+- **Lift lands anywhere in the budget.** The round carrying a campaign's best accuracy is spread
+  uniformly across it, and the strongest run peaked on its last round, still climbing.
+- **Nothing has accumulated across campaigns.** Every `promptpotter-self` campaign banked so far
+  carries a different `inner_origin`, so none replayed another's cells and each re-measured its
+  origin under the engine revision of its day. The fingerprint was narrowed on 2026-08-15 to what
+  the inner optimizer nodes resolve to plus the estimator's own source (§ Invariants,
+  `_identity_config`); the mint counts the prior campaigns a novel instrument matches before the
+  spend (`jobs/mint.py::_warn_on_novel_instrument`). A test pinning the fingerprint's VALUE is not
+  the guard — it moved on a third of all commits and was removed twice; the prompt half is walked
+  (`registry.py::renderer_modules`), so only the estimator roster
+  (`connectors/promptpotter.py::measurement_modules`) can lose a member quietly.
+- **Seed retirement.** Of the first six seeds three were retired, one of them on the collapse
+  criterion (`seed_screen.py::rewards_collapse`); `inner_tasks.yaml` records the grounds per seat.
+
 ## Open
 
 1. **A bounded, cheap default config** — the committed `inner_tasks.yaml` + `campaign.json` must let

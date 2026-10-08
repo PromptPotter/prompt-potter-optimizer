@@ -1,6 +1,14 @@
 ---
 name: potter-run
-description: Runs and supervises PromptPotter optimization campaigns — launches (`new` / `resume`), reads a live run's dashboard and round files, diagnoses what the loop produced, and onboards a new dataset. Fires when the operator says "/potter-run", "start a campaign", "run promptpotter-self", "resume", "watch it", "how's the run", "why did round N do that", or names a dataset to optimize — and equally when a campaign is ALREADY in flight and needs supervising mid-conversation, with no fresh-start ceremony. Re-reads run state from disk on every entry, then declares its mode in one line: bug-hunting (the default in this repo — the run is an instrument, the bug is the deliverable) or campaign-supervision (the run is the product).
+description: >-
+  Runs and supervises PromptPotter optimization campaigns — launches (`new` / `resume`), reads a
+  live run's dashboard and round files, diagnoses what the loop produced, and onboards a new
+  dataset. Fires when the operator says "/potter-run", "start a campaign", "run promptpotter-self",
+  "resume", "watch it", "how's the run", "why did round N do that", or names a dataset to
+  optimize — and equally when a campaign is already in flight and needs supervising
+  mid-conversation, with no fresh-start ceremony. Re-reads run state from disk on every entry,
+  then declares its mode in one line — bug-hunting (the default in this repo, where the run is an
+  instrument and the bug is the deliverable) or campaign-supervision (the run is the product).
 model: opus
 ---
 
@@ -39,7 +47,7 @@ broke", "bug-hunting", an operator already mid-investigation.
 There is no fresh-start ceremony and no audit to replay. Whatever the conversation already
 covered, re-read state from disk — that is what makes turn 0 and turn 100 the same entry:
 
-1. `projects/{tenant}/.workspace/active_session.json` → `{session_id, campaign_id, cycle_id}` —
+1. `.promptpotter/projects/{tenant}/.workspace/active_session.json` → `{session_id, campaign_id, cycle_id}` —
    the LATEST launch only; parallel runs each say so by their own `run_phase` (`GET /cycles`)
 2. that cycle's `dashboard.json` (`round`, `best`, `run_standing`, `error_count`; on disk it holds
    only `declared_phase`, the runner's claim; the phase to trust is `GET /cycles`' `run_phase`) + the
@@ -84,7 +92,7 @@ owned by `/potter-self`.
 | `evidence` | Read any set of campaigns together: roster, comparability, replicates, the variance split, resolving power, and (behind `--ranking`) which edits beat their own origin. Zero spend, writes nothing. |
 | `compact-archive <mode>` | Reclaim the measurement archive: `inventory` COUNTS it first — runs, cells, bytes and replay rate by dataset, label and age, and the read that sizes every other mode. Then `compact` moves the fields nothing reads out of candidate runs into a gzip store beside them, `restore` puts them back, `purge-cold` deletes that store. Dry-run by default; `--dataset` scopes it. `origin` / `parent` runs are never touched. **`purge-cold --apply` is the one irreversible verb in this table** — the rows it drops are paid LLM spend. Refuses outright while any cycle can still append. |
 
-**Every ending now states its own next verb** (`STOP_REASON_INFO::next_step`), so read the run's
+**Every ending states its own next verb** (`STOP_REASON_INFO::next_step`), so read the run's
 readout rather than a ladder here. What it cannot tell you is the two ways a raise silently fails:
 the ceiling is clamped against the account allowance, so read the ARMED value back off
 `dashboard.json::run_limits` rather than trusting the number you sent; and the counter is
@@ -182,14 +190,13 @@ disagree without either being broken. Read both, name both.
 **A number can be set by where you STOPPED — ask what CHOSE the rows.** `reference_*` strata
 are defined by the *parent's own* grades, so on a truncated prefix the score is fixed by
 construction rather than by the data (one HIT-stratum slot every 4th position ⇒ a cut arm reports
-`⌊n/4⌋/n`). `scoring/metrics.py::matched_parent_stats` now returns `None` unless the candidate
+`⌊n/4⌋/n`). `scoring/metrics.py::matched_parent_stats` returns `None` unless the candidate
 measured every cell its parent did, so a cut arm reports where it stopped plus its θ, never a standing.
-**A `reference_accuracy` on a row whose `scored_samples < expected_samples` is a pre-fix
-artifact — do not quote it, and do not compare it across arms.**
+**A `reference_accuracy` on a row whose `scored_samples < expected_samples` is not a standing —
+do not quote it, and do not compare it across arms.**
 
-What the ordering does **not** do is starve the posterior — `p_best` moves across most of the
-budget, so the stratification is not why ε fails to fire. Arms that end close are close. Checked
-and refuted; don't re-run this hypothesis.
+**The ordering does not starve the posterior.** `p_best` moves across most of the budget, so arms
+that end close are close, and stratification is not why ε fails to fire.
 
 So: **when a round reports `improved: false`, open
 `.runtime/streams/round_NNNN_pobb.jsonl` and read the final `paired_breakdown` before accepting
@@ -198,15 +205,16 @@ candidate that failed. Report it as an instrument disagreement, and name both nu
 
 Do **not** answer this by retuning PoBB's `epsilon`, and do **not** route promotion through
 `display_metric` — that knob is display-only on purpose, and the gate is already θ. A held round
-now means exactly one thing: no candidate's ability exceeded the parent's. If that still looks
+means exactly one thing: no candidate's ability exceeded the parent's. If that still looks
 wrong after reading both numbers, ask what the round measured, not which estimator the gate uses.
 
 ## Configs are the source of truth
 
 The skill carries no parallel default-ladder. `dataset.md` (source, split, sample shape) ·
 `campaign.yaml` (max_rounds, and the node knobs n_variants, sp_budget_round, patiences) · `pipeline.yaml` (pipeline,
-model, caps). BBEH only: `notebooks/bbeh_potter.ipynb::build_campaign_config()` shadows
-`campaign.yaml` and wins. Model, `reasoning_effort` and the `max_tokens` convention are owned by
+model, caps). BBEH's notebook run alone passes overrides beside the file:
+`docs/research/bbeh-comparison/bbeh_potter_runner.py::build_campaign_config` merges them over
+`campaign.yaml`, and an override wins. Model, `reasoning_effort` and the `max_tokens` convention are owned by
 [`docs/operations/dataset-reasoning-matrix.md`](../../../docs/operations/dataset-reasoning-matrix.md)
 — CHECK a campaign's `pipeline_overlay` against it rather than assuming.
 
@@ -215,8 +223,9 @@ leaderboard picks.
 
 ## Style
 
-- **One shape: a sentence, or a compact box, or 3–5 bullets.** Combine only to put an anomaly flag
-  above the state line. Interpret results; never dump CLI output.
+- **The operator reads a report between other work and acts on its first line**, so a reply is one
+  shape: a sentence, or a compact box, or 3–5 bullets. Combine only to put an anomaly flag above
+  the state line. Interpret results; never dump CLI output.
 - **Warn only from this allowlist** — backend `/status` non-200 or refused (`{backend_url}` is the
   backend, default `:8000`; the PromptPotter API on `:8001` has no `/status` and 404s there); the
   active pointer naming a different dataset than requested; recent

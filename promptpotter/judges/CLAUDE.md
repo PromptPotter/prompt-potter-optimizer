@@ -63,7 +63,7 @@ parallel (a panel, voted) are the same type. `Judge.grade` returns one `JudgeVer
 calls it made is its own business, and token accounting is per underlying call via `call.py::ask`,
 so a chain prices correctly with no special case.
 
-**Every judge shipped today asks exactly ONE stage, and says so in `Judge.max_stages`**, which
+**Every shipped judge asks exactly ONE stage, and says so in `Judge.max_stages`**, which
 `build_evaluators` enforces at init, before a cell is bought. A judge that genuinely composes
 raises its own.
 

@@ -51,8 +51,8 @@ connector shapes its `experiment_data` to fit the loader, never the reverse**.
 ## TermNorm is not a third party
 
 **A structural bug whose cause sits in TermNorm's code gets fixed in TermNorm — never
-papered over on this side.** It lives at `C:\Users\dsacc\OfficeAddinApps\TermNorm-excel`
-(backend under `backend-api/`), the same project as PromptPotter, split into a separate
+papered over on this side.** Its checkout sits beside this one (`../TermNorm-excel` from the repo
+root, backend in its `backend-api` folder), and this line is the one statement of where. It is the same project as PromptPotter, split into a separate
 repo for security reasons only; folding it back in is the goal. That makes it the
 exception to "backends are read-only" — and to nothing else: per-dataset config still
 rides the overlay, backend *behaviour* still earns a TermNorm root-fix, and which one
@@ -183,11 +183,11 @@ Four things that follow:
 ## A multi-turn cell — the turns are the backend's, the steps are the task's
 
 A backend whose cell is a CONVERSATION emits `pipeline_data::turns`
-(`domain/scoring.py::TurnRecord`), and everything about that channel is settled there. Three rules
+(`domain/scoring.py::TurnRecord`), and everything about that channel is settled there. These rules
 belong here, because they are what a connector author gets wrong:
 
 - **Project a published turn format; never author one.** `TurnRecord` narrows Harbor's ATIF
-  (`harbor/models/trajectories/step.py`), dropping the training surface (token ids, logprobs,
+  (`harbor.models.trajectories.step`), dropping the training surface (token ids, logprobs,
   per-turn metrics) that no prompt, ruler or formula reads. Parse it as plain JSON:
   the file is upstream's PRIVATE trial layout, so a field they add must degrade the record, not
   raise inside a cell already paid for.
@@ -215,8 +215,8 @@ fills the required observation `SKILL_KEY`, and a round of unopened skills is a 
 measured.
 
 **There is deliberately no core `turn_scalars` member for this, and that hole is not an oversight to
-fix.** A term whose value is decided by which backend you are on is not a core projection: on the
-other three it would be the constant `1.0`. The rule generalizes rather than the key — **ask of any
+fix.** A term whose value is decided by which backend you are on is not a core projection: on
+every other one it would be the constant `1.0`. The rule generalizes rather than the key — **ask of any
 new connector whether what it injects is what the model consumes**, and if the two can diverge, that
 gap is a measured observation and not a diagnostic.
 

@@ -45,7 +45,7 @@ you edited. Each file's docstring lists its packages; its `# N.` headers are the
 | `intelligence/exploration.py` and `adaptive_queue_mechanism.py`, `bench/difficulty.py`, `domain/ruler.py`, `domain/l4/proxies.py` | `test_ruler.py` | the estimator · the δ ruler and the cells a round reads it on · the L4 outer proxy |
 | The hashes a measurement is filed under, `application/pipeline_resolve.py`, `domain/pipeline_overlay.py`, the held-out partition, anything a scored prompt is composed from | `test_identity.py` | what a measurement is filed under · the config a campaign runs · contamination of a scored prompt |
 | `infrastructure/store/measurement_archive.py` and `archive_queries.py`, `application/maintenance/`, `bench/resume_and_fork/`, `application/origin.py` | `test_archive.py` | replay eligibility · the archive on disk · replayed decisions and forks |
-| `infrastructure/llm/` (pricing, the spend book, wire cost), `infrastructure/identity/quota.py`, `account_spend.py`, the runner's budget gate, judge billing | `test_spend.py` | what a call costs · what a run is billed · ceilings · spend outlives what spent it |
+| `infrastructure/llm/` (pricing, the spend book, wire cost), `application/jobs/quota.py`, `account_spend.py`, the runner's budget gate, judge billing | `test_spend.py` | what a call costs · what a run is billed · ceilings · spend outlives what spent it |
 | `infrastructure/store/layout.py` path builders, `config/log_redaction.py`, the dispatch fence, `infrastructure/identity/grants.py`, `application/jobs/reaper.py` | `test_security.py` | leaks · delegation · unattended deletes |
 | Anything that adds or removes a module, a knob, a served field, a test | `test_complexity_ledger.py` | the ratchet, which asserts EQUALITY in both directions |
 
