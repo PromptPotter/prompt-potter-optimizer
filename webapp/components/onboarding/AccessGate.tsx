@@ -1,6 +1,5 @@
 "use client";
-// Overlay for a BLOCKED account. It reflects the dispatcher's capability gate, never enforces
-// it, and takes precedence over ConsentGate: a blocked account cannot submit, so has nothing to consent to.
+// Takes precedence over ConsentGate: a blocked account cannot submit, so has nothing to consent to.
 
 import { useAuth } from "@/lib/auth-context";
 import { postLogout } from "@/lib/api/account";

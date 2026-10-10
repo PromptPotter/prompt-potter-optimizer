@@ -1,21 +1,20 @@
 "use client";
-// Outer signal: the leading arm's blocked lift over its parent per round, and the panel's precision.
-// ONE shared axis across rounds — per-round auto-scaling hides the tightening a reader is here to see.
 
 import { memo, useMemo } from "react";
 import { useCycleStream } from "@/lib/poll";
-import type { RoundSummary, RoundSummaryCandidate } from "@/lib/api/types";
+import type { ArmReading, RoundAdvance, ServedRound } from "@/lib/api/types";
+import { ROUND_ADVANCE_LABELS } from "@/lib/api/types.generated";
 import { CardFrame, Badge } from "@/components/ui";
-import { NOT_SEPARABLE, type LiftSide } from "@/lib/fitness";
+import { liftOf } from "@/lib/derivations";
+import type { LiftSide } from "@/lib/fitness";
 import { fmtSigned } from "@/lib/format";
 
 const AXIS_W = 220;
 const ROW_H = 18;
 
-// SERVED (`round_summary.py::_leading_arm`), the same arm `panel_precision` is measured on — never
-// an argmax here, which cannot apply the election's admission rule.
-function leadingArm(r: RoundSummary): RoundSummaryCandidate | null {
-  return r.candidates.find((c) => c.is_leading) ?? null;
+// served: domain/results.py::leading_arm — never an argmax here, which cannot apply the election's admission rule.
+function leadingArm(r: ServedRound): ArmReading | null {
+  return r.candidates.find((c) => c.reading.election.leading)?.reading ?? null;
 }
 
 type Lift = {
@@ -23,47 +22,37 @@ type Lift = {
   lift: number;
   lo: number;
   hi: number;
-  // SERVED (`reference_lift_side`): this arm's interval against 0, never the round's verdict.
+  // served: LiftEstimate.side — this arm's interval against 0, never the round's verdict.
   side: LiftSide;
   label: string;
-  // SERVED three-state (`RoundResult.separable`) over the whole electable field; `null` (no arm
-  // carried an interval) is not `false`.
-  separable: boolean | null;
+  advance: RoundAdvance;
 };
 
-function liftsOf(rounds: RoundSummary[]): Lift[] {
+function liftsOf(rounds: ServedRound[]): Lift[] {
   const out: Lift[] = [];
   for (const r of rounds) {
     if (r.round === 0) continue;
     const c = leadingArm(r);
-    if (
-      !c ||
-      c.reference_lift === null ||
-      c.reference_lift_ci_lo === null ||
-      c.reference_lift_ci_hi === null ||
-      c.reference_lift_side == null
-    )
-      continue;
+    const lift = c ? liftOf(c.vs_reference) : null;
+    if (!c || !lift) continue;
     out.push({
       round: r.round,
-      lift: c.reference_lift,
-      lo: c.reference_lift_ci_lo,
-      hi: c.reference_lift_ci_hi,
-      side: c.reference_lift_side,
-      label: c.label,
-      separable: r.separable,
+      lift: lift.value,
+      lo: lift.ci_lo,
+      hi: lift.ci_hi,
+      side: lift.side,
+      label: c.arm.label,
+      advance: r.overlap.advance,
     });
   }
   return out;
 }
 
-// `null` keeps its own word: "inconclusive" would report an unasked question as a negative answer.
-function verdictWord(d: Lift): { tone: "success" | "danger" | "accent"; word: string } {
-  if (d.separable === true) {
-    if (d.side === "below") return { tone: "danger", word: "worse" };
-    return { tone: d.side === "above" ? "success" : "accent", word: "separated" };
-  }
-  return { tone: "accent", word: d.separable === false ? "inconclusive" : "unbracketed" };
+function verdictWord(d: Lift): { tone: "success" | "accent"; word: string } {
+  return {
+    tone: d.advance === "advanced" ? "success" : "accent",
+    word: ROUND_ADVANCE_LABELS[d.advance],
+  };
 }
 
 const STROKE: Record<LiftSide, string> = {
@@ -72,7 +61,7 @@ const STROKE: Record<LiftSide, string> = {
   spans: "var(--color-text-secondary)",
 };
 
-const PRECISION_ADVICE: Record<NonNullable<RoundSummary["panel_precision_verdict"]>, string> = {
+const PRECISION_ADVICE: Record<NonNullable<ServedRound["panel_precision_verdict"]>, string> = {
   noise: "The panel is re-reading its own noise — sharpen the cells before buying more of them.",
   spread: "The cells genuinely differ — that spread is signal about where this optimizer prompt works.",
 };
@@ -91,7 +80,7 @@ function LiftRow({ d, x }: { d: Lift; x: (v: number) => number }) {
         height={ROW_H}
         viewBox={`0 0 ${AXIS_W} ${ROW_H}`}
         role="img"
-        aria-label={`Round ${d.round}: ${value}${d.separable === false ? `, ${NOT_SEPARABLE}` : ""}`}
+        aria-label={`Round ${d.round}: ${value}, ${ROUND_ADVANCE_LABELS[d.advance]}`}
       >
         <line x1={x(0)} y1={2} x2={x(0)} y2={ROW_H - 2} stroke="var(--color-border)" strokeWidth={1} />
         <line
@@ -114,6 +103,7 @@ export const OuterSignalPanel = memo(function OuterSignalPanel() {
   const rounds = useMemo(() => dash?.rounds ?? [], [dash?.rounds]);
   const lifts = useMemo(() => liftsOf(rounds), [rounds]);
 
+  // ONE axis across rounds: per-round auto-scaling hides the tightening.
   const x = useMemo(() => {
     const vals = [0, ...lifts.flatMap((d) => [d.lo, d.hi])];
     const lo = Math.min(...vals);
@@ -134,14 +124,14 @@ export const OuterSignalPanel = memo(function OuterSignalPanel() {
   return (
     <CardFrame title="Outer signal" headingTag="h2">
       {!latest ? (
-        <p className="l4-empty">
+        <p className="note-empty">
           {rounds.some((r) => r.round > 0)
             ? "No round has two cells both its leading arm and the origin measured, so no interval can be drawn. A one-cell panel never will — the reading is honest, not missing."
             : "Select a pp-self cycle with a completed round to see whether its panel resolves anything yet."}
         </p>
       ) : (
         <>
-          <p className="l4-lede">
+          <p className="note-lede">
             <Badge tone={verdictWord(latest).tone}>
               {verdictWord(latest).word}
             </Badge>{" "}
@@ -156,9 +146,8 @@ export const OuterSignalPanel = memo(function OuterSignalPanel() {
               <LiftRow key={d.round} d={d} x={x} />
             ))}
           </div>
-          {/* Two bars, never their ratio; in θ logits, never fitness. */}
           {precision ? (
-            <p className="l4-lede">
+            <p className="note-lede">
               Each cell was measured to ±{precision.estimation_sd.toFixed(3)} logits; the cells
               landed ±{precision.observed_sd.toFixed(3)} apart across {precision.n_cells}.
               {advice ? ` ${PRECISION_ADVICE[advice]}` : ""}

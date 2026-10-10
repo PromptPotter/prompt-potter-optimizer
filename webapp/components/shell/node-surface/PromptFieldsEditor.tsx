@@ -6,10 +6,6 @@ import { cx } from "@/lib/cx";
 import { PROMPT_STRING_FIELDS, promptFieldLabel } from "@/lib/prompt-fields";
 import { LockButton } from "./NodeConfigEditor";
 
-// The starting prompt's six string fields (`draft.origin_prompt_fields`), edited in place and
-// persisted via `edit-draft-campaign` on blur.
-
-// A field's label is not here: `promptFieldLabel` owns it, shared with the run card's diff summary.
 const FIELD_META: Record<string, { hint: string; rows: number }> = {
   persona: { hint: "Who the model should act as", rows: 2 },
   task_intent: { hint: "The goal, in one line", rows: 2 },
@@ -43,15 +39,12 @@ export function PromptFieldsEditor({
 }: {
   value: Record<string, unknown>;
   onApply?: (patch: DraftPatch) => void;
-  // Each field's lock off its SERVED row (a `param_keys` membership like any param's).
   locks?: Record<string, boolean>;
   onLock?: (field: string, locked: boolean) => void;
   readOnly?: boolean;
-  // Empty fields drop only when also `readOnly`: hiding a typeable slot makes the prompt look shorter.
   compact?: boolean;
 }) {
-  // `ui/CommitInput`'s two latches over a record: `prevFp` is "the prop moved", `sentFp` "what was
-  // last handed up". Not CommitInput itself, since all six fields merge into ONE patch.
+  // `ui/CommitInput`'s two latches, not CommitInput itself: all six fields merge into ONE patch.
   const fingerprint = JSON.stringify(asStrings(value));
   const [prevFp, setPrevFp] = useState(fingerprint);
   const [sentFp, setSentFp] = useState(fingerprint);
@@ -64,7 +57,7 @@ export function PromptFieldsEditor({
 
   const setField = (key: string, v: string) => setFields((prev) => ({ ...prev, [key]: v }));
 
-  // Never re-send a value already sent: each patch is a CommandRecord on the check-in ledger.
+  // Never re-sends a sent value: each patch is a CommandRecord on the check-in ledger.
   const commit = () => {
     if (readOnly || !onApply) return;
     // Through `asStrings` so both sides of the compare are keyed in `FIELDS` order.

@@ -1,5 +1,3 @@
-/* The global floating control strip (components/shell/RemoteControl.tsx); it docks as a band
-   below --bp-md, where a phone has no whitespace to hover over. */
 .remote-control{
   position:fixed;
   left:50%;
@@ -19,14 +17,10 @@
   color:var(--color-text-secondary);
 }
 
-/* Stays mounted offline — it reads the server's last-known run_phase — dimmed so the operator
-   knows the state on screen may lag. */
 .remote-control-offline{opacity:.6}
 
-/* It floats and reserves no space of its own, so it publishes its height to the
-   spacer shell.css puts at the foot of every pane — only while mounted. */
+/* It floats and reserves no space: this publishes its height to the spacer shell.css puts at the foot of every pane. */
 .shell:has(> .remote-control){--remote-dock-h:62px}
-/* Squeezed to `100vw - 24px`, the floating pill crushes its own contents. */
 @media (max-width:880px){
   .remote-control{
     left:0;right:0;transform:none;max-width:none;
@@ -37,14 +31,9 @@
     border-radius:0;border-left:0;border-right:0;border-bottom:0;
     box-shadow:0 -2px 12px rgba(0,0,0,.16);
   }
-  /* Nothing shrinks below its own text; a row that no longer fits wraps. Five slots
-     fit 390px only at these gaps — the sixth is what the panel is for. */
   .remote-control > *{flex:0 0 auto}
-  /* The one place this height is stated. Measure under touch emulation: `pointer:coarse` does not
-     match in a desktop browser. */
+  /* Measure under touch emulation: `pointer:coarse` does not match in a desktop browser. */
   .shell:has(> .remote-control){--remote-dock-h:64px}
-  /* The list screen's scroller is the forest, not `.content`, so it reserves its own;
-     the footer is a flex sibling BELOW the scroller, under the band, so it lifts too. */
   .shell.mobile-list:has(> .remote-control) .unit-library-list,
   .shell.mobile-list:has(> .remote-control) .sidebar-footer{
     padding-bottom:calc(var(--remote-dock-h) + env(safe-area-inset-bottom,0px));
@@ -67,7 +56,6 @@
 .remote-btn:disabled{opacity:.5;cursor:not-allowed}
 .remote-skip{color:var(--color-warn)}
 .remote-drill{color:var(--color-accent)}
-/* The segments ARE the buttons, so `.remote-btn` here would nest one control inside another. */
 .remote-cells-group{display:flex;align-items:center;gap:var(--space-4);width:100%}
 .remote-cells-group .remote-cells{display:flex;flex:1 1 auto;min-width:0}
 .remote-cells-group .remote-cells > button{flex:1 1 0;min-width:0;padding-inline:0;font-variant-numeric:tabular-nums}
@@ -76,14 +64,12 @@
 
 .remote-babysat{display:inline-flex;align-items:center;gap:var(--space-4);padding:2px var(--space-8);border-radius:999px;background:var(--color-background-tertiary);color:var(--color-warn);font-weight:600}
 
-/* Some calls had no resolvable USD cost, so the $ figure undercounts and the USD cap is blind. */
 .remote-spend-warn{display:inline-flex;align-items:center;gap:var(--space-4);padding:2px var(--space-8);border-radius:999px;background:var(--color-background-tertiary);color:var(--color-warn);font-weight:600}
 
 .remote-spend-cache{color:var(--color-text-secondary);font-weight:400}
 
 .remote-err{color:var(--color-danger);max-width:200px}
 
-/* The panel opens UPWARD because the strip is bottom-fixed. */
 .remote-readout{
   display:inline-flex;align-items:center;gap:var(--space-10);
   padding:var(--space-4) var(--space-10);
@@ -97,14 +83,12 @@
 .remote-readout-on{background:var(--color-background-primary)}
 .remote-readout .chip{display:inline-flex;align-items:center;gap:var(--space-6);white-space:nowrap;font-family:var(--font-mono);line-height:1.3}
 .remote-readout .chip strong{color:var(--color-text-primary);font-weight:600}
-/* The chevron is the only control here — the chip beside it teaches and is read, never pressed. */
 .remote-readout-toggle{display:inline-flex;align-items:center;padding:0;border:0;background:transparent;color:inherit;cursor:pointer}
 .remote-readout-toggle:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent);border-radius:3px}
 .remote-readout .chev{transition:transform .15s;flex-shrink:0}
 .remote-readout-toggle[aria-expanded="true"] .chev{transform:rotate(180deg);color:var(--color-accent)}
 
-/* Absolute, not a flex child: in flow the centre-anchored pill would re-centre its controls
-   under the cursor on open. It scrolls inside itself. */
+/* Absolute, not a flex child: in flow the centre-anchored pill re-centres its controls under the cursor on open. */
 .remote-panel{
   position:absolute;
   left:50%;transform:translateX(-50%);
@@ -137,7 +121,6 @@
 .run-limits-control-note{color:var(--color-success);font-size:var(--text-xs)}
 
 @media (max-width:640px){
-  /* Scoped to the STRIP, so the look-ahead button in the panel keeps its label. */
   .remote-control > .remote-btn .remote-btn-label{display:none}
 }
 @media (prefers-reduced-motion:reduce){.remote-readout .chev{transition:none}}

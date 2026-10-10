@@ -1,21 +1,23 @@
 "use client";
-// One candidate's last `verify`: the level on cells its rounds never bought, beside the level
-// those rounds recorded. Every number is the served reading's.
 
-import type { BandedValue, MeasuredUnit, VerifyReading as Reading } from "@/lib/api/types";
+import type { MeasuredUnit, VerifyReading as Reading } from "@/lib/api/types";
+import { VERIFY_STRATEGY_LABELS } from "@/lib/api/types.generated";
 import { cx } from "@/lib/cx";
 import { fmtFitness, fmtPct0, fmtSigned, unitCount } from "@/lib/format";
 import { Term } from "@/components/ui";
+import { PairedLift } from "@/components/shell/PairedLift";
 
-function band(v: BandedValue | null, fmt: (n: number) => string): string {
+function band(
+  v: { ci_lo: number | null; ci_hi: number | null } | null,
+  fmt: (n: number) => string,
+): string {
   return v?.ci_lo == null || v.ci_hi == null ? "" : ` [${fmt(v.ci_lo)}, ${fmt(v.ci_hi)}]`;
 }
 
 export function VerifyReading({ reading, unit }: { reading: Reading; unit: MeasuredUnit }) {
-  const { fresh, recorded, lift } = reading;
+  const { fresh, recorded } = reading;
   return (
     <div className="verify-reading">
-      {/* `held` is SERVED: the producer owns when two measured rates count as equal. */}
       {reading.held !== null && (
         <span className={cx("verify-verdict", reading.held ? "held" : "dropped")}>
           {reading.held ? "held" : "dropped"}
@@ -45,19 +47,23 @@ export function VerifyReading({ reading, unit }: { reading: Reading; unit: Measu
             {fmtSigned(reading.composite_increment, 2)})
           </dd>
         </div>
-        {lift.accuracy && (
-          <div>
-            <dt>
-              <Term content="This candidate over the campaign origin, paired cell by cell on every cell both scored — the round's and the fresh ones alike. A band spanning zero has not separated the two.">
-                lift over origin
-              </Term>
-            </dt>
-            <dd>
-              <strong>{fmtSigned(lift.accuracy.value, 2)}</strong>
-              {band(lift.accuracy, (n) => fmtSigned(n, 2))} on {reading.n_shared} shared
-            </dd>
-          </div>
-        )}
+        <div>
+          <dt>
+            <Term content="This candidate over the campaign origin, paired cell by cell on every cell both scored — the round's and the fresh ones alike. A band spanning zero has not separated the two.">
+              lift over origin
+            </Term>
+          </dt>
+          <dd>
+            <PairedLift reading={reading.vs_origin} unread="sentence">
+              {({ estimate }, shared) => (
+                <>
+                  <strong>{fmtSigned(estimate.value, 2)}</strong>
+                  {band(estimate, (n) => fmtSigned(n, 2))} on {shared} shared
+                </>
+              )}
+            </PairedLift>
+          </dd>
+        </div>
         <div>
           <dt>
             <Term content="Fresh cells that returned a verdict, and how they were picked. Hardest-first cells sit below the candidate's level by construction, so that read carries no held / dropped call — read the lift.">
@@ -65,8 +71,8 @@ export function VerifyReading({ reading, unit }: { reading: Reading; unit: Measu
             </Term>
           </dt>
           <dd>
-            <strong>{unitCount(reading.n_fresh, unit)}</strong>,{" "}
-            {reading.strategy === "hard" ? "hardest first" : "at random"}
+            <strong>{unitCount(reading.fresh.n, unit)}</strong>,{" "}
+            {VERIFY_STRATEGY_LABELS[reading.strategy]}
           </dd>
         </div>
       </dl>

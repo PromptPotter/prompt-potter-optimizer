@@ -20,8 +20,7 @@ export function NumberField({
   const { local, setLocal, dirty } = useAppliableField(String(value));
   return (
     <div className="new-campaign-field">
-      {/* The label names the INPUT alone — wrapping the button too would fold "Apply" into the
-          field's accessible name and let a click on the caption press it. */}
+      {/* Labels the INPUT alone: wrapping the button would fold "Apply" into the field's accessible name. */}
       <label htmlFor={id}>{label}</label>
       <span className="new-campaign-apply">
         <input

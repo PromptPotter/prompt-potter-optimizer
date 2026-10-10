@@ -1,6 +1,5 @@
-/* `.chat-messages` is the tab's only scroller, which pins the composer. `min-height:0` is
-   load-bearing: without it the flex children size to content past the viewport. */
-.chat-content{padding:0 0 var(--space-18);display:flex;flex-direction:column;min-height:0;overflow:hidden}
+/* `min-height:0` is load-bearing: without it the tab sizes past the viewport. */
+.chat-content{padding:0;display:flex;flex-direction:column;min-height:0;overflow-y:auto}
 .pipeline-zoom{display:flex;align-items:center;gap:var(--space-4);flex-shrink:0;margin-right:var(--space-8)}
 .pipeline-zoom-btn{
   display:inline-flex;align-items:center;justify-content:center;
@@ -11,14 +10,13 @@
 }
 .pipeline-zoom-btn:hover{color:var(--color-accent);border-color:var(--color-accent)}
 .pipeline-zoom-btn:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
-.pipeline-stack{flex:1 1 100%;padding:0 var(--space-16)}
+.pipeline-zoom-btn[aria-pressed="true"]{color:var(--color-text-on-accent);background:var(--color-accent);border-color:var(--color-accent)}
+.pipeline-stack{flex:1 1 100%;padding:0 var(--space-16);display:grid;grid-template-columns:auto minmax(0,auto);align-items:center;justify-content:center}
+.pipeline-stack > .pipeline-stack-note{grid-column:1 / -1}
 
 .wf-hero{position:relative;display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:var(--space-6) var(--space-10);padding:var(--space-16) var(--space-16) var(--space-18);max-width:var(--reading-measure);margin:0 auto;width:100%}
-/* NodeDetail (560px) and the expanded heat table need the whole row: the table breaks out
-   full-bleed off its wrap's box, which a shrink-to-fit wrap resolves against nothing. */
-.wf-hero > .bnode{flex:1 1 100%}
-.wf-hero .hs-heat-wrap{flex:0 1 auto;width:auto;margin-top:0;padding:0}
-.wf-hero .hs-heat-wrap:has(.hs-expand-wrap){flex-basis:100%;width:100%}
+/* The whole row: the heat table breaks out full-bleed off its wrap's box, which a shrink-to-fit wrap resolves against nothing. */
+.wf-hero-detail{flex:0 0 100%;min-width:0}
 .wf-hero-flow{display:flex;align-items:center;justify-content:center;gap:0;padding:var(--space-10) 0}
 .wf-hero-node{background:var(--color-background-secondary);border:1px solid var(--color-border);border-radius:10px;padding:var(--space-14) var(--space-24);text-align:left;min-width:140px;display:flex;flex-direction:row;align-items:center;gap:var(--space-12);position:relative;z-index:2}
 .wf-hero-node .ico{color:var(--color-text-secondary);display:flex;align-items:center;justify-content:center;flex-shrink:0}
@@ -37,10 +35,6 @@
 .wf-hero-node .lbl{font-size:var(--text-md);letter-spacing:.08em;color:var(--color-text-secondary);text-transform:uppercase;font-weight:600}
 .wf-hero-node.llm .lbl{font-size:var(--text-3xl);color:var(--color-text-primary);letter-spacing:.06em}
 .wf-hero-node .val{font-size:var(--text-md);font-weight:500;color:var(--color-text-primary);font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px}
-.wf-hero-node-toggle{cursor:pointer;font:inherit;color:inherit;text-align:left;transition:border-color .15s,box-shadow .15s,background .15s}
-.wf-hero-node-toggle:hover{border-color:var(--color-accent)}
-.wf-hero-node-toggle:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent-glow)}
-.wf-hero-node-toggle[aria-pressed="true"]{border-color:var(--color-accent);box-shadow:inset 0 0 0 1px var(--color-accent),0 0 14px var(--color-accent-glow)}
 .wf-hero-node.llm .val{color:var(--color-accent);align-self:center;text-align:center;max-width:220px}
 .wf-hero-node.llm.running{
   border-color:var(--color-success-border);
@@ -59,7 +53,6 @@
   border-left:9px solid var(--color-accent);border-top:5px solid transparent;border-bottom:5px solid transparent;
   filter:drop-shadow(0 0 5px var(--color-accent-glow))
 }
-/* Hit area stays 14px via a transparent button; the visible 6px dot lives in ::before. */
 .connector{position:absolute;left:50%;top:50%;transform:translate(-50%,calc(-50% - 7px));z-index:3}
 .connector-dot{
   appearance:none;border:0;padding:0;cursor:pointer;background:transparent;
@@ -119,18 +112,14 @@
   min-width:280px;max-width:560px;
   width:auto
 }
-/* Here, not in responsive.css: domains/ load after foundation/, so the same override there
-   loses the cascade at equal specificity. */
+/* Here, not in responsive.css: domains/ load after foundation/, so the same override there loses at equal specificity. */
 @media (max-width:640px){
   .wf-hero-node.llm.wf-hero-node-multi{min-width:0;max-width:100%}
 }
-/* The top padding is glow room: a top-row dot sits 7px from the viewBox edge and `pulse-active`
-   reaches 14px, so the rail's own clip would shave the halo. */
+/* The top padding is glow room: `pulse-active` reaches 14px and the rail's own clip would shave the halo. */
 .wf-hero-multi-rail{max-width:100%;padding-top:8px;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;scroll-behavior:smooth}
-/* No height: the strip carries `height={CELL_H}` beside a same-height viewBox, and a
-   contradicting CSS height makes `meet` scale the level instead of shortening it. */
+/* No height: one contradicting the strip's `height={CELL_H}` makes `meet` scale the level instead of shortening it. */
 .wf-hero-multi-svg{display:block;overflow:visible}
-/* The cells reflow when one expands; without this the whole strip jumps. */
 .wf-hero-multi-node{transition:transform .18s ease}
 @media (prefers-reduced-motion:reduce){
   .wf-hero-multi-rail{scroll-behavior:auto}
@@ -150,9 +139,6 @@
 .wf-hero-multi-node .node{fill:var(--color-accent);stroke:var(--color-accent);stroke-width:1;filter:drop-shadow(0 0 4px var(--color-accent-glow));transition:transform .15s,filter .15s}
 .wf-hero-multi-node:hover .node{transform-box:fill-box;transform-origin:center;transform:scale(1.18)}
 .wf-hero-multi-node .node.selected{filter:drop-shadow(0 0 7px var(--color-accent-glow)) drop-shadow(0 0 11px var(--color-accent-glow))}
-/* Padlock BESIDE the node, never instead of it. CLOSED = every openable axis shut; OPEN = some
-   shut, some searched; a node with nothing openable wears none. */
-/* `pulse-active` is declared in `workflow.css`, so the hero and the Optimizer card share one language. */
 .wf-hero-multi-node .node.active{fill:var(--color-success);stroke:var(--color-success);filter:drop-shadow(0 0 7px rgba(var(--color-success-rgb),0.55));animation:pulse-active 1.6s ease-in-out infinite}
 .wf-hero-multi-node .node-lock .body{fill:var(--color-text-secondary)}
 .wf-hero-multi-node .node-lock .shackle{fill:none;stroke:var(--color-text-secondary);stroke-width:1.5;stroke-linecap:round}
@@ -160,25 +146,19 @@
 .wf-hero-multi-node .node-lock.is-open .shackle{opacity:.7}
 .wf-hero-multi-node:hover .node-lock .body{fill:var(--color-text-secondary)}
 .wf-hero-multi-node:hover .node-lock .shackle{stroke:var(--color-text-secondary)}
-/* No `selected`/`active` variant: the NODE carries both, and two things pulsing for one fact read as two. */
-/* The REACH ring marks where the search works — a positive statement, since most nodes declare
-   no axis. It composes with the lock rather than replacing it. */
 .wf-hero-multi-node .node-reach{fill:none;stroke:var(--color-accent);stroke-width:1.1;opacity:.55}
 .wf-hero-multi-node:hover .node-reach{opacity:.9}
 .wf-hero-multi-node .node-reach.active{stroke:var(--color-success);opacity:.95}
-/* Not a lock in either state: the node's knobs are real, they just live in another cycle. */
 .wf-hero-multi-node .node-nest .frame{fill:none;stroke:var(--color-text-secondary);stroke-width:1.4}
 .wf-hero-multi-node .node-nest .inner{fill:var(--color-text-secondary);opacity:.7}
 .wf-hero-multi-node .node-nest.selected .frame{stroke:var(--color-accent)}
 .wf-hero-multi-node .node-nest.selected .inner{fill:var(--color-accent)}
 .wf-hero-multi-node:hover .node-nest .frame{stroke:var(--color-text-secondary)}
 .wf-hero-multi-node:hover .node-nest .inner{fill:var(--color-text-secondary)}
-/* Last, so running outranks selected/hover — same order as the dot and lock. */
+/* Last, so running outranks selected/hover. */
 .wf-hero-multi-node .node-nest.active .frame{stroke:var(--color-success)}
 .wf-hero-multi-node .node-nest.active .inner{fill:var(--color-success)}
 .wf-hero-multi-node .node-nest.active{animation:pulse-active 1.6s ease-in-out infinite}
-/* One rule set for the whole served kind vocabulary — every surface draws these dots, so a
-   kind styled anywhere else is a kind styled on one surface and not the others. */
 .wf-hero-multi-node .node.kind-measurement{fill:var(--color-text-secondary);stroke:var(--color-text-secondary);filter:drop-shadow(0 0 3px rgba(var(--color-accent-rgb),0.25))}
 .wf-hero-multi-node .node.kind-tool{fill:var(--color-accent);opacity:.85}
 .wf-hero-multi-node .node.kind-retriever{fill:var(--color-accent);opacity:.85}
@@ -186,21 +166,17 @@
 .wf-hero-multi-node .node-label{font-size:var(--text-xs);font-weight:500;fill:var(--color-text-primary);font-family:var(--font-mono);pointer-events:none}
 .wf-hero-multi-node .node-sub{font-size:var(--text-xs);fill:var(--color-text-secondary);font-family:var(--font-mono);pointer-events:none}
 .wf-hero-multi-tag{font-size:var(--text-xs);font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--color-text-secondary);text-align:center;padding-bottom:4px;font-family:var(--font-mono)}
-/* Runs ONCE, before the loop: it recedes so the eye lands on what repeats. */
 .wf-hero-multi-node.muted{opacity:.42}
 .wf-hero-multi-node.muted:hover,
 .wf-hero-multi-node.muted:focus-visible{opacity:1}
 .wf-hero-multi-node.inert{cursor:default}
 .wf-hero-multi-node.inert:hover .node{transform:none}
-/* The chip is the button: a <button> cannot legally contain the nested level below it. */
 .wf-hero-sole{background:none;border:0;padding:0;font:inherit;color:inherit;cursor:pointer;display:flex;flex-direction:column;gap:var(--space-4);width:100%}
 .wf-hero-sole:disabled{cursor:default}
 .wf-hero-sole:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent-glow);border-radius:8px}
-/* The box and its level are SIBLINGS, so the box's rules cannot reach in. `max-width` is
-   load-bearing: unbounded, the wrapper squeezes the flanking chips instead of letting the rail scroll. */
+/* `max-width` is load-bearing: unbounded, the wrapper squeezes the flanking chips instead of letting the rail scroll. */
 .wf-hero-unit{display:flex;flex-direction:column;min-width:0;max-width:100%;position:relative;z-index:2}
-/* Depth reads as accent fill on alternate levels, counted outward from the anchor. Child
-   combinators: a descendant selector would re-cut every deeper box too. */
+/* Child combinators: a descendant selector would re-cut every deeper box too. */
 .wf-hero-unit.has-nested{border-radius:12px}
 .wf-hero-unit.has-nested > .wf-hero-node.llm{
   max-width:none;
@@ -208,8 +184,6 @@
   padding:var(--space-6) var(--space-12);
   border:0;box-shadow:none;background:none;border-radius:12px 12px 0 0
 }
-/* Tint is opt-in on the STRIP only, never on the area it nests: an untinted level
-   inherits whatever its parent painted, which cancels the alternation either way. */
 .wf-hero-unit.tone-accent.has-nested > .wf-hero-node.llm{background:rgba(var(--color-accent-rgb),0.10)}
 .wf-hero-unit.has-nested > .wf-hero-node.llm > .wf-hero-multi-tag{
   padding-bottom:0;line-height:1;text-align:left;
@@ -225,57 +199,42 @@
 @media (max-width:640px){
   .wf-hero-nested{padding-left:var(--space-4);padding-right:var(--space-4)}
 }
-/* Gives way when an open node detail or sample table outgrows the tab, and scrolls only then:
-   the connector's hover card counts as scrollable overflow even while hidden. */
-.chat-content > .wf-hero{flex:0 1 auto;min-height:0}
-.wf-hero:has(> .bnode),.wf-hero:has(.hs-expand-wrap){overflow-y:auto}
+.chat-content > .wf-hero{flex:0 0 auto}
+.chat-content .chat-grid{flex:1 0 auto}
+.chat-content .chat-panel{background:transparent;border:0;border-radius:0;overflow:visible}
+.chat-content .chat-messages{flex:1 0 auto;overflow:visible;padding-bottom:calc(var(--space-18) + var(--remote-dock-h))}
+.chat-content .chat-input-row{position:sticky;bottom:0;z-index:3;background:var(--color-background-tertiary)}
+.chat-content::after{display:none}
+.shell:has(.chat-content) > .remote-control{bottom:calc(var(--nav-dock-h) + var(--chat-composer-h,0px) + env(safe-area-inset-bottom,0px))}
 .chat-grid{display:grid;grid-template-columns:minmax(0,var(--reading-measure));gap:var(--space-24);justify-content:center;flex:1 0 240px;min-height:0;padding:0 var(--space-18)}
-/* No height floor at any width: a floor pushes the input row below the fold. */
 .chat-panel{background:var(--color-background-primary);border:1px solid var(--color-border);border-radius:var(--border-radius-lg);display:flex;flex-direction:column;overflow:hidden;min-height:0;min-width:0}
 .chat-messages{flex:1;overflow-y:auto;padding:var(--space-18);display:flex;flex-direction:column;gap:var(--space-12)}
-/* A column flex child shrinks by default, so an overfull thread COMPRESSES its entries instead
-   of scrolling. On the container, so a child added later inherits it. */
+/* A column flex child shrinks by default: without this an overfull thread COMPRESSES its entries instead of scrolling. */
 .chat-messages>*{flex-shrink:0}
 .chat-msg{max-width:75%;padding:var(--space-10) var(--space-14);border-radius:14px;font-size:var(--text-md);line-height:1.5}
-.chat-msg.user{
-  align-self:flex-end;
-  background:linear-gradient(180deg,rgba(var(--color-accent-rgb),0.16) 0%,rgba(var(--color-accent-rgb),0.06) 100%);
-  border:1px solid rgba(var(--color-accent-rgb),0.32);
-  color:var(--color-text-primary);
-  border-bottom-right-radius:4px;
-  box-shadow:0 0 18px rgba(var(--color-accent-rgb),0.18);
-  backdrop-filter:blur(8px);
-  -webkit-backdrop-filter:blur(8px)
-}
-.chat-msg.ai{align-self:flex-start;background:var(--color-background-secondary);border:1px solid var(--color-border);color:var(--color-text-primary);border-bottom-left-radius:4px}
+.chat-msg.user{align-self:flex-end;background:var(--color-background-hover);color:var(--color-text-primary)}
+.chat-msg.ai{align-self:stretch;max-width:100%;padding:0;color:var(--color-text-primary)}
 .chat-input-row{padding:var(--space-14) var(--space-18);display:flex;gap:var(--space-8);align-items:flex-end}
 .chat-attach{background:transparent;border:1px solid var(--color-border);color:var(--color-text-secondary);padding:0;width:40px;height:40px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;border-radius:8px;transition:background .15s,color .15s,border-color .15s;flex-shrink:0}
 .chat-attach:hover:not(:disabled){background:var(--color-background-hover);color:var(--color-accent);border-color:var(--color-accent)}
 .chat-attach:disabled{opacity:.5;cursor:not-allowed}
-/* The FIELD is the frame and the textarea is bare, so Tools can sit in the input's corner. */
-.chat-field{flex:1;min-width:0;display:flex;align-items:flex-end;background:var(--color-background-secondary);border:1px solid var(--color-border);border-radius:8px;transition:border-color .15s}
+.chat-field{flex:1;min-width:0;display:flex;align-items:flex-end;background:var(--color-background-primary);border:1px solid var(--color-border);border-radius:var(--border-radius-lg);transition:border-color .15s}
 .chat-field:focus-within{border-color:var(--color-accent)}
 .chat-input{flex:1;min-width:0;background:transparent;border:0;padding:var(--space-10) var(--space-12);font-family:var(--font-sans);font-size:var(--text-md);color:var(--color-text-primary);resize:none;min-height:40px;max-height:120px;outline:none}
 .chat-input:disabled{opacity:.5;cursor:not-allowed}
-/* In FLOW, not absolute: an absolute chip leaves the row, and the textarea loses both the chip's
-   width and the padding reserved to clear it. */
 .chat-tools-wrap{margin:0 var(--space-6) var(--space-8) 0}
 .chat-tools{display:inline-flex;align-items:center;gap:var(--space-4);padding:2px var(--space-4);background:transparent;border:0;border-radius:5px;color:var(--color-text-secondary);font-family:var(--font-sans);font-size:var(--text-xs);line-height:1;cursor:pointer;white-space:nowrap;transition:color .15s}
 .chat-tools:hover{color:var(--color-text-primary)}
 .chat-tools[aria-expanded="true"]{color:var(--color-accent)}
 .chat-tools:focus-visible{outline:2px solid var(--color-accent);outline-offset:1px}
-/* Capped to the viewport so a phone never opens it off-screen. */
 .chat-tools-panel{width:min(340px,calc(100vw - 32px));padding:var(--space-6) var(--space-12) var(--space-10)}
 .chat-tools-err{margin:var(--space-6) 0 0;font-size:var(--text-sm);color:var(--color-danger)}
 .chat-send{background:var(--color-accent);color:var(--color-text-on-accent);border:none;border-radius:8px;padding:var(--space-10) var(--space-18);font-size:var(--text-md);font-weight:600;cursor:pointer;transition:background .15s,color .15s}
 .chat-send:hover:not(:disabled){background:var(--color-accent-strong);color:#fff}
 .chat-send:disabled{opacity:.5;cursor:not-allowed}
-/* Fires on touch tablets at desktop widths, above the 640px band. */
 @media (pointer:coarse){
   .chat-input{font-size:var(--text-xl);min-height:44px}
   .chat-attach,.chat-send{min-height:44px}
-  /* The touch floor grows Tools' HIT BOX, never its ink — the button reaches 44px
-     and sits flush in the field's bottom corner, so the field stays 44px too. */
   .chat-tools-wrap{margin:0 var(--space-4) 0 0}
   .chat-tools{padding:0 var(--space-4)}
 }
@@ -296,13 +255,11 @@
 .chat-cta-btn{background:var(--color-accent);color:var(--color-text-on-accent);border:none;border-radius:8px;padding:var(--space-8) var(--space-16);font-size:var(--text-md);font-weight:600;cursor:pointer;transition:background .15s,color .15s}
 .chat-cta-btn:hover:not(:disabled){background:var(--color-accent-strong);color:#fff}
 .chat-cta-btn:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px}
-/* On touch a disabled CTA would otherwise look live, and a tap would die silently. */
 .chat-cta-btn:disabled{opacity:.5;cursor:not-allowed}
 .chat-cta-btn.secondary{background:transparent;color:var(--color-accent);border:1px solid var(--color-accent)}
 .chat-cta-btn.secondary:hover:not(:disabled){background:var(--color-background-hover);color:var(--color-accent)}
 .chat-msg.chat-collision{display:flex;flex-direction:column;gap:var(--space-10)}
 .chat-collision-actions{display:flex;flex-wrap:wrap;gap:var(--space-8);align-items:center}
-/* "Replace" is data-safe but supersedes, so it reads as the cautionary choice, not a primary CTA. */
 .chat-cta-btn.chat-collision-replace{background:transparent;color:var(--color-text-secondary);border:1px solid var(--color-border)}
 .chat-cta-btn.chat-collision-replace:hover{background:var(--color-background-hover);color:var(--color-text-primary)}
 .chat-collision-cancel{background:none;border:0;color:var(--color-text-secondary);font-size:var(--text-base);cursor:pointer;padding:var(--space-6) var(--space-4)}
@@ -311,17 +268,13 @@
 .chat-msg.chat-msg-error{border:1px solid var(--color-danger-border);color:var(--color-danger)}
 .chat-msg.chat-msg-warn{border:1px solid var(--color-warn-border);background:var(--color-warn-bg);color:var(--color-warn)}
 
-/* Hosted by the chat tab and the New campaign modal; the modal's padding rides its host, never a
-   variant class on the thread. */
 .ingest-conversation{display:flex;flex-direction:column;flex:1;min-height:0}
-.new-campaign-modal .ingest-conversation{flex:1 1 auto;min-height:0}
-.new-campaign-modal .chat-input-row{padding:var(--space-14) var(--space-18) var(--space-18)}
 .chat-msg.ingest-picklist,.chat-msg.ingest-ready{max-width:100%;width:100%;align-self:stretch;background:none;border:0;padding:0}
 .ingest-picklist{display:flex;flex-direction:column;gap:var(--space-12)}
 .ingest-picklist-group{display:flex;flex-direction:column;gap:var(--space-6)}
 .ingest-picklist-head{font-size:var(--text-sm);letter-spacing:.06em;text-transform:uppercase;color:var(--color-text-secondary);font-weight:600}
 .ingest-picklist-items{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px}
-/* Cap each menu to 8 rows (row ≈ 33px + 3px gap); scroll beyond. */
+/* 284px = 8 rows (row ≈ 33px + 3px gap). */
 .ingest-picklist-scroll{max-height:284px;overflow-y:auto;padding-right:4px}
 .ingest-pick-btn{width:100%;display:flex;align-items:center;justify-content:space-between;gap:var(--space-12);background:var(--color-background-secondary);border:1px solid var(--color-border);border-radius:6px;padding:var(--space-6) var(--space-12);font-size:var(--text-md);color:var(--color-text-primary);cursor:pointer;text-align:left;transition:background .15s,border-color .15s}
 .ingest-pick-btn:hover:not(:disabled){background:var(--color-background-hover);border-color:var(--color-accent)}
@@ -329,7 +282,6 @@
 .ingest-pick-btn:disabled{opacity:.5;cursor:not-allowed}
 .ingest-pick-meta{flex-shrink:0;font-size:var(--text-sm);color:var(--color-text-secondary)}
 .ingest-ready{display:flex;flex-direction:column;gap:var(--space-12)}
-/* A section here is a heading over a hairline, never a second card inside the panel. */
 .ingest-ready > :is(.setup-preview,.origin-checkin){padding:var(--space-14) 0 0;border:0;border-top:0.5px solid var(--color-border);border-radius:0;background:none}
 .ingest-degraded{display:flex;flex-direction:column;gap:var(--space-8);align-items:flex-start;border:1px solid var(--color-warn-border);background:var(--color-warn-bg);color:var(--color-warn);border-radius:8px;padding:var(--space-10) var(--space-12);font-size:var(--text-base);line-height:1.5}
 .ingest-degraded p{margin:0}
@@ -371,7 +323,6 @@
 .toggle.on{background:var(--color-accent)}
 .toggle.on::after{left:16px;background:var(--color-text-on-accent)}
 .toggle.locked{cursor:not-allowed;opacity:.5;pointer-events:none}
-/* Muted, not accent: it reads "later", not "new" (frontend-surface-contract.md § I3). */
 .soon-tag{display:inline-block;font-size:var(--text-xs);font-weight:700;letter-spacing:.08em;padding:1px var(--space-6);border-radius:4px;background:var(--color-border);color:var(--color-text-secondary);margin-left:8px;text-transform:uppercase;vertical-align:middle}
 
 .chat-live{display:flex;flex-direction:column;gap:var(--space-6)}
@@ -382,8 +333,6 @@
 .chat-activity.tone-good .chat-activity-icon{color:var(--color-success)}
 .chat-activity.tone-warn .chat-activity-icon{color:var(--color-accent)}
 .chat-activity.tone-bad .chat-activity-icon{color:var(--color-danger)}
-.chat-activity.kind-round{font-family:inherit;font-size:var(--text-base)}
-.chat-activity.kind-round .chat-activity-label{font-weight:600}
 .chat-activity.kind-warning .chat-activity-label,.chat-activity.kind-error .chat-activity-label{color:var(--color-danger)}
 .chat-activity.kind-merge .chat-activity-label{color:var(--color-accent)}
 .chat-activity.kind-progress{opacity:.85}
@@ -395,7 +344,6 @@
 .chat-decision-verdict>div{display:contents}
 .chat-decision-verdict dt{color:var(--color-text-secondary)}
 .chat-decision-verdict dd{margin:0;font-family:var(--font-mono);color:var(--color-text-primary)}
-/* A provider's verbatim error is often one unbroken token: it wraps anywhere and scrolls. */
 .chat-decision-error{overflow-wrap:anywhere;white-space:pre-wrap;max-height:9em;overflow-y:auto;font-size:var(--text-sm);color:var(--color-danger)}
 .chat-decision-reasons{margin:0;padding-left:18px;font-size:var(--text-sm);color:var(--color-text-secondary);line-height:1.5}
 .chat-decision-actions{display:flex;flex-wrap:wrap;gap:var(--space-8)}
@@ -407,86 +355,22 @@
 .chat-decision-btn.btn-danger{border-color:var(--color-danger-border);color:var(--color-danger)}
 .chat-decision-err{margin:0;font-size:var(--text-sm);color:var(--color-danger)}
 
-/* ONE frame, flat inside: sections part by hairlines, never boxes. IN FLOW at the log's tail,
-   never pinned — a sticky card buries the thread it reports on. */
 .run-card{display:flex;flex-direction:column;gap:var(--space-6);width:100%;align-self:stretch;padding:var(--space-8) var(--space-10);border:1px solid var(--color-border);border-radius:var(--border-radius-md);background:var(--color-background-secondary)}
 .run-card.is-live{border-color:rgba(var(--color-accent-rgb),0.45)}
-/* The leader's cost to run, read before anything else in the box: the lead pair at display
-   size, the rest as a quiet line beneath. Lower is better for every row, so `is-lower` is the win. */
-.leader-signals{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:var(--space-8) var(--space-12)}
-.leader-signals > dl{display:flex;flex-wrap:wrap;gap:var(--space-8) var(--space-18);margin:0}
-.leader-signal{display:flex;flex-direction:column;gap:2px;min-width:0}
-.leader-signal > dt{font-size:var(--text-xs);letter-spacing:.06em;text-transform:uppercase;color:var(--color-text-secondary)}
-.leader-signal > dd{margin:0;font-family:var(--font-mono);font-size:var(--text-sm);color:var(--color-text-secondary)}
-.leader-signal.is-lead > dd{font-size:var(--text-2xl);font-weight:500;color:var(--color-text-primary)}
-.leader-signal-was{color:var(--color-text-secondary)}
-.leader-signal-arrow{margin:0 var(--space-6);color:var(--color-text-secondary)}
-.leader-signal-now.is-lower{color:var(--color-success)}
-.leader-signal-now.is-higher{color:var(--color-warn)}
-.run-box{min-width:0;display:flex;flex-direction:column;gap:var(--space-6)}
-.run-box+.run-box{border-top:1px solid var(--color-border);padding-top:var(--space-6)}
-.run-trend{cursor:pointer;border-radius:var(--border-radius-md)}
-.run-trend:hover{outline:1px solid rgba(var(--color-accent-rgb),0.45);outline-offset:var(--space-4)}
-.run-trend:focus-visible{outline-offset:var(--space-4)}
-.run-trend .card{border:0;background:transparent;padding:0;margin:0}
-/* Wraps rather than clips: `overflow:hidden` on a nowrap row cuts the numbers silently. */
-.run-box-head{display:flex;align-items:center;gap:var(--space-8);flex-wrap:wrap;min-height:20px}
-.run-box-head>*{flex:0 0 auto}
-.run-box-note{margin:0;font-size:var(--text-sm);color:var(--color-text-secondary)}
+.run-card-axis{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-6) var(--space-10);min-width:0}
+.run-card-axis:empty{display:none}
+.run-card-axis .hs-heat-wrap{flex:0 1 auto;width:auto;margin-top:0;padding:0}
+.run-card-axis .hs-heat-wrap:has(.hs-expand-wrap){flex-basis:100%;width:100%;align-items:flex-start}
+.run-card-axis .round-axis-scroll{max-width:260px}
+.trend-glyph{flex:0 0 auto;position:relative;width:78px;height:26px;padding:2px var(--space-4);border-radius:13px;border:1px solid var(--color-border);background:transparent;cursor:pointer;opacity:.7;transition:opacity 100ms,border-color 100ms}
+.trend-glyph:hover,.trend-glyph:focus-visible{opacity:1;border-color:var(--color-text-secondary)}
+.run-card-section{min-width:0;display:flex;flex-direction:column;gap:var(--space-6)}
+.run-card-section+.run-card-section{border-top:1px solid var(--color-border);padding-top:var(--space-6)}
 
-.run-headline{flex:0 1 auto;margin:0;margin-right:auto;display:flex;align-items:baseline;gap:var(--space-4);flex-wrap:nowrap;min-width:0;font-size:var(--text-xs);color:var(--color-text-secondary)}
-.run-headline strong{font-family:var(--font-mono);font-size:var(--text-md);font-weight:600;color:var(--color-text-primary)}
-.run-headline-unit{font-size:var(--text-xs);color:var(--color-text-secondary)}
-.run-headline-sep{color:var(--color-border)}
-.run-headline-lift,.run-headline-acc{font-family:var(--font-mono);color:var(--color-text-primary)}
-.run-headline-was{color:var(--color-text-secondary)}
-/* Quietest weight: a stopped arm is the normal outcome of elimination. */
-.run-headline-cut{font-size:var(--text-xs);color:var(--color-text-secondary)}
-/* A dotted rule, NOT `cursor:help`: the OS help cursor reads as an error state. */
-.run-headline-acc,.run-flip-line{text-decoration:underline dotted var(--color-border);text-underline-offset:3px}
-.run-headline-acc:focus-visible,.run-flip-line:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px;border-radius:3px}
-.run-lift-card{max-width:280px}
-.run-lift-bench{margin:0 0 3px;font-family:var(--font-mono);font-size:var(--text-sm);color:var(--color-text-primary)}
-.run-lift-note{margin:0;font-size:var(--text-xs);line-height:1.45;color:var(--color-text-secondary)}
-.run-lift-note+.run-lift-note{margin-top:4px}
-
-.run-diff>summary{cursor:pointer;display:flex;flex-direction:column;gap:2px;list-style:revert}
-.run-diff>summary:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px;border-radius:4px}
-.run-diff-label{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-secondary)}
-.run-diff-changes{display:flex;flex-wrap:wrap;gap:3px var(--space-10);font-size:var(--text-sm);line-height:1.45;color:var(--color-text-primary)}
-.run-diff-group{display:flex;align-items:baseline;gap:var(--space-4);min-width:0}
-.run-diff-key{flex:0 0 auto;font-size:var(--text-xs);color:var(--color-text-secondary)}
-.run-diff-node{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-secondary)}
-.run-diff-verdict{font-size:var(--text-xs);line-height:1.4;color:var(--color-text-secondary)}
-.run-diff[open]>summary{margin-bottom:6px}
-
-.run-facts{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 var(--space-4);font-size:var(--text-xs);line-height:1.6;color:var(--color-text-secondary)}
-.run-fact-label{color:var(--color-text-secondary)}
-.run-fact-note{margin:0;white-space:pre-wrap}
-
-/* ONE wrapping row: the four segments are one partition, and stacked they read as four claims. */
-.run-flips{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 var(--space-4);font-size:var(--text-xs);line-height:1.6}
-.run-flip-ref,.run-flip-total,.run-flip-same,.run-flip-sep{color:var(--color-text-secondary)}
-.run-flip-sep{color:var(--color-border)}
-.run-flip-line{margin:0;color:var(--color-text-secondary)}
-.run-flip-line strong{font-family:var(--font-mono);color:var(--color-text-primary)}
-.run-flip-line.is-gained strong{color:var(--color-success)}
-.run-flip-line.is-lost strong{color:var(--color-danger)}
-.run-flip-card{max-width:340px;max-height:280px;overflow:hidden}
-.run-flip-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px;font-size:var(--text-xs)}
-.run-flip-list li{display:flex;align-items:baseline;gap:var(--space-6);white-space:nowrap}
-.run-flip-id{font-family:var(--font-mono);color:var(--color-text-primary);flex:0 0 auto}
-.run-flip-was{font-family:var(--font-mono);color:var(--color-text-secondary);text-decoration:line-through}
-.run-flip-now{font-family:var(--font-mono);color:var(--color-text-primary)}
-.run-flip-gt{margin-left:auto;color:var(--color-text-secondary)}
-
-/* A WINDOW, not a list: three rows, a gutter to slide them, the roster's shape beside;
-   `flex-wrap` folds the spread on a narrow thread, so no breakpoint of its own. */
 .hsp{display:flex;flex-direction:column;gap:var(--space-4)}
 .hsp-note{margin:0;font-size:var(--text-sm);color:var(--color-text-secondary)}
 .hsp-walk{display:flex;align-items:stretch;gap:var(--space-10);flex-wrap:wrap}
 
-/* The gutter IS the axis: ▲ past, ▼ future. */
 .hsp-nav{flex:0 0 auto;display:flex;flex-direction:column;align-items:center;gap:1px}
 .hsp-nav-line{flex:1 1 auto;width:1px;background:var(--color-border);min-height:4px}
 .hsp-nav-btn{background:none;border:0;padding:0;width:14px;font:inherit;font-size:var(--text-xs);line-height:1;color:var(--color-text-secondary);cursor:pointer}
@@ -496,7 +380,6 @@
 .hsp-nav-home{background:none;border:0;padding:0;width:14px;font:inherit;font-size:var(--text-xs);line-height:1;color:var(--color-accent);cursor:pointer}
 
 .hsp-rows{list-style:none;margin:0;padding:0;flex:1 1 260px;min-width:0;display:flex;flex-direction:column}
-/* ONE line per row, never query text — a row can run 1,500 characters; the text rides `title`. */
 .hsp-row{display:flex;align-items:baseline;gap:var(--space-8);padding:1px var(--space-6);font-size:var(--text-xs);min-width:0;line-height:1.7;white-space:nowrap}
 .hsp-row+.hsp-row{border-top:1px solid var(--color-border)}
 .hsp-row:nth-child(even){background:var(--color-background-tint)}
@@ -505,7 +388,6 @@
 .hsp-row.is-now .hsp-mark{color:var(--color-accent)}
 .hsp-row.is-done .hsp-mark{color:var(--color-success)}
 .hsp-id{font-family:var(--font-mono);color:var(--color-text-primary);flex:0 0 auto;min-width:3.6em}
-/* Coloured by the bucket the stacked counts use, so that column reads as their legend. */
 .hsp-rate{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-secondary);flex:0 0 auto}
 .hsp-rate.is-never{color:var(--color-danger)}
 .hsp-rate.is-partly{color:var(--color-warn)}
@@ -513,7 +395,6 @@
 .hsp-tag{margin-left:auto;font-size:var(--text-xs);letter-spacing:.04em;text-transform:uppercase;color:var(--color-text-secondary);flex:0 0 auto}
 .hsp-row.is-now .hsp-tag{color:var(--color-accent)}
 
-/* The spread IS the control that opens the roster. */
 .hsp-spread{flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-start;gap:1px;padding:1px var(--space-8);border:0;border-left:1px solid var(--color-border);background:none;font:inherit;text-align:left;cursor:pointer}
 .hsp-spread:hover{background:var(--color-background-hover)}
 .hsp-spread:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px}
@@ -528,5 +409,4 @@
 
 .chat-msg.run-summary-item{max-width:100%;width:100%;align-self:stretch;display:flex;flex-direction:column;gap:var(--space-4)}
 .run-summary-changes{margin:0;font-size:var(--text-sm);line-height:1.5;color:var(--color-text-secondary)}
-/* Served, never composed here (`run-phase.ts`). */
 .run-summary-next{margin:0;font-size:var(--text-sm);line-height:1.5;color:var(--color-text-secondary)}

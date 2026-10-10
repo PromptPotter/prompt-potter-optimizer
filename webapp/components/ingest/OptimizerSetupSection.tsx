@@ -1,6 +1,6 @@
 "use client";
 import { useMemo } from "react";
-import { fetchOptimizerRoster, type DraftCampaignWire, type DraftPatch } from "@/lib/api";
+import { optimizerRosterRead, type DraftCampaignWire, type DraftPatch } from "@/lib/api";
 import { StaticConnectorProvider, useConnector } from "@/lib/hooks/useConnector";
 import { useOptimizerPipeline } from "@/lib/hooks/useOptimizerPipeline";
 import { readyData, useRead } from "@/lib/hooks/useRead";
@@ -10,9 +10,6 @@ import { PipelineFlow } from "@/components/dashboard/pipeline/PipelineFlow";
 import { NodeKnobsPanel } from "@/components/dashboard/pipeline/NodeKnobsPanel";
 import { NodeDetail } from "@/components/shell/node-surface/NodeDetail";
 
-// The check-in's optimizer: which manifest this campaign runs, its loop, and its knobs. Not
-// `PipelineStack`: the level below is `PipelineSetupSection`'s. The roster is served, never listed.
-
 export function OptimizerSetupSection({
   draft,
   onApply,
@@ -21,8 +18,10 @@ export function OptimizerSetupSection({
   onApply: (patch: DraftPatch) => void;
 }) {
   const { optimizer } = draft.optimization_overrides;
-  // The draft response's own field, so the node detail below reads the manifest this draft picked.
-  const fields = useMemo(() => ({ optimizer, pipelineStatus: "ok" as const }), [optimizer]);
+  const fields = useMemo(
+    () => ({ optimizer, schema: { status: "ok" as const, config: null, output: null, isSingleNode: false } }),
+    [optimizer],
+  );
   return (
     <StaticConnectorProvider fields={fields}>
       <OptimizerSetupInner draft={draft} onApply={onApply} />
@@ -39,10 +38,7 @@ function OptimizerSetupInner({
 }) {
   const { optimizer, nodes } = draft.optimization_overrides;
   const { doc, error } = useOptimizerPipeline(useConnector().optimizer);
-  const rosterRead = useRead(
-    { key: "optimizers", fetch: (signal) => fetchOptimizerRoster(signal) },
-    { surface: "optimizer-roster" },
-  );
+  const rosterRead = useRead(optimizerRosterRead());
   const roster = readyData(rosterRead);
   const { node: selected, setSelectionForNode } = useSelection();
   // Match on SCOPE too: node ids are not disjoint across pipelines (self-optimization shares all).

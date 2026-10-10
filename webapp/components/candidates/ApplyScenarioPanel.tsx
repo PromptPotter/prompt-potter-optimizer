@@ -1,6 +1,4 @@
 "use client";
-// Where the scoring mask becomes the run: a fork minted at the round the served overlay says the
-// readings part. Only a criterion or subset previews; a knob, model or prompt goes to `SteerForkPanel`.
 
 import { useState } from "react";
 import { postSteerFork } from "@/lib/api";
@@ -10,11 +8,8 @@ export function ApplyScenarioPanel({
   campaignId,
   cycleId,
   isLive,
-  // `null` when there is nothing to apply, so the panel is not on screen.
   criterion,
-  // `null` where the two readings never part.
   divergentRound,
-  // Used when nothing diverges: every measured round is kept.
   nextRound,
 }: {
   campaignId: string | null;
@@ -35,19 +30,17 @@ export function ApplyScenarioPanel({
     void cmd.run(
       "apply-scenario",
       () =>
-        postSteerFork(campaignId, cycleId, at, "", {
-          // No `origin_prompt_fields`: the lifted round 0 IS the origin, and the server refuses the pair.
-          // A map lays onto the parent's scoring block, so the fork keeps its correctness formula.
+        postSteerFork([{ campaignId, cycleId }], at, "", {
+          // No `origin_prompt_fields`: the lifted round 0 is the origin, and the server refuses the pair.
           seed: { config_overrides: { scoring: { per_cell: criterion } } },
           keepRounds: true,
-          pauseFirst: isLive,
         }),
       () => setDone(true),
     );
 
   return (
     <div className="mask-apply">
-      <p className="l4-lede">
+      <p className="note-lede">
         {divergentRound !== null ? (
           <>
             Under this criterion the record and the counterfactual <strong>part at round{" "}
@@ -65,19 +58,19 @@ export function ApplyScenarioPanel({
           </>
         )}
       </p>
-      <p className="l4-note">
+      <p className="note-info">
         The criterion and the sample subset are the only two settings a preview can reach: both
         re-read rows already measured. A node parameter, a model or a prompt has no measurement to
         be re-read under, so it forks with no preview — that is the steer panel on a searchpoint.
         Budget and sample look-ahead are the only two that move a running cycle in place.
       </p>
       {cmd.failure && (
-        <p className="l4-warn" role="alert">
+        <p className="note-warn" role="alert">
           apply: {cmd.failure.message}
         </p>
       )}
       {done ? (
-        <p className="l4-note">
+        <p className="note-info">
           Forked at round {at}. The sidebar follows the new branch as it comes up.
         </p>
       ) : (

@@ -1,60 +1,45 @@
 "use client";
 import { useMemo, useState } from "react";
 import type { CapabilityMenu, DraftPatch, ModelCapability, NodeConfigParam } from "@/lib/api";
-import type { NodeSearchNarrowing } from "@/lib/api/types";
+import type { ParamIntent } from "@/lib/api/types";
 import { CommitInput, ValueList } from "@/components/ui";
 import { cx } from "@/lib/cx";
+import { MOVABLE_AGENT_LABELS } from "@/lib/api/types.generated";
 import {
-  agentLabel,
   configRows,
   effortLadder,
   flatConfigKey,
   parseNested,
-  nodeNarrowing,
   nodeOverlayPatch,
   pickedRoute,
+  rowIntents,
   seedOverlayFromRows,
   type ConfigMode,
   type ConfigRow,
 } from "@/lib/derivations";
-import type { PipelineStatus } from "@/lib/types";
+import type { NodeSchemaReading, PipelineStatus } from "@/lib/types";
 
-// The one node-config editor for every host; `mode` picks only the value transport. Governed by
-// `webapp/components/CLAUDE.md` § Component conventions (an axis is a `ValueList`; gate on the fact, not a callback).
 export function NodeConfigEditor(props: {
   mode: ConfigMode;
-  schema: Record<string, NodeConfigParam[]> | null;
-  // Not read off the connector context: two hosts resolve `schema` from a different read, and the
-  // context's status would describe someone else's fetch.
-  schemaStatus: PipelineStatus;
-  // search-space merges a patch onto it and reads no row from it; values seeds its rows from it.
+  // A prop, not the connector context: two hosts resolve it from different reads.
+  schema: NodeSchemaReading;
   overlay: Record<string, unknown>;
-  // SERVED, never counted: rows cover every DECLARED node, while the active chain may run one.
-  isSingleNode?: boolean;
   node?: string;
   readOnly?: boolean;
-  // values mode: false holds un-permitted models read-only — steering to one is the ADR-0005
-  // babysit act, needing `campaign.babysit`.
   babysitEditable?: boolean;
   compact?: boolean;
   // Absent = UNKNOWN, never "no model supports it".
   modelCapabilities?: CapabilityMenu;
-  // values mode only: an un-permitted steer is disabled rather than rejected on confirm.
   permittedModels?: Record<string, readonly string[]>;
   onApply?: (patch: DraftPatch) => void;
-  // search-space only: the permission half alone, per NODE — the editor can span the whole pipeline.
-  onNarrowing?: (node: string, narrowing: NodeSearchNarrowing) => void;
+  onNarrowing?: (node: string, rows: ParamIntent[]) => void;
   onChange?: (overlay: Record<string, Record<string, unknown>>) => void;
-  // Not drawn here but still in every emit: a row missing from `rows` would leave `param_keys`,
-  // reading as the operator closing it.
   keysAskedElsewhere?: readonly string[];
 }) {
   const {
     mode,
-    schema,
-    schemaStatus,
+    schema: { status, config: declared, isSingleNode },
     overlay,
-    isSingleNode = false,
     node,
     readOnly = false,
     babysitEditable = true,
@@ -67,15 +52,13 @@ export function NodeConfigEditor(props: {
     keysAskedElsewhere,
   } = props;
   const nodeId = node ?? "";
-  // Kept beside the edited copy: `seedOverlayFromRows` needs the untouched seed to tell an edit
-  // from an inherited value.
   const base = useMemo(
-    () => configRows(schema, overlay, mode, node),
-    [schema, overlay, mode, node],
+    () => configRows(declared, overlay, mode, node),
+    [declared, overlay, mode, node],
   );
   const [rows, setRows] = useState<ConfigRow[]>(base);
   const [touched, setTouched] = useState<ReadonlySet<string>>(() => new Set());
-  // The steer fork's seed lands async (`useRoundFile`); an earlier edit must not mask it.
+  // The steer fork's seed lands async (`useRound`); an earlier edit must not mask it.
   const [prevBase, setPrevBase] = useState(base);
   if (base !== prevBase) {
     setPrevBase(base);
@@ -85,13 +68,13 @@ export function NodeConfigEditor(props: {
 
   const drawn = (r: ConfigRow) => r.kind !== "prompt" && !keysAskedElsewhere?.includes(r.key);
   if (!rows.some(drawn)) {
-    return <EmptyConfig status={schemaStatus} schema={schema} node={node} />;
+    return <EmptyConfig status={status} schema={declared} node={node} />;
   }
 
   const persist = (next: ConfigRow[], marks: ReadonlySet<string>) => {
     onApply?.(nodeOverlayPatch(overlay, nodeId, next));
     for (const n of new Set(next.map((r) => r.node))) {
-      onNarrowing?.(n, nodeNarrowing(next.filter((r) => r.node === n)));
+      onNarrowing?.(n, rowIntents(next.filter((r) => r.node === n)));
     }
     onChange?.(
       seedOverlayFromRows(
@@ -133,18 +116,16 @@ export function NodeConfigEditor(props: {
     if (!r) return;
     const on = r.allowed.includes(value);
     const next = on ? r.allowed.filter((v) => v !== value) : [...r.allowed, value];
-    if (next.length === 0) return; // an axis with nothing permitted has nothing to run
+    if (next.length === 0) return;
     update(i, { allowed: next });
   };
-  // A widening rides the PERMITTED set: `PipelineSchema.narrow` replaces rather than intersects it,
-  // so an added value survives the mint on a reused dataset.
+  // `PipelineSchema.narrow` REPLACES the permitted set, so an added value survives the mint.
   const add = (i: number, value: string) => {
     const r = rows[i];
     if (!r || r.allowed.includes(value)) return;
     update(i, { allowed: [...r.allowed, value] });
   };
 
-  // The picked model qualifies the reasoning ladder on the MENU only; the ticks stay the campaign's.
   const { model: pickedModel, caps } = pickedRoute(rows, modelCapabilities);
 
   return (
@@ -156,7 +137,6 @@ export function NodeConfigEditor(props: {
             <ConfigRowView
               key={`${r.node}.${r.key}`}
               row={r}
-              // `unsupported_params` absent = the catalogue said nothing, and the row claims nothing.
               ignoredBy={caps?.unsupported_params?.includes(r.key) ? pickedModel : undefined}
               readOnly={readOnly || (!babysitEditable && r.neverAxis === "cost_lever")}
               onToggleLock={lockable(r) ? () => update(i, { locked: !r.locked }) : undefined}
@@ -165,7 +145,6 @@ export function NodeConfigEditor(props: {
           );
         }
         const { values, inert, userAdded } = axisMenu(r, caps);
-        // Without the babysit cap, un-permitted models ride `inert`, like a capability refusal.
         const barred =
           r.kind === "model" && !babysitEditable
             ? values.filter((v) => !(permittedModels?.[r.node] ?? []).includes(v))
@@ -227,7 +206,6 @@ export function NodeConfigEditor(props: {
   );
 }
 
-// No rows is several facts; `frontend-surface-contract.md::I1` — never one wearing another's words.
 function EmptyConfig({
   status,
   schema,
@@ -237,8 +215,6 @@ function EmptyConfig({
   schema: Record<string, NodeConfigParam[]> | null;
   node?: string;
 }) {
-  // Whole-pipeline hosts pass no node, so this reads the flattened schema — else a prompt-only
-  // pipeline would read as declaring nothing.
   const scoped = node !== undefined && schema !== null ? schema[node] : undefined;
   const declared = node !== undefined ? scoped : Object.values(schema ?? {}).flat();
   const subject = node !== undefined ? "node" : "pipeline";
@@ -261,8 +237,7 @@ function EmptyConfig({
   );
 }
 
-// `inert` strikes only where the model answered — UNKNOWN never strikes. Ticked AND struck stay two
-// facts: folding them would emit the model's refusals as the campaign's own narrowing.
+// Ticked and struck stay apart: folded, the model's refusals emit as the campaign's narrowing.
 function axisMenu(row: ConfigRow, caps: ModelCapability | undefined) {
   const ladder = effortLadder(row, caps);
   const rest = [...new Set([...ladder, ...row.allowed])].filter((v) => v !== row.value);
@@ -283,7 +258,7 @@ function axisNote(
 ): string {
   const grant =
     row.movableBy.length > 0
-      ? `Searched by ${row.movableBy.map(agentLabel).join(", ")} — ticks are what it may pick.`
+      ? `Searched by ${row.movableBy.map((a) => MOVABLE_AGENT_LABELS[a]).join(", ")} — ticks are what it may pick.`
       : "Nothing searches this axis today — ticks sanction a human fork.";
   if (row.key !== "reasoning_effort" || !pickedModel || !caps) return grant;
   return `${grant} ${pickedModel}: ${caps.reasoning_note}`;
@@ -358,7 +333,7 @@ function ConfigRowView({
         ) : row.movableBy.length > 0 ? (
           <span
             className="config-optmovable"
-            title={`Searched by ${row.movableBy.map(agentLabel).join(", ")}.`}
+            title={`Searched by ${row.movableBy.map((a) => MOVABLE_AGENT_LABELS[a]).join(", ")}.`}
           >
             🔓
           </span>
@@ -370,12 +345,10 @@ function ConfigRowView({
       </span>
       <div className="config-value">
         {!onValue ? (
-          // Text, not a disabled input: a greyed box says "you may not" where the truth is "not here".
           <span className={cx("config-static", row.kind === "nested" && "is-structured")}>
             {row.value || "—"}
           </span>
         ) : row.kind === "nested" ? (
-          // `parseNested` is the emitter's own question, so the box cannot accept what it would drop.
           <CommitInput
             rows={6}
             validate={(d) => parseNested(d) !== undefined}
@@ -396,7 +369,6 @@ function ConfigRowView({
             onChange={(e) => onValue(e.target.checked ? "true" : "false")}
           />
         ) : (
-          // Never per keystroke: each emission invalidates a searchpoint and its descendants on Compare.
           <CommitInput
             type={row.kind === "number" ? "number" : "text"}
             inputMode={row.kind === "number" ? "decimal" : undefined}
@@ -413,10 +385,8 @@ function ConfigRowView({
   );
 }
 
-// `neverAxis` outranks `held`. Both `neverAxis` reasons are SERVED — never tell them apart by key name.
 function lockReason(row: ConfigRow, readOnly: boolean): string {
   if (row.neverAxis === "schema_owned") {
-    // `never_axis` says who may SEARCH a key (`SCHEMA_OWNED_FIELDS`), never who may set it.
     return "The structured-output contract — the shape this node answers in, and which slot carries the answer. No optimizer may search it; set it here to steer a fork onto a different contract.";
   }
   if (row.neverAxis === "cost_lever") {

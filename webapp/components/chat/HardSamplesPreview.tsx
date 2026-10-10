@@ -4,40 +4,32 @@ import type { DatasetItem } from "@/lib/api";
 import { useHardSamples } from "@/lib/hard-samples";
 import { useCycleStream } from "@/lib/poll";
 import { MeasurementsPane } from "@/components/shell/measurements/MeasurementsPane";
-import { sampleBucket, sampleSpread, sampleWalk, type SampleBucket } from "@/lib/derivations";
 import { fmtDuration, fmtPct0 } from "@/lib/format";
 import { cx } from "@/lib/cx";
 
-// Hard-samples middle rung: a sliding three-line window over the declared scoring order while a
-// candidate runs, else the served ranking. Rows are ids and rates, never query text.
-
-interface Props {
-  // Threaded in, not subscribed: the chat holds the one EventSource.
-  sampleOrder?: number[] | null;
-}
-
 const ROWS = 3;
 
-export function HardSamplesPreview({ sampleOrder = null }: Props) {
-  const { datasetName, items, totals, stale, error } = useHardSamples();
+type SampleBucket = Exclude<DatasetItem["hit_spread"], "unmeasured">;
+
+export function HardSamplesPreview() {
+  const { datasetName, items, measuredCount, totals, stale, error } = useHardSamples();
   const { dash, isLive } = useCycleStream();
   const [showAll, setShowAll] = useState(false);
-  // `/cells` serves rank order — never sort here; an ordering IS a score.
   const ranked = useMemo(() => items.map((it) => it.sample_id), [items]);
 
-  const walk = sampleWalk(dash, sampleOrder, isLive);
-  const running = walk.ids.length > 0;
+  const walk = isLive ? (dash?.walk ?? null) : null;
+  const running = walk != null && walk.ids.length > 0;
   const ids = running ? walk.ids : ranked;
   const cursor = running ? walk.cursor : -1;
+  const walkKey = walk?.key ?? "";
 
   const [pinned, setPinned] = useState<number | null>(null);
-  const [prevKey, setPrevKey] = useState(walk.walkKey);
-  if (walk.walkKey !== prevKey) {
-    setPrevKey(walk.walkKey);
+  const [prevKey, setPrevKey] = useState(walkKey);
+  if (walkKey !== prevKey) {
+    setPrevKey(walkKey);
     setPinned(null);
   }
 
-  const spread = useMemo(() => sampleSpread(items.map((it) => it.mean_fitness ?? null)), [items]);
   const byId = useMemo(() => new Map(items.map((it) => [it.sample_id, it])), [items]);
 
   if (error) {
@@ -65,17 +57,19 @@ export function HardSamplesPreview({ sampleOrder = null }: Props) {
 
   const rateOf = (id: number): { text: string; bucket: SampleBucket | null } => {
     const it = byId.get(id);
-    const n = it?.n_measured ?? 0;
-    if (n === 0 || it?.mean_fitness == null) return { text: "not measured yet", bucket: null };
+    if (it === undefined) return { text: "—", bucket: null };
+    const n = it.n_measured;
+    if (n === 0 || it.mean_fitness == null || it.hit_spread === "unmeasured") {
+      return { text: "not measured yet", bucket: null };
+    }
     return {
       text: `${fmtPct0(it.mean_fitness)} of ${n} ${n === 1 ? "try" : "tries"}`,
-      bucket: sampleBucket(it.mean_fitness),
+      bucket: it.hit_spread,
     };
   };
   const itemOf = (id: number): DatasetItem | undefined => byId.get(id);
-  // How long the open cell has been out (`waiting_since`, served). Re-read on every dashboard
-  // poll, which is the clock: one slow cell otherwise reads as a walk that stopped.
-  const openFor = running ? openedFor(dash?.waiting_since ?? null) : null;
+  const openS = dash?.producer.open_for_s;
+  const openFor = running && openS != null ? fmtDuration(openS) : null;
 
   return (
     <div className="hsp">
@@ -132,16 +126,16 @@ export function HardSamplesPreview({ sampleOrder = null }: Props) {
           aria-expanded={showAll}
           onClick={() => setShowAll((v) => !v)}
           title={
-            spread.measured > 0
-              ? `${spread.measured} of ${items.length} rows measured in this scope - click for the leaderboard`
+            measuredCount > 0
+              ? `${measuredCount} of ${items.length} rows measured in this scope - click for the leaderboard`
               : `${items.length} rows - click for the leaderboard`
           }
         >
-          {spread.measured > 0 ? (
+          {totals && measuredCount > 0 ? (
             <>
-              <SpreadLine bucket="never" n={spread.never} />
-              <SpreadLine bucket="partly" n={spread.partly} />
-              <SpreadLine bucket="always" n={spread.always} />
+              <SpreadLine bucket="never" n={totals.never_hit} />
+              <SpreadLine bucket="partly" n={totals.partly_hit} />
+              <SpreadLine bucket="always" n={totals.always_hit} />
             </>
           ) : (
             <span className="hsp-of">
@@ -161,10 +155,6 @@ export function HardSamplesPreview({ sampleOrder = null }: Props) {
   );
 }
 
-function openedFor(since: number | null): string | null {
-  return since === null ? null : fmtDuration(Math.max(0, Date.now() / 1000 - since));
-}
-
 type Tone = "done" | "now" | "next" | "rank";
 
 const MARKS: Record<Tone, string> = { done: "✓", now: "▶", next: "·", rank: "·" };
@@ -174,8 +164,7 @@ function toneAt(at: number, cursor: number): Tone {
   return at < cursor ? "done" : at === cursor ? "now" : "next";
 }
 
-// Idle, the word is the SERVED `hard_sample_rank`; position is only a fallback, since a paged,
-// filtered roster parts the two.
+// Position is only a fallback: a paged, filtered roster parts it from the served `hard_sample_rank`.
 function labelAt(at: number, cursor: number, servedRank?: number): string {
   if (cursor < 0) return `rank ${servedRank ?? at + 1}`;
   if (at === cursor) return "scoring now";
@@ -185,7 +174,6 @@ function labelAt(at: number, cursor: number, servedRank?: number): string {
   return "queued";
 }
 
-// Disabled, never hidden, at the ends (`I3_affordance_honest`).
 function NavButton({
   dir,
   onClick,

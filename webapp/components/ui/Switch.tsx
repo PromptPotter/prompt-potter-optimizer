@@ -1,5 +1,4 @@
-// The one switch. `locked` is a visibly unavailable control, never a dead one styled live
-// (frontend-surface-contract.md § I3); styling is `.toggle` in app/styles/domains/chat.css.
+// Styled by `.toggle` in app/styles/domains/chat.css.
 
 import { cx } from "@/lib/cx";
 

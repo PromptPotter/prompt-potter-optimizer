@@ -1,6 +1,4 @@
 "use client";
-// The one sign-in control + copy, shared by /login and WelcomeLockoutModal. Signing in IS how an
-// account is made; whether it may run anything is AccessGate's, after sign-in.
 
 function GoogleMark() {
   return (

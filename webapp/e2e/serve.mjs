@@ -1,5 +1,4 @@
-// The harness's own server: the real API over the real static export, on PP_E2E_PORT, never the
-// operator's :8001. It does not build — `npm run e2e` builds once, since two servers start at once.
+// It does not build — `npm run e2e` builds once, since two servers start at once.
 
 import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, rmSync } from "node:fs";
@@ -30,12 +29,10 @@ for (const [what, where, remedy] of [
 // PROMPTPOTTER_HOME is read once at import (`config/paths.py`), so it must be set before spawn.
 const home = process.env.PROMPTPOTTER_HOME;
 
-// This decides WHETHER to reset; `reset_world.py` decides WHAT and does the deleting — never an
-// `fs.rmSync` here.
+// `reset_world.py` decides WHAT to delete and does it — never an `fs.rmSync` here.
 if (home && process.env.PP_E2E_RESET === "1" && process.env.PP_E2E_KEEP !== "1") {
   const args = [path.join(WEBAPP, "e2e", "reset_world.py"), path.resolve(home)];
   if (process.env.PP_E2E_DROP_CACHES === "1") args.push("--drop-caches");
-  // This interpreter is cp1252.
   const reset = spawnSync(PYTHON, args, {
     cwd: REPO,
     stdio: "inherit",
@@ -44,19 +41,16 @@ if (home && process.env.PP_E2E_RESET === "1" && process.env.PP_E2E_KEEP !== "1")
   if (reset.status !== 0) process.exit(reset.status ?? 2);
 }
 
-// Server output is TEED so `harness.ts` fails on faults the server swallows (`ledger.append`
-// catches every subscriber failure), which the browser's console guard never sees.
+// TEED so `harness.ts` fails on faults the server swallows, which the browser's console guard never sees.
 const FAULTS = path.join(os.tmpdir(), `pp-e2e-server-${PORT}.log`);
 rmSync(FAULTS, { force: true });
 
-// Anchored to the LEVEL COLUMN, not the word anywhere. WARNING is absent: the engine warns on
-// states it handles.
+// Anchored to the LEVEL COLUMN; WARNING is absent: the engine warns on states it handles.
 const FAULT_LINE =
   /^\d{4}-\d{2}-\d{2} \S+ +(ERROR|CRITICAL)\b|^(ERROR|CRITICAL):|^Traceback \(most recent call last\):/;
 const NEW_RECORD = /^\d{4}-\d{2}-\d{2} |^(INFO|WARNING|DEBUG|ERROR|CRITICAL):/;
 
-// A fault stays open until the next LOG RECORD begins, never a blank line: `logger.exception`
-// emits none after the traceback.
+// A fault stays open until the next LOG RECORD, never a blank line: `logger.exception` emits none after the traceback.
 let open = false;
 
 function tee(stream, out) {

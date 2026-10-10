@@ -1,15 +1,14 @@
 "use client";
-import type { CapabilityMenu, DraftPatch, NodeConfigParam, NodeOutputSchema } from "@/lib/api";
-import type { NodeSearchNarrowing } from "@/lib/api/types";
-import type { PipelineStatus } from "@/lib/types";
+import type { CapabilityMenu, DraftPatch, NodeOutputSchema } from "@/lib/api";
+import type { ParamIntent } from "@/lib/api/types";
+import { SCHEMA_DESCRIPTION_PREFIX } from "@/lib/api/types.generated";
+import type { NodeSchemaReading } from "@/lib/types";
 import type { CandidateSearchPoint, ConfigMode } from "@/lib/derivations";
 import {
   authoredAnswerField,
   authoredOutputSchema,
-  DESCRIPTION_PREFIX,
   descriptionSubtree,
   nodeLockPatch,
-  nodeSchemaPatch,
   outputContract,
 } from "@/lib/derivations";
 import { Button } from "@/components/ui";
@@ -18,16 +17,11 @@ import { PromptFieldsEditor } from "./PromptFieldsEditor";
 import { LockButton, NodeConfigEditor } from "./NodeConfigEditor";
 import { SchemaTreeEditor } from "./SchemaTreeEditor";
 
-// The one node surface: config → prompt → output as one unit, for ONE runnable searchpoint the
-// host picks (identity props only, never a source). Draws no chrome; every host frames it.
 export function NodeSurface({
   node,
   point,
   overlay,
-  isSingleNode,
   schema,
-  schemaStatus,
-  outputSchema,
   label,
   mode,
   babysitEditable,
@@ -40,49 +34,37 @@ export function NodeSurface({
 }: {
   node: PipelineViewNode | null;
   point: CandidateSearchPoint;
-  // The draft's optimizer overlay in search-space mode, the candidate's values in values mode —
-  // never `point.pipeline_overlay`.
+  // The draft's overlay (search-space) or the candidate's values — never `point.pipeline_overlay`.
   overlay: Record<string, unknown>;
-  // Served, never counted here. See `NodeConfigEditor`.
-  isSingleNode?: boolean;
-  schema: Record<string, NodeConfigParam[]> | null;
-  // Travels with `schema`: an in-flight read and a node with nothing to configure are both empty.
-  schemaStatus: PipelineStatus;
-  outputSchema: Record<string, NodeOutputSchema | null> | null;
+  schema: NodeSchemaReading;
   label?: string;
   mode: ConfigMode;
-  // values mode: gates optimizer-locked axes behind `campaign.babysit`; undefined leaves them editable.
   babysitEditable?: boolean;
-  // A density, never a subset: no width folds a param away.
   compact?: boolean;
-  // Absent = UNKNOWN, never "no model supports it".
   modelCapabilities?: CapabilityMenu;
-  // values mode only: an un-permitted steer is disabled rather than rejected on confirm.
   permittedModels?: Record<string, readonly string[]>;
-  // Absence IS read-only — there is no second flag. Values-mode config rides `onConfigChange`.
   onApply?: (patch: DraftPatch) => void;
   onConfigChange?: (overlay: Record<string, Record<string, unknown>>) => void;
-  onNarrowing?: (node: string, narrowing: NodeSearchNarrowing) => void;
+  onNarrowing?: (node: string, rows: ParamIntent[]) => void;
 }) {
   const kind = node?.kind;
   const showPrompt = kind === "llm" || node === null;
   // Absent from the served map = no contract declared, distinct from a declared-null one.
-  const ownOutput = node && outputSchema ? outputSchema[node.id] : undefined;
+  const ownOutput = node && schema.output ? schema.output[node.id] : undefined;
   const nodeOutput = node
     ? ownOutput === undefined
       ? null
       : { [node.id]: ownOutput }
-    : outputSchema;
+    : schema.output;
 
   const readOnly = !onApply;
   const configReadOnly = mode === "search-space" ? !onApply : !onConfigChange;
 
-  // A check-in AUTHORS the contract. A registry schema (`schema_family`) is the backend's: an inline
-  // one written over it is ignored at parse.
+  // A registry schema (`schema_family`) is the backend's: an inline one over it is ignored at parse.
   const nodeId = node?.id;
   const author = mode === "search-space" ? onApply : undefined;
   const authored = nodeId ? authoredOutputSchema(overlay, nodeId) : undefined;
-  const rows = nodeId ? schema?.[nodeId] : undefined;
+  const rows = nodeId ? schema.config?.[nodeId] : undefined;
   const toggle = rows?.find((p) => p.key === "response_format");
   const asksForSchema = (toggle?.permitted ?? toggle?.options)?.includes("json") === true;
   const onAuthor =
@@ -92,13 +74,14 @@ export function NodeSurface({
     rows?.some((p) => p.key === "schema_family") !== true &&
     (authored !== undefined || (!ownOutput && asksForSchema))
       ? (next: Record<string, unknown>, answer?: string) =>
-          author(nodeSchemaPatch(overlay, nodeId, next, answer))
+          author({
+            node_output: { node: nodeId, output_schema: next, answer_field: answer ?? null },
+          })
       : undefined;
-  // Locks the grid does not draw still flip through its emitter, so none can disagree with it.
   const lockKeys =
     author && nodeId
       ? (keys: readonly string[], locked: boolean) =>
-          author(nodeLockPatch(schema, overlay, nodeId, keys, locked))
+          author(nodeLockPatch(schema.config, overlay, nodeId, keys, locked))
       : undefined;
   const ofKind = (kind: string) => (rows ?? []).filter((p) => p.kind === kind);
   const locksOf = (kind: string, prefix = "") =>
@@ -109,7 +92,7 @@ export function NodeSurface({
   const tree = {
     authored,
     answer: nodeId ? authoredAnswerField(overlay, nodeId) : undefined,
-    locks: lockKeys ? locksOf("description", DESCRIPTION_PREFIX) : undefined,
+    locks: lockKeys ? locksOf("description", SCHEMA_DESCRIPTION_PREFIX) : undefined,
     onLock: lockKeys
       ? (path: string, locked: boolean) => lockKeys(descriptionSubtree(described, path), locked)
       : undefined,
@@ -123,10 +106,8 @@ export function NodeSurface({
       <NodeConfigEditor
         mode={mode}
         schema={schema}
-        schemaStatus={schemaStatus}
         node={node?.id}
         overlay={overlay}
-        isSingleNode={isSingleNode}
         babysitEditable={babysitEditable}
         readOnly={configReadOnly}
         compact={compact}
@@ -164,8 +145,6 @@ export function NodeSurface({
   );
 }
 
-// The output schema RESOLVED at this searchpoint. `never_axis` fences the optimizer, not the
-// operator: with `onAuthor`, `SchemaAuthor` replaces this reading rather than sitting beside it.
 function OutputContract({
   schema,
   onAuthor,
@@ -182,8 +161,7 @@ function OutputContract({
   const nodes = entries
     .map(([node, out]) => [node, outputContract(out)] as const)
     .filter(([, fields]) => fields.length > 0);
-  // `null` is a read not yet landed (the config editor says so); an answered read with no schema
-  // is a fact about the node and gets a sentence.
+  // `null` = the read has not landed, and the config editor above already says so.
   if (schema === null) return null;
   if (onAuthor) return <SchemaAuthor {...tree} onAuthor={onAuthor} />;
   if (nodes.length === 0) {
@@ -238,7 +216,6 @@ const STARTER = {
   additionalProperties: false,
 };
 
-// The head's lock covers the whole schema (path `""`).
 function SchemaAuthor({
   authored,
   answer,

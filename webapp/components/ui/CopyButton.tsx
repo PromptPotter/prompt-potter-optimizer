@@ -21,12 +21,9 @@ type Props = {
   | { data?: never; choices: readonly CopyChoice[] }
 );
 
-// The one clipboard copy. A payload is an object (pretty JSON), a string, or a thunk for either;
-// never host one inside a LABEL (webapp/components/CLAUDE.md § Component conventions).
 export function CopyButton({ data, title = "Copy as JSON", choices, children, disabled }: Props) {
   const [copied, setCopied] = useState(false);
-  // Every host frames this in something clickable (a `<summary>`, a selectable row); swallowed here
-  // so one click does not also fire the frame. `Popover` dismisses on mousedown, so this is safe.
+  // Hosts frame this in something clickable (a `<summary>`, a row); one click must not also fire the frame.
   const swallow = (e: MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();

@@ -1,6 +1,4 @@
 "use client";
-// Compare's binding of the shared criterion (`components/shell/scoring/`) to one channel's address.
-// Applying REPLACES that channel in place; the grammar is `lib/api/reads.ts::maskedSubject`'s — never split here.
 
 import { useState } from "react";
 import { maskedSubject } from "@/lib/api/reads";
@@ -16,12 +14,9 @@ export function ChannelMask({
 }: {
   subject: SubjectReading;
   invalid: string | null;
-  // A no-op edit is not applied (identical key, pointless refetch).
   onApply: (from: string, to: string) => void;
   onClose: () => void;
 }) {
-  // A SERVED lens is a string; decomposing it back into weights is the formula parse this layer does
-  // not do. So it opens in Expression mode, verbatim.
   const served = subject.mask?.lens ?? "";
   const [mask, setMask] = useState<ScoringMask>(() =>
     served ? { kind: "expression", lens: served } : NO_DIALS,

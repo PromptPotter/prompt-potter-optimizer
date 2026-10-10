@@ -1,70 +1,30 @@
 "use client";
-// The disabled footer search icon is an INTENTIONAL placeholder — out of scope for any "hide
-// non-functional controls" sweep. Peers: `chat/ChatPane.tsx`, `account/AccountModal.tsx`.
-import { useEffect, useMemo, useState } from "react";
+// The disabled footer search icon is an INTENTIONAL placeholder: never sweep it as non-functional.
 import { useWorkspace } from "@/lib/workspace";
 import { useAuth } from "@/lib/auth-context";
 import { postLogout } from "@/lib/api";
 import { useCommand } from "@/lib/hooks/useCommand";
+import { useIngest } from "@/lib/ingest-flow";
+import { useSidebarCollapsed } from "@/lib/sidebar-prefs";
 import { BRAND } from "@/lib/brand";
 import { TERMS } from "@/lib/terms";
 import { Term } from "@/components/ui";
 import { PotterMark } from "@/components/brand/PotterMark";
-import { encodeCyclePath, rootCycleId, type CyclePath } from "@/lib/ids";
-import { useNodeToggle } from "@/lib/view-memory";
-import { useShowCandidates } from "@/lib/tree-prefs";
 import { applyTheme, readStoredTheme } from "@/lib/theme";
-import { buildForest, nodeKey } from "@/lib/derivations";
-import type { TreeCtx } from "./ForestRows";
 import { AccountSpend } from "./AccountSpend";
 import { SidebarContent } from "./SidebarContent";
 import { ViewGlyph } from "@/components/shell/ViewTabs";
-import { WORKSPACE_TABS, tabLabel, type Tab } from "@/lib/view-tab";
-
-interface Props {
-  onSelectPath: (path: CyclePath, candidate?: string | null) => void;
-  onNewCycle: () => void;
-  tab: Tab;
-  onOpenView: (tab: Tab) => void;
-  collapsed: boolean;
-  onToggleCollapse: () => void;
-}
-
-// A FOREST, recursive: Forest → Origin → Run → Cycle-tree → (Inner Forest). An origin tier
-// renders only when it groups 2+ runs; a single-run origin IS its run row. An origin's identity is
-// its spec's content hash (the root `cycle_<hash>`), and `.inner/<cycle_id>` is just another store.
+import { WORKSPACE_TABS, tabLabel } from "@/lib/view-tab";
 
 function flipTheme() {
   applyTheme(readStoredTheme() === "light" ? "dark" : "light");
 }
 
-export function Sidebar({
-  onSelectPath,
-  onNewCycle,
-  tab,
-  onOpenView,
-  collapsed,
-  onToggleCollapse,
-}: Props) {
-  const {
-    viewedPath,
-    viewedCandidateId,
-    campaigns,
-    cycles,
-    cyclesLoaded,
-    campaignsLoaded,
-    activeCycleId,
-    activeCampaignId,
-    lifecycleFilter,
-    setLifecycleFilter,
-    openAccount,
-  } = useWorkspace();
-  const nodes = useNodeToggle();
-  const [showCandidates] = useShowCandidates();
-  // null = all datasets.
-  const [datasetFilter, setDatasetFilter] = useState<string | null>(null);
+export function Sidebar() {
+  const { tab, openView: onOpenView, openAccount } = useWorkspace();
+  const { compose: onNewCycle } = useIngest();
+  const [collapsed, onToggleCollapse] = useSidebarCollapsed();
 
-  // Authed and anon footer control sets are mutually exclusive (frontend-surface-contract § I4).
   const { status, openAuthPrompt } = useAuth();
   // Nothing polls the session; the navigation below is the read-back.
   const logout = useCommand<"logout">("sidebar-session", { revalidate: false });
@@ -72,56 +32,6 @@ export function Sidebar({
     void logout.run("logout", postLogout, () => {
       window.location.href = "/login/";
     });
-
-  // Filter BEFORE grouping: an origin's run count decides whether its tier renders at all.
-  const origins = useMemo(() => {
-    const kept =
-      datasetFilter == null
-        ? campaigns
-        : campaigns.filter(
-            (c) => (c.dataset_name || "(unknown)") === datasetFilter,
-          );
-    return buildForest(kept, cycles);
-  }, [campaigns, cycles, datasetFilter]);
-
-  const datasetNames = useMemo(() => {
-    const s = new Set<string>();
-    for (const c of campaigns) s.add(c.dataset_name || "(unknown)");
-    return [...s].sort();
-  }, [campaigns]);
-
-  // Keyed on the ACTIVE cycle only, never the viewed one: a manual selection must not pop a
-  // course open.
-  const focusKey = useMemo(() => {
-    if (!activeCampaignId || !activeCycleId) return null;
-    const path = encodeCyclePath([
-      { campaignId: activeCampaignId, cycleId: rootCycleId(activeCycleId) },
-    ]);
-    return nodeKey("course", path);
-  }, [activeCampaignId, activeCycleId]);
-
-  // ONCE per (campaign, active cycle): unlatched, every remount re-opens the row the operator
-  // just collapsed.
-  useEffect(() => {
-    if (!focusKey || !activeCampaignId || !activeCycleId) return;
-    if (nodes.autoExpandedFor(activeCampaignId) === activeCycleId) return;
-    nodes.markAutoExpanded(activeCampaignId, activeCycleId, focusKey);
-  }, [focusKey, activeCampaignId, activeCycleId, nodes]);
-
-  const ctx: TreeCtx = useMemo(
-    () => ({
-      isNodeOpen: nodes.isOpen,
-      toggleNode: nodes.toggle,
-      viewedPath,
-      viewedCandidateId,
-      selectCyclePath: onSelectPath,
-      showCandidates,
-    }),
-    [nodes, viewedPath, viewedCandidateId, onSelectPath, showCandidates],
-  );
-
-  // Both lists, so switching lifecycle tab shows `loading…` rather than the prior tab's rows.
-  const loaded = cyclesLoaded && campaignsLoaded;
 
   return (
     <nav className="sidebar" aria-label="Primary">
@@ -155,7 +65,6 @@ export function Sidebar({
         >
           + New campaign
         </button>
-        {/* The workspace views hang off the campaign LIST, the surface they read across. */}
         <div className="sidebar-views">
           {WORKSPACE_TABS.map((t) => (
             <button
@@ -171,17 +80,7 @@ export function Sidebar({
           ))}
         </div>
       </div>
-      <SidebarContent
-        status={status}
-        loaded={loaded}
-        lifecycleFilter={lifecycleFilter}
-        setLifecycleFilter={setLifecycleFilter}
-        datasetNames={datasetNames}
-        datasetFilter={datasetFilter}
-        setDatasetFilter={setDatasetFilter}
-        origins={origins}
-        ctx={ctx}
-      />
+      <SidebarContent />
       <AccountSpend />
       <div className="sidebar-footer">
         <div className="sidebar-footer-chrome">

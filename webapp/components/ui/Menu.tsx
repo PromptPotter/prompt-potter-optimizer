@@ -5,7 +5,6 @@ import { cx } from "@/lib/cx";
 import { Popover } from "./Popover";
 import s from "./Menu.module.css";
 
-// The overflow menu behind a toolbar's "⋯", for controls that are real but rare.
 export function Menu({
   renderTrigger,
   align = "right",

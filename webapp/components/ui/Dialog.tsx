@@ -5,12 +5,11 @@ import { createPortal } from "react-dom";
 import { useDialogA11y } from "@/lib/hooks/useDialogA11y";
 import s from "./Dialog.module.css";
 
-// The accessible name: a `title` the dialog prints, or the id of a heading the host renders.
 type Name = { title: string; labelledBy?: never } | { labelledBy: string; title?: never };
 
 type Props = Name & {
   open: boolean;
-  /** Absent = undismissable: Escape and the backdrop do nothing, and the host owns the exit. */
+  // Absent = undismissable: Escape and the backdrop do nothing.
   onClose?: () => void;
   children: ReactNode;
   footer?: ReactNode;

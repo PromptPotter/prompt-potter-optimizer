@@ -46,7 +46,6 @@
   flex-wrap: wrap;
 }
 
-/* `bare`: no chrome — the host's child is the card, centred as the backdrop would centre it. */
 .bare {
   display: flex;
   justify-content: center;

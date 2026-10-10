@@ -1,44 +1,10 @@
 "use client";
 
-import type { AbilityReading } from "@/lib/api/types.generated";
+import { THETA_CAVEAT_INFO, type AbilityReading } from "@/lib/api/types.generated";
 import type { ThetaCaveat as Caveat } from "@/lib/types";
-
-// Copy is the human-facing twin of docs/methods/verdict-resolution.md — keep the two in step.
-// `model` null means a cold ruler (neither 1PL nor 2PL); never collapse it into "1PL".
-
-// SERVED, never derived here: total over `domain/ruler.py::ThetaCaveat`, which says each
-// member's scope, so the screen and the optimizer's `confounds` panel cannot disagree.
-export const CAVEAT_COPY: Record<Caveat, { head: string; body: string }> = {
-  cold_ruler: {
-    head: "θ is not ability yet",
-    body: "No difficulty ruler has been fitted, so θ is plain accuracy on the logit scale, read on each candidate's own cells. These θ compare to each other and to nothing else.",
-  },
-  flat_ruler: {
-    head: "θ is not ability here",
-    body: "The ruler itself spans almost nothing, so every cell counts the same and θ is accuracy plus a constant. That is the instrument, not this round's draw — no round could have read wider.",
-  },
-  collapsed_band: {
-    head: "θ is not ability this round",
-    body: "This round bought a thin slice of a wide ruler. Inside a band that narrow every cell is equally hard, so ranking on θ ranks on accuracy. That is the draw, not the instrument.",
-  },
-  prior_pinned: {
-    head: "θ is not ability here",
-    body: "The ruler gave most of this round's cells one shared difficulty, its prior, because every candidate that saw them answered the same way. That pinned value moves as the ruler grows, so a higher θ than before can be the scale shifting, not the prompt improving. Compare within a round; don't read the level across rounds.",
-  },
-  unmeasured_delta: {
-    head: "θ skips some of these cells",
-    body: "The ruler does not carry some of these cells, because no candidate already on the scale answered them. θ leaves them out, so it is read on fewer cells than the accuracy beside it, and two candidates can be read on different ones. A later round places a cell on the scale once such a candidate answers it.",
-  },
-  floor_pinned: {
-    head: "θ reads nothing for an all-miss arm",
-    body: "This arm missed every cell it answered. With no hit the fit has nothing to read: every all-miss arm lands on the same floor whatever cells it saw, so its θ, and any lift taken from it, is not a measurement. The ruler, the election and the other arms' θ are unaffected.",
-  },
-};
 
 const fmtSpan = (v: number | null) => (v == null ? null : `${v.toFixed(2)} logits`);
 
-// Takes the caveat, not the reading: an arm's caveat rides its row and carries no spans; the
-// round's rides `RoundResult.ability`, which does.
 export function ThetaCaveatNotice({
   caveat,
   ability,
@@ -47,7 +13,7 @@ export function ThetaCaveatNotice({
   ability?: AbilityReading | null;
 }) {
   if (!caveat) return null;
-  const { head, body } = CAVEAT_COPY[caveat];
+  const { head, body } = THETA_CAVEAT_INFO[caveat];
   const round = fmtSpan(ability?.round_span ?? null);
   const ruler = fmtSpan(ability?.ruler_span ?? null);
   return (
@@ -106,7 +72,7 @@ export function AbilityHelp({
       </p>
       {caveat ? (
         <p className="ability-help-calib">
-          <strong>{CAVEAT_COPY[caveat].head}</strong> {CAVEAT_COPY[caveat].body}
+          <strong>{THETA_CAVEAT_INFO[caveat].head}</strong> {THETA_CAVEAT_INFO[caveat].body}
         </p>
       ) : null}
     </div>

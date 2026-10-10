@@ -1,21 +1,20 @@
 "use client";
 
-import type { DraftCampaignWire, DraftPatch, ProvenanceTag } from "@/lib/api";
+import type { DraftCampaignWire, DraftPatch, Provenance } from "@/lib/api";
 import { ORIGIN_KEY } from "@/lib/origin-readiness";
 
-const PROVENANCE_LABEL: Record<ProvenanceTag, string> = {
+const PROVENANCE_LABEL: Record<Provenance, string> = {
   unset: "Not set",
   proposed: "Proposed",
   confirmed: "Confirmed",
 };
 
-function ProvenanceBadge({ tag }: { tag: ProvenanceTag }) {
+function ProvenanceBadge({ tag }: { tag: Provenance }) {
   return (
     <span className={`origin-prov origin-prov--${tag}`}>{PROVENANCE_LABEL[tag]}</span>
   );
 }
 
-// Picks the input and target headers. The pick IS the confirmation — there is no Apply.
 export function ColumnMappingPicker({
   draft,
   onApply,
@@ -31,8 +30,8 @@ export function ColumnMappingPicker({
     );
   }
 
-  const queryProv: ProvenanceTag = draft.field_provenance[ORIGIN_KEY.columnQuery] ?? "unset";
-  const gtProv: ProvenanceTag = draft.field_provenance[ORIGIN_KEY.columnGroundTruth] ?? "unset";
+  const queryProv: Provenance = draft.field_provenance[ORIGIN_KEY.columnQuery] ?? "unset";
+  const gtProv: Provenance = draft.field_provenance[ORIGIN_KEY.columnGroundTruth] ?? "unset";
   const sameColumn =
     !!draft.column_query && draft.column_query === draft.column_ground_truth;
 

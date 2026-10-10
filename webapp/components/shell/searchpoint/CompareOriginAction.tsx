@@ -1,6 +1,4 @@
 "use client";
-// The affordance for reading a searchpoint against the campaign's origin: both on the Compare
-// board, nothing else beside them.
 
 import type { SelectedCandidate } from "@/lib/types";
 import type { CyclePath } from "@/lib/ids";

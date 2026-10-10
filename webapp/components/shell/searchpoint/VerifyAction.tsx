@@ -1,11 +1,10 @@
 "use client";
-// Verifying a searchpoint, and the answer beside the button that asked: a candidate's rate is a
-// claim about the panel its round bought, not about the dataset.
 
 import { useState } from "react";
 import type { SelectedCandidate } from "@/lib/types";
 import type { CyclePath } from "@/lib/ids";
 import { postVerifyCandidate, type VerifyStrategy } from "@/lib/api/commands";
+import { VERIFY_STRATEGY_LABELS } from "@/lib/api/types.generated";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { useVerify } from "@/lib/hooks/useVerify";
 import { unitCount } from "@/lib/format";
@@ -28,7 +27,6 @@ export function VerifyAction({
 }) {
   const cmd = useCommand<"verify-candidate">("verify-candidate");
   const [strategy, setStrategy] = useState<VerifyStrategy>("random");
-  // Blank is the server's own count, never a number this browser picked.
   const [samples, setSamples] = useState("");
   const sending = cmd.pending !== null;
   const { readings, pass, unit } = useVerify(path, sending ? PASS_POLL_MS : undefined);
@@ -36,7 +34,6 @@ export function VerifyAction({
   if (!path || !candidate.label) return null;
 
   const reading = readings.get(candidate.label) ?? null;
-  // SERVED, so a pass another tab or a terminal started holds this button too.
   const flying = pass !== null && pass.label === candidate.label ? pass : null;
   const busy = sending || flying !== null;
 
@@ -107,14 +104,14 @@ export function VerifyAction({
       </div>
       {busy && (
         <p className="verify-action-note">
-          {flying
-            ? `Measuring ${flying.label} on ${unitCount(flying.rows, unit)} it has never seen, ${flying.strategy === "hard" ? "hardest first" : "picked at random"}.`
+          {flying && unit
+            ? `Measuring ${flying.label} on ${unitCount(flying.rows, unit)} it has never seen, ${VERIFY_STRATEGY_LABELS[flying.strategy]}.`
             : `Measuring ${candidate.label} on cells it has never seen.`}{" "}
           This mints no round, so the cycle&rsquo;s own series does not move.
         </p>
       )}
       {cmd.failure ? <p className="verify-action-note error">{cmd.failure.message}</p> : null}
-      {reading && <VerifyReading reading={reading} unit={unit} />}
+      {reading && unit && <VerifyReading reading={reading} unit={unit} />}
     </div>
   );
 }

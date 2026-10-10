@@ -1,7 +1,5 @@
 import { test, expect, open, ready, noSidewaysScroll } from "../harness";
 
-// A body that scrolls sideways is the observable half of the overflow family no lint sees.
-
 const WIDTHS = [
   { name: "phone-375", width: 375, height: 812 },
   { name: "phone-393", width: 393, height: 852 },

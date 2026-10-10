@@ -1,6 +1,3 @@
-// Connector-state inspector: dot button + popover over the Input→LLM arrow. Presentational —
-// `ConnectorProvider` owns the join, so this never fetches, derives or matches by string.
-
 import { cx } from "@/lib/cx";
 import { connectorReachability, interiorNodes } from "@/lib/derivations";
 import type { ConnectorView } from "@/lib/types";
@@ -23,10 +20,8 @@ export function ConnectorInspector({ view }: Props) {
     isTls,
     health,
   } = view;
-  // Shared with CriticalAlertBanner (lib/derivations/connector-state.ts), so LED and banner agree.
   const { reachable, stateCls, stateLabel } = connectorReachability(health);
-  // An L4 unit's backend is PromptPotter itself (`selfOpt`): nothing to probe. No resolved connector
-  // is a terminal "idle", never a perpetual "probing…" (frontend-surface-contract.md § I1).
+  // No resolved connector is a terminal "idle", never a perpetual "probing…" (frontend-surface-contract.md § I1).
   const noBackend = connector == null && !selfOpt;
   const label = selfOpt ? "self-optimization" : noBackend ? "idle" : stateLabel;
   const footText = selfOpt
@@ -89,7 +84,6 @@ export function ConnectorInspector({ view }: Props) {
             docs ↗
           </a>
         </div>
-        {/* No node roster: the graph in the same row draws them from the same `view`. */}
         {interior.length === 0 && (
           <p className="connector-pop-empty">
             {selfOpt

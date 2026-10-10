@@ -7,42 +7,25 @@ import {
   type SeriesCtx,
 } from "../series";
 import type { VerifyReading } from "@/lib/api/types";
-import type { CandidateView } from "@/lib/types";
+import type { CandidateBar } from "@/lib/types";
+import { armNode, armReading, ownLevel } from "@/lib/test-fixtures";
 
-// Every one of these fails silently on screen: a plausible bar, no whisker, a `transparent` ink.
-
-function view(over: Partial<CandidateView>): CandidateView {
+function bar(
+  reading: Parameters<typeof armReading>[0] = {},
+  over: Partial<CandidateBar> = {},
+): CandidateBar {
+  const node = armNode({ id: "a", label: "C1.1", reading: armReading(reading) }, 1);
   return {
     key: "k",
-    round: 1,
     idx: 0,
-    candidate_id: "a",
-    label: "C1.1",
-    accuracy: null,
-    composite: null,
-    theta: null,
-    theta_se: null,
-  thetaCaveat: null,
-    meanFitnessCiLo: null,
-    meanFitnessCiHi: null,
-    referenceLift: null,
-    referenceLiftCiLo: null,
-    referenceLiftCiHi: null,
-    referenceLiftSide: null,
-    is_selected: false,
-    n_samples: null,
-    n_expected: null,
-    panelCut: false,
-    cached_samples: null,
+    label: node.label,
+    node,
+    arm: node,
+    reading: node.reading,
     source: "history",
-    lensValue: null,
-    compositeRank: null,
-    lensRank: null,
-    started: false,
-    electionPending: false,
-    crown: null,
-    overlapAccuracy: null,
-    overlapN: null,
+    level: node.reading.own?.accuracy?.value ?? null,
+    overlap: null,
+    benchPass: null,
     ...over,
   };
 }
@@ -53,6 +36,7 @@ const ctx = (over: Partial<SeriesCtx> = {}): SeriesCtx => ({
   showCache: false,
   showOverlap: false,
   views: [],
+  overlapBasis: null,
   unit: "sample",
   electedMetric: "ability",
   ...over,
@@ -61,27 +45,40 @@ const ctx = (over: Partial<SeriesCtx> = {}): SeriesCtx => ({
 const spec = (key: string) => CANDIDATE_SERIES.find((s) => s.key === key)!;
 
 describe("a missing value renders as a gap or a floor, never as a measurement", () => {
-  it("floors accuracy, composite and the mask once scoring has begun", () => {
-    const started = [view({ started: true })];
-    for (const key of ["accuracy", "composite", "mask"]) {
+  const started = [bar({ own: { ...ownLevel(0.5), composite: null } })];
+
+  it("floors the composite and the mask once scoring has begun", () => {
+    for (const key of ["composite", "mask"]) {
       expect(seriesColumn(spec(key), started)).toEqual([0]);
-      expect(seriesColumn(spec(key), [view({ started: false })])).toEqual([null]);
+    }
+    for (const key of ["accuracy", "composite", "mask"]) {
+      expect(seriesColumn(spec(key), [bar()])).toEqual([null]);
     }
   });
 
   it("never floors θ, overlap or verify — not even on a started bar", () => {
-    const started = [view({ started: true })];
     for (const key of ["ability", "overlap", "verify"]) {
       expect(seriesColumn(spec(key), started)).toEqual([null]);
     }
   });
 
   it("reads its own served number and nothing else", () => {
-    const v = view({ accuracy: 0.7, theta: -1.5, overlapAccuracy: 0.5, cached_samples: 3, n_samples: 6 });
+    const v = bar(
+      {
+        own: ownLevel(0.7),
+        ability: { theta: -1.5, se: 0.2, ci_lo: -1.9, ci_hi: -1.1, caveat: null },
+        panel: { cached: 3, scored: 6, cached_share: 0.25 },
+      },
+      { overlap: { rate: 0.5, n: 4 } },
+    );
+    expect(seriesColumn(spec("accuracy"), [v])).toEqual([0.7]);
     expect(seriesColumn(spec("ability"), [v])).toEqual([-1.5]);
     expect(seriesColumn(spec("overlap"), [v])).toEqual([0.5]);
-    expect(seriesColumn(spec("cached"), [v])).toEqual([0.5]);
-    expect(seriesColumn(spec("cached"), [view({ cached_samples: 0, n_samples: 0 })])).toEqual([null]);
+    // 0.25, not 3/6: the served share, never the two counts beside it divided here.
+    expect(seriesColumn(spec("cached"), [v])).toEqual([0.25]);
+    expect(seriesColumn(spec("cached"), [bar()])).toEqual([null]);
+    const band = whiskerBands(ctx({ metrics: new Set(["ability"]), views: [v] }));
+    expect(band).toEqual([{ anchor: "ability", lo: [-1.9], hi: [-1.1] }]);
   });
 });
 
@@ -103,7 +100,6 @@ describe("the axis and sign facts the chart cannot re-derive", () => {
       "ability",
       "composite",
     ]);
-    // Everything else must carry its own legend text, or it appears unlabelled.
     for (const s of CANDIDATE_SERIES) {
       if (!s.metric) expect(s.legend).toBeTypeOf("function");
     }
@@ -112,13 +108,10 @@ describe("the axis and sign facts the chart cannot re-derive", () => {
 
 describe("what is on screen", () => {
   it("shows the overlap bars at BOTH on-rungs, and only when a reading exists", () => {
-    const withReading = [view({ overlapAccuracy: 0.5 })];
+    const withReading = [bar({}, { overlap: { rate: 0.5, n: 4 } })];
     const on = (c: Partial<SeriesCtx>) => activeSeries(ctx(c)).map((s) => s.key);
-    // `showOverlap` is `rung > 0`: on for both the served set and a picked one.
     expect(on({ showOverlap: true, views: withReading })).toContain("overlap");
-    // On, but nothing has been read on the whole set yet.
-    expect(on({ showOverlap: true, views: [view({})] })).not.toContain("overlap");
-    // A reading exists but the operator stepped the control off.
+    expect(on({ showOverlap: true, views: [bar()] })).not.toContain("overlap");
     expect(on({ showOverlap: false, views: withReading })).not.toContain("overlap");
   });
 });
@@ -127,8 +120,6 @@ describe("the confidence band", () => {
   it("draws the served band only on the bar that produced it", () => {
     const anchors = (c: Partial<SeriesCtx>) => whiskerBands(ctx(c)).map((b) => b.anchor);
     expect(anchors({ electedMetric: "ability" })).toEqual(["accuracy", "ability"]);
-    // `mean_fitness_ci` is accuracy's: under a composite headline it stays on the accuracy bar,
-    // and with no accuracy bar on screen the composite bar gets no borrowed whisker.
     const both: Partial<SeriesCtx> = {
       electedMetric: "composite",
       metrics: new Set(["accuracy", "composite"]),
@@ -139,22 +130,30 @@ describe("the confidence band", () => {
   });
 
   it("puts a verify on its fresh cells alone, under the band those cells produced", () => {
-    const col = { accuracy: null, composite: null };
     const verify: VerifyReading = {
       label: "C1.1",
       scorer_id: "s",
       strategy: "random",
-      n_fresh: 6,
-      fresh: { accuracy: { value: 0.5, ci_lo: 0.2, ci_hi: 0.8 }, composite: null },
-      n_recorded: 12,
-      recorded: { accuracy: { value: 0.75, ci_lo: 0.5, ci_hi: 1 }, composite: null },
+      fresh: { accuracy: { value: 0.5, ci_lo: 0.2, ci_hi: 0.8 }, composite: null, n: 6 },
+      recorded: { accuracy: { value: 0.75, ci_lo: 0.5, ci_hi: 1 }, composite: null, n: 12 },
       accuracy_increment: -0.25,
       composite_increment: null,
-      n_shared: 18,
-      lift: col,
+      vs_origin: {
+        state: "same_individual",
+        a: null,
+        b: null,
+        cell_set: null,
+        instrument_id: null,
+        scope: "report",
+        spec: { interval_method: "student_t", alpha: 0.05, null_value: 0 },
+        coverage: null,
+        headline: null,
+        beside: [],
+      },
       held: true,
+      held_absent: null,
     };
-    const views = [view({ accuracy: 0.75, verify }), view({ accuracy: 0.6 })];
+    const views = [bar({ own: ownLevel(0.75), verify }), bar({ own: ownLevel(0.6) })];
     expect(seriesColumn(spec("verify"), views)).toEqual([0.5, null]);
     const band = whiskerBands(ctx({ metrics: new Set(), views })).find((b) => b.anchor === "verify");
     expect(band).toEqual({ anchor: "verify", lo: [0.2, null], hi: [0.8, null] });

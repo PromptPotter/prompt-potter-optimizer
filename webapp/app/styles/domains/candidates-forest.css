@@ -1,5 +1,12 @@
-/* The sidebar stays mounted across tab switches, so a tab toggle never reflows the page width. */
-
+.lineage-node:hover .lineage-stub{stroke-width:3}
+/* SVG <g> paints `outline` unreliably, so focus mirrors the hover affordance on stub + label. */
+.lineage-node:focus{outline:none}
+.lineage-node:focus-visible .lineage-stub{stroke-width:3}
+.lineage-node:focus-visible .lineage-label{text-decoration:underline}
+.lineage-node:not(.selected) .lineage-stub{stroke:var(--color-accent)}
+.lineage-node:not(.selected) .lineage-label{fill:var(--color-accent)}
+.lineage-node.selected .lineage-stub{stroke:var(--color-selection);stroke-width:3}
+.lineage-node.selected .lineage-label{fill:var(--color-selection);font-weight:600}
 .lineage-stub{stroke:var(--color-text-primary);stroke-width:1;fill:none}
 .lineage-stub.winner{stroke-width:1.6}
 .lineage-label{fill:var(--color-text-secondary);font-size:var(--text-xs);letter-spacing:.02em}
@@ -8,11 +15,8 @@
 .lineage-inherit-link{background:transparent;border:0;color:var(--color-accent);cursor:pointer;font:inherit;font-style:italic;text-decoration:underline;padding:0}
 .lineage-inherit-link:hover{color:var(--color-text-primary)}
 
-/* No bottom border/margin: the viewport sits flush so its resize grip lands in the card's corner. */
 .family-cladogram{margin-top:8px}
 .family-cladogram-head{display:flex;align-items:center;justify-content:space-between;padding:0 2px var(--space-4);font-size:var(--text-xs);text-transform:uppercase;letter-spacing:0.06em;color:var(--color-text-secondary)}
-/* Capped at 60vh, then scrolls. A campaign switch remounts the box (keyed on campaignId), so a
-   dragged height does not leak into the next campaign. */
 .family-cladogram-viewport{max-height:60vh;overflow:auto;resize:vertical}
 .family-cladogram-forest{margin-top:6px}
 .family-cladogram-forest:first-of-type{margin-top:0}
@@ -31,14 +35,8 @@
 .family-cladogram-dot.kind-fork{fill:var(--color-accent)}
 .family-cladogram-dot.kind-diag{fill:var(--color-success)}
 .family-cladogram-lane-selected{fill:var(--color-background-tint-active);opacity:0.45}
-/* The hue is inline (`CladogramCtx.inkOf`); the stroke ring keeps a 3.5px dot legible on both
-   themes and against the divergence red. */
 .lineage-channel-mark{stroke:var(--color-background-primary);stroke-width:1}
-/* A ring: at DENSE there is no label, and a channel stub's colour is inline. Outside
-   `.lineage-channel-mark`, so a node that is both reads as both. */
 .lineage-pick-mark{fill:none;stroke:var(--color-selection);stroke-width:1.5}
-/* UNKNOWN: a setting changed at or above this point. Neither a counterfactual (`mask-divergent`)
-   nor a record (`retired`) — there is no reading at all, so dashed. */
 .lineage-node.unknown .lineage-stub,
 .family-cladogram-node.unknown .family-cladogram-dot{stroke-dasharray:2 2;opacity:0.6}
 .lineage-node.unknown .lineage-label{fill:var(--color-text-secondary);font-style:italic}
@@ -48,19 +46,13 @@
 .family-cladogram-node.selected .family-cladogram-cyclelabel{fill:var(--color-accent);font-weight:600}
 .family-cladogram-node:hover .family-cladogram-dot{r:5}
 .family-cladogram-node:hover .family-cladogram-cyclelabel{fill:var(--color-text-primary)}
-/* In front of branches but behind the node groups, so dot clicks still win. */
 .family-cladogram-lane-hit{fill:transparent}
 .family-cladogram-lane-hit:hover{fill:var(--color-background-hover);opacity:0.5}
 .family-cladogram-lane-hit:focus{outline:none}
 .family-cladogram-lane-hit:focus-visible{fill:var(--color-background-hover);opacity:0.5}
-/* Rendered from the served overlay, never recomputed; the dim always pairs with an aria-label. */
 .family-cladogram-node.mask-divergent,
 .lineage-node.mask-divergent{opacity:0.38}
-/* RETIRED: what the run did, not what a mask would have done — a lighter dim and its own
-   tooltip. Still selectable. */
 .lineage-node.retired{opacity:0.55}
-/* Divergence = RED, no glyphs: the alternative's branch glows, the collapsed round node wears a
-   ring. Reduced motion keeps the glow and drops the pulse. */
 .family-cladogram-divergence-ring{
   fill:none;
   stroke:var(--color-danger);
@@ -78,8 +70,6 @@
   0%,100%{opacity:0.65;stroke-width:2}
   50%{opacity:1;stroke-width:2.75}
 }
-/* The winner AT the divergence round glows even when the lens names no alternative, so a
-   divergence is never invisible in the expanded tree. */
 .lineage-node.mask-alt .lineage-stub,
 .lineage-node.mask-divergence .lineage-stub{
   stroke:var(--color-danger);

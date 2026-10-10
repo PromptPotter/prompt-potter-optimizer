@@ -1,9 +1,6 @@
-// @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { Button } from "../Button";
-
-afterEach(cleanup);
 
 describe("Button", () => {
   it("renders children and defaults type to button (never submits)", () => {

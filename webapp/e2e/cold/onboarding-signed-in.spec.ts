@@ -1,8 +1,7 @@
 import { test, expect, ready } from "../harness";
 import { startFakeIssuer, type FakeIssuer } from "../fake_issuer";
 
-// `AccessGate` and `AllowanceSpent` need a signed-in NON-host identity, which the auth-off
-// cold/walk servers can never produce — hence `fake_issuer.ts`.
+// `AccessGate` and `AllowanceSpent` need a signed-in NON-host identity, which the auth-off servers cannot produce.
 
 let fake: FakeIssuer;
 
@@ -32,8 +31,7 @@ test("an account at its free-tier ceiling sees AllowanceSpent", async ({ page, c
   const sessionId = fake.mintSession({ tenantId, email: "allowance@example.com" });
   await context.addCookies([{ name: "promptpotter_session", value: sessionId, url: fake.baseURL }]);
 
-  // Pre-accept Terms, or ConsentGate paints over AllowanceSpent. `request` is bound to the cold
-  // project's baseURL, hence full URLs and an explicit Cookie header.
+  // Pre-accept Terms, or ConsentGate paints over AllowanceSpent; `request` is bound to the cold project's baseURL, hence full URLs.
   const cookie = { Cookie: `promptpotter_session=${sessionId}` };
   const me = await (
     await request.get(`${fake.baseURL}/api/v1/auth/me`, { headers: cookie })

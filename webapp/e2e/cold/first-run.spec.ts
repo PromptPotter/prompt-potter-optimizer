@@ -10,8 +10,7 @@ import {
   passConsent,
 } from "../harness";
 
-// The world a brand-new account meets: every pane renders from an EMPTY read. ORDER IS
-// LOAD-BEARING: accepting the terms is persisted, so the gate can be met once per reset.
+// ORDER IS LOAD-BEARING: accepting the terms is persisted, so the gate can be met once per reset.
 
 test.describe.configure({ mode: "serial" });
 

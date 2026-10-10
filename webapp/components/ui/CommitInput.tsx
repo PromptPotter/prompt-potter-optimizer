@@ -6,9 +6,6 @@ import {
   type TextareaHTMLAttributes,
 } from "react";
 
-// Commits on Enter or blur (blur alone when multi-line), never per keystroke — the rule of
-// `webapp/components/CLAUDE.md` § Component conventions.
-
 type Own = {
   value: string;
   onCommit: (value: string) => void;
@@ -24,8 +21,7 @@ type MultiLine = Own & { rows: number } & Omit<
     Owned | "rows"
   >;
 
-// Two latches: `seen` triggers the reset, `sent` is what was last handed UP. A caller that rejects
-// a commit keeps its old `value`, so one latch would re-fire the rejected value on the next blur.
+// Two latches: a caller that rejects a commit keeps its old `value`, so one would re-fire it on the next blur.
 function useCommitted(
   value: string,
   onCommit: (value: string) => void,

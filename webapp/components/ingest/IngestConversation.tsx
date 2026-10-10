@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
-import type { DatasetIndexEntry, OriginEntry, StartCheckinLimits } from "@/lib/api";
+import { useEffect, useId, useState } from "react";
+import type { DatasetIndexEntry, OriginEntry, StartCheckinOptions } from "@/lib/api";
 import type { IngestFlow } from "@/lib/hooks/useIngestFlow";
-import { cx } from "@/lib/cx";
+import type { BlockItem } from "@/lib/chat/thread";
+import { useIngest } from "@/lib/ingest-flow";
+import { Composer } from "@/components/chat/Composer";
+import { useThreadFollow } from "@/components/chat/Thread";
 import { NumberField } from "@/components/ingest/NumberField";
 import { SlugField } from "@/components/ingest/SlugField";
-import { RunSummaryItem } from "@/components/chat/RunCard";
 import { Criterion } from "@/components/shell/scoring/Criterion";
 import { dialsOf, dialsText } from "@/lib/scoring-mask";
 import { ColumnMappingPicker } from "./ColumnMappingPicker";
@@ -17,30 +19,6 @@ import { OptimizerSetupSection } from "./OptimizerSetupSection";
 import { PipelineDependencies } from "./PipelineDependencies";
 import { OriginCheckinPanel } from "./OriginCheckinPanel";
 import { DatasetPickList } from "./DatasetPickList";
-
-function ChatFileChip({ name, rows }: { name: string; rows: number | null }) {
-  return (
-    <div className="chat-msg user user-file">
-      <div className="file-chip">
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 18 18"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden="true"
-        >
-          <path d="M14.5 7.5 8 14a3.5 3.5 0 0 1-4.95-4.95L9.5 2.6a2.4 2.4 0 0 1 3.4 3.4L6.4 12.5a1.3 1.3 0 0 1-1.83-1.83L11 4.2" />
-        </svg>
-        <span className="name">{name}</span>
-        {rows != null && <span className="meta">· {rows} rows</span>}
-      </div>
-    </div>
-  );
-}
 
 function CheckinLoadingWindow({ model }: { model: string }) {
   const [secs, setSecs] = useState(0);
@@ -66,196 +44,113 @@ function CheckinLoadingWindow({ model }: { model: string }) {
   );
 }
 
-// Sub-pixel heights and a half-drawn row must not read as the reader having scrolled away.
-const FOLLOW_SLACK_PX = 24;
-
-// The one ingest conversation, hosted only by the chat tab; the "New campaign" modal hands
-// the shared thread over here the moment a pick or drop advances it.
-export function IngestConversation({
+function EntryList({
   flow,
   origins,
   datasets,
-  liveSegment,
-  runCard,
+  open,
 }: {
   flow: IngestFlow;
-  origins?: OriginEntry[];
-  datasets?: DatasetIndexEntry[];
-  liveSegment?: ReactNode;
-  // LAST in the thread; separate from the append-only `liveSegment` because it is always-current.
-  runCard?: ReactNode;
+  origins: OriginEntry[];
+  datasets: DatasetIndexEntry[];
+  // React writes `open` only when the PROP changes, so a poll tick leaves a hand-opened list alone.
+  open: boolean;
 }) {
-  const { phase, messages } = flow;
-  const [dragging, setDragging] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-
-  const showEntryList = phase.stage === "idle" && datasets !== undefined;
-  // No state behind the fold: React writes `open` only when the PROP changes, so a poll tick
-  // leaves a hand-opened list alone.
-  const threadHasContent = messages.length > 0 || !!liveSegment || !!runCard;
-
-  const threadRef = useRef<HTMLDivElement | null>(null);
-  // A ref, not state: scrolling must not itself cause a render.
-  const followRef = useRef(true);
-  // No deps: growth arrives as `liveSegment` / `runCard` elements no dependency list can compare.
-  useEffect(() => {
-    const el = threadRef.current;
-    if (el && followRef.current) el.scrollTop = el.scrollHeight;
-  });
-
+  const follow = useThreadFollow();
   return (
-    <div className="ingest-conversation">
-      <div
-        className="chat-messages"
-        aria-live="polite"
-        ref={threadRef}
-        onScroll={(e) => {
-          const el = e.currentTarget;
-          followRef.current =
-            el.scrollHeight - el.scrollTop - el.clientHeight <= FOLLOW_SLACK_PX;
-        }}
-      >
-        {showEntryList ? (
-          <details
-            className="new-campaign-optional"
-            open={!threadHasContent}
-            // The list expands ABOVE the tail; a still-following thread would scroll past it.
-            onToggle={(e) => {
-              if (e.currentTarget.open) followRef.current = false;
-            }}
-          >
-            <summary>
-              Start a campaign — {origins?.length ?? 0} origins · {datasets!.length} datasets
-            </summary>
-            <DatasetPickList
-              origins={origins ?? []}
-              datasets={datasets!}
-              onOpenOrigin={flow.openOrigin}
-              onPick={flow.pickDataset}
-              busy={flow.busy}
-            />
-          </details>
-        ) : null}
+    <details
+      className="new-campaign-optional"
+      open={open}
+      onToggle={(e) => {
+        if (e.currentTarget.open) follow.hold();
+      }}
+    >
+      <summary>
+        Start a campaign — {origins.length} origins · {datasets.length} datasets
+      </summary>
+      <DatasetPickList
+        origins={origins}
+        datasets={datasets}
+        onOpenOrigin={flow.openOrigin}
+        onPick={flow.pickDataset}
+        busy={flow.busy}
+      />
+    </details>
+  );
+}
 
-        {messages.map((msg) =>
-          msg.kind === "user-file" ? (
-            <ChatFileChip key={msg.id} name={msg.name} rows={msg.rows} />
-          ) : msg.kind === "user" ? (
-            <div key={msg.id} className="chat-msg user">
-              {msg.text}
-            </div>
-          ) : msg.kind === "ai" ? (
-            <div key={msg.id} className="chat-msg ai">
-              {msg.text}
-            </div>
-          ) : msg.kind === "warning" ? (
-            <div key={msg.id} className="chat-msg ai chat-msg-warn" role="status">
-              {msg.text}
-            </div>
-          ) : msg.kind === "run" ? (
-            <RunSummaryItem key={msg.id} summary={msg.summary} />
-          ) : (
-            <div key={msg.id} className="chat-msg ai chat-msg-error" role="alert">
-              {msg.text}
-            </div>
-          ),
-        )}
+function SetupBlocks({ flow }: { flow: IngestFlow }) {
+  const { phase } = flow;
+  return (
+    <>
+      {phase.stage === "uploading" ? (
+        <p className="checkin-loading" role="status" aria-live="polite">
+          Parsing your file…
+        </p>
+      ) : null}
+      {phase.stage === "checkin" ? <CheckinLoadingWindow model={phase.model} /> : null}
+      {phase.stage === "collision" ? (
+        <CollisionCard flow={flow} existingSlug={phase.existingSlug} suggestedSlug={phase.suggestedSlug} />
+      ) : null}
+      {phase.stage === "ready" ? <ReadyBlock flow={flow} /> : null}
 
-        {phase.stage === "uploading" ? (
-          <p className="checkin-loading" role="status" aria-live="polite">
-            Parsing your file…
+      {flow.awaitingContext ? (
+        <div className="ingest-context-help" role="note">
+          <p>
+            Cover what each row means, what counts as a correct answer, and any
+            rules or edge cases the model must respect — a few sentences is plenty.
           </p>
-        ) : null}
-        {phase.stage === "checkin" ? <CheckinLoadingWindow model={phase.model} /> : null}
-        {phase.stage === "collision" ? (
-          <CollisionCard flow={flow} existingSlug={phase.existingSlug} suggestedSlug={phase.suggestedSlug} />
-        ) : null}
-        {phase.stage === "ready" ? <ReadyBlock flow={flow} /> : null}
-
-        {flow.awaitingContext ? (
-          <div className="ingest-context-help" role="note">
-            <p>
-              Cover what each row means, what counts as a correct answer, and any
-              rules or edge cases the model must respect — a few sentences is plenty.
+          {!flow.inputText.trim() ? (
+            <p className="ingest-context-warning" role="alert">
+              Context can’t be empty — the check-in needs it to set things up.
             </p>
-            {!flow.inputText.trim() ? (
-              <p className="ingest-context-warning" role="alert">
-                Context can’t be empty — the check-in needs it to set things up.
-              </p>
-            ) : null}
-          </div>
-        ) : null}
-
-        {liveSegment}
-        {runCard}
-      </div>
-
-      <div
-        className={cx("chat-input-row", dragging && "is-dragover")}
-        onDragOver={(e) => {
-          e.preventDefault();
-          setDragging(true);
-        }}
-        onDragLeave={() => setDragging(false)}
-        onDrop={(e) => {
-          e.preventDefault();
-          setDragging(false);
-          const f = e.dataTransfer.files[0];
-          if (f) flow.onDatasetFile(f);
-        }}
-      >
-        <input
-          ref={fileInputRef}
-          type="file"
-          hidden
-          accept=".csv,.tsv,.json,.jsonl,.ndjson,.xlsx,text/csv,application/json"
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) flow.onDatasetFile(f);
-            e.target.value = "";
-          }}
-        />
-        <button
-          className="chat-attach"
-          type="button"
-          title="Attach a dataset file"
-          aria-label="Attach a dataset file"
-          disabled={flow.busy}
-          onClick={() => fileInputRef.current?.click()}
-        >
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M14.5 7.5 8 14a3.5 3.5 0 0 1-4.95-4.95L9.5 2.6a2.4 2.4 0 0 1 3.4 3.4L6.4 12.5a1.3 1.3 0 0 1-1.83-1.83L11 4.2" />
-          </svg>
-        </button>
-        <div className="chat-field">
-          <textarea
-            className="chat-input"
-            // Must fit ONE line beside attach and send at 390px; formats live in `accept`.
-            placeholder={flow.awaitingContext ? "Describe the task…" : "Drop a dataset file…"}
-            rows={1}
-            value={flow.inputText}
-            onChange={(e) => flow.setInputText(e.target.value)}
-            onKeyDown={(e) => {
-              if (flow.awaitingContext && e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                flow.submitContext();
-              }
-            }}
-            disabled={!flow.awaitingContext}
-            aria-label="Chat input"
-          />
-          <ComposerTools />
+          ) : null}
         </div>
-        <button
-          className="chat-send"
-          type="button"
-          disabled={!flow.awaitingContext || !flow.inputText.trim()}
-          onClick={() => flow.submitContext()}
-        >
-          Send
-        </button>
-      </div>
-    </div>
+      ) : null}
+    </>
+  );
+}
+
+export function useIngestItems(threadEmpty: boolean): { head: BlockItem[]; tail: BlockItem[] } {
+  const { flow, collection } = useIngest();
+  const head: BlockItem[] =
+    flow.phase.stage === "idle" && collection.kind === "ready"
+      ? [
+          {
+            id: "ingest-entry",
+            kind: "block",
+            node: (
+              <EntryList
+                flow={flow}
+                origins={collection.origins}
+                datasets={collection.entries}
+                open={threadEmpty}
+              />
+            ),
+          },
+        ]
+      : [];
+  const tail: BlockItem[] = [
+    { id: "ingest-setup", kind: "block", node: <SetupBlocks flow={flow} /> },
+  ];
+  return { head, tail };
+}
+
+export function IngestComposer() {
+  const { flow } = useIngest();
+  return (
+    <Composer
+      value={flow.inputText}
+      onChange={flow.setInputText}
+      onSubmit={flow.submitContext}
+      canSend={flow.awaitingContext}
+      placeholder={flow.awaitingContext ? "Describe the task…" : "Drop a dataset file…"}
+      onFile={flow.onDatasetFile}
+      accept=".csv,.tsv,.json,.jsonl,.ndjson,.xlsx,text/csv,application/json"
+      attachLabel="Attach a dataset file"
+      attachDisabled={flow.busy}
+      tools={<ComposerTools />}
+    />
   );
 }
 
@@ -267,17 +162,17 @@ interface CapDrafts {
 }
 const NO_CAPS: CapDrafts = { halt: "", usd: "", tokens: "" };
 
-// Anything finite is SENT, out-of-range too: `StartCheckinPayload` owns the bounds, and its 422
-// names the field where a silently dropped key would not.
-function launchLimits(c: CapDrafts): StartCheckinLimits {
+// Anything finite is SENT, out-of-range too: `StartCheckinPayload` owns the bounds and its 422 names the field.
+function launchLimits(c: CapDrafts): StartCheckinOptions {
   const num = (s: string) => {
     const n = Number(s);
     return s.trim() !== "" && Number.isFinite(n) ? n : undefined;
   };
+  const usd = num(c.usd) ?? null;
+  const tokens = num(c.tokens) ?? null;
   return {
     halt_at_accuracy: num(c.halt),
-    spend_budget_usd: num(c.usd),
-    token_budget: num(c.tokens),
+    ceiling: usd === null && tokens === null ? undefined : { usd, tokens },
   };
 }
 
@@ -380,7 +275,6 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
 
       <ColumnMappingPicker draft={draft} onApply={flow.applyPatch} />
 
-      {/* A check-in's channel is the draft's dials alone, so the mask narrows before it is spelled. */}
       <Criterion
         startRung={1}
         dialsOnly
@@ -413,8 +307,7 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
       <OptimizerSetupSection draft={draft} onApply={flow.applyPatch} />
 
       <details className="new-campaign-optional ingest-advanced">
-        {/* Two persistence classes on purpose: max rounds patches the draft's `OptimizationConfig`,
-            the caps ride the Start press and are saved nowhere. */}
+        {/* Max rounds patches the draft; the caps ride the Start press and are saved nowhere. */}
         <summary>Run bounds (optional)</summary>
         <div className="new-campaign-optional-body">
           <LaunchCaps caps={caps} onChange={setCaps} />
@@ -448,8 +341,7 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
         </ul>
       ) : null}
 
-      {/* `saving` never disables Start: `startFromReady` awaits the in-flight edit, and
-          disabling would eat the tap whose blur committed the field. */}
+      {/* `saving` never disables Start: that would eat the tap whose blur committed the field. */}
       <button
         type="button"
         className="chat-cta-btn"

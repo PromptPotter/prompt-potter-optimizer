@@ -2,12 +2,12 @@
 
 import { useState } from "react";
 import { AccountEmpty, AccountFailure, AccountLoading } from "./AccountSection";
-import { billText } from "@/lib/derivations";
+import { billText, ratePricedText } from "@/lib/derivations";
 import { fmtCompact } from "@/lib/format";
 import { seriesVar } from "@/lib/theme";
 import { useRead } from "@/lib/hooks/useRead";
 import {
-  fetchActivity,
+  activityRead,
   type ActivityBucket,
   type ActivityGroupBy,
   type ActivityResponse,
@@ -30,14 +30,7 @@ const WINDOW_ORDER = Object.keys(WINDOW_LABEL) as ActivityWindow[];
 export function AccountActivityTab() {
   const [window, setWindow] = useState<ActivityWindow>("1d");
   const [groupBy, setGroupBy] = useState<ActivityGroupBy>("model");
-  // Keyed on the axis, so old buckets never render against new axis labels.
-  const read = useRead(
-    {
-      key: `${window}\x1f${groupBy}`,
-      fetch: (signal) => fetchActivity(window, groupBy, signal),
-    },
-    { surface: "activity" },
-  );
+  const read = useRead(activityRead(window, groupBy));
 
   return (
     <>
@@ -83,6 +76,7 @@ export function AccountActivityTab() {
 function ActivityCharts({ data }: { data: ActivityResponse }) {
   const labels = data.series_labels;
   const palette = labels.map((_, i) => seriesVar(i));
+  const priced = ratePricedText(data.total_rate_priced_usd, data.calls_rate_priced);
   return (
     <>
       <ul className="activity-legend">
@@ -99,12 +93,14 @@ function ActivityCharts({ data }: { data: ActivityResponse }) {
       </ul>
       <ActivityBarChart
         title="Spend"
-        valueLabel={billText(data.total_spend_usd, data.bill_is_floor)}
+        valueLabel={
+          billText(data.total_spend_usd, data.bill_is_floor) + (priced ? ` + ${priced}` : "")
+        }
         buckets={data.buckets}
         labels={labels}
         palette={palette}
         accessor={(b) => b.series_spend}
-        totalAccessor={(b) => b.spend_usd}
+        peak={data.peak_spend_usd}
       />
       <ActivityBarChart
         title="Requests"
@@ -113,7 +109,7 @@ function ActivityCharts({ data }: { data: ActivityResponse }) {
         labels={labels}
         palette={palette}
         accessor={(b) => b.series_requests}
-        totalAccessor={(b) => b.requests}
+        peak={data.peak_requests}
       />
       <ActivityBarChart
         title="Tokens"
@@ -122,7 +118,7 @@ function ActivityCharts({ data }: { data: ActivityResponse }) {
         labels={labels}
         palette={palette}
         accessor={(b) => b.series_tokens}
-        totalAccessor={(b) => b.tokens}
+        peak={data.peak_tokens}
       />
     </>
   );
@@ -135,7 +131,7 @@ interface ActivityBarChartProps {
   labels: string[];
   palette: string[];
   accessor: (b: ActivityBucket) => Record<string, number>;
-  totalAccessor: (b: ActivityBucket) => number;
+  peak: number | null;
 }
 
 function ActivityBarChart({
@@ -145,11 +141,8 @@ function ActivityBarChart({
   labels,
   palette,
   accessor,
-  totalAccessor,
+  peak,
 }: ActivityBarChartProps) {
-  const totals = buckets.map(totalAccessor);
-  const max = totals.reduce((m, v) => (v > m ? v : m), 0);
-  const hasData = max > 0;
   const w = 600;
   const h = 90;
   const padX = 4;
@@ -167,7 +160,7 @@ function ActivityBarChart({
         <span className="activity-chart-total">{valueLabel}</span>
       </header>
       <div className="activity-chart-body">
-        {hasData ? (
+        {peak !== null ? (
           <svg
             className="activity-chart-svg"
             viewBox={`0 0 ${w} ${h}`}
@@ -180,9 +173,9 @@ function ActivityBarChart({
               return (
                 <g key={i} transform={`translate(${padX + i * slotW + barGap / 2}, 0)`}>
                   {labels.map((label, li) => {
-                    const v = series[label] ?? 0;
-                    if (v <= 0) return null;
-                    const segH = (v / max) * innerH;
+                    const v = series[label];
+                    if (v === undefined || v <= 0) return null;
+                    const segH = (v / peak) * innerH;
                     const y = padY + (innerH - yOffset - segH);
                     yOffset += segH;
                     return (

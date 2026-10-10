@@ -1,6 +1,5 @@
 "use client";
-// Which install you are looking at, painted into the browser tab. Read off the hostname at mount,
-// never baked at build: local and deployed serve the SAME static export.
+// Read off the hostname at mount, never baked at build: local and deployed serve the SAME static export.
 
 import { useEffect } from "react";
 

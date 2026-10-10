@@ -3,8 +3,7 @@
 import type { DraftCampaignWire } from "@/lib/api";
 import { Toolbar, ToolbarSpacer } from "@/components/ui";
 
-// The draft's sample rows, keyed by RAW upload headers — a check-in has no `datasets/{slug}/`
-// until Start, so `/cells` cannot answer. Read-only: `ColumnMappingPicker` owns the mapping.
+// A check-in has no `datasets/{slug}/` until Start, so `/cells` cannot answer.
 export function DatasetPreview({ draft }: { draft: DraftCampaignWire }) {
   const { sample_preview: rows, headers } = draft;
   if (rows.length === 0 || headers.length === 0) return null;
@@ -43,8 +42,7 @@ export function DatasetPreview({ draft }: { draft: DraftCampaignWire }) {
               <tr key={i}>
                 {headers.map((h) => {
                   const role = roleOf(h);
-                  // NOT `?? ""`: a ragged row lacks trailing keys, and a missing cell must not
-                  // read as an empty value.
+                  // NOT `?? ""`: a ragged row lacks trailing keys, and a missing cell is not an empty value.
                   const v = row[h];
                   return (
                     <td

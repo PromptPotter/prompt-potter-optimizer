@@ -3,8 +3,6 @@ import type { ReactNode } from "react";
 import { HoverCard } from "./HoverCard";
 import s from "./Term.module.css";
 
-// Teaching prose on a term — the ONE mechanism, never `title=`
-// (`webapp/components/CLAUDE.md` § Component conventions).
 export function Term({
   children,
   content,

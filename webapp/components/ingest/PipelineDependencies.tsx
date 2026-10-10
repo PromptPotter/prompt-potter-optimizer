@@ -1,11 +1,10 @@
 "use client";
 
 import { useRef, useState } from "react";
-import type { PipelineDependencyWire } from "@/lib/api";
+import type { DraftDependency } from "@/lib/api";
 import { cx } from "@/lib/cx";
 
-// The pipeline's server-derived required inputs (a `candidate_source` node needs a target
-// library). Soft: the answers already in the data are a runnable pool, so it never gates Start.
+// Soft: the answers already in the data are a runnable pool, so it never gates Start.
 export function PipelineDependencies({
   dependencies,
   librarySize,
@@ -15,7 +14,7 @@ export function PipelineDependencies({
   onBuildFromColumn,
   busy,
 }: {
-  dependencies: PipelineDependencyWire[];
+  dependencies: DraftDependency[];
   librarySize: number;
   headers: string[];
   targetColumn: string;
@@ -51,7 +50,7 @@ function DependencyRow({
   onBuildFromColumn,
   busy,
 }: {
-  dep: PipelineDependencyWire;
+  dep: DraftDependency;
   librarySize: number;
   headers: string[];
   targetColumn: string;

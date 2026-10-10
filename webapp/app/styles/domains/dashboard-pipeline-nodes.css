@@ -1,0 +1,21 @@
+/* Loads after `chat.css`: it restates `.wf-hero-node.llm`, and a same-specificity rule wins on barrel order. */
+
+.pipeline-stack-note {
+  font-size:var(--text-xs);
+  color: var(--color-text-secondary);
+  text-align: center;
+  margin: var(--space-8) 0 0;
+}
+
+.wf-hero-node.llm {
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.wf-hero-node.llm:hover { border-color: var(--color-accent); }
+.wf-hero-node.llm:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--color-accent-glow); }
+.wf-hero-node.llm.selected {
+  border-color: var(--color-accent);
+  box-shadow: inset 0 0 0 1px var(--color-accent), 0 0 16px var(--color-accent-glow);
+}

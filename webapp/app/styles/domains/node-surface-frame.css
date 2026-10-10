@@ -1,6 +1,3 @@
-/* The node as one read-only `NodeSurface`; this file adds only what the dashboard context
-   needs on top of that shared chrome. */
-
 .bnode {
   position: relative;
   max-width: 560px;
@@ -9,10 +6,8 @@
   flex-direction: column;
   gap: var(--space-8);
 }
-/* Width is the content's, not the tab's: a RUN trace is two payload columns a 560px form crushes. */
 .bnode-wide { max-width: none; }
 
-/* Selects WHICH spec the box shows; it is not part of the spec. */
 .observe-toggle {
   max-width: 560px;
   margin: var(--space-14) auto 0;
@@ -45,14 +40,6 @@
   color: var(--color-text-secondary);
 }
 
-/* A level that failed says so where it sits, never in a footer. */
-.pipeline-stack-note {
-  font-size:var(--text-xs);
-  color: var(--color-text-secondary);
-  text-align: center;
-  margin: var(--space-8) 0 0;
-}
-
 .setup-preview-side { display: inline-flex; align-items: center; gap: var(--space-8); }
 .bnode-close {
   background: none;
@@ -66,16 +53,3 @@
 }
 .bnode-close:hover { color: var(--color-accent); background: var(--color-background-primary); }
 .bnode-close:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
-
-.wf-hero-node.llm {
-  cursor: pointer;
-  font: inherit;
-  color: inherit;
-  transition: border-color 0.15s, box-shadow 0.15s;
-}
-.wf-hero-node.llm:hover { border-color: var(--color-accent); }
-.wf-hero-node.llm:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--color-accent-glow); }
-.wf-hero-node.llm.selected {
-  border-color: var(--color-accent);
-  box-shadow: inset 0 0 0 1px var(--color-accent), 0 0 16px var(--color-accent-glow);
-}

@@ -1,6 +1,5 @@
 "use client";
-// Swaps a surface that cannot fit a portrait phone for a "rotate" card; the swap CSS lives in
-// foundation/responsive.css, and the children also UNMOUNT to skip their costly layout pass.
+// The swap CSS lives in foundation/responsive.css; children also UNMOUNT to skip their layout pass.
 
 import { type ReactNode } from "react";
 import { useIsPortraitPhone } from "@/lib/hooks/useMediaQuery";

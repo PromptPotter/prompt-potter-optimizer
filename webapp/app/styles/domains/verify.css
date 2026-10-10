@@ -1,4 +1,3 @@
-/* The verify button and the reading it produced (`shell/searchpoint/VerifyAction.tsx`). */
 .verify-action{display:flex;flex-direction:column;align-items:flex-start;gap:var(--space-8)}
 .verify-action-row{display:flex;align-items:center;gap:var(--space-6)}
 .verify-samples{display:flex;align-items:center;gap:var(--space-8);padding:var(--space-4) var(--space-10);font-size:var(--text-sm);color:var(--color-text-secondary)}

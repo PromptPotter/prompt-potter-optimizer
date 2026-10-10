@@ -36,7 +36,6 @@ export function AccountEmpty({ title, children }: { title: string; children: Rea
   );
 }
 
-// Never a transport string (`frontend-surface-contract.md::I2`).
 const FAILURE_SENTENCE: Record<FailureKind, string> = {
   transient: "The server did not answer. It retries when you reopen this pane.",
   auth: "Your session has ended. Sign in again to see this.",

@@ -1,9 +1,6 @@
-// @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { pressable } from "../pressable";
-
-afterEach(cleanup);
 
 describe("pressable", () => {
   it("activates on click, Enter and Space only, and swallows Space's page scroll", () => {

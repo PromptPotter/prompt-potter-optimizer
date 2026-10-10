@@ -72,7 +72,6 @@
   border-bottom-color: var(--color-border);
 }
 
-/* The underline takes the chip's own `ink`, so a group of chips IS the legend for what it draws. */
 .joined .on {
   background: var(--color-background-tint-active);
   color: var(--color-accent);

@@ -1,14 +1,11 @@
 "use client";
-// The mark for who TRAINED a model, keyed by the served `VendorModels.vendor`. Never fetch a logo at
-// runtime: OpenRouter's icon path answers a miss with HTTP 200 HTML, breaking silently.
+// Never fetch a logo at runtime: OpenRouter's icon path answers a miss with HTTP 200 HTML.
 import type { CSSProperties } from "react";
 import { cx } from "@/lib/cx";
 import { seriesVar } from "@/lib/theme";
 import { VENDOR_MARKS } from "./vendor-marks.generated";
 import s from "./VendorLogo.module.css";
 
-// `<use href>` resolves within the DOCUMENT: unmount `VendorSprite` (in `AppShell`) and every mark
-// draws nothing.
 const SYMBOL = (vendor: string) => `pp-vendor-${vendor}`;
 
 export function VendorSprite() {
@@ -38,7 +35,6 @@ function fallbackTint(vendor: string): string {
   return seriesVar(Math.abs(hash));
 }
 
-// `models` are the ids this mark STANDS IN FOR: the sidebar row shows it instead of the model text.
 export function VendorLogo({
   vendor,
   models,

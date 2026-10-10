@@ -4,7 +4,6 @@ import { AuthProvider } from "@/lib/auth-context";
 import { SurfaceFavicon } from "@/components/brand/SurfaceFavicon";
 import { BRAND, softwareApplicationLd } from "@/lib/brand";
 
-// Link-unfurl copy, mirroring promptpotter-web's split: a descriptive card title, not the tab title.
 const CARD_TITLE = "PromptPotter — automatic prompt optimizer for better AI answers";
 const CARD_DESC =
   "Give PromptPotter the prompt you used on your AI provider. It critiques and " +
@@ -15,7 +14,6 @@ export const metadata: Metadata = {
   title: "optimize, potter, learn",
   description: BRAND.description,
   applicationName: BRAND.shortName,
-  // publisher = the distributing brand; provider authored the software.
   publisher: BRAND.publisher.name,
   authors: [{ name: BRAND.provider.name, url: BRAND.provider.url }],
   creator: BRAND.provider.name,
@@ -43,7 +41,6 @@ export const viewport: Viewport = {
   ],
 };
 
-// Pre-paint, so the stored theme lands before the first frame.
 const themeInit = `(function(){var s=null;try{s=localStorage.getItem('promptpotter.theme');}catch(_){}var t=s||'light';if(t==='light')document.documentElement.setAttribute('data-theme','light');})();`;
 
 export default function RootLayout({
@@ -53,8 +50,7 @@ export default function RootLayout({
     // `themeInit` stamps `data-theme` before hydration, so the attribute is the client's alone.
     <html lang="en" suppressHydrationWarning>
       <head>
-        {/* Not `metadata.icons`: that is re-emitted at hydration, after `SurfaceFavicon`
-            repaints, and takes the tab back. */}
+        {/* Not `metadata.icons`: that is re-emitted at hydration and takes the tab back from `SurfaceFavicon`. */}
         <link rel="icon" type="image/png" media="(prefers-color-scheme: light)" href="/brand/tab-icon-pot-32.png" />
         <link rel="icon" type="image/png" media="(prefers-color-scheme: dark)" href="/brand/tab-icon-pot-32-dark.png" />
         <script dangerouslySetInnerHTML={{ __html: themeInit }} />

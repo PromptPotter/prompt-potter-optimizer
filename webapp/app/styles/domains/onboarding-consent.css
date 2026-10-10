@@ -1,0 +1,7 @@
+/* Reuses .account-modal chrome, so it loads after `account.css`. */
+.consent-modal{flex-direction:column;max-width:440px;min-height:0}
+.consent-modal .account-pane-body{gap:var(--space-16)}
+.consent-check{display:flex;gap:var(--space-10);align-items:flex-start;font-size:var(--text-base);line-height:1.5;color:var(--color-text-secondary);cursor:pointer}
+.consent-check input{margin-top:3px;flex:0 0 auto;cursor:pointer}
+.consent-actions .login-button{cursor:pointer}
+.consent-actions .login-button:disabled{opacity:.5;cursor:not-allowed}

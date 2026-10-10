@@ -9,8 +9,7 @@
 .login-button:hover{background:var(--color-background-hover)}
 .login-button .google-mark{flex-shrink:0}
 
-/* Theme-independent on purpose: the buyer-facing register. Whitelabel hosts replace
-   BrandShowcase.tsx or clear NEXT_PUBLIC_MARKETING_URL. */
+/* Theme-independent on purpose: the buyer-facing register. */
 .login-showcase{
   --ls-cobalt:#090C9B;--ls-cobalt-deep:#060888;
   --ls-taupe:#C5AFA4;--ls-olive:#696047;--ls-bone:#F5F1EA;--ls-ink:#0a0a0a;--ls-success:#1a8265;
@@ -21,7 +20,6 @@
     radial-gradient(ellipse at -5% 110%, rgba(105,96,71,0.40) 0%, transparent 50%),
     linear-gradient(135deg, var(--ls-cobalt-deep) 0%, var(--ls-cobalt) 46%, #05063f 115%);
 }
-/* The brand motif: sideways, never downward. */
 .login-showcase .ls-aurora{position:absolute;inset:0;pointer-events:none;
   background:
     linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.08) 50%, transparent 100%),

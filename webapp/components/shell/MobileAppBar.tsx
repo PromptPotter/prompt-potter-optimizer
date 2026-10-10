@@ -1,27 +1,19 @@
 "use client";
 import { useAuth } from "@/lib/auth-context";
+import { useIngest } from "@/lib/ingest-flow";
+import { useRegistry } from "@/lib/registry";
 import { useWorkspace } from "@/lib/workspace";
-import { campaignDisplayName } from "@/lib/names";
 import { cx } from "@/lib/cx";
-import { WORKSPACE_LABEL } from "@/lib/view-tab";
+import { WORKSPACE_LABEL, isWorkspaceTab } from "@/lib/view-tab";
 import { CampaignMenu } from "@/components/shell/sidebar/CampaignMenu";
 import s from "./MobileAppBar.module.css";
 
-// The phone's app bar over whatever `.main` shows: one campaign, or a workspace view. The VIEW
-// axis is not here — ViewTabs owns it; the `←` dot reads the same `runningCycles` as JobsDock
-// (I6), not a second dock.
-
-interface Props {
-  listScreen: boolean;
-  // A workspace view is on screen: the bar names the workspace and carries no campaign menu.
-  workspace: boolean;
-  onBack: () => void;
-  onNewCycle: () => void;
-}
-
-export function MobileAppBar({ listScreen, workspace, onBack, onNewCycle }: Props) {
+export function MobileAppBar() {
   const { status, openAuthPrompt } = useAuth();
-  const { campaignId, campaigns, runningCycles } = useWorkspace();
+  const { campaigns, runningCycles } = useRegistry();
+  const { campaignId, tab, listScreen, showList } = useWorkspace();
+  const { openComposer } = useIngest();
+  const workspace = isWorkspaceTab(tab);
 
   if (listScreen) return null;
 
@@ -29,7 +21,7 @@ export function MobileAppBar({ listScreen, workspace, onBack, onNewCycle }: Prop
   const title = workspace
     ? WORKSPACE_LABEL
     : campaign
-      ? campaignDisplayName(campaign)
+      ? campaign.display_name
       : "PromptPotter";
   const anon = status === "unauthed";
   const running = runningCycles.length;
@@ -42,7 +34,7 @@ export function MobileAppBar({ listScreen, workspace, onBack, onNewCycle }: Prop
           type="button"
           className={cx(s.icon, running > 0 && s.dotted)}
           aria-label={running > 0 ? `Campaigns — ${running} running` : "Campaigns"}
-          onClick={onBack}
+          onClick={showList}
         >
           <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M11.5 5 6.5 10l5 5" />
@@ -66,7 +58,7 @@ export function MobileAppBar({ listScreen, workspace, onBack, onNewCycle }: Prop
               className={s.icon}
               aria-label="New campaign"
               title="New campaign"
-              onClick={onNewCycle}
+              onClick={openComposer}
             >
               <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d="M3 5.5A1.5 1.5 0 0 1 4.5 4h7A1.5 1.5 0 0 1 13 5.5v4A1.5 1.5 0 0 1 11.5 11H6l-3 2.5z" />

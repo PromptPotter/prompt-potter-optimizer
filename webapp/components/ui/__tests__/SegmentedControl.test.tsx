@@ -1,9 +1,6 @@
-// @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { SegmentedControl, type Segment } from "../SegmentedControl";
-
-afterEach(cleanup);
 
 const VIEWS: readonly Segment<"sequence" | "forest">[] = [
   { value: "sequence", label: "Sequence" },

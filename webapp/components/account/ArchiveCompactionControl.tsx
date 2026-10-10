@@ -22,7 +22,6 @@ const BLURB: Record<Mode, string> = {
     "Deletes the compressed copy for good. The rows cost real money and hours to measure again, and nothing puts them back.",
 };
 
-// Two slots because `revalidate` is per-slot: a dry run reaches nothing a poll reads.
 const describeFailure =
   (apply: boolean) =>
   (f: CommandFailure): string =>
@@ -32,12 +31,11 @@ const describeFailure =
         ? "The archive did not finish. Some runs may already have been rewritten — preview again to see what stands."
         : "Could not reach the archive. Nothing was changed.";
 
-// Archive maintenance, PREVIEW FIRST: `apply` is unreachable until a dry run has returned, so
-// consent is to a byte count seen rather than to a verb.
 export function ArchiveCompactionControl() {
   const [mode, setMode] = useState<Mode>("compact");
   const [preview, setPreview] = useState<ArchiveReport | null>(null);
   const [done, setDone] = useState<ArchiveReport | null>(null);
+  // Two slots because `revalidate` is per-slot: a dry run reaches nothing a poll reads.
   const dry = useCommand<Mode>("archive-preview", {
     revalidate: false,
     describe: describeFailure(false),
@@ -91,7 +89,7 @@ export function ArchiveCompactionControl() {
         <Button
           variant={mode === "purge-cold" ? "danger" : "primary"}
           onClick={() => void run(true)}
-          disabled={busy || preview === null || blocked || preview.runs_touched === 0}
+          disabled={busy || preview === null || blocked || preview.files_touched === 0}
         >
           {mode === "purge-cold" ? "Delete permanently" : "Apply"}
         </Button>
@@ -99,12 +97,12 @@ export function ArchiveCompactionControl() {
 
       {error && <p className="account-error">{error}</p>}
 
-      {blocked && (
-        <p className="account-error">
-          A campaign is still running, so nothing was read or written — the archive is shared and a
-          rewrite could lose a row it is landing. Pause it and try again.
-        </p>
-      )}
+      {report !== null &&
+        report.notes.map((note) => (
+          <p key={note} className={blocked ? "account-error" : "account-muted"}>
+            {note}
+          </p>
+        ))}
 
       {report && !blocked && (
         <dl className="wsmaint-report">
@@ -122,37 +120,17 @@ export function ArchiveCompactionControl() {
             <dd>{fmtBytes(Math.abs(report.bytes_freed))}</dd>
           </div>
           <div>
-            <dt>Runs</dt>
-            <dd>
-              {report.runs_touched} touched, {report.runs_skipped} left alone
-            </dd>
+            <dt>Files</dt>
+            <dd>{report.files_touched} touched</dd>
           </div>
           <div>
-            <dt>Rows</dt>
+            <dt>Answers</dt>
             <dd>{report.rows_moved}</dd>
           </div>
-          {report.conflicts > 0 && (
-            <div>
-              <dt>Refused</dt>
-              <dd>
-                {report.conflicts} run(s) — the stored copy no longer lines up, so nothing was put
-                back rather than half of it.
-              </dd>
-            </div>
-          )}
-          {mode === "restore" && report.purged > 0 && (
-            <div>
-              <dt>Already dropped</dt>
-              <dd>
-                {report.purged} run(s) were purged on purpose — nothing to put back. They still
-                measure difficulty and still serve a cache hit.
-              </dd>
-            </div>
-          )}
         </dl>
       )}
 
-      {report && !blocked && report.runs_touched === 0 && (
+      {report && !blocked && report.files_touched === 0 && (
         <p className="account-muted">Nothing to do.</p>
       )}
     </div>

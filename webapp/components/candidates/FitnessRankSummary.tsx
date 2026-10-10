@@ -1,21 +1,21 @@
-import type { CandidateView } from "@/lib/types";
+import type { ArmNode, LensShift } from "@/lib/api";
+import type { CandidateBar } from "@/lib/types";
 import { fmtNum } from "@/lib/format";
 
-function ranks(lines: { key: string; r: number | null }[]): Map<string, number> {
-  return new Map(lines.filter((l) => l.r != null).map((l) => [l.key, l.r as number]));
-}
-
-// Top bar by composite — NOT the round winner, which is θ-elected (`isWinner`).
-function topByFitness(rank: Map<string, number>): string | null {
-  for (const [key, r] of rank) if (r === 1) return key;
-  return null;
-}
+const MOVE_MARK: Record<NonNullable<ArmNode["lens_rank_move"]>, { glyph: string; cls: string }> = {
+  up: { glyph: "▲", cls: "rank-up" },
+  down: { glyph: "▼", cls: "rank-down" },
+  unchanged: { glyph: "·", cls: "rank-flat" },
+};
 
 export function FitnessRankSummary({
   views,
+  shift,
   criterion,
 }: {
-  views: CandidateView[];
+  views: CandidateBar[];
+  // served: `CourseNode.lens_shift` — the top by composite, not the θ-elected round winner.
+  shift: LensShift | null;
   // `lensOf(mask) != null`, not "are tiles ticked": Expression mode builds a criterion with no tiles.
   criterion: boolean;
 }) {
@@ -33,51 +33,29 @@ export function FitnessRankSummary({
       </span>
     );
   }
-  const lines = views.map((b) => ({
-    key: b.key,
-    label: b.label,
-    actual: b.composite ?? null,
-    masked: b.lensValue,
-    actualRank: b.compositeRank,
-    maskedRank: b.lensRank,
-  }));
-  const rankActual = ranks(lines.map((l) => ({ key: l.key, r: l.actualRank })));
-  const rankMasked = ranks(lines.map((l) => ({ key: l.key, r: l.maskedRank })));
-  const wA = topByFitness(rankActual);
-  const wW = topByFitness(rankMasked);
-  const topLabel = (k: string | null) =>
-    k == null ? "—" : (lines.find((l) => l.key === k)?.label ?? "—");
-  let movedUp = 0, movedDown = 0, flat = 0;
-  for (const l of lines) {
-    const rA = rankActual.get(l.key);
-    const rW = rankMasked.get(l.key);
-    if (rA == null || rW == null) continue;
-    if (rA > rW) movedUp += 1;
-    else if (rA < rW) movedDown += 1;
-    else flat += 1;
-  }
-  const topSwap = wA != null && wW != null && wA !== wW;
   return (
     <>
-      <div>
-        {topSwap
-          ? <span className="rank-up">top fitness flips {topLabel(wA)} → {topLabel(wW)}</span>
-          : <span className="rank-flat">top fitness unchanged ({topLabel(wA)})</span>}
-      </div>
-      <div>
-        <span className="rank-up">▲ {movedUp}</span> moved up · <span className="rank-down">▼ {movedDown}</span> moved down · <span className="rank-flat">· {flat}</span> unchanged
-      </div>
+      {shift && (
+        <>
+          <div>
+            {shift.top_changed
+              ? <span className="rank-up">top fitness flips {shift.top_composite ?? "—"} → {shift.top_lens ?? "—"}</span>
+              : <span className="rank-flat">top fitness unchanged ({shift.top_composite ?? "—"})</span>}
+          </div>
+          <div>
+            <span className="rank-up">▲ {shift.moved_up}</span> moved up · <span className="rank-down">▼ {shift.moved_down}</span> moved down · <span className="rank-flat">· {shift.unchanged}</span> unchanged
+          </div>
+        </>
+      )}
       <div style={{ marginTop: 6 }}>
-        candidates: {lines.map((l, i) => {
-          const rA = rankActual.get(l.key);
-          const rW = rankMasked.get(l.key);
-          const arrow = rA != null && rW != null
-            ? (rA > rW ? <span className="rank-up">▲</span> : rA < rW ? <span className="rank-down">▼</span> : <span className="rank-flat">·</span>)
-            : <span className="rank-flat">—</span>;
+        candidates: {views.map((b, i) => {
+          const move = b.arm?.lens_rank_move;
+          const mark = move ? MOVE_MARK[move] : { glyph: "—", cls: "rank-flat" };
           return (
-            <span key={l.key}>
+            <span key={b.key}>
               {i > 0 && " · "}
-              {l.label} {fmtNum(l.actual, 3)}→{fmtNum(l.masked, 3)} {arrow}
+              {b.label} {fmtNum(b.reading?.own?.composite?.value ?? null, 3)}→{fmtNum(b.arm?.lens_value ?? null, 3)}{" "}
+              <span className={mark.cls}>{mark.glyph}</span>
             </span>
           );
         })}

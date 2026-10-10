@@ -2,7 +2,6 @@ import { BRAND } from "@/lib/brand";
 import { AuthCore } from "@/components/login/AuthCore";
 import { BrandShowcase } from "@/components/login/BrandShowcase";
 
-// `AuthCore` is the one sign-in surface; `WelcomeLockoutModal` wraps the same component.
 export default function LoginPage() {
   return (
     <div className="login-split">

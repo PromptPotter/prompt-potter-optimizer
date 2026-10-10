@@ -4,9 +4,7 @@ import { SegmentedControl } from "@/components/ui";
 import { promptFieldLabel } from "@/lib/prompt-fields";
 import { fmtValue } from "@/lib/format";
 
-// What `l1_generate` produced this round, one candidate at a time. The shape is the LLM's output
-// as the audit twin banked it, not a served model, so every field is read defensively.
-
+// The LLM's output as the audit twin banked it, not a served model: read defensively.
 interface Variant {
   evidence_grounding?: { field?: string; citation?: string } | null;
   targets_cluster?: string | null;
@@ -15,7 +13,6 @@ interface Variant {
   changes_description?: string | null;
 }
 
-// Null (not an `l1_generate` block) and `[]` are different answers; the caller renders them apart.
 export function variantsOf(response: unknown): Variant[] | null {
   if (!response || typeof response !== "object") return null;
   const v = (response as Record<string, unknown>).variants;
@@ -47,7 +44,7 @@ function Overrides({ title, map }: { title: string; map: Record<string, unknown>
 }
 
 export function L1Variants({ variants }: { variants: Variant[] }) {
-  // Index is the key: a variant's POSITION is what its candidate label (`C{round}.{idx}`) is minted from.
+  // Index is the key: a variant's POSITION mints its candidate label (`C{round}.{idx}`).
   const [pick, setPick] = useState("0");
   const idx = Number(pick);
   const shown = variants[idx] ?? variants[0];

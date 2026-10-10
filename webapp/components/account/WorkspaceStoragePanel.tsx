@@ -1,16 +1,13 @@
 "use client";
 import { useRead } from "@/lib/hooks/useRead";
-import { fetchWorkspaceStorage } from "@/lib/api";
+import { workspaceStorageRead } from "@/lib/api";
 import { fmtBytes } from "@/lib/format";
 import { cx } from "@/lib/cx";
 import { AccountEmpty, AccountFailure, AccountLoading, AccountSection } from "./AccountSection";
 import { ArchiveCompactionControl } from "./ArchiveCompactionControl";
 
 export function WorkspaceStoragePanel() {
-  const read = useRead(
-    { key: "workspace-storage", conditional: fetchWorkspaceStorage },
-    { surface: "workspace-storage" },
-  );
+  const read = useRead(workspaceStorageRead());
 
   if (read.status === "failed") {
     return <AccountFailure kind={read.failure.kind} subject="workspace storage" />;

@@ -4,7 +4,6 @@ import { useState } from "react";
 import type { DraftCampaignWire, DraftPatch, OriginQuestion } from "@/lib/api";
 import { questionOptions, questionPatch } from "@/lib/origin-readiness";
 
-// One resolver question and its answer control; the server flips the answered field CONFIRMED.
 export function QuestionAnswer({
   question,
   draft,

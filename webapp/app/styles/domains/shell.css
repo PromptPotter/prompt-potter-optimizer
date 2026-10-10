@@ -1,13 +1,7 @@
-/* The sidebar is the campaign FOREST; `components/shell/ViewTabs` is the view axis, a ROW of
-   `.main` at every width — the ≤bp-md block at the foot of this file orders it last, as the
-   bottom tab bar. */
 .shell{--sidebar-width:200px;--nav-dock-h:0px;--remote-dock-h:0px;position:relative;display:flex;height:var(--vh-full);min-height:700px}
-/* A spacer ITEM, not padding: Chrome omits a flex container's end padding from scrollable
-   overflow, and the chat pane is one. Only what FLOATS over the pane reserves here; the nav is a
-   row of its own and takes its height in flow. */
+/* A spacer ITEM, not padding: Chrome omits a flex container's end padding from scrollable overflow. */
 .content::after{content:"";display:block;flex:0 0 auto;height:calc(var(--remote-dock-h) + var(--safe-bottom))}
 .main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
-/* Scrolls rather than compressing: a squeezed strip silently loses its last nav. */
 .view-tabs,.view-subnav{display:flex;flex:0 0 auto;padding:var(--space-6) var(--space-18);border-bottom:0.5px solid var(--color-border);overflow-x:auto;scrollbar-width:thin}
 .view-subnav{background:var(--color-background-secondary)}
 .workspace-header{display:flex;flex:0 0 auto;flex-wrap:wrap;align-items:center;gap:var(--space-8) var(--space-12);padding:var(--space-10) var(--space-18);border-bottom:0.5px solid var(--color-border)}
@@ -17,7 +11,6 @@
 .skip-link:focus{top:8px}
 .shell.sidebar-collapsed{--sidebar-width:36px}
 .sidebar{width:var(--sidebar-width);flex-shrink:0;background:var(--color-background-primary);border-right:0.5px solid var(--color-border);display:flex;flex-direction:column;padding:var(--space-16) 0;overflow:hidden}
-/* Overlaid so it consumes no flex column and never shifts layout. */
 .sidebar-resizer{position:absolute;top:0;bottom:0;left:var(--sidebar-width);width:9px;transform:translateX(-4px);z-index:6;cursor:col-resize;touch-action:none;background:transparent}
 .sidebar-resizer::after{content:"";position:absolute;top:0;bottom:0;left:4px;width:1px;background:transparent;transition:background 120ms ease}
 .sidebar-resizer:hover::after,.sidebar-resizer:focus-visible::after{background:var(--color-accent)}
@@ -32,7 +25,6 @@
 .shell.sidebar-collapsed .sidebar > .sidebar-footer{display:none}
 .brand{padding:var(--space-8) var(--space-16) var(--space-18);border-bottom:0.5px solid var(--color-border);margin-bottom:8px}
 .brand-lockup{display:flex;align-items:center;gap:var(--space-8);margin-bottom:2px}
-/* The mark inside tints with `currentColor`, so the tile sets the ink it sits on. */
 .brand-mark{width:22px;height:22px;background:var(--color-accent);color:var(--color-text-on-accent);border-radius:4px;display:flex;align-items:center;justify-content:center}
 .brand-name{font-size:var(--text-xl);font-weight:500}
 .brand-sub{font-size:var(--text-xs);letter-spacing:.1em;color:var(--color-text-secondary)}
@@ -40,12 +32,9 @@
 .sidebar-footer-chrome{display:flex;align-items:center;gap:var(--space-6);margin-bottom:var(--space-8)}
 .sidebar-footer-chrome .account-trigger{margin-left:auto}
 .sidebar-footer-auth{display:flex;flex-wrap:wrap;gap:var(--space-6);margin-bottom:var(--space-8)}
-/* Inert placeholder; the refusal that keeps it lives in `components/shell/Sidebar.tsx`'s header. */
 .sidebar-search{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;background:transparent;border:0;border-radius:var(--border-radius-md);color:var(--color-text-secondary);cursor:pointer;font-family:inherit;flex-shrink:0;padding:0}
 .sidebar-search:hover:not(:disabled){background:var(--color-background-hover);color:var(--color-text-primary)}
 .sidebar-search:disabled{cursor:default}
-/* Theme switch. Takes no `margin-left:auto` — in this footer row it would shove
-   everything after it off the end. */
 .theme-toggle{background:var(--color-background-secondary);color:var(--color-text-secondary);border:0.5px solid var(--color-border);border-radius:var(--border-radius-md);width:34px;height:28px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;transition:background .15s,color .15s,border-color .15s;flex-shrink:0}
 .theme-toggle:hover{background:var(--color-background-hover);color:var(--color-accent);border-color:var(--color-accent)}
 .theme-toggle .sun{display:block}
@@ -63,7 +52,6 @@
 .sidebar-view:hover{background:var(--color-background-hover);color:var(--color-text-primary)}
 .sidebar-view[aria-current="page"]{color:var(--color-accent);border-color:var(--color-accent);font-weight:600}
 .unit-library{margin-top:14px;padding:0 var(--space-8) 0 3px;border-top:0.5px solid var(--color-border);padding-top:10px;display:flex;flex-direction:column;min-height:0;flex:1}
-/* The header keeps its inset so only the TREE moves left. */
 .unit-library-head{display:flex;align-items:center;justify-content:space-between;padding:0 var(--space-8) var(--space-6) var(--space-12);font-size:var(--text-xs);text-transform:uppercase;letter-spacing:0.06em;color:var(--color-text-secondary)}
 .unit-library-filter-btn{position:relative;display:inline-flex;align-items:center;justify-content:center;padding:2px var(--space-4);background:transparent;border:0;border-radius:4px;color:var(--color-text-secondary);cursor:pointer}
 .unit-library-filter-btn:hover{color:var(--color-text-primary);background:var(--color-background-hover)}
@@ -85,14 +73,12 @@
 .unit-library-empty{padding:var(--space-12) var(--space-10);display:flex;flex-direction:column;gap:var(--space-6)}
 .unit-library-empty .empty-headline{font-size:var(--text-base);font-weight:500;color:var(--color-text-secondary)}
 .unit-library-empty .empty-body{font-size:var(--text-sm);color:var(--color-text-secondary)}
-/* Deleted is hidden from the UI; recover one through the file tree by campaign id. */
 .sidebar-filter-lifecycle{display:flex;margin-bottom:var(--space-6)}
 .sidebar-filter-lifecycle > *{flex:1}
 .campaign-menu-trigger{background:transparent;border:0;color:var(--color-text-secondary);font-size:var(--text-md);line-height:1;padding:2px var(--space-6);cursor:pointer;border-radius:4px}
 .campaign-menu-trigger:hover{color:var(--color-text-primary);background:var(--color-background-hover)}
 .campaign-menu-trigger[aria-expanded="true"]{color:var(--color-accent);background:var(--color-background-tint-active)}
 .campaign-menu-trigger:disabled{cursor:default;opacity:.5}
-/* The destructive row's ink. On the LABEL, so the menu row's own hover still lights the row. */
 .campaign-menu-danger{color:var(--color-danger)}
 .campaign-menu-err{margin-left:4px;color:var(--color-danger);font-weight:700;font-size:var(--text-xs)}
 .campaign-rename-id{margin:var(--space-8) 0 0;font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-secondary);word-break:break-all}
@@ -103,14 +89,11 @@
 .unit-library-list{list-style:none;margin:0;padding:0;overflow-y:auto;flex:1}
 .unit-library-item{display:flex;align-items:flex-start;gap:var(--space-6);padding:var(--space-6) var(--space-8);background:transparent;border:0;border-radius:6px;cursor:pointer;width:100%;text-align:left;font-family:inherit;color:var(--color-text-secondary);font-size:var(--text-base)}
 .unit-library-item:hover{background:var(--color-background-hover);color:var(--color-text-primary)}
-/* Name and meta share ONE line and fold only when they cannot: a 60% basis grows into the
-   slack, and `flex-wrap` drops the meta at the width where the two would collide. */
 .unit-library-row{display:flex;flex-wrap:wrap;align-items:baseline;column-gap:var(--space-6);row-gap:1px;min-width:0;flex:1}
 .unit-library-name{flex:1 1 60%;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .unit-library-meta{flex:0 1 auto;font-size:var(--text-xs);color:var(--color-text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .unit-library-live{color:var(--color-success);margin-left:4px;font-size:var(--text-xs);vertical-align:middle}
 .unit-library-status{text-transform:uppercase;letter-spacing:.04em;color:var(--color-text-secondary)}
-/* The word is the aria-label and the hover card's headline: cut to "PAU…" it reads as nothing. */
 .unit-library-meta-marked{display:inline-flex;align-items:baseline;gap:var(--space-6)}
 .unit-library-mark{display:inline-block;min-inline-size:1em;text-align:center;font-size:var(--text-xs);line-height:1}
 .unit-library-mark.tone-live{color:var(--color-success)}
@@ -119,51 +102,37 @@
 .unit-library-mark.tone-success{color:var(--color-success)}
 .unit-library-mark.tone-warn{color:var(--color-warn)}
 .unit-library-mark.tone-danger{color:var(--color-danger)}
-/* A campaign's served dollars, never truncated. */
 .unit-library-spend{flex:0 0 auto;font-family:var(--font-mono);font-variant-numeric:tabular-nums;color:var(--color-text-secondary)}
-/* `flex:1 1 100%` breaks the wrapping row before it, so it takes a line of its own. */
-/* Two lines of clamp: at the resting 200px sidebar the id alone fills the first. */
 .unit-library-sub{flex:1 1 100%;min-width:0;font-size:var(--text-xs);color:var(--color-text-secondary);font-family:var(--font-mono);overflow:hidden;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2}
 .unit-library-name-split{display:flex;align-items:baseline}
-/* `font-size` HERE, so `min-inline-size` resolves in the mark's own scale and a one-vendor row
-   reserves exactly one mark — that is what lines the column up. */
+/* `font-size` HERE, so `min-inline-size` resolves in the mark's own scale and a one-vendor row reserves exactly one mark. */
 .unit-library-vendors{flex:0 0 auto;display:inline-flex;align-items:center;gap:2px;font-size:var(--text-xs);min-inline-size:1.2em;margin-inline-end:var(--space-6)}
 .unit-library-name-head{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-/* Under the NAME, one mark's width in; both are --text-xs, so the two ems match. */
 .unit-library-sub-indent{padding-inline-start:calc(1.2em + var(--space-6))}
 /* Refuses the surrounding `overflow-wrap:anywhere`: an id broken mid-hash matches no directory. */
 .unit-library-id{white-space:nowrap}
 .unit-library-kind{display:inline-block;margin-left:6px;padding:0 var(--space-4);border-radius:3px;background:var(--color-background-secondary);border:0.5px solid var(--color-border);color:var(--color-text-secondary);font-size:var(--text-xs);font-weight:600;text-transform:uppercase;letter-spacing:0.04em;vertical-align:middle}
-/* `:not(.selected)` on the hover is load-bearing, or hover grey paints over the accent and the
-   row flashes deselected. SELECTED lives on the family, never the item. */
+/* `:not(.selected)` on the hover is load-bearing, or hover grey paints over the accent and the row flashes deselected. */
 .unit-library-family{display:flex;align-items:center;gap:2px;padding:0 var(--space-4);border-radius:6px}
 .unit-library-family > .unit-library-item{flex:1;min-width:0;width:auto}
 .unit-library-family:not(.selected):hover{background:var(--color-background-hover)}
 .unit-library-family > .unit-library-item:hover{background:transparent;color:var(--color-text-primary)}
 .unit-library-family.selected{background:var(--color-background-tint-active)}
-/* Archived only leaves the `active` filter, so it stays readable; RETIRED recedes alike. The dim
-   never carries either alone — the row wears a badge. */
 .unit-library-family.archived > .unit-library-item,
 .unit-library-family.retired > .unit-library-item{opacity:0.6;font-style:italic}
 .unit-library-family.archived > .unit-library-item:hover,
 .unit-library-family.retired > .unit-library-item:hover{opacity:1}
 .unit-library-twist{flex:0 0 18px;background:transparent;border:0;color:var(--color-text-secondary);cursor:pointer;font-size:var(--text-xs);padding:0;line-height:1;display:flex;align-items:center;justify-content:center;border-radius:4px}
 .unit-library-twist:hover{background:var(--color-background-hover);color:var(--color-text-primary)}
-/* The campaign library is the one place campaigns are picked, for viewing and comparing alike.
-   Quiet until hovered or ticked: every row carries one. */
 .unit-library-compare{flex:0 0 18px;background:transparent;border:0;color:var(--color-text-secondary);cursor:pointer;font-size:var(--text-xs);padding:0;line-height:1;display:flex;align-items:center;justify-content:center;border-radius:4px}
 .unit-library-compare[aria-pressed="true"]{color:var(--color-accent)}
 .unit-library-compare:hover{background:var(--color-background-hover);color:var(--color-text-primary)}
-/* The rail owns the whole indent; child rows add none — two rules each adding depth read as a
-   double indent. */
 .unit-library-children{list-style:none;margin:0;padding-left:11px}
 .unit-library-children>li{position:relative}
 .unit-library-children>li::before{content:"";position:absolute;left:-9px;top:0;bottom:0;border-left:1px solid var(--color-accent)}
 .unit-library-children>li:last-child::before{bottom:auto;height:20px}
 .unit-library-children>li::after{content:"";position:absolute;left:-9px;top:20px;width:9px;border-top:1px solid var(--color-accent)}
-/* The fixed-position shell escaping overflow is the `HoverCard` primitive; this is only the body. */
 .rowhover{display:flex;flex-direction:column;gap:var(--space-10);inline-size:min(300px,calc(100vw - var(--space-40)))}
-/* `SummaryBlock` — one block for every host; `.is-dense` is the host's density, never a second look. */
 .summary-block{display:flex;flex-direction:column;gap:var(--space-10);min-width:0}
 .summary-block-head{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--space-8)}
 .summary-block-titleline{display:flex;flex-wrap:wrap;align-items:baseline;gap:var(--space-4) var(--space-8);min-width:0}
@@ -180,7 +149,6 @@
 .summary-block.is-dense{gap:var(--space-6)}
 .summary-block.is-dense .summary-block-stats{grid-template-columns:repeat(auto-fit,minmax(64px,1fr));gap:var(--space-6) var(--space-10);padding-block:var(--space-6);border-bottom:0}
 .summary-block.is-dense .summary-block-stat-value{font-size:var(--text-sm)}
-/* `SpendBuckets`, the breakdown a spend figure opens onto — the masthead's chip, the chat's run card. */
 .spend-buckets{min-width:200px;font-size:var(--text-sm)}
 .spend-buckets table{width:100%;border-collapse:collapse}
 .spend-buckets th,.spend-buckets td{padding:0 0 var(--space-4);font-weight:inherit;text-align:right;font-variant-numeric:tabular-nums}
@@ -212,7 +180,6 @@
 .rowhover-fold[open] summary{margin-bottom:var(--space-6)}
 .rowhover-fold-total{font-family:var(--font-mono);color:var(--color-text-primary)}
 .rowhover-note{margin:var(--space-6) 0 0;font-size:var(--text-xs);color:var(--color-text-secondary)}
-/* Pinned above the footer in every sidebar state; the 36px rail keeps only the figure. */
 .account-spend{flex:0 0 auto;display:grid;grid-template-columns:1fr auto;grid-template-areas:"label cap" "value value" "bar bar";align-items:baseline;gap:2px var(--space-8);margin:var(--space-8) var(--space-8) 0;padding:var(--space-8) var(--space-10);background:var(--color-background-secondary);border:0.5px solid var(--color-border);border-radius:var(--border-radius-md)}
 .account-spend-label{grid-area:label;font-size:var(--text-xs);font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--color-text-secondary)}
 .account-spend-cap{grid-area:cap;font-size:var(--text-xs);color:var(--color-text-secondary);white-space:nowrap}
@@ -234,51 +201,41 @@
   .shell.sidebar-collapsed .account-spend-reading{justify-self:center}
   .shell.sidebar-collapsed .account-spend-value{writing-mode:vertical-rl;transform:rotate(180deg);font-size:var(--text-sm)}
 }
-/* z-index 45: its outer half sits over `.main`, where `.critical-alert` is sticky z-40; above the
-   resizer's 6, so the dock owns the ~30px of drag strip it covers. */
+/* z-index 45: above `.critical-alert`'s sticky 40 in `.main`, and the resizer's 6. */
 .jobs-dock{position:absolute;left:var(--sidebar-width);top:var(--space-16);transform:translateX(-50%);z-index:45}
 .jobs-dock-btn{position:relative;display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:var(--border-radius-md);background:var(--color-background-secondary);border:0.5px solid var(--color-border);color:var(--color-accent);cursor:pointer;transition:background .15s,color .15s,border-color .15s;flex-shrink:0;padding:0;font-family:inherit;box-shadow:0 2px 8px rgba(0,0,0,.28)}
-/* Held at the origin gate = blocked ON THE OPERATOR; the accent pairs with the phase word. */
-.jobs-dock-btn.phase-gate{border-color:var(--color-accent);box-shadow:0 0 0 1px var(--color-accent),0 2px 8px rgba(0,0,0,.28)}
+.jobs-dock-btn.tone-attention{border-color:var(--color-accent);box-shadow:0 0 0 1px var(--color-accent),0 2px 8px rgba(0,0,0,.28)}
 .jobs-dock-btn:hover{background:var(--color-background-hover);border-color:var(--color-accent)}
 .jobs-dock-count{position:absolute;top:-5px;right:-5px;min-width:15px;height:15px;padding:0 3px;display:inline-flex;align-items:center;justify-content:center;font-size:var(--text-xs);font-weight:600;line-height:1;border-radius:8px;background:var(--color-accent-strong);color:#fff;border:1.5px solid var(--color-background-primary)}
 .jobs-dock-row{display:flex;align-items:center;gap:var(--space-8);min-width:0}
 .jobs-dock-row .phase-chip{flex-shrink:0;font-size:var(--text-xs)}
 .jobs-dock-item-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-/* Shared by RemoteControl and the jobs dock, so a phase reads identically wherever it surfaces. */
 .phase-chip{display:inline-flex;align-items:center;gap:var(--space-6);font-weight:600;font-size:var(--text-sm);color:var(--color-text-primary);white-space:nowrap}
 .phase-dot{width:8px;height:8px;border-radius:50%;background:var(--color-text-secondary)}
-.phase-running .phase-dot{background:var(--color-success)}
-.phase-paused .phase-dot{background:var(--color-warn)}
-.phase-gate .phase-dot{background:var(--color-accent)}
-.phase-detached .phase-dot{background:var(--color-text-secondary)}
-/* Groups, never navigates: no cycle is addressed by it, so the label is a span. */
+.tone-live .phase-dot,.tone-success .phase-dot{background:var(--color-success)}
+.tone-attention .phase-dot{background:var(--color-accent)}
+.tone-warn .phase-dot{background:var(--color-warn)}
+.tone-danger .phase-dot{background:var(--color-danger)}
 .origin-row > .origin-label{flex:1;min-width:0;padding:2px var(--space-4);color:var(--color-text-secondary);font-size:var(--text-xs);cursor:default}
 .origin-row > .origin-label .unit-library-name{font-variant-numeric:tabular-nums}
 
-/* The candidate's label INSPECTS rather than navigates: it drives the shared candidate axis, and
-   the cycle row above owns the address. */
 .candidate-label{flex:1;min-width:0;padding:2px var(--space-4);cursor:pointer;font-variant-numeric:tabular-nums}
-.unit-library-arrow{margin:0 3px;color:var(--color-text-secondary)}
 
 .inner-library-empty{padding:2px var(--space-4) 2px var(--space-16);font-size:var(--text-xs);color:var(--color-text-secondary);font-style:italic}
 .inner-breadcrumb{display:inline-flex;align-items:center;gap:var(--space-6);margin-left:8px}
 .inner-breadcrumb-sep{color:var(--color-text-secondary)}
 .inner-breadcrumb-label{font-size:var(--text-xs);color:var(--color-text-secondary);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
-/* `display` lives here alone (its look is MobileAppBar.module.css): a CSS Module's order
-   against this barrel is not reliable. */
+/* `display` lives here alone (the look is MobileAppBar.module.css): a CSS Module's order against this barrel is not reliable. */
 .mobile-appbar{display:none}
 
-/* ≤bp-md: a COLUMN where `.main` or, under `.mobile-list`, `.sidebar` takes the viewport. A flow
-   swap, not position:fixed, so the alert banner stays mounted on both. */
+/* A flow swap, not position:fixed, so the alert banner stays mounted on both screens. */
 @media (max-width:880px){
   .mobile-appbar{display:flex;flex-direction:column}
   .shell{flex-direction:column;min-height:0}
   .shell > .main{order:1;min-height:0}
   .shell > .sidebar{order:2;width:100%;max-width:100%;flex:1;min-height:0;border-right:0;border-top:0.5px solid var(--color-border);padding-top:max(var(--space-8),var(--safe-top))}
   .shell:not(.mobile-list) > .sidebar{display:none}
-  /* MobileAppBar renders null here, so the app bar needs no exception. */
   .shell.mobile-list > .main{flex:0 0 auto}
   .shell.mobile-list > .main > :not(.critical-alert){display:none}
   .sidebar > .sidebar-toggle{display:none}
@@ -286,10 +243,8 @@
   .shell.sidebar-collapsed .sidebar > .sidebar-footer{display:block}
   .shell.sidebar-collapsed .sidebar > .sidebar-primary,
   .shell.sidebar-collapsed .sidebar > .unit-library{display:flex}
-  /* Desktop-only: on a phone the live-run signal is the dot on the app bar's back arrow. */
   .jobs-dock{display:none}
 
-  /* The bottom tab bar: the same row, ordered last. In flow, so no pane reserves room for it. */
   .view-tabs{
     order:99;padding:0 0 var(--safe-bottom);overflow:visible;
     background:var(--color-background-primary);
@@ -302,12 +257,10 @@
     min-height:var(--nav-row-h);padding:var(--space-6) var(--space-4);font-size:var(--text-xs);
   }
   .view-tabs > [role="group"] > button svg{width:22px;height:22px}
-  /* Inked, never filled: an accent block reads as a pressed button, not "you are here". */
   .view-tabs > [role="group"] > button[aria-pressed="true"]{color:var(--color-accent);font-weight:600}
   .view-subnav,.workspace-header{padding-left:var(--space-12);padding-right:var(--space-12)}
   .view-subnav > [role="group"]{display:flex;width:100%}
   .view-subnav > [role="group"] > button{flex:1 1 0;justify-content:center}
-  /* What the floating remote stands ON; zero wherever the bar is not on screen. */
   .shell{--nav-row-h:56px}
   .shell:has(> .main > .view-tabs){--nav-dock-h:var(--nav-row-h)}
   .shell.mobile-list{--nav-dock-h:0px}

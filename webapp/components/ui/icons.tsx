@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 
-// Decorative by construction: an icon-only control carries its own `aria-label`.
 export function Icon({
   size,
   viewBox = "0 0 24 24",

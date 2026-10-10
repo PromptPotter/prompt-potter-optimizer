@@ -1,7 +1,7 @@
 "use client";
 import { useMemo, useState } from "react";
-import { fetchFiles, type FileEntry } from "@/lib/api";
-import { useWorkspace } from "@/lib/workspace";
+import { filesRead, type FileEntry } from "@/lib/api";
+import { useActivePointer, useRegistry } from "@/lib/registry";
 import { readyData, useRead } from "@/lib/hooks/useRead";
 import { Empty, Loading, ErrorNote } from "@/components/ui";
 
@@ -59,14 +59,10 @@ interface Props {
 }
 
 export function FileTree({ campaignId, cycleId, selected, onSelect }: Props) {
-  // Tells a network failure apart from a genuinely empty workspace.
-  const { activeError, cyclesError } = useWorkspace();
-  const read = useRead(
-    campaignId && cycleId
-      ? { key: `${campaignId}\x1f${cycleId}`, fetch: (s) => fetchFiles(campaignId, cycleId, s) }
-      : null,
-    { surface: "files" },
-  );
+  const registryFailure = useRegistry().failure;
+  const pointerFailure = useActivePointer().failure;
+  const unreachable = registryFailure !== null || pointerFailure !== null;
+  const read = useRead(campaignId && cycleId ? filesRead(campaignId, cycleId) : null);
   const listing = readyData(read);
   const tree = useMemo(
     () => (listing ? buildTree(listing.entries) : null),
@@ -74,7 +70,7 @@ export function FileTree({ campaignId, cycleId, selected, onSelect }: Props) {
   );
 
   if (!cycleId) {
-    return activeError || cyclesError ? (
+    return unreachable ? (
       <ErrorNote>Server unreachable — retrying</ErrorNote>
     ) : (
       <Empty>No active campaign — pick one from the sidebar, or start one in a terminal.</Empty>

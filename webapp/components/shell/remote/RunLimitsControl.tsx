@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { postChangeRunLimits, type MeteredSpend } from "@/lib/api";
-import { METER_WORD } from "@/lib/derivations";
+import { CEILING_METER_LABELS } from "@/lib/api/types.generated";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { fmtUsd, fmtTokens } from "@/lib/format";
 import { parseCap } from "@/lib/run-limits";
@@ -10,30 +10,26 @@ import { Modal } from "@/components/shell/Modal";
 import { Button } from "@/components/ui";
 
 interface Props {
-  // `null` = disarmed; for rounds, the spend caps alone govern.
   currentBudgetUsd: number | null;
   currentBudgetTokens: number | null;
   currentMaxRounds: number | null;
   metered: MeteredSpend | null;
 }
 
-// Arms the run's caps (USD, tokens, rounds) via `change-run-limits`; the loop re-reads them at the
-// next round boundary. A `0` cap halts after the current round, so it is confirmed first.
 export function RunLimitsControl({
   currentBudgetUsd,
   currentBudgetTokens,
   currentMaxRounds,
   metered,
 }: Props) {
-  const { campaignId, cycleId } = useWorkspace();
+  const { viewedPath, leafCycleId } = useWorkspace();
   const [usdDraft, setUsdDraft] = useState<string>(
     currentBudgetUsd != null ? String(currentBudgetUsd) : "",
   );
   const [tokDraft, setTokDraft] = useState<string>(
     currentBudgetTokens != null ? String(currentBudgetTokens) : "",
   );
-  // This panel is never remounted on a unit switch, so re-seed here or `apply()` writes the prior
-  // cycle's cap onto the new one.
+  // Never remounted on a unit switch: unseeded, `apply()` writes the prior cycle's cap on the new.
   const [prevUsd, setPrevUsd] = useState(currentBudgetUsd);
   if (currentBudgetUsd !== prevUsd) {
     setPrevUsd(currentBudgetUsd);
@@ -52,15 +48,13 @@ export function RunLimitsControl({
     setPrevRounds(currentMaxRounds);
     setRoundsDraft(currentMaxRounds != null ? String(currentMaxRounds) : "");
   }
-  // Scoped to the cycle: a refusal from the previous unit must not sit under the new one's caps.
-  const cmd = useCommand<"change-run-limits">("run-limits", { scope: cycleId });
+  const cmd = useCommand<"change-run-limits">("run-limits", { scope: leafCycleId });
   const [confirmingHalt, setConfirmingHalt] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const pending = cmd.pending !== null;
 
-  const disabled = !campaignId || !cycleId;
+  const disabled = !viewedPath;
 
-  // Only changed caps are sent; the applier merges, so an untouched cap stays as it is on disk.
   const usd = parseCap(usdDraft);
   const tok = parseCap(tokDraft, { int: true });
   const rounds = parseCap(roundsDraft, { int: true });
@@ -71,20 +65,19 @@ export function RunLimitsControl({
   const isHalt = nextUsd === 0 || nextTok === 0 || nextRounds === 0;
 
   const apply = async () => {
-    if (!campaignId || !cycleId || !hasChange) return;
+    if (!viewedPath || !hasChange) return;
     setConfirmingHalt(false);
     setNote(null);
     // A null `maxRounds` would LIFT the cap, so an unchanged one is left out rather than sent.
     const r = await cmd.run("change-run-limits", () =>
-      postChangeRunLimits(campaignId, cycleId, {
+      postChangeRunLimits(viewedPath, {
         maxUsd: nextUsd,
         maxTokens: nextTok,
         ...(nextRounds != null ? { maxRounds: nextRounds } : {}),
       }),
     );
     if (!r.ok) return;
-    // Quotes NO number: `quota.py::clamp_budget_change` silently mins the request against the
-    // remaining allowance; the rows above show what the server armed.
+    // Quotes NO number: `quota.py::clamp_budget_change` mins the request against the allowance.
     setNote(
       isHalt
         ? "Applied — halting after this round."
@@ -93,10 +86,10 @@ export function RunLimitsControl({
   };
 
   const liftRounds = async () => {
-    if (!campaignId || !cycleId) return;
+    if (!viewedPath) return;
     setNote(null);
     const r = await cmd.run("change-run-limits", () =>
-      postChangeRunLimits(campaignId, cycleId, { maxRounds: null }),
+      postChangeRunLimits(viewedPath, { maxRounds: null }),
     );
     if (!r.ok) return;
     setNote("Applied — no round cap from the next round; the spend caps govern.");
@@ -120,7 +113,7 @@ export function RunLimitsControl({
           {metered ? (
             <span className="run-limits-control-used">
               {" "}
-              · {fmtUsd(metered.metered_usd)} {METER_WORD[metered.meter]}
+              · {fmtUsd(metered.metered_usd)} {CEILING_METER_LABELS[metered.meter]}
             </span>
           ) : null}
         </span>
@@ -210,8 +203,6 @@ export function RunLimitsControl({
           {pending ? "Setting…" : "Set caps"}
         </button>
       </div>
-      {/* Name the other ceiling rather than infer which one bound — the browser has no authority
-          to make that derivation. */}
       <small className="run-limits-control-hint">
         {isHalt
           ? "Halts the run after the current round."
@@ -224,7 +215,7 @@ export function RunLimitsControl({
       <Modal
         open={confirmingHalt}
         title="Halt this run?"
-        message={`Setting a cap to 0 stops ${cycleId ?? "this unit"} after the current round completes. Measurements so far are preserved; you can resume later by raising the cap and re-running.`}
+        message={`Setting a cap to 0 stops ${leafCycleId ?? "this unit"} after the current round completes. Measurements so far are preserved; you can resume later by raising the cap and re-running.`}
         actions={[
           { label: "Cancel", onClick: () => setConfirmingHalt(false) },
           { label: "Set 0 & halt", variant: "danger", onClick: () => void apply() },

@@ -1,9 +1,7 @@
 "use client";
-// Config map: which knob moves which estimand and which CLASH, served from the one
-// `application/knobs` registry the CLI diagnostic and preflight also read.
 
 import { useRead } from "@/lib/hooks/useRead";
-import { fetchConfigMap, type ConfigCoupling } from "@/lib/api";
+import { configMapRead, type ConfigCoupling } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace";
 import { CardFrame, Badge, type BadgeTone } from "@/components/ui";
 import { fmtValue } from "@/lib/format";
@@ -16,7 +14,7 @@ const SEVERITY_TONE: Record<ConfigCoupling["severity"], BadgeTone> = {
 
 function sourceTone(source: string): BadgeTone {
   if (source === "campaign" || source === "required") return "accent";
-  return "default"; // default | constant — muted
+  return "default";
 }
 
 function CouplingRow({ c }: { c: ConfigCoupling }) {
@@ -36,10 +34,7 @@ function CouplingRow({ c }: { c: ConfigCoupling }) {
 
 export function ConfigMapPanel() {
   const { campaignId } = useWorkspace();
-  const read = useRead(
-    campaignId ? { key: campaignId, fetch: (signal) => fetchConfigMap(campaignId, signal) } : null,
-    { surface: "config-map" },
-  );
+  const read = useRead(campaignId ? configMapRead(campaignId) : null);
 
   if (read.status === "idle") {
     return <p className="mech-empty">Select a campaign to see its config map.</p>;

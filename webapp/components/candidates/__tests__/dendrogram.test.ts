@@ -9,7 +9,6 @@ import {
   type DendroRow,
 } from "../dendrogram";
 
-// Built the way `roundCandidates` does. `winners[round]` null = a HELD round.
 function spine(
   rounds: { round: number; n: number; winner: number | null }[],
 ): DendroRow[] {
@@ -39,8 +38,7 @@ const depthRows = (ys: number[]) => new Set(ys).size;
 
 describe("dendrogram", () => {
   it("packs into exactly two depth rows while every round advances", () => {
-    // C0 → R1(2) → R2(2) → R3(2) → R4(2) → R5(2). Bracket r overlaps bracket r+1
-    // but never bracket r+2, so greedy packing alternates two rows forever.
+    // Bracket r overlaps bracket r+1 but never r+2, so greedy packing alternates two rows.
     const rows = spine([
       { round: 0, n: 1, winner: 0 },
       { round: 1, n: 2, winner: 1 },
@@ -51,17 +49,16 @@ describe("dendrogram", () => {
     ]);
     const g = dendrogram(rows, centers(rows.length));
 
-    expect(g.brackets).toHaveLength(5); // one per round that has a parent
+    expect(g.brackets).toHaveLength(5);
     expect(depthRows(g.brackets.map((b) => b.y))).toBe(2);
     expect(g.height).toBe(FIRST_ROW_Y + ROW_H + BOTTOM_PAD);
   });
 
   it("hangs a held round's successors off the EARLIER winner, and grows a third row", () => {
-    // R2 is held, so R3 fans from R1's winner; the brackets share a left edge and nest.
     const rows = spine([
       { round: 0, n: 1, winner: 0 },
       { round: 1, n: 2, winner: 0 },
-      { round: 2, n: 2, winner: null }, // held
+      { round: 2, n: 2, winner: null },
       { round: 3, n: 2, winner: 1 },
     ]);
     const g = dendrogram(rows, centers(rows.length));
@@ -72,7 +69,7 @@ describe("dendrogram", () => {
 
     expect(b3?.parentKey).toBe(rows[r1Winner]!.key);
     expect(b2?.parentKey).toBe(rows[r1Winner]!.key);
-    expect(b3?.x1f).toBe(b2?.x1f); // same parent ⇒ same left edge ⇒ they nest
+    expect(b3?.x1f).toBe(b2?.x1f);
     expect(depthRows(g.brackets.map((b) => b.y))).toBe(3);
     expect(g.height).toBe(FIRST_ROW_Y + 2 * ROW_H + BOTTOM_PAD);
   });
@@ -87,7 +84,6 @@ describe("dendrogram", () => {
     ]);
     const g = dendrogram(rows, centers(rows.length));
 
-    // R2, R3, R4 all fan from R1's winner: three nested brackets, three rows.
     const r1Winner = rows.find((r) => r.round === 1 && r.is_selected)!;
     for (const b of g.brackets.filter((x) => x.round >= 2)) {
       expect(b.parentKey).toBe(r1Winner.key);
@@ -110,7 +106,6 @@ describe("dendrogram", () => {
   });
 
   it("refuses to draw when the spine and the bar categories disagree", () => {
-    // React has N+1 rows but the chart still has N.
     const rows = spine([
       { round: 0, n: 1, winner: 0 },
       { round: 1, n: 2, winner: 0 },
@@ -136,7 +131,6 @@ describe("dendrogram", () => {
     for (const b of g.brackets) {
       expect(b.x1f).toBeLessThan(b.x2f);
       const parent = byKey.get(b.parentKey)!;
-      // Every child of this bracket sits right of its parent on the spine.
       for (const kid of g.nodes.filter((n) => n.round === b.round)) {
         expect(kid.i).toBeGreaterThan(parent.i);
       }
@@ -144,7 +138,6 @@ describe("dendrogram", () => {
   });
 
   it("mints no bracket for the origin, and lets a winner-less last round hand nothing forward", () => {
-    // Round 2 is in flight: it receives a bracket but never becomes a parent.
     const rows = spine([
       { round: 0, n: 1, winner: 0 },
       { round: 1, n: 2, winner: 0 },
@@ -159,7 +152,6 @@ describe("dendrogram", () => {
   });
 
   it("keeps a fork bar's slot but leaves it out of the round packing", () => {
-    // A fork's stamped round must not stretch that round's bracket to reach it.
     const rows = [
       ...spine([
         { round: 0, n: 1, winner: 0 },
@@ -181,7 +173,6 @@ describe("dendrogram", () => {
     expect(g.nodes[3]!.isFork).toBe(true);
     expect(g.nodes[3]!.xf).toBe(centers(4)[3]);
     const r1 = g.brackets.find((b) => b.round === 1)!;
-    // The bracket ends at the last CANDIDATE of round 1, not at the fork bar.
     expect(r1.x2f).toBe(centers(4)[2]);
     expect(g.stubs.every((s) => s.xf !== centers(4)[3])).toBe(true);
   });

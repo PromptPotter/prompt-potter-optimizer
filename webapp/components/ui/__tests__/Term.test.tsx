@@ -1,12 +1,8 @@
-// @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
 import { Term } from "../Term";
 
-afterEach(cleanup);
-
 describe("Term", () => {
-  // If the trigger stops being focusable, the card is unreachable by keyboard and nothing says so.
   it("makes its trigger focusable, and opens on that focus", () => {
     render(<Term content="the metric the winner is elected on">θ</Term>);
     const trigger = screen.getByText("θ");

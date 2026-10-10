@@ -20,8 +20,7 @@ export function ErrorNote({ children }: { children: ReactNode }) {
   );
 }
 
-// What an auth-gated panel shows instead of firing a read that would 401
-// (frontend-surface-contract.md § I1). Trailing slash matches `next.config.ts::trailingSlash`.
+// The `/login/` trailing slash matches `next.config.ts::trailingSlash`.
 export function SignInPrompt({
   message,
   className,

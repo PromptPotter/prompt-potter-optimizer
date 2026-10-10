@@ -1,17 +1,16 @@
 "use client";
-// Every figure is `/auth/quota-status` or `/machine-status` as served; the meters only draw them.
 
-import { useState } from "react";
+import { invalidateReads } from "@/lib/read-cache";
 import { AccountFailure, AccountLoading, AccountSection } from "./AccountSection";
 import { SegmentedControl, CommitInput, type Segment } from "@/components/ui";
 import { cx } from "@/lib/cx";
-import { billText } from "@/lib/derivations";
+import { billText, ratePricedText } from "@/lib/derivations";
 import { fmtTokens, fmtUsd } from "@/lib/format";
-import { readyData, useRead } from "@/lib/hooks/useRead";
+import { readyData, shownData, useRead } from "@/lib/hooks/useRead";
 import { useMachineStatus } from "@/lib/hooks/useMachineStatus";
 import { useCommand, type CommandFailure } from "@/lib/hooks/useCommand";
 import {
-  fetchQuotaStatus,
+  quotaRead,
   postSetConcurrentCycles,
   type MachineStatusResponse,
   type QuotaStatus,
@@ -20,11 +19,9 @@ import {
 const SEGMENTED_MAX = 8;
 
 export function AccountUsageTab() {
-  const read = useRead({ key: "quota", fetch: fetchQuotaStatus }, { surface: "usage", auth: true });
-  // A save re-reads in place, so the pane does not blank between the press and the answer.
-  const [fresh, setFresh] = useState<QuotaStatus | null>(null);
+  const read = useRead(quotaRead(), { auth: true });
   const machine = readyData(useMachineStatus());
-  const quota = fresh ?? readyData(read);
+  const quota = shownData(read);
 
   if (read.status === "failed" && quota === null) {
     return <AccountFailure kind={read.failure.kind} subject="your usage" />;
@@ -33,11 +30,7 @@ export function AccountUsageTab() {
   return (
     <>
       <SpendSection quota={quota} />
-      <RunsSection
-        quota={quota}
-        machine={machine}
-        onSaved={() => fetchQuotaStatus().then(setFresh)}
-      />
+      <RunsSection quota={quota} machine={machine} />
       <AccountSection
         title="Campaigns today"
         lede="An abuse limit, not an allowance. It resets at UTC midnight."
@@ -60,9 +53,9 @@ function Meter({ share, tone }: { share: number; tone?: "warn" }) {
 }
 
 function SpendSection({ quota }: { quota: QuotaStatus }) {
-  // A floor bill leaves the USD cap blind; `shell/remote/RemoteControl.tsx`'s pill says the same.
   const lifetime = quota.spend_lifetime;
   const blind = lifetime.bill_is_floor;
+  const priced = ratePricedText(lifetime.rate_priced_usd, lifetime.calls_rate_priced);
   const usdCap = quota.spend_budget_usd_total;
   const tokenCap = quota.token_budget_total;
   const usdShare = quota.spend_budget_used_share;
@@ -93,6 +86,12 @@ function SpendSection({ quota }: { quota: QuotaStatus }) {
               resolvable rate, so this figure undercounts. The token ceiling is the one holding.
             </span>
           ) : null}
+          {priced ? (
+            <span className="account-warn">
+              + {priced} — calls no provider reported a bill for. Not spent; the ceiling counts
+              it beside what was billed.
+            </span>
+          ) : null}
           {lifetime.sends_unreported ? (
             <span className="account-warn">
               + up to {fmtUsd(lifetime.unreported_usd)} unreported — sends that ended with no
@@ -115,7 +114,6 @@ function SpendSection({ quota }: { quota: QuotaStatus }) {
   );
 }
 
-// One pip per slot; a slot at or past `open` is one the machine is holding back.
 function Slots({
   total,
   running,
@@ -149,11 +147,9 @@ function Slots({
 function RunsSection({
   quota,
   machine,
-  onSaved,
 }: {
   quota: QuotaStatus;
   machine: MachineStatusResponse | null;
-  onSaved: () => Promise<void>;
 }) {
   const limit = quota.max_concurrent_cycles;
   const running = quota.concurrent_running;
@@ -195,11 +191,8 @@ function RunsSection({
               <span className="account-runs-text">
                 <strong>{machine.running}</strong> running · <strong>{machine.queued}</strong>{" "}
                 waiting · <strong>{machine.ceiling}</strong> slots
-                {machine.capacity < machine.ceiling ? (
-                  <span className="account-warn">
-                    {" "}
-                    — admitting {machine.capacity} while the provider throttle is saturated
-                  </span>
+                {machine.held_back !== null ? (
+                  <span className="account-warn"> — {machine.held_back}</span>
                 ) : null}
               </span>
             </>
@@ -220,13 +213,12 @@ function RunsSection({
           </span>
         </div>
       </div>
-      <LimitControl quota={quota} machine={machine} onSaved={onSaved} />
+      <LimitControl quota={quota} machine={machine} />
     </AccountSection>
   );
 }
 
-// The server words `concurrency_set_by_host` / `concurrency_above_machine` itself; only a flat
-// denial needs a sentence here, and 403 and 404 are one answer.
+// Only a flat denial needs a sentence here: the server words its own refusals, and 403 and 404 are one answer.
 function refusal(f: CommandFailure): string | null {
   return f.kind === "denied" || f.kind === "gone"
     ? "This session may not change spend limits."
@@ -236,15 +228,11 @@ function refusal(f: CommandFailure): string | null {
 function LimitControl({
   quota,
   machine,
-  onSaved,
 }: {
   quota: QuotaStatus;
   machine: MachineStatusResponse | null;
-  onSaved: () => Promise<void>;
 }) {
   const cmd = useCommand<"set-concurrent-cycles">("account-run-limit", { describe: refusal });
-  // A failed re-read is not a refused write: the limit is already written.
-  const [reread, setReread] = useState<"idle" | "busy" | "failed">("idle");
   const limit = quota.max_concurrent_cycles;
 
   if (!quota.max_concurrent_cycles_writable) {
@@ -260,24 +248,13 @@ function LimitControl({
 
   const save = async (next: number) => {
     if (next === limit || !Number.isInteger(next) || next < 1) return;
-    setReread("idle");
-    const r = await cmd.run("set-concurrent-cycles", () => postSetConcurrentCycles(next));
-    if (!r.ok) return;
-    setReread("busy");
-    try {
-      await onSaved();
-      setReread("idle");
-    } catch {
-      setReread("failed");
-    }
+    await cmd.run("set-concurrent-cycles", () => postSetConcurrentCycles(next), () =>
+      invalidateReads("quota"),
+    );
   };
 
-  const busy = cmd.pending !== null || reread === "busy";
-  const error =
-    cmd.failure?.message ??
-    (reread === "failed"
-      ? "Saved, but the new limit could not be read back. Reopen this pane to see it."
-      : null);
+  const busy = cmd.pending !== null;
+  const error = cmd.failure?.message ?? null;
   const ceiling = machine?.ceiling ?? null;
   return (
     <div className="account-limit">
@@ -319,11 +296,8 @@ function LimitControl({
           {error}
         </p>
       ) : null}
-      {ceiling !== null && limit > ceiling ? (
-        <p className="account-warn">
-          This account&rsquo;s limit of {limit} is above the machine&rsquo;s {ceiling}, so the
-          machine is what binds.
-        </p>
+      {quota.machine_binds !== null ? (
+        <p className="account-warn">{quota.machine_binds}</p>
       ) : null}
       <p className="account-note">
         Lowering it stops nothing already running; it refuses the next launch. The machine&rsquo;s

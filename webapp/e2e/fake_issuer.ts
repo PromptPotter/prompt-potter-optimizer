@@ -4,8 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-// A signed-in identity without an OIDC round trip: `serve.mjs` with PROMPTPOTTER_AUTH unset plus a
-// dummy `oidc.json` closes both doors of `deps.py::auth_is_open`; a session is a file minted directly.
+// PROMPTPOTTER_AUTH unset plus a dummy `oidc.json` closes both doors of `deps.py::auth_is_open`; a session is a file minted directly.
 
 // `__dirname`, not `import.meta.url`: Playwright's loader compiles this file to CommonJS.
 const WEBAPP = path.resolve(__dirname, "..");
@@ -50,7 +49,6 @@ export async function startFakeIssuer(
     env,
   });
 
-  // `serve.mjs` exits 2 with the remedy on a failed preflight; surface it before the health timeout.
   let died: number | null = null;
   proc.on("exit", (code) => (died = code ?? 1));
   await waitForHealth(`${baseURL}/api/v1/health`, () => died);

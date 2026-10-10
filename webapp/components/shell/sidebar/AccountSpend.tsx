@@ -1,40 +1,31 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useRef } from "react";
 import { Term } from "@/components/ui";
-import { fetchQuotaStatus } from "@/lib/api";
+import { quotaRead } from "@/lib/api";
 import { cx } from "@/lib/cx";
-import { billText } from "@/lib/derivations";
+import { billText, ratePricedText } from "@/lib/derivations";
 import { fmtTokens, fmtUsd } from "@/lib/format";
-import { useRead } from "@/lib/hooks/useRead";
-import { useRevalidation } from "@/lib/revalidate";
-import { useWorkspace } from "@/lib/workspace";
+import { shownData, useRead } from "@/lib/hooks/useRead";
+import { invalidateReads } from "@/lib/read-cache";
+import { useRegistry } from "@/lib/registry";
 
-// The quota read sums every ledger the account owns: it polls slowly and re-ticks early when the
-// campaign list's served spend moves.
+// The quota read sums every ledger the account owns: polled slowly, re-ticked when spend moves.
 const QUOTA_POLL_MS = 60_000;
 
-// What this ACCOUNT has spent against its ALLOWANCE, pinned in every sidebar state.
 export function AccountSpend() {
-  const { campaigns } = useWorkspace();
-  const generation = useRevalidation();
+  const { campaigns } = useRegistry();
+  const read = useRead(quotaRead(), { auth: true, intervalMs: QUOTA_POLL_MS });
 
   const signature = campaigns.map((c) => c.spend_lifetime.billed_usd).join(",");
-  const [moved, setMoved] = useState({ signature, count: 0 });
-  if (signature !== moved.signature) setMoved({ signature, count: moved.count + 1 });
-
-  const read = useRead(
-    { key: "quota", fetch: fetchQuotaStatus },
-    {
-      surface: "account-spend",
-      auth: true,
-      intervalMs: QUOTA_POLL_MS,
-      revalidateOn: generation + moved.count,
-    },
-  );
+  const asked = useRef(signature);
+  useEffect(() => {
+    if (asked.current === signature) return;
+    asked.current = signature;
+    invalidateReads("quota");
+  }, [signature]);
 
   if (read.status === "idle") return null;
-  // The last good reading stays up through a failed re-read; only a first read can fail visibly.
-  const data = read.status === "ready" ? read.data : read.kept;
+  const data = shownData(read);
   if (data == null) {
     return (
       <div className="account-spend" aria-busy={read.status === "loading"}>
@@ -50,6 +41,7 @@ export function AccountSpend() {
   const lifetime = data.spend_lifetime;
   const floor = lifetime.bill_is_floor;
   const spent = fmtUsd(lifetime.billed_usd);
+  const priced = ratePricedText(lifetime.rate_priced_usd, lifetime.calls_rate_priced);
   const exhausted = data.allowance_spent;
   const fill = data.spend_budget_used_share;
 
@@ -68,6 +60,12 @@ export function AccountSpend() {
         <p>
           {fmtTokens(lifetime.unpriced_tokens)} were billed by a model with no known price, so
           the dollar figure undercounts and the token allowance is the one holding.
+        </p>
+      ) : null}
+      {priced ? (
+        <p>
+          {priced} beside it — calls no provider reported a bill for. Not spent; the allowance
+          counts it anyway.
         </p>
       ) : null}
       {lifetime.sends_unreported ? (

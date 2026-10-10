@@ -1,39 +1,30 @@
 "use client";
-// The sidebar tree — ONE recursive renderer over the served `/tree`:
-//   ForestRows → OriginRow → RunRow → CourseRow ⇄ CandidateRow → (CourseRow…)
 
 import type { ReactNode } from "react";
 import { cx } from "@/lib/cx";
 import { useSelectNode } from "@/lib/hooks/useSelectNode";
-import { campaignDisplayName } from "@/lib/names";
 import { fmtPct0, fmtSigned, fmtThetaSe, sideTone } from "@/lib/format";
-import { CAVEAT_COPY } from "@/components/candidates/AbilityInfo";
+import { ARM_VERDICT_LABELS, THETA_CAVEAT_INFO } from "@/lib/api/types.generated";
 import {
   accuracyStat,
   campaignCard,
-  campaignLineParts,
-  campaignStatus,
-  campaignVendors,
-  candidatesOf,
-  childCourses,
-  cutFromLabel,
+  liftOf,
   nodeKeyOf,
   panelCellLabel,
   pathOf,
-  phaseStatus,
-  spendHeadline,
   splitRetired,
   type NodeKind,
   type OriginGroup,
   type RetiredGroup,
   type RowCardFacts,
   type RowStat,
-  type RowStatus,
   type RunGroup,
 } from "@/lib/derivations";
 import { encodeCyclePath, nodeAddress, shortFamilyTail, type CyclePath } from "@/lib/ids";
-import type { LineageNode } from "@/lib/api";
+import type { ArmNode, CourseNode, RunStanding } from "@/lib/api";
 import { useLineageTree, type CampaignTree } from "@/lib/lineage";
+import { useWorkspace } from "@/lib/workspace";
+import { PairedLift } from "@/components/shell/PairedLift";
 import { CampaignMenu } from "./CampaignMenu";
 import { CampaignRowLabel, PhaseMark } from "./CampaignRowLabel";
 import { CompareToggle } from "./CompareToggle";
@@ -44,12 +35,9 @@ export interface TreeCtx {
   toggleNode: (kind: NodeKind, path: string) => void;
   viewedPath: CyclePath | null;
   viewedCandidateId: string | null;
-  selectCyclePath: (path: CyclePath, candidateId?: string | null) => void;
-  // `lib/tree-prefs.ts`. Off, a campaign is the last row of its branch and its `/tree` never loads.
   showCandidates: boolean;
 }
 
-// One gate for both readers — the row that draws the children and the fetch that supplies them.
 function courseOpen(ctx: TreeCtx, path: CyclePath): boolean {
   return ctx.showCandidates && ctx.isNodeOpen("course", encodeCyclePath(path));
 }
@@ -64,7 +52,6 @@ export function ForestRows({ origins, ctx }: { origins: OriginGroup[]; ctx: Tree
   );
 }
 
-// A grouping, not an address: nothing here is selectable, so the row only opens and closes.
 function GroupRow({
   kind,
   addr,
@@ -125,7 +112,6 @@ function OriginRow({ origin, ctx }: { origin: OriginGroup; ctx: TreeCtx }) {
           <span className="unit-library-kind">{origin.runs.length} runs</span>
         </>
       }
-      meta={fmtPct0(origin.bestAccuracy)}
     >
       {origin.runs.map((run) => (
         <li key={run.campaign.campaign_id}>
@@ -140,10 +126,11 @@ function shortOrigin(originId: string): string {
   return originId.startsWith("cycle_") ? originId.slice(6, 14) : originId.slice(0, 8);
 }
 
-// The one `/tree` fetch for the whole subtree — no fetch below this.
 function RunRow({ run, ctx }: { run: RunGroup; ctx: TreeCtx }) {
-  const { campaign, root } = run;
-  const rootPath: CyclePath = [{ campaignId: root.campaign_id, cycleId: root.cycle_id }];
+  const { campaign } = run;
+  const rootPath: CyclePath = [
+    { campaignId: campaign.campaign_id, cycleId: campaign.root_cycle_id },
+  ];
   const tree = useLineageTree(rootPath, courseOpen(ctx, rootPath));
 
   return (
@@ -152,56 +139,49 @@ function RunRow({ run, ctx }: { run: RunGroup; ctx: TreeCtx }) {
       path={rootPath}
       tree={tree}
       ctx={ctx}
-      label={campaignDisplayName(campaign)}
       run={run}
       chrome={
         <>
           <CompareToggle
             campaignId={campaign.campaign_id}
-            answeringCycleId={run.answering.cycle_id}
+            answeringCycleId={run.line.holder.cycle_id}
           />
           <CampaignMenu campaign={campaign} />
         </>
       }
-      // Always `/cycles`, never the tree node the row only has while expanded.
-      phase={run.answering.run_phase}
-      phaseReason={run.answering.stop_reason}
     />
   );
 }
 
-// A campaign's root or an L4 inner run. `node` is null only for the root before its tree lands.
 function CourseRow({
   node,
   path,
   tree,
   ctx,
-  label,
   run,
   chrome,
-  phase,
-  phaseReason,
 }: {
-  node: LineageNode | null;
+  node: CourseNode | null;
   path: CyclePath;
   tree: CampaignTree;
   ctx: TreeCtx;
-  label: string;
-  // Top-level root only; an inner run carries no campaign.
   run?: RunGroup;
   chrome?: React.ReactNode;
-  // Handed in, never picked here: `/cycles` for a root row, the tree node for a nested course.
-  phase: string | null | undefined;
-  phaseReason: LineageNode["stop_reason"] | undefined;
 }) {
+  const { navigate } = useWorkspace();
   const addr = encodeCyclePath(path);
   const open = courseOpen(ctx, path);
-  const rows = candidatesOf(node ?? undefined);
+  const rows = node?.children ?? [];
   const { live: liveRows, retired: retiredGroups } = splitRetired(rows);
 
-  const originAccuracy = node?.origin_accuracy ?? null;
-  const best = run?.bestAccuracy ?? node?.best_accuracy ?? null;
-  const lifted = originAccuracy != null && best != null && best !== originAccuracy;
+  // A root row reads the served line ALWAYS — never the tree node it only has while expanded.
+  const standing = run ? run.line.standing : (node?.run_standing ?? null);
+  const status = run ? run.line.status : (node?.status ?? null);
+  const label = run
+    ? run.campaign.display_name
+    : node?.task
+      ? panelCellLabel(node.task)
+      : (node?.dataset_name ?? "");
 
   const archived = run?.campaign.lifecycle_status === "archived";
   // The WHOLE path, not the leaf cycleId: `cycle_id` is an origin hash two campaigns can share.
@@ -209,28 +189,22 @@ function CourseRow({
     ctx.viewedPath != null &&
     encodeCyclePath(ctx.viewedPath) === encodeCyclePath(path) &&
     ctx.viewedCandidateId == null;
-  const status: RowStatus | null = run
-    ? campaignStatus(run)
-    : phase
-      ? phaseStatus(phase, phaseReason)
-      : null;
 
   const cycleId = path[path.length - 1]!.cycleId;
   const card: RowCardFacts = run
-    ? campaignCard(run, node, status?.word)
+    ? campaignCard(run, node)
     : {
         title: label,
-        state: status?.word,
+        state: status?.label,
         lede: node?.task
           ? "An inner run: it measured one candidate of the course above on one panel cell."
           : "The course and what it ran. Its origin is the C0 row inside it.",
-        stats: innerStats(node, originAccuracy, best),
+        stats: innerStats(node, standing),
         facts: innerFacts(node, cycleId),
       };
 
   const row = (
     <div className={cx("unit-library-family", selected && "selected", archived && "archived")}>
-      {/* No inert ▶ when there is nothing to expand into (frontend-surface-contract § I3). */}
       {ctx.showCandidates ? (
         <button
           type="button"
@@ -246,33 +220,19 @@ function CourseRow({
       <button
         type="button"
         className="unit-library-item"
-        onClick={() => ctx.selectCyclePath(path, null)}
+        onClick={() => navigate(path, { resume: true })}
         aria-current={selected ? "true" : undefined}
         disabled={archived}
       >
         {run ? (
-          <CampaignRowLabel
-            name={label}
-            status={status}
-            spend={spendHeadline(run.campaign.spend_metered)}
-            parts={campaignLineParts(run)}
-            vendors={campaignVendors(run)}
-          />
+          <CampaignRowLabel run={run} />
         ) : (
           <span className="unit-library-row">
             <span className="unit-library-name">{label}</span>
             <span className="unit-library-meta unit-library-meta-marked">
               {status && <PhaseMark status={status} />}
               <span>
-                {fmtPct0(originAccuracy ?? best ?? null)}
-                {lifted && (
-                  <>
-                    <span className="unit-library-arrow" aria-label="improved to">
-                      →
-                    </span>
-                    {fmtPct0(best)}
-                  </>
-                )}
+                {standing ? <PairedLift reading={standing.vs_origin} unread="label" /> : "—"}
               </span>
             </span>
           </span>
@@ -299,18 +259,12 @@ function CourseRow({
           {tree.loaded && rows.length === 0 && <li className="inner-library-empty">Never ran</li>}
           {liveRows.map((cand) => (
             <li key={nodeKeyOf(cand)}>
-              <CandidateRow cand={cand} siblings={rows} tree={tree} ctx={ctx} timeline={path} />
+              <CandidateRow cand={cand} tree={tree} ctx={ctx} timeline={path} />
             </li>
           ))}
           {retiredGroups.map((group) => (
             <li key={group.branch}>
-              <RetiredGroupRow
-                group={group}
-                siblings={rows}
-                tree={tree}
-                ctx={ctx}
-                timeline={path}
-              />
+              <RetiredGroupRow group={group} tree={tree} ctx={ctx} timeline={path} />
             </li>
           ))}
         </ul>
@@ -319,7 +273,7 @@ function CourseRow({
   );
 }
 
-function innerFacts(node: LineageNode | null, cycleId: string): [string, string][] {
+function innerFacts(node: CourseNode | null, cycleId: string): [string, string][] {
   const facts: [string, string][] = [];
   if (node?.dataset_name) facts.push(["Dataset", node.dataset_name]);
   if (node?.task) facts.push(["Task", node.task]);
@@ -327,9 +281,8 @@ function innerFacts(node: LineageNode | null, cycleId: string): [string, string]
   return facts;
 }
 
-function innerStats(node: LineageNode | null, origin: number | null, best: number | null) {
-  const stats: RowStat[] = [accuracyStat(origin, best, node)];
-  const standing = node?.run_standing;
+function innerStats(node: CourseNode | null, standing: RunStanding | null) {
+  const stats: RowStat[] = standing ? [accuracyStat(standing, node)] : [];
   if (standing?.stalls_left != null && standing.stalls_left_cap != null) {
     stats.push({ label: "Lives", value: `${standing.stalls_left} / ${standing.stalls_left_cap}` });
   }
@@ -338,13 +291,11 @@ function innerStats(node: LineageNode | null, origin: number | null, best: numbe
 
 function RetiredGroupRow({
   group,
-  siblings,
   tree,
   ctx,
   timeline,
 }: {
   group: RetiredGroup;
-  siblings: readonly LineageNode[];
   tree: CampaignTree;
   ctx: TreeCtx;
   timeline: CyclePath;
@@ -363,111 +314,94 @@ function RetiredGroupRow({
     >
       {group.candidates.map((cand) => (
         <li key={nodeKeyOf(cand)}>
-          <CandidateRow cand={cand} siblings={siblings} tree={tree} ctx={ctx} timeline={timeline} />
+          <CandidateRow cand={cand} tree={tree} ctx={ctx} timeline={timeline} />
         </li>
       ))}
     </GroupRow>
   );
 }
 
-// Navigating and inspecting are one gesture here, in the tree; a bar click only ever inspects.
 function CandidateRow({
   cand,
-  siblings,
   tree,
   ctx,
   timeline,
 }: {
-  cand: LineageNode;
-  siblings: readonly LineageNode[];
+  cand: ArmNode;
   tree: CampaignTree;
   ctx: TreeCtx;
   // Not necessarily the minting course: a fork's contribution differs, and deselect lands here.
   timeline: CyclePath;
 }) {
-  const inner = childCourses(cand);
+  const inner = cand.children;
+  const { reading, fork } = cand;
   const candPath = pathOf(cand);
   const addr = nodeKeyOf(cand);
   const open = ctx.isNodeOpen("cand", addr);
   const hasChildren = inner.length > 0;
   // Keyed on the ROUND, not the label: a fork's C0 replays the candidate it was cut from.
-  const isOrigin = (cand.round ?? 0) === 0;
-  const cutFrom = cutFromLabel(cand, siblings);
+  const isOrigin = reading.arm.round === 0;
+  const cutFrom = fork?.cut_from ?? null;
   const retiredBy = cand.superseded_by;
 
   const cycleId = candPath[candPath.length - 1]!.cycleId;
-  const { isPicked, pick } = useSelectNode(ctx.selectCyclePath);
+  const { isPicked, pick } = useSelectNode({ resume: true });
   const selected = isPicked(cand);
 
   const lede = retiredBy
     ? `Retired: the run branched to ${shortFamilyTail(retiredBy)} and continued there. It stays as the record of what ran; nothing after it is on the line.`
     : isOrigin
       ? "This course's ORIGIN: the specification it started from, measured. Click selects it; ▶ expands what measured it."
-      : cand.course_kind
+      : fork
         ? `An attempt cut as a fork (${shortFamilyTail(cycleId)}), on this campaign's one timeline. Click selects it; the dashboard follows that fork.`
         : "A candidate this course proposed and measured. Click selects it; ▶ expands what measured it.";
 
-  const verdict = retiredBy
-    ? "retired"
-    : cand.status === "invalid"
-      ? "invalid — never measured"
-      : isOrigin
-        ? "origin"
-        : cand.crown === "elected"
-          ? "won its round"
-          : cand.crown === "uncontested"
-            ? "advanced uncontested"
-            : cand.is_selected
-              ? "selected"
-              : cand.election_held
-                ? "not elected"
-                : cand.status === "minted"
-                  ? "not measured yet"
-                  : "awaiting election";
+  const verdict = ARM_VERDICT_LABELS[cand.verdict];
 
-  // θ is a row only where this node's optimizer stamps one; elsewhere a blank reads as a cold ruler.
-  const caveat = cand.stamps_theta ? cand.theta_caveat : null;
-  const lift = cand.reference_lift;
-  const liftLo = cand.reference_lift_ci_lo;
-  const liftHi = cand.reference_lift_ci_hi;
+  const { theta = null, se = null, caveat = null } = reading.ability ?? {};
+  const accuracy = reading.own?.accuracy?.value ?? null;
+  const { scored, expected } = reading.panel;
+  const lift = liftOf(reading.vs_reference);
   const stats: RowStat[] = [];
-  if (cand.stamps_theta) {
+  if (theta != null || caveat != null) {
     stats.push({
       label: "Ability θ",
-      value: fmtThetaSe(cand.theta, cand.theta_se),
-      sub: caveat ? "not ability — see below" : "what the round elects on",
+      value: fmtThetaSe(theta, se),
+      sub: caveat
+        ? "not ability — see below"
+        : cand.elects_on === "ability"
+          ? "what the round elects on"
+          : undefined,
       className: caveat ? "summary-block-warn" : undefined,
     });
   }
   stats.push({
     label: "Accuracy",
-    value: fmtPct0(cand.accuracy),
+    value: fmtPct0(accuracy),
     sub:
-      cand.scored_samples != null
-        ? `${cand.scored_samples}${cand.expected_samples != null ? ` of ${cand.expected_samples}` : ""} scored`
-        : undefined,
+      scored != null ? `${scored}${expected != null ? ` of ${expected}` : ""} scored` : undefined,
   });
   if (lift != null) {
     stats.push({
       label: "Lift vs parent",
-      value: fmtSigned(lift),
-      sub: liftLo != null && liftHi != null ? `[${fmtSigned(liftLo)}, ${fmtSigned(liftHi)}]` : "no interval",
-      className: sideTone(cand.reference_lift_side),
+      value: fmtSigned(lift.value),
+      sub: `[${fmtSigned(lift.ci_lo)}, ${fmtSigned(lift.ci_hi)}]`,
+      className: sideTone(lift.side),
     });
   }
-  const facts: [string, string][] = [["Round", String(cand.round ?? 0)], ["Cycle", cycleId]];
-  if (cand.sp_hash) facts.push(["Searchpoint", cand.sp_hash]);
-  if (cand.steered_by) facts.push(["Steered by", cand.steered_by]);
+  const facts: [string, string][] = [["Round", String(reading.arm.round)], ["Cycle", cycleId]];
+  if (reading.sp_hash) facts.push(["Searchpoint", reading.sp_hash]);
+  if (fork?.steered_by) facts.push(["Steered by", fork.steered_by]);
 
   const card = {
     title: cand.label,
     state: verdict,
-    tags: cand.course_kind ? [`⑂${cutFrom ? ` from ${cutFrom}` : " fork"}`] : undefined,
+    tags: fork ? [`⑂${cutFrom ? ` from ${cutFrom}` : " fork"}`] : undefined,
     lede,
     stats,
     caveat: caveat ? (
       <>
-        <strong>{CAVEAT_COPY[caveat].head}.</strong> {CAVEAT_COPY[caveat].body}
+        <strong>{THETA_CAVEAT_INFO[caveat].head}.</strong> {THETA_CAVEAT_INFO[caveat].body}
       </>
     ) : undefined,
     facts,
@@ -498,15 +432,15 @@ function CandidateRow({
             <span className="unit-library-row">
               <span className="unit-library-name">
                 {cand.label}
-                {cand.course_kind && (
+                {fork && (
                   <span
                     className="unit-library-kind"
-                    title={`Cut as a fork (${cycleId})${cand.steered_by ? ` by ${cand.steered_by}` : ""} — it replays ${cutFrom ?? "its origin"} and searches on from there.`}
+                    title={`Cut as a fork (${cycleId})${fork.steered_by ? ` by ${fork.steered_by}` : ""} — it replays ${cutFrom ?? "its origin"} and searches on from there.`}
                   >
                     ⑂{cutFrom ? ` from ${cutFrom}` : ""}
                   </span>
                 )}
-                {cand.crown === "elected" && (
+                {reading.election.crown === "elected" && (
                   <span className="unit-library-kind" title="Elected this round's winner">
                     won
                   </span>
@@ -521,11 +455,10 @@ function CandidateRow({
                 )}
               </span>
               <span className="unit-library-meta">
-                {/* A cut that broke before measuring must not borrow the origin's number. */}
-                {cand.accuracy == null && cand.course_kind ? (
-                  <PhaseMark status={phaseStatus("terminal", cand.stop_reason)} />
+                {accuracy == null && fork ? (
+                  <PhaseMark status={fork.status} />
                 ) : (
-                  fmtPct0(cand.accuracy)
+                  fmtPct0(accuracy)
                 )}
               </span>
             </span>
@@ -541,10 +474,6 @@ function CandidateRow({
                 path={pathOf(course)}
                 tree={tree}
                 ctx={ctx}
-                label={course.task ? panelCellLabel(course.task) : course.dataset_name}
-                // `/cycles` lists top-level cycles only, so an inner run answers off its node.
-                phase={course.run_phase}
-                phaseReason={course.stop_reason}
               />
             </li>
           ))}

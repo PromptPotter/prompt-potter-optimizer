@@ -1,11 +1,10 @@
 "use client";
 import { useMemo } from "react";
-import { useRoundRows } from "@/lib/hooks/useRoundRows";
+import { useRound } from "@/lib/hooks/useRound";
 import { useCycleStream } from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";
 import type { SelectedCandidate } from "@/lib/types";
 import {
-  benchByLabel,
   candidateObserveConfig,
   liveCandidateObserveConfig,
   searchpointCopyChoices,
@@ -23,15 +22,12 @@ interface Props {
   onClose: () => void;
 }
 
-// Dashboard HOST for `shell/searchpoint/SearchpointDrillIn`: it owns only the streaming cycle, the
-// round in flight and the fork verb. No stitch (`useRoundRows`): the live round never fetches its file.
 export function ScoringInspector({ selected, onClose }: Props) {
   const { dash } = useCycleStream();
   const cv = useConnector();
   const { viewedPath } = useWorkspace();
-  const round = useRoundRows(selected?.round ?? null);
+  const round = useRound(viewedPath, selected?.round ?? null);
   const arms = round.rows.length;
-  // On LABEL: an in-flight row has no lineage id until it is scored.
   const row = selected ? round.row(selected.label) : null;
   const samples = useMemo(() => round.samples(row), [round, row]);
 
@@ -41,18 +37,21 @@ export function ScoringInspector({ selected, onClose }: Props) {
       ? liveCandidateObserveConfig(dash, selected.label)
       : candidateObserveConfig(round.doc, selected.label, selected.label);
 
-  const bench = selected ? benchByLabel(dash?.rounds ?? [], dash?.bench_pass).get(selected.label) : undefined;
-
   if (!selected) return null;
+  const pass = dash?.bench_pass ?? null;
 
   return (
     <section className="scoring-inspector" aria-label="Scoring inspector">
       <Toolbar className="inspector-head">
         <span className="inspector-title">Scoring · {selected.label}</span>
         <ToolbarSpacer />
-        {/* The payload comes from the shared builder, never from this host. */}
         <CopyButton
-          choices={searchpointCopyChoices({ cfg, row, samples, arms: arms || null })}
+          choices={searchpointCopyChoices({
+            cfg,
+            reading: row?.reading,
+            samples,
+            arms: arms || null,
+          })}
           title={`Copy ${selected.label}`}
         />
         <button
@@ -66,38 +65,30 @@ export function ScoringInspector({ selected, onClose }: Props) {
         </button>
       </Toolbar>
       <SearchpointDrillIn
-        row={row}
+        reading={row?.reading ?? null}
         cfg={cfg}
-        bench={bench}
+        benchPass={pass?.label === selected.label ? pass : null}
         measurements={
           <MeasurementsPane
             preset={{ candidateId: selected.candidate_id, scope: "cycle", groupBy: "none" }}
           />
         }
         arms={arms || null}
-        schema={cv.nodeConfigSchema}
-        schemaStatus={cv.pipelineStatus}
-        outputSchema={cv.nodeOutputSchema}
+        schema={cv.schema}
         pending={
           round.unfiled
             ? `Scoring in progress for R${selected.round} — the spec and its numbers appear as this candidate's samples land.`
             : `Round file not yet on disk for R${selected.round}.`
         }
         actions={
-          // The VIEWED address, so an L4 inner searchpoint is refused rather than forked at the
-          // outer cycle.
+          // The VIEWED address: an L4 inner searchpoint is refused, never forked at the outer cycle.
           <>
             <CompareOriginAction candidate={selected} path={viewedPath} />
             <VerifyAction candidate={selected} path={viewedPath} />
             <SteerForkAction
               candidate={selected}
               path={viewedPath}
-              dash={dash}
-              parentIsLive={cv.isLive}
-              schema={cv.nodeConfigSchema}
-              schemaStatus={cv.pipelineStatus}
-              isSingleNode={cv.isSingleNode}
-              outputSchema={cv.nodeOutputSchema}
+              schema={cv.schema}
             />
           </>
         }

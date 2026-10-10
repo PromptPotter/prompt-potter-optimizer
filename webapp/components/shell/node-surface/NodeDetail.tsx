@@ -1,21 +1,21 @@
 "use client";
-import type { DraftPatch } from "@/lib/api";
-import type { SelectedNode } from "@/lib/SelectionContext";
+import { useMemo } from "react";
+import type { DraftPatch, StartPrompt } from "@/lib/api";
+import { useSelection, type SelectedNode } from "@/lib/SelectionContext";
 import { cx } from "@/lib/cx";
-import type { NodeBlock } from "@/lib/types";
+import type { NodeBlock } from "@/lib/api/types";
+import type { NodeSchemaReading } from "@/lib/types";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { roundOf, useCycleStream } from "@/lib/poll";
-import { useObserveSearchPoint } from "@/lib/hooks/useObserveSearchPoint";
+import { useObserveSubject } from "@/lib/hooks/useObserveSubject";
+import { useSearchpointRead, type SearchpointRead } from "@/lib/hooks/useSearchpointRead";
 import { useOptimizerPipeline } from "@/lib/hooks/useOptimizerPipeline";
 import { useRoundNodes } from "@/lib/hooks/useRoundNodes";
 import {
-  cacheShare,
   interiorNodes,
-  nodeOriginPrompt,
-  observeOptions,
   pipelineReadStatus,
-  prefixReading,
   type ObserveState,
+  type ObserveSubject,
 } from "@/lib/derivations";
 import { fmtPct0, fmtSecs, fmtValue } from "@/lib/format";
 import { nodeKind } from "@/lib/types";
@@ -24,11 +24,6 @@ import { NodeSurface } from "./NodeSurface";
 import { MeasurementRun } from "./MeasurementRun";
 import { L1Variants, variantsOf } from "./L1Variants";
 
-// The one node detail for every tab: PROGRAM (what it is) and, optimizer-scoped only, RUN (what it
-// did). The audit twin records the optimizer's calls, and pp-self's target reuses its node ids.
-
-// Its presence is the MODE; its fields are documents, never a store — config rows still come from
-// `useConnector()` (`frontend-surface-contract.md::I9`).
 export interface NodeAuthoring {
   overlay: Record<string, unknown>;
   promptFields: Record<string, unknown>;
@@ -36,7 +31,6 @@ export interface NodeAuthoring {
 
 interface Props {
   node: SelectedNode;
-  // Target scope only.
   authoring?: NodeAuthoring;
   onClose: () => void;
   onPromptApply?: (patch: DraftPatch) => void;
@@ -52,27 +46,30 @@ export function NodeDetail({ node: selected, authoring, onClose, onPromptApply }
   const { doc: optimizer, loading: pipelineLoading } = useOptimizerPipeline(
     isOptimizer ? cv.optimizer : null,
   );
-  const observe = useObserveSearchPoint(id, !isOptimizer && !authoring);
+  const subject = useObserveSubject();
+  const observed = useSearchpointRead(!isOptimizer && !authoring ? subject.point : null, id);
 
   const view = isOptimizer ? optimizer?.view : cv.view;
   const node = interiorNodes(view).find((n) => n.id === id) ?? null;
-  // Not defaulted: the run half dispatches on it, and the header captions a kind only once the
-  // view names one.
   const servedKind = node?.kind ?? null;
   const kindInfo = servedKind ? nodeKind(servedKind) : null;
-  const schema = isOptimizer ? (optimizer?.node_config_schema ?? null) : cv.nodeConfigSchema;
-  // Two fetches back this panel; `cv.pipelineStatus` answers for the campaign's alone.
-  const schemaStatus = isOptimizer
-    ? pipelineReadStatus({
-        bound: cv.pipelineStatus !== "unbound",
-        loading: pipelineLoading || cv.pipelineStatus === "loading",
-        failed: !optimizer,
-      })
-    : cv.pipelineStatus;
-  const outputSchema = isOptimizer
-    ? (optimizer?.node_output_schema ?? null)
-    : cv.nodeOutputSchema;
-  // Off the SAME read as the rows it qualifies, never fetched separately.
+  const optimizerStatus = pipelineReadStatus({
+    bound: cv.schema.status !== "unbound",
+    loading: pipelineLoading || cv.schema.status === "loading",
+    failed: !optimizer,
+  });
+  const schema = useMemo<NodeSchemaReading>(
+    () =>
+      isOptimizer
+        ? {
+            status: optimizerStatus,
+            config: optimizer?.node_config_schema ?? null,
+            output: optimizer?.node_output_schema ?? null,
+            isSingleNode: false,
+          }
+        : cv.schema,
+    [isOptimizer, optimizerStatus, optimizer, cv.schema],
+  );
   const modelCapabilities = isOptimizer
     ? (optimizer?.model_capabilities ?? {})
     : cv.modelCapabilities;
@@ -85,10 +82,8 @@ export function NodeDetail({ node: selected, authoring, onClose, onPromptApply }
   } = useRoundNodes();
   const block: NodeBlock | null = isOptimizer ? (roundNodes[id] ?? null) : null;
 
-  // Resolved here, not in `OptimizerProgram`: the header's copy and the body must show one prompt.
-  const origin = nodeOriginPrompt(optimizer, id);
+  const origin = optimizer?.start_prompts[id] ?? null;
 
-  // RUN is dropped rather than offered empty until the node fires.
   const identity = { id, scope, label: node?.label ?? id, kind: servedKind };
   const program = isOptimizer
     ? { ...identity, prompt_fields: origin?.fields ?? {} }
@@ -98,12 +93,12 @@ export function NodeDetail({ node: selected, authoring, onClose, onPromptApply }
           resolved_pipeline_params: authoring.overlay,
           prompt_fields: authoring.promptFields,
         }
-      : observe.cfg
+      : observed.cfg
         ? {
             ...identity,
-            searchpoint: observe.cfg.label,
-            resolved_pipeline_params: observe.cfg.config,
-            prompt_fields: observe.cfg.promptFields,
+            searchpoint: observed.cfg.label,
+            resolved_pipeline_params: observed.cfg.config,
+            prompt_fields: observed.cfg.promptFields,
           }
         : identity;
   const copyChoices = [
@@ -157,19 +152,15 @@ export function NodeDetail({ node: selected, authoring, onClose, onPromptApply }
             node={node}
             origin={origin}
             schema={schema}
-            schemaStatus={schemaStatus}
-            outputSchema={outputSchema}
             modelCapabilities={modelCapabilities}
           />
         ) : (
           <TargetProgram
             node={node}
             authoring={authoring}
-            isSingleNode={cv.isSingleNode}
-            observe={observe}
+            subject={subject}
+            observed={observed}
             schema={schema}
-            schemaStatus={schemaStatus}
-            outputSchema={outputSchema}
             modelCapabilities={modelCapabilities}
             isLive={isLive}
             onPromptApply={onPromptApply}
@@ -196,20 +187,15 @@ function scopeLabel(isOptimizer: boolean): string {
   return isOptimizer ? "the optimizer's own loop" : "this campaign's pipeline";
 }
 
-// Read-only by construction: the optimizer manifest is one operator-owned file with no draft.
 function OptimizerProgram({
   node,
   origin,
   schema,
-  schemaStatus,
-  outputSchema,
   modelCapabilities,
 }: {
   node: Parameters<typeof NodeSurface>[0]["node"];
-  origin: ReturnType<typeof nodeOriginPrompt>;
-  schema: Parameters<typeof NodeSurface>[0]["schema"];
-  schemaStatus: Parameters<typeof NodeSurface>[0]["schemaStatus"];
-  outputSchema: Parameters<typeof NodeSurface>[0]["outputSchema"];
+  origin: StartPrompt | null;
+  schema: NodeSchemaReading;
   modelCapabilities: Parameters<typeof NodeSurface>[0]["modelCapabilities"];
 }) {
   return (
@@ -219,44 +205,38 @@ function OptimizerProgram({
         point={{ origin_prompt_fields: origin?.fields ?? {}, pipeline_overlay: {} }}
         overlay={{}}
         schema={schema}
-        schemaStatus={schemaStatus}
-        outputSchema={outputSchema}
         modelCapabilities={modelCapabilities}
         mode="values"
       />
-      {origin && origin.count > 1 && (
+      {origin && origin.versions_declared > 1 && (
         <p className="inspector-note">
-          Showing prompt {origin.version} of {origin.count} this node declares.
+          Showing prompt {origin.version} of {origin.versions_declared} this node declares.
         </p>
       )}
     </>
   );
 }
 
-// Dispatches on LIFECYCLE: authoring a draft, previewing it whole, or observing a measured searchpoint.
 function TargetProgram({
   node,
   authoring,
-  isSingleNode,
-  observe,
+  subject,
+  observed,
   schema,
-  schemaStatus,
-  outputSchema,
   modelCapabilities,
   isLive,
   onPromptApply,
 }: {
   node: Parameters<typeof NodeSurface>[0]["node"];
   authoring?: NodeAuthoring;
-  isSingleNode: boolean;
-  observe: ReturnType<typeof useObserveSearchPoint>;
-  schema: Parameters<typeof NodeSurface>[0]["schema"];
-  schemaStatus: Parameters<typeof NodeSurface>[0]["schemaStatus"];
-  outputSchema: Parameters<typeof NodeSurface>[0]["outputSchema"];
+  subject: ObserveSubject;
+  observed: SearchpointRead;
+  schema: NodeSchemaReading;
   modelCapabilities: Parameters<typeof NodeSurface>[0]["modelCapabilities"];
   isLive: boolean;
   onPromptApply?: (patch: DraftPatch) => void;
 }) {
+  const { setObserve } = useSelection();
   if (authoring) {
     const scoped = node != null;
     return (
@@ -264,10 +244,7 @@ function TargetProgram({
         node={scoped ? node : null}
         point={{ origin_prompt_fields: authoring.promptFields, pipeline_overlay: {} }}
         overlay={scoped ? authoring.overlay : {}}
-        isSingleNode={isSingleNode}
         schema={schema}
-        schemaStatus={schemaStatus}
-        outputSchema={outputSchema}
         modelCapabilities={modelCapabilities}
         mode={scoped ? "search-space" : "values"}
         onApply={scoped ? onPromptApply : undefined}
@@ -275,36 +252,33 @@ function TargetProgram({
     );
   }
 
-  const options = observeOptions(observe.avail);
+  const cfg = observed.cfg;
 
   return (
     <>
-      {options.length > 1 && (
+      {subject.options.length > 1 && (
         <div className="observe-toggle">
           <span className="observe-toggle-label">Searchpoint</span>
           <SegmentedControl<ObserveState>
-            options={options}
-            value={observe.state}
-            onChange={observe.setPref}
+            options={subject.options}
+            value={subject.state}
+            onChange={setObserve}
             ariaLabel="Which searchpoint to show"
           />
         </div>
       )}
-      {observe.cfg ? (
+      {cfg ? (
         <>
           <NodeSurface
             node={node}
-            point={{ origin_prompt_fields: observe.cfg.promptFields, pipeline_overlay: {} }}
-            overlay={observe.cfg.config}
+            point={{ origin_prompt_fields: cfg.promptFields, pipeline_overlay: {} }}
+            overlay={cfg.config}
             schema={schema}
-            schemaStatus={schemaStatus}
-            outputSchema={outputSchema}
             modelCapabilities={modelCapabilities}
-            label={observe.cfg.label}
+            label={cfg.label}
             mode="values"
           />
-          {/* The prompt is the optimizer's evolved DELTA: empty means untouched, not "runs on nothing". */}
-          {Object.keys(observe.cfg.promptFields).length === 0 && (
+          {Object.keys(cfg.promptFields).length === 0 && (
             <p className="inspector-note">
               The optimizer has not changed this node&apos;s prompt — it still runs the
               one its dataset shipped.
@@ -313,7 +287,7 @@ function TargetProgram({
         </>
       ) : (
         <p className="inspector-note">
-          {observe.loading
+          {observed.loading
             ? "Loading the searchpoint…"
             : isLive
               ? "Scoring in progress — the resolved spec appears when the round closes."
@@ -324,8 +298,7 @@ function TargetProgram({
   );
 }
 
-// Dispatch on the served `kind`, never block shape: an unfired LLM node lacks the same keys a
-// measurement node does.
+// Dispatch on the served `kind`, never block shape: an unfired LLM node has a measurement node's.
 function RunSection({
   kind,
   block,
@@ -377,40 +350,36 @@ function CallRun({
   loading: boolean;
   inFlight: boolean;
 }) {
-  const templateFields = block?.input?.template_fields as Record<string, unknown> | undefined;
-  const response = block?.output?.response;
-  const reasoning = typeof block?.output?.reasoning === "string" ? block.output.reasoning : null;
+  const templateFields = Object.entries(block?.input.template_fields ?? {});
+  const response = block?.output.response;
+  const reasoning = block?.output.reasoning;
   const usage = block?.usage;
   const variants = variantsOf(response);
-  const prefix = prefixReading(
-    cacheShare(usage?.cache_read, usage?.input, !!block?.cached),
-    !!block?.cached,
-  );
+  const prefix = block?.prefix;
 
   // The ask carries the routing suffix; OpenRouter echoes `block.model` bare, dropping `:nitro`.
-  const asked = block?.config?.["model"];
+  const asked = block?.config["model"];
   const model = (typeof asked === "string" ? asked : block?.model) || "";
 
   const chips = [
+    { label: "call", value: block?.synthesized ? "none — banked answer replayed" : "" },
     { label: "model", value: model },
     { label: "dur", value: block ? fmtSecs(block.duration_s) : "" },
     {
       label: "tokens",
-      value: usage
-        ? `${usage.input ?? "—"}in / ${usage.output ?? "—"}out / ${(usage.input ?? 0) + (usage.output ?? 0)}t`
-        : "",
+      value: usage ? `${usage.input}in / ${usage.output}out / ${usage.input + usage.output}t` : "",
     },
     // Never labelled "cached": app-wide that means OUR archive answered, the opposite fact.
     {
       label: "prefix cached",
       value:
-        prefix.state === "unreported"
+        prefix?.state === "unreported"
           ? "not reported"
-          : prefix.share != null
+          : prefix?.share != null
             ? `${fmtPct0(prefix.share)} of prompt`
             : "",
     },
-    { label: "template", value: (block?.input?.template_name as string | undefined) ?? "" },
+    { label: "template", value: block?.input.template_name ?? "" },
     { label: "ts", value: block?.timestamp ?? "" },
   ].filter((c) => c.value !== "" && c.value !== "—");
 
@@ -441,16 +410,14 @@ function CallRun({
             <section className="opt-detail-col opt-detail-col-fields" aria-label="Template fields">
               <div className="opt-detail-col-head">
                 <span>Rendered input</span>
-                {templateFields && (
-                  <span className="opt-detail-col-count">
-                    {Object.keys(templateFields).length}
-                  </span>
+                {templateFields.length > 0 && (
+                  <span className="opt-detail-col-count">{templateFields.length}</span>
                 )}
               </div>
               <div className="opt-detail-col-body">
-                {templateFields && Object.keys(templateFields).length > 0 ? (
+                {templateFields.length > 0 ? (
                   <dl className="opt-detail-fields">
-                    {Object.entries(templateFields).map(([k, v]) => (
+                    {templateFields.map(([k, v]) => (
                       <div key={k} className="opt-detail-field">
                         <dt>{k}</dt>
                         <dd>

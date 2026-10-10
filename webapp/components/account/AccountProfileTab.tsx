@@ -1,5 +1,4 @@
 "use client";
-// A session with no provider is the local workspace (sign-in off, or the CLI's own identity).
 
 import { AccountEmpty, AccountSection } from "./AccountSection";
 import { PROVIDER_LABEL, ProviderIcon } from "./providers";

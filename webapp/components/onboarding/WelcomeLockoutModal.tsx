@@ -1,12 +1,11 @@
 "use client";
-// The auth prompt: popup chrome around the shared <AuthCore/>, which /login renders bare.
 
 import { BRAND } from "@/lib/brand";
 import { useAuth } from "@/lib/auth-context";
 import { Button, Dialog, IconClose } from "@/components/ui";
 import { AuthCore } from "@/components/login/AuthCore";
 
-// Props-free: mounted ONCE (app/page.tsx); every trigger calls `openAuthPrompt()`, never an `open` prop.
+// Mounted ONCE (app/page.tsx): every trigger calls `openAuthPrompt()`, never an `open` prop.
 export function WelcomeLockoutModal() {
   const { authPrompt, closeAuthPrompt } = useAuth();
   const { open, code: errorCode, email: errorEmail } = authPrompt;

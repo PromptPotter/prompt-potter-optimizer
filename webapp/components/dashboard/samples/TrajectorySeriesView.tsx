@@ -1,6 +1,4 @@
 "use client";
-// Sample Trajectory grid: one row per round, one column per sample, coloured by position change.
-// No round-file fetch — the order is positional over the round's `selection` in `dashboard.json`.
 
 import { useMemo, useState } from "react";
 import type { CSSProperties } from "react";
@@ -8,21 +6,20 @@ import { pressable } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { useSelection } from "@/lib/SelectionContext";
 import {
-  classifyCell,
   orderAtStep,
   seedFromOrder,
-  type CellKind,
+  type SampleMovement,
   type SelectMode,
   type StepOrder,
-  cumulativeEverSeen,
   unionFirstAppearance,
   type SortedRounds,
 } from "@/lib/derivations";
+import { SAMPLE_MOVEMENT_LABELS } from "@/lib/api/types.generated";
 import { sameSampleSet } from "@/lib/sample-set";
 
-// Presentation half; `classifyCell` owns the predicate.
-const CELL_CLASS: Record<Exclude<CellKind, "absent">, string> = {
+const CELL_CLASS: Record<SampleMovement, string> = {
   new: "new",
+  readded: "new",
   gained: "add",
   lost: "lost",
   kept: "kept",
@@ -31,8 +28,8 @@ const CELL_CLASS: Record<Exclude<CellKind, "absent">, string> = {
 interface HoverState {
   round: number;
   sampleId: number;
-  position: number; // 1-indexed measurement position in the round
-  total: number; // round's measured count
+  position: number; // 1-indexed
+  total: number;
   x: number;
   y: number;
 }
@@ -49,8 +46,6 @@ export function SeriesView({
   const columns = useMemo(() => unionFirstAppearance(sorted.rounds), [sorted.rounds]);
   const { sampleSet, setSelectionForSampleSet } = useSelection();
   const [hover, setHover] = useState<HoverState | null>(null);
-
-  const everSeen = cumulativeEverSeen(sorted.rounds);
 
   const hoveredSelection = hover
     ? (sorted.rounds.find((r) => r.round === hover.round)?.selection ?? [])
@@ -76,29 +71,23 @@ export function SeriesView({
         {sorted.rounds.map((r, i) => {
           const pos = sorted.positions[i]!;
           const prev = i > 0 ? sorted.positions[i - 1]! : null;
-          const everPrev = i > 0 ? everSeen[i - 1]! : new Set<number>();
+          const movements = sorted.movements[i]!;
           const total = r.selection.length;
           return (
             <div key={r.round} className="st-series-row">
               <span className="st-row-label">R{r.round}</span>
               <span className="st-series-cells">
                 {columns.map((sid) => {
-                  const kind = classifyCell(sid, pos, prev, everPrev);
-                  if (kind === "absent") {
+                  const kind = movements.get(sid);
+                  const p = pos.get(sid);
+                  if (kind === undefined || p === undefined) {
                     return <span key={sid} className="st-sq absent">·</span>;
                   }
-                  const p = pos.get(sid)!;
                   const pp = prev?.get(sid);
                   const titleNote =
-                    kind === "new"
-                      ? everPrev.has(sid)
-                        ? "re-added"
-                        : "newly added"
-                      : kind === "gained"
-                        ? `gained: pos ${pp} → ${p}`
-                        : kind === "lost"
-                          ? `lost: pos ${pp} → ${p}`
-                          : "kept position";
+                    pp !== undefined && pp !== p
+                      ? `${SAMPLE_MOVEMENT_LABELS[kind]}: pos ${pp} → ${p}`
+                      : SAMPLE_MOVEMENT_LABELS[kind];
                   const isHovered = hover?.round === r.round && hover.sampleId === sid;
                   const activate = () => {
                     const o = orderAtStep(r.selection, sid, p);
@@ -201,10 +190,10 @@ function Legend() {
   );
   return (
     <div className="st-legend">
-      {swatch("st-sq new", "new / re-added")}
-      {swatch("st-sq add", "gained position")}
-      {swatch("st-sq lost", "lost position")}
-      {swatch("st-sq kept", "kept position")}
+      {swatch("st-sq new", `${SAMPLE_MOVEMENT_LABELS.new} / ${SAMPLE_MOVEMENT_LABELS.readded}`)}
+      {swatch("st-sq add", SAMPLE_MOVEMENT_LABELS.gained)}
+      {swatch("st-sq lost", SAMPLE_MOVEMENT_LABELS.lost)}
+      {swatch("st-sq kept", SAMPLE_MOVEMENT_LABELS.kept)}
       {swatch("st-sq absent", "not in bank")}
     </div>
   );

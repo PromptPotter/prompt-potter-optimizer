@@ -28,16 +28,11 @@ import {
 } from "@/components/ui";
 import { CellPanel } from "@/components/shell/cell/CellPanel";
 
-// THE measurement log: every list of measured cells is a PRESET of this pane. Grouping buckets
-// served rows under a served key order and never re-sorts them.
-
 type GroupBy = "sample" | "candidate" | "none";
 
 interface MeasurementsPreset {
-  // IDENTITY, never source (I9).
   path?: CyclePath;
   datasetName?: string;
-  // Any of these set makes the pane read its own slice rather than the shared roster.
   candidateId?: string;
   round?: number;
   scope?: HardSamplesScope;
@@ -81,8 +76,8 @@ function SampleHeader({ it, n }: { it: DatasetItem; n: number }) {
         {it.n_measured}/{n} graded
       </span>
       <Fitness value={it.mean_fitness} />
-      <span className="ms-dim" title="Fitted difficulty δ (higher = harder)">
-        {it.delta == null ? "δ —" : `δ ${it.delta.toFixed(2)}`}
+      <span className="ms-dim" title="Difficulty δ on the ruler (higher = harder)">
+        {it.delta == null ? it.delta_label : `δ ${it.delta.toFixed(2)}`}
       </span>
     </span>
   );
@@ -101,8 +96,6 @@ function CandidateHeader({ c, n }: { c: CellCandidate; n: number }) {
 
 export function MeasurementsPane({
   preset = {},
-  // Only Records → Measurements answers the ADDRESS's open cell; an embedded preset opens the
-  // panel only for a row clicked on it.
   claimsAddress = false,
   heading,
 }: {
@@ -228,19 +221,18 @@ export function MeasurementsPane({
     });
   }, [groupBy, data.cells, data.items, data.candidates, hideUnmeasured]);
 
-  // Folds ignored, so J/K stepping never skips a cell.
   const walk = useMemo(
     () => (groups ? groups.flatMap((g) => g.rows) : data.cells),
     [groups, data.cells],
   );
   const openIdx =
     owns && openCell
-      ? walk.findIndex((c) => c.run_id === openCell.runId && c.sample_id === openCell.sampleId)
+      ? walk.findIndex((c) => c.answer === openCell.answer)
       : -1;
   const activeRowId = openIdx >= 0 ? cellId(walk[openIdx]!) : null;
 
   const open = (c: CellRow) => {
-    const addr: CellAddress = { runId: c.run_id, sampleId: c.sample_id };
+    const addr: CellAddress = { answer: c.answer };
     setOpenCell(addr, paneId);
   };
 
@@ -281,7 +273,7 @@ export function MeasurementsPane({
             onChange={shared.setRankedBy}
             options={[
               { value: "info_gain", label: "Info gain", title: "Rank by expected decision-information gain." },
-              { value: "difficulty", label: "Hardness", title: "Rank by fitted difficulty (δ), hardest first." },
+              { value: "difficulty", label: "Hardness", title: "Rank by the ruler's difficulty (δ), hardest first." },
             ]}
           />
         )}

@@ -2,7 +2,6 @@ import type { ReactNode } from "react";
 import { cx } from "@/lib/cx";
 import s from "./SegmentedControl.module.css";
 
-// Exclusive choice, exactly one segment on. A non-exclusive set is `Chip`.
 export interface Segment<T extends string> {
   value: T;
   // An icon label REQUIRES `ariaLabel`.
@@ -10,7 +9,6 @@ export interface Segment<T extends string> {
   ariaLabel?: string;
   title?: string;
   disabled?: boolean;
-  // A gauge drawn behind the label, independent of which segment is on.
   fill?: "full" | "part";
 }
 

@@ -1,94 +1,93 @@
 "use client";
-// The disabled controls are INTENTIONAL placeholders for the chat-first front door (`docs/specs/chat-foundation.md`):
-// exempt from any "hide non-functional controls" sweep and from the no-M-milestone gate.
+// The disabled controls are INTENTIONAL placeholders (`docs/specs/chat-foundation.md`): never hide them.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useHardSamples } from "@/lib/hard-samples";
 import { useCycleStream } from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";
+import { useCycleEntry } from "@/lib/registry";
+import { phaseIs } from "@/lib/run-phase";
 import { useIngest } from "@/lib/ingest-flow";
-import { IngestConversation } from "@/components/ingest/IngestConversation";
-import { hasLiveProducer } from "@/lib/run-phase";
-import { draftForCampaign, runSummary } from "@/lib/derivations";
-import { HardSamplesHeatmap } from "@/components/dashboard/samples/HardSamplesHeatmap";
+import { IngestComposer, useIngestItems } from "@/components/ingest/IngestConversation";
+import { draftForCampaign, runSummary, type RunSummary } from "@/lib/derivations";
 import { NodeDetail } from "@/components/shell/node-surface/NodeDetail";
 import { PipelineStack } from "@/components/dashboard/pipeline/PipelineStack";
-import { RoundAxis } from "@/components/dashboard/pipeline/RoundAxis";
-import { useConnector } from "@/lib/hooks/useConnector";
 import { useSelection } from "@/lib/SelectionContext";
 import { useCycleEvents } from "@/lib/chat/useCycleEvents";
-import { benchPassActivity } from "@/lib/chat/activity";
-import { deriveDecision } from "@/lib/chat/decision";
+import { useThread, type ThreadItem } from "@/lib/chat/thread";
+import { Thread } from "@/components/chat/Thread";
 import { LiveSegment } from "@/components/chat/LiveSegment";
-import { RunCard } from "@/components/chat/RunCard";
+import { RunCard, RunSummaryItem } from "@/components/chat/RunCard";
 
-interface Props {
-  // The selected campaign when it is a durable check-in awaiting authoring, else null.
-  checkinCampaignId: string | null;
-  onOpenDashboard: () => void;
-}
-
-// The Chat surface: a display-only pipeline hero over the shared `IngestConversation` thread. Everything
-// above the thread is deliberately MINIATURE — the Dashboard reads the same surfaces at size.
-export function ChatPane({ checkinCampaignId, onOpenDashboard }: Props) {
+export function ChatPane() {
   const { datasetName } = useHardSamples();
   const { dash } = useCycleStream();
-  // The feed and its gate decision follow the viewed LEAF hop (an L4 inner campaign tails its own cycle);
-  // root identity (session, ingest compose) stays on the root exports.
-  const { viewedPath, cycleId, leafCampaignId, leafCycleId } = useWorkspace();
-  const [samplesOpen, setSamplesOpen] = useState(false);
-  const toggleSamples = () => setSamplesOpen((v) => !v);
+  const { viewedPath, campaignId, cycleId, leafCampaignId, leafCycleId } = useWorkspace();
+  const checkin = phaseIs(useCycleEntry(campaignId, cycleId)?.run_phase, "authoring");
+  const checkinCampaignId = checkin ? campaignId : null;
 
-  // `composing` suppresses the bound cycle's live feed so a fresh thread is not drawn over the last run.
-  const { flow: ingest, collection, composing } = useIngest();
+  const { flow: ingest, composing } = useIngest();
+  const thread = useThread<RunSummary>();
 
-  // A check-in has no dashboard.json; `reopenCheckin` loads its draft from disk. Keyed on the campaign
-  // alone — `ingest`'s methods close over stable setState.
+  // Keyed on the campaign alone: `ingest`'s methods close over stable setState.
   useEffect(() => {
     if (checkinCampaignId) ingest.reopenCheckin(checkinCampaignId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [checkinCampaignId]);
 
-  // Freeze a run into the thread on the live→stopped EDGE; the identity check stops a cycle switch filing
-  // the new cycle's numbers under the old one's ending. `hasLiveProducer`, NOT `isLive` (false at the gate).
-  const liveCycleKey = cycleId && hasLiveProducer(dash?.run_phase) ? cycleId : null;
+  // The served `attached`, NOT `isLive`, which is false at the gate.
+  const attached = dash?.producer.attached === true;
+  const liveCycleKey = cycleId && attached ? cycleId : null;
   const [prevLiveCycle, setPrevLiveCycle] = useState(liveCycleKey);
   if (liveCycleKey !== prevLiveCycle) {
     setPrevLiveCycle(liveCycleKey);
     const ended = runSummary(dash);
+    // The identity check stops a cycle switch filing the new cycle's numbers under the old one's ending.
     if (prevLiveCycle && !liveCycleKey && ended?.cycleId === prevLiveCycle) {
-      ingest.pushRunSummary(ended);
+      thread.appendRun(ended.cycleId, ended);
     }
   }
 
   const live = useCycleEvents(viewedPath);
-  const decision = deriveDecision(dash?.run_phase, dash);
-  const liveSegment =
-    leafCampaignId && leafCycleId ? (
-      <LiveSegment
-        campaignId={leafCampaignId}
-        cycleId={leafCycleId}
-        activity={live.activity}
-        progress={(liveCycleKey ? benchPassActivity(dash?.bench_pass) : null) ?? live.progress}
-        listening={live.connected && hasLiveProducer(dash?.run_phase)}
-        decision={decision}
-        hearts={dash?.run_standing?.stalls_left ?? null}
-        livesCap={dash?.run_standing?.stalls_left_cap ?? null}
-      />
-    ) : null;
+  // `composing` drops both, so a fresh thread is not drawn over the bound cycle's run.
+  const mounted: ThreadItem<RunSummary>[] = [];
+  if (!composing && leafCycleId) {
+    mounted.push({
+      id: "live",
+      kind: "block",
+      node: (
+        <LiveSegment
+          notices={live.notices}
+          status={live.status}
+          listening={live.connected && attached}
+          decision={live.decision}
+          lives={dash?.run_standing?.lives ?? null}
+        />
+      ),
+    });
+  }
+  if (!composing && cycleId) {
+    mounted.push({
+      id: "run-card",
+      kind: "block",
+      node: <RunCard />,
+    });
+  }
+  const ingestItems = useIngestItems(thread.items.length === 0 && mounted.length === 0);
+  const items: ThreadItem<RunSummary>[] = [
+    ...ingestItems.head,
+    ...thread.items,
+    ...ingestItems.tail,
+    ...mounted,
+  ];
 
-  const cv = useConnector();
-  // An L4 unit has no cache.json roster — its samples ARE the inner campaigns.
-  const selfOpt = cv.selfOptimization;
   const { node: selectedNode, setSelectionForNode } = useSelection();
-  // A campaign being set up previews the DRAFT's searchpoint, only for the campaign that draft is:
-  // the ingest thread outlives a sidebar selection.
+  // Only for the campaign that draft is: the ingest thread outlives a sidebar selection.
   const previewDraft = draftForCampaign(
     ingest.phase.stage === "ready" || ingest.phase.stage === "awaiting-context"
       ? ingest.phase.draft
       : null,
     leafCampaignId,
   );
-  // The draft's documents, not the wire, so config is read only where the served resolution answered.
   const authoring = useMemo(
     () =>
       previewDraft
@@ -99,49 +98,43 @@ export function ChatPane({ checkinCampaignId, onOpenDashboard }: Props) {
         : undefined,
     [previewDraft],
   );
-  // Auto-open once per mount; the ref keeps a manual close respected across cycle changes.
-  const samplesAutoOpened = useRef(false);
+  // The remote floats above the composer, so its height is published to the shell the remote hangs off.
+  const paneRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
-    if (cycleId && !samplesAutoOpened.current) {
-      samplesAutoOpened.current = true;
-      setSamplesOpen(true);
-    }
-  }, [cycleId]);
+    const row = paneRef.current?.querySelector<HTMLElement>(".chat-input-row");
+    const shell = paneRef.current?.closest<HTMLElement>(".shell");
+    if (!row || !shell) return;
+    const publish = new ResizeObserver(() =>
+      shell.style.setProperty("--chat-composer-h", `${row.offsetHeight}px`),
+    );
+    publish.observe(row);
+    return () => {
+      publish.disconnect();
+      shell.style.removeProperty("--chat-composer-h");
+    };
+  }, []);
 
   return (
-    <div className="content chat-content" id="content-chat">
+    <div className="content chat-content" id="content-chat" ref={paneRef}>
       <div className="wf-hero">
-        {/* The corner zoom buttons belong to the stack, the only thing that knows the level count. */}
-        <PipelineStack
-          datasetName={datasetName}
-          samplesOpen={samplesOpen}
-          onToggleSamples={toggleSamples}
-        />
-        {/* Its twin is on the Dashboard's optimizer card; both write the one `selection.round` axis. */}
-        <RoundAxis />
+        <PipelineStack datasetName={datasetName} />
         {selectedNode && (
-          <NodeDetail
-            node={selectedNode}
-            authoring={authoring}
-            onClose={() => setSelectionForNode(null)}
-          />
+          <div className="wf-hero-detail">
+            <NodeDetail
+              node={selectedNode}
+              authoring={authoring}
+              onClose={() => setSelectionForNode(null)}
+            />
+          </div>
         )}
-        {samplesOpen && !selfOpt && <HardSamplesHeatmap />}
       </div>
 
       <div className="chat-grid">
         <div className="chat-panel">
-          <IngestConversation
-            flow={ingest}
-            origins={collection.kind === "ready" ? collection.origins : undefined}
-            datasets={collection.kind === "ready" ? collection.entries : undefined}
-            liveSegment={composing ? undefined : liveSegment}
-            runCard={
-              composing || !cycleId ? undefined : (
-                <RunCard sampleOrder={live.sampleOrder} onOpenDashboard={onOpenDashboard} />
-              )
-            }
-          />
+          <div className="ingest-conversation">
+            <Thread items={items} renderRun={(summary) => <RunSummaryItem summary={summary} />} />
+            <IngestComposer />
+          </div>
         </div>
       </div>
     </div>

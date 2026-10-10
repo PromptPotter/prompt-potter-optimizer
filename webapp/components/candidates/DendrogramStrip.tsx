@@ -1,26 +1,22 @@
 "use client";
 import { memo, useMemo } from "react";
 import { cx } from "@/lib/cx";
-import { fmtDisplayValue, type DisplayMetric } from "@/lib/derivations";
+import { barValueLabel, type DisplayMetric } from "@/lib/derivations";
 import { useStableContent } from "@/lib/stable";
 import { pressable } from "@/components/ui";
-import type { LineageNode } from "@/lib/api";
-import type { CandidateView } from "@/lib/types";
-import { dendrogram, type DendroRow } from "./dendrogram";
+import type { CourseNode } from "@/lib/api";
+import type { CandidateBar } from "@/lib/types";
+import { dendroRow, dendrogram, type DendroRow } from "./dendrogram";
 import type { PlotGeometry } from "./FitnessChart";
 
-// The genealogy under the fitness bars, plotting the same flat candidate spine so x maps 1:1 onto
-// bar categories. x is a percentage of a viewport inset by the chart's gutters (`PlotGeometry`).
-
 interface Props {
-  views: CandidateView[];
+  views: CandidateBar[];
   plot: PlotGeometry | null;
   metric: DisplayMetric;
   selectedKey: string | null;
-  onSelect: (view: CandidateView | null) => void;
-  forkedFrom: ReadonlyMap<string, LineageNode>;
-  forkKeys: ReadonlySet<string>;
-  onFreeHierarchy: (course: LineageNode) => void;
+  onSelect: (view: CandidateBar | null) => void;
+  forkedFrom: ReadonlyMap<string, CourseNode>;
+  onFreeHierarchy: (course: CourseNode) => void;
 }
 
 export const DendrogramStrip = memo(function DendrogramStrip({
@@ -30,24 +26,9 @@ export const DendrogramStrip = memo(function DendrogramStrip({
   selectedKey,
   onSelect,
   forkedFrom,
-  forkKeys,
   onFreeHierarchy,
 }: Props) {
-  const rows = useStableContent(
-    useMemo<DendroRow[]>(
-      () =>
-        views.map((v) => ({
-          key: v.key,
-          round: v.round,
-          label: v.label,
-          candidate_id: v.candidate_id,
-          is_selected: v.is_selected,
-          crown: v.crown,
-          is_fork: forkKeys.has(v.key),
-        })),
-      [views, forkKeys],
-    ),
-  );
+  const rows = useStableContent(useMemo<DendroRow[]>(() => views.map(dendroRow), [views]));
   const geo = useMemo(() => dendrogram(rows, plot?.centers ?? []), [rows, plot]);
   const byKey = useMemo(() => new Map(views.map((v) => [v.key, v])), [views]);
 
@@ -87,15 +68,12 @@ export const DendrogramStrip = memo(function DendrogramStrip({
             y2={s.y2}
           />
         ))}
-        {/* Keyed positionally besides: a repair re-measures without re-minting, so two bars of one
-            timeline can share an address. */}
+        {/* Index in the key: a repair re-measures without re-minting, so two bars can share an address. */}
         {geo.nodes.map((n, i) => {
           const view = byKey.get(n.key);
           const selected = n.key === selectedKey;
           const forkCycle = forkedFrom.get(n.candidateId);
-          const value = view
-            ? fmtDisplayValue(metric, metric === "composite" ? view.composite : view.accuracy, view.theta)
-            : "—";
+          const value = view ? barValueLabel(metric, view) : "—";
           return (
             <g key={`${n.key}|${i}`} className="cand-dendro-node">
               <g

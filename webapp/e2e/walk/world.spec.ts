@@ -1,7 +1,6 @@
 import { test, expect, campaigns, richestCampaign } from "../harness";
 
-// The walk tier's precondition as a failing test: every other spec SKIPS on an empty world, so
-// without this the tier exits 0 having checked nothing.
+// Every other spec SKIPS on an empty world, so without this the tier exits 0 having checked nothing.
 
 test.describe("the walk world", () => {
   test("has campaigns to walk", async ({ request }) => {

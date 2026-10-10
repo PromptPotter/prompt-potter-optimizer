@@ -1,14 +1,13 @@
 "use client";
-// The Compare tab: any subjects from any datasets, read jointly — no L4 gate, no dataset scope.
-// Cheap reads auto-load on any selection change; the edit ranking and winner chains sit behind a press.
 
-import { useCallback, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Evidence, SubjectReading } from "@/lib/api";
 import { CardFrame, SegmentedControl, Toolbar, ToolbarSep } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { useCompareSelection } from "@/lib/compare-selection";
-import { buildForest } from "@/lib/derivations";
-import { useWorkspace } from "@/lib/workspace";
+import { readPaired } from "@/lib/derivations";
+import { invalidateReads } from "@/lib/read-cache";
+import { useRegistry } from "@/lib/registry";
 import { useEvidence } from "@/lib/hooks/useEvidence";
 import {
   sideTone,
@@ -19,11 +18,13 @@ import {
   verdictTone,
 } from "@/lib/format";
 import { maskedSubject } from "@/lib/api/reads";
+import { phaseWalks } from "@/lib/run-phase";
+import { PairedLift } from "@/components/shell/PairedLift";
 import { ChannelCards } from "./ChannelCards";
 import { Coverage, EvidenceCharts, SeriesLegend, type CompareView } from "./EvidenceCharts";
 import { ChannelMask } from "./ChannelMask";
 import { FactorGrid } from "./FactorGrid";
-import { NO_EDITS, type ScenarioEdits } from "./config-edit";
+import { NO_EDITS, ScenarioEditsProvider, type ScenarioEdits } from "./config-edit";
 import { isCustomMetric, MetricExpression, MetricPicker } from "./MetricPicker";
 import { PairwisePanel } from "./PairwisePanel";
 import { SearchpointCards } from "./SearchpointPanels";
@@ -48,61 +49,36 @@ function channelNames(subjects: readonly SubjectReading[]): ReadonlyMap<string, 
 }
 
 export function ComparePane() {
-  // Shell-level: a searchpoint is added from another tab (`lib/compare-selection.tsx`).
-  const {
-    channels,
-    subjects: selected,
-    hasSubject,
-    addSubject,
-    replace,
-    remove,
-  } = useCompareSelection();
+  const { channels, subjects: selected, replace } = useCompareSelection();
   const [view, setView] = useState<CompareView>("grouped");
-  // The BARE address, not the key: applying a mask changes the key, which would close the form on
-  // the edit it just accepted.
+  // The bare address, not the key: applying a mask changes the key, which would close the form.
   const [masking, setMasking] = useState<string | null>(null);
   const [ranking, setRanking] = useState(false);
   const [winnerChain, setWinnerChain] = useState(false);
   const [config, setConfig] = useState(true);
-  // Config edits invalidate rather than re-project — nothing ran at an edited value (`config-edit.tsx`).
   const [edits, setEdits] = useState<ScenarioEdits>(NO_EDITS);
-  // A catalogue key or an `expr:…`. Empty omits the query param so the SERVER picks its own default.
+  const editing = useMemo(() => ({ edits, setEdits }), [edits]);
+  // "" omits the query param, so the server picks its own default.
   const [metric, setMetric] = useState("");
-  // Server `row,col`, held here because cells pool server-side: an axis change is a refetch.
   const [grid, setGrid] = useState("");
-  // The registry's own poll says when a compared campaign moved: a closed round or a new phase
-  // re-reads the evidence at once, and a running one is re-read on a slow tick besides.
-  const { campaigns, cycles } = useWorkspace();
+  const { forest } = useRegistry();
   const runs = useMemo(
-    () =>
-      new Map(
-        buildForest(campaigns, cycles)
-          .flatMap((o) => o.runs)
-          .map((r) => [r.campaign.campaign_id, r]),
-      ),
-    [campaigns, cycles],
+    () => new Map(forest.flatMap((o) => o.runs).map((r) => [r.campaign.campaign_id, r])),
+    [forest],
   );
-  const compared = channels.flatMap((c) => runs.get(c.rootCampaignId)?.answering ?? []);
-  const moved = compared.map((a) => `${a.cycle_id}:${a.rounds_closed}:${a.run_phase}`).join("|");
-  const [seenMoved, setSeenMoved] = useState(moved);
-  const [revalidateOn, setRevalidateOn] = useState(0);
-  if (moved !== seenMoved) {
-    setSeenMoved(moved);
-    setRevalidateOn((n) => n + 1);
-  }
-  const running = compared.some((a) => a.run_phase === "running");
+  const compared = channels.flatMap((c) => runs.get(c.rootCampaignId)?.line ?? []);
+  const moved = compared
+    .map((a) => `${a.holder.cycle_id}:${a.rounds_closed}:${a.run_phase}`)
+    .join("|");
+  useEffect(() => invalidateReads("evidence"), [moved]);
+  const running = compared.some((a) => phaseWalks(a.run_phase));
   const { evidence, loading, error, invalidMetric } = useEvidence(
     selected,
-    ranking,
-    winnerChain,
-    config,
-    metric,
-    grid,
-    running ? { intervalMs: LIVE_EVIDENCE_MS, revalidateOn } : null,
+    running ? LIVE_EVIDENCE_MS : null,
+    { ranking, winnerChain, config, metric, grid },
   );
 
-  // A new campaign set drops the ranking press, the metric (the catalogue is per-selection; a stale
-  // pick 400s) and the edits. Keyed on CAMPAIGNS, so re-pointing a channel keeps the metric.
+  // Keyed on campaigns, so re-pointing a channel keeps the metric; a stale metric pick 400s.
   const campaignsKey = useMemo(
     () => [...new Set(channels.map((c) => c.rootCampaignId))].sort().join("~"),
     [channels],
@@ -116,20 +92,12 @@ export function ComparePane() {
     setMasking(null);
   }
 
-  const repoint = useCallback(
-    (from: string, to: string) => {
-      setMasking(null);
-      replace(from, to);
-    },
-    [replace],
-  );
-
   const comparability = evidence?.comparability ?? null;
   const readable = !!evidence?.subjects.some((c) => c.n_cells > 0);
   const names = useMemo(() => channelNames(evidence?.subjects ?? []), [evidence?.subjects]);
-  // Resolved against the LAST GOOD read (`survive:"invalid"`), so a formula typo keeps the form open.
   const maskTarget =
     evidence?.subjects.find((s) => maskedSubject(s, {}) === masking) ?? null;
+  if (masking !== null && evidence && !loading && maskTarget === null) setMasking(null);
   const hasBranch = !!evidence?.subjects.some((s) => s.kind !== "campaign");
 
   return (
@@ -137,7 +105,7 @@ export function ComparePane() {
         <div className="cmp-main">
           {selected.length === 0 ? (
             <CardFrame title="Compare" headingTag="h2">
-              <p className="l4-lede">
+              <p className="note-lede">
                 {/* "the campaign list", not "the sidebar": on a phone there is no sidebar. */}
                 Tick <strong>▢</strong> beside two or more campaigns in the campaign list. Each lands on
                 its own winner; open a channel&rsquo;s lineage to walk its cladogram — click any
@@ -148,36 +116,21 @@ export function ComparePane() {
             </CardFrame>
           ) : error ? (
             <CardFrame title="Compare" headingTag="h2">
-              <p className="l4-warn">Could not read the selection: {error}</p>
+              <p className="note-warn">Could not read the selection: {error}</p>
             </CardFrame>
           ) : !evidence || loading ? (
             <CardFrame title="Compare" headingTag="h2">
-              <p className="l4-empty">Reading {selected.length} channel(s)…</p>
+              <p className="note-empty">Reading {selected.length} channel(s)…</p>
             </CardFrame>
           ) : (
-            <>
-              <ChannelCards
-                evidence={evidence}
-                channels={channels}
-                runs={runs}
-                edits={edits}
-                onEdits={setEdits}
-                onReplace={repoint}
-                onAdd={addSubject}
-                hasSubject={hasSubject}
-                onRemove={remove}
-              />
+            <ScenarioEditsProvider value={editing}>
+              <ChannelCards evidence={evidence} runs={runs} />
 
               {config ? (
-                <SearchpointCards
-                  evidence={evidence}
-                  loading={loading}
-                  edits={edits}
-                  onEdits={setEdits}
-                />
+                <SearchpointCards evidence={evidence} loading={loading} />
               ) : (
                 <CardFrame title="How these searchpoints are configured" headingTag="h2">
-                  <p className="l4-lede">
+                  <p className="note-lede">
                     Not fetched.{" "}
                     <button
                       type="button"
@@ -218,12 +171,11 @@ export function ComparePane() {
                     onMetric={setMetric}
                   />
                 )}
-                {/* `useEvidence` keeps the last good read on an invalid metric; this says so. */}
                 {invalidMetric && !isCustomMetric(metric) && (
-                  <p className="l4-warn">{invalidMetric}</p>
+                  <p className="note-warn">{invalidMetric}</p>
                 )}
                 {evidence.unread_subjects.length > 0 && (
-                  <p className="l4-note">
+                  <p className="note-info">
                     Selected but not read: {evidence.unread_subjects.join(", ")}. Each has nothing
                     measured at the point it addresses, so it is absent from every number here
                     rather than counted as a low one.
@@ -246,8 +198,7 @@ export function ComparePane() {
                     />
                     {maskTarget && (
                       <ChannelMask
-                        // Keyed: the editor holds a local draft, and unkeyed the next channel
-                        // would open holding the previous one's criterion.
+                        // Keyed: unkeyed, the next channel opens holding this one's local draft.
                         key={masking}
                         subject={maskTarget}
                         invalid={invalidMetric}
@@ -308,14 +259,13 @@ export function ComparePane() {
               >
                 <Ranking evidence={evidence} nSubjects={selected.length} />
               </CardFrame>
-            </>
+            </ScenarioEditsProvider>
           )}
         </div>
     </div>
   );
 }
 
-// Every field is served, the caveat included — it has one owner on the server.
 function Scenarios({ evidence }: { evidence: Evidence }) {
   const masked = evidence.subjects.filter((s) => s.scenario !== null);
   if (masked.length === 0) return null;
@@ -326,7 +276,7 @@ function Scenarios({ evidence }: { evidence: Evidence }) {
         if (!sc) return null;
         return (
           <div key={s.key}>
-            <p className={sc.first_divergent_round !== null ? "l4-warn" : "l4-lede"}>
+            <p className={sc.first_divergent_round !== null ? "note-warn" : "note-lede"}>
               <strong>{s.label}</strong> under <code>{s.mask?.lens}</code>:{" "}
               {sc.winner_changed ? (
                 <>
@@ -341,7 +291,7 @@ function Scenarios({ evidence }: { evidence: Evidence }) {
               {sc.total_rounds === 1 ? "" : "s"} unchanged; the head reads over{" "}
               {sc.n_samples_scored} sample{sc.n_samples_scored === 1 ? "" : "s"}.
             </p>
-            <p className="l4-note">{sc.note}</p>
+            <p className="note-info">{sc.note}</p>
           </div>
         );
       })}
@@ -349,8 +299,6 @@ function Scenarios({ evidence }: { evidence: Evidence }) {
   );
 }
 
-// It reads the VIEW: the cell-wise forms plot every cell any subject reached, while Merged brackets
-// each subject over its own — so the denominator differs exactly when a subject came up short.
 function MetricLede({
   evidence,
   view,
@@ -366,20 +314,20 @@ function MetricLede({
   const shared = `${n} cell${n === 1 ? "" : "s"}`;
   return (
     <>
-      <p className="l4-lede">
+      <p className="note-lede">
         {m.spec.label} — {m.spec.description} Graded by <code>{evidence.scorer_id}</code>.{" "}
         {view === "merged"
           ? `Each subject is merged over its own cells, counted on its row; ${shared} are shared by all of them.`
           : `Plotted over every one of the ${m.covered_cells.length} cell(s) any selected subject reached; ${shared} are shared by all of them, which is what the pairs and the variance split are over.`}
       </p>
       {m.spec.higher_is_better === null && (
-        <p className="l4-note">
+        <p className="note-info">
           A composed metric has no direction the server can name — whether higher is better here is
           yours to know.
         </p>
       )}
       {missing && (
-        <p className="l4-note">
+        <p className="note-info">
           Cells measured but unreadable here: {missing}. Absent from the plot, never zero.
         </p>
       )}
@@ -387,7 +335,6 @@ function MetricLede({
   );
 }
 
-// Filtered to subjects that actually came up short; a zero-count row would read as "abc123 (0)".
 function unreadable(
   rows: readonly SubjectReading[],
   names: ReadonlyMap<string, string>,
@@ -408,11 +355,11 @@ function MetricUnavailable({
   const m = evidence.metric;
   return (
     <>
-      <p className="l4-empty">
+      <p className="note-empty">
         No subject in this selection can be read as <strong>{m.spec.label}</strong>.{" "}
         {m.spec.description}
       </p>
-      <p className="l4-note">
+      <p className="note-info">
         Cells measured but unreadable here: {unreadable(evidence.subjects, names)}. Absent, never
         zero — pick another metric to compare these subjects.
       </p>
@@ -431,7 +378,7 @@ function WinnerChains({
 }) {
   if (!hasBranch) {
     return (
-      <p className="l4-lede">
+      <p className="note-lede">
         Every channel here is a campaign, which is its origin — nothing precedes it. Pick a branch
         or a searchpoint to see the chain that led to it.
       </p>
@@ -439,16 +386,16 @@ function WinnerChains({
   }
   if (!shown) {
     return (
-      <p className="l4-lede">
+      <p className="note-lede">
         Not fetched. Each channel above reads one searchpoint; a winner chain opens every round
-        document its branch elected on, which is why it waits for a press.
+        file its branch elected on, which is why it waits for a press.
       </p>
     );
   }
   const points = evidence.subjects.reduce((n, s) => n + (s.winner_chain?.length ?? 0), 0);
   const parted = evidence.subjects.some((s) => s.scenario?.winner_changed);
   return (
-    <p className="l4-lede">
+    <p className="note-lede">
       {points} point(s) across {evidence.subjects.filter((s) => s.winner_chain).length} branch(es),
       shown under their heads in the <strong>Merged</strong> view. Each point is read on the cells
       that round actually scored — the subsets move between rounds, so a chain drawn on one shared
@@ -468,12 +415,11 @@ function Readings({ evidence }: { evidence: Evidence }) {
   const v = evidence.variance;
   const p = evidence.power;
   const oc = evidence.order_confound;
-  // Spreads and SDs of the SELECTED metric's own values, so they carry its unit.
   const unit = evidence.metric.spec.unit;
   return (
     <CardFrame title="What this selection can settle" headingTag="h2">
       {evidence.replicates.map((r) => (
-        <p className="l4-note" key={r.arm_id}>
+        <p className="note-info" key={r.arm_id}>
           Arm <code>{r.arm_id.slice(0, 8)}</code> ran {r.campaign_ids.length} times, spread{" "}
           {fmtMetricValue(unit, r.level_spread)}.{" "}
           {r.n_instruments === 1 ? (
@@ -490,13 +436,12 @@ function Readings({ evidence }: { evidence: Evidence }) {
         </p>
       ))}
       {!v ? (
-        <p className="l4-empty">
+        <p className="note-empty">
           The variance split needs two subjects sharing two cells. Subjects on different datasets
           never share one, which is why a mixed selection stops here.
         </p>
       ) : (
         <>
-          {/* The three-way split only: `null_subject_scatter` is stated with its meaning below. */}
           <dl className="l4-readings">
             <div>
               <dt>cell effect</dt>
@@ -513,7 +458,7 @@ function Readings({ evidence }: { evidence: Evidence }) {
               <dd>{fmtMetricValue(unit, v.residual_sd)}</dd>
             </div>
           </dl>
-          <p className="l4-lede">
+          <p className="note-lede">
             Over the {v.n_cells} cell{v.n_cells === 1 ? "" : "s"} all {v.n_subjects} subjects
             measured. Under the null a subject mean still scatters by{" "}
             {fmtMetricValue(unit, v.null_subject_scatter)} —{" "}
@@ -526,7 +471,7 @@ function Readings({ evidence }: { evidence: Evidence }) {
         </>
       )}
       {p && (
-        <p className="l4-lede">
+        <p className="note-lede">
           At {p.cells_per_subject} cells/subject the paired SE is{" "}
           {fmtMetricValue(unit, p.paired_se)}, so the smallest detectable effect is{" "}
           {fmtMetricValue(unit, p.min_detectable_effect)}. The widest gap on the roster is{" "}
@@ -538,7 +483,7 @@ function Readings({ evidence }: { evidence: Evidence }) {
         </p>
       )}
       {oc?.level_vs_order != null && (
-        <p className={cx("l4-lede", oc.order_confounded && "l4-warn")}>
+        <p className={cx("note-lede", oc.order_confounded && "note-warn")}>
           Run-order confound: value vs order ρ {fmtSigned(oc.level_vs_order, 2)}
           {oc.order_confounded && (
             <>
@@ -558,9 +503,9 @@ function Ranking({ evidence, nSubjects }: { evidence: Evidence; nSubjects: numbe
   const m = evidence.metric;
   if (!evidence.ranking_computed) {
     return (
-      <p className="l4-lede">
+      <p className="note-lede">
         Not computed. Everything above reads one searchpoint per channel; this walks every round
-        document of all {nSubjects} — the widest read here, which is why it waits for a press. It
+        file of all {nSubjects} — the widest read here, which is why it waits for a press. It
         ranks each SEARCHPOINT against its own campaign&rsquo;s origin, so only campaign channels
         feed it and nothing pools across two of them.
       </p>
@@ -568,7 +513,7 @@ function Ranking({ evidence, nSubjects }: { evidence: Evidence; nSubjects: numbe
   }
   if (evidence.edits.length === 0) {
     return (
-      <p className="l4-empty">
+      <p className="note-empty">
         No scored edits in this selection. One needs its campaign&rsquo;s round-0 origin plus a
         second searchpoint measured on cells that origin also scored — and a campaign channel to
         be ticked at all.
@@ -583,37 +528,42 @@ function Ranking({ evidence, nSubjects }: { evidence: Evidence; nSubjects: numbe
             <th scope="col">#</th>
             <th scope="col">edit</th>
             <th scope="col">{m.spec.label} over its origin · 95% CI</th>
-            <th scope="col">cells / n</th>
+            <th scope="col">cells</th>
             <th scope="col">seen</th>
           </tr>
         </thead>
         <tbody>
-          {/* Keyed on BOTH halves of the served identity: two campaigns can share one `sp_hash`. */}
-          {evidence.edits.map((row, i) => (
-            <tr className="l4-row" key={`${row.campaign_id}/${row.sp_hash}`}>
-              <td className="l4-rank">{i + 1}</td>
-              <td className="l4-label" title={`${row.label} · ${row.campaign_id}`}>
-                <code>{row.sp_hash}</code> {row.label}
-                <span className="l4-dim"> {shortId(row.campaign_id)}</span>
-              </td>
-              <td className={cx("l4-effect", sideTone(row.side))}>
-                <span className="l4-effect-mean">
-                  {fmtMetricValue(m.spec.unit, row.anchor_effect)}
-                </span>
-                <span className="l4-effect-ci">
-                  {fmtMetricInterval(m.spec.unit, row.ci_lo, row.ci_hi)}
-                </span>
-              </td>
-              <td className="l4-num">
-                {row.n_cells}
-                <span className="l4-dim"> / {row.n_measurements}</span>
-              </td>
-              <td className="l4-num">{row.provenance.length}</td>
-            </tr>
-          ))}
+          {/* Keyed on both halves: two campaigns can share one `sp_hash`. */}
+          {evidence.edits.map((row, i) => {
+            const pair = readPaired(row.reading);
+            const lift = pair.read ? pair.lift.estimate : null;
+            return (
+              <tr className="l4-row" key={`${row.campaign_id}/${row.sp_hash}`}>
+                <td className="l4-rank">{lift === null ? "—" : i + 1}</td>
+                <td className="l4-label" title={`${row.label} · ${row.campaign_id}`}>
+                  <code>{row.sp_hash}</code> {row.label}
+                  <span className="l4-dim"> {shortId(row.campaign_id)}</span>
+                </td>
+                {lift === null ? (
+                  <td className="l4-dim">
+                    <PairedLift reading={row.reading} unread="sentence" />
+                  </td>
+                ) : (
+                  <td className={cx("l4-effect", sideTone(lift.side))}>
+                    <span className="l4-effect-mean">{fmtMetricValue(m.spec.unit, lift.value)}</span>
+                    <span className="l4-effect-ci">
+                      {fmtMetricInterval(m.spec.unit, lift.ci_lo, lift.ci_hi)}
+                    </span>
+                  </td>
+                )}
+                <td className="l4-num">{pair.read ? pair.cells : "—"}</td>
+                <td className="l4-num">{row.provenance.length}</td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
-      <p className="l4-lede">
+      <p className="note-lede">
         An interval spanning zero is the ordinary outcome on a small panel — the ranking orders
         these, it does not endorse them. To settle one, deepen it with <code>verify</code> rather
         than repeating it.

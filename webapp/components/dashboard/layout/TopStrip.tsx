@@ -4,20 +4,16 @@ import { useCycleStream } from "@/lib/poll";
 import { fmtSecs } from "@/lib/format";
 import { Hearts } from "@/components/ui";
 
-// Frameless one-line run summary. Run state is NOT repeated here — the masthead owns it.
-
 export const TopStrip = memo(function TopStrip() {
   const { dash } = useCycleStream();
   const lastQuery = dash?.last_query_elapsed_s ?? null;
-  // Only where the optimizer banks stalls; the cap is the denominator (3-of-4 vs 3-of-7).
-  const hearts = dash?.run_standing?.stalls_left ?? null;
-  const livesCap = dash?.run_standing?.stalls_left_cap ?? null;
+  const lives = dash?.run_standing?.lives ?? null;
 
   return (
     <div className="topstrip">
-      {hearts != null && (
+      {lives && (
         <>
-          <Hearts hearts={hearts} cap={livesCap} className="topstrip-hearts" />
+          <Hearts lives={lives} className="topstrip-hearts" />
           <span className="topstrip-sep" aria-hidden="true" />
         </>
       )}
