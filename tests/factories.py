@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from pathlib import Path
-from types import EllipsisType, SimpleNamespace
+from types import EllipsisType
 from typing import Any, cast
 
 from promptpotter.application.initialization.session import Session
@@ -14,6 +14,7 @@ from promptpotter.application.optimizers.potter.records import (
     Ladder,
     PotterRoundState,
 )
+from promptpotter.connectors.protocol import PROBE_WORKLOAD, Connector
 from promptpotter.domain.bench import (
     BENCH_HEADLINE,
     BandedValue,
@@ -41,6 +42,7 @@ from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import CellSheet, Grade, GradedCell, MeasuredCell
 from promptpotter.domain.spend import SpendBucket, SpendCeilings, SpendRollup
 from promptpotter.domain.wounds import ValidationFailure
+from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.llm.spend_book import CeilingMeter, SpendBook
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.io import write_json
@@ -148,6 +150,11 @@ def spend_book(
     )
 
 
+def backend_client(**declared: Any) -> BackendClient:
+    connector = Connector("fake", lambda query, params: {"query": query}, **declared)
+    return BackendClient(connector, "http://backend", workload=PROBE_WORKLOAD)
+
+
 def workspace(root: Path) -> Stores:
     return build_stores(
         default_identity(), projects_root=root / "projects", benchmarks_root=root / "datasets"
@@ -160,13 +167,8 @@ def loop_session(
     session = Session(
         store=stores,
         backend_id=backend_id,
-        backend_client=SimpleNamespace(  # type: ignore[arg-type]
-            max_cells_in_flight=1,
-            cancel_stops_billing=True,
-            holds_own_sends=True,
-            derives_spend_bounds=False,
-            measured_unit="sample",
-            backpressure=SimpleNamespace(reading=lambda: None),
+        backend_client=backend_client(
+            max_cells_in_flight=1, cancel_stops_billing=True, holds_own_sends=True
         ),
         pipeline_schema=schema,
         samples=samples,

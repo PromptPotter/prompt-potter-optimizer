@@ -770,8 +770,8 @@ def test_rewriting_the_prompt_panel_cannot_accumulate_the_operator_framing() -> 
 def test_a_controlled_arm_remembers_only_the_answers_its_own_line_walked(built_stores: Any) -> None:
     import contextvars
 
-    from factories import measurements
-
+    from promptpotter.domain.sample import ArchiveEntry
+    from promptpotter.domain.scoring import MeasuredCell
     from promptpotter.infrastructure.store.archive_queries import (
         SampleFoldRow,
         list_populations,
@@ -783,55 +783,63 @@ def test_a_controlled_arm_remembers_only_the_answers_its_own_line_walked(built_s
     )
     from promptpotter.infrastructure.store.measurement_archive import config_key
 
-    def entry(name: str) -> dict[str, Any]:
-        key = config_key([("", {"individual": name})])
-        return {"config_key": key, "dataset_name": "ds", "prompt_fields_id": name}
+    def entry(name: str) -> ArchiveEntry:
+        return ArchiveEntry(
+            config_key=config_key([("", {"individual": name})]),
+            prompt_fields_id=name,
+            rendered_prompt_hash="",
+            node_configs=[],
+            pipeline_params={},
+            dataset_name="ds",
+        )
 
-    def bank(name: str, grades: list[float], at: int) -> list[str]:
-        stamps = {"role": "panel", "source": "optimization_loop", "provenance": "A"}
-        stamps["created_at"] = f"2026-09-28T00:00:{at:02d}Z"
-        rows = [{**row, **stamps} for row in measurements(grades)]
-        return list(built_stores.archive.file_answers(entry(name), rows))
+    def bank(name: str, said: list[str], at: int) -> list[str]:
+        return built_stores.archive.file_answers(
+            entry(name),
+            [(MeasuredCell(sample_id=i, predicted=p), "A") for i, p in enumerate(said)],
+            role="panel",
+            source="optimization_loop",
+            created_at=f"2026-09-28T00:00:{at:02d}Z",
+        )
 
     def listed() -> set[str]:
-        return {e["prompt_fields_id"] for e in list_populations(built_stores, dataset_name="ds")}
+        return {e.prompt_fields_id for e in list_populations(built_stores, dataset_name="ds")}
 
-    def remembered(name: str) -> list[float]:
-        held = load_population(built_stores, entry(name))
-        return [row["hit"] for row in held["measurements"]] if held else []
+    def remembered(name: str) -> list[str]:
+        return [answer.cell.predicted for answer in load_population(built_stores, entry(name))]
 
-    bank("foreign", [1.0, 0.0], 1)
-    bank("shared", [0.0, 0.0], 2)
+    bank("foreign", ["yes", "no"], 1)
+    bank("shared", ["no", "no"], 2)
 
     def fold_row(key: str) -> SampleFoldRow:
         return SampleFoldRow(config_key=key, sp=key, fk="formula", sig=[], graded=[])
 
     write_sample_fold(built_stores, dataset_name="ds", rows=[fold_row("x")])
 
-    def inside_arm() -> tuple[set[str], list[float], list[SampleFoldRow]]:
-        scope_memory_to_own_answers(set(bank("origin", [1.0, 0.0], 3)))
+    def inside_arm() -> tuple[set[str], list[str], list[SampleFoldRow]]:
+        scope_memory_to_own_answers(set(bank("origin", ["yes", "no"], 3)))
         assert listed() == {"origin"}
         # A replayed answer joins the arm's memory exactly as a filed one does.
-        for answer in bank("shared", [1.0, 1.0], 0):
+        for answer in bank("shared", ["yes", "yes"], 0):
             note_walked(answer)
         write_sample_fold(built_stores, dataset_name="ds", rows=[fold_row("y")])
         return listed(), remembered("shared"), sample_fold_rows(built_stores, dataset_name="ds")
 
     own, shared, fold = contextvars.copy_context().run(inside_arm)
     assert own == {"origin", "shared"}
-    assert shared == [True, True], "another campaign's answer of a shared cell steered the arm"
+    assert shared == ["yes", "yes"], "another campaign's answer of a shared cell steered the arm"
     assert fold == []
     assert listed() == {"foreign", "shared", "origin"}
-    assert remembered("shared") == [False, False]
+    assert remembered("shared") == ["no", "no"]
     assert sample_fold_rows(built_stores, dataset_name="ds") == [fold_row("x")]
 
 
 def test_no_held_out_row_reaches_a_round_panel_or_an_archive_view() -> None:
-    from promptpotter.application.intelligence.exploration import (
+    from promptpotter.application.intelligence.indexes.sample import SampleFoldRow, SampleIndex
+    from promptpotter.application.intelligence.rasch import (
         Observation,
         select_round_subset,
     )
-    from promptpotter.application.intelligence.indexes.sample import SampleFoldRow, SampleIndex
     from promptpotter.application.optimizers.capo.members import cross_shots, mutate_shots
     from promptpotter.application.optimizers.potter.validators.l1_strict import (
         L1_SHOTS_IN_DEMO_POOL,

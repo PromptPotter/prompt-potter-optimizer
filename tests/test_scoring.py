@@ -122,7 +122,7 @@ from promptpotter.domain.run_records import (
     SampleScoredRecord,
     TokenUsageRecord,
 )
-from promptpotter.domain.sample import Sample
+from promptpotter.domain.sample import ArchiveEntry, Sample
 from promptpotter.domain.scoring import (
     ROW_GRADES,
     CellSheet,
@@ -135,7 +135,7 @@ from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.spend import SpendCeilings
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store.measurement_archive import config_key
-from promptpotter.shared import extract_gsm8k_number
+from promptpotter.shared.answer_text import extract_gsm8k_number
 from promptpotter.shared.measurement_context import NO_ROUND_SLOT, MeasurementRole, RoleScope
 from promptpotter.shared.statistics import paired_mean_t
 from tests.factories import (
@@ -431,10 +431,6 @@ def test_a_cell_read_off_the_wire_keeps_its_facts_and_drops_any_grade_it_arrived
         "ground_truth_rank": 3,
         "n_candidates": 5,
         "answer": "file.a1",
-        "role": "panel",
-        "source": "optimization_loop",
-        "provenance": "A",
-        "created_at": "2026-05-19T00:00:00Z",
         "retry_of_degraded": True,
         "degraded_obs_count": 2,
     }
@@ -726,7 +722,7 @@ def test_round_winner_elects_by_ability_not_subset_accuracy() -> None:
 
 def test_a_thin_arm_cannot_win_on_a_margin_inside_its_own_noise() -> None:
     """`coverage_floor` IS PoBB's `n_min`, so every cut arm clears it and reaches the election."""
-    from promptpotter.application.intelligence.exploration import candidate_abilities
+    from promptpotter.application.intelligence.rasch import candidate_abilities
     from promptpotter.application.scoring.selection import elect_round_winner
     from promptpotter.shared.statistics import p_exceeds
 
@@ -759,7 +755,7 @@ def test_the_bar_is_what_the_parent_can_do_not_the_draw_that_crowned_it() -> Non
     """The rank reads the bias-corrected bar; ADMISSION reads the parent's measured θ."""
     import math
 
-    from promptpotter.application.intelligence.exploration import (
+    from promptpotter.application.intelligence.rasch import (
         candidate_abilities,
         theta_lift_over_parent,
     )
@@ -2587,7 +2583,7 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored() -> None:
 
 
 def test_a_cell_measured_twice_is_one_standing_row_to_every_reader() -> None:
-    from promptpotter.application.intelligence.exploration import responses_of
+    from promptpotter.application.intelligence.rasch import responses_of
     from promptpotter.application.scoring.metrics import fold_cells
     from promptpotter.application.scoring.selection import distinct_valid_cells, level_band
 
@@ -3329,14 +3325,22 @@ def _filed(
     stores: Any, individual: str, rows: list[Any], *, role: str = "panel", sp_hash: str = ""
 ) -> list[WalkedCell]:
     """A cell is keyed by the query it asks unless the row names its own key."""
-    entry = {
-        "config_key": config_key([("", {"individual": individual})]),
-        "dataset_name": "ds",
-        "prompt_fields_id": sp_hash or individual,
-    }
-    stamps = {"role": role, "source": "optimization_loop", "provenance": "A", "created_at": ""}
+    entry = ArchiveEntry(
+        config_key=config_key([("", {"individual": individual})]),
+        prompt_fields_id=sp_hash or individual,
+        rendered_prompt_hash="",
+        node_configs=[],
+        pipeline_params={},
+        dataset_name="ds",
+    )
     keyed = [{"sample_key": f"key:{row['query']}", **row} for row in rows]
-    answers = stores.archive.file_answers(entry, [{**row, **stamps} for row in keyed])
+    answers = stores.archive.file_answers(
+        entry,
+        [(MeasuredCell.from_wire(row), "A") for row in keyed],
+        role=role,
+        source="optimization_loop",
+        created_at="",
+    )
     return [
         (row["sample_key"], row["sample_id"], answer, False)
         for row, answer in zip(keyed, answers, strict=True)
@@ -3428,7 +3432,7 @@ def test_a_pairs_flips_pair_on_the_cell_and_count_only_what_both_subjects_graded
 def test_a_sample_is_never_hit_only_where_every_graded_cell_of_it_scored_nothing(
     built_stores: Any,
 ) -> None:
-    from promptpotter.application.scoring.cells import measurement_log
+    from promptpotter.application.scoring.measurement_log import measurement_log
 
     stores = built_stores
     stores.tenant_datasets.save_benchmark_rows(

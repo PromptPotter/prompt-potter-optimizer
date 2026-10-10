@@ -24,7 +24,6 @@ from promptpotter.application.commands.payloads import (
     CommandAcceptedBody,
     DatasetReplaced,
     EditDraftCampaignPayload,
-    OriginGateDecisionPayload,
     StartCheckinPayload,
     StartRunPayload,
 )
@@ -110,7 +109,7 @@ from promptpotter.application.optimizer_manifest import (
     OptimizerRoster,
     StartPrompt,
 )
-from promptpotter.application.origin import DatasetIndexEntry, OriginEntry
+from promptpotter.application.origin_listing import DatasetIndexEntry, OriginEntry
 from promptpotter.application.pipeline_resolve import (
     CampaignPipelineResponse,
     CampaignRunsWith,
@@ -153,6 +152,7 @@ from promptpotter.domain.cells import (
     CellsResponse,
     DatasetItem,
 )
+from promptpotter.domain.command_kinds import CommandKind, OriginGateDecisionPayload
 from promptpotter.domain.cycle_listing import CycleListEntry, LineStanding, RunStatus
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.dashboard_rows import (
@@ -660,9 +660,7 @@ def _emit_arm_outcomes_ended_early() -> str:
 
 
 def _emit_command_kinds() -> str:
-    from promptpotter.domain.command_kinds import ALL_DISPATCHED_KINDS
-
-    members = " | ".join(repr(k) for k in sorted(ALL_DISPATCHED_KINDS))
+    members = " | ".join(repr(k.value) for k in sorted(CommandKind))
     note = "Every kind `POST /commands/{kind}` dispatches (domain/command_kinds.py)."
     return f"// {note}\nexport type CommandKind = {members};"
 

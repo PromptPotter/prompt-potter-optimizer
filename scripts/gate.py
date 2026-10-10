@@ -286,10 +286,11 @@ def _help_imports(_: Sel) -> Outcome:
 _HANDLER_PROBE = """
 import importlib
 from promptpotter.application.commands import dispatcher
+from promptpotter.domain.command_kinds import CommandKind
 from promptpotter.presentation.cli import campaign_runner
 for table, package, rows in (
     ("COMMANDS", campaign_runner._COMMANDS_PACKAGE, campaign_runner.COMMANDS),
-    ("HANDLER_FOR_KIND", dispatcher._HANDLER_PACKAGE, dispatcher.HANDLER_FOR_KIND),
+    ("CommandKind", dispatcher._HANDLER_PACKAGE, {k.value: k.handler for k in CommandKind}),
 ):
     for key, target in rows.items():
         module, _, name = target.partition(":")

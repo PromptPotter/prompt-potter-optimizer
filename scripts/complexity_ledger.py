@@ -28,11 +28,11 @@ from pydantic import BaseModel
 
 BASELINE = {
     # Every `.py` under the package.
-    "modules": 429,
+    "modules": 434,
     # Every `__init__.py` among them.
     "init_files": 55,
     # The `__init__.py` files that re-export names instead of staying empty.
-    "reexport_shims": 6,
+    "reexport_shims": 5,
     # Campaign-config knobs, plus the node knobs each optimizer member declares.
     "config_leaf_fields": 79,
     # `Settings` fields — what the environment can set.
@@ -44,7 +44,7 @@ BASELINE = {
     # Leaves of `CycleResult` — what a run produces.
     "cycle_result_fields": 520,
     # Parameters annotated `Any`.
-    "any_params": 46,
+    "any_params": 47,
     # `dict[str, Any]` maps declared in `domain/`.
     "domain_any_maps": 62,
     # Models that opt out of `StrictModel`'s `extra="forbid"`.
@@ -57,7 +57,7 @@ BASELINE = {
     # transition written as a branch beside the tables was policy the count could not see.
     "escalation_rules": 11,
     # Function-local imports of the package's own modules.
-    "deferred_imports": 5,
+    "deferred_imports": 6,
     # `CLAUDE.md` files under the package.
     "claude_md": 10,
     # `tests/test_*.py` — `tests/CLAUDE.md` names what each one owns.
@@ -65,7 +65,7 @@ BASELINE = {
     # Test functions across them, each admitted through the charter's three axes.
     "test_functions": 144,
     # Every property of every schema the generated contract offers the browser.
-    "served_fields": 1655,
+    "served_fields": 1641,
 }
 
 _REPO = Path(__file__).resolve().parents[1]

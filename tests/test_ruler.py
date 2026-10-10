@@ -1,6 +1,6 @@
 """A wrong θ — the scale every ability is read on.
 
-Owns `application/intelligence/exploration.py` and `adaptive_queue_mechanism.py`,
+Owns `application/intelligence/rasch.py` and `adaptive_queue_mechanism.py`,
 `application/bench/difficulty.py`, `domain/ruler.py` and `domain/l4/proxies.py`. Pure estimator
 arithmetic: each test recovers a known answer from data built to have one.
 """
@@ -13,7 +13,7 @@ from statistics import NormalDist
 import numpy as np
 import pytest
 
-from promptpotter.application.intelligence.exploration import (
+from promptpotter.application.intelligence.rasch import (
     Observation,
     extend_ruler,
     fit_rasch,
@@ -205,7 +205,7 @@ def test_graduation_gate_stays_1pl_until_2pl_wins_holdout() -> None:
 
 def test_delta_ruler_stays_flat_until_a_second_arm_exists() -> None:
     from promptpotter.application.bench.difficulty import calibrate_delta_ruler
-    from promptpotter.application.intelligence.exploration import Observation
+    from promptpotter.application.intelligence.rasch import Observation
 
     n_min = 4
     arm_a = [Observation("a", sid, 1.0 if sid % 3 else 0.0) for sid in range(8)]

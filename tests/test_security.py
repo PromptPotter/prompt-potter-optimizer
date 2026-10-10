@@ -15,6 +15,7 @@ import pytest
 from factories import SANDBOX_CAMPAIGN, inner_sandbox, round_result, scored_candidate
 
 from promptpotter.application.jobs.reaper import reclaim_orphan_sandboxes
+from promptpotter.domain.command_kinds import CommandKind
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.phases import RunPhase, StopReason
 from promptpotter.domain.run_records import RunPhaseRecord
@@ -311,9 +312,9 @@ def test_subprincipal_grant_attenuates_and_the_dispatcher_gate_enforces(tmp_path
     assert ident.capabilities == frozenset({CAMPAIGN_STEP_CAP})
 
     disp = CommandDispatcher(types.SimpleNamespace(identity=ident))
-    disp._require_capability_for("skip-searchpoint")  # holds campaign.step → no raise
+    disp._require_capability_for(CommandKind.SKIP_SEARCHPOINT)  # holds campaign.step → no raise
     with pytest.raises(NotFoundError):
-        disp._require_capability_for("start-run")  # lacks campaign.run
+        disp._require_capability_for(CommandKind.START_RUN)  # lacks campaign.run
     assert acting_principal_id(ident) == "sub-1", "audit must name the delegate, not the delegator"
 
     # A grant with no delegator is fail-secure: own tenant, ZERO caps — never owner.
@@ -431,8 +432,8 @@ async def test_a_skip_marks_the_cycle_babysat_only_where_a_searchpoint_was_cut(
     built_stores: Stores,
 ) -> None:
     from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
-    from promptpotter.application.commands.payloads import SkipSearchpointPayload
     from promptpotter.application.run_phase_control import RunControl
+    from promptpotter.domain.command_kinds import SkipSearchpointPayload
     from promptpotter.domain.run_records import CommandAckRecord
     from promptpotter.infrastructure.llm.telemetry import reset_cycle_ledger, set_cycle_ledger
     from promptpotter.infrastructure.producer_lock import release_cycle
@@ -493,11 +494,8 @@ async def test_a_loop_command_no_loop_will_take_is_refused_not_acked_and_dropped
     built_stores: Stores,
 ) -> None:
     from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
-    from promptpotter.application.commands.payloads import (
-        OriginGateDecisionPayload,
-        PauseCyclePayload,
-    )
     from promptpotter.application.run_phase_control import RunControl
+    from promptpotter.domain.command_kinds import OriginGateDecisionPayload, PauseCyclePayload
     from promptpotter.domain.phases import PauseCause
     from promptpotter.infrastructure.llm.telemetry import reset_cycle_ledger, set_cycle_ledger
     from promptpotter.infrastructure.producer_lock import release_cycle

@@ -47,7 +47,6 @@ from promptpotter.application.campaign_config import (
     load_campaign_config,
 )
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
-from promptpotter.application.commands.payloads import SkipSearchpointPayload
 from promptpotter.application.datasets.authored import (
     dataset_campaign_path,
     read_campaign_config_file,
@@ -65,13 +64,13 @@ from promptpotter.application.pipeline_resolve import (
     configure_and_apply_pipeline,
     resolve_campaign_config,
 )
-from promptpotter.application.runner.entry import RunMode
 from promptpotter.application.runner.inner.connector import measurement_modules
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, benchmark_datasets_root
 from promptpotter.config.settings import Settings
 from promptpotter.domain.bench import BenchScore, BenchTrigger
 from promptpotter.domain.campaign import ArmRequest
-from promptpotter.domain.launch_limits import LaunchLimits
+from promptpotter.domain.command_kinds import SkipSearchpointPayload
+from promptpotter.domain.launch_limits import LaunchLimits, RunMode
 from promptpotter.domain.phases import RunPhase, StopOutcome, StopReason, stop_reason_outcome
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import PROMPT_STRING_FIELDS
@@ -789,10 +788,9 @@ async def run_controlled(
     def memory(campaign_id: str) -> set[str]:
         scope_memory_to_own_answers(filed(campaign_id))
         return {
-            row["answer"]
+            answer.answer
             for entry in list_populations(stores, dataset_name=DATASET)
-            if (held := load_population(stores, entry)) is not None
-            for row in held["measurements"]
+            for answer in load_population(stores, entry)
         }
 
     foreign_only = set().union(*(filed(c) for c in subjects)) - set().union(

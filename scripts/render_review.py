@@ -13,7 +13,7 @@ from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
 from promptpotter.application.runner.campaign_result import read_cycle_bench
 from promptpotter.application.runner.review_md import render_review_md
-from promptpotter.application.scoring.cells import closed_rounds
+from promptpotter.application.scoring.closed_rounds import closed_rounds
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.projections.audit_trail import load_round_audits

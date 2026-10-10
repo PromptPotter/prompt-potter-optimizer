@@ -37,8 +37,7 @@ from promptpotter.application.embedded_run import open_session, run_campaign  # 
 from promptpotter.application.pipeline_resolve import (  # noqa: E402
     configure_and_apply_pipeline,
 )
-from promptpotter.application.runner.entry import RunMode  # noqa: E402
-from promptpotter.domain.launch_limits import LaunchLimits  # noqa: E402
+from promptpotter.domain.launch_limits import LaunchLimits, RunMode  # noqa: E402
 from promptpotter.presentation.terminal.completion import report_completion  # noqa: E402
 
 

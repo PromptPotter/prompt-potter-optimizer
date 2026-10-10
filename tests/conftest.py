@@ -6,8 +6,14 @@ from pathlib import Path
 import pytest
 from factories import workspace
 
+from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.application.optimizer_manifest import _BOUND, resolve_optimizer
 from promptpotter.infrastructure.store.stores import Stores
+
+
+@pytest.fixture(autouse=True, scope="session")
+def completed_registries() -> None:
+    complete_registries(every_treatment=False)
 
 
 @pytest.fixture(autouse=True)

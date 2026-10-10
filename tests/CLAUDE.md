@@ -42,7 +42,7 @@ you edited. Each file's docstring lists its packages; its `# N.` headers are the
 | You touched | Run | Sections |
 |-------------|-----|----------|
 | `application/scoring/`, `shared/statistics.py`, potter's `pobb/` and `escalation/`, the runner's election, `diagnostics/verify.py`, `evidence/` | `test_scoring.py` | scorer formulas · composite fitness and coverage · electing a round winner · elimination · escalation and stop, live and folded back on resume · paired readings over shared cells |
-| `intelligence/exploration.py` and `adaptive_queue_mechanism.py`, `bench/difficulty.py`, `domain/ruler.py`, `domain/l4/proxies.py` | `test_ruler.py` | the estimator · the δ ruler and the cells a round reads it on · the L4 outer proxy |
+| `intelligence/rasch.py` and `adaptive_queue_mechanism.py`, `bench/difficulty.py`, `domain/ruler.py`, `domain/l4/proxies.py` | `test_ruler.py` | the estimator · the δ ruler and the cells a round reads it on · the L4 outer proxy |
 | The hashes a measurement is filed under, `application/pipeline_resolve.py`, `domain/pipeline_overlay.py`, the held-out partition, anything a scored prompt is composed from | `test_identity.py` | what a measurement is filed under · the config a campaign runs · contamination of a scored prompt |
 | `infrastructure/store/measurement_archive.py` and `archive_queries.py`, `application/maintenance/`, `bench/resume_and_fork/`, `application/origin.py` | `test_archive.py` | replay eligibility · the archive on disk · replayed decisions and forks |
 | `infrastructure/llm/` (pricing, the spend book, wire cost), `application/jobs/quota.py`, `account_spend.py`, the runner's budget gate, judge billing | `test_spend.py` | what a call costs · what a run is billed · ceilings · spend outlives what spent it |
@@ -70,7 +70,7 @@ fails loud before a run spends, costs nothing to maintain, and needs no
 test to update. They exist across the package, e.g.
 one replayer per decision kind (`application/bench/resume_and_fork/replayers.py::replayers`),
 `L1_POSSIBLE ⊆ injection_table()` (`dispatch/injections/registry.py`), the `L1_MANDATORY`/origin-layout
-subset checks (`optimizers/potter/dispatch/layout.py`), the unread/abandoned row-key checks (`domain/scoring.py`),
+subset checks (`optimizers/potter/dispatch/layout.py`), the unread row-key check (`domain/scoring.py`),
 the divergence-hint exhaustiveness (`cli/commands/launch.py`). Add new ones the same way — beside
 the thing they validate, never as a repo-wide structure scan.
 

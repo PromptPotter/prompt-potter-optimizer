@@ -21,6 +21,7 @@ from unittest import mock
 import pytest
 from factories import (
     SANDBOX_CAMPAIGN,
+    backend_client,
     cycle_result,
     inner_sandbox,
     pipeline_schema,
@@ -217,7 +218,6 @@ async def test_a_cell_that_ran_without_a_grade_still_bills_what_it_spent() -> No
         measure_sample,
     )
     from promptpotter.domain.run_records import TokenUsageRecord
-    from promptpotter.infrastructure.backend import BackendClient
     from promptpotter.infrastructure.llm import telemetry
     from promptpotter.infrastructure.llm.spend_book import spending_under, unbounded_spend_book
     from promptpotter.shared.errors import CellUnscoreableError, ErrorCategory
@@ -227,15 +227,7 @@ async def test_a_cell_that_ran_without_a_grade_still_bills_what_it_spent() -> No
     async def _ran_ungraded(*_args: Any) -> dict[str, Any]:
         raise CellUnscoreableError("verifier timed out", spent=spent)
 
-    client = BackendClient(
-        "http://unused",
-        wire_adapter=lambda query, params: {"query": query},
-        session=types.SimpleNamespace(),  # type: ignore[arg-type]
-        execution="in_process",
-        in_process_run=_ran_ungraded,
-        workload=types.SimpleNamespace(),  # type: ignore[arg-type]
-        prompt_delivery=types.SimpleNamespace(),  # type: ignore[arg-type]
-    )
+    client = backend_client(execution="in_process", in_process_run=_ran_ungraded)
 
     class _Ledger:
         def __init__(self) -> None:
@@ -707,12 +699,7 @@ async def _walk(
                 held_lookahead=armed,
                 book=book,
             ),
-            backend_client=types.SimpleNamespace(
-                max_cells_in_flight=max_cells,
-                cancel_stops_billing=False,
-                holds_own_sends=False,
-                node_spend_bound=lambda node, cfg: node.spend_bound,
-            ),
+            backend_client=backend_client(max_cells_in_flight=max_cells),
             # One node the backend bounds at the cell's dollar, so the scheduler counts in them.
             pipeline_schema=types.SimpleNamespace(
                 nodes=[
@@ -786,12 +773,7 @@ async def _round(
         scoring=_row_scoring(),
         state=types.SimpleNamespace(ledger=None),
         control=_control_pausing(lambda: flag["pause"], held_lookahead=armed),
-        backend_client=types.SimpleNamespace(
-            max_cells_in_flight=armed,
-            cancel_stops_billing=False,
-            holds_own_sends=True,
-            derives_spend_bounds=False,
-        ),
+        backend_client=backend_client(max_cells_in_flight=armed, holds_own_sends=True),
         flight=None,
     )
     walks = [
@@ -997,12 +979,7 @@ async def test_a_resumed_arm_re_reads_its_cells_and_still_reaches_its_bench(
         scoring=_row_scoring(),
         state=types.SimpleNamespace(ledger=None),
         control=RunControl(book=book),
-        backend_client=types.SimpleNamespace(
-            max_cells_in_flight=1,
-            cancel_stops_billing=False,
-            holds_own_sends=False,
-            node_spend_bound=lambda node, cfg: node.spend_bound,
-        ),
+        backend_client=backend_client(max_cells_in_flight=1),
         pipeline_schema=types.SimpleNamespace(
             nodes=[
                 types.SimpleNamespace(
@@ -1239,12 +1216,12 @@ def test_a_run_in_its_own_process_spends_as_the_account_that_launched_it(
     """An identity rebuilt from the tenant alone carries no issuer, and no issuer IS the operator."""
     import types
 
-    from promptpotter.application.jobs.launcher.run_job import JobSpec
+    from promptpotter.application.jobs.launcher.run_job import HeldRun, JobSpec
     from promptpotter.application.jobs.quota import spends_the_hosts_own_key
     from promptpotter.application.jobs.registry import JobRegistry
-    from promptpotter.application.runner.entry import RunMode, _arm_spend_book
+    from promptpotter.application.runner.entry import _arm_spend_book
     from promptpotter.domain.cycle_paths import CycleHop
-    from promptpotter.domain.launch_limits import HeldLimits
+    from promptpotter.domain.launch_limits import HeldLimits, RunMode
     from promptpotter.domain.spend import SpendCeilings
     from promptpotter.infrastructure.store.stores import build_stores
     from promptpotter.shared.identity import IdentityContext, Issuer, TenantId, UserId
@@ -1269,20 +1246,22 @@ def test_a_run_in_its_own_process_spends_as_the_account_that_launched_it(
         reserve=SpendCeilings(0.5, 80_000),
         step_rounds=2,
     )
-    wire = JobSpec.of(
-        stores=stores,
+    hop = CycleHop(campaign_id="ds__000001", cycle_id="cycle_root")
+    mode = RunMode(from_round=2, diag=True)
+    launched = HeldRun(
         job_registry=JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1),
         job_id="job-a",
-        hop=CycleHop(campaign_id="ds__000001", cycle_id="cycle_root"),
+        session=types.SimpleNamespace(store=stores, hop=hop),
+        campaign_config=None,
         limits=held,
-        mode=RunMode(diag=True),
-    ).model_dump_json()
+    )
 
-    spec = JobSpec.model_validate_json(wire)
+    spec = JobSpec.model_validate_json(launched.job_spec(mode).model_dump_json())
     assert spec.identity == signup
+    assert spec.hop == hop
     # The round allowance crosses with the limits: dropped, a step runs to the campaign's end.
     assert spec.limits == held
-    assert spec.mode == RunMode(diag=True)
+    assert spec.mode == mode
     book = _arm_spend_book(
         types.SimpleNamespace(
             dashboard=types.SimpleNamespace(spend_metered=lambda _meters: _no_spend()),
@@ -1296,9 +1275,9 @@ def test_a_run_in_its_own_process_spends_as_the_account_that_launched_it(
     assert (book.ceiling, book.reserve) == (held.ceiling, held.reserve)
     rebuilt = build_stores(
         spec.identity,
-        projects_root=Path(spec.projects_root),
-        benchmarks_root=Path(spec.benchmarks_root),
-        shared_root=Path(spec.shared_root),
+        projects_root=spec.projects_root,
+        benchmarks_root=spec.benchmarks_root,
+        shared_root=spec.shared_root,
     )
     assert spends_the_hosts_own_key(rebuilt) is spends_the_hosts_own_key(stores) is False
     assert rebuilt.base_dir == stores.base_dir
@@ -1766,7 +1745,6 @@ def test_a_backend_cell_is_never_sent_again_while_it_may_still_bill(
     from promptpotter.application.scoring.cell_envelope import CellEnvelope
     from promptpotter.application.scoring.sample_measurement import cell_billing
     from promptpotter.connectors.termnorm import TermNormSession
-    from promptpotter.infrastructure.backend import BackendClient
     from promptpotter.infrastructure.llm.spend_book import SendBound, replied
     from promptpotter.shared.errors import CellHaltedError
 
@@ -1799,13 +1777,7 @@ def test_a_backend_cell_is_never_sent_again_while_it_may_still_bill(
         raise httpx.ReadTimeout("slow", request=request)
 
     monkeypatch.setattr("promptpotter.infrastructure.backend._OUTAGE_POLL_S", 0.0)
-    cells = BackendClient(
-        "http://termnorm",
-        wire_adapter=lambda query, params: {"query": query},
-        session=TermNormSession(),
-        workload=types.SimpleNamespace(),  # type: ignore[arg-type]
-        prompt_delivery=types.SimpleNamespace(),  # type: ignore[arg-type]
-    )
+    cells = backend_client(session_factory=TermNormSession)
     cells._http = httpx.AsyncClient(transport=httpx.MockTransport(backend))
     cell = SendBound(input_tokens=100, output_tokens=50, usd=0.01)
     wallet = spend_book()
@@ -1883,7 +1855,7 @@ def test_a_dspy_cell_bills_each_lm_call_and_its_providers_failure_is_a_hole(
     )
     from promptpotter.connectors import dspy_module
     from promptpotter.connectors.protocol import InProcessWorkload
-    from promptpotter.infrastructure.backend import build_backend_client
+    from promptpotter.infrastructure.backend import BackendClient
     from promptpotter.infrastructure.llm.pricing import Rate, RateTable
     from promptpotter.infrastructure.llm.spend_book import SendBound
     from promptpotter.shared.errors import (
@@ -1942,7 +1914,7 @@ def test_a_dspy_cell_bills_each_lm_call_and_its_providers_failure_is_a_hole(
             metric=lambda ex, pred: pred.answer == ex.answer,
             examples=[example],
         )
-        client = build_backend_client(
+        client = BackendClient(
             dspy_module.CONNECTOR, "", workload=InProcessWorkload(experiment=None, program=program)
         )
         config = {"prompt": "Answer.", "model": "openai/gpt-x", "max_calls": 2, "max_tokens": 50}
@@ -2014,7 +1986,7 @@ def test_a_cell_billed_send_by_send_reserves_its_bound_and_holds_only_what_is_ou
 ) -> None:
     from promptpotter.application.scoring.cell_envelope import CellEnvelope
     from promptpotter.domain.spend import TokenAccount
-    from promptpotter.infrastructure.backend import CELL, BackendClient
+    from promptpotter.infrastructure.backend import CELL
     from promptpotter.infrastructure.llm.litellm_sends import ReportedCost
     from promptpotter.infrastructure.llm.spend_book import (
         Billed,
@@ -2048,16 +2020,7 @@ def test_a_cell_billed_send_by_send_reserves_its_bound_and_holds_only_what_is_ou
             )
         return {"data": {"terminal_node": "agent"}}
 
-    agent = BackendClient(
-        "",
-        wire_adapter=lambda query, params: {"query": query},
-        session=types.SimpleNamespace(),  # type: ignore[arg-type]
-        execution="in_process",
-        in_process_run=episode,
-        workload=types.SimpleNamespace(),  # type: ignore[arg-type]
-        holds_own_sends=True,
-        prompt_delivery=types.SimpleNamespace(),  # type: ignore[arg-type]
-    )
+    agent = backend_client(execution="in_process", in_process_run=episode, holds_own_sends=True)
     cell_ledger = CycleEventLog(tmp_path / "cell.jsonl")
     purse = spend_book(1.0)
     cell_ledger.bind(purse)
@@ -2507,6 +2470,8 @@ def test_host_wallet_ceilings_hold_in_both_units(
                 {
                     "record_type": "token_usage",
                     "timestamp": "2026-01-01T00:00:00+00:00",
+                    "kind": "backend",
+                    "node": "solve",
                     "model": model,
                     "provider": "openrouter",
                     "input_tokens": 400_000,
@@ -2667,6 +2632,8 @@ def test_host_wallet_ceilings_hold_in_both_units(
             {
                 "record_type": "token_usage",
                 "timestamp": "2026-01-01T00:00:00+00:00",
+                "kind": "backend",
+                "node": "solve",
                 "model": "openai/gpt-4o",
                 "provider": "openrouter",
                 "input_tokens": 1_000,

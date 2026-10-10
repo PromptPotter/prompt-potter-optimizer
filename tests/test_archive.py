@@ -40,7 +40,7 @@ from promptpotter.domain.run_records import (
     RoundClosedRecord,
     RoundEnteredRecord,
 )
-from promptpotter.domain.sample import Sample, sample_key
+from promptpotter.domain.sample import ArchiveEntry, Sample, sample_key
 from promptpotter.domain.scoring import MeasuredCell
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 from promptpotter.infrastructure.ledger import CycleEventLog
@@ -61,13 +61,15 @@ from tests.factories import optimizer_state, scored_candidate, sheet
 _LLM_ONLY: list[tuple[str, dict[str, Any]]] = [("llm_only", {"model": "X"})]
 
 
-def _entry(node_configs: list[tuple[str, dict[str, Any]]], dataset_name: str) -> dict[str, Any]:
-    return {
-        "config_key": config_key(node_configs),
-        "dataset_name": dataset_name,
-        "prompt_fields_id": "pf_x",
-        "node_configs": node_configs,
-    }
+def _entry(node_configs: list[tuple[str, dict[str, Any]]], dataset_name: str) -> ArchiveEntry:
+    return ArchiveEntry(
+        config_key=config_key(node_configs),
+        prompt_fields_id="pf_x",
+        rendered_prompt_hash="",
+        node_configs=node_configs,
+        pipeline_params={},
+        dataset_name=dataset_name,
+    )
 
 
 def _file(
@@ -76,33 +78,36 @@ def _file(
     *,
     dataset_name: str,
     node_configs: list[tuple[str, dict[str, Any]]] = _LLM_ONLY,
-    **stamps: str,
+    provenance: str = "A",
+    created_at: str = "2026-05-19T00:00:00Z",
 ) -> list[str]:
-    """Grade A unless stamped: the replay feed reads an unstamped answer as C and never serves C."""
-    stamped = [
-        {
-            **(
-                {
-                    "sample_key": sample_key(
-                        query=row["query"],
-                        ground_truth=row["ground_truth"],
-                        question=None,
-                        source_pin=None,
-                    )
-                }
-                if "query" in row and "ground_truth" in row
-                else {}
-            ),
-            "role": "panel",
-            "source": RunSource.OPTIMIZATION_LOOP.value,
-            "provenance": "A",
-            "created_at": "2026-05-19T00:00:00Z",
-            **stamps,
-            **row,
-        }
+    cells = [
+        MeasuredCell.from_wire(
+            {
+                **(
+                    {
+                        "sample_key": sample_key(
+                            query=row["query"],
+                            ground_truth=row["ground_truth"],
+                            question=None,
+                            source_pin=None,
+                        )
+                    }
+                    if "query" in row and "ground_truth" in row
+                    else {}
+                ),
+                **row,
+            }
+        )
         for row in rows
     ]
-    return archive.file_answers(_entry(node_configs, dataset_name), stamped)
+    return archive.file_answers(
+        _entry(node_configs, dataset_name),
+        [(cell, provenance) for cell in cells],
+        role="panel",
+        source=RunSource.OPTIMIZATION_LOOP.value,
+        created_at=created_at,
+    )
 
 
 def test_full_chain_rows_never_replay_on_prefix_match(tmp_path: Path) -> None:
@@ -140,7 +145,7 @@ def test_full_chain_rows_never_replay_on_prefix_match(tmp_path: Path) -> None:
         ("l3_plan", {}),
     ]
     cache = ReplayFeed(archive, query_configs).advance()
-    served = [b.row["predicted"] for b in cache.values()]
+    served = [b.cell.predicted for b in cache.values()]
     assert "full_chain" not in served, (
         "full-chain row replayed across a later-node config change — fake measurement"
     )
@@ -177,7 +182,7 @@ def test_a_grade_C_answer_is_never_replayed(tmp_path: Path) -> None:
     _seed_graded(archive, name="connector", grade="C", terminal_node="token_matching", sample_id=8)
 
     served = ReplayFeed(archive, _LLM_ONLY).advance()
-    assert [b.row["query"] for b in served.values()] == ["q_clean"]
+    assert [b.cell.query for b in served.values()] == ["q_clean"]
 
 
 def _seed_cell(archive: MeasurementArchive, *, dataset_name: str, hit: bool) -> None:
@@ -227,11 +232,12 @@ def test_a_cell_replays_by_its_content_never_its_dataset_or_slot(tmp_path: Path)
     holder, waiter = (ReplayFeed(MeasurementArchive(tmp_path), _LLM_ONLY) for _ in range(2))
     held = holder.claim("k_held")
     assert held is not None and waiter.claim("k_held") is None
-    held.publish({"sample_id": 0, "sample_key": "k_held", "predicted": "p"}, grade="B")
+    held.publish(MeasuredCell(sample_id=0, sample_key="k_held", predicted="p"), grade="B")
     beside = waiter.claim("k_beside")
     assert beside is not None, "one cell's claim held another sample of its configuration"
-    assert waiter.claimed_row("k_beside") is None
-    assert (waiter.claimed_row("k_held") or {}).get("predicted") == "p"
+    assert waiter.claimed_cell("k_beside") is None
+    published = waiter.claimed_cell("k_held")
+    assert published is not None and published.predicted == "p"
     held.release()
     beside.release()
 
@@ -307,7 +313,7 @@ def test_rows_banked_under_one_formula_read_under_another_as_a_fresh_run_would(
     shared, banked_walk = _walk_panel(tmp_path / "shared", panel, *banked_under)
     assert all(GRADE_KEYS & r.keys() for r in banked_walk.sheet.wire()), "guard: the walk graded"
     banked = archive_queries.walked_answers(shared.store, banked_walk.cells)
-    assert len(banked) == len(panel) and not any(GRADE_KEYS & r.keys() for r in banked)
+    assert len(banked) == len(panel)
     filed = shared.store.archive.cell_signatures()
 
     _, fresh = _walk_panel(tmp_path / "fresh", panel, *read_under)
@@ -366,7 +372,12 @@ def test_a_reader_tailing_a_rewritten_cell_file_skips_no_answer(
     feed = ReplayFeed(reader, _LLM_ONLY)
 
     def _bank(sid: int, dataset_name: str = "reidx", via: MeasurementArchive = archive) -> None:
-        cell = {"sample_id": sid, "sample_key": f"k{sid}", "predicted": "p", "trace": "T" * 400}
+        cell = {
+            "sample_id": sid,
+            "sample_key": f"k{sid}",
+            "predicted": "p",
+            "pipeline_data": {"reasoning_trace": "T" * 400},
+        }
         _file(via, [cell], dataset_name=dataset_name)
 
     for sid in (1, 2, 3):
@@ -408,29 +419,31 @@ def test_every_answer_of_a_cell_is_kept_and_reindex_destroys_none(built_stores: 
     entry = _entry(_LLM_ONLY, "reidx")
     other: list[tuple[str, dict[str, Any]]] = [("llm_only", {"model": "Y"})]
 
-    def _answer(predicted: str, at: int, **facts: Any) -> dict[str, Any]:
-        return {
-            "sample_id": 1,
-            "predicted": predicted,
-            **facts,
-            "created_at": f"2026-05-19T00:{at:02}",
-        }
+    def _answer(predicted: str, at: int, **facts: Any) -> list[str]:
+        node_configs = facts.pop("node_configs", _LLM_ONLY)
+        return _file(
+            archive,
+            [{"sample_id": 1, "predicted": predicted, **facts}],
+            dataset_name="reidx",
+            node_configs=node_configs,
+            created_at=f"2026-05-19T00:{at:02}",
+        )
 
     refs = [
-        *_file(archive, [_answer("first", 1)], dataset_name="reidx"),
-        *_file(archive, [_answer("second", 2)], dataset_name="reidx"),
-        *_file(archive, [_answer("ERROR", 3, error_category="transient")], dataset_name="reidx"),
-        *_file(archive, [_answer("elsewhere", 4)], dataset_name="reidx", node_configs=other),
+        *_answer("first", 1),
+        *_answer("second", 2),
+        *_answer("ERROR", 3, error_category="transient"),
+        *_answer("elsewhere", 4, node_configs=other),
     ]
     assert len(set(refs)) == 4
     held = archive.population(entry)
-    assert [row["predicted"] for row in held] == ["first", "second", "ERROR"]
-    assert standing(held)[1]["predicted"] == "second"
+    assert [answer.cell.predicted for answer in held] == ["first", "second", "ERROR"]
+    assert standing(held)[1].cell.predicted == "second"
 
-    described = {e["config_key"] for e in archive.list_all(dataset_name="reidx")}
+    described = {e.config_key for e in archive.list_all(dataset_name="reidx")}
     assert described == {config_key(_LLM_ONLY), config_key(other)}
     assert archive.reindex() == {"indexed": 2, "undescribed": 0}
-    assert {e["config_key"] for e in archive.list_all(dataset_name="reidx")} == described
+    assert {e.config_key for e in archive.list_all(dataset_name="reidx")} == described
     assert archive.population(entry) == held
     assert all(archive.answer(ref) is not None for ref in refs)
 
@@ -441,11 +454,6 @@ def _compactable_cell(sample_id: int, **extra: object) -> dict[str, object]:
         "query": f"q{sample_id}",
         "ground_truth": "g",
         "predicted": "p",
-        "fitness": 1.0,
-        "objective": 1.0,
-        "hit": True,
-        "scored": {"auto": {"fitness": 1.0, "formula": "label_match(predicted, ground_truth)"}},
-        "error_category": "",
         "ground_truth_rank": 0,
         "pipeline_data": {
             "terminal_node": "llm_only",
@@ -467,8 +475,8 @@ def test_compaction_round_trips_every_field_it_moved(built_stores: Stores) -> No
     # TWO filings, so a restore must clear each answer's own compaction stamp.
     _file(archive, [_compactable_cell(1)], dataset_name="reidx")
     _file(archive, [_compactable_cell(2)], dataset_name="reidx")
-    before = [dict(row) for row in archive.population(entry)]
-    assert len(before) == 2 and not any("compaction" in row for row in before)
+    before = archive.population(entry)
+    assert len(before) == 2 and not any(answer.compaction for answer in before)
 
     report = compact_measurement_archive(built_stores, dataset="reidx", apply=True)
     assert report.files_touched == 1
@@ -476,16 +484,14 @@ def test_compaction_round_trips_every_field_it_moved(built_stores: Stores) -> No
     assert report.bytes_freed > 0
 
     mid = archive.population(entry)
-    hot = mid[0]
-    assert "hit" not in hot
-    assert "scored" not in hot
-    assert "reasoning_trace" not in hot["pipeline_data"]
+    hot, was = mid[0].cell, before[0].cell
+    assert hot.pipeline.reasoning_trace is None and was.pipeline.reasoning_trace
     # The reading campaign's scorer re-grades from these, so compaction leaves them hot.
-    assert hot["predicted"] == "p"
-    assert hot["ground_truth"] == "g"
-    assert hot["pipeline_data"]["step_tokens"] == {"llm_only": {"input": 10, "output": 5}}
-    assert hot["pipeline_data"]["step_timings"] == {"llm_only": 0.5}
-    assert all("compaction" in row for row in mid)
+    assert (hot.predicted, hot.ground_truth) == ("p", "g")
+    assert hot.pipeline.step_tokens == was.pipeline.step_tokens != {}
+    assert hot.pipeline.step_timings == {"llm_only": 0.5}
+    assert hot.pipeline.result_ranking == (1, 2, 3)
+    assert all(answer.compaction for answer in mid)
 
     restored = restore_measurement_archive(built_stores, dataset="reidx", apply=True)
     assert restored.files_touched == 1
