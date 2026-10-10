@@ -1,34 +1,22 @@
-"""Measurement archive — DB core. **Nothing whole, in either direction**: a save appends only what
-is new (the scoring walk re-saves per sample), and a read tails only the bytes since the last one.
-
-**It holds FACTS, never a grade.** Every row it writes passes ``measured_facts``, so no formula's
-reading of a cell (``GRADE_KEYS``) reaches disk, and a reader grades under its own ``CellScorer``."""
-
 from __future__ import annotations
 
 import contextlib
 import gzip
-import hashlib
 import json
-import logging
 import os
 import threading
+import uuid
 from collections import OrderedDict
-from collections.abc import Callable, Iterable, Iterator
-from functools import partial
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any, ClassVar, NamedTuple
 
 from filelock import BaseFileLock, FileLock, Timeout
 
-from promptpotter.domain.measurement_provenance import (
-    REUSABLE_MIN_GRADE,
-    entry_grade,
-    meets_grade,
-)
+from promptpotter.domain.measurement_provenance import REUSABLE_MIN_GRADE, meets_grade
 from promptpotter.domain.results_health import is_deprecated
 from promptpotter.domain.sample import Measurement
-from promptpotter.domain.scoring import measured_facts
+from promptpotter.domain.scoring import MeasuredCell, PipelineData, measured_facts
 from promptpotter.infrastructure.store.io import (
     read_bytes_optional,
     read_json_optional,
@@ -40,72 +28,71 @@ from promptpotter.infrastructure.store.io import (
 )
 from promptpotter.infrastructure.store.layout import MEASUREMENTS_DIR
 from promptpotter.infrastructure.store.read_model import (
-    Signature,
     append_row,
-    compact,
-    derived,
     file_sig,
-    fold_jsonl,
     fold_jsonl_from,
+    iter_jsonl,
 )
 from promptpotter.shared.errors import is_error_result
+from promptpotter.shared.hashing import ADDRESS_HEX, stable_hash
 
-logger = logging.getLogger(__name__)
-
-# The detail log's fold key, and the one row that is not a measurement.
-_FOLD_KEY = "k"
-_HEADER_KEY = "run"
-# The INDEX's fold key — a run's identity, which is what addresses its detail file
-# (`runs/{run_id}.jsonl`). Never `content_hash`: `origin_<h>` and `parent_<h>` are two readings of
-# one searchpoint, and folded on the hash they merge last-wins and `reindex` unlinks one as an orphan.
-_INDEX_FOLD_KEY = "run_id"
-_DETAIL_SUFFIX = ".jsonl"
-_COLD_SUFFIX = ".jsonl.gz"
-
-
-def _measurement_key(item: dict[str, Any]) -> str:
-    """A row without a ``sample_id`` is a writer bug, but the archive is paid LLM spend — keying it by
-    its own content keeps it in the log instead of dropping it, and cannot collide with a real key."""
-    sid = item.get("sample_id")
-    if isinstance(sid, int):
-        return f"m:{sid}"
-    digest = hashlib.blake2b(
-        json.dumps(item, sort_keys=True, default=str).encode(), digest_size=8
-    ).hexdigest()
-    logger.warning("Measurement row without an int sample_id — keying by content (%s).", digest)
-    return f"m:!{digest}"
-
-
-def _summary(data: dict[str, Any]) -> dict[str, Any]:
-    """Shared by :meth:`MeasurementArchive.save` and :meth:`MeasurementArchive.reindex`, so the
-    summary the two write can never drift.
-
-    The defaulted ``.get(…)`` reads LOOK like tolerance for a drifted writer and are not: test
-    fixtures call ``save`` with partial dicts, so tightening them to subscripts breaks the callers
-    rather than catching one. The subscripted keys above are the ones every writer supplies."""
-    return {
-        "run_id": data["run_id"],
-        "name": data.get("name", data["run_id"]),
-        "dataset_name": data.get("dataset_name"),
-        "prompt_fields_id": data["prompt_fields_id"],
-        "item_count": data["item_count"],
-        "content_hash": data["content_hash"],
-        "rendered_prompt_hash": data.get("rendered_prompt_hash", ""),
-        "node_configs": data.get("node_configs"),
-        "pipeline_params": data.get("pipeline_params"),
-        "source": data.get("source", ""),
-        "provenance": data.get("provenance"),
-        "created_at": data["created_at"],
+ANSWER_KEY = "answer"
+PROVENANCE_KEYS = frozenset(
+    {
+        "config_key",
+        "dataset_name",
+        "role",
+        "source",
+        "provenance",
+        "created_at",
+        "compaction",
+        "purged",
     }
+)
+_INDEX_FOLD_KEY = "k"
+_CELLS_SUFFIX = ".jsonl"
+_COLD_SUFFIX = ".jsonl.gz"
+_FILES_MAX_BYTES = 32 << 20
+
+
+def config_key(node_configs: list[tuple[str, dict[str, Any]]]) -> str:
+    return stable_hash(node_configs, length=ADDRESS_HEX)
+
+
+def _cell_key(node_configs: list[tuple[str, dict[str, Any]]], sample_key: str) -> str:
+    return stable_hash([node_configs, sample_key], length=ADDRESS_HEX)
+
+
+def _chain(entry: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    return [
+        (pair[0], pair[1])
+        for pair in entry.get("node_configs") or []
+        if isinstance(pair, list | tuple) and len(pair) == 2 and isinstance(pair[1], dict)
+    ]
+
+
+def _file_keys(entry: dict[str, Any]) -> list[str]:
+    chain = _chain(entry)
+    if not chain:
+        return [entry["config_key"]]
+    return [config_key(chain[:n]) for n in range(1, len(chain) + 1)]
+
+
+def _file_of(entry: dict[str, Any], row: dict[str, Any]) -> str:
+    chain = _chain(entry)
+    terminal = PipelineData.from_wire(row.get("pipeline_data") or {}).terminal_node
+    # A failed cell answers for the WHOLE configuration, whichever node it failed at.
+    if terminal and not is_error_result(row):
+        for n, (name, _) in enumerate(chain, start=1):
+            if name == terminal:
+                return config_key(chain[:n])
+    return config_key(chain) if chain else entry["config_key"]
 
 
 def _matches_subset(
     run_node_configs: list[Any],
     predicate: dict[str, dict[str, Any]],
 ) -> bool:
-    """Every node in *predicate* must appear in the stored chain with at least the required pairs.
-    Empty subdict tests presence; empty predicate returns False (no constraints → no rows).
-    """
     if not predicate:
         return False
     by_name: dict[str, dict[str, Any]] = {}
@@ -124,83 +111,103 @@ def _matches_subset(
     return True
 
 
-def _match_length(node_configs: list[tuple[str, dict[str, Any]]], stored: list[Any] | None) -> int:
-    """How many leading nodes a run's stored chain shares with *node_configs*, position by position."""
-    match_len = 0
-    for (n_want, c_want), stored_pair in zip(node_configs, stored or (), strict=False):
-        if not (isinstance(stored_pair, list | tuple) and len(stored_pair) == 2):
-            break
-        n_have, c_have = stored_pair
-        if n_have != n_want or c_have != c_want:
-            break
-        match_len += 1
-    return match_len
-
-
-def _cell_key(node_configs: list[tuple[str, dict[str, Any]]], sample_key: str) -> str:
-    blob = json.dumps([node_configs, sample_key], sort_keys=True, default=str)
-    return hashlib.blake2b(blob.encode(), digest_size=16).hexdigest()
-
-
-_APPENDED_MAX = 32
-
-
-def _append_alone(path: Path, *rows: dict[str, Any]) -> tuple[os.stat_result, int] | None:
-    """Append *rows* and return the file's stat after it with the byte the append began at —
-    ``None`` where anything else wrote to the file meanwhile, or replaced it. Read off the two
-    stats rather than assumed: another process banks into the same logs."""
-    try:
-        before: os.stat_result | None = path.stat()
-    except FileNotFoundError:
-        before = None
-    added = append_row(path, *rows)
-    after = path.stat()
-    start = 0 if before is None else before.st_size
-    if (before is not None and before.st_ino != after.st_ino) or after.st_size != start + added:
-        return None
-    return after, start
-
-
 def _tail_from(st: os.stat_result, cursor: tuple[int, int] | None) -> int:
-    """Where a tail of the file *st* describes resumes: the cursor's ``(inode, offset)`` only while
-    it is still that file, else 0 — a compaction swaps the file, and ext4 reuses a freed inode."""
     if cursor is None:
         return 0
     inode, offset = cursor
+    # The size test too: a rewrite swaps the file, and ext4 reuses a freed inode.
     return offset if st.st_ino == inode and st.st_size >= offset else 0
 
 
-def _entry_dataset(entry: dict[str, Any]) -> str | None:
-    val = entry.get("dataset_name")
-    return val if isinstance(val, str) and val else None
-
-
 def _entry_matches_dataset(entry: dict[str, Any], dataset_name: str | None) -> bool:
-    """``None`` ⇒ everything (forensic/admin). An entry carrying no ``dataset_name`` belongs to no
-    dataset, so it matches no concrete name."""
-    return dataset_name is None or _entry_dataset(entry) == dataset_name
+    return dataset_name is None or entry.get("dataset_name") == dataset_name
+
+
+def answer_facts(row: dict[str, Any]) -> dict[str, Any]:
+    return {k: v for k, v in row.items() if k not in PROVENANCE_KEYS}
+
+
+def standing(answers: Iterable[dict[str, Any]]) -> dict[int, dict[str, Any]]:
+    taken: dict[int, tuple[bool, dict[str, Any]]] = {}
+    for row in answers:
+        sid = row.get("sample_id")
+        if not isinstance(sid, int):
+            continue
+        facts = MeasuredCell.from_wire(row)
+        live = not (facts.errored or is_deprecated(facts))
+        held = taken.get(sid)
+        if held is None or live or not held[0]:
+            taken[sid] = (live, row)
+    return {sid: row for sid, (_, row) in taken.items()}
 
 
 class ReplayableRow(NamedTuple):
-    """A banked row a configuration may replay, and the dataset that measured it. Replay matches on
-    the row's ``sample_key`` alone; the dataset is what a POSITIONAL reader still needs, since its
-    ``sample_id`` names a slot in that dataset and nowhere else."""
+    """The row's ``sample_id`` names a slot in ``dataset_name`` and nowhere else."""
 
     dataset_name: str | None
     row: dict[str, Any]
 
 
+class _CellFile:
+    def __init__(self) -> None:
+        self._cursor: tuple[int, int] | None = None
+        self._stat: tuple[int, int] | None = None
+        self._empty()
+
+    def _empty(self) -> None:
+        # NEW containers: a reader still iterating the ones it was handed must not see them emptied.
+        self.rows: list[dict[str, Any]] = []
+        self.by_id: dict[str, dict[str, Any]] = {}
+
+    @property
+    def size(self) -> int:
+        return 0 if self._stat is None else self._stat[1]
+
+    def refresh(self, path: Path) -> None:
+        try:
+            st = path.stat()
+        except FileNotFoundError:
+            self._cursor = self._stat = None
+            self._empty()
+            return
+        sig = (st.st_mtime_ns, st.st_size)
+        if sig == self._stat:
+            return
+        start = _tail_from(st, self._cursor)
+        # The fold returns the newline-aligned offset, so a torn trailing line stays pending.
+        fresh, offset = fold_jsonl_from(path, ANSWER_KEY, start)
+        if start == 0:
+            self._empty()
+        self.rows.extend(fresh.values())
+        self.by_id.update(fresh)
+        self._cursor = (st.st_ino, offset)
+        self._stat = sig
+
+    def append(self, path: Path, rows: list[dict[str, Any]]) -> None:
+        """Takes *rows* into the tail unread: on Windows, opening a just-appended file waits out a scan."""
+        self.refresh(path)
+        held = 0 if self._cursor is None else self._cursor[1]
+        whole = self._stat is None or self._stat[1] == held
+        added = append_row(path, *rows)
+        st = path.stat()
+        if not (whole and st.st_size == held + added and _tail_from(st, self._cursor) == held):
+            return
+        # Through JSON, as a reader folds them: a tuple is a list on disk.
+        fresh = [json.loads(json.dumps(row, ensure_ascii=False)) for row in rows]
+        self.rows.extend(fresh)
+        self.by_id.update((row[ANSWER_KEY], row) for row in fresh)
+        self._cursor = (st.st_ino, st.st_size)
+        self._stat = (st.st_mtime_ns, st.st_size)
+
+
 class MeasurementArchive:
-    """**Identity does not include the execution path.** A measurement is keyed by content, and no
-    read or write takes a ``backend_id`` — repointing a dataset at another connector serves the old rows."""
+    """Keyed by content, never ``backend_id``: a dataset repointed elsewhere is served its old rows."""
 
     _open: ClassVar[dict[Path, MeasurementArchive]] = {}
     _open_lock: ClassVar[threading.Lock] = threading.Lock()
 
     @classmethod
     def at(cls, base_dir: Path) -> MeasurementArchive:
-        """The process's ONE archive over *base_dir*, so every reader of it shares the index tail
-        instead of re-folding the whole index per request."""
         with cls._open_lock:
             archive = cls._open.get(base_dir)
             if archive is None:
@@ -213,23 +220,10 @@ class MeasurementArchive:
         self._rows: dict[str, dict[str, Any]] | None = None
         self._stat: tuple[int, int] | None = None
         self._cursor: tuple[int, int] | None = None
-        # run_id -> the tick its entry last changed at, oldest first, so a `ReplayFeed` reads only
-        # the runs banked since its own mark.
-        self._ticks: dict[str, int] = {}
-        self._clock = 0
-        self._replays: OrderedDict[str, _ConfigReplay] = OrderedDict()
-        # run_id -> (inode, start, [(end, rows)]): the unbroken span of a run's log THIS process
-        # appended, so a feed whose cursor sits inside it reads the rows here, not off disk.
-        self._appended: OrderedDict[str, tuple[int, int, list[tuple[int, list[Any]]]]] = (
-            OrderedDict()
-        )
-
-    # -- path helpers ---------------------------------------------------------
+        self._files: OrderedDict[str, _CellFile] = OrderedDict()
 
     @property
     def base_dir(self) -> Path:
-        """The archive's root — its identity. run_ids are content-addressed, but an L4 inner cycle runs
-        in-process over a SANDBOXED archive, so run_id alone is not unique across live instances."""
         return self._base_dir
 
     def _store_dir(self) -> Path:
@@ -238,21 +232,20 @@ class MeasurementArchive:
     def _index_path(self) -> Path:
         return self._store_dir() / "index.jsonl"
 
-    def _runs_dir(self) -> Path:
-        return self._store_dir() / "runs"
+    def _cells_dir(self) -> Path:
+        return self._store_dir() / "cells"
+
+    def _configs_dir(self) -> Path:
+        return self._store_dir() / "configs"
 
     def derived_dir(self) -> Path:
-        """Read models folded FROM these measurements live under them — the derivation is the
-        archive's own, so the path is not something a view module gets to spell for itself."""
         return self._store_dir() / "derived"
 
-    def _detail_path(self, run_id: str) -> Path:
-        return self._runs_dir() / f"{run_id}{_DETAIL_SUFFIX}"
+    def _cell_path(self, file_key: str) -> Path:
+        return self._cells_dir() / f"{file_key}{_CELLS_SUFFIX}"
 
     def _claim_path(self, node_configs: list[tuple[str, dict[str, Any]]], sample_key: str) -> Path:
         return self._store_dir() / "claims" / _cell_key(node_configs, sample_key)
-
-    # -- index read model -----------------------------------------------------
 
     def _invalidate(self) -> None:
         self._rows = None
@@ -260,8 +253,7 @@ class MeasurementArchive:
         self._cursor = None
 
     def _live_rows(self) -> dict[str, dict[str, Any]]:
-        """Tailed rather than re-folded, and every read STATS the file first — an L4 inner cycle runs
-        in-process over the same dir, so a memo trusting only its own writes goes blind to its appends."""
+        """Every read stats the file: an in-process L4 inner cycle appends to the same dir."""
         path = self._index_path()
         with self._lock:
             try:
@@ -273,153 +265,146 @@ class MeasurementArchive:
             if self._rows is not None and sig == self._stat:
                 return self._rows
             start = 0 if self._rows is None else _tail_from(st, self._cursor)
-            # The fold returns the newline-aligned offset, so a crash-truncated trailing line stays
-            # pending instead of being skipped forever once the writer completes it.
             fresh, offset = fold_jsonl_from(path, _INDEX_FOLD_KEY, start)
-            # A NEW dict on every change: the instance is shared, and a reader still iterating
-            # the one it was handed must not see it grow.
+            # A NEW dict per change: a reader still iterating the shared one must not see it grow.
             self._rows = {**self._rows, **fresh} if start and self._rows is not None else fresh
             self._cursor = (st.st_ino, offset)
-            for run_id in fresh:
-                self._ticks.pop(run_id, None)
-                self._clock += 1
-                self._ticks[run_id] = self._clock
             self._stat = sig
             return self._rows
 
-    def _entries_since(self, mark: int) -> tuple[list[dict[str, Any]], int]:
-        """Index entries changed after tick *mark*, and the tick to pass next time."""
+    def _file(self, file_key: str) -> _CellFile:
         with self._lock:
-            rows = self._live_rows()
-            changed: list[dict[str, Any]] = []
-            for run_id, tick in reversed(self._ticks.items()):
-                if tick <= mark:
-                    break
-                if run_id in rows:
-                    changed.append(rows[run_id])
-            return changed, self._clock
-
-    def _replay(self, node_configs: list[tuple[str, dict[str, Any]]]) -> _ConfigReplay:
-        key = _cell_key(node_configs, "")
-        with self._lock:
-            replay = self._replays.get(key)
-            if replay is None:
-                replay = self._replays[key] = _ConfigReplay(self, node_configs)
-                while len(self._replays) > _REPLAYS_MAX:
-                    self._replays.popitem(last=False)
+            held = self._files.get(file_key)
+            fresh = held is None
+            if held is None:
+                held = self._files[file_key] = _CellFile()
             else:
-                self._replays.move_to_end(key)
-            return replay
+                self._files.move_to_end(file_key)
+            held.refresh(self._cell_path(file_key))
+            if fresh:
+                weight = sum(f.size for f in self._files.values())
+                while weight > _FILES_MAX_BYTES and len(self._files) > 1:
+                    weight -= self._files.popitem(last=False)[1].size
+            return held
 
-    # -- complete runs --------------------------------------------------------
-
-    def append_run(
-        self,
-        run_id: str,
-        data: dict[str, Any],
-        new_measurements: Iterable[dict[str, Any]],
-    ) -> Path:
-        """The caller passes ONLY the rows it has not appended yet; rewriting the accumulated detail per
-        sample is O(samples²). Measurements land before the header, so the header is the commit marker."""
-        detail_path = self._detail_path(run_id)
-        rows = [
-            {_FOLD_KEY: _measurement_key(item), **measured_facts(item)} for item in new_measurements
-        ]
-        header = {_FOLD_KEY: _HEADER_KEY, **{k: v for k, v in data.items() if k != "measurements"}}
-        summary = _summary(data)
+    def file_answers(self, entry: dict[str, Any], rows: Iterable[dict[str, Any]]) -> list[str]:
+        by_file: dict[str, list[dict[str, Any]]] = {}
+        refs: list[str] = []
+        for row in rows:
+            file_key = _file_of(entry, row)
+            ref = f"{file_key}.{uuid.uuid4().hex[:12]}"
+            refs.append(ref)
+            by_file.setdefault(file_key, []).append(
+                {
+                    **measured_facts(row),
+                    ANSWER_KEY: ref,
+                    "config_key": entry["config_key"],
+                    "dataset_name": entry.get("dataset_name"),
+                }
+            )
+        if not refs:
+            return refs
         with self._lock:
-            if (span := _append_alone(detail_path, *rows, header)) is not None:
-                self._keep_appended(run_id, span, rows)
-            else:
-                self._appended.pop(run_id, None)
-            if (span := _append_alone(self._index_path(), summary)) is not None:
-                self._fold_appended(span, summary)
-        return detail_path
+            # First: no answer is ever on disk under a configuration nothing describes.
+            self._register(entry, by_file)
+            for file_key, filed in by_file.items():
+                self._file(file_key).append(self._cell_path(file_key), filed)
+        return refs
 
-    def _keep_appended(
-        self, run_id: str, span: tuple[os.stat_result, int], rows: list[dict[str, Any]]
-    ) -> None:
-        st, start = span
-        # As a reader parses them off the log, so a row read here is the row read there.
-        batch = (st.st_size, json.loads(json.dumps(rows, ensure_ascii=False)))
-        held = self._appended.get(run_id)
-        if held is not None and held[0] == st.st_ino and held[2][-1][0] == start:
-            held[2].append(batch)
-        else:
-            self._appended[run_id] = (st.st_ino, start, [batch])
-        self._appended.move_to_end(run_id)
-        while len(self._appended) > _APPENDED_MAX:
-            self._appended.popitem(last=False)
-
-    def _appended_since(self, run_id: str, st: os.stat_result, start: int) -> list[Any] | None:
-        """The rows of *run_id*'s log from byte *start* to its end, where this process appended
-        every one of them; ``None`` where it did not, and the log itself must be read."""
-        held = self._appended.get(run_id)
-        if held is None or held[0] != st.st_ino or held[2][-1][0] != st.st_size:
-            return None
-        _, at, batches = held
-        rows: dict[str, Any] | None = None
-        for end, batch in batches:
-            if at == start:
-                rows = {}
-            if rows is not None:
-                rows.update((row[_FOLD_KEY], row) for row in batch)
-            at = end
-        # ``None`` still: the cursor sits before the span, or inside one of its appends.
-        return None if rows is None else list(rows.values())
-
-    def _fold_appended(self, span: tuple[os.stat_result, int], summary: dict[str, Any]) -> None:
-        """Take this process's own index append into the fold it already holds, where that fold
-        was current to the byte the append began at: the next read then finds the file as it
-        left it, and opens nothing."""
-        st, start = span
-        if self._rows is None or self._cursor != (st.st_ino, start):
+    def _register(self, entry: dict[str, Any], by_file: dict[str, list[dict[str, Any]]]) -> None:
+        key = entry["config_key"]
+        config_path = self._configs_dir() / f"{key}.json"
+        described = {k: v for k, v in entry.items() if k not in ("dataset_name", "name")}
+        if not config_path.exists():
+            write_json(config_path, described)
+        fold_key = f"{key}|{entry.get('dataset_name') or ''}"
+        if fold_key in self._live_rows():
             return
-        row = json.loads(json.dumps(summary, ensure_ascii=False))
-        run_id = row[_INDEX_FOLD_KEY]
-        self._rows = {**self._rows, run_id: row}
-        self._cursor = (st.st_ino, st.st_size)
-        self._stat = (st.st_mtime_ns, st.st_size)
-        self._ticks.pop(run_id, None)
-        self._clock += 1
-        self._ticks[run_id] = self._clock
+        first = next(iter(by_file.values()))[0]
+        append_row(
+            self._index_path(),
+            {
+                _INDEX_FOLD_KEY: fold_key,
+                **described,
+                "dataset_name": entry.get("dataset_name"),
+                "name": first.get("role") or "",
+                "created_at": first.get("created_at") or "",
+            },
+        )
 
-    def compact_run(self, run_id: str) -> bool:
-        """``factor=1`` is required, not a tuning choice: a walk of S samples leaves S header rows
-        against ONE live one, so the default 2× guard would never fire."""
-        return compact(self._detail_path(run_id), _FOLD_KEY, factor=1)
+    def answer(self, ref: str) -> dict[str, Any] | None:
+        file_key, _, _ = ref.partition(".")
+        if not file_key or any(ch in ref for ch in "/\\") or ".." in ref:
+            return None
+        return self._file(file_key).by_id.get(ref)
 
-    # -- field compaction: the cold store -------------------------------------
-    #
-    # Dropping a field from a measurement row destroys paid LLM spend, so the archive does not
-    # offer a way to drop one. It offers a way to MOVE one: the payload lands gzipped beside the
-    # runs and `restore_cold` puts it back. Deleting the cold store is a separate act, and the
-    # only one that is irreversible.
+    def population(self, entry: dict[str, Any]) -> list[dict[str, Any]]:
+        dataset_name = entry.get("dataset_name")
+        with self._lock:
+            found = [
+                row
+                for file_key in _file_keys(entry)
+                for row in self._file(file_key).rows
+                if row.get("dataset_name") == dataset_name
+            ]
+        found.sort(key=lambda row: str(row.get("created_at") or ""))
+        return found
+
+    def list_all(self, *, dataset_name: str | None = None) -> list[dict[str, Any]]:
+        entries = list(self._live_rows().values())
+        if dataset_name is None:
+            return entries
+        return [e for e in entries if _entry_matches_dataset(e, dataset_name)]
+
+    def entry(self, key: str, dataset_name: str | None) -> dict[str, Any] | None:
+        return self._live_rows().get(f"{key}|{dataset_name or ''}")
+
+    def cell_signatures(self) -> dict[str, tuple[int, int]]:
+        out: dict[str, tuple[int, int]] = {}
+        try:
+            with os.scandir(self._cells_dir()) as it:
+                for e in it:
+                    if not e.name.endswith(_CELLS_SUFFIX):
+                        continue
+                    st = e.stat()
+                    out[e.name[: -len(_CELLS_SUFFIX)]] = (st.st_mtime_ns, st.st_size)
+        except OSError:
+            return out
+        return out
+
+    def signature(
+        self,
+        entry: dict[str, Any] | None = None,
+        sigs: dict[str, tuple[int, int]] | None = None,
+    ) -> tuple[tuple[str, int, int], ...] | None:
+        sigs = self.cell_signatures() if sigs is None else sigs
+        keys = sorted(sigs) if entry is None else _file_keys(entry)
+        held = tuple((key, *sigs[key]) for key in keys if key in sigs)
+        return held or None
+
+    def files_signature(self, file_keys: Iterable[str]) -> tuple[Any, ...]:
+        return tuple(file_sig(self._cell_path(key)) for key in sorted(set(file_keys)))
 
     def _cold_dir(self) -> Path:
         return self._store_dir() / "cold"
 
-    def cold_path(self, run_id: str) -> Path:
-        return self._cold_dir() / f"{run_id}{_COLD_SUFFIX}"
+    def cold_path(self, file_key: str) -> Path:
+        return self._cold_dir() / f"{file_key}{_COLD_SUFFIX}"
 
-    def has_cold(self, run_id: str) -> bool:
-        return self.cold_path(run_id).exists()
+    def file_keys(self) -> list[str]:
+        return sorted(self.cell_signatures())
 
-    def detail_lines(self, run_id: str) -> list[str]:
-        """The detail log's raw lines, IN ORDER. Order is load-bearing — the file folds last-wins on
-        ``k``, so a caller rewriting it must preserve both the sequence and the unparseable lines."""
-        path = self._detail_path(run_id)
+    def detail_lines(self, file_key: str) -> list[str]:
+        # RAW lines: a rewrite hands every one back, unparseable ones included, in order.
         try:
-            with path.open(encoding="utf-8") as fh:
+            with self._cell_path(file_key).open(encoding="utf-8") as fh:
                 return fh.readlines()
         except FileNotFoundError:
             return []
 
-    def replace_detail(self, run_id: str, lines: Iterable[str]) -> int:
-        """Swap the whole detail log atomically; returns the byte count written. ``append`` is not
-        crash-atomic and neither is a truncate-then-write, so a rewrite never happens in place."""
+    def replace_detail(self, file_key: str, lines: Iterable[str]) -> int:
         content = "".join(lines)
-        write_text(self._detail_path(run_id), content)
+        write_text(self._cell_path(file_key), content)
         return len(content.encode("utf-8"))
 
     @staticmethod
@@ -428,36 +413,29 @@ class MeasurementArchive:
         return gzip.compress(blob.encode("utf-8"), 6)
 
     def cold_size(self, rows: Iterable[dict[str, Any]]) -> int:
-        """What :meth:`write_cold` WOULD cost, without writing it — so a dry run reports the same
-        number the apply produces rather than a ratio someone guessed."""
         return len(self._encode_cold(rows))
 
-    def cold_bytes_on_disk(self, run_id: str) -> int:
-        """Bytes the run's cold payload occupies; 0 when absent."""
+    def cold_bytes_on_disk(self, file_key: str) -> int:
         try:
-            return self.cold_path(run_id).stat().st_size
+            return self.cold_path(file_key).stat().st_size
         except OSError:
             return 0
 
-    def write_cold(self, run_id: str, rows: Iterable[dict[str, Any]]) -> int:
-        """Persist the moved payload; returns bytes on disk. Written WHOLE rather than appended: a
-        second compaction of the same run must not leave two generations under one name."""
+    def write_cold(self, file_key: str, rows: Iterable[dict[str, Any]]) -> int:
         data = self._encode_cold(rows)
-        write_bytes(self.cold_path(run_id), data)
+        write_bytes(self.cold_path(file_key), data)
         return len(data)
 
-    def read_cold(self, run_id: str) -> list[dict[str, Any]] | None:
-        """``None`` when the run was never compacted — distinct from a compaction that moved
-        nothing, which reads as an empty list."""
-        raw = read_bytes_optional(self.cold_path(run_id))
+    def read_cold(self, file_key: str) -> list[dict[str, Any]] | None:
+        """``None`` = never compacted; ``[]`` = a compaction that moved nothing."""
+        raw = read_bytes_optional(self.cold_path(file_key))
         if raw is None:
             return None
         text = gzip.decompress(raw).decode("utf-8")
         return [json.loads(line) for line in text.splitlines() if line.strip()]
 
-    def drop_cold(self, run_id: str) -> int:
-        """Delete one run's cold payload for good; returns the bytes reclaimed, 0 if absent."""
-        path = self.cold_path(run_id)
+    def drop_cold(self, file_key: str) -> int:
+        path = self.cold_path(file_key)
         try:
             size = path.stat().st_size
         except OSError:
@@ -465,209 +443,112 @@ class MeasurementArchive:
         path.unlink(missing_ok=True)
         return size
 
-    def reset_run(self, run_id: str) -> None:
-        """Append-only does not overwrite, so a re-measure meaning to REPLACE has to say so — an
-        interrupted force-fresh otherwise leaves post-fix and pre-fix rows under one header."""
-        self._detail_path(run_id).unlink(missing_ok=True)
-
-    def maintain_index(self) -> bool:
-        """Self-limiting — ``compact`` no-ops on a tight log, so calling this every run costs one fold
-        and usually rewrites nothing."""
-        if compact(self._index_path(), _INDEX_FOLD_KEY):
-            self._invalidate()
-            return True
-        return False
-
-    def load_by_id(self, run_id: str) -> dict[str, Any] | None:
-        """Fold a run's detail log into the full run dict (no index scan); ``None`` if the log
-        is absent or carries no header row yet."""
-        return _fold_detail(self._detail_path(run_id))
-
-    def sample_ids(self, run_id: str) -> frozenset[int]:
-        """The samples one run measured — the answer to "did this run touch that set", for a
-        reader that would otherwise fold the whole detail to look at one column of it."""
-        path = self._detail_path(run_id)
-        ids = derived(
-            ("run_sample_ids", path), sig=file_sig(path), compute=partial(_sample_ids, path)
-        )
-        return ids or frozenset()
-
-    def signature(self, run_id: str | None = None) -> Signature | None:
-        """What a memo over one run's detail is keyed on — over the index where *run_id* is
-        ``None``, which every ``append_run`` moves, so it stands for "the archive changed"."""
-        return file_sig(self._index_path() if run_id is None else self._detail_path(run_id))
-
-    def detail_signatures(self) -> dict[str, tuple[int, int]]:
-        """Lets a caller memoize a DERIVATION of the details rather than the details themselves. A run_id
-        is NOT immutable content — the scoring walk appends to the same log, so it grows under a reader."""
-        out: dict[str, tuple[int, int]] = {}
-        try:
-            with os.scandir(self._runs_dir()) as it:
-                for e in it:
-                    if not e.name.endswith(_DETAIL_SUFFIX):
-                        continue
-                    st = e.stat()
-                    out[e.name[: -len(_DETAIL_SUFFIX)]] = (st.st_mtime_ns, st.st_size)
-        except OSError:
-            return out
-        return out
-
-    def restamp_dataset(self, old_name: str, new_name: str) -> int:
-        """Idempotent: only entries still stamped *old_name* are touched, so a re-run after a crash is a
-        no-op. Each rename is one appended row per log — no measurement is rewritten."""
-        index_path = self._index_path()
-        count = 0
-        for entry in list(fold_jsonl(index_path, _INDEX_FOLD_KEY).values()):
-            if entry.get("dataset_name") != old_name:
-                continue
-            count += 1
-            run_id = entry.get("run_id", "")
-            detail = self.load_by_id(run_id) if run_id else None
-            if detail is not None:
-                # Appends the restamped header AND its index summary — one write path.
-                self.append_run(run_id, {**detail, "dataset_name": new_name}, [])
-            else:
-                append_row(index_path, {**entry, "dataset_name": new_name})
-        if count:
-            compact(index_path, _INDEX_FOLD_KEY)
-            self._invalidate()
-        return count
-
-    def list_all(
-        self,
-        *,
-        dataset_name: str | None = None,
-    ) -> list[dict[str, Any]]:
-        """Index entries (summaries), one fold of ``index.jsonl`` (last-wins by
-        ``run_id``). *dataset_name* scopes to one dataset (None = forensic/admin)."""
-        entries = list(self._live_rows().values())
-        if dataset_name is None:
-            return entries
-        return [e for e in entries if _entry_matches_dataset(e, dataset_name)]
-
     def reindex(self) -> dict[str, int]:
-        """Rebuild ``index.jsonl`` from the detail files — losing the index loses nothing, because
-        every entry is a fold of the run that owns it. **It deletes nothing.** The GC that stood here
-        unlinked a detail whose ``content_hash`` a later run repeated, which is not a duplicate but a
-        second reading of one searchpoint — the cache replay outliving the original it was replayed
-        from, reported as ``orphans_removed``. A run is identified by ``run_id``, which is also its
-        filename, so no two details can claim one entry and nothing can lose."""
-        indexed: list[dict[str, Any]] = []
-        for path in self._runs_dir().glob(f"*{_DETAIL_SUFFIX}"):
-            data = _fold_detail(path)
-            # Positive identification only: a detail that folded to no header, or to one carrying
-            # neither identity, is left where it is rather than indexed or removed.
-            if data is not None and "run_id" in data and "content_hash" in data:
-                indexed.append(_summary(data))
-
+        first: dict[str, dict[str, Any]] = {}
+        undescribed = 0
+        for file_key in self.file_keys():
+            for row in iter_jsonl(self._cell_path(file_key)):
+                key, dataset_name = row.get("config_key"), row.get("dataset_name")
+                if not isinstance(key, str):
+                    continue
+                fold_key = f"{key}|{dataset_name or ''}"
+                held = first.get(fold_key)
+                at = str(row.get("created_at") or "")
+                if held is not None and held["created_at"] <= at:
+                    continue
+                described = read_json_optional(self._configs_dir() / f"{key}.json")
+                if not isinstance(described, dict):
+                    undescribed += 1
+                    continue
+                first[fold_key] = {
+                    _INDEX_FOLD_KEY: fold_key,
+                    **described,
+                    "dataset_name": dataset_name,
+                    "name": row.get("role") or "",
+                    "created_at": at,
+                }
+        indexed = sorted(first.values(), key=lambda e: (e["created_at"], e[_INDEX_FOLD_KEY]))
         write_jsonl(self._index_path(), indexed)
         self._invalidate()
-        return {"indexed": len(indexed)}
+        return {"indexed": len(indexed), "undescribed": undescribed}
 
-    def load_since(
-        self,
-        seen_ids: set[str],
-        *,
-        dataset_name: str | None = None,
-    ) -> Iterator[tuple[str, dict[str, Any]]]:
-        """`(run_id, detail)` for runs not in *seen_ids*. Index scan + per-run load encapsulated
-        so derived views (AxisIndex) don't reinvent it. Dataset-filtered per `list_all`.
-        """
-        for entry in self.list_all(dataset_name=dataset_name):
-            run_id = entry["run_id"]
-            if run_id in seen_ids:
-                continue
-            detail = self.load_by_id(run_id)
-            if detail is None:
-                continue
-            yield run_id, detail
-
-    # -- direct retrieval (the database-core view) -----------------------------
-
-    def measurements_for_sample(
-        self,
-        sample_id: int,
-        *,
-        run_ids: list[str] | None = None,
-        dataset_name: str | None = None,
-    ) -> list[Measurement]:
-        """Caller-supplied *run_ids* must already be dataset-scoped (true when sourced from
-        ``Sample.run_ids``); without the hint this walks every batch."""
-        if run_ids is not None:
-            sources: Iterator[tuple[str, dict[str, Any]]] = (
-                (rid, detail) for rid in run_ids if (detail := self.load_by_id(rid)) is not None
-            )
-        else:
-            sources = (
-                (entry["run_id"], detail)
-                for entry in self.list_all(dataset_name=dataset_name)
-                if (detail := self.load_by_id(entry["run_id"])) is not None
-            )
-
-        out: list[Measurement] = []
-        for run_id, detail in sources:
-            for item in detail.get("measurements", []):
-                if item.get("sample_id") == sample_id:
-                    out.append(_to_measurement(run_id, detail, item))
-        return out
+    def restamp_dataset(self, old_name: str, new_name: str) -> int:
+        touched = {e["config_key"] for e in self.list_all(dataset_name=old_name)}
+        if not touched:
+            return 0
+        with self._lock:
+            for file_key in self.file_keys():
+                lines = self.detail_lines(file_key)
+                out: list[str] = []
+                moved = False
+                for line in lines:
+                    try:
+                        row = json.loads(line)
+                    except json.JSONDecodeError:
+                        out.append(line)
+                        continue
+                    if isinstance(row, dict) and row.get("dataset_name") == old_name:
+                        row["dataset_name"] = new_name
+                        line = json.dumps(row, ensure_ascii=False) + "\n"
+                        moved = True
+                    out.append(line)
+                if moved:
+                    self.replace_detail(file_key, out)
+            self._files.clear()
+        self.reindex()
+        return len(touched)
 
     def measurements_for_config(
         self,
         predicate: dict[str, dict[str, Any]],
         *,
-        run_ids: set[str] | list[str] | None = None,
         dataset_name: str | None = None,
         newest: int | None = None,
     ) -> Iterator[Measurement]:
-        """Every measurement under configs matching *predicate*, across samples; an empty predicate
-        yields none. *run_ids* hint turns O(N) into O(K + matches); must be dataset-scoped at source.
-        *newest* reads only that many of the latest matching runs.
-
-        One run at a time, never the lot: a dataset's archive outgrows memory long before it
-        outgrows disk, and a reader averaging one channel held every row's node I/O to do it."""
         if not predicate:
             return
-        if run_ids is None:
-            matching = [
-                entry
-                for entry in self.list_all(dataset_name=dataset_name)
-                if (stored := entry.get("node_configs")) and _matches_subset(stored, predicate)
-            ]
-            if newest is not None:
-                matching.sort(key=lambda entry: entry.get("created_at") or "", reverse=True)
-                del matching[newest:]
-            run_ids = [entry["run_id"] for entry in matching]
-        for run_id in run_ids:
-            detail = self.load_by_id(run_id)
-            if detail is None:
-                continue
-            for item in detail.get("measurements", []):
-                yield _to_measurement(run_id, detail, item)
+        matching = [
+            entry
+            for entry in self.list_all(dataset_name=dataset_name)
+            if (stored := entry.get("node_configs")) and _matches_subset(stored, predicate)
+        ]
+        if newest is not None:
+            matching.sort(key=lambda entry: entry.get("created_at") or "", reverse=True)
+            del matching[newest:]
+        for entry in matching:
+            chain = _chain(entry)
+            for row in self.population(entry):
+                yield Measurement(
+                    answer=row[ANSWER_KEY],
+                    config_key=entry["config_key"],
+                    sample_id=int(row.get("sample_id", -1)),
+                    node_configs=chain,
+                    row=answer_facts(row),
+                    created_at=str(row.get("created_at") or ""),
+                )
+
+
+def _reusable(row: dict[str, Any], grade: str) -> bool:
+    return not is_error_result(row) and meets_grade(grade, REUSABLE_MIN_GRADE)
 
 
 class CellClaim:
-    """An OS lock on one cell, dropped by the kernel with its holder, so no expiry is needed and none
-    can time a live holder out. Its row is SHARED on return: no waiter waits on the holder's walk."""
+    """An OS lock the kernel drops with its holder: no expiry, so none can time a live holder out."""
 
-    def __init__(
-        self, lock: BaseFileLock, row_path: Path, shareable: Callable[[dict[str, Any]], bool]
-    ) -> None:
+    def __init__(self, lock: BaseFileLock, row_path: Path) -> None:
         self._lock = lock
         self.row_path = row_path
-        self._shareable = shareable
 
-    def publish(self, row: dict[str, Any]) -> None:
-        """Share *row* with every waiter — or, where no replay could serve it, let them measure."""
-        if not self._shareable(row):
+    def publish(self, row: dict[str, Any], *, grade: str) -> None:
+        if not _reusable(row, grade) or is_deprecated(MeasuredCell.from_wire(row)):
             self.release()
             return
-        # Windows refuses the replace while a waiter reads a row a past holder left there — the same
-        # cell, already shareable, so the waiters keep it and this walk keeps its own.
+        # Windows refuses the replace while a waiter reads a past holder's row of this same cell.
         with contextlib.suppress(PermissionError):
             write_json(self.row_path, measured_facts(row))
 
     def release(self) -> None:
-        """Idempotent. The row goes first: one standing with the lock free is no live holder's."""
+        # The row goes first: one standing with the lock free is no live holder's.
         try:
             _drop_row(self.row_path)
         finally:
@@ -676,108 +557,13 @@ class CellClaim:
 
 
 def _drop_row(path: Path) -> None:
-    # Windows refuses the delete while a waiter reads the row. Left so, it is no live holder's, and the
-    # next claimer's drop or publish removes it — a busy row never fails a walk.
+    # Windows refuses the delete while a waiter reads the row; the next claimer's drop removes it.
     with contextlib.suppress(PermissionError):
         unlink_robust(path)
 
 
-_REPLAYS_MAX = 64
-
-
-class _ConfigReplay:
-    """The rows one configuration may replay, read off disk ONCE per process: every walk on that
-    configuration reads the same runs, and a feed per walk re-parsed all of them at each opening.
-    ``served`` is append-only — a later entry for a key is the one upgrade, a deprecated row for a
-    live one — so each feed keeps only how far into it it has read."""
-
-    def __init__(
-        self,
-        archive: MeasurementArchive,
-        node_configs: list[tuple[str, dict[str, Any]]],
-    ) -> None:
-        self._archive = archive
-        self._node_configs = node_configs
-        self._mark = 0
-        # run_id -> (inode, bytes folded), the cursor `_tail_from` resumes a run's log at.
-        self._read: dict[str, tuple[int, int]] = {}
-        # sample_key -> whether the row already served is deprecated, the one row an upgrade
-        # replaces.
-        self._deprecated: dict[str, bool] = {}
-        self.served: list[tuple[str, ReplayableRow]] = []
-
-    def refresh(self) -> None:
-        entries, self._mark = self._archive._entries_since(self._mark)
-        ranked = [
-            (entry, n)
-            for entry in entries
-            if (n := _match_length(self._node_configs, entry.get("node_configs"))) > 0
-        ]
-        # Best-first, and the first row to reach a key wins it: unconditional assignment would
-        # serve the row matching the FEWEST nodes.
-        ranked.sort(key=lambda t: (t[1], t[0].get("item_count", 0)), reverse=True)
-        chain_len = len(self._node_configs)
-        for entry, match_length in ranked:
-            if not meets_grade(entry_grade(entry), REUSABLE_MIN_GRADE):
-                continue
-            is_full_match = match_length >= chain_len
-            trusted_nodes = {name for name, _ in self._node_configs[:match_length]}
-            for item in self._banked_since(entry["run_id"]):
-                if is_error_result(item):
-                    continue
-                if not is_full_match:
-                    terminal_node = (item.get("pipeline_data") or {}).get("terminal_node", "")
-                    if not (terminal_node and terminal_node in trusted_nodes):
-                        continue
-                key = item.get("sample_key")
-                if not key:
-                    raise ValueError(
-                        f"run {entry['run_id']!r} banks a row with no `sample_key`, so nothing can "
-                        "say which sample it measured. Every row the scoring walk writes carries "
-                        "one; this archive holds rows written before it did."
-                    )
-                deprecated = is_deprecated(item)
-                # The one upgrade allowed: a deprecated row, which is not an answer, for a live one.
-                if (served := self._deprecated.get(key)) is not None and not (
-                    served and not deprecated
-                ):
-                    continue
-                self._deprecated[key] = deprecated
-                self.served.append((key, ReplayableRow(_entry_dataset(entry), item)))
-
-    def _banked_since(self, run_id: str) -> list[dict[str, Any]]:
-        path = self._archive._detail_path(run_id)
-        try:
-            st = path.stat()
-        except FileNotFoundError:
-            return []
-        start = _tail_from(st, self._read.get(run_id))
-        if start and start == st.st_size:
-            return []
-        if (own := self._archive._appended_since(run_id, st, start)) is not None:
-            self._read[run_id] = (st.st_ino, st.st_size)
-            return [{k: v for k, v in row.items() if k != _FOLD_KEY} for row in own]
-        rows, offset = fold_jsonl_from(path, _FOLD_KEY, start)
-        if start == 0 and _HEADER_KEY not in rows:
-            # A log with no header yet is a walk that died before its first commit — not a run.
-            return []
-        self._read[run_id] = (st.st_ino, offset)
-        return [
-            {k: v for k, v in row.items() if k != _FOLD_KEY}
-            for k, row in rows.items()
-            if k != _HEADER_KEY
-        ]
-
-
 class ReplayFeed:
-    """Every banked row one configuration may replay, keyed by ``sample_key`` and drawn from EVERY
-    dataset: a cell is the sample's content under the instrument's configuration, never the panel it
-    sat in, so widening a panel or renaming a dataset re-measures nothing already measured. A config
-    change at node N re-measures past N.
-
-    Read FORWARD — each :meth:`advance` returns only the rows banked since the last, so a walk sees a
-    cell a concurrent walk banked after it opened — and :meth:`claim` holds a cell while it is being
-    measured, so no two walks buy one. The grade floor is `REUSABLE_MIN_GRADE`, never a caller's."""
+    """Drawn from EVERY dataset: a cell is the sample's content under a configuration, never its panel."""
 
     def __init__(
         self,
@@ -786,40 +572,46 @@ class ReplayFeed:
     ) -> None:
         self._archive = archive
         self._node_configs = node_configs
-        self._replay = archive._replay(node_configs)
-        self._seen = 0
+        self._file_keys = [config_key(node_configs[:n]) for n in range(1, len(node_configs) + 1)]
+        self._seen: dict[str, int] = {}
+        self._deprecated: dict[str, bool] = {}
 
     def advance(self) -> dict[str, ReplayableRow]:
-        if not self._node_configs:
-            return {}
+        banked: list[dict[str, Any]] = []
         with self._archive._lock:
-            self._replay.refresh()
-            fresh = dict(self._replay.served[self._seen :])
-            self._seen = len(self._replay.served)
+            for file_key in self._file_keys:
+                rows = self._archive._file(file_key).rows
+                banked.extend(rows[self._seen.get(file_key, 0) :])
+                self._seen[file_key] = len(rows)
+        banked.sort(key=lambda row: str(row.get("created_at") or ""))
+        fresh: dict[str, ReplayableRow] = {}
+        for row in banked:
+            key = row.get("sample_key")
+            if not key or not _reusable(row, str(row.get("provenance") or "C")):
+                continue
+            deprecated = is_deprecated(MeasuredCell.from_wire(row))
+            if deprecated and self._deprecated.get(key) is False:
+                continue
+            self._deprecated[key] = deprecated
+            fresh[key] = ReplayableRow(row.get("dataset_name"), answer_facts(row))
         return fresh
 
-    def claim(
-        self, sample_key: str, *, shareable: Callable[[dict[str, Any]], bool]
-    ) -> CellClaim | None:
-        """This process's hold on one cell while it measures it, or ``None`` while another holds it.
-        *shareable* is the caller's replay floor, so no waiter replays a row the archive would not."""
+    def claim(self, sample_key: str) -> CellClaim | None:
         path = self._archive._claim_path(self._node_configs, sample_key)
         lock = FileLock(f"{path}.lock", timeout=0, thread_local=False)
         try:
             lock.acquire()
         except Timeout:
             return None
-        claim = CellClaim(lock, path.with_suffix(".json"), shareable)
+        claim = CellClaim(lock, path.with_suffix(".json"))
         # A holder unlinks its row before it unlocks, so a row found here outlived its holder.
         _drop_row(claim.row_path)
         return claim
 
     def cell_key(self, sample_key: str) -> str:
-        """The cell's identity — this configuration measuring this sample — the one its claim holds."""
         return _cell_key(self._node_configs, sample_key)
 
     def claimed_row(self, sample_key: str) -> dict[str, Any] | None:
-        """The row the cell's holder measured and has not taken yet; ``None`` until it returns."""
         path = self._archive._claim_path(self._node_configs, sample_key)
         try:
             return read_json_optional(path.with_suffix(".json"))
@@ -828,48 +620,14 @@ class ReplayFeed:
             return None
 
 
-def _fold_detail(path: Path) -> dict[str, Any] | None:
-    """Last-wins per key. ``None`` when the log has no header yet — a headerless log is a walk that
-    appended measurements and died before its first commit, and it must not read as a run."""
-    rows = fold_jsonl(path, _FOLD_KEY)
-    header = rows.pop(_HEADER_KEY, None)
-    if header is None:
-        return None
-    data = {k: v for k, v in header.items() if k != _FOLD_KEY}
-    data["measurements"] = [
-        {k: v for k, v in row.items() if k != _FOLD_KEY} for row in rows.values()
-    ]
-    return data
-
-
-def _sample_ids(path: Path) -> frozenset[int]:
-    detail = _fold_detail(path)
-    if detail is None:
-        return frozenset()
-    return frozenset(
-        sid for row in detail["measurements"] if isinstance(sid := row.get("sample_id"), int)
-    )
-
-
-def _to_measurement(
-    run_id: str,
-    detail: dict[str, Any],
-    item: dict[str, Any],
-) -> Measurement:
-    raw_configs = detail.get("node_configs") or []
-    node_configs: list[tuple[str, dict[str, Any]]] = [
-        (pair[0], pair[1])
-        for pair in raw_configs
-        if isinstance(pair, list | tuple) and len(pair) == 2 and isinstance(pair[1], dict)
-    ]
-    return Measurement(
-        run_id=run_id,
-        content_hash=detail.get("content_hash", ""),
-        sample_id=int(item.get("sample_id", -1)),
-        node_configs=node_configs,
-        row=item,
-        created_at=detail.get("created_at", ""),
-    )
-
-
-__all__ = ["CellClaim", "MeasurementArchive", "ReplayFeed", "ReplayableRow"]
+__all__ = [
+    "ANSWER_KEY",
+    "PROVENANCE_KEYS",
+    "CellClaim",
+    "MeasurementArchive",
+    "ReplayFeed",
+    "ReplayableRow",
+    "answer_facts",
+    "config_key",
+    "standing",
+]

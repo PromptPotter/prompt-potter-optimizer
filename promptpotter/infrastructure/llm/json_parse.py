@@ -1,6 +1,3 @@
-"""JSON parsing, repair, and post-response validation for LLM outputs — invalid escapes, trailing
-commas, brace truncation, plus Groq's ``json_validate_failed`` salvage."""
-
 from __future__ import annotations
 
 import logging
@@ -14,20 +11,14 @@ from promptpotter.infrastructure.llm.response import LLMResponse
 
 logger = logging.getLogger(__name__)
 
-# Below this, content is "the provider returned nothing", not an attempt at the schema.
-# ONE home for the threshold: the client picks its retry STRATEGY with it and the error
-# classifies itself with it, so a call retried as a flake cannot then be scored as a
-# prompt fault (or the reverse) because two modules drew the line differently.
 MIN_CONTENT_CHARS = 20
 
-# Retry strategies (``OptimizerPromptParseError.retry_kind``). See ``OpenAICompatibleClient.chat``.
 RETRY_CLEAN_REASK = "clean_reask"
 RETRY_SCHEMA_REPAIR = "schema_repair"
 
 
 class OptimizerPromptParseError(RuntimeError):
-    """Content that failed Pydantic validation after one repair-hint retry. **Two round-trips, two
-    accounts**: the ``first_*`` fields describe the attempt that failed, the rest the repair."""
+    """Two round-trips, two accounts: ``first_*`` is the attempt that failed, the rest the repair."""
 
     def __init__(
         self,
@@ -53,32 +44,25 @@ class OptimizerPromptParseError(RuntimeError):
         self.attempts = attempts
         self.model = model
         self.finish_reason = finish_reason
-        # The BILLED account, summed across both round-trips, and `bench/llm_call.py`
-        # meters the burned spend off it. Narrowing it to one attempt to make a log read nicer
-        # under-reports every repaired call by a full round-trip.
+        # BILLED across both round-trips: `bench/llm_call.py` meters the burned spend off it.
         self.usage = usage or TokenAccount()
         self.reasoning_chars = reasoning_chars
         self.first_finish_reason = first_finish_reason
         self.first_content_chars = first_content_chars
-        # The attempt that FAILED, on its own — the retry cannot answer why this one was rejected.
         self.first = first or TokenAccount()
         self.retry_kind = retry_kind
 
     @property
     def raw_chars(self) -> int:
-        """Stripped content length — the number every consumer reports."""
         return len(self.raw.strip())
 
     @property
     def failing_chars(self) -> int:
-        """Content length of the attempt that FAILED — the first one where it was
-        recorded, else the repair's. The number the classification below reasons over."""
         return self.raw_chars if self.first_content_chars is None else self.first_content_chars
 
     @property
     def reproduced(self) -> bool:
-        """Did the second attempt fail the SAME way as the first? Only meaningful after a clean re-ask,
-        where matching ``finish_reason`` means the failure is a property of the request, not the moment."""
+        """Only meaningful after a clean re-ask."""
         first_empty = (self.first_content_chars or 0) < MIN_CONTENT_CHARS
         return self.first_finish_reason == self.finish_reason and first_empty == (
             self.raw_chars < MIN_CONTENT_CHARS
@@ -86,8 +70,7 @@ class OptimizerPromptParseError(RuntimeError):
 
     @property
     def is_empty(self) -> bool:
-        """Provider degraded, vs output the optimizer prompt owns. Downstream DELETES an L4 round on this, so a wrong
-        answer loses evidence: ``finish_reason="length"`` is never degradation, and a clean re-ask decides the rest."""
+        """Downstream DELETES an L4 round on this: ``finish_reason="length"`` is never degradation."""
         if self.first_finish_reason == "length":
             return False
         if self.retry_kind == RETRY_CLEAN_REASK and self.reproduced:
@@ -95,8 +78,6 @@ class OptimizerPromptParseError(RuntimeError):
         return self.failing_chars < MIN_CONTENT_CHARS
 
     def warning_detail(self) -> dict[str, Any]:
-        """The provider's own account of WHY, for a round warning's disk-bound ``detail``. ``length`` + large reasoning tokens
-        means the PROMPT is too big; ``stop`` with ~2 completion tokens means the provider degraded. Opposite fixes."""
         return {
             "retry_kind": self.retry_kind,
             "reproduced": self.reproduced if self.retry_kind == RETRY_CLEAN_REASK else None,
@@ -112,8 +93,6 @@ class OptimizerPromptParseError(RuntimeError):
         }
 
     def diagnosis(self) -> str:
-        """One-line disk-bound account of the failure. Per ATTEMPT, because the two attempts are different events with
-        different causes, and the fix differs by which one you are reading."""
         return (
             f"attempt1(finish={self.first_finish_reason} chars={self.first_content_chars} "
             f"completion_tokens={self.first.output} "
@@ -128,9 +107,8 @@ class OptimizerPromptParseError(RuntimeError):
 
 
 def try_parse_json(content: str, provider: str) -> Any | None:
-    """Parse JSON from response content, ``None`` on failure. Strips ```` ```json ```` fences, which
-    Groq and Kimi emit even under ``response_format=json``."""
     text = content.strip()
+    # Groq and Kimi emit a fence even under ``response_format=json``.
     if text.startswith("```"):
         first_nl = text.find("\n")
         if first_nl != -1:
@@ -146,16 +124,13 @@ def try_parse_json(content: str, provider: str) -> Any | None:
 
 
 def _unwrap_single_element_list(parsed: Any) -> Any:
-    # Groq/openai-oss occasionally wraps the structured-output object in a
-    # single-element list; every optimizer response_model is a root-object.
+    # Groq/openai-oss occasionally wraps the object in a one-element list; every model is a root object.
     if isinstance(parsed, list) and len(parsed) == 1 and isinstance(parsed[0], dict):
         return parsed[0]
     return parsed
 
 
 def extract_parsed_json(response: LLMResponse) -> Any:
-    """The parsed JSON object from an ``LLMResponse`` — the ``output_format='text'`` fallback, since
-    JSON-mode calls populate ``response.parsed`` upstream."""
     if response.parsed is not None:
         return response.parsed
     parsed = try_parse_json(response.content, "extract_parsed_json")
@@ -172,9 +147,8 @@ def parse_response_content(
     response_schema: dict[str, Any] | None,
     provider_name: str,
 ) -> Any | None:
-    """Decode + optionally validate provider content, mirroring ``chat()``'s contract. An EMPTY
-    body raises rather than leaking past the schema guard as ``parsed=None``."""
     if not content or not content.strip():
+        # An EMPTY body raises here rather than leaking past the schema guard as ``parsed=None``.
         if response_model is not None:
             response_model.model_validate(None)
         return None
@@ -193,7 +167,6 @@ def parse_response_content(
 
 
 def _repair_json_validate_failure(err_str: str) -> tuple[str, Any] | None:
-    """Salvage Groq's ``json_validate_failed`` 400 by re-parsing ``failed_generation``; ``None`` to fall through."""
     fg_key = "'failed_generation': '"
     fg_start = err_str.find(fg_key)
     if fg_start < 0:
@@ -215,7 +188,6 @@ def try_groq_json_validate_repair(
     provider_name: str,
     response_model: type[BaseModel] | None,
 ) -> LLMResponse | None:
-    """Groq 400 ``json_validate_failed`` → salvaged ``LLMResponse``; ``None`` otherwise (caller re-raises)."""
     if getattr(exc, "status_code", None) != 400 or "json_validate_failed" not in str(exc):
         return None
     repaired = _repair_json_validate_failure(str(exc))

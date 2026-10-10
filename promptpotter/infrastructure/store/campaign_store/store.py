@@ -1,69 +1,84 @@
 from __future__ import annotations
 
 import contextlib
-import json
 import logging
-import shutil
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, Unpack
 
-from promptpotter.domain.bench import BankPartition
+from promptpotter.domain.bench import BenchScore, PartitionRecord
 from promptpotter.domain.campaign import (
     Campaign,
+    CampaignEdit,
     CampaignResult,
     HeadToHeadRecord,
     LifecycleFilter,
+    LifecycleStatus,
 )
-from promptpotter.domain.cycle_listing import CycleListEntry
+from promptpotter.domain.cycle_listing import CycleIndex, CycleListEntry, RunStatus
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.export import PromptExport, parse_prompt_export
 from promptpotter.domain.launch_limits import RoundsCap
-from promptpotter.domain.phases import RunPhase, StopReason
-from promptpotter.domain.results import RoundResult, SharedCellPoint, best_round_on_shared_cells
+from promptpotter.domain.phases import ErrorRecord, LaunchStage, ProducerState, StopReason
+from promptpotter.domain.results import RoundResult
 from promptpotter.domain.ruler import DeltaRuler
 from promptpotter.domain.run_records import (
-    MINT_KIND_FOR_TRIGGER,
+    CheckinClosedRecord,
     CycleFinal,
+    CycleFinalRecord,
+    CycleMintedRecord,
+    CycleRecord,
     CycleSeed,
     CycleSeedRecord,
-    ForkTrigger,
-    MintKind,
+    CycleSupersededRecord,
+    ForkDirection,
+    ForkGradedRecord,
+    ForkSpec,
+    InterventionRecord,
+    LaunchClaimRecord,
+    LaunchReleasedRecord,
+    OptimizerStateRecord,
+    RoundEnteredRecord,
+    RoundProposedRecord,
     RulerRecord,
     RunLimitsRecord,
+    RunPhaseRecord,
+    SpawnedBy,
+    SpawnedRecord,
 )
-from promptpotter.domain.spend import BudgetChange
+from promptpotter.domain.spend import SpendCeilings
 from promptpotter.domain.value_tree import ValueLeaf
-from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.runtime_flags import (
-    derive_run_phase,
-    is_checkin,
-    write_run_limits_mirror,
+from promptpotter.infrastructure import producer_lock
+from promptpotter.infrastructure.ledger import CycleEventLog, continued_chain, ledger_chain
+from promptpotter.infrastructure.projections.cycle_index import (
+    read_cycle_index,
+    write_cycle_index,
 )
+from promptpotter.infrastructure.projections.live_dashboard.projection import materializing_over
+from promptpotter.infrastructure.runtime_flags import derive_run_state, is_checkin
 from promptpotter.infrastructure.store.account_spend import bank_spend, sandbox_cycle_dirs
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
+    StandingRounds,
+    scan_cycle_facts,
+    scan_launch_claim,
     scan_ledger_cycle_seed,
-    scan_ledger_declared_phase,
-    scan_ledger_round_closes,
-    scan_ledger_rulers,
+    scan_ledger_ruler,
     scan_ledger_run_limits,
+    scan_standing_rounds,
 )
 from promptpotter.infrastructure.store.io import (
     iter_files,
     read_json,
     read_json_optional,
-    read_json_tolerant,
     read_text_optional,
     read_yaml_optional,
     rmtree_robust,
     unlink_robust,
-    validate_path_component,
     write_json,
     write_text,
     write_yaml,
 )
 from promptpotter.infrastructure.store.layout import (
-    ROUND_GLOB,
     CampaignLayout,
     CycleLayout,
     campaign_cycles_dir,
@@ -74,142 +89,23 @@ from promptpotter.infrastructure.store.layout import (
     head_to_head_path,
     inner_sandbox_key,
     root_cycle_id,
-    round_number,
     sibling_kind,
 )
+from promptpotter.infrastructure.store.read_model import LedgerSpan, Moment
 from promptpotter.infrastructure.store.session_pointer import (
     clear_active_pointer,
     read_active_pointer,
 )
-from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import BadRequestError, ConflictError, NotFoundError, graceful
 
 logger = logging.getLogger(__name__)
-
-
-def _index_round(rr: RoundResult) -> dict[str, Any]:
-    """One closed round, as the LISTING path needs it — the three facts every reader of this list
-    asks for. It carried five more that nothing read, `label` among them, which is the winner's
-    whole `changes_description`: prose duplicated per round into a manifest the sidebar, the tree
-    and every resume open. The round DOCUMENT is where a round is read in full.
-
-    The overlap pair is this round's winner scored on the cells its whole line has answered — the
-    number `best_round_on_shared_cells` elects on."""
-    return SharedCellPoint.of(rr.round, rr.accuracy, rr.overlap)._asdict()
-
-
-def origin_accuracy_of(index: dict[str, Any]) -> float | None:
-    """Round 0 IS the origin and there is no stored copy — every path that (re)scores it
-    (init, a diag fork, the origin gate) re-emits round 0 through ``save_round_file``.
-
-    A round 0 that recorded NO accuracy answers ``None``, which is what this signature has
-    always promised and what an outer L4 cycle actually stores: its measurand is
-    ``mean_round_delta``, so the row carries ``accuracy: null``. Reading the key without asking
-    whether it held a value turned that into ``float(None)`` — and because this is folded by
-    every lineage and listing read, one L4 campaign with a completed round 500'd ``/cycles``,
-    ``/tree``, ``/ray`` and ``/origins`` at once, taking the campaign picker down with them."""
-    rounds = index.get("rounds") or []
-    recorded = next((r.get("accuracy") for r in rounds if r.get("round") == 0), None)
-    return float(recorded) if recorded is not None else None
-
-
-_ENDING_KEYS = (
-    "finished_at",
-    "stop_reason",
-    "final",
-    "interrupted_round",
-    "crash_traceback",
-    "superseded_by",
-)
-
-
-def cycle_ending(index: Mapping[str, Any]) -> StopReason | None:
-    """Why this cycle ended, or ``None`` while it has not — the ONE reading of a cycle's ending
-    off ``index.json``. ``finished_at`` is the latch and ``stop_reason`` the only key that says
-    why, so a reader asks here instead of defaulting a missing string per surface."""
-    return StopReason(index["stop_reason"]) if index.get("finished_at") else None
-
-
-def cycle_final(index: Mapping[str, Any]) -> CycleFinal | None:
-    """What the cycle banked when it stopped, or ``None`` where it has not — or was stamped
-    terminal by something other than its own runner (a reap, a supersede cut), which banks none."""
-    final = index.get("final")
-    return None if final is None else CycleFinal.model_validate(final)
-
-
-def _apply_best(data: dict[str, Any]) -> None:
-    """Never argmax ``cumulative_accuracy``: no rescore backs that series, so the headline
-    would exceed anything the cycle measured. Two deliberate bases — ``architecture.md`` §0.5."""
-    data["best_accuracy"], data["best_round"] = best_round_on_shared_cells(
-        [SharedCellPoint(**row) for row in data["rounds"]]
-    ) or (None, None)
-
-
-def reproject_round_index(
-    index_path: Path, round_docs: Sequence[Path], *, apply: bool = True
-) -> bool:
-    """Rebuild a cycle index's ``rounds[]`` from the round DOCUMENTS, which are the source of truth.
-    The index is a derived read model, so a projection that gains a field leaves every index written
-    before it stale — silently, since the derivation reads the row it was handed and `_apply_best`
-    then falls through to the origin. Sole rebuild: the rewind path and the maintenance walk are two
-    callers, never two definitions. Returns whether the projection differs from disk."""
-    data = read_json(index_path)
-    before = (data.get("rounds"), data.get("best_accuracy"), data.get("best_round"))
-    data["rounds"] = [
-        _index_round(RoundResult.model_validate(read_json(p))) for p in sorted(round_docs)
-    ]
-    data["n_rounds"] = len(data["rounds"])
-    _apply_best(data)
-    if apply:
-        data["updated_at"] = utcnow_iso()
-        write_json(index_path, data)
-    return before != (data["rounds"], data["best_accuracy"], data["best_round"])
-
-
-def _branch_offset(parent_dir: Path) -> int:
-    """Where on the PARENT's ledger this fork's history begins — the cut, as an ADDRESS.
-
-    Stamped at the cut because that is the only moment it is true: a fork of a still-running parent
-    is a different number one record later. It was derived twice and stored zero times
-    (``run_observers.py`` recomputed it from the parent's length at run start), which is why a
-    fork's history could not be reconstructed off disk at all — ``forked_from_round`` is a round
-    and ``forked_at`` a wall clock, and neither addresses the ray. With it, ``(parent_path, N)``
-    names the branch and a reader can walk parent[0..N) then own, which is exactly what
-    ``CycleEventLog.iter`` does in memory and nothing could do from a file.
-    """
-    return CycleEventLog.open(CycleDir(parent_dir)).next_offset
-
-
-def _fresh_sibling_index_blob(
-    parent_index: dict[str, Any],
-    parent_cycle_id: str,
-    forked_at: str,
-    *,
-    forked_at_offset: int,
-) -> dict[str, Any]:
-    # Deliberately no ``sibling_kind``: the id's separator IS the kind (``layout.py``), and a
-    # stored copy is a second answer free to disagree with the id it sits under.
-    return {
-        "type": parent_index.get("type", "optimization_loop"),
-        "header": parent_index.get("header", {}),
-        "parent_cycle_id": parent_cycle_id,
-        "parent_session_id": parent_index.get("parent_session_id", ""),
-        "forked_from_round": 0,
-        "forked_at": forked_at,
-        "rounds": [],
-        "n_rounds": 0,
-        "best_accuracy": None,
-        "created_at": forked_at,
-        "updated_at": forked_at,
-        "forked_at_offset": forked_at_offset,
-    }
 
 
 def _prune_empty_dirs(root: Path) -> None:
     for d in sorted(
         (p for p in root.rglob("*") if p.is_dir()), key=lambda p: len(p.parts), reverse=True
     ):
-        with contextlib.suppress(OSError):  # non-empty (holds keepsake) or already gone
+        with contextlib.suppress(OSError):
             d.rmdir()
 
 
@@ -228,31 +124,13 @@ def _strip_to_keepsake(campaign_dir: Path) -> None:
             _prune_empty_dirs(cdir)
 
 
-def _mint_kind(kind: str, fork_trigger: str | None) -> MintKind:
-    """``session`` for a root run, else the badge the TRIGGER declares. The fallback covers a fork
-    whose trigger is absent or unreadable ON DISK — never a trigger nobody classified, which
-    ``MINT_KIND_FOR_TRIGGER`` refuses at import."""
-    if kind == "root":
-        return "session"
-    try:
-        return MINT_KIND_FOR_TRIGGER[ForkTrigger(fork_trigger or "")]
-    except ValueError:
-        return "user_fork"
-
-
 class CampaignStore:
     def __init__(self, base_dir: WorkspaceDir):
         self._base_dir = base_dir
 
     @property
     def workspace(self) -> WorkspaceDir:
-        """The tenant root this store is rooted at — ask the store rather than passing a second
-        ``projects_root``, which lets a mint target a workspace other than its own cycle's."""
         return self._base_dir
-
-    # ------------------------------------------------------------------
-    # Path resolution + cross-cutting reads
-    # ------------------------------------------------------------------
 
     def campaign_root_dir(self, campaign_id: str) -> Path:
         return campaign_root_dir_for(self._base_dir, campaign_id)
@@ -269,14 +147,10 @@ class CampaignStore:
     def _layout(self, hop: CycleHop) -> CycleLayout:
         return CycleLayout(self.cycle_dir(hop))
 
-    def _index_path(self, hop: CycleHop) -> Path:
-        return self._layout(hop).manifest
-
-    def _rounds_dir(self, hop: CycleHop) -> Path:
-        return self._layout(hop).rounds
-
-    def _candidates_dir(self, hop: CycleHop) -> Path:
-        return self._layout(hop).candidates_cache
+    def _append(self, hop: CycleHop, record: CycleRecord) -> None:
+        cycle_dir = self.cycle_dir(hop)
+        CycleEventLog.open(CycleDir(cycle_dir)).append(record)
+        write_cycle_index(cycle_dir)
 
     def load_campaign(self, campaign_id: str) -> Campaign | None:
         data = read_json_optional(self._manifest_path(campaign_id))
@@ -284,37 +158,25 @@ class CampaignStore:
             return None
         return Campaign.model_validate(data)
 
-    def load_owned(self, campaign_id: str, owner_user_id: str) -> Campaign | None:
-        """Missing and cross-owner both collapse to ``None`` so every caller 404s them alike
-        (existence-hiding). The single definition — never re-checked at a call site."""
-        campaign = self.load_campaign(campaign_id)
-        if campaign is None or campaign.owner_user_id != owner_user_id:
-            return None
-        return campaign
-
     def _campaigns_root(self) -> Path:
         return campaigns_root_dir_for(self._base_dir)
 
-    def _index_files(self) -> list[Path]:
+    def _cycle_dirs(self) -> list[Path]:
         root = self._campaigns_root()
-        return sorted(root.glob("*/cycles/*/index.json")) if root.exists() else []
+        return sorted(p for p in root.glob("*/cycles/*") if p.is_dir()) if root.exists() else []
 
     def iter_campaign_dirs(self) -> list[Path]:
-        """The one campaign-tree enumeration, archived included — anything reducing over
-        all campaigns walks this, so an archived campaign's spend stays visible."""
+        """Archived included: archiving must not free daily spend-cap budget."""
         root = self._campaigns_root()
         if not root.exists():
             return []
         return sorted(p for p in root.iterdir() if CampaignLayout(p).manifest.is_file())
 
     def campaign_cycle_dirs(self, campaign_id: str) -> list[Path]:
-        """One campaign's cycle directories — the enumeration `bank_spend` reads before
-        `delete_campaign` destroys them, and the grain the L4 roll-up's forwarded mark sits at."""
         cycles = campaign_cycles_dir(self.campaign_root_dir(campaign_id))
         return sorted(p for p in cycles.glob("*") if p.is_dir())
 
     def campaign_cycle_ledgers(self, campaign_id: str) -> list[Path]:
-        """One campaign's cycle ledgers. Derived from the dirs so the tree is spelled once."""
         return [
             ledger
             for cycle_dir in self.campaign_cycle_dirs(campaign_id)
@@ -322,31 +184,18 @@ class CampaignStore:
         ]
 
     def iter_cycle_ledgers(self) -> list[Path]:
-        """Every cycle ledger, archived included — archiving must not free daily spend-cap budget."""
         return [
             ledger
             for campaign_dir in self.iter_campaign_dirs()
             for ledger in self.campaign_cycle_ledgers(campaign_dir.name)
         ]
 
-    @staticmethod
-    def _ids_from_index_path(index_path: Path) -> tuple[str, str]:
-        cycle_id = index_path.parent.name
-        campaign_id = index_path.parent.parent.parent.name
-        return campaign_id, cycle_id
-
-    # ------------------------------------------------------------------
-    # Campaign manifest CRUD — ``campaign.json`` + the cycle tree
-    # ------------------------------------------------------------------
-
     def create_campaign(self, campaign: Campaign) -> Path:
-        """Write ``campaign.json``; the single config-snapshot writer."""
         path = self._manifest_path(campaign.campaign_id)
         write_json(path, campaign.model_dump(mode="json"))
         return path
 
     def load_result(self, campaign_id: str) -> CampaignResult | None:
-        """``None`` until the campaign's line first banks one — no launch has reached its origin."""
         data = read_json_optional(self._campaign_layout(campaign_id).result)
         return None if data is None else CampaignResult.model_validate(data)
 
@@ -363,21 +212,17 @@ class CampaignStore:
             record.model_dump(mode="json"),
         )
 
-    def update_campaign(self, campaign_id: str, updates: dict[str, Any]) -> None:
-        path = self._manifest_path(campaign_id)
-        data = read_json(path)
-        data.update(updates)
-        write_json(path, data)
+    def update_campaign(self, campaign_id: str, **changes: Unpack[CampaignEdit]) -> None:
+        manifest = Campaign.model_validate(read_json(self._manifest_path(campaign_id)))
+        self.create_campaign(manifest.edited(**changes))
 
     def repoint_dataset(self, old_name: str, new_name: str) -> int:
-        """Rewrites the manifest pin ``campaign.json::dataset_name`` — the ONE owner, which
-        every cycle-level reader derives from — across every lifecycle, archived included."""
         count = 0
         for cid in self.list_campaign_ids():
             campaign = self.load_campaign(cid)
             if campaign is None or campaign.dataset_name != old_name:
                 continue
-            self.update_campaign(cid, {"dataset_name": new_name})
+            self.update_campaign(cid, dataset_name=new_name)
             count += 1
         return count
 
@@ -386,8 +231,7 @@ class CampaignStore:
 
     @staticmethod
     def _ids_matching(ids: list[str], needle: str) -> list[str]:
-        """The ONE needle rule, for a campaign and a cycle alike: the full id, else a 6-hex suffix
-        or a prefix, else a substring. An empty needle names every id."""
+        # Exact first: a root cycle's id is a prefix of every fork and diag of it.
         if needle in ids:
             return [needle]
         matches = [i for i in ids if i.endswith(f"__{needle}") or i.startswith(needle)]
@@ -396,13 +240,9 @@ class CampaignStore:
         return matches
 
     def match_campaign_ids(self, needle: str) -> list[str]:
-        """Every campaign *needle* could name, so every entry point that names a campaign reaches
-        the same one; more than one answer is the caller's ambiguity to refuse."""
         return self._ids_matching(self.list_campaign_ids(), needle)
 
     def match_cycle_ids(self, campaign_id: str, needle: str) -> list[str]:
-        """Every cycle of *campaign_id* that *needle* could name. The exact arm is what lets a
-        root cycle be named at all: every fork and diag of it carries its id as a prefix."""
         ids = [p.name for p in self.campaign_cycle_dirs(campaign_id)]
         return self._ids_matching(ids, needle)
 
@@ -413,10 +253,6 @@ class CampaignStore:
         lifecycle: LifecycleFilter = "active",
         owner_user_id: str | None = None,
     ) -> list[Campaign]:
-        """The sole lifecycle/owner filter gateway — API and CLI pass through, never re-filtering.
-
-        ``checkin`` is an AUTHORING PHASE, not a visibility state, so it is asked of the root
-        cycle's flag rather than the manifest. A check-in campaign is `active` and lists as one."""
         out: list[Campaign] = []
         for cid in self.list_campaign_ids():
             campaign = self.load_campaign(cid)
@@ -434,75 +270,53 @@ class CampaignStore:
             out.append(campaign)
         return out
 
-    def _live_cycle_ids(self, campaign_id: str) -> list[str]:
-        """``RUNNING`` is the whole answer — a gated cycle heartbeats, so it derives ``RUNNING``
-        too, and none of the rest is a reason to refuse a verb the operator asked for."""
+    def attached_cycle_ids(self, campaign_id: str) -> list[str]:
         cycles_dir = campaign_cycles_dir(self.campaign_root_dir(campaign_id))
         if not cycles_dir.is_dir():
             return []
-        live: list[str] = []
+        attached: list[str] = []
         for cdir in sorted(p for p in cycles_dir.iterdir() if p.is_dir()):
-            data = read_json_optional(CycleLayout(cdir).manifest)
-            if not isinstance(data, dict):
-                continue
-            if (
-                derive_run_phase(cdir, is_terminal=bool(data.get("finished_at")))
-                is RunPhase.RUNNING
-            ):
-                live.append(cdir.name)
-        return live
-
-    def live_cycle_ids(self, campaign_id: str) -> list[str]:
-        return self._live_cycle_ids(campaign_id)
+            if derive_run_state(cdir).producer.attached:
+                attached.append(cdir.name)
+        return attached
 
     def _guard_and_release(self, campaign_id: str, verb: str) -> None:
-        """Only a LIVE producer's open handles are a hazard; a stranded pointer is a UI state
-        to fix, not a reason to refuse, so it is simply released."""
-        if live := self._live_cycle_ids(campaign_id):
+        if live := self.attached_cycle_ids(campaign_id):
             raise ConflictError(
                 f"refusing to {verb} {campaign_id}: cycle {live[0]} has a live producer "
                 "— pause or stop it first"
             )
-        _, active_campaign, _ = read_active_pointer(self._base_dir)
+        active_campaign, _ = read_active_pointer(self._base_dir)
         if active_campaign == campaign_id:
             clear_active_pointer(self._base_dir)
 
-    def _lifecycle_updates(self, status: str, changed_at: str, reason: str) -> dict[str, str]:
-        return {
-            "lifecycle_status": status,
-            "lifecycle_changed_at": changed_at,
-            "lifecycle_reason": reason,
-        }
+    def _set_lifecycle(
+        self, campaign_id: str, status: LifecycleStatus, changed_at: str, reason: str
+    ) -> None:
+        self.update_campaign(
+            campaign_id,
+            lifecycle_status=status,
+            lifecycle_changed_at=changed_at,
+            lifecycle_reason=reason,
+        )
 
     def archive_campaign(self, campaign_id: str, *, changed_at: str, reason: str = "") -> bool:
-        """``lifecycle_status`` is the WHOLE mechanism — the tree stays in ``campaigns/``. Every
-        reader already asks the flag (the ``list_campaigns`` filter, the sidebar, the storage
-        rollup), so moving the tree only bought a second parent each enumerator had to remember."""
         if self.load_campaign(campaign_id) is None:
             return False
         self._guard_and_release(campaign_id, "archive")
-        self.update_campaign(campaign_id, self._lifecycle_updates("archived", changed_at, reason))
+        self._set_lifecycle(campaign_id, "archived", changed_at, reason)
         return True
 
     def unarchive_campaign(self, campaign_id: str, *, changed_at: str, reason: str = "") -> bool:
-        """Only an ARCHIVED campaign comes back. A `deleted` one has already banked its spend as
-        a `SpendTombstoneRecord`, so restoring it makes `_already_banked` answer for money the
-        resurrected campaign then spends again — and that second spend reaches no ledger."""
         campaign = self.load_campaign(campaign_id)
+        # Never a `deleted` one: its spend is already banked, so what it spent next reaches no ledger.
         if campaign is None or campaign.lifecycle_status != "archived":
             return False
-        self.update_campaign(campaign_id, self._lifecycle_updates("active", changed_at, reason))
+        self._set_lifecycle(campaign_id, "active", changed_at, reason)
         return True
 
     def bank_all_before_removal(self) -> None:
-        """Bank EVERY campaign's spend, for a caller about to remove this workspace's campaign tree
-        wholesale instead of campaign by campaign — the host-only CLI `reset`, which is the third
-        path that can take a ledger. The name states the precondition because banking a subject
-        that KEEPS its rows counts the money twice; only a removal may call this.
-
-        It lives here beside the two destroyers' own calls so all three pair ledgers with a
-        campaign_id one way. A caller doing that walk itself is a third spelling of the pairing,
-        free to drift from how a delete does it."""
+        """Removal only: banking a subject that keeps its rows counts the money twice."""
         for campaign_dir in self.iter_campaign_dirs():
             bank_spend(
                 workspace=self._base_dir,
@@ -519,34 +333,24 @@ class CampaignStore:
         reason: str = "",
         inner_sandbox_root: Path | None = None,
     ) -> bool:
-        """Destructive. The cross-campaign ``measurements/`` cache is NEVER touched, and
-        ``inner_sandbox_root`` cascades to this campaign's off-tree L4 sandboxes, which bank their
-        own residue on the way out.
-
-        Both arms take the cycle ledgers — ``.runtime/ledger.jsonl`` is not a keepsake, so
-        ``keep_results`` does not spare it — and those ledgers ARE the account's lifetime spend
-        record, so the spend is banked here rather than by the caller. After the guard: a refused
-        delete keeps its rows, and a tombstone beside them is the same money counted twice."""
         campaign_dir = self.campaign_root_dir(campaign_id)
         if not CampaignLayout(campaign_dir).manifest.is_file():
             return False
         self._guard_and_release(campaign_id, "delete")
+        # After the guard: a tombstone beside a refused delete's rows counts the money twice.
         bank_spend(
             workspace=self._base_dir,
             cycle_dirs=self.campaign_cycle_dirs(campaign_id),
             campaign_id=campaign_id,
         )
-        # Enumerate cycle_ids BEFORE the tree is stripped/removed — the inner
-        # sandboxes are keyed by cycle_id and live off-tree, so we need the ids first.
+        # Before the tree goes: the off-tree inner sandboxes are keyed by these ids.
         inner_cycle_ids: list[str] = []
         if inner_sandbox_root is not None:
             cycles_dir = campaign_cycles_dir(campaign_dir)
             if cycles_dir.is_dir():
                 inner_cycle_ids = [p.name for p in cycles_dir.iterdir() if p.is_dir()]
         if keep_results:
-            self.update_campaign(
-                campaign_id, self._lifecycle_updates("deleted", changed_at, reason)
-            )
+            self._set_lifecycle(campaign_id, "deleted", changed_at, reason)
             _strip_to_keepsake(campaign_dir)
         else:
             rmtree_robust(campaign_dir)
@@ -560,16 +364,9 @@ class CampaignStore:
         return True
 
     def delete_inner_sandbox(self, sandbox: Path, *, campaign_id: str) -> None:
-        """The third destroyer. An inner sandbox is off the account walk — it is a SIBLING of the
-        tenant tree — so nothing else banks what its ledgers still hold, and every call its run
-        settled was already carried onto its outer cycle's ledger (a ``mirrored`` row). Banking
-        only what was not is what makes the delete safe in both directions.
-
-        The tombstone is keyed on the sandbox DIRECTORY, whose name hashes the full owner triple;
-        keying it on the inner cycle would collide, because inner cycle ids are content-addressed
-        and repeat across sandboxes."""
         if not sandbox.exists():
             return
+        # Keyed on the sandbox directory: inner cycle ids are content-addressed and repeat across them.
         bank_spend(
             workspace=self._base_dir,
             cycle_dirs=sandbox_cycle_dirs(sandbox),
@@ -578,93 +375,53 @@ class CampaignStore:
         )
         rmtree_robust(sandbox)
 
-    # ------------------------------------------------------------------
-    # Per-cycle ``index.json`` CRUD — create, update, rewind, enumerate
-    # ------------------------------------------------------------------
+    def load(self, hop: CycleHop) -> CycleIndex | None:
+        return read_cycle_index(self.cycle_dir(hop))
 
-    def load(self, hop: CycleHop) -> dict[str, Any] | None:
-        """``dict``, not a model, and that was MEASURED rather than assumed: 43 files / 24 top-level
-        keys / 0 unreadable against ~+60–100 LOC, the complexity ledger scores the typing zero, and
-        ``extra="forbid"`` would break the deliberately tolerant reads in ``enumerate_cycles`` and
-        the lineage surveys. Re-verify those counts before re-opening it."""
-        data: dict[str, Any] | None = read_json_optional(self._index_path(hop))
-        if data is None:
-            return None
-        data["cycle_id"] = hop.cycle_id
-        return data
+    def mint_cycle(self, hop: CycleHop, *, checkin: bool = False) -> None:
+        if scan_cycle_facts(self._layout(hop).ledger).minted is None:
+            self._append(hop, CycleMintedRecord(checkin=checkin))
 
-    def session_id_of(self, hop: CycleHop) -> str:
-        """The session *hop* was minted under (``index.json::parent_session_id``). Raises rather
-        than answering ``""``: an active pointer saved under no session names a cycle no verb loads."""
-        session_id = str((self.load(hop) or {}).get("parent_session_id") or "")
-        if not session_id:
-            raise NotFoundError(f"cycle {hop.cycle_id!r} in {hop.campaign_id!r} names no session")
-        return session_id
+    def close_checkin(self, hop: CycleHop) -> None:
+        if scan_cycle_facts(self._layout(hop).ledger).checkin:
+            self._append(hop, CheckinClosedRecord())
 
-    def create(
-        self,
-        hop: CycleHop,
-        metadata: dict[str, Any],
-    ) -> Path:
-        """Create/augment ``index.json``; a replay merges keys without clobbering rounds/best."""
-        path = self._index_path(hop)
-        existing = read_json_optional(path) or {}
-        now = utcnow_iso()
-        defaults: dict[str, Any] = {
-            "created_at": existing.get("created_at", now),
-            "updated_at": now,
-            "type": "optimization_loop",
-            "parent_session_id": existing.get("parent_session_id", ""),
-            "parent_cycle_id": None,
-            "n_rounds": 0,
-            # Unmeasured until round 0 banks: `_apply_best` is the only writer of a number here.
-            "best_accuracy": None,
-            "rounds": [],
-            # Babysat marker: flips True the moment an operator manually
-            # intervenes (today: skip-searchpoint), so the cycle is permanently
-            # distinguishable from a pure/reproducible run. `interventions` is the
-            # append-only audit trail of those gestures.
-            "human_intervened": False,
-            "interventions": [],
-        }
-        data = {**defaults, **existing, **metadata}
-        data["updated_at"] = now
-        write_json(path, data)
-        return path
+    def mint_fork_cycle(
+        self, parent: CycleHop, new_cycle_id: str, spec: ForkSpec, *, from_round: int
+    ) -> CycleHop:
+        child = CycleHop(campaign_id=parent.campaign_id, cycle_id=new_cycle_id)
+        # Read at the mint: the only moment the offset is true of a parent still running.
+        cut = CycleEventLog.open(CycleDir(self.cycle_dir(parent))).next_offset
+        self._append(
+            child,
+            CycleMintedRecord(
+                parent_cycle_id=parent.cycle_id,
+                forked_at_offset=cut,
+                fork=spec.model_copy(update={"seed": None}),
+            ),
+        )
+        self._append(child, RoundEnteredRecord(round=from_round, rewound=True))
+        return child
 
-    def update(
-        self,
-        hop: CycleHop,
-        updates: dict[str, Any],
-        *,
-        remove: Sequence[str] = (),
-    ) -> None:
-        path = self._index_path(hop)
-        data = read_json(path)
-        for key in remove:
-            data.pop(key, None)
-        data.update(updates)
-        data["updated_at"] = utcnow_iso()
-        write_json(path, data)
+    def grade_fork(self, hop: CycleHop, direction: ForkDirection) -> None:
+        self._append(hop, ForkGradedRecord(direction=direction))
 
-    def mark_human_intervened(
-        self,
-        hop: CycleHop,
-        *,
-        kind: str,
-        at: str,
-    ) -> None:
-        """Written the moment the operator intervenes, not at teardown — a still-running
-        babysat cycle must already be distinguishable from a pure, reproducible one."""
-        path = self._index_path(hop)
-        data = read_json(path)
-        data["human_intervened"] = True
-        # setdefault: the babysit stamp fires at init on a fresh-sibling fork index
-        # that carries no `interventions` list yet, unlike the skip-searchpoint caller
-        # which runs on an established cycle. The single append site guarantees the key.
-        data.setdefault("interventions", []).append({"kind": kind, "at": at})
-        data["updated_at"] = utcnow_iso()
-        write_json(path, data)
+    def record_intervention(self, hop: CycleHop, *, kind: str) -> None:
+        self._append(hop, InterventionRecord(kind=kind))
+
+    def record_spawned(self, hop: CycleHop, spawned_by: SpawnedBy) -> None:
+        self._append(hop, SpawnedRecord(spawned_by=spawned_by))
+
+    def standing_rounds(self, hop: CycleHop, moment: Moment | None = None) -> StandingRounds:
+        return scan_standing_rounds(ledger_chain(CycleDir(self.cycle_dir(hop)), moment))
+
+    def round_proposals(self, hop: CycleHop, round_num: int) -> RoundProposedRecord | None:
+        return self.standing_rounds(hop).proposals.get(round_num)
+
+    def restate_optimizer_state(self, hop: CycleHop, rr: RoundResult) -> None:
+        CycleEventLog.open(CycleDir(self.cycle_dir(hop))).append(
+            OptimizerStateRecord(round=rr.round, optimizer_state=rr.optimizer_state)
+        )
 
     def rewind_to_round(
         self,
@@ -672,257 +429,173 @@ class CampaignStore:
         after_round: int,
     ) -> None:
         layout = self._layout(hop)
-        rounds_dir = layout.rounds
-        candidates_dir = layout.candidates_cache
-
-        ledger_path = layout.ledger
-        if not ledger_path.exists():
+        if not layout.ledger.exists():
             raise NotFoundError(f"cycle {hop.cycle_id!r} has no ledger on disk")
-        max_complete = max(scan_ledger_round_closes(ledger_path), default=-1)
+        max_complete = max(self.standing_rounds(hop).rounds, default=-1)
         if after_round > max_complete:
             raise BadRequestError(
                 f"--from {after_round}: ledger only has completed rounds 0..{max_complete}"
             )
+        self._append(hop, RoundEnteredRecord(round=after_round + 1, rewound=True))
 
-        if after_round >= 1:
-            if not rounds_dir.exists():
-                raise NotFoundError(
-                    f"cycle {hop.cycle_id!r}: ledger has rounds 0..{max_complete} but "
-                    f"{rounds_dir} is missing — projection cache out of sync with ledger"
-                )
-            target = layout.round_file(after_round)
-            if not target.exists():
-                raise NotFoundError(
-                    f"--from {after_round}: round_{after_round:04d}.json not found in "
-                    f"{rounds_dir} (ledger has completed rounds 0..{max_complete} — "
-                    "projection cache out of sync)"
-                )
-
-        survivors: list[Path] = []
-        displaced: list[Path] = []
-        for p in sorted(rounds_dir.glob(ROUND_GLOB)):
-            if (n := round_number(p)) is None:
-                continue
-            (displaced if n > after_round else survivors).append(p)
-        # Every per-round cache goes with its round: an audit file left behind is read back as a
-        # round the cycle ran (`review.md` counted a discarded round's L2 fire).
-        for cache_dir in (candidates_dir, layout.audit_rounds):
-            if cache_dir.exists():
-                for p in sorted(cache_dir.glob(ROUND_GLOB)):
-                    if (n := round_number(p)) is not None and n > after_round:
-                        displaced.append(p)
-
-        if displaced:
-            for p in displaced:
-                unlink_robust(p)
-            logger.info(
-                "Rewind cycle %s to round %d: deleted %d displaced file(s)",
-                hop.cycle_id,
-                after_round,
-                len(displaced),
-            )
-
-        # No dashboard.json repair here, and now nothing to repair: the resumed run's view
-        # is FOLDED off the ledger and cut there (`resolve_resume_state`) — the one cut, off
-        # the schema. A second writer here re-spelled that rule against the raw dict, with
-        # its own `max(...)` fold in place of the domain helper.
-        self._rebuild_round_index(hop, survivors)
-
-    def _rebuild_round_index(
+    def bank_final(
         self,
         hop: CycleHop,
-        survivors: list[Path],
-    ) -> None:
-        reproject_round_index(self._index_path(hop), survivors)
-
-    def mark_finished(
-        self,
-        hop: CycleHop,
+        final: CycleFinal,
         *,
-        stop_reason: StopReason,
-        finished_at: str,
         interrupted_round: int | None = None,
-        crash_traceback: str | None = None,
-        final: CycleFinal | None = None,
         export: PromptExport | None = None,
     ) -> None:
-
-        updates: dict[str, Any] = {
-            "stop_reason": stop_reason.value,
-            "finished_at": finished_at,
-        }
-        if final is not None:
-            updates["final"] = final.model_dump()
-        # Store partial-round / traceback markers based on what the caller computed
-        # (halted_mid_round → interrupted_round; has_traceback → crash_traceback).
-        remove_keys: list[str] = []
-        if interrupted_round is not None:
-            updates["interrupted_round"] = interrupted_round
-        else:
-            remove_keys.append("interrupted_round")
-        if crash_traceback:
-            updates["crash_traceback"] = crash_traceback
-        else:
-            remove_keys.append("crash_traceback")
-        with graceful("Cycle completion update failed"):
-            self.update(hop, updates, remove=remove_keys)
-        # The export is written HERE, from the same call that stamps `final`, because both are
-        # projections of the one `CycleResult` the runner just built. A separate observer would
-        # be a second walk over the same facts, free to disagree with this one. It is its own
-        # FILE and not a key under `final` for the opposite reason: its readers are outside this
-        # package, and handing them the campaign index to dig through is not an artifact.
+        with graceful("Cycle final append failed"):
+            self._append(hop, CycleFinalRecord(final=final, interrupted_round=interrupted_round))
         if export is not None:
             with graceful("Export artifact write failed"):
-                write_text(
-                    self._layout(hop).export,
-                    export.model_dump_json(indent=2) + "\n",
-                )
+                self._write_export(hop, export)
+
+    def _write_export(self, hop: CycleHop, export: PromptExport) -> None:
+        write_text(self._layout(hop).export, export.model_dump_json(indent=2) + "\n")
+
+    def restate_export_bench(self, hop: CycleHop, bench: BenchScore) -> None:
+        export = self.read_export(hop)
+        if export is not None:
+            self._write_export(hop, export.model_copy(update={"bench": bench}))
 
     def read_export(self, hop: CycleHop) -> PromptExport | None:
-        """The finished cycle's export artifact, or ``None`` when it wrote none.
-
-        The reader half of "we write a file and provide a reader" (`roadmap.md` § Application
-        radius), so no consumer re-derives the winner from `CycleResult`'s wire-side
-        `result_prompt_fields`, which cannot be rebuilt into a `PromptTemplate`.
-        """
         text = read_text_optional(self._layout(hop).export)
         return parse_prompt_export(text) if text else None
 
-    def reopen_for_continuation(self, hop: CycleHop) -> None:
-        """The ONLY writer that removes ``finished_at``, which is a latch: ``derive_run_phase``
-        returns ``TERMINAL`` on it, and TERMINAL is the one phase the reaper will re-stamp.
-
-        ``superseded_by`` goes with it — consumers navigate it to find who answers NOW, so a stale
-        one points off the reopened running cycle onto its idle successor."""
-        self.update(hop, {}, remove=_ENDING_KEYS)
-
     def mark_superseded(self, hop: CycleHop, successor_cycle_id: str) -> None:
-        """The line moved to *successor_cycle_id*. TWO facts, written apart because only one is
-        once-only: the relation is ALWAYS true and is what consumers navigate, while the terminal
-        stamp is skipped where one exists — overwriting a real ``stop_reason`` would destroy why
-        the cycle ended. A cut from an already-finished parent therefore still records its
-        successor. ``reopen_for_continuation`` clears the latch."""
-
-        with graceful("Supersede relation write failed"):
-            self.update(hop, {"superseded_by": successor_cycle_id})
-        self._stamp_terminal(hop, StopReason.REBASED)
+        # The relation always lands; the ending only where none stands, or it replaces why it ended.
+        with graceful("Supersede relation append failed"):
+            self._append(hop, CycleSupersededRecord(successor_cycle_id=successor_cycle_id))
+        self._declare_ended(hop, StopReason.REBASED)
 
     def line(self, hop: CycleHop) -> list[CycleHop]:
-        """*hop* and every cycle a supersede cut handed its line to since, oldest first."""
         out = [hop]
-        while (data := self.load(hop)) is not None and (successor := data.get("superseded_by")):
+        while successor := scan_cycle_facts(self._layout(hop).ledger).superseded_by:
             hop = CycleHop(campaign_id=hop.campaign_id, cycle_id=successor)
             out.append(hop)
         return out
 
     def line_holder(self, hop: CycleHop) -> CycleHop:
-        """The cycle answering for *hop*'s line now — itself unless a supersede cut moved it."""
         return self.line(hop)[-1]
 
-    def _stamp_terminal(self, hop: CycleHop, reason: StopReason) -> bool:
-        data = read_json_optional(self._index_path(hop))
-        if not isinstance(data, dict) or data.get("finished_at"):
+    def declare_stop(
+        self, hop: CycleHop, stop: RunPhaseRecord, *, error: ErrorRecord | None = None
+    ) -> None:
+        cycle_dir = CycleDir(self.cycle_dir(hop))
+        dashboard = materializing_over(cycle_dir, hop)
+        ledger = CycleEventLog.open(cycle_dir)
+        if dashboard is not None:
+            ledger.bind(dashboard)
+        # Error first, so no reader finds the ending without it.
+        if error is not None:
+            ledger.append(error)
+        ledger.append(stop)
+        if dashboard is not None:
+            dashboard.drain()
+        write_cycle_index(cycle_dir)
+
+    def claim_launch(
+        self,
+        hop: CycleHop,
+        *,
+        stage: LaunchStage,
+        job_id: str,
+        claimant_lock: Path,
+    ) -> None:
+        self._append(
+            hop,
+            LaunchClaimRecord(stage=stage, job_id=job_id, claimant_lock=str(claimant_lock)),
+        )
+
+    def launch_claim(self, hop: CycleHop) -> LaunchClaimRecord | None:
+        return scan_launch_claim(self._layout(hop).ledger)
+
+    def release_claim(self, hop: CycleHop, *, job_id: str, detail: str) -> None:
+        claim = self.launch_claim(hop)
+        if claim is not None and claim.job_id == job_id:
+            self._append(hop, LaunchReleasedRecord(job_id=job_id, detail=detail))
+
+    def _declare_ended(self, hop: CycleHop, reason: StopReason) -> bool:
+        facts = scan_cycle_facts(self._layout(hop).ledger)
+        if facts.minted is None or facts.ended is not None:
             return False
-        self.mark_finished(hop, stop_reason=reason, finished_at=utcnow_iso())
+        self.declare_stop(hop, RunPhaseRecord.stop(reason))
         return True
 
     def mark_producer_vanished(self, hop: CycleHop) -> bool:
-        """Never reaps a paused, check-in or origin-gated cycle — none is a dead producer, and
-        pause is checked through BOTH its writers (the flag, and the runner's declaration)."""
         cycle_dir = self.cycle_dir(hop)
-        layout = CycleLayout(cycle_dir)
-        if layout.pause_flag.is_file() or is_checkin(cycle_dir):
+        if derive_run_state(cycle_dir).producer.state is not ProducerState.SILENT:
             return False
-        if scan_ledger_declared_phase(layout.ledger) in (RunPhase.GATE, RunPhase.PAUSED):
+        lock = CycleLayout(cycle_dir).producer_lock
+        # Declared holding the cycle, so a launch taking it up is never ended under itself.
+        if not producer_lock.take(lock):
             return False
-        return self._stamp_terminal(hop, StopReason.PRODUCER_VANISHED)
+        try:
+            return self._declare_ended(hop, StopReason.PRODUCER_VANISHED)
+        finally:
+            producer_lock.release(lock)
 
-    def _entry_from_index(self, index_path: Path) -> CycleListEntry:
-        """THE decoder of ``index.json`` into the served ``CycleListEntry``."""
-        campaign_id, cycle_id = self._ids_from_index_path(index_path)
-        data = read_json_tolerant(index_path)
+    def _list_entry(self, cycle_dir: Path, index: CycleIndex) -> CycleListEntry:
+        campaign_id, cycle_id = cycle_dir.parent.parent.name, cycle_dir.name
         kind = sibling_kind(cycle_id)
-        # The single run-phase derivation — running / paused / stopping /
-        # detached / terminal. Lifecycle (terminal) comes from index
-        # ``finished_at``; control + freshness from derive_run_phase. This is
-        # the one computation the picker, both live dots, and the badge all
-        # read — no surface re-derives "running" from its own inputs.
-        is_terminal = isinstance(data, dict) and bool(data.get("finished_at"))
-        run_phase = derive_run_phase(index_path.parent, is_terminal=is_terminal)
-        if not isinstance(data, dict):
-            data = {}
-        header_raw = data.get("header")
-        header: dict[str, Any] = header_raw if isinstance(header_raw, dict) else {}
-        fork_raw = data.get("fork")
-        fork_trigger = fork_raw.get("trigger") if isinstance(fork_raw, dict) else None
-        # Derived from the one owner (campaign.json::dataset_name) — no per-cycle copy.
+        run = derive_run_state(cycle_dir)
         campaign = self.load_campaign(campaign_id)
-        dataset_name = campaign.dataset_name if campaign is not None else ""
         return CycleListEntry(
             campaign_id=campaign_id,
             cycle_id=cycle_id,
-            parent_session_id=data.get("parent_session_id", ""),
-            parent_cycle_id=data.get("parent_cycle_id")
-            or (None if kind == "root" else root_cycle_id(cycle_id)),
-            dataset_name=dataset_name,
-            backend_id=header.get("backend_id", ""),
-            mint_kind=_mint_kind(kind, fork_trigger),
+            parent_cycle_id=index.parent_cycle_id,
+            dataset_name="" if campaign is None else campaign.dataset_name,
+            backend_id="" if campaign is None else campaign.backend_id,
+            mint_kind=index.mint_kind,
             is_root=kind == "root",
-            stop_reason=cycle_ending(data),
-            superseded_by=data.get("superseded_by"),
-            run_phase=run_phase,
-            best_accuracy=data.get("best_accuracy"),
-            origin_accuracy=origin_accuracy_of(data),
-            rounds_closed=sum(1 for r in data.get("rounds") or [] if r.get("round", 0) > 0),
-            created_at=data.get("created_at", ""),
-            updated_at=data.get("updated_at", ""),
-            human_intervened=bool(data.get("human_intervened", False)),
-            spawned_by=data.get("spawned_by"),
+            stop_reason=index.stop_reason,
+            superseded_by=index.superseded_by,
+            run_phase=run.run_phase,
+            status=RunStatus.of(run.run_phase, index.stop_reason),
+            producer_attached=run.producer.attached,
+            run_admission=run.admission,
+            pause=run.pause,
+            standing=index.standing,
+            rounds_closed=index.rounds_closed,
+            created_at=index.created_at,
+            updated_at=index.updated_at,
+            human_intervened=index.human_intervened,
+            spawned_by=index.spawned_by,
         )
 
     def enumerate_cycles(self) -> list[CycleListEntry]:
-        return [self._entry_from_index(p) for p in self._index_files()]
+        return [
+            self._list_entry(cycle_dir, index)
+            for cycle_dir in self._cycle_dirs()
+            if (index := read_cycle_index(cycle_dir)) is not None
+        ]
 
     def _stub_deletion_blocked(self, hop: CycleHop) -> str | None:
-        """Why this cycle may NOT be deleted as a stub, or ``None`` when it may. Asked before the
-        spend is banked, because banking a cycle the delete then refuses counts that money twice.
-
-        Banked-nothing is measured against what the cut INHERITED, never against zero: a rebase
-        fork mints carrying ``n_rounds == from_round`` without having run a round."""
-        index_path = self._index_path(hop)
-        # NOT read_json_tolerant: this has to tell "absent" from "corrupt" — one is a
-        # stub to delete, the other is a cycle whose state we cannot vouch for.
-        try:
-            index = read_json_optional(index_path)
-        except (OSError, json.JSONDecodeError) as exc:
-            return f"index.json unreadable: {exc}"
-        if index is None:
+        cycle_dir = self.cycle_dir(hop)
+        if self.load(hop) is None:
             return "not on disk"
+        if derive_run_state(cycle_dir).producer.attached:
+            return "a producer holds it — pause it or let it end first"
         if root_cycle_id(hop.cycle_id) == hop.cycle_id:
             return "family root — deletion is for sibling stubs only"
-        n_rounds = index.get("n_rounds", 0)
-        fork = index.get("fork")
-        from_round = (fork or {}).get("from_round") if isinstance(fork, dict) else None
-        inherited = from_round if isinstance(from_round, int) and from_round > 0 else 0
-        if not isinstance(n_rounds, int) or n_rounds > inherited:
-            return f"n_rounds={n_rounds} against {inherited} inherited — cycle ran real work"
-        for other in self._index_files():
-            other_campaign, other_cycle = self._ids_from_index_path(other)
-            if other_campaign != hop.campaign_id or other_cycle == hop.cycle_id:
-                continue
-            other_data = read_json_optional(other)
-            if isinstance(other_data, dict) and other_data.get("parent_cycle_id") == hop.cycle_id:
-                return f"has descendant {other_cycle}"
+        # Its OWN ledger, not the chain: a rebase fork stands on parent rounds it never closed.
+        own = scan_standing_rounds([LedgerSpan(CycleLayout(cycle_dir).ledger)]).rounds
+        if own:
+            return f"closed {len(own)} round(s) of its own — cycle ran real work"
+        for other in self.campaign_cycle_dirs(hop.campaign_id):
+            minted = scan_cycle_facts(CycleLayout(other).ledger).minted
+            if minted is not None and minted.parent_cycle_id == hop.cycle_id:
+                return f"has descendant {other.name}"
         return None
 
     def try_delete_stub_cycle(self, hop: CycleHop) -> tuple[bool, str]:
-        """Bank, then destroy — a stub is deletable at ``n_rounds == inherited``, which an
-        origin-scored fork reaches having already paid for round 0, so its ledger holds real money
-        the ``rmtree`` would otherwise un-spend."""
         blocked = self._stub_deletion_blocked(hop)
         if blocked is not None:
             return False, blocked
         cycle_dir = self.cycle_dir(hop)
+        # After the refusal, before the rmtree: an origin-scored stub already paid for round 0.
         bank_spend(
             workspace=self._base_dir,
             cycle_dirs=[cycle_dir],
@@ -931,215 +604,6 @@ class CampaignStore:
         )
         rmtree_robust(cycle_dir)
         return True, ""
-
-    # ------------------------------------------------------------------
-    # Fork-sibling ``index.json`` writers — rebase / diag
-    # ------------------------------------------------------------------
-
-    def write_fresh_sibling(
-        self,
-        campaign_id: str,
-        parent_cycle_id: str,
-        new_cycle_id: str,
-        *,
-        forked_at: str,
-    ) -> Path:
-        """The single writer for the diag / steered triggers — numbering restarts at round 1;
-        parent-round inheritance is ``save_rebase_fork``'s job."""
-        parent = CycleHop(campaign_id=campaign_id, cycle_id=parent_cycle_id)
-        child = CycleHop(campaign_id=campaign_id, cycle_id=new_cycle_id)
-        parent_index = read_json_optional(self._index_path(parent)) or {}
-        blob = _fresh_sibling_index_blob(
-            parent_index,
-            parent_cycle_id,
-            forked_at,
-            forked_at_offset=_branch_offset(self.cycle_dir(parent)),
-        )
-        path = self._index_path(child)
-        write_json(path, blob)
-        return path
-
-    def save_rebase_fork(
-        self,
-        campaign_id: str,
-        parent_cycle_id: str,
-        new_cycle_id: str,
-        *,
-        forked_at: str,
-        forked_from_round: int,
-        surviving_rounds: list[RoundResult],
-    ) -> Path:
-        """Single writer for all four rebase triggers; the issuer rides ``ForkSpec.trigger`` on
-        the FORK_CUT record. ``rounds[]`` is the index SUMMARY shape, never whole documents.
-
-        The parent's ENDING is its own: a fork cut from a finished cycle is born unfinished."""
-        parent = CycleHop(campaign_id=campaign_id, cycle_id=parent_cycle_id)
-        parent_index = read_json_optional(self._index_path(parent)) or {}
-        index = {
-            **{k: v for k, v in parent_index.items() if k not in _ENDING_KEYS},
-            "parent_cycle_id": parent_cycle_id,
-            "forked_from_round": forked_from_round,
-            "forked_at": forked_at,
-            "forked_at_offset": _branch_offset(self.cycle_dir(parent)),
-            "rounds": [_index_round(rr) for rr in surviving_rounds],
-            "n_rounds": len(surviving_rounds),
-            "updated_at": forked_at,
-        }
-        _apply_best(index)
-        path = self._index_path(CycleHop(campaign_id=campaign_id, cycle_id=new_cycle_id))
-        write_json(path, index)
-        return path
-
-    def copy_parent_rounds_and_candidates(
-        self,
-        campaign_id: str,
-        parent_cycle_id: str,
-        new_cycle_id: str,
-        *,
-        before_round: int,
-    ) -> int:
-        parent = CycleHop(campaign_id=campaign_id, cycle_id=parent_cycle_id)
-        child = CycleHop(campaign_id=campaign_id, cycle_id=new_cycle_id)
-        copy_specs: tuple[tuple[Path, Path, str], ...] = (
-            (self._rounds_dir(parent), self._rounds_dir(child), "round_"),
-            (self._candidates_dir(parent), self._candidates_dir(child), "round_"),
-            # The audit twin rides with its round: a fork's `review.md` reads these, and without
-            # them every inherited round scores as one where no layer fired.
-            (self._layout(parent).audit_rounds, self._layout(child).audit_rounds, "round_"),
-        )
-        n_copied = 0
-        for src, dst, prefix in copy_specs:
-            if not src.exists():
-                continue
-            dst.mkdir(parents=True, exist_ok=True)
-            for p in sorted(src.glob(f"{prefix}*.json")):
-                try:
-                    n = int(p.stem.removeprefix(prefix))
-                except ValueError:
-                    continue
-                if n < before_round:
-                    shutil.copyfile(p, dst / p.name)
-                    n_copied += 1
-        self._copy_parent_decisions(parent, child, before_round=before_round)
-        return n_copied
-
-    @staticmethod
-    def _decision_line(line: str) -> dict[str, Any] | None:
-        """One ledger line as a dict, or ``None`` if it is torn — a partial trailing write is
-        normal on an append-only file and must not fail the mint."""
-        try:
-            rec = json.loads(line)
-        except json.JSONDecodeError:
-            return None
-        return rec if isinstance(rec, dict) else None
-
-    def _copy_parent_decisions(
-        self, parent: CycleHop, child: CycleHop, *, before_round: int
-    ) -> int:
-        """Append the parent's ``decision`` records for the LIFTED rounds onto the fork's ledger.
-
-        A fork answers for itself: every ``scan_ledger_*`` reads the physical file, deliberately,
-        so a record only the parent holds is invisible to the branch — the same rule that makes a
-        repair re-bank its corrected rounds. Resume replays the lifted rounds to find where the
-        branch departs, and it reads their decisions from here; without the copy that check sees
-        an empty list and passes every inherited round silently.
-
-        Only decisions: the rest of the prefix is the parent's own history and copying it would
-        duplicate a ledger that already measured 56% duplication once."""
-        src = CycleLayout(self.cycle_dir(parent)).ledger
-        if not src.is_file():
-            return 0
-        lifted = [
-            line
-            for line in src.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-            and (rec := self._decision_line(line)) is not None
-            and rec.get("record_type") == "decision"
-            and isinstance(rec.get("round"), int)
-            and rec["round"] < before_round
-        ]
-        if not lifted:
-            return 0
-        dst = CycleLayout(self.cycle_dir(child)).ledger
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        with dst.open("a", encoding="utf-8") as fh:
-            fh.write("\n".join(lifted) + "\n")
-        return len(lifted)
-
-    # ------------------------------------------------------------------
-    # Round + candidate detail-file CRUD under a cycle dir
-    # ------------------------------------------------------------------
-
-    def save_round_file(
-        self,
-        hop: CycleHop,
-        rr: RoundResult,
-    ) -> Path:
-        validate_path_component(rr.round_id)
-
-        detail_path = self._layout(hop).round_file(rr.round)
-        write_json(detail_path, rr.model_dump(mode="json"))
-
-        index_path = self._index_path(hop)
-        data = read_json(index_path)
-
-        data["rounds"] = [t for t in data["rounds"] if t.get("round") != rr.round]
-        data["rounds"].append(_index_round(rr))
-        data["n_rounds"] = len(data["rounds"])
-        _apply_best(data)
-        data["updated_at"] = utcnow_iso()
-        write_json(index_path, data)
-
-        return detail_path
-
-    def load_round_file(
-        self,
-        hop: CycleHop,
-        round_num: int,
-    ) -> RoundResult | None:
-        raw = read_json_optional(self._layout(hop).round_file(round_num))
-        return None if raw is None else RoundResult.model_validate(raw)
-
-    def load_rounds_range(
-        self,
-        hop: CycleHop,
-        start: int,
-        end: int,
-    ) -> list[RoundResult]:
-        out: list[RoundResult] = []
-        for r in range(start, end + 1):
-            rr = self.load_round_file(hop, r)
-            if rr is not None:
-                out.append(rr)
-        return out
-
-    def save_round_candidates(
-        self,
-        hop: CycleHop,
-        round_num: int,
-        candidates: list[dict[str, Any]],
-        *,
-        consumed: str,
-    ) -> None:
-        """``consumed`` is the ``round_document_digest`` of the round this generation read;
-        without it a replayed cache is unfalsifiable, so both halves ride ONE file."""
-        path = self._layout(hop).candidate_file(round_num)
-        write_json(path, {"consumed": consumed, "candidates": candidates})
-        logger.debug("Saved %d candidates for round %d → %s", len(candidates), round_num, path.name)
-
-    def load_round_candidates(
-        self,
-        hop: CycleHop,
-        round_num: int,
-    ) -> tuple[list[dict[str, Any]], str] | None:
-        raw = read_json_optional(self._layout(hop).candidate_file(round_num))
-        if raw is None:
-            return None
-        return list(raw["candidates"]), str(raw["consumed"])
-
-    # ------------------------------------------------------------------
-    # Cycle-seed I/O — the read-once ``CycleSeedRecord`` on the ledger
-    # ------------------------------------------------------------------
 
     def write_cycle_seed(self, hop: CycleHop, seed: CycleSeed) -> None:
         cycle_dir = self.cycle_dir(hop)
@@ -1151,43 +615,29 @@ class CampaignStore:
     def write_run_limits(
         self,
         hop: CycleHop,
-        ceiling: BudgetChange,
+        ceiling: SpendCeilings,
         *,
         rounds: RoundsCap | None,
-        reserve: BudgetChange,
+        pause_at_round: int | None,
+        reserve: SpendCeilings,
     ) -> None:
-        """Land the cycle's standing operator ceiling — the record, then its polled mirror. The ONE
-        writer of both, so the mirror a running book reads can never name a ceiling the ledger does
-        not. WHOLE: the last record wins, so ``rounds=None`` drops a standing round cap."""
-        cycle_dir = self.cycle_dir(hop)
-        CycleEventLog.open(CycleDir(cycle_dir)).append(
-            RunLimitsRecord(usd=ceiling.usd, tokens=ceiling.tokens, rounds=rounds)
+        """Whole, last wins: a ``None`` rounds cap or ``pause_at_round`` DROPS the standing one."""
+        CycleEventLog.open(CycleDir(self.cycle_dir(hop))).append(
+            RunLimitsRecord(
+                ceiling=ceiling, rounds=rounds, pause_at_round=pause_at_round, reserve=reserve
+            )
         )
-        # *reserve* rides the mirror alone: every launch admits its own.
-        write_run_limits_mirror(cycle_dir, ceiling, rounds=rounds, reserve=reserve)
 
     def read_run_limits(self, hop: CycleHop) -> RunLimitsRecord:
         return scan_ledger_run_limits(self._layout(hop).ledger)
 
     def write_resolved_pipeline(self, hop: CycleHop, declaration: dict[str, Any]) -> None:
-        """Record the declaration this cycle RUNS — the merge of the live backend and the dataset
-        overlay, written once at run init. Not the ledger: it is a fact about the whole cycle, not
-        an event in it, and a reader that only wants "what may move here" should not scan a log."""
         write_yaml(self._layout(hop).resolved_pipeline, declaration)
 
     def write_resolved_experiment(
         self, hop: CycleHop, experiment: Mapping[str, Any] | None
     ) -> None:
-        """Land the panel this cycle measures — FIRST write wins, unlike the declaration above.
-
-        The two have opposite cadences on purpose. A declaration is re-written every resume because
-        what it owes the operator is what the NEXT round will search; a roster is written once
-        because what it owes is what every round ALREADY measured, and re-pinning it mid-campaign
-        would change what the cells are without changing the campaign's name.
-
-        A later resolution that DISAGREES is the whole reason this file exists, so it is reported
-        rather than dropped: the roster moved under a name that was supposed to be fixed, and every
-        round banked before now was measured on the other one."""
+        """First write wins: the roster names what every round ALREADY measured."""
         if experiment is None:
             return
         doc = dict(experiment)
@@ -1205,45 +655,17 @@ class CampaignStore:
             )
 
     def read_resolved_experiment(self, hop: CycleHop) -> dict[str, Any] | None:
-        """The panel this cycle measured, or ``None`` where it never ran — a read outside a run
-        resolves the dataset's own file then, which is the honest answer for a campaign that has
-        yet to pin anything."""
         raw = read_yaml_optional(self._layout(hop).resolved_experiment)
         return raw if isinstance(raw, dict) else None
 
-    def read_bank_ids(self, hop: CycleHop) -> frozenset[int]:
-        """Every bank row this cycle partitioned at run init, or empty where it never ran one."""
-        raw = read_json_tolerant(self._layout(hop).bank_partition, {})
-        return frozenset(
-            int(i) for part in ("search_ids", "bench_ids", "demo_ids") for i in raw.get(part) or []
-        )
+    def read_bank_partition(self, hop: CycleHop) -> PartitionRecord | None:
+        raw = read_json_optional(self._layout(hop).bank_partition)
+        return None if raw is None else PartitionRecord.model_validate(raw)
 
-    def write_bank_partition(self, hop: CycleHop, partition: BankPartition) -> None:
-        """Re-written every run init: the partition is a pure function of the bank and the frozen
-        declaration, so a disagreement between runs is a changed bank, which the id lists show."""
-        split = partition.split
-        write_json(
-            self._layout(hop).bank_partition,
-            {
-                "split": None if split is None else split.model_dump(mode="json"),
-                "search_ids": [s.id for s in partition.search],
-                "bench_ids": [s.id for s in partition.bench],
-                "demo_ids": [s.id for s in partition.demo],
-            },
-        )
+    def write_bank_partition(self, hop: CycleHop, record: PartitionRecord) -> None:
+        write_json(self._layout(hop).bank_partition, record.model_dump(mode="json"))
 
     def write_optimized_surface(self, hop: CycleHop, leaves: Sequence[ValueLeaf]) -> None:
-        """Record WHAT this cycle optimizes, and how each value reaches the model.
-
-        Beside the resolved declaration rather than inside it, because the two are different kinds:
-        that file is the declaration, this is the READING of it an operator needs and cannot derive
-        from it — a declaration names a key, never the channel it travels nor whether the model
-        will see it. Human-readable and on disk per the pre-flight gate; a material fact surfaced
-        only in stdout is one the operator had to have been watching for.
-
-        Written at init and re-written on resume, the same cadence and for the same reason as the
-        declaration above: what this owes the operator is what the NEXT round will search.
-        """
         by_delivery: dict[str, list[ValueLeaf]] = {}
         for leaf in leaves:
             by_delivery.setdefault(leaf.delivery, []).append(leaf)
@@ -1272,35 +694,19 @@ class CampaignStore:
         write_text(self._layout(hop).optimized_surface, "\n".join(lines))
 
     def read_resolved_pipeline(self, hop: CycleHop) -> dict[str, Any] | None:
-        """``None`` where a campaign has never run — the committed dataset file answers then, and
-        that IS the honest answer, because no backend has told this campaign anything yet."""
         raw = read_yaml_optional(self._layout(hop).resolved_pipeline)
         return raw if isinstance(raw, dict) else None
 
     def write_ruler(
         self, hop: CycleHop, ruler: DeltaRuler, *, dataset_name: str, round_num: int
     ) -> None:
-        """Appended BEFORE the round document that names it. A crash between the two leaves a ruler
-        carrying cells no round mentions, which is harmless; the reverse leaves a round whose θ
-        nothing can reproduce, which is the state this record exists to end."""
         cycle_dir = self.cycle_dir(hop)
         CycleEventLog.open(CycleDir(cycle_dir)).append(
             RulerRecord(ruler=ruler, dataset_name=dataset_name, round=round_num)
         )
 
     def read_ruler(self, hop: CycleHop, *, dataset_name: str) -> DeltaRuler | None:
-        return scan_ledger_rulers(self._layout(hop).ledger).get(dataset_name)
-
-    def copy_rulers(self, parent: CycleHop, new_cycle_id: str, *, round_num: int) -> None:
-        """Re-append every scale the parent holds — ALL of them, since an L4 outer cycle also owns
-        the shared inner one, and a fork lifting only its own would re-fit the other."""
-        for dataset_name, ruler in scan_ledger_rulers(self._layout(parent).ledger).items():
-            self.write_ruler(
-                CycleHop(campaign_id=parent.campaign_id, cycle_id=new_cycle_id),
-                ruler,
-                dataset_name=dataset_name,
-                round_num=round_num,
-            )
+        return scan_ledger_ruler(continued_chain(CycleDir(self.cycle_dir(hop))), dataset_name)
 
 
-__all__ = ["CampaignStore", "cycle_ending", "cycle_final", "origin_accuracy_of"]
+__all__ = ["CampaignStore"]

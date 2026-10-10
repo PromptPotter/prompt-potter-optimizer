@@ -1,5 +1,4 @@
-"""GitHub is OAuth 2.0, NOT OIDC — no ID token, no JWS verification; identity comes from the profile API under TLS. The
-synthetic issuer ``https://github.com`` keeps ``(iss, sub)`` hashing provider-distinct from Google."""
+"""GitHub is OAuth 2.0, not OIDC: no ID token to verify, and a synthetic issuer keeps `(iss, sub)` provider-distinct."""
 
 from __future__ import annotations
 
@@ -10,6 +9,7 @@ import httpx
 
 from promptpotter.infrastructure.identity.google import ProviderIdentity
 from promptpotter.infrastructure.identity.provider_config import OIDCProviderConfig
+from promptpotter.infrastructure.tls import tls_context
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ class GitHubProviderClient:
         return f"{GITHUB_AUTH_URL}?{urlencode(params)}"
 
     async def exchange_code(self, *, code: str) -> ProviderIdentity:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=15.0, verify=tls_context()) as client:
             token_response = await client.post(
                 GITHUB_TOKEN_URL,
                 data={
@@ -79,13 +79,7 @@ class GitHubProviderClient:
                     f"GitHub /user response missing numeric id: {user!r}"
                 )
 
-            # ONLY the verified list. ``/user``'s ``email`` is the PUBLIC PROFILE field, which the
-            # account holder sets to any string and GitHub never checks — so preferring it (which
-            # this did, falling back to the verified list only when it was absent) inverted the
-            # trust order and handed us an address nobody proved they own. Downstream that address
-            # is an identity key: the sign-in blocklist matches on it, and so does the host-admin
-            # claim. An account with no verified address yields ``None`` and signs in on its
-            # subject alone, which is the honest answer rather than a guess.
+            # Only the verified list: `/user`'s `email` is unchecked, and the blocklist and host-admin claim match on it.
             email = None
             email_response = await client.get(GITHUB_EMAIL_URL, headers=auth_headers)
             if email_response.status_code == 200:

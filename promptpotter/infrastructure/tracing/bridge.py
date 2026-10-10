@@ -1,311 +1,206 @@
-"""Observability bridge — fans events to file + Langfuse + MLflow under :func:`graceful`, so observability never crashes
-the loop. Langfuse id state persists after every mutation, so an interrupted resume produces one continuous trace."""
-
 from __future__ import annotations
 
 import logging
-import time
-from collections.abc import AsyncIterator, Callable, Sequence
-from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
+from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, get_args
+from typing import TYPE_CHECKING, Any
 
-from promptpotter.config.settings import DATASET_NAME, settings
-from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.phases import StopReason
+from promptpotter.config.settings import settings
+from promptpotter.domain.phases import RunPhase
+from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.tracing.events import (
-    CampaignEnd,
     CampaignStart,
     DatasetRegistered,
-    DatasetRun,
-    Event,
-    NodeEnd,
-    NodeStart,
-    PromptVersion,
+    MeasurementEvent,
     QueryNodeSpan,
-    QueryScoreEnd,
     QueryScoreStart,
-    RoundEnd,
-    RoundStart,
-    dataset_item_id,
+    TraceSink,
 )
 from promptpotter.infrastructure.tracing.file_sink import FileSink
-from promptpotter.infrastructure.tracing.langfuse_client import LangfuseLogger
-
-if TYPE_CHECKING:
-    from promptpotter.domain.sample import Sample
 from promptpotter.infrastructure.tracing.langfuse_sink import LangfuseSink
 from promptpotter.infrastructure.tracing.mlflow_sink import MLflowSink
 from promptpotter.shared.errors import graceful
 
+if TYPE_CHECKING:
+    from promptpotter.domain.cycle_paths import CycleHop
+    from promptpotter.domain.run_records import (
+        CandidateScoredRecord,
+        LLMCallRecord,
+        LLMCallStartRecord,
+        PhaseRecord,
+        RoundClosedRecord,
+        RoundEnteredRecord,
+        RunPhaseRecord,
+    )
+    from promptpotter.domain.sample import Sample
+    from promptpotter.infrastructure.tracing.langfuse_client import LangfuseLogger
+
 logger = logging.getLogger(__name__)
 
-__all__ = ["ObservabilityBridge", "observed_node"]
+__all__ = ["TracingProjection"]
 
-_Route = tuple[str, Callable[[Any], None] | None]
-
-
-@dataclass
-class NodeTrace:
-    output: dict[str, Any] = field(default_factory=dict)
-    duration_ms: float = 0.0
-    error: str | None = None
+DATASET_NAME: str = "ground_truth"
 
 
-class ObservabilityBridge:
-    def __init__(
-        self,
-        *,
-        file_sink: FileSink,
-        langfuse_sink: LangfuseSink | None,
-        mlflow_sink: MLflowSink | None = None,
-    ) -> None:
-
+class TracingProjection(Projection):
+    def __init__(self, campaign_id: str, sinks: Sequence[TraceSink]) -> None:
         self._enabled: bool = settings.OBS_ENABLED
-        self._file = file_sink
-        self._langfuse = langfuse_sink
-        self._mlflow = mlflow_sink
-
-        f, lf, ml = file_sink, langfuse_sink, mlflow_sink
-        # The routing table IS the fan-out: event type → the sink handlers that receive it,
-        # as literal bound methods, so `grep on_node_start` still lands on the one call site
-        # and a sink's ABSENCE from a row means it genuinely isn't called. Adding an event is
-        # this row plus its handlers — never a separate dispatch arm to keep in step.
-        self._routes: dict[type, tuple[_Route, ...]] = {
-            DatasetRegistered: (
-                ("file", f.on_dataset_registered),
-                ("langfuse", lf.on_dataset_registered if lf else None),
-            ),
-            CampaignStart: (
-                ("file", f.on_campaign_start),
-                ("langfuse", lf.on_campaign_start if lf else None),
-                ("mlflow", ml.on_campaign_start if ml else None),
-            ),
-            DatasetRun: (
-                ("file", f.on_dataset_run),
-                ("langfuse", lf.on_dataset_run if lf else None),
-            ),
-            RoundStart: (
-                ("file", f.on_round_start),
-                ("langfuse", lf.on_round_start if lf else None),
-            ),
-            NodeStart: (
-                ("file", f.on_node_start),
-                ("langfuse", lf.on_node_start if lf else None),
-            ),
-            NodeEnd: (
-                ("file", f.on_node_end),
-                ("langfuse", lf.on_node_end if lf else None),
-            ),
-            RoundEnd: (
-                ("file", f.on_round_end),
-                ("langfuse", lf.on_round_end if lf else None),
-                ("mlflow", ml.on_round_end if ml else None),
-            ),
-            PromptVersion: (
-                ("file", f.on_prompt_version),
-                ("langfuse", lf.on_prompt_version if lf else None),
-            ),
-            CampaignEnd: (
-                ("file", f.on_campaign_end),
-                ("langfuse", lf.on_campaign_end if lf else None),
-            ),
-            QueryScoreStart: (("langfuse", lf.on_query_score_start if lf else None),),
-            QueryNodeSpan: (("langfuse", lf.on_query_node_span if lf else None),),
-            QueryScoreEnd: (("langfuse", lf.on_query_score_end if lf else None),),
-        }
-        # The table is the registry, so it must be WHOLE: an `Event` member with no row is
-        # dropped by `emit` in silence, which is the one failure this fan-out cannot report.
-        unrouted = [e.__name__ for e in get_args(Event) if e not in self._routes]
-        if unrouted:
-            raise RuntimeError(
-                f"ObservabilityBridge routes no sink for {', '.join(unrouted)} — every Event "
-                "member needs a row, or delete it from the union (it has no sink to reach)"
-            )
+        self._campaign_id = campaign_id
+        self._sinks = tuple(sinks)
+        self._langfuse = next((s for s in self._sinks if isinstance(s, LangfuseSink)), None)
+        # A close with no open (a call replayed from cache, a bracket entered before a restart) reaches no sink.
+        self._open: set[tuple[int | None, str]] = set()
+        self._closed: set[int] = set()
 
     @classmethod
-    def from_settings(
-        cls,
-        store_base_dir: str | Path,
-        hop: CycleHop,
-        *,
-        langfuse: LangfuseLogger | None,
-    ) -> ObservabilityBridge:
+    def for_cycle(
+        cls, store_base_dir: str | Path, hop: CycleHop, *, langfuse: LangfuseLogger | None
+    ) -> TracingProjection:
+        sinks: list[TraceSink] = [FileSink(store_base_dir, hop)]
+        if langfuse and langfuse.enabled:
+            sinks.append(LangfuseSink(store_base_dir, hop.campaign_id, langfuse))
+        if settings.MLFLOW_ENABLED:
+            sinks.append(MLflowSink(store_base_dir))
+        return cls(hop.cycle_id, sinks)
 
-        file_sink = FileSink(store_base_dir, hop)
-        lf_sink = (
-            LangfuseSink(store_base_dir, hop.campaign_id, langfuse)
-            if (langfuse and langfuse.enabled)
-            else None
-        )
-        mlflow_sink = MLflowSink(store_base_dir) if settings.MLFLOW_ENABLED else None
-        return cls(file_sink=file_sink, langfuse_sink=lf_sink, mlflow_sink=mlflow_sink)
-
-    def emit(self, event: Event) -> None:
-        """Call each sink handler routed to ``event``'s type under :func:`graceful`. An event type
-        absent from ``_routes`` has no sink and is dropped — declaring one without a row is the bug."""
-        if not self._enabled:
-            return
-        for label, fn in self._routes.get(type(event), ()):
-            if fn is None:
-                continue
-            with graceful(f"{label} sink failed on {type(event).__name__}"):
-                fn(event)
-
-    def flush(self) -> None:
-        with graceful("Langfuse sink flush failed"):
-            if self._langfuse is not None:
-                self._langfuse.flush()
-
-    def get_langfuse_trace_id(self, campaign_id: str) -> str | None:
-        return self._langfuse.get_langfuse_trace_id(campaign_id) if self._langfuse else None
-
-    @property
-    def langfuse_sink(self) -> LangfuseSink | None:
-        return self._langfuse
-
-    def register_dataset(
-        self, dataset_name: str, dataset: Sequence[Sample | dict[str, Any]]
-    ) -> dict[str, str]:
-        if not self._enabled:
-            return {}
-
-        query_to_item_id: dict[str, str] = {}
-        seen: set[str] = set()
-        items: list[tuple[str, str]] = []
-        for entry in dataset:
-            if isinstance(entry, dict):
-                query = entry.get("query", "")
-                ground_truth = entry.get("ground_truth", "")
-            else:
-                query = entry.query
-                ground_truth = entry.ground_truth
-            if not query or query in seen:
-                continue
-            seen.add(query)
-            items.append((query, ground_truth))
-            query_to_item_id[query] = dataset_item_id(dataset_name, query)
-
-        self.emit(DatasetRegistered(dataset_name=dataset_name, items=tuple(items)))
-        return query_to_item_id
-
-    @classmethod
-    def start_campaign(
-        cls,
-        tenant_root: str | Path | None,
-        backend_id: str | None,
+    def start(
+        self,
         *,
         config_snapshot: dict[str, Any],
-        origin_accuracy: float | None,
-        dataset: Sequence[Sample | dict[str, Any]],
-        tracing_campaign_id: str,
-        campaign_id: str,
-        cycle_id: str | None,
+        dataset: Sequence[Sample],
         langfuse_session_id: str | None,
-        langfuse: LangfuseLogger | None,
-    ) -> ObservabilityBridge | None:
-        """``None`` for a run that minted no cycle: every sink writes under one."""
-        if not (tenant_root and backend_id and cycle_id):
+    ) -> None:
+        opening = CampaignStart(
+            campaign_id=self._campaign_id,
+            config=config_snapshot,
+            cycle_id=self._campaign_id,
+            session_id=langfuse_session_id or self._campaign_id,
+        )
+        self._tell("campaign start", lambda sink: sink.on_campaign_start(opening))
+        self._register_dataset(dataset)
+
+    def _tell(self, what: str, call: Callable[[TraceSink], None]) -> None:
+        if not self._enabled:
+            return
+        for sink in self._sinks:
+            with graceful(f"{type(sink).__name__} failed on {what}"):
+                call(sink)
+
+    def _register_dataset(self, dataset: Sequence[Sample]) -> None:
+        seen: set[str] = set()
+        items: list[tuple[str, str]] = []
+        for sample in dataset:
+            if not sample.query or sample.query in seen:
+                continue
+            seen.add(sample.query)
+            items.append((sample.query, sample.ground_truth or ""))
+        registered = DatasetRegistered(dataset_name=DATASET_NAME, items=tuple(items))
+        self._tell("dataset registration", lambda sink: sink.on_dataset_registered(registered))
+
+    def emit(self, event: MeasurementEvent) -> None:
+        if isinstance(event, QueryScoreStart):
+            self._tell("query score start", lambda sink: sink.on_query_score_start(event))
+        elif isinstance(event, QueryNodeSpan):
+            self._tell("query node span", lambda sink: sink.on_query_node_span(event))
+        else:
+            self._tell("query score end", lambda sink: sink.on_query_score_end(event))
+
+    def langfuse_trace_id(self) -> str | None:
+        if self._langfuse is None:
             return None
+        return self._langfuse.get_langfuse_trace_id(self._campaign_id)
 
-        bridge: ObservabilityBridge | None = None
-        with graceful("Failed to create ObservabilityBridge"):
-            bridge = cls.from_settings(
-                tenant_root, CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), langfuse=langfuse
-            )
-        if bridge is None:
-            return None
+    def drain(self) -> None:
+        self._tell("flush", lambda sink: sink.flush())
 
-        with graceful("CampaignStart emit failed"):
-            bridge.emit(
-                CampaignStart(
-                    campaign_id=tracing_campaign_id,
-                    config=config_snapshot,
-                    origin_accuracy=origin_accuracy,
-                    cycle_id=cycle_id,
-                    session_id=langfuse_session_id,
-                )
-            )
-        with graceful("Dataset registration failed"):
-            dataset_item_map = bridge.register_dataset(DATASET_NAME, dataset)
-            if dataset_item_map:
-                logger.debug(
-                    "Registered %d dataset items for '%s'",
-                    len(dataset_item_map),
-                    DATASET_NAME,
-                )
-        return bridge
-
-    def end_campaign(
+    def _open_span(
         self,
-        tracing_campaign_id: str,
+        round_num: int | None,
+        span_id: str,
         *,
-        result_accuracy: float | None,
-        n_rounds_after_origin: int,
-        stop_reason: StopReason,
-        result_round: int,
-    ) -> str | None:
-        langfuse_trace_id: str | None = None
-        with graceful("Bridge campaign end failed"):
-            self.emit(
-                CampaignEnd(
-                    campaign_id=tracing_campaign_id,
-                    result_accuracy=result_accuracy,
-                    n_rounds_after_origin=n_rounds_after_origin,
-                    stop_reason=stop_reason,
-                    result_round=result_round,
-                )
+        name: str,
+        node_type: str,
+        as_type: str,
+        metadata: dict[str, Any],
+    ) -> None:
+        self._open.add((round_num, span_id))
+        self._tell(
+            f"span {name}",
+            lambda sink: sink.on_span_open(
+                self._campaign_id,
+                round_num,
+                span_id,
+                name=name,
+                node_type=node_type,
+                as_type=as_type,
+                metadata=metadata,
+            ),
+        )
+
+    def _close_span(self, round_num: int | None, span_id: str, *, error: str | None) -> None:
+        if (round_num, span_id) not in self._open:
+            return
+        self._open.discard((round_num, span_id))
+        self._tell(
+            f"span {span_id}",
+            lambda sink: sink.on_span_close(self._campaign_id, round_num, span_id, error=error),
+        )
+
+    def _handle_round_entered(self, record: RoundEnteredRecord) -> None:
+        self._closed.discard(record.round)
+        self._tell("round entered", lambda sink: sink.on_round_entered(self._campaign_id, record))
+
+    def _handle_phase(self, record: PhaseRecord) -> None:
+        span_id = f"phase:{record.phase}"
+        if record.event == "enter":
+            name = record.phase if record.round is None else f"{record.phase}_r{record.round}"
+            self._open_span(
+                record.round, span_id, name=name, node_type="phase", as_type="span", metadata={}
             )
-            self.flush()
-            langfuse_trace_id = self.get_langfuse_trace_id(tracing_campaign_id)
-        return langfuse_trace_id
+        elif record.event == "exit":
+            self._close_span(record.round, span_id, error=None)
 
+    def _handle_llm_call_start(self, record: LLMCallStartRecord) -> None:
+        name = record.node if record.round is None else f"{record.node}_r{record.round}"
+        self._open_span(
+            record.round,
+            record.call_id,
+            name=name,
+            node_type="llm",
+            as_type="generation",
+            metadata={
+                "model": record.model,
+                "candidate_idx": record.candidate_idx,
+                "prompt_chars": record.prompt_chars,
+            },
+        )
 
-@asynccontextmanager
-async def observed_node(
-    node_id: str,
-    node_type: str,
-    *,
-    obs: ObservabilityBridge | None,
-    campaign_id: str,
-    round_num: int,
-    as_type: str = "generation",
-) -> AsyncIterator[NodeTrace]:
-    trace = NodeTrace()
-    opened = False
+    def _handle_llm_call(self, record: LLMCallRecord) -> None:
+        error = record.payload.get("error")
+        self._close_span(
+            record.round, record.call_id, error=error if isinstance(error, str) else None
+        )
 
-    if obs is not None:
-        with graceful(f"observed_node start failed for {node_id}"):
-            obs.emit(
-                NodeStart(
-                    campaign_id=campaign_id,
-                    round_num=round_num,
-                    node_id=node_id,
-                    node_type=node_type,
-                    as_type=as_type,
-                    input_data={},
-                )
-            )
-            opened = True
+    def _handle_candidate_scored(self, record: CandidateScoredRecord) -> None:
+        self._tell(
+            "candidate scored", lambda sink: sink.on_candidate_scored(self._campaign_id, record)
+        )
 
-    t0 = time.perf_counter()
-    try:
-        yield trace
-    except Exception as exc:
-        trace.error = f"{type(exc).__name__}: {exc}"
-        raise
-    finally:
-        trace.duration_ms = (time.perf_counter() - t0) * 1000
-        if obs is not None and opened:
-            with graceful(f"observed_node end failed for {node_id}"):
-                obs.emit(
-                    NodeEnd(
-                        campaign_id=campaign_id,
-                        round_num=round_num,
-                        node_id=node_id,
-                        output_data=trace.output,
-                        metrics={"duration_ms": trace.duration_ms},
-                        error=trace.error,
-                    )
-                )
+    def _handle_round_closed(self, record: RoundClosedRecord) -> None:
+        # Only a round's FIRST close ends its span: a later one restates it (round 0, once the ruler warms).
+        if record.round in self._closed:
+            return
+        self._closed.add(record.round)
+        self._tell("round closed", lambda sink: sink.on_round_closed(self._campaign_id, record))
+
+    def _handle_run_phase(self, record: RunPhaseRecord) -> None:
+        if record.run_phase not in (RunPhase.PAUSED, RunPhase.TERMINAL):
+            return
+        rounds_closed = max(self._closed, default=0)
+        self._tell(
+            "run stopped",
+            lambda sink: sink.on_run_stopped(
+                self._campaign_id, record, rounds_closed=rounds_closed
+            ),
+        )
+        self._tell("flush", lambda sink: sink.flush())

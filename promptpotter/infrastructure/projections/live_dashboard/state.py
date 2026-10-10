@@ -1,43 +1,21 @@
-"""Pydantic schema for ``dashboard.json``. The writer mutates a plain dict for speed and validates
-through this model at every ``_persist()``, so writer/schema drift raises at write time."""
-
 from __future__ import annotations
 
-import logging
-import time
-from collections.abc import Mapping
-from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any
 
-from pydantic import ConfigDict, Field, TypeAdapter, ValidationError, computed_field
+from pydantic import ConfigDict, Field
 
 from promptpotter.domain.backend import BackpressureReading
-from promptpotter.domain.bench import BenchScore, BenchSubject, bench_missing_reason
+from promptpotter.domain.bench import BenchScore, BenchSubject
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.dashboard_rows import (
-    LiveCandidate,
-    OptimizerLimit,
-    RoundSummary,
-    RunStanding,
-    lift_side,
-    panel_cuts,
-    precision_verdict,
-)
-from promptpotter.domain.l4.proxies import PanelPrecision
+from promptpotter.domain.dashboard_rows import LiveCandidate, RoundSummary, RunLimits
 from promptpotter.domain.phases import DashboardState, RunPhase, StopReason
-from promptpotter.domain.results import DisplayMetric, OverlapReading, VerifyStrategy
-from promptpotter.domain.ruler import AbilityReading
-from promptpotter.domain.run_records import ForkRemainder
-from promptpotter.domain.scoring import anchored_criterion_dials
-from promptpotter.domain.spend import CeilingMeter, MeteredSpend, SpendRollup
+from promptpotter.domain.results import DisplayMetric, RunStanding
+from promptpotter.domain.round_audit import LoopWarning, NodeBlock
+from promptpotter.domain.run_records import RunWiringRecord
+from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.runtime_flags import verify_stale_after
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_verify
-from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.shared.clock import utcnow_iso
-
-logger = logging.getLogger(__name__)
 
 __all__ = [
     "BackendWarning",
@@ -45,150 +23,14 @@ __all__ = [
     "CatchUpLogEntry",
     "CurrentRound",
     "DashboardError",
+    "DashboardFacts",
     "LiveDashboardState",
-    "LoopWarning",
     "RacingBlock",
-    "RunLimits",
-    "VerifyPassProgress",
-    "overlay_criterion_dials",
-    "overlay_fork_remainder",
-    "overlay_round_readings",
-    "overlay_spend_metered",
-    "overlay_verify",
-    "served_spend",
-    "warming_payload",
 ]
 
 
-def warming_payload(hop: CycleHop, *, run_phase: str) -> dict[str, Any]:
-    """The canonical "this cycle has no ``dashboard.json`` yet" body, served at 200 rather than 404 so
-    the webapp renders "initialising" instead of appearing offline. It lives beside the model whose
-    absence it stands in for, because BOTH wire surfaces serve it — the dashboard route and the SSE
-    snapshot — and they had drifted into two hand-written shapes carrying different keys.
-
-    ``run_phase`` is required, not defaulted: a body with no phase is exactly what let the browser
-    invent one (a warming cycle read as "stopped", and the run-control button offered Start)."""
-    return {
-        "warming_up": True,
-        "campaign_id": hop.campaign_id,
-        "cycle_id": hop.cycle_id,
-        "phase_hint": "origin",
-        "run_phase": run_phase,
-    }
-
-
-def served_spend(body: Mapping[str, Any]) -> tuple[SpendRollup, dict[str, SpendRollup]] | None:
-    """The cycle's spend and its per-round split off a ``dashboard.json`` body — the ONE reading of
-    them. Read WHOLE: a body without the pair, or one this build cannot parse, answers ``None``."""
-    try:
-        spend = SpendRollup.model_validate(body["spend"])
-        by_round = {k: SpendRollup.model_validate(v) for k, v in body["spend_by_round"].items()}
-    except (KeyError, ValidationError):
-        return None
-    return spend, by_round
-
-
-def overlay_spend_metered(body: dict[str, Any], meter: CeilingMeter) -> None:
-    """A ``spend`` block this build cannot parse serves none, rather than failing the poll. The
-    per-round split is served in round order, its keys being the writer's ``str(round)``."""
-    if (served := served_spend(body)) is None:
-        return
-    spend, by_round = served
-    body["spend_metered"] = MeteredSpend.of(spend, meter).model_dump()
-    body["spend_metered_by_round"] = {
-        k: MeteredSpend.of(r, meter).model_dump()
-        for k, r in sorted(by_round.items(), key=lambda kv: int(kv[0]))
-    }
-
-
-def overlay_fork_remainder(body: dict[str, Any]) -> None:
-    """What an offshoot of this cycle starts under, off the body's own rounds, caps and metered
-    spend — so it is laid on after ``overlay_spend_metered``, and the mint reads this same key."""
-    limits = body.get("run_limits")
-    caps: Mapping[str, Any] = limits if isinstance(limits, dict) else {}
-    metered = body.get("spend_metered")
-    body["fork_remainder"] = ForkRemainder.of(
-        rounds_closed=sum(1 for r in body.get("rounds") or [] if r.get("round", 0) > 0),
-        max_rounds=caps.get("max_rounds"),
-        metered_usd=None if metered is None else metered["metered_usd"],
-        spend_budget_usd=caps.get("spend_budget_usd"),
-    ).model_dump()
-
-
-def overlay_criterion_dials(body: dict[str, Any]) -> None:
-    """The served formula as its dials and their anchors, where it spells an anchored criterion.
-    Derived on the way out: both are pure functions of the string beside them, so a stored copy
-    is one more thing a finished cycle's file holds stale."""
-    formula = body.get("composite_fitness_formula")
-    dials = anchored_criterion_dials(formula) if isinstance(formula, str) else None
-    body["composite_fitness_weights"] = (
-        None if dials is None else {name: d.weight for name, d in dials.items()}
-    )
-    body["composite_fitness_anchors"] = (
-        None
-        if dials is None
-        else {name: d.anchor for name, d in dials.items() if d.anchor is not None}
-    )
-
-
-def _read[M: StrictModel](model: type[M], value: object) -> M | None:
-    """A served block as its model, or ``None`` where it is absent or this build cannot parse it."""
-    try:
-        return None if value is None else model.model_validate(value)
-    except ValidationError:
-        return None
-
-
-def _count(value: object) -> int | None:
-    return value if isinstance(value, int) and not isinstance(value, bool) else None
-
-
-def _bound(value: object) -> float | None:
-    return float(value) if isinstance(value, int | float) and not isinstance(value, bool) else None
-
-
-def _stamp_arm_readings(rows: object) -> None:
-    """One round's candidate rows: each arm's lift side, and whether its panel was cut."""
-    arms = [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
-    cuts = panel_cuts(
-        [(_count(arm.get("scored_samples")), _count(arm.get("expected_samples"))) for arm in arms]
-    )
-    for arm, cut in zip(arms, cuts, strict=True):
-        arm["reference_lift_side"] = lift_side(
-            _bound(arm.get("reference_lift_ci_lo")), _bound(arm.get("reference_lift_ci_hi"))
-        )
-        arm["panel_cut"] = cut
-
-
-def overlay_round_readings(body: dict[str, Any]) -> None:
-    """Every reading a surface would otherwise decide for itself off the served rounds, laid on
-    once — all pure functions of the rows beside them, so none is stored. Mutates in place."""
-    rounds = sorted(
-        (r for r in body.get("rounds") or [] if isinstance(r, dict)),
-        key=lambda r: r["round"] if isinstance(r.get("round"), int) else 0,
-    )
-    body["rounds"] = rounds
-    series: AbilityReading | None = None
-    for closed in rounds:
-        ability = _read(AbilityReading, closed.get("ability"))
-        if series is None and ability is not None and ability.ruler_id is not None:
-            series = ability
-        closed["ability_on_series_ruler"] = (
-            ability is not None and series is not None and ability.comparable_to(series)
-        )
-        precision = _read(PanelPrecision, closed.get("panel_precision"))
-        closed["panel_precision_verdict"] = (
-            None if precision is None else precision_verdict(precision)
-        )
-        _stamp_arm_readings(closed.get("candidates"))
-    current = body.get("current_round")
-    if isinstance(current, dict):
-        _stamp_arm_readings(current.get("candidates"))
-
-
 class CatchUpLogEntry(StrictModel):
-    """One race catch-up — the priors eliminator ``member`` re-measured on one sample.
-    Appended by ``LiveDashboardProjection._append_catch_up``, capped at 256 entries."""
+    """One race catch-up: the priors eliminator ``member`` re-measured on one sample."""
 
     member: str
     round: int
@@ -199,9 +41,7 @@ class CatchUpLogEntry(StrictModel):
 
 
 class BackendWarning(StrictModel):
-    """One entry in ``recent_backend_warnings`` — a backend transport or 5xx retry, never a 429.
-
-    That one is the provider's pushback rather than a fault, and is served as ``backpressure``."""
+    """A backend transport or 5xx retry; a 429 is ``backpressure``, never one of these."""
 
     ts: str
     kind: str
@@ -212,56 +52,21 @@ class BackendWarning(StrictModel):
     status_code: int | None = None
     final: bool = False
     query: str | None = None
-    # The backend's OWN words about what went wrong. The kind says a cell could not be measured;
-    # only this says why — and why is the half that decides whether the operator restarts a daemon,
-    # clears a cache or changes nothing. Absent on a wire retry, which has a status code instead.
     detail: str | None = None
 
 
-class LoopWarning(StrictModel):
-    """One entry in ``recent_loop_warnings`` — an optimizer-loop degradation the
-    self-healing rails recovered from: a zero-candidate round, a layer's unparseable output, a blank
-    terminate, truncation."""
-
-    ts: str
-    kind: str
-    severity: str
-    message: str
-    round: int | None = None
-    detail: dict[str, Any] = Field(default_factory=dict)
-
-
 class DashboardError(StrictModel):
-    """``dashboard.json::error`` — structured failure summary written by ``_handle_error`` off the
-    run's ``ErrorRecord``, on a stop whose ``STOP_REASON_INFO`` row is FAILED; absent otherwise."""
+    """The structured failure of a stop whose ``STOP_REASON_INFO`` row is FAILED, else absent."""
 
     kind: str
     message: str
     stop_reason: StopReason
-
-
-class RunLimits(StrictModel):
-    """``state.run_limits`` — the cycle's run-limit ceilings, stamped at WIRING off the effective
-    ``campaign_config``, so a fork's reconcile dialog can default against them. It rode
-    ``INIT:enter`` and that record lands after the whole origin has scored, so the operator watched
-    the longest phase of the run with no ceiling on screen at all.
-
-    **The two spend arms and ``max_rounds`` are the ARMED ceilings, not the declared ones**,
-    re-read from ``run_limits.json``, the standing ceiling's polled mirror, at every persist
-    (``projection.py::_stamp_armed_controls``). Held static, every surface reading them — the control's own
-    prefill, the run strip — reports a number the run stops using the moment
-    ``change-run-limits`` lands."""
-
-    max_rounds: int | None = None
-    spend_budget_usd: float | None = None
-    token_budget: int | None = None
-    # The optimizer's own run-bounding knobs (`OptimizerPacing.limits`), in its own words.
-    optimizer: list[OptimizerLimit] = Field(default_factory=list)
+    label: str
+    next_step: str
 
 
 class RacingBlock(StrictModel):
-    """``current_round.racing`` — the round's standing in its eliminator ``member``'s race.
-    Rebuilt every persist."""
+    """The round's standing in its eliminator ``member``'s race."""
 
     member: str
     current_id: str
@@ -272,7 +77,7 @@ class RacingBlock(StrictModel):
 
 
 class BenchPassProgress(StrictModel):
-    """``dashboard.json::bench_pass`` — the held-out pass in flight. Its rows are no round's cells."""
+    """The held-out pass in flight; its rows are no round's cells."""
 
     subject: BenchSubject
     label: str = Field(description="The candidate the pass grades, as its row is labelled.")
@@ -286,150 +91,47 @@ class BenchPassProgress(StrictModel):
     )
 
 
-class VerifyPassProgress(StrictModel):
-    """``verify_pass`` on a served dashboard — one candidate being re-scored on unseen cells."""
-
-    label: str = Field(description="The candidate the pass re-scores, as its row is labelled.")
-    round: int = Field(description="That candidate's own round; 0 is the origin.")
-    rows: int = Field(description="Unseen search cells the pass sends.")
-    strategy: VerifyStrategy
-
-
-def overlay_verify(body: dict[str, Any], cycle_dir: Path) -> None:
-    """Each candidate's last verify reading, and the pass in flight, onto a served
-    ``dashboard.json`` body — read off the cycle's LEDGER, where the process that ran the pass
-    banked it. That process is the runner only for a saturation check, so the runner's file can
-    hold neither for an operator's verify, least of all on a halted cycle. Mutates in place.
-
-    **A REPLAY must not call this**: the readings are the ones standing now."""
-    verify = scan_ledger_verify(CycleLayout(cycle_dir).ledger)
-    readings = {
-        label: reading.model_dump(mode="json") for label, (_, reading) in verify.graded.items()
-    }
-    for closed in body.get("rounds") or []:
-        for row in closed.get("candidates") or []:
-            row["verify"] = readings.get(row.get("label"))
-    stale_after = verify_stale_after(cycle_dir)
-    in_flight = verify.open is not None and stale_after is not None and time.time() < stale_after
-    body["verify_pass"] = (
-        VerifyPassProgress.model_validate(verify.open).model_dump(mode="json")
-        if in_flight
-        else None
-    )
-
-
 class CurrentRound(StrictModel):
-    """``dashboard.json::current_round`` — the round in flight, rebuilt whole on every persist.
-    The four rules it serves under (no ``live`` flag, ``round`` is ``state.round``, this-round-only
-    ``nodes``, one candidate shape) are ``infrastructure/CLAUDE.md`` § LiveDashboardProjection RESOLVES."""
+    """The round in flight, rebuilt whole on every persist."""
 
     round: int = 0
     active_node: str | None = None
-    # The node the ledger named at `measure:enter`, null before one has; `active_node` equals it
-    # while it measures.
     measurement_node: str | None = None
     candidates: list[LiveCandidate] = Field(default_factory=list)
-    # Free-form per-node optimizer LLM I/O (``build_node_block``), mirroring the audit twin's
-    # ``nodes``.
-    nodes: dict[str, dict[str, Any]] = Field(default_factory=dict)
-    # Null before the round's first standing, and on an optimizer that races nothing.
+    nodes: dict[str, NodeBlock] = Field(default_factory=dict)
     racing: RacingBlock | None = None
-    # The best-so-far line on its shared cells, stamped at the ELECTION and null before it; null
-    # is "not measured yet", never "withheld". ONLY this one of the round's readings: the others
-    # (`verdict_reason`, `electable_count`, `separable`, `ability`, `health`) reach no live
-    # surface, and a served field nothing renders is a note nobody reads.
-    overlap: OverlapReading | None = None
 
 
-class LiveDashboardState(StrictModel):
-    """``dashboard.json`` — operator-facing snapshot, polled by the webapp.
-    ``current_round`` wipes when the round number moves; past deep audit lives in ``round_NNNN.json``."""
-
+class DashboardFacts(StrictModel):
     model_config = ConfigDict(validate_assignment=False)
 
-    # Set once at construction; the webapp drops any polled payload whose stamp doesn't
-    # match the unit it asked for.
     campaign_id: str
     cycle_id: str
-    session_id: str
 
-    # WHICH MOMENT this file is of — its ``Cut``. Without it a holder cannot tell a lagging copy
-    # from a current one, nor join this file to the event stream except by guessing. ``-1`` until
-    # the first record lands.
+    # ``-1`` until the first record lands; the SSE snapshot parks its tail one past it.
     at_offset: int = -1
 
-    # Composed at construction because the webapp can't — LANGFUSE_HOST is backend-only.
-    # None when Langfuse is disabled.
     langfuse_trace_url: str | None = None
 
     state: DashboardState = DashboardState.INIT
-    # The running optimizer step's own words (`OptimizerPhase.activity`) while `state` is
-    # `optimizer_step`; null in every other state.
     optimizer_step: str | None = None
     state_since: str
-
-    # The runner's DECLARATION of the coarse lifecycle+control axis, made via control
-    # PhaseRecords — so a paused run stays readable as paused once this file goes stale.
-    # ``state`` above stays the fine-grained activity. It is an INPUT to
-    # ``derive_run_phase``, never the answer: its only writer is the runner's own process,
-    # so it cannot report "detached" (a dead producer can't write) and says "running" forever
-    # after a kill. It is NAMED for what it is, so that nobody reading
-    # this file in an editor — the folder-UI contract's equal consumer — mistakes it for
-    # the answer.
-    declared_phase: RunPhase = RunPhase.RUNNING
-
-    # The answer, and WIRE-ONLY: ``exclude=True`` keeps it out of every ``model_dump``, so
-    # it never reaches disk, while ``model_fields`` still carries it to the TS generator —
-    # which is what lets the browser's type name the field the browser actually reads. The
-    # route and the SSE snapshot set it from ``derive_run_phase`` on the way out; nothing
-    # in Python reads or writes it, and the writer must never start.
-    run_phase: RunPhase = Field(default=RunPhase.RUNNING, exclude=True)
 
     stop_reason: StopReason | None = None
 
     round: int = 0
     candidate: str = ""
-    # The last closed round's; ``None`` until round 0 closes. A per-round marker, not a
-    # ceiling — hence not in ``run_limits``.
     run_standing: RunStanding | None = None
 
     rounds: list[RoundSummary] = Field(default_factory=list)
 
-    # `best_round_on_shared_cells` over `rounds` — `index.json::best_accuracy`'s number, never a
-    # max over each round's own subset. ``None`` until round 0 settles, never a `0.0`.
-    best: float | None = None
-    current_acc: float | None = None
-    # The headline for every optimizer: the selection and the origin graded on the held-out bench
-    # set. Null until the bench pass lands; a split holding nothing out says so in `missing_reason`.
+    # As the run last DECLARED it; the served body reads it anew (`served_dashboard`).
     bench_score: BenchScore | None = None
-    # The bench pass in flight, null outside one: while it is set, the cells being scored are
-    # held-out rows of `subject`'s pass and no round's.
     bench_pass: BenchPassProgress | None = None
-    # A verify pass in flight on one of this cycle's candidates, null outside one. Wire-only,
-    # set by ``overlay_verify`` beside each candidate row's ``verify`` reading.
-    verify_pass: VerifyPassProgress | None = Field(default=None, exclude=True)
-    # That lift per dollar the SEARCH incurred (`BenchScore.lift_per_usd`, `evidence`'s rule too),
-    # settled in ``compose``: spend moves on every call, and a browser dividing the two divides
-    # two polls.
-    bench_lift_per_incurred_usd: float | None = None
     composite_fitness_formula: str | None = None
-    # The same formula as ``{term: weight}``, where it IS an anchored criterion — what the scoring
-    # form's dials seed from. ``None`` says the formula cannot carry them and the form opens on
-    # its expression rather than guessing, which is the whole point of serving it: a browser
-    # parsing coefficients out of the string substitutes a default for whatever its regex missed.
-    # WIRE-ONLY like ``run_phase``, set by ``overlay_criterion_dials``.
-    composite_fitness_weights: dict[str, float] | None = Field(default=None, exclude=True)
-    # The level each anchored dial in it is read against, by term. Wire-only beside it.
-    composite_fitness_anchors: dict[str, float] | None = Field(default=None, exclude=True)
-    # DISPLAY config — the selector decides on its own objective; this seeds the webapp's
-    # client-overridable metric toggle. Stamped at construction (``for_run``), so a fork carries its own.
-    display_metric: DisplayMetric = "accuracy"
-    # Mirrors `RoundResult.stamps_theta` — campaign-wide, so the per-arm θ column reads ONE flag
-    # rather than a candidate's `None` theta, which a cold ruler leaves `None` too.
-    stamps_theta: bool = False
+    display_metric: DisplayMetric
+    elects_on: DisplayMetric
 
-    # Run totals. `degraded_count` is over `total_backend_calls`; a round's own is its
-    # document's `degraded_samples`.
     degraded_count: int = 0
     error_count: int = 0
 
@@ -440,163 +142,86 @@ class LiveDashboardState(StrictModel):
     total_queries_scored: int = 0
     total_backend_calls: int = 0
 
-    # The OLDEST open sample, derived from the open set rather than assigned per event, since
-    # look-ahead leaves more than one open (``projection.py::_refresh_open_sample_markers``).
     current_query_payload: str | None = None
-    current_sample_id: int | None = None
-    # EVERY sample in flight, oldest first — the membership test `current_sample_id` cannot
-    # answer. That one is the walk's CURSOR and names a single position; asked "is this row
-    # running?" it lights one row of N under look-ahead. Two questions, so two fields.
     open_sample_ids: list[int] = Field(default_factory=list)
-    # The order the running candidate DECLARED it would walk. Served as well as streamed, because
-    # the SSE event fires once per candidate and a reader that joins after it has no forward view
-    # at all. Named `declared_` because the heatmap's `sample_order` is absolute difficulty and
-    # this one is relevance — and it is a PLAN: an eliminator can stop a candidate before the tail is
-    # reached, so no reader may word it as "will".
-    declared_sample_order: list[int] = Field(default_factory=list)
 
-    # The depth IN FORCE — how many samples the walk holds in flight, read straight off
-    # `.runtime/sample_lookahead.json`. ONE number: a second field for "what the loop last held"
-    # is a log with no round-boundary writer, and no surface may reconcile the two.
-    sample_lookahead: int = 1
-    # Whether that depth outlives its round — the operator's auto-arm, read off the same file.
-    sample_lookahead_auto: bool = False
-    # Samples launched then discarded unabsorbed — the depth's whole running cost, cumulative.
     sample_lookahead_discards: int = 0
-    # The scoring phase's calls in flight; how many its stop rules allow right now; and the most it
-    # could ever hold — all counted over every candidate walking and the race catch-ups
-    # (`scoring/query_loop.py::FlightGauge`). Between phases `lookahead_most` is the next round's
-    # (`arms_per_round` x `sp_budget_round`), so the operator can size a press before it starts —
-    # ``None`` there under an optimizer that declares no `arms_per_round`.
     in_flight: int = 0
     lookahead_allowed: int = 0
+    # Between phases it is the NEXT round's; ``None`` under an optimizer declaring no `arms_per_round`.
     lookahead_most: int | None = 0
-    # How many MORE cells the spend limits admit, and what one reserves: a reserve a few worst
-    # cases wide pins the walk at one call while the depth reads armed. ``None``: no book binds.
-    lookahead_affordable: int | None = None
+    # ``None``: no book binds.
     cell_reserve_usd: float | None = None
-    # Whether money, not the armed depth, holds the walk; and the deepest press the next walk can
-    # take. WIRE-ONLY like ``run_phase``: both read the ARMED depth, so ``overlay_armed_controls``
-    # sets them beside it on the way out.
-    lookahead_money_pinned: bool = Field(default=False, exclude=True)
-    lookahead_pick_max: int = Field(default=1, exclude=True)
-    # The call the round's next decision waits on — calls are taken in walk order, so one slow cell
-    # at a candidate's head holds every call behind it — and when it was launched (epoch seconds).
     waiting_on: str | None = None
-    waiting_since: float | None = None
-    # The model provider holding calls out but unsent (`rate_limit.py::Backpressure`); None while
-    # it holds nothing.
     backpressure: BackpressureReading | None = None
-    # The connector's own declarations, stamped at INIT:exit. SERVED rather than inferred: the
-    # browser's only available guess — "is this self-optimization?" — is not the question. `1`
-    # says the control does not apply.
-    max_cells_in_flight: int = 1
-    # The backend's own noun for a measured row, so the browser never picks one off a local flag.
-    measured_unit: MeasuredUnit = "sample"
+    # `1` says the look-ahead control does not apply.
+    max_cells_in_flight: int
+    measured_unit: MeasuredUnit
 
-    # ``None`` where the last row recorded no time at all — a cached replay's 0.0 is a real
-    # reading and must stay separable from it (``domain/scoring.py::recorded_elapsed_s``).
+    # ``None`` = no time recorded; a cached replay's 0.0 is a real reading.
     last_query_elapsed_s: float | None = None
     wallclock_serialized_at: str | None = None
 
-    # The most arms one round races (`OptimizerPacing.arms_per_round`); ``None`` where undeclared.
     arms_per_round: int | None
     sp_budget_round: int
 
-    # None until INIT:exit.
-    run_limits: RunLimits | None = None
-
-    spend: SpendRollup = Field(default_factory=SpendRollup)
-    # WIRE-ONLY like `run_phase`: the dashboard route sets it off `spend` under the campaign's
-    # `ceiling_meter`, a manifest fact no ledger record carries, so a replay serves it too.
-    spend_metered: MeteredSpend | None = Field(default=None, exclude=True)
-    # WIRE-ONLY: what an offshoot of this cycle starts under, off `run_limits` and `spend_metered`.
-    fork_remainder: ForkRemainder | None = Field(default=None, exclude=True)
-
-    # The SAME fold, keyed by the round each call stamped itself with — so "what did round 3 cost,
-    # and how much of its input did providers serve off their own prefix cache" is answerable at
-    # all. `spend` above is one running total for the whole cycle, and `rounds[]` carries no cost.
-    #
-    # PER ROUND, not cumulative: the atom is what a bar needs and what a cumulative series is
-    # summed FROM, and the reverse does not hold. `evidence/read.py::_spend_to_round` folds these
-    # forward for its own cumulative reading rather than walking the ledger a second time.
-    #
-    # A call carrying no `round` banks at "0" — it ran before any round closed (init, the origin
-    # score), and dropping it would under-report every prefix. Keys are `str` because JSON has no
-    # integer keys and a round-trip must not change the shape. NOT clamped by a rewind, unlike
-    # `rounds[]`: a re-measured round cost money both times, and the sum over this map is what
-    # reconciles against `spend`.
-    spend_by_round: dict[str, SpendRollup] = Field(default_factory=dict)
-    # WIRE-ONLY, `spend_metered` per round off `spend_by_round`, so a bar is read like the cap.
-    spend_metered_by_round: dict[str, MeteredSpend] | None = Field(default=None, exclude=True)
+    # As DECLARED; what binds now is ``ServedDashboard.run_limits``.
+    run_limits: RunLimits
 
     catch_up_log: list[CatchUpLogEntry] = Field(default_factory=list)
 
     current_round: CurrentRound = Field(default_factory=CurrentRound)
 
-    # Sole writer ``LiveDashboardProjection._handle_error``; absent on normal stops.
     error: DashboardError | None = None
 
-    # Stamped at run start and riding no ledger record, so a fold off disk cannot answer for them
-    # and takes the head file's as an input (``projection.py::fold_at``). Everything NOT in here
-    # moves over a run and is folded.
-    WIRING_FIELDS: ClassVar[tuple[str, ...]] = (
-        "session_id",
-        "arms_per_round",
-        "sp_budget_round",
-        "display_metric",
-        "langfuse_trace_url",
-        "max_cells_in_flight",
-        "measured_unit",
-        "run_limits",
-    )
+
+class LiveDashboardState(DashboardFacts):
+    # Says "running" forever after a kill: the answer is ``ServedDashboard.run_phase``.
+    declared_phase: RunPhase = RunPhase.RUNNING
+
+    current_sample_id: int | None = None
+    # A PLAN: an eliminator can stop a candidate before the tail is reached.
+    declared_sample_order: list[int] = Field(default_factory=list)
+
+    waiting_since: float | None = None
+
+    # ``None``: no book binds.
+    lookahead_affordable: int | None = None
+
+    spend: SpendRollup = Field(default_factory=SpendRollup)
+
+    # PER ROUND, and NOT clamped by a rewind, unlike `rounds[]`: a re-measured round costs twice.
+    spend_by_round: dict[str, SpendRollup] = Field(default_factory=dict)
 
     @classmethod
-    def wiring_of(cls, head: object) -> dict[str, Any] | None:
-        """The wiring constants off a stored ``dashboard.json`` body. ONLY these: the rest of *head*
-        may be a shape this build cannot parse. ``None`` where the file does not carry them whole."""
-        if not isinstance(head, dict):
-            return None
-        try:
-            return {
-                name: TypeAdapter(cls.model_fields[name].annotation).validate_python(head[name])
-                for name in cls.WIRING_FIELDS
-            }
-        except (KeyError, ValidationError) as exc:
-            logger.warning("dashboard wiring unreadable — a replay folds at defaults: %s", exc)
-            return None
+    def declared(cls, hop: CycleHop, wiring: RunWiringRecord) -> LiveDashboardState:
+        return cls(
+            campaign_id=hop.campaign_id,
+            cycle_id=hop.cycle_id,
+            state_since=utcnow_iso(),
+            **cls.wired(wiring),
+        )
 
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def bench_missing_reason(self) -> str | None:
-        """Why ``bench_score`` is null; null beside one."""
-        return None if self.bench_score is not None else bench_missing_reason(self.stop_reason)
+    @staticmethod
+    def wired(wiring: RunWiringRecord) -> dict[str, Any]:
+        return {
+            "arms_per_round": wiring.arms_per_round,
+            "sp_budget_round": wiring.sp_budget_round,
+            "display_metric": wiring.display_metric,
+            "elects_on": wiring.elects_on,
+            "max_cells_in_flight": wiring.max_cells_in_flight,
+            "measured_unit": wiring.measured_unit,
+            "langfuse_trace_url": wiring.langfuse_trace_url,
+            "run_limits": wiring.run_limits,
+        }
 
     @classmethod
-    def for_run(
-        cls,
-        prior: LiveDashboardState | None,
-        *,
-        hop: CycleHop,
-        session_id: str,
-        arms_per_round: int | None,
-        sp_budget_round: int,
-        langfuse_trace_url: str | None,
-        display_metric: DisplayMetric,
-    ) -> LiveDashboardState:
-        """The state a starting run writes — ``prior`` carried forward WHOLESALE, this process's own facts
-        stamped over it. This model IS the on-disk shape, so a hand-picked subset resets what it omits."""
+    def for_run(cls, prior: LiveDashboardState, *, hop: CycleHop) -> LiveDashboardState:
+        """``prior`` carried WHOLESALE: a hand-picked subset resets every field it omits."""
         mine: dict[str, Any] = {
             "campaign_id": hop.campaign_id,
             "cycle_id": hop.cycle_id,
-            "session_id": session_id,
-            "langfuse_trace_url": langfuse_trace_url,
             "state_since": utcnow_iso(),
-            "arms_per_round": arms_per_round,
-            "sp_budget_round": sp_budget_round,
-            # Not carried from `prior` and not deferred to INIT:exit — round 0 runs before any
-            # INIT event reaches the ledger, so waiting mis-headlines the whole origin pass.
-            "display_metric": display_metric,
             "declared_phase": RunPhase.RUNNING,
             "stop_reason": None,
             "error": None,
@@ -609,4 +234,4 @@ class LiveDashboardState(StrictModel):
             "open_sample_ids": [],
             "declared_sample_order": [],
         }
-        return prior.model_copy(update=mine) if prior is not None else cls(**mine)
+        return prior.model_copy(update=mine)

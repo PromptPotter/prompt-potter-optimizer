@@ -1,308 +1,156 @@
-"""MeasurementArchive facade — the sole WRITE gateway, tenant-global and never backend-scoped.
-Nothing enforces that mechanically, and claiming a guard that does not exist is worse."""
+"""Where a run files answers and its memory scope is applied; maintenance rewrites the archive itself."""
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable
 from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.infrastructure.store.io import append_jsonl, write_jsonl
-from promptpotter.infrastructure.store.measurement_archive import ReplayFeed
+from pydantic import ConfigDict, Field
+
+from promptpotter.domain.results import CellFold
+from promptpotter.domain.strict_model import StrictModel
+from promptpotter.infrastructure.store.io import write_jsonl
+from promptpotter.infrastructure.store.measurement_archive import (
+    ANSWER_KEY,
+    answer_facts,
+    standing,
+)
 from promptpotter.infrastructure.store.read_model import iter_jsonl
-from promptpotter.shared.instrument import MeasurementRole, instrument_mode
+from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from promptpotter.domain.sample import Measurement
+    from promptpotter.domain.scoring import WalkedCell
     from promptpotter.infrastructure.store.stores import Stores
 
 __all__ = [
+    "SampleFoldRow",
     "bench_reads",
-    "capture_evidence_epoch",
-    "cold_payload_bytes",
-    "cold_payload_size",
-    "compact_measurement_run",
-    "drop_cold_payload",
-    "has_cold_payload",
-    "list_runs",
-    "load_run",
-    "maintenance_runs",
-    "measurement_detail_lines",
-    "measurements_for_config",
-    "measurements_for_sample",
+    "list_populations",
+    "load_population",
     "memory_scoped",
-    "read_cold_payload",
-    "record_measurement_run",
-    "reindex_measurements",
-    "replace_measurement_detail",
-    "replay_feed",
-    "reset_measurement_run",
-    "run_signatures",
-    "runs_since",
+    "note_walked",
+    "population_signatures",
+    "read_answer",
     "sample_fold_rows",
-    "scope_memory_to_own_runs",
-    "write_cold_payload",
+    "scope_memory_to_own_answers",
+    "walked_answers",
     "write_sample_fold",
 ]
 
 
-# -- CACHE vs MEMORY ----------------------------------------------------------
-#
-# The archive plays two roles that were never named apart, and conflating them is
-# what made an L4 inner cycle unreproducible:
-#
-#   CACHE  — content-addressed replay of raw grades (`replay_feed`). Keyed by
-#            content hash, so a hit IS the same measurement. Must stay tenant-global:
-#            it is what lets an inner origin replay instead of being re-paid and
-#            re-drawn. NEVER filtered.
-#   MEMORY — cross-run evidence: the δ ruler (`build_archive_observations`) and the
-#            `AxisIndex` panels (`axis_memory` / `archive_top_runs` / `rare_hit_samples`).
-#            Read through `list_runs` / `runs_since`, and invisible behind the caller's
-#            evidence epoch (`shared/instrument.py`, which is where the WHY lives).
-#
-# For a normal campaign no mode is bound, the epoch is empty, and MEMORY over the tenant's
-# whole archive is the feature. A CONTROLLED arm binds the opposite fence: its MEMORY is the
-# runs its own line filed and nothing else, so no other campaign's measurement steers it.
-
-_OWN_RUNS: ContextVar[set[str] | None] = ContextVar("own_runs", default=None)
+# CACHE (`ReplayFeed`) is NEVER filtered; MEMORY reads fence a controlled line to its own walks.
+_OWN_ANSWERS: ContextVar[set[str] | None] = ContextVar("own_answers", default=None)
 
 
-def scope_memory_to_own_runs(run_ids: set[str]) -> None:
-    """Bind this task's MEMORY to *run_ids*, grown by every run it files from here on. Called once
-    at the runner seam of a controlled arm, inside its own task."""
-    _OWN_RUNS.set(set(run_ids))
+def scope_memory_to_own_answers(answers: set[str]) -> None:
+    """Called once at the runner seam of a controlled line, INSIDE its own task."""
+    _OWN_ANSWERS.set(set(answers))
 
 
 def memory_scoped() -> bool:
-    return _OWN_RUNS.get() is not None
+    return _OWN_ANSWERS.get() is not None
 
 
-def _evidence_epoch() -> frozenset[str]:
-    """Runs this task must not see as evidence — empty for a normal campaign."""
-    mode = instrument_mode()
-    return mode.evidence_epoch if mode is not None else frozenset()
+def note_walked(answer: str) -> None:
+    if (own := _OWN_ANSWERS.get()) is not None:
+        own.add(answer)
 
 
-def _in_memory(run_id: object) -> bool:
-    own = _OWN_RUNS.get()
-    return own is None or run_id in own
+def _remembered(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    own = _OWN_ANSWERS.get()
+    return rows if own is None else [row for row in rows if row[ANSWER_KEY] in own]
 
 
-def capture_evidence_epoch(stores: Stores) -> frozenset[str]:
-    """Every run-id banked right now — the epoch an instrument-mode cycle hides. Reads the RAW
-    index: ``list_runs`` is already epoch-filtered, and an epoch must be absolute."""
-    return frozenset(e["run_id"] for e in stores.archive.list_all())
+def read_answer(stores: Stores, answer: str) -> dict[str, Any] | None:
+    """A fresh dict: a reader grades it in place."""
+    stored = stores.archive.answer(answer)
+    return None if stored is None else dict(stored)
 
 
-# -- reads --------------------------------------------------------------------
-
-
-def measurements_for_sample(
-    stores: Stores,
-    sample_id: int,
-    *,
-    run_ids: list[str] | None = None,
-    dataset_name: str | None = None,
-) -> list[Measurement]:
-    """Every measurement of one sample, across configs; *dataset_name* scopes the slice."""
-    return stores.archive.measurements_for_sample(
-        sample_id,
-        run_ids=run_ids,
-        dataset_name=dataset_name,
-    )
-
-
-def measurements_for_config(
-    stores: Stores,
-    predicate: dict[str, dict[str, Any]],
-    *,
-    run_ids: set[str] | list[str] | None = None,
-    dataset_name: str | None = None,
-    newest: int | None = None,
-) -> Iterator[Measurement]:
-    return stores.archive.measurements_for_config(
-        predicate,
-        run_ids=run_ids,
-        dataset_name=dataset_name,
-        newest=newest,
-    )
-
-
-def load_run(stores: Stores, run_id: str) -> dict[str, Any] | None:
-    """Load one run's detail file by ``run_id``; ``None`` if absent. Dataset-agnostic — a caller
-    needing the stamp reads ``detail['dataset_name']`` itself."""
-    return stores.archive.load_by_id(run_id)
-
-
-def run_signatures(stores: Stores) -> dict[str, tuple[int, int]]:
-    """Change-tokens for every run detail, one scan — see `MeasurementArchive.detail_signatures`."""
-    return stores.archive.detail_signatures()
+def walked_answers(stores: Stores, cells: Iterable[WalkedCell]) -> list[dict[str, Any]]:
+    """``sample_id`` is the WALK's: an answer filed by another dataset holds that dataset's slot."""
+    rows: list[dict[str, Any]] = []
+    for _, sample_id, answer, _ in cells:
+        if (stored := stores.archive.answer(answer)) is not None:
+            rows.append({**answer_facts(stored), "sample_id": sample_id})
+    return rows
 
 
 def bench_reads(stores: Stores, *, dataset_name: str, sample_ids: frozenset[int]) -> int:
-    """How many individuals the archive has graded on any of *sample_ids* under the bench's role.
-    The RAW index, never the evidence epoch: a holdout was spent by every read, seen or not."""
+    """Never memory-scoped: a holdout was spent by every read, seen or not."""
     graded: set[str] = set()
     for entry in stores.archive.list_all(dataset_name=dataset_name):
-        if entry.get("name") != MeasurementRole.BENCH:
-            continue
-        if not sample_ids.isdisjoint(stores.archive.sample_ids(entry["run_id"])):
-            graded.add(str(entry.get("prompt_fields_id") or entry["run_id"]))
+        if any(
+            row.get("role") == MeasurementRole.BENCH and row.get("sample_id") in sample_ids
+            for row in stores.archive.population(entry)
+        ):
+            graded.add(str(entry.get("prompt_fields_id") or entry["config_key"]))
     return len(graded)
 
 
-def list_runs(
-    stores: Stores,
-    *,
-    dataset_name: str | None = None,
-) -> list[dict[str, Any]]:
-    """Run-summary entries from the archive index, scoped to ``dataset_name`` — an
-    EVIDENCE read, so runs behind the evidence epoch or outside a controlled arm's own are invisible."""
-    epoch = _evidence_epoch()
-    return [
-        e
-        for e in stores.archive.list_all(dataset_name=dataset_name)
-        if e.get("run_id") not in epoch and _in_memory(e.get("run_id"))
-    ]
+def load_population(stores: Stores, entry: dict[str, Any]) -> dict[str, Any] | None:
+    """A fresh dict per row: a reader grades them in place."""
+    rows = _remembered(stores.archive.population(entry))
+    if not rows:
+        return None
+    return {**entry, "measurements": [dict(row) for row in standing(rows).values()]}
 
 
-def runs_since(
-    stores: Stores,
-    seen_ids: set[str],
-    *,
-    dataset_name: str | None = None,
-) -> Iterator[tuple[str, dict[str, Any]]]:
-    """Yield ``(run_id, detail)`` for runs not in *seen_ids*; missing details skipped.
-    An EVIDENCE read — runs behind the evidence epoch or outside a controlled arm's are invisible."""
-    since = stores.archive.load_since(seen_ids | _evidence_epoch(), dataset_name=dataset_name)
-    return ((run_id, detail) for run_id, detail in since if _in_memory(run_id))
+def list_populations(stores: Stores, *, dataset_name: str | None = None) -> list[dict[str, Any]]:
+    entries = stores.archive.list_all(dataset_name=dataset_name)
+    if not memory_scoped():
+        return entries
+    return [e for e in entries if _remembered(stores.archive.population(e))]
 
 
-def replay_feed(
-    stores: Stores,
-    node_configs: list[tuple[str, dict[str, Any]]],
-) -> ReplayFeed:
-    """Per-sample cache reuse from prior runs sharing *node_configs*, keyed by ``sample_key``.
-
-    The grade floor is the feed's, not the caller's: this is the seam ADR-0005's "every consumer
-    excludes ``C``" is enforced at, and a replayed row is re-archived under the reading run, so a
-    caller free to lower it could launder a ``C`` cell into the δ ruler."""
-    return ReplayFeed(stores.archive, node_configs)
-
-
-# -- writes -------------------------------------------------------------------
-
-
-def record_measurement_run(
-    stores: Stores,
-    run_id: str,
-    data: dict[str, Any],
-    new_measurements: Iterable[dict[str, Any]],
-) -> Path:
-    """Sole write entry point. *new_measurements* is what is NEW — the detail log is append-only,
-    so rows already on disk are never rewritten."""
-    if (own := _OWN_RUNS.get()) is not None:
-        own.add(run_id)
-    return stores.archive.append_run(run_id, data, new_measurements)
-
-
-def compact_measurement_run(stores: Stores, run_id: str) -> bool:
-    """Drop the run's superseded rows (dead headers, re-measured samples). Self-limiting —
-    a no-op on a log that is already tight."""
-    return stores.archive.compact_run(run_id)
-
-
-def reset_measurement_run(stores: Stores, run_id: str) -> None:
-    """Discard the run's detail log — a ``force_fresh`` pass REPLACES its rows, and an
-    append-only log does not overwrite. See :meth:`MeasurementArchive.reset_run`."""
-    stores.archive.reset_run(run_id)
-
-
-# -- field compaction ---------------------------------------------------------
-#
-# The facade half of the archive's cold store. These are deliberately thin: WHICH fields move is
-# a policy the application layer owns (`application/maintenance/archive_maintenance.py`), and the
-# archive owns the paths, the fold-key ordering invariant and the atomic swap.
-
-
-def maintenance_runs(stores: Stores, *, dataset_name: str | None = None) -> list[dict[str, Any]]:
-    """Every index entry, RAW — never epoch-filtered. ``list_runs`` is an EVIDENCE read and hides
-    an instrument's own runs; a maintenance pass that cannot see a run cannot maintain it."""
-    return stores.archive.list_all(dataset_name=dataset_name)
-
-
-def measurement_detail_lines(stores: Stores, run_id: str) -> list[str]:
-    return stores.archive.detail_lines(run_id)
-
-
-def replace_measurement_detail(stores: Stores, run_id: str, lines: Iterable[str]) -> int:
-    return stores.archive.replace_detail(run_id, lines)
-
-
-def write_cold_payload(stores: Stores, run_id: str, rows: Iterable[dict[str, Any]]) -> int:
-    return stores.archive.write_cold(run_id, rows)
-
-
-def cold_payload_size(stores: Stores, rows: Iterable[dict[str, Any]]) -> int:
-    """What writing *rows* would cost. One compression path serves the dry run and the apply."""
-    return stores.archive.cold_size(rows)
-
-
-def cold_payload_bytes(stores: Stores, run_id: str) -> int:
-    return stores.archive.cold_bytes_on_disk(run_id)
-
-
-def read_cold_payload(stores: Stores, run_id: str) -> list[dict[str, Any]] | None:
-    return stores.archive.read_cold(run_id)
-
-
-def drop_cold_payload(stores: Stores, run_id: str) -> int:
-    return stores.archive.drop_cold(run_id)
-
-
-def has_cold_payload(stores: Stores, run_id: str) -> bool:
-    return stores.archive.has_cold(run_id)
-
-
-def maintain_measurement_index(stores: Stores) -> bool:
-    """Compact the index's superseded rows at run start. **Silently skipped inside an instrument**,
-    wrapped around the disk touch so a second caller inherits the rule instead of restating it."""
-    if instrument_mode() is not None:
-        return False
-    return stores.archive.maintain_index()
-
-
-def reindex_measurements(stores: Stores) -> dict[str, int]:
-    """Rebuild the append-only measurement index from the detail files and GC orphans.
-    A maintenance verb — the index is derived, so this loses nothing; returns counts."""
-    return stores.archive.reindex()
+def population_signatures(
+    stores: Stores, *, dataset_name: str | None = None
+) -> dict[str, list[list[Any]]]:
+    sigs = stores.archive.cell_signatures()
+    out: dict[str, list[list[Any]]] = {}
+    for entry in stores.archive.list_all(dataset_name=dataset_name):
+        held = stores.archive.signature(entry, sigs) or ()
+        out[entry["config_key"]] = [list(part) for part in held]
+    return out
 
 
 def _sample_fold_path(stores: Stores, dataset_name: str) -> Path:
     return stores.archive.derived_dir() / f"sample_fold__{dataset_name}.jsonl"
 
 
-def sample_fold_rows(stores: Stores, *, dataset_name: str) -> list[dict[str, Any]]:
-    """The persisted ``SampleIndex`` derivation, **in append order**: one consumer reads a sample's
-    trailing observations as a streak, so the replay sequence is part of the answer. A controlled
-    arm reads none: the fold is every campaign's."""
+class SampleFoldRow(StrictModel):
+    model_config = ConfigDict(frozen=True)
+
+    config_key: str
+    sp: str
+    fk: str
+    sig: list[list[Any]]
+    # ``(sample_id, objective, provenance)`` per graded cell.
+    graded: list[tuple[int, float, str]]
+    unscoreable: bool = False
+    # ``(sample_id, hit, degraded, failure_mode)`` per cell, in walk order.
+    cells: list[tuple[int, bool, bool, str | None]] = Field(default_factory=list)
+    # ``(sample_id, query, ground_truth)`` per sample this row was first to introduce.
+    new_samples: list[tuple[int, str, str]] = Field(default_factory=list)
+    reading: CellFold | None = None
+
+
+def sample_fold_rows(stores: Stores, *, dataset_name: str) -> list[SampleFoldRow]:
+    """A controlled line reads none: the fold is every campaign's."""
     if memory_scoped():
         return []
-    return iter_jsonl(_sample_fold_path(stores, dataset_name))
+    return [
+        SampleFoldRow.model_validate(row)
+        for row in iter_jsonl(_sample_fold_path(stores, dataset_name))
+    ]
 
 
-def write_sample_fold(
-    stores: Stores, *, dataset_name: str, rows: Iterable[dict[str, Any]], append: bool
-) -> None:
-    """Persist per-run derivation *rows* — ``append`` for runs newly folded, else replace. Skipped
-    inside an instrument or a controlled arm, whose fold is not the dataset's."""
-    if instrument_mode() is not None or memory_scoped():
+def write_sample_fold(stores: Stores, *, dataset_name: str, rows: Iterable[SampleFoldRow]) -> None:
+    if memory_scoped():
         return
-    path = _sample_fold_path(stores, dataset_name)
-    if append:
-        for row in rows:
-            append_jsonl(path, row)
-        return
-    write_jsonl(path, rows)
+    write_jsonl(
+        _sample_fold_path(stores, dataset_name), (row.model_dump(mode="json") for row in rows)
+    )

@@ -1,11 +1,8 @@
-"""Per-cycle file sink — a Langfuse-shape mirror. Append-only: ``events.jsonl`` is NEVER read back for state
-reconstruction; resume and fork are driven by the round files."""
-
 from __future__ import annotations
 
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
 from promptpotter.infrastructure.store.io import (
@@ -16,28 +13,30 @@ from promptpotter.infrastructure.store.io import (
 )
 from promptpotter.infrastructure.store.layout import cycle_dir_for
 from promptpotter.infrastructure.tracing.events import (
-    CampaignEnd,
     CampaignStart,
     DatasetRegistered,
-    DatasetRun,
-    NodeEnd,
-    NodeStart,
-    PromptVersion,
-    RoundEnd,
-    RoundStart,
+    TraceSink,
     dataset_item_id,
     generate_observation_id,
 )
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.instrument import instrument_depth
+from promptpotter.shared.measurement_context import instrument_depth
+
+if TYPE_CHECKING:
+    from promptpotter.domain.run_records import (
+        CandidateScoredRecord,
+        RoundClosedRecord,
+        RoundEnteredRecord,
+        RunPhaseRecord,
+    )
 
 
-class FileSink:
+class FileSink(TraceSink):
     def __init__(self, store_base_dir: str | Path, hop: CycleHop) -> None:
         self._scope = cycle_dir_for(WorkspaceDir(Path(store_base_dir)), hop)
         self._campaign_traces: dict[str, str] = {}
         self._round_observation_ids: dict[tuple[str, int], tuple[str, str]] = {}
-        self._node_observations: dict[tuple[str, int, str], tuple[str, str]] = {}
+        self._node_observations: dict[tuple[str, int | None, str], tuple[str, str]] = {}
 
     def _log_event(self, event: dict[str, Any]) -> None:
         event["timestamp"] = utcnow_iso()
@@ -89,19 +88,7 @@ class FileSink:
         }
         if parent_observation_id is not None:
             observation["parentObservationId"] = parent_observation_id
-        # An INSTRUMENT does not dump per-observation traces. Same argument that already
-        # force-disables the cloud sink for an inner cycle (`runner/inner/spawn.py`:
-        # "per-(sample x candidate x round) traces have no operator value"), applied to the
-        # local one — and measured: `.inner/` reached 343 MB across 9 sandboxes, 60% of the
-        # whole store, essentially all of it this one write. Nothing in the repo reads
-        # `langfuse/observations/` back except `_finalize_observation` below, which already
-        # treats an absent file as "nothing to finalize". The path is also the deepest the
-        # package produces (`.inner/<cyid>/<tenant>/campaigns/…/observations/<trace>/<obs>.json`
-        # measured at 668 chars), so not writing it is also what keeps these trees under
-        # MAX_PATH rather than needing a special deleter to get rid of them.
-        #
-        # The id is still returned and still bookkept by callers: a skipped dump must not
-        # change control flow, only what lands on disk. Top-level campaigns are untouched.
+        # An inner cycle dumps no per-observation file (bulk, and the package's deepest path); the id is still returned.
         if not instrument_depth():
             obs_dir = self._scope / "langfuse" / "observations" / trace_id
             write_json(obs_dir / f"{observation_id}.json", observation)
@@ -143,8 +130,7 @@ class FileSink:
         ds_dir.mkdir(parents=True, exist_ok=True)
         for query, ground_truth in event.items:
             item_id = dataset_item_id(event.dataset_name, query)
-            # Every launch registers the whole panel again, and a dataset's rows are never
-            # re-cut under a name it already used: a file already there is this item.
+            # Every launch registers the whole panel again, and rows are never re-cut under a used name.
             if (ds_dir / f"{item_id}.json").exists():
                 continue
             item_data = {
@@ -166,211 +152,189 @@ class FileSink:
     def on_campaign_start(self, event: CampaignStart) -> None:
         trace_id = self._write_trace(
             name="optimization_loop",
-            input_data={
-                "campaign_id": event.campaign_id,
-                "origin_accuracy": event.origin_accuracy,
-                "config": event.config,
-            },
+            input_data={"campaign_id": event.campaign_id, "config": event.config},
             tags=["campaign", "optimization_loop"],
         )
         self._campaign_traces[event.campaign_id] = trace_id
-        if event.origin_accuracy is not None:
-            self._write_score(trace_id, "origin_accuracy", event.origin_accuracy)
         self._log_event(
-            {
-                "event": "campaign_start",
-                "trace_id": trace_id,
-                "campaign_id": event.campaign_id,
-                "origin_accuracy": event.origin_accuracy,
-            }
+            {"event": "campaign_start", "trace_id": trace_id, "campaign_id": event.campaign_id}
         )
 
-    def on_dataset_run(self, event: DatasetRun) -> None:
+    def on_candidate_scored(self, campaign_id: str, record: CandidateScoredRecord) -> None:
+        scores = record.scores
+        walked = {
+            "label": scores.label,
+            "candidate_id": scores.candidate_id,
+            "prompt_fields_id": scores.sp_hash,
+        }
+        accuracy = scores.accuracy
         trace_id = self._write_trace(
             name="dataset_run",
-            input_data={
-                "run_id": event.run_id,
-                "content_hash": event.content_hash,
-                "prompt_fields_id": event.prompt_fields_id,
-            },
-            output_data={
-                "accuracy": event.accuracy,
-                "total": event.total,
-            },
+            input_data=walked,
+            output_data={"accuracy": accuracy, "total": scores.total},
             tags=["dataset_run"],
         )
-        if event.accuracy is not None:
-            self._write_score(trace_id, "accuracy", event.accuracy)
+        if accuracy is not None:
+            self._write_score(trace_id, "accuracy", accuracy)
         self._log_event(
             {
                 "event": "dataset_run",
                 "trace_id": trace_id,
-                "run_id": event.run_id,
-                "content_hash": event.content_hash,
-                "accuracy": event.accuracy,
-                "total": event.total,
-                "prompt_fields_id": event.prompt_fields_id,
+                "round": record.round,
+                **walked,
+                "accuracy": accuracy,
+                "total": scores.total,
             }
         )
 
-    def on_round_start(self, event: RoundStart) -> None:
-        trace_id = self._campaign_traces.get(event.campaign_id, "")
+    def on_round_entered(self, campaign_id: str, record: RoundEnteredRecord) -> None:
+        trace_id = self._campaign_traces.get(campaign_id, "")
         if trace_id:
             observation_id = self._write_observation(
                 trace_id=trace_id,
                 as_type="span",
-                name=f"round_{event.round_num}",
-                input_data={"round": event.round_num},
-                metadata={"round": event.round_num},
+                name=f"round_{record.round}",
+                input_data={"round": record.round},
+                metadata={"round": record.round},
             )
-            self._round_observation_ids[(event.campaign_id, event.round_num)] = (
-                trace_id,
-                observation_id,
-            )
+            self._round_observation_ids[(campaign_id, record.round)] = (trace_id, observation_id)
 
-    def on_node_start(self, event: NodeStart) -> None:
-        trace_id = self._campaign_traces.get(event.campaign_id, "")
+    def on_span_open(
+        self,
+        campaign_id: str,
+        round_num: int | None,
+        span_id: str,
+        *,
+        name: str,
+        node_type: str,
+        as_type: str,
+        metadata: dict[str, Any],
+    ) -> None:
+        trace_id = self._campaign_traces.get(campaign_id, "")
         if not trace_id:
             return
-        round_ids = self._round_observation_ids.get((event.campaign_id, event.round_num))
-        parent_observation_id = round_ids[1] if round_ids else None
+        round_ids = (
+            None if round_num is None else self._round_observation_ids.get((campaign_id, round_num))
+        )
         observation_id = self._write_observation(
             trace_id=trace_id,
-            as_type=event.as_type,
-            name=event.node_id,
-            input_data=event.input_data,
-            metadata={"node_type": event.node_type, **(event.metadata or {})},
-            parent_observation_id=parent_observation_id,
+            as_type=as_type,
+            name=name,
+            input_data={},
+            metadata={"node_type": node_type, **metadata},
+            parent_observation_id=round_ids[1] if round_ids else None,
         )
-        self._node_observations[(event.campaign_id, event.round_num, event.node_id)] = (
-            trace_id,
-            observation_id,
-        )
+        self._node_observations[(campaign_id, round_num, span_id)] = (trace_id, observation_id)
         self._log_event(
             {
                 "event": "node_start",
                 "trace_id": trace_id,
                 "observation_id": observation_id,
-                "node_id": event.node_id,
-                "node_type": event.node_type,
+                "node_id": name,
+                "node_type": node_type,
             }
         )
 
-    def on_node_end(self, event: NodeEnd) -> None:
-        key = (event.campaign_id, event.round_num, event.node_id)
-        ids = self._node_observations.pop(key, None)
+    def on_span_close(
+        self, campaign_id: str, round_num: int | None, span_id: str, *, error: str | None
+    ) -> None:
+        ids = self._node_observations.pop((campaign_id, round_num, span_id), None)
         if ids is None:
             return
         trace_id, observation_id = ids
-        meta_extra: dict[str, Any] = {}
-        if event.metrics:
-            meta_extra["metrics"] = event.metrics
-        if event.error:
-            meta_extra["error"] = event.error
-        self._finalize_observation(trace_id, observation_id, event.output_data, meta_extra or None)
+        self._finalize_observation(
+            trace_id, observation_id, None, {"error": error} if error else None
+        )
         self._log_event(
             {
                 "event": "node_end",
                 "trace_id": trace_id,
                 "observation_id": observation_id,
-                "node_id": event.node_id,
-                "error": event.error,
+                "error": error,
             }
         )
 
-    def on_round_end(self, event: RoundEnd) -> None:
-        trace_id = self._campaign_traces.get(event.campaign_id, "")
+    def on_round_closed(self, campaign_id: str, record: RoundClosedRecord) -> None:
+        trace_id = self._campaign_traces.get(campaign_id, "")
+        winner = record.opt_sp
+        winner_id = winner.id if winner is not None else ""
+        if winner is not None:
+            self._write_prompt_version(record)
         if trace_id:
-            round_ids = self._round_observation_ids.pop((event.campaign_id, event.round_num), None)
+            round_ids = self._round_observation_ids.pop((campaign_id, record.round), None)
             if round_ids is not None:
                 _, observation_id = round_ids
-                meta_extra: dict[str, Any] = {"candidate_scores": event.candidate_scores}
-                if event.optimizer_templates:
-                    meta_extra["optimizer_templates"] = event.optimizer_templates
                 self._finalize_observation(
                     trace_id,
                     observation_id,
                     {
-                        "accuracy": event.accuracy,
-                        "total": event.total,
-                        "improved": event.improved,
-                        "next_action": event.next_action,
-                        "winner_lineage_id": event.winner_lineage_id,
+                        "accuracy": record.accuracy,
+                        "total": record.total,
+                        "improved": record.improved,
+                        "winner_lineage_id": winner_id,
                     },
-                    meta_extra,
+                    {"candidate_scores": [c.model_dump() for c in record.candidate_scores]},
                 )
-            if event.accuracy is not None:
-                self._write_score(trace_id, "accuracy", event.accuracy)
+            if record.accuracy is not None:
+                self._write_score(trace_id, "accuracy", record.accuracy)
 
-        log_entry: dict[str, Any] = {
-            "event": "round_complete",
-            "trace_id": trace_id,
-            "campaign_id": event.campaign_id,
-            "round": event.round_num,
-            "accuracy": event.accuracy,
-            "total": event.total,
-            "improved": event.improved,
-            "next_action": event.next_action,
-            "winner_lineage_id": event.winner_lineage_id,
-        }
-        if event.optimizer_templates:
-            log_entry["optimizer_templates"] = event.optimizer_templates
-        self._log_event(log_entry)
+        self._log_event(
+            {
+                "event": "round_complete",
+                "trace_id": trace_id,
+                "campaign_id": campaign_id,
+                "round": record.round,
+                "accuracy": record.accuracy,
+                "total": record.total,
+                "improved": record.improved,
+                "winner_lineage_id": winner_id,
+            }
+        )
 
-    def on_prompt_version(self, event: PromptVersion) -> None:
-        # The prompt the optimizer PRODUCED for the user's task — not one of the prompts the
-        # optimizer itself runs on. This family was called "optimizer_prompt", the same words
-        # `load_optimizer_prompt` uses for the opposite population, so the one word named both
-        # sides of the loop. Write-only (no reader in the package), so the rename orphans some
-        # directories and breaks nothing.
+    def _write_prompt_version(self, record: RoundClosedRecord) -> None:
+        winner = record.opt_sp
+        assert winner is not None
         family = "target_prompt"
-        version = event.lineage_id[:8] if event.lineage_id else "unknown"
+        version = winner.id[:8] if winner.id else "unknown"
         prompt_dir = self._scope / "prompts" / family / version
-        write_text(prompt_dir / "prompt.txt", event.rendered_prompt)
+        write_text(prompt_dir / "prompt.txt", winner.render())
+        parent_ids = list(winner.lineage.parent_ids)
         metadata = {
             "family": family,
             "version": version,
-            "lineage_id": event.lineage_id,
-            "parent_ids": list(event.parent_ids),
-            "layer1_fields": event.layer1_fields,
+            "lineage_id": winner.id,
+            "parent_ids": parent_ids,
+            "layer1_fields": record.prompt_fields,
             "created_at": utcnow_iso(),
         }
         write_json(prompt_dir / "metadata.json", metadata)
         self._log_event(
             {
                 "event": "prompt_version",
-                "lineage_id": event.lineage_id,
+                "lineage_id": winner.id,
                 "family": family,
                 "version": version,
-                "parent_ids": list(event.parent_ids),
+                "parent_ids": parent_ids,
             }
         )
 
-    def on_campaign_end(self, event: CampaignEnd) -> None:
-        trace_id = self._campaign_traces.get(event.campaign_id, "")
+    def on_run_stopped(
+        self, campaign_id: str, record: RunPhaseRecord, *, rounds_closed: int
+    ) -> None:
+        trace_id = self._campaign_traces.get(campaign_id, "")
+        ending = {
+            "run_phase": record.run_phase.value,
+            "stop_reason": record.stop_reason,
+            "rounds_closed": rounds_closed,
+        }
         if trace_id:
             trace_path = self._scope / "langfuse" / "traces" / f"{trace_id}.json"
             trace_data = read_json_optional(trace_path)
             if trace_data is not None:
-                trace_data["output"] = {
-                    "result_accuracy": event.result_accuracy,
-                    "n_rounds_after_origin": event.n_rounds_after_origin,
-                    "stop_reason": event.stop_reason,
-                }
+                trace_data["output"] = ending
                 write_json(trace_path, trace_data)
-            if event.result_accuracy is not None:
-                self._write_score(trace_id, "result_accuracy", event.result_accuracy)
-
         self._log_event(
-            {
-                "event": "campaign_end",
-                "trace_id": trace_id,
-                "campaign_id": event.campaign_id,
-                "result_accuracy": event.result_accuracy,
-                "n_rounds_after_origin": event.n_rounds_after_origin,
-                "stop_reason": event.stop_reason,
-                "result_round": event.result_round,
-            }
+            {"event": "campaign_end", "trace_id": trace_id, "campaign_id": campaign_id, **ending}
         )
 
 

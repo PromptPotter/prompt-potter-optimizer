@@ -1,160 +1,41 @@
-"""Per-round display summary for ``dashboard.json::rounds[]`` — the strict subset the chart, tree and sparkline consume.
-Deep audit stays in ``round_NNNN.json``, fetched on demand."""
-
 from __future__ import annotations
 
-import logging
-from pathlib import Path
-from typing import Any
-
-from pydantic import ValidationError
-
-from promptpotter.domain.dashboard_rows import RoundSummary, RoundSummaryCandidate
-from promptpotter.domain.l4.proxies import panel_precision
-from promptpotter.domain.results import (
-    RoundResult,
-    ScoredCandidate,
-    is_electable,
-    order_floor,
-)
-from promptpotter.infrastructure.store.io import read_json_tolerant
-from promptpotter.infrastructure.store.layout import CycleLayout
-
-logger = logging.getLogger(__name__)
-
-# The ``ScoredCandidate`` fields each display model copies verbatim — its own field list
-# minus the derived flags below. Deriving from ``model_fields`` keeps the copy set in
-# lockstep with the model definition (add a field there, it flows here automatically).
-_SUMMARY_INCLUDE = set(RoundSummaryCandidate.model_fields) - {"is_selected", "is_leading"}
+from promptpotter.domain.dashboard_rows import DashboardCandidate, RoundSummary
+from promptpotter.domain.l4.proxies import PanelPrecision
+from promptpotter.domain.results_health import critical_health_title
+from promptpotter.domain.run_records import RoundClosedRecord
+from promptpotter.domain.scoring import WalkedCell
 
 
-def origin_rows_from_disk(cycle_dir: Path) -> list[dict[str, Any]]:
-    """The round-0 per-cell ROWS — the control the L4 panel's precision read pairs against, and
-    the sole reader of that file for it. Round 0 is never re-measured, so the cached rows ARE the
-    control; and rows rather than a pre-extracted map, because the read wants two fields off each."""
-    doc = read_json_tolerant(CycleLayout(Path(cycle_dir)).round_file(0))
-    if not isinstance(doc, dict):
+def _measurement_order(arms: dict[str, list[WalkedCell]]) -> list[int]:
+    if not arms:
         return []
-    acr = doc.get("all_candidate_results") or {}
-    if not acr:
-        return []
-    origin_id = next(iter(acr))  # round 0 is the single origin arm
-    rows = acr.get(origin_id) or []
-    return list(rows) if isinstance(rows, list) else []
-
-
-def round_result_from_disk(cycle_dir: Path, round_num: int) -> RoundResult | None:
-    """The closed round document, for a fold with no live producer behind it.
-
-    ``PhaseRecord.live_round_result`` is ``exclude=True``, so a ``round:display`` record read back
-    off the ledger carries the round's headline scalars and none of its arrays — which is why
-    ``rounds[]`` was the one served field a replay could not rebuild. It is the SAME document
-    either way: ``CampaignStore.save_round_file`` persists ``RoundResult.model_dump()``, so this
-    reads the record's own carrier from its other home rather than reconstructing it.
-
-    ``None`` when the file is absent or unreadable: ``delete --keep-results`` strips the tree, and
-    one missing round must not blind the whole chronology."""
-    doc = read_json_tolerant(CycleLayout(Path(cycle_dir)).round_file(round_num))
-    if not isinstance(doc, dict):
-        return None
-    try:
-        return RoundResult.model_validate(doc)
-    except ValidationError:
-        logger.warning("round %d document at %s is unreadable — row skipped", round_num, cycle_dir)
-        return None
-
-
-def _measurement_order(acr: dict[str, list[dict[str, Any]]]) -> list[int]:
-    # Factual order samples were measured against this round's candidates.
-    # Each candidate's results list preserves the order the adaptive queue
-    # mechanism presented samples to it; the longest list survived farthest
-    # under elimination and therefore carries the full sequence. Ties on
-    # length break on candidate_id for deterministic projection.
-    if not acr:
-        return []
-    longest_cid = max(acr, key=lambda k: (len(acr[k]), k))
-    out: list[int] = []
-    seen: set[int] = set()
-    for r in acr[longest_cid]:
-        sid = r.get("sample_id")
-        if sid is None:
-            continue
-        sid_int = int(sid)
-        if sid_int in seen:
-            continue
-        seen.add(sid_int)
-        out.append(sid_int)
-    return out
-
-
-def _leading_arm(rr: RoundResult) -> ScoredCandidate | None:
-    """The ONE arm a round's reading is taken off — its winner, else its best-scoring electable one.
-
-    Every arm ran the same cells, so any measures the same instrument; picking the arm the reader is
-    already looking at keeps the precision and the lift interval attached to what they explain.
-    ``is_electable`` is the election's own admission rule, so a collapsed arm cannot supply the
-    round's reading — and that is the half a browser-side argmax over ``composite_fitness`` cannot
-    apply, which is why the flag is SERVED rather than left to be re-derived."""
-    if rr.round == 0:
-        return None
-    electable = [
-        c
-        for c in rr.candidate_scores
-        if is_electable(c, rr.all_candidate_results.get(c.candidate_id, []))
-    ]
-    if not electable:
-        return None
-    return next(
-        (c for c in electable if c.label in rr.selected_labels),
-        max(electable, key=lambda c: order_floor(c.composite_fitness)),
-    )
+    longest_cid = max(arms, key=lambda k: (len(arms[k]), k))
+    return list(dict.fromkeys(sample_id for _, sample_id, _, _ in arms[longest_cid]))
 
 
 def build_round_summary(
-    rr: RoundResult, origin_rows: list[dict[str, Any]], *, best_so_far: float | None
+    closed: RoundClosedRecord, panel_precision: PanelPrecision | None
 ) -> RoundSummary:
-    """One ``RoundSummary`` from a closed round — the sole writer of the persisted ``is_selected`` flag. ``health`` is
-    COPIED from ``rr.health``: the projection renders the served verdict and never recomputes it."""
-    # Both display models are strict name-subsets of ``ScoredCandidate`` plus the derived flags
-    # below — so each is a ``model_dump(include=…)`` projection, not a hand-copy. The include-set
-    # is the target model's OWN field list minus those: a field added to the target can't be
-    # silently forgotten here (it just flows), and a field the source lacks fails loud at
-    # construction. One field-list, spelled at the model.
-    leading = _leading_arm(rr)
-    candidates = [
-        RoundSummaryCandidate(
-            **c.model_dump(include=_SUMMARY_INCLUDE),
-            is_selected=c.label in rr.selected_labels,
-            is_leading=leading is not None and c.candidate_id == leading.candidate_id,
-        )
-        for c in rr.candidate_scores
-    ]
-    selection = _measurement_order(rr.all_candidate_results)
+    candidates = [DashboardCandidate(reading=reading) for reading in closed.arm_readings()]
     return RoundSummary(
-        round=rr.round,
-        accuracy=rr.accuracy,
-        composite_fitness=rr.composite_fitness,
-        total=rr.total,
-        ability=rr.ability if rr.stamps_theta else None,
-        best_so_far=best_so_far,
-        improved=None if rr.round == 0 else rr.improved,
-        electable_count=None if rr.round == 0 else rr.electable_count,
-        verdict_reason=None if rr.round == 0 else rr.verdict_reason,
-        separable=rr.separable,
-        stamps_theta=rr.stamps_theta,
+        round=closed.round,
+        leading=closed.leading_arm,
+        selected=closed.selected_arms,
+        accuracy=closed.accuracy,
+        composite_fitness=None if closed.accuracy is None else closed.composite_fitness,
+        total=closed.total,
+        ability=closed.ability,
+        improved=None if closed.round == 0 else closed.improved,
+        verdict_reason=None if closed.round == 0 else closed.verdict_reason,
         candidates=candidates,
-        selection=selection,
-        health=rr.health,
-        overlap=rr.overlap,
-        panel_precision=(
-            None
-            if leading is None
-            else panel_precision(
-                rr.all_candidate_results.get(leading.candidate_id, []), origin_rows
-            )
-        ),
-        optimizer_facts=rr.optimizer_facts,
+        selection=_measurement_order(closed.cells.arms),
+        health=closed.health,
+        health_alert=critical_health_title(closed.round, closed.health),
+        overlap=closed.overlap,
+        panel_precision=panel_precision,
+        optimizer_facts=closed.optimizer_facts,
     )
 
 
-__all__ = ["build_round_summary", "origin_rows_from_disk", "round_result_from_disk"]
+__all__ = ["build_round_summary"]

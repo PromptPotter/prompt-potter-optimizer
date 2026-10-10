@@ -1,6 +1,3 @@
-"""Per-user quota knobs at ``projects/{tenant}/user.json`` — the abuse-limit ceilings the launcher gates against. A
-missing file yields defaults via :meth:`get_or_create`."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -16,8 +13,7 @@ from promptpotter.shared.clock import utcnow_iso
 
 
 class ConsentRecord(StrictModel):
-    """Provable record that a user accepted a specific Terms version. ``accepted_at`` is SERVER-stamped, never client-supplied —
-    the record's legal weight depends on a trustworthy clock."""
+    """``accepted_at`` is SERVER-stamped, never client-supplied: its legal weight rests on that clock."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -26,9 +22,6 @@ class ConsentRecord(StrictModel):
 
 
 class User(StrictModel):
-    """Per-user quota record at ``user.json`` under the tenant root. Every limit is nullable and overridable on disk, so an
-    operator can raise one for a trusted user without a redeploy."""
-
     model_config = ConfigDict(frozen=True)
 
     user_id: str
@@ -86,10 +79,7 @@ class UserStore:
 
 
 def count_accounts(projects_root: Path) -> int:
-    """How many accounts exist on this install. A CROSS-tenant read, so it takes the projects root rather
-    than a ``Stores`` — a tenant-scoped store cannot name another tenant's directory, which is the isolation
-    working, not a gap to route around. ``user.json`` is what makes a tenant dir an account; a directory
-    without one is a workspace nobody has signed into."""
+    """A CROSS-tenant read, so it takes the projects root: a tenant-scoped `Stores` cannot name another tenant's dir."""
     if not projects_root.is_dir():
         return 0
     return sum(1 for child in projects_root.iterdir() if (child / "user.json").is_file())

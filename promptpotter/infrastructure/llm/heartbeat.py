@@ -1,6 +1,3 @@
-"""The ONE in-flight heartbeat loop; a second is a bug. **An await that outlasts ``RUN_FRESH_S`` and writes nothing
-of its own MUST heartbeat** — silence is how this package says the producer died."""
-
 from __future__ import annotations
 
 import logging
@@ -21,9 +18,6 @@ __all__ = ["HEARTBEAT_INTERVAL_S", "heartbeat", "waiting_on"]
 
 
 def waiting_on(client: LLMClientBase, model: str | None, *, role: str) -> str:
-    """WHO an open call's wait belongs to, and WHY: a send the provider's pushback is holding is not
-    a slow answer, and reading one as the other is the misdiagnosis this line exists to prevent.
-    The provider's own words, never a countdown — a duration rides `elapsed_s`, formatted once."""
     name = model or "(unnamed)"
     held = client.pushback(model) if model else None
     if held is not None and held.since is not None:
@@ -32,18 +26,7 @@ def waiting_on(client: LLMClientBase, model: str | None, *, role: str) -> str:
 
 
 HEARTBEAT_INTERVAL_S = 10.0
-"""Seconds between in-flight progress ticks.
-
-This is the refresh rate of the only surface that says WHY the run is quiet — the
-chat's progress chip and the terminal's `still waiting` line both re-render per tick,
-naming the provider the call is waiting on. 15s was chosen so short calls emitted no
-tick at all; the cost of that silence turned out to be an operator reading a healthy
-long call as a hang, which is the more expensive failure. The ledger pays one append
-per tick — at four optimizer calls/round and ~90s average duration that is ~36
-records/round, still negligible.
-
-**`webapp/lib/format.ts::fmtGap` derives its threshold from this number** (it counts
-missed heartbeats to decide a silence is real). Change one, re-read the other."""
+"""`webapp/lib/format.ts::fmtGap` derives its threshold from this: change one, re-read the other."""
 
 
 async def heartbeat(
@@ -56,8 +39,7 @@ async def heartbeat(
     detail_fn: Callable[[], str | None] | None = None,
     on_suspend: Callable[[float], None] | None = None,
 ) -> None:
-    """Append progress records while a call is open. ``ledger=None`` still ticks — that is what lets a caller
-    create the task unconditionally, so a ledger guard cannot silently disarm ``on_suspend``."""
+    """``ledger=None`` still ticks, so a missing ledger cannot disarm ``on_suspend``."""
     while True:
         overshoot = await sleep_measuring_suspend(HEARTBEAT_INTERVAL_S)
         if on_suspend is not None and overshoot > SUSPEND_GRACE_S:
@@ -77,10 +59,7 @@ async def heartbeat(
 
 
 def _safe_detail(detail_fn: Callable[[], str | None] | None) -> str | None:
-    """A tick's status line, and never a reason the call it describes fails.
-
-    A detail function reads a surface another process is writing — that is what makes it one — so
-    it can raise where nothing about the await has gone wrong."""
+    """A detail read can raise on another process's write; it must never fail the call."""
     if detail_fn is None:
         return None
     try:

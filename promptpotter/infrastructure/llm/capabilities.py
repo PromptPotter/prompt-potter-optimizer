@@ -1,35 +1,3 @@
-"""What a MODEL accepts — resolved in four layers, hand-authored first, so a wrong or missing
-fetch is always correctable without a code change — beside what the PROVIDER running it bills,
-which is no layer of these: ``pricing.py::lookup_rate`` owns every price.
-
-Distinct from ``registry._MODEL_PROFILES``, deliberately, and the split is what keeps either
-usable. That table holds facts WE measured against the live endpoint — a reasoning model's
-``max_tokens`` floor, which effort rungs it refuses or cannot distinguish — and it belongs in code
-because it is evidence. This holds facts the PROVIDER declares, which go stale on their schedule
-rather than ours and cannot be shipped in a release. Merging them would make one file both
-evidence and cache.
-
-The layers, highest first:
-
-1. ``model_capabilities.yaml`` in the tenant's own workspace — HAND-AUTHORED, and the reason the
-   whole thing is safe to build on a third party's metadata. A locally-hosted model appears in no
-   catalogue at all; a provider's list can simply be wrong. Either is one file away from fixed.
-2. ``registry._MODEL_PROFILES`` — what WE measured against the live endpoint, which narrows the
-   fetched ladder below but can never widen it. The catalogue reports that ``reasoning_effort``
-   exists and never which values it takes, so a model carrying the parameter can still 400 on one
-   (``openai/gpt-oss-20b`` on ``none``). Composed here, not merged: the tables stay apart, and
-   ``reasoning_note`` says which layer narrowed the answer.
-3. ``.cache/model_capabilities.json`` in the same workspace — the fetched snapshot. Per TENANT
-   rather than per install: which models an operator asks about is their business, and a shared
-   cache would pool that across accounts.
-4. Nothing — ``reasoning_efforts=None``, which every caller must render as UNKNOWN and never as
-   unsupported. An absent answer that reads as "no" silently deletes a real search axis.
-
-The snapshot stores the provider's fields RAW and derives at resolve time. A derived cache
-answers a question it was not asked, and the question here — which rungs does this model take,
-against this node's ladder — has an answer that differs per dataset.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -50,40 +18,22 @@ from promptpotter.infrastructure.store.io import (
     write_json,
 )
 from promptpotter.infrastructure.store.read_model import derived, file_sig
+from promptpotter.infrastructure.tls import tls_context
 from promptpotter.shared.clock import utcnow_iso
 
 logger = logging.getLogger(__name__)
 
 MODELS_URL = "https://openrouter.ai/api/v1/models"
-"""Public catalogue listing — no key, no account, and no request body, so the fetch carries
-nothing about the tenant on whose behalf it runs. That is what makes caching it per tenant a
-privacy measure rather than a ritual: the REQUEST leaks nothing, and the stored ANSWER never
-pools with another account's."""
 
 CAPABILITY_FILE = "model_capabilities.yaml"
-"""Operator-authored override, at the tenant workspace root where it is findable — the twin of
-the optimizer manifest's ``$PROMPTPOTTER_HOME`` shadow. Shape, and every key optional::
-
-    qwen/qwen3.7-flash:
-      reasoning_efforts: [none, default]
-      note: local vLLM build ignores the effort ladder
-"""
 
 _CACHE_REL = Path(".cache") / "model_capabilities.json"
 
-# Presence bounds no RUNG — the catalogue never lists a value set. A model taking an effort may be
-# listed under OpenRouter's `reasoning` object alone and still honour `reasoning_effort` on the
-# wire (`qwen/qwen3.7-flash`), while `openai/gpt-oss-20b` lists both and 400s on `none`.
 _EFFORT_PARAM = "reasoning_effort"
 _REASONING_PARAM = "reasoning"
 
 STANDARD_EFFORT_LADDER: tuple[str, ...] = ("none", "default", "low", "medium", "high")
-"""The rungs EVERY model is offered — OURS, not a provider's, since no catalogue publishes a value
-set. Narrowed only by measured ``refuses_efforts``. It REPLACES whatever a node declared, because
-the node's list is a default authored before anyone knew which model would run there; a CAMPAIGN's
-narrowing intersects instead (``PipelineSchema.param_options``).
-``assets/optimizers/potter/pipeline.yaml`` lists exactly these five; a YAML cannot import a constant, so
-that file cites this one by name."""
+"""``assets/optimizers/potter/pipeline.yaml`` lists exactly these five by hand: change both."""
 
 
 def _override_path(workspace: Path) -> Path:
@@ -95,7 +45,6 @@ def _cache_path(workspace: Path) -> Path:
 
 
 def _per_mtok(per_token: float | None) -> float | None:
-    """Per Mtok is the unit an operator reads a bill in, so the conversion happens here, once."""
     return None if per_token is None else round(per_token * 1_000_000, 6)
 
 
@@ -109,9 +58,6 @@ def _as_int(raw: object) -> int | None:
 
 
 def _card(entry: dict[str, Any], fetched_at: str) -> dict[str, Any]:
-    """The provider's own description of a model, projected onto :class:`ModelCapability`'s card
-    half. Every field optional: a catalogue that drops one must degrade the card, never raise
-    inside a resolve the caller already committed to."""
     top, arch = (
         part if isinstance(part := entry.get(key), dict) else {}
         for key in ("top_provider", "architecture")
@@ -127,13 +73,8 @@ def _card(entry: dict[str, Any], fetched_at: str) -> dict[str, Any]:
 
 
 def resolve_model_capabilities(model: str, provider: str, *, workspace: Path) -> ModelCapability:
-    """The four-layer read for ONE model, priced on ONE provider.
-
-    Returns the ladder this model OFFERS, which is a fact about the model and not about any node.
-    A caller holding a node's declared ladder uses it only where the answer is ``None``. The price
-    rides every arm: a model no catalogue lists is still billed by whoever serves it."""
     key = normalize_model_id(model)
-    # The table a bill is computed from, never the catalogue's own list — that is one gateway's.
+    # The table a bill is computed from, never the snapshot's `pricing` — that is one gateway's.
     rate = lookup_rate(model, provider or None)
     answer = partial(
         ModelCapability,
@@ -160,11 +101,8 @@ def resolve_model_capabilities(model: str, provider: str, *, workspace: Path) ->
                 source="override",
             )
         if note:
-            # A note with no list is still an override — it says something about this model
-            # without claiming to know its ladder, so the answer stays unknown and carries it.
             return answer(reasoning_efforts=None, reasoning_note=note, source="override")
 
-    # The snapshot is hundreds of KB and a menu asks once per model, so it is parsed per write.
     path = _cache_path(workspace)
     cached = (
         derived(
@@ -187,13 +125,11 @@ def resolve_model_capabilities(model: str, provider: str, *, workspace: Path) ->
         )
 
     raw_params = record.get("supported_parameters")
-    # The GENERAL answer, computed once here so no surface re-derives it: of the keys we would
-    # actually send, which does this model not accept. Only where the catalogue DECLARED a list —
-    # a record without one says nothing, and an absent list read as "supports none" would strike
-    # every row on a model that takes them all.
+    # An absent list is UNKNOWN (`None`), never "supports none".
     unsupported: list[str] | None
     if isinstance(raw_params, list):
         params = [str(p) for p in raw_params]
+        # Listed under `reasoning` alone, a model still honours `reasoning_effort` on the wire.
         accepted = set(params) | ({_EFFORT_PARAM} if _REASONING_PARAM in params else set())
         unsupported = sorted(PROVIDER_REQUEST_PARAMS - accepted)
     else:
@@ -206,17 +142,13 @@ def resolve_model_capabilities(model: str, provider: str, *, workspace: Path) ->
         else "Catalogue lists no reasoning_effort — which does not mean the rungs are inert here."
     )
 
-    # Measurement outranks the catalogue; only the operator override (above) outranks measurement.
-    # A composition, not a merge — the tables stay apart and the note says which layer narrowed.
     profile = model_profile(model)
     indistinct: list[str] | None = None
     if profile is not None:
         if refused := profile.refuses_efforts & set(offered):
             offered = [rung for rung in offered if rung not in refused]
             note += f" Measured to REFUSE {', '.join(sorted(refused))}, so not offered."
-        # NOT subtracted — an indistinct rung is legal and stays in the axis; what it is not is a
-        # difference. Absence carries through as absence: a profile that never probed the rungs
-        # answers UNKNOWN, where `[]` would claim they were measured and found distinct.
+        # Not subtracted: an indistinct rung is legal. `None` stays `None` — `[]` claims "distinct".
         if profile.indistinct_efforts is not None:
             indistinct = sorted(profile.indistinct_efforts & set(offered))
             if indistinct:
@@ -233,10 +165,6 @@ def resolve_model_capabilities(model: str, provider: str, *, workspace: Path) ->
 
 
 def resolve_menu(routes: Iterable[tuple[str, str]], *, workspace: Path | None) -> CapabilityMenu:
-    """Every ``(provider, model)`` route on a menu, resolved once.
-
-    *workspace* ``None`` yields an empty map, which every reader must render as UNKNOWN rather
-    than as a menu of unsupported models."""
     menu: CapabilityMenu = {}
     if workspace is None:
         return menu
@@ -248,27 +176,13 @@ def resolve_menu(routes: Iterable[tuple[str, str]], *, workspace: Path | None) -
 
 
 def resolve_schema_menu(schema: PipelineSchema, *, workspace: Path | None) -> CapabilityMenu:
-    """Every route a SCHEMA can put on screen, resolved — the ONE call each wire producer makes.
-
-    The PAIRING is the rule, not the convenience. Ask ``available_models`` here instead — the
-    obvious spelling, and the one that stood — and a model the OPERATOR typed resolves nothing at
-    all, because a typed value rides ``param_allowed_values.model`` and by construction never
-    reaches the admin catalogue. The card carrying that model's context, price and modality then
-    rendered blank, silently, on the surface where the spend is committed. Spelled once, so the
-    next door to open cannot re-derive it wrongly."""
     return resolve_menu(schema.selectable_routes(), workspace=workspace)
 
 
 async def ensure_model_capabilities(
     workspace: Path, *, max_age_days: float = 7.0, timeout: float = 15.0
 ) -> int:
-    """Fetch the snapshot if this workspace has none or has a stale one. Returns models stored, 0
-    when nothing was written — including the healthy "already fresh" case, which is not a failure.
-
-    Every entry point that can SPEND calls this, not just the HTTP ingest routes: without a
-    snapshot every model resolves ``source="unknown"``, which this module's contract makes the
-    reader render as UNKNOWN, and the whole resolve goes inert. Non-fatal — the fetch is one
-    unauthenticated GET, and a failed one keeps whatever snapshot already stands."""
+    """0 is "nothing written" — an already-fresh snapshot as much as a failed fetch."""
     cached = read_json_tolerant(_cache_path(workspace), default={}) or {}
     fetched = cached.get("fetched_at") if isinstance(cached, dict) else None
     if isinstance(fetched, str) and fetched:
@@ -282,17 +196,10 @@ async def ensure_model_capabilities(
 
 
 async def refresh_model_capabilities(workspace: Path, *, timeout: float = 15.0) -> int:
-    """Fetch the catalogue and cache each model's raw record. Returns how many models were stored;
-    0 means the fetch failed and the previous cache still stands.
-
-    Stores the provider's fields as they arrive rather than a derived ladder: the derivation
-    depends on the node asking, which differs per dataset, so baking one in would cache an answer
-    to a question this function was not asked.
-    """
     import httpx
 
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
+        async with httpx.AsyncClient(timeout=timeout, verify=tls_context()) as client:
             resp = await client.get(MODELS_URL)
             resp.raise_for_status()
             payload: dict[str, Any] = resp.json()

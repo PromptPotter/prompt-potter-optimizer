@@ -1,6 +1,3 @@
-"""Default-tenant claim — first sign-in renames ``projects/default/`` and rewrites every ``owner_user_id``.
-One-shot, atomic, irreversible; the marker is written even when there was nothing to claim."""
-
 from __future__ import annotations
 
 import logging
@@ -26,7 +23,6 @@ def maybe_claim_default(
     user_id: str,
     marker_path: Path,
 ) -> bool:
-    """Run the one-shot rebind. Returns True iff a directory rename happened."""
     user_dir = projects_root / user_id
     default_dir = projects_root / "default"
     renamed = False
@@ -49,9 +45,6 @@ def maybe_claim_default(
 
 
 def registered_or_default_identity(explicit_tenant: str | None = None) -> IdentityContext:
-    """The CLI's identity: explicit ``--tenant`` > registered user > ``default``. A registered developer resolves to their own
-    tenant, so terminal runs join the one workspace the authenticated web reads."""
-
     if explicit_tenant:
         return default_identity(tenant_id=explicit_tenant)
     uid = registered_user_id(default_identity_paths().default_claim_marker)
@@ -59,8 +52,6 @@ def registered_or_default_identity(explicit_tenant: str | None = None) -> Identi
 
 
 def registered_user_id(marker_path: Path) -> str | None:
-    """The claimed operator's ``user_id`` from the marker, or ``None``. The marker is the single-operator registration record:
-    once written at first sign-in, the local developer IS that user."""
     if not marker_path.is_file():
         return None
     try:
@@ -71,8 +62,7 @@ def registered_user_id(marker_path: Path) -> str | None:
 
 
 def _rewrite_campaign_ownership(campaigns_root: Path, user_id: str) -> None:
-    """Rewrite every ``owner_user_id`` from ``default`` to *user_id*. Idempotent, and any OTHER owner is left alone: a
-    multi-user install may hold campaigns that legitimately belong to someone else already."""
+    """Any OTHER owner is left alone: a multi-user install holds campaigns that are someone else's."""
     if not campaigns_root.is_dir():
         return
     rewritten = 0

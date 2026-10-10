@@ -1,5 +1,3 @@
-"""Google OIDC provider client — Authorization Code flow + ID Token verify."""
-
 from __future__ import annotations
 
 import logging
@@ -15,6 +13,7 @@ from promptpotter.infrastructure.identity.verifier import (
     VerifiedIDToken,
     verify_id_token,
 )
+from promptpotter.infrastructure.tls import tls_context
 
 logger = logging.getLogger(__name__)
 
@@ -30,8 +29,6 @@ class GoogleTokenExchangeError(RuntimeError):
 
 @dataclass(frozen=True)
 class ProviderIdentity:
-    """Verified identity from a provider — common shape across Google + GitHub."""
-
     issuer: str
     subject: str
     email: str | None
@@ -39,9 +36,6 @@ class ProviderIdentity:
 
 
 class GoogleProviderClient:
-    """OIDC client — Authorization Code to ID Token verification. Every URL may be overridden in ``oidc.json``, so any
-    OIDC-conformant IdP (Dex, Keycloak, Auth0, Okta) rides the same client."""
-
     def __init__(self, config: OIDCProviderConfig, jwks_cache: JWKSCache) -> None:
         self._config = config
         self._jwks = jwks_cache
@@ -64,7 +58,7 @@ class GoogleProviderClient:
         return f"{self._authorize_url}?{urlencode(params)}"
 
     async def exchange_code(self, *, code: str, expected_nonce: str) -> ProviderIdentity:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=15.0, verify=tls_context()) as client:
             response = await client.post(
                 self._token_url,
                 data={

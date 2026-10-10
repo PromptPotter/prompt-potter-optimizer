@@ -1,6 +1,3 @@
-"""Provider registry — name → factory. The provider must be supplied EXPLICITLY from the optimizer node's config; there
-is no auto-detection and no env-var fallback."""
-
 from __future__ import annotations
 
 import functools
@@ -11,29 +8,21 @@ from promptpotter.config.settings import settings
 from promptpotter.infrastructure.llm.anthropic import AnthropicClient
 from promptpotter.infrastructure.llm.base import LLMClientBase
 from promptpotter.infrastructure.llm.openai_compat import OpenAICompatibleClient, ProviderSpec
-from promptpotter.infrastructure.llm.rate_limit import build_rate_limiter
+from promptpotter.infrastructure.llm.send_pacing import build_rate_limiter
 
 
 @dataclass(frozen=True)
 class ModelProfile:
-    """What we MEASURED about one model's serving behaviour. A row IS the claim that this model
-    reasons — ``model_profile`` answers ``None`` for anything unprofiled, so an unknown model is
-    never assumed to reason and can block no run."""
+    """A row IS the claim that this model reasons: an unprofiled model is never assumed to."""
 
-    # Below this floor a reasoning model spends its whole output budget thinking and emits nothing;
-    # `preflight.refuse_below_reasoning_floor` turns that paid-for silence into a block.
+    # Below this a reasoning model spends its whole output budget thinking and emits nothing.
     min_max_tokens: int = 0
-    # Rungs the endpoint REFUSES — the only thing that narrows the offered ladder, since no
-    # catalogue publishes a value set. Applied in `capabilities.py`.
     refuses_efforts: frozenset[str] = frozenset()
-    # Rungs measured to produce the SAME call — never subtracted, only reported. THREE-STATE, and
-    # the middle one is the trap: `None` is unprobed, `frozenset()` is probed and all distinct.
+    # Never subtracted, only reported. `None` is unprobed; `frozenset()` is probed, all distinct.
     indistinct_efforts: frozenset[str] | None = None
 
 
-# Per-model profiles, keyed by the normalized ``org/model`` id — ONLY the models we run today, and
-# a model absent here simply gets no measured layer. Fill one with `probe-reasoning <model>`.
-# What each measurement means per dataset: ``docs/operations/dataset-reasoning-matrix.md``.
+# Keyed by the normalized ``org/model`` id; fill one with `probe-reasoning <model>`.
 _MODEL_PROFILES: dict[str, ModelProfile] = {
     "deepseek/deepseek-v4-flash": ModelProfile(min_max_tokens=8000),
     "openai/gpt-6-luna": ModelProfile(min_max_tokens=8000),
@@ -57,8 +46,7 @@ _MODEL_PROFILES: dict[str, ModelProfile] = {
 
 
 def normalize_model_id(model: str) -> str:
-    """A model's IDENTITY, without the routing suffix — ``:nitro`` picks a HOST, and every host of
-    one model takes the same parameters."""
+    """``:nitro`` picks a HOST, and every host of one model takes the same parameters."""
     return model.split(":", 1)[0].strip().lower()
 
 
@@ -77,12 +65,7 @@ _OPENAI_COMPAT_SPECS: dict[str, ProviderSpec] = {
         "OpenAI",
         "OPENAI_API_KEY",
     ),
-    # `:nitro` asks OpenRouter for the fastest provider. The catch is that the fastest provider
-    # need not implement `response_format`, and OpenRouter drops the parameter rather than refusing
-    # the route: `openai/gpt-oss-120b:nitro` lands on Cerebras, which intermittently returns the
-    # SCHEMA ITSELF instead of an instance — valid JSON, finish_reason=stop, no payload. Rule:
-    # never point a schema-bearing node at a new :nitro route without re-running the schema probe
-    # — the failure corrupts the search silently instead of erroring.
+    # A `:nitro` host may silently drop `response_format`: re-run the schema probe on a new route.
     "openrouter": ProviderSpec(
         "OpenRouter",
         "OPENROUTER_API_KEY",
@@ -93,9 +76,6 @@ _OPENAI_COMPAT_SPECS: dict[str, ProviderSpec] = {
 
 
 def openai_compat_spec(provider: str) -> ProviderSpec | None:
-    """The OpenAI-compatible gateway ``provider`` names — for a sender OUTSIDE this process (a
-    containerized harness) that has to be pointed at the endpoint and key our own client would use.
-    ``None`` for a provider that is not one of them."""
     return _OPENAI_COMPAT_SPECS.get(provider)
 
 
@@ -130,8 +110,7 @@ _PROVIDER_FACTORIES: dict[str, Callable[[], LLMClientBase]] = {
 
 @functools.cache
 def get_llm_client(provider: str) -> LLMClientBase:
-    """The LLM client for ``provider``, one instance per provider per process. Cached because rate-limiter state is
-    per-provider-account and rightly shared across cycles, and the lazy SDK pool should be built once."""
+    """Cached: rate-limiter state is per provider account and shared across cycles."""
     factory = _PROVIDER_FACTORIES.get(provider)
     if factory is None:
         valid = ", ".join(sorted(_PROVIDER_FACTORIES))

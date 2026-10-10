@@ -1,5 +1,4 @@
-"""User spend, summed from the canonical per-cycle ledger — NOT from ``dashboard.json``, whose spend
-block is cumulative-from-seed, so summing those snapshots double-counts a fork's inherited spend."""
+"""Summed from the ledgers, never `dashboard.json`: its spend is cumulative-from-seed and double-counts a fork."""
 
 from __future__ import annotations
 
@@ -11,36 +10,35 @@ from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple
 from pydantic import Field
 
 from promptpotter.domain.cycle_paths import CycleDir, WorkspaceDir
-from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.run_records import SpendTombstoneRecord
-from promptpotter.domain.spend import bill_is_floor
+from promptpotter.domain.spend import bill_is_floor, calls_rate_priced
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.ledger import CycleEventLog, ledger_chain
-from promptpotter.infrastructure.runtime_flags import derive_run_phase
+from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.layout import CycleLayout
-from promptpotter.infrastructure.store.read_model import HOLD_TRAIL, HeldSends, LedgerIndex
+from promptpotter.infrastructure.store.read_model import (
+    HOLD_TRAIL,
+    HeldSends,
+    LedgerIndex,
+    held_tokens,
+    usage_row_figures,
+)
 from promptpotter.shared.clock import epoch_seconds
 
 if TYPE_CHECKING:
-    # Type-only: the campaign store imports THIS module to bank a spend before it destroys the
-    # rows carrying it, so a runtime edge back would close the loop.
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 
 
 def account_ledgers(campaigns: CampaignStore) -> list[Path]:
-    """Every file an account's lifetime spend is recorded in: its cycle ledgers plus the workspace
-    ledger, where a deleted campaign's spend is banked. It takes the STORE rather than a ``Stores``
-    so the cross-tenant install report sums by the same walk, over a store it rooted itself. The
-    workspace path is RESOLVED, not opened — a read must not mint the dir it reads."""
+    """The workspace path is resolved, not opened: a read must not mint the dir it reads."""
     return [*campaigns.iter_cycle_ledgers(), CycleEventLog.workspace_path(campaigns.workspace)]
 
 
 class UsageRow(NamedTuple):
-    """One dated ``TokenUsageRecord``, cut to what a reading over time needs."""
-
     ts: float
     billed_usd: float | None
-    """:func:`record_cost_usd`'s answer: ``None`` is unpriced, and a replay is ``0.0``."""
+    rate_priced_usd: float | None
+    """:func:`row_figures`' pair: both ``None`` is unpriced, and a replay is a bill of ``0.0``."""
     tokens: int
     model: str | None
     provider: str | None
@@ -48,8 +46,6 @@ class UsageRow(NamedTuple):
 
 
 def iter_user_token_usage(*, ledgers: Iterable[Path], since: float, until: float) -> list[UsageRow]:
-    """Every ``TokenUsageRecord`` in ``[since, until)``. A torn line degrades to "not there"; an
-    unreadable FILE still raises."""
     return [
         row
         for ledger in ledgers
@@ -58,31 +54,25 @@ def iter_user_token_usage(*, ledgers: Iterable[Path], since: float, until: float
     ]
 
 
-def record_cost_usd(rec: dict[str, Any]) -> float | None:
-    """Billed USD for one usage record — the price it was stamped with — and only ``cached=False``
-    is money that left the account. ``None`` means unpriced, which each caller answers for itself."""
-    if rec.get("cached"):
-        return 0.0
-    raw = rec.get("cost_usd")
-    return float(raw) if isinstance(raw, int | float) else None
+def row_figures(rec: dict[str, Any]) -> tuple[float | None, float | None]:
+    return (0.0, None) if rec.get("cached") else usage_row_figures(rec)
 
 
 class UserSpend(NamedTuple):
-    """What an account has spent — its BILLS, in both units plus the residue the first one cannot
-    see — and apart from them what its unreported sends may have cost, which is never spent and
-    still binds every ceiling (``infrastructure/llm/spend_book.py``). Field names mirror
-    ``SpendBucket`` so the per-cycle and per-account reads name one concept."""
-
     used_usd: float
     used_tokens: int
     unpriced_tokens: int
     unreported_usd: float = 0.0
     unreported_tokens: int = 0
+    rate_priced_usd: float = 0.0
+
+    @property
+    def sent_usd(self) -> float:
+        return self.used_usd + self.rate_priced_usd
 
     @property
     def at_most_usd(self) -> float:
-        """The most that may have left the account: every bill, and every unreported send."""
-        return self.used_usd + self.unreported_usd
+        return self.sent_usd + self.unreported_usd
 
     @property
     def at_most_tokens(self) -> int:
@@ -90,7 +80,6 @@ class UserSpend(NamedTuple):
 
     @property
     def sends_unreported(self) -> bool:
-        """THE rule for "a send ended with no bill": every surface that says so asks here."""
         return self.unreported_usd > 0
 
     def plus(self, other: UserSpend) -> UserSpend:
@@ -100,6 +89,7 @@ class UserSpend(NamedTuple):
             self.unpriced_tokens + other.unpriced_tokens,
             self.unreported_usd + other.unreported_usd,
             self.unreported_tokens + other.unreported_tokens,
+            self.rate_priced_usd + other.rate_priced_usd,
         )
 
 
@@ -110,15 +100,26 @@ class LifetimeSpend(StrictModel):
     """What an account, or one campaign's share of it, was billed over its whole life."""
 
     billed_usd: float = Field(
-        description="What the providers BILLED, over every cycle, fork and forwarded inner run, "
-        "plus what a deleted cycle banked. Never an estimate: a send whose bill never came is "
-        "`unreported_usd`, not this."
+        description="What the providers REPORTED they billed, over every cycle, fork and "
+        "forwarded inner run, plus what a deleted cycle banked. Never an estimate: a call priced "
+        "off our rate table is `rate_priced_usd`, a send whose bill never came `unreported_usd`."
+    )
+    rate_priced_usd: float = Field(
+        description="What our rate table prices the calls no provider reported a cost for. Not "
+        "spent — an estimate, shown beside `billed_usd` and never added into it. It binds the "
+        "ceiling beside `billed_usd`."
+    )
+    calls_rate_priced: bool = Field(
+        description="Some call was priced at our rate, so there is a `rate_priced_usd` to show "
+        "beside the bill."
     )
     bill_is_floor: bool = Field(
-        description="`billed_usd` understates, by what `unpriced_tokens` cost; the token ceiling "
-        "is then the binding one."
+        description="`billed_usd` and `rate_priced_usd` understate, by what `unpriced_tokens` "
+        "cost; the token ceiling is then the binding one."
     )
-    unpriced_tokens: int = Field(description="Billed tokens with no resolvable rate.")
+    unpriced_tokens: int = Field(
+        description="Tokens no provider billed and no rate on file prices."
+    )
     sends_unreported: bool = Field(
         description="Some send ended with no bill, so up to `unreported_usd` more may have left "
         "the account than `billed_usd` says."
@@ -133,6 +134,8 @@ class LifetimeSpend(StrictModel):
     def of(cls, spent: UserSpend) -> LifetimeSpend:
         return cls(
             billed_usd=round(spent.used_usd, 6),
+            rate_priced_usd=round(spent.rate_priced_usd, 6),
+            calls_rate_priced=calls_rate_priced(spent.rate_priced_usd),
             bill_is_floor=bill_is_floor(spent.unpriced_tokens),
             unpriced_tokens=spent.unpriced_tokens,
             sends_unreported=spent.sends_unreported,
@@ -141,19 +144,16 @@ class LifetimeSpend(StrictModel):
 
 
 def _billed_of(rec: dict[str, Any]) -> UserSpend:
-    """One non-cached ``token_usage`` row as billed spend. Unpriced means the count is known and
-    the rate is not, so the tokens land in the residue and the USD stays at zero."""
     tokens = int(rec.get("input_tokens", 0)) + int(rec.get("output_tokens", 0))
-    usd = record_cost_usd(rec)
-    return UserSpend(0.0, tokens, tokens) if usd is None else UserSpend(usd, tokens, 0)
+    billed, rate_priced = row_figures(rec)
+    if billed is None and rate_priced is None:
+        return UserSpend(0.0, tokens, tokens)
+    return UserSpend(billed or 0.0, tokens, 0, rate_priced_usd=rate_priced or 0.0)
 
 
 def _unreported_of(hold: dict[str, Any]) -> UserSpend:
-    """One hold no bill closed, at the bound it was admitted on. Unpriced lands in the residue for
-    the same reason a bill's does (:func:`_billed_of`): the bound is known in tokens and not in
-    money, so folding it as ``$0.00`` would report an unpriceable send as a free one — and
-    ``at_most_usd``, which bounds the account's own ceiling, would under-read by it."""
-    tokens = int(hold.get("input_tokens", 0)) + int(hold.get("output_tokens", 0))
+    """Unpriced lands in the token residue: `$0.00` would report an unpriceable send as a free one."""
+    tokens = held_tokens(hold)
     usd = hold.get("cost_usd")
     if not isinstance(usd, int | float):
         return UserSpend(0.0, 0, tokens, 0.0, tokens)
@@ -161,11 +161,6 @@ def _unreported_of(hold: dict[str, Any]) -> UserSpend:
 
 
 class _Billed:
-    """The bills over the usage rows, and apart from them what the trail still holds at its bounds
-    (``read_model.py::HeldSends``) — whether a hold no bill closed is a send still out or one
-    unreported, only the run's liveness says (:func:`_unreported_once_stopped`). A nested run's
-    bill that was carried onto its outer run's ledger is summed there, never here."""
-
     probes: ClassVar[frozenset[str]] = HOLD_TRAIL
 
     def __init__(self) -> None:
@@ -192,9 +187,6 @@ class _Billed:
 
 
 class _Tombstones:
-    """What the deleted subjects of one ledger banked: by campaign, and which ``(campaign, cycle)``
-    subjects already carry one."""
-
     probes: ClassVar[frozenset[str]] = frozenset({"spend_tombstone"})
 
     def __init__(self) -> None:
@@ -202,8 +194,6 @@ class _Tombstones:
         self._subjects: set[tuple[str, str]] = set()
 
     def feed(self, offset: int, rec: dict[str, Any]) -> None:
-        # The probe is a raw-line SUBSTRING test, so the type is re-asserted on the parsed row —
-        # a neighbouring record naming the string in a payload must not answer for a tombstone.
         if rec.get("record_type") != "spend_tombstone":
             return
         campaign_id = str(rec.get("campaign_id", ""))
@@ -220,9 +210,6 @@ def _interned(value: object) -> str | None:
 
 
 class _Usage:
-    """Every dated ``token_usage`` row, whatever the window a reader then cuts from it. A row
-    naming no ``kind`` is not there: this fold shares its index with the bills, so it never raises."""
-
     probes: ClassVar[frozenset[str]] = frozenset({"token_usage"})
 
     def __init__(self) -> None:
@@ -234,10 +221,12 @@ class _Usage:
         kind = _interned(rec.get("kind"))
         if rec.get("record_type") != "token_usage" or ts is None or kind is None:
             return
+        billed, rate_priced = row_figures(rec)
         self._rows.append(
             UsageRow(
                 ts=ts,
-                billed_usd=record_cost_usd(rec),
+                billed_usd=billed,
+                rate_priced_usd=rate_priced,
                 tokens=int(rec.get("input_tokens", 0)) + int(rec.get("output_tokens", 0)),
                 model=_interned(rec.get("model")),
                 provider=_interned(rec.get("provider")),
@@ -256,20 +245,14 @@ _SPEND_FOLDS = (_Billed, _Tombstones, _Usage)
 
 
 def _unreported_once_stopped(ledger: Path, held: UserSpend) -> UserSpend:
-    """A hold no bill closed on a LIVE run is a send still out, and one a bill closed without a
-    price is held by that run's book: the account wallet already reserves the run's whole ceiling,
-    so counting either too would read it twice. On a run that is not live (killed, paused,
-    finished) nobody will close them: they are unreported, at their bounds."""
+    """While a producer is attached the account wallet already reserves the run's ceiling: counting a hold too reads it twice."""
     if held == ZERO_SPEND:
         return held
-    phase = derive_run_phase(CycleLayout.of_ledger(ledger).cycle_dir)
-    return ZERO_SPEND if phase in (RunPhase.RUNNING, RunPhase.GATE) else held
+    run = derive_run_state(CycleLayout.of_ledger(ledger).cycle_dir)
+    return ZERO_SPEND if run.producer.attached else held
 
 
 def billed_spend(ledgers: Iterable[Path]) -> UserSpend:
-    """What these ledgers' own rows say was billed, and left unreported, over their whole life.
-    Holds and bills only — a tombstone is appended to the WORKSPACE ledger, never a cycle's, so no
-    cycle ledger can carry one to double-count."""
     total = ZERO_SPEND
     for ledger in ledgers:
         billed, held = LedgerIndex.of(ledger, _SPEND_FOLDS).view(_Billed)
@@ -279,8 +262,7 @@ def billed_spend(ledgers: Iterable[Path]) -> UserSpend:
 
 
 def history_spend(cycle_dir: CycleDir) -> UserSpend:
-    """What :func:`sum_user_spend` counted from one cycle's ``ledger_chain``. A hold in the prefix
-    is its owner's: a bill past the cut may close it (``spend_book.py::unreported_on``)."""
+    """A hold in the prefix is its owner's: a bill past the cut may close it."""
     *prefix, own = ledger_chain(cycle_dir)
     total = billed_spend([own.path])
     for span in prefix:
@@ -290,19 +272,17 @@ def history_spend(cycle_dir: CycleDir) -> UserSpend:
 
 
 def _tombstone_of(rec: dict[str, Any]) -> UserSpend:
-    """A banked subject's spend — whole, never re-priced: its rows are gone."""
     return UserSpend(
         float(rec.get("used_usd", 0.0)),
         int(rec.get("used_tokens", 0)),
         int(rec.get("unpriced_tokens", 0)),
         float(rec.get("unreported_usd", 0.0)),
         int(rec.get("unreported_tokens", 0)),
+        float(rec.get("rate_priced_usd", 0.0)),
     )
 
 
 def campaign_spend(campaigns: CampaignStore, campaign_id: str) -> UserSpend:
-    """One campaign's share of :func:`sum_user_spend`'s lifetime total: its cycle ledgers plus the
-    tombstones banked under its id (a deleted stub fork, a reaped inner sandbox's residue)."""
     own = billed_spend(campaigns.campaign_cycle_ledgers(campaign_id))
     workspace_ledger = CycleEventLog.workspace_path(campaigns.workspace)
     banked, _ = LedgerIndex.of(workspace_ledger, _SPEND_FOLDS).view(_Tombstones)
@@ -310,16 +290,11 @@ def campaign_spend(campaigns: CampaignStore, campaign_id: str) -> UserSpend:
 
 
 def sandbox_cycle_dirs(sandbox: Path) -> list[Path]:
-    """Every cycle inside one L4 inner sandbox. The sandbox tree is a SIBLING of the tenant tree
-    (``layout.py::inner_sandboxes_dir``), so no account-wide walk reaches it and a destroyer that
-    takes one has to enumerate it here."""
+    """The sandbox tree is a sibling of the tenant tree, so no account-wide walk reaches it."""
     return sorted(sandbox.glob("*/campaigns/*/cycles/*")) if sandbox.is_dir() else []
 
 
 def sum_user_spend(*, ledgers: Iterable[Path]) -> UserSpend:
-    """An account's LIFETIME spend: both units plus the unpriceable residue, and the unreported
-    sends beside them, over live usage AND banked tombstones — a tombstone is spend whose rows are
-    gone, so it is added whole rather than re-priced."""
     paths = list(ledgers)
     total = billed_spend(paths)
     for ledger in paths:
@@ -336,16 +311,7 @@ def bank_spend(
     campaign_id: str,
     cycle_id: str = "",
 ) -> UserSpend:
-    """Sum what a subject still HOLDS and write it to the workspace ledger BEFORE its rows are
-    destroyed. Called from inside the three destroyers themselves, so no caller can take a ledger
-    without banking it; obligatory THERE and nowhere else, since archiving keeps the rows and
-    banking them too would double-count. A subject already carrying a tombstone is skipped —
-    banking precedes the delete, so a crash between the two leaves the tombstone standing and a
-    retry counts the money twice. ``cycle_id`` is empty for a whole campaign.
-
-    What an L4 inner cycle spent that already reached its outer ledger is not banked again: those
-    rows are ``mirrored``, and :func:`billed_spend` leaves them out."""
-    # Unbounded on purpose: this banks everything the subject ever wrote, not a window of it.
+    """Destroyers only (archiving keeps the rows); a tombstone already standing is a crashed delete's, kept for the retry."""
     spent = billed_spend(CycleLayout(d).ledger for d in cycle_dirs)
     if spent == ZERO_SPEND:
         return spent
@@ -357,6 +323,7 @@ def bank_spend(
             campaign_id=campaign_id,
             cycle_id=cycle_id,
             used_usd=spent.used_usd,
+            rate_priced_usd=spent.rate_priced_usd,
             used_tokens=spent.used_tokens,
             unpriced_tokens=spent.unpriced_tokens,
             unreported_usd=spent.unreported_usd,
@@ -382,7 +349,7 @@ __all__ = [
     "campaign_spend",
     "history_spend",
     "iter_user_token_usage",
-    "record_cost_usd",
+    "row_figures",
     "sandbox_cycle_dirs",
     "sum_user_spend",
 ]

@@ -1,7 +1,3 @@
-"""The Docker host a containerized connector runs its cells on — the `docker` CLI, the daemon
-probe, a cell's labelled container, the machine's package cache, and the sweep of what a killed
-run left behind."""
-
 from __future__ import annotations
 
 import asyncio
@@ -13,8 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from filelock import FileLock, Timeout
-
+from promptpotter.infrastructure import producer_lock
 from promptpotter.infrastructure.store.io import rmtree_robust
 from promptpotter.shared.errors import CellInfrastructureError
 
@@ -24,27 +19,16 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# What one process leaves on this machine under one token: its scratch directory, and the label
-# every container it starts carries. The token's lock is how the next run tells what a hard kill
-# left from a live sibling, the kernel dropping it with its holder exactly as machine slots rely
-# on (`backend.py::MachineSlots`).
+# The token's lock is how the next run tells what a hard kill left from a live sibling.
 CONTAINER_PRODUCER = f"{os.getpid():x}{uuid4().hex[:4]}"
 _PRODUCER_LABEL = "com.promptpotter.producer"
-# Compose's own record of the files a container was built from, which names a connector's overlay
-# — the one marker on an unlabelled container.
 _COMPOSE_FILES_LABEL = "com.docker.compose.project.config_files"
 _PRODUCER_LOCK = ".producer.lock"
-# ONE home for every connector's cells: under a second, the sweep reads a live sibling's token as
-# a producer with no scratch, and reaps it. In the system temp dir: a workspace path nears MAX_PATH.
+# ONE home: under a second, the sweep reaps a live sibling as scratch-less. Temp dir: MAX_PATH.
 _PRODUCERS_HOME = Path(tempfile.gettempdir()) / "promptpotter-cells"
 PRODUCER_SCRATCH = _PRODUCERS_HOME / CONTAINER_PRODUCER
-_PRODUCER_HELD = FileLock(str(PRODUCER_SCRATCH / _PRODUCER_LOCK), timeout=0)
-# The overlays swept for, ``None`` standing for the sweep that names none.
 _SWEPT: set[Path | None] = set()
 
-# The machine's package-download cache — one container, image and volume of this name
-# (`docs/operations/package-cache.md`). `apt-cacher-ng` from Debian's own archive, not a
-# third-party image.
 PACKAGE_CACHE = "promptpotter-package-cache"
 _PACKAGE_CACHE_PORT = 3142
 PACKAGE_CACHE_PROXY = f"http://host.docker.internal:{_PACKAGE_CACHE_PORT}"
@@ -55,7 +39,6 @@ _PACKAGE_CACHE_DOCKERFILE = (
     f"EXPOSE {_PACKAGE_CACHE_PORT}\n"
     'CMD ["/usr/sbin/apt-cacher-ng", "-c", "/etc/apt-cacher-ng", "ForeGround=1"]\n'
 )
-# Process-scoped: the container is a fact about the machine, not a run.
 _package_cache_running = False
 
 
@@ -85,8 +68,6 @@ async def docker(
 
 
 async def docker_daemon_fault() -> str | None:
-    """Why the daemon cannot run a cell, for a ``Connector.preflight`` — a container runtime must
-    answer before a campaign starts spending — or ``None`` where it answers."""
     try:
         code, out = await docker("version", "--format", "{{.Server.Version}}")
     except (OSError, TimeoutError) as exc:
@@ -96,8 +77,6 @@ async def docker_daemon_fault() -> str | None:
 
 @contextlib.contextmanager
 def machine_step() -> Iterator[None]:
-    """A docker CLI unreachable or silent at cell time is the machine's fault: the cell measured
-    nothing and is never banked as the candidate's."""
     try:
         yield
     except (OSError, TimeoutError) as exc:
@@ -107,22 +86,19 @@ def machine_step() -> Iterator[None]:
 async def run_cell_container(
     name: str, *args: str, env: Mapping[str, str], timeout: float
 ) -> tuple[int, str]:
-    """One cell's ``docker run``, labelled this producer's so the sweep finds what a hard kill left.
-    Killed where its caller stops waiting: left alone, the container goes on calling the provider."""
     label = f"{_PRODUCER_LABEL}={CONTAINER_PRODUCER}"
     try:
         return await docker(
             "run", "--rm", "--name", name, "--label", label, *args, env=env, timeout=timeout
         )
     except (asyncio.CancelledError, TimeoutError):
+        # Left alone, the container goes on calling the provider.
         with contextlib.suppress(OSError, TimeoutError):
             await asyncio.shield(docker("kill", name))
         raise
 
 
 async def ensure_package_cache() -> None:
-    """The machine's package cache, running. Idempotent, and safe against a sibling cell racing it:
-    a second ``run`` loses on the name and the re-inspect finds the winner's container."""
     global _package_cache_running
     if _package_cache_running:
         return
@@ -139,6 +115,7 @@ async def ensure_package_cache() -> None:
                 raise CellInfrastructureError(
                     f"building {PACKAGE_CACHE} failed: {out[-300:]}", spent={}
                 )
+        # Unchecked: a sibling racing this wins the name, and the re-inspect finds its container.
         await docker(
             "run", "--detach", "--name", PACKAGE_CACHE, "--restart", "unless-stopped",
             "--publish", f"{_PACKAGE_CACHE_PORT}:{_PACKAGE_CACHE_PORT}",
@@ -159,24 +136,11 @@ def forget_package_cache() -> None:
 
 
 def _producer_is_dead(home: Path, token: str) -> bool:
-    """Whether the process behind *token* is gone. Asked of the lock it holds for its own life,
-    never of an mtime: a cell runs for minutes writing nothing, and a sibling's live containers are
-    not this run's to remove."""
-    scratch = home / token
-    if not scratch.is_dir():
-        return True
-    lock = FileLock(str(scratch / _PRODUCER_LOCK), timeout=0)
-    try:
-        lock.acquire()
-    except Timeout:
-        return False
-    lock.release()
-    return True
+    # The lock, never an mtime: a cell runs for minutes writing nothing.
+    return not producer_lock.held(home / token / _PRODUCER_LOCK)
 
 
 async def reap_dead_producers(home: Path, *, compose_overlay: Path | None) -> None:
-    """Remove the containers and scratch of every dead producer under *home*. An unlabelled
-    container naming *compose_overlay* is nobody's: nothing this code starts is unlabelled."""
     code, out = await docker(
         "ps", "-a", "--format",
         f'{{{{.ID}}}}|{{{{.Label "{_PRODUCER_LABEL}"}}}}|{{{{.Label "{_COMPOSE_FILES_LABEL}"}}}}',
@@ -191,6 +155,7 @@ async def reap_dead_producers(home: Path, *, compose_overlay: Path | None) -> No
             continue
         if token.strip():
             by_token.setdefault(token.strip(), []).append(cid)
+        # Unlabelled yet naming our overlay is nobody's: nothing this code starts is unlabelled.
         elif ours is not None and ours in compose_files.lower():
             gone.append(cid)
     for token in by_token.keys() | {d.name for d in home.iterdir() if d.is_dir()}:
@@ -207,12 +172,9 @@ async def reap_dead_producers(home: Path, *, compose_overlay: Path | None) -> No
 
 
 async def claim_machine(*, compose_overlay: Path | None) -> None:
-    """Hold this process's scratch and its lock, then sweep dead producers, once per
-    *compose_overlay*. Runs at ``backend.py::MachineSlots.hold``, never in ``Connector.preflight``."""
     if compose_overlay in _SWEPT:
         return
-    PRODUCER_SCRATCH.mkdir(parents=True, exist_ok=True)
-    _PRODUCER_HELD.acquire()
+    producer_lock.take(PRODUCER_SCRATCH / _PRODUCER_LOCK)
     _SWEPT.add(compose_overlay)
     try:
         await reap_dead_producers(_PRODUCERS_HOME, compose_overlay=compose_overlay)

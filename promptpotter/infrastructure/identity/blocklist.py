@@ -1,7 +1,4 @@
-"""Email blocklist. Completing OIDC ENTITLES: an account holds the owner capability set unless its email is
-listed here. The free-tier spend ceiling, not this file, is what bounds a stranger — this is the operator's
-revoke, and it is a courtesy control rather than a security boundary, because a blocked person can sign up
-again from another address and land in a fresh account with a fresh ceiling."""
+"""The operator's revoke, a courtesy control and no security boundary: a blocked person signs up again from another address."""
 
 from __future__ import annotations
 
@@ -23,18 +20,11 @@ class BlocklistDecision:
 
 
 def _norm_email(email: str) -> str:
-    """Canonical email form: stripped + lowercased. The ONE normalizer, so the membership test and the stored form cannot
-    drift apart."""
     return email.strip().lower()
 
 
 def check_blocklist(path: Path, email: str | None) -> BlocklistDecision:
-    """Blocklist gate. Missing or empty file → nobody blocked; otherwise membership.
-
-    Malformed blocks EVERYONE, which is the same shape the allowlist used and for the same reason: absent and
-    corrupt are opposite security answers, and the corrupt one may never be the wider of the two. A typo in
-    this file locks the box out loudly, where an un-ban nobody ordered would be silent.
-    """
+    """Malformed blocks EVERYONE: absent and corrupt are opposite security answers, and corrupt is never the wider."""
     if not path.is_file():
         return BlocklistDecision(blocked=False, reason="blocklist_absent")
     raw = path.read_text(encoding="utf-8").strip()
@@ -53,28 +43,15 @@ def check_blocklist(path: Path, email: str | None) -> BlocklistDecision:
     if not blocked:
         return BlocklistDecision(blocked=False, reason="blocklist_empty")
     if not email:
-        # An identity with no email claim cannot be matched against the list. It is admitted rather than
-        # refused because entitlement is the default here — and it is bounded by the free-tier ceiling
-        # exactly like every other account.
+        # No email claim: admitted, since entitlement is the default and the free-tier ceiling still bounds it.
         return BlocklistDecision(blocked=False, reason="email_missing_from_claims")
     if _norm_email(email) in blocked:
         return BlocklistDecision(blocked=True, reason="email_blocked")
     return BlocklistDecision(blocked=False, reason="email_not_blocked")
 
 
-# ---------------------------------------------------------------------------
-# Administration — the Identity-kind write facet (ADR-0004).
-#
-# These are the sanctioned mutators behind the operator-admin channel
-# (`presentation/admin_bot.py`). They edit the same `{"emails": [...]}` file
-# `check_blocklist` reads, atomically, and append one audit line per change to
-# the identity-zone `blocklist_audit.jsonl` — never the campaign ledger.
-# ---------------------------------------------------------------------------
-
-
 def _load_emails(path: Path) -> list[str]:
-    """The blocklist as a normalized sorted list. Tolerant — missing, empty or malformed all yield ``[]`` — so editing
-    always starts from a clean view and a corrupt file is overwritten by the next write."""
+    """Tolerant where `check_blocklist` is strict: a corrupt file reads empty and the next write overwrites it."""
     if not path.is_file():
         return []
     raw = path.read_text(encoding="utf-8").strip()
@@ -92,7 +69,6 @@ def _load_emails(path: Path) -> list[str]:
 
 
 def _write_emails(path: Path, emails: list[str]) -> None:
-    """Atomically write the ``{"emails": [...]}`` file via the canonical seam."""
     write_json(path, {"emails": emails})
 
 

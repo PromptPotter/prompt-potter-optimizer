@@ -1,23 +1,31 @@
-"""Pure projections from scalar state + ``RoundBuffer`` to the ``dashboard.json`` shape — side-effect free, returning
-plain dicts."""
-
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from promptpotter.domain.dashboard_rows import (
     DashboardSample,
     LiveCandidate,
-    SampleStatus,
     sample_status,
 )
-from promptpotter.domain.results import candidate_label
-from promptpotter.domain.scoring import is_verifier_graded
+from promptpotter.domain.paired_reading import ArmPointer
+from promptpotter.domain.results import (
+    ArmAbility,
+    ArmElection,
+    ArmReading,
+    candidate_label,
+    panel_cuts,
+)
+from promptpotter.domain.results_health import terminal_node
+from promptpotter.domain.scoring import SampleStatus, ground_truth_text, is_verifier_graded
+from promptpotter.domain.spend import TokenAccount
 from promptpotter.infrastructure.projections.live_dashboard.state import RacingBlock
 from promptpotter.shared.composite import inline_short_formula_values
 
 if TYPE_CHECKING:
-    from promptpotter.infrastructure.projections.live_dashboard.round_buffer import RoundBuffer
+    from promptpotter.infrastructure.projections.live_dashboard.round_buffer import (
+        RoundBuffer,
+        WalkedSample,
+    )
 
 
 def _trim(text: str, n: int) -> str:
@@ -25,114 +33,93 @@ def _trim(text: str, n: int) -> str:
     return t if len(t) <= n else t[: n - 1] + "…"
 
 
-def sample_row(s: dict[str, Any]) -> DashboardSample:
-    """One buffered sample as the dashboard serves it — the ONE place the tape's facts are
-    decided, and where the display trim happens."""
-    sid = s.get("sample_id")
-    time_s = s.get("time_s")
-    cost_s = s.get("cost_s")
-    status: SampleStatus = sample_status(s)
-    # A verifier-graded row has no label, so the answer/truth pair is both halves of a comparison
-    # nobody made — and `prediction` there is the `NO_RESULT` sentinel a ranking mechanism that is
-    # not in play left behind. Served EMPTY rather than sentinel-and-blank, so a client can still
-    # tell the two apart: `NO_RESULT` beside a real truth is an extraction that broke.
-    ground_truth = _trim(s.get("ground_truth") or "", 20)
+def sample_row(s: WalkedSample) -> DashboardSample:
+    facts, grade = s.facts, s.grade
+    time_s, cost_s = facts.elapsed_s, facts.cost_s
+    status: SampleStatus = sample_status(facts, grade)
+    # A verifier-graded row's `predicted` is the `NO_RESULT` sentinel: served EMPTY, not as an answer.
+    ground_truth = _trim(facts.ground_truth, 20)
     graded_by_verifier = is_verifier_graded(ground_truth)
-    fitness = s.get("fitness")
+    account = TokenAccount.from_step_tokens(facts.pipeline.step_tokens)
     return DashboardSample(
-        qi=int(s.get("qi", 0)),
-        sample_id=None if sid is None else int(sid),
+        qi=s.qi,
+        sample_id=facts.sample_id,
         status=status,
-        # Off the same row `status` was decided from — an errored row carries none, which is
-        # what `status == "ERR"` already says.
-        fitness=float(fitness) if isinstance(fitness, int | float) else None,
-        terminal_node=s.get("terminal_node"),
-        cached=bool(s.get("cached", False)),
-        time_s=float(time_s) if isinstance(time_s, int | float) else None,
-        cost_s=float(cost_s) if isinstance(cost_s, int | float) else None,
-        predicted="" if graded_by_verifier else _trim(s.get("prediction") or "", 28),
+        fitness=grade.fitness,
+        terminal_node=terminal_node(facts),
+        cached=facts.cached,
+        time_s=None if time_s is None else round(time_s, 2),
+        cost_s=None if cost_s is None else round(cost_s, 2),
+        predicted="" if graded_by_verifier else _trim(facts.predicted, 28),
         ground_truth=ground_truth,
-        query=_trim(s.get("query") or "", 42),
-        input_tokens=s.get("input_tokens"),
-        output_tokens=s.get("output_tokens"),
-        cache_read_tokens=s.get("cache_read_tokens"),
+        ground_truth_text=ground_truth_text(ground_truth),
+        query=_trim(facts.query, 42),
+        input_tokens=account.input if account else None,
+        output_tokens=account.output if account else None,
+        cache_read_tokens=account.cache_read if account else None,
     )
-
-
-def _served(cand: dict[str, Any]) -> dict[str, Any]:
-    """The candidate's own numbers, best available. Mid-scoring the final ``scores`` are empty, so the scorer's running
-    fitness stands in — the same shape, ridden out per sample on ``_running`` — and ``scores`` wins the moment it lands."""
-    return cand.get("scores") or cand.get("running") or {}
 
 
 def build_candidate_rows(
     buffer: RoundBuffer, short_formula_template: str | None
 ) -> list[LiveCandidate]:
-    """This round's candidates in the SAME shape a closed round serves (``rounds[].candidates``), so a reader takes a
-    whole row from one half instead of filling one in from the other per field.
-
-    ``scores`` is the ``candidate_scored`` report, folded onto by the election; before it lands, ``running`` is the
-    gateway's own per-sample fold. Both carry accuracy's CI, so the whisker widens with its bar. The ``or`` between
-    them is a PRECEDENCE, not two spellings of one thing — only ``scores`` carries ``label``, ``candidate_id``
-    and ``outcome``. ``label`` is canonical — display sites read it verbatim, and no ``idx + 1``
-    arithmetic exists."""
+    slots = [buffer.candidates[idx] for idx in sorted(buffer.candidates)]
+    cuts = panel_cuts(
+        [
+            (len(slot.samples), slot.expected_samples)
+            if slot.scores is None
+            else (slot.scores.scored_samples, slot.scores.expected_samples)
+            for slot in slots
+        ]
+    )
     rows: list[LiveCandidate] = []
-    for idx in sorted(buffer.candidates.keys()):
-        cand = buffer.candidates[idx]
-        served = _served(cand)
-        samples = cand.get("samples") or []
-        cached = served.get("cached_samples")
-        tape = [sample_row(s) for s in samples]
+    for slot, cut in zip(slots, cuts, strict=True):
+        report = slot.scores
+        label = candidate_label(buffer.round_num, slot.idx)
+        arm = ArmPointer(
+            round=buffer.round_num,
+            label=label,
+            candidate_id=slot.candidate_id or ("" if report is None else report.candidate_id),
+        )
+        election = ArmElection.of(
+            label,
+            held=buffer.elected is not None,
+            selected=buffer.elected or (),
+            leading=None,
+            electable=None,
+        )
+        if report is None:
+            reading = ArmReading.walking(
+                arm,
+                fold=slot.running,
+                scored=len(slot.samples),
+                expected=slot.expected_samples,
+                cached=sum(1 for s in slot.samples if s.facts.cached),
+                cut=cut,
+                election=election,
+                changes_description=slot.changes_description,
+            )
+        else:
+            reading = ArmReading.of(
+                arm,
+                report,
+                cut=cut,
+                election=election,
+                changes_description=slot.changes_description or report.changes_description,
+                ability=ArmAbility.of(report.theta, report.theta_se, report.theta_caveat),
+                vs_reference=report.vs_reference,
+            )
+        served = report or slot.running
         rows.append(
             LiveCandidate(
-                label=candidate_label(buffer.round_num, idx),
-                candidate_id=served.get("candidate_id"),
-                # The report's once it lands, and until then off the samples, which carry it from
-                # the first one — the walk mints the run before it measures anything.
-                run_id=served.get("run_id")
-                or next((s["run_id"] for s in samples if s.get("run_id")), None),
-                accuracy=served.get("accuracy"),
-                composite_fitness=served.get("composite_fitness"),
-                outcome=served.get("outcome"),
-                scored_samples=int(served.get("scored_samples") or len(samples)),
-                cached_samples=int(
-                    cached if cached is not None else sum(1 for s in samples if s.get("cached"))
-                ),
-                expected_samples=cand.get("expected_samples"),
-                # What measuring this candidate consumed, folded once at `l1/population.py` off
-                # the rows themselves. Lands with the score report, like θ and the matched floor
-                # below: the buffered samples here carry the flat per-row counts rather than the
-                # `pipeline_data` the fold reads, and a second fold over those would be a second
-                # spelling of one number.
-                input_tokens=served.get("input_tokens"),
-                output_tokens=served.get("output_tokens"),
-                cache_read_tokens=served.get("cache_read_tokens"),
-                evaluators=dict(served.get("evaluators") or {}),
-                changes_description=(
-                    cand.get("changes_description") or served.get("changes_description") or ""
-                ),
-                mean_fitness_ci_lo=served.get("mean_fitness_ci_lo"),
-                mean_fitness_ci_hi=served.get("mean_fitness_ci_hi"),
-                # Everything below lands at the election, folded in by `RoundBuffer.stamp_fit`
-                # and `mark_winner` off the one `ElectionRecord` — so the whole verdict is live
-                # from the election rather than from the round close, two LLM calls later. Absent
-                # before it: the fit needs two arms, and a cold ruler stamps no θ at all.
-                theta=served.get("theta"),
-                theta_se=served.get("theta_se"),
-                theta_caveat=served.get("theta_caveat"),
-                reference_accuracy=served.get("reference_accuracy"),
-                reference_composite=served.get("reference_composite"),
-                reference_lift=served.get("reference_lift"),
-                reference_lift_ci_lo=served.get("reference_lift_ci_lo"),
-                reference_lift_ci_hi=served.get("reference_lift_ci_hi"),
-                is_selected=bool(cand.get("is_selected")),
-                prompt_fields=cand.get("prompt_fields"),
-                resolved_pipeline_params=cand.get("resolved_pipeline_params"),
-                pipeline_overlay=cand.get("pipeline_overlay"),
-                samples=tape,
-                validation_failures=served.get("validation_failures") or [],
+                reading=reading,
+                prompt_fields=slot.prompt_fields,
+                resolved_pipeline_params=slot.resolved_pipeline_params,
+                pipeline_overlay=slot.pipeline_overlay,
+                samples=[sample_row(s) for s in slot.samples],
+                validation_failures=[] if report is None else report.validation_failures,
                 composite_fitness_formula_short=inline_short_formula_values(
-                    short_formula_template, dict(served.get("evaluators") or {})
+                    short_formula_template, {} if served is None else dict(served.evaluators)
                 ),
             )
         )
@@ -140,8 +127,7 @@ def build_candidate_rows(
 
 
 def build_racing_block(buffer: RoundBuffer) -> RacingBlock | None:
-    """The round's race standing. ``leader_prob`` is the best standing among CANDIDATES — never a max over one
-    snapshot's dict, whose other entries are that same candidate's odds against each prior."""
+    """``leader_prob`` is the best standing among CANDIDATES, never a max over one snapshot's dict."""
     if not buffer.race_standings:
         return None
     ranked = sorted(buffer.race_standings.items(), key=lambda kv: -kv[1])

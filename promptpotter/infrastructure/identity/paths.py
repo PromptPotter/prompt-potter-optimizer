@@ -1,6 +1,3 @@
-"""Repo-local paths for OIDC config, sessions and the claim ledger. The whole identity surface lives under one
-git-ignored ``.promptpotter/identity/`` dir."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -35,8 +32,6 @@ class IdentityPaths:
 
     @property
     def grants(self) -> Path:
-        """Sealed sub-principal grant store (ADR-0005) — the delegation authority
-        file, in the same protected zone as the blocklist."""
         return self.root / "grants.json"
 
     @property
