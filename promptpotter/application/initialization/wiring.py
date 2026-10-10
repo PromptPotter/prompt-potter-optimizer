@@ -1,16 +1,14 @@
-"""Stores + LLMClient + connector resolution → ``Session`` — step 1 of run init. Identity and
-the scoring lifecycle live in ``session`` + ``loop_start``."""
+"""Step 1 of run init: stores + LLM client + connector resolution → ``Session``."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
 import re
-from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from promptpotter import connectors, judges
+from promptpotter import connectors
 from promptpotter.application import optimizers
 from promptpotter.application.bench.resume_and_fork.replayers import replayers
 from promptpotter.application.datasets.csv_ingest import read_candidate_library_file
@@ -31,7 +29,7 @@ from promptpotter.config.settings import (
     DEFAULT_BACKEND_ID,
     DEFAULT_BACKEND_URL,
 )
-from promptpotter.connectors.protocol import Connector, InProcessWorkload
+from promptpotter.connectors.protocol import PACKAGE_CACHE_KEY, Connector, InProcessWorkload
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.optimizer_state import round_payload_type
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
@@ -40,7 +38,6 @@ from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import all_verifier_graded
 from promptpotter.infrastructure.backend import BackendClient, build_backend_client
 from promptpotter.infrastructure.llm.capabilities import ensure_model_capabilities
-from promptpotter.infrastructure.store.archive_queries import maintain_measurement_index
 from promptpotter.infrastructure.store.dataset_access import (
     dataset_experiment,
     declared_backend_type,
@@ -49,6 +46,7 @@ from promptpotter.infrastructure.store.dataset_access import (
 )
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.infrastructure.tracing.langfuse_client import LangfuseLogger
+from promptpotter.judges import registry as judge_registry
 from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.identity import IdentityContext
 
@@ -64,8 +62,6 @@ async def _verify_connector_revision(
     client: BackendClient,
     connector: Connector,
 ) -> None:
-    """WARN on drift between ``connector.expected_revision`` and the live backend's. Opt-in per
-    connector; a network error says "could not verify", never "mismatch"."""
     expected = connector.expected_revision
     check = connector.version_check
     if not expected or check is None:
@@ -102,19 +98,8 @@ def _warn_if_labels_have_no_ranker(
     schema: PipelineSchema,
     samples: list[Sample],
     connector: Connector | None,
-    status: Callable[[str], None],
 ) -> None:
-    """**Labels and a ranker travel together.** A dataset carrying ground truth and no node emitting
-    a ranked list is mis-wired — every sample silently scores ``NO_RESULT`` against a real label —
-    so it is surfaced at setup, on the status line, not at score time.
-
-    Judging it needs the schema AND the samples, which is why it is called from ``init_services``
-    after they resolve rather than from ``_resolve_pipeline_schema``, which sees neither.
-
-    **The converse is deliberately not warned.** A ranker with no labels is not a fault —
-    ``promptpotter-self`` declares ``l1_critique`` as one so its summary reaches ``predicted`` for
-    a human reading the round file — and neither is a backend that carries its answer elsewhere,
-    which a declared ``Connector.answer_key`` says."""
+    """The converse is deliberately not warned: a ranker with no labels is no fault."""
     if not schema.nodes or not samples:
         return
     if all_verifier_graded(s.ground_truth for s in samples):
@@ -123,13 +108,11 @@ def _warn_if_labels_have_no_ranker(
         return
     if any(n.emits_ranking and n.output_keys for n in schema.nodes):
         return
-    msg = (
-        f"Pipeline {schema.name!r} has no terminal ranker — no node emits a ranked list, "
-        "so every sample will score NO_RESULT against a real label "
-        "(check node_role on the final node)"
+    logger.warning(
+        "Pipeline %r has no terminal ranker — no node emits a ranked list, so every sample will "
+        "score NO_RESULT against a real label (check node_role on the final node)",
+        schema.name,
     )
-    logger.warning(msg)
-    status(f"⚠ {msg}")
 
 
 def _verify_required_observation_keys(
@@ -137,9 +120,7 @@ def _verify_required_observation_keys(
     connector: Connector,
     dataset_name: str | None,
 ) -> None:
-    """Fails at arm time rather than letting a dropped key reach the formula as a measurement
-    nobody took. RAISES, unlike its advisory revision sibling — a silently dropped term is a wrong
-    number, not drift (``connectors/CLAUDE.md`` § Conventions)."""
+    """RAISES, unlike its advisory revision sibling: a dropped term is a wrong number, not drift."""
     required = connector.required_observation_keys
     if not required:
         return
@@ -156,21 +137,38 @@ def _verify_required_observation_keys(
         )
 
 
+def _verify_package_cache_scope(
+    connector: Connector,
+    experiment: dict[str, Any] | None,
+    dataset_name: str,
+) -> None:
+    scope = (experiment or {}).get(PACKAGE_CACHE_KEY)
+    if scope is None or scope in connector.package_cache_scopes:
+        return
+    honoured = sorted(connector.package_cache_scopes)
+    raise PayloadInvalidError(
+        f"{dataset_name}'s {connector.experiment_file} declares `{PACKAGE_CACHE_KEY}: {scope}`, "
+        f"but backend {connector.name!r} "
+        + (f"honours only {honoured}." if honoured else "routes nothing through the package cache.")
+        + f" Remove the key{' or name one of those' if honoured else ''}.",
+        code="pipeline_config_invalid",
+        details={
+            "dataset_name": dataset_name,
+            PACKAGE_CACHE_KEY: scope,
+            "package_cache_scopes": honoured,
+        },
+    )
+
+
 async def _resolve_pipeline_schema(
     client: BackendClient,
     stores: Stores,
     dataset_config_dir: Path | None,
-    status: Callable[[str], None],
     *,
     connector: Connector,
     experiment: dict[str, Any] | None,
 ) -> tuple[PipelineSchema, dict[str, Any]]:
-    """Backend schema underneath, dataset overlay on top; an ``in_process`` connector has no backend, so the dataset's
-    own declaration IS the schema. RAISES rather than returning ``None`` — optional at ~40 readers means a run
-    completes with wrong numbers.
-
-    Returns the parsed schema AND the declaration it was parsed from — the only copy of that merge
-    anywhere, which is why :attr:`Session.pipeline_declaration` carries it on."""
+    """RAISES, never ``None``: a schema optional at its readers is a run that completes with wrong numbers."""
     backend_resp: dict[str, Any] | None = None
     if connector.execution != "in_process":
         try:
@@ -184,17 +182,12 @@ async def _resolve_pipeline_schema(
     if dataset_config_dir is not None:
         local_raw = dataset_pipeline_declaration(stores, dataset_config_dir, experiment)
 
-    # A `PayloadInvalidError` from the parser is a DECLARATION the operator got wrong — an unknown
-    # node type, a gateway carrying config — and it is re-raised rather than warned past. Falling
-    # back to the local file would answer a broken declaration with a different pipeline, and
-    # falling through to the generic raise below would report "nothing usable" for a file that
-    # parses fine but for one named node. Everything else here is still a REACHABILITY problem,
-    # which is exactly what the fallback exists for.
+    # A `PayloadInvalidError` is a DECLARATION error: falling back would answer with another pipeline.
     if backend_resp:
         merged = overlay_dataset_pipeline(backend_resp, local_raw or {})
         try:
             schema = parse_pipeline_response(merged)
-            status(f"Pipeline: {schema.name} ({len(schema.nodes)} nodes)")
+            logger.info("Pipeline: %s (%d nodes)", schema.name, len(schema.nodes))
             return schema, merged
         except PayloadInvalidError:
             raise
@@ -204,14 +197,13 @@ async def _resolve_pipeline_schema(
     if local_raw is not None:
         try:
             schema = parse_pipeline_response(local_raw)
-            status(f"Pipeline: {schema.name} ({len(schema.nodes)} nodes, offline)")
+            logger.info("Pipeline: %s (%d nodes, offline)", schema.name, len(schema.nodes))
             return schema, local_raw
         except PayloadInvalidError:
             raise
         except Exception as exc:
             logger.warning("Failed to parse offline pipeline.yaml: %s", exc)
 
-    status("Pipeline: unavailable")
     raise PayloadInvalidError(
         f"could not resolve a pipeline schema for {dataset_config_dir}. The backend "
         f"returned nothing usable and the dataset's own pipeline.yaml did not parse "
@@ -225,19 +217,13 @@ async def _resolve_pipeline_schema(
 def _load_dataset_into_session(
     session: Session,
     dataset_name: str,
-    status: Callable[[str], None],
     *,
     connector: Connector,
     experiment: dict[str, Any] | None,
 ) -> None:
-    """Populate session.samples + index_terms — out of the connector's own experiment document where
-    it declares one, else tenant Origin, then repo benchmark, then the loader's one-shot download."""
-    # First, never a fallback: a connector declaring an `experiment_file` OWNS its panel, and rows
-    # cached under the same dataset name describe a different instrument.
+    # First, never a fallback: rows cached under the same dataset name describe another instrument.
     if connector.experiment_file:
         if experiment is None:
-            # Handed init's own connector, `dataset_experiment` answers None for one cause: the
-            # panel file is not on this machine, the ordinary state of a fresh clone.
             raise PayloadInvalidError(
                 f"Connector {connector.name!r} owns {dataset_name!r}'s panel, but "
                 f"{connector.experiment_file!r} is not in "
@@ -247,11 +233,10 @@ def _load_dataset_into_session(
             )
         queries = extract_panel_rows(connector, dataset_name, experiment)
         session.samples = samples_from_dicts(queries)
-        status(f"Experiment: {connector.experiment_file} ({len(queries)} tasks)")
+        logger.info("Experiment: %s (%d tasks)", connector.experiment_file, len(queries))
         return
-    items = resolve_dataset_items(session.store, dataset_name, status=status)
+    items = resolve_dataset_items(session.store, dataset_name)
     if not items:
-        status(f"Dataset '{dataset_name}' not available")
         raise PayloadInvalidError(
             f"Dataset {dataset_name!r} not found in tenant uploads, repo benchmarks, "
             f"or any registered loader. Add one to DATASET_LOADERS in "
@@ -262,19 +247,16 @@ def _load_dataset_into_session(
     session.samples = bank_samples(items)
     gt_terms = {r["ground_truth"] for r in items if r.get("ground_truth")}
     config_dir = readable_dataset_dir(session.store, dataset_name)
-    # The candidate library is part of the per-pipeline origin; read it through the
-    # one origin-file seam. Unioned with the ground-truth answers (never replacing
-    # them) so every label stays rankable even when the library uses a different
-    # surface form — the SimaPro Cut-off **S** labels vs the Cut-off **U** library
-    # that share no verbatim string, where a plain swap would zero the score.
+    # Unioned with the ground-truth answers, never replacing them: every label stays rankable.
     library = read_candidate_library_file(config_dir)
     session.index_terms = sorted(gt_terms | set(library))
     if library:
-        status(
-            f"Candidate library: +{len(set(library) - gt_terms)} targets "
-            f"(term index now {len(session.index_terms)})"
+        logger.info(
+            "Candidate library: +%d targets (term index now %d)",
+            len(set(library) - gt_terms),
+            len(session.index_terms),
         )
-    status(f"Dataset: {dataset_name} ({len(items)} samples)")
+    logger.info("Dataset: %s (%d samples)", dataset_name, len(items))
 
 
 def _resolve_backend_id(
@@ -284,12 +266,7 @@ def _resolve_backend_id(
     backend_type: str,
     name: str,
 ) -> str:
-    """One physical endpoint = one ``BackendConnection``, and the id a caller asks for is a
-    PREFERENCE the endpoint outranks. Both directions were wrong when only existence was checked:
-    an endpoint already registered got a second row under the requested id, and an id already
-    taken by a DIFFERENT endpoint silently absorbed the run, attributing every measurement to a
-    backend nobody pointed it at. Neither is recoverable after the fact — the row is what names
-    the URL."""
+    """*requested* is a PREFERENCE: an id a DIFFERENT endpoint holds never absorbs the run."""
     norm = backend_url.rstrip("/")
     for b in stores.backends.list_all():
         if b.base_url.rstrip("/") == norm and b.backend_type == backend_type:
@@ -310,19 +287,16 @@ def _resolve_backend_id(
 
 
 def complete_registries(*, every_treatment: bool = True) -> None:
-    """*every_treatment* is the boot guard a server and the gate take. A process that runs ONE
-    campaign or one verb passes ``False``: its own optimizer's treatment is read at the mint."""
+    """A process running ONE campaign passes ``False``: its own treatment is read at the mint."""
     table = connectors.registered()
-    judges.registered()
+    judge_registry.registered()
     optimizers.registered()
     for runtime in optimizers.runtimes().values():
         round_payload_type(runtime.name)
         runtime.complete()
-        # Every campaign's mint reads it, and its source digest raises on a prompt-shaping helper
-        # nothing hashes — so a half-hashed optimizer stops the server at boot.
+        # Its source digest raises on a prompt-shaping helper nothing hashes, stopping the boot.
         if every_treatment:
             resolve_optimizer(runtime.name, {}).treatment()
-    # Every decision kind gated once, and a replayer for exactly the REPLAYED ones.
     replayers()
     for connector in table.values():
         if connector.completion_check is not None:
@@ -333,47 +307,34 @@ async def init_services(
     dataset_name: str,
     backend_url: str = DEFAULT_BACKEND_URL,
     backend_id: str = "",
-    on_status: Callable[[str], None] | None = None,
     *,
     identity: IdentityContext,
     stores: Stores | None = None,
     enable_tracing: bool = True,
     program: object | None = None,
 ) -> Session:
-    """``store`` injects a pre-built :class:`Stores` rather than resolving the user-data root: it is
-    the ONE way to relocate the tree, and the L4 inner runner passes a sandboxed one."""
-
-    def status(msg: str) -> None:
-        if on_status:
-            on_status(msg)
-
+    """*stores* is the ONE way to relocate the tree: the L4 inner runner passes a sandboxed one."""
     complete_registries(every_treatment=False)
 
     if stores is None:
         stores = build_stores(identity, projects_root=DEFAULT_PROJECTS_ROOT)
 
-    # Off-thread: this takes a CROSS-PROCESS lock on the tenant-global index, which no sandbox
-    # isolates — held on the event loop it blocks every other cell in the group and every
-    # heartbeat keeping them alive.
-    await asyncio.to_thread(maintain_measurement_index, stores)
-
-    # The run is an entry point that spends, so it ensures its own snapshot — age-gated, non-fatal.
     await ensure_model_capabilities(Path(stores.base_dir))
 
     dataset_config_dir = readable_dataset_dir(stores, dataset_name)
     backend_type = declared_backend_type(dataset_config_dir)
     connector = connectors.get(backend_type)
     experiment = dataset_experiment(dataset_config_dir, connector)
+    _verify_package_cache_scope(connector, experiment, dataset_name)
     client = build_backend_client(
         connector, backend_url, workload=InProcessWorkload(experiment=experiment, program=program)
     )
-    status(f"Backend: {backend_url}")
+    logger.info("Backend: %s", backend_url)
 
     pipeline_schema, pipeline_declaration = await _resolve_pipeline_schema(
         client,
         stores,
         dataset_config_dir,
-        status,
         connector=connector,
         experiment=experiment,
     )
@@ -394,19 +355,13 @@ async def init_services(
         dataset_config_dir=dataset_config_dir,
         identity=identity,
         tenant_root=str(stores.base_dir),
-        # ``enable_tracing=False`` (L4 inner campaigns) force-disables the cloud
-        # Langfuse logger so ``bridge.from_settings`` skips ``LangfuseSink`` — no
-        # cloud spans, no ``_trace_metadata`` accumulation, no quota burn. The
-        # local ``FileSink`` (gated on OBS_ENABLED) is untouched, so on-disk inner
-        # traces still exist for the self-potter-hop drill-down.
+        # ``enable_tracing=False`` (L4 inner campaigns) drops only the cloud sink, never ``FileSink``.
         langfuse=LangfuseLogger(enabled=enable_tracing),
     )
 
-    _load_dataset_into_session(
-        session, dataset_name, status, connector=connector, experiment=experiment
-    )
+    _load_dataset_into_session(session, dataset_name, connector=connector, experiment=experiment)
     # After the samples, never before: the invariant is about the schema AND the bank together.
-    _warn_if_labels_have_no_ranker(pipeline_schema, session.samples, connector, status)
+    _warn_if_labels_have_no_ranker(pipeline_schema, session.samples, connector)
     return session
 
 
@@ -414,13 +369,10 @@ async def bind_cycle_session(
     stores: Stores,
     campaign: Campaign,
     hop: CycleHop,
-    *,
-    backend_url: str = DEFAULT_BACKEND_URL,
 ) -> tuple[Session, CampaignConfig]:
-    """A session bound to the EXISTING cycle at *hop*, and the config a resume of it reads. Unbound,
-    the runner mints a fresh campaign and steals the active pointer from the cycle it is asked to run."""
+    """Unbound, the runner mints a fresh campaign and steals the active pointer from this cycle."""
     session = await init_services(
-        backend_url=backend_url,
+        backend_url=campaign.backend_url,
         backend_id=campaign.backend_id,
         dataset_name=campaign.dataset_name,
         identity=stores.identity,

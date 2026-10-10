@@ -1,6 +1,3 @@
-"""``ReadoutProjection`` — the ledger stream as readout lines: every cycle's ``readout.log``, and
-the line sink an entry point with a terminal hands in."""
-
 from __future__ import annotations
 
 import logging
@@ -8,12 +5,15 @@ import re
 import time
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.scoring.formula import split_scoring_block
-from promptpotter.application.views.render.ansi import render_round_verdict, to_text
+from promptpotter.application.views.render.ansi import (
+    render_round_verdict,
+    render_run_spend,
+    to_text,
+)
 from promptpotter.application.views.render.candidate import (
     fmt_individual_header,
-    individual_summary_from_dict,
+    individual_summary,
 )
 from promptpotter.application.views.render.phase import (
     fmt_elapsed,
@@ -22,7 +22,6 @@ from promptpotter.application.views.render.phase import (
     render_round_stats,
     round_verdict_basis,
 )
-from promptpotter.application.views.render.prefix_reading import prefix_reading
 from promptpotter.application.views.render.primitives import (
     DIM,
     GREEN,
@@ -40,30 +39,49 @@ from promptpotter.application.views.render.primitives import (
     display_tags,
 )
 from promptpotter.application.views.render.sample import fmt_query_result
-from promptpotter.application.views.view_models import AnyView, RoundCompleteView
 from promptpotter.domain.connector import MeasuredUnit
-from promptpotter.domain.dashboard_rows import RunStanding
-from promptpotter.domain.phases import CampaignPhase, PhaseEvent
+from promptpotter.domain.cycle_paths import CycleDir
+from promptpotter.domain.phase_views import (
+    InitExitView,
+    RoundCompleteView,
+    RoundStartView,
+    ViewAnchors,
+)
+from promptpotter.domain.phases import CampaignPhase
 from promptpotter.domain.results import (
     ArmOutcome,
     ScoreboardRankKey,
+    ScoredCandidate,
     candidate_label,
     scoreboard_rank_key,
 )
 from promptpotter.domain.run_records import (
+    CandidateMintedRecord,
+    CandidateScoredRecord,
+    CandidateStartedRecord,
     ElectionRecord,
     LLMCallProgressRecord,
     LLMCallRecord,
     LLMCallStartRecord,
     PhaseRecord,
+    RaceCatchUpRecord,
+    RaceStandingRecord,
+    RoundClosedRecord,
+    RoundStandingRecord,
     RoundWarningRecord,
-    SnapshotRecord,
+    RunPhaseRecord,
+    SampleOrderRecord,
+    SampleScoredRecord,
+    SampleStartedRecord,
+    scored_cell,
 )
-from promptpotter.domain.spend import TokenAccount
+from promptpotter.domain.spend import TokenAccount, prefix_reading
+from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.projections.base import Projection
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_standing_rounds
 from promptpotter.infrastructure.store.io import append_line
 from promptpotter.infrastructure.store.layout import CycleLayout
-from promptpotter.judges import judge_instrument
+from promptpotter.judges.registry import judge_instrument
 from promptpotter.shared.composite import render_composite_fitness_block
 
 if TYPE_CHECKING:
@@ -73,7 +91,7 @@ if TYPE_CHECKING:
     from promptpotter.application.embedded_run import StatusFn
     from promptpotter.application.initialization.session import Session
     from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.domain.results import RoundResult
+    from promptpotter.domain.scoring import Grade, MeasuredCell
 
 
 logger = logging.getLogger(__name__)
@@ -85,10 +103,7 @@ class ReadoutProjection(Projection):
     def __init__(
         self,
         *,
-        # Where each styled line also goes; `None` leaves the cycle's file the only reader.
         sink: StatusFn | None,
-        # The optimizer's patience (`OptimizerPacing.patience`); `None` on one that keeps none,
-        # which prints no patience line at all.
         patience: int | None,
         pipeline_schema: PipelineSchema | None,
         scoring_formula: str | None = None,
@@ -100,26 +115,17 @@ class ReadoutProjection(Projection):
         self.pipeline_schema = pipeline_schema
         self._display_tags = display_tags(pipeline_schema)
         self.scoring_formula = scoring_formula
-        # The terminal's half of the one noun (`Connector.measured_unit`).
         self.measured_unit = measured_unit
-        # The rounds the progress table prints, round 0 included.
-        self._rounds: list[RoundResult] = []
+        # Each round's LAST close, so a round re-closed on a warmed ruler shows the θ that stands.
+        self._closed: dict[int, RoundClosedRecord] = {}
         self.sample_counter = 0
-        self._phase_ctx: dict[str, Any] = {}  # wired by RunCallbacks; shared with phase-view
-        # Last look-ahead depth printed; the tape carries transitions, not the value. ``None``
-        # until the first sample announces the depth the run OPENS at — seeded to 1, a run that
-        # opens sequential said nothing, so the operator learned the depth only by changing it.
+        self._anchors = ViewAnchors()
         self._sample_lookahead_depth: int | None = None
-        # Live round-leader tracker, ordered by the shared `scoreboard_rank_key`
-        # (composite-first, accuracy tie-break) so ★ can't contradict the display
-        # ranking; `_round_best_acc` is kept alongside for the Δ-from-leader line.
         self._round_best_key: ScoreboardRankKey | None = None
         self._round_best_acc: float | None = None
         self._round_best_label: str | None = None
         self._round_started_at: float | None = None
         self._standing_printed_for: str = ""
-        # A block race's round: arms racing per block, each block's decided arms (whether each
-        # was cut), the arms headed. Empty on a round raced in turn.
         self._block_racing: dict[int, int] = {}
         self._block_decided: dict[int, list[tuple[str, bool]]] = {}
         self._blocks_of = 0
@@ -127,6 +133,7 @@ class ReadoutProjection(Projection):
         self._headed: set[int] = set()
         self._pending_calls: dict[str, int] = {}
         self._readout: Path | None = None
+        self._cycle_dir: Path | None = None
         self._verdict: RoundCompleteView | None = None
 
     @classmethod
@@ -139,7 +146,7 @@ class ReadoutProjection(Projection):
     ) -> ReadoutProjection:
         return cls(
             sink=sink,
-            patience=select_optimizer(campaign_config.optimization).pacing.patience,
+            patience=campaign_config.optimization.convergence_patience,
             pipeline_schema=session.pipeline_schema,
             scoring_formula=split_scoring_block(
                 campaign_config.scoring, judge_instrument=judge_instrument(campaign_config.judges)
@@ -148,12 +155,12 @@ class ReadoutProjection(Projection):
         )
 
     def open_readout(self, cycle_dir: Path) -> None:
-        """Mirror every later line into *cycle_dir*'s readout. A fork rebinds the projection, so the
-        readout follows the ledger, and the file it leaves ends on the line naming the next one."""
+        """A fork rebinds here; the file it leaves ends on the line naming the next one."""
         path = CycleLayout(cycle_dir.absolute()).readout
         line = f"Readout: {path} · {time.strftime('%Y-%m-%d %H:%M:%S')}"
         self._write(line)
         self._readout = path
+        self._cycle_dir = cycle_dir
         self._mirror(line)
 
     def _write(self, line: str) -> None:
@@ -167,67 +174,74 @@ class ReadoutProjection(Projection):
         try:
             append_line(self._readout, _ANSI_RE.sub("", line))
         except OSError as exc:
-            # Stop retrying and never break the run for its mirror — but say so once, where the
-            # operator is looking: a readout that just ends reads as a run that stopped.
+            # Said once: a readout that just ends reads as a run that stopped.
             logger.warning("readout.log stopped at %s: %s", self._readout, exc)
             self._readout = None
 
-    # --- Ledger subscription (via Projection) ---------------------
-
     def _handle_phase(self, record: PhaseRecord) -> None:
-        payload = record.payload
-        if record.phase == "round" and record.event == "display":
-            # Full RoundResult rides the in-memory-only field; the persisted
-            # payload['round_result'] is the lean 3-scalar form for the SSE tail.
-            round_result = record.live_round_result
-            if round_result is not None:
-                # Re-sync phase ctx so composite_fitness reads listener-side anchors.
-                ctx = payload.get("phase_ctx")
-                if isinstance(ctx, dict):
-                    self._phase_ctx.update(ctx)
-                standing = RunStanding.model_validate(payload["run_standing"])
-                self.on_round_complete(round_result, standing.rounds_without_advance)
-            return
-        self.on_phase(
-            PhaseEvent(
-                phase=record.phase,
-                event=record.event,
-                round=record.round,
-                data=record.data,
-            ),
-            payload.get("view"),
+        if record.phase == CampaignPhase.ORIGIN and record.event == "enter":
+            self._write("\n" + _round_rule("ROUND 0 — ORIGIN", "C0 · campaign root"))
+        view = record.view
+        if isinstance(view, RoundCompleteView):
+            # Held, not printed: the panel gate can still unwind this round.
+            self._verdict = view
+        elif view is not None and (rendered := to_text(view)):
+            self._write(rendered)
+        if record.round is not None:
+            self._round_num = record.round
+        if isinstance(view, RoundStartView):
+            self._round_best_key = None
+            self._round_best_acc = None
+            self._round_best_label = None
+            self._round_started_at = time.monotonic()
+        # `> 1`, not `> 0`: `resumed_from_round` counts the NEXT round, so a fresh mint is 1.
+        if (
+            isinstance(view, InitExitView)
+            and view.resumed_from_round > 1
+            and self._cycle_dir is not None
+        ):
+            standing = scan_standing_rounds(ledger_chain(CycleDir(self._cycle_dir))).rounds
+            self._closed = {
+                n: held.close for n, held in standing.items() if n < view.resumed_from_round
+            }
+
+    def _handle_run_phase(self, record: RunPhaseRecord) -> None:
+        if record.spend is not None:
+            self._write(render_run_spend(record.spend))
+
+    def _handle_round_standing(self, record: RoundStandingRecord) -> None:
+        self._anchors = record.anchors
+        self.on_round_complete(
+            self._closed[record.round], record.run_standing.rounds_without_advance
         )
+
+    def _handle_round_closed(self, record: RoundClosedRecord) -> None:
+        self._closed[record.round] = record
 
     def _handle_llm_call_start(self, record: LLMCallStartRecord) -> None:
         self._pending_calls[record.call_id] = record.started_at_ms
         model = record.model or "(default)"
         round_tag = f"r{record.round}" if record.round is not None else ""
         node_label = f"{record.node}_{round_tag}" if round_tag else record.node
-        # A REFUSED panel, not a big prompt — same alarm the run log raises, for the reason stated
-        # at `bench/llm_call.py`: a mandatory floor is admitted whatever it costs.
+        # The alarm is a REFUSED panel, never a big prompt: a mandatory floor is admitted whatever it costs.
         refused = record.refused_panels
         marker = "⚠ " if refused else "↻ "
         bits = [f"{marker}optimizer call: {node_label} · {model}"]
         if record.prompt_chars > 0:
             bits.append(f"{record.prompt_chars:,}c prompt")
-        # ADDRESSED, not reprinted: on the warning path only, name the panel to go and look at.
-        # The full breakdown is `injection_chars` on this record — the alarm's job here is to point.
         if refused:
             bits.append(f"NO ROOM: {', '.join(refused[:3])}")
         color = YELLOW if refused else DIM
         self._write(f"  {color}{' · '.join(bits)}{RESET}")
 
     def _handle_round_warning(self, record: RoundWarningRecord) -> None:
-        """Surface a self-healed round degradation as a one-line marker — parity with the dashboard's warning list and the round
-        file's block, the same fact on every channel. ``message`` is composed at the emit site, so this just prints it."""
         round_tag = f"r{record.round}" if record.round is not None else ""
         glyph = "✗" if record.severity == "error" else "⚠"
         prefix = f"{glyph} {round_tag}".rstrip()
         self._write(f"  {YELLOW}{prefix} {record.message}{RESET}")
 
     def _handle_llm_call_progress(self, record: LLMCallProgressRecord) -> None:
-        """Heartbeat tick; cached replays skip it. A BARE tick proves only that the process is alive, one carrying ``detail`` reports
-        progress — print ``detail`` VERBATIM: dropping it let a healthy inner campaign read as a frozen call."""
+        """``detail`` prints VERBATIM: a bare tick proves only liveness, and a healthy inner campaign reads as frozen."""
         round_tag = f"r{record.round}" if record.round is not None else ""
         node_label = f"{record.node}_{round_tag}" if round_tag else record.node
         line = f"  · {node_label} still waiting · {record.elapsed_s:.0f}s"
@@ -250,26 +264,16 @@ class ReadoutProjection(Projection):
             bits.append(f"{duration_s:.1f}s")
         if usage.total > 0:
             bits.append(f"{usage.total} tok")
-        # What the seconds beside it actually bought. A reasoning model can spend nearly its whole
-        # output budget thinking against a schema-capped answer, and the duration alone then reads
-        # as a slow provider rather than a node asked to think about something small. Silent at 0
-        # so a non-reasoning model's line stays clean.
         if usage.reasoning > 0 and usage.output > 0:
             bits.append(f"{usage.reasoning / usage.output:.0%} reasoning")
-        # What the PROVIDER served off its own prefix cache — the number the prompt's field ORDER
-        # moves, since an implicit cache hits only on an identical leading prefix and a volatile
-        # block early in the prompt voids everything behind it.
         prefix = prefix_reading(usage.cache_share(replayed=cached), replayed=cached)
         if prefix.state == "unreported":
             bits.append("prefix not reported")
         elif prefix.share is not None:
             bits.append(f"{prefix.share:.0%} prefix cached")
-        # "replayed", not "cached": OUR archive served this call and no provider saw it. The word
-        # `cached` now names the provider-side discount one line up, and one word cannot mean both.
+        # "replayed", not "cached": OUR archive served it; `cached` names the provider-side discount above.
         if cached:
             bits.append("replayed")
-        # The two ways a call that landed still went wrong: every attempt before the last is a
-        # whole paid round trip, and an answer cut at `max_tokens` parsed only as far as it got.
         flags: list[str] = []
         if retries := len(payload.get("schema_repair_errors") or ()):
             flags.append(f"re-asked {retries}x")
@@ -279,13 +283,8 @@ class ReadoutProjection(Projection):
         self._write(f"  {lead} {' · '.join([*bits, *flags])}{RESET}")
 
     def _handle_election(self, record: ElectionRecord) -> None:
-        """The news, where the election makes it — not at the round close two LLM calls later.
-
-        One line and no numbers: the board, the reason and the overlap series print together in
-        the verdict block at round close, which is the first moment all three exist. Silent where
-        the selector gave no reason — the origin round, which chose between nobody."""
-        rr = record.live_round_result
-        if rr is None or not rr.verdict_reason:
+        """One line and no numbers: the board, reason and overlap series first all exist at round close."""
+        if not record.verdict_reason:
             return
         self._write(
             f"  {GREEN}✓ selected {', '.join(record.selected_labels)}{RESET}"
@@ -293,111 +292,72 @@ class ReadoutProjection(Projection):
             else f"  {DIM}· held the best-so-far{RESET}"
         )
 
-    def _handle_snapshot(self, record: SnapshotRecord) -> None:
-        payload = record.payload
-        ci = int(record.candidate_idx or 0)
-        ct = int(record.candidate_total or 0)
-        qi = int(record.sample_idx or 0)
-        qt = int(record.sample_total or 0)
-        ev = record.event
-        # sample_started: LiveDashboardProjection pulses the in-flight row; the readout has no equivalent (sample_scored covers it).
-        if ev == "sample_started":
-            # …except a look-ahead TRANSITION: armed mid-run, expiring a round later, and nothing
-            # else on the tape would show it. Per-sample repetition would bury the tape.
-            depth: int = payload["sample_lookahead"]
-            if depth != self._sample_lookahead_depth:
-                opening = self._sample_lookahead_depth is None
-                self._sample_lookahead_depth = depth
-                if opening and depth <= 1:
-                    # The depth a run OPENS at, priced in the samples it serialises. Costed once,
-                    # here, because the press only lands at the next sample boundary: an operator
-                    # who reads the depth off the first sample can arm before it binds, and one
-                    # who waits for a transition line pays a whole sample to learn the default.
-                    tail = (
-                        f" — {qt} samples run one at a time; arm it from the browser to overlap them"
-                        if qt > 1
-                        else ""
-                    )
-                elif opening:
-                    tail = f" — up to {depth} of {qt} in flight (armed)" if qt else " (armed)"
-                elif depth > 1:
-                    tail = " (armed — expires when this round finishes scoring)"
-                else:
-                    tail = " (back to sequential)"
-                self._write(f"  {DIM}⇉ sample look-ahead depth {depth}{tail}{RESET}")
+    def _handle_sample_started(self, record: SampleStartedRecord) -> None:
+        depth, qt = record.sample_lookahead, record.sample_total
+        if depth == self._sample_lookahead_depth:
             return
-        if ev == "sample_scored":
-            self.on_sample_scored(ci, payload["result"], qi, qt)
-        elif ev == "candidate_started":
-            self.on_candidate_started(
-                ci,
-                ct,
-                payload["changes_description"],
-                payload["pipeline_overlay"],
-                payload["block"],
+        opening = self._sample_lookahead_depth is None
+        self._sample_lookahead_depth = depth
+        if opening and depth <= 1:
+            tail = (
+                f" — {qt} samples run one at a time; arm it from the browser to overlap them"
+                if qt > 1
+                else ""
             )
-        elif ev == "candidate_scored":
-            self._phase_ctx.update(payload["phase_ctx"])
-            self.on_candidate_scored(ci, ct, payload["scores"])
-        elif ev == "race_standing":
-            self.on_race_standing(
-                payload["member"],
-                payload["current_id"],
-                payload["n_samples"],
-                payload["p_best"],
-                payload["paired_breakdown"],
-                payload["decision_grade"],
-            )
-        elif ev == "sample_order_preview":
-            self.on_sample_order_preview(payload["sample_order"], payload["n_priors"])
-        elif ev == "race_catch_up":
-            self.on_race_catch_up(payload["member"], payload["sample_id"], payload["prior_ids"])
+        elif opening:
+            tail = f" — up to {depth} of {qt} in flight (armed)" if qt else " (armed)"
+        elif depth > 1:
+            tail = " (armed — expires when this round finishes scoring)"
+        else:
+            tail = " (back to sequential)"
+        self._write(f"  {DIM}⇉ sample look-ahead depth {depth}{tail}{RESET}")
 
-    # --- Public callback API (pre-ledger paths call these directly) ---
+    def _handle_sample_scored(self, record: SampleScoredRecord) -> None:
+        self.on_sample_scored(*scored_cell(record.result))
 
-    def on_phase(self, event: PhaseEvent, view: AnyView | None = None) -> None:
-        # Round 0 gets the same rule every later round gets, so no stretch of the readout sits
-        # under no round marker.
-        if event.phase == CampaignPhase.ORIGIN and event.event == "enter":
-            self._write("\n" + _round_rule("ROUND 0 — ORIGIN", "C0 · campaign root"))
-        if isinstance(view, RoundCompleteView):
-            # Held, not printed: the panel gate can still unwind this round, and a re-run's
-            # `select:exit` replaces it here.
-            self._verdict = view
-        elif view is not None and (rendered := to_text(view)):
-            self._write(rendered)
-        if event.round is not None:
-            self._round_num = event.round
-        if event.phase == CampaignPhase.PROPOSE and event.event == "enter":
-            self._round_best_key = None
-            self._round_best_acc = None
-            self._round_best_label = None
-            self._round_started_at = time.monotonic()
-        # Resume-rewind rebuild needs the live ``env``/``state`` objects, which exist only on
-        # the direct in-memory callback path — ``PhaseRecord.data`` is ``exclude=True`` and
-        # reaches no disk. On the ledger path ``env`` is absent and the display rebuilds from
-        # the replayed ``round:display`` records instead, so skip cleanly.
-        env_obj = (
-            event.data.get("env")
-            if event.phase == CampaignPhase.INIT and event.event == "exit"
-            else None
+    def _handle_candidate_minted(self, record: CandidateMintedRecord) -> None:
+        if chain := " → ".join(
+            f"{v.node} ({v.mode}): {', '.join(v.loci) or 'nothing'}"
+            for v in record.lineage.variations
+        ):
+            self._write(f"  {DIM}◆ {record.label} ← {chain}{RESET}")
+
+    def _handle_candidate_started(self, record: CandidateStartedRecord) -> None:
+        self.on_candidate_started(
+            record.candidate_idx,
+            record.candidate_total,
+            record.changes_description,
+            record.pipeline_overlay,
+            record.block,
         )
-        # `> 1`, not `> 0` — `resumed_from_round` counts the NEXT L1 round, so a fresh mint is 1
-        # and only `>= 2` is a real rewind (`initialization/loop_start.py` gates on the same
-        # number). At `> 0` this fired on every fresh run and seeded the origin a second time
-        # beside the one `on_round_complete` appends, printing round 0 twice in the table.
-        if env_obj is not None and env_obj.state.resumed_from_round > 1:
-            self._rounds = list(event.data["state"].rounds)
 
-    def on_sample_scored(
-        self, cand_idx: int, result: dict[str, Any], sample_idx: int, n_samples: int
-    ) -> None:
+    def _handle_candidate_scored(self, record: CandidateScoredRecord) -> None:
+        self._anchors = record.anchors
+        self.on_candidate_scored(record.candidate_total, record.scores)
+
+    def _handle_race_standing(self, record: RaceStandingRecord) -> None:
+        self.on_race_standing(
+            record.member,
+            record.current_id,
+            record.n_samples,
+            record.p_best,
+            record.paired_breakdown,
+            record.decision_grade,
+        )
+
+    def _handle_sample_order(self, record: SampleOrderRecord) -> None:
+        self.on_sample_order(record.sample_order, record.n_priors)
+
+    def _handle_race_catch_up(self, record: RaceCatchUpRecord) -> None:
+        self.on_race_catch_up(record.member, record.sample_id, record.prior_ids)
+
+    def on_sample_scored(self, facts: MeasuredCell, grade: Grade) -> None:
         self.sample_counter += 1
         prefix = f"  [{self.sample_counter:>3d}] "
         self._write(
             fmt_query_result(
-                result,
-                cached=bool(result.get("cached", False)),
+                facts,
+                grade,
                 prefix=prefix,
                 scoring_formula=self.scoring_formula,
                 display_tags=self._display_tags,
@@ -413,7 +373,6 @@ class ReadoutProjection(Projection):
         paired_breakdown: dict[str, dict[str, float]],
         decision_grade: bool,
     ) -> None:
-        # A block race decides at its closes, and the summary names what each close cut.
         if (
             not self._block_racing
             and current_id
@@ -422,9 +381,6 @@ class ReadoutProjection(Projection):
         ):
             self._standing_printed_for = current_id
             current_p = p_best
-            # Paired PoBB: hardest prior = min P(cand > prior). Read off the field that NAMES
-            # that quantity rather than off the P(best) reading, which is one number about
-            # this candidate and cannot answer a per-prior question.
             if paired_breakdown:
                 hardest_id, hardest = min(
                     paired_breakdown.items(), key=lambda kv: kv[1].get("p_better", 1.0)
@@ -440,7 +396,7 @@ class ReadoutProjection(Projection):
                 f"(of {n_priors} prior{prior_s})"
             )
 
-    def on_sample_order_preview(self, sample_order: list[int], n_priors: int) -> None:
+    def on_sample_order(self, sample_order: list[int], n_priors: int) -> None:
         if not sample_order or self._block_racing:
             return
         prior_s = "" if n_priors == 1 else "s"
@@ -488,24 +444,21 @@ class ReadoutProjection(Projection):
                     f"  {DIM}▦ block {block['n']}/{block['of']} · {block['size']} cells · "
                     f"{block['racing']} arms racing{RESET}"
                 )
-            # Named once per round; a later block only marks whose cells follow.
             if idx in self._headed:
                 self._write(f"  {label}/{total}")
                 return
             self._headed.add(idx)
         self._write(fmt_individual_header(label, total, changes_description, pipeline_overlay))
 
-    def on_candidate_scored(self, idx: int, total: int, scores: dict[str, Any]) -> None:
+    def on_candidate_scored(self, total: int, scores: ScoredCandidate) -> None:
         w = 66
-        label = scores.get("label") or candidate_label(self._round_num, idx)
-        outcome = scores.get("outcome")
+        label, outcome = scores.label, scores.outcome
         if self._block_racing and outcome in (ArmOutcome.ELIMINATED, ArmOutcome.LOCKED_IN):
-            # A block race stops an arm at a block's close, so its rows name the block.
-            block = -(-int(scores["scored_samples"]) // self._block_size)
+            block = -(-scores.scored_samples // self._block_size)
             self._block_decided.setdefault(block, []).append(
                 (label, outcome == ArmOutcome.ELIMINATED)
             )
-        summary = individual_summary_from_dict(scores, unit=self.measured_unit)
+        summary = individual_summary(scores, unit=self.measured_unit)
 
         self._write(f"  {_box_top(f'{label}/{total}', summary.tag, width=w)}")
         if summary.body_line:
@@ -517,56 +470,39 @@ class ReadoutProjection(Projection):
         else:
             self._write(f"  {_box_bottom(width=w)}")
 
-        acc = scores.get("accuracy")
-        comp = scores.get("composite_fitness")
-        if isinstance(acc, int | float):
+        if scores.accuracy is not None:
             self._write(
                 self._fmt_round_leader(
-                    label,
-                    float(acc),
-                    scores.get("reference_lift"),
-                    float(comp) if isinstance(comp, int | float) else None,
+                    label, scores.accuracy, summary.lift, scores.composite_fitness
                 )
             )
 
     def _fmt_round_leader(
         self, label: str, acc: float, lift: float | None, composite: float | None
     ) -> str:
-        """Scoreboard one-liner, ordered by the shared ``scoreboard_rank_key``.
-
-        Ranks the round's arms AGAINST EACH OTHER, which needs no parent — mid-round no arm
-        carries a θ and nobody is crowned, so the key degrades to the composite it always was.
-        The θ-ordered scoreboard prints at round close, once the election has fit one.
-
-        The Δ is the SERVED ``reference_lift``, absent until round close stamps it: recomputed
-        here it crowns whichever arm was cut earliest."""
+        """The Δ is the SERVED lift: recomputed here it would crown whichever arm was cut earliest."""
         key = scoreboard_rank_key(composite, acc)
         new_round_max = self._round_best_key is None or key > self._round_best_key
         if new_round_max:
             self._round_best_key = key
             self._round_best_acc = acc
             self._round_best_label = label
-            vs = f"  (Δ {_fmt_delta(lift)} vs reference)" if isinstance(lift, int | float) else ""
+            vs = f"  (Δ {_fmt_delta(lift)} vs reference)" if lift is not None else ""
             return f"  {GREEN}★ leader: {label} {acc:.1%}{vs}{RESET}"
         gap = acc - (self._round_best_acc or acc)
         prior = self._round_best_label or "leader"
         return f"  {DIM}→ {label} {acc:.1%}  ({gap:.1%} from {prior}){RESET}"
 
-    def on_round_complete(self, round_result: RoundResult, stall: int) -> None:
+    def on_round_complete(self, round_result: RoundClosedRecord, stall: int) -> None:
         self.sample_counter = 0
 
-        self._rounds.append(round_result)
-
-        # `round_result.round`, never `self._round_num` — the block race advances that
-        # counter toward the NEXT round before this round's own summary prints.
+        # Never `self._round_num`: the block race advances it before this round's summary prints.
         rn = round_result.round
         elapsed_label = ""
         if self._round_started_at is not None:
             elapsed = time.monotonic() - self._round_started_at
             elapsed_label = f" — {fmt_elapsed(elapsed)}"
         self._round_started_at = None
-        # The round's verdict, whole and once. The origin round elects nobody, so it has none and
-        # its composite prints in the summary below instead.
         verdict, self._verdict = self._verdict, None
         if verdict is not None:
             self._write(
@@ -576,23 +512,29 @@ class ReadoutProjection(Projection):
             )
         self._write("")
         self._write(_node_top(f"ROUND {rn} SUMMARY{elapsed_label}"))
-        table = render_progress_table(self._rounds, stamps_theta=round_result.stamps_theta)
+        table = render_progress_table([self._closed[n] for n in sorted(self._closed)])
         for line in table.split("\n"):
             self._write(line)
         for line in self._render_block_lines():
             self._write(_node_line(line))
         self._block_racing, self._block_decided, self._headed = {}, {}, set()
-        formula_short = self._phase_ctx.get("composite_fitness_formula_short")
-        formula_full = self._phase_ctx.get("composite_fitness_formula")
+        formula_short = self._anchors.composite_fitness_formula_short
+        formula_full = self._anchors.composite_fitness_formula
         composite = round_result.composite_fitness
         if verdict is None and composite is not None and (formula_short or formula_full):
-            # Under per_round_resubset the round-0 composite is a different subset, so
-            # a cross-subset fallback would read draw difficulty as candidate lift.
+            # No round-0 fallback reference: a cross-subset one reads draw difficulty as candidate lift.
             for line in render_composite_fitness_block(
                 composite,
                 dict(round_result.evaluators),
                 formula_short or formula_full,
-                reference=next((s.reference_composite for s in round_result.selected_scores), None),
+                reference=next(
+                    (
+                        s.vs_reference.reference_level("objective")
+                        for s in round_result.selected_scores
+                        if s.vs_reference is not None
+                    ),
+                    None,
+                ),
                 use_short_names=bool(formula_short),
             ):
                 self._write(_node_line(line))
@@ -600,14 +542,12 @@ class ReadoutProjection(Projection):
             for line in stats.split("\n"):
                 if line:
                     self._write(line)
-        # A note stays off the tape: it is prose the round file and `log.md` hold whole.
         for fact in (f for f in round_result.optimizer_facts if f.kind == "stat"):
             self._write(_node_line(f"{fact.label}: {fact.text}"))
-        if self.patience is not None:
-            for line in render_patience_status(round_result.improved, stall, self.patience).split(
-                "\n"
-            ):
-                self._write(line)
+        for line in render_patience_status(
+            round_result.overlap.advance, stall, self.patience
+        ).split("\n"):
+            self._write(line)
         self._write(_node_bottom())
 
 

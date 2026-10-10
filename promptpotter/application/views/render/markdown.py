@@ -1,6 +1,3 @@
-"""``log.md`` render target — the per-cycle digest rewritten after each round: per-round block, sparklines, heatmap,
-fork siblings, final winner."""
-
 from __future__ import annotations
 
 import json
@@ -8,8 +5,7 @@ from typing import Any
 
 from promptpotter.application.views.render.heatmap import render_hard_sample_heatmap
 from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct as _fmt_pct
-from promptpotter.application.views.render.prefix_reading import prefix_reading
-from promptpotter.application.views.render.primitives import fmt_fitness
+from promptpotter.application.views.render.primitives import fmt_fitness, overlap_series
 from promptpotter.application.views.view_models import (
     ForkSummaryView,
     HardSamplesView,
@@ -17,12 +13,13 @@ from promptpotter.application.views.view_models import (
     RoundDigestView,
 )
 from promptpotter.domain.phases import STOP_REASON_INFO, StopReason
-from promptpotter.domain.results import order_floor, overlap_series
+from promptpotter.domain.results import DISPLAY_METRIC_INFO, RunStanding
+from promptpotter.domain.ruler import THETA_CAVEAT_INFO
+from promptpotter.domain.spend import RATE_PRICED_LABEL, CloseSpend, calls_rate_priced
 from promptpotter.shared.composite import render_composite_fitness_block
 
 
 def _ending_lines(stop_reason: StopReason | None) -> list[str]:
-    """A digest is rendered for a cycle still running too, and that one has no ending to name."""
     if stop_reason is None:
         return ["- ended: not yet"]
     info = STOP_REASON_INFO[stop_reason]
@@ -60,17 +57,14 @@ def _spark(values: list[float]) -> str:
 
 
 def _render_p_best_trajectory(rd: RoundDigestView) -> list[str]:
-    """Per-round P(best) sparkline section; silent when JSONL is absent (resumed cycles)."""
     if not rd.p_best_trajectory:
         return []
-    # The ELECTED arm first, then by final P(best) desc — a round is won on θ lift, and the arm
-    # this posterior likes most is regularly not it.
+    # The ELECTED arm first: a round is won on θ lift, and the highest final P(best) is often not it.
     ordered = sorted(
         rd.p_best_trajectory.items(),
         key=lambda kv: (kv[0] != rd.winner_id, -(kv[1][-1] if kv[1] else 0.0)),
     )
-    # Each row is one arm against ITS OWN priors at its own turn, so the rows share no scale and
-    # the heading says so: two finals side by side are not a comparison between those arms.
+    # Each row is one arm against ITS OWN priors, so two finals side by side are no comparison.
     lines: list[str] = ["", "P(best) trajectory (each arm against its own priors):", "```"]
     for cid, traj in ordered[:8]:
         if not traj:
@@ -90,30 +84,21 @@ def _render_p_best_trajectory(rd: RoundDigestView) -> list[str]:
 
 
 def _render_round_cost(rd: RoundDigestView) -> str:
-    """What this round cost, per bucket, with each bucket's prefix-cache reading beside it.
-
-    PER BUCKET and never pooled: the three run different prompts against different providers, and
-    a backend row carries ~86k input against a judge's ~1.6k, so one ratio over the pooled counts
-    is the backend's share wearing everyone's name.
-
-    The prefix reading is `prefix_reading`'s, so this line says the same thing the terminal tape
-    and the browser's sample badge do. A bucket holds billed calls only — the fold excludes a
-    replay — so `replayed=False` here is a statement about the bucket, not a shortcut.
-
-    A round answered wholly from the archive still renders: billed $0 beside what it incurred."""
+    """PER BUCKET, never pooled: one pooled cache ratio is the largest bucket's share under everyone's name."""
     if rd.spend is None:
         return ""
     bits: list[str] = []
     for kind, bucket in rd.spend.by_kind.items():
-        if bucket.used_usd <= 0 and bucket.input_tokens <= 0:
+        if not bucket.sent:
             if bucket.incurred_usd > 0:
                 bits.append(f"{kind} $0.0000 (${bucket.incurred_usd:.4f} replayed)")
             continue
-        badge = prefix_reading(bucket.cache_share, replayed=False).badge
-        # Writes with no reads is the one shape worth calling out inline: it is paying a premium
-        # to fill a prefix nothing ever collects (`run_records.py::cache_write_tokens`).
-        wrote = f" ·w{bucket.cache_write_tokens}" if bucket.cache_write_tokens else ""
-        bits.append(f"{kind} ${bucket.used_usd:.4f} {badge}{wrote}")
+        priced = (
+            f" + ${bucket.rate_priced_usd:.4f} {RATE_PRICED_LABEL}"
+            if calls_rate_priced(bucket.rate_priced_usd)
+            else ""
+        )
+        bits.append(f"{kind} ${bucket.used_usd:.4f}{priced} {bucket.prefix.badge}")
     by_bucket = f" ({' · '.join(bits)})" if bits else ""
     return f"- spend: {rd.spend.billed_beside_incurred()}{by_bucket}"
 
@@ -126,13 +111,17 @@ def _render_round(rd: RoundDigestView, *, formula: str | None) -> list[str]:
         f"- samples: {rd.total}",
         f"- composite_fitness: `{fmt_fitness(rd.composite_fitness)}`",
     ]
-    if rd.ability is not None and rd.stamps_theta:
-        # The cross-round series, with the ruler it was read on beside it: accuracy above is
-        # subset-relative and this is not, so they can move in opposite directions legitimately.
-        parts.append(f"- ability θ: `{rd.ability.theta:+.3f}` ({rd.ability.scale()})")
+    if rd.ability is not None:
+        parts.append(
+            f"- {DISPLAY_METRIC_INFO['ability'].label}: `{rd.ability.theta:+.3f}` "
+            f"({rd.ability.scale()})"
+        )
+        if rd.ability.caveat is not None:
+            parts.append(
+                f"- θ caveat: `{rd.ability.caveat.value}` — "
+                f"{THETA_CAVEAT_INFO[rd.ability.caveat].head}"
+            )
     if series := overlap_series(rd.overlap):
-        # The one row two rounds can be differenced on — `accuracy` above is read on whatever
-        # subset this round bought, and the acquisition does not hold it still.
         parts.append(f"- overlap: {series}")
     if rd.verdict_reason:
         parts.append(f"- verdict: {rd.verdict_reason}")
@@ -146,8 +135,7 @@ def _render_round(rd: RoundDigestView, *, formula: str | None) -> list[str]:
             rd.composite_fitness,
             rd.evaluators,
             formula,
-            # THIS round's matched floor, the same one the terminal compares against.
-            reference=rd.reference_composite,
+            reference=rd.composite_floor,
             use_short_names=False,
         )
         parts += ["", "```", *composite_fitness_block, "```"]
@@ -161,14 +149,23 @@ def _render_round(rd: RoundDigestView, *, formula: str | None) -> list[str]:
 def _render_hard_samples(view: HardSamplesView | None) -> list[str]:
     if view is None:
         return []
-    heatmap = render_hard_sample_heatmap(
-        view.artifact,
-        sample_query_lookup=view.sample_query_lookup,
-        order=view.order,
-    ).strip()
+    heatmap = render_hard_sample_heatmap(view).strip()
     if not heatmap:
         return []
     return ["## Hard Samples", "", "```", heatmap, "```", ""]
+
+
+def _selection(standing: RunStanding | None) -> str:
+    return "nothing selected" if standing is None else standing.selection_line
+
+
+def _spent(spent: CloseSpend) -> str:
+    search = "unpriced" if spent.search_usd is None else f"${spent.search_usd:.4f}"
+    return (
+        f"search {search} · billed ${spent.billed_usd:.4f} · "
+        f"{RATE_PRICED_LABEL} ${spent.rate_priced_usd:.4f} · {spent.calls} calls · "
+        f"{spent.tokens} tokens · {spent.worked_s:.0f}s worked"
+    )
 
 
 def _render_forks(forks: tuple[ForkSummaryView, ...]) -> list[str]:
@@ -178,11 +175,7 @@ def _render_forks(forks: tuple[ForkSummaryView, ...]) -> list[str]:
     for f in forks:
         short = f.cycle_id.split("_", 1)[-1] if "_" in f.cycle_id else f.cycle_id
         rounds_word = "round" if f.n_rounds == 1 else "rounds"
-        line = (
-            f"- `{short}` — {f.kind} · "
-            f"best {_fmt_pct(f.best_accuracy)} "
-            f"(origin {_fmt_pct(f.origin_accuracy)}, {f.n_rounds} {rounds_word})"
-        )
+        line = f"- `{short}` — {f.kind} · {_selection(f.standing)} ({f.n_rounds} {rounds_word})"
         if f.stop_reason is not None:
             line += f" · {f.stop_reason.value}"
         parts.append(line)
@@ -196,24 +189,16 @@ def to_markdown(view: LogMdView) -> str:
         f"# Campaign {status.campaign_id or '(unknown cycle)'}",
         "",
     ]
-    if status.parent_session_id:
-        parts += [f"_session: `{status.parent_session_id}`_", ""]
 
     parts += [
         "## Status",
         "",
         *([f"- optimizer: `{status.optimizer}`"] if status.optimizer else []),
         *_ending_lines(status.stop_reason),
-        f"- origin: {_fmt_pct(status.origin_accuracy)}",
-        (
-            f"- best: {_fmt_pct(status.best_accuracy)}"
-            + (f" (round {status.best_round})" if status.best_round is not None else "")
-        ),
+        f"- selection: {_selection(status.standing)}",
     ]
-    top = view.forks[0] if view.forks else None
-    if top is not None and order_floor(top.best_accuracy) > order_floor(status.best_accuracy):
-        short = top.cycle_id.split("_", 1)[-1] if "_" in top.cycle_id else top.cycle_id
-        parts.append(f"- family best: {_fmt_pct(top.best_accuracy)} (in fork `{short}`)")
+    if status.standing is not None and status.standing.spent is not None:
+        parts.append(f"- cost at the last close: {_spent(status.standing.spent)}")
     scored_rounds = status.rounds_completed - status.gen_only_rounds
     if status.gen_only_rounds:
         parts.append(

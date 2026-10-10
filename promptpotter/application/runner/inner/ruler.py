@@ -1,10 +1,4 @@
-"""The ONE δ scale every inner cell of one outer round reads on.
-
-A cell left to fit its own sees only the arms its evidence epoch leaves visible — which are its
-own — so the scale comes out of the treatment under test and a re-measured cell returns a
-different θ. Fitting it here instead makes it the same for every arm: cold it anchors, warm it
-EXTENDS, so one anchor holds for the whole outer campaign.
-"""
+"""A cell fitting its own δ scale derives it from the arms under test, so it is fit here, once."""
 
 from __future__ import annotations
 
@@ -13,7 +7,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from promptpotter.application.bench.difficulty import calibrate_delta_ruler
-from promptpotter.application.datasets.authored import dataset_cell_scorer
+from promptpotter.application.datasets.authored import dataset_scorer
 from promptpotter.application.intelligence.exploration import extend_ruler
 from promptpotter.application.intelligence.hard_sample_archive import build_archive_observations
 from promptpotter.application.runner.inner.spawn_context import (
@@ -35,10 +29,7 @@ __all__ = ["refresh_inner_rulers"]
 def refresh_inner_rulers(
     session: Session, campaign_config: CampaignConfig, *, round_num: int
 ) -> None:
-    """Fit-or-extend the shared scale of every inner dataset this campaign spawns, and publish it.
-
-    At run init and each outer round boundary, where the prior round's cells are all banked. A
-    no-op for a campaign that spawns nothing."""
+    """Called where the prior round's cells are all banked: run init and each outer round boundary."""
     ctx = inner_spawn_context()
     if ctx is None or ctx.cells is None or not session.state.cycle_id:
         return
@@ -53,19 +44,13 @@ def refresh_inner_rulers(
 def _fit_or_extend(
     session: Session, campaign_config: CampaignConfig, dataset_name: str, round_num: int
 ) -> DeltaRuler | None:
-    """This dataset's scale, grown onto everything the archive now carries. ``None`` while the
-    bank is too thin to identify one — legitimate, and it re-attempts at the next boundary."""
+    """``None`` while the bank is too thin to identify a scale; the next boundary re-attempts."""
 
-    # No `origin_sp_hash`: the outer origin is not an arm on THIS dataset, and the fit wants every
-    # arm equally.
-    # The INNER dataset's own scorer, never the outer session's: this scale grades justlogic cells,
-    # while the outer formula is over whole inner CAMPAIGNS and names measurands these rows lack.
-    scorer, scorer_id = dataset_cell_scorer(readable_dataset_dir(session.store, dataset_name))
+    # The INNER dataset's own scorer: the outer formula names measurands these rows lack.
     obs = build_archive_observations(
         session.store,
         dataset_name=dataset_name,
-        scorer=scorer,
-        scorer_id=scorer_id,
+        scorer=dataset_scorer(readable_dataset_dir(session.store, dataset_name)),
         # An inner cell holds nothing out (`tasks.py::inner_instrument_config`).
         sample_ids=None,
     )
@@ -91,9 +76,7 @@ def _fit_or_extend(
     else:
         ruler = extend_ruler(held, obs, history=[])
         if ruler == held:
-            # `RulerRecord` is written WHOLE, so an append that carries no new cell is a copy of
-            # the scale already on the ledger. A cell no anchored arm answered stays off it; the
-            # inner cycle's own extension reaches it once its round grades exist.
+            # `RulerRecord` is written WHOLE, so an append carrying no new cell would copy the scale.
             return held
         logger.info(
             "inner δ scale for %s EXTENDED to %d cells (+%d) at outer round %d",

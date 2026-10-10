@@ -1,7 +1,4 @@
-"""Resume entry point — rescore prior rounds under the active scorer, then halt or fork on
-divergence. The repair that makes a holed round re-derive is ``repair.py``: incompleteness and
-divergence are different questions, so the repair runs regardless of config scope and this file
-short-circuits on a ``NONE`` / ``POLICY_ONLY`` diff while the repair never does."""
+"""``repair.py`` runs regardless of config scope; only the divergence check short-circuits on it."""
 
 from __future__ import annotations
 
@@ -18,14 +15,11 @@ from promptpotter.application.bench.resume_and_fork.replayers import (
     replay_decisions,
 )
 from promptpotter.application.knobs import DiffScope, classify_config_diff
-from promptpotter.application.scoring.formula import rescore_results
+from promptpotter.application.pipeline_resolve import frozen_config
+from promptpotter.application.scoring.cells import closed_rounds
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.results import round_document_digest
 from promptpotter.domain.run_records import ForkSpec, ForkTrigger
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
-    scan_ledger_decisions,
-)
-from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.shared.errors import ResumeDivergenceError
 
 if TYPE_CHECKING:
@@ -46,13 +40,12 @@ def _stale_generation(
     prior: list[RoundResult],
     resumed_from_round: int,
 ) -> ReplayMismatch | None:
-    """Is the round about to run holding candidates its own predecessor no longer matches? Both
-    sides are persisted, so this survives a restart. No recorded digest ⇒ a divergence, not a shrug."""
+    """No recorded digest is a divergence, not a shrug."""
 
-    cached = campaign_store.load_round_candidates(hop, resumed_from_round)
+    cached = campaign_store.round_proposals(hop, resumed_from_round)
     if cached is None or not prior:
         return None
-    _candidates, consumed = cached
+    consumed = cached.consumed
     current = round_document_digest(prior[-1])
     if consumed == current:
         return None
@@ -76,8 +69,7 @@ def _stale_generation(
 def _optimizer_mismatches(
     prior: list[RoundResult], selected: SelectedOptimizer
 ) -> dict[int, ReplayMismatch]:
-    """Rounds produced by a DIFFERENT optimizer than the one loaded now. Asked PER ROUND so an edit
-    forks from where it bites."""
+    """Asked PER ROUND so an edit forks from where it bites."""
 
     current = selected.prompt_hashes()
     out: dict[int, ReplayMismatch] = {}
@@ -113,30 +105,17 @@ async def resume_with_divergence_check(
     skip_divergence_check: bool,
     fork_on_divergence: bool = False,
 ) -> ForkResult | None:
-    """Rescore prior rounds under the active scorer; halt or fork on divergence. Short-circuits on a
-    ``NONE`` / ``POLICY_ONLY`` config diff — the parent's data trace is fully valid."""
     sc = session.scoring
     scorer = sc.require_scorer()
-    prior = campaign_store.load_rounds_range(hop, 0, resumed_from_round - 1)
+    prior = closed_rounds(session.store, hop, scorer, before_round=resumed_from_round)
 
-    # In place: each row is restamped where it sits.
-    for t in prior:
-        rescore_results(t.results, scorer)
-        for items in t.all_candidate_results.values():
-            rescore_results(items, scorer)
+    # For the CYCLE's own state, never as a comparison anchor.
+    cycle.tracking.current_results = [
+        scorer.grade(cell.facts) for cell in cycle.tracking.current_results
+    ]
 
-    # For the CYCLE's own state, never as a comparison anchor: the PoBB prior seed and the
-    # trajectory pool read these rows, and each election's anchor rides its own decision record.
-    rescore_results(cycle.tracking.current_results, scorer)
-
-    # Fingerprinted BEFORE any repair, from ONE cycle, so both sets differ by exactly what the
-    # repair changed. Deep copies because the repair mutates `prior` in place. No pre-replay:
-    # `round_packages` seeds every round's state itself, k=0 included.
-    packages_before = cycle.optimizer.runtime.round_packages(
-        cycle, [t.model_copy(deep=True) for t in prior]
-    )
-    # The trajectory the loop continues from, whichever optimizer walked it: the pick the bench
-    # grades and the parent the next round measures are both read off `cycle.rounds`.
+    # Fingerprinted BEFORE the repair, so the corrected set differs by exactly what it changed.
+    packages_before = cycle.optimizer.runtime.round_packages(cycle, prior)
     cycle.replay_priors(prior)
 
     correction = await apply_correction(
@@ -145,18 +124,15 @@ async def resume_with_divergence_check(
     if correction is not None:
         return correction
 
-    # Read the decisions once, from the cycle's OWN ledger — a fork carries the lifted rounds'
-    # records because the mint copies them, the same reason it copies their round files.
-    ledger_decisions = scan_ledger_decisions(CycleLayout(campaign_store.cycle_dir(hop)).ledger)
+    # Over the cycle's whole history: a fork's lifted rounds made theirs on its parent's ledger.
+    ledger_decisions = campaign_store.standing_rounds(hop).decisions
 
     if not skip_divergence_check:
-        # Both ABOVE the config short-circuit, deliberately: an optimizer's prompt hashes are
-        # not KNOBS, so `DiffScope.NONE` says nothing about them; and a stale generation is the
-        # one check answering for an EARLIER resume, which by now diffs clean.
+        # Both ABOVE the config short-circuit: neither is a knob, so a clean diff misses them.
         optimizer_mismatches = _optimizer_mismatches(prior, cycle.optimizer)
         stale = _stale_generation(campaign_store, hop, prior, resumed_from_round)
         campaign = campaign_store.load_campaign(hop.campaign_id)
-        frozen = campaign.config if campaign is not None else {}
+        frozen = frozen_config(session.store, campaign) if campaign is not None else {}
         scope, diffed = classify_config_diff(
             cycle.config, frozen, arm=campaign is not None and campaign.arm is not None
         )
@@ -180,8 +156,7 @@ async def resume_with_divergence_check(
         def _branch_or_halt(
             div: ReplayMismatch, survivors: list[RoundResult], *, self_inflicted: bool
         ) -> ForkResult:
-            """The ONE exit every divergence takes: branch at ``div.round_num``, or halt. Branches this resume
-            CAUSED take themselves; a change from OUTSIDE is the operator's call."""
+            """A branch this resume CAUSED takes itself; a change from OUTSIDE is the operator's call."""
             if not fork_on_divergence and not self_inflicted:
                 raise ResumeDivergenceError(
                     round_num=div.round_num,
@@ -189,7 +164,7 @@ async def resume_with_divergence_check(
                     recorded_outcome=div.recorded_outcome,
                     current_outcome=div.current_outcome,
                     diagnostics={
-                        "scorer_id": sc.scorer_id,
+                        "scorer_id": scorer.id,
                         "fork_hint": (
                             "rerun `resume --fork-on-divergence` to branch a new cycle "
                             "here; this one keeps what the superseded package produced"
@@ -199,14 +174,12 @@ async def resume_with_divergence_check(
             new_cycle_id = mint_fork(
                 campaign_store,
                 hop,
-                session.session_id,
                 div.round_num,
                 ForkSpec(
                     trigger=ForkTrigger.SCORING_DIVERGENCE,
                     reason=f"resume_divergence:{div.kind}",
                     issued_by="system",
                 ),
-                surviving_rounds=survivors,
             )
             cycle.replay_priors(survivors)
             logger.warning(
@@ -219,19 +192,15 @@ async def resume_with_divergence_check(
             return ForkResult(new_cycle_id=new_cycle_id, new_resumed_from_round=div.round_num)
 
         for i, t in enumerate(prior):
-            # A different OPTIMIZER produced it, or its OUTCOME no longer re-derives. One
-            # `ReplayMismatch`, one exit. Both come from outside this resume.
             div = optimizer_mismatches.get(t.round) or replay_decisions(
                 t,
-                ledger_decisions.get(t.round),
+                ledger_decisions.get(t.round, []),
                 ruler=cycle.difficulty.ruler,
             )
             if div is not None:
                 return _branch_or_halt(div, list(prior[:i]), self_inflicted=False)
 
-        # The round about to run has no round file, so the loop above cannot visit it — same
-        # exit, every prior round crossing the cut. This one IS ours: a generation left stale
-        # by an earlier resume is the resume doing its job, so it branches without asking.
+        # The round about to run has no round file, so the loop above cannot visit it.
         if stale is not None:
             return _branch_or_halt(stale, list(prior), self_inflicted=True)
 

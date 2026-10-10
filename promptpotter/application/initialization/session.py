@@ -6,24 +6,23 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.pipeline_resolve import resolved_dataset_name
-from promptpotter.application.run_observers import build_campaign_emitter
+from promptpotter.application.run_observers import build_campaign_emitter, declare_run_wiring
 from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.campaign_ids import mint_campaign_id, mint_checkin_cycle_id
-from promptpotter.config.settings import APP_VERSION
 from promptpotter.domain.bench import BankPartition
 from promptpotter.domain.campaign import Arm, Campaign, Treatment
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.measurement_provenance import RunSource
+from promptpotter.domain.paired_reading import instrument_of
 from promptpotter.domain.results import DisplayMetric
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import CellScorer
+from promptpotter.domain.scoring import Scorer
 from promptpotter.domain.spend import SpendCeilings
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
 from promptpotter.infrastructure.store.io import validate_path_component
-from promptpotter.infrastructure.store.layout import CycleLayout
-from promptpotter.infrastructure.store.session_pointer import mint_session_id, save_active_pointer
+from promptpotter.infrastructure.store.session_pointer import save_active_pointer
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.identity import IdentityContext, default_identity
@@ -37,7 +36,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.validators import StopRule
     from promptpotter.infrastructure.ledger import CycleEventLog
     from promptpotter.infrastructure.projections.audit_trail import AuditTrailProjection
-    from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
     from promptpotter.infrastructure.tracing.langfuse_client import LangfuseLogger
 
 
@@ -46,14 +44,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ScorerSetup:
-    scorer: CellScorer | None = None
-    scorer_id: str = "none"
-    scorer_cell_formula: str | None = None
-    # WHICH number the operator's surfaces display first. Here rather than only on
-    # `dashboard.json` because the terminal is an entry point too: served to the browser
-    # alone, a campaign that declares `ability` still led every CLI line with the
-    # subset-relative accuracy, which is the one reading `per_round_resubset` makes
-    # unsafe (`couplings.py::display_subset_relative_under_resubset`).
+    scorer: Scorer | None = None
     display_metric: DisplayMetric = "accuracy"
     partition: BankPartition | None = None
     degradation_checks: list[StopRule] = field(default_factory=list)
@@ -64,9 +55,7 @@ class ScorerSetup:
     per run rather than per sample, so the registry lookup, the term validation and the spec
     validation all happen before any money is spent."""
 
-    def require_scorer(self) -> CellScorer:
-        """The compiled scorer, or a loud stop. ``None`` means ``populate_session_scoring`` has not
-        run, so anything grading a cell here would be grading it under no declared formula."""
+    def require_scorer(self) -> Scorer:
         if self.scorer is None:
             raise RuntimeError(
                 "session.scoring.scorer is unset — populate_session_scoring must run first."
@@ -74,8 +63,6 @@ class ScorerSetup:
         return self.scorer
 
     def require_partition(self) -> BankPartition:
-        """``None`` means neither ``run_optimization`` nor ``arm_diagnostic_scoring`` split the
-        bank, so any draw here could reach the bench set."""
         if self.partition is None:
             raise RuntimeError("session.scoring.partition is unset — the bank was never split.")
         return self.partition
@@ -83,23 +70,12 @@ class ScorerSetup:
 
 @dataclass
 class CycleSnapshot:
-    """Per-cycle bundle — flips on fork."""
-
     cycle_id: str = ""
-    tracing_campaign_id: str = ""
     resumed_from_round: int = 1
-    obs: ObservabilityBridge | None = None
     audit_projection: AuditTrailProjection | None = None
     ledger: CycleEventLog | None = None
-    # Every cell (`ReplayFeed.cell_key`) this campaign's search already priced, grown as a walk
-    # takes each: a replay of one is a re-read and costs nothing again (`QueryLoopState.counted`).
-    # The optimizer and judge calls it priced ride it too, as `call:{reuse key}`.
+    # Cells (`ReplayFeed.cell_key`) and calls (`call:{reuse key}`) the search already priced.
     priced_keys: set[str] = field(default_factory=set)
-    # Forensic traceback for ``index.json::crash_traceback`` written by
-    # ``mark_finished``. Operator-facing summary (kind + message) is owned by
-    # the canonical ``ErrorRecord`` on the ledger; this field is the in-process
-    # conduit between the runner's ``except`` block and ``_finalize_run`` only.
-    crash_traceback: str | None = None
 
 
 @dataclass
@@ -107,60 +83,50 @@ class Session:
     store: Stores
     backend_id: str
     backend_client: BackendClient
-    # Non-optional: the schema decides what a measurement MEANS (which node carries the
-    # prompt, which configs are hashed into the identity), so a session without one is
-    # not a degraded session, it is a session that cannot measure. `_resolve_pipeline_schema`
-    # raises instead of handing back a `None` for ~40 readers to each mis-handle quietly.
     pipeline_schema: PipelineSchema
-    # The DECLARATION `pipeline_schema` was parsed from — the live backend's under the dataset's
-    # overlay, and the only copy of it in the system: a committed dataset file snapshots values
-    # and never axes, so `init_cycle` records this per cycle. Empty for an offline resolve.
+    # The only copy of the live backend's declaration; `init_cycle` records it. Empty offline.
     pipeline_declaration: dict[str, Any] = field(default_factory=dict)
     samples: list[Sample] = field(default_factory=list)
     index_terms: list[str] = field(default_factory=list)
     identity: IdentityContext = field(default_factory=default_identity)
     dataset_name: str | None = None
-    # Resolved tenant-first at init (`readable_dataset_dir`): tenant
-    # uploads at `projects/{tenant}/datasets/{slug}/`, else repo `datasets/{name}/`.
-    # The single resolution seam — every dataset-file loader reads this rather than
-    # recomputing a repo path from the bare name.
     dataset_config_dir: Path | None = None
     tenant_root: str = ""
     pipeline_params: dict[str, Any] = field(default_factory=dict)
-    # Per node, the keys of `pipeline_params` its identity layer wrote: hashed with the rest, and
-    # never sent to a backend (`sample_measurement.py::measure_sample`).
+    # Per node, the `pipeline_params` keys hashed into identity and never sent to a backend.
     identity_keys: dict[str, frozenset[str]] = field(default_factory=dict)
     langfuse: LangfuseLogger | None = None
 
-    session_id: str = ""
     campaign_id: str = ""
 
     state: CycleSnapshot = field(default_factory=CycleSnapshot)
     scoring: ScorerSetup = field(default_factory=ScorerSetup)
 
     source: RunSource | None = None
-    # This cycle was babysat — an operator directly edited an engine-owned/locked
-    # value (ADR-0005). Read from the cycle index at init; forces every run
-    # this cycle scores to grade C (excluded from digest / reuse / L4).
+    # An operator edited a locked value (ADR-0005): every run this cycle scores grades C.
     human_intervened: bool = False
-    # The head-to-head this campaign runs as an arm of (`Campaign.arm`), read at the runner seam.
     arm: Arm | None = None
 
     @property
     def controlled(self) -> bool:
-        """An arm of a declared head-to-head — the one predicate every mechanism reading past the
-        declaration asks (`docs/architecture.md` § The controlled comparison)."""
         return self.arm is not None
 
     @property
     def hop(self) -> CycleHop:
-        """This session's cycle as the PAIR that names it. Derived, never stored — ``cycle_id`` flips on a fork, and it
-        repeats across sibling ``.inner`` sandboxes, so reading either half alone crosses one fan-out into another."""
+        """Derived, never stored: ``cycle_id`` flips on a fork and repeats across sandboxes."""
         return CycleHop(campaign_id=self.campaign_id, cycle_id=self.state.cycle_id)
 
+    @property
+    def measured_dataset(self) -> str:
+        if not self.dataset_name:
+            raise RuntimeError("session.dataset_name is unset — this session measures no dataset.")
+        return self.dataset_name
+
+    @property
+    def instrument_id(self) -> str:
+        return instrument_of(self.measured_dataset, self.pipeline_params)
+
     def llm_node_name(self) -> str:
-        """The dataset's prompt-bearing LLM node — the override target for a per-cell seed or model pin. Derived from the
-        schema, never a literal, and RAISES rather than guessing: a dataset with no prompt node cannot carry an override."""
         names = self.pipeline_schema.prompt_node_names()
         if not names:
             raise ValueError(
@@ -169,66 +135,29 @@ class Session:
             )
         return names[0]
 
-    # Pause, skip, look-ahead and the ceiling, as every checkpoint polls them: one object, so the
-    # per-sample and round-boundary cadences cannot disagree. Unbound outside a run.
     control: RunControl = field(default_factory=RunControl)
-    # What the scoring phase has out and what its stop rules allow, summed over every walk and
-    # published to the ledger. ``None`` outside a run, where there is nobody to show it to.
     flight: FlightGauge | None = None
-    # What the account reserved for this run (``HeldLimits.reserve``), set at the runner seam
-    # before the book is armed.
-    reserve: SpendCeilings = field(default_factory=lambda: SpendCeilings(None, None))
+    # ``HeldLimits.reserve``, set at the runner seam BEFORE the book is armed.
+    reserve: SpendCeilings = field(default_factory=SpendCeilings)
 
 
-def _session_row(session: Session) -> dict[str, Any]:
-    """The session-store row: where a terminal verb finds the backend its cycle was minted on."""
-    return {
-        "init_params": {
-            "backend_url": session.backend_client.base_url,
-            "backend_id": session.backend_id,
-            "dataset_name": session.dataset_name,
-        }
-    }
-
-
-def _build_index_header(session: Session, dataset_size: int) -> dict[str, Any]:
-
-    nodes = list(session.pipeline_schema.nodes)
-    return {
-        "tool": "promptpotter",
-        "version": APP_VERSION,
-        "n_nodes": len(nodes),
-        "steps": [n.name for n in nodes],
-        "backend_url": session.backend_client.base_url,
-        "backend_id": session.backend_id,
-        # No dataset_name here — campaign.json::dataset_name is the one owner;
-        # every reader derives from it (a header copy needed its own re-sync).
-        "dataset_size": dataset_size,
-    }
-
-
-def auto_mint_session(
+def mint_campaign(
     session: Session,
     campaign_config: CampaignConfig,
     *,
     hop: CycleHop,
-    dataset_size: int = 0,
     label: str = "",
     treatment: Treatment,
     arm: Arm | None,
-) -> tuple[str, str, str]:
-    """Mint fresh campaign + session + root cycle; claim the active pointer. ``campaign_id`` comes from the CALLER, so an
-    L4 inner spawn can hand in an id derived from the cell it measures and land back on a campaign it already ran."""
+) -> None:
+    """``hop.campaign_id`` is the CALLER's, so an L4 inner spawn lands back on a campaign it ran."""
 
     target_hash = hop.cycle_id.removeprefix("cycle_")
     validate_path_component(target_hash)
-    session_id = mint_session_id()
     now = utcnow_iso()
     dataset_name = resolved_dataset_name(session, campaign_config)
     validate_path_component(hop.campaign_id)
     root_cycle = hop.cycle_id
-
-    session.store.sessions.create(session_id, _session_row(session))
 
     campaigns = session.store.campaigns
     campaigns.create_campaign(
@@ -242,6 +171,7 @@ def auto_mint_session(
             treatment=treatment,
             arm=arm,
             backend_id=session.backend_id,
+            backend_url=session.backend_client.base_url,
             backend_type=backend_type_of_dataset(session.store, dataset_name),
             owner_user_id=str(session.identity.user_id),
             lifecycle_status="active",
@@ -250,50 +180,40 @@ def auto_mint_session(
         )
     )
 
-    root_hop = CycleHop(campaign_id=hop.campaign_id, cycle_id=root_cycle)
-    campaigns.create(
-        root_hop,
-        {
-            "parent_session_id": session_id,
-            "header": _build_index_header(session, dataset_size),
-        },
-    )
+    _declare_frozen_wiring(session, campaign_config, hop)
+    campaigns.mint_cycle(hop)
 
-    session.session_id = session_id
     session.campaign_id = hop.campaign_id
     session.state.cycle_id = root_cycle
 
-    save_active_pointer(session.store.base_dir, session_id, root_hop)
+    save_active_pointer(session.store.base_dir, hop)
 
-    # Pre-seed dashboard.json so the webapp doesn't 404 in the mint→loop-start window.
-    build_campaign_emitter(session, campaign_config)
+    # So the mint → loop-start window serves `dashboard.json` off the campaign's own declarations.
+    build_campaign_emitter(session)
 
-    logger.info(
-        "Minted fresh campaign %s — session %s, cycle %s",
-        hop.campaign_id,
-        session_id,
-        root_cycle,
-    )
-    return session_id, hop.campaign_id, root_cycle
+    logger.info("Minted fresh campaign %s — cycle %s", hop.campaign_id, root_cycle)
 
 
-def mint_checkin_skeleton(stores: Stores, *, slug: str, backend_type: str) -> tuple[str, str, str]:
-    """Mint a disk-backed campaign in the ``checkin`` lifecycle. It does NOT claim the active pointer — a
-    not-yet-run check-in following it snaps a watching workspace out of the authoring flow.
-    ``backend_type`` is a required parameter, not read off the dataset: an ingest mints the
-    skeleton before the slug has a ``pipeline.yaml``, so only the caller's draft knows it."""
+def _declare_frozen_wiring(
+    session: Session, campaign_config: CampaignConfig, hop: CycleHop
+) -> None:
+    """Runs AHEAD of the record taking the cycle past check-in, so no read finds it stateless."""
+    ledger = CycleEventLog.open(CycleDir(session.store.campaigns.cycle_dir(hop)))
+    declare_run_wiring(session, campaign_config, ledger, tracing=None)
+
+
+def mint_checkin_skeleton(stores: Stores, *, slug: str, backend_type: str) -> CycleHop:
+    """Claims NO active pointer: an unrun check-in would pull a watching workspace off authoring."""
 
     now = utcnow_iso()
-    campaign_id = mint_campaign_id(slug)
-    cycle_id = mint_checkin_cycle_id()
-    session_id = mint_session_id()
+    hop = CycleHop(campaign_id=mint_campaign_id(slug), cycle_id=mint_checkin_cycle_id())
 
     stores.campaigns.create_campaign(
         Campaign(
-            campaign_id=campaign_id,
+            campaign_id=hop.campaign_id,
             dataset_name=slug,
             created_at=now,
-            root_cycle_id=cycle_id,
+            root_cycle_id=hop.cycle_id,
             backend_id="",
             backend_type=backend_type,
             owner_user_id=str(stores.identity.user_id),
@@ -301,32 +221,10 @@ def mint_checkin_skeleton(stores: Stores, *, slug: str, backend_type: str) -> tu
             config={},
         )
     )
-    stores.campaigns.create(
-        CycleHop(campaign_id=campaign_id, cycle_id=cycle_id),
-        {
-            "parent_session_id": session_id,
-            "header": {
-                "tool": "promptpotter",
-                "version": APP_VERSION,
-                "dataset_name": slug,
-                "backend_id": "",
-            },
-        },
-    )
-    # Placeholder session row so re-open + the sidebar's session count resolve a real
-    # session between skeleton and Start; finalize overwrites it with the run state.
-    stores.sessions.create(session_id, {"dataset_name": slug})
+    stores.campaigns.mint_cycle(hop, checkin=True)
 
-    checkin_flag = CycleLayout(
-        stores.campaigns.cycle_dir(CycleHop(campaign_id=campaign_id, cycle_id=cycle_id))
-    ).checkin_flag
-    checkin_flag.parent.mkdir(parents=True, exist_ok=True)
-    checkin_flag.write_text("", encoding="utf-8")
-
-    logger.info(
-        "Minted check-in campaign %s — session %s, cycle %s", campaign_id, session_id, cycle_id
-    )
-    return session_id, campaign_id, cycle_id
+    logger.info("Minted check-in campaign %s — cycle %s", hop.campaign_id, hop.cycle_id)
+    return hop
 
 
 def finalize_checkin_to_active(
@@ -334,62 +232,33 @@ def finalize_checkin_to_active(
     campaign_config: CampaignConfig,
     *,
     hop: CycleHop,
-    session_id: str,
     cycle_plan: CyclePlan,
-    dataset_size: int,
 ) -> None:
-    """Flip a ``checkin`` campaign to ``active`` against its EXISTING ids — the cycle id stays the provisional
-    ``cycle_chk_*``, since drift reads ``root_content_hash`` and not the parsed id. This mints nothing new."""
+    """The cycle id stays the provisional ``cycle_chk_*``: drift reads ``root_content_hash``."""
 
     target_hash = cycle_plan.cycle_id.removeprefix("cycle_")
-    session.store.sessions.create(session_id, _session_row(session))
 
     session.store.campaigns.update_campaign(
         hop.campaign_id,
-        {
-            "root_content_hash": target_hash,
-            "treatment": cycle_plan.treatment.model_dump(mode="json"),
-            "backend_id": session.backend_id,
-            # Re-read rather than trusted from the skeleton: the check-in wrote the slug's
-            # `pipeline.yaml` between the two, and the operator may have picked a different
-            # connector in the meantime. This is the mint that freezes it for good.
-            "backend_type": backend_type_of_dataset(session.store, session.dataset_name or ""),
-            "config": campaign_config.frozen(arm=False),
-        },
+        root_content_hash=target_hash,
+        treatment=cycle_plan.treatment.model_dump(mode="json"),
+        backend_id=session.backend_id,
+        backend_url=session.backend_client.base_url,
+        # Re-read, not trusted from the skeleton: the check-in writes `pipeline.yaml` in between.
+        backend_type=backend_type_of_dataset(session.store, session.dataset_name or ""),
+        config=campaign_config.frozen(arm=False),
     )
-    session.store.campaigns.create(
-        hop,
-        {
-            "parent_session_id": session_id,
-            "header": _build_index_header(session, dataset_size),
-        },
-    )
-
-    session.session_id = session_id
     session.campaign_id = hop.campaign_id
     session.state.cycle_id = hop.cycle_id
 
-    # Claim the active pointer now (not at skeleton mint) — Start is when the cycle
-    # becomes the running one the dashboard follows. A following workspace snaps to
-    # it here, so the operator lands on the live run instead of being bounced
-    # mid-authoring (the skeleton deliberately left the pointer alone).
-    # The store's OWN workspace, so a sandboxed inner cycle (L4) stamps its own
-    # pointer and never the outer tenant's — otherwise the inner mint clobbers the
-    # outer's active_session.json and the webapp (which reads the default root)
-    # follows a pointer to a campaign that lives under `.inner/…` and 404s.
-    save_active_pointer(session.store.base_dir, session_id, hop)
+    # The store's OWN workspace: a sandboxed inner cycle (L4) never stamps the outer tenant's.
+    save_active_pointer(session.store.base_dir, hop)
 
-    cycle_dir = session.store.campaigns.cycle_dir(hop)
-    CycleLayout(cycle_dir).checkin_flag.unlink(missing_ok=True)
+    _declare_frozen_wiring(session, campaign_config, hop)
+    session.store.campaigns.close_checkin(hop)
+    build_campaign_emitter(session)
 
-    build_campaign_emitter(session, campaign_config)
-
-    logger.info(
-        "Check-in campaign %s started — session %s, cycle %s",
-        hop.campaign_id,
-        session_id,
-        hop.cycle_id,
-    )
+    logger.info("Check-in campaign %s started — cycle %s", hop.campaign_id, hop.cycle_id)
 
 
 def open_cycle_ledger(session: Session, cycle_id: str) -> CycleEventLog:
@@ -404,7 +273,7 @@ def open_cycle_ledger(session: Session, cycle_id: str) -> CycleEventLog:
 __all__ = [
     "ScorerSetup",
     "Session",
-    "auto_mint_session",
     "finalize_checkin_to_active",
+    "mint_campaign",
     "mint_checkin_skeleton",
 ]

@@ -1,16 +1,11 @@
-"""Hard-sample-sorter heatmap — plain-text grid + hardness leaderboard.
-Used by the standalone CLI hard-sample run and ``to_markdown`` when ``LogMdView.hard_samples`` is set."""
-
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING
 
-from promptpotter.domain.results import HardSampleOrder
+if TYPE_CHECKING:
+    from promptpotter.application.views.view_models import HardSamplesView
 
-# Graded shade, densest = best. A binary ▓/▒ split would re-impose the `fitness >= 1.0`
-# threshold this projection exists to avoid: on a graded scorer every cell sits strictly
-# inside (0,1), so a threshold renders the whole grid identically and the matrix carries
-# no information at all.
+# Graded, not binary: on a graded scorer every cell sits inside (0,1) and a split shades them alike.
 _SHADES = ("░", "▒", "▓", "█")
 _UNMEASURED = "·"
 _HEATMAP_LABEL_W = 10
@@ -18,63 +13,34 @@ _HEATMAP_CELL_W = 2
 
 
 def _shade(fitness: float) -> str:
-    """Bucket a [0,1] fitness onto ``_SHADES``. 1.0 lands in the top bucket."""
     idx = min(int(fitness * len(_SHADES)), len(_SHADES) - 1)
     return _SHADES[idx]
 
 
-def _cell_index(artifact: dict[str, Any]) -> dict[tuple[str, int], float]:
-    return {(c["c"], int(c["s"])): float(c["f"]) for c in artifact.get("cells", [])}
-
-
-def render_hard_sample_heatmap(
-    artifact: dict[str, Any],
-    *,
-    sample_query_lookup: dict[int, str] | None = None,
-    order: HardSampleOrder = "info_gain",
-) -> str:
-    """*order* ranks the LEADERBOARD only — `CampaignConfig.hard_sample_order`, the same knob
-    the webapp panes read through the served rank. The GRID above it stays δ-sorted whatever
-    it says: that is a Rasch matrix, its column axis is difficulty by construction, and the
-    staircase only reads as one while difficulty runs monotonically across it."""
-    if not artifact or not artifact.get("n_observations"):
+def render_hard_sample_heatmap(shown: HardSamplesView) -> str:
+    """``shown.ranked`` orders the LEADERBOARD only; the GRID stays δ-sorted whatever it says."""
+    view = shown.artifact
+    if not view.cells:
         return ""
 
-    candidate_order: list[str] = list(artifact.get("candidate_order", []))
-    sample_order: list[int] = [int(s) for s in artifact.get("sample_order", [])]
-    if not candidate_order or not sample_order:
-        return ""
-
-    cells = _cell_index(artifact)
-    rasch = artifact.get("rasch") or {}
-    theta = rasch.get("theta") or {}
-    delta = rasch.get("delta") or {}
-
-    n_cand = artifact.get("n_candidates", len(candidate_order))
-    n_samp = artifact.get("n_samples", len(sample_order))
-    total_cand = artifact.get("total_candidates", n_cand)
-    total_samp = artifact.get("total_samples", n_samp)
-    truncated = bool(artifact.get("truncated"))
+    candidate_order, sample_order = view.candidate_order, view.sample_order
+    cells = {(c.candidate, c.sample_id): c.fitness for c in view.cells}
+    fitted = view.ruler.state == "fitted"
 
     label_w = max(_HEATMAP_LABEL_W, min(24, max(len(c) for c in candidate_order)))
     cell_w = _HEATMAP_CELL_W
 
-    cand_str = f"{n_cand} of {total_cand}" + (
-        " (truncated)" if truncated and n_cand < total_cand else ""
-    )
-    samp_str = f"{n_samp} of {total_samp}" + (
-        " (truncated)" if truncated and n_samp < total_samp else ""
-    )
     lines = [
-        f"  individuals : {cand_str}",
-        f"  samples     : {samp_str}",
-        f"  observed cells : {artifact['n_observations']}",
+        f"  individuals : {len(candidate_order)}",
+        f"  samples     : {len(sample_order)}",
+        f"  observed cells : {len(view.cells)}",
         f"  legend : fitness {_SHADES[0]} low → {_SHADES[-1]} high   {_UNMEASURED} not measured",
     ]
 
     header_pad = " " * (label_w + 3)
+    axis = "hardest ──── sample_id ────→ easiest" if fitted else f"sample_id ({view.ruler.label})"
     lines.append("")
-    lines.append(header_pad + "hardest ──── sample_id ────→ easiest")
+    lines.append(header_pad + axis)
     lines.append(header_pad + "".join(f"{(sid // 10) % 10:>{cell_w}d}" for sid in sample_order))
     lines.append(header_pad + "".join(f"{sid % 10:>{cell_w}d}" for sid in sample_order))
 
@@ -83,37 +49,40 @@ def render_hard_sample_heatmap(
         for sid in sample_order:
             fitness = cells.get((cid, sid))
             row_cells.append(_UNMEASURED * cell_w if fitness is None else _shade(fitness) * cell_w)
-        t = theta.get(cid)
-        theta_str = f"{t:>+5.2f}" if isinstance(t, (int, float)) else "  ?  "
+        theta_str = f"{view.theta[cid]:>+5.2f}" if cid in view.theta else " " * 5
         label = cid[: label_w - 1].ljust(label_w)
         lines.append(f"  {label} {theta_str}  {''.join(row_cells)}")
 
-    pick = {
-        int(k): float(v)
-        for k, v in ((artifact.get("pick_score") or {}).get("per_sample") or {}).items()
-    }
-    if order == "info_gain" and pick:
-        ranked = sorted(sample_order, key=lambda s: (-pick.get(s, 0.0), s))
-        key_map, title, key_label = pick, "Info-gain leaderboard", "info gain"
-    else:
-        # `sample_order` already IS δ-descending, on its own mean-miss tiebreak — re-sorting
-        # here on sample_id would quietly answer a slightly different question.
-        ranked = sample_order
-        key_map = {int(k): float(v) for k, v in delta.items()}
-        title, key_label = "Hardness leaderboard", "delta"
+    lines.append("")
+    if not fitted:
+        lines.append(f"  {view.ruler.label}")
+        return "\n".join(lines)
 
-    top_samples = ranked[:10]
-    if top_samples:
-        lookup = sample_query_lookup or {}
-        lines.append("")
-        lines.append(f"  {title} (top {len(top_samples)})")
+    by_gain = shown.order == "info_gain"
+    title, key_label = (
+        ("Info-gain leaderboard", "info gain") if by_gain else ("Hardness leaderboard", "delta")
+    )
+    keyed = (
+        (sid, on.pick_score if by_gain else on.delta, on.delta_se)
+        for sid in shown.ranked
+        for on in (view.samples[sid],)
+    )
+    top = [
+        (sid, key, delta_se)
+        for sid, key, delta_se in keyed
+        if key is not None and delta_se is not None
+    ][:10]
+    if top:
+        lines.append(f"  {title} (top {len(top)})")
         lines.append(f"    {'sample_id':>10s} {key_label:>10s} {'delta_se':>10s}  query")
         lines.append(f"    {'-' * 10} {'-' * 10} {'-' * 10}  {'-' * 40}")
-        delta_se = rasch.get("delta_se") or {}
-        for sid in top_samples:
-            se = float(delta_se.get(str(sid), 0.0))
-            query = (lookup.get(sid) or "")[:40]
-            lines.append(f"    {sid:>10d} {key_map.get(sid, 0.0):>+10.3f} {se:>10.3f}  {query}")
+        for sid, key, delta_se in top:
+            query = shown.sample_query_lookup.get(sid, "")[:40]
+            lines.append(f"    {sid:>10d} {key:>+10.3f} {delta_se:>10.3f}  {query}")
+
+    off = [sid for sid in sample_order if view.samples[sid].delta is None]
+    if off:
+        lines.append(f"  {view.samples[off[0]].label}: {', '.join(str(sid) for sid in off)}")
 
     return "\n".join(lines)
 

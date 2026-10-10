@@ -1,9 +1,7 @@
-"""The unified fork-mint primitive; every trigger mints here and none may grow its own path. A fork is
-a new CYCLE in the SAME campaign, flat under ``cycles/``, never nested under its parent."""
+"""A fork is a new CYCLE in the SAME campaign, flat under ``cycles/``, never nested under its parent."""
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import re
 from collections.abc import Mapping
@@ -13,30 +11,26 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 from promptpotter.application.bench.resume_and_fork.decisions import (
     record_decision,
 )
-from promptpotter.application.served_dashboard import served_dashboard
+from promptpotter.application.served_dashboard import fork_remainder
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.pipeline_overlay import (
     allowed_values_from_narrowing,
     node_config_items,
 )
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
-from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_records import (
     FORK_DIRECTION,
     BenchCheckpointKind,
     ForkDirection,
-    ForkRemainder,
     ForkSpec,
     ForkTrigger,
 )
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store.layout import campaign_cycles_dir, root_cycle_id
-from promptpotter.infrastructure.store.session_pointer import (
-    read_active_pointer,
-    save_active_pointer,
-)
+from promptpotter.infrastructure.store.session_pointer import save_active_pointer
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import PayloadInvalidError, graceful
+from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.identity import acting_principal_id
 
 if TYPE_CHECKING:
@@ -48,7 +42,6 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "ForkResult",
-    "cleanup_stub_fork_if_empty",
     "declare_steered_values",
     "mint_diag_sibling",
     "mint_fork",
@@ -64,21 +57,19 @@ class ForkResult(NamedTuple):
 def _fork_sibling_setup(
     campaign_store: CampaignStore,
     parent: CycleHop,
-    session_id: str,
     new_cycle_id: str,
     *,
     from_round: int,
     payload: ForkSpec,
-) -> str:
+) -> None:
     parent_dir = campaign_store.cycle_dir(parent)
     new_dir = campaign_store.cycle_dir(parent.model_copy(update={"cycle_id": new_cycle_id}))
     if new_dir.exists():
         raise FileExistsError(f"forked cycle dir already exists: {new_dir}")
     new_dir.mkdir(parents=True, exist_ok=True)
 
-    now = utcnow_iso()
     record_data: dict[str, Any] = {
-        "forked_at": now,
+        "forked_at": utcnow_iso(),
         "fork": payload.model_dump(mode="json"),
     }
 
@@ -93,9 +84,7 @@ def _fork_sibling_setup(
         )
 
     save_active_pointer(
-        campaign_store.workspace,
-        session_id,
-        parent.model_copy(update={"cycle_id": new_cycle_id}),
+        campaign_store.workspace, parent.model_copy(update={"cycle_id": new_cycle_id})
     )
     logger.info(
         "Forked %s → %s at round %d [trigger=%s] (active pointer retargeted)",
@@ -104,13 +93,18 @@ def _fork_sibling_setup(
         from_round,
         payload.trigger.value,
     )
-    return now
+    # After the FORK_CUT, so the cut the mint reads off the parent's ledger includes it.
+    campaign_store.mint_fork_cycle(parent, new_cycle_id, payload, from_round=from_round)
+    if payload.seed is not None:
+        # Without its own record a rebase's config unlock silently re-locks on the fork's first `resume`.
+        campaign_store.write_cycle_seed(
+            parent.model_copy(update={"cycle_id": new_cycle_id}), payload.seed
+        )
 
 
 def _next_diag_sibling_id(
     campaign_store: CampaignStore, campaign_id: str, parent_cycle_id: str
 ) -> str:
-    """Next ``{root}_diag_NNN`` id; siblings root at the family root."""
     root_id = root_cycle_id(parent_cycle_id)
     cycles_dir = campaign_cycles_dir(campaign_store.campaign_root_dir(campaign_id))
     pattern = re.compile(rf"^{re.escape(root_id)}_diag_(\d+)$")
@@ -125,12 +119,6 @@ def _next_diag_sibling_id(
     return f"{root_id}_diag_{max_n + 1:03d}"
 
 
-# Fork mint creates the on-disk dir + index.json + ledger inheritance +
-# active-pointer retarget BEFORE the fork's first round runs. An
-# interrupt between this call and round-1-commit would leave a stub
-# (n_rounds=0). The orchestration layer guards against that via
-# ``cleanup_stub_fork_if_empty`` below — wrapped around every fork run
-# site.
 _REBASE_TRIGGERS = frozenset(
     {
         ForkTrigger.SCORING_DIVERGENCE,
@@ -144,25 +132,18 @@ _ZERO_ROUND_TRIGGERS = frozenset(ForkTrigger) - _REBASE_TRIGGERS
 
 
 def _fork_suffix(*parts: str) -> str:
-    """8-hex id suffix over *parts* + the wall clock, which is what separates two forks cut from one
-    parent — the *parts* alone cannot, since every rebase of a given parent passes the same tuple.
-    The stamp is therefore read at MICROSECOND resolution: at the second resolution it carried, two
-    forks cut inside one second hashed identically and the later one landed on the earlier one's id."""
+    """The clock, at MICROSECOND resolution, is all that separates two forks of one parent: *parts* cannot."""
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
-    return hashlib.sha256("|".join((*parts, stamp)).encode()).hexdigest()[:8]
+    return stable_hash([*parts, stamp], length=8)
 
 
 def mint_fork(
     campaign_store: CampaignStore,
     parent: CycleHop,
-    session_id: str,
     fork_from_round: int,
     payload: ForkSpec,
-    *,
-    surviving_rounds: list[RoundResult] | None = None,
 ) -> str:
-    """Single entry point, dispatching on ``payload.trigger``. ``fork_from_round`` is MECHANICAL (how many
-    parent rounds this lifts); ``ForkSpec.from_round`` is PROVENANCE (which round the cut came from)."""
+    """``fork_from_round`` is MECHANICAL (parent rounds lifted); ``ForkSpec.from_round`` is PROVENANCE."""
     if payload.from_round is None:
         payload = payload.model_copy(update={"from_round": fork_from_round})
     if payload.trigger in _ZERO_ROUND_TRIGGERS and fork_from_round != 0:
@@ -171,144 +152,28 @@ def mint_fork(
             f"round, so fork_from_round must be 0; got {fork_from_round}"
         )
     if payload.trigger in _REBASE_TRIGGERS:
-        if payload.trigger is ForkTrigger.SCORING_DIVERGENCE and surviving_rounds is None:
-            raise ValueError("mint_fork(SCORING_DIVERGENCE) requires surviving_rounds")
-        if surviving_rounds is None:
-            # L2_REBASE / L3_REBASE / OPERATOR_REWIND: lift rounds 0..fork_from_round-1
-            # from the parent's round files.
-            surviving_rounds = campaign_store.load_rounds_range(parent, 0, fork_from_round - 1)
         new_cycle_id = f"{parent.cycle_id}_fork_{_fork_suffix(parent.cycle_id)}"
-        now = _fork_sibling_setup(
-            campaign_store,
-            parent,
-            session_id,
-            new_cycle_id,
-            from_round=fork_from_round,
-            payload=payload,
-        )
-        campaign_store.save_rebase_fork(
-            parent.campaign_id,
-            parent.cycle_id,
-            new_cycle_id,
-            surviving_rounds=surviving_rounds,
-            forked_at=now,
-            forked_from_round=fork_from_round,
-        )
-        # BEFORE the copy: the rounds it copies are the documents naming these rulers, and a
-        # ledger scan sees only THIS cycle, so without it a fork cannot reproduce its own δ scale.
-        campaign_store.copy_rulers(parent, new_cycle_id, round_num=fork_from_round)
-        campaign_store.copy_parent_rounds_and_candidates(
-            parent.campaign_id,
-            parent.cycle_id,
-            new_cycle_id,
-            before_round=fork_from_round,
-        )
-        if payload.seed is not None:
-            # An L2/L3 rebase carrying a config unlock writes its seed like any other
-            # seeded cycle. `read_cycle_seed` scans THIS cycle's own ledger, so without
-            # the record the unlock would live only in memory: it would hold for the
-            # in-process run and silently re-lock on the first `resume` of the fork.
-            campaign_store.write_cycle_seed(
-                CycleHop(campaign_id=parent.campaign_id, cycle_id=new_cycle_id), payload.seed
-            )
     elif payload.trigger is ForkTrigger.OPERATOR_DIAG:
         new_cycle_id = _next_diag_sibling_id(campaign_store, parent.campaign_id, parent.cycle_id)
-        now = _fork_sibling_setup(
-            campaign_store,
-            parent,
-            session_id,
-            new_cycle_id,
-            from_round=0,
-            payload=payload,
-        )
-        campaign_store.write_fresh_sibling(
-            parent.campaign_id, parent.cycle_id, new_cycle_id, forked_at=now
-        )
-    elif payload.trigger is ForkTrigger.OPERATOR_STEERED:
+    else:
         new_cycle_id = (
             f"{root_cycle_id(parent.cycle_id)}_fork_{_fork_suffix(parent.cycle_id, 'operator')}"
         )
-        now = _fork_sibling_setup(
-            campaign_store,
-            parent,
-            session_id,
-            new_cycle_id,
-            from_round=0,
-            payload=payload,
-        )
-        # Clean-offshoot fork from the lineage/control panel (endorse or steered):
-        # fresh sibling index (no parent-round copy, round numbering restarts at 1);
-        # the origin re-scores from the selected/edited searchpoint at init. The
-        # ForkSpec provenance lands on index.json::fork via the single fork-block
-        # writer below.
-        campaign_store.write_fresh_sibling(
-            parent.campaign_id, parent.cycle_id, new_cycle_id, forked_at=now
-        )
-        # The steered seed (edited searchpoint + reconciled limits) rides its own
-        # read-once home; the ledger FORK_CUT still carries it as SoT.
-        if payload.seed is not None:
-            campaign_store.write_cycle_seed(
-                CycleHop(campaign_id=parent.campaign_id, cycle_id=new_cycle_id), payload.seed
-            )
-    # The lineage-read fork block — serialized from the one typed ForkSpec (no
-    # hand-built per-trigger dict). The heavy `seed` payload is excluded; it rides
-    # the fork's ledger as its own read-once `CycleSeedRecord`.
-    campaign_store.update(
-        CycleHop(campaign_id=parent.campaign_id, cycle_id=new_cycle_id),
-        {"fork": payload.model_dump(mode="json", exclude={"seed"})},
+    _fork_sibling_setup(
+        campaign_store,
+        parent,
+        new_cycle_id,
+        from_round=fork_from_round,
+        payload=payload,
     )
-    # THE LINE MOVED, and to WHERE — an offshoot's parent keeps running, hence the DIRECTION.
-    # Naming the successor is what lets a reader follow the line off an already-stopped parent.
+    # An offshoot's parent keeps running, hence the DIRECTION.
     if FORK_DIRECTION.get(payload.trigger) is ForkDirection.SUPERSEDE:
         campaign_store.mark_superseded(parent, new_cycle_id)
     return new_cycle_id
 
 
-def cleanup_stub_fork_if_empty(
-    *,
-    campaign_store: CampaignStore,
-    hop: CycleHop,
-    parent_cycle_id: str,
-) -> tuple[bool, str]:
-    """THE stub-deletion path — the runner's cleanup, ``delete-cycle`` and ``cleanup-empty-cycles``
-    all come here, so pointer discipline has one home. The session id comes off the POINTER, never
-    the caller, who may have none. Spend banking is the store's, inside the delete itself."""
-    workspace = campaign_store.workspace
-    session_id, _, active_cid = read_active_pointer(workspace)
-    was_active = active_cid == hop.cycle_id
-    if was_active:
-        save_active_pointer(
-            workspace, session_id, CycleHop(campaign_id=hop.campaign_id, cycle_id=parent_cycle_id)
-        )
-    try:
-        deleted, reason = campaign_store.try_delete_stub_cycle(hop)
-    except Exception as exc:
-        logger.warning("Stub cleanup raised for %s: %s", hop.cycle_id, exc)
-        if was_active:
-            save_active_pointer(workspace, session_id, hop)
-        return False, str(exc)
-    if not deleted and was_active:
-        save_active_pointer(workspace, session_id, hop)
-        logger.info(
-            "Stub cleanup skipped for %s (%s); active pointer restored", hop.cycle_id, reason
-        )
-    elif deleted:
-        logger.info("Stub fork cleaned up: %s (parent=%s)", hop.cycle_id, parent_cycle_id)
-    return deleted, reason
-
-
 def declare_steered_values(seed: CycleSeed, narrowing: Mapping[str, Any] | None) -> CycleSeed:
-    """A steered value on an enumerable axis joins the fork's OWN permitted set. Without it the
-    fork runs ``model=X`` beside a set that excludes X, and L1 is offered a menu the running value
-    is not on. *narrowing* is the campaign's frozen ``optimizer_narrowing``; an axis it declares no
-    list for keeps the dataset's, which this cannot see and does not need to — except ``model``,
-    where the gate reads nothing declared as nothing sanctioned, so the fork must say what it runs.
-    An axis the caller's seed already declares is theirs and stays.
-
-    Applied at the MINT, so the terminal and the browser cannot mint two different forks from the
-    same steer. It widens the FORK's search space and nothing else: `steers_disallowed_model`
-    reads the campaign manifest, never a cycle seed, so a branch steered outside the origin's
-    sanction stays babysat in every fork below it."""
+    """Without it the fork runs ``model=X`` beside a permitted set that excludes X."""
 
     origin = allowed_values_from_narrowing(narrowing)
     declared = dict(seed.optimizer_narrowing)
@@ -332,7 +197,6 @@ def mint_diag_sibling(*, stores: Stores, hop: CycleHop) -> str:
     return mint_fork(
         stores.campaigns,
         hop,
-        stores.campaigns.session_id_of(hop),
         0,
         ForkSpec(
             trigger=ForkTrigger.OPERATOR_DIAG,
@@ -352,40 +216,23 @@ def mint_operator_fork(
     keep_rounds: bool = False,
     reason: str = "",
 ) -> str:
-    """The operator-initiated fork entry; no parallel creation path exists. Every operator fork is a clean
-    offshoot carrying *seed* — recorded, not forbidden: operators may act, and we record that they did.
-
-    An offshoot naming no candidate branches from the parent's C0, the origin candidate of its
-    round 0 — an entry point with no searchpoint to point at still inherits that measurement.
-
-    ``keep_rounds`` picks which of the two the act is. Default is the OFFSHOOT: branch from the
-    origin, re-score the edited searchpoint, number rounds from 1 — the steer that starts over from
-    a point, under the parent's REMAINING rounds and spend wherever the seed names no cap. Set, it is the REWIND the terminal spells ``resume --rewind N``: rounds ``0..N-1`` are
-    lifted and the fork continues at N under the seed's overrides. That is the shape a mask
-    preview earns — the preview names the round the record stops holding, and this is the fork that
-    keeps everything before it."""
     campaign = stores.campaigns.load_campaign(hop.campaign_id)
     seed = declare_steered_values(
         seed, campaign.config.get("optimizer_narrowing") if campaign else None
     )
     if keep_rounds and seed.origin_prompt_fields:
-        # Two different origins asked for at once: the lifted round 0 is already the origin, so a
-        # declared one would either be ignored or overwrite measured rows. Refused rather than
-        # silently dropped — the caller meant one of the two acts and this says which it cannot be.
         raise PayloadInvalidError(
             "keep_rounds lifts the parent's round 0 as its origin, so the seed must not "
             "declare origin_prompt_fields; fork without keep_rounds to start from an edited origin"
         )
     if not keep_rounds:
         # The remainder the parent's dashboard serves, so the fork's caps are the ones on screen.
-        remainder = served_dashboard(stores, hop).get("fork_remainder")
-        if remainder is not None:
-            caps = ForkRemainder.model_validate(remainder).under(seed.config_overrides)
-            seed = seed.model_copy(update={"config_overrides": caps})
+        caps = fork_remainder(stores, hop).under(seed.config_overrides)
+        seed = seed.model_copy(update={"config_overrides": caps})
     if not from_candidate_id and not keep_rounds:
-        origin_round = stores.campaigns.load_round_file(hop, 0)
-        if origin_round is not None and origin_round.candidate_scores:
-            from_candidate_id = origin_round.candidate_scores[0].candidate_id
+        origin_round = stores.campaigns.standing_rounds(hop).rounds.get(0)
+        if origin_round is not None and origin_round.close.candidate_scores:
+            from_candidate_id = origin_round.close.candidate_scores[0].candidate_id
     spec = ForkSpec(
         trigger=ForkTrigger.OPERATOR_REWIND if keep_rounds else ForkTrigger.OPERATOR_STEERED,
         reason=reason
@@ -402,7 +249,6 @@ def mint_operator_fork(
     return mint_fork(
         stores.campaigns,
         hop,
-        stores.campaigns.session_id_of(hop),
         from_round if keep_rounds else 0,
         spec,
     )

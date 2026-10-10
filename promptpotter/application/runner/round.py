@@ -1,23 +1,19 @@
-"""One round: the selected manifest's ``default`` pipeline, walked by node type — sampler, the
-proposers, the measurement under the eliminator, the selector, the adapters, and the controller at
-the boundary — then persisted. The ledger is the sole persistence ingress; bypassing this seam
-collapses the round's display AND its audit together."""
-
 from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application import optimizers
 from promptpotter.application.bench.cycle import Cycle
+from promptpotter.application.bench.node_context import NodeContext
 from promptpotter.application.bench.resume_and_fork.decisions import record_decision
 from promptpotter.application.bench.round_analysis import compute_round_diagnostics
 from promptpotter.application.diagnostics.verify import verify_on_saturation
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizers.nodes import (
-    Population,
+    Proposals,
     RoundContext,
     RoundOpening,
     round_state,
@@ -31,27 +27,34 @@ from promptpotter.application.runner.output import (
     write_review_md,
 )
 from promptpotter.application.runner.overlap import measure_overlap
-from promptpotter.application.runner.termination import panel_gate_tripped
+from promptpotter.application.runner.termination import panel_gate_tripped, standing_tripped
+from promptpotter.application.scoring.candidate_report import arm_id, fatal_validation_failures
 from promptpotter.application.scoring.row_diagnostics import count_degraded_samples
-from promptpotter.application.scoring.selection import matched_parent_lift
-from promptpotter.config.settings import PROMPT_STRING_FIELDS
-from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.dashboard_rows import RunStanding
+from promptpotter.application.views.ingress import propose_enter, propose_exit, select_exit
+from promptpotter.application.views.render.primitives import overlap_series
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop
+from promptpotter.domain.l4.proxies import panel_precision
+from promptpotter.domain.paired_reading import READING_STATE_INFO, ReadingState
+from promptpotter.domain.phase_views import MeasureEnterView
 from promptpotter.domain.phases import (
     STOP_REASON_INFO,
     CampaignPhase,
     StopLoop,
     StopReason,
-    emit_phase,
 )
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.results import (
+    ROUND_ADVANCE_INFO,
     CandidateProposal,
+    OverlapReading,
+    RoundAdvance,
     RoundResult,
+    RunStanding,
     ScoredCandidate,
     candidate_label,
     is_leader_eligible,
-    overlap_series,
+    recall_at,
+    stalls_left,
     unscoreable_cells,
 )
 from promptpotter.domain.results_health import (
@@ -64,15 +67,16 @@ from promptpotter.domain.run_records import (
     CandidateMintedRecord,
     ResumeCheckpointRecord,
 )
-from promptpotter.domain.scoring import is_unscored
-from promptpotter.domain.search_point import strip_rendered_prompt
+from promptpotter.domain.scoring import NO_CELLS
 from promptpotter.domain.wounds import collapse_counts
+from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.llm.telemetry import emit_round_warning
-from promptpotter.infrastructure.tracing.bridge import observed_node
-from promptpotter.infrastructure.tracing.events import PromptVersion, RoundEnd, RoundStart
-from promptpotter.shared.errors import graceful, is_error_result
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import close_spend
+from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.optimizers.nodes import (
         Adapter,
@@ -86,8 +90,9 @@ if TYPE_CHECKING:
         Selector,
     )
     from promptpotter.domain.opt_search_point import OptSearchPoint
+    from promptpotter.domain.results import DisplayMetric
     from promptpotter.domain.sample import Sample
-    from promptpotter.domain.scoring import QueryMeasurement
+    from promptpotter.domain.scoring import CellSheet
 
 logger = logging.getLogger(__name__)
 
@@ -107,13 +112,14 @@ __all__ = [
 ]
 
 
+INITIAL_POPULATION = "initial_population"
+
+
 @dataclass(frozen=True)
 class RoundPlan:
-    """The members a manifest's ``default`` pipeline names, by the role their type and position
-    give them — nodes before the measurement propose, nodes after the selector adapt."""
-
     measurement: str
     sampler: Sampler
+    seeders: tuple[Proposer, ...]
     proposers: tuple[Proposer, ...]
     eliminator: Eliminator | None
     selector: Selector
@@ -126,7 +132,6 @@ class RoundPlan:
 
 
 def round_plan(selected: SelectedOptimizer) -> RoundPlan:
-    """Refuses a walk the bench cannot run rather than skipping the node it cannot place."""
     walk = selected.schema.pipelines["default"]
     kinds = [selected.node(name).kind for name in walk]
     measured_at = kinds.index(NodeKind.GATEWAY)
@@ -173,6 +178,10 @@ def round_plan(selected: SelectedOptimizer) -> RoundPlan:
     return RoundPlan(
         measurement=walk[measured_at],
         sampler=samplers[0],
+        seeders=tuple(
+            cast("Proposer", optimizers.member(name))
+            for name in selected.schema.pipelines.get(INITIAL_POPULATION, ())
+        ),
         proposers=tuple(proposers),
         eliminator=eliminators[0] if eliminators else None,
         selector=selectors[0],
@@ -181,88 +190,57 @@ def round_plan(selected: SelectedOptimizer) -> RoundPlan:
     )
 
 
-def _separability(round_result: RoundResult) -> bool | None:
-    """Did this round ADVANCE the best-so-far line — read on the origin panel, where a gain
-    accumulates against C0 instead of being re-asked as one round's increment over its parent.
-    A single round's interval at panel width spans 0 for almost any real edit, so it stalled every
-    round alike. ``None`` where the line carries no interval: there is nothing to be inconclusive
-    ABOUT."""
+def _warn_not_advanced(round_result: RoundResult) -> None:
     overlap = round_result.overlap
-    if overlap is None or overlap.lead_interval is None:
-        return None
-    if not round_result.improved:
-        return False
-    *earlier, newest = overlap.members
-    return overlap.lead_interval[0] > 0.0 and newest.accuracy > max(m.accuracy for m in earlier)
-
-
-def _warn_not_separable(round_result: RoundResult) -> None:
-    overlap = round_result.overlap
-    if round_result.separable is not False or not round_result.improved:
+    if overlap.advance not in (RoundAdvance.NOT_SEPARATED, RoundAdvance.UNREAD):
         return
-    assert overlap is not None and overlap.lead_interval is not None
-    lo, hi = overlap.lead_interval
+    lead = overlap.lead
+    evidence = (
+        READING_STATE_INFO[lead.state].sentence
+        if lead.headline is None
+        else f"lift interval [{lead.headline.estimate.ci_lo:+.3f}, "
+        f"{lead.headline.estimate.ci_hi:+.3f}] on {overlap_series(overlap)}"
+    )
     emit_round_warning(
-        kind="round_not_separable",
+        kind="round_not_advanced",
         message=(
-            f"round {round_result.round} selected {overlap.members[-1].label}, which has not "
-            f"separated from C0: lift interval [{lo:+.3f}, {hi:+.3f}] on "
-            f"{overlap_series(overlap)}. The selection is the best of what the round saw, not "
-            "yet a measured improvement"
+            f"round {round_result.round} selected {round_result.label}: "
+            f"{ROUND_ADVANCE_INFO[overlap.advance].sentence} {evidence}"
         ),
-        detail={"lead_ci_lo": lo, "lead_ci_hi": hi},
+        detail={"advance": overlap.advance.value, "lead_state": lead.state.value},
     )
 
 
 def _round_result(
     ctx: RoundContext,
-    population: Population,
     measured: Measured,
     selection: Selection,
-    pipeline_params: dict[str, Any] | None,
     *,
-    stamps_theta: bool,
+    elects_on: DisplayMetric,
 ) -> RoundResult:
-    # A held round's headline is the RETAINED parent re-scored on this panel — never
-    # `tracking.current_*`, which unions rows DIFFERENT configurations measured.
+    # A held round headlines the parent RE-SCORED on this panel, never `tracking.current_*`, a union.
     parent = measured.parent
     winner_id = selection.selected_id
     scores = selection.scores
     cs_by_id = {cs.candidate_id: cs for cs in scores}
-    params_by_id = {
-        ind.lineage.id: pp
-        for ind, pp in zip(
-            population.individuals, population.params_under(pipeline_params), strict=True
+    if winner_id and selection.leading_id != winner_id:
+        raise ValueError(
+            f"round {ctx.round_num}: the selector kept {winner_id[:12]} and named "
+            f"{selection.leading_id[:12] or 'no arm'} as the one the round is read off"
         )
-    }
-    # The arm the round ended on, and every headline off ITS report: the label, the rates and the
-    # sample count are one individual's, so the round header and the per-candidate table agree.
     elected: ScoredCandidate = parent.report
     best_opt_sp: OptSearchPoint = parent.opt_sp
-    best_results: list[QueryMeasurement] = list(measured.parent_rows)
-    best_params = pipeline_params
+    best_results: CellSheet = measured.parent_rows
     if winner_id:
         elected = cs_by_id[winner_id]
-        best_opt_sp = next(ind for ind in measured.electable if ind.lineage.id == winner_id)
-        best_results = list(measured.rows[winner_id])
-        best_params = params_by_id[winner_id]
-    p_value: float | None = None
-    winner_reference = elected.reference_id if winner_id else None
-    if elected.total > 0 and winner_reference is not None:
-        # A recorded diagnostic; it gates nothing. The p of the SAME reading the winner's
-        # `reference_lift_ci_*` came from, so the interval and the test agree about zero.
-        paired = matched_parent_lift(
-            best_results, measured.references[winner_reference], grade="fitness"
-        )
-        p_value = paired.p_value if paired else None
-    # Cells of the winner's panel never sent. An eliminator stop is one legitimate reason for it,
-    # so this is REPORTED here and graded only on the origin.
+        best_opt_sp = next(ind for ind in measured.electable if ind.id == winner_id)
+        best_results = measured.rows[winner_id]
+    lift_reference = ctx.cycle.config.optimization.lift_reference
     not_attempted = max(0, elected.expected_samples - elected.scored_samples) if winner_id else 0
-    # Counted off the rows: an ungraded cell WAS sent and WAS measured, so it is already inside
-    # `scored_samples` and no subtraction can find it.
-    unscored = sum(1 for r in best_results if is_unscored(r))
-    results = cast("list[dict[str, Any]]", best_results)
-    return RoundResult(
+    # Counted off the rows: an ungraded cell is already inside `scored_samples`.
+    unscored = sum(1 for cell in best_results if cell.grade.unscored is not None)
+    cycle = ctx.cycle
+    elected_round = RoundResult(
         round=ctx.round_num,
         label=elected.label,
         accuracy=elected.accuracy,
@@ -270,53 +248,56 @@ def _round_result(
         total=elected.total,
         not_attempted=not_attempted,
         unscored=unscored,
-        # Graded HERE, with the rows it grades: no reader meets a round whose verdict is pending.
         health=compute_round_health(
-            results=results,
+            results=best_results.cells,
             prior_healths=assemble_prior_healths(ctx.cycle.rounds, ctx.round_num),
             not_attempted=not_attempted,
             unscored=unscored,
         ),
         improved=bool(winner_id),
-        p_value=p_value,
+        # Until `measure_overlap` lands, after every pick this round makes.
+        overlap=OverlapReading.unpaired(ReadingState.PENDING, ctx.round_num, bool(winner_id)),
+        reference_rule=lift_reference,
         verdict_reason=selection.verdict_reason,
-        stamps_theta=stamps_theta,
+        elects_on=elects_on,
         prompt_fields=best_opt_sp.prompt_field_dict(),
-        # Stripped, because the round's incoming params carry the PREVIOUS winner's render and
-        # nothing re-renders at this write; every reader rebuilds the render from `prompt_fields`.
-        pipeline_params=strip_rendered_prompt(best_params),
-        results=results,
-        all_candidate_results=cast("dict[str, list[dict[str, Any]]]", dict(measured.rows)),
-        # Banked with the arms read against them: every scalar this round stamps about a
-        # reference is read off exactly these rows.
-        reference_results={
-            rid: cast("list[dict[str, Any]]", list(rows))
-            for rid, rows in measured.references.items()
-        },
+        pipeline_params=best_opt_sp.pipeline_params,
+        results=best_results,
+        all_candidate_results=dict(measured.rows),
+        reference_results=dict(measured.references),
         candidates_scored=len(measured.scored),
         electable_count=len(measured.electable),
         candidate_scores=scores,
         selected_labels=[elected.label] if winner_id else [],
-        degraded_samples=count_degraded_samples(best_results),
-        deprecated=sum(1 for r in best_results if is_deprecated(r)),
+        leading_label=cs_by_id[selection.leading_id].label if selection.leading_id else None,
+        degraded_samples=count_degraded_samples(best_results.cells),
+        deprecated=sum(1 for cell in best_results if is_deprecated(cell.facts)),
+        recall_at=recall_at(best_results),
+        ability=cycle.ability_after(best_results),
         evaluators=dict(elected.evaluators),
-        opt_sp=best_opt_sp,
-        optimizer_state=round_state(ctx.cycle.optimizer, selection.payload),
+        # A HELD round ends on the parent the cycle already stands on, lineage and all.
+        opt_sp=best_opt_sp if best_opt_sp.id != cycle.opt_sp.id else cycle.opt_sp,
+        optimizer_state=round_state(
+            cycle.optimizer, cycle.working_state.round_payload(), cycle.population
+        ),
     )
+    diagnostics = compute_round_diagnostics(
+        elected_round, [*cycle.rounds, elected_round], cycle.session.pipeline_schema
+    )
+    return elected_round.model_copy(update={"diagnostics": diagnostics})
 
 
 def _panel_gate(ctx: RoundContext, round_result: RoundResult) -> None:
     session = ctx.cycle.session
     round_num = ctx.round_num
+    arm_rows = round_result.all_candidate_results
     # A broken arm also carries error rows, but its own outcome already charges it.
     holed = sorted(
         c.candidate_id
         for c in round_result.candidate_scores
-        if is_leader_eligible(c)
-        and unscoreable_cells(round_result.all_candidate_results.get(c.candidate_id) or [])
+        if is_leader_eligible(c) and unscoreable_cells(arm_rows.get(c.candidate_id, NO_CELLS))
     )
-    # Sink is the LEDGER: the halt below unwinds before `persist_round`, so a round-local record
-    # would never reach disk on exactly the round it is evidence about. ARCHIVAL by gating.
+    # Sink is the LEDGER: the halt below unwinds before `persist_round`.
     ledger = session.state.ledger
     assert ledger is not None, "build_run_observers must bind state.ledger before a round runs"
     record_decision(
@@ -330,32 +311,23 @@ def _panel_gate(ctx: RoundContext, round_result: RoundResult) -> None:
         node=None,
         data={
             "holes_by_candidate": {
-                c.candidate_id: unscoreable_cells(
-                    round_result.all_candidate_results.get(c.candidate_id) or []
-                )
+                c.candidate_id: unscoreable_cells(arm_rows.get(c.candidate_id, NO_CELLS))
                 for c in round_result.candidate_scores
             }
         },
         round=round_num,
     )
-    # Which of the two resumable halts this is depends on whether a declared bound cut the cell,
-    # so the gate reads the holed ROWS, not their candidates' ids.
-    holed_rows = [
-        (cid, row)
-        for cid in holed
-        for row in round_result.all_candidate_results.get(cid) or []
-        if is_error_result(row)
-    ]
+    holed_rows = [(cid, cell) for cid in holed for cell in arm_rows[cid] if cell.facts.errored]
     opt = ctx.cycle.config.optimization
-    if (reason := panel_gate_tripped([row for _, row in holed_rows], opt.panel_gate)) is None:
+    if (reason := panel_gate_tripped([cell for _, cell in holed_rows], opt.panel_gate)) is None:
         return
-    for cid, row in holed_rows:
+    for cid, cell in holed_rows:
         logger.warning(
             "round %d panel HOLE: candidate %s, sample %s — %s",
             round_num,
             cid,
-            row.get("sample_id"),
-            row.get("error") or row.get("error_category"),
+            cell.sample_id,
+            cell.facts.error or cell.facts.error_category,
         )
     logger.warning(
         "Round %d halted BEFORE electing on an incomplete panel: %d of %d electable "
@@ -370,7 +342,6 @@ def _panel_gate(ctx: RoundContext, round_result: RoundResult) -> None:
 
 
 def proposal_summaries(proposals: list[CandidateProposal], round_num: int) -> list[dict[str, Any]]:
-    """Each proposal as the ``propose:exit`` event and a replayed generation's call record name it."""
     summaries = []
     for i, cp in enumerate(proposals):
         prompt_fields = cp.opt_sp.prompt_fields()
@@ -387,24 +358,27 @@ def proposal_summaries(proposals: list[CandidateProposal], round_num: int) -> li
     return summaries
 
 
-def announce_opening(ctx: RoundContext, node: str) -> RoundOpening:
-    """Open the round's proposing on the ledger, in the bench's words and the optimizer's own."""
+def announce_opening(ctx: RoundContext) -> RoundOpening:
     cycle = ctx.cycle
     assert cycle.tracking.current_sp is not None
     opening = cycle.optimizer.runtime.opening(ctx)
-    emit_phase(
-        ctx.callbacks.on_phase,
+    cb = ctx.callbacks
+    cb.on_phase(
         CampaignPhase.PROPOSE,
         "enter",
         round=ctx.round_num,
-        node=node,
-        max_rounds=cycle.config.optimization.max_rounds,
-        current_accuracy=cycle.tracking.current_accuracy,
-        prompt_preview=cycle.opt_sp.render()[:120],
-        model=cycle.optimizer.model(),
-        opening=opening,
-        pipeline_params=cycle.tracking.current_sp.pipeline_params,
-        parent_prompt_fields={k: v for k, v in cycle.opt_sp.prompt_field_dict().items() if v},
+        view=propose_enter(
+            cb.view_context,
+            round=ctx.round_num,
+            node=cycle.optimizer.proposer,
+            opening=opening,
+            max_rounds=cycle.config.optimization.max_rounds,
+            parent_accuracy=cycle.tracking.current_accuracy,
+            prompt_preview=cycle.opt_sp.render()[:120],
+            model=cycle.optimizer.model(),
+            pipeline_params=cycle.tracking.current_sp.pipeline_params,
+            parent_prompt_fields=cycle.opt_sp.prompt_field_dict(),
+        ),
     )
     return opening
 
@@ -412,53 +386,85 @@ def announce_opening(ctx: RoundContext, node: str) -> RoundOpening:
 def announce_population(
     ctx: RoundContext, opening: RoundOpening, proposals: list[CandidateProposal], n_cells: int
 ) -> None:
-    """Close the round's proposing on the ledger: each new individual's identity, minted before a
-    cell is bought so a round that never closes still names its arms. A carried id is minted once."""
+    """A mint is an EDGE SET: a held individual is minted again only for a parent no earlier mint names."""
     if (ledger := ctx.cycle.session.state.ledger) is not None:
-        minted = {
-            rec.candidate_id for _, rec in ledger.iter() if isinstance(rec, CandidateMintedRecord)
-        }
+        minted: dict[str, set[str]] = {}
+        for _, rec in ledger.iter():
+            if isinstance(rec, CandidateMintedRecord):
+                minted.setdefault(rec.candidate_id, set()).update(rec.lineage.parent_ids)
         for idx, proposal in enumerate(proposals):
             lineage = proposal.opt_sp.lineage
-            if lineage.id in minted:
+            candidate_id = arm_id(proposal, ctx.round_num, idx)
+            if candidate_id in minted and minted[candidate_id].issuperset(lineage.parent_ids):
                 continue
             ledger.append(
                 CandidateMintedRecord(
                     round=ctx.round_num,
                     idx=idx,
-                    candidate_id=lineage.id,
-                    parent_ids=list(lineage.parent_ids),
+                    candidate_id=candidate_id,
                     label=candidate_label(ctx.round_num, idx),
-                    changes_description=lineage.changes_description,
-                    source=lineage.source,
+                    lineage=lineage,
                 )
             )
-    emit_phase(
-        ctx.callbacks.on_phase,
+    ctx.callbacks.on_phase(
         CampaignPhase.PROPOSE,
         "exit",
         round=ctx.round_num,
-        opening=opening,
-        n_scoring_samples=n_cells,
-        candidates=proposal_summaries(proposals, ctx.round_num),
-        collapses=collapse_counts(cp.validation_failures for cp in proposals),
+        view=propose_exit(
+            ctx.callbacks.view_context,
+            round=ctx.round_num,
+            opening=opening,
+            candidates=proposal_summaries(proposals, ctx.round_num),
+            collapses=collapse_counts(cp.validation_failures for cp in proposals),
+            n_scoring_samples=n_cells,
+        ),
     )
 
 
-async def propose_population(ctx: RoundContext, plan: RoundPlan, panel: Panel) -> Population:
-    population = Population.of([])
-    for proposer in plan.proposers:
-        population = await proposer.propose(ctx, panel, population)
-    return population
+async def _walk(ctx: RoundContext, proposers: Sequence[Proposer], panel: Panel) -> Proposals:
+    proposals = Proposals([])
+    for proposer in proposers:
+        proposals = await proposer.propose(NodeContext(ctx, proposer.name), panel, proposals)
+    return proposals
+
+
+async def propose_population(ctx: RoundContext, plan: RoundPlan, panel: Panel) -> Proposals:
+    if plan.seeders and not ctx.cycle.population:
+        seeded = await _walk(ctx, plan.seeders, panel)
+        ctx.cycle.population = [
+            p.opt_sp
+            for p in seeded.proposals
+            if not fatal_validation_failures(p.validation_failures)
+        ]
+    population = await _walk(ctx, plan.proposers, panel)
+    seen: dict[str, CandidateProposal] = {}
+    for idx, proposal in enumerate(population.proposals):
+        candidate_id = arm_id(proposal, ctx.round_num, idx)
+        if (arm := seen.get(candidate_id)) is None:
+            seen[candidate_id] = proposal
+            continue
+        logger.info(
+            "round %d: proposal %d reaches %s, which this round already measures — one arm",
+            ctx.round_num,
+            idx + 1,
+            candidate_id[:12],
+        )
+        edges = list(
+            dict.fromkeys([*arm.opt_sp.lineage.parent_ids, *proposal.opt_sp.lineage.parent_ids])
+        )
+        if edges != arm.opt_sp.lineage.parent_ids:
+            lineage = arm.opt_sp.lineage.model_copy(update={"parent_ids": edges})
+            arm.opt_sp = arm.opt_sp.model_copy(update={"lineage": lineage})
+    return replace(population, proposals=list(seen.values()))
 
 
 async def _adapt(ctx: RoundContext, plan: RoundPlan, round_result: RoundResult) -> None:
     if not plan.adapters:
         return
-    emit_phase(ctx.callbacks.on_phase, CampaignPhase.ADAPT, "enter", round=ctx.round_num)
+    ctx.callbacks.on_phase(CampaignPhase.ADAPT, "enter", round=ctx.round_num)
     for adapter in plan.adapters:
-        await adapter.adapt(ctx, round_result)
-    emit_phase(ctx.callbacks.on_phase, CampaignPhase.ADAPT, "exit", round=ctx.round_num)
+        await adapter.adapt(NodeContext(ctx, adapter.name), round_result)
+    ctx.callbacks.on_phase(CampaignPhase.ADAPT, "exit", round=ctx.round_num)
 
 
 async def execute_round(
@@ -469,171 +475,77 @@ async def execute_round(
     *,
     is_final_round: bool = False,
 ) -> tuple[RoundResult, StopReason | None]:
-    """The round, and the budget stop that cut its measurement short — a cut round is the run's
-    last. The cycle absorbs the round once it has elected, so the adapters read the cycle it
-    left. On the final round they are skipped: they write for a NEXT round."""
-    session = cycle.session
-    obs = session.state.obs
     plan = round_plan(cycle.optimizer)
     ctx = RoundContext(
         cycle=cycle, round_num=round_num, callbacks=callbacks, is_final_round=is_final_round
     )
-    if obs:
-        with graceful("RoundStart emit failed"):
-            obs.emit(RoundStart(campaign_id=session.state.tracing_campaign_id, round_num=round_num))
 
-    panel = plan.sampler.draw(ctx, pool)
-    opening = announce_opening(ctx, plan.proposers[0].name)
+    panel = plan.sampler.draw(NodeContext(ctx, plan.sampler.name), pool)
+    opening = announce_opening(ctx)
     population = await propose_population(ctx, plan, panel)
     assert cycle.tracking.current_sp is not None
     announce_population(ctx, opening, population.proposals, len(panel.cells))
 
-    emit_phase(
-        callbacks.on_phase,
+    callbacks.on_phase(
         CampaignPhase.MEASURE,
         "enter",
         round=round_num,
-        node=plan.measurement,
-        n_candidates=len(population.proposals),
-        n_samples=len(panel.cells),
-        current_best_accuracy=cycle.tracking.current_accuracy,
-        current_pipeline_params=cycle.tracking.current_sp.pipeline_params,
+        view=MeasureEnterView(
+            node=plan.measurement,
+            n_candidates=len(population.proposals),
+            n_samples=len(panel.cells),
+        ),
     )
-    async with observed_node(
-        f"{plan.measurement}_r{round_num}",
-        "scoring",
-        obs=obs,
-        as_type="span",
-        campaign_id=session.state.tracing_campaign_id,
-        round_num=round_num,
-    ):
-        measured = await measure_population(ctx, population, panel, plan.eliminator, plan.selector)
-    emit_phase(
-        callbacks.on_phase,
-        CampaignPhase.MEASURE,
-        "exit",
-        round=round_num,
-        n_scored=len(measured.scored),
-        n_electable=len(measured.electable),
-    )
-    emit_phase(callbacks.on_phase, CampaignPhase.SELECT, "enter", round=round_num)
-    selection = plan.selector.select(ctx, measured, population)
-    round_result = _round_result(
-        ctx,
-        population,
-        measured,
-        selection,
-        cycle.tracking.current_sp.pipeline_params,
-        stamps_theta=plan.selector.stamps_theta,
-    )
-    emit_phase(
-        callbacks.on_phase,
+    measured = await measure_population(ctx, population, panel, plan.eliminator, plan.selector)
+    callbacks.on_phase(CampaignPhase.MEASURE, "exit", round=round_num)
+    callbacks.on_phase(CampaignPhase.SELECT, "enter", round=round_num)
+    selection = plan.selector.select(NodeContext(ctx, plan.selector.name), measured, population)
+    round_result = _round_result(ctx, measured, selection, elects_on=plan.selector.elects_on)
+    callbacks.on_phase(
         CampaignPhase.SELECT,
         "exit",
         round=round_num,
-        winner_label=next(iter(round_result.selected_labels), ""),
-        stamps_theta=plan.selector.stamps_theta,
-        winner_accuracy=round_result.accuracy,
-        winner_composite_fitness=round_result.composite_fitness,
-        winner_evaluators=dict(round_result.evaluators),
-        winner_total=round_result.total,
-        improved=round_result.improved,
-        verdict_reason=round_result.verdict_reason,
-        p_value=round_result.p_value,
-        candidate_scores=round_result.candidate_scores,
-        winner_reference_accuracy=next(
-            (s.reference_accuracy for s in round_result.selected_scores), None
-        ),
-        winner_reference_composite=next(
-            (s.reference_composite for s in round_result.selected_scores), None
-        ),
+        view=select_exit(callbacks.view_context, round_result),
     )
     _panel_gate(ctx, round_result)
-    # The election, banked AFTER the panel gate: a round halted on a holed panel is unwound and
-    # re-run, so crowning it would put a winner on the timeline for a round that never stood.
+    # AFTER the panel gate: a round halted on a holed panel is unwound and re-run, never crowned.
     callbacks.on_election(round_result)
     cycle.absorb_round(round_result)
 
-    # The 1-to-1 series, measured WHILE the adapters run — every decision this round makes is
-    # already made, and the fields it writes sit outside `results` / `all_candidate_results`.
     overlap = asyncio.create_task(measure_overlap(cycle, round_result, pool))
     try:
-        round_result.diagnostics = compute_round_diagnostics(
-            round_result, cycle.rounds, session.pipeline_schema
-        )
-        # A zero-candidate round leaves `results` holding the parent's rows: there is nothing to
-        # adapt to. And an adapter writes for the NEXT round, so none runs when no round follows —
-        # the calendar cap knows that before the round, the controller only now.
+        # An adapter writes for the NEXT round, so none runs when no round follows.
+        lives = cycle.config.optimization.lives
         will_stop = (
             is_final_round
             or measured.cut is not None
-            or (plan.controller is not None and plan.controller.stops_after(ctx, round_result))
+            or (lives is not None and stalls_left(cycle.rounds, lives.bank) == 0)
         )
         if population.proposals and round_result.results and not will_stop:
             await _adapt(ctx, plan, round_result)
     except BaseException:
         overlap.cancel()
         raise
-    await overlap
-    round_result.separable = _separability(round_result)
-    _warn_not_separable(round_result)
-    winner_opt_sp = round_result.opt_sp
-    assert winner_opt_sp is not None
-    if obs:
-        with graceful("RoundEnd emit failed"):
-            obs.emit(
-                RoundEnd(
-                    campaign_id=session.state.tracing_campaign_id,
-                    round_num=round_num,
-                    accuracy=round_result.accuracy,
-                    total=round_result.total,
-                    improved=round_result.improved,
-                    winner_lineage_id=winner_opt_sp.lineage.id,
-                    candidate_scores=[c.model_dump() for c in round_result.candidate_scores],
-                    model=cycle.optimizer.model(),
-                    n_candidates=len(population.proposals),
-                    optimizer_templates=plan.llm_nodes,
-                    evaluators=dict(round_result.evaluators),
-                )
-            )
-        with graceful("PromptVersion emit failed"):
-            obs.emit(
-                PromptVersion(
-                    campaign_id=session.state.tracing_campaign_id,
-                    round_num=round_num,
-                    lineage_id=winner_opt_sp.lineage.id,
-                    rendered_prompt=winner_opt_sp.render(),
-                    layer1_fields={f: getattr(winner_opt_sp, f) for f in PROMPT_STRING_FIELDS},
-                    parent_ids=tuple(winner_opt_sp.lineage.parent_ids),
-                )
-            )
+    reading, bought = await overlap
+    round_result = cycle.seat(
+        round_result.model_copy(update={"overlap": reading, "overlap_results": bought})
+    )
+    _warn_not_advanced(round_result)
     return round_result, measured.cut
 
 
 async def emit_origin_round(cycle: Cycle, session: Session, cb: RunCallbacks) -> None:
-    """Close **round 0**, the origin's measurement, through the standard path — the adapters
-    first, then ``close_round``, so the round file, ``index.json`` and ``dashboard.json`` carry
-    one shape. Diag forks inherit round 0 and never reach here, so round 1 stays bit-identical
-    across cheap forks."""
     round_result = cycle.origin_round
-    # Without the adapters' pass over the origin's misses, round 1 opens blind to the per-sample
-    # failure pattern and falls back to surface-axis guesses.
     if round_result.results:
-        round_result.diagnostics = compute_round_diagnostics(
-            round_result, [round_result], session.pipeline_schema
-        )
         await _adapt(
             RoundContext(cycle=cycle, round_num=0, callbacks=cb),
             round_plan(cycle.optimizer),
             round_result,
         )
 
-    # Round 0 elects too: it adopts C0. Emitted here rather than from `close_round`, which round
-    # 0 reaches TWICE — the second time carrying the warm ruler's θ.
+    # Here, never from `close_round`, which round 0 reaches TWICE.
     cb.on_election(round_result)
-    # And it spends the look-ahead arming, exactly as round N's measurement does — one rule, at
-    # the two places a round elects. Unspent here, a press during the origin's scoring outlives
-    # the round it paid for and silently widens round 1 too.
+    # Unspent here, a look-ahead press during the origin's scoring widens round 1 too.
     session.control.spend_sample_lookahead()
     await close_round(cycle, round_result, 0, session, cb)
 
@@ -643,13 +555,7 @@ def persist_round(
     round_result: RoundResult,
     session: Session,
     cb: RunCallbacks,
-) -> None:
-    """The ledger emit is unconditional — every completed round lands on the ledger."""
-    # ONE destination. Every pending record goes to the ledger, which is its chronological
-    # place and the only home it needs: each carries its own ``round`` stamp, so the round that
-    # MADE a decision is a fact about the record rather than about when it happened to be
-    # flushed. Assemble no second copy onto the round document: a record stamped for a round
-    # whose file is already written reaches no document at all.
+) -> RoundResult:
     flushed: list[ResumeCheckpointRecord] = []
     if cycle.pending_decisions:
         flushed = list(cycle.pending_decisions)
@@ -658,33 +564,27 @@ def persist_round(
     if (ledger := session.state.ledger) is not None:
         for d in flushed:
             ledger.append(d)
-        # The close IS the document's address: fold the ledger to this offset and you get
-        # exactly this round. Stamped between the emit and the write, the only window where
-        # both are true.
-        round_result.at_offset = cb.on_round_close(round_result)
+        round_result = cycle.seat(
+            round_result.model_copy(update={"at_offset": cb.on_round_close(round_result)})
+        )
 
     if session.state.cycle_id:
-        with graceful("Round checkpoint failed"):
-            session.store.campaigns.save_round_file(
-                session.hop,
-                round_result,
-            )
         write_hard_samples_artifacts(session, cycle)
         write_log_md(session, cycle.config)
-        write_review_md(session, cycle)
+        write_review_md(
+            session,
+            accuracy_ceiling=cycle.config.accuracy_ceiling,
+            optimizer=cycle.optimizer,
+            framing=cycle.framing,
+        )
 
     if _rr := session.state.audit_projection:
         _rr.flush()
+    return round_result
 
 
 def flush_pending_decisions(cycle: Cycle, session: Session) -> int:
-    """Teardown's half of ``persist_round``'s drain — the ledger only, since no round is closing.
-
-    The controller acts AFTER the round it belongs to has already persisted, so its decision waits
-    for the next ``persist_round``. A cycle that stops right there — max_rounds, a terminate
-    proposal, a spend halt, Ctrl+C — has no next round, and an unflushed record is an act a
-    resume re-spends.
-    """
+    """The controller acts after its round persisted; unflushed at a stop, a resume re-spends the act."""
     if not cycle.pending_decisions or (ledger := session.state.ledger) is None:
         return 0
     pending = list(cycle.pending_decisions)
@@ -701,32 +601,53 @@ async def close_round(
     round_num: int,
     session: Session,
     cb: RunCallbacks,
-) -> None:
-    """Round-completion bookkeeping: the optimizer's facts, the emit, the round file, the index."""
+) -> tuple[RoundResult, RunStanding]:
     if cycle.origin_restamped:
-        # A ruler that warmed this round gave round 0 the θ it could not have had at its own
-        # close; unsaved, every non-live reader shows a θ-less C0 beside candidates that have one.
+        # A ruler that warmed this round gave round 0 a θ it could not have had at its own close.
         cycle.origin_restamped = False
         persist_round(cycle, cycle.origin_round, session, cb)
-    round_result.optimizer_facts = cycle.optimizer.runtime.round_facts(
-        cycle.optimizer, round_result
+    state = round_result.optimizer_state.model_copy(
+        update={"payload": cycle.working_state.round_payload()}
     )
-    stall, stalls_left = cycle.working_state.standing(cycle.rounds)
-    bank = cycle.optimizer.pacing.stalls_left
-    standing = RunStanding(
-        rounds_without_advance=stall,
-        stalls_left=stalls_left,
-        stalls_left_cap=None if bank is None else bank[1],
+    stood = round_result.model_copy(update={"optimizer_state": state})
+    facts = cycle.optimizer.runtime.round_facts(cycle.optimizer, stood)
+    round_result = cycle.seat(stood.model_copy(update={"optimizer_facts": facts}))
+    lives = cycle.config.optimization.lives
+    standing = RunStanding.after(
+        cycle.rounds,
+        lives=None if lives is None else lives.bank,
+        spent=close_spend(ledger_chain(CycleDir(session.store.campaigns.cycle_dir(session.hop))))
+        if session.state.cycle_id
+        else None,
     )
-    cb.on_round_complete(round_result, standing)
-    persist_round(cycle, round_result, session, cb)
+    # The close first: a subscriber of the standing reads the round it names off that record.
+    round_result = persist_round(cycle, round_result, session, cb)
+    leading = next(
+        (
+            c.candidate_id
+            for c in round_result.candidate_scores
+            if round_result.round and c.label == round_result.leading_label
+        ),
+        None,
+    )
+    origin = cycle.origin_round
+    cb.on_round_complete(
+        round_result,
+        standing,
+        None
+        if leading is None
+        else panel_precision(
+            round_result.all_candidate_results.get(leading, NO_CELLS).cells,
+            origin.all_candidate_results[origin.origin.candidate_id].cells,
+        ),
+    )
     if cycle.sample_index is not None:
         cycle.sample_index.refresh(
             session.store,
             scorer=session.scoring.require_scorer(),
-            scorer_id=session.scoring.scorer_id,
             dataset_name=session.dataset_name,
         )
+    return round_result, standing
 
 
 async def post_round(
@@ -738,19 +659,20 @@ async def post_round(
     *,
     is_final_round: bool = False,
 ) -> None:
-    """The boundary: the controller reads the closed round, the round is persisted, and the
-    controller stops the run or acts on its reading. ``is_final_round`` withholds the act — what
-    it writes is read by a NEXT round that never comes. Raises ``StopLoop`` on a stop."""
     controller = round_plan(cycle.optimizer).controller
-    ctx = RoundContext(
-        cycle=cycle, round_num=round_num, callbacks=cb, is_final_round=is_final_round
-    )
-    boundary = controller.observe(ctx, round_result) if controller is not None else None
+    acts = False
+    if controller is not None:
+        ctx = NodeContext[Any](
+            RoundContext(
+                cycle=cycle, round_num=round_num, callbacks=cb, is_final_round=is_final_round
+            ),
+            controller.name,
+        )
+        acts = controller.observe(ctx, round_result)
 
-    await close_round(cycle, round_result, round_num, session, cb)
+    round_result, standing = await close_round(cycle, round_result, round_num, session, cb)
 
-    # After close_round and before the stop below, so a perfect round that also ends the campaign
-    # still gets its check. Bounded and never fatal — the model is in ``verify_on_saturation``.
+    # Before the stop below, so a perfect round that also ends the campaign still gets its check.
     await verify_on_saturation(
         stores=session.store,
         hop=CycleHop(campaign_id=session.campaign_id, cycle_id=session.state.cycle_id),
@@ -758,15 +680,12 @@ async def post_round(
         accuracy=round_result.accuracy,
         winner_id=next((c.candidate_id for c in round_result.selected_scores), None),
         control=session.control,
-        log=logger.info,
     )
     await grade_round_selection(cycle, session, round_result, cb=cb)
     reserve_selection_pass(cycle, session)
 
-    if boundary is None:
-        return
-    if boundary.stop is not None:
-        raise StopLoop(boundary.stop)
-    if not is_final_round and boundary.act:
+    if (stop := standing_tripped(cycle, standing)) is not None:
+        raise StopLoop(stop)
+    if acts and not is_final_round:
         assert controller is not None
         await controller.act(ctx)

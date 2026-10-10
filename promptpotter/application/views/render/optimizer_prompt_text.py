@@ -12,21 +12,10 @@ shapes_optimizer_prompt(__name__)
 
 
 def fmt_pct(x: float | None, spec: str = "{:.1%}") -> str:
-    """``—`` for a measurement that was never taken. Rendering absence as ``0.0%`` is the one
-    reading an operator cannot recover from: it looks like a campaign whose origin scored nothing,
-    which is the shape of a broken pipeline rather than of a cycle that never got there.
-
-    Every rate a surface prints routes here, because ``accuracy`` is nullable at the source and an
-    f-string's format spec is the one place the type checker cannot follow the value to."""
     return "—" if x is None else spec.format(x)
 
 
 def critique_axes(schema: PipelineSchema, *, offers_shots: bool) -> frozenset[str]:
-    """Schema-legitimate axes (open prompt fields + node names + param keys) — used to filter L2's
-    hallucinated `suggested_axes` (e.g. `prompt_size`) before they seed the next round. A prompt
-    field the campaign held is not one, nor `shot_ids` where the round offers no shots: steering
-    L1 at either spends a round on a slot it cannot write.
-    """
     out: set[str] = set(schema.open_prompt_fields()) | ({"shot_ids"} if offers_shots else set())
     for node in schema.nodes:
         if node.name:
@@ -39,7 +28,6 @@ def critique_axes(schema: PipelineSchema, *, offers_shots: bool) -> frozenset[st
 
 
 def _priority_fix_axis(priority_fix: str) -> str:
-    """The axis a ``<axis>: <change>`` steer names, so the menu beside it cannot omit it."""
     head, sep, _ = priority_fix.partition(":")
     axis = head.strip()
     return axis if sep and axis.isidentifier() else ""
@@ -48,7 +36,6 @@ def _priority_fix_axis(priority_fix: str) -> str:
 def format_l1_critique_for_prompt(
     critique: CritiqueReadout | None, axes: frozenset[str] | None = None
 ) -> str:
-    """``axes`` filters the steer's menu to :func:`critique_axes`; ``None`` renders it as written."""
     if not critique:
         return ""
     parts: list[str] = []
@@ -56,8 +43,7 @@ def format_l1_critique_for_prompt(
     if pf:
         parts.append(f"Fix: {pf}")
     sa = list(critique.get("suggested_axes") or [])
-    # The steer's own axis leads its menu: a `Fix:` naming an axis `Axes:` omitted told the
-    # generator two different things about one round, and it was the steer that got followed.
+    # The steer's own axis leads its menu, so `Fix:` and `Axes:` never name different things.
     if lead := _priority_fix_axis(pf):
         sa = [lead, *(a for a in sa if a != lead)]
     if axes is not None:
@@ -70,8 +56,7 @@ def format_l1_critique_for_prompt(
             parts.append(f"  {h}")
     if not parts:
         return ""
-    # Titled like every panel beside it. `critique` is offered in the citation enum, but the block
-    # rendered untitled, so variants grounding on it named whichever heading rendered above.
+    # `critique` is in the citation enum, and a variant grounding on it cites this heading.
     return "\n".join(["CRITIQUE (last round's failures, distilled):", *parts])
 
 

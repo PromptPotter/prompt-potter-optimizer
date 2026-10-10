@@ -1,5 +1,3 @@
-"""Run init steps 2-4 — a wired ``Session`` to a running round loop."""
-
 from __future__ import annotations
 
 import logging
@@ -11,9 +9,13 @@ from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.bench.resume_and_fork.resume import (
     resume_with_divergence_check,
 )
+from promptpotter.application.datasets.authored import scorer_of
 from promptpotter.application.initialization.session import Session, open_cycle_ledger
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
-from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
+from promptpotter.application.pipeline_resolve import (
+    configure_and_apply_pipeline,
+    resolved_dataset_name,
+)
 from promptpotter.application.preflight import (
     refuse_arm_below_round,
     refuse_below_reasoning_floor,
@@ -22,19 +24,16 @@ from promptpotter.application.preflight import (
 from promptpotter.application.runner.campaign_ids import cycle_config_identity
 from promptpotter.application.runner.inner.spawn_context import retarget_inner_spawn
 from promptpotter.application.scoring.classification import build_degradation_checks
-from promptpotter.application.scoring.evaluators import resolve_cell_formula
-from promptpotter.application.scoring.formula import (
-    cell_channels_of,
-    compile_scorer,
-    split_scoring_block,
-)
+from promptpotter.application.scoring.formula import cell_channels_of
 from promptpotter.application.scoring.sample_measurement import cell_bound
+from promptpotter.application.views.ingress import init_enter, init_exit
 from promptpotter.domain.bench import partition_bank
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
+from promptpotter.domain.l4.inner_origin import inner_origin_of
 from promptpotter.domain.measurement_provenance import RunSource
-from promptpotter.domain.phases import STOP_REASON_INFO, CampaignPhase, StopLoop, emit_phase
+from promptpotter.domain.phases import STOP_REASON_INFO, CampaignPhase, StopLoop
 from promptpotter.domain.pipeline_overlay import node_config_items
-from promptpotter.domain.scoring import all_verifier_graded
+from promptpotter.domain.scoring import MeasuredCell, all_verifier_graded
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.spend_book import (
     bind_spend_book,
@@ -47,10 +46,8 @@ from promptpotter.infrastructure.llm.telemetry import (
     reset_cycle_ledger,
     set_cycle_ledger,
 )
-from promptpotter.infrastructure.store import archive_queries
-from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
-from promptpotter.judges import build_evaluators, judge_instrument
-from promptpotter.shared.errors import graceful
+from promptpotter.judges.registry import build_evaluators
+from promptpotter.shared.hashing import dataset_hash
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
@@ -60,16 +57,8 @@ if TYPE_CHECKING:
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.infrastructure.store.stores import Stores
-    from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
-
 
 logger = logging.getLogger(__name__)
-
-
-def next_resume_round(round_summaries: list[dict[str, Any]]) -> int:
-    """Next L1 round = highest persisted round NUMBER + 1. Keyed on the number, never ``len()``: the origin is round 0 in
-    ``index.json::rounds``, so counting entries over-counts by one and the loop skips a round."""
-    return max((int(r["round"]) for r in round_summaries), default=0) + 1
 
 
 def init_cycle(
@@ -80,8 +69,7 @@ def init_cycle(
     *,
     resume_from_round_override: int | None = None,
 ) -> tuple[str | None, int]:
-    """Resolve the cycle for run init. A genuinely-absent cycle starts fresh; a present-but-BROKEN one (corrupt index,
-    disk fault, bad ``--from``) propagates — swallowing it would silently re-spend the campaign from scratch."""
+    """A present-but-BROKEN cycle propagates: swallowing it re-spends the campaign from scratch."""
 
     if not session.backend_id:
         return None, 1
@@ -89,18 +77,14 @@ def init_cycle(
     campaign_id = session.campaign_id
     resolved = cycle_id_override or cycle_config_identity(origin_jsp, dataset)
     hop = CycleHop(campaign_id=campaign_id, cycle_id=resolved)
-    # Re-written on a resume on purpose: the backend may have changed its axes since, and what the
-    # panel owes the operator is what the NEXT round will search, not what the first one did.
+    # Re-written on a resume on purpose: the backend may have changed its axes since.
     if session.pipeline_declaration:
         store.write_resolved_pipeline(hop, session.pipeline_declaration)
-    # The CELLS beside the search space, and write-once where that one is re-written — a roster a
-    # connector only NAMES (a Harbor dataset version) can move under its name, and every read of
-    # this campaign after today must see what it measured rather than what the registry now says.
+    # Write-once, unlike the line above: a roster a connector only NAMES can move under its name.
     store.write_resolved_experiment(hop, session.backend_client.workload.experiment)
-    store.write_bank_partition(hop, session.scoring.require_partition())
-    # Beside the declaration and on the same cadence: the declaration says which keys exist, this
-    # says which the optimizer MOVES and whether the model can even see them. The connector owns
-    # the channel, so it is read off the client rather than assumed.
+    store.write_bank_partition(
+        hop, session.scoring.require_partition().record(dataset_hash=dataset_hash(session.samples))
+    )
     store.write_optimized_surface(
         hop,
         session.pipeline_schema.value_tree(
@@ -111,50 +95,22 @@ def init_cycle(
         store.rewind_to_round(hop, resume_from_round_override)
     existing = store.load(hop)
     if existing is not None:
-        # No origin_accuracy stamp here — the index derives it from rounds[0]
-        # (`origin_accuracy_of`); any re-measure re-emits round 0 through
-        # emit_origin_round → save_round_file, so the row is always fresh.
-        # A babysat cycle carries `human_intervened` on its index — surface it so a
-        # resume grades its runs non-clean without re-reading the seed.
-        session.human_intervened = bool(existing.get("human_intervened", False))
-        if existing.get("finished_at"):
-            # About to run rounds on a cycle still carrying its terminal latch (a reaped
-            # inner cell, an operator resume past a stop). `derive_run_phase` returns
-            # TERMINAL on `finished_at` BEFORE it consults anything else, so leaving it
-            # set makes a live run report finished to the cycle list, the picker and the
-            # reaper — and masks a `paused` declaration, which ranks below it. Both levels
-            # reach here (an inner cell runs this same `run_optimization`), so one clear
-            # serves both. Ordering is safe by construction: `build_run_observers` has
-            # already refreshed `dashboard.json`, so the cycle steps TERMINAL → RUNNING;
-            # clearing while the producer was stale would derive DETACHED — what the
-            # reaper's `_is_dead` collects.
-            store.reopen_for_continuation(hop)
-        return resolved, next_resume_round(existing["rounds"])
+        session.human_intervened = existing.human_intervened
+        # The round NUMBER after the highest one closed, never a count: the origin is round 0.
+        return resolved, max(store.standing_rounds(hop).rounds, default=0) + 1
     return resolved, 1
 
 
 def populate_session_scoring(
     session: Session, campaign_config: CampaignConfig, *, source: RunSource
 ) -> None:
-    """Arm *session* with the scorer ``campaign_config.scoring`` declares (step 2 of run init),
-    once per session. Requires ``init_services`` already ran: ``session.samples`` is what lets the
-    compiler refuse a label-comparing formula before a single cell is spent."""
-    spec = split_scoring_block(
-        campaign_config.scoring, judge_instrument=judge_instrument(campaign_config.judges)
-    )
     session.source = source
-    session.scoring.scorer = compile_scorer(
-        spec.per_sample,
-        spec.per_cell,
+    session.scoring.scorer = scorer_of(
+        campaign_config,
         verifier_graded=all_verifier_graded(s.ground_truth for s in session.samples),
     )
-    session.scoring.scorer_id = spec.scorer_id
-    session.scoring.scorer_cell_formula = spec.per_cell
     session.scoring.display_metric = campaign_config.display_metric
-    # The sole judge builder, serving the runner and the verbs that score outside it
-    # (`arm_diagnostic_scoring`) — so one line arms grading reuse on every entry point, and a
-    # bad spec fails here rather than on the first cell. Required and assigned unconditionally:
-    # `{}` declares none, and never means "keep what was armed before".
+    # Assigned unconditionally: `{}` declares no judges, and never means "keep what is armed".
     session.scoring.judges = build_evaluators(
         campaign_config.judges, cache=session.store.judge_reuse
     )
@@ -165,17 +121,10 @@ def arm_diagnostic_scoring(
     campaign_config: CampaignConfig,
     *,
     source: RunSource,
-    log: Callable[[str], None] | None = None,
 ) -> None:
-    """Resolve the pipeline onto *session* and arm the scorer for a verb that scores OUTSIDE the
-    runner — ``verify`` / ``ab`` / ``noise-floor`` / ``seed-screen``.
-
-    A verb run inside a campaign — the saturation ``verify`` — spends under that run's book; one
-    run on its own gets a book for its task, which no ceiling binds yet."""
-
     if bound_spend_book() is None:
         bind_spend_book(unbounded_spend_book())
-    configure_and_apply_pipeline(session, campaign_config, log=log or (lambda *_a, **_k: None))
+    configure_and_apply_pipeline(session, campaign_config)
     populate_session_scoring(session, campaign_config, source=source)
     session.scoring.partition = partition_bank(session.samples, campaign_config.dataset_split)
 
@@ -183,10 +132,7 @@ def arm_diagnostic_scoring(
 async def diagnostic_pass(
     error: Callable[[str], Exception], scoring: Awaitable[ScoredWalk]
 ) -> ScoredWalk:
-    """Score for a verb armed by :func:`arm_diagnostic_scoring`, whole or not at all. Nothing
-    above it catches the round loop's ``StopLoop``, so a stop ends as the verb's own
-    resolved-state error instead; and a pass decided before its last cell is refused the same
-    way, because a reading over part of it describes whatever stopped it."""
+    """Nothing above a diagnostic verb catches the round loop's ``StopLoop``."""
     try:
         scored = await scoring
     except StopLoop as stop:
@@ -195,64 +141,85 @@ async def diagnostic_pass(
         raise error(f"{info.label}{unmeasured}. {info.next_step}".strip()) from None
     if scored.stopped is not None:
         raise error(
-            f"Scoring stopped after {len(scored.results)} cell(s): {scored.stopped}. A reading "
+            f"Scoring stopped after {len(scored.sheet)} cell(s): {scored.stopped}. A reading "
             "over part of the pass would describe the stop, not the configuration."
         )
     return scored
 
 
 @contextmanager
-def diagnostic_trace(stores: Stores, hop: CycleHop | None) -> Iterator[None]:
-    """A diagnostic verb's bills join a ledger, in the ``diagnostic`` bucket: the campaign's own
-    where the verb re-scores one, the workspace's where it answers for none (``seed-screen``). A
-    bill that reaches no ledger is money no account, campaign or ceiling ever sees.
-
-    Inside every ceiling, always: the bucket is folded into ``SpendRollup``'s totals like any other
-    (``SpendRollup.by_kind``), so the budget gate sees this money. It is banked APART because it
-    answers a question about the search rather than advancing it — folded into ``backend``, an
-    operator reads re-measuring a candidate as the cost of finding one.
-
-    The ledger is opened only when none is bound. In the loop and behind the API one already is
-    (the round's, and the dispatcher's), and a second handle on one file is a second appender."""
-    if active_cycle_ledger() is not None:
-        with filed_as("diagnostic"):
-            yield
+def verb_ledger(stores: Stores, hop: CycleHop | None) -> Iterator[CycleEventLog]:
+    """Opens one only when none is bound: a second handle on one file is a second appender."""
+    if (bound := active_cycle_ledger()) is not None:
+        yield bound
         return
     ledger = (
         CycleEventLog.open_workspace(stores.campaigns.workspace)
         if hop is None
         else CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(hop)))
     )
-    # The verb's own book files here too, so what an L4 cell spends beneath it lands on this
-    # ledger rather than only on the sandbox's.
+    # So what an L4 cell spends beneath the verb lands here, not only on the sandbox's ledger.
     if (book := bound_spend_book()) is not None and book.ledger is None:
         book.ledger = ledger
     token = set_cycle_ledger(ledger)
     try:
-        with filed_as("diagnostic"):
-            yield
+        yield ledger
     finally:
         reset_cycle_ledger(token)
+
+
+@contextmanager
+def diagnostic_trace(stores: Stores, hop: CycleHop | None) -> Iterator[None]:
+    with verb_ledger(stores, hop), filed_as("diagnostic"):
+        yield
 
 
 _PRICED_RUNS = 32
 
 
-def _measured_cell_usd(
+def measured_cell_usd(
     session: Session, node_configs: list[tuple[str, dict[str, Any]]]
 ) -> float | None:
-    """What a cell of this dataset billed on the models it runs on, ``None`` where no archived row
-    answers. The latest runs only, never all of them: a price is a recent fact."""
     on_models = {name: {"model": cfg["model"]} for name, cfg in node_configs if cfg.get("model")}
     total, cells = 0.0, 0
-    for m in archive_queries.measurements_for_config(
-        session.store, on_models, dataset_name=session.dataset_name, newest=_PRICED_RUNS
+    for m in session.store.archive.measurements_for_config(
+        on_models, dataset_name=session.dataset_name, newest=_PRICED_RUNS
     ):
-        cost = cell_channels_of(m.row).get("cost")
+        # An archive row carries no grade, and the price is no formula's reading.
+        cost = cell_channels_of(MeasuredCell.from_wire(m.row), None).get("cost")
         if cost is not None:
             total += cost
             cells += 1
     return total / cells if cells else None
+
+
+def _campaigns_on_origin(session: Session) -> list[str]:
+    """A cycle id is content-addressed: every other campaign holding it ran this origin."""
+    cycle_id = session.state.cycle_id
+    if not cycle_id:
+        return []
+    return sorted(
+        {
+            entry.campaign_id
+            for entry in session.store.campaigns.enumerate_cycles()
+            if entry.cycle_id == cycle_id and entry.campaign_id != session.campaign_id
+        }
+    )
+
+
+def _banked_instruments(session: Session, config: CampaignConfig) -> list[str]:
+    campaigns = session.store.campaigns
+    dataset_name = resolved_dataset_name(session, config)
+    banked: list[str] = []
+    for campaign_dir in campaigns.iter_campaign_dirs():
+        campaign = campaigns.load_campaign(campaign_dir.name)
+        if campaign is None or campaign.dataset_name != dataset_name:
+            continue
+        origin = campaigns.standing_rounds(campaign.root_hop).rounds.get(0)
+        instrument = None if origin is None else inner_origin_of(origin.close.pipeline_params)
+        if instrument is not None:
+            banked.append(instrument)
+    return banked
 
 
 async def _emit_preflight_and_init_session(
@@ -266,30 +233,35 @@ async def _emit_preflight_and_init_session(
     target_node_configs = list(node_config_items(session.pipeline_params))
     target_models = tuple(str(v["model"]) for _, v in target_node_configs if v.get("model"))
 
-    # A resume plans no cycle, so the block a mint already passed is asked again here.
     refuse_below_reasoning_floor(config, session.pipeline_params)
 
     bound = await cell_bound(session, session.pipeline_params or {})
-    measured_cell_usd = _measured_cell_usd(session, target_node_configs)
+    measured_usd = measured_cell_usd(session, target_node_configs)
+    instrument = inner_origin_of(session.pipeline_params)
     preflight_warnings = run_preflight_checks(
         config,
         dataset,
         target_models,
         framing=origin.framing,
         cell_usd=None if bound is None else bound.usd,
-        measured_cell_usd=measured_cell_usd,
+        measured_cell_usd=measured_usd,
+        origin_campaigns=_campaigns_on_origin(session),
+        instrument=instrument,
+        banked_instruments=[] if instrument is None else _banked_instruments(session, config),
     )
     for w in preflight_warnings:
         logger.warning("preflight[%s]: %s — %s", w.code, w.title, w.detail)
-    refuse_arm_below_round(session.arm, preflight_warnings, measured_cell_usd=measured_cell_usd)
-    emit_phase(
-        cb.on_phase,
+    refuse_arm_below_round(session.arm, preflight_warnings, measured_cell_usd=measured_usd)
+    cb.on_phase(
         CampaignPhase.INIT,
         "enter",
-        config=config,
-        dataset=dataset,
-        env=session,
-        warnings=preflight_warnings,
+        view=init_enter(
+            cb.view_context,
+            config=config,
+            dataset=dataset,
+            session=session,
+            warnings=preflight_warnings,
+        ),
     )
 
     if session.index_terms:
@@ -307,11 +279,8 @@ def _build_and_start_cycle(
 
     if origin.resolved_origin is None:
         raise ValueError("origin.resolved_origin is required; run origin scoring first.")
-    # resolved_origin is the resolved origin OptSearchPoint (lineage intact) — use it directly; no
-    # re-roundtrip through from_prompt_fields, which would drop the lineage.
-    resolved_origin = origin.resolved_origin
     cycle = Cycle.start(
-        resolved_origin,
+        origin.resolved_origin,
         origin.report,
         schema=session.pipeline_schema,
         framing=origin.framing,
@@ -319,52 +288,15 @@ def _build_and_start_cycle(
         session=session,
         config=config,
     )
-
-    # session.pipeline_params (overlay-merged) makes origin JSP + cycle-id sensitive to overlay edits.
-    base_pp = session.pipeline_params or session.pipeline_schema.to_pipeline_params()
-    origin_jsp = resolved_origin.to_job_search_point(
-        base_pipeline_params=base_pp,
-        schema=session.pipeline_schema,
-        framing=origin.framing,
-        demo=session.scoring.require_partition().demo,
-    )
+    assert cycle.tracking.current_sp is not None
     resolved_cycle_id, resumed_from_round = init_cycle(
         session,
-        origin_jsp,
+        cycle.tracking.current_sp,
         dataset,
         cycle_id,
         resume_from_round_override=resume_from_round_override,
     )
     return cycle, resolved_cycle_id, resumed_from_round
-
-
-def _start_observability_and_scoring(
-    session: Session,
-    config: CampaignConfig,
-    origin: CampaignOrigin,
-    dataset: list[Sample],
-    *,
-    resolved_cycle_id: str | None,
-    started_at: str,
-    langfuse_session_id: str | None,
-) -> tuple[str, ObservabilityBridge | None]:
-
-    tracing_campaign_id = resolved_cycle_id or f"campaign_{started_at[:19].replace(':', '')}"
-    obs = ObservabilityBridge.start_campaign(
-        session.tenant_root,
-        session.backend_id,
-        config_snapshot=config.model_dump(mode="json"),
-        origin_accuracy=origin.report.accuracy,
-        dataset=dataset,
-        tracing_campaign_id=tracing_campaign_id,
-        campaign_id=session.campaign_id,
-        cycle_id=resolved_cycle_id,
-        langfuse_session_id=langfuse_session_id or resolved_cycle_id,
-        langfuse=session.langfuse,
-    )
-    session.state.obs = obs
-    session.source = RunSource.OPTIMIZATION_LOOP
-    return tracing_campaign_id, obs
 
 
 async def _apply_resume_fork(
@@ -393,12 +325,6 @@ async def _apply_resume_fork(
         if fork_result is not None:
             resolved_cycle_id = fork_result.new_cycle_id
             resumed_from_round = fork_result.new_resumed_from_round
-        # Rebuilt from the ledger whichever way that went — halt, fork, or carry on — because
-        # every one of them replays priors, and what the round documents do not bank is the
-        # ledger's to answer. A postcondition of the call belongs at the call.
-        cycle.working_state.resume(
-            session.state.ledger, cycle.optimizer, before_round=resumed_from_round
-        )
     return resolved_cycle_id, resumed_from_round
 
 
@@ -410,14 +336,12 @@ def _finalize_loop_state(
     cb: RunCallbacks,
     *,
     resolved_cycle_id: str | None,
-    tracing_campaign_id: str,
     resumed_from_round: int,
 ) -> None:
 
     cycle.sample_index = SampleIndex.ensure_for(
         session.store,
         scorer=session.scoring.require_scorer(),
-        scorer_id=session.scoring.scorer_id,
         dataset_name=session.dataset_name,
         sample_ids=session.scoring.require_partition().admitted_ids,
     )
@@ -427,34 +351,16 @@ def _finalize_loop_state(
         # Idempotent — runner/entry.py may have pre-opened the ledger.
         if session.state.ledger is None:
             session.state.ledger = open_cycle_ledger(session, resolved_cycle_id)
-        # First moment the lock from `Cycle.start` has an id to be written under, and round 0 is
-        # already stamped with it.
+        # The first moment the lock from `Cycle.start` has a cycle id to be written under.
         cycle.difficulty.persist(round_num=len(cycle.rounds) - 1)
-    session.state.tracing_campaign_id = tracing_campaign_id
     session.scoring.degradation_checks = build_degradation_checks(config)
     session.state.resumed_from_round = resumed_from_round
 
-    # Stamped at init rather than only into `index.json::final`: that block exists only once the
-    # cycle STOPS, and a RUNNING cycle's `log.md` must still name the formula its numbers carry.
-    if session.state.cycle_id:
-        with graceful("round-formula stamp failed"):
-            session.store.campaigns.update(
-                session.hop,
-                {
-                    "scorer_cell_formula": resolve_cell_formula(
-                        session.scoring.scorer_cell_formula, session.pipeline_schema
-                    )[0]
-                },
-            )
-
-    emit_phase(
-        cb.on_phase,
+    # A RUNNING cycle's `log.md` reads its formula off this bracket (`scorer_cell_formula`).
+    cb.on_phase(
         CampaignPhase.INIT,
         "exit",
-        state=cycle,
-        env=session,
-        config=config,
-        dataset=dataset,
+        view=init_exit(cb.view_context, cycle=cycle, session=session),
     )
 
 
@@ -466,11 +372,9 @@ async def init_optimization_loop(
     cb: RunCallbacks,
     no_divergence_check: bool,
     fork_on_divergence: bool,
-    langfuse_session_id: str | None,
     cycle_id: str | None,
     resume_from_round_override: int | None,
     session: Session,
-    started_at: str,
 ) -> Cycle:
     await _emit_preflight_and_init_session(config, dataset, cb, session, origin)
 
@@ -483,15 +387,7 @@ async def init_optimization_loop(
         resume_from_round_override,
     )
 
-    tracing_campaign_id, _obs = _start_observability_and_scoring(
-        session,
-        config,
-        origin,
-        dataset,
-        resolved_cycle_id=resolved_cycle_id,
-        started_at=started_at,
-        langfuse_session_id=langfuse_session_id,
-    )
+    session.source = RunSource.OPTIMIZATION_LOOP
 
     resolved_cycle_id, resumed_from_round = await _apply_resume_fork(
         session,
@@ -502,8 +398,7 @@ async def init_optimization_loop(
         no_divergence_check=no_divergence_check,
         fork_on_divergence=fork_on_divergence,
     )
-    # The cycle id is FINAL here — a resume fork retargets it above, and the spawn context was
-    # published before any of that resolved (a child may recurse before this point).
+    # The cycle id is FINAL only here; the spawn context was published before a fork could move it.
     retarget_inner_spawn(session)
 
     _finalize_loop_state(
@@ -513,7 +408,6 @@ async def init_optimization_loop(
         dataset,
         cb,
         resolved_cycle_id=resolved_cycle_id,
-        tracing_campaign_id=tracing_campaign_id,
         resumed_from_round=resumed_from_round,
     )
     return cycle

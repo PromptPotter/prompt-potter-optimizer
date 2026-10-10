@@ -1,24 +1,21 @@
-"""The δ ruler as the bench serves it: a view over archive facts under an explicit scope, which any
-selector may read as a declared input — potter's θ election reads it like any other."""
-
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal, NamedTuple
+from typing import TYPE_CHECKING, Literal, NamedTuple
 
 from promptpotter.application.intelligence.exploration import (
     ORIGIN_ABILITY_ID,
     Observation,
     dedup_observations,
     extend_ruler,
-    fit_theta_given_delta,
+    fit_theta,
+    graded_response,
     graduate_ruler_model,
     observations_from_results,
 )
 from promptpotter.application.intelligence.hard_sample_archive import build_archive_observations
-from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.results import RoundResult, measured_cells, merge_known_outcomes
 from promptpotter.domain.ruler import (
     AbilityReading,
@@ -27,11 +24,10 @@ from promptpotter.domain.ruler import (
     is_flat_ruler_id,
     theta_caveat,
 )
+from promptpotter.domain.scoring import NO_CELLS, CellSheet, GradedCell
 from promptpotter.infrastructure.store.archive_queries import memory_scoped
-from promptpotter.infrastructure.store.io import read_json_tolerant
-from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.shared.errors import RulerUnpersistedError
-from promptpotter.shared.instrument import instrument_mode
+from promptpotter.shared.measurement_context import instrument_mode
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
@@ -41,15 +37,10 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["DifficultyView", "RulerScope", "StampedReading", "calibrate_delta_ruler"]
 
-# Which archive rows a fit reads — `dataset`: every campaign's on the cycle's dataset
-# (`docs/architecture.md` § Three data scopes); `campaign`: a controlled arm's own line alone.
 RulerScope = Literal["dataset", "campaign"]
 
 
 class StampedReading(NamedTuple):
-    """A reading beside the two counts its caveat was decided on, so a surface stating them reads
-    the stamp's own operands. In memory only: a round banks the reading alone."""
-
     ability: AbilityReading | None
     unlinked: int
     pinned_share: float | None
@@ -60,15 +51,9 @@ def _reading(
     ruler: DeltaRuler | None,
     *,
     objective_id: str,
-    results: Sequence[Mapping[str, Any]],
+    results: Iterable[GradedCell],
 ) -> StampedReading:
-    """The SOLE stamping site: a θ pair, the scale it was read on, and whether that scale makes it
-    ability at all — minted together, so no round can carry an ability whose scale disagrees with
-    the ruler that produced it, or a caveat that disagrees with either.
-
-    ``objective_id`` is read only on the cold arm, where θ is plain logit-accuracy and the
-    objective is the whole of what separates two readings. ``results`` are the rows THIS θ was fit
-    on; their cells decide the round's own δ span, which is half of the collapsed-band reading."""
+    """The SOLE stamping site: θ, its scale and its caveat are minted together so none can disagree."""
     if theta is None:
         return StampedReading(None, 0, None)
     cells = list(measured_cells(results))
@@ -98,62 +83,43 @@ def _reading(
 
 
 def _cycle_history(rounds: list[RoundResult]) -> list[Observation]:
-    """What every arm answered in the rounds this cycle closed, under its own individual id: each
-    round's arms, the references they were read against, and the individual the round stood on."""
     groups: list[list[Observation]] = []
     for rr in rounds:
         groups.append(observations_from_results(rr.all_candidate_results))
         groups.append(observations_from_results(rr.reference_results))
         if rr.opt_sp is not None:
-            groups.append(observations_from_results({rr.opt_sp.lineage.id: rr.results}))
+            groups.append(observations_from_results({rr.opt_sp.id: rr.results}))
     return dedup_observations(*groups)
 
 
-def _with_origin(
-    origin_results: list[dict[str, Any]] | None, archive_obs: list[Observation]
-) -> list[Observation]:
-    """*archive_obs* under the cycle's own origin rows, which win the cells both hold: an inner
-    cycle that cache-replays its origin banks that run INSIDE its own evidence epoch."""
-    origin_obs = observations_from_results({ORIGIN_ABILITY_ID: list(origin_results or [])})
+def _with_origin(origin_results: CellSheet, archive_obs: list[Observation]) -> list[Observation]:
+    origin_obs = observations_from_results({ORIGIN_ABILITY_ID: origin_results})
+    # Argument order is the rule: the cycle's own origin rows win the cells both hold.
     return dedup_observations(archive_obs, origin_obs)
 
 
 def _origin_theta(obs: list[Observation], ruler: DeltaRuler | None) -> tuple[float, float] | None:
-    """C0's ability over every origin row in *obs* — on *ruler*'s cells, or flat where it is cold.
-    Never the JOINT fit's ``post.theta[ORIGIN_ABILITY_ID]``: ``fit_rasch`` re-anchors per call."""
-    origin = [o for o in obs if o.candidate_id == ORIGIN_ABILITY_ID]
-    entries = ruler.entries() if ruler is not None else None
-    return fit_theta_given_delta(origin, entries).get(ORIGIN_ABILITY_ID)
+    """Never the JOINT fit's ``post.theta[ORIGIN_ABILITY_ID]``: ``fit_rasch`` re-anchors per call."""
+    origin = {o.sample_id: o.response for o in obs if o.candidate_id == ORIGIN_ABILITY_ID}
+    return fit_theta(origin, ruler.entries() if ruler is not None else None)
 
 
 def calibrate_delta_ruler(
-    origin_results: list[dict[str, Any]] | None,
+    origin_results: CellSheet | None,
     n_min: int,
     *,
     enable_2pl: bool,
     archive_obs: list[Observation],
 ) -> tuple[DeltaRuler | None, tuple[float, float] | None]:
-    """The ANCHORING fit — the scale every later θ readout is measured against
-    (``docs/methods/verdict-resolution.md``). It locks the anchor; ``extend_ruler`` grows the
-    membership afterwards without moving it. Cold start returns ``None``, which reads FLAT."""
+    """The ANCHORING fit; ``extend_ruler`` grows it without moving it. ``None`` is cold and reads FLAT."""
 
-    obs = _with_origin(origin_results, archive_obs)
+    obs = _with_origin(NO_CELLS if origin_results is None else origin_results, archive_obs)
     if not obs:
         return None, None
-    # Two warmth conditions, both knowable without fitting — below either the ruler stays flat
-    # and the fit would be discarded unread, so skip the 1PL + 2PL + CV storm entirely.
-    # DISTINCT SAMPLES ≥ n_min: both fits key δ on ``sorted({o.sample_id})``.
-    # DISTINCT ARMS ≥ 2: δ is identified only against a second ability. With one arm the anchor
-    # pins θ and δ collapses to that arm's own hit pattern in two values, so every later θ in
-    # the cycle restates whether round 0 happened to get the sample right, on a scale where the
-    # origin sits at 0.000 by construction. That is exactly what a fresh campaign hands this
-    # function, since 40 origin rows from one candidate clear any sample floor alone. One arm
-    # therefore stays FLAT and re-attempts next round, once the round's own candidates are
-    # banked grade-A and the fit has arms to compare.
+    # ≥2 ARMS: with one, the anchor pins θ and δ collapses to that arm's own hit pattern.
     ruler: DeltaRuler | None = None
     if len({o.sample_id for o in obs}) >= n_min and len({o.candidate_id for o in obs}) >= 2:
         fitted, post = graduate_ruler_model(obs, enable=enable_2pl)
-        # Cold below the floor: too few banked samples to trust a fitted ruler → stay flat.
         if len(post.delta) >= n_min:
             ruler = post.anchored(fitted)
             if fitted == "2PL":
@@ -162,12 +128,9 @@ def calibrate_delta_ruler(
 
 
 def _given_ruler(session: Session) -> DeltaRuler | None:
-    """The scale something outside this cycle already fixed, never re-derived: its OWN ledger
-    (resume — a re-fit walks an archive grown since the lock), then the INSTRUMENT (L4 — the
-    spawner's pooled fit, so every arm on a cell shares one δ and the origin cancels)."""
+    """A scale already fixed is never re-derived: the cycle's OWN ledger first, then the INSTRUMENT."""
     if session.state.cycle_id:
-        # A δ key names a sample only within one dataset, so an unnamed cycle has no scale to
-        # read back — and still owes the refusal, which is what its rounds on disk answer.
+        # A δ key names a sample only within one dataset; an unnamed cycle still owes the refusal.
         own = (
             session.store.campaigns.read_ruler(session.hop, dataset_name=session.dataset_name)
             if session.dataset_name
@@ -181,20 +144,14 @@ def _given_ruler(session: Session) -> DeltaRuler | None:
 
 
 def _refuse_unreproducible_rounds(session: Session) -> None:
-    """Nothing on the ledger, but the rounds on disk say a warm ruler read them.
+    """Falling through re-fits on an archive grown since the lock: a different scale, same cycle."""
 
-    Warmth is monotone within a cycle, so the LAST round document answers this in one read — and
-    a fresh mint has no round files at all, which is the silent path. Falling through instead is
-    what the fix removes: ``calibrate_delta_ruler`` would walk an archive that has grown since the lock and
-    hand back a different scale under the same cycle."""
-
-    cycle_dir = session.store.campaigns.cycle_dir(session.hop)
-    rounds = CycleLayout(CycleDir(cycle_dir)).round_files()
+    rounds = session.store.campaigns.standing_rounds(session.hop).rounds
     if not rounds:
         return
-    doc = read_json_tolerant(rounds[-1], {})
-    ability = (doc or {}).get("ability")
-    stamped = str(ability.get("ruler_id") or "") if isinstance(ability, dict) else ""
+    # Warmth is monotone within a cycle, so the LAST standing round answers in one read.
+    ability = rounds[max(rounds)].close.ability
+    stamped = (ability.ruler_id or "") if ability is not None else ""
     if not stamped or is_flat_ruler_id(stamped):
         return
     raise RulerUnpersistedError(
@@ -202,36 +159,23 @@ def _refuse_unreproducible_rounds(session: Session) -> None:
     )
 
 
-_FRONTIER_ABILITY_ID = "_frontier"
-
-
 def _cumulative_theta(
-    results: list[dict[str, Any]], ruler: DeltaRuler | None
+    results: Sequence[GradedCell], ruler: DeltaRuler | None
 ) -> tuple[float, float] | None:
-    """The θ-space peer of the cumulative composite: one virtual candidate (the frontier) fit
-    against the fixed δ, so rounds land on one scale once per-round subsets drift."""
-
-    obs = observations_from_results({_FRONTIER_ABILITY_ID: results})
-    entries = ruler.entries() if ruler is not None else None
-    return fit_theta_given_delta(obs, entries).get(_FRONTIER_ABILITY_ID)
+    responses = {cell.ruler_key: graded_response(cell) for cell in results if cell.scored}
+    return fit_theta(responses, ruler.entries() if ruler is not None else None)
 
 
 @dataclass
 class DifficultyView:
-    """One cycle's δ scale over the archive rows ``scope`` admits. ``ruler`` is ANCHORED on the
-    first warm fit and grown by :meth:`calibrate` after every round onto each cell an anchored arm
-    answered, while the anchor stays put; ``None`` = still cold, θ == logit-accuracy."""
-
     session: Session
     n_min: int
     enable_2pl: bool
     scope: RulerScope = "dataset"
-    # The δ fit renames the archive candidate carrying it to ``ORIGIN_ABILITY_ID``, so the origin
-    # is ONE candidate with one θ rather than one per round subset it was re-scored against.
     origin_sp_hash: str = ""
-    # The archive under ``scope`` as it stood when the cycle opened — the rows the ruler anchors on,
-    # read by whoever wants cross-cycle evidence beside the cycle's own.
+    # The archive as it stood when the cycle OPENED, never re-read.
     observations: list[Observation] = field(default_factory=list)
+    # ``None`` = still cold, where θ is logit-accuracy.
     ruler: DeltaRuler | None = None
 
     @classmethod
@@ -241,10 +185,9 @@ class DifficultyView:
         config: CampaignConfig,
         *,
         origin_sp_hash: str,
-        origin_results: list[dict[str, Any]],
+        origin_results: CellSheet,
         scope: RulerScope,
     ) -> tuple[DifficultyView, tuple[float, float] | None]:
-        """The view a cycle opens on, and C0's θ on it."""
         view = cls(
             session=session,
             n_min=config.optimization.elimination_n_min,
@@ -255,7 +198,6 @@ class DifficultyView:
         view.observations = view.archive()
         given = _given_ruler(session)
         if given is not None:
-            # Read on the cells that ruler carries, though the archive has grown since the lock.
             view.ruler = given
             return view, _origin_theta(_with_origin(origin_results, view.observations), given)
         view.ruler, origin_theta = calibrate_delta_ruler(
@@ -264,8 +206,6 @@ class DifficultyView:
         return view, origin_theta
 
     def archive(self) -> list[Observation]:
-        """The archive under ``scope``, read now. ``campaign`` is what the facade's memory fence
-        admits, so it refuses to read where no fence is bound rather than fit off every campaign."""
         session = self.session
         if self.scope == "campaign" and not memory_scoped():
             raise RuntimeError("a campaign-scoped ruler read with no controlled arm's fence bound")
@@ -273,58 +213,45 @@ class DifficultyView:
             session.store,
             dataset_name=session.dataset_name,
             scorer=session.scoring.require_scorer(),
-            scorer_id=session.scoring.scorer_id,
             sample_ids=session.scoring.require_partition().admitted_ids,
             origin_sp_hash=self.origin_sp_hash,
         )
 
     @property
     def scale_id(self) -> str:
-        """The ``ruler_id`` a reading taken on this view now carries."""
         if self.ruler is not None:
             return self.ruler.anchor_id
-        return flat_ruler_id(self.session.scoring.scorer_id)
+        return flat_ruler_id(self.session.scoring.require_scorer().id)
 
     @property
     def cells(self) -> set[int]:
         return set(self.ruler.delta) if self.ruler is not None else set()
 
     def reading(
-        self, theta: tuple[float, float] | None, *, results: Sequence[Mapping[str, Any]]
+        self, theta: tuple[float, float] | None, *, results: Iterable[GradedCell]
     ) -> AbilityReading | None:
         return self._stamp(theta, results).ability
 
     def _stamp(
-        self, theta: tuple[float, float] | None, results: Sequence[Mapping[str, Any]]
+        self, theta: tuple[float, float] | None, results: Iterable[GradedCell]
     ) -> StampedReading:
         return _reading(
-            theta, self.ruler, objective_id=self.session.scoring.scorer_id, results=results
+            theta,
+            self.ruler,
+            objective_id=self.session.scoring.require_scorer().id,
+            results=results,
         )
 
-    def frontier(self, results: list[dict[str, Any]]) -> StampedReading:
-        """The frontier's reading on this scale."""
+    def frontier(self, results: Sequence[GradedCell]) -> StampedReading:
         return self._stamp(_cumulative_theta(results, self.ruler), results)
 
     def calibrate(
-        self, measured: Mapping[str, Sequence[Mapping[str, Any]]], rounds: list[RoundResult]
-    ) -> bool:
-        """Cold: attempt the anchoring fit, LOCK, and re-read every θ ``rounds`` banked — True
-        then. Warm: EXTEND onto every cell an anchored arm answered, in ``measured`` or in
-        ``rounds``.
+        self, measured: Mapping[str, CellSheet], rounds: list[RoundResult]
+    ) -> list[RoundResult] | None:
+        """After every cell is graded and BEFORE the election; the re-read rounds only where a fit locked now."""
 
-        ``measured`` is keyed by INDIVIDUAL id, the parent's re-score under the parent's own, so an
-        arm's link reads its cells across this cycle's rounds and not this round's alone. Linking
-        is owned here: no selector's choice of parent cells carries it. A cell left off the ruler
-        enters no θ and is served as ``ThetaCaveat.UNMEASURED_DELTA`` — never a raise, never δ=0.
-        Called once per round, after every cell has a grade and before the election that reads
-        them.
-        """
-
-        warmed = False
+        reread: list[RoundResult] | None = None
         if self.ruler is None:
-            # The ≥2-arm floor is satisfied the moment the round's own candidates are banked, so
-            # the attempt sits BEFORE the election that needs it rather than after the round closed.
-            # This relaxes the TIMING, never the rule — a one-arm pool still stays flat.
             ruler, origin_theta = calibrate_delta_ruler(
                 rounds[0].results,
                 self.n_min,
@@ -332,57 +259,44 @@ class DifficultyView:
                 archive_obs=self.archive(),
             )
             if ruler is None:
-                return False  # still cold — legitimate, and it re-attempts next round
+                return None
             self.ruler = ruler
-            self._restamp(rounds, origin_theta)
-            warmed = True
+            reread = self._reread(rounds, origin_theta)
 
         self.ruler = extend_ruler(
             self.ruler, observations_from_results(measured), history=_cycle_history(rounds)
         )
         self.persist(round_num=max(len(rounds) - 1, 0))
-        return warmed
+        return reread
 
-    def _restamp(self, rounds: list[RoundResult], origin_theta: tuple[float, float] | None) -> None:
-        """Every θ already taken on the flat ruler, re-read on the one just locked."""
-        # Round 0 carries θ twice — its own frontier and, under a θ selector, C0's row — and a
-        # warm fit must move both, or the round file reports the origin at two abilities.
+    def _reread(
+        self, rounds: list[RoundResult], origin_theta: tuple[float, float] | None
+    ) -> list[RoundResult]:
+        # Round 0 carries θ twice — its frontier and C0's row — and a warm fit must move both.
         origin = rounds[0]
         reading = self.reading(origin_theta, results=origin.results)
-        origin.ability = reading
-        if origin.stamps_theta:
-            origin.candidate_scores = [
-                c.model_copy(
-                    update={
-                        "theta": reading.theta if reading is not None else None,
-                        "theta_se": reading.se if reading is not None else None,
-                    }
-                )
-                for c in origin.candidate_scores
-            ]
-        # …and every L1 round that already closed: a round that closed on a flat ruler had its θ
-        # fit at δ≡0, a DIFFERENT scale, and unrestamped they sit side by side in
-        # ``round_levels`` for the L4 law to average. The ROUND's frontier θ only —
-        # ``l1_score`` stamps no candidate θ on a cold ruler, so none can contradict this.
+        arms = [
+            c.model_copy(
+                update={
+                    "theta": reading.theta if reading is not None else None,
+                    "theta_se": reading.se if reading is not None else None,
+                }
+            )
+            for c in origin.candidate_scores
+        ]
+        reread = [origin.model_copy(update={"ability": reading, "candidate_scores": arms})]
+        # A round closed on a flat ruler had θ fit at δ≡0, a DIFFERENT scale the L4 law would average.
         cells = self.cells
-        frontier: list[dict[str, Any]] = []
+        frontier: list[GradedCell] = []
         for rr in rounds:
-            frontier = merge_known_outcomes(frontier, list(rr.results))
+            frontier = merge_known_outcomes(frontier, rr.results)
             if rr.round > 0:
-                # Only the cells the freshly-locked ruler carries: it was anchored on the origin
-                # and the archive, and a round that already walked past that is not on this scale.
-                on_ruler = [r for r in frontier if int(r.get("sample_id", -1)) in cells]
-                rr.ability = self.frontier(on_ruler).ability
+                on_ruler = [cell for cell in frontier if cell.ruler_key in cells]
+                reread.append(rr.model_copy(update={"ability": self.frontier(on_ruler).ability}))
+        return reread
 
     def persist(self, *, round_num: int) -> None:
-        """The ruler lands on the cycle ledger BEFORE the round document that names it. A crash
-        between them leaves a ruler carrying cells no round mentions, which is harmless; the
-        reverse leaves a round whose θ nothing can reproduce, which is the state being removed.
-
-        Called from run init as well as from every extension: ``Cycle.start`` locks the anchoring
-        fit while the cycle still has no id to write it under, and round 0 is stamped and saved
-        from that lock — so waiting for the first ``calibrate`` puts a whole round of scoring
-        between the stamp and the record."""
+        """Must land BEFORE the round file that names it: the reverse leaves a θ nothing can reproduce."""
         dataset_name = self.session.dataset_name
         if self.ruler is None or not self.session.state.cycle_id or not dataset_name:
             return

@@ -1,9 +1,8 @@
-"""Compute ``RoundDiagnostics`` from a freshly-completed round — a pure function over already-computed scoring data."""
-
 from __future__ import annotations
 
 import logging
-from typing import Any
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.scoring.row_diagnostics import extract_sample_diagnostics
 from promptpotter.domain.pipeline_schema import PipelineSchema
@@ -16,9 +15,11 @@ from promptpotter.domain.round_diagnostics import (
     SampleDiag,
     TrendClass,
 )
-from promptpotter.domain.scoring import all_verifier_graded, is_hit
-from promptpotter.shared.errors import is_error_result
+from promptpotter.domain.scoring import all_verifier_graded
 from promptpotter.shared.hashing import shapes_optimizer_prompt
+
+if TYPE_CHECKING:
+    from promptpotter.domain.scoring import GradedCell
 
 shapes_optimizer_prompt(__name__)
 
@@ -37,9 +38,8 @@ def compute_round_diagnostics(
     rounds_history: list[RoundResult],
     pipeline_schema: PipelineSchema | None,
 ) -> RoundDiagnostics:
-    """Compute typed deterministics over a completed round. *rounds_history* MUST contain *round_result* as its LAST
-    element — callers fold the round into ``cycle.rounds`` before computing diagnostics."""
-    results = round_result.results
+    """*rounds_history* MUST hold *round_result* as its LAST element."""
+    results = round_result.results.cells
 
     rank_buckets, top_k, near_misses, n_valid = _rank_analysis(results)
     error_rate, warning_rate = _pipeline_health(results)
@@ -64,86 +64,58 @@ def compute_round_diagnostics(
     )
 
 
-# ---------------------------------------------------------------------------
-# Section helpers — each returns the typed slice it owns.
-# ---------------------------------------------------------------------------
-
-
 def _rank_analysis(
-    results: list[dict[str, Any]],
+    results: Sequence[GradedCell],
 ) -> tuple[dict[str, int], dict[int, float], list[NearMiss], int]:
-    # A rank is a POSITION AGAINST A LABEL. With none, every walk below returns `None`, so every
-    # row lands in `not_found` and every top-k reads 0.0 — measured on a Harbor origin that solved
-    # eight of ten, this banked `not_found: 10` and `top-1: 0.0` into `RoundResult.diagnostics`.
-    # Absence, not zero: the empty dicts are what `RoundDiagnostics` defaults to, and the panel
-    # that reads them already self-suppresses on an undiscriminating distribution.
-    # `n_valid` still answers — it counts rows that were measured, which is not a rank claim.
-    if all_verifier_graded(r.get("ground_truth") for r in results):
-        return {}, {}, [], sum(1 for r in results if not is_error_result(r))
-    # The rank the MEASUREMENT stamped, against the terminal ranker's list: on a retrieve-then-rank
-    # pipeline the first non-empty ranking key is the candidate pool, never the prediction's list.
-    rank_map: dict[int, int | None] = {
-        i: r.get("ground_truth_rank") for i, r in enumerate(results) if not is_error_result(r)
-    }
+    answered = [r.facts for r in results if not r.facts.errored]
+    n_valid = len(answered)
+    # A rank is a position against a LABEL: with none, absence, never `not_found` and a 0.0 top-k.
+    if all_verifier_graded(r.facts.ground_truth for r in results):
+        return {}, {}, [], n_valid
+    ranks = [facts.ground_truth_rank for facts in answered]
     buckets: dict[str, int] = dict.fromkeys(_RANK_BUCKET_KEYS, 0)
     near_misses: list[NearMiss] = []
-    for i, r in enumerate(results):
-        if is_error_result(r):
-            continue
-        rank = rank_map.get(i)
+    for facts, rank in zip(answered, ranks, strict=True):
         if rank == 1:
             buckets["1"] += 1
         elif rank is not None and rank <= 10:
             buckets["2-5" if rank <= 5 else "6-10"] += 1
             near_misses.append(
                 NearMiss(
-                    query=r["query"][:80],
-                    ground_truth=(r.get("ground_truth") or "")[:60],
+                    query=facts.query[:80],
+                    ground_truth=facts.ground_truth[:60],
                     rank=rank,
-                    predicted=(r.get("predicted") or "?")[:60],
+                    predicted=(facts.predicted or "?")[:60],
                 )
             )
         elif rank is not None and rank <= 20:
             buckets["11-20"] += 1
         else:
             buckets["not_found"] += 1
-    n_valid = sum(1 for r in results if not is_error_result(r))
     top_k: dict[int, float] = {}
     if n_valid:
         for k in _TOP_K_LEVELS:
-            in_top_k = sum(1 for rank in rank_map.values() if rank is not None and rank <= k)
+            in_top_k = sum(1 for rank in ranks if rank is not None and rank <= k)
             top_k[k] = in_top_k / n_valid
 
     return buckets, top_k, near_misses, n_valid
 
 
-def _pipeline_health(results: list[dict[str, Any]]) -> tuple[float, float]:
-    """Rates only — ``terminal_node`` is not a health signal and must not be tallied here
-    (``domain/round_diagnostics.py::RoundDiagnostics``)."""
+def _pipeline_health(results: Sequence[GradedCell]) -> tuple[float, float]:
     total = len(results)
     if not total:
         return 0.0, 0.0
     warning_count = 0
     error_count = 0
     for r in results:
-        diag = (r.get("pipeline_data") or {}).get("diagnostics") or {}
-        if diag.get("warnings"):
+        if r.facts.pipeline.diagnostics.warnings:
             warning_count += 1
-        if is_error_result(r):
+        if r.facts.errored:
             error_count += 1
     return error_count / total, warning_count / total
 
 
-def _warning_str(w: object) -> str:
-    """Normalize a pipeline warning to ``step:code``. Pipelines emit either dicts or bare strings; both shapes must reach
-    the same downstream surface."""
-    if isinstance(w, dict):
-        return f"{w.get('step', 'unknown')}:{w.get('code', 'unknown')}"
-    return str(w)
-
-
 def _evolution(rounds: list[RoundResult]) -> tuple[list[EvolutionRow], list[str]]:
-    """Per-round evolution rows + plateau detection, which fires when enough consecutive deltas fall under the threshold."""
     if not rounds:
         return [], []
     rows: list[EvolutionRow] = []
@@ -151,8 +123,7 @@ def _evolution(rounds: list[RoundResult]) -> tuple[list[EvolutionRow], list[str]
     max_plateau = 0
     prev_acc: float | None = None
     for r in rounds:
-        # Between two MEASURED rounds only. An unreadable round breaks the series rather than
-        # contributing a 0.0 delta, which the plateau counter below would read as a flat round.
+        # An unreadable round breaks the series: a 0.0 delta would count as a flat round below.
         delta = (r.accuracy - prev_acc) if prev_acc is not None and r.accuracy is not None else None
         rows.append(
             EvolutionRow(
@@ -178,12 +149,7 @@ def _evolution(rounds: list[RoundResult]) -> tuple[list[EvolutionRow], list[str]
 
 
 def _trend(rounds: list[RoundResult]) -> tuple[TrendClass, str]:
-    """Classify the cycle by what its rounds ELECTED — the SOLE owner of that decision.
-
-    **Never the accuracy series.** Accuracy is relative to the subset a round bought and the
-    acquisition re-picks that subset at the leader's own θ, so an unchanged prompt climbs on its
-    own — and this verdict reaches L1's critique panel, where "improving" is the one thing that
-    stops it changing strategy. Election means the same in every round, so a series of it is one."""
+    """Elections, never the accuracy series: subsets are re-picked at the leader's θ, so accuracy drifts."""
     if len(rounds) < 3:
         return "healthy", "Too few rounds to classify"
     elected = [bool(r.improved) for r in rounds]
@@ -206,58 +172,48 @@ def _trend(rounds: list[RoundResult]) -> tuple[TrendClass, str]:
 
 
 def _cross_candidate_diff(round_result: RoundResult) -> list[str]:
-    """Cells other candidates hit but the winner missed. Empty when fewer than two candidates ran, or the winner solved
-    everything."""
     winner_results = round_result.results
     all_results = round_result.all_candidate_results
     if not winner_results or len(all_results) < 2:
         return []
 
-    # Keyed on the cell's id, the handle every other panel names it by: a query stem cannot be
-    # matched to a transcript or a failing row, and over a templated dataset every stem reads alike.
-    winner_misses = {
-        r.get("sample_id")
-        for r in winner_results
-        if not is_hit(r.get("fitness")) and r.get("sample_id") is not None
-    }
-    solvers: dict[Any, int] = {}
+    winner_misses = {r.sample_id for r in winner_results if not r.hit}
+    solvers: dict[int, int] = {}
     for results in all_results.values():
         for r in results:
-            if r.get("sample_id") in winner_misses and is_hit(r.get("fitness")):
-                solvers[r["sample_id"]] = solvers.get(r["sample_id"], 0) + 1
+            if r.sample_id in winner_misses and r.hit:
+                solvers[r.sample_id] = solvers.get(r.sample_id, 0) + 1
     ranked = sorted(solvers.items(), key=lambda kv: -kv[1])
     return [f"  #{sid} — solved by {n} other candidate(s)" for sid, n in ranked[:5]]
 
 
 def _sample_diagnostics(
-    results: list[dict[str, Any]],
+    results: Sequence[GradedCell],
     pipeline_schema: PipelineSchema | None,
 ) -> list[SampleDiag]:
-    """Per-sample tactical view (≤8 actionable misses, capped for token budget)."""
     out: list[SampleDiag] = []
     for r in results:
-        if is_error_result(r):
+        facts, fitness = r.facts, r.grade.fitness
+        if facts.errored or fitness is None:
             continue
-        pd = r.get("pipeline_data") or {}
-        diag = pd.get("diagnostics") or {}
         sd: dict[str, Any] | None = None
         if pipeline_schema is not None:
-            sd = extract_sample_diagnostics(r, pipeline_schema)
+            sd = extract_sample_diagnostics(facts, pipeline_schema)
         out.append(
             SampleDiag(
-                query=r.get("query", "")[:80],
-                ground_truth=(r.get("ground_truth") or "")[:60],
-                predicted=(r.get("predicted") or "?")[:60],
-                rank=r.get("ground_truth_rank"),
-                terminal_node=terminal_node(r) or UNKNOWN_STEP,
+                query=facts.query[:80],
+                ground_truth=facts.ground_truth[:60],
+                predicted=(facts.predicted or "?")[:60],
+                rank=facts.ground_truth_rank,
+                terminal_node=terminal_node(facts) or UNKNOWN_STEP,
                 gt_in_source=(sd or {}).get("gt_in_source"),
                 gt_in_ranked=(sd or {}).get("gt_in_ranked"),
-                warnings=[_warning_str(w) for w in (diag.get("warnings") or ())],
-                # CORRECTNESS. Its one reader thresholds it with `is_hit`
-                # (`panels.py::_r_diagnostics`), which `CellScorer` declares a predicate on
-                # `fitness`; `graded_response` here fed it the composite instead, so under any
-                # `per_cell` penalty a correct-but-costly cell rendered to `l1_critique` as a MISS.
-                fitness=float(r["fitness"]),
+                warnings=[
+                    f"{w.step or 'unknown'}:{w.code or 'unknown'}"
+                    for w in facts.pipeline.diagnostics.warnings
+                ],
+                # CORRECTNESS, never the composite: `panels.py::_r_diagnostics` thresholds it with `is_hit`.
+                fitness=float(fitness),
             )
         )
     return out

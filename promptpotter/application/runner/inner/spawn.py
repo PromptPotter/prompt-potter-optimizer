@@ -1,5 +1,4 @@
-"""The L4 recursion arm. Instrument mode — what makes this a measurement rather than a campaign
-— is declared in ``shared/instrument.py`` alone; read it before changing anything it binds."""
+"""Instrument mode is declared in ``shared/measurement_context.py`` alone; read it before changing what it binds."""
 
 from __future__ import annotations
 
@@ -7,7 +6,6 @@ import asyncio
 import contextlib
 import logging
 import time
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from promptpotter.application.campaign_config import load_campaign_config
@@ -20,6 +18,7 @@ from promptpotter.application.optimizer_manifest import (
     set_optimizer_prompt_overrides,
 )
 from promptpotter.application.run_observers import build_run_observers
+from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.entry import RunMode, run_optimization
 from promptpotter.application.runner.inner.spawn_context import (
     InnerSpawnContext,
@@ -31,6 +30,7 @@ from promptpotter.application.runner.inner.tasks import (
     inner_instrument_config,
     resolve_inner_task,
 )
+from promptpotter.application.served_dashboard import ServedDashboard, served_dashboard
 from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.l4.proxies import (
@@ -44,15 +44,16 @@ from promptpotter.domain.l4.proxies import (
     parent_level_series,
 )
 from promptpotter.domain.launch_limits import LaunchLimits
-from promptpotter.domain.phases import REFUSAL_STOPS, RunPhase, StopReason
+from promptpotter.domain.phases import REFUSAL_STOPS, StopReason
 from promptpotter.domain.results import ArmOutcome, candidate_label
+from promptpotter.domain.run_records import SpawnedBy
 from promptpotter.domain.wounds import collapse_counts
 from promptpotter.infrastructure.llm.heartbeat import heartbeat
 from promptpotter.infrastructure.llm.telemetry import _CURRENT_ROUND, _CYCLE_LEDGER
-from promptpotter.infrastructure.runtime_flags import derive_run_phase
-from promptpotter.infrastructure.store.archive_queries import capture_evidence_epoch
-from promptpotter.infrastructure.store.io import read_json_optional, write_json
-from promptpotter.infrastructure.store.layout import CycleLayout, sandbox_owner_path
+from promptpotter.infrastructure.runtime_flags import derive_run_state, standing_run_limits
+from promptpotter.infrastructure.store.archive_queries import scope_memory_to_own_answers
+from promptpotter.infrastructure.store.io import write_json
+from promptpotter.infrastructure.store.layout import sandbox_owner_path
 from promptpotter.infrastructure.store.session_pointer import save_active_pointer
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.shared.errors import (
@@ -61,7 +62,7 @@ from promptpotter.shared.errors import (
     ErrorCategory,
 )
 from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
-from promptpotter.shared.instrument import (
+from promptpotter.shared.measurement_context import (
     MAX_INSTRUMENT_DEPTH,
     MeasurementRole,
     enter_instrument_mode,
@@ -81,34 +82,22 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# An inner cycle's budget is its ROUND budget (`max_rounds` + `lives`) and carries no spend or
-# token cap by design: those trip on MEASURED token counts, which jitter run to run, making a
-# truncated trajectory indistinguishable from "this optimizer prompt found nothing". The cost
-# ceiling is the OUTER campaign's spend budget, which every inner dollar rolls up onto.
+# An inner cycle's budget is ROUNDS, never a spend or token cap: those trip on token counts, which jitter.
 
-# The stop an inner run ends on when a send was refused, back to the hole category that says so.
 _REFUSALS: dict[StopReason | None, ErrorCategory] = {
     stop: category for category, stop in REFUSAL_STOPS.items()
 }
 
-# Per-round wall-clock allowance for ONE inner cell — the rate `inner_cell_envelope_s` multiplies
-# out, enforced at the measure seam (`application/scoring/cell_envelope.py`). Never make it
-# INSTRUMENT-depth-dependent: an outcome that moves with what else was in flight is the one thing
-# the concurrency control promises it never does.
+# Per round, for ONE inner cell; never instrument-depth-dependent, or an outcome moves with what is in flight.
 OUTER_SAMPLE_WALL_S_PER_ROUND = 600.0
 
 
 def _spawn_provenance(ctx: InnerSpawnContext, round_num: int | None, query: str) -> dict[str, Any]:
-    """A work-item is (candidate × ``task``), not a candidate — the panel runs every task per
-    candidate, so ``task`` is the only thing telling one candidate's spawns apart."""
-
     cand = measured_candidate()
     return {
-        # The ASKER, not the sandbox owner — a repair fork asks while the parent still owns
-        # the sandbox, and this is the join the lineage hangs an inner run off.
+        # The ASKER, not the sandbox owner: a repair fork asks while the parent still owns the sandbox.
         "outer_cycle_id": ctx.asking_cycle_id,
-        # A cycle_id is content-addressed on its origin, so it is SHARED by every campaign
-        # minted from that origin: alone it is half an identity.
+        # A cycle_id is shared by every campaign minted from one origin: alone it is half an identity.
         "outer_campaign_id": ctx.spawn_campaign_id,
         "round": round_num,
         "candidate_idx": cand.idx if cand else None,
@@ -116,9 +105,6 @@ def _spawn_provenance(ctx: InnerSpawnContext, round_num: int | None, query: str)
         "candidate_label": (
             cand.label if cand else (candidate_label(0, 0) if round_num == 0 else None)
         ),
-        # WHY this cell ran. A backfill is spawned outside the round's shared order to fill a
-        # paired comparison, and reading one as the candidate's own panel cell makes a repaired
-        # round unreproducible.
         "role": cand.role.value if cand else None,
         "task": query,
     }
@@ -134,8 +120,6 @@ def _clip(text: str, cap: int) -> str:
 
 @shapes_optimizer_prompt
 def _lift_shape(result: CycleResult) -> str:
-    """Which rounds LIFTED, read off ``RoundResult.improved`` — a within-round paired verdict that
-    touches neither noise term the scalar carries. Denominator is the ROUND BUDGET it divides by."""
     l1 = [rr for rr in result.rounds if rr.round > 0]
     marks = " ".join(f"r{rr.round}{'+' if rr.improved else '.'}" for rr in l1)
     if not marks:
@@ -147,23 +131,16 @@ def _lift_shape(result: CycleResult) -> str:
 
 @shapes_optimizer_prompt
 def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
-    """Human-grade digest of one inner campaign — the outer loop's MODEL REASONING, riding the
-    ``reasoning_trace`` infra key. Authored under ``TRANSCRIPT_REASONING_CAP`` so the render never clips."""
-    # A floored cycle has no trajectory to narrate — say why it was floored instead.
+    """Authored under ``TRANSCRIPT_REASONING_CAP``, so the outer transcripts render never clips it."""
     if (floor := floor_reason(result)) is not None:
         return (
             f"INNER {spec.inner_dataset} seed-{spec.seed}: {floor} — scored at the floor "
             f"(optimizer-prompt-owned); stop={result.stop_reason}."
         )
-    # Narrated only for a cycle that carried evidence (`compute_outer_proxies` raised
-    # otherwise). No `or 0.0`: an origin that was never scored has no level to narrate.
     assert result.origin_level is not None
     origin = result.origin_level
     levels = result.round_levels
-    # Lead with `mean_round_delta`, the term the outer formula scores — a headline the generator
-    # is not graded on teaches the wrong lesson, so this line moves whenever the measurand does.
-    # `parent_level_series`, not `levels`: the law averages over the round BUDGET, and dividing by
-    # the rounds that ran would disagree with the score.
+    # `parent_level_series`, not `levels`: the law averages over the round BUDGET, not the rounds run.
     series = parent_level_series(result)
     mean = sum(series) / len(series)
     lines = [
@@ -199,27 +176,27 @@ def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
             parts.append(f"steer: {_clip(steer['priority_fix'], 130)}")
         scored = [c for c in rnd.candidate_scores if c.outcome is not ArmOutcome.INVALID]
         if scored:
-            # Rank by lift over the MATCHED parent, and never invent the comparison where there
-            # is none: `accuracy - 0.0` hands an arm that never covered the parent's panel its
-            # whole accuracy as lift, floating the shortest prefix to the top of the very
-            # sentence the outer optimizer learns from.
-            top = max(
-                scored,
-                key=lambda c: (
-                    c.accuracy - c.reference_accuracy
-                    if c.reference_accuracy is not None and c.accuracy is not None
-                    else float("-inf"),
-                    c.composite_fitness,
-                ),
-            )
+            # Lift over the MATCHED parent only: an arm that never covered its panel has no lift.
+            floors = {
+                c.label: c.vs_reference.reference_level("fitness") if c.vs_reference else None
+                for c in scored
+            }
+            margins = {
+                c.label: float("-inf")
+                if (matched := floors[c.label]) is None or c.accuracy is None
+                else c.accuracy - matched
+                for c in scored
+            }
+            top = max(scored, key=lambda c: (margins[c.label], c.composite_fitness))
+            reference = floors[top.label]
             theta = (
                 f", th {top.theta:.2f}+/-{top.theta_se:.2f}"
                 if top.theta is not None and top.theta_se is not None
                 else ""
             )
             versus = (
-                f" vs matched-parent {top.reference_accuracy:.3f}"
-                if top.reference_accuracy is not None
+                f" vs matched-parent {reference:.3f}"
+                if reference is not None
                 else " (stopped before it covered the origin's samples, so nothing to compare)"
             )
             parts.append(
@@ -231,8 +208,6 @@ def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
         collapses = collapse_counts(c.validation_failures for c in rnd.candidate_scores)
         anomalies = [
             f"{tag} x{n}"
-            # `repeat` is the anomaly the OUTER generator most needs: the inner loop stopped
-            # forming new hypotheses, which is an optimizer prompt defect, not task difficulty.
             for tag, n in (
                 ("no-op", collapses.get("no_op_variant", 0)),
                 ("dup", collapses.get("duplicate_variant", 0)),
@@ -243,8 +218,7 @@ def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
         if anomalies:
             parts.append(", ".join(anomalies))
         lines.append(f"R{r} " + " | ".join(parts))
-    # Drop the EARLIEST round lines first — the trajectory's tail is the informative end, and
-    # the panel's head-keep clip would silently cut the latest rounds instead.
+    # Earliest rounds go first: the panel's own head-keep clip would cut the latest instead.
     n_head = 3 if highlight else 2
     head_lines, round_lines = lines[:n_head], lines[n_head:]
     elided = False
@@ -263,27 +237,14 @@ def inner_campaign_id(
     overrides: dict[str, dict[str, Any]],
     role: MeasurementRole = MeasurementRole.PANEL,
 ) -> str:
-    """Content, never asker: the cell and the optimizer prompts it runs under ARE its identity, so a
-    re-measured cell continues the rounds a previous attempt banked. ``cycle_id`` collides across candidates.
-
-    The RESOLVED overrides, never the declared ones — the prompts are built from the resolution, so
-    hashing the declaration made the id both over- and under-specific at once: two arms whose
-    declarations resolve to one prompt paid for two inner campaigns and continued neither, while a
-    resolution-inert re-declaration restarted a banked cell at round 0.
-
-    The cell's TREATMENT, never its budget (:data:`~promptpotter.application.runner.inner.tasks._DEPTH_FIELDS`).
-    Hashing the whole spec put the round cap, the lives and the sample breadth into the identity, so
-    raising a cell's depth minted a second campaign and left the first one's rounds stranded —
-    continuation worked only while the budget held still, which is the one case that never needs it.
-    Depth is what a cell has SPENT; two cells are two cells only where their treatments differ."""
+    """Content, never asker: the TREATMENT, never the budget, so a deepened cell continues the rounds already banked."""
     purpose = "backfill" if role is MeasurementRole.BACKFILL else "own"
-    digest = stable_hash([spec.treatment(), resolved_overrides(overrides), purpose])[:6]
+    digest = stable_hash([spec.treatment(), resolved_overrides(overrides), purpose], length=6)
     return f"{spec.inner_dataset}__{digest}"
 
 
 class _InnerCell(NamedTuple):
-    """One outer cell as an inner campaign: the panel task, the optimizer prompts under test, why it
-    runs, and the campaign those address. Resolved in the OUTER task, which alone carries the role."""
+    """Resolved in the OUTER task, which alone carries the role."""
 
     ctx: InnerSpawnContext
     spec: InnerTaskSpec
@@ -306,23 +267,19 @@ def _resolve_inner_cell(sample: Sample, payload: dict[str, Any]) -> _InnerCell:
 
 
 def _sandbox_stores(ctx: InnerSpawnContext) -> Stores:
-    """Only campaign STATE is sandboxed. The content-addressed caches stay on the REAL tenant tree
-    via ``shared_root``: re-scoring a hit would re-pay for it AND redraw its stochastic value."""
+    """Only campaign STATE is sandboxed; the caches stay on the real tenant tree via ``shared_root``."""
     return build_stores(
         ctx.identity, projects_root=ctx.inner_sandbox_root, shared_root=ctx.shared_root
     )
 
 
 def _banked_inner_rounds(store: CampaignStore, root: CycleHop) -> int:
-    """The round records on the cycle answering for *root*'s line now — the one a continued cell
-    reopens (``_open_inner_campaign``), so what it is granted and what it resumes are one count."""
     index = store.load(store.line_holder(root))
-    return len(index["rounds"]) if index else 0
+    return len(index.rounds) if index else 0
 
 
 def inner_cell_envelope_s(sample: Sample, payload: dict[str, Any]) -> float:
-    """What the `promptpotter` connector DECLARES one cell may spend, budgeted over the rounds that
-    REMAIN. ``max(1, …)`` grants a fully-banked cycle the round it needs to replay and finalize."""
+    """``max(1, …)`` grants a fully-banked cycle the round it needs to replay and finalize."""
     cell = _resolve_inner_cell(sample, payload)
     store = _sandbox_stores(cell.ctx).campaigns
     campaign = store.load_campaign(cell.campaign_id)
@@ -337,9 +294,7 @@ def _open_inner_campaign(
     *,
     campaign_id: str,
 ) -> None:
-    """Continue unless something is LIVE on it — every terminal class resumes, reaped included.
-    ``stop_reason_outcome`` governs scoring (``domain/l4/proxies.py``), never resumption."""
-
+    """Continues unless something is LIVE on it: ``stop_reason_outcome`` governs scoring, never resumption."""
     plan = resolve_cycle_plan(session, campaign_config, train_data)
     store = session.store.campaigns
     root = CycleHop(campaign_id=campaign_id, cycle_id=plan.cycle_id)
@@ -355,34 +310,23 @@ def _open_inner_campaign(
             f"its campaign {campaign_id} names successor {hop.cycle_id}, which has no index",
             spent={},
         )
-    phase = derive_run_phase(
-        store.cycle_dir(hop),
-        is_terminal=bool(existing.get("finished_at")),
-    )
-    if phase in (RunPhase.RUNNING, RunPhase.GATE, RunPhase.CHECKIN):
+    run = derive_run_state(store.cycle_dir(hop))
+    if not run.resumable:
         raise CellUnscoreableError(
-            f"its campaign {campaign_id}/{hop.cycle_id} reads {phase} — another producer "
+            f"its campaign {campaign_id}/{hop.cycle_id} reads {run.run_phase} — another producer "
             "owns it, and two runs writing one cycle is not a measurement",
             spent={},
         )
-    session_id = str(existing.get("parent_session_id") or "")
-    if not session_id:
-        raise CellUnscoreableError(
-            f"its campaign {campaign_id}/{hop.cycle_id} names no parent session, so there "
-            "is no session record to continue under",
-            spent={},
-        )
 
-    session.session_id = session_id
     session.campaign_id = campaign_id
     session.state.cycle_id = hop.cycle_id
-    save_active_pointer(session.store.base_dir, session_id, hop)
+    save_active_pointer(session.store.base_dir, hop)
     logger.info(
         "inner campaign %s/%s CONTINUES from %d banked round record(s) (was %s)",
         campaign_id,
         hop.cycle_id,
         _banked_inner_rounds(store, root),
-        phase,
+        run.run_phase,
     )
 
 
@@ -393,21 +337,15 @@ def _cells(ctx: InnerSpawnContext) -> InnerCells:
 
 async def _run_inner_campaign(
     cell: _InnerCell,
-    cycle_dir_box: dict[str, Path],
+    minted: list[CycleHop],
     spawned_by: dict[str, Any],
 ) -> CycleResult:
-    """Runs in a FRESH task, so the per-task ContextVars are isolated. ``.spend`` is captured from
-    live state rather than the sandbox's debounced ``dashboard.json``, which would race."""
+    """Runs in a FRESH task, so every ContextVar bound below is this cell's alone."""
     ctx, spec = cell.ctx, cell.spec
-    # Set in THIS task's context copy, so they cannot reach the outer's optimizer. The SPECIMEN
-    # under test, not part of the instrument — the same channel carries a normal outer cycle's
-    # own optimizer prompt SET, so it is not mode-gated.
     set_optimizer_prompt_overrides(cell.overrides or None)
 
     store = _sandbox_stores(ctx)
-    # The directory name is a hash, so this file is the only place the three owner names
-    # survive for a human or the orphan reaper. Written here rather than at
-    # `publish_inner_spawn_context`, which fires for EVERY cycle and would mint empty sandboxes.
+    # Not written at `publish_inner_spawn_context`, which fires for EVERY cycle.
     write_json(
         sandbox_owner_path(ctx.inner_sandbox_root),
         {
@@ -417,34 +355,25 @@ async def _run_inner_campaign(
         },
     )
 
-    # THE declaration: this cycle is a measurement instrument, not a campaign. ONE call binds
-    # every hermetic property in this task's context copy, so none can be forgotten piecemeal by
-    # a future code path.
-    # THE scale, not a scale: the outer round fixed one, so every candidate measured against this
-    # cell reads its origin at the same θ.
-    enter_instrument_mode(
-        evidence_epoch=capture_evidence_epoch(store),
-        ruler=ctx.rulers.get(spec.inner_dataset),
-    )
+    # The ruler is the outer round's, so every candidate reads this cell's origin at the same θ.
+    enter_instrument_mode(ruler=ctx.rulers.get(spec.inner_dataset))
+    # The archive stays this cycle's CACHE and is withheld as cross-run MEMORY.
+    scope_memory_to_own_answers(set())
 
-    # enable_tracing=False: cloud traces for an ephemeral fitness measurement piled
-    # payload-bearing spans in the logger's _trace_metadata until the process was OOM-killed.
-    # The local FileSink still records inner traces to disk.
+    # enable_tracing=False: cloud traces of an ephemeral measurement pile spans in process memory.
     session = await init_services(
         dataset_name=spec.inner_dataset,
         identity=ctx.identity,
         stores=store,
         enable_tracing=False,
     )
+    session.control = RunControl(enclosing=ctx.enclosing)
     all_samples = session.samples
     if not all_samples:
         raise ValueError(f"inner dataset {spec.inner_dataset!r} loaded zero samples")
     n = min(max(spec.n_samples, spec.n_samples_origin or 0), len(all_samples))
-    # Spelled once, in the screen that CHOOSES seeds — a runner drawing differently would run a
-    # bank nobody screened, and nothing reports the divergence.
+    # The draw `seed-screen` chose the seeds under: drawn differently, the bank is one nobody screened.
     train_data = draw_bank(all_samples, n, spec.seed)
-    # Computed here because this is the first moment the drawn rows exist. `seed-screen` owns
-    # the disqualifier but is hand-run, so nothing recomputes it for the seats actually seated.
     bank_floor = class_floor(train_data)
 
     campaign_config = inner_instrument_config(
@@ -454,13 +383,10 @@ async def _run_inner_campaign(
         n_scored=len(train_data),
     )
 
-    # A retry must not orphan the rounds the previous attempt banked.
     _open_inner_campaign(session, campaign_config, train_data, campaign_id=cell.campaign_id)
     if session.campaign_id and session.state.cycle_id:
-        # An L4-only fact, so it stays out of the generic mint seam every campaign shares.
-        session.store.campaigns.update(session.hop, {"spawned_by": spawned_by})
-        # Publish the minted dir so the outer heartbeat's detail_fn can tail this dashboard.
-        cycle_dir_box["dir"] = session.store.campaigns.cycle_dir(session.hop)
+        session.store.campaigns.record_spawned(session.hop, SpawnedBy.model_validate(spawned_by))
+        minted.append(session.hop)
     observers = build_run_observers(session=session, campaign_config=campaign_config)
     try:
         result = await run_optimization(
@@ -468,8 +394,7 @@ async def _run_inner_campaign(
             campaign_config,
             session=session,
             observers=observers,
-            # Declares nothing of its own: the inner cycle holds what its config declares (none —
-            # `inner_instrument_config` clears both arms) and spends under the ROOT's book.
+            # Declares no ceiling of its own: the inner cycle spends under the ROOT's book.
             limits=unadmitted_limits(
                 campaign_config,
                 stores=session.store,
@@ -479,19 +404,18 @@ async def _run_inner_campaign(
             mode=RunMode(),
         )
     finally:
-        # One process runs dozens of inner campaigns back-to-back, so anything holding an OS
-        # handle or a large payload piles up until the process is OOM-killed with no traceback.
-        # The optimizer LLM clients and the Langfuse SDK are process-SHARED, so neither may be
-        # shut down here — that would break every later campaign.
+        # The optimizer LLM clients and the Langfuse SDK are process-SHARED: never shut either down.
         with contextlib.suppress(Exception):
             await session.backend_client.aclose()
         if session.langfuse is not None:
             with contextlib.suppress(Exception):
                 session.langfuse.reset()
-    # A bank paying MORE for answering one label than for reasoning cannot measure an optimizer
-    # prompt. REPORTED, never enforced: one origin pass sits inside its own error bar, so
-    # rejecting a seat on it is the single-pass error the screen itself stopped making.
-    origin_acc = result.origin_accuracy
+    # Reported, never enforced: one origin pass sits inside its own error bar.
+    origin_acc = (
+        None
+        if result.origin is None or result.origin.accuracy is None
+        else result.origin.accuracy.value
+    )
     if origin_acc is not None and bank_floor is not None and bank_floor >= origin_acc:
         logger.warning(
             "inner cell %s/seed-%d MAY REWARD COLLAPSE: constant-answer floor %.3f >= this "
@@ -507,8 +431,6 @@ async def _run_inner_campaign(
 
 
 async def run_inner_cycle(sample: Sample, payload: dict[str, Any]) -> dict[str, Any]:
-    """Projects the three proxy metrics onto the ``{"data": {…}}`` shape ``measure_sample`` parses
-    from an HTTP body, so the outer scorer reads an inner result identically to a remote one."""
     query = sample.query
     depth = instrument_depth()
     if depth >= MAX_INSTRUMENT_DEPTH:
@@ -518,64 +440,41 @@ async def run_inner_cycle(sample: Sample, payload: dict[str, Any]) -> dict[str, 
             "campaign. An inner dataset whose own backend_type is 'promptpotter' recurses "
             "without bound — check the inner_benchmark named in inner_tasks.yaml."
         )
-    # A FAILED outcome surfaces as a returned ``stop_reason``; the runner does not raise, so it
-    # is classified below with every other no-evidence shape rather than caught here. A run that
-    # merely failed to improve is a SUCCESS with poor proxies — measured, so a bad mutation is
-    # still penalised.
     cell = _resolve_inner_cell(sample, payload)
     ctx, spec, campaign_id = cell.ctx, cell.spec, cell.campaign_id
     start = time.monotonic()
-    # Filled by the inner task once the campaign is open, for the progress line to read its
-    # dashboard. What the campaign spends reaches the outer ledger call by call, as each settles
-    # against the outer run's book (`spend_book.py::SpendBook.mirror`).
-    cycle_dir_box: dict[str, Path] = {}
+    minted: list[CycleHop] = []
 
-    # This runs in the OUTER task, so ``_CYCLE_LEDGER`` still holds the outer ledger. The
-    # heartbeat below appends to it, because the inner campaign emits only to its OWN sandbox
-    # ledger and the outer surfaces would read the silence as a vanished producer.
+    # Still the OUTER ledger: the inner campaign emits only to its sandbox's, and the outer reads silence.
     outer_ledger = _CYCLE_LEDGER.get()
-    # Captured in the OUTER task and handed over explicitly: the inner task gets a COPY of this
-    # context and rebinds `_CURRENT_ROUND`, so a read over there attributes the campaign to
-    # itself.
+    # Captured in the OUTER task: the inner task's context copy rebinds `_CURRENT_ROUND`.
     spawned_by = _spawn_provenance(ctx, _CURRENT_ROUND.get(), query)
 
-    def _inner_detail() -> str | None:
-        cycle_dir = cycle_dir_box.get("dir")
-        if cycle_dir is None:
-            return "inner campaign starting…"
-        dash = read_json_optional(CycleLayout(cycle_dir).dashboard)
-        if not dash:
-            return "inner campaign starting…"
-        rnd = dash.get("round")
-        best = dash.get("best")
-        max_rounds = (dash.get("run_limits") or {}).get("max_rounds")
-        # The SERVED bench lift, the webapp's headline too, once the inner pass has graded its
-        # pick; until then only the inner optimizer's own search-pool reading exists.
-        score = dash.get("bench_score") or {}
-        column = score.get("headline")
-        bench = (score.get("lift") or {}).get(column)
-        lift = f"best measured {best:.0%}" if isinstance(best, int | float) else "best —"
-        if bench is not None:
-            lift += f" · bench {column} lift {bench['value']:+.3f}"
-        return f"inner r{rnd if rnd is not None else '?'}/{max_rounds or '?'} · {lift}"
+    sandbox = _sandbox_stores(ctx)
 
-    # Awaiting `inner_task` DIRECTLY makes it this coroutine's `_fut_waiter`, so the envelope's
-    # cancellation propagates and the campaign really stops: never wrap it in `asyncio.shield` or
-    # `asyncio.wait`, both of which orphan it to keep calling the optimizer and billing tokens
-    # against a sample nobody will read. The bound itself is the measure seam's
-    # (`application/scoring/cell_envelope.py`), off what this module declares per cell.
-    # The inner campaign measures no OUTER candidate: unbound, its own optimizer calls would bill
-    # under the outer cell's role.
+    def _inner_detail() -> str | None:
+        dash = served_dashboard(sandbox, minted[0]) if minted else None
+        if not isinstance(dash, ServedDashboard):
+            return "inner campaign starting…"
+        standing = standing_run_limits(sandbox.campaigns.cycle_dir(minted[0])).rounds
+        max_rounds = spec.n_rounds if standing is None else standing.max_rounds
+        score = dash.bench_score
+        bench = None if score is None else score.vs_origin.headline
+        stands = dash.run_standing
+        lift = "nothing selected" if stands is None else stands.selection_line
+        if score is not None and bench is not None:
+            lift += f" · bench {score.headline} lift {bench.estimate.value:+.3f}"
+        return f"inner r{dash.round}/{max_rounds or '?'} · {lift}"
+
+    # Awaited DIRECTLY, never under `asyncio.shield`/`wait`, which orphan it to keep billing.
+    # The context binds no OUTER candidate, or inner optimizer calls bill under the outer cell's role.
     inner_task = asyncio.create_task(
-        _run_inner_campaign(cell, cycle_dir_box, spawned_by),
+        _run_inner_campaign(cell, minted, spawned_by),
         context=measured_candidate_context(None),
     )
 
     heartbeat_task = asyncio.create_task(
-        # NOT an optimizer node name: a whole campaign runs here, so naming it after one node
-        # charges that node with the entire wall clock and a healthy run reads as a hang. The
-        # `terminal_node` stamp below answers a different question (which config the row depends
-        # on) — do not re-align this display label to it.
+        # `node` is NOT an optimizer node name, nor the `terminal_node` stamp below: do not align them.
         heartbeat(
             outer_ledger,
             call_id=f"inner:{query}",
@@ -588,12 +487,10 @@ async def run_inner_cycle(sample: Sample, payload: dict[str, Any]) -> dict[str, 
     try:
         result = await inner_task
     except asyncio.CancelledError:
-        # Name where the banked rounds are: the outer row carries only the cell id, so otherwise
-        # the abandoned campaign is unfindable from either surface.
         logger.warning(
             "inner cell %s abandoned; its partial campaign is at %s",
             query,
-            cycle_dir_box.get("dir", "<not yet minted>"),
+            sandbox.campaigns.cycle_dir(minted[0]) if minted else "<not yet minted>",
         )
         if not inner_task.done():
             inner_task.cancel()
@@ -601,48 +498,31 @@ async def run_inner_cycle(sample: Sample, payload: dict[str, Any]) -> dict[str, 
                 await inner_task
         raise
     finally:
-        # Whether the inner run returned or raised — an in-flight heartbeat would otherwise keep
-        # appending against a finished sample.
         heartbeat_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await heartbeat_task
     if (refused := _REFUSALS.get(result.stop_reason)) is not None:
-        # The inner run spends the outer run's provider key and ceiling, so the refusal is every
-        # later cell's: a hole that halts the walk, never an excluded cell the walk steps past.
+        # The inner run spends the outer's key and ceiling, so the refusal halts the walk for every later cell.
         raise CellSendRefusedError(
             f"its inner campaign {campaign_id} stopped on {result.stop_reason}",
             category=refused,
             spent={},
         )
-    # Every other no-evidence shape is the law's: `compute_outer_proxies` raises
-    # `CellUnscoreableError`, which `measure_sample` resolves to this cell's UNSCOREABLE row.
+    # Raises `CellUnscoreableError` on every other no-evidence shape, which `measure_sample` resolves.
     proxies = compute_outer_proxies(result)
     facts = inner_cell_facts(result, campaign_id)
 
     data: dict[str, Any] = {
-        # A summary line for the reader, not an answer to be matched: this cell carries no label
-        # (`Sample.ground_truth is None`), which is what `domain/scoring.py::all_verifier_graded`
-        # derives from. Do not add a hit/miss reader here.
+        # A summary line, not an answer to be matched: this cell carries no label, so add no hit/miss reader.
         INNER_RESULT_KEY: [f"inner:{query} D{proxies.mean_round_delta:+.3f}"],
-        # The outer loop's raw evidence, rendered as MODEL REASONING in its transcripts panel.
         "reasoning_trace": _inner_narrative(result, spec),
         **proxies.model_dump(),
-        # An INFRA key, deliberately NOT an `OuterSampleProxies` field: those reach the scoring
-        # formula's namespace, and a standard error inside the formula is one keystroke from the
-        # `mean - λ·se` haircut the spec forbids. Precision travels beside the measurement; it
-        # never grades it.
+        # An INFRA key, NOT an `OuterSampleProxies` field: those reach the scoring formula's namespace.
         PARENT_LEVEL_SE_KEY: mean_parent_level_se(result),
-        # The rest of what this seed knows about itself, as numbers rather than as the sentence
-        # in `reasoning_trace`. Same infra slot and the same rule: they travel beside the
-        # measurement and never grade it. `None` on a floored cell, whose keys are then absent.
-        **(facts.model_dump() if facts is not None else {}),
-        # The archive's reuse contract: a named node means "this outcome depends on config only
-        # UP TO that node". An inner campaign consumes the ENTIRE outer config at once, so the
-        # only honest stamp is `InnerCells.terminal`.
+        **(facts.model_dump(mode="json") if facts is not None else {}),
+        # An inner campaign consumes the ENTIRE outer config, so the stamp is `InnerCells.terminal`.
         "terminal_node": _cells(ctx).terminal,
-        # No `step_tokens`: every call the campaign made was billed as it settled
-        # (`spend_book.py::SpendBook.mirror`). Returning it HERE would bill the cell twice, a
-        # continued cell's whole history again, and the lot whenever the archive replays this row.
+        # No `step_tokens`: every call was billed as it settled, and returning it bills the cell twice.
     }
     return {"data": data}
 
