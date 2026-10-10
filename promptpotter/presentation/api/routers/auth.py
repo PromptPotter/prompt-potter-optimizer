@@ -1,5 +1,4 @@
-"""``/auth/*`` — the Identity I/O kind (ADR-0002), NOT the ``/commands`` highway, so its per-user mutations ride
-it directly. Login / callback / logout run pre-auth and deliberately take no ``IdentityDep``."""
+"""Login / callback / logout run pre-auth and deliberately take no `IdentityDep`."""
 
 from __future__ import annotations
 
@@ -54,25 +53,20 @@ auth_router = APIRouter(prefix="/auth", tags=["Auth"])
 
 
 class ConnectedAccount(StrictModel):
-    """One OIDC provider currently bound to the active session.
-
-    Stage-1 beta is single-account-per-user — the list is always length 1.
-    The Clerk-style "connected accounts" surface in the webapp displays this
-    list; multi-account linking ships with ADR-0002 Stage 2.
-    """
+    """One OIDC provider bound to the active session."""
 
     provider: str
     email: str | None
 
 
 class UserSettings(StrictModel):
-    """Per-user preferences surfaced in Account → Preferences."""
+    """The caller's per-user preferences."""
 
     demo_mode_enabled: bool
 
 
 class MeResponse(StrictModel):
-    """Current identity envelope. Returned by ``GET /auth/me`` only."""
+    """The caller's identity envelope, with the provider and consent state the account and consent gates read."""
 
     user_id: str
     tenant_id: str
@@ -82,39 +76,14 @@ class MeResponse(StrictModel):
     provider: str | None
     connected_accounts: list[ConnectedAccount]
     available_providers: list[str]
-    # RBAC permit set for this identity (sorted) — the honest permit envelope.
-    # Empty for a first-time signup; the pinned developer carries the admin caps
-    # (e.g. benchmark-dataset read). Server routes enforce them; the webapp reads
-    # this to reflect, not to gate (the outer-loop dashboard boxes gate on data).
     capabilities: list[str]
-    # Entitlement gate input, the sibling of the consent gate below: a `blocked` account is signed in
-    # and holds nothing, so the webapp shows the holding screen instead of the app. Reflecting, not
-    # gating — the server already refuses a blocked account's commands at the dispatcher.
     access_state: AccessState
-    # Consent gate inputs. ``terms_version`` is the live required version;
-    # ``terms_accepted_version`` is what this user last accepted (None = never).
-    # The webapp blocks the app while the two differ. The accepted timestamp
-    # stays server-side in user.json — the frontend needs only the version match.
     terms_version: str
     terms_accepted_version: str | None
 
 
 def _is_declared_host_admin(email: str | None, issuer: str | None) -> bool:
-    """May this sign-in claim the box? Answered from `HOST_ADMIN_EMAIL`, and from `HOST_ADMIN_ISSUER`
-    when that is set too. Unset email means nobody may, which is a refusal rather than a fallback —
-    the alternative, "first one in wins", is the thing that stopped being safe the moment signing up
-    became the grant.
-
-    The issuer half is why the email half is not enough on its own: an email is a CLAIM a provider
-    makes, and two providers are wired. Whichever has the weaker email handling would otherwise be
-    able to grant the box by asserting the declared address — so the pin bounds this to the one
-    provider the operator actually signs in with, and bounds any provider added later by default.
-    An empty `HOST_ADMIN_ISSUER` accepts any issuer, which is what every existing box already does,
-    so setting it is an upgrade and never a deploy-time lockout.
-
-    `email` arriving as ``None`` is the normal answer for an address the issuer would not vouch for
-    (`verifier.py`, `github.py`) — and it can never match here, which is the point.
-    """
+    """Unset `HOST_ADMIN_EMAIL` means nobody may: signing up is the grant, so "first one in wins" is unsafe."""
     declared = settings.HOST_ADMIN_EMAIL.strip().lower()
     if not declared or (email or "").strip().lower() != declared:
         return False
@@ -154,8 +123,7 @@ def _require_provider_client(bundle: IdentityBundle, provider: str) -> Any:
 
 
 def _redirect_with_error(code: str, *, email: str | None = None) -> RedirectResponse:
-    """Bounce a failed callback to the sign-in surface with a query-param error. The consent screen browser-navigates here,
-    so raising would dump raw JSON into the tab — a 303 lets the React modal render an inline banner."""
+    """The callback is browser-navigated: raising would dump raw JSON into the tab."""
     qs = f"auth_error={code}"
     if email:
         qs += f"&email={quote_plus(email)}"
@@ -190,11 +158,6 @@ async def callback(
     request: Request,
     provider: Annotated[str, Path(pattern=r"^[a-z]+$", max_length=16)],
 ) -> RedirectResponse:
-    # All failure paths in this handler redirect to /?auth_error=<code>
-    # instead of raising HTTPException — this route is browser-navigated by
-    # the provider's consent screen, so a JSON 4xx renders as raw text in the
-    # tab. The sibling routes (/login, /providers, /me, /logout) keep raising
-    # since they're called by fetch() and want JSON.
     if provider not in SUPPORTED_PROVIDERS:
         return _redirect_with_error("signin_unavailable")
     bundle: IdentityBundle | None = getattr(request.app.state, "identity_bundle", None)
@@ -229,27 +192,19 @@ async def callback(
         logger.warning("OIDC code exchange failed for %s: %s", provider, exc)
         return _redirect_with_error("code_exchange_failed")
 
-    # The blocklist is NOT consulted here. Anyone completing OIDC gets an account and is entitled by
-    # that alone; the blocklist is resolved per-request at the session seam (`resolve_access_state`),
-    # which hands a blocked account an empty capability set. Rejecting at the callback is what left an
-    # interested stranger with nothing but an error banner and no record we could later act on.
+    # A blocked account still gets a session: the session seam empties its capabilities per request.
     user_id = derive_user_id(identity.issuer, identity.subject)
     access_state = resolve_access_state(identity.email, bundle)
     if access_state == "blocked":
         logger.info("Blocked account signed in: %s (%s)", identity.email, provider)
     elif _is_declared_host_admin(identity.email, identity.issuer):
-        # The marker NAMES the box's own tenant — the workspace terminal runs and browser sessions
-        # share — so WHO writes it must be DECLARED. Now that signing up entitles, an inferred claim
-        # would hand that workspace to whoever arrived first.
+        # The marker names the box's own tenant, so who writes it is declared, never inferred from arrival order.
         maybe_claim_default(
             projects_root=DEFAULT_PROJECTS_ROOT,
             user_id=str(user_id),
             marker_path=bundle.paths.default_claim_marker,
         )
     elif registered_user_id(bundle.paths.default_claim_marker) is None:
-        # A state the box can enter, so it says so: unclaimed AND undeclared means the terminal keeps
-        # resolving the `default` tenant while every browser session resolves its own, and the two
-        # workspaces drift apart in silence.
         logger.warning(
             "Sign-in by %s did not claim this box: HOST_ADMIN_EMAIL is unset, so no browser identity "
             "may write the claim marker. Terminal and browser will resolve DIFFERENT tenants until it is.",
@@ -292,25 +247,15 @@ async def logout(request: Request) -> JSONResponse:
 def _announce_new_account(
     *, email: str | None, name: str | None, user_id: str, access_state: AccessState
 ) -> None:
-    """Both one-shot notices an account's first request fires — the operator's and the CRM's.
-
-    Off the request path (``BackgroundTasks``), so the two ``timeout=10`` posts land after the
-    response rather than holding a new operator's first page. ``admin_bot.py`` makes both
-    best-effort by contract, so nothing here can raise and there is no result to wait for.
-
-    The count is read HERE, after ``get_or_create`` returned, so the arriving account is inside
-    the total both notices lead with: with signup as the grant, "how many are on the free tier"
-    is the number that decides whether anything needs doing, and no other surface holds it.
-    """
     who = email or f"(no email) {user_id}"
+    # Read after `get_or_create` returned, so the arriving account is inside the total.
     total = count_accounts(DEFAULT_PROJECTS_ROOT)
     notify_operator(
         f"New PromptPotter account: {who}\n"
         f"Accounts now: {total}\n"
         f"Access: {access_state}" + (f"\nRevoke it with:  /block {email}" if email else "")
     )
-    # Entitlement and contact record are separate questions: a blocked account is still a real
-    # person worth keeping, so both notices fire regardless of `access_state`.
+    # Fires regardless of `access_state`: a blocked account is still a contact worth keeping.
     forward_new_account_to_crm(email=email, name=name, user_id=user_id, account_count=total)
 
 
@@ -318,28 +263,14 @@ def _announce_new_account(
 def me(
     request: Request, background: BackgroundTasks, identity: IdentityDep, stores: StoresDep
 ) -> MeResponse:
-    """Identity envelope + the data the account modal + consent gate need.
-
-    `connected_accounts` is a single-entry list at Stage 1 (one provider
-    per session). `available_providers` is configured-minus-connected so
-    the "+ Connect account" affordance only surfaces real targets.
-    `terms_*` drive the post-auth consent gate (read from `user.json`);
-    `access_state` drives the entitlement gate in front of it.
-
-    This is also where a new account first becomes real on disk, so it is what schedules the
-    new-account announcement — after the response, never on it. See the comment on
-    `is_new_account`.
-    """
+    """The caller's identity envelope; ``available_providers`` is the configured ones minus the connected one."""
     bundle = _require_bundle(request)
     email, provider, access_state = identity.email, identity.provider, identity.access_state
     name = display_name(email)
     connected = [ConnectedAccount(provider=provider, email=email)] if provider else []
     configured = set(bundle.config.configured)
     available = sorted(configured - {provider}) if provider else sorted(configured)
-    # `load() is None` is the single moment an account comes into being: `get_or_create` writes
-    # `user.json` on the next line and every later request finds it. The notice fires HERE rather
-    # than at the OIDC callback because that makes it exactly-once per account instead of once per
-    # sign-in — a pending user who retries login would otherwise re-notify every time.
+    # `load() is None` is the one moment an account comes into being; its announcement runs after the response, never on it.
     is_new_account = stores.users.load() is None
     user = stores.users.get_or_create(
         user_id=str(identity.user_id),
@@ -372,19 +303,13 @@ def me(
 
 @auth_router.get("/quota-status", response_model=QuotaStatus)
 def get_quota_status(job_registry: JobRegistryDep, stores: StoresDep) -> QuotaStatus:
-    """Live quota snapshot for the Account → Usage & limits pane.
-
-    Usage is uncapped, so an over-budget account shows the true overage rather
-    than clamping the display to the cap. The served ceilings are the RESOLVED
-    ones, never the raw nullable overrides, so the browser is not left joining
-    a null against an install default to learn its own caps.
-    """
+    """The caller's live quota: usage is unclamped, and the ceilings are the resolved ones, never the raw nullable overrides."""
     return quota_status(stores=stores, job_registry=job_registry)
 
 
 @auth_router.get("/user-settings", response_model=UserSettings)
 def get_user_settings(stores: StoresDep) -> UserSettings:
-    """Read the current user's preferences (Account → Preferences)."""
+    """The current user's preferences."""
     user = stores.users.get_or_create(
         user_id=str(stores.identity.user_id),
         tenant_id=str(stores.identity.tenant_id),
@@ -395,9 +320,7 @@ def get_user_settings(stores: StoresDep) -> UserSettings:
 
 @auth_router.patch("/user-settings", response_model=UserSettings)
 def patch_user_settings(body: UserSettings, stores: StoresDep) -> UserSettings:
-    """Persist a preference change. A user-account mutation (not a campaign
-    command), so it rides the auth router alongside session writes rather than
-    the ``/commands`` highway."""
+    """Persist a preference change for the current user."""
     user = stores.users.get_or_create(
         user_id=str(stores.identity.user_id),
         tenant_id=str(stores.identity.tenant_id),
@@ -408,14 +331,13 @@ def patch_user_settings(body: UserSettings, stores: StoresDep) -> UserSettings:
 
 
 class AcceptTermsBody(StrictModel):
-    """The version the client is accepting — must equal the live TERMS_VERSION."""
+    """The terms version the client accepts, which must equal the live ``TERMS_VERSION``."""
 
     version: str
 
 
 class TermsConsent(StrictModel):
-    """Consent state echoed back after an accept (same fields the gate reads on
-    ``/me``). The accepted timestamp stays server-side in ``user.json``."""
+    """The consent state after an accept, in the fields ``/me`` reports it."""
 
     terms_version: str
     terms_accepted_version: str | None
@@ -423,13 +345,9 @@ class TermsConsent(StrictModel):
 
 @auth_router.post("/accept-terms", response_model=TermsConsent)
 def accept_terms(body: AcceptTermsBody, stores: StoresDep) -> TermsConsent:
-    """Record the current user's acceptance of the Terms — the provable consent
-    artifact the legal clauses depend on. A per-user identity mutation (like
-    user-settings), not a campaign command, so it rides the auth router rather
-    than the ``/commands`` highway. The accepted version must equal the live
-    ``TERMS_VERSION``; a stale version is rejected so the gate re-prompts against
-    current text. The timestamp is server-stamped — never trust the client clock
-    for a record that has to hold up.
+    """Record the current user's acceptance of the Terms, server-stamped.
+
+    A version other than the live ``TERMS_VERSION`` answers 409 ``terms_version_stale``.
     """
     if body.version != TERMS_VERSION:
         raise ConflictError(
@@ -453,15 +371,9 @@ def activity(
     window: ActivityWindow = "1d",
     group_by: ActivityGroupBy = "model",
 ) -> ActivityResponse:
-    """Time-bucketed spend / requests / tokens over the requested window.
+    """Time-bucketed spend, requests and tokens over the window, each billed call at the price it was stamped with.
 
-    Every billed call on the account whose timestamp lands in the window, on
-    evenly spaced bins, each at the price it was stamped with when it was
-    recorded.
-
-    ``group_by`` selects the colour axis: ``model`` = exact model string,
-    ``api_key`` = who billed the call (``openai`` / ``groq`` / ``anthropic`` /
-    ``openrouter``).
+    ``group_by`` is ``model`` (the exact model string) or ``api_key`` (who billed the call).
     """
     return account_activity(stores, window=window, group_by=group_by)
 

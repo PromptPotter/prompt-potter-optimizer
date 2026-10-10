@@ -1,6 +1,3 @@
-"""Workspace-scope diagnostic-run records — ``noise-floor``'s sidecars. Cross-cycle and cross-campaign: the records
-live on the tenant archive root, not on any single campaign."""
-
 from __future__ import annotations
 
 from fastapi import APIRouter, Query
@@ -24,7 +21,7 @@ def list_diagnostic_runs(
     stores: StoresDep,
     dataset: str | None = Query(default=None, description="Filter to one dataset."),
 ) -> DiagnosticRunListResponse:
-    """Return every diagnostic-run record on disk, optionally filtered by dataset."""
+    """Every diagnostic-run record on disk, optionally filtered by dataset."""
     runs = stores.diagnostic_runs.list(dataset=dataset)
     return DiagnosticRunListResponse(n=len(runs), runs=runs)
 

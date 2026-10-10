@@ -1,124 +1,97 @@
-"""CLI entry-point facade — COMMANDS dispatch + ``main()``; bodies in ``commands/``. Ctrl+C is a resumable pause that exits
-130, not a stop; ``pause`` asks a RUNNING cycle to stop through the dispatcher the webapp's control also fires."""
+"""No verb's module is imported here: ``main()`` imports the one it dispatches, so ``--help`` loads no verb."""
 
 from __future__ import annotations
 
-import argparse
 import asyncio
+import contextlib
+import importlib
 import json
 import sys
-from collections.abc import Callable, Coroutine
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 # Windows consoles default to cp1252 which can't print Unicode symbols.
 if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
 
-from promptpotter.application.initialization.wiring import complete_registries
-from promptpotter.application.jobs.reaper import sweep_dead_cycles
-from promptpotter.config.first_run import ensure_api_key
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.config.settings import settings
 from promptpotter.domain.command_kinds import ALL_DISPATCHED_KINDS
 from promptpotter.domain.phases import StopOutcome
 from promptpotter.infrastructure.store.layout import tenant_workspace
 from promptpotter.infrastructure.store.session_pointer import active_pointer_exists
-from promptpotter.presentation.cli.commands._shared import (
-    CommandResult,
-    identity_from_args,
-    launch_limits_from_args,
-    set_verbose,
-)
-from promptpotter.presentation.cli.commands.ab import cmd_ab
-from promptpotter.presentation.cli.commands.evidence import cmd_evidence
-from promptpotter.presentation.cli.commands.lifecycle import (
-    cmd_archive,
-    cmd_cancel_queued,
-    cmd_cleanup_empty_cycles,
-    cmd_delete,
-    cmd_delete_cycle,
-    cmd_origin_gate,
-    cmd_pause,
-    cmd_rename,
-    cmd_replace_dataset,
-    cmd_set_concurrent_cycles,
-    cmd_set_limits,
-    cmd_skip_searchpoint,
-    cmd_step_cycle,
-    cmd_unarchive,
-)
-from promptpotter.presentation.cli.commands.maintenance import cmd_compact_archive
-from promptpotter.presentation.cli.commands.new import cmd_new
-from promptpotter.presentation.cli.commands.noise_floor import cmd_noise_floor
-from promptpotter.presentation.cli.commands.probe_reasoning import cmd_probe_reasoning
-from promptpotter.presentation.cli.commands.reindex import cmd_reindex
-from promptpotter.presentation.cli.commands.reset import cmd_reset
-from promptpotter.presentation.cli.commands.restamp import cmd_restamp
-from promptpotter.presentation.cli.commands.resume_command import cmd_resume
-from promptpotter.presentation.cli.commands.seed_screen import cmd_seed_screen
-from promptpotter.presentation.cli.commands.verify import cmd_verify
-from promptpotter.presentation.cli.parsers import build_parser, parser_verbs
+from promptpotter.presentation.cli.parsers import build_parser, identity_from_args, parser_verbs
 from promptpotter.shared.errors import (
     PotterError,
     RequestTooLargeError,
     SendRefusedError,
 )
 
+if TYPE_CHECKING:
+    import argparse
+    from collections.abc import Callable, Coroutine
+
+    from promptpotter.presentation.cli.commands.result import CommandResult
+
 __all__ = ["main"]
 
 
-# Verb -> handler, one command, one ledger record, either surface.
-COMMANDS: dict[str, Callable[[argparse.Namespace], Coroutine[Any, Any, CommandResult]]] = {
-    "new": cmd_new,
-    "resume": cmd_resume,
-    "ab": cmd_ab,
-    "reset": cmd_reset,
-    "reindex": cmd_reindex,
-    "restamp": cmd_restamp,
-    "compact-archive": cmd_compact_archive,
-    "verify": cmd_verify,
-    "noise-floor": cmd_noise_floor,
-    "seed-screen": cmd_seed_screen,
-    "evidence": cmd_evidence,
-    "probe-reasoning": cmd_probe_reasoning,
-    "archive": cmd_archive,
-    "delete": cmd_delete,
-    "unarchive": cmd_unarchive,
-    "pause": cmd_pause,
-    "rename": cmd_rename,
-    "set-limits": cmd_set_limits,
-    "skip-searchpoint": cmd_skip_searchpoint,
-    "origin-gate": cmd_origin_gate,
-    "step-cycle": cmd_step_cycle,
-    "delete-cycle": cmd_delete_cycle,
-    "cleanup-empty-cycles": cmd_cleanup_empty_cycles,
-    "replace-dataset": cmd_replace_dataset,
-    "cancel-queued": cmd_cancel_queued,
-    "set-concurrent-cycles": cmd_set_concurrent_cycles,
+_COMMANDS_PACKAGE = "promptpotter.presentation.cli.commands"
+
+COMMANDS: dict[str, str] = {
+    "new": "new:cmd_new",
+    "resume": "resume_command:cmd_resume",
+    "ab": "ab:cmd_ab",
+    "reset": "reset:cmd_reset",
+    "reindex": "reindex:cmd_reindex",
+    "restamp": "restamp:cmd_restamp",
+    "compact-archive": "maintenance:cmd_compact_archive",
+    "verify": "verify:cmd_verify",
+    "noise-floor": "noise_floor:cmd_noise_floor",
+    "seed-screen": "seed_screen:cmd_seed_screen",
+    "decision-bank": "decision_bank:cmd_decision_bank",
+    "evidence": "evidence:cmd_evidence",
+    "cycles": "cycles:cmd_cycles",
+    "machine-status": "machine_status:cmd_machine_status",
+    "probe-reasoning": "probe_reasoning:cmd_probe_reasoning",
+    "archive": "lifecycle:cmd_archive",
+    "delete": "lifecycle:cmd_delete",
+    "unarchive": "lifecycle:cmd_unarchive",
+    "pause": "lifecycle:cmd_pause",
+    "rename": "lifecycle:cmd_rename",
+    "set-limits": "lifecycle:cmd_set_limits",
+    "skip-searchpoint": "lifecycle:cmd_cycle_verb",
+    "origin-gate": "lifecycle:cmd_origin_gate",
+    "step-cycle": "lifecycle:cmd_step_cycle",
+    "bench": "bench:cmd_bench",
+    "delete-cycle": "lifecycle:cmd_cycle_verb",
+    "cleanup-empty-cycles": "lifecycle:cmd_cycle_verb",
+    "replace-dataset": "lifecycle:cmd_replace_dataset",
+    "cancel-queued": "lifecycle:cmd_cancel_queued",
+    "set-concurrent-cycles": "lifecycle:cmd_set_concurrent_cycles",
 }
 
-# A verb is one row here plus one `sub.add_parser` in `parsers.py`, and nothing made the two
-# agree. Both halves fail QUIETLY: a parser row with no handler raises `KeyError` from the
-# dispatch below — the operator's verb parsed, then crashed on a bare key — and a handler with
-# no parser row is unreachable, reported by argparse as an unknown verb rather than a missing
-# one. An import-time assert beside the table (`tests/CLAUDE.md`: structural invariants live in
-# production, not tests) costs nothing to maintain and fails before `main()` can dispatch.
+
+def _handler(verb: str) -> Callable[[argparse.Namespace], Coroutine[Any, Any, CommandResult]]:
+    module, _, name = COMMANDS[verb].partition(":")
+    handler: Callable[[argparse.Namespace], Coroutine[Any, Any, CommandResult]] = getattr(
+        importlib.import_module(f"{_COMMANDS_PACKAGE}.{module}"), name
+    )
+    return handler
+
+
+# Each half fails QUIETLY alone: a handler-less parser row is a bare `KeyError`, a parser-less handler an unknown verb.
 _PARSER = build_parser()
 _declared = parser_verbs(_PARSER)
-assert _declared == COMMANDS.keys(), (
-    "CLI verb drift between COMMANDS and parsers.py — "
-    f"parser-only: {sorted(_declared - COMMANDS.keys())}, "
-    f"handler-only: {sorted(COMMANDS.keys() - _declared)}"
-)
+if _declared != COMMANDS.keys():
+    raise RuntimeError(
+        "CLI verb drift between COMMANDS and parsers.py — "
+        f"parser-only: {sorted(_declared - COMMANDS.keys())}, "
+        f"handler-only: {sorted(COMMANDS.keys() - _declared)}"
+    )
 
-# Which CLI verb reaches each server command kind. The assert below makes it TOTAL over the
-# dispatched set, so a new kind cannot land browser-only in silence — its author names a verb or
-# declares the gap with its reason. `CAP_FOR_KIND` and `PAYLOAD_MODEL_FOR_KIND` already bind the
-# same vocabulary to authorization and payload shape; the terminal was the one consumer nothing
-# checked, which is why five verbs had to be found one at a time before this existed.
+# TOTAL over the dispatched set: a new kind names its verb or declares the gap, so none lands browser-only in silence.
 CLI_VERB_FOR_KIND: dict[str, str | None] = {
-    # Verbs that dispatch the kind itself — one command, one ledger record, either surface.
     "archive-campaign": "archive",
     "delete-campaign": "delete",
     "unarchive-campaign": "unarchive",
@@ -127,6 +100,7 @@ CLI_VERB_FOR_KIND: dict[str, str | None] = {
     "skip-searchpoint": "skip-searchpoint",
     "origin-gate-decision": "origin-gate",
     "step-cycle": "step-cycle",
+    "grade-bench": "bench",
     "pause-cycle": "pause",
     "change-run-limits": "set-limits",
     "set-campaign-label": "rename",
@@ -136,55 +110,33 @@ CLI_VERB_FOR_KIND: dict[str, str | None] = {
     "start-checkin": "new",
     "cancel-queued-run": "cancel-queued",
     "set-concurrent-cycles": "set-concurrent-cycles",
-    # Reached by the verb named, but through an IN-PROCESS path rather than the command — the
-    # terminal changes the same state and writes no `CommandRecord` naming who asked. Each is its
-    # own standing finding; they are named here so the next reader inherits them instead of
-    # rediscovering them. `new`/`resume` mint and run inline (`--steer` is the fork),
-    # `register-backend` is written by init wiring, `verify` calls `verify_candidate` and
-    # `compact-archive` the maintenance pass direct.
     "verify-candidate": "verify",
-    "mint-campaign": "new",
-    "register-backend": "new",
-    "start-run": "resume",
-    "fork-cycle": "resume",
     "compact-archive": "compact-archive",
-    # Browser-only ON PURPOSE, and the absence IS the boundary: look-ahead spends the box's shared
-    # provider rate bucket, so an assistant may recommend the control but never press it. Root
-    # `CLAUDE.md` § Conventions; `docs/operations/access-model.md` § host-admin ↔ user.
+    "fork-cycle": "resume",
+    "mint-campaign": "new",
+    "start-run": "resume",
+    # Reached by the verb named, but written by init wiring rather than through the command.
+    "register-backend": "new",
+    # Browser-only ON PURPOSE: the absence IS the boundary (root `CLAUDE.md` § Conventions).
     "set-sample-lookahead": None,
 }
 _named_verbs = {v for v in CLI_VERB_FOR_KIND.values() if v is not None}
-assert set(CLI_VERB_FOR_KIND) == ALL_DISPATCHED_KINDS, (
-    "command kind unclassified for the terminal — name the verb that reaches it, or declare the "
-    f"gap: {sorted(ALL_DISPATCHED_KINDS.symmetric_difference(CLI_VERB_FOR_KIND))}"
-)
-assert _named_verbs <= COMMANDS.keys(), (
-    f"CLI_VERB_FOR_KIND names verbs that do not exist: {sorted(_named_verbs - COMMANDS.keys())}"
-)
-
-
-def _validate_run_limits(args: argparse.Namespace) -> None:
-    """Refuse a launch ceiling the wire would refuse, before anything is minted."""
-    from pydantic import ValidationError
-
-    try:
-        launch_limits_from_args(args)
-    except ValidationError as exc:
-        bad = ", ".join(f"--{str(e['loc'][0]).replace('_', '-')}: {e['msg']}" for e in exc.errors())
-        raise SystemExit(f"invalid run limit — {bad}") from None
+if set(CLI_VERB_FOR_KIND) != ALL_DISPATCHED_KINDS:
+    raise RuntimeError(
+        "command kind unclassified for the terminal — name the verb that reaches it, or declare "
+        f"the gap: {sorted(ALL_DISPATCHED_KINDS.symmetric_difference(CLI_VERB_FOR_KIND))}"
+    )
+if not _named_verbs <= COMMANDS.keys():
+    raise RuntimeError(
+        f"CLI_VERB_FOR_KIND names verbs that do not exist: {sorted(_named_verbs - COMMANDS.keys())}"
+    )
 
 
 def main() -> None:
 
     parser = _PARSER
     args = parser.parse_args()
-    set_verbose(bool(getattr(args, "verbose", False)))
 
-    # Bare invocation defaults to `resume`. Re-parse with the verb appended to the ORIGINAL
-    # argv (not alone) so `resume`'s own defaults populate (--from, --fork-on-divergence,
-    # halt/spend, etc.) WITHOUT dropping the globals — `--tenant`/`--json` sit before the verb.
-    # First-run guard: if no active session exists, print a friendly landing
-    # instead of letting resume fail with a confusing error.
     if args.command is None:
         identity = identity_from_args(args)
         if not active_pointer_exists(tenant_workspace(DEFAULT_PROJECTS_ROOT, identity.tenant_id)):
@@ -195,64 +147,42 @@ def main() -> None:
                 "  promptpotter new <file.csv>  ingest a raw file → resolve origin → mint + run\n"
                 "  promptpotter resume          continue the active campaign\n"
                 "  promptpotter verify          re-score a candidate on more samples\n"
+                "  promptpotter bench           grade the origin and the selection on held-out rows\n"
                 "  promptpotter ab              re-derive the active cycle's decisions under the current engine\n\n"
                 "Run `promptpotter <verb> --help` for per-verb options.\n"
                 f"Docs: {settings.BRAND_DOCS_URL}"
             )
             return
+        # Appended to the ORIGINAL argv, so `resume`'s defaults populate without dropping the globals before the verb.
         args = parser.parse_args([*sys.argv[1:], "resume"])
 
-    # Every verb may read a round document, whose optimizer payload only a completed registry
-    # can type.
-    complete_registries(every_treatment=False)
+    # A launch verb's handler runs its preamble and THEN answers the coroutine: all of it happens here, outside the runner.
+    run = _handler(args.command)(args)
 
-    # Reconcile liveness before dispatch. The reaper had exactly two call sites, both bound
-    # to the API server's lifespan — so on a CLI-only install nothing ever ran it, and a
-    # cycle whose process died hard (SIGKILL, laptop lid, power) kept `status: active`
-    # forever: the dock, the pickers and `resume` all read a corpse as a live unit. The
-    # operator's own next command is the honest moment to notice, and it costs one glob.
-    #
-    # This is the whole answer, not half of it: no `atexit`/signal handler in this process
-    # can stamp a cycle its own SIGKILL just ended, and a second mechanism that only covers
-    # the graceful case would answer the same question twice. Ctrl+C already saves through
-    # the loop's own checkpoint.
-
-    sweep_dead_cycles(DEFAULT_PROJECTS_ROOT)
-
-    if args.command in ("new", "resume"):
-        # The launch ceilings through the SAME bounds the wire enforces. argparse types them and
-        # bounds neither, so `--halt-at 1.5` was accepted and then never fired.
-        _validate_run_limits(args)
-        ensure_api_key()
-
-    handler = COMMANDS[args.command]
-
+    runner = asyncio.Runner()
     try:
-        result = asyncio.run(handler(args))
+        result = runner.run(run)
     except (RequestTooLargeError, SendRefusedError, PotterError) as exc:
-        # Operator-facing input errors (e.g. `resume --from N` past the last
-        # completed round → BadRequestError) surface as a clean message, not a
-        # traceback. PotterError is the one typed-error family the seams raise.
+        runner.close()
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
     except (KeyboardInterrupt, asyncio.CancelledError) as exc:
-        # Both kinds land here: `asyncio.Runner` cancels the main task on the first SIGINT and
-        # raises KeyboardInterrupt on the second. The cycle already finalized itself as PAUSED,
-        # so this writes nothing — it is the process's half of that pause.
+        # The cycle already finalized itself as PAUSED; closing a loop a second SIGINT stopped mid-unwind raises.
+        with contextlib.suppress(RuntimeError, KeyboardInterrupt):
+            runner.close()
         reason = f" — {exc}" if str(exc) else ""
         print(f"\nPaused{reason}. Completed work is saved; continue with:", file=sys.stderr)
         print("  python -m promptpotter resume", file=sys.stderr)
-        sys.exit(130)
+        sys.exit(StopOutcome.PAUSED.exit_code)
+    runner.close()
     if result is None:
         return
     if args.json_output or result.human is None:
         print(json.dumps(result.data, indent=2, default=str))
     else:
         print(result.human)
-    if result.outcome is StopOutcome.FAILED:
-        # The cycle finalized itself and the read-out names the cause; a shell or CI wrapper
-        # reads only this code.
-        sys.exit(1)
+    if result.outcome is not None and (code := result.outcome.exit_code):
+        sys.exit(code)
 
 
 if __name__ == "__main__":

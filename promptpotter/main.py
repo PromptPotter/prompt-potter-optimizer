@@ -50,11 +50,7 @@ logger = logging.getLogger(__name__)
 
 
 def _telegram_shutdown_notice(registry: JobRegistry) -> None:
-    """Tell the operator the API stopped, on the admin bot's existing channel. The incident this
-    exists for exited 0, so ``Restart=on-failure`` stayed quiet and the box was down until someone
-    loaded the page — a stop with a campaign still in flight is the shape worth waking up for, and
-    it names what it interrupted. An in-process hook cannot report a SIGKILL, an OOM or a power
-    cut; those need a watchdog off the box."""
+    """A clean exit 0 leaves ``Restart=on-failure`` quiet; a SIGKILL or OOM never reaches this hook."""
     running = registry.list_running()
     if running:
         interrupted = ", ".join(f"{job.hop.campaign_id}/{job.hop.cycle_id}" for job in running)
@@ -68,8 +64,6 @@ def _telegram_shutdown_notice(registry: JobRegistry) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    # Quiet the benign Windows ProactorEventLoop disconnect noise (bpo-39010)
-    # that fires when a browser tab drops a kept-alive socket.
     silence_proactor_disconnect_noise()
     complete_registries()
     bundle = build_identity_bundle(default_identity_paths())
@@ -82,19 +76,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             data_root=user_data_root(),
             auth_open=auth_is_open(bundle),
             providers=bundle.config.configured,
-            # The one reading of it, shared with the probe that refuses a launch under it.
             non_utf8=non_utf8_encoding(),
         ),
         flush=True,
     )
 
-    # Liveness reconciler. The registry stamps a cycle terminal the moment its
-    # job is proven dead (torn task, or a producer process that is gone) —
-    # including, at the first read after a restart, every job this
-    # server's previous incarnation left behind. The background periodic sweep
-    # clears dead CYCLES the registry never saw, for the server's whole uptime.
-    # Both keep the OS-style dock and the on-disk truth honest — a vanished
-    # producer is not a live unit. See application/jobs/reaper.py.
+    # The registry ends cycles whose JOB is proven dead; the sweep clears dead cycles it never saw.
     registry = JobRegistry.attach()
     app.state.job_registry = registry
     sweep_task = asyncio.create_task(periodic_sweep(DEFAULT_PROJECTS_ROOT))
@@ -125,12 +112,7 @@ async def scalar_docs() -> Response:
     return doc
 
 
-# Every API error serializes to the ONE flat envelope declared in
-# docs/specs/api-openapi.yaml#/components/schemas/ErrorEnvelope —
-# `{"error", "message", "error_id", "details"?}` at the top level (no `detail`
-# wrapper). Three handlers feed it: typed PotterError (the application taxonomy),
-# FastAPI's request-validation 422, and the catch-all 500. No route raises
-# HTTPException.
+# The ONE flat envelope (`api-openapi.yaml::ErrorEnvelope`); no route raises HTTPException.
 def _error_response(
     request: Request,
     *,
@@ -140,8 +122,6 @@ def _error_response(
     details: dict[str, object] | None = None,
     exc_info: bool = False,
 ) -> JSONResponse:
-    """Mint the trace id, log it, serialize the envelope — one seam, all errors. EVERY error carries an ``error_id``, so a bug
-    report quotes it instead of a wall-clock guess."""
     error_id = uuid.uuid4().hex[:12]
     logger.log(
         logging.ERROR if exc_info else logging.WARNING,
@@ -161,9 +141,6 @@ def _error_response(
 
 @app.exception_handler(PotterError)
 async def potter_error_handler(request: Request, exc: PotterError) -> JSONResponse:
-    # The one mapping seam for the application error taxonomy: each subclass
-    # carries its own status + code + optional structured details. Routes that
-    # need extra context still catch the specific subclass and add it first.
     return _error_response(
         request,
         status=exc.http_status,
@@ -175,8 +152,6 @@ async def potter_error_handler(request: Request, exc: PotterError) -> JSONRespon
 
 @app.exception_handler(RequestValidationError)
 async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
-    # FastAPI's request-shape validation (bad body/query/header) → the same
-    # envelope; the per-field error list rides `details.errors`.
     return _error_response(
         request,
         status=422,
@@ -188,8 +163,7 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    # An unhandled error is by definition one we can't describe, so the id is the
-    # only way back to the traceback — `exc_info` puts it beside the same handle.
+    # `exc_info` logs the traceback beside the `error_id`, the only way back to it.
     return _error_response(
         request,
         status=500,
@@ -199,7 +173,6 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
     )
 
 
-# CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins_list,
@@ -208,19 +181,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# OIDC middleware — populates request.state.identity_ctx from the opaque
-# session cookie. Per ADR-0002 no-drift gate #2: tokens never appear past
-# this boundary; downstream code sees only IdentityContext.
+# Tokens never appear past this boundary (ADR-0002): downstream code sees only IdentityContext.
 install_oidc_middleware(app)
 
 
 class SecurityHeadersMiddleware:
-    """The single response-header seam — never add a second middleware beside it. Pure ASGI, not
-    ``BaseHTTPMiddleware``, which buffers the body and breaks the SSE feed's disconnect/shutdown teardown.
-
-    Here rather than beside ``install_oidc_middleware`` in ``api/middleware/``: that one belongs to the
-    ``/api/v1`` layer, this one headers the static webapp mount as well (its CSP branches on which), so
-    it sits at the composition root that owns both."""
+    """The ONE header seam. Pure ASGI: ``BaseHTTPMiddleware`` buffers the body and breaks SSE teardown."""
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
@@ -251,8 +217,6 @@ class SecurityHeadersMiddleware:
                 )
                 if is_api:
                     headers["cache-control"] = "no-store"
-                    # Time to the first response byte, so the browser's Network panel splits
-                    # what the server spent from what the request spent queued behind others.
                     elapsed_ms = (time.perf_counter() - began) * 1000
                     headers["server-timing"] = f"app;dur={elapsed_ms:.1f}"
             await send(message)
@@ -260,13 +224,11 @@ class SecurityHeadersMiddleware:
         await self.app(scope, receive, send_with_headers)
 
 
-# Inside the header seam, so a response is timed and headed once, compressed or not. Pure ASGI,
-# and it passes ``text/event-stream`` through untouched — the SSE feed is never buffered.
+# Inside the header seam; GZip passes ``text/event-stream`` through, so SSE is never buffered.
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
 app.add_middleware(SecurityHeadersMiddleware)
 
 
-# Health check
 _health = APIRouter(tags=["Health"])
 
 
@@ -287,8 +249,6 @@ async def health_check() -> HealthResponse:
     )
 
 
-# Include routers. Each router owns its own tags (and prefix where it maps to a
-# single resource); the mount supplies only the shared /api/v1 version prefix.
 app.include_router(_health, prefix="/api/v1")
 app.include_router(backends_router, prefix="/api/v1")
 app.include_router(campaigns_router, prefix="/api/v1")
@@ -299,12 +259,7 @@ app.include_router(diagnostics_router, prefix="/api/v1")
 app.include_router(commands_router, prefix="/api/v1")
 app.include_router(auth_router, prefix="/api/v1")
 
-# Static webapp mount — the operator dashboard, served at the domain root
-# (Next.js export from webapp/, built via `npm run build` in that directory).
-# The app owns `/`; the API is the carved-out `/api/v1` namespace. This mount
-# is a catch-all and MUST stay the last route registered — every API router
-# plus FastAPI's auto /docs + /openapi.json are matched first by Starlette's
-# in-order resolution. `html=True` serves out/index.html at `/`.
+# A catch-all, so it MUST stay the last route registered: Starlette resolves in order.
 WEBAPP_DIR = webapp_static_root()
 if WEBAPP_DIR.exists():
     app.mount("/", StaticFiles(directory=WEBAPP_DIR, html=True), name="webapp")

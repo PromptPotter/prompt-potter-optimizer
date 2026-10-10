@@ -1,12 +1,9 @@
-"""What a terminal or a notebook cell does with a finished cycle. The launch half is
-``application/embedded_run.py``; this is the read-out of what it returned."""
-
 from __future__ import annotations
 
 import html
 import json
 import textwrap
-from typing import TYPE_CHECKING, assert_never, get_args
+from typing import TYPE_CHECKING, assert_never
 
 from promptpotter.application.views.render.primitives import (
     BOLD,
@@ -18,7 +15,6 @@ from promptpotter.application.views.render.primitives import (
     _dbox_block,
     render_pipeline_overlay,
 )
-from promptpotter.domain.bench import BenchColumn
 from promptpotter.domain.phases import (
     STOP_REASON_INFO,
     StopOutcome,
@@ -30,7 +26,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from promptpotter.application.initialization.session import Session
-    from promptpotter.domain.bench import BenchReading, BenchScore
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.results import CycleResult
 
@@ -44,10 +39,7 @@ def render_completion(
     dataset_name: str | None = None,
     campaign_dir: Path | None = None,
 ) -> str:
-    """The ONE read-out of a finished cycle, whichever entry point ran it: the box, the winning
-    overlay, then where the campaign's artifacts are — addressed, never reprinted."""
-    # The OUTCOME, never the member: `StopOutcome.PAUSED` is the one non-terminal class, and a
-    # second reason in it (a panel the bounds cut) read as COMPLETE against a name comparison.
+    # The outcome, never the member: more than one stop reason is PAUSED.
     info = STOP_REASON_INFO[result.stop_reason]
     match info.outcome:
         case StopOutcome.PAUSED:
@@ -65,17 +57,11 @@ def render_completion(
     if result.result_accuracy is not None:
         headline += f"Selected     {result.result_accuracy:.1%} (round {result.result_round})"
     fields: list[str] = []
-    # First, because it is the headline: the selection graded on rows it never read. `Selected`
-    # below is the optimizer's own reading on the rows that chose it.
-    if (bench := result.bench) is not None:
-        fields.append(f"Bench        {_bench_text(bench)}")
-    fields += [headline, f"Stop reason  {info.label}"]
+    fields += [f"Bench        {result.bench.line}", headline, f"Stop reason  {info.label}"]
     if result.error is not None:
         fields.append(f"Error        {result.error.kind}: {result.error.message}")
     if result.spend is not None:
         fields.append(f"Spend        {result.spend.billed_beside_incurred()}")
-    # The reason's OWN next step, off the one table, so the terminal advises what `log.md`,
-    # `review.md` and the browser advise; `""` is a stated answer and prints nothing.
     if info.next_step:
         fields.append(f"Next         {info.next_step}")
     if dataset_name:
@@ -84,13 +70,9 @@ def render_completion(
         fields.append(f"Campaign     {campaign_dir.name}")
     if result.cycle_id:
         fields.append(f"Cycle ID     {result.cycle_id}")
-    if result.session_id:
-        fields.append(f"Session      {result.session_id}")
     if trace_url := langfuse_trace_url(result.langfuse_trace_id):
         fields.append(f"Langfuse     {trace_url}")
 
-    # Wrapped under the value column, never left to the box to cut: the bench line, an error and a
-    # next step all outrun it, and a truncated instruction is not one.
     wrapped = [
         line
         for field in fields
@@ -110,26 +92,6 @@ def render_completion(
             " + readout.log",
         ]
     return "\n".join(out)
-
-
-def _bench_text(bench: BenchScore) -> str:
-    def _level(reading: BenchReading | None) -> str:
-        level = None if reading is None else reading.level
-        return "—" if level is None else f"{level.value:.3f}"
-
-    lift = "—" if bench.headline_lift is None else f"{bench.headline_lift.value:+.3f}"
-    for column in get_args(BenchColumn):
-        beside = bench.lift.of(column)
-        if column != bench.headline and beside is not None:
-            lift += f" ({column} {beside.value:+.3f})"
-    selected = bench.selected
-    missing = "" if bench.missing_reason is None else f" · missing: {bench.missing_reason}"
-    return (
-        f"{bench.headline} {_level(selected)} selected"
-        f"{'' if selected is None else f' (round {selected.round})'} · "
-        f"{_level(bench.origin)} origin · lift {lift} · "
-        f"{bench.bench_size} held-out rows{missing}"
-    )
 
 
 def render_completion_html(result: CycleResult) -> str:
@@ -168,9 +130,7 @@ def _try_display_html(html_body: str) -> bool:
 
 
 def report_completion(result: CycleResult, *, session: Session) -> None:
-    """Print the box, and render the winner inline when the caller is a notebook."""
-    # Only a pause is resumable-with-nothing-to-show; a cycle refused or crashed at run init
-    # also holds no round, and its box names the cause.
+    # Pause only: a cycle refused or crashed at run init also holds no round, and its box says why.
     if not result.rounds and stop_reason_outcome(result.stop_reason) is StopOutcome.PAUSED:
         print(
             f"\n{YELLOW}{BOLD}[PAUSED]{RESET} Cycle ended before any rounds completed — "

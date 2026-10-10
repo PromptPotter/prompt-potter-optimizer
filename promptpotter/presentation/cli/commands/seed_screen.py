@@ -1,53 +1,31 @@
-"""Measure a dataset's seeded bank draws before putting one on a panel. A fenced debug diagnostic — no config field, no L1
-injection, no ledger event; the loop never learns this verb exists."""
-
 from __future__ import annotations
 
 import argparse
-import logging
 
 from promptpotter.application.diagnostics.seed_screen import SeedScreenError, screen_inner_seeds
 from promptpotter.config.logging import setup_logging
-from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
-from promptpotter.infrastructure.store.stores import build_stores
-from promptpotter.presentation.cli.commands._shared import (
-    CommandResult,
-    get_verbose,
-    identity_from_args,
-)
-
-logger = logging.getLogger("promptpotter.presentation.cli")
+from promptpotter.presentation.cli.commands.result import CommandResult
+from promptpotter.presentation.cli.commands.workspace import open_stores
 
 
 async def cmd_seed_screen(args: argparse.Namespace) -> CommandResult:
-    """Score each candidate seed's bank with the dataset origin and the strongest banked
-    configuration, and report what separates them."""
-
-    setup_logging(style="full" if get_verbose() else "cli")
-    identity = identity_from_args(args)
-    stores = build_stores(identity, projects_root=DEFAULT_PROJECTS_ROOT)
+    setup_logging(style="full" if args.verbose else "cli")
+    stores = open_stores(args)
 
     try:
         outcome = await screen_inner_seeds(
             stores=stores,
-            identity=identity,
+            identity=stores.identity,
             dataset_name=args.dataset,
             seeds=list(args.seeds),
             n_samples=args.n_samples,
             repeat=args.repeat,
             parallel=args.parallel,
-            log=logger.info if get_verbose() else None,
         )
     except SeedScreenError as exc:
         raise SystemExit(f"ERROR: {exc}") from exc
 
     rows = outcome.readings
-    # Speed and cost ride the same row as the margin, because choosing a target model is one
-    # decision over all three and reading them from separate places is how a model gets picked
-    # on quality it cannot afford. Median and mean are both shown: a gap between them is a
-    # route stalling, which no single number says.
-    # THREE collapse states, never two: a bank with no labels has no constant answer to score, and
-    # rendering that as `ok` reports a verdict the screen never took.
     collapse = {True: "REWARDS COLLAPSE", False: "ok              ", None: "no floor        "}
     settled = {True: "settled  ", False: "UNSETTLED", None: "--       "}
     table = "\n".join(
@@ -65,8 +43,6 @@ async def cmd_seed_screen(args: argparse.Namespace) -> CommandResult:
     )
     bad = [r.seed for r in rows if r.verdict == "reject"]
     suspect = [r.seed for r in rows if r.verdict == "suspect"]
-    # A suspect is unsettled too; a bank with no floor took no verdict, so it is in neither list
-    # and nothing advises a `--repeat` that could not settle anything.
     unsettled = [r.seed for r in rows if r.verdict in ("suspect", "unsettled")]
     verdict = (
         f"REJECT {bad} — a candidate that stops reasoning and answers one label outscores the "
@@ -82,8 +58,6 @@ async def cmd_seed_screen(args: argparse.Namespace) -> CommandResult:
     human = (
         f"seed-screen {outcome.dataset_name}: {len(rows)} seed(s), {passes} origin pass(es) each"
         f" over {rows[0].n} rows.\n{verdict}{table}\n"
-        # A verdict inside its own error bar is not a verdict — say so, rather than let a reader
-        # take the sign of a near-zero margin at face value.
         + (
             f"UNSETTLED (margin within 2 SE): {unsettled} — re-run those at a higher --repeat "
             f"before acting on their sign.\n"

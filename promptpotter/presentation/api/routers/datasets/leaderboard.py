@@ -1,7 +1,3 @@
-"""Everything that reads a MEASUREMENT, as routes: the ranked log (`/cells`, grouped by sample it
-IS the hard-sample leaderboard) and one cell opened (`/cells/{run_id}/{sample_id}`). Both parse
-and call — which rows a page holds and in what order is `application/scoring/cells.py`'s."""
-
 from __future__ import annotations
 
 from typing import Annotated
@@ -10,8 +6,8 @@ from fastapi import Query, Request, Response
 
 from promptpotter.application.scoring.cells import measurement_log, open_cell
 from promptpotter.domain.cells import Cell, CellsResponse, HeatmapScope
-from promptpotter.domain.dashboard_rows import SampleStatus
 from promptpotter.domain.results import HardSampleOrder
+from promptpotter.domain.scoring import SampleStatus
 from promptpotter.presentation.api.deps import StoresDep, decode_descend
 from promptpotter.presentation.api.routers.campaigns._conditional import conditional_json
 from promptpotter.presentation.api.routers.datasets._router import datasets_router
@@ -32,8 +28,8 @@ def get_dataset_cells(
     scope: Annotated[
         HeatmapScope,
         Query(
-            description="dataset=cross-campaign; campaign=pooled (needs campaign_id); "
-            "cycle=one cycle (needs both ids).",
+            description="dataset=cross-campaign; campaign=the cycle holding the campaign's "
+            "line (needs campaign_id); cycle=one cycle (needs both ids).",
         ),
     ] = "dataset",
     campaign_id: str | None = Query(
@@ -58,19 +54,26 @@ def get_dataset_cells(
     candidate_id: str | None = Query(
         default=None,
         description="Keep only this individual's cells (`CellCandidate.candidate_id`). A "
-        "campaign's candidates carry one; dataset-scope runs do not, so there it keeps nothing.",
+        "campaign's candidates carry one; a dataset-scope column does not, so there it keeps "
+        "nothing.",
     ),
     round: int | None = Query(
         default=None,
-        description="Keep only this round's cells. Dataset-scope runs carry no round, so there "
-        "it keeps nothing.",
+        description="Keep only this round's cells. A dataset-scope column carries no round, so "
+        "there it keeps nothing.",
     ),
     status: Annotated[
         SampleStatus | None, Query(description="Keep only cells with this mark.")
     ] = None,
+    at: int | None = Query(
+        default=None,
+        ge=0,
+        description="Replay scope=cycle to this line of the cycle's own ledger — the dashboard "
+        "route's `at`: the candidates named and the cells walked by then. Refused on any other "
+        "scope, which no single ledger offset addresses.",
+    ),
 ) -> Response:
-    """The measurement log. Under a filter, ``samples`` and ``candidates`` shrink to the ones
-    holding a kept cell, so a preset (one candidate, one round) serves exactly its own rows."""
+    """The measurement log; under a filter, ``samples`` and ``candidates`` shrink to the ones holding a kept cell."""
     log = measurement_log(
         stores,
         name,
@@ -84,11 +87,12 @@ def get_dataset_cells(
         candidate_id=candidate_id,
         round=round,
         status=status,
+        at=at,
     )
     return conditional_json(request, log)
 
 
-@datasets_router.get("/{name}/cells/{run_id}/{sample_id}", response_model=Cell)
-def get_dataset_cell(name: str, run_id: str, sample_id: int, stores: StoresDep) -> Cell:
-    """One cell opened — its row assembled into a trace (`application/scoring/cells.py`)."""
-    return open_cell(stores, name, run_id, sample_id)
+@datasets_router.get("/{name}/cells/{answer}", response_model=Cell)
+def get_dataset_cell(name: str, answer: str, stores: StoresDep) -> Cell:
+    """One answer opened: its row assembled into a trace."""
+    return open_cell(stores, name, answer)

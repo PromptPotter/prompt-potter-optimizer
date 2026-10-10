@@ -1,27 +1,26 @@
-"""``PromptPotterOpt`` — the loop as a DSPy optimizer, and the fifth way in.
-
-The other four entry points drive a campaign the operator watches; this one runs PromptPotter
-inside someone else's program, on their rows, graded by their metric. It is a presentation
-adapter for the same reason the CLI is: it parses a caller's arguments, calls
-``application/embedded_run.py``, and formats what comes back.
-
-Importing this module needs DSPy — ``pip install promptpotter[dspy]``. Nothing else in the
-package imports it, so a plain install never pays for that.
-"""
+"""Needs the ``dspy`` extra, so nothing else in the package may import this module."""
 
 from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import contextlib
+import sys
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 try:
     from dspy.teleprompt import Teleprompter
-except ModuleNotFoundError as exc:  # lazy: an extra, and the only importer is the caller
+except ModuleNotFoundError as exc:
     raise ModuleNotFoundError(
         "promptpotter.presentation.teleprompter needs DSPy — `pip install promptpotter[dspy]`"
     ) from exc
+else:
+    # DSPy parks lazy stand-ins in `sys.modules`; importing a SUBMODULE of an unloaded one fails.
+    for _parked in list(sys.modules.values()):
+        if type(_parked).__module__ == "dspy.utils.lazy_import":
+            with contextlib.suppress(ImportError):
+                getattr(_parked, "__file__", None)
 
 from promptpotter.application.campaign_config import OptimizationConfig
 from promptpotter.application.datasets.authored import (
@@ -55,8 +54,6 @@ if TYPE_CHECKING:
 __all__ = ["Node", "PromptPotterOpt", "compile_loop"]
 
 
-# What a compile starts from where the caller names nothing: the one field the schema requires,
-# and a round count and pruning floor sized for a trainset rather than a benchmark.
 _COMPILE_DEFAULTS: dict[str, Any] = {
     "max_rounds": 5,
     "degradation_threshold": 0.4,
@@ -65,8 +62,6 @@ _COMPILE_DEFAULTS: dict[str, Any] = {
 
 
 def compile_loop(**knobs: Any) -> OptimizationConfig:
-    """Loop control for a compile: the campaign's own ``OptimizationConfig``, so every knob any entry
-    point takes is reachable, and one the schema or manifest refuses is refused before ``compile``."""
     optimization = OptimizationConfig.model_validate({**_COMPILE_DEFAULTS, **knobs})
     select_optimizer(optimization)
     return optimization
@@ -74,26 +69,17 @@ def compile_loop(**knobs: Any) -> OptimizationConfig:
 
 @dataclass(frozen=True)
 class Node:
-    """The student, as one tunable node. ``tune`` is the axis list — prompt fields and model params
-    evolve together; anything left off it is frozen at the value set here.
-
-    ONE node, because a DSPy program is a single call from here: the winning prompt and the tuned
-    model settings reach EVERY predictor in the scoring copy. Right for predictors that share a
-    task, wrong for a program whose predictors do different jobs — those want two compiles."""
+    """ONE node: the winning prompt and tuned settings reach EVERY predictor of the program."""
 
     model: str
     temperature: float = 0.0
     tune: tuple[str, ...] = ("instruction", "persona", "answer_format")
     allowed: dict[str, list[str]] = field(default_factory=dict)
+    # Reaches the predictor's ``lm`` only when named in ``tune``; frozen otherwise.
     extra: dict[str, Any] = field(default_factory=dict)
-    """Any further node config — ``max_tokens``, ``reasoning_effort``, whatever the caller's LM
-    takes. Reaches the predictor's ``lm`` when named in ``tune``, and is frozen otherwise."""
 
 
 class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imports=skip
-    """PromptPotter as a ``Teleprompter``. ``compile`` obeys DSPy's contract; ``acompile`` is the
-    async peer a host with a running event loop awaits instead."""
-
     def __init__(
         self,
         *,
@@ -111,9 +97,8 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
         self.node = node or Node(model="openai/gpt-4o-mini")
         self.task_description = task_description
         self.scoring = scoring
+        # ``None`` until a compile finishes, and after one that did not.
         self.export: PromptExport | None = None
-        """The winner artifact of the last compile — prompt fields plus the provenance that makes
-        its fitness readable. ``None`` until a compile finishes, and after one that did not."""
 
     def compile(
         self,
@@ -122,17 +107,12 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
         trainset: list[Any],
         valset: list[Any] | None = None,
     ) -> Any:
-        """Sync entry. With no loop running this is ``asyncio.run``; inside one — a notebook, which
-        DSPy's own docs single out — the run moves to a dedicated thread with its own loop.
-
-        The thread costs exactly one thing: SIGINT never reaches it, so **Ctrl+C stops pausing the
-        campaign**. `promptpotter pause` and the webapp control both still work, because they poll
-        a flag rather than catch an interrupt. Await :meth:`acompile` to keep the interrupt."""
         coro = self.acompile(student, trainset=trainset, valset=valset)
         try:
             asyncio.get_running_loop()
         except RuntimeError:
             return asyncio.run(coro)
+        # SIGINT never reaches this thread: under a running loop, Ctrl+C no longer pauses the run.
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
             return pool.submit(asyncio.run, coro).result()
 
@@ -143,11 +123,7 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
         trainset: list[Any],
         valset: list[Any] | None = None,
     ) -> Any:
-        """Run one campaign over *trainset* and return *student* with the winning prompt applied.
-
-        ``valset`` is accepted for contract parity and deliberately unused: the campaign this
-        writes declares no ``dataset_split``, so the whole trainset is the search pool, no bench
-        score is taken, and the caller evaluates the returned program on its own held-out rows."""
+        """``valset`` is contract parity only: with no ``dataset_split``, the trainset is the pool."""
         rows = samples_from_dicts([{"query": _query_of(ex), "ground_truth": ""} for ex in trainset])
         if (distinct := len({row.key for row in rows})) != len(trainset):
             raise ValueError(
@@ -156,20 +132,18 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
             )
         program = DspyProgram(student=student, metric=self.metric, examples=list(trainset))
 
-        # The operator's own workspace, resolved once: the dataset this writes and the campaign
-        # the session mints have to land in the one tree the terminal and the webapp read.
         stores = build_stores(registered_or_default_identity(), projects_root=DEFAULT_PROJECTS_ROOT)
         dataset_dir = stores.tenant_datasets.dataset_dir(self.dataset_name)
         self._write_dataset_dir(dataset_dir)
+        stores.tenant_datasets.save_benchmark_rows(self.dataset_name, rows)
         session = await open_session(self.dataset_name, stores=stores, program=program)
         try:
-            # No overrides, budgets included: the file this compile just wrote IS the projection
-            # of `loop` and `nodes`, so passing them again would be a second path to the same values.
+            # No overrides: the file this compile just wrote IS the projection of `loop` and `node`.
             config = load_dataset_campaign_config(dataset_campaign_path(dataset_dir))
             configure_and_apply_pipeline(session, config)
             result = await run_campaign(
                 session,
-                rows,
+                list(session.samples),
                 config,
                 limits=LaunchLimits(),
                 mode=RunMode(),
@@ -179,19 +153,13 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
 
         if stop_reason_outcome(result.stop_reason) is not StopOutcome.SUCCESS:
             return student
-        # The winner comes off the ARTIFACT, never off `CycleResult.result_prompt_fields`: that is
-        # the wire-side projection, whose rendered shot block a `PromptTemplate` rejects outright.
+        # Off the ARTIFACT, never `CycleResult.result_prompt_fields`, which no `PromptTemplate` takes.
         self.export = session.store.campaigns.read_export(session.hop)
         if self.export is None:
             return student
         return _with_instructions(student, self.export.render())
 
-    # -- the dataset the campaign is keyed by -------------------------------------------------
-
     def _write_dataset_dir(self, dataset_dir: Path) -> None:
-        """Materialize the files a campaign resolves by name. Rewritten every compile, because they
-        are a projection of the arguments just passed — not operator-authored config that a second
-        compile would be clobbering."""
         write_text(dataset_dir / "task_description.md", self.task_description)
         write_yaml(
             dataset_pipeline_path(dataset_dir),
@@ -208,8 +176,7 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
             {
                 "campaign_config": {
                     "dataset_name": self.dataset_name,
-                    # The caller's metric already graded the sample; the formula only carries its
-                    # number through. Overriding `scoring` composes evaluators on top of it.
+                    # The caller's metric already graded the sample; the formula carries it through.
                     "scoring": self.scoring,
                     "display_metric": "accuracy",
                     "optimization": self.loop.model_dump(mode="json", exclude_unset=True),
@@ -219,8 +186,7 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
 
 
 def _query_of(example: Any) -> str:
-    """The example's inputs as the one string a :class:`Sample` can carry and the connector can
-    join back on. Stable across a re-run, which is what lets a second compile reuse measurements."""
+    """Stable across re-runs (sorted keys): what lets a second compile reuse measurements."""
     inputs = example.inputs().toDict()
     return "\n".join(f"{k}: {inputs[k]}" for k in sorted(inputs))
 

@@ -1,6 +1,3 @@
-"""The ``reset`` verb's shell: resolve which tenants, show the plan, confirm, apply. What a reset
-drops and what it preserves is ``application/maintenance/reset.py``'s."""
-
 from __future__ import annotations
 
 import argparse
@@ -11,7 +8,8 @@ from promptpotter.application.maintenance.reset import ResetPlan, apply_reset, p
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.infrastructure.store.io import iter_files
 from promptpotter.infrastructure.store.layout import SHARED_CACHE_DIRS
-from promptpotter.presentation.cli.commands._shared import CommandResult, identity_from_args
+from promptpotter.presentation.cli.commands.result import CommandResult
+from promptpotter.presentation.cli.parsers import identity_from_args
 
 __all__ = ["cmd_reset"]
 
@@ -71,18 +69,15 @@ def _render_summary(plan: ResetPlan) -> str:
 
 
 async def cmd_reset(args: argparse.Namespace) -> CommandResult:
-    """Drop campaigns + sessions across the selected tenant(s); preserve the paid caches."""
     plan = plan_reset(
         DEFAULT_PROJECTS_ROOT,
-        tenant_id=None
-        if getattr(args, "all_tenants", False)
-        else identity_from_args(args).tenant_id,
+        tenant_id=None if args.all_tenants else identity_from_args(args).tenant_id,
     )
     tenants = [str(tenant.workspace) for tenant in plan.tenants]
     drops = plan.drops
     summary = _render_summary(plan)
 
-    if getattr(args, "dry_run", False):
+    if args.dry_run:
         if not drops:
             return CommandResult(
                 data={"tenants": tenants, "dropped": [], "dry_run": True},
@@ -99,7 +94,7 @@ async def cmd_reset(args: argparse.Namespace) -> CommandResult:
             human=summary + "\n\nnothing to drop.",
         )
 
-    if not getattr(args, "yes", False):
+    if not args.yes:
         sys.stdout.write(summary + "\n\nproceed? [y/N]: ")
         sys.stdout.flush()
         reply = sys.stdin.readline().strip().lower()
@@ -125,8 +120,6 @@ async def cmd_reset(args: argparse.Namespace) -> CommandResult:
             f"reset: dropped {len(drops)} path(s), including {len(plan.sandboxes)} inner "
             f"sandbox(es).\n"
             f"{kept_note}"
-            # Derived, never counted in prose: "the two paid caches" was already a number that
-            # drifts the moment a third one lands.
             f"preserved: {', '.join(d + '/' for d in SHARED_CACHE_DIRS)} — the paid caches.\n"
             "banked: each campaign's spend plus every sandbox's unforwarded residue, onto the "
             "workspace ledger — a reset drops the data, never the money.\n"

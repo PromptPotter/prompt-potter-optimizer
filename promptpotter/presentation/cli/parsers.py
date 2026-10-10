@@ -1,21 +1,24 @@
-"""Argparse schema for the write + diagnostic verbs, imported by ``campaign_runner.main()``. Help
-text is verbose by design — this is the operator-facing surface."""
+"""Imports no ``promptpotter.application`` module: ``--help`` and an argument error load no verb."""
 
 from __future__ import annotations
 
 import argparse
-from typing import get_args
+from typing import TYPE_CHECKING, get_args
 
-from promptpotter.application.diagnostics.noise_floor import RescoreCount, rescore_count
-from promptpotter.application.runner.origin_gate import GateDecision
 from promptpotter.config.settings import (
     DEFAULT_BACKEND_ID,
     DEFAULT_BACKEND_URL,
     settings,
 )
-from promptpotter.domain.launch_limits import RoundsCap
-from promptpotter.domain.results import VerifyStrategy
+from promptpotter.domain.cycle_paths import CyclePath, decode_cycle_path
+from promptpotter.domain.launch_limits import LaunchLimits, RoundsCap
+from promptpotter.domain.phases import GateDecision
+from promptpotter.domain.results import RescoreCount, VerifyStrategy, rescore_count
+from promptpotter.infrastructure.identity.migration import registered_or_default_identity
 from promptpotter.infrastructure.store.layout import SHARED_CACHE_DIRS
+
+if TYPE_CHECKING:
+    from promptpotter.shared.identity import IdentityContext
 
 
 def _rounds_cap_arg(raw: str) -> RoundsCap:
@@ -34,6 +37,13 @@ def _rescore_count_arg(raw: str) -> RescoreCount:
         return rescore_count(int(raw))
     except ValueError as exc:
         raise argparse.ArgumentTypeError(f"expected a rescore count >= 2, got {raw!r}") from exc
+
+
+def _inside_arg(raw: str) -> CyclePath:
+    try:
+        return decode_cycle_path(raw)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 def _add_global_args(parser: argparse.ArgumentParser) -> None:
@@ -61,10 +71,6 @@ def _add_global_args(parser: argparse.ArgumentParser) -> None:
 
 
 def _add_runtime_halts(p: argparse.ArgumentParser) -> None:
-    """The two LOOP verbs' shared run controls: ``--halt-at`` / ``--spend-budget`` /
-    ``--token-budget``, which halt at the next round boundary once their own cumulative total
-    (optimizer + backend) crosses the threshold, plus ``--no-wait``, which is about starting at all.
-    Only `new` and `resume` take these — no diagnostic verb holds a machine slot or runs a loop."""
     p.add_argument(
         "--no-wait",
         action="store_true",
@@ -99,8 +105,6 @@ def _add_runtime_halts(p: argparse.ArgumentParser) -> None:
 
 
 def _add_new_args(p_new: argparse.ArgumentParser) -> None:
-    """Fresh-init flags. The positional takes a dataset NAME or a raw FILE, the headless twin of the web
-    onboarding; a residual gap is answered with ``--set`` or printed — no silent default reaches mint."""
     p_new.add_argument(
         "dataset",
         nargs="?",
@@ -289,6 +293,67 @@ def _add_verify_args(p_verify: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_decision_bank_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument(
+        "dataset",
+        help="Dataset whose campaigns' closed rounds are the bank (e.g. 'justlogic-d234').",
+    )
+    p.add_argument(
+        "--campaign",
+        dest="campaigns",
+        action="append",
+        default=[],
+        help="Restrict the bank to this campaign id; repeat for several (default: every one).",
+    )
+    p.add_argument(
+        "--base",
+        dest="base",
+        default=None,
+        help="YAML of optimizer overrides the BASE arm proposes under, `{node: {prompt field: "
+        "text, model: …}}` — the shape an L4 arm declares. Default: the optimizer as each "
+        "campaign's manifest resolves it. A `model` pins one proposer model across the bank.",
+    )
+    p.add_argument(
+        "--variant",
+        dest="variant",
+        default=None,
+        help="YAML of optimizer overrides for the arm under test, same shape. Omitted, the base "
+        "is graded against ITSELF under the next seed — the instrument's own noise floor.",
+    )
+    p.add_argument(
+        "--seed",
+        dest="seed",
+        type=int,
+        default=0,
+        help="Seed both arms' proposers draw with (default 0). Re-running one seed replays its "
+        "base generations and their cells from the caches.",
+    )
+    p.add_argument(
+        "--cells",
+        dest="cells",
+        type=int,
+        default=None,
+        help="Cap each decision's panel at its first N cells (default: every cell the round "
+        "read its parent on).",
+    )
+    p.add_argument(
+        "--max-usd",
+        dest="max_usd",
+        type=float,
+        default=None,
+        help="The run's spend ceiling; a send that does not fit is refused before it leaves. "
+        "OMITTED = DRY RUN: nothing is sent, and the calls, cells and dollar bound are printed.",
+    )
+    p.add_argument(
+        "--parallel",
+        dest="parallel",
+        type=int,
+        default=1,
+        help="Cells to hold in flight within each proposal's pass (default 1), clamped to the "
+        "backend's own ceiling.",
+    )
+
+
 def _add_seed_screen_args(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "dataset",
@@ -360,8 +425,6 @@ def _add_noise_floor_args(p_noise_floor: argparse.ArgumentParser) -> None:
 
 
 def _add_reset_args(p_reset: argparse.ArgumentParser) -> None:
-    """Tenant scope + safety flags for ``reset``. Drops campaigns + sessions + the active pointer;
-    every ``layout.py::SHARED_CACHE_DIRS`` tree is PRESERVED. ``--dry-run`` first."""
     scope = p_reset.add_mutually_exclusive_group()
     scope.add_argument(
         "--all-tenants",
@@ -384,14 +447,13 @@ def _add_reset_args(p_reset: argparse.ArgumentParser) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Bare ``python -m promptpotter`` defaults to ``resume`` — the commonest action, shortest invocation."""
     parser = argparse.ArgumentParser(
         prog="python -m promptpotter",
         description=f"{settings.BRAND_SHORT_NAME} optimization CLI. Bare invocation runs "
         "`resume` (continue the active session). `new [DATASET|FILE]` mints a "
         "fresh campaign — from a dataset name or a raw file it ingests + "
         "origin-resolves. Reads happen by opening the artifact tree "
-        "(sessions/{id}/, campaigns/{campaign_id}/) directly.",
+        "(campaigns/{campaign_id}/) directly.",
     )
     _add_global_args(parser)
     sub = parser.add_subparsers(dest="command", required=False)
@@ -435,7 +497,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_reset_args(
         sub.add_parser(
             "reset",
-            help="Drop campaigns/ + sessions/ + active_session.json for the "
+            help="Drop campaigns/ + active_session.json for the "
             "selected tenant; preserve the paid caches ("
             + ", ".join(f"{d}/" for d in SHARED_CACHE_DIRS)
             + "). The escape hatch for cycles "
@@ -500,7 +562,7 @@ def build_parser() -> argparse.ArgumentParser:
         "every dropped key is reported with the value its file held. (2) Re-project each "
         "finished cycle's ledger onto the current record shape, dropping what the archive "
         "and the round files already hold. A cycle with a live producer is left alone. (3) "
-        "REPORT whether every banked round document still loads, grouped by what drifted — "
+        "REPORT whether every banked round file still loads, grouped by what drifted — "
         "read-only, because "
         "pruning cannot restore a renamed field's value, so a repair there would be silently "
         "wrong. The sanctioned remedy after a field rename or a record-shape change, and (3) is "
@@ -554,14 +616,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Also print the branch behind each course / candidate subject — the winner chain "
         "from its origin to its head, each point read on its own cells. OFF by default: every "
-        "point past the origin opens a round document.",
+        "point past the origin opens a round file.",
     )
     p_evidence.add_argument(
         "--metric",
         dest="metric",
-        # No default spelled here: which metrics exist and which one is the headline are the
-        # read's to decide against the selection in hand, so `cmd_evidence` supplies MEASURAND
-        # rather than this module keeping a second copy of the name.
+        # No default here: `cmd_evidence` supplies MEASURAND, so the name has one copy.
         default=None,
         help="Which number to compare on. Unset reads each cell's own headline: the seed's lift "
         "over its origin on the recursion, the sample's fitness elsewhere. The rest are offered "
@@ -606,6 +666,16 @@ def build_parser() -> argparse.ArgumentParser:
             "its origin pays a candidate for collapsing to one label. Real spend: "
             "--n-samples target calls per seed, no optimizer calls. Never invoked by "
             "the loop itself.",
+        )
+    )
+
+    _add_decision_bank_args(
+        sub.add_parser(
+            "decision-bank",
+            help="Debug diagnostic (NOT a loop feature): replay every closed round's propose "
+            "step under two optimizer-prompt arms and measure each arm's proposals on the "
+            "cells that round read its parent on — a paired, one-round reading of a prompt "
+            "variant. A DRY RUN unless --max-usd is passed. Mints no cycle.",
         )
     )
 
@@ -723,15 +793,11 @@ def build_parser() -> argparse.ArgumentParser:
         "dataset-name fallback.",
     )
     p_rename.add_argument("campaign_id", help="Target campaign id ({dataset}__{rand6_hex})")
-    # Optional rather than a positional `''`: PowerShell drops an empty argument before
-    # argparse ever sees it, so the clear form has to be the ABSENT one to exist at all.
+    # Optional, not a positional `''`: PowerShell drops an empty argument before argparse sees it.
     p_rename.add_argument(
         "label", nargs="?", default="", help="The new name; omit it to clear the name."
     )
 
-    # The cycle/campaign controls the browser could already fire and the terminal could not.
-    # Each posts the SAME command kind the webapp posts — the two surfaces share the server's
-    # vocabulary and nothing else, which is why these needed no UI arrangement to land.
     p_skip = sub.add_parser(
         "skip-searchpoint",
         help="Cut the candidate currently being scored, at its next sample boundary. The round "
@@ -764,6 +830,20 @@ def build_parser() -> argparse.ArgumentParser:
         "--rounds", dest="rounds", type=int, default=1, help="How many rounds to run (default 1)."
     )
 
+    p_bench = sub.add_parser(
+        "bench",
+        help="Grade the campaign's origin and its selection on the held-out bench rows and bank "
+        "the headline — the pass a `bench_trigger: manual` campaign (the default) sends only "
+        "when asked. Reuses a pass the line already holds; refuses a cycle with a run in flight, "
+        "one beside the campaign's line, a split holding nothing out and a selection already "
+        "graded — the served status's own answer (`bench_score.status`). Spends: two passes over "
+        "the bench rows. Defaults to the active campaign's line.",
+    )
+    p_bench.add_argument("--campaign", default="", help="Campaign id (default: the active one).")
+    p_bench.add_argument(
+        "--cycle", default="", help="Cycle id (default: the cycle holding the campaign's line)."
+    )
+
     p_cleanup = sub.add_parser(
         "cleanup-empty-cycles",
         help="Remove the stub cycles a mint left behind when it never reached round 0.",
@@ -779,8 +859,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_del_cycle.add_argument(
         "--campaign", default="", help="Campaign id (default: the active one)."
     )
-    # The one cycle-scoped verb whose `--cycle` is REQUIRED. Its siblings fall back to the active
-    # pointer, which for a delete would make the likeliest typo the destructive one.
+    # REQUIRED here alone: an active-pointer fallback would make the likeliest typo the delete.
     p_del_cycle.add_argument("--cycle", required=True, help="Cycle id to remove.")
 
     p_replace = sub.add_parser(
@@ -795,7 +874,33 @@ def build_parser() -> argparse.ArgumentParser:
         help="Withdraw a launch waiting for a machine slot. A terminal run leaves the queue by "
         "Ctrl+C; this reaches the ones that cannot, such as a browser launch behind a full box.",
     )
-    p_cancel_q.add_argument("job_id", help="The queued job id, as served by /machine-status.")
+    p_cancel_q.add_argument("job_id", help="The queued job id, as `machine-status` lists it.")
+
+    p_cycles = sub.add_parser(
+        "cycles",
+        help="Every cycle with its run state (`run_phase`) — derived at each read and written to "
+        "no file, so this is where a terminal reads which runs are live. Read-only, zero spend.",
+    )
+    p_cycles.add_argument("--campaign", default="", help="Only this campaign's cycles.")
+    p_cycles.add_argument(
+        "--attached", action="store_true", help="Only cycles a producer process holds."
+    )
+    p_cycles.add_argument(
+        "--inside",
+        type=_inside_arg,
+        default=(),
+        metavar="CAMPAIGN::CYCLE[~…]",
+        help="List an L4 inner run's cycles instead: the sandbox chain it lives in, one hop per "
+        "level, same codec as the API's '?descend=' and `evidence`'s ';in='. The only verb that "
+        "takes it — every run-control verb acts on the outer run, and `verify` / `evidence` "
+        "address an inner searchpoint through their subject.",
+    )
+
+    sub.add_parser(
+        "machine-status",
+        help="How many campaigns the machine runs and admits, and where your queued launches "
+        "stand in line. Read-only, zero spend.",
+    )
 
     p_concurrency = sub.add_parser(
         "set-concurrent-cycles",
@@ -808,8 +913,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def parser_verbs(parser: argparse.ArgumentParser) -> frozenset[str]:
-    """The subcommand names registered on ``parser``, so ``campaign_runner`` can assert ``COMMANDS``
-    against it at import. They drift one way: a verb with no parser row is silently unreachable."""
+    """``campaign_runner`` asserts ``COMMANDS`` against this: a verb with no parser row is unreachable."""
     return frozenset(
         name
         for action in parser._actions
@@ -818,4 +922,17 @@ def parser_verbs(parser: argparse.ArgumentParser) -> frozenset[str]:
     )
 
 
-__all__ = ["build_parser", "parser_verbs"]
+def identity_from_args(args: argparse.Namespace) -> IdentityContext:
+    return registered_or_default_identity(args.tenant)
+
+
+def launch_limits_from_args(args: argparse.Namespace) -> LaunchLimits:
+    return LaunchLimits.model_validate(
+        {
+            "halt_at_accuracy": args.halt_at_accuracy,
+            "ceiling": {"usd": args.spend_budget_usd, "tokens": args.token_budget},
+        }
+    )
+
+
+__all__ = ["build_parser", "identity_from_args", "launch_limits_from_args", "parser_verbs"]

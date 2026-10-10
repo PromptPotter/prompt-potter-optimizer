@@ -1,9 +1,3 @@
-"""The operator-admin channel (ADR-0004) — long-polls Telegram OUTBOUND only and edits the blocklist + delegations. It
-opens no inbound port, which is the entire point: the privileged auth-gate mutation never leaves the protected zone.
-
-The same charter covers the one-shot outbound notices the API process fires when an account first exists
-(``notify_operator``, ``forward_new_account_to_crm``): deployment-side, outbound-only, best-effort, no inbound door."""
-
 from __future__ import annotations
 
 import logging
@@ -18,6 +12,7 @@ from promptpotter.application.jobs.quota import overrun
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.config.settings import settings
+from promptpotter.domain.spend import RATE_PRICED_LABEL
 from promptpotter.infrastructure.identity.blocklist import (
     block_email,
     list_blocked,
@@ -30,6 +25,7 @@ from promptpotter.infrastructure.identity.grants import (
 )
 from promptpotter.infrastructure.identity.migration import registered_user_id
 from promptpotter.infrastructure.identity.paths import IdentityPaths, default_identity_paths
+from promptpotter.infrastructure.tls import tls_context
 from promptpotter.shared.identity import CAMPAIGN_CAP_BY_NAME, capabilities_from_names
 
 logger = logging.getLogger(__name__)
@@ -43,8 +39,6 @@ _USAGE = (
 
 
 def parse_command(text: str, passphrase: str | None) -> tuple[str, str] | None:
-    """Parse a message into ``(command, argument)``. When *passphrase* is set the message must START with it (the second
-    factor), and it is stripped before parsing; a failed gate returns ``None``."""
     body = text.strip()
     if passphrase:
         prefix = passphrase.strip()
@@ -89,17 +83,14 @@ def handle_command(command: str, argument: str, actor: str) -> str:
 
 
 def _render_install_spend() -> str:
-    """Cost and data per account, costliest first — the half of metering the account itself never
-    sees."""
     rows = read_install_spend(DEFAULT_PROJECTS_ROOT)
     if not rows:
         return "No accounts on this install."
-    # An unreadable account contributes nothing to the totals, so the header SAYS so — a headline
-    # figure quietly missing an account is worse than one that names what it could not read.
     torn = sum(1 for r in rows if r.unreadable)
     lines = [
         f"{len(rows)} account{'' if len(rows) == 1 else 's'}, "
-        f"${sum(r.spent.used_usd for r in rows):.4f} / "
+        f"${sum(r.spent.used_usd for r in rows):.4f} billed + "
+        f"${sum(r.spent.rate_priced_usd for r in rows):.4f} {RATE_PRICED_LABEL} / "
         f"{sum(r.spent.used_tokens for r in rows):,} tokens"
         + (f" (excludes {torn} unreadable)" if torn else "")
     ]
@@ -117,7 +108,8 @@ def _render_install_spend() -> str:
         if over_usd or over_tokens:
             flags.append(f"⚠ ${over_usd:.4f}/{over_tokens:,} past ceiling")
         lines.append(
-            f"{who}: ${r.spent.used_usd:.4f} / {r.spent.used_tokens:,} tok · "
+            f"{who}: ${r.spent.used_usd:.4f} billed + ${r.spent.rate_priced_usd:.4f} "
+            f"{RATE_PRICED_LABEL} / {r.spent.used_tokens:,} tok · "
             f"{r.campaigns} campaigns / {r.cycles} cycles"
             + (f" · {'; '.join(flags)}" if flags else "")
         )
@@ -125,7 +117,6 @@ def _render_install_spend() -> str:
 
 
 def _handle_grant_command(command: str, argument: str, actor: str, paths: IdentityPaths) -> str:
-    """The delegation facet: /grants (list), /grant <sub> <capabilities>, /revoke <sub>."""
     if command == "grants":
         grants = list_grants(paths.grants)
         if not grants:
@@ -148,7 +139,6 @@ def _handle_grant_command(command: str, argument: str, actor: str, paths: Identi
         return (
             f"Revoked {argument.strip()}." if removed else f"No delegation for {argument.strip()}."
         )
-    # /grant <sub_user_id> <capabilities>
     parts = argument.split(maxsplit=1)
     if len(parts) < 2:
         return "Usage: /grant <sub_user_id> <capabilities>  (e.g. step,create)"
@@ -161,7 +151,6 @@ def _handle_grant_command(command: str, argument: str, actor: str, paths: Identi
     except ValueError as exc:
         return f"Error: {exc}"
     if not caps:
-        # Derived, never spelled: the hand-written list here had already lost `lookahead`.
         return f"Error: name at least one capability ({', '.join(sorted(CAMPAIGN_CAP_BY_NAME))})."
     try:
         grant_principal(
@@ -185,33 +174,27 @@ def _send_message(client: httpx.Client, chat_id: str, text: str) -> None:
     except httpx.HTTPError:
         logger.warning("sendMessage failed", exc_info=True)
         return
-    # Telegram refuses in the BODY, not the transport, so a 400 is no `httpx.HTTPError` — without
-    # this a refused reply drops silently and reads as a command that never arrived.
+    # Telegram refuses in the BODY, not the transport: a 400 is no `httpx.HTTPError`.
     if resp.status_code != 200:
         logger.warning("sendMessage refused: HTTP %d %s", resp.status_code, resp.text[:300])
 
 
 def notify_operator(text: str) -> bool:
-    """One-shot outbound notice on the SAME channel the bot polls (ADR-0004): same token, same chat lock,
-    no inbound door. Callable from the API process, which is a different process from ``run_bot`` — this
-    opens its own short-lived client rather than sharing one.
-
-    Best-effort by contract: an unconfigured bot or a dead network returns ``False`` and never raises, so
-    a notice can't fail the request that triggered it. Returns whether it was sent.
-    """
+    """Best-effort: ``False`` and never a raise, so a notice cannot fail the request behind it."""
     token = settings.ADMIN_BOT_TELEGRAM_TOKEN.strip()
     chat_id = settings.ADMIN_BOT_CHAT_ID.strip()
     if not token or not chat_id:
         logger.info("Operator notice skipped (admin bot not configured): %s", text)
         return False
     try:
-        with httpx.Client(base_url=f"https://api.telegram.org/bot{token}", timeout=10) as client:
+        with httpx.Client(
+            base_url=f"https://api.telegram.org/bot{token}", timeout=10, verify=tls_context()
+        ) as client:
             resp = client.post("/sendMessage", json={"chat_id": chat_id, "text": text})
     except httpx.HTTPError:
         logger.warning("Operator notice failed to send", exc_info=True)
         return False
-    # This bool IS the claim the operator was told, and a refusal arrives as a non-200 body rather
-    # than an exception — so returning True on one reports a sign-in nobody heard about as heard.
+    # A refusal is a non-200 body, not an exception; True on one reports an unheard notice as heard.
     if resp.status_code != 200:
         logger.warning("Operator notice refused: HTTP %d %s", resp.status_code, resp.text[:300])
         return False
@@ -221,24 +204,12 @@ def notify_operator(text: str) -> bool:
 def forward_new_account_to_crm(
     email: str | None, name: str | None, user_id: str, account_count: int
 ) -> bool:
-    """Announce a new account to the n8n ``signup-intake`` door, which logs it and writes the CRM row.
-
-    Every account joins the CRM on arrival; curation happens afterwards. The alternative — a row that
-    appears only when the operator taps a button — means the contact record depends on someone being at
-    their phone, and an untapped signup simply never exists.
-
-    n8n holds the Google Sheets credentials, so this announces the account rather than writing the row
-    itself: one system owns that surface, and it is not this one. Same charter as ``notify_operator``
-    (ADR-0004) — outbound-only, no inbound door, and best-effort by contract, so an unconfigured webhook
-    or a dead network returns ``False`` and never raises. A CRM hiccup must not fail the sign-in that
-    created the account. Returns whether it was sent.
-    """
     url = settings.N8N_SIGNUP_WEBHOOK_URL.strip()
     if not url:
         logger.info("CRM forward skipped (N8N_SIGNUP_WEBHOOK_URL not set): %s", email or user_id)
         return False
     try:
-        with httpx.Client(timeout=10) as client:
+        with httpx.Client(timeout=10, verify=tls_context()) as client:
             client.post(
                 url,
                 json={
@@ -246,9 +217,6 @@ def forward_new_account_to_crm(
                     "name": name or "",
                     "use_case": "",
                     "signup_source": "promptpotter-app",
-                    # How many accounts exist once this one is counted. n8n renders it straight into
-                    # the real-time notice, so the operator reads the running total at the moment the
-                    # signup lands rather than waiting for the next morning's digest to derive one.
                     "account_count": account_count,
                 },
             )
@@ -276,8 +244,7 @@ def _process_update(
         return
     parsed = parse_command(text, passphrase)
     if parsed is None:
-        # A refused message and one that never arrived are the same silence to Telegram; this log is
-        # the only place they differ. The text stays out of it — it carries the passphrase attempt.
+        # The text stays out of the log: it carries the passphrase attempt.
         logger.info("Ignoring message (%d chars, gated=%s)", len(text), passphrase is not None)
         return
     command, argument = parsed
@@ -286,11 +253,12 @@ def _process_update(
 
 
 def run_bot(token: str, chat_id: str, passphrase: str | None) -> None:
-    """Outbound long-poll loop. Blocks forever (until SIGTERM / Ctrl-C)."""
     base_url = f"https://api.telegram.org/bot{token}"
     offset: int | None = None
     logger.info("Admin bot started (outbound long-poll; no inbound port).")
-    with httpx.Client(base_url=base_url, timeout=_POLL_TIMEOUT_S + 10) as client:
+    with httpx.Client(
+        base_url=base_url, timeout=_POLL_TIMEOUT_S + 10, verify=tls_context()
+    ) as client:
         while True:
             try:
                 params: dict[str, Any] = {"timeout": _POLL_TIMEOUT_S}
@@ -298,10 +266,7 @@ def run_bot(token: str, chat_id: str, passphrase: str | None) -> None:
                     params["offset"] = offset
                 resp = client.get("/getUpdates", params=params)
                 if resp.status_code == 409:
-                    # Telegram refuses getUpdates while a webhook is registered on the same bot. It is
-                    # a CONFIGURATION error, not a transient one — this token belongs to a bot something
-                    # else already drives (n8n's Telegram Trigger is how it happened here), and no amount
-                    # of retrying resolves it. Mint a separate bot with @BotFather for this channel.
+                    # A webhook on the same bot is a CONFIGURATION error: no retry resolves it.
                     logger.error(
                         "getUpdates refused with 409: a webhook is active on this bot, so it cannot "
                         "also be long-polled. Give the admin channel its OWN bot token."
@@ -310,9 +275,7 @@ def run_bot(token: str, chat_id: str, passphrase: str | None) -> None:
                 resp.raise_for_status()
                 updates = resp.json().get("result", [])
             except httpx.HTTPError:
-                # A bare `continue` here spins as fast as the network answers: the long-poll only
-                # blocks when the request SUCCEEDS, so an erroring one returns instantly and the
-                # loop hammers the API with no gap. Back off before retrying.
+                # The long-poll blocks only on SUCCESS: without the sleep an erroring one spins.
                 logger.warning(
                     "getUpdates failed; retrying in %ss", _RETRY_BACKOFF_S, exc_info=True
                 )
@@ -325,9 +288,7 @@ def run_bot(token: str, chat_id: str, passphrase: str | None) -> None:
                 try:
                     _process_update(update, client, chat_id, passphrase)
                 except Exception:
-                    # This loop IS the ADR-0004 channel, so one handler's raise ending it takes
-                    # the operator's only admin surface down until someone restarts the service by
-                    # hand. The offset has already advanced: the failing update is not retried.
+                    # One handler's raise must not end the operator's only admin channel (ADR-0004).
                     logger.exception("admin command failed; channel stays up")
 
 

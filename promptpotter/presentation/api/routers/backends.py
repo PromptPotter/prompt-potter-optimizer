@@ -1,6 +1,3 @@
-"""GET-only reads over registered backends. Mutations ride the command highway at ``POST /commands/{kind}``, which writes a
-``CommandRecord`` to the workspace ledger."""
-
 from __future__ import annotations
 
 from typing import Literal
@@ -8,10 +5,8 @@ from typing import Literal
 from fastapi import APIRouter
 from pydantic import Field
 
-from promptpotter import connectors
-from promptpotter.connectors.protocol import PROBE_WORKLOAD
+from promptpotter.application.jobs.launcher.admission import probe_backend
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.backend import build_backend_client
 from promptpotter.presentation.api.deps import StoresDep, get_backend_or_404
 from promptpotter.shared.clock import utcnow_iso
 
@@ -26,8 +21,6 @@ class BackendResponse(StrictModel):
     created_at: str = Field(description="ISO 8601 creation timestamp")
 
 
-# The probe's closed answer set — server-owned, so the browser derives its union from this
-# rather than re-declaring three string literals a rename would silently desync.
 BackendReachability = Literal["live", "unreachable", "error"]
 
 
@@ -38,7 +31,9 @@ class BackendHealthResponse(StrictModel):
         description="Reachability: 'live', 'unreachable', or 'error'"
     )
     checked_at: str = Field(description="ISO 8601 probe timestamp")
-    detail: str | None = Field(default=None, description="Error detail when not 'live'")
+    detail: str | None = Field(
+        default=None, description="The refusal a launch would get when not 'live'"
+    )
 
 
 @backends_router.get("", response_model=list[BackendResponse])
@@ -58,37 +53,18 @@ def list_backends(stores: StoresDep) -> list[BackendResponse]:
 
 @backends_router.get("/{backend_id}/health", response_model=BackendHealthResponse)
 async def get_backend_health(backend_id: str, stores: StoresDep) -> BackendHealthResponse:
-    """Probe the connector's own ``GET /status`` for live reachability.
+    """Whether a launch against this backend would be admitted, by the reading admission itself takes.
 
-    Thin wrapper over ``BackendClient.check_status()`` — the read half of the
-    connector-state probe the webapp polls (slow cadence) to show the backend's
-    true up/down on the connector node. ``check_status`` already maps a TCP-level
-    failure to ``{"status": "unreachable"}``, so this never raises on a down
-    backend; only a genuinely missing ``backend_id`` 404s (via ``get_backend_or_404``).
+    A down backend is an answer, never an error; only a missing ``backend_id`` answers 404.
     """
     backend = get_backend_or_404(backend_id, stores)
-    client = build_backend_client(
-        connectors.get(backend.backend_type), backend.base_url, workload=PROBE_WORKLOAD
-    )
-    try:
-        probe = await client.check_status()
-    finally:
-        await client.aclose()
-    raw = probe.get("status")
-    # Reachable: any successful /status response that isn't our own failure
-    # sentinel. `check_status` returns the backend's status dict on success
-    # (its `status` may be absent or backend-specific) and {status:unreachable|error}
-    # on failure — only those two sentinels are non-live.
-    status: BackendReachability = (
-        "unreachable" if raw == "unreachable" else "error" if raw == "error" else "live"
-    )
-    detail = probe.get("error") if status != "live" else None
+    down = await probe_backend(backend.backend_type, backend.base_url)
     return BackendHealthResponse(
         backend_id=backend_id,
         base_url=backend.base_url,
-        status=status,
+        status="live" if down is None else "unreachable",
         checked_at=utcnow_iso(),
-        detail=str(detail) if detail is not None else None,
+        detail=None if down is None else str(down),
     )
 
 

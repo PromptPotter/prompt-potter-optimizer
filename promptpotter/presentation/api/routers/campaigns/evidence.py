@@ -1,9 +1,4 @@
-"""The cross-subject evidence read — what an arbitrary SET of subjects jointly says.
-
-Path is ``/evidence`` rather than ``/campaigns/evidence``: the selection spans campaigns and
-datasets, so it is scoped to neither, and a literal under ``/campaigns/`` would have to out-order
-``/campaigns/{campaign_id}`` to match at all.
-"""
+"""``/evidence``, not ``/campaigns/evidence``: that literal must out-order ``{campaign_id}``."""
 
 from __future__ import annotations
 
@@ -19,9 +14,7 @@ from promptpotter.presentation.api.routers.campaigns._router import campaigns_ro
 from promptpotter.shared.errors import BadRequestError
 
 
-# Tenant-scoped (the walk only sees this tenant's campaigns) and self-gating on data: an id that
-# names nothing is simply absent from the roster. No capability gate and no L4 gate — an ordinary
-# campaign and a self-optimizing one take exactly the same path through here.
+# No capability gate and no L4 gate: tenant-scoped, and an id naming nothing is simply absent.
 @campaigns_router.get("/evidence", response_model=Evidence)
 def get_evidence(
     request: Request,
@@ -79,7 +72,7 @@ def get_evidence(
                 "Also serve the branch standing behind each course / candidate subject — the "
                 "winner chain from its origin to its head, each point read on its own cells. "
                 "OFF by default for the same reason as `ranking`: every point past the origin "
-                "opens a round document. A campaign subject serves none, having no branch."
+                "opens a round file. A campaign subject serves none, having no branch."
             )
         ),
     ] = False,
@@ -121,11 +114,7 @@ def get_evidence(
         ),
     ] = "",
 ) -> Response:
-    """The campaign subjects' bench head-to-head, guarded by whether one bench set graded them;
-    then roster, comparability, replicates, the cell/subject/residual decomposition, what the
-    selection can resolve, the run-order confound, and — under the selected metric — a merged
-    interval per subject with every pairwise test. Reduced on each fetch (on-demand, not the 2 s
-    poll) from per-subject reads held until a file they read moves; zero LLM, nothing persisted."""
+    """The cross-subject read: the bench head-to-head, roster, comparability, replicates and decomposition, then a merged interval per subject with every pairwise test under the selected metric."""
     try:
         evidence = select_evidence(
             stores,
@@ -138,7 +127,5 @@ def get_evidence(
             metric=metric,
         )
     except (ValueError, SyntaxError) as exc:
-        # Passed through unprefixed — the read says whether an ADDRESS, the METRIC or the
-        # SELECTION was the problem.
         raise BadRequestError(str(exc)) from exc
     return conditional_json(request, evidence, stamp="generated_at")

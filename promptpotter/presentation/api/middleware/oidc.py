@@ -1,6 +1,3 @@
-"""OIDC middleware — the Stage-1 sole identity ingress; enforcement is ``resolve_identity``'s job.
-Per ADR-0002 no-drift gate #2, no JWT type ever appears past this boundary."""
-
 from __future__ import annotations
 
 import logging
@@ -31,25 +28,16 @@ SESSION_COOKIE_NAME = "promptpotter_session"
 
 
 def resolve_access_state(email: str | None, bundle: IdentityBundle) -> AccessState:
-    """Is this account entitled to act? Signing up IS the grant, so this answers ``active`` for everyone the
-    operator has not blocked. The ONE derivation — the capability set and the served ``access_state`` both
-    read it, so an account cannot be blocked on one surface and active on another."""
     return "blocked" if check_blocklist(bundle.paths.blocklist, email).blocked else "active"
 
 
 def _session_capabilities(access_state: AccessState) -> frozenset[str]:
-    """Capabilities for an authenticated web identity — every ENTITLED user owns their tenant, so each
-    holds the owner set, the box's operator included. A BLOCKED account holds none: the dispatcher's
-    `_require_capability_for` refuses every command with the same 404 a stranger already gets, so no
-    surface needs its own check."""
     if access_state == "blocked":
         return frozenset()
     return OWNER_COMMAND_CAPABILITIES
 
 
 def _delegated_identity(data: SessionData, grant: PrincipalGrant) -> IdentityContext:
-    """Rebind a sub-principal to act inside its delegator's tenant (ADR-0005 §1); its own identity is kept
-    in ``claims["principal"]``. Capabilities are the grant INTERSECTED with the owner set, never admin."""
     if grant.is_denied:
         return IdentityContext(
             user_id=UserId(data.user_id),
@@ -57,8 +45,7 @@ def _delegated_identity(data: SessionData, grant: PrincipalGrant) -> IdentityCon
             issuer=Issuer(data.issuer) if data.issuer else None,
             email=data.email,
             provider=data.provider,
-            # A sub-principal's entitlement IS its grant, never the blocklist — it acts inside a
-            # delegator's tenant. Revoked reads as blocked: authenticated, holding nothing.
+            # A sub-principal's entitlement IS its grant, never the blocklist: revoked reads blocked.
             access_state="blocked",
             claims={"subject": data.subject},
             capabilities=frozenset(),
@@ -82,8 +69,6 @@ def _delegated_identity(data: SessionData, grant: PrincipalGrant) -> IdentityCon
 def _identity_context_from_session(
     session_id: str, bundle: IdentityBundle
 ) -> IdentityContext | None:
-    """The session's ``IdentityContext``, or ``None`` if expired/unknown. A grant-carrying user resolves
-    to a delegated identity in their delegator's tenant; everyone else owns their own."""
     data = bundle.session_store.read(session_id)
     if data is None:
         return None
@@ -104,8 +89,7 @@ def _identity_context_from_session(
 
 
 class OIDCMiddleware:
-    """Pure-ASGI identity ingress. ASGI and NOT ``BaseHTTPMiddleware``, which buffers the whole response
-    through a memory stream: that breaks a streaming SSE response and hangs graceful shutdown."""
+    """Pure ASGI, never ``BaseHTTPMiddleware``: that buffers the response and breaks SSE."""
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app

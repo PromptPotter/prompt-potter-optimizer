@@ -1,6 +1,3 @@
-"""``cmd_new`` — mint a fresh campaign + run the loop from round 0. The declaration (target +
-optimizer-prompt hash) rides ``campaign.json`` for resume-time drift, never derives the id."""
-
 from __future__ import annotations
 
 import argparse
@@ -13,91 +10,73 @@ import yaml
 from pydantic import ValidationError
 
 from promptpotter.application.campaign_config import load_campaign_config as _load_cfg
-from promptpotter.application.commands.checkin_dispatch import (
-    dispatch_draft_patch,
-    dispatch_origin_resolution,
-    dispatch_start_checkin,
-)
-from promptpotter.application.commands.dispatcher import CommandCall
+from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
+from promptpotter.application.commands.draft_editing import dispatch_draft_patch
+from promptpotter.application.commands.launching import dispatch_start_checkin
+from promptpotter.application.commands.origin_resolving import dispatch_origin_resolution
 from promptpotter.application.commands.payloads import (
     EditDraftCampaignPayload,
+    MintCampaignPayload,
     ResolveOriginPayload,
     StartCheckinPayload,
 )
-from promptpotter.application.datasets.authored import (
-    dataset_campaign_path,
-    read_campaign_config_file,
-)
+from promptpotter.application.datasets.authored import read_campaign_config_file
 from promptpotter.application.datasets.csv_ingest import IngestError
 from promptpotter.application.datasets.draft_campaign import (
+    SETTABLE_SCALARS,
+    EditDraftPatch,
     OptimizationOverrides,
     load_checkin_draft,
 )
-from promptpotter.application.datasets.draft_patch import SETTABLE_SCALARS, EditDraftPatch
 from promptpotter.application.datasets.ingest import SlugTakenError, ingest_draft
 from promptpotter.application.datasets.origin_readiness import origin_readiness
-from promptpotter.application.jobs.launcher.admission import probe_backend
-from promptpotter.application.jobs.launcher.checkin import prepare_checkin_run
-from promptpotter.application.jobs.launcher.mint_and_start import with_optimization
-from promptpotter.application.jobs.mint import fresh_campaign_id, mint_framed_cycle
+from promptpotter.application.jobs.launcher.mint_and_start import dataset_campaign_config
 from promptpotter.application.runner.entry import RunMode
-from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
+from promptpotter.config.logging import setup_logging
 from promptpotter.domain.campaign import ArmRequest
 from promptpotter.domain.connector import BackendUnreachableError
-from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
-from promptpotter.infrastructure.store.stores import build_stores
-from promptpotter.presentation.cli.commands._shared import (
-    CommandResult,
+from promptpotter.infrastructure.store.dataset_access import (
+    DatasetAccessError,
+    backend_type_of_dataset,
+    readable_dataset_dir,
+)
+from promptpotter.presentation.cli.commands.launch import (
     backend_reach_line,
     backend_unreachable_result,
     cycle_result_command,
-    drive_cycle,
-    get_verbose,
-    identity_from_args,
-    init_services_cli,
-    launch_limits_from_args,
+    held_run,
+    inline_launch,
     pipeline_summary,
+    prepare_launch,
+    run_inline,
 )
-from promptpotter.presentation.cli.session import load_session, no_dataset_hint
+from promptpotter.presentation.cli.commands.result import CommandResult
+from promptpotter.presentation.cli.commands.workspace import open_stores
+from promptpotter.presentation.cli.parsers import launch_limits_from_args
+from promptpotter.presentation.cli.session import no_dataset_hint
 from promptpotter.presentation.terminal.startup_checklist import checkin_line
 from promptpotter.shared.errors import PotterError
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Coroutine, Sequence
 
-    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.datasets.draft_campaign import DraftCampaign
-    from promptpotter.application.datasets.origin_readiness import FieldGap
-    from promptpotter.application.initialization.session import Session
-    from promptpotter.domain.sample import Sample
+    from promptpotter.application.datasets.origin_readiness import FieldGap, OriginLastResolution
+    from promptpotter.application.jobs.launcher.run_job import HeldRun
     from promptpotter.infrastructure.store.stores import Stores
-    from promptpotter.presentation.cli.session import SessionCtx
 
 logger = logging.getLogger("promptpotter.presentation.cli")
 
 
-# --- File-ingest branch: `new <file>` folds onto the durable check-in path ----
-
-# The CLI's ``--set`` vocabulary, DERIVED from the one patch model every ingress edits an origin
-# through (``application/datasets/draft_patch.py::EditDraftPatch``) — hand-listing it here would
-# make the terminal and the web Advanced block two capabilities wearing one name. Only the two
-# SPELLINGS that genuinely differ live here.
 _SET_ALIAS: dict[str, str] = {
-    # What an operator calls the framing; the model names the RAW text, pre-decomposition.
     "task_description": "raw_task_description",
-    # Dotted on a command line, underscored on the wire — one field either way.
     "column.query": "column_query",
     "column.ground_truth": "column_ground_truth",
 }
 
-# The campaign-config knobs are NOT patch fields — they ride the patch's one
-# ``optimization_overrides`` dict, merged and validated by ``plan_draft_patch`` exactly as the web
-# Advanced block's are. Derived from the model, never hand-listed. ``nodes`` is nested, so a node's
-# knob is spelled ``nodes.{node}.{knob}=VALUE``.
 _NODES = "nodes"
 _SET_KNOBS: frozenset[str] = frozenset(OptimizationOverrides.model_fields) - {_NODES}
 
-# What a `FIELD=VALUE` can name: every scalar the patch declares, under its CLI spelling.
 _SET_FIELDS: frozenset[str] = (SETTABLE_SCALARS - set(_SET_ALIAS.values())) | set(_SET_ALIAS)
 
 
@@ -106,9 +85,7 @@ def _settable() -> str:
 
 
 def _sets_to_patch(sets: list[str]) -> EditDraftPatch:
-    """``--set FIELD=VALUE`` → the patch the web sends. Shape only: every BOUND, the slug-collision
-    check and the column-membership check belong to the patch model and ``plan_draft_patch``, so the
-    terminal cannot enforce a different rule than the browser does."""
+    """Shape only: every bound is the patch model's and ``plan_draft_patch``'s, as for the browser."""
     patch_raw: dict[str, Any] = {}
     knobs: dict[str, Any] = {}
     for item in sets:
@@ -119,7 +96,6 @@ def _sets_to_patch(sets: list[str]) -> EditDraftPatch:
             knobs[field] = raw
         elif field.startswith(f"{_NODES}.") and field.count(".") == 2:
             _, node, knob = field.split(".")
-            # A node's knob is typed by its member, so the value is read as YAML — `0.3`, `true`.
             config = knobs.setdefault(_NODES, {}).setdefault(node, {"config": {}})["config"]
             config[knob] = yaml.safe_load(raw)
         elif field in _SET_FIELDS:
@@ -140,12 +116,9 @@ def _sets_to_patch(sets: list[str]) -> EditDraftPatch:
         ) from None
 
 
-def _with_sets(config: CampaignConfig, sets: list[str]) -> CampaignConfig:
-    """The name form's ``--set``: the same patch the file form sends, whose knobs lay onto the
-    dataset's config through the one seam every door validates by. A named dataset has its
-    origin on disk, so a check-in field has nothing to confirm and is refused."""
+def _set_knobs(sets: list[str]) -> dict[str, Any]:
     if not sets:
-        return config
+        return {}
     patch = _sets_to_patch(sets)
     spelled = {model: cli for cli, model in _SET_ALIAS.items()}
     fields = patch.model_fields_set - {"optimization_overrides"}
@@ -155,35 +128,23 @@ def _with_sets(config: CampaignConfig, sets: list[str]) -> CampaignConfig:
             f"does not have. On a name: {', '.join(sorted(_SET_KNOBS))}, {_NODES}.<node>.<knob>."
         )
     knobs = patch.optimization_overrides
-    assert knobs is not None  # every --set left after the refusal above is a knob
-    try:
-        return with_optimization(config, knobs)
-    except PotterError as exc:
-        raise SystemExit(f"ERROR: --set rejected: {exc}") from None
+    assert knobs is not None
+    return knobs
 
 
 def _reload_draft(stores: Stores, campaign_id: str) -> DraftCampaign:
-    """The draft as the dispatcher just left it. Every write path persists, so the CLI re-reads
-    rather than threading a model the applier already superseded."""
-
     draft = load_checkin_draft(stores, campaign_id)
-    assert draft is not None  # just written by the applier
+    assert draft is not None
     return draft
 
 
-def _raise_incomplete(gaps: Sequence[FieldGap], resolution: dict[str, Any] | None) -> NoReturn:
-    """Print the still-open gaps + the resolver's questions and exit non-zero, rather than minting a
-    half-specified origin."""
+def _raise_incomplete(gaps: Sequence[FieldGap], turn: OriginLastResolution | None) -> NoReturn:
     lines = ["ERROR: origin still incomplete — nothing minted.", "", "Open fields:"]
     lines += [f"  - {g.field}: {g.hint}" for g in gaps]
-    questions = (
-        ((resolution or {}).get("last_resolution") or {})
-        .get("next_action", {})
-        .get("questions", [])
-    )
+    questions = turn.next_action.questions if turn else []
     if questions:
         lines += ["", "The resolver asked:"]
-        lines += [f"  - {q.get('prompt', '')}".rstrip() for q in questions]
+        lines += [f"  - {q.prompt}".rstrip() for q in questions]
     lines += [
         "",
         "Confirm a field and re-run, e.g.:",
@@ -194,11 +155,9 @@ def _raise_incomplete(gaps: Sequence[FieldGap], resolution: dict[str, Any] | Non
 
 
 async def _ingest_checkin(args: argparse.Namespace) -> str:
-    """Parse → ``--set`` → resolve the origin → the gated check-in campaign id. On a residual gap this
-    exits non-zero but the campaign SURVIVES, so a later ``--set`` + ``resume`` completes it."""
-
+    """A residual gap exits non-zero but the campaign SURVIVES, for a later ``--set`` + ``resume``."""
     file_path = Path(args.dataset)
-    stores = build_stores(identity_from_args(args), projects_root=DEFAULT_PROJECTS_ROOT)
+    stores = open_stores(args)
 
     try:
         draft = await ingest_draft(
@@ -217,13 +176,10 @@ async def _ingest_checkin(args: argparse.Namespace) -> str:
             f"ERROR: slug '{exc.slug}' already exists. Try --slug {exc.suggested}."
         ) from None
 
-    campaign_id = draft.draft_id  # the check-in campaign id (draft re-keyed at mint)
+    campaign_id = draft.draft_id
     checkin_line("ingest", f"{draft.n_samples} rows → check-in '{draft.slug}' ({campaign_id})")
 
-    # Both mutations ride `CommandDispatcher`, exactly as the browser's do: each lands a
-    # `CommandRecord` + ack on the check-in ledger, each is idempotent under its key, and the
-    # resolver turn replays from `cache.json` rather than re-spending the LLM call. Writing the
-    # draft directly here records an operator's `--set` nowhere and re-bills every retry.
+    # Dispatched, as the browser's: a direct draft write records nothing and re-bills every retry.
     try:
         if args.sets:
             await dispatch_draft_patch(
@@ -235,66 +191,46 @@ async def _ingest_checkin(args: argparse.Namespace) -> str:
             )
             draft = _reload_draft(stores, campaign_id)
 
-        resolution: dict[str, Any] | None = None
+        last_turn: OriginLastResolution | None = None
         if not origin_readiness(draft).complete:
             checkin_line("origin resolver", "running AI check-in")
-            # One turn: code owns the deterministic facts (the answer space) and the operator
-            # states the framing up front via --set, so the resolver only reads the columns +
-            # authors the prompt. A residual gap surfaces below with the --set instructions
-            # rather than spinning more LLM turns.
+            # One turn: a residual gap surfaces below with --set instructions, not more LLM turns.
             turn = await dispatch_origin_resolution(
                 stores,
                 CommandCall(ResolveOriginPayload(draft_id=campaign_id), uuid.uuid4().hex),
             )
-            resolution = turn.get("resolution") or {}
+            last_turn = turn.resolution.last_resolution
             draft = _reload_draft(stores, campaign_id)
     except PotterError as exc:
-        # The dispatcher's own refusals — a taken slug, a column that is not an uploaded header,
-        # a knob out of range. One wording for both entry points.
         raise SystemExit(f"ERROR: {exc}") from None
 
     readiness = origin_readiness(draft)
     if not readiness.complete:
-        _raise_incomplete(readiness.gaps, resolution)
+        _raise_incomplete(readiness.gaps, last_turn)
 
     checkin_line("origin", f"complete — check-in '{draft.slug}' ready")
     return campaign_id
 
 
-async def _ingest_and_prepare_checkin(
-    args: argparse.Namespace,
-) -> tuple[Session, CampaignConfig, str]:
-    """The CLI tail of check-in Start. Backend reachability is not preflighted: a check-in is
-    durable, so ``resume`` runs it later."""
-
+async def _hold_ingested_checkin(args: argparse.Namespace) -> HeldRun:
     campaign_id = await _ingest_checkin(args)
-    stores = build_stores(identity_from_args(args), projects_root=DEFAULT_PROJECTS_ROOT)
-
-    async def make_session(dataset_name: str) -> Session:
-        return await init_services_cli(
-            backend_url=args.backend_url,
-            backend_id=args.backend_id,
-            dataset_name=dataset_name,
-            identity=identity_from_args(args),
-        )
-
-    # The ceilings ride the payload even though `drive_cycle` is what admits under them here: the
-    # `CommandRecord` is the only durable statement of what this Start asked for, and a terminal
-    # launch whose record says "no ceiling" reads as a different command from the web's.
-    prepared = await dispatch_start_checkin(
+    stores = open_stores(args)
+    launched = await dispatch_start_checkin(
         stores,
         CommandCall(
             StartCheckinPayload(
-                campaign_id=campaign_id, **launch_limits_from_args(args).model_dump()
+                campaign_id=campaign_id,
+                diag=args.diag,
+                backend_url=args.backend_url,
+                backend_id=args.backend_id,
+                **launch_limits_from_args(args).model_dump(),
             ),
             uuid.uuid4().hex,
         ),
-        start=lambda hop, draft: prepare_checkin_run(
-            stores, hop=hop, draft=draft, make_session=make_session
-        ),
+        inline=inline_launch(args),
     )
     checkin_line("campaign", f"started check-in {campaign_id}")
-    return prepared.session, prepared.campaign_config, prepared.session.dataset_name or "?"
+    return held_run(launched)
 
 
 def _arm_request(raw: str | None) -> ArmRequest | None:
@@ -309,15 +245,13 @@ def _arm_request(raw: str | None) -> ArmRequest | None:
         raise SystemExit(f"ERROR: --arm {raw!r}: {exc}") from exc
 
 
-async def _mint_fresh_session(
-    args: argparse.Namespace,
-) -> tuple[Session, CampaignConfig, str]:
-    """Find-or-create campaign + mint session + root cycle. No scoring — the origin is phase 0 of the loop."""
-
-    file_config = read_campaign_config_file(Path(args.config)) if args.config else {}
-    # Resolution order: positional dataset → --dataset-name → config["dataset_name"]
+async def _hold_named_mint(args: argparse.Namespace) -> HeldRun:
+    declared = None
+    if args.config:
+        file_config = read_campaign_config_file(Path(args.config))
+        declared = _load_cfg(file_config)
     dataset_name = (
-        getattr(args, "dataset", None) or args.dataset_name or file_config.get("dataset_name")
+        args.dataset or args.dataset_name or (declared.dataset_name if declared else None)
     )
     if not dataset_name:
         raise SystemExit(
@@ -325,96 +259,76 @@ async def _mint_fresh_session(
             "(`new aime`), via `--dataset-name <name>`, or via a `--config` "
             "that names one.\n\n" + no_dataset_hint()
         )
-
-    session = await init_services_cli(
-        backend_url=args.backend_url,
-        backend_id=args.backend_id,
-        dataset_name=dataset_name,
-        identity=identity_from_args(args),
-    )
-
-    # Auto-load dataset's campaign.json from the resolved config dir (tenant-first
-    # via session.dataset_config_dir) when --config wasn't given — else the session
-    # persists with scoring=null + default knobs. file_config only feeds
-    # campaign_config below, so reading it post-init is safe.
-    if not args.config and session.dataset_config_dir is not None:
-        default_config_path = dataset_campaign_path(session.dataset_config_dir)
-        if default_config_path.exists():
-            file_config = read_campaign_config_file(default_config_path)
-
-    campaign_config = _with_sets(_load_cfg(file_config), args.sets)
-
-    train_data = session.samples
-
-    # The one shared mint prologue — same application seam the web mint runs (detached).
-    minted = await mint_framed_cycle(
-        session,
-        campaign_config,
-        train_data,
-        campaign_id=fresh_campaign_id(session, campaign_config),
-        task_text=Path(args.task_file).read_text(encoding="utf-8")
-        if args.task_file
-        else args.task_text,
-        arm=_arm_request(args.arm),
-        limits=launch_limits_from_args(args),
-        log=logger.info if get_verbose() else None,
-    )
-
-    checkin_line("campaign", f"minted {minted.campaign_id}")
-
-    return session, minted.campaign_config, dataset_name
-
-
-async def _run_loop(
-    args: argparse.Namespace,
-    ctx: SessionCtx,
-    campaign_config: CampaignConfig,
-    session: Session,
-    train_data: list[Sample],
-) -> CommandResult:
-
-    cycle_result, _ = await drive_cycle(
-        args,
-        ctx,
-        campaign_config,
-        session,
-        train_data,
-        mode=RunMode(
-            diag=getattr(args, "diag", False),
-        ),
-    )
-    return cycle_result_command(ctx, session, cycle_result)
-
-
-async def cmd_new(args: argparse.Namespace) -> CommandResult:
-    """Mint a fresh campaign and run from round 0. The positional is a dataset name or a raw CSV; both
-    produce the same session bundle, so the tail (backend → dataset → pipeline → task → loop) is one."""
-    if (pos := getattr(args, "dataset", None)) and Path(pos).is_file():
-        if args.arm is not None:
-            raise SystemExit("ERROR: --arm mints a committed dataset's campaign, not a raw file")
-        session, campaign_config, dataset_name = await _ingest_and_prepare_checkin(args)
-    else:
-        session, campaign_config, dataset_name = await _mint_fresh_session(args)
-
-    backend_type = backend_type_of_dataset(session.store, dataset_name)
+    stores = open_stores(args)
+    knobs = _set_knobs(args.sets)
     try:
-        await probe_backend(backend_type, args.backend_url)
+        dataset_campaign_config(
+            readable_dataset_dir(stores, dataset_name), optimization=knobs, declared=declared
+        )
+    except DatasetAccessError:
+        raise SystemExit(
+            f"ERROR: no dataset named {dataset_name!r}.\n\n" + no_dataset_hint()
+        ) from None
+    except PotterError as exc:
+        raise SystemExit(f"ERROR: --set rejected: {exc}") from None
+    arm = _arm_request(args.arm)
+    task_text = (
+        Path(args.task_file).read_text(encoding="utf-8") if args.task_file else args.task_text
+    )
+
+    try:
+        mint = MintCampaignPayload(
+            dataset_name=dataset_name,
+            optimization=OptimizationOverrides.model_validate(knobs) if knobs else None,
+            arm=arm,
+            diag=args.diag,
+            campaign_config=declared,
+            task_text=task_text,
+            backend_url=args.backend_url,
+            backend_id=args.backend_id,
+            **launch_limits_from_args(args).model_dump(),
+        )
+    except ValidationError as exc:
+        raise SystemExit(f"ERROR: {exc.errors()[0].get('msg', exc)}") from None
+    outcome = await CommandDispatcher(
+        stores, inline=inline_launch(args)
+    ).dispatch_workspace_command(CommandCall(mint, uuid.uuid4().hex))
+    held = held_run(outcome.result)
+    checkin_line("campaign", f"minted {held.session.campaign_id}")
+    return held
+
+
+def cmd_new(args: argparse.Namespace) -> Coroutine[Any, Any, CommandResult]:
+    prepare_launch(args)
+    return mint_and_run(args)
+
+
+async def mint_and_run(args: argparse.Namespace) -> CommandResult:
+    setup_logging(style="full" if args.verbose else "cli")
+    try:
+        if args.dataset and Path(args.dataset).is_file():
+            if args.arm is not None:
+                raise SystemExit(
+                    "ERROR: --arm mints a committed dataset's campaign, not a raw file"
+                )
+            held = await _hold_ingested_checkin(args)
+        else:
+            held = await _hold_named_mint(args)
     except BackendUnreachableError as exc:
         return backend_unreachable_result(exc)
-    checkin_line("backend", backend_reach_line(backend_type, args.backend_url))
 
-    train_data = session.samples
-    checkin_line("dataset", f"{dataset_name} ({len(train_data)} queries)")
+    session = held.session
+    dataset_name = session.dataset_name or "?"
+    backend_type = backend_type_of_dataset(session.store, dataset_name)
+    checkin_line("backend", backend_reach_line(backend_type, session.backend_client.base_url))
+    checkin_line("dataset", f"{dataset_name} ({len(session.samples)} queries)")
     checkin_line("pipeline", pipeline_summary(session, session.pipeline_params))
 
-    ctx = load_session(session.store, session.hop)
-    campaign_config = ctx.campaign_config
-
-    logger.info("Session: %s", session.store.sessions.session_dir(ctx.session_id))
-    logger.info("Campaign: %s", session.store.campaigns.campaign_root_dir(ctx.campaign_id))
+    logger.info("Campaign: %s", session.store.campaigns.campaign_root_dir(session.campaign_id))
 
     checkin_line("origin", "launching origin scoring")
-    return await _run_loop(args, ctx, campaign_config, session, train_data)
+    result = await run_inline(held, mode=RunMode(diag=args.diag))
+    return cycle_result_command(session, result)
 
 
-__all__ = ["cmd_new"]
+__all__ = ["cmd_new", "mint_and_run"]

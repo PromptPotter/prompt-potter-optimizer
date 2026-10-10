@@ -1,5 +1,4 @@
-"""``cmd_resume`` — continue the active campaign. Drift is the stored ``root_content_hash`` against a
-fresh one; ``classify_config_diff`` calls it policy-only (resume) or data-affecting (fork or new)."""
+"""The launch is the command's own (``jobs/launcher/launch.py``); this verb owns its flags and the inline run."""
 
 from __future__ import annotations
 
@@ -9,14 +8,16 @@ import logging
 import uuid
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.bench.resume_and_fork.fork_siblings import mint_diag_sibling
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
-from promptpotter.application.commands.payloads import ForkCyclePayload
-from promptpotter.application.jobs.launcher.admission import probe_backend
-from promptpotter.application.jobs.mint import resolve_cycle_plan
-from promptpotter.application.knobs import DiffScope, classify_config_diff
-from promptpotter.application.runner.entry import RunMode
-from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
+from promptpotter.application.commands.launching import run_mode_of
+from promptpotter.application.commands.payloads import (
+    ForkCyclePayload,
+    RunShape,
+    StartRunPayload,
+)
+from promptpotter.application.initialization.wiring import init_services
+from promptpotter.application.jobs.mint import ConfigDriftError
+from promptpotter.config.logging import setup_logging
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.pipeline_overlay import (
@@ -24,226 +25,108 @@ from promptpotter.domain.pipeline_overlay import (
     steers_disallowed_model,
 )
 from promptpotter.infrastructure.runtime_flags import is_checkin
-from promptpotter.infrastructure.store.campaign_store.store import cycle_final
-from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
-from promptpotter.infrastructure.store.stores import build_stores
-from promptpotter.presentation.cli.commands._shared import (
-    CommandResult,
+from promptpotter.presentation.cli.commands.launch import (
     backend_unreachable_result,
     confirm_tty,
     cycle_result_command,
     divergence_hint,
-    drive_cycle,
-    get_verbose,
-    identity_from_args,
-    init_services_cli,
+    held_run,
+    inline_launch,
     log_startup_summary,
-    resolve_target,
+    prepare_launch,
+    run_inline,
 )
-from promptpotter.presentation.cli.commands.new import cmd_new
+from promptpotter.presentation.cli.commands.new import mint_and_run
+from promptpotter.presentation.cli.commands.result import CommandResult
+from promptpotter.presentation.cli.commands.workspace import open_stores, resolve_target
+from promptpotter.presentation.cli.parsers import launch_limits_from_args
 from promptpotter.presentation.cli.session import load_session, no_dataset_hint
 from promptpotter.shared.errors import PotterError, ResumeDivergenceError
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign_config import CampaignConfig
-    from promptpotter.application.initialization.session import Session
+    from collections.abc import Coroutine
+
+    from promptpotter.application.jobs.launcher.run_job import HeldRun
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.results import CycleResult
-    from promptpotter.domain.sample import Sample
     from promptpotter.presentation.cli.session import SessionCtx
 
 logger = logging.getLogger("promptpotter.presentation.cli")
 
 
-class _PivotToFreshError(Exception):
-    """Operator confirmed at the drift prompt: pivot resume → new on this dataset."""
-
-    def __init__(self, dataset_name: str) -> None:
-        self.dataset_name = dataset_name
-
-
-def _prepare_cycle_for_resume(
-    args: argparse.Namespace,
-    ctx: SessionCtx,
-    session: Session,
-    campaign_config: CampaignConfig,
-    train_data: list[Sample],
-    *,
-    pivot_prompt: bool = True,
-    steer_fork: bool = False,
-) -> dict[Any, Any]:
-    """Apply pipeline + verify the config still matches. OPTIMIZER drift is NOT asked here — it is asked
-    per round from the application seam every entry point reaches, since a webapp resume bypasses this."""
-
-    resume_from_round: int | None = getattr(args, "resume_from_round", None)
-    plan = resolve_cycle_plan(
-        session, campaign_config, train_data, log=logger.info if get_verbose() else None
+def _run_shape(args: argparse.Namespace, *, fork_on_divergence: bool) -> RunShape:
+    return RunShape(
+        from_round=args.resume_from_round,
+        no_divergence_check=args.no_divergence_check,
+        fork_on_divergence=fork_on_divergence,
+        diag=args.diag,
     )
-    pipeline_params = plan.pipeline_params
-    # build_origin_cycle_id yields ``cycle_<hash>``; campaign.json stores the bare hash.
-    current_hash = plan.cycle_id.removeprefix("cycle_")
-
-    campaign = session.store.campaigns.load_campaign(ctx.campaign_id)
-    if campaign is None:
-        raise SystemExit(
-            f"ERROR: campaign manifest not found for '{ctx.campaign_id}'.\n"
-            "Run `python -m promptpotter new <dataset>` to mint a fresh campaign."
-        )
-
-    if campaign.root_content_hash is None:
-        # Only an unstarted check-in campaign carries none — both mint
-        # seams stamp it (auto_mint at mint, finalize_checkin at Start).
-        raise SystemExit(
-            f"ERROR: campaign {ctx.campaign_id} has no stamped identity — an "
-            "unstarted check-in can't be resumed. Start it first."
-        )
-    if campaign.root_content_hash == current_hash:
-        print(f"config: unchanged (content hash {current_hash})")
-    else:
-        scope, diffed = classify_config_diff(
-            campaign_config, campaign.config, arm=campaign.arm is not None
-        )
-        dataset_name = ctx.init_params.get("dataset_name") or "<dataset>"
-        print()
-        print("Config changed since the campaign was minted.")
-        print(f"  campaign:     {ctx.campaign_id}")
-        print(f"  stored hash:  {campaign.root_content_hash}")
-        print(f"  current hash: {current_hash}")
-        if diffed:
-            print(f"  changed:      {', '.join(diffed)}")
-        print()
-        if scope is DiffScope.POLICY_ONLY:
-            # Policy-only: cached measurements + L1 candidates stay valid; divergence walk short-circuits.
-            print("Diff is policy-only — safe to resume in place. The new policy")
-            print("governs unevaluated rounds; past measurements are reused.")
-        elif steer_fork:
-            # A steer-fork mints a fresh sibling under the current config — the drift's
-            # own recommended resolution. Don't halt; the fork carries the new config.
-            print("Diff is data-affecting, but --steer mints a fresh sibling")
-            print("under the current config — proceeding to fork (parent preserved).")
-        else:
-            print("Diff is data-affecting — cached measurements may not apply.")
-            print("  • `python -m promptpotter resume --fork-on-divergence` branches a")
-            print("    sibling cycle in this campaign at the divergence point.")
-            print(f"  • `python -m promptpotter new {dataset_name}` mints a fresh")
-            print("    campaign with the new config (this campaign is preserved).")
-            drift_error_msg = (
-                f"ERROR: data-affecting config drift on campaign {ctx.campaign_id}.\n"
-                f"  stored hash:  {campaign.root_content_hash}\n"
-                f"  current hash: {current_hash}\n"
-                f"  changed:      {', '.join(diffed) or '(unclassified)'}\n"
-                f"\n"
-                f"Run `resume --fork-on-divergence` to branch a sibling cycle, or "
-                f"`new {dataset_name}` for a fresh campaign."
-            )
-            if not pivot_prompt:
-                raise SystemExit(drift_error_msg)
-            answer = confirm_tty(
-                f"Start a fresh campaign on `{dataset_name}` instead?", default_no=True
-            )
-            if answer is None:
-                raise SystemExit(drift_error_msg)
-            if not answer:
-                raise SystemExit(
-                    "Cancelled. Re-run `resume --fork-on-divergence` to branch a "
-                    "sibling cycle, or revert the config edits and retry `resume`."
-                )
-            raise _PivotToFreshError(dataset_name)
-
-    if resume_from_round is not None:
-        if not ctx.cycle_id:
-            raise SystemExit(
-                "ERROR: `resume --from N` requires an active cycle on this session.\n"
-                "Run `python -m promptpotter new <dataset>` first."
-            )
-        if resume_from_round < 0:
-            raise SystemExit(f"ERROR: --from must be >= 0, got {resume_from_round}")
-        logger.info("Resuming cycle %s from after round %d", ctx.cycle_id, resume_from_round)
-    elif ctx.cycle_id:
-        logger.info("Resuming cycle %s", ctx.cycle_id)
-
-    return pipeline_params
 
 
-def _maybe_fork_diag_sibling(args: argparse.Namespace, ctx: SessionCtx, session: Session) -> None:
-    """Diag-BFS: ``--diag`` against a finalized diag cycle branches a counted sibling
-    (``{root}_diag_NNN``); each probe is its own cycle with ``parent_cycle_id`` set."""
-    if not (
-        getattr(args, "diag", False)
-        and ctx.cycle_id
-        and getattr(args, "resume_from_round", None) is None
-    ):
-        return
-    final = cycle_final(session.store.campaigns.load(ctx.hop) or {})
-    if final is None or final.mode != "diag":
-        return
+def _start_run(
+    args: argparse.Namespace, hop: CycleHop, *, fork_on_divergence: bool
+) -> StartRunPayload:
+    return StartRunPayload(
+        campaign_id=hop.campaign_id,
+        cycle_id=hop.cycle_id,
+        **_run_shape(args, fork_on_divergence=fork_on_divergence).model_dump(),
+        **launch_limits_from_args(args).model_dump(),
+    )
 
-    new_cycle_id = mint_diag_sibling(stores=session.store, hop=ctx.hop)
-    ctx.cycle_id = new_cycle_id
-    session.state.cycle_id = new_cycle_id
+
+async def _dispatch_held(
+    args: argparse.Namespace, ctx: SessionCtx, payload: StartRunPayload | ForkCyclePayload
+) -> HeldRun:
+    """*ctx* follows the cycle the command answers (a fork, a diag sibling) and stays put when the hold is refused."""
+    outcome = await CommandDispatcher(ctx.store, inline=inline_launch(args)).dispatch_cycle_command(
+        CommandCall(payload, uuid.uuid4().hex), expected_version=None
+    )
+    held = held_run(outcome.result)
+    ctx.cycle_id = held.session.hop.cycle_id
+    return held
 
 
 async def _dispatch_fork(
+    args: argparse.Namespace,
     ctx: SessionCtx,
-    session: Session,
     *,
     from_round: int,
     seed: dict[str, Any],
     keep_rounds: bool = False,
     reason: str = "",
-) -> str:
-    """Cut an operator fork through the SAME ``fork-cycle`` command the browser fires and point the
-    session at it: the loop then runs inline, where the web's detaches. Returns the parent's cycle id."""
-    parent = ctx.hop
-
-    async def _adopt(fork: CycleHop) -> None:
-        ctx.cycle_id = fork.cycle_id
-        session.state.cycle_id = fork.cycle_id
-
+) -> HeldRun:
+    """A refused hold leaves no fork: the applier removes the stub it minted."""
     try:
-        await CommandDispatcher(session.store).dispatch_cycle_command(
-            CommandCall(
-                ForkCyclePayload(
-                    campaign_id=parent.campaign_id,
-                    cycle_id=parent.cycle_id,
-                    round=from_round,
-                    seed=seed,
-                    keep_rounds=keep_rounds,
-                    reason=reason,
-                ),
-                uuid.uuid4().hex,
+        return await _dispatch_held(
+            args,
+            ctx,
+            ForkCyclePayload(
+                campaign_id=ctx.campaign_id,
+                cycle_id=ctx.cycle_id,
+                round=from_round,
+                seed=seed,
+                keep_rounds=keep_rounds,
+                reason=reason,
+                **_run_shape(args, fork_on_divergence=args.fork_on_divergence).model_dump(),
             ),
-            expected_version=None,
-            start_fork=_adopt,
         )
+    except (ConfigDriftError, BackendUnreachableError):
+        raise
     except PotterError as exc:
         raise SystemExit(f"ERROR: fork refused — {exc}") from exc
-    return parent.cycle_id
 
 
-async def _maybe_fork_operator_rewind(
-    args: argparse.Namespace, ctx: SessionCtx, session: Session
-) -> None:
-    """``--rewind N``: mint an OPERATOR_REWIND sibling at round N with the parent intact. Rounds 0..N-1
-    are copied to the fork, which then continues from N."""
-    rewind_to = getattr(args, "rewind_to_round", None)
-    if rewind_to is None:
-        return
-    if not ctx.cycle_id:
-        raise SystemExit(
-            "ERROR: `resume --rewind N` requires an active cycle on this session.\n"
-            "Run `python -m promptpotter new <dataset>` first."
-        )
+async def _fork_operator_rewind(args: argparse.Namespace, ctx: SessionCtx) -> HeldRun:
+    rewind_to: int = args.rewind_to_round
     if rewind_to < 0:
         raise SystemExit(f"ERROR: --rewind must be >= 0, got {rewind_to}")
     if rewind_to == 0:
         raise SystemExit("ERROR: --rewind 0 mints a fork at the cycle root. Use `--diag` instead.")
 
-    reason = (getattr(args, "rewind_reason", "") or "").strip() or (
-        f"operator rewind to round {rewind_to}"
-    )
-    parent_cycle_id = await _dispatch_fork(
-        ctx, session, from_round=rewind_to, seed={}, keep_rounds=True, reason=reason
+    reason = args.rewind_reason.strip() or f"operator rewind to round {rewind_to}"
+    parent_cycle_id = ctx.cycle_id
+    held = await _dispatch_fork(
+        args, ctx, from_round=rewind_to, seed={}, keep_rounds=True, reason=reason
     )
     logger.info(
         "Operator rewind: %s → %s at round %d [reason=%s]",
@@ -252,19 +135,11 @@ async def _maybe_fork_operator_rewind(
         rewind_to,
         reason,
     )
+    return held
 
 
 def _steer_overlay(specs: list[str], schema: PipelineSchema) -> dict[str, dict[str, Any]]:
-    """``NODE.PARAM=VALUE`` → the flat ``{node: {param: value}}`` seed overlay — the ONE channel L1,
-    L2 and the browser's steer form all write into, so the terminal gets a verb for the channel
-    rather than one per axis. A value is read in the param's DECLARED type, the same table the
-    browser coerces by (`nodeConfig.ts::coerce`): a string stays text, anything else is JSON.
-
-    The node's OWN ``param_types`` is the whole answer — it already resolves every key the node
-    declares or configures through ``WELL_KNOWN_PARAM_TYPES``, so asking that table again here
-    would type a param this node does not carry. A param it has no answer for is refused, which is
-    the same door the unknown-node arm below opens: both are typos, and the browser cannot express
-    either because neither has a served row."""
+    """A value is read in the param's DECLARED type, as the browser coerces (`nodeConfig.ts::coerce`): a string stays text, anything else is JSON."""
     overlay: dict[str, dict[str, Any]] = {}
     for spec in specs:
         key, sep, raw = spec.partition("=")
@@ -292,26 +167,19 @@ def _steer_overlay(specs: list[str], schema: PipelineSchema) -> dict[str, dict[s
     return overlay
 
 
-async def _maybe_fork_operator_steer(
-    args: argparse.Namespace, ctx: SessionCtx, session: Session
-) -> None:
-    """``--steer NODE.PARAM=VALUE``: the web steer-fork from a terminal; C0 is INHERITED. A steer to
-    a gateway or a non-PERMITTED model needs ``campaign.babysit`` — the dispatcher's gate; this warns."""
-    specs = getattr(args, "steer", None)
-    if not specs:
-        return
-    if not ctx.cycle_id:
-        raise SystemExit(
-            "ERROR: `resume --steer` requires an active cycle on this session.\n"
-            "Run `python -m promptpotter new <dataset>` first."
-        )
+async def _fork_operator_steer(args: argparse.Namespace, ctx: SessionCtx) -> HeldRun:
+    """C0 is INHERITED; a steer to a non-PERMITTED model needs ``campaign.babysit``, the dispatcher's gate: this only warns."""
+    # The overlay is typed by the backend's own schema, which only a session holds.
+    typing_session = await init_services(
+        backend_url=ctx.campaign.backend_url,
+        backend_id=ctx.campaign.backend_id,
+        dataset_name=ctx.campaign.dataset_name,
+        identity=ctx.store.identity,
+    )
+    overlay = _steer_overlay(args.steer, typing_session.pipeline_schema)
 
-    overlay = _steer_overlay(specs, session.pipeline_schema)
-
-    # The terminal's `fork-preview`: the SAME function the fork-cycle applier gates on, over the
-    # origin's frozen per-node permitted set — never `ctx.campaign_config`, which the seed has moved.
-    campaign = session.store.campaigns.load_campaign(ctx.campaign_id)
-    frozen_config = campaign.config if campaign else None
+    # The fork-cycle applier's own gate, over the origin's FROZEN config: `ctx.campaign_config` is the one the seed moved.
+    frozen_config = ctx.campaign.config
     disallowed = steers_disallowed_model(frozen_config, overlay)
     if disallowed:
         permitted = permitted_models_for_campaign(frozen_config)
@@ -325,18 +193,15 @@ async def _maybe_fork_operator_steer(
         print(f"   the origin: {permitted or '{} (nothing sanctioned)'}.")
         print("   This branch will be marked babysat (grade C); the origin's C0 is inherited.")
         print()
-        # The `campaign.babysit` cap is the authorization and the dispatcher checks it. The TTY
-        # prompt is a courtesy: a typed "no" cancels; a non-TTY run (None) proceeds on the cap.
+        # The cap is the authorization; the prompt is a courtesy, and a non-TTY run (None) proceeds on the cap.
         if confirm_tty("Proceed with the babysit steer?", default_no=True) is False:
             raise SystemExit("Cancelled. The active campaign is unchanged.")
 
     seed: dict[str, Any] = {"pipeline_overlay": overlay}
-    steer_max = getattr(args, "steer_max_rounds", None)
-    if steer_max is not None:
-        seed["config_overrides"] = {"max_rounds": steer_max}
-    # No candidate named: the fork inherits the parent's C0 and goes straight to L1 on the
-    # steered values.
-    parent_cycle_id = await _dispatch_fork(ctx, session, from_round=0, seed=seed)
+    if args.steer_max_rounds is not None:
+        seed["config_overrides"] = {"max_rounds": args.steer_max_rounds}
+    parent_cycle_id = ctx.cycle_id
+    held = await _dispatch_fork(args, ctx, from_round=0, seed=seed)
     logger.info(
         "Operator steer-fork (%s): %s → %s [overlay=%s]",
         "babysit, grade C" if disallowed else "clean, sanctioned values",
@@ -344,67 +209,33 @@ async def _maybe_fork_operator_steer(
         ctx.cycle_id,
         overlay,
     )
+    return held
 
 
-async def _drive_optimization(
-    args: argparse.Namespace,
-    ctx: SessionCtx,
-    campaign_config: CampaignConfig,
-    session: Session,
-    train_data: list[Sample],
-    *,
-    fork_on_divergence: bool,
-) -> CycleResult:
-    """One pass through the loop. Caller handles divergence menu + re-invoke."""
-
-    cycle_result, _ = await drive_cycle(
-        args,
-        ctx,
-        campaign_config,
-        session,
-        train_data,
-        mode=RunMode(
-            resume_from_round_override=getattr(args, "resume_from_round", None),
-            no_divergence_check=getattr(args, "no_divergence_check", False),
-            fork_on_divergence=fork_on_divergence,
-            diag=getattr(args, "diag", False),
-        ),
+def _divergence_result(div: ResumeDivergenceError) -> CommandResult:
+    return CommandResult(
+        data={
+            "error": "resume_divergence",
+            "round": div.round_num,
+            "kind": div.kind,
+            "recorded_outcome": div.recorded_outcome,
+            "current_outcome": div.current_outcome,
+        },
+        human=f"{div}\n\n{divergence_hint()}",
     )
-    return cycle_result
 
 
-async def _run_loop(
-    args: argparse.Namespace,
-    ctx: SessionCtx,
-    campaign_config: CampaignConfig,
-    session: Session,
-    train_data: list[Sample],
-) -> CommandResult:
-
-    fork_on_divergence = bool(getattr(args, "fork_on_divergence", False))
+async def _run_loop(args: argparse.Namespace, ctx: SessionCtx, held: HeldRun) -> CommandResult:
+    fork_on_divergence: bool = args.fork_on_divergence
+    cycle_result: CycleResult
     try:
-        cycle_result = await _drive_optimization(
-            args,
-            ctx,
-            campaign_config,
-            session,
-            train_data,
-            fork_on_divergence=fork_on_divergence,
+        cycle_result = await run_inline(
+            held, mode=run_mode_of(_run_shape(args, fork_on_divergence=fork_on_divergence))
         )
     except ResumeDivergenceError as div:
-        # Pre-authorized (--fork-on-divergence set; trigger fired pre-checkpoint) — no menu, propagate.
         if fork_on_divergence:
-            return CommandResult(
-                data={
-                    "error": "resume_divergence",
-                    "round": div.round_num,
-                    "kind": div.kind,
-                    "recorded_outcome": div.recorded_outcome,
-                    "current_outcome": div.current_outcome,
-                },
-                human=f"{div}\n\n{divergence_hint()}",
-            )
-        # Interactive: show context + ask y/N; non-TTY falls through to the structured error (scripts get exit-code).
+            return _divergence_result(div)
+        # A non-TTY (None) falls through to the structured error, so a script gets its exit code.
         print()
         print(str(div))
         print()
@@ -413,16 +244,7 @@ async def _run_loop(
         print("The parent campaign is preserved untouched.")
         answer = confirm_tty("Fork here?", default_no=True)
         if answer is None:
-            return CommandResult(
-                data={
-                    "error": "resume_divergence",
-                    "round": div.round_num,
-                    "kind": div.kind,
-                    "recorded_outcome": div.recorded_outcome,
-                    "current_outcome": div.current_outcome,
-                },
-                human=f"{div}\n\n{divergence_hint()}",
-            )
+            return _divergence_result(div)
         if not answer:
             return CommandResult(
                 data={"cancelled": True, "reason": "divergence_declined"},
@@ -431,36 +253,69 @@ async def _run_loop(
         logger.info(
             "Operator accepted fork on divergence — re-running with fork_on_divergence=True"
         )
-        cycle_result = await _drive_optimization(
-            args,
-            ctx,
-            campaign_config,
-            session,
-            train_data,
-            fork_on_divergence=True,
+        # The refused run handed its slot back; the re-run is a launch — and a command — of its own.
+        rerun = _start_run(args, ctx.hop, fork_on_divergence=True)
+        held = await _dispatch_held(args, ctx, rerun)
+        cycle_result = await run_inline(held, mode=run_mode_of(rerun))
+
+    return cycle_result_command(held.session, cycle_result)
+
+
+async def _pivot_to_fresh(
+    args: argparse.Namespace, ctx: SessionCtx, drift: ConfigDriftError
+) -> CommandResult:
+    print()
+    print(str(drift))
+    print()
+    answer = confirm_tty(
+        f"Start a fresh campaign on `{drift.dataset_name}` instead?", default_no=True
+    )
+    if answer is None:
+        raise SystemExit(f"ERROR: {drift}")
+    if not answer:
+        raise SystemExit("Cancelled. Revert the config edits and retry `resume`.")
+    return await mint_and_run(
+        argparse.Namespace(
+            command="new",
+            dataset=drift.dataset_name,
+            dataset_name=None,
+            config=None,
+            task_file=None,
+            task_text=None,
+            slug=None,
+            sets=[],
+            arm=None,
+            backend_url=ctx.campaign.backend_url,
+            backend_id=ctx.campaign.backend_id,
+            diag=False,
+            no_wait=args.no_wait,
+            halt_at_accuracy=args.halt_at_accuracy,
+            spend_budget_usd=args.spend_budget_usd,
+            token_budget=args.token_budget,
+            tenant=args.tenant,
+            verbose=args.verbose,
+            json_output=args.json_output,
         )
+    )
 
-    return cycle_result_command(ctx, session, cycle_result)
+
+def cmd_resume(args: argparse.Namespace) -> Coroutine[Any, Any, CommandResult]:
+    prepare_launch(args)
+    return _resume(args)
 
 
-async def cmd_resume(args: argparse.Namespace) -> CommandResult:
-    _stores = build_stores(identity_from_args(args), projects_root=DEFAULT_PROJECTS_ROOT)
-    campaign_id, cycle_id = resolve_target(args, _stores)
-    if not campaign_id:
+async def _resume(args: argparse.Namespace) -> CommandResult:
+    setup_logging(style="full" if args.verbose else "cli")
+    stores = open_stores(args)
+    campaign_id, cycle_id = resolve_target(args, stores)
+    if not campaign_id or not cycle_id:
         raise SystemExit(
             "ERROR: No active session.\n\n"
             "To start a campaign, run `new` against a dataset:\n\n" + no_dataset_hint()
         )
-    ctx = load_session(_stores, CycleHop(campaign_id=campaign_id, cycle_id=cycle_id))
-
-    # A check-in campaign (origin still being authored — no committed dataset, no
-    # rounds) isn't resumable: there's nothing to run until it's Started. Guard
-    # cheaply before init_services so the operator gets a clear next step instead of
-    # a confusing dataset-not-found deep in the loop.
-
-    _campaigns = _stores.campaigns
-    _campaign = _campaigns.load_campaign(ctx.campaign_id)
-    if _campaign is not None and is_checkin(_campaigns.cycle_dir(_campaign.root_hop)):
+    ctx = load_session(stores, CycleHop(campaign_id=campaign_id, cycle_id=cycle_id))
+    campaign = ctx.campaign
+    if is_checkin(stores.campaigns.cycle_dir(campaign.root_hop)):
         raise SystemExit(
             f"ERROR: campaign '{ctx.campaign_id}' is still in check-in — its origin "
             "isn't authored yet, so there's nothing to resume.\n"
@@ -468,64 +323,44 @@ async def cmd_resume(args: argparse.Namespace) -> CommandResult:
             "`python -m promptpotter new <file>` to author and run from the CLI."
         )
 
-    campaign_config = ctx.campaign_config
-    session = await init_services_cli(**ctx.init_params, identity=identity_from_args(args))
+    resume_from_round: int | None = args.resume_from_round
+    if resume_from_round is not None and resume_from_round < 0:
+        raise SystemExit(f"ERROR: --from must be >= 0, got {resume_from_round}")
+    rewinding = args.rewind_to_round is not None
+    steering = bool(args.steer)
+    if rewinding and steering:
+        raise SystemExit("ERROR: --rewind and --steer each cut a fork — pass one per `resume`.")
 
     try:
-        await probe_backend(
-            backend_type_of_dataset(session.store, ctx.init_params.get("dataset_name") or ""),
-            ctx.backend_url,
-        )
+        if rewinding:
+            held = await _fork_operator_rewind(args, ctx)
+        elif steering:
+            held = await _fork_operator_steer(args, ctx)
+        else:
+            held = await _dispatch_held(
+                args, ctx, _start_run(args, ctx.hop, fork_on_divergence=args.fork_on_divergence)
+            )
     except BackendUnreachableError as exc:
         return backend_unreachable_result(exc)
+    except ConfigDriftError as drift:
+        return await _pivot_to_fresh(args, ctx, drift)
 
-    train_data = session.samples
-    steering = bool(getattr(args, "steer", None))
-    try:
-        pipeline_params = _prepare_cycle_for_resume(
-            args, ctx, session, campaign_config, train_data, steer_fork=steering
-        )
-    except _PivotToFreshError as pivot:
-        # Operator pivoted: synthesize a ``new`` namespace from the active session's dataset + halt/spend knobs.
-
-        new_args = argparse.Namespace(
-            command="new",
-            dataset=pivot.dataset_name,
-            dataset_name=None,
-            config=None,
-            task_file=None,
-            task_text=None,
-            backend_url=ctx.init_params.get("backend_url"),
-            backend_id=ctx.init_params.get("backend_id"),
-            diag=False,
-            halt_at_accuracy=getattr(args, "halt_at_accuracy", None),
-            spend_budget_usd=getattr(args, "spend_budget_usd", None),
-            token_budget=getattr(args, "token_budget", None),
-            tenant=getattr(args, "tenant", None),
-            verbose=getattr(args, "verbose", False),
-            json_output=getattr(args, "json_output", False),
-        )
-        return await cmd_new(new_args)
-
-    session.session_id = ctx.session_id
-    session.campaign_id = ctx.campaign_id
-    session.state.cycle_id = ctx.cycle_id
-
-    _maybe_fork_diag_sibling(args, ctx, session)
-    await _maybe_fork_operator_rewind(args, ctx, session)
-    await _maybe_fork_operator_steer(args, ctx, session)
-
+    session = held.session
+    logger.info(
+        "Resuming cycle %s%s",
+        ctx.cycle_id,
+        "" if resume_from_round is None else f" from after round {resume_from_round}",
+    )
     log_startup_summary(
         session,
-        pipeline_params,
-        len(train_data),
-        ctx.backend_url,
-        ctx.init_params["dataset_name"],
+        session.pipeline_params,
+        len(session.samples),
+        session.backend_client.base_url,
+        session.dataset_name,
     )
-    logger.info("Session: %s", session.store.sessions.session_dir(ctx.session_id))
     logger.info("Campaign: %s", session.store.campaigns.campaign_root_dir(ctx.campaign_id))
 
-    return await _run_loop(args, ctx, campaign_config, session, train_data)
+    return await _run_loop(args, ctx, held)
 
 
 __all__ = ["cmd_resume"]
