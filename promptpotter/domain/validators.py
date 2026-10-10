@@ -1,5 +1,4 @@
-"""Two distinct contracts: ``LLMOutputValidator`` checks one parsed node output, ``StopRule`` checks the running results
-stream. An outcome is EVIDENCE, never a control signal — what one costs is decided at the site that raised it."""
+"""An outcome is EVIDENCE, never a control signal: what one costs is decided at the site that raised it."""
 
 from __future__ import annotations
 
@@ -8,15 +7,16 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
+    import asyncio
+
     from promptpotter.domain.results import ArmOutcome, DegradationContext
     from promptpotter.domain.sample import Sample
-    from promptpotter.domain.scoring import QueryMeasurement
+    from promptpotter.domain.scoring import GradedCell
 
 
 @dataclass(frozen=True)
 class ValidatorOutcome:
-    """One issue found in an LLM-node output; a clean output returns ``None`` instead. No ``passed`` (an outcome only exists
-    for an issue), no ``score`` and no severity: a SOFT report rides the same stream, so no consumer may escalate on the stream alone."""
+    """No severity: a SOFT report rides the same stream, so the stream alone escalates nothing."""
 
     validator_id: str
     evidence: dict[str, Any] = field(default_factory=dict)
@@ -43,9 +43,6 @@ def run_validators(
 
 @dataclass(frozen=True)
 class StopSignal:
-    """Why a stop rule ended a walk: ``outcome`` is the arm's, ``check_result`` the rule's own
-    reading of it, named by the rule that fired."""
-
     check_name: str
     outcome: ArmOutcome
     check_result: Mapping[str, Any]
@@ -53,36 +50,47 @@ class StopSignal:
 
 @dataclass(frozen=True)
 class BrokenSignal(StopSignal):
-    """A walk the BENCH stopped — its run-health rule or the gateway's own abort — as opposed to an
-    eliminator's cut. Its reading is built by ``results.py::degradation_reading``."""
+    """A walk the BENCH stopped (run-health rule, gateway abort), never an eliminator's cut."""
 
     check_result: DegradationContext
 
 
 @runtime_checkable
 class StopRule(Protocol):
-    """Mid-round stop rule over a candidate's results stream. Implementations may carry extra state; only ``name``,
-    ``check`` and ``earliest_stop`` are contract, and the first non-``None`` signal wins."""
-
     name: str
 
-    def check(self, results: list[QueryMeasurement]) -> StopSignal | None: ...
+    def check(self, results: Sequence[GradedCell]) -> StopSignal | None: ...
 
     def earliest_stop(
         self,
-        results: list[QueryMeasurement],
-        upcoming: Sequence[tuple[Sample, QueryMeasurement | None]],
+        results: Sequence[GradedCell],
+        upcoming: Sequence[tuple[Sample, GradedCell | None]],
     ) -> int | None:
-        """The fewest rows at which ``check`` could fire, over every way the ``upcoming`` cells can
-        still resolve — ``None`` if not before they are all in. A cell already measured out of order
-        carries its row, and is a fact rather than an unknown. It may answer EARLY but never late:
-        the walk launches one cell past it, so a late answer is paid in discarded calls. A rule that
-        fires on a single row's content cannot be foreseen, and leaves that row out of this answer."""
+        """May answer EARLY but never late: the walk launches one cell past it, so a late answer is paid in discarded calls."""
         ...
+
+
+class CatchUps(Protocol):
+    """A prior's configuration on the cell just taken: awaited before judged, then committed."""
+
+    def start_backfill(self, sample: Sample, room: int) -> list[asyncio.Future[Any]]: ...
+
+    def owed_backfills(self, sample: Sample) -> int: ...
+
+    def backfills_in_flight(self) -> list[asyncio.Future[Any]]: ...
+
+    def backfills_for(self, sample: Sample) -> list[asyncio.Future[Any]]: ...
+
+    def commit_backfills(self, sample: Sample) -> None: ...
+
+    def bank_backfills(self, samples: Sequence[Sample]) -> None: ...
+
+    def discard_backfills(self) -> None: ...
 
 
 __all__ = [
     "BrokenSignal",
+    "CatchUps",
     "LLMOutputValidator",
     "StopRule",
     "StopSignal",

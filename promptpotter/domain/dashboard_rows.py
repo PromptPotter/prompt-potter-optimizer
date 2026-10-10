@@ -1,125 +1,78 @@
-"""What `dashboard.json` SERVES, as opposed to what a round MEASURED.
-
-`RoundResult` is the measurement; these shapes are a narrower frozen projection of it for the
-browser, read by exactly one package (`infrastructure/projections/live_dashboard/`). Living
-beside the measurement made a display field look like a measurement field — the confusion
-`webapp/CLAUDE.md` § Scoring authority exists to prevent. Named `dashboard_rows` and not
-`round_summary` because the projection that BUILDS these already owns that name.
-
-`DegradationHealth` stays in `results.py` — `RoundResult.health` is typed on it, so moving it
-here would invert this module's one-way import."""
-
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from typing import Any, Literal
+from collections.abc import Collection, Mapping, Sequence
+from typing import Any, Literal, get_args
 
-from pydantic import ConfigDict, Field, computed_field
+from pydantic import ConfigDict, Field
 
 from promptpotter.domain.bench import BenchReading
 from promptpotter.domain.l4.proxies import PanelPrecision
+from promptpotter.domain.paired_reading import ArmPointer
 from promptpotter.domain.results import (
-    ArmOutcome,
+    ArmReading,
     DegradationHealth,
+    LineRate,
     OptimizerFact,
     OverlapReading,
     VerifyReading,
+    line_by_individual,
+    overlap_line,
 )
-from promptpotter.domain.ruler import AbilityReading, ThetaCaveat
-from promptpotter.domain.scoring import is_hit, is_unscored
+from promptpotter.domain.ruler import AbilityReading, series_levels
+from promptpotter.domain.scoring import Grade, MeasuredCell, SampleStatus, is_hit
+from promptpotter.domain.spend import SpendCeilings
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.wounds import ValidationFailure
 
 __all__ = [
+    "SAMPLE_MOVEMENT_LABELS",
     "DashboardCandidate",
     "DashboardSample",
-    "LiftSide",
     "LiveCandidate",
     "OptimizerLimit",
     "PrecisionVerdict",
     "RoundSummary",
-    "RoundSummaryCandidate",
-    "RunStanding",
-    "SampleStatus",
-    "SidedInterval",
-    "lift_side",
-    "panel_cuts",
+    "RunLimits",
+    "SampleMovement",
+    "ServedRound",
     "precision_verdict",
+    "sample_movements",
     "sample_status",
+    "served_rounds",
 ]
 
-#: Which side of 0 one arm's lift interval sits on. `spans` is the arm its round could not tell
-#: from its parent; it says nothing about the round's own verdict (`RoundSummary.separable`).
-LiftSide = Literal["above", "below", "spans"]
-
-#: Which lever an L4 panel's spread calls for: `noise` where the cells were measured no more
-#: sharply than they landed apart, so they want sharpening; `spread` where they genuinely differ.
+#: `noise`: the cells were measured no more sharply than they landed apart; `spread`: they differ.
 PrecisionVerdict = Literal["noise", "spread"]
 
 
-def lift_side(lo: float | None, hi: float | None) -> LiftSide | None:
-    """The ONE reading of an interval's sign, for every surface that words or colours a lift.
-    `None` where the arm carries no interval."""
-    if lo is None or hi is None:
-        return None
-    return "above" if lo > 0 else "below" if hi < 0 else "spans"
-
-
-class SidedInterval(StrictModel):
-    """A 95% interval on a DIFFERENCE, and the side of 0 it sits on — derived, so no model stores
-    a side its own bounds could contradict. Served only: a derived key does not read back."""
-
-    ci_lo: float | None
-    ci_hi: float | None
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def side(self) -> LiftSide | None:
-        return lift_side(self.ci_lo, self.ci_hi)
-
-
 def precision_verdict(precision: PanelPrecision) -> PrecisionVerdict:
-    """Measurement error that reaches the observed spread leaves nothing for the cells to differ by."""
     return "noise" if precision.estimation_sd >= precision.observed_sd else "spread"
 
 
-def panel_cuts(panels: Sequence[tuple[int | None, int | None]]) -> list[bool]:
-    """Which arms of ONE round stopped short, from each arm's `(scored, expected)`: under its own
-    panel, or under the fullest any arm reached. An arm that measured nothing is not cut."""
-    fullest = max((scored for scored, _ in panels if scored is not None), default=0)
-    return [
-        scored is not None and ((expected is not None and scored < expected) or scored < fullest)
-        for scored, expected in panels
-    ]
+#: Against the last earlier round that measured any; `readded` was measured before, but not in it.
+SampleMovement = Literal["new", "readded", "gained", "lost", "kept"]
+
+SAMPLE_MOVEMENT_LABELS: dict[SampleMovement, str] = {
+    "new": "new",
+    "readded": "re-added",
+    "gained": "gained position",
+    "lost": "lost position",
+    "kept": "kept position",
+}
+assert SAMPLE_MOVEMENT_LABELS.keys() == set(get_args(SampleMovement))
 
 
-#: The tape's four marks. ERR and UNSC are each a state of their OWN, not a bad MISS — neither row
-#: was graded, so reading an absent fitness as one reports a backend fault (ERR) or the active
-#: formula's own silence (UNSC) as a wrong answer. UNSC is the row the backend ANSWERED and the
-#: formula could not read, which is why it is not an error: the measurement is worth keeping and a
-#: re-grade recovers it (`domain/scoring.py::is_unscored`).
-SampleStatus = Literal["HIT", "MISS", "ERR", "UNSC"]
-
-
-def sample_status(row: Mapping[str, Any]) -> SampleStatus:
-    """The ONE ladder from a measured row to its mark — the live tape (`blocks.py::sample_row`) and
-    the served cells (`infrastructure/store/cell_queries.py`) both ask it, so two readouts of one
-    row cannot disagree about whether it was ever graded. `ERR` and `UNSC` are asked BEFORE the
-    grade: neither row was graded, so an absent fitness through `is_hit` would report a backend
-    fault — or the formula's own silence — as a wrong answer."""
-    if row.get("error"):
+def sample_status(facts: MeasuredCell, grade: Grade) -> SampleStatus:
+    """`ERR` and `UNSC` are asked BEFORE the grade: an errored row grades `fitness = 0.0`, which reads as a MISS."""
+    if facts.errored:
         return "ERR"
-    if is_unscored(row):
+    if grade.unscored is not None:
         return "UNSC"
-    return "HIT" if is_hit(row.get("fitness")) else "MISS"
+    return "HIT" if is_hit(grade.fitness) else "MISS"
 
 
 class DashboardSample(StrictModel):
-    """One scored sample as `dashboard.json` serves it — the rule `DashboardCandidate` states,
-    applied to samples: ONE shape whatever the round's state.
-
-    Display-TRIMMED at the producer, because this rides a file polled every couple of seconds
-    and the untrimmed measurement already sits in `rounds/round_NNNN.json::results`."""
+    """One scored sample as `dashboard.json` serves it, display-trimmed and one shape in any state."""
 
     qi: int = Field(description="Iteration position within the candidate's walk — the #000 column.")
     sample_id: int | None = Field(
@@ -168,6 +121,10 @@ class DashboardSample(StrictModel):
         "`status` carries the whole verdict. A client tells that from a broken extraction by the "
         "pair: both empty is verifier-graded, `NO_RESULT` beside a real truth is extraction.",
     )
+    ground_truth_text: str = Field(
+        description="`ground_truth` as a surface shows it: itself, or the one sentence for a "
+        "verifier-graded row (`domain/scoring.py::ground_truth_text`)."
+    )
     query: str = Field(default="", description="Query, trimmed for display.")
     input_tokens: int | None = Field(default=None)
     output_tokens: int | None = Field(default=None)
@@ -180,129 +137,23 @@ class DashboardSample(StrictModel):
 
 
 class DashboardCandidate(StrictModel):
-    """One candidate as `dashboard.json` serves it, in ANY round state — the live rows under
-    `current_round.candidates` and the closed rows under `rounds[].candidates` are this shape,
-    so a reader takes a whole row rather than merging two shapes field by field.
-
-    The optionals are the facts a candidate genuinely lacks until it finishes;
-    `RoundSummaryCandidate` re-declares required exactly what closing guarantees."""
+    """One candidate as `dashboard.json` serves it, the same shape live or closed."""
 
     model_config = ConfigDict(frozen=True)
 
-    # Canonical `C{round}.{n}` — composed at mint, so it exists before any measurement.
-    label: str
-    # Minted with the searchpoint but only carried on the score report, so a seeded row
-    # that has not reached `candidate_scored` has no id to serve yet.
-    candidate_id: str | None = None
-    # The archive run the candidate's cells land in (`ScoredCandidate.run_id`) — known from its
-    # FIRST sample, unlike `candidate_id`, because the walk mints it before measuring. With a
-    # sample's `sample_id` it addresses one cell. `None` before any sample and on an invalid row.
-    run_id: str | None = None
-    accuracy: float | None = None
-    composite_fitness: float | None = None
-    # How the arm's walk ended (`ScoredCandidate.outcome`), `None` until it is decided. Served
-    # because an `invalid` row's scores are SYNTHETIC, and a broken arm is not an eliminated one.
-    outcome: ArmOutcome | None = None
-    scored_samples: int = 0
-    cached_samples: int = 0
-    # What measuring this searchpoint CONSUMED — the served twin of ``ScoredCandidate``'s three,
-    # which own the prose. Same fold, same exclusions, same ``None``-is-not-0 reading.
-    input_tokens: int | None = None
-    output_tokens: int | None = None
-    cache_read_tokens: int | None = None
-    # Unknown until the first sample announces the walk's length.
-    expected_samples: int | None = None
-    evaluators: dict[str, float] = Field(default_factory=dict)
-    changes_description: str = ""
-    # Difficulty-adjusted Rasch ability + SE (`ScoredCandidate.theta`) — the metric the winner
-    # was elected on, so the chart can explain a lower-accuracy winner. `None` outside the fit,
-    # which is round-scoped and needs two arms: every row is null until the ELECTION stamps it,
-    # and none is after (`ElectionRecord.fit`). Not fittable sooner — `calibrate_ruler` extends
-    # the δ scale onto the round's cells first, and `fit_theta_given_delta` skips one it does not
-    # carry rather than defaulting it to a position on the scale.
-    theta: float | None = None
-    theta_se: float | None = None
-    # This candidate read on the held-out bench set, a second reading beside the search cells
-    # above. `None` unless a bench pass graded it: the origin, and each selection the bench read.
-    bench: BenchReading | None = None
-    # This candidate's last `verify` pass — re-scored on search cells it had never met — as that
-    # pass read under the scorer it ran with. WIRE-ONLY: whichever process ran the pass banked it
-    # on the cycle's ledger, so the serving seam places it (`overlay_verify`) and the runner's
-    # file never holds a copy to go stale.
-    verify: VerifyReading | None = Field(default=None, exclude=True)
-    # Why the θ above is NOT this arm's ability (`ScoredCandidate.theta_caveat`) — `FLOOR_PINNED`
-    # or `UNMEASURED_DELTA`, since the rest are facts about the round's scale and ride
-    # `RoundResult.ability` once instead of being copied onto every row. Served rather than
-    # derived in the browser: the rows a client would test are the fat per-sample arrays the
-    # candidate row exists to avoid shipping.
-    theta_caveat: ThetaCaveat | None = None
-    # The whisker the chart draws (`ScoredCandidate.mean_fitness_ci_lo/hi`), folded off the
-    # candidate's own rows by the scoring gateway (`search_point_scorer::_composite`) on every
-    # sample, so it widens with the accuracy bar instead of arriving whole at the end. ONE band per
-    # candidate from that one writer: a second estimator overriding it makes the whisker come and
-    # go by gating rather than by evidence.
-    mean_fitness_ci_lo: float | None = None
-    mean_fitness_ci_hi: float | None = None
-    # The floor this candidate was JUDGED against (`ScoredCandidate.reference_*`): the
-    # origin restricted to the samples it actually measured. Served because `accuracy` alone is
-    # unreadable under elimination — a PoBB-locked candidate beat something that is NOT the
-    # origin's full-set rate. `None` unless the candidate covered the origin's panel, since a
-    # prefix rate is set by where PoBB stopped it.
-    reference_accuracy: float | None = None
-    reference_composite: float | None = None
-    # The blocked lift over that floor and its interval — the one number saying whether this
-    # candidate beat the origin or the panel merely wobbled, and the one the L4 outer level
-    # reads. Same scale as `mean_fitness_ci_*`, sharper on the same rows because pairing cancels
-    # the origin's cell-to-cell variation. `None` below two shared cells, which at a one-cell
-    # panel is every round and is the honest reading rather than a missing feature.
-    reference_lift: float | None = None
-    reference_lift_ci_lo: float | None = None
-    reference_lift_ci_hi: float | None = None
-    # Two readings of the fields above, decided on the way out (`overlay_round_readings`) and
-    # WIRE-ONLY: the lift interval's side of 0 (`lift_side`) and a short panel (`panel_cuts`).
-    reference_lift_side: LiftSide | None = Field(default=None, exclude=True)
-    panel_cut: bool = Field(default=False, exclude=True)
-    # On the BASE, because the election is not a closing act: `elect_round_winner` runs at the
-    # end of SCORING, two LLM calls before the round closes, and the live row is the only
-    # surface that can say so then. `False` until it lands, and on every row of a round that
-    # held none — never a claim that this candidate lost.
-    is_selected: bool = False
+    reading: ArmReading
 
 
 class LiveCandidate(DashboardCandidate):
-    """A `DashboardCandidate` in the round in flight — `dashboard.json::current_round.candidates`.
-    The only carrier, until the round file lands, of the searchpoint it runs, its sample tape and
-    why validation rejected it."""
+    """A candidate of the round in flight, with its searchpoint, sample tape and rejection reason."""
 
-    # The evolved prompt (`OptSearchPoint.prompt_field_dict()` shape) and the config-only
-    # resolved params — the half a steered fork seeds from, as `candidate_scores[]` carries it.
+    # `OptSearchPoint.prompt_field_dict()` shape; with the resolved params, what a steered fork seeds from.
     prompt_fields: dict[str, Any] | None = None
     resolved_pipeline_params: dict[str, Any] | None = None
     pipeline_overlay: dict[str, Any] | None = None
     samples: list[DashboardSample] = Field(default_factory=list)
     validation_failures: list[ValidationFailure] = Field(default_factory=list)
-    # The composite's short formula with this candidate's own evaluator values inlined.
     composite_fitness_formula_short: str | None = None
-
-
-class RoundSummaryCandidate(DashboardCandidate):
-    """A `DashboardCandidate` on a CLOSED round — `dashboard.json::rounds[].candidates`.
-    Narrows to what closing guarantees; the field list is inherited, so a field added to the base
-    flows to both halves and `_SUMMARY_INCLUDE` keeps picking it up."""
-
-    candidate_id: str
-    accuracy: float | None
-    composite_fitness: float | None
-    outcome: ArmOutcome
-    expected_samples: int
-    is_selected: bool
-    # The arm this round's READING is taken off, and the same one `RoundSummary.panel_precision`
-    # is measured on (`round_summary.py::_leading_arm`). Distinct from `is_selected`, which says the
-    # election CROWNED it: a held round crowns nothing and its reading still comes off one arm.
-    # Served because the tie-break a reader would reach for — argmax on `composite_fitness` —
-    # cannot apply `is_electable`, so it hangs the lift interval off a collapsed arm the election
-    # refused. `False` on every row of round 0, which holds no election.
-    is_leading: bool = False
 
 
 class OptimizerLimit(StrictModel):
@@ -319,90 +170,133 @@ class OptimizerLimit(StrictModel):
     integer: bool
 
 
-class RunStanding(StrictModel):
-    """Where an optimizer stands after a round, whichever optimizer runs: the rounds since its
-    selection last advanced, and the stalls it may still absorb out of its ceiling."""
+class RunLimits(StrictModel):
+    """The ceilings a launch declared; a served dashboard lays the standing operator ceiling over them."""
 
-    model_config = ConfigDict(frozen=True)
-
-    rounds_without_advance: int
-    # ``None`` where the optimizer banks no stalls; the run then ends on its other limits.
-    stalls_left: int | None
-    stalls_left_cap: int | None
+    max_rounds: int | None = None
+    ceiling: SpendCeilings = SpendCeilings()
+    optimizer: list[OptimizerLimit] = Field(default_factory=list)
 
 
 class RoundSummary(StrictModel):
-    """Display row for `dashboard.json::rounds[]` — webapp's completed-round source.
-    Top-level `accuracy` is what the round MEASURED; `ability` is the invariant series."""
+    """Top-level `accuracy` is what the round MEASURED; `ability` is the invariant series."""
 
     model_config = ConfigDict(frozen=True)
 
     round: int
-    # ``None`` where the round measured nothing readable, so the chart draws a GAP rather
-    # than a point at zero (`ScoredCandidate.accuracy`).
+    leading: ArmPointer | None = Field(
+        description="The ONE arm this round is read off, as its selector named it and never "
+        "re-ranked: the selection where the round selected, on a held round the challenger "
+        "`verdict_reason` names as its best, at round 0 the origin. `panel_precision` is "
+        "measured on it. Null where the selector could read no arm."
+    )
+    selected: list[ArmPointer] = Field(
+        description="The arms the election crowned; empty on a round that held."
+    )
+    # ``None`` where the round measured nothing readable: the chart draws a GAP, never a point at zero.
     accuracy: float | None
     composite_fitness: float | None
-    # The rows `accuracy` is a mean over — the winner's, or on a held round the parent's on this
-    # panel. Mirrors `RoundResult.total`; no arm's own count stands in for it.
+    # Rows of the individual the round ENDED on: on a held round the retained parent, never the leading arm.
     total: int
-    # The cross-round-comparable series and the scale that makes it one: ability on the cycle's
-    # fixed δ ruler, subset-invariant where `accuracy`/`composite_fitness` above are
-    # subset-relative — under `per_round_resubset` those swing on each fresh draw, reading as a
-    # false "great start → decay". The trend/sparkline plot THIS series, dropping any point whose
-    # ruler differs; the per-round measured number stays on `candidates[]`, badged with its count.
-    # Never add a `cumulative_accuracy` beside it: a mean over rows from DIFFERENT configurations
-    # fabricates a number no individual scored. Mirrors `RoundResult.ability` where the round's
-    # selector stamps θ, and is ``None`` everywhere else.
+    # Never add a `cumulative_accuracy`: a mean over DIFFERENT configurations is a score nobody scored.
     ability: AbilityReading | None = None
-    # Whether `ability` is on the scale the cycle's θ series is drawn on, the first ruler a round
-    # stamped (`AbilityReading.comparable_to`). WIRE-ONLY, decided in `overlay_round_readings`.
-    ability_on_series_ruler: bool = Field(default=False, exclude=True)
-    # The cycle's best on shared cells as it stood when this round closed, a fork's seeded rounds
-    # included — the BEST line, served so no surface folds its own.
-    best_so_far: float | None = None
-    # The bench's grade of the selection this round declared — the origin at round 0, the final
-    # pick, and under `bench_each_round` every round that selected. ``None`` where none graded it.
+    # ``None`` where no bench pass graded this round's selection.
     bench: BenchReading | None = None
-    # The round's verdict and the evidence it rests on — the two bits that decide how long the
-    # cycle lives. `improved` moves the stall counter and the life bank; `electable_count`
-    # decides whether the bank moves AT ALL, since a round no candidate reached measured
-    # nothing about the search (`EscalationFSM._bank_round`). Both engine-only would let a
-    # campaign visibly climb while its bank drained. Round 0 holds no election ⇒ both unset.
+    # Moves the stall counter and the life bank. Unset at round 0, which holds no election.
     improved: bool | None = None
-    electable_count: int | None = None
-    # WHY it ended that way, in the numbers it was decided on — mirrors
-    # ``RoundResult.verdict_reason``. `improved` alone says a round held and cannot say which arm
-    # came closest or how far short, which is the question a browser reader actually has; this is
-    # that answer's only route out of the engine. Round 0 holds no election ⇒ unset.
     verdict_reason: str | None = None
-    # Did this round advance the best-so-far line — mirrors ``RoundResult.separable``
-    # (`runner/round.py::_separability`). THREE-state: ``None`` is "the line carries no
-    # interval", which is not inconclusive but nothing to be conclusive about, and a reader
-    # collapsing it onto ``False`` reports an unasked question as a negative answer. An arm's own
-    # bracket over its parent cannot answer this, so no surface may stand in for it with one.
-    separable: bool | None = None
-    # Mirrors `RoundResult.stamps_theta`.
-    stamps_theta: bool = False
-    candidates: list[RoundSummaryCandidate] = Field(default_factory=list)
-    # Sample ids in measurement order; the longest candidate sequence carries the full series,
-    # since PoBB truncates losers rather than the queue mechanism itself.
+    candidates: list[DashboardCandidate] = Field(default_factory=list)
+    # Measurement order, off the longest candidate sequence: PoBB truncates losers.
     selection: list[int] = Field(default_factory=list)
-    # Round-close degradation verdict, origin included. ``None`` only when the round measured
-    # zero samples. Webapp/CLI render it; never recompute.
+    # ``None`` only when the round measured zero samples. Rendered, never recomputed.
     health: DegradationHealth | None = None
-    # The best-so-far line read on ONE shared set of cells — C0 and each new best since, on one
-    # exam. `accuracy` above and this are not rivals: that one is the round's own subset, this one
-    # is the only basis two rounds can be differenced on. `None` until the line has a second
-    # member. Mirrors `RoundResult.overlap`; the rows behind it stay on the round
-    # document, since a browser reading them would be reading a quarantine.
-    overlap: OverlapReading | None = None
-    # How sharply the L4 panel's cells were measured against how far apart they landed — the
-    # monitoring read saying which lever the round's spread calls for. ``None`` on any non-L4
-    # round: an ordinary sample is graded and carries no error bar to decompose. The VERDICT is
-    # not here; it rides `candidates[].reference_lift*` like every other level's.
+    health_alert: str | None = Field(
+        default=None,
+        description="The alert a `critical` `health` raises, worded "
+        "(`results_health.py::critical_health_title`); null on every other grade.",
+    )
+    # C0 and each new best since on ONE shared set of cells: the only basis two rounds can be differenced on.
+    overlap: OverlapReading
+    # ``None`` on a non-L4 round. The VERDICT rides `candidates[].reading.vs_reference`.
     panel_precision: PanelPrecision | None = None
-    # Which lever those two bars call for (`precision_verdict`), null where `panel_precision` is.
-    # WIRE-ONLY and beside the reading: `PanelPrecision` is hashed into the L4 estimator's identity.
-    panel_precision_verdict: PrecisionVerdict | None = Field(default=None, exclude=True)
-    # Mirrors `RoundResult.optimizer_facts`: the optimizer's own words about this round.
     optimizer_facts: list[OptimizerFact] = Field(default_factory=list)
+
+
+class ServedRound(RoundSummary):
+    """A closed round as a dashboard serves it: the banked summary plus every reading derived from it."""
+
+    ability_on_series_ruler: bool = Field(
+        description="Whether `ability` is on the scale the cycle's θ series is drawn on, the "
+        "first ruler a round stamped (`AbilityReading.comparable_to`)."
+    )
+    overlap_line: list[LineRate] = Field(
+        description="`overlap` as its members and rates, C0 first; empty where the lead was not "
+        "read."
+    )
+    panel_precision_verdict: PrecisionVerdict | None = Field(
+        description="Which lever `panel_precision` calls for, null where it is. Beside the "
+        "reading and not on it: `PanelPrecision` is hashed into the L4 estimator's identity."
+    )
+    selection_movement: list[SampleMovement] = Field(
+        description="How each sample of `selection` moved against the round before it that "
+        "measured any, position for position with `selection` (`sample_movements`)."
+    )
+
+
+def sample_movements(
+    selection: Sequence[int], previous: Sequence[int], seen: Collection[int]
+) -> list[SampleMovement]:
+    """*seen* is every sample an earlier round measured; a sample listed twice stands at its last position."""
+    was = {sample_id: at for at, sample_id in enumerate(previous)}
+    now = {sample_id: at for at, sample_id in enumerate(selection)}
+
+    def movement(sample_id: int) -> SampleMovement:
+        before = was.get(sample_id)
+        if before is None:
+            return "readded" if sample_id in seen else "new"
+        at = now[sample_id]
+        return "gained" if at < before else "lost" if at > before else "kept"
+
+    return [movement(sample_id) for sample_id in selection]
+
+
+def served_rounds(
+    rounds: Sequence[RoundSummary], verify: Mapping[str, VerifyReading]
+) -> list[ServedRound]:
+    ordered = sorted(rounds, key=lambda r: r.round)
+    levels = series_levels([r.ability for r in ordered])
+    line = line_by_individual(
+        next((r.overlap for r in reversed(ordered) if overlap_line(r.overlap)), None)
+    )
+    movements: list[list[SampleMovement]] = []
+    previous: Sequence[int] = ()
+    seen: set[int] = set()
+    for closed in ordered:
+        movements.append(sample_movements(closed.selection, previous, seen))
+        if closed.selection:
+            previous = closed.selection
+            seen.update(closed.selection)
+    return [
+        ServedRound(
+            **{name: getattr(closed, name) for name in RoundSummary.model_fields}
+            | {
+                "candidates": [
+                    row.model_copy(
+                        update={
+                            "reading": row.reading.on_line(line).model_copy(
+                                update={"verify": verify.get(row.reading.arm.label)}
+                            )
+                        }
+                    )
+                    for row in closed.candidates
+                ]
+            },
+            ability_on_series_ruler=level is not None,
+            overlap_line=overlap_line(closed.overlap),
+            panel_precision_verdict=None
+            if closed.panel_precision is None
+            else precision_verdict(closed.panel_precision),
+            selection_movement=movement,
+        )
+        for closed, level, movement in zip(ordered, levels, movements, strict=True)
+    ]

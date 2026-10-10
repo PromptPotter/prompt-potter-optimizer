@@ -1,9 +1,4 @@
-"""The `/commands/{kind}` vocabulary — the one control-plane verb set every surface shares.
-
-It sits here, and not beside the dispatcher that applies it, because the parties that must
-agree on it cannot all afford to import that dispatcher: the CLI resolves its command bodies
-lazily so `--help` does not pay for the application tree, and `scripts/build_ts_types.py`
-emits the TypeScript union from these names alone."""
+"""The `/commands/{kind}` vocabulary, in `domain/` so its readers need not import the dispatcher."""
 
 from __future__ import annotations
 
@@ -13,6 +8,7 @@ __all__ = [
     "ALL_DISPATCHED_KINDS",
     "CampaignConfigKind",
     "CheckinScopedKind",
+    "CommandKind",
     "CycleScopedKind",
     "LifecycleKind",
     "WorkspaceScopedKind",
@@ -32,27 +28,26 @@ CycleScopedKind = Literal[
     "start-run",
     "step-cycle",
     "verify-candidate",
+    "grade-bench",
 ]
 WorkspaceScopedKind = Literal[
     "register-backend",
     "mint-campaign",
     "replace-dataset",
     "compact-archive",
-    # Workspace-scoped because a queued MINT has no cycle to address — the campaign it will
-    # create does not exist yet, which is also why `pause-cycle` cannot serve one.
+    # A queued MINT has no cycle to address yet, which is why `pause-cycle` cannot serve one.
     "cancel-queued-run",
     # Account-scoped: a limit on how many cycles this account holds, which no one cycle owns.
     "set-concurrent-cycles",
 ]
 CheckinScopedKind = Literal["edit-draft-campaign", "resolve-origin", "start-checkin"]
-# Campaign-scoped IN-PLACE manifest edits (the campaign persists — distinct from
-# `delete`, the one lifecycle verb that removes a tree). Rewrites `campaign.json`.
 CampaignConfigKind = Literal["set-campaign-label"]
 
-# Derived from the Literal types themselves, so every registry keyed on it — the dispatcher's
-# `CAP_FOR_KIND` and `PAYLOAD_MODEL_FOR_KIND`, the CLI's `CLI_VERB_FOR_KIND`, the router's
-# wired set — cannot drift from the wire. A verb reachable over HTTP but absent from a Literal
-# is invisible to all four, which is how `replace-dataset` ran unguarded.
+CommandKind = (
+    LifecycleKind | CycleScopedKind | WorkspaceScopedKind | CheckinScopedKind | CampaignConfigKind
+)
+
+# Derived from the Literals, so no registry keyed on it can drift from the wire.
 ALL_DISPATCHED_KINDS: frozenset[str] = frozenset(
     get_args(LifecycleKind)
     + get_args(CycleScopedKind)

@@ -5,7 +5,6 @@ import logging
 from collections.abc import Mapping, Sequence
 from typing import Any, NoReturn
 
-from promptpotter.config.settings import WELL_KNOWN_PARAM_TYPES
 from promptpotter.domain.pipeline_schema import (
     ANSWER_AS_JSON,
     ANSWER_AS_TEXT,
@@ -41,26 +40,36 @@ __all__ = [
     "parse_resolved_schema",
 ]
 
-# The node-definition sub-blocks a partial overlay AUGMENTS rather than replaces.
-# Every other key in a node block replaces wholesale — `output_schema` above all,
-# because a shallow-merged schema can keep a `required` entry naming a field the
-# incoming `properties` just dropped, and the backend rejects that.
+WELL_KNOWN_PARAM_TYPES: dict[str, str] = {
+    "temperature": "number",
+    "top_p": "number",
+    "max_tokens": "integer",
+    "max_completion_tokens": "integer",
+    "thinking_budget": "integer",
+    "seed": "integer",
+    "model": "string",
+    "provider": "string",
+    "reasoning_effort": "string",
+    "persona": "string",
+    "task_intent": "string",
+    "problem_description": "string",
+    "instruction": "string",
+    "thinking_style": "string",
+    "answer_format": "string",
+    # Typed, not inferred: both must resolve on a node declaring NO schema.
+    "output_schema": "object",
+    "answer_field": "string",
+}
+
+# Every other key replaces wholesale: a shallow-merged `output_schema` keeps a `required` naming a dropped property.
 _MERGED_NODE_SUB_BLOCKS = ("config", "optimizer")
 
-# Maps INSIDE `optimizer` that are keyed BY PARAM, so a layer naming one param says nothing about
-# the others. `PipelineSchema.narrow` composes `param_allowed_values` the same way, and the two
-# must not disagree about what narrowing a value space means: merged one level, a rung list for
-# one axis DELETES the declared space of every other axis on that node, which leaves those axes
-# open with nothing to bound them and `build_l1_response_schema` emitting a bare string.
+# Keyed BY PARAM: merged one level up, a layer naming one axis deletes every other axis's value space.
 _MERGED_OPTIMIZER_MAPS = ("param_allowed_values", "param_descriptions")
 
 
 def merge_node_blocks(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
-    """Layers node DEFINITIONS — one level above ``application.pipeline_resolve.apply_node_overlay``,
-    which merges ``pipeline_params``. Only :data:`_MERGED_NODE_SUB_BLOCKS` merge by name, and
-    inside `optimizer` the per-param maps merge by param (:data:`_MERGED_OPTIMIZER_MAPS`).
-    ``param_keys`` is a SET declaration and still replaces: a layer restating which axes exist is
-    answering for all of them."""
+    """``param_keys`` is a SET declaration, so it replaces: a layer restating the axes answers for all."""
     out = copy.deepcopy(base)
     for node_name, node_def in overlay.items():
         if not isinstance(node_def, dict):
@@ -85,8 +94,7 @@ def merge_node_blocks(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str
 
 
 def strip_lone_surrogates(obj: Any) -> Any:
-    """A lone surrogate is a valid Python codepoint that raises ``UnicodeEncodeError`` at the
-    wire, so overlays are scrubbed at parse time and the schema is born wire-safe."""
+    """A lone surrogate is a valid Python codepoint that raises ``UnicodeEncodeError`` at the wire."""
     if isinstance(obj, str):
         return obj.encode("utf-8", errors="replace").decode("utf-8")
     if isinstance(obj, dict):
@@ -97,10 +105,6 @@ def strip_lone_surrogates(obj: Any) -> Any:
 
 
 def _node_kind(name: str, raw: object) -> NodeKind | None:
-    """The declared ``type:``, admitted only if :class:`NodeKind` names it. RAISES on anything
-    else — a typed setup error, not a warning, because the alternative is what stood before: an
-    unrecognised type fell through to ``tool`` and the run proceeded describing the node wrongly on
-    every surface. Absent stays ``None``; that is a producer saying nothing, not a bad answer."""
     if raw is None or raw == "":
         return None
     if isinstance(raw, str):
@@ -108,8 +112,6 @@ def _node_kind(name: str, raw: object) -> NodeKind | None:
             return NodeKind(raw)
         except ValueError:
             pass
-    # One raise for both misses — an unknown spelling and a non-string (a YAML `type: 3`) are the
-    # same answer to the operator, and splitting them would state the permitted set twice.
     raise PayloadInvalidError(
         f"node {name!r} declares type {raw!r}, which is not a node kind. One of: "
         f"{', '.join(sorted(k.value for k in NodeKind))}.",
@@ -119,18 +121,9 @@ def _node_kind(name: str, raw: object) -> NodeKind | None:
 
 
 def _derive_node_kind(node: PipelineNode) -> ViewKind:
-    """The DECLARED kind (:class:`NodeKind`) mapped to the coarser vocabulary the CLIENT styles
-    (``PipelineViewNode.kind``). Cache role wins — a hit short-circuits the pipeline.
-
-    TOTAL over ``NodeKind`` rather than matched by prefix. ``startswith("llm")`` could not tell a
-    declared type from a view kind spelled into a manifest, and every unlisted string fell through
-    to ``tool`` — so a kind the client styles for nothing and a kind nobody declared were one
-    answer. Now the first is this match's job and the second is refused at parse."""
     if node.role is NodeRole.CACHE:
         return "cache"
     kind = node.kind
-    # An undeclared node is plumbing until its producer says otherwise — the one place the old
-    # catch-all survives, now naming the single input it actually covers.
     if kind is None:
         return "tool"
     if kind in THINKING_KINDS:
@@ -153,16 +146,6 @@ def derive_pipeline_view(
     pipelines: Mapping[str, Sequence[str]],
     descriptions: Mapping[str, str],
 ) -> PipelineView:
-    """The graph the engine actually runs, read off the two blocks that declare it, each node
-    carrying the ``description`` its declaration gives.
-
-    ``default`` is the chain a sample runs, and an optimizer manifest's repeats once per round.
-    A pipeline sharing no step with it is a PHASE its optimizer opens on its own occasion (CAPO's
-    initial population), drawn ahead of the chain and outside the repeat. Every other pipeline
-    is an ALTERNATIVE a controller picks at the round boundary: the nodes it introduces are
-    placed at its depth, and the depths order by containment, since a deeper alternative re-runs
-    the shallower one's steps. A target pipeline with no alternatives is one straight tier.
-    """
     declared = list(nodes)
     chain = [n for n in (pipelines.get("default") or declared) if n in nodes]
     in_chain = set(chain)
@@ -171,16 +154,12 @@ def derive_pipeline_view(
         for name, seq in pipelines.items()
         if name != "default"
     )
-    # Sharing no step with the chain makes a pipeline a separate PHASE — its own occasion,
-    # ahead of the chain and outside anything that repeats. Sharing steps makes it an
-    # ALTERNATIVE, which re-runs the chain rather than standing beside it. A node named by
-    # NO pipeline is not in the flow at all and is drawn nowhere.
+    # Sharing no step with the chain makes a pipeline a PHASE, drawn ahead of it; sharing steps, an ALTERNATIVE.
     spine = [*(s for _n, seq in others if not (set(seq) & in_chain) for s in seq), *chain]
     rank_of = {name: i for i, name in enumerate(spine)}
     placed: dict[str, tuple[int, int]] = {n: (0, i) for i, n in enumerate(spine)}
 
-    # Shortest first: an alternative that re-runs another's steps is the deeper of the two,
-    # so length IS the containment order for a chain of them.
+    # Shortest first: an alternative re-running another's steps is the deeper, so length is containment.
     ordered = sorted(
         ((name, seq) for name, seq in others if set(seq) & in_chain),
         key=lambda kv: (len(kv[1]), kv[0]),
@@ -193,7 +172,6 @@ def derive_pipeline_view(
             continue
         depth += 1
         for step in fresh:
-            # Ranked on the tier-0 step it acts on: the first spine node that follows it.
             following = seq[seq.index(step) + 1 :]
             placed[step] = (
                 depth,
@@ -223,8 +201,6 @@ def derive_pipeline_view(
     sequence = ["input", *spine, "output"]
     for i in range(len(sequence) - 1):
         _edge(sequence[i], sequence[i + 1], "forward")
-    # The bench walks an optimizer's chain once per round, and an alternative re-runs a chain — so
-    # a loopless view is a target pipeline, which a renderer may lay out as a straight rail.
     repeats = bool(introduced) or any(n.kind in MEMBER_KINDS for n in nodes.values())
     if repeats and chain:
         _edge(chain[-1], chain[0], "loop")
@@ -240,8 +216,7 @@ def derive_pipeline_view(
 
 
 def parse_resolved_schema(resolved: dict[str, Any]) -> NodeOutputSchema:
-    """``fields`` CONSTRAINS ``json_schema`` — it must name exactly its properties, and its
-    order is the generation order. An empty ``description`` is a searchpoint, not an absence."""
+    """``fields`` order is the generation order; an empty ``description`` is a searchpoint, not an absence."""
     json_schema = resolved.get("json_schema", {})
     props = json_schema.get("properties", {})
     fields = resolved.get("fields") or list(props)
@@ -312,8 +287,7 @@ _PY_TO_JSON_TYPE: dict[type, str] = {
 
 
 def _infer_param_types(opt: dict[str, Any], node_config: dict[str, Any]) -> dict[str, str]:
-    """Resolves every key the node carries, not only the tunable ``param_keys`` — the steer panel
-    bundles the config-only ones too, so their widget kind must resolve."""
+    """Covers config-only keys too: the steer panel renders them, so their widget kind must resolve."""
     declared: dict[str, str] = dict(opt.get("param_types") or {})
     param_keys = list(opt.get("param_keys") or [])
     config_only = [k for k in node_config if k not in param_keys]
@@ -384,12 +358,9 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
     nodes = config.get("nodes", {})
     resolved_metadata = _extract_resolved_metadata(config)
 
-    # A manifest naming no `default` runs its nodes in declaration order.
     pipelines = {"default": list(nodes), **(config.get("pipelines") or {})}
 
-    # EVERY declared node, because the alternative pipelines name nodes beside the chain and
-    # both the view and the config surface reach them. The chain stays `pipelines["default"]`
-    # alone, which is what keeps `active_steps` — and so `sp_hash` — a fact about the round.
+    # The chain stays `pipelines["default"]` alone, which keeps `active_steps` and `sp_hash` facts about the round.
     parsed: dict[str, PipelineNode] = {}
     for name in nodes:
         node = nodes.get(name, {})
@@ -399,12 +370,7 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
         nc = node.get("config", {})
         pk = set(opt.get("param_keys", []))
         kind = _node_kind(name, node.get("type"))
-        # A GATEWAY runs another PIPELINE, so the tunables it appears to have are that pipeline's
-        # and it owns none. Refused here rather than filtered downstream: `node_config_schema`
-        # derives a node's params from `param_keys | param_keys_held | current_config`, so a key
-        # left standing in EITHER block becomes a row on every surface — which is how a dead
-        # `reasoning_effort` came to be drawn, padlocked, on the one node in the optimizer graph
-        # that does not reason. Both blocks, or the rule holds on the half that bit once.
+        # Refused, not filtered downstream: a key left in EITHER block becomes a row on every surface.
         if kind is NodeKind.GATEWAY and (declared := sorted(set(nc) | pk)):
             raise PayloadInvalidError(
                 f"node {name!r} is a gateway ({kind.value}): it runs another pipeline, so its "
@@ -427,7 +393,6 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
             "spend_bound": node.get("spend_bound"),
         }
 
-        # Observation mappings
         obs_name = opt.get("observation_name")
         if obs_name:
             step_kwargs["observation_name"] = obs_name
@@ -435,31 +400,21 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
         if mappings:
             step_kwargs["observation_mappings"] = mappings
 
-        # Merge resolved registry metadata
         rm = resolved_metadata.get(name, {})
         if "output_schema" in rm:
             step_kwargs["output_schema"] = rm["output_schema"]
         if "prompt_info" in rm:
             step_kwargs["prompt_info"] = rm["prompt_info"]
 
-        # Inline prompt_info (for static pipeline.yaml without resolved_prompts)
         if "prompt_info" not in step_kwargs and "prompt_info" in node:
             step_kwargs["prompt_info"] = NodePromptInfo(**node["prompt_info"])
 
-        # Inline output_schema — the schema the WIRE already carries. A node that declares
-        # its structured output on `config.output_schema` (rather than via a
-        # `schema_family` registry entry) gets the same read-model, from the same parser,
-        # off the same declaration the connector forwards to the backend. One schema, not
-        # a display copy beside a wire copy — which is why it is read from `config` and
-        # why `SCHEMA_OWNED_FIELDS` locks the optimizer out of it.
+        # Read from `config`, the declaration the connector forwards: never a display copy beside the wire copy.
         if "output_schema" not in step_kwargs and isinstance(nc.get("output_schema"), dict):
             step_kwargs["output_schema"] = parse_resolved_schema(
                 {"json_schema": nc["output_schema"]}
             )
-            # `answer_field` names which slot IS the answer. Checked at LOAD, before one
-            # call is paid for: an executor destructuring a field the schema never declares
-            # reads "" for every sample, and the whole run grades NO_RESULT with nothing
-            # but a floor score to say why.
+            # Checked at load: an undeclared field reads "" on every sample, and the run grades NO_RESULT.
             answer_field = nc.get("answer_field")
             props = nc["output_schema"].get("properties") or {}
             if answer_field is not None and answer_field not in props:
@@ -468,10 +423,7 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
                     f"output_schema (have: {sorted(props)})"
                 )
 
-        # Synthesize the `description` lever onto any node that ships an `output_schema` —
-        # schema-driven, never a per-dataset `param_keys` opt-in. The field NAME stays locked
-        # (`SCHEMA_OWNED_FIELDS`); only the free prose becomes tunable, one `string` param per
-        # field, so a campaign's `param_keys` holds or opens each like any scalar.
+        # Schema-driven, never a `param_keys` opt-in; the field NAME stays locked (`SCHEMA_OWNED_FIELDS`).
         out_schema = step_kwargs.get("output_schema")
         described = (
             [description_key(p) for p in description_paths(out_schema.json_schema)]
@@ -485,16 +437,10 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
                 **dict.fromkeys(described, "string"),
             }
 
-        # Synthesize the schema TOGGLE onto every node that tunes an LLM — the sibling of the
-        # lever above, and neither is a per-dataset opt-in: whether the request carries a schema
-        # is PromptPotter's own decision, so a connector re-declaring it would be a second
-        # declaration of one axis (`docs/developer/node-standard.md`). One bound rides the value
-        # space below; the model's own refusal is the other and belongs to `_refused`.
+        # Synthesized, never connector-declared: whether a request carries a schema is ours to decide.
         if step_kwargs["tunes_llm"]:
             step_kwargs["param_keys"] = step_kwargs["param_keys"] | {SCHEMA_TOGGLE_PARAM}
-            # Typed even where the node declares no schema — that is the row an operator creates
-            # one from, and inference has nothing to read. Types only: they stay out of
-            # `param_keys`, so no layer's `narrow` can intersect the row away.
+            # Types only: outside `param_keys`, so no layer's `narrow` can intersect the row away.
             step_kwargs["param_types"] = {
                 **step_kwargs["param_types"],
                 SCHEMA_TOGGLE_PARAM: "string",
@@ -506,9 +452,7 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
                     [ANSWER_AS_TEXT, ANSWER_AS_JSON] if out_schema else [ANSWER_AS_TEXT]
                 ),
             }
-            # Operator-facing, and only that: the menu renderer prints a description for an axis
-            # with no value space, so L1 reads this axis through `catalogues::_schema_toggle_block`
-            # instead, which states the precondition rather than the two values.
+            # Operator-facing only: L1 reads this axis through `catalogues::_schema_toggle_block`.
             step_kwargs["param_descriptions"] = {
                 SCHEMA_TOGGLE_PARAM: (
                     f"How this node answers: {ANSWER_AS_JSON!r} fills the declared output "
@@ -519,10 +463,7 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
 
         parsed[name] = PipelineNode(**step_kwargs)
 
-    # DEBUG, not INFO: this is a pure parse on a READ path, so it fires per request and scales
-    # with polling rather than with anything happening — measured at two per `GET /origins`, one
-    # per dataset. At INFO it printed a line every few seconds into the console an operator
-    # supervises a live run in, which is where the run's own events have to be findable.
+    # DEBUG: a parse on a read path fires per poll, and INFO would flood a supervised run's console.
     logger.debug(
         "Parsed pipeline '%s' with %d nodes",
         config.get("name", "unknown"),
@@ -539,8 +480,7 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
         available_models=config.get("available_models", []),
     )
 
-    # Always derived, never read off the manifest: a declared ``view`` is a second roster
-    # beside `nodes`, with nothing able to catch the two drifting apart.
+    # Derived, never read off the manifest: a declared ``view`` is a second roster beside `nodes`.
     descriptions = {name: str(nodes[name].get("description") or "") for name in parsed}
     view = derive_pipeline_view(parsed, pipelines, descriptions) if parsed else None
 

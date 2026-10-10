@@ -1,6 +1,3 @@
-"""The connector contract's pure half, read without loading the registry. ``PipelineSchema`` owns
-pipeline SHAPE and a connector only TRANSMITS it, so no pipeline fact lives here."""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Literal, Protocol
@@ -40,9 +37,6 @@ def unit_count(n: int, unit: MeasuredUnit) -> str:
 
 
 class BackendUnreachableError(PotterError):
-    """The configured backend isn't responding (503). Carries backend type + URL on ``details`` so the ``PotterError`` seam
-    composes the envelope without re-parsing the message."""
-
     http_status = 503
     code = "backend_unreachable"
 
@@ -50,9 +44,7 @@ class BackendUnreachableError(PotterError):
         self.backend_type = backend_type
         self.backend_url = backend_url
         self.detail = detail
-        # A connector that DIAGNOSED the fault leads with what to do about it; the URL and "start
-        # the backend" belong to a wire backend that said nothing, and name a port nothing serves
-        # for an in-process one.
+        # A connector that DIAGNOSED the fault leads with it; the URL names a port nothing serves for an in-process one.
         super().__init__(
             f"Backend '{backend_type}' is not ready: {detail}"
             if detail
@@ -63,8 +55,6 @@ class BackendUnreachableError(PotterError):
 
 
 class WireAdapter(Protocol):
-    """Pure ``(query, pipeline_params) → request_body`` for ``BackendClient.run_query``."""
-
     def __call__(
         self,
         query: str,
@@ -73,8 +63,7 @@ class WireAdapter(Protocol):
 
 
 class CellEnvelopeSeconds(Protocol):
-    """Pure ``(sample, pipeline_params) → seconds``, the pair a cell is run from. The NUMBER only;
-    the bound it puts in force is ``application/scoring/cell_envelope.py::CellEnvelope``."""
+    """The NUMBER only; the bound it puts in force is ``scoring/cell_envelope.py::CellEnvelope``."""
 
     def __call__(
         self,
@@ -84,8 +73,7 @@ class CellEnvelopeSeconds(Protocol):
 
 
 class SessionProtocol(Protocol):
-    """Session lifecycle for stateful backends, and how this backend's error replies READ — so
-    ``BackendClient`` parses no backend's envelope. A backend without sessions passes a no-op."""
+    """Also how this backend's error replies READ, so ``BackendClient`` parses no backend's envelope."""
 
     async def set_terms(
         self,
@@ -94,11 +82,8 @@ class SessionProtocol(Protocol):
         terms: list[str],
     ) -> dict[str, Any]: ...
 
-    async def recover(self, http: httpx.AsyncClient, base_url: str, reply: httpx.Response) -> bool:
-        """Whether *reply*, a 400, reported a lost session that is now re-established — so the
-        request is worth one resend."""
-        ...
+    async def recover(
+        self, http: httpx.AsyncClient, base_url: str, reply: httpx.Response
+    ) -> bool: ...
 
-    def resend_refused(self, reply: httpx.Response) -> str | None:
-        """The backend's reason where *reply*, a 5xx, says a resend ends the same way."""
-        ...
+    def resend_refused(self, reply: httpx.Response) -> str | None: ...

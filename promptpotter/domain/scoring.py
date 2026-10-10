@@ -1,61 +1,73 @@
-"""Datasets declare the formula in ``campaign.json::scoring`` — string shorthand is
-``per_sample``, or the twin ``{"per_sample", "per_cell"}``. Missing raises; no default."""
-
 from __future__ import annotations
 
 import ast
 from collections import Counter
-from collections.abc import Callable, Iterable, Mapping, Sequence
-from typing import Annotated, Any, Literal, NamedTuple, NotRequired, TypedDict, cast
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from dataclasses import dataclass, field, replace
+from functools import cached_property
+from typing import (
+    Annotated,
+    Any,
+    Literal,
+    NamedTuple,
+    Required,
+    TypedDict,
+    get_args,
+    get_type_hints,
+)
 
-from promptpotter.config.settings import ANSWER_SPACE_CAP, NO_RESULT
-from promptpotter.domain.phases import StopReason
-from promptpotter.shared.errors import ErrorCategory, is_charged_error, is_error_result
+from pydantic import GetJsonSchemaHandler, TypeAdapter
+from pydantic.json_schema import JsonSchemaValue
+from pydantic_core import core_schema
+
+from promptpotter.domain.paired_reading import MeasurandUnit
+from promptpotter.domain.spend import StepUsage
+from promptpotter.domain.wire_record import (
+    ALWAYS,
+    BY_HAND,
+    REST,
+    WireRecord,
+    always_as,
+    record_of,
+    typed_record,
+    whole,
+)
+from promptpotter.shared.errors import (
+    ERROR_IS_CHARGED,
+    ErrorCategory,
+    error_category,
+    is_error_result,
+)
 from promptpotter.shared.hashing import shapes_optimizer_prompt
+
+# What a cell's `predicted` reads when its pipeline ran and emitted nothing parseable.
+NO_RESULT: Annotated[str, shapes_optimizer_prompt] = "NO_RESULT"
+
+# Above this many distinct ground truths the answer space is open: no enumerable label identity.
+ANSWER_SPACE_CAP: Annotated[int, shapes_optimizer_prompt] = 10
 
 
 class TurnRecord(TypedDict, total=False):
-    """ONE turn of a multi-turn cell — a projection of ATIF's ``Step``
-    (``harbor/models/trajectories/step.py``), never a schema of ours, narrowed to drop the training
-    surface no prompt, ruler or formula reads.
-
-    **The three rules a connector author gets wrong — owned by** ``connectors/CLAUDE.md``
-    § A multi-turn cell."""
+    """ONE turn of a multi-turn cell, a narrowed projection of an ATIF trajectory ``Step``."""
 
     index: int
-    # Who spoke: ``system`` | ``user`` | ``agent``. ATIF's ``source``, renamed to the word this
-    # repo already uses for where a thing came from.
+    # ``system`` | ``user`` | ``agent`` — ATIF's ``source``.
     source: str
-    # The semantic step this turn served, from the backend's own declaration. ``None``/absent on a
-    # single-step cell, which is every backend but a multi-step Harbor task.
+    # Absent on a single-step cell.
     step: str
     message: str
-    # The turn's own thinking channel, kept apart from ``message`` because a grader reading "what
-    # the system did" and one reading "what it said" are different questions.
     reasoning: str
-    # Tool NAMES only. The arguments are the bulk of a trajectory and no rubric here consults
-    # them; what a panel needs is which tools were reached for, in what order.
+    # Tool NAMES only, in call order.
     tools: list[str]
-    # What the environment answered — the half a `reasoning_trace` scrape loses first, and the
-    # only evidence in the record that is not the model's own assertion.
     observation: str
 
 
-# Checked against `CELL_INTRINSIC_NAMES` in the tests: `cell_namespace`'s splat drops a colliding
-# key in silence.
+# Disjoint from `CELL_INTRINSIC_NAMES` (`formula/compiler.py`): the splat drops a collision silently.
 TURN_SCALAR_KEYS: frozenset[str] = frozenset({"n_turns", "n_tool_calls"})
 
 
 def turn_scalars(turns: list[TurnRecord] | None) -> dict[str, float]:
-    """The conversation, reduced to floats a scoring formula can name.
-
-    A formula cannot reach :attr:`PipelineData.turns` and must not learn to — the compiler allows
-    no subscript, no attribute access and no ``len``, and the list is in
-    :data:`UNREAD_PIPELINE_KEYS`. So scoring reads a conversation two ways only: this projection,
-    or a judge that grades the turns at measure time and banks a term.
-
-    Few keys on purpose, since each rides every archived row forever. Per-step keys are
-    ``{step}_turns``, identifier-safe because a formula can name nothing else."""
+    """Per-step keys are ``{step}_turns``, kept only where a formula can name them."""
     if not turns:
         return {}
     out: dict[str, float] = {
@@ -72,256 +84,509 @@ def turn_scalars(turns: list[TurnRecord] | None) -> dict[str, float]:
     return out
 
 
-class LedgerPipelineData(TypedDict, total=False):
-    """The pipeline half of a ledger record. Membership IS the projection: a field declared here
-    reaches ``ledger_sample_view``'s output, one declared on :class:`PipelineData` does not."""
+@dataclass(frozen=True, slots=True)
+class NodeWarning:
+    """``kind`` is the BACKEND's stamp: an absent or unrecognized one is SKIPPED, never guessed."""
 
-    total_time: float
-    # The DEEPEST node that ran — never a failure signal. It doubles as the archive's reuse
-    # depth ("this outcome depends on config only up to here"), which is what the L4 connector
-    # stamps outright. Read it as "where did it get to", never as "where did it die".
-    terminal_node: str
-    # Per-LLM-node tokens, and the ONLY place a row's token counts live. The key set is
-    # ``StepTokenUsage`` (domain/spend.py, beside the account that reads one), whose ``_WIRE_SEEDED``
-    # is asserted total over it — so this comment names the type and never re-lists its members,
-    # which is what let the list here fall two fields behind. ``estimated=True`` ⇒ the counts came
-    # from the chars/4 fallback rather than provider usage.
-    #
-    # **Read it through ``TokenAccount.from_step_tokens``, never by hand.** Four surfaces read a
-    # top-level ``input_tokens`` twin here instead; it was declared, read by all four and written
-    # by nothing, so each of them rendered blank for the life of the field.
-    step_timings: dict[str, Any]
-    step_tokens: dict[str, dict[str, Any]]
-    diagnostics: dict[str, Any]
-    # Seconds this cell was BLOCKED rather than working — machine suspend plus time queued behind
-    # the shared rate limiter — handed back to its wall-clock envelope by the seam that holds one
-    # (``application/scoring/cell_envelope.py``). ABSENT where the backend declares no envelope: no
-    # give-back is installed there, so nothing watched, and 0.0 would be a reading nobody took.
-    # It rides the LEDGER half because the campaign's wall clock is summed off the chronology.
-    unworked_s: float
+    step: str = field(default="", metadata=ALWAYS)
+    code: str = field(default="", metadata=ALWAYS)
+    message: str = field(default="", metadata=ALWAYS)
+    kind: str = field(default="", metadata=ALWAYS)
+    details: tuple[Any, ...] | None = None
+    stats: Mapping[str, Any] | None = None
+
+    @classmethod
+    def from_wire(cls, warning: Mapping[str, object]) -> NodeWarning:
+        return _NODE_WARNING.read(warning)
+
+    def wire(self) -> dict[str, object]:
+        return _NODE_WARNING.write(self)
+
+
+_NODE_WARNING = WireRecord.of(
+    NodeWarning, "NodeWarningRecord", "A :class:`NodeWarning` on the wire."
+)
+
+
+@dataclass(frozen=True, slots=True)
+class Diagnostics:
+    step_statuses: Mapping[str, str] = field(default_factory=dict)
+    warnings: tuple[NodeWarning, ...] = ()
+
+    @classmethod
+    def from_wire(cls, diagnostics: Mapping[str, object]) -> Diagnostics:
+        return _DIAGNOSTICS.read(diagnostics)
+
+    def wire(self) -> dict[str, object]:
+        return _DIAGNOSTICS.write(self)
+
+
+_DIAGNOSTICS = WireRecord.of(
+    Diagnostics,
+    "DiagnosticsRecord",
+    "A :class:`Diagnostics` on the wire; a key is absent where it would be empty.",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class JudgeReading:
+    """Beside the term's score, never in place of it; a failed grading has a reason and no label."""
+
+    label: str | None = None
+    why: str | None = None
+
+    @classmethod
+    def from_wire(cls, reading: Mapping[str, object]) -> JudgeReading:
+        return _JUDGE_READING.read(reading)
+
+    def wire(self) -> dict[str, object]:
+        return _JUDGE_READING.write(self)
+
+
+_JUDGE_READING = WireRecord.of(
+    JudgeReading,
+    "JudgeReadingRecord",
+    "A :class:`JudgeReading` on the wire; a key is absent where the judge said nothing.",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class PipelineData:
+    """``None`` is a key the record did not carry; ``0.0`` is a reading."""
+
+    total_time: float | None = None
+    # The DEEPEST node that ran — never a failure signal — and the archive's reuse depth.
+    terminal_node: str | None = None
+    step_timings: Mapping[str, float] = field(default_factory=dict)
+    # The ONLY place a row's token counts live (`TokenAccount.from_step_tokens`): declare no twin.
+    step_tokens: Mapping[str, StepUsage] = field(default_factory=dict)
+    diagnostics: Diagnostics = field(default_factory=Diagnostics)
+    # Seconds BLOCKED, not working. ABSENT, never 0.0, where the backend declares no envelope.
+    unworked_s: float | None = None
     # L4: one outer sample IS a whole inner campaign, so its "answer" is a lift.
-    mean_round_delta: float
-    error: str | None
+    mean_round_delta: float | None = None
+    # The BACKEND reporting a fault on a row PromptPotter classified clean.
+    error: str | None = None
+    result_ranking: tuple[Any, ...] | None = None
+    reasoning_trace: str | None = None
+    # ``None`` means "this backend has no turn concept", never `[]`.
+    turns: tuple[TurnRecord, ...] | None = None
+    outcome_note: str | None = None
+    # Sub-node structure beside ``step_timings``, summed by nobody. ``None``, never ``{}``.
+    step_phases: Mapping[str, float] | None = None
+    # By the TERM each judge graded, in declaration order.
+    judge_readings: Mapping[str, JudgeReading] = field(default_factory=dict)
+    # Chars of the prompt TEMPLATE, before a sample is interpolated: one number per candidate.
+    target_prompt_chars: int | None = None
+    # The bare question, where the dataset declared one distinct from `query` — what a judge reads.
+    question: str | None = None
+    # This arm's OWN half of a paired difference: the shared origin level cancels (`l4/proxies.py`).
+    mean_parent_level_se: float | None = None
+    # `InnerCellFacts`; `inner_sent_usd` and `inner_tokens` are reporting figures and bill nothing.
+    inner_origin_level: float | None = None
+    inner_final_lift: float | None = None
+    inner_peak_lift: float | None = None
+    inner_rounds_ran: int | None = None
+    inner_round_budget: int | None = None
+    inner_stop_reason: str | None = None
+    inner_sent_usd: float | None = None
+    inner_tokens: int | None = None
+    inner_campaign_id: str | None = None
+    # What only the DATASET names: observation keys, turn scalars, banked evaluator and judge terms.
+    observations: Mapping[str, Any] = field(default_factory=dict, metadata=REST)
+
+    @classmethod
+    def from_wire(cls, data: Mapping[str, object]) -> PipelineData:
+        return _PIPELINE.read(data)
+
+    def wire(self) -> dict[str, object]:
+        """A key is written only where it says something: an absent key and a default are one state."""
+        return _PIPELINE.write(self)
+
+    def terms(self) -> dict[str, object]:
+        return _PIPELINE.said(self)
 
 
-class PipelineData(LedgerPipelineData, total=False):
-    """What the backend returned BESIDE the ledger half. It is on disk twice already, from the
-    same objects and never from a ledger record: the ``MeasurementArchive`` row addressed by
-    ``(node_configs, sample_key)``, and ``rounds/round_NNNN.json::results[]`` +
-    ``::all_candidate_results{}``. The reasoning trace and the resolved params are the bulk of it,
-    and the panels that cite them (``dispatch/injections/panels.py``) read the in-memory
-    ``InjectionBundle.trajectory_results``, never a ledger record."""
-
-    # The pipeline's result ranking — the terminal ranker's output, derived at
-    # measurement time (``terminal_ranking``). The scorer reads this.
-    result_ranking: list[dict[str, Any]]
-    # Raw per-node ranker outputs, copied from the wire response for per-node
-    # diagnostics (retriever recall vs ranker precision). One of these is the source
-    # ``result_ranking`` was derived from; both may be absent for non-ranking pipelines.
-    final_ranking: list[dict[str, Any]]
-    pipeline_params: dict[str, Any]
-    # Everything the target produced BESIDES its answer — hidden reasoning, a structured
-    # response's other slots, an agent's decisions — whatever the shape (pipeline, loop, LLM,
-    # agent, skill). The critique tier reads it to diagnose WHERE a deduction broke; a connector
-    # that forwards less leaves the critique quoting the input instead.
-    reasoning_trace: str
-    # The cell's conversation, beside `reasoning_trace` rather than instead of it: the trace is one
-    # prose blob every backend composes, this is the record a judge segments by step. Absent means
-    # "this backend has no turn concept"; `[]` would mean "it had none", and only one is ever true.
-    turns: list[TurnRecord]
-    # A verifier-graded cell's one-line account of its grade in the environment's own words — the
-    # failed check. Absent where it gave none.
-    outcome_note: str
-    # Where a cell's WALL CLOCK went, inside the one node that produced it. ``step_timings`` keys
-    # by node and is what ``recorded_cost_s`` sums, so it cannot also carry sub-node structure
-    # without double-counting the cell against itself; this is that structure, and it is summed by
-    # nobody. An agent-backed cell is one node and four phases, and only one of them is the
-    # prompt's doing — provisioning a container is the harness's, and charging a prompt for it
-    # grades the machine. Absent means the backend reports no phases; ``{}`` would mean it
-    # reported none, and only one of those is ever true.
-    step_phases: dict[str, float]
-    # Characters of the candidate's prompt template, stamped at `measure_sample` BEFORE a sample
-    # is interpolated: one number per candidate, which the archive key covers, so a replay is right.
-    target_prompt_chars: int
-    # The SE beside ``mean_round_delta`` is this arm's OWN half of a paired cell difference — the
-    # shared origin level is excluded because it cancels in that difference (`domain/l4/proxies.py`).
-    mean_parent_level_se: float
-    # The rest of that inner campaign's own trajectory and cost, carried beside the lift so a
-    # reader can ask what the run DID rather than only what it scored. `inner_spend_usd` /
-    # `inner_tokens` are reporting figures and bill nothing — see `InnerCellFacts`.
-    inner_origin_level: float
-    inner_final_lift: float
-    inner_peak_lift: float
-    inner_rounds_ran: int
-    inner_round_budget: int
-    inner_stop_reason: StopReason
-    inner_spend_usd: float | None
-    inner_tokens: int | None
-    inner_campaign_id: str
-
-
-class QueryMeasurement(TypedDict):
-    """``fitness`` and ``objective`` are the active-scorer projections written only by
-    ``rescore_results`` — a fresh trace has neither. ``sample_id`` is the cell's POSITION in the
-    dataset that measured it; ``sample_key`` is what the cell IS (``Sample.key``), and the only one
-    of the two that replay matches on."""
-
-    sample_id: int
-    sample_key: str
-    query: str
-    ground_truth: str
-    predicted: str
-    fitness: NotRequired[float]
-    # What this cell was WORTH under the campaign's composite formula — the value θ is fit on.
-    # Equals ``fitness`` wherever no ``per_cell`` formula was declared. See :class:`CellScorer`.
-    objective: NotRequired[float]
-    # True when this measurement was reused from a prior identical searchpoint
-    # instead of a fresh backend call. Stamped ``False`` at measurement time,
-    # ``True`` by ``_materialize_cached``. Always present so readers (the live
-    # tape + the per-candidate audit table) can show fresh-vs-cached uniformly.
-    cached: NotRequired[bool]
-    error: str | None
-    # Typed error channel: the category owns "this sample errored"; ``error`` is a
-    # plain human message (no ``[TAG]`` prefix). ``None``/absent ⇒ clean measurement.
-    error_category: NotRequired[ErrorCategory | None]
-    # The measurement LANDED and the active formula cannot grade it — a third state beside scored
-    # and errored, carrying the missing term's own message. Presence IS the state; ``fitness`` and
-    # ``objective`` are then absent. Never an error: the backend answered and the row is worth
-    # keeping, so it must not reach the walk's abort classifier (`query_loop.py::Walk._abort_reason`).
-    unscored: NotRequired[str]
-    pipeline_data: PipelineData | None
-    # ---- Stamped after measurement, by the scorer and the walk -------------------
-    # Where the ground truth landed in the terminal ranking, and how many candidates it
-    # ranked against — computed once at measure time (``rank_ground_truth``); every reader
-    # takes the pair and none re-derives it.
-    ground_truth_rank: NotRequired[int | None]
-    n_candidates: NotRequired[int]
-    # The candidate's composite over samples-so-far, attached for the ledger path only
-    # (``query_loop._with_running``) so a file-tree or chat reader watches it converge.
-    _running: NotRequired[dict[str, Any]]
-    # The archive run the row lands in, attached beside ``_running`` on the ledger copy only — the
-    # archived row is filed under its run already, so it never carries its own address.
-    run_id: NotRequired[str]
-    # The stale-data ladder's per-sample verdicts. Each renders one annotation under the
-    # HIT/MISS line (``views/render/sample.py``) and nothing else reads them, so they are the
-    # ladder's only report: a dropped flag makes a re-measurement look like a plain score.
-    retry_of_deprecated_cache: NotRequired[bool]
-    retry_of_degraded: NotRequired[bool]
-    rerun_comparison: NotRequired[dict[str, Any]]
-    switched_out: NotRequired[bool]
-    config_fundamental_skip: NotRequired[bool]
-    persistently_degraded: NotRequired[bool]
-    degraded_observed: NotRequired[bool]
-    degraded_obs_count: NotRequired[int]
-    degraded_obs_threshold: NotRequired[int]
-
-
-# The ledger's per-sample view: the UNION of what its two subscribers render — the terminal
-# tape (`views/render/sample.py::fmt_query_result` + `classify_result`) and the dashboard
-# (`live_dashboard/projection.py::_absorb_sample_scored` → `RoundBuffer.append_sample` → the SSE
-# chat's `sampleScoredCandidate`). A superset of both, so the ledger holds exactly what the
-# operator was shown and there is one definition to keep in sync instead of two.
-_LEDGER_PIPELINE_KEYS: frozenset[str] = frozenset(
-    LedgerPipelineData.__required_keys__ | LedgerPipelineData.__optional_keys__
+_PIPELINE = WireRecord.of(
+    PipelineData,
+    "PipelineRecord",
+    "The flat ``pipeline_data`` record, as :meth:`PipelineData.wire` writes it.\n\n"
+    "Each declared key is present only where its field says something; every other key is one of\n"
+    "the dataset's own observations.",
 )
 
-_ROW_KEYS: frozenset[str] = frozenset(
-    QueryMeasurement.__required_keys__ | QueryMeasurement.__optional_keys__
-)
-_PIPELINE_KEYS: frozenset[str] = frozenset(
-    PipelineData.__required_keys__ | PipelineData.__optional_keys__
+PIPELINE_KEYS: frozenset[str] = _PIPELINE.keys
+
+# The UNION of what the terminal tape and the dashboard render: the ledger holds what was shown.
+LEDGER_PIPELINE_KEYS: frozenset[str] = frozenset(
+    {
+        "total_time",
+        "terminal_node",
+        "step_timings",
+        "step_tokens",
+        "diagnostics",
+        "unworked_s",
+        "mean_round_delta",
+        "error",
+    }
 )
 
+assert LEDGER_PIPELINE_KEYS <= PIPELINE_KEYS, "a ledger key must be one PipelineData declares"
 
-GRADE_KEYS: frozenset[str] = frozenset({"fitness", "objective", "unscored"})
-"""What ``rescore_results`` stamps: one formula's reading of a row, never a fact about it. An
-in-memory row carries them for the round's own use; ``MeasurementArchive`` persists none."""
+
+class RerunComparison(TypedDict):
+    """What re-measuring a degraded cached cell changed, in the words the tape prints."""
+
+    hit_change: str
+    rank_change: str | None
+    improved: bool
+
+
+@dataclass(frozen=True, slots=True)
+class MeasuredCell:
+    """``sample_id`` is the cell's POSITION; ``sample_key`` is what it IS: replay matches on it."""
+
+    sample_id: int = field(metadata=ALWAYS)
+    sample_key: str = field(default="", metadata=ALWAYS)
+    query: str = field(default="", metadata=ALWAYS)
+    ground_truth: str = field(default="", metadata=ALWAYS)
+    predicted: str = field(default="", metadata=ALWAYS)
+    # A plain human message (no ``[TAG]`` prefix); the CATEGORY owns "this cell errored".
+    error: str | None = field(default=None, metadata=ALWAYS)
+    error_category: ErrorCategory | None = field(default=None, metadata=BY_HAND)
+    pipeline: PipelineData = field(
+        default_factory=PipelineData, metadata=always_as("pipeline_data")
+    )
+    cached: bool = field(default=False, metadata=ALWAYS)
+    # A ``None`` rank beside a count is a value: the truth was not in the ranking.
+    ground_truth_rank: int | None = field(default=None, metadata=BY_HAND)
+    n_candidates: int | None = None
+    # The archive's address, ``{cell file}.{answer id}``; these are ``None`` where nothing was filed.
+    answer: str | None = None
+    role: str | None = None
+    source: str | None = None
+    provenance: str | None = None
+    created_at: str | None = None
+    retry_of_deprecated_cache: bool = False
+    retry_of_degraded: bool = False
+    rerun_comparison: RerunComparison | None = None
+    switched_out: bool = False
+    config_fundamental_skip: bool = False
+    persistently_degraded: bool = False
+    degraded_observed: bool = False
+    degraded_obs_count: int | None = None
+    degraded_obs_threshold: int | None = None
+
+    @classmethod
+    def from_wire(cls, row: Mapping[str, object]) -> MeasuredCell:
+        """Tolerant of what a producer omits, deaf to undeclared keys, strict on the slot."""
+        slot = row.get("sample_id")
+        if not isinstance(slot, int | str) or isinstance(slot, bool):
+            raise KeyError(f"a measured cell names its slot; this record carries {slot!r}")
+        rank = row.get("ground_truth_rank")
+        return _CELL.read(
+            row,
+            sample_id=int(slot),
+            error_category=(
+                (error_category(row) or ErrorCategory.UNKNOWN) if is_error_result(row) else None
+            ),
+            ground_truth_rank=(
+                None if rank is None else whole(rank, "MeasuredCell.ground_truth_rank")
+            ),
+        )
+
+    def wire(self) -> dict[str, object]:
+        out = _CELL.write(self)
+        if self.error_category is not None:
+            out["error_category"] = self.error_category.value
+        if self.n_candidates is not None or self.ground_truth_rank is not None:
+            out["ground_truth_rank"] = self.ground_truth_rank
+        return out
+
+    def ledger_wire(self) -> dict[str, object]:
+        out = self.wire()
+        if isinstance(pipeline_data := out["pipeline_data"], dict):
+            out["pipeline_data"] = {
+                k: v for k, v in pipeline_data.items() if k in LEDGER_PIPELINE_KEYS
+            }
+        return out
+
+    @property
+    def errored(self) -> bool:
+        return self.error_category is not None
+
+    @property
+    def charged(self) -> bool:
+        """Whether it errored for a reason the configuration under test answers for."""
+        return self.error_category is not None and ERROR_IS_CHARGED[self.error_category]
+
+    @property
+    def verifier_graded(self) -> bool:
+        return is_verifier_graded(self.ground_truth)
+
+    def replayed(self) -> MeasuredCell:
+        if self.pipeline == PipelineData():
+            return replace(self, cached=True)
+        return replace(self, cached=True, pipeline=replace(self.pipeline, total_time=0.0))
+
+    @property
+    def elapsed_s(self) -> float | None:
+        """A replay's ``0.0`` is a true reading; what a cell COST is :attr:`cost_s`."""
+        return self.pipeline.total_time
+
+    @property
+    def cost_s(self) -> float | None:
+        """The first run's work, so a replay still prices the cell; an EMPTY map is unpriced."""
+        timings = self.pipeline.step_timings
+        return sum(timings.values()) if timings else None
+
+    @property
+    def shown_s(self) -> float | None:
+        """A replay occupied no clock, so a clock column shows what the cell took when MEASURED."""
+        return self.cost_s if self.cached else self.elapsed_s
+
+
+_CELL = WireRecord.of(
+    MeasuredCell,
+    "MeasuredCellRecord",
+    "A :class:`MeasuredCell` on the wire, as :meth:`MeasuredCell.wire` writes it.",
+)
 
 
 def measured_facts(row: Mapping[str, object]) -> dict[str, object]:
-    """*row* without its grades — the only shape the archive writes."""
     return {k: v for k, v in row.items() if k not in GRADE_KEYS}
 
 
-# -- what an archive row may lose ---------------------------------------------
-#
-# `application/maintenance/archive_maintenance.py` moves these into the cold store; they live HERE
-# because the question they answer — which of a row's keys does anything read — is about the two
-# types above, and a set of key names sitting anywhere else is a second contract nobody declared.
-#
-# Two sets rather than one, because the asserts below run in OPPOSITE directions and a flat set
-# could not carry either.
-#
-# A THIRD direction has no set, because it must have no members: a key DECLARED and READ but
-# written by nothing. Nothing can catch one — it is not unread, so no compaction moves it, and it
-# is declared, so no assert refuses it. It simply renders blank forever, and every reader reports
-# "this backend does not say" about a fact the row is carrying one level down. `input_tokens` /
-# `output_tokens` sat here exactly that way, read by four surfaces. A row's counts come from
-# `domain/spend.py::TokenAccount.from_step_tokens`; declare no twin beside `step_tokens`.
+# What `archive_maintenance.py` may move to the cold store; the two asserts run OPPOSITE ways.
 
+# On disk in quantity and written by no code path: naming them lets a compaction move them.
 ABANDONED_ROW_KEYS: frozenset[str] = frozenset({"hit", "scored"})
-"""On disk in quantity, declared by nothing, and written by no code path in this tree.
 
-They are not deprecated fields — they were never fields. Nothing derives them either: every reader
-meaning "did this cell land" calls :func:`is_hit` on ``fitness`` at the point of use. Naming them
-is what lets a compaction move them; the assert is what stops one silently becoming a real key
-again."""
-
+# No ranking may join: a row cannot tell a MOVED ranking from an empty one, so it grades a miss.
 UNREAD_PIPELINE_KEYS: frozenset[str] = frozenset(
     {"reasoning_trace", "total_time", "turns", "step_phases"}
 )
-"""``pipeline_data`` keys no estimator, cache, ruler or index reads.
 
-``reasoning_trace`` reaches only the three L1 transcript panels, and only for rows live in the
-current cycle; ``total_time`` is zeroed on replay anyway. ``turns`` joins them because a judge
-grades it at MEASURE time and banks its verdict on the row, so no re-grade ever
-reaches back for the conversation — and it is the largest thing such a cell carries.
-``step_phases`` joins them for the reason it exists: it is sub-node structure beside the per-node
-attribution the cost term actually reads, so nothing in the loop consults it and moving it costs
-the loop nothing. It is banked rather than derived because a phase split cannot be recovered from
-a total after the fact, and re-measuring an agent episode to get one costs what the episode cost.
-
-**A ranking may not be moved.** The `candidate_recall` / `source_recall` evaluators walk
-`final_ranking` / `candidate_ranking` for GT membership, and a row cannot tell a MOVED key from a
-ranker that legitimately returned nothing — so a compacted row grades as a real miss on every
-read, while the denominator (`terminal_node` / `step_timings`) survives compaction intact."""
-
-assert GRADE_KEYS <= _ROW_KEYS, "a grade key must be one QueryMeasurement declares"
-assert not (ABANDONED_ROW_KEYS & _ROW_KEYS), "an abandoned key that got declared is no longer one"
-assert UNREAD_PIPELINE_KEYS <= _PIPELINE_KEYS, "an unread key must be one PipelineData declares"
+assert not (ABANDONED_ROW_KEYS & _CELL.keys), "an abandoned key that got declared is no longer one"
+assert UNREAD_PIPELINE_KEYS <= PIPELINE_KEYS, "an unread key must be one PipelineData declares"
 
 
-def ledger_sample_view(result: QueryMeasurement) -> QueryMeasurement:
-    """NEW dicts, never a pop: the argument is the same object that becomes the archive row,
-    ``RoundResult.results``, ``all_candidate_results``, ``overlap_results`` and
-    ``InjectionBundle.trajectory_results``. Every top-level key rides along — only
-    ``pipeline_data`` is narrowed, to :class:`LedgerPipelineData`."""
-    out: dict[str, Any] = {k: v for k, v in result.items() if k != "pipeline_data"}
-    if "pipeline_data" in result:
-        pd = result["pipeline_data"]
-        out["pipeline_data"] = (
-            None if pd is None else {k: v for k, v in pd.items() if k in _LEDGER_PIPELINE_KEYS}
+# ``(sample_key, sample_id, answer, replayed)``: walks pair on the key; the id is THIS walk's slot.
+WalkedCell = tuple[str, int, str, bool]
+
+
+class ScoringFormulaError(Exception):
+    """A formula↔trace contract bug every cell fails: it halts loud, never swallowed to ``0.0``."""
+
+
+class ScoringTermMissingError(ScoringFormulaError):
+    """PER-CELL, unlike its parent: ``Scorer.grade`` reads the row UNSCORED and keeps the paid."""
+
+
+class Grade(NamedTuple):
+    """ERRORED is both ``0.0``, graded without the formula; UNSCORED is both ``None`` + a reason."""
+
+    fitness: float | None
+    objective: float | None
+    unscored: str | None
+
+    def wire(self) -> dict[str, object]:
+        if self.unscored is not None:
+            return {"unscored": self.unscored}
+        return {"fitness": self.fitness, "objective": self.objective}
+
+
+GRADE_KEYS: frozenset[str] = frozenset(Grade._fields)
+
+assert not (GRADE_KEYS & _CELL.keys), "a grade is a formula's reading, never a fact of the cell"
+
+
+#: ERR and UNSC are states of their own, not a bad MISS; a re-grade recovers UNSC.
+SampleStatus = Literal["HIT", "MISS", "ERR", "UNSC"]
+
+
+SHEET_ROW: type = typed_record(
+    "SheetRow",
+    "One row of a :class:`CellSheet` on the wire, as :meth:`GradedCell.wire` writes it.\n\n"
+    "The cell's facts beside its grade — ``unscored``, or ``fitness`` and ``objective``, never\n"
+    "both. ``status`` is the served round's mark and ``ground_truth_text`` its label as shown\n"
+    "(``application/scoring/cells.py::served_round``), on every row it serves; a round file\n"
+    "carries neither.",
+    {
+        **get_type_hints(record_of(MeasuredCell), include_extras=True),
+        **get_type_hints(Grade),
+        "status": Required[SampleStatus],
+        "ground_truth_text": Required[str],
+    },
+    module=__name__,
+    open=False,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class GradedCell:
+    facts: MeasuredCell
+    grade: Grade
+    scored: bool
+
+    @property
+    def key(self) -> str:
+        """What the cell IS (``Sample.key``) — what two individuals pair on."""
+        if not self.facts.sample_key:
+            raise KeyError(f"cell at slot {self.facts.sample_id} carries no sample_key")
+        return self.facts.sample_key
+
+    @property
+    def sample_id(self) -> int:
+        """The cell's POSITION in the dataset that measured it."""
+        return self.facts.sample_id
+
+    @property
+    def ruler_key(self) -> int:
+        """The key the δ ruler, θ and the round queue file a cell under."""
+        return self.facts.sample_id
+
+    @property
+    def hit(self) -> bool:
+        return is_hit(self.grade.fitness)
+
+    def filed(self, facts: MeasuredCell) -> GradedCell:
+        """Only a field no formula reads may differ from the facts this grade was read off."""
+        return GradedCell(facts, self.grade, self.scored)
+
+    def wire(self) -> dict[str, object]:
+        return {**self.facts.wire(), **self.grade.wire()}
+
+    def ledger_wire(self) -> dict[str, object]:
+        return {**self.facts.ledger_wire(), **self.grade.wire()}
+
+
+@dataclass(frozen=True)
+class CellSheet:
+    """A cell's STANDING row is its last scored row, else its last; statistics read the scored."""
+
+    scorer_id: str
+    cells: tuple[GradedCell, ...] = ()
+
+    def __len__(self) -> int:
+        return len(self.cells)
+
+    def __iter__(self) -> Iterator[GradedCell]:
+        return iter(self.cells)
+
+    def __bool__(self) -> bool:
+        return bool(self.cells)
+
+    def wire(self) -> list[dict[str, object]]:
+        return [cell.wire() for cell in self.cells]
+
+    def standing(self) -> CellSheet:
+        """Folded AFTER the grade, so the replicate rule can read it."""
+        return CellSheet(self.scorer_id, tuple(self.by_key().values()))
+
+    def _standing[K](self, key: Callable[[GradedCell], K]) -> dict[K, GradedCell]:
+        held: dict[K, GradedCell] = {}
+        for cell in self.cells:
+            k = key(cell)
+            if cell.scored or k not in held or not held[k].scored:
+                held[k] = cell
+        return held
+
+    def by_key(self) -> dict[str, GradedCell]:
+        return self._standing(lambda cell: cell.key)
+
+    @cached_property
+    def on_ruler(self) -> dict[int, GradedCell]:
+        """Each cell's standing row by :attr:`GradedCell.ruler_key`, in first-walked order."""
+        return self._standing(lambda cell: cell.ruler_key)
+
+    @cached_property
+    def scoreable(self) -> tuple[GradedCell, ...]:
+        """The EVIDENCE population: one standing row per cell that carries a verdict."""
+        return tuple(cell for cell in self.on_ruler.values() if cell.scored)
+
+    def column(self, column: GradeColumn) -> dict[int, float]:
+        return {cell.ruler_key: column.read(cell) for cell in self.scoreable}
+
+    def where(self, keep: Callable[[GradedCell], bool]) -> CellSheet:
+        return CellSheet(self.scorer_id, tuple(cell for cell in self.cells if keep(cell)))
+
+    def merged(self, later: CellSheet) -> CellSheet:
+        """*later* wins each cell both scored."""
+        if not later.cells:
+            return self
+        if not self.cells:
+            return later
+        if self.scorer_id != later.scorer_id:
+            raise ValueError(
+                f"cells graded under {later.scorer_id!r} cannot join a sheet graded under "
+                f"{self.scorer_id!r}"
+            )
+        return CellSheet(self.scorer_id, (*self.cells, *later.cells))
+
+    def addresses(self) -> list[WalkedCell]:
+        return [
+            (cell.key, cell.sample_id, answer, cell.facts.cached)
+            for cell in self.cells
+            if (answer := cell.facts.answer) is not None
+        ]
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls, _source: object, _handler: object
+    ) -> core_schema.CoreSchema:
+        # Held as itself, serialized as its rows: no reader can hand a model rows nobody graded.
+        return core_schema.is_instance_schema(
+            cls,
+            serialization=core_schema.plain_serializer_function_ser_schema(
+                lambda sheet: sheet.wire(),
+                return_schema=core_schema.list_schema(
+                    core_schema.dict_schema(core_schema.str_schema(), core_schema.any_schema())
+                ),
+            ),
         )
-    return cast("QueryMeasurement", out)
+
+    @classmethod
+    def __get_pydantic_json_schema__(
+        cls, _schema: object, handler: GetJsonSchemaHandler
+    ) -> JsonSchemaValue:
+        return handler(core_schema.list_schema(TypeAdapter(SHEET_ROW).core_schema))
 
 
-class CellScorer(NamedTuple):
-    """The two numbers one cell carries, minted together because they are read apart.
-
-    ``fitness`` is CORRECTNESS — what :func:`is_hit` thresholds for the tape, the difficulty
-    stratification and the failing-samples panel L1 repairs from. ``objective`` is WORTH, what the
-    campaign's composite makes of that cell, and the only one θ is fit on
-    (``intelligence/exploration.py::graded_response``).
-
-    Two numbers rather than one: a cost penalty folded into the first renders a correct-but-slow
-    answer MISS and sends L1 to repair reasoning that was right, while a second left at bare
-    accuracy keeps every cost and reliability term out of the election a round is won on."""
-
-    fitness: Callable[[dict[str, Any]], float]
-    objective: Callable[[dict[str, Any]], float]
+NO_CELLS = CellSheet("")
 
 
-# Which of a row's two :class:`CellScorer` numbers a per-cell fold reads.
+@dataclass(frozen=True)
+class Scorer:
+    """``fitness`` is CORRECTNESS; ``objective`` is WORTH, the one θ is fit on, ``None`` = same."""
+
+    id: str
+    per_cell: str | None
+    fitness: Callable[[MeasuredCell], float]
+    # Reads the cell WITH its fitness: every shipped composite names it.
+    objective: Callable[[MeasuredCell, float], float] | None
+
+    def grade(self, facts: MeasuredCell) -> GradedCell:
+        """Only ``ScoringTermMissingError`` resolves to UNSCORED; its parent halts loud."""
+        if facts.errored:
+            return GradedCell(
+                facts, Grade(0.0, 0.0, None), facts.charged and not facts.verifier_graded
+            )
+        try:
+            fitness = self.fitness(facts)
+            # In this order: the composite reads the correctness it is composed OF.
+            objective = fitness if self.objective is None else self.objective(facts, fitness)
+        except ScoringTermMissingError as exc:
+            return GradedCell(facts, Grade(None, None, str(exc)), False)
+        return GradedCell(facts, Grade(fitness, objective, None), True)
+
+    def sheet(self, facts: Iterable[MeasuredCell]) -> CellSheet:
+        return CellSheet(self.id, tuple(self.grade(cell) for cell in facts))
+
+    def read(self, rows: Iterable[Mapping[str, Any]]) -> CellSheet:
+        return self.sheet(MeasuredCell.from_wire(row) for row in rows)
+
+
 CellGrade = Literal["fitness", "objective"]
 
 
@@ -332,8 +597,6 @@ HIT_THRESHOLD: Annotated[float, shapes_optimizer_prompt] = 1.0
 
 @shapes_optimizer_prompt
 def extract_item_label(c: Any) -> str:
-    """Canonical label of a ranked item (dict ``{candidate: ...}``, list/tuple, or string) — what a
-    rank walk compares against ground truth and what a display line prints."""
     if isinstance(c, dict):
         return str(c.get("candidate", c))
     return c[0] if isinstance(c, (list, tuple)) else str(c)
@@ -341,81 +604,45 @@ def extract_item_label(c: Any) -> str:
 
 @shapes_optimizer_prompt
 def is_hit(fitness: float | None) -> bool:
-    """Per-sample display and stratification ONLY — never a rate, an interval or a comparison:
-    graded formulas never reach the ceiling, and on a binary one the mean is ``accuracy``."""
+    """Display and stratification ONLY, never a rate: graded formulas never reach the ceiling."""
     return fitness is not None and fitness >= HIT_THRESHOLD
 
 
+class GradeColumn(NamedTuple):
+    """One number a graded row answers with: whether it is two-valued, and the unit it is in."""
+
+    # DECLARED, never read off the values: a formula grading every cell 0 or 1 may grade the next 0.5.
+    binary: bool
+    unit: MeasurandUnit
+    read: Callable[[GradedCell], float]
+
+
 @shapes_optimizer_prompt
-def is_unscored(result: Mapping[str, object]) -> bool:
-    """Whether the active formula could not grade a measurement that LANDED — the sibling of
-    :func:`~promptpotter.shared.errors.is_error_result`, where the backend never answered.
-
-    **The one place that fact is asked**, on the ``unscored`` channel that ``rescore_results``
-    owns. Ask this, never ``"fitness" not in row``: an ungraded row lacks the key too."""
-    return bool(result.get("unscored"))
-
-
-@shapes_optimizer_prompt
-def is_graded(result: Mapping[str, object]) -> bool:
-    """Whether a row carries a verdict — every reading's ONE population, optimizer and bench alike.
-    A refusal or a truncation is a miss the formula graded, and an error the configuration caused
-    is a miss at ``rescore_results``' 0.0 wherever a label defines one; the rest carry none."""
-    if is_unscored(result):
-        return False
-    if not is_error_result(result):
-        return True
-    return is_charged_error(result) and not is_verifier_graded(
-        str(result.get("ground_truth") or "")
-    )
+def _stamped(cell: GradedCell, grade: CellGrade) -> float:
+    """Raises on an ungraded cell: a zero in its place is a miss nobody measured."""
+    value: float | None = getattr(cell.grade, grade)
+    if not cell.scored or value is None:
+        raise ValueError(
+            f"sample {cell.sample_id} carries no {grade}: an ungraded cell answers no column, "
+            "so ask `scored` before reading one"
+        )
+    return value
 
 
-def recorded_elapsed_s(result: QueryMeasurement) -> float | None:
-    """Wall-clock this row RECORDED, or ``None`` where it recorded none — the display read.
+ROW_GRADES: Annotated[dict[str, GradeColumn], shapes_optimizer_prompt] = {
+    "fitness": GradeColumn(False, MeasurandUnit.RATE, lambda cell: _stamped(cell, "fitness")),
+    "objective": GradeColumn(False, MeasurandUnit.SCORE, lambda cell: _stamped(cell, "objective")),
+    # The one column every scorer's rows carry two-valued, by construction of `is_hit`.
+    "hit": GradeColumn(
+        True, MeasurandUnit.RATE, lambda cell: float(is_hit(_stamped(cell, "fitness")))
+    ),
+}
 
-    A cached replay's ``0.0`` is a true reading (``_materialize_cached`` stamps it; nothing was
-    spent), while a row that never reached the pipeline has no time at all. Two display sites
-    each wrote ``pd.get("total_time", 0.0) or 0.0``, which made those two identical and painted
-    the second as an instant success. What a cell COST is the question ``recorded_cost_s``
-    answers, off ``step_timings``, which survives the cache stamp."""
-    pd = result.get("pipeline_data") or {}
-    total = pd.get("total_time")
-    return float(total) if isinstance(total, int | float) else None
-
-
-def shown_seconds(result: QueryMeasurement, *, cached: bool) -> float | None:
-    """The seconds a per-row CLOCK COLUMN shows — one rule, so no two readouts of a row disagree.
-
-    A replay occupied no clock, so its elapsed reading is a true ``0.0`` and the number the
-    operator needs is what the cell took when it was MEASURED, which ``step_timings`` carries
-    through the cache stamp. ``webapp/lib/derivations/sample-clock.ts`` holds the browser's peer
-    spelling — one per runtime, never one per renderer."""
-    return recorded_cost_s(result) if cached else recorded_elapsed_s(result)
-
-
-def recorded_cost_s(result: QueryMeasurement) -> float | None:
-    """What producing this row COST in seconds, or ``None`` where it recorded no timing.
-
-    The cache-surviving half of the pair above: ``step_timings`` holds what the work took the
-    first time it ran, so a replay still prices the cell it replays. Summing an EMPTY map to
-    ``0.0`` would report an unpriced cell as a free one, so absent stays absent."""
-    timings = (result.get("pipeline_data") or {}).get("step_timings")
-    if not isinstance(timings, dict) or not timings:
-        return None
-    total = 0.0
-    for entry in timings.values():
-        if not isinstance(entry, int | float) or isinstance(entry, bool):
-            return None
-        total += float(entry)
-    return total
+assert set(ROW_GRADES) - {"hit"} == set(get_args(CellGrade))
 
 
 class ScoringSpec(NamedTuple):
-    """Parsed ``campaign.json::scoring`` block — ``(per_sample, per_cell, scorer_id)``.
-
-    ``per_cell`` is the composite, evaluated on ONE cell rather than the round: latency, cost and
-    unreliability are provoked prompt by prompt, and a round-level mean hides a 2000-second cell
-    behind a fast one."""
+    """``per_cell`` is evaluated on ONE cell: a round mean hides a slow cell behind a fast one."""
 
     per_sample: str | None
     per_cell: str | None
@@ -424,18 +651,11 @@ class ScoringSpec(NamedTuple):
 
 DialKind = Literal["anchored", "unit"]
 
-# The term every dial discounts: a criterion is correctness, charged for what it cost.
 CRITERION_BASE = "fitness"
 
 
 class Dial(NamedTuple):
-    """How much ONE term weighs in an anchored criterion — the share of a solved cell's score that
-    term can take away.
-
-    ``anchor`` is the level the term is read against, and what makes an unbounded cost weighable at
-    all: at the anchor or below the cell keeps its whole score, at twice the anchor it loses half
-    of ``weight``. ``None`` is a 0/1 flag, which needs none, and ``rewards`` says whether that flag
-    being set is the good outcome."""
+    """At ``anchor`` or below a cell keeps its score, at twice it loses half of ``weight``."""
 
     weight: float
     anchor: float | None = None
@@ -457,10 +677,6 @@ def _dial_factor(name: str, dial: Dial) -> str:
 
 
 def anchored_criterion(dials: Mapping[str, Dial]) -> str:
-    """The ``per_cell`` formula *dials* spell: correctness, times one discount per weighted term.
-
-    The one spelling of that shape. A dial at weight 0 contributes no factor, so no dials at all is
-    the bare base — the same float ``per_cell`` absent grades."""
     factors = [_dial_factor(name, dial) for name, dial in dials.items() if dial.weight]
     return " * ".join([CRITERION_BASE, *factors])
 
@@ -522,13 +738,7 @@ def _dial_of(node: ast.expr) -> tuple[str, Dial] | None:
 
 
 def anchored_criterion_dials(formula: str) -> dict[str, Dial] | None:
-    """The dials *formula* spells, where it IS an anchored criterion — ``anchored_criterion``'s
-    inverse.
-
-    ``None`` where it is not one, and that is the load-bearing answer rather than a failure: a
-    control offering one dial per term can only describe this shape, so inventing dials for a
-    formula of another hands the operator thermometers that do not add up to what is being scored.
-    A term appearing twice is refused for the same reason — one dial cannot stand for two factors."""
+    """``None`` where *formula* is not an anchored criterion, or names a term twice."""
     try:
         tree = ast.parse(formula, "<scoring formula>", "eval")
     except SyntaxError:
@@ -547,37 +757,22 @@ def anchored_criterion_dials(formula: str) -> dict[str, Dial] | None:
 
 @shapes_optimizer_prompt
 def is_verifier_graded(ground_truth: str | None) -> bool:
-    """Whether this cell was graded with NO label — the backend answered with a number and the
-    task's own verifier (or L4's outer proxies) decided it, so there is no truth string for
-    ``predicted`` to match.
-
-    **The one place that fact is asked.** It takes the LABEL rather than its carrier because the
-    two carriers are different types — a not-yet-measured ``Sample`` (``ground_truth: str | None``,
-    where ``None`` is the declaration) and a measured row (``QueryMeasurement.ground_truth: str``,
-    where the same fact arrives as ``""``) — and both ask this one question.
-
-    Ask this, never ``predicted == NO_RESULT``. That sentinel is set by ``terminal_ranking``
-    returning nothing, which a DATASET decides: Harbor's ``agent`` node declares no ``node_role``
-    so the sentinel fires, while ``promptpotter-self``'s ``l1_critique`` declares ``ranker`` so it
-    never does. Two labelless backends, opposite answers, from a proxy for something neither of
-    them is about. The label's absence is the same on both.
-    """
+    """Ask this, never ``predicted == NO_RESULT``: ``node_role`` declarations decide that sentinel."""
     return not (ground_truth or "")
+
+
+VERIFIER_GRADED_TEXT = "verifier-graded — no label"
+
+
+def ground_truth_text(ground_truth: str | None) -> str:
+    if ground_truth is None or is_verifier_graded(ground_truth):
+        return VERIFIER_GRADED_TEXT
+    return ground_truth
 
 
 @shapes_optimizer_prompt
 def all_verifier_graded(labels: Iterable[str | None]) -> bool:
-    """The SET arity: whether a whole round, bank or dataset carries no labels.
-
-    Empty is False — a set with no members declares nothing, and the readers that ask this
-    (rank statistics, the recall evaluators, the formula gate) would otherwise treat "measured
-    nothing yet" as "this backend has no labels" and go silent on a real one.
-
-    What it decides is whether a LABEL-comparing reading means anything. With no label,
-    ``predicted`` can never equal ``ground_truth``, so every row is a miss, every rank is
-    ``not_found`` and every recall is ``0.0`` — a split that partitions nothing, reported as if it
-    had. Emit absence there, not zero.
-    """
+    """Empty is False: "measured nothing yet" is not "this backend has no labels"."""
     seen = False
     for label in labels:
         if not is_verifier_graded(label):
@@ -587,47 +782,37 @@ def all_verifier_graded(labels: Iterable[str | None]) -> bool:
 
 
 @shapes_optimizer_prompt
-def enumerable_truth_labels(rows: Sequence[Mapping[str, Any]]) -> Counter[str] | None:
-    """The ground-truth label tally, or ``None`` where collapse is not a meaningful question —
-    above ``ANSWER_SPACE_CAP`` truths, or one truth per row, every prediction is its own bucket."""
-    truth = Counter(str(v) for r in rows if (v := r.get("ground_truth")) not in (None, ""))
-    if not truth or len(truth) > ANSWER_SPACE_CAP or len(truth) == len(rows):
+def enumerable_truth_labels(cells: Sequence[GradedCell]) -> Counter[str] | None:
+    """``None`` where collapse is not a meaningful question: an open space, or one truth per row."""
+    truth = Counter(c.facts.ground_truth for c in cells if c.facts.ground_truth)
+    if not truth or len(truth) > ANSWER_SPACE_CAP or len(truth) == len(cells):
         return None
     return truth
 
 
 @shapes_optimizer_prompt
-def modal_answer_share(rows: Sequence[Mapping[str, Any]]) -> float | None:
-    """Over PREDICTIONS — the ``answer_distribution`` panel's ``constant`` is over GROUND TRUTHS.
-    Reports and never gates: below 1.0 this measures hedging, the gradient the loop climbs."""
-    if enumerable_truth_labels(rows) is None:
+def modal_answer_share(cells: Sequence[GradedCell]) -> float | None:
+    """Over PREDICTIONS; reports and never gates — below 1.0 it measures hedging."""
+    if enumerable_truth_labels(cells) is None:
         return None
-    said = Counter(str(v) for r in rows if (v := r.get("predicted")) not in (None, ""))
+    said = Counter(c.facts.predicted for c in cells if c.facts.predicted)
     total = sum(said.values())
     if total == 0:
         return None
     return said.most_common(1)[0][1] / total
 
 
-def is_answer_collapsed(rows: Sequence[Mapping[str, Any]]) -> bool:
-    """The ABSENCE of a measurement, not a low score — θ fitted to a constant answer is an
-    artifact, so the candidate is withheld from θ and eliminated by PoBB.
-
-    One answer to every cell, CONTRADICTED by the cells. What contradicts it is whatever the bank
-    has: a truth set that varies, or — with no labels at all — a verifier that left a cell
-    unsolved, so an arm answering every cell alike AND solving every one of them is not collapsed.
-    Errored rows carry no answer and are dropped first, or a broken backend reads as a verdict on
-    the idea — and neither is a row that answered nothing, so an empty or ``NO_RESULT`` prediction
-    disqualifies the whole set rather than counting as the one answer everything shares."""
-    answered = [r for r in rows if not is_error_result(r)]
-    said = {str(r.get("predicted") or "") for r in answered}
+def is_answer_collapsed(cells: Sequence[GradedCell]) -> bool:
+    """The ABSENCE of a measurement, not a low score: θ fitted to a constant answer is an artifact."""
+    answered = [c for c in cells if not c.facts.errored]
+    said = {c.facts.predicted for c in answered}
     if len(said) != 1 or said & {"", NO_RESULT}:
         return False
     truth = enumerable_truth_labels(answered)
     if truth is not None:
         return len(truth) >= 2
-    return all_verifier_graded(str(r.get("ground_truth") or "") for r in answered) and not all(
-        is_hit(r.get("fitness")) for r in answered
+    return all_verifier_graded(c.facts.ground_truth for c in answered) and not all(
+        c.hit for c in answered
     )
 
 
@@ -636,25 +821,40 @@ __all__ = [
     "DEFAULT_SCORER_ID",
     "GRADE_KEYS",
     "HIT_THRESHOLD",
+    "LEDGER_PIPELINE_KEYS",
+    "NO_CELLS",
+    "PIPELINE_KEYS",
+    "ROW_GRADES",
+    "SHEET_ROW",
     "UNREAD_PIPELINE_KEYS",
     "CellGrade",
-    "CellScorer",
+    "CellSheet",
+    "Diagnostics",
     "Dial",
     "DialKind",
+    "Grade",
+    "GradeColumn",
+    "GradedCell",
+    "JudgeReading",
+    "MeasuredCell",
+    "NodeWarning",
     "PipelineData",
-    "QueryMeasurement",
+    "RerunComparison",
+    "SampleStatus",
+    "Scorer",
+    "ScoringFormulaError",
     "ScoringSpec",
+    "ScoringTermMissingError",
     "TurnRecord",
+    "WalkedCell",
     "all_verifier_graded",
     "anchored_criterion",
     "anchored_criterion_dials",
     "enumerable_truth_labels",
+    "ground_truth_text",
     "is_answer_collapsed",
-    "is_graded",
     "is_hit",
-    "is_unscored",
     "is_verifier_graded",
-    "ledger_sample_view",
     "measured_facts",
     "modal_answer_share",
 ]

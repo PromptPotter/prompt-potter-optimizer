@@ -1,23 +1,11 @@
-"""Typed post-scoring deterministics, computed once per round and attached to ``RoundResult``. Pure data — rendering lives in the
-dispatch hub's ``diagnostics`` signal, which is layer-agnostic.
-
-**Tolerance is scoped by what a payload is FOR** — owned by
-[`CLAUDE.md`](CLAUDE.md) § Tolerance is scoped by what a payload is FOR. Everything here is
-reporting, so every field defaults and producers pass them all explicitly anyway."""
+"""Reporting rows: every field defaults (`CLAUDE.md` § Tolerance is scoped by what a payload is FOR)."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Literal
 
-# No "regressing" and no "oscillating": `round_analysis._trend` is the sole producer and returns
-# neither. It classifies the ELECTION series — did this round clear the parent — and on that
-# series "oscillating" is "elected before, not lately", which `plateau` already names.
-#
-# **Not "trajectory".** This is the election series CLASSIFIED — while a trajectory in this repo
-# is a walk of points that each carry their own reading (`p_best_trajectory`, the
-# Sample-trajectory grid). Two meanings under one word, and the reader
-# could tell them apart from neither name.
+# The ELECTION series classified (did the round clear the parent), not a trajectory of readings.
 TrendClass = Literal["healthy", "plateau", "ceiling"]
 
 
@@ -33,14 +21,10 @@ class NearMiss:
 
 @dataclass(frozen=True)
 class EvolutionRow:
-    """``elected`` is the only field here comparable ACROSS rows. ``accuracy`` and its ``delta``
-    are relative to the subset that round bought, and the acquisition re-picks that subset at the
-    leader's own θ, so an unchanged prompt climbs on its own. Render the pair, never accuracy
-    alone."""
+    """Only ``elected`` compares across rows; ``accuracy`` is relative to its round's subset."""
 
     round: int = 0
-    # ``None`` where the round measured nothing readable, and ``delta`` is ``None`` with it: a gap
-    # in the series is not a flat stretch of it.
+    # ``None``, with ``delta``, where the round measured nothing readable: a gap, not a flat stretch.
     accuracy: float | None = None
     delta: float | None = None
     degraded: int = 0
@@ -63,32 +47,24 @@ class SampleDiag:
 
 @dataclass(frozen=True)
 class RoundDiagnostics:
-    """Post-scoring deterministics computed once per round; renderers READ this and never recompute. The ``trend``
-    field type encodes which classifications the renderer must handle."""
+    """One round's post-scoring diagnostics, computed once and read by every renderer."""
 
-    # Rank distribution — where does GT land in candidates?
     rank_buckets: dict[str, int] = field(default_factory=dict)
     top_k_accuracy: dict[int, float] = field(default_factory=dict)
     near_misses: list[NearMiss] = field(default_factory=list)
     n_valid: int = 0
 
-    # Pipeline shape this round. Add no `terminal_node` tally beside these: that field names the
-    # deepest node a sample REACHED, so a healthy round tallies wholly under the last node and
-    # reads as a mass failure. A run that stopped short is already carried by these two rates and
-    # by `evidence_health`, and is derivable from `terminal_node` against the schema.
+    # No `terminal_node` tally: the deepest node REACHED reads as that node failing en masse.
     error_rate: float = 0.0
     warning_rate: float = 0.0
 
-    # Cycle arc (cumulative across rounds)
     evolution_rows: list[EvolutionRow] = field(default_factory=list)
     trend: TrendClass = "healthy"
     trend_description: str = ""
     anomalies: list[str] = field(default_factory=list)
 
-    # Population this round
     cross_candidate_diff: list[str] = field(default_factory=list)
 
-    # Per-sample (used by L2 for tactical reasoning over actionable misses)
     samples: list[SampleDiag] = field(default_factory=list)
 
 

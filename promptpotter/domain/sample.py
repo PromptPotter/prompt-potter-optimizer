@@ -1,56 +1,31 @@
-"""``Sample`` is the data-side peer to SearchPoint; aggregates live in ``SampleIndex`` and measurements in ``measurements/``,
-never duplicated on the model. Mutable because ``run_ids`` accumulates over the campaign."""
-
 from __future__ import annotations
 
-import hashlib
-import json
 from dataclasses import dataclass
 from typing import Any
 
-from pydantic import ConfigDict, Field, JsonValue
+from pydantic import ConfigDict, JsonValue
 
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.shared.hashing import stable_hash
 
 
 class Sample(StrictModel):
-    # `extra="ignore"`: a dataset row carries whatever columns the operator's file had
-    # (`task`, `source_sheet`, …); this model owns only the ones it names.
+    # `extra="ignore"`: a dataset row carries whatever columns the operator's file had.
     model_config = ConfigDict(extra="ignore")
 
-    # Primary identity + inputs — owned directly.
     id: int
     query: str
-    # ``None`` DECLARES a verifier-graded cell: this backend answers with a reward, not a label,
-    # so there is nothing for ``predicted`` to match. A placeholder string instead of this reads
-    # as a MISS on every row, and three sites downstream then have to un-believe it.
+    # ``None`` DECLARES a verifier-graded cell; a placeholder string reads as a MISS on every row.
     ground_truth: str | None
 
-    # The bare question, where ``query`` also carries CONTEXT the model must read and a grader
-    # must not. ``None`` on every ordinary dataset, where the two are the same string.
-    #
-    # It exists because a judge is handed the measured row, not the sample, and reads ``query`` as
-    # "the question". On a long-context bank that is the question plus its whole document
-    # haystack, so each of N judges re-sends the haystack — LongSeal's median cell is ~40k
-    # characters and its arm plus three graders paid that four times over for evidence none of
-    # them reads. It is NOT a second copy of the question: ``query`` stays the model's input
-    # verbatim, and this is the strictly smaller thing a grader is entitled to see.
+    # The bare question, where ``query`` also carries context a grader must not read; else ``None``.
     question: str | None = None
 
-    # What the sample POINTS AT that its text does not carry, as its connector resolved it — a
-    # Harbor task's repository commit, an inner task's treatment. ``None`` wherever the text is the
-    # whole sample. It belongs to the SAMPLE's content address, never to the instrument's: a panel
-    # is a set of these, and a set folded into the instrument re-keyed every shared cell whenever
-    # the panel grew.
+    # Part of the SAMPLE's content address, never the instrument's: there, a growing panel re-keys every shared cell.
     source_pin: dict[str, JsonValue] | None = None
 
-    # Bench by DECLARATION: `partition_bank` holds the row out without ranking it, so a bank
-    # widened with these keeps the pools of the rows beside them. Where the row sits, never what
-    # it is — so it stays out of `key`, and a cell measured on it replays under any membership.
+    # Where the row sits, never what it is: out of `key`, so its cells replay under any membership.
     bench_only: bool = False
-
-    # Cross-campaign metadata — accumulates via SampleIndex.ingest_run.
-    run_ids: list[str] = Field(default_factory=list)
 
     @property
     def key(self) -> str:
@@ -63,9 +38,6 @@ class Sample(StrictModel):
 
     @classmethod
     def from_dict(cls, data: dict[str, Any], fallback_id: int | None = None) -> Sample:
-        """``id`` falls back to ``fallback_id`` (positional) when absent.
-        Extra keys (``task``, ``source_sheet``, etc.) are ignored.
-        """
         if "id" not in data and fallback_id is not None:
             data = {**data, "id": fallback_id}
         return cls(**data)
@@ -78,29 +50,23 @@ def sample_key(
     question: str | None,
     source_pin: dict[str, JsonValue] | None,
 ) -> str:
-    """What a sample IS, content-addressed — the archive's replay key beside the instrument's node
-    configs. Its position and its dataset's name are not in it, so a sample carried into a wider
-    panel or under another name replays every cell already measured on it. Normalized the way a
-    measured row stores these fields, so a row and the sample it measured always agree."""
-    blob = json.dumps(
+    """Position and dataset name are not in it; normalized as a measured row stores these fields, so the two agree."""
+    return stable_hash(
         {
             "query": query,
             "ground_truth": ground_truth or "",
             "question": question or None,
             "source_pin": source_pin,
-        },
-        sort_keys=True,
+        }
     )
-    return hashlib.sha256(blob.encode()).hexdigest()[:16]
 
 
 @dataclass(frozen=True, slots=True)
 class Measurement:
-    """One ``(sample × config → outcome)`` archive row beside the run that banked it. ``row`` is
-    the banked facts WHOLE — a reader grades it as it stands, error channel included."""
+    """``row`` is the banked facts WHOLE: a reader grades it as it stands, errors included."""
 
-    run_id: str
-    content_hash: str
+    answer: str
+    config_key: str
     sample_id: int
     node_configs: list[tuple[str, dict[str, Any]]]
     row: dict[str, Any]

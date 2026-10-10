@@ -1,5 +1,4 @@
-"""One block-library entry: its material and its AUTHORED provenance, unknown left ``None``. A measured lift is
-never a field here — it is derived from the archive, per model and dataset."""
+"""A measured lift is never a field here: it is derived from the archive, per model and dataset."""
 
 from __future__ import annotations
 

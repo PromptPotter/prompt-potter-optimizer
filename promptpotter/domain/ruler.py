@@ -1,83 +1,102 @@
-"""The δ scale a θ is read on — the value, its identity, and the two ways to read it.
-
-Domain rather than `intelligence/` because the ruler is PERSISTED, FORKED and STAMPED: it rides
-the cycle ledger as a `RulerRecord`, a fork inherits its parent's, and every `RoundResult` names
-the one it was read on. `intelligence/exploration.py` keeps the estimators that produce it.
-"""
-
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from enum import StrEnum
-from typing import Literal
+from statistics import NormalDist
+from typing import Literal, NamedTuple
 
 from pydantic import ConfigDict, Field
 
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.hashing import stable_hash
 
-# A difficulty-ruler entry is either a bare δ (1PL — discrimination ≡ 1) or a ``(δ, a)`` pair
-# (2PL — per-sample discrimination ``a``). The richer 2PL value rides *inside* the same ruler
-# mapping so every θ consumer reads one ``Ruler`` and the 1PL→2PL switch is invisible above
-# ``fit_theta_given_delta`` (the seam).
+# A bare δ is 1PL (a ≡ 1); a ``(δ, a)`` pair is 2PL.
 RulerEntry = float | tuple[float, float]
 Ruler = Mapping[int, RulerEntry]
 
-# A COLD ruler's id, qualified by the OBJECTIVE θ was fit on: flat δ depends on no fit, so the
-# objective is the only thing separating two cold readings. A FITTED ruler needs no qualifier —
-# `anchor_id_of` hashes δ that were fit from the objective's own responses.
+# A cold id carries the OBJECTIVE: flat δ depends on no fit, so nothing else separates two readings.
 _FLAT_PREFIX = "flat"
 
-# Which IRT model a cycle's δ ruler was fitted under. The ABSENCE of a member is the third,
-# real state — a cold ruler is flat, so θ degenerates to logit-accuracy. Never collapse it
-# into "1PL".
+# ``None`` beside these is a third state (cold ruler, θ is logit-accuracy); never collapse it to "1PL".
 CalibrationModel = Literal["1PL", "2PL"]
 
-# A round this fraction of whose cells sit on a δ the ruler shares with another cell is reading θ
-# mostly against the PRIOR: a continuous MLE produces no ties, so a run of identical δ marks cells
-# whose observations carried no variance. Unvalidated against banked rounds.
+# The share of a round's cells on a shared δ; a chosen value, unvalidated against banked rounds.
 PRIOR_PINNED_RATIO = 0.5
-# A round whose cells span less than this FRACTION of the ruler's own δ range is a collapsed band.
-# Deliberately loose: it must catch the case `verdict-resolution.md` records without firing on an
-# ordinary acquisition draw. A first estimate, to refine against banked rounds.
+# A FRACTION of the ruler's own δ range; a chosen value, unvalidated against banked rounds.
 BAND_COLLAPSE_RATIO = 0.20
-# ...and this many LOGITS absolutely. The ratio measures the round against the ruler, so on a ruler
-# that is itself collapsed the yardstick is the thing under test and a wide-looking fraction of a
-# narrow scale stays silent. Below this span θ is logit-accuracy plus a constant either way.
+# The absolute floor in LOGITS: on a collapsed ruler the ratio measures against the thing under test.
 BAND_COLLAPSE_LOGITS = 1.0
 
 
 class ThetaCaveat(StrEnum):
-    """A state in which θ is NOT ability — decided beside the ruler, never in a view. Each renders
-    every number, so WHICH one fired is the value: `docs/methods/verdict-resolution.md` § Reading a round."""
+    """A state in which θ is NOT ability; every number still renders, so WHICH fired is the fact."""
 
-    # No δ scale at all — θ is plain logit-accuracy on whatever subset this arm answered, so two
-    # readings are comparable to each other and to nothing else.
+    # No δ scale: θ is logit-accuracy on the arm's own subset, comparable only to another cold θ.
     COLD_RULER = "cold_ruler"
     # The INSTRUMENT: the ruler itself spans almost nothing, so no draw could have been wider.
     FLAT_RULER = "flat_ruler"
-    # The ACQUISITION: a warm, wide ruler, and this round bought a thin slice of it. The silent
-    # one — the ruler id matches, the cell count is healthy, and every number renders.
+    # The ACQUISITION: a thin slice of a wide ruler. Silent: the id matches and every number renders.
     COLLAPSED_BAND = "collapsed_band"
-    # The PRIOR standing in for a measurement: most of this round's cells sit on a δ the ruler
-    # shares with other cells, which a continuous fit does not produce — it is the prior pinning
-    # every cell whose observations carried no variance. θ then reads those cells against a
-    # difficulty nobody measured, and the pin MOVES as the ruler grows — so an unchanged prompt
-    # drifts upward round on round. Silent like COLLAPSED_BAND: the ruler id matches, the cell
-    # count is healthy, every number renders.
+    # Most cells sit on a δ shared with other cells: the prior, whose pin MOVES as the ruler grows. Silent.
     PRIOR_PINNED = "prior_pinned"
-    # NO δ at all: a cell the ruler does not carry, because no arm holding an anchored ability
-    # answered it (`intelligence/exploration.py::extend_ruler`). θ skips that cell, so it is read
-    # on fewer cells than the accuracy beside it. The one member with BOTH scopes: the round's
-    # reading carries it for the frontier's cells, an arm's row for that arm's own.
+    # θ skips cells the ruler does not carry, so it is read on fewer cells than accuracy. Round AND arm scope.
     UNMEASURED_DELTA = "unmeasured_delta"
-    # The ARM: it scored 0.0 on every cell it answered, so the fit has no response to separate
-    # ability from the prior and θ settles on the floor the δ vector and n imply. Per-CANDIDATE,
-    # so it rides the candidate row rather than the round's reading — and it is the one caveat
-    # that makes a LIFT unreadable rather than a level: every lift measured against a floor
-    # constant reads `0.000` whatever the arm did.
+    # Per-ARM: all-miss, so θ sits on the prior's floor and every LIFT taken against it reads 0.000.
     FLOOR_PINNED = "floor_pinned"
+
+
+class ThetaCaveatInfo(NamedTuple):
+    head: str
+    body: str
+
+
+THETA_CAVEAT_INFO: dict[ThetaCaveat, ThetaCaveatInfo] = {
+    ThetaCaveat.COLD_RULER: ThetaCaveatInfo(
+        "θ is not ability yet",
+        "No difficulty ruler has been fitted, so θ is plain accuracy on the logit scale, read on "
+        "each candidate's own cells. These θ compare to each other and to nothing else.",
+    ),
+    ThetaCaveat.FLAT_RULER: ThetaCaveatInfo(
+        "θ is not ability here",
+        "The ruler itself spans almost nothing, so every cell counts the same and θ is accuracy "
+        "plus a constant. That is the instrument, not this round's draw — no round could have "
+        "read wider.",
+    ),
+    ThetaCaveat.COLLAPSED_BAND: ThetaCaveatInfo(
+        "θ is not ability this round",
+        "This round bought a thin slice of a wide ruler. Inside a band that narrow every cell is "
+        "equally hard, so ranking on θ ranks on accuracy. That is the draw, not the instrument.",
+    ),
+    ThetaCaveat.PRIOR_PINNED: ThetaCaveatInfo(
+        "θ is not ability here",
+        "The ruler gave most of this round's cells one shared difficulty, its prior, because "
+        "every candidate that saw them answered the same way. That pinned value moves as the "
+        "ruler grows, so a higher θ than before can be the scale shifting, not the prompt "
+        "improving. Compare within a round; don't read the level across rounds.",
+    ),
+    ThetaCaveat.UNMEASURED_DELTA: ThetaCaveatInfo(
+        "θ skips some of these cells",
+        "The ruler does not carry some of these cells, because no candidate already on the scale "
+        "answered them. θ leaves them out, so it is read on fewer cells than the accuracy beside "
+        "it, and two candidates can be read on different ones. A later round places a cell on the "
+        "scale once such a candidate answers it.",
+    ),
+    ThetaCaveat.FLOOR_PINNED: ThetaCaveatInfo(
+        "θ reads nothing for an all-miss arm",
+        "This arm missed every cell it answered. With no hit the fit has nothing to read: every "
+        "all-miss arm lands on the same floor whatever cells it saw, so its θ, and any lift taken "
+        "from it, is not a measurement. The ruler, the election and the other arms' θ are "
+        "unaffected.",
+    ),
+}
+
+_missing_caveat_info = set(ThetaCaveat) - set(THETA_CAVEAT_INFO)
+if _missing_caveat_info:
+    raise RuntimeError(
+        f"THETA_CAVEAT_INFO is missing rows for {sorted(c.value for c in _missing_caveat_info)} "
+        "(domain/ruler.py)."
+    )
 
 
 def theta_caveat(
@@ -88,8 +107,7 @@ def theta_caveat(
     unlinked: int,
     pinned_share: float | None = None,
 ) -> ThetaCaveat | None:
-    """The SOLE decision for the SCALE states, stamped once (``bench/difficulty.py::_reading``) for
-    screen and ``confounds`` panel alike. A ``None`` span or share is no verdict; order is severity."""
+    """A ``None`` span or share is no verdict; the order is severity."""
     if calibration_model is None:
         return ThetaCaveat.COLD_RULER
     if round_span is not None and ruler_span is not None:
@@ -105,32 +123,37 @@ def theta_caveat(
 __all__ = [
     "BAND_COLLAPSE_LOGITS",
     "BAND_COLLAPSE_RATIO",
+    "DELTA_STATE_LABEL",
+    "THETA_CAVEAT_INFO",
     "CalibrationModel",
     "DeltaRuler",
+    "DeltaState",
     "Ruler",
     "RulerEntry",
+    "RulerStanding",
     "ThetaCaveat",
+    "ThetaCaveatInfo",
     "anchor_id_of",
     "flat_ruler_id",
     "is_flat_ruler_id",
     "ruler_entry",
+    "series_levels",
+    "theta_band",
     "theta_caveat",
+    "theta_plateau",
 ]
 
 
 def flat_ruler_id(objective_id: str) -> str:
-    """The scale of a COLD ruler, per the prefix above."""
     return f"{_FLAT_PREFIX}:{objective_id}"
 
 
 def is_flat_ruler_id(value: str) -> bool:
-    """Whether a STAMPED id names a cold ruler. A fitted anchor is a hex digest, so the prefix
-    cannot collide with one."""
+    """A fitted anchor is a hex digest, so the prefix cannot collide with one."""
     return value.startswith(_FLAT_PREFIX)
 
 
 def ruler_entry(value: RulerEntry) -> tuple[float, float]:
-    """Split a ruler entry into ``(δ, a)``; a bare float is 1PL (a≡1)."""
     if isinstance(value, tuple):
         return float(value[0]), float(value[1])
     return float(value), 1.0
@@ -142,14 +165,7 @@ def anchor_id_of(
     sigma_delta: float,
     calibration_model: CalibrationModel,
 ) -> str:
-    """The identity of the ANCHORING fit — computed once, at lock, and then carried verbatim.
-
-    Deliberately NOT a hash of the current membership. Anchored extension adds cells without
-    moving the ones already there, so a θ read on the smaller ruler and one read on the larger
-    are on the same scale and must share an id. Hashing the membership would churn the id every
-    round, make a cycle read as incomparable with ITSELF, and — because `evidence/` reads round
-    0's `ruler_id` into `Comparability` — poison cross-campaign comparison too.
-    """
+    """Computed once at lock and carried verbatim: anchored extension grows the membership, not the id."""
     return stable_hash(
         [
             [[sid, delta[sid]] for sid in sorted(delta)],
@@ -161,11 +177,6 @@ def anchor_id_of(
 
 
 class DeltaRuler(StrictModel):
-    """A cycle's locked δ scale, plus everything an anchored EXTENSION needs to add a cell to it
-    without bending it: the prior the anchoring fit converged to (``mu_delta`` / ``sigma_delta``
-    / ``sigma_theta``) and which model it was fit under. Those four were discarded before, which
-    is precisely why the ruler could only ever be frozen or re-fit — never grown."""
-
     model_config = ConfigDict(frozen=True)
 
     delta: dict[int, float]
@@ -174,15 +185,12 @@ class DeltaRuler(StrictModel):
     discrimination: dict[int, float] = Field(default_factory=dict)
     mu_delta: float
     sigma_delta: float
-    # The θ prior the anchoring fit converged to. Every later read must use THIS one, or the
-    # extension is regularized differently from the anchor and the scale bends.
+    # Every later read must use THIS θ prior, or the extension is regularized apart from the anchor.
     sigma_theta: float
     calibration_model: CalibrationModel
     anchor_id: str
 
     def entries(self) -> dict[int, RulerEntry]:
-        """``{sid: δ}`` under 1PL, ``{sid: (δ, a)}`` where discrimination was estimated — the shape
-        the θ seam reads. Covers exactly the cells this ruler carries, and nothing else."""
         return {
             sid: ((d, self.discrimination[sid]) if sid in self.discrimination else d)
             for sid, d in self.delta.items()
@@ -190,35 +198,18 @@ class DeltaRuler(StrictModel):
 
     @property
     def delta_span(self) -> float:
-        """Total δ range in logits — how much difficulty this scale can actually tell apart. Near
-        zero means θ is logit-accuracy plus a constant however many cells the ruler carries."""
+        """In logits; near zero, θ is logit-accuracy plus a constant, whatever the cell count."""
         return max(self.delta.values()) - min(self.delta.values()) if self.delta else 0.0
 
     def band_span(self, sample_ids: Iterable[int]) -> tuple[float, float] | None:
-        """``(round_span, ruler_span)`` in logits — ``None`` below two cells on either side, where
-        a span is not a reading.
-
-        The collapsed-band check `docs/methods/verdict-resolution.md` § "A collapsed band" names
-        and nothing performed. The acquisition buys the cells whose δ sits nearest the leader's θ,
-        and against a wide bank that collapses onto a razor-thin range; inside one every cell is
-        equally hard, so the 1PL fit reduces to ``θ = logit(accuracy) + c`` and the difficulty
-        adjustment does no work. Unlike a cold ruler it is SILENT — the ruler is warm, the id
-        matches, every number renders — which is why the state has to be computed to be seen.
-        """
+        """``(round_span, ruler_span)``. Inside a thin band 1PL reduces to ``θ = logit(accuracy) + c``."""
         on = [self.delta[sid] for sid in sample_ids if sid in self.delta]
         if len(on) < 2 or len(self.delta) < 2:
             return None
         return (max(on) - min(on), self.delta_span)
 
     def pinned_share(self, sample_ids: Iterable[int]) -> float | None:
-        """What fraction of these cells carry a δ this ruler gives to more than one cell — ``None``
-        where the round holds no cell on the ruler at all, which is an absence, not a clean read.
-
-        A continuous fit does not produce ties, so a run of identical δ is the PRIOR standing in
-        for cells whose observations carried no variance — common, because nothing solves the
-        hardest cells. They still enter the θ fit and the point they sit on MOVES as the ruler
-        grows, which is how an unchanged prompt walks up the scale with nothing flagged.
-        """
+        """A continuous fit produces no ties, so a shared δ is the PRIOR standing in for a measurement."""
         shared = {d for d, n in Counter(self.delta.values()).items() if n > 1}
         on = [self.delta[sid] for sid in sample_ids if sid in self.delta]
         if not on:
@@ -226,23 +217,10 @@ class DeltaRuler(StrictModel):
         return sum(1 for d in on if d in shared) / len(on)
 
     def unlinked(self, sample_ids: Iterable[int]) -> int:
-        """How many of these cells this ruler does not carry — measured, and counted by no θ.
-
-        The ONE derivation of the off-ruler state: the round's reading and each arm's row both
-        ask here, so neither surface can report a θ as whole that skipped a cell."""
         return sum(1 for sid in set(sample_ids) if sid not in self.delta)
 
     def entries_covering(self, sample_ids: Iterable[int]) -> dict[int, RulerEntry]:
-        """This ruler completed with a PROVISIONAL entry at its own centre (``mu_delta``, a=1) for
-        each id it does not carry.
-
-        One sanctioned caller: PoBB, which reads θ mid-round on cells the extension cannot have
-        reached yet — extension needs the round's grades, which do not exist while it is running.
-        A provisional δ at the centre is the honest prior for "unknown"; 0.0 is not, because zero
-        is a POSITION on this scale and claims "easier than anything measured". The comparison
-        stays paired on identical cells, so both arms see the identical δ vector and a constant
-        misspecification cannot favour one.
-        """
+        """PoBB only, where the paired comparison absorbs it: an uncarried id reads the prior centre, never 0.0."""
         out = self.entries()
         for sid in sample_ids:
             if sid not in out:
@@ -250,12 +228,61 @@ class DeltaRuler(StrictModel):
         return out
 
 
-class AbilityReading(StrictModel):
-    """A Rasch θ and the δ scale it was read on — meaningless apart, so they are one value.
-    ``ruler_id`` ``None`` names NO scale: that reading is comparable to nothing.
+class DeltaState(StrEnum):
+    LINKED = "linked"
+    UNLINKED = "unlinked"
+    NOT_FITTED = "not_fitted"
 
-    Beside :class:`DeltaRuler` rather than in ``results.py`` because ``run_records.py`` needs it
-    too, and ``results.py`` imports that module — the same constraint that put the ruler here.
+
+DELTA_STATE_LABEL: dict[DeltaState, str | None] = {
+    DeltaState.LINKED: None,
+    DeltaState.UNLINKED: "not on the ruler yet",
+    DeltaState.NOT_FITTED: "ruler not fitted yet",
+}
+
+_missing_delta_labels = set(DeltaState) - set(DELTA_STATE_LABEL)
+if _missing_delta_labels:
+    raise RuntimeError(
+        f"DELTA_STATE_LABEL is missing rows for {sorted(s.value for s in _missing_delta_labels)} "
+        "(domain/ruler.py)."
+    )
+
+
+class RulerStanding(StrictModel):
+    """Whether a scope has a δ ruler, and which one."""
+
+    model_config = ConfigDict(frozen=True)
+
+    state: Literal["fitted", "not_fitted"]
+    ruler_id: str | None = Field(
+        description="The anchor every θ and δ of this scope is read on (`AbilityReading.ruler_id`). "
+        "Null while not fitted."
+    )
+    calibration_model: CalibrationModel | None = Field(description="Null while not fitted.")
+
+    @classmethod
+    def of(cls, ruler: DeltaRuler | None) -> RulerStanding:
+        if ruler is None:
+            return cls(state="not_fitted", ruler_id=None, calibration_model=None)
+        return cls(
+            state="fitted", ruler_id=ruler.anchor_id, calibration_model=ruler.calibration_model
+        )
+
+    @property
+    def label(self) -> str | None:
+        """What to print in place of every δ of the scope; ``None`` once the ruler is fitted."""
+        return DELTA_STATE_LABEL[self.delta_state(True)]
+
+    def delta_state(self, carried: bool) -> DeltaState:
+        if self.state == "not_fitted":
+            return DeltaState.NOT_FITTED
+        return DeltaState.LINKED if carried else DeltaState.UNLINKED
+
+
+class AbilityReading(StrictModel):
+    """A Rasch θ and the δ scale it was read on, held as one value because apart they mean nothing.
+
+    A null ``ruler_id`` names NO scale: that reading is comparable to nothing.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -265,28 +292,56 @@ class AbilityReading(StrictModel):
     ruler_id: str | None
     # The ruler grows by anchored extension, so the id alone cannot say how much scale was real.
     ruler_n: int
-    # ...and the count cannot either: 600 cells inside a quarter-logit is a WARM ruler reading
-    # flat, the one degenerate state that renders every number and says nothing. On disk beside
-    # the θ it qualifies, so an operator surface can read it and not only the optimizer node.
+    # ...and the count cannot either: many cells inside a narrow span is a WARM ruler reading flat.
     ruler_span: float | None
-    # The δ span of the cells THIS reading was taken on. Beside `ruler_span` because the pair is
-    # the reading: a thin round on a wide ruler and a wide round on a thin one are different
-    # faults with identical θ. ``None`` below two cells, where a span is not a reading.
+    # A thin round on a wide ruler and a wide round on a thin one read identical θ. ``None`` below two cells.
     round_span: float | None
     # ``None`` = the ruler is cold (flat δ) and θ is plain logit-accuracy — neither model.
     calibration_model: CalibrationModel | None
-    # SERVED, never re-derived: which scale state this θ is in, or ``None`` where it is
-    # genuinely ability. Stamped from `theta_caveat` at the one minting site, so the browser and
-    # the optimizer's `confounds` panel cannot disagree about whether a number means anything.
+    # Stamped from `theta_caveat` at the one minting site, never re-derived; ``None`` = θ is ability.
     caveat: ThetaCaveat | None
 
     def comparable_to(self, other: AbilityReading) -> bool:
         return self.ruler_id is not None and self.ruler_id == other.ruler_id
 
     def scale(self, *, named: bool = True) -> str:
-        """The scale in words — the one rendering, so no surface reassembles it. ``named=False``
-        leaves out the anchor id, which an operator differences scales by and an optimizer prompt
-        has nothing to compare against."""
         model = f", {self.calibration_model}" if self.calibration_model else ""
         name = f"ruler {self.ruler_id or 'unscaled'}, " if named else ""
         return f"{name}{self.ruler_n} cells{model}"
+
+
+# Well inside one round's θ SE: a plateau advises stopping, and a false stop costs more than a miss.
+PLATEAU_THETA_BAND = 0.05
+PLATEAU_ROUNDS = 3
+
+
+_THETA_BAND_Z = NormalDist().inv_cdf(0.975)
+
+
+def theta_band(theta: float | None, se: float | None) -> tuple[float, float] | None:
+    if theta is None or se is None:
+        return None
+    return theta - _THETA_BAND_Z * se, theta + _THETA_BAND_Z * se
+
+
+def series_levels(readings: Sequence[AbilityReading | None]) -> list[float | None]:
+    """The series scale is the first ruler any reading names; a θ off it is ``None``."""
+    series = next((r for r in readings if r is not None and r.ruler_id is not None), None)
+    return [
+        r.theta if r is not None and series is not None and r.comparable_to(series) else None
+        for r in readings
+    ]
+
+
+def theta_plateau(readings: Sequence[AbilityReading | None]) -> float | None:
+    """Withheld under any ``ThetaCaveat``: a flat run of a θ that is not ability advises a stop on nothing."""
+    recent = list(zip(readings, series_levels(readings), strict=True))[-PLATEAU_ROUNDS:]
+    levels = [
+        level
+        for reading, level in recent
+        if level is not None and reading is not None and reading.caveat is None
+    ]
+    if len(levels) < PLATEAU_ROUNDS:
+        return None
+    mean = sum(levels) / len(levels)
+    return mean if all(abs(level - mean) < PLATEAU_THETA_BAND for level in levels) else None

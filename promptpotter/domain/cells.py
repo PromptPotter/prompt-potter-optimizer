@@ -1,64 +1,136 @@
-"""A CELL — one candidate measured on one sample — as the measurement views serve it.
-
-Every surface that shows a measured sample reads these shapes and no other: the Records →
-Measurements log grouped by sample (the hard-sample leaderboard), by candidate, or not at all,
-and the detail panel one click opens.
-
-**A cell's address is `(run_id, sample_id)`**: the archive run its row was filed under
-(`ScoredCandidate.run_id`) and its position in that run's dataset. Unique in the archive, which
-folds last-wins on `m:{sample_id}`."""
-
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any, Literal
 
 from pydantic import Field
 
-from promptpotter.domain.dashboard_rows import SampleStatus
 from promptpotter.domain.results import HardSampleOrder
+from promptpotter.domain.ruler import DELTA_STATE_LABEL, DeltaState, RulerStanding
+from promptpotter.domain.scoring import SampleStatus, is_hit
 from promptpotter.domain.strict_model import StrictModel
 
 __all__ = [
+    "HARD_SAMPLES_VERSION",
     "Cell",
     "CellCandidate",
     "CellRow",
     "CellSpan",
     "CellsResponse",
     "DatasetItem",
+    "HardSampleCell",
+    "HardSamples",
     "HeatmapScope",
+    "HitSpread",
+    "SampleDifficulty",
+    "hit_spread",
 ]
 
-# `cycle` (one cycle's Rasch fit) / `campaign` (pooled) / `dataset` (cross-campaign archive).
-# Workspace scope would be meaningless (samples differ per dataset), so the tier stops at dataset.
+# The tier stops at dataset: samples differ per dataset, so a workspace scope would mean nothing.
 HeatmapScope = Literal["cycle", "campaign", "dataset"]
+
+# A reader takes a `hard_samples.json` of any other version as not written.
+HARD_SAMPLES_VERSION = 7
+
+
+class SampleDifficulty(StrictModel):
+    """Every number is null outside ``linked``; two also where the scope holds no frontier ability."""
+
+    state: DeltaState
+    delta: float | None
+    delta_se: float | None
+    pick_score: float | None
+    p_hat: float | None
+
+    @classmethod
+    def on(
+        cls,
+        ruler: RulerStanding,
+        held: tuple[float, float] | None,
+        *,
+        pick_score: float | None,
+        p_hat: float | None,
+    ) -> SampleDifficulty:
+        delta, delta_se = held if held is not None else (None, None)
+        return cls(
+            state=ruler.delta_state(held is not None),
+            delta=delta,
+            delta_se=delta_se,
+            pick_score=pick_score,
+            p_hat=p_hat,
+        )
+
+    @property
+    def label(self) -> str | None:
+        """What to print in place of the δ; ``None`` when the sample is ``linked``."""
+        return DELTA_STATE_LABEL[self.state]
+
+
+class HardSampleCell(StrictModel):
+    candidate: str
+    sample_id: int
+    fitness: float
+
+
+class HardSamples(StrictModel):
+    """``hard_samples.json``, and the same view folded per request over an archive; it fits nothing."""
+
+    schema_version: int
+    cycle_id: str | None
+    generated_at: str
+    ruler: RulerStanding
+    # Stamped θ descending; an individual no round stamped trails, by id.
+    candidate_order: list[str]
+    theta: dict[str, float]
+    # The samples this scope measured: δ descending, then the ones off the ruler; ties by id.
+    sample_order: list[int]
+    samples: dict[int, SampleDifficulty]
+    round_order: list[int]
+    cells: list[HardSampleCell]
+
+    def difficulty(self, sample_id: int) -> SampleDifficulty:
+        held = self.samples.get(sample_id)
+        if held is not None:
+            return held
+        return SampleDifficulty.on(self.ruler, None, pick_score=None, p_hat=None)
+
+
+#: `partly` is both a sample some candidates hit and others missed, and one a graded scorer part-credited.
+HitSpread = Literal["unmeasured", "never", "partly", "always"]
+
+
+def hit_spread(graded: Sequence[float]) -> HitSpread:
+    if not graded:
+        return "unmeasured"
+    if all(is_hit(fitness) for fitness in graded):
+        return "always"
+    return "never" if all(fitness <= 0.0 for fitness in graded) else "partly"
 
 
 class CellCandidate(StrictModel):
-    """Who measured a cell — a round's candidate in cycle and campaign scope, an archive run in
-    dataset scope, where no campaign names one. Served in chronological order, which is the order
-    a client lists them in."""
+    """Who measured a cell: a round's candidate or, in dataset scope, a configuration."""
 
     key: str = Field(
         description="What `CellRow.candidate` joins on. Opaque — never parse it; every field it "
         "was built from is served beside it."
     )
-    label: str = Field(description="`C{round}.{n}` in a campaign; the run's name in dataset scope.")
+    label: str = Field(
+        description="`C{round}.{n}` in a campaign; in dataset scope the role the configuration "
+        "was first measured under, and the head of its key."
+    )
     candidate_id: str | None = Field(
         default=None, description="The individual's lineage id. Null in dataset scope."
-    )
-    run_id: str | None = Field(
-        description="The archive run its cells were filed under. Null where the candidate was "
-        "never walked — rejected before it ran — so it holds no cells."
     )
     round: int | None = Field(default=None, description="Null in dataset scope.")
     cycle_id: str | None = Field(default=None, description="Null in dataset scope.")
     live: bool = Field(
         default=False,
-        description="Read off the round still being measured (`dashboard.json`), whose round file "
-        "lands only at its close.",
+        description="No score report has landed for it: its walk is still open, or ended with "
+        "its producer, so its cells are a prefix of the walk.",
     )
     created_at: str | None = Field(
-        default=None, description="When the run was banked — dataset scope only."
+        default=None,
+        description="When the configuration was first measured — dataset scope only.",
     )
 
 
@@ -66,7 +138,7 @@ class CellRow(StrictModel):
     """One cell as a table row — enough to scan, sort by the served order and open."""
 
     sample_id: int
-    run_id: str = Field(description="With `sample_id`, the cell's address. See `CellCandidate`.")
+    answer: str = Field(description="The address of the answer this row read — what opens it.")
     candidate: str = Field(description="`CellCandidate.key` of the candidate that measured it.")
     status: SampleStatus
     fitness: float | None = Field(
@@ -76,7 +148,7 @@ class CellRow(StrictModel):
     predicted: str = Field(default="", description="Trimmed for display.")
     seconds: float | None = Field(
         default=None,
-        description="What producing the cell cost (`recorded_cost_s`) — the half that survives "
+        description="What producing the cell cost (`MeasuredCell.cost_s`) — the half that survives "
         "a cache replay. Null where no timing was recorded.",
     )
     input_tokens: int | None = None
@@ -91,12 +163,12 @@ class CellSpan(StrictModel):
     provider: str | None = None
     input: str | None = Field(
         default=None,
-        description="The prompt this node was sent, RENDERED at read time from the run's own node "
-        "config and this sample — exactly the interpolation the measurement made, so nothing is "
+        description="The prompt this node was sent, RENDERED at read time from the configuration's "
+        "own node config and this sample — exactly the interpolation the measurement made, so nothing is "
         "stored twice. Null on a node configured with no prompt.",
     )
     config: dict[str, Any] = Field(
-        default_factory=dict, description="The node's config for this run, prompt excepted."
+        default_factory=dict, description="The node's config, prompt excepted."
     )
     outputs: dict[str, Any] = Field(
         default_factory=dict,
@@ -106,29 +178,42 @@ class CellSpan(StrictModel):
     input_tokens: int | None = None
     output_tokens: int | None = None
     cache_read_tokens: int | None = None
-    cost_usd: float | None = None
+    cost_usd: float | None = Field(
+        default=None, description="What the node's provider reported it billed. Null where none."
+    )
+    rate_priced_usd: float | None = Field(
+        default=None,
+        description="What our rate table prices the node's tokens where its provider reported no "
+        "bill. Never spent.",
+    )
     estimated: bool = Field(
         default=False, description="Token counts from the chars/4 fallback, not the provider."
     )
 
 
 class Cell(StrictModel):
-    """One cell opened — the detail panel's whole read."""
+    """One answer opened — the detail panel's whole read."""
 
-    run_id: str
-    sample_id: int
+    answer: str
+    sample_id: int = Field(description="Its slot in the dataset that measured it.")
     dataset_name: str | None = None
-    run_name: str = Field(default="", description="The run's own name (its measuring label).")
+    role: str = Field(default="", description="Why the pass that measured it ran.")
     created_at: str | None = None
     prompt_fields_id: str | None = Field(
         default=None, description="The configuration's address (`ScoredCandidate.sp_hash`)."
     )
     query: str
-    ground_truth: str
+    ground_truth: str | None = Field(
+        description="The label the answer was graded against; null where the cell is "
+        "verifier-graded, as `DatasetItem.ground_truth` declares it."
+    )
+    ground_truth_text: str = Field(
+        description="That label as a surface shows it: itself, or the one sentence for a "
+        "verifier-graded cell (`domain/scoring.py::ground_truth_text`)."
+    )
     predicted: str
     status: SampleStatus
     fitness: float | None = None
-    cached: bool = False
     error: str | None = None
     terminal_node: str | None = None
     seconds: float | None = None
@@ -159,42 +244,29 @@ class DatasetItem(StrictModel):
         "an ordering is a score and a locally-sorted one silently answers a different "
         "question in the same slot. Rows measured in this scope rank first; the rest trail.",
     )
-    n_obs: int | None = Field(
-        default=None,
-        description=(
-            "Times this sample has been tried. ``null`` where the row is not in this scope's "
-            "Rasch artifact at all — the same absence its `delta` / `delta_se` / `p_hat` "
-            "neighbours already report, and not a fit that observed it zero times."
-        ),
+    delta_label: str | None = Field(
+        description="What to print in place of the δ where the scope's ruler "
+        "(`CellsResponse.ruler`) holds none for this sample — the ruler is not fitted, or does "
+        "not carry it. The four numbers below are then null, never 0; null where `delta` stands."
     )
     pick_score: float | None = Field(
-        default=None,
-        description=(
-            "Queue-mechanism's blended objective on this sample for a brand-new candidate (prior "
-            "N(0, sigma_theta**2)) vs the best fitted candidate. The live adaptive queue "
-            "mechanism re-evaluates per step. None when unmeasured."
-        ),
+        description="The acquisition score (`adaptive_queue_mechanism.pick_value`) of this sample "
+        "for a new candidate centred on the scope's frontier ability, on the ruler's δ. Null "
+        "off the ruler, and in a scope with no frontier ability (dataset scope)."
     )
     delta: float | None = Field(
-        default=None,
-        description="Rasch difficulty delta_s (higher = harder). None when unmeasured.",
+        description="The ruler's difficulty δ for this sample (higher = harder)."
     )
-    delta_se: float | None = Field(
-        default=None,
-        description="SE of delta_s (large = barely measured). None when unmeasured.",
-    )
+    delta_se: float | None = Field(description="SE of that δ (large = barely measured).")
     p_hat: float | None = Field(
-        default=None,
-        description=(
-            "Marginal hit prob the seed-centred decision-IG reads — see "
-            "``adaptive_queue_mechanism.marginal_hit_probability``. Near 0.5 = contested at seed; "
-            "near 0/1 = predictable. None when unmeasured."
-        ),
+        description="Marginal hit probability of that same new candidate "
+        "(`adaptive_queue_mechanism.marginal_hit_probability`). Near 0.5 = contested at the "
+        "frontier; near 0/1 = predictable. Null wherever `pick_score` is."
     )
     n_measured: int = Field(
         default=0,
-        description="GRADED cells of this sample in scope (errored and unscored cells excluded, as "
-        "the Rasch fit excludes them) — the denominator of the two below.",
+        description="GRADED cells of this sample in scope (errored and unscored cells excluded) "
+        "— the denominator of the two below.",
     )
     n_hits: int = Field(
         default=0,
@@ -204,22 +276,36 @@ class DatasetItem(StrictModel):
     mean_fitness: float | None = Field(
         default=None, description="Mean graded fitness over those cells; null when none."
     )
+    hit_spread: HitSpread = Field(
+        description="How often those cells got the sample right: `never`, `partly` or `always` "
+        "— `unmeasured` where the scope holds no graded cell of it. Served, because the two "
+        "thresholds are the scorer's.",
+    )
 
 
 class CellsResponse(StrictModel):
-    """The measurement log of one scope, in served order: ``samples`` ranked (their
-    ``hard_sample_rank``), ``candidates`` chronological within a cycle, ``cells`` by candidate,
-    then in each candidate's walk order, so the flat list is the run's time series.
-    A client GROUPS these — by sample, by candidate or not at all — by bucketing the served list
-    under a served key order, and never re-sorts: an ordering is a score."""
+    """The measurement log of one scope, in served order.
+
+    Samples are ranked, candidates chronological, cells by candidate then walk order. A client
+    groups the served lists and never re-sorts them: an ordering is a score."""
 
     name: str
     scope: HeatmapScope
     row_count: int
     order: HardSampleOrder = Field(
         description="The key `samples` are ranked by — the request's `order` when it named one, "
-        "else the dataset's `CampaignConfig.hard_sample_order`. Echoed so a client that sent "
-        "no override can label what it is showing without guessing the default.",
+        "else the dataset's `CampaignConfig.hard_sample_order`; `difficulty` wherever the scope "
+        "holds no `pick_score` to rank on. Echoed so a client labels what it is showing.",
+    )
+    ruler: RulerStanding = Field(
+        description="The ONE δ ruler every `delta`, `pick_score` and `p_hat` below is read on: "
+        "the ruler of the cycle `ruler_cycle_id` names in cycle and campaign scope; in dataset "
+        "scope one anchored per request on the dataset's archived cells, which no θ was read on."
+    )
+    ruler_cycle_id: str | None = Field(
+        description="The cycle this scope reads, whose ruler `ruler` is and whose walks `cells` "
+        "are: the requested cycle in cycle scope, the one campaign scope names "
+        "(`application/scoring/cells.py::campaign_scope_cycle`). Null in dataset scope."
     )
     samples: list[DatasetItem]
     candidates: list[CellCandidate]
@@ -232,3 +318,6 @@ class CellsResponse(StrictModel):
     mean_fitness: float | None = Field(
         description="Mean graded fitness across those cells; null when the scope holds none."
     )
+    never_hit: int = Field(description="`samples` whose `hit_spread` is `never`.")
+    partly_hit: int = Field(description="`samples` whose `hit_spread` is `partly`.")
+    always_hit: int = Field(description="`samples` whose `hit_spread` is `always`.")

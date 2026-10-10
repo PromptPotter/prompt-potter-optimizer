@@ -1,8 +1,3 @@
-"""The SHAPE of a ``pipeline_params`` dict — one declared answer to "is this key a node config?",
-and the three readers that need it. Every consumer of the tunable surface walks it through
-``node_config_items``; re-deriving ``k == "steps" and isinstance(v, dict)`` at a call site is how
-two sites came to disagree about what a node config is."""
-
 from __future__ import annotations
 
 import copy
@@ -37,21 +32,14 @@ __all__ = [
 ]
 
 
+# The `pipeline_params` keys that are NOT node-config dicts: `steps` is the wire scaffold.
 RESERVED_PIPELINE_PARAM_KEYS: Annotated[frozenset[str], shapes_optimizer_prompt] = frozenset(
     {"steps"}
 )
-"""Keys in ``pipeline_params`` that are NOT node-config dicts. ``steps`` is the
-wire scaffold (the active-node list every connector's outbound payload reads);
-everything else is a ``{node: {param: value}}`` config block. The single source
-of truth for the "is this a node config or reserved?" question — read this or
-``node_config_items`` instead of re-deriving ``k == "steps" and isinstance(...)``
-at each site."""
 
 
 @shapes_optimizer_prompt
 def node_config_items(pp: dict[str, Any] | None) -> Iterator[tuple[str, dict[str, Any]]]:
-    """The canonical walk over a ``pipeline_params`` dict's tunable surface — skips the reserved
-    wire keys and any non-dict value."""
     for k, v in (pp or {}).items():
         if k in RESERVED_PIPELINE_PARAM_KEYS or not isinstance(v, dict):
             continue
@@ -59,12 +47,7 @@ def node_config_items(pp: dict[str, Any] | None) -> Iterator[tuple[str, dict[str
 
 
 def overlay_is_locked_axis_only(overlay: dict[str, Any] | None) -> bool:
-    """A steer touching only WHO ANSWERS leaves the origin unchanged in every other respect, so the
-    fork INHERITS the done C0 instead of re-scoring it. Gates the inherit path, not the taint.
-
-    Reads :data:`WHO_ANSWERS_KEYS`, not the forbidden subset — ``model`` is a searchable axis, so
-    the narrower set misses the model-only steer, which re-asks one question of a different
-    responder and is exactly the case this inherit exists for."""
+    """Gates the C0 inherit. :data:`WHO_ANSWERS_KEYS`, not the forbidden subset, which misses a model-only steer."""
     keys = [k for _node, cfg in node_config_items(overlay) for k in cfg]
     return bool(keys) and all(k in WHO_ANSWERS_KEYS for k in keys)
 
@@ -72,9 +55,7 @@ def overlay_is_locked_axis_only(overlay: dict[str, Any] | None) -> bool:
 def allowed_values_from_narrowing(
     narrowing: Mapping[str, object] | None,
 ) -> dict[str, dict[str, list[str]]]:
-    """What a frozen ``config.optimizer_narrowing`` DECLARES, per node and per param. The ONE
-    shape-read of it: a block is a :class:`NodeSearchNarrowing` in memory and a plain dict off
-    disk, so a caller spelling that itself sees one of the two and nothing in the other."""
+    """A block is a :class:`NodeSearchNarrowing` in memory and a plain dict off disk; this reads both."""
     out: dict[str, dict[str, list[str]]] = {}
     for node, block in (narrowing or {}).items():
         values = getattr(block, "param_allowed_values", None)
@@ -92,8 +73,6 @@ def allowed_values_from_narrowing(
 def permitted_models_from_narrowing(
     narrowing: Mapping[str, object] | None,
 ) -> dict[str, list[str]]:
-    """The per-node permitted model set, so the fork gate, the runner and the CLI cannot disagree
-    about which models a branch sanctions."""
     return {
         node: values["model"]
         for node, values in allowed_values_from_narrowing(narrowing).items()
@@ -104,13 +83,7 @@ def permitted_models_from_narrowing(
 def overlay_sets_model_outside_allowed(
     overlay: dict[str, Any] | None, permitted: Mapping[str, Sequence[str]] | None
 ) -> bool:
-    """The ADR-0005 babysit trigger: does this steer pick a responder the origin never sanctioned?
-
-    *permitted* is per NODE — the node's own ``param_allowed_values["model"]``. A node absent from
-    it sanctions nothing, the restrictive default. A cost lever (`PARAM_FORBIDDEN_KEYS` — the
-    gateway and the route) has no permitted set that could sanction it, so an edit to one always
-    counts. The SET, not one member of it: naming ``provider`` alone left ``route_order`` locked in
-    the browser and free on the wire."""
+    """The ADR-0005 babysit trigger. A node absent from *permitted* sanctions nothing; a cost lever always counts."""
     for node, cfg in node_config_items(overlay):
         if cfg.keys() & PARAM_FORBIDDEN_KEYS:
             return True
@@ -123,62 +96,46 @@ def overlay_sets_model_outside_allowed(
 def permitted_models_for_campaign(
     campaign_config: Mapping[str, Any] | None,
 ) -> dict[str, list[str]]:
-    """Which responders THIS CAMPAIGN sanctions, per node — where the babysit verdict's own
-    comparison set comes from. One hop above :func:`permitted_models_from_narrowing`, which reads a
-    narrowing block already in hand; this knows where in the frozen manifest that block lives."""
     return permitted_models_from_narrowing((campaign_config or {}).get("optimizer_narrowing"))
 
 
 def steers_disallowed_model(
     campaign_config: Mapping[str, Any] | None, overlay: dict[str, Any] | None
 ) -> bool:
-    """The babysit verdict a fork draws, from the campaign manifest the gate reads it off.
-
-    The two steps below are one question, and splitting them is what let the browser answer it
-    against a different list than ``fork-cycle`` dispatch did — so a surface NAMING that list must
-    serve :func:`permitted_models_for_campaign`, never re-derive one beside the verdict."""
+    """A surface NAMING the permitted list serves :func:`permitted_models_for_campaign`, never its own."""
     return overlay_sets_model_outside_allowed(
         overlay, permitted_models_for_campaign(campaign_config)
     )
 
 
-def fold_output_contract(pp: dict[str, Any] | None, schema: PipelineSchema) -> None:
-    """Resolve the two structured-output levers onto the wire config: whether the node uses its
-    schema at all, and what its `description` prose says.
-
-    *schema* is REQUIRED — a node declaring its schema by registry identity carries none to write
-    on, and without it two opposite steers produced a byte-identical payload whose hashes collided.
-
-    The toggle is read, never WRITTEN: an unmoved node keeps a byte-identical payload, so every
-    banked measurement stays addressed by the hash it was measured under, and only a candidate
-    that actually chose ``text`` pays for a new one."""
+def fold_output_contract(pp: dict[str, Any] | None, schema: PipelineSchema) -> dict[str, Any]:
+    """The toggle is read, never WRITTEN: an unmoved node keeps a byte-identical payload, and so its banked hash."""
+    out = dict(pp or {})
     for node, cfg in node_config_items(pp):
         descriptions = {
-            path: cfg.pop(key) for key in list(cfg) if (path := description_path(key)) is not None
+            path: text for key, text in cfg.items() if (path := description_path(key)) is not None
         }
-        if cfg.get(SCHEMA_TOGGLE_PARAM) == ANSWER_AS_TEXT:
-            # BOTH keys go, not just the schema: a backend destructuring `answer_field` out of a
-            # response that never had the slot reads "" for every sample and grades the run
-            # NO_RESULT. The descriptions were popped above, so the fold below cannot resolve a
-            # registry schema back onto a node that just said it wants none.
-            for key in OUTPUT_CONTRACT_KEYS:
-                cfg.pop(key, None)
+        folded = {key: value for key, value in cfg.items() if description_path(key) is None}
+        if folded.get(SCHEMA_TOGGLE_PARAM) == ANSWER_AS_TEXT:
+            # BOTH keys go: `answer_field` read off a slotless response is "" on every sample (NO_RESULT).
+            out[node] = {k: v for k, v in folded.items() if k not in OUTPUT_CONTRACT_KEYS}
             continue
+        out[node] = folded
         if not descriptions:
             continue
-        out_schema = cfg.get("output_schema")
-        if not isinstance(out_schema, dict):
+        declared = folded.get("output_schema")
+        if not isinstance(declared, dict):
             resolved = schema.get_node(node)
-            out_schema = (
-                copy.deepcopy(resolved.output_schema.json_schema)
-                if resolved and resolved.output_schema
-                else None
+            declared = (
+                resolved.output_schema.json_schema if resolved and resolved.output_schema else None
             )
-            if not isinstance(out_schema, dict) or not out_schema:
+            if not isinstance(declared, dict) or not declared:
                 continue
-            cfg["output_schema"] = out_schema
-        # Written in place: both callers fold a deep copy, never the params they were handed.
+        # A copy: the declared schema is the node's or the registry's.
+        out_schema = copy.deepcopy(declared)
+        folded["output_schema"] = out_schema
         for path, text in descriptions.items():
             field = described_field(out_schema, path)
             if field is not None and isinstance(text, str) and text.strip():
                 field["description"] = text
+    return out
