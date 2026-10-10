@@ -1,14 +1,11 @@
 "use client";
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import type { ObserveState } from "@/lib/derivations";
 import type { SelectedCandidate } from "@/lib/types";
-
-// The dashboard's INSPECTION axes: candidate, round (null = follow live), node and sampleSet.
-// A candidate implies its round, so the pair is written only through the helpers below.
 
 export type { SelectedCandidate };
 
-// A node id alone is ambiguous: the `promptpotter-self` TARGET pipeline declares node ids
-// byte-identical to the OPTIMIZER's own, so the writer records the canvas it was clicked on.
+// A node id alone is ambiguous: `promptpotter-self`'s TARGET pipeline reuses the OPTIMIZER's node ids.
 export type NodeScope = "optimizer" | "target";
 
 export interface SelectedNode {
@@ -18,11 +15,15 @@ export interface SelectedNode {
 
 interface Ctx {
   candidate: SelectedCandidate | null;
+  // null follows live.
   round: number | null;
   node: SelectedNode | null;
+  // `null` is no pick (the served set); `[]` is the picker open with nothing selected.
   sampleSet: number[] | null;
+  // `null` follows `resolveObserveSubject`'s own rule.
+  observe: ObserveState | null;
+  setObserve: (s: ObserveState) => void;
   setSelectionForCandidate: (c: SelectedCandidate | null) => void;
-  // Clears a candidate whose round differs.
   setSelectionForRound: (r: number | null) => void;
   setSelectionForNode: (n: SelectedNode | null) => void;
   setSelectionForSampleSet: (ids: number[] | null) => void;
@@ -30,7 +31,6 @@ interface Ctx {
 
 const SelectionCtx = createContext<Ctx | null>(null);
 
-// Keyed on the VIEWED LEAF hop, the cycle the inspector, samples panes and round file re-root to.
 export function SelectionProvider({
   cycleId,
   children,
@@ -42,29 +42,31 @@ export function SelectionProvider({
   const [round, setRound] = useState<number | null>(null);
   const [node, setNode] = useState<SelectedNode | null>(null);
   const [sampleSet, setSampleSet] = useState<number[] | null>(null);
+  const [observe, setObserve] = useState<ObserveState | null>(null);
   const [prevCycle, setPrevCycle] = useState(cycleId);
   if (cycleId !== prevCycle) {
     setPrevCycle(cycleId);
-    // A candidate survives only if it NAMES the incoming cycle — the cross-cycle click (a sidebar
-    // candidate row, an off-lane forest node) — and its round goes with it.
+    // A candidate naming the incoming cycle is the cross-cycle click that caused the switch.
     const kept = candidate && candidate.cycle_id === cycleId ? candidate : null;
     setCandidate(kept);
     setRound(kept ? kept.round : null);
     setNode(null);
     setSampleSet(null);
+    setObserve(null);
   }
 
   const setSelectionForCandidate = useCallback(
     (c: SelectedCandidate | null) => {
       setCandidate(c);
       setRound(c ? c.round : null);
+      setObserve(null);
     },
     [],
   );
 
   const setSelectionForRound = useCallback((r: number | null) => {
     setRound(r);
-    // r=null (follow live) leaves a still-relevant candidate alone.
+    setObserve(null);
     if (r != null) {
       setCandidate((prev) => (prev && prev.round !== r ? null : prev));
     }
@@ -75,7 +77,6 @@ export function SelectionProvider({
   }, []);
 
   const setSelectionForSampleSet = useCallback((ids: number[] | null) => {
-    // `null` = no pick (the served set); `[]` is distinct — the picker open with nothing selected.
     setSampleSet(ids);
   }, []);
 
@@ -85,6 +86,8 @@ export function SelectionProvider({
       round,
       node,
       sampleSet,
+      observe,
+      setObserve,
       setSelectionForCandidate,
       setSelectionForRound,
       setSelectionForNode,
@@ -95,6 +98,7 @@ export function SelectionProvider({
       round,
       node,
       sampleSet,
+      observe,
       setSelectionForCandidate,
       setSelectionForRound,
       setSelectionForNode,

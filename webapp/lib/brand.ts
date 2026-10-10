@@ -1,6 +1,4 @@
-// Single source of brand identity, each field `NEXT_PUBLIC_*`-overridable. Next inlines those
-// only on LITERAL member access — never a dynamic lookup helper.
-
+// Next inlines `NEXT_PUBLIC_*` only on LITERAL member access — never a dynamic lookup helper.
 export const BRAND = {
   name: process.env.NEXT_PUBLIC_BRAND_NAME || "PromptPotter Live Unit",
   shortName: process.env.NEXT_PUBLIC_BRAND_SHORT_NAME || "PromptPotter",
@@ -18,8 +16,7 @@ export const BRAND = {
     name: "PromptPotter",
     url: "https://promptpotter.com",
   },
-  // `??`, not `||`: an explicit empty string drops the login "visit our website" card, so a
-  // whitelabel host never funnels its users upstream.
+  // `??`, not `||`: an explicit empty string drops the login "visit our website" card.
   marketing: {
     url: process.env.NEXT_PUBLIC_MARKETING_URL ?? "https://promptpotter.com",
     title: process.env.NEXT_PUBLIC_MARKETING_TITLE || "PromptPotter",
@@ -42,12 +39,10 @@ export const BRAND = {
   // Mirrors the dark ground in `foundation/tokens.css` and layout's themeColor.
   themeColor: "#181818",
   backgroundColor: "#181818",
-  // The About pane must never show a "verified" affordance while this says `self-declared`.
   verification: "self-declared" as "self-declared" | "verified",
 } as const;
 
-// One builder for the <head> JSON-LD and the About pane's "View provenance". No softwareVersion:
-// the version is live from /health.
+// No softwareVersion: the version is live from /health.
 interface SoftwareApplicationLd {
   "@context": "https://schema.org";
   "@type": "SoftwareApplication";

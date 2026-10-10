@@ -1,5 +1,4 @@
-// The incident ring: each failure keyed by the `error_id` the API stamps, which greps the server
-// log. Ids, codes, URLs and counts only — never measurements, prompt text or payloads.
+// Ids, codes, URLs and counts only — never measurements, prompt text or payloads.
 
 import { useSyncExternalStore } from "react";
 import { ApiError, failureKind, type FailureKind } from "@/lib/api";
@@ -19,7 +18,6 @@ export interface Incident {
   count: number;
   /** Null if the server never answered. */
   errorId: string | null;
-  /** The `ErrorEnvelope` code (closed enum, api-openapi.yaml). */
   code: string | null;
   kind: FailureKind;
   status: number | null;
@@ -145,8 +143,7 @@ export function useIncidents(): Ring {
   return useSyncExternalStore(subscribeIncidents, getIncidents, emptyIncidents);
 }
 
-// Stable in shape. Never ship it anywhere from here: ADR-0004 keeps privileged outbound work
-// out of the app.
+// Never ship it anywhere from here: ADR-0004 keeps privileged outbound work out of the app.
 export function formatDiagnostics(opts: { version: string | null }): string {
   const ring = getIncidents();
   const lines = [

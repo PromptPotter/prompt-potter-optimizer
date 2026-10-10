@@ -1,5 +1,4 @@
 "use client";
-// The one localStorage-backed state hook, synced within the tab and across tabs.
 
 import { useCallback, useRef, useSyncExternalStore } from "react";
 

@@ -1,9 +1,4 @@
-// The terms a composite fitness prices a cell on, as served means over one point's own cells
-// (`SubjectReading.cell_means`). ONE table, so every surface naming a mean words and formats it
-// alike. Indexed through a guard by its readers: a channel no cell carries is absent.
-//
-// ORDER is the reading order: the two `lead` rows are what an operator checks first on a new
-// leader — a prompt that got shorter, and a cell that got faster.
+// served: `SubjectReading.cell_means`; a channel no cell carries is absent.
 
 import { fmtMetricValue } from "@/lib/format";
 

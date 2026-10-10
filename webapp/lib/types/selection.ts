@@ -3,13 +3,11 @@ export interface SelectedCandidate {
   cycle_id: string;
   round: number;
   candidate_id: string;
-  // A downstream JOIN KEY: the MINTING course's label, which that course's round document speaks —
-  // not a fork-contributed attempt's renumbered one.
+  // A join key: the MINTING course's label, not a fork-contributed attempt's renumbered one.
   label: string;
 }
 
-// The one selection mint. Ids and a label only, never a measurement: a selection outlives the poll
-// it was picked on, and a number carried here would go stale beside the served row.
+// Ids and a label only, never a measurement: a selection outlives the poll it was picked on.
 export function selectedCandidateOf(
   cycleId: string,
   round: number,

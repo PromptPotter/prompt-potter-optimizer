@@ -1,5 +1,3 @@
-// Theme resolution for JS-painted surfaces: a <canvas> cannot resolve var(...), so it reads :root.
-
 import { useSyncExternalStore } from "react";
 import {
   Chart as ChartJS,
@@ -34,12 +32,26 @@ export function ensureChartRegistered(): void {
   registered = true;
 }
 
-// `animation: false`: the dashboard polls every 2 s, so a tween would re-animate every bar per poll.
-
+// `animation: false`: a tween would re-animate every bar on each poll.
 export function lineChartDefaults(
   over?: Partial<ChartOptions<"line">>,
 ): ChartOptions<"line"> {
   return { responsive: true, maintainAspectRatio: false, animation: false, ...over };
+}
+
+export function lineLook(ink: string, dashed = false) {
+  return {
+    borderColor: ink,
+    backgroundColor: ink,
+    borderWidth: 1.5,
+    tension: 0.3,
+    pointRadius: 2,
+    ...(dashed ? { borderDash: [4, 3] } : {}),
+  };
+}
+
+export function lineMotion(reducedMotion: boolean) {
+  return reducedMotion ? (false as const) : { duration: 1000, easing: "easeOutQuart" as const };
 }
 
 export function barChartDefaults(
@@ -53,20 +65,17 @@ export function getCss(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
 
-// Every categorical chart reads `--chart-series-1..8` (tokens.css) through here; never a local copy.
+// `--chart-series-1..8` in `foundation/tokens.css`.
 const SERIES_SLOTS = 8;
 
 function seriesToken(index: number): string {
   return `--chart-series-${(index % SERIES_SLOTS) + 1}`;
 }
 
-// Resolved, for a `<canvas>` only — re-read it on a theme flip (`useThemeVersion`).
 export function seriesColor(index: number): string {
   return getCss(seriesToken(index));
 }
 
-// For inline SVG and `style={{}}`, which repaint on a theme flip with no re-render; a swatch
-// built from `seriesColor` freezes at the theme of its last render.
 export function seriesVar(index: number): string {
   return `var(${seriesToken(index)})`;
 }

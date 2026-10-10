@@ -1,7 +1,6 @@
 import type { DraftCampaignWire } from "@/lib/api";
 
-// `draft_id` IS the check-in campaign's id, but the ingest thread holding the draft is app-wide —
-// so a draft must never render over another selected campaign.
+// The ingest thread holding the draft is app-wide, so a draft must not render over another campaign.
 export function draftForCampaign(
   draft: DraftCampaignWire | null | undefined,
   campaignId: string | null | undefined,

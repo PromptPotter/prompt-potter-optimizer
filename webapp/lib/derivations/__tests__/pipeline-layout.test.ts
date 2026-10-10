@@ -15,8 +15,6 @@ const edge = (
   kind: PipelineViewEdge["kind"] = "forward",
 ): PipelineViewEdge => ({ from, to, kind });
 
-// The optimizer's shape: a three-step round that repeats, a check-in that runs once ahead
-// of it, and two alternatives reached only by leaving the round.
 const OPT_NODES = [
   node("checkin", 0, 0),
   node("l1_generate", 0, 1),
@@ -80,7 +78,6 @@ describe("layoutGrid", () => {
     expect([...out.pos.keys()].sort()).toEqual(OPT_NODES.map((n) => n.id).sort());
   });
 
-  // The arrangement, spelled out: across the top, fold, back along the bottom.
   it("lays the optimizer out as two rows of three, serpentine", () => {
     expect(out.cols).toBe(3);
     expect(out.rows).toBe(2);
@@ -94,10 +91,8 @@ describe("layoutGrid", () => {
   });
 
   it("puts the fold under the step it follows — no edge crosses the diagram", () => {
-    // `l1_score → l1_critique` is the fold: same column, one row down.
     expect(at("l1_score").col).toBe(at("l1_critique").col);
     expect(at("l1_critique").row).toBe(at("l1_score").row + 1);
-    // and the directive back up sits in its own column, one row apart.
     expect(at("l2_context").col).toBe(at("l1_generate").col);
   });
 

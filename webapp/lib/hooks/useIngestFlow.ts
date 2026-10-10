@@ -21,22 +21,11 @@ import {
   type OriginEntry,
   type OriginLastResolution,
   type RaisedCommand,
-  type StartCheckinLimits,
+  type StartCheckinOptions,
 } from "@/lib/api";
 import { plainLanguageRecap } from "@/lib/origin-readiness";
-import type { RunSummary } from "@/lib/derivations";
-// `start-checkin` returns the (campaign, cycle) synchronously, so the caller can select it at once.
+import { useThread, type MessageTone } from "@/lib/chat/thread";
 type OnMinted = (selection: { campaignId: string; cycleId: string }) => void;
-
-type ChatMsg =
-  | { id: string; kind: "user-file"; name: string; rows: number | null }
-  | { id: string; kind: "user"; text: string }
-  | { id: string; kind: "ai"; text: string }
-  | { id: string; kind: "warning"; text: string }
-  | { id: string; kind: "error"; text: string }
-  // Captured VALUES, never a pointer into `dashboard.json`: `resume` re-animates that file, so a
-  // pointer would restate itself as the next run.
-  | { id: string; kind: "run"; summary: RunSummary };
 
 type IngestPhase =
   | { stage: "idle" }
@@ -60,18 +49,15 @@ type IngestPhase =
     };
 
 export interface IngestFlow {
-  messages: ChatMsg[];
   phase: IngestPhase;
   inputText: string;
   setInputText: (v: string) => void;
   busy: boolean;
-  // NOT folded into `busy` and disables nothing: disabling Start here eats the tap whose
-  // mousedown blurred the field; `startFromReady` awaits the in-flight writes instead.
+  // Never folded into `busy`: disabling Start eats the tap whose mousedown blurred the field.
   saving: boolean;
   awaitingContext: boolean;
   onDatasetFile: (file: File) => void;
   pickDataset: (entry: DatasetIndexEntry) => void;
-  // No check-in call: an origin is already a runnable starting point.
   openOrigin: (entry: OriginEntry) => void;
   reopenCheckin: (campaignId: string) => void;
   submitContext: () => void;
@@ -79,28 +65,21 @@ export interface IngestFlow {
   uploadCandidateLibrary: (file: File) => void;
   buildCandidateLibraryFromColumn: (column: string) => void;
   rerunCheckin: () => void;
-  // The limits are the caller's, not draft state: nothing persists them, so a reopened check-in
-  // must not appear to hold a budget nobody re-entered.
-  startFromReady: (limits: StartCheckinLimits) => void;
+  startFromReady: (limits: StartCheckinOptions) => void;
   useExistingFromCollision: () => void;
   saveAsNew: () => void;
   replaceExisting: () => void;
   cancelCollision: () => void;
-  pushRunSummary: (summary: RunSummary) => void;
   reset: () => void;
 }
 
-const uid = () => crypto.randomUUID();
-
-// The single dataset → origin → campaign state machine. Instantiate it ONCE, in
-// `lib/ingest-flow.tsx`; every surface reads that provider.
+// Instantiate ONCE, in `lib/ingest-flow.tsx`.
 export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
-  const [messages, setMessages] = useState<ChatMsg[]>([]);
+  const thread = useThread();
   const [phase, setPhase] = useState<IngestPhase>({ stage: "idle" });
   const [inputText, setInputText] = useState("");
   const [minting, setMinting] = useState(false);
-  // Counter, not a boolean: overlapping patches are the designed case, so the first to land
-  // must not clear the flag under a sibling.
+  // A counter, not a boolean: the first overlapping patch to land must not clear a sibling's flag.
   const [pendingPatches, setPendingPatches] = useState(0);
   const pendingDraftWrites = useRef<Set<Promise<unknown>>>(new Set());
 
@@ -108,19 +87,15 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
     phase.stage === "uploading" || phase.stage === "checkin" || minting;
   const awaitingContext = phase.stage === "awaiting-context";
 
-  const pushAi = (text: string) =>
-    setMessages((m) => [...m, { id: uid(), kind: "ai", text }]);
-  const pushWarning = (text: string) =>
-    setMessages((m) => [...m, { id: uid(), kind: "warning", text }]);
+  const say = (text: string, tone: MessageTone = "plain") =>
+    thread.append({ kind: "message", role: "assistant", tone, text });
+  const sayError = (e: unknown) => say(operatorMessage(e, failureKind(e)), "error");
+  const echo = (text: string) =>
+    thread.append({ kind: "message", role: "user", tone: "plain", text });
 
   // Functional update, so overlapping patches cannot write a stale snapshot back.
   const commitDraftUpdate = (updated: DraftCampaignWire) =>
     setPhase((p) => (p.stage === "ready" ? { ...p, draft: updated } : p));
-  const pushError = (e: unknown) =>
-    setMessages((m) => [
-      ...m,
-      { id: uid(), kind: "error", text: operatorMessage(e, failureKind(e)) },
-    ]);
 
   const runCheckin = async (draft: DraftCampaignWire) => {
     setPhase({ stage: "checkin", model: "the check-in model" });
@@ -132,16 +107,16 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
     try {
       const r = await postResolveOrigin(draft.draft_id);
       resolved = r.draft;
-      resolution = r.resolution.last_resolution ?? null;
-      raised = r.resolution.raised ?? [];
-      degradedCause = r.resolution.degraded_cause ?? null;
+      resolution = r.resolution.last_resolution;
+      raised = r.resolution.raised;
+      degradedCause = r.resolution.degraded_cause;
       recap = resolution?.recap || resolution?.assessment || plainLanguageRecap(resolved);
     } catch (e) {
       recap = plainLanguageRecap(resolved);
-      pushError(e);
+      sayError(e);
     }
-    if (degradedCause) pushWarning(degradedCause);
-    pushAi(recap);
+    if (degradedCause) say(degradedCause, "warning");
+    say(recap);
     // Even a complete draft lands in review: a launch spends money, so no path here mints.
     setPhase({ stage: "ready", draft: resolved, resolution, raised, degradedCause });
   };
@@ -149,12 +124,12 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
   const advance = (draft: DraftCampaignWire) => {
     if (draft.raw_task_description.trim()) {
       setInputText("");
-      pushAi(`Parsed ${draft.n_samples} rows — task already on file. Checking the setup…`);
+      say(`Parsed ${draft.n_samples} rows — task already on file. Checking the setup…`);
       void runCheckin(draft);
       return;
     }
     setInputText("");
-    pushAi(
+    say(
       `Parsed ${draft.n_samples} rows. Describe the task — what should the model do with each row? The more you give me, the better I set up the prompt and pipeline. Send when ready.`,
     );
     setPhase({ stage: "awaiting-context", draft });
@@ -163,16 +138,14 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
   const ingestAndResolve = async (file: File, slug?: string, chipId?: string) => {
     // A refused drop must SAY so, or the previous campaign's draft reads as this file's.
     if (busy) {
-      pushWarning(
+      say(
         `“${file.name}” wasn’t picked up — the previous step was still loading. ` +
           `Nothing on screen is from this file; drop it again.`,
+        "warning",
       );
       return;
     }
-    const id = chipId ?? uid();
-    if (!chipId) {
-      setMessages((m) => [...m, { id, kind: "user-file", name: file.name, rows: null }]);
-    }
+    const id = chipId ?? thread.append({ kind: "file", name: file.name, detail: null });
     setPhase({ stage: "uploading" });
     let draft: DraftCampaignWire;
     try {
@@ -194,27 +167,23 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
         return;
       }
       setPhase({ stage: "idle" });
-      pushError(e);
+      sayError(e);
       return;
     }
-    setMessages((m) =>
-      m.map((msg) =>
-        msg.id === id && msg.kind === "user-file" ? { ...msg, rows: draft.n_samples } : msg,
-      ),
-    );
+    thread.setFileDetail(id, `${draft.n_samples} rows`);
     advance(draft);
   };
 
   const draftFrom = async (name: string, label: string) => {
     if (busy) return;
-    setMessages((m) => [...m, { id: uid(), kind: "user", text: label }]);
+    echo(label);
     setPhase({ stage: "uploading" });
     let draft: DraftCampaignWire;
     try {
       draft = await postDraftFromDataset(name);
     } catch (e) {
       setPhase({ stage: "idle" });
-      pushError(e);
+      sayError(e);
       return;
     }
     advance(draft);
@@ -226,10 +195,7 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
   // A prepared origin IS its dataset's current config, so the dataset-draft path reproduces it.
   const openOrigin = async (entry: OriginEntry) => {
     if (busy) return;
-    setMessages((m) => [
-      ...m,
-      { id: uid(), kind: "user", text: `Reuse origin “${entry.label || entry.dataset_name}”` },
-    ]);
+    echo(`Reuse origin “${entry.label || entry.dataset_name}”`);
     setPhase({ stage: "uploading" });
     let draft: DraftCampaignWire;
     try {
@@ -238,33 +204,32 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
         : await postDraftFromOrigin(entry.origin_id);
     } catch (e) {
       setPhase({ stage: "idle" });
-      pushError(e);
+      sayError(e);
       return;
     }
-    pushAi("Opened the origin — edit anything below, then Start.");
+    say("Opened the origin — edit anything below, then Start.");
     setPhase({ stage: "ready", draft, resolution: null, raised: [], degradedCause: null });
   };
 
-  // Only an unauthored draft re-runs the resolver: on an authored one it would re-propose the
-  // prompt fields over the operator's edits.
+  // Only an unauthored draft re-runs the resolver: it would re-propose over the operator's edits.
   const reopenCheckin = async (campaignId: string) => {
-    setMessages([]);
+    thread.clear();
     setPhase({ stage: "uploading" });
     let res;
     try {
       res = await getCampaignCheckin(campaignId);
     } catch (e) {
       setPhase({ stage: "idle" });
-      pushError(e);
+      sayError(e);
       return;
     }
     const draft = res.draft;
     if (Object.keys(draft.origin_prompt_fields).length === 0) {
-      pushAi("Reopened your check-in — picking up where the setup left off.");
+      say("Reopened your check-in — picking up where the setup left off.");
       advance(draft);
       return;
     }
-    pushAi("Reopened your check-in — finish the setup below, then Start.");
+    say("Reopened your check-in — finish the setup below, then Start.");
     setPhase({
       stage: "ready",
       draft,
@@ -280,20 +245,19 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
     if (!text) return;
     const draft = phase.draft;
     setInputText("");
-    setMessages((m) => [...m, { id: uid(), kind: "user", text }]);
+    echo(text);
     let updated = draft;
     try {
       updated = await postEditDraftCampaign(draft.draft_id, { raw_task_description: text });
     } catch (e) {
-      pushError(e);
+      sayError(e);
       setPhase({ stage: "awaiting-context", draft });
       return;
     }
     await runCheckin(updated);
   };
 
-  // THE seam for every ready-draft write: a mutator posting on its own escapes the await in
-  // `startFromReady`, and the mint races the patch.
+  // Every ready-draft write rides this: one posting on its own escapes `startFromReady`'s await.
   const mutateDraft = async (
     send: () => Promise<DraftCampaignWire>,
   ): Promise<DraftCampaignWire | null> => {
@@ -305,7 +269,7 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
       commitDraftUpdate(updated);
       return updated;
     } catch (e) {
-      pushError(e);
+      sayError(e);
       return null;
     } finally {
       pendingDraftWrites.current.delete(write);
@@ -318,13 +282,12 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
     void mutateDraft(() => postEditDraftCampaign(phase.draft.draft_id, patch));
   };
 
-  // Never gates mint: the answers are already a runnable pool.
   const uploadCandidateLibrary = async (file: File) => {
     if (phase.stage !== "ready" || busy) return;
     const updated = await mutateDraft(() =>
       postUploadCandidateLibrary(phase.draft.draft_id, file),
     );
-    if (updated) pushAi(`Candidate library attached — ${updated.candidate_library_size} targets.`);
+    if (updated) say(`Candidate library attached — ${updated.candidate_library_size} targets.`);
   };
 
   const buildCandidateLibraryFromColumn = async (column: string) => {
@@ -333,7 +296,7 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
       postBuildCandidateLibraryFromColumn(phase.draft.draft_id, column),
     );
     if (updated)
-      pushAi(`Candidate library built from “${column}” — ${updated.candidate_library_size} targets.`);
+      say(`Candidate library built from “${column}” — ${updated.candidate_library_size} targets.`);
   };
 
   const rerunCheckin = () => {
@@ -341,7 +304,7 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
     void runCheckin(phase.draft);
   };
 
-  const startFromReady = async (limits: StartCheckinLimits) => {
+  const startFromReady = async (limits: StartCheckinOptions) => {
     if (phase.stage !== "ready" || !phase.draft.readiness.complete) return;
     setMinting(true);
     try {
@@ -350,11 +313,11 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
         await Promise.allSettled([...pendingDraftWrites.current]);
       }
       const r = await postStartCheckin(phase.draft.draft_id, limits);
-      pushAi("Campaign started.");
+      say("Campaign started.");
       setPhase({ stage: "idle" });
       onMint({ campaignId: r.campaign_id, cycleId: r.cycle_id });
     } catch (e) {
-      pushError(e);
+      sayError(e);
     } finally {
       setMinting(false);
     }
@@ -370,7 +333,6 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
     void ingestAndResolve(phase.file, phase.suggestedSlug, phase.chipId);
   };
 
-  // Data-safe: the server keeps the old data and every prior campaign under `{slug}-vN`.
   const replaceExisting = async () => {
     if (phase.stage !== "collision") return;
     const { file, existingSlug, chipId } = phase;
@@ -379,7 +341,7 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
       await postReplaceDataset(existingSlug);
     } catch (e) {
       setPhase({ stage: "idle" });
-      pushError(e);
+      sayError(e);
       return;
     }
     await ingestAndResolve(file, existingSlug, chipId);
@@ -387,22 +349,13 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
 
   const cancelCollision = () => setPhase({ stage: "idle" });
 
-  // Idempotent per cycle: a live→stopped edge can be observed twice (a re-mount, a switch back).
-  const pushRunSummary = (summary: RunSummary) =>
-    setMessages((m) =>
-      m.some((x) => x.kind === "run" && x.summary.cycleId === summary.cycleId)
-        ? m
-        : [...m, { id: uid(), kind: "run", summary }],
-    );
-
   const reset = () => {
     setInputText("");
-    setMessages([]);
+    thread.clear();
     setPhase({ stage: "idle" });
   };
 
   return {
-    messages,
     phase,
     inputText,
     setInputText,
@@ -423,7 +376,6 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
     saveAsNew,
     replaceExisting: () => void replaceExisting(),
     cancelCollision,
-    pushRunSummary,
     reset,
   };
 }

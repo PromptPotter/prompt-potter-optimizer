@@ -1,5 +1,4 @@
-// `null` = none of mine: blank and out-of-range both DROP the key, since the account allowance
-// still binds and a fork inherits its parent.
+// Blank and out-of-range both DROP the key (`null`): the account allowance still binds.
 export function parseCap(
   raw: string,
   { int = false, min = 0, max = Number.POSITIVE_INFINITY } = {},

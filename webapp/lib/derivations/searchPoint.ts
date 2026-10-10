@@ -1,28 +1,30 @@
-// Selects which searchpoint's served `resolved_pipeline_params` the read-only observe view shows;
-// never re-merges. The origin is a round-0 candidate, not a third state.
-
-import { liveCandidate, liveCandidates, type DashboardSnapshot } from "@/lib/poll";
+import { liveCandidate, liveCandidates, roundOf, type DashboardSnapshot } from "@/lib/poll";
 import { PROMPT_STRING_FIELDS } from "@/lib/prompt-fields";
-import type { LiveCandidate } from "@/lib/api/types";
-import type { ElectedRow, RoundResult, SampleRow } from "@/lib/types";
-import { roundHasCandidates } from "./round-candidates";
+import type { ArmNode, ArmReading, LiveCandidate } from "@/lib/api/types";
+import type { ArmRow, RoundResult, SampleRow, SelectedCandidate } from "@/lib/types";
+import { rowAt } from "./round-candidates";
+import { roundReading, type RoundReading } from "./round-reading";
 
-// best = the parent the search expands from; latest = in-flight while running, else the last
-// measured; selected = a pick made on another surface, offered only while one exists.
-export type ObserveState = "best" | "latest" | "selected";
+export type ObserveState = "best" | "latest" | "round" | "selected";
 
 const OBSERVE_LABELS: Record<ObserveState, string> = {
   best: "Best",
   latest: "Most recent",
+  round: "Round",
   selected: "Selected",
 };
 
-// An unavailable state is DROPPED, not disabled — no permanently-dead button.
 export function observeOptions(
   avail: Record<ObserveState, boolean>,
+  round: number | null = null,
 ): { value: ObserveState; label: string }[] {
-  const order: ObserveState[] = ["best", "latest", "selected"];
-  return order.filter((s) => avail[s]).map((s) => ({ value: s, label: OBSERVE_LABELS[s] }));
+  const order: ObserveState[] = ["best", "latest", "round", "selected"];
+  return order
+    .filter((s) => avail[s])
+    .map((s) => ({
+      value: s,
+      label: s === "round" && round != null ? `Round ${round}` : OBSERVE_LABELS[s],
+    }));
 }
 
 export interface ObserveConfig {
@@ -33,28 +35,28 @@ export interface ObserveConfig {
   label: string;
 }
 
-// Keys are the served names so a paste greps against `round_NNNN.json`. Samples are ALL of them,
-// never the render cap: a cap is a screen budget and a copy has none.
+// Keys are the served names, so a paste greps against `round_NNNN.json`; samples are ALL of them, never the render cap.
 export function searchpointCopyChoices({
   cfg,
-  row,
+  reading,
   samples = [],
   arms = null,
 }: {
   cfg: ObserveConfig | null;
-  row?: ElectedRow | null;
+  reading?: ArmReading | null;
   samples?: readonly SampleRow[];
   arms?: number | null;
 }): { key: string; label: string; data: unknown }[] {
+  const label = reading?.arm.label;
   const spec = cfg
     ? {
-        // `label` is the join key, so only a row answers for it; the decorated header rides `shown_as`.
-        ...(row ? { label: row.label } : { shown_as: cfg.label }),
+        // `label` is the join key, so only a reading answers for it; the decorated header rides `shown_as`.
+        ...(label !== undefined ? { label } : { shown_as: cfg.label }),
         resolved_pipeline_params: cfg.config,
         prompt_fields: cfg.promptFields,
       }
     : null;
-  const scored = row ? { ...(spec ?? { label: row.label }), arms, scored: row } : null;
+  const scored = reading ? { ...(spec ?? { label }), arms, scored: reading } : null;
 
   const choices: { key: string; label: string; data: unknown }[] = [];
   if (spec) choices.push({ key: "spec", label: "Searchpoint spec", data: spec });
@@ -69,8 +71,19 @@ export function searchpointCopyChoices({
   return choices;
 }
 
-// The promptpotter-self shape: each optimizer node owns its prompt fields per-node, and the round
-// file carries only the mutated delta, not the static `prompts/{node}.json` origin.
+// NOT the runnable string: that is backend `PromptTemplate.compile_prompt()`, which nothing serves.
+export function searchpointText(cfg: ObserveConfig): string {
+  const lines: string[] = [];
+  for (const key of PROMPT_STRING_FIELDS) {
+    const v = cfg.promptFields[key];
+    if (typeof v === "string" && v.trim()) lines.push(`${key}:\n${v.trim()}\n`);
+  }
+  if (lines.length === 0) lines.push("(this searchpoint carries no prompt fields)\n");
+  lines.push(`pipeline config:\n${JSON.stringify(cfg.config, null, 2)}`);
+  return lines.join("\n");
+}
+
+// promptpotter-self: prompt fields ride per node, and the round file carries only the mutated delta.
 function nodePromptFields(
   resolved: Record<string, unknown> | undefined | null,
   nodeId: string | null | undefined,
@@ -86,7 +99,6 @@ function nodePromptFields(
   return out;
 }
 
-// The searchpoint half both a live row and a round file's `candidate_scores[]` carry.
 type SearchpointRow = Pick<LiveCandidate, "prompt_fields" | "resolved_pipeline_params">;
 
 function rowConfig(
@@ -104,18 +116,16 @@ function rowConfig(
   };
 }
 
-// The latest-seeded row, which the served list orders last. Null only between the buffer's reset
-// and the first candidate starting; the host falls back to the last closed searchpoint.
+// The served list orders the latest-seeded row last.
 export function liveObserveConfig(
   dash: DashboardSnapshot | null,
   nodeId?: string | null,
 ): ObserveConfig | null {
   const latest = liveCandidates(dash).at(-1);
   if (!latest) return null;
-  return rowConfig(latest, `live — ${latest.label}`, nodeId);
+  return rowConfig(latest, `live — ${latest.reading.arm.label}`, nodeId);
 }
 
-// Null until that candidate is seeded (`candidate_started`).
 export function liveCandidateObserveConfig(
   dash: DashboardSnapshot | null,
   label: string,
@@ -124,8 +134,7 @@ export function liveCandidateObserveConfig(
   return rowConfig(liveCandidate(dash, label), `live — ${label}`, nodeId);
 }
 
-// Joined on the positional label, never `candidate_id`: a resume re-scores C0 under a NEW id while
-// the round file keeps the old one, and the miss is silent.
+// Joined on the label, never `candidate_id`: a resume re-scores C0 under a NEW id, a silent miss.
 export function candidateObserveConfig(
   doc: RoundResult | null,
   courseLabel: string,
@@ -137,54 +146,129 @@ export function candidateObserveConfig(
   return rowConfig(row, display, nodeId);
 }
 
-// Apart from `ObserveConfig`: a state's availability is served, its config a fetch that may not
-// have landed. `courseLabel` is the join key; `label` is decoration.
 export interface ObserveTarget {
   round: number;
-  idx: number;
-  courseLabel: string;
   label: string;
-  candidateId: string;
 }
 
-// The label comes off the row, never the position: `domain/results.py::candidate_label` answers
-// `C0` for EVERY round-0 arm.
-function targetAt(
-  round: number,
-  idx: number,
-  candidateId: string,
-  courseLabel: string,
-  prefix: string,
-): ObserveTarget {
-  return { round, idx, courseLabel, label: `${prefix} · ${courseLabel}`, candidateId };
+function bestObserveTarget(dash: DashboardSnapshot | null): ObserveTarget | null {
+  const winner = dash?.run_standing?.selection;
+  return winner ? { round: winner.round, label: winner.label } : null;
 }
 
-// The most recent served crown, not the highest θ ever: after a rewind the two differ, and a strict
-// global best would need a served pointer.
-export function bestObserveTarget(dash: DashboardSnapshot | null): ObserveTarget | null {
-  const rounds = (dash?.rounds ?? []).filter(roundHasCandidates).reverse();
-  for (const r of rounds) {
-    const idx = r.candidates.findIndex((c) => c.is_selected);
-    const w = idx >= 0 ? r.candidates[idx] : null;
-    if (!w?.candidate_id) continue;
-    return targetAt(
-      r.round,
-      idx,
-      w.candidate_id,
-      w.label,
-      r.round === 0 ? "origin" : "best",
-    );
+// Served `leading` is the arm the selector read the round off, so a held round still has one.
+function roundObserveTarget(dash: DashboardSnapshot | null, round: number): ObserveTarget | null {
+  if (!dash?.round_axis.completed.includes(round)) return null;
+  const r = dash.rounds.find((x) => x.round === round);
+  return r?.leading ? { round: r.leading.round, label: r.leading.label } : null;
+}
+
+export interface ObservePoint extends ObserveTarget {
+  title: string;
+  row: ArmRow | null;
+}
+
+function pointAt(dash: DashboardSnapshot | null, target: ObserveTarget, title: string): ObservePoint {
+  return { ...target, title, row: rowAt(dash, target) };
+}
+
+export function originPoint(
+  dash: DashboardSnapshot | null,
+  origin: Pick<ArmNode, "reading"> | null,
+): ObservePoint | null {
+  if (!origin) return null;
+  const { round, label } = origin.reading.arm;
+  return pointAt(dash, { round, label }, `origin · ${label}`);
+}
+
+export interface ObserveSelection {
+  candidate: Pick<SelectedCandidate, "round" | "label"> | null;
+  round: number | null;
+  observe: ObserveState | null;
+}
+
+export interface ObserveSubject {
+  state: ObserveState;
+  options: { value: ObserveState; label: string }[];
+  point: ObservePoint | null;
+  reading: RoundReading | null;
+  verdict: RoundReading | null;
+  round: number | null;
+  live: boolean;
+}
+
+function subjectTitle(state: ObserveState, target: ObserveTarget, inFlight: boolean): string {
+  switch (state) {
+    case "selected":
+      return `selected · ${target.label}`;
+    case "round":
+      return `round ${target.round} · ${target.label}`;
+    case "best":
+      return `${target.round === 0 ? "origin" : "best"} · ${target.label}`;
+    case "latest":
+      return inFlight ? `live — ${target.label}` : `latest · ${target.label}`;
   }
-  return null;
 }
 
-// The closed half of `latest`; the host, which alone knows the run is live, switches to `liveObserveConfig`.
-export function latestClosedTarget(dash: DashboardSnapshot | null): ObserveTarget | null {
-  const rounds = (dash?.rounds ?? []).filter(roundHasCandidates);
-  const last = rounds.at(-1);
-  if (!last) return null;
-  const idx = last.candidates.length - 1;
-  const c = last.candidates[idx];
-  if (!c?.candidate_id) return null;
-  return targetAt(last.round, idx, c.candidate_id, c.label, "latest");
+export function resolveObserveSubject(
+  dash: DashboardSnapshot | null,
+  isLive: boolean,
+  selection: ObserveSelection,
+): ObserveSubject {
+  // In flight only while the run is live: `current_round` lingers in `dashboard.json` after a stop.
+  const observed = dash?.observed ?? null;
+  const latest = observed && { round: observed.round, label: observed.label };
+  const inFlight = isLive && latest?.round === roundOf(dash);
+  const targets: Record<ObserveState, ObserveTarget | null> = {
+    best: bestObserveTarget(dash),
+    latest,
+    round: selection.round != null ? roundObserveTarget(dash, selection.round) : null,
+    selected: selection.candidate
+      ? { round: selection.candidate.round, label: selection.candidate.label }
+      : null,
+  };
+  const asked = selection.observe && targets[selection.observe] ? selection.observe : null;
+  const followsLive = !asked && !targets.selected && !targets.round;
+  const state: ObserveState =
+    asked ??
+    (targets.selected
+      ? "selected"
+      : targets.round
+        ? "round"
+        : inFlight
+          ? "latest"
+          : targets.best
+            ? "best"
+            : "latest");
+  const target = targets[state];
+  const liveRound = isLive ? (dash?.round_axis.live ?? null) : null;
+  const round = followsLive && liveRound != null ? liveRound : (target?.round ?? null);
+  const reading = target ? roundReading(dash, target.round) : null;
+  const newestClosed = dash?.round_axis.completed.at(-1);
+  return {
+    state,
+    options: observeOptions(
+      {
+        best: !!targets.best,
+        latest: !!targets.latest,
+        round: !!targets.round,
+        selected: !!targets.selected,
+      },
+      selection.round,
+    ),
+    point: target
+      ? pointAt(dash, target, subjectTitle(state, target, state === "latest" && inFlight))
+      : null,
+    reading,
+    verdict:
+      state === "latest"
+        ? null
+        : state === "best"
+          ? newestClosed != null
+            ? roundReading(dash, newestClosed)
+            : null
+          : reading,
+    round,
+    live: round != null && round === liveRound,
+  };
 }

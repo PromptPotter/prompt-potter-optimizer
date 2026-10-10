@@ -1,6 +1,3 @@
-// Cycle-id helpers. The sibling regexes mirror `store/layout.py::root_cycle_id` — change both;
-// the address grammar is generated from `domain/cycle_paths.py`.
-
 import {
   ALL_DOTS_RE,
   CYCLE_PATH_HOP_SEP,
@@ -8,6 +5,7 @@ import {
   ID_COMPONENT_RE,
 } from "@/lib/api/types.generated";
 
+// Mirror `store/layout.py::root_cycle_id` — change both.
 const SIBLING_LAST_SEP_RE = /_(fork|diag)_(?!.*_(?:fork|diag)_)([^/]*)$/;
 const SIBLING_FIRST_SEP_RE = /_(fork|diag)_/;
 
@@ -31,8 +29,7 @@ export function unitKey(campaignId: string, cycleId: string): string {
   return `${campaignId}${UNIT_SEP}${cycleId}`;
 }
 
-// Not the generated `CycleHop`: this address is persisted in view memory and the hash, so a
-// server-side field rename must not invalidate it.
+// Not the generated `CycleHop`: persisted in view memory and the hash, so it must survive a server rename.
 interface PathHop {
   campaignId: string;
   cycleId: string;
@@ -42,7 +39,6 @@ export type CyclePath = PathHop[];
 const HOP_SEP = CYCLE_PATH_HOP_SEP;
 
 // All-dots ids match the charset but are traversal segments the server refuses.
-// `lib/address.ts` validates through this too; never a second regex there.
 export function validIdComponent(s: string): boolean {
   return ID_COMPONENT_RE.test(s) && !ALL_DOTS_RE.test(s);
 }
@@ -65,8 +61,7 @@ export function decodeCyclePath(s: string): CyclePath | null {
   return hops.length ? hops : null;
 }
 
-// A sidebar node: an encoded path, optionally `|<candidate>`. The empty-path form is an origin,
-// which groups several campaigns rather than addressing one.
+// The empty-path form `|<id>` is an origin, which groups campaigns rather than addressing one.
 const NODE_SEP = "|";
 
 export function nodeAddress(path: CyclePath, nodeId?: string): string {
@@ -74,8 +69,7 @@ export function nodeAddress(path: CyclePath, nodeId?: string): string {
   return nodeId ? `${encoded}${NODE_SEP}${nodeId}` : encoded;
 }
 
-// The view-memory key (`lib/view-memory.tsx`): the root campaign, else the origin id. Never feed
-// a suffixed address to `decodeCyclePath` — it answers null and the view memory goes inert.
+// Never feed a suffixed address to `decodeCyclePath`: it answers null and view memory goes inert.
 export function ownerOfNodeAddress(addr: string): string | null {
   const cut = addr.indexOf(NODE_SEP);
   const encoded = cut < 0 ? addr : addr.slice(0, cut);

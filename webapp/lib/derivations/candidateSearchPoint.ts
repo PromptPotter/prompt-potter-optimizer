@@ -1,10 +1,8 @@
-// Seeds a steered fork from the RESOLVED config, never the sparse delta: fork init layers it onto
-// the dataset overlay (`entry.py`), so a sparse seed resets every untouched param to the dataset.
+// Seeds from the RESOLVED config: fork init layers it onto the dataset overlay (`entry.py`), so a sparse seed resets untouched params.
 
 import { liveCandidate, type DashboardSnapshot } from "@/lib/poll";
 import type { RoundResult } from "@/lib/types";
 
-// `config_overrides` comes from the reconcile dialog, not the candidate.
 export interface CandidateSearchPoint {
   origin_prompt_fields: Record<string, unknown>;
   pipeline_overlay: Record<string, unknown>;
@@ -31,7 +29,6 @@ function nodeConfigs(
   return out;
 }
 
-// null ⇒ the caller renders the unseeded state, never a stale or empty editor.
 export function candidateSearchPoint(
   doc: RoundResult | null,
   candidateId: string,
@@ -42,8 +39,6 @@ export function candidateSearchPoint(
   return searchPoint(entry.prompt_fields, nodeConfigs(entry.resolved_pipeline_params));
 }
 
-// In-flight round: the seed rides `current_round.candidates` until the round file lands. Matched
-// by LABEL, since a live row has no lineage id yet.
 export function liveCandidateSearchPoint(
   dash: DashboardSnapshot | null,
   label: string,

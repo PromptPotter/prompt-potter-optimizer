@@ -1,27 +1,22 @@
-// Which searchpoints stand ON a changed one, so a drawing withdraws their numbers. Walks every
-// served `parent_ids` edge across forks: a change where a branch left invalidates the branch too.
-
-import type { LineageNode } from "@/lib/api";
+import type { CourseNode } from "@/lib/api";
+import { walkCourses } from "./lineage-candidates";
 
 export function descendantsOf(
-  root: LineageNode | null,
+  root: CourseNode | null,
   seeds: Iterable<string>,
 ): ReadonlySet<string> {
   const out = new Set(seeds);
   if (!root || out.size === 0) return out;
 
-  // Whole family at once: a candidate's children may sit on another course, so a per-course pass
-  // would stop at every fork.
+  // Whole family at once: a candidate's children may sit on another course.
   const kids = new Map<string, string[]>();
-  const visit = (node: LineageNode): void => {
-    if (node.kind === "candidate") {
-      for (const parent of node.parent_ids) {
-        kids.set(parent, [...(kids.get(parent) ?? []), node.id]);
+  for (const course of walkCourses(root)) {
+    for (const arm of course.children) {
+      for (const parent of arm.parent_ids) {
+        kids.set(parent, [...(kids.get(parent) ?? []), arm.id]);
       }
     }
-    for (const child of node.children) visit(child);
-  };
-  visit(root);
+  }
 
   // `out` doubles as the visited set, so a cycling tree terminates instead of hanging the tab.
   const queue = [...out];

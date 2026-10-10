@@ -10,21 +10,17 @@ export const VIEW_MEMORY_KEY = "promptpotter.view.byCampaign";
 // Bumping this DROPS every stored record rather than migrating it.
 const RECORD_VERSION = 1;
 
-// Past two weeks a stored expansion set describes a tree that has since grown forks and inner runs.
 const TTL_MS = 14 * 24 * 60 * 60 * 1000;
 
 const MAX_CAMPAIGNS = 24;
 
-// Ids, flags and UI keys only — never a measurement. The card's headline `metrics` is not stored:
-// `CandidatesCard` seeds it per cycle from the run's own headline metric.
+// Ids, flags and UI keys only — never a measurement.
 export interface CampaignView {
   v: number;
-  // Drives both the TTL and the LRU eviction order.
   at: number;
-  // Sidebar nodes TOGGLED AWAY FROM THEIR DEFAULT (`campaign-forest.ts::isNodeOpen`).
+  // Sidebar nodes toggled AWAY from their default (`campaign-forest.ts::isNodeOpen`).
   toggled: string[];
-  // Latches the one-shot "reveal the running course", or a sidebar remount re-opens a row the
-  // operator deliberately collapsed.
+  // Latches the one-shot reveal, or a sidebar remount re-opens a row the operator collapsed.
   autoExpandedFor: string | null;
   viewedPath: string | null;
   viewedCandidateId: string | null;
@@ -50,7 +46,6 @@ export function emptyView(): CampaignView {
   };
 }
 
-// TTL + version drop + LRU live in the codec, so no caller can forget them.
 export function pruneStore(store: Store, now: number): Store {
   const fresh = Object.entries(store).filter(
     ([, v]) => v && v.v === RECORD_VERSION && now - v.at < TTL_MS,
@@ -68,10 +63,8 @@ export const viewMemoryCodec = {
   },
 };
 
-// `owner` is a campaign id everywhere but the sidebar's origin tier (see `NodeToggle`).
 interface ViewMemory {
   viewFor: (owner: string | null) => CampaignView;
-  // Built once per store change: `isOpen` runs per sidebar row per render.
   toggledFor: (owner: string | null) => ReadonlySet<string>;
   // Called from the handler that changed the axis, never during render.
   recordView: (owner: string | null, patch: Partial<CampaignView>) => void;
@@ -132,8 +125,7 @@ export function useViewMemory(): ViewMemory {
   return ctx;
 }
 
-// Owner is the ROOT hop's campaign for a course or candidate; an ORIGIN spans campaigns, so it owns
-// its own record under its `cycle_<hash>` id (`ownerOfNodeAddress`).
+// An ORIGIN spans campaigns, so it owns a record under its own `cycle_<hash>` id (`ownerOfNodeAddress`).
 export interface NodeToggle {
   isOpen: (kind: NodeKind, path: string) => boolean;
   toggle: (kind: NodeKind, path: string) => void;

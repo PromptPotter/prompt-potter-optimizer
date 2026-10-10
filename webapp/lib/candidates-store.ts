@@ -1,6 +1,4 @@
 "use client";
-// Module-scoped rather than a context: the card and `lib/lineage.tsx` both read it and neither
-// contains the other.
 
 import type { DisplayMetric } from "@/lib/derivations";
 import { createModuleStore } from "@/lib/module-store";

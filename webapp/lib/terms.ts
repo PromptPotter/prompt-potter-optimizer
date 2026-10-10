@@ -4,14 +4,6 @@ import { interiorNodes } from "@/lib/derivations";
 // Operator vocabulary for in-product tooltips — one short sentence each; longer goes to docs/manual/.
 
 export const TERMS: Record<string, string> = {
-  // Thresholds match ageBucket() in lib/poll.tsx.
-  status_live:        "Optimizer wrote dashboard.json in the last 30 seconds — running.",
-  status_idle:        "Last write 30s–5m ago. Round between phases or paused.",
-  status_snapshot:    "Last write >5m ago. No live optimizer — viewing a frozen unit.",
-  status_offline:     "No active session, or dashboard.json unreachable. Run `python -m promptpotter new <dataset>` or `resume`.",
-  status_nowall:      "Dashboard has no wallclock yet — optimizer probably has not started.",
-  status_stamp_mismatch: "dashboard.json keeps reporting a different (campaign, cycle) than this view expects — the optimizer may be re-instantiating, or this unit's session never wrote a dashboard.",
-
   composite: "composite_fitness — the per-candidate scalar the optimizer optimizes. Recipe in the criterion.",
 
   criterion_accuracy: "Whether the answer is right, as the matcher grades it. Every dial below scales this — a dial at 0 is off.",
@@ -25,7 +17,7 @@ export const TERMS: Record<string, string> = {
   cache_replayed: "Replayed — OUR content-addressed archive answered, so no provider was reached and the cell cost nothing. Counted per CANDIDATE: how many carry at least one replayed sample.",
   cache_prefix:   "Prefix cache — the PROVIDER served part of a call's input off its own prompt-prefix cache, billed at a discount. The call did happen; part of it was cheaper.",
 
-  masthead_best: "The best pick so far, read on the ORIGIN's panel — the one set of cells C0 and every new best since have all answered. A round's own accuracy is read on the subset that round bought, so this can sit above or below every round on the chart. The line is that reading as each round closed.",
+  masthead_best: "The run's selection against its origin: both rates on the ORIGIN's panel, over the cells the two both answered — the one pair the two may be compared on. Where the run stands as of its last closed round, never a high-water mark; a round's own accuracy is read on the subset that round bought, so this can sit above or below every round on the chart. '—' while the selection is the origin, or until it has been read against it.",
   remote_eff:    "Bench lift per dollar: the selection's lift over the origin, in the bench's headline column, on held-out rows no optimizer node read — the masthead's BENCH lift — divided by what its search incurred, never the bench's own pass; '—' where the search carries tokens no rate priced. The same reading for every optimizer, potter included; θ is potter's election signal and never stands in for it. '—' until the bench grades the pick, when the run ends.",
   arm_broken:     "Its measurements kept failing, so the bench stopped it. That is the candidate's own fault, and it is charged to it.",
   arm_eliminated: "The optimizer's eliminator stopped buying it: a budget call, not a verdict on the idea.",

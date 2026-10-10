@@ -3,8 +3,6 @@ import { candidateSearchPoint } from "../candidateSearchPoint";
 import type { RoundResult } from "@/lib/types";
 import { roundDoc, scored } from "@/lib/test-fixtures";
 
-// Each candidate carries its evolved prompt + COMPLETE resolved config, as `build_score_report`
-// persists them.
 const doc: RoundResult = roundDoc({
   round: 2,
   candidate_scores: [
@@ -29,8 +27,6 @@ describe("candidateSearchPoint", () => {
     const sp = candidateSearchPoint(doc, "cand-a");
     expect(sp).toEqual({
       origin_prompt_fields: { instruction: "evolved A", persona: "solver" },
-      // model carried (not just the evolved delta); the `steps` list is stripped
-      // so the per-node fork-init merge can't choke on it.
       pipeline_overlay: { llm_only: { model: "openai/gpt-oss-120b", reasoning_effort: "high" } },
     });
   });

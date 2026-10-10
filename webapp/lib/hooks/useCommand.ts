@@ -1,12 +1,11 @@
 "use client";
-// The one write path. Never retries — each send mints a fresh idempotency key, so a retry is a
-// second command — and never reports an address gone: a write's 404 is a missing capability.
+// Never retries: each send mints a fresh idempotency key, so a retry is a second command.
 
 import { useRef, useState } from "react";
 import { ApiError, failureKind, operatorMessage, type FailureKind } from "@/lib/api";
 import { useAuthGate } from "@/lib/auth-context";
 import { reportIncident } from "@/lib/diagnostics";
-import { bumpRevalidation } from "@/lib/revalidate";
+import { invalidateReads } from "@/lib/read-cache";
 
 export interface CommandFailure {
   kind: FailureKind;
@@ -30,7 +29,6 @@ const isAbort = (e: unknown) =>
 export function useCommand<V extends string>(
   surface: string,
   opts: {
-    /** Per-kind wording; `null` keeps the default sentence. */
     describe?: (f: CommandFailure, verb: V) => string | null;
     /** `false` for a write no poll reads back (preferences, consent, logout). */
     revalidate?: boolean;
@@ -62,7 +60,7 @@ export function useCommand<V extends string>(
     try {
       const value = await send();
       then?.(value);
-      if (revalidate) bumpRevalidation();
+      if (revalidate) invalidateReads();
       return { ok: true, value };
     } catch (e) {
       if (!isAbort(e)) {

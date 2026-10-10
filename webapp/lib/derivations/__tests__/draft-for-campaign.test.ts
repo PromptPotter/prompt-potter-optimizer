@@ -2,8 +2,7 @@ import { describe, expect, it } from "vitest";
 import { draftForCampaign } from "../draft-for-campaign";
 import type { DraftCampaignWire } from "@/lib/api";
 
-// Only `draft_id` is read, and the cast says so rather than fabricating a 20-field wire object
-// whose other values no assertion here depends on.
+// Only `draft_id` is read, hence the cast.
 const draft = (draft_id: string) => ({ draft_id }) as DraftCampaignWire;
 
 describe("draftForCampaign", () => {
@@ -13,7 +12,6 @@ describe("draftForCampaign", () => {
   });
 
   it("withholds a draft belonging to a DIFFERENT campaign", () => {
-    // A running campaign selected while the ingest thread still holds a draft must not show it.
     expect(draftForCampaign(draft("swiss__09daf6"), "swiss__3ace04")).toBeNull();
   });
 

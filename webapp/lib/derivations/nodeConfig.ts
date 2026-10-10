@@ -1,7 +1,3 @@
-// The one node-config row model and its two emitters, one per transport: search-space → the draft
-// `pipeline_overlay` (split at mint by `launcher.split_overlay`); values → the fork seed's `pipeline_overlay`.
-// An OPTIMIZER node's knobs are the third reading: a served `KnobRow` typed in as text.
-
 import type {
   CapabilityMenu,
   DraftPatch,
@@ -9,7 +5,8 @@ import type {
   ModelCapability,
   NodeConfigParam,
 } from "@/lib/api";
-import type { ManifestNodeOverlay, NodeSearchNarrowing } from "@/lib/api/types";
+import type { ManifestNodeOverlay, ParamIntent } from "@/lib/api/types";
+import { SCHEMA_DESCRIPTION_PREFIX } from "@/lib/api/types.generated";
 
 export type ConfigMode = "search-space" | "values";
 
@@ -19,28 +16,20 @@ export interface ConfigRow {
   // "model" | "enum" | "number" | "bool" | "string" | "nested" | "prompt"; `nested` round-trips as JSON.
   kind: string;
   options: string[];
-  // "" when neither the overlay nor the schema carries it (declared but unset).
   value: string;
   baseValue: string;
   // Only a free-valued param carries this: an enumerable axis locks by `allowed.length <= 1`.
   locked: boolean;
-  // Also what a human fork may steer `model` to without the grade-C taint.
   allowed: string[];
-  // The server stated `permitted`, so the emit writes the set even where it equals the menu.
-  stated: boolean;
-  // A transport fact (keep in the emitted seed even untouched), never provenance: that is `source`.
+  // A transport fact (kept in the emitted seed even untouched), never provenance: that is `source`.
   inSeed: boolean;
   source: NodeConfigParam["source"];
-  // Served, "" where none: the key's name alone cannot tell which construction forbids the axis.
   neverAxis: NodeConfigParam["never_axis"];
-  movableBy: string[];
-  // The dataset offered this axis and THIS campaign closed it — the only shut state a person caused.
+  movableBy: NodeConfigParam["movable_by"];
   held: boolean;
   description: string;
 }
 
-/** The route the rows RUN — the model row's value on its own node's provider — and the served
- *  capability at that address. An edited value re-addresses with no round-trip; a miss is UNKNOWN. */
 export function pickedRoute(
   rows: ConfigRow[],
   menu: CapabilityMenu | undefined,
@@ -51,15 +40,13 @@ export function pickedRoute(
   return { model, caps: menu?.[provider]?.[model] };
 }
 
-/** Display only, never the engine's `param_options` resolve: the ticks stay the operator's, or a
- *  repaint saves the model's refusals as the campaign's choice. Unknown model → the node's list. */
+// Display only: emitted as ticks, it would save the model's refusals as the campaign's choice.
 export function effortLadder(row: ConfigRow, caps: ModelCapability | undefined): string[] {
   if (row.key !== "reasoning_effort") return row.options;
   return caps?.reasoning_efforts ?? row.options;
 }
 
-/** What the editor may OFFER only. The babysit verdict and the models a warning names come from
- *  `POST /campaigns/{id}/fork-preview`, never from this. */
+// Only what the editor may OFFER; the verdict is `POST /campaigns/{id}/fork-preview`'s.
 export function permittedModels(
   schema: Record<string, NodeConfigParam[]> | null | undefined,
 ): Record<string, readonly string[]> {
@@ -69,14 +56,6 @@ export function permittedModels(
     if (row) out[node] = row.permitted ?? row.options;
   }
   return out;
-}
-
-export function agentLabel(agent: string): string {
-  return agent === "proposer"
-    ? "the optimizer's proposer, every round"
-    : agent === "optimizer"
-      ? "the optimizer itself, mid-run"
-      : agent;
 }
 
 function asObj(v: unknown): Record<string, unknown> {
@@ -99,7 +78,6 @@ function coerce(kind: string, raw: string): unknown {
   return raw;
 }
 
-/** Exported so the widget's commit gate and the emitters share one "is this valid JSON". */
 export function parseNested(raw: string): unknown {
   if (raw.trim() === "") return "";
   try {
@@ -109,7 +87,7 @@ export function parseNested(raw: string): unknown {
   }
 }
 
-/** The draft's own overlay, never the served resolution, which is empty while the node is `text`. */
+// The draft's own overlay, never the served resolution, which is empty while the node is `text`.
 export function authoredOutputSchema(
   overlay: Record<string, unknown>,
   node: string,
@@ -126,55 +104,12 @@ export function authoredAnswerField(
   return typeof field === "string" ? field : undefined;
 }
 
-/** Mirrors `domain/pipeline_schema.py::SCHEMA_DESCRIPTION_PREFIX`. */
-export const DESCRIPTION_PREFIX = "output_schema_descriptions.";
-
-/** This click IS the lock's inheritance: nothing else writes these keys, so a descendant unlocked
- *  afterwards holds for its own subtree. */
 export function descriptionSubtree(keys: readonly string[], path: string): string[] {
-  const key = DESCRIPTION_PREFIX + path;
+  const key = SCHEMA_DESCRIPTION_PREFIX + path;
   return path === "" ? [...keys] : keys.filter((k) => k === key || k.startsWith(`${key}.`));
 }
 
-/** The answer slot falls back to the LAST field: fields generate in order, reasoning first. A first
- *  schema re-opens `response_format`, which a pre-schema narrowing could only tick `text`. */
-export function nodeSchemaPatch(
-  base: Record<string, unknown>,
-  node: string,
-  schema: Record<string, unknown>,
-  answer?: string,
-): DraftPatch {
-  const overlay = JSON.parse(JSON.stringify(base)) as Record<string, Record<string, unknown>>;
-  const prev = asObj(overlay[node]);
-  const fields = Object.keys(asObj(schema.properties));
-  const first = authoredOutputSchema(base, node) === undefined;
-  const chosen = [answer, authoredAnswerField(base, node)].find(
-    (f) => f !== undefined && fields.includes(f),
-  );
-  const optimizer = { ...asObj(prev.optimizer) };
-  if (prev.optimizer !== undefined && first) {
-    const allowed = { ...asObj(optimizer.param_allowed_values) };
-    delete allowed.response_format;
-    optimizer.param_allowed_values = allowed;
-    if (Array.isArray(optimizer.param_keys)) {
-      optimizer.param_keys = [...new Set([...optimizer.param_keys, "response_format"])];
-    }
-  }
-  overlay[node] = {
-    ...prev,
-    ...(prev.optimizer === undefined ? {} : { optimizer }),
-    config: {
-      ...asObj(prev.config),
-      output_schema: schema,
-      answer_field: chosen ?? (fields.includes("answer") ? "answer" : fields[fields.length - 1]),
-      ...(first ? { response_format: "json" } : {}),
-    },
-  };
-  return { pipeline_overlay: overlay };
-}
-
-// `valuesSeed` is read in `values` mode only: search-space rows are served, and re-deriving them
-// from a client overlay breaks `frontend-surface-contract.md::I9`.
+// `valuesSeed` is read in `values` mode only: search-space rows are served (`frontend-surface-contract.md::I9`).
 export function configRows(
   schema: Record<string, NodeConfigParam[]> | null,
   valuesSeed: Record<string, unknown>,
@@ -189,7 +124,6 @@ export function configRows(
   for (const [n, params] of entries) {
     const nodeSeed = asObj(valuesSeed[n]);
     for (const p of params) {
-      // Nothing subtracted: a `prompt` field's lock is a `param_keys` membership, so every emit lists it.
       const baseValue = asRowValue(p.kind, p.value);
       // `null` = same as the menu; `[]` = nothing may be picked. `??` keeps them apart.
       const permitted = p.permitted ?? p.options;
@@ -203,7 +137,6 @@ export function configRows(
           baseValue,
           locked: p.movable_by.length === 0,
           allowed: permitted,
-          stated: p.permitted !== null,
           inSeed: false,
           source: p.source,
           neverAxis: p.never_axis,
@@ -224,7 +157,6 @@ export function configRows(
           locked: false,
           // The whole menu: a fork may be steered outside the permitted set, taking the grade-C taint.
           allowed: p.options,
-          stated: false,
           inSeed,
           source: p.source,
           neverAxis: p.never_axis,
@@ -238,29 +170,8 @@ export function configRows(
   return rows;
 }
 
-/** DIFFERS, never "is a subset": an operator may widen an axis, and `PipelineSchema.narrow`
- *  replaces `param_allowed_values`, so the widened list survives the mint. */
-function sameMembers(a: readonly string[], b: readonly string[]): boolean {
-  if (a.length !== b.length) return false;
-  const set = new Set(b);
-  return a.every((v) => set.has(v));
-}
-
-/** An absent `param_allowed_values` entry resolves to the DECLARATION. The draft wraps this in a
- *  `DraftPatch`; the steer fork sends it bare as its seed's `optimizer_narrowing`. */
-export function nodeNarrowing(rows: ConfigRow[]): NodeSearchNarrowing {
-  const paramKeys: string[] = [];
-  const allowedValues: Record<string, string[]> = {};
-  for (const r of rows) {
-    const enumerable = r.kind === "enum" || r.kind === "model";
-    const locked = enumerable ? r.allowed.length <= 1 : r.locked;
-    if (!locked) paramKeys.push(r.key);
-    if (enumerable && r.allowed.length > 0 && (r.stated || !sameMembers(r.allowed, r.options))) {
-      // Written even when pinned: it is also what a human fork may steer to un-tainted.
-      allowedValues[r.key] = r.allowed;
-    }
-  }
-  return { param_keys: paramKeys, param_allowed_values: allowedValues };
+export function rowIntents(rows: ConfigRow[]): ParamIntent[] {
+  return rows.map((r) => ({ key: r.key, open: !r.locked, allowed: r.allowed }));
 }
 
 export function nodeOverlayPatch(
@@ -268,7 +179,6 @@ export function nodeOverlayPatch(
   node: string,
   rows: ConfigRow[],
 ): DraftPatch {
-  const overlay = JSON.parse(JSON.stringify(base)) as Record<string, Record<string, unknown>>;
   const config: Record<string, unknown> = {};
   for (const r of rows) {
     if (r.value !== r.baseValue && r.value !== "") {
@@ -276,18 +186,15 @@ export function nodeOverlayPatch(
       if (value !== undefined) config[r.key] = value;
     }
   }
-
-  const prev = (overlay[node] ?? {}) as Record<string, unknown>;
-  const prevConfig = (prev.config ?? {}) as Record<string, unknown>;
-  overlay[node] = {
-    ...prev,
-    optimizer: nodeNarrowing(rows),
-    ...(Object.keys(config).length > 0 ? { config: { ...prevConfig, ...config } } : {}),
+  const narrowing = { node_narrowing: { [node]: rowIntents(rows) } };
+  if (Object.keys(config).length === 0) return narrowing;
+  const prev = asObj(base[node]);
+  return {
+    pipeline_overlay: { ...base, [node]: { ...prev, config: { ...asObj(prev.config), ...config } } },
+    ...narrowing,
   };
-  return { pipeline_overlay: overlay };
 }
 
-/** The one lock emitter for a surface outside the grid, through the grid's own emitter. */
 export function nodeLockPatch(
   schema: Record<string, NodeConfigParam[]> | null,
   overlay: Record<string, unknown>,
@@ -304,13 +211,12 @@ export function nodeLockPatch(
   );
 }
 
-/** The server's `flatten_sp_summary` spelling; mint it nowhere else. */
+// The server's `flatten_sp_summary` spelling; mint it nowhere else.
 export function flatConfigKey(node: string, param: string): string {
   return `${node}.${param}`;
 }
 
-// The emission is the WHOLE running config, not a diff. Compare against the browser's own seed,
-// never `SubjectReading.config`, whose Python `str` reads a bool `"True"`.
+// Diffed against the browser's own seed, never `SubjectReading.config`: its Python `str` reads a bool `"True"`.
 export function overlayEdits(
   emitted: Record<string, Record<string, unknown>>,
   seed: Record<string, unknown>,
@@ -333,7 +239,6 @@ export function overlayEdits(
   return out;
 }
 
-/** `NodeConfigEditor` drops its draft when the seed changes, so clearing an edit restores the input. */
 export function applyFlatEdits(
   seed: Record<string, unknown>,
   flat: ReadonlyMap<string, string>,
@@ -350,7 +255,6 @@ export function applyFlatEdits(
   return out;
 }
 
-// Inherited-untouched params stay out: they already live in `pipeline_params`.
 export function seedOverlayFromRows(
   rows: ConfigRow[],
   edits: Record<string, string>,
@@ -361,7 +265,7 @@ export function seedOverlayFromRows(
     const edit = edits[flatConfigKey(r.node, r.key)];
     if (!r.inSeed && (edit === undefined || edit === r.value)) continue;
     const raw = edit ?? r.value;
-    if (raw === "") continue; // "" = inherit
+    if (raw === "") continue;
     const value = coerce(r.kind, raw);
     if (value === undefined) continue;
     (overlay[r.node] ??= {})[r.key] = value;
@@ -369,7 +273,6 @@ export function seedOverlayFromRows(
   return overlay;
 }
 
-/** The value a knob runs at: the overlay's where it sets the key, else the manifest's. */
 export function knobValue(
   nodes: Record<string, ManifestNodeOverlay> | null,
   node: string,
@@ -379,7 +282,6 @@ export function knobValue(
   return set && knob.key in set ? set[knob.key] : knob.value;
 }
 
-/** The text a knob's editor holds; a list or an object round-trips as JSON. */
 export function knobText(value: unknown): string {
   if (value === null || value === undefined) return "";
   return typeof value === "string" ? value : JSON.stringify(value);
@@ -394,7 +296,6 @@ function withinBounds(knob: KnobRow, n: number): boolean {
   );
 }
 
-/** The served bounds as an interval, `null` for an unbounded knob. */
 export function knobRange(knob: KnobRow): string | null {
   const low = knob.exclusive_minimum ?? knob.minimum;
   const high = knob.exclusive_maximum ?? knob.maximum;
@@ -404,8 +305,6 @@ export function knobRange(knob: KnobRow): string | null {
   return `${open}${low ?? "−∞"}, ${high ?? "∞"}${close}`;
 }
 
-/** What *text* means under the knob's served type; `undefined` is text that cannot commit. Blank
- * is `null` only where the knob is nullable — an opt-in knob, off. */
 export function parseKnob(knob: KnobRow, text: string): unknown {
   const t = text.trim();
   if (knob.type === "string") return t === "" && knob.nullable ? null : text;

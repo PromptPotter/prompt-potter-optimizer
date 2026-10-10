@@ -2,14 +2,13 @@
 import { useState } from "react";
 import { postPauseCycle, postStartRun } from "@/lib/api";
 import { useCommand } from "@/lib/hooks/useCommand";
-import { phasePauseLabel, runPhaseAction, type RunAction } from "@/lib/run-phase";
+import type { RunAdmission } from "@/lib/api/types";
+import { phasePauseLabel, phaseWalks } from "@/lib/run-phase";
 import { useCycleStream } from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";
 
-// Start / pause the viewed cycle — the VERB, with no opinion about what it looks like; every
-// run toggle rides it.
 export interface RunControl {
-  action: RunAction;
+  action: RunAdmission["offers"];
   running: boolean;
   pending: boolean;
   // Pause clicked, `paused` not yet declared: the runner finishes the current sample first.
@@ -17,37 +16,40 @@ export interface RunControl {
   pausingNote: string;
   err: string | null;
   label: string;
-  // Stated, never rendered as a dead button (I3).
   noneReason: string | null;
+  // served: `dash.pause`; null in every other phase.
+  pauseNote: string | null;
   toggle: () => void;
 }
 
 export function useRunControl(): RunControl | null {
   const { dash } = useCycleStream();
-  const { campaignId, cycleId } = useWorkspace();
+  const { viewedPath } = useWorkspace();
   const cmd = useCommand<"pause-cycle" | "start-run">("run-control");
   const [pausing, setPausing] = useState(false);
 
   const runPhase = dash?.run_phase;
-  const action = runPhaseAction(runPhase);
+  const admission = dash?.run_admission;
+  const action = admission?.offers ?? null;
+  const pause = dash?.pause ?? null;
 
   const [prevRunPhase, setPrevRunPhase] = useState(runPhase);
   if (runPhase !== prevRunPhase) {
     setPrevRunPhase(runPhase);
-    if (runPhase !== "running") setPausing(false);
+    if (!phaseWalks(runPhase)) setPausing(false);
   }
 
-  if (!campaignId || !cycleId) return null;
+  if (!viewedPath) return null;
 
   const toggle = () => {
-    if (action === "none") return;
+    if (action === null) return;
     if (action === "pause") {
       setPausing(true);
-      void cmd.run("pause-cycle", () => postPauseCycle(campaignId, cycleId));
+      void cmd.run("pause-cycle", () => postPauseCycle(viewedPath));
       return;
     }
     // A paused cycle's worker has exited, so resume is a relaunch: the same branch as start.
-    void cmd.run("start-run", () => postStartRun(campaignId, cycleId));
+    void cmd.run("start-run", () => postStartRun(viewedPath));
   };
 
   return {
@@ -59,14 +61,11 @@ export function useRunControl(): RunControl | null {
     pausingNote: `Finishing ${phasePauseLabel(dash?.state, dash?.optimizer_step)} — will pause after the current sample.`,
     err: cmd.failure?.message ?? null,
     label: action === "pause" ? "Pause run" : action === "resume" ? "Resume run" : "Start run",
-    noneReason:
-      action !== "none"
-        ? null
-        : runPhase === "gate"
-          ? "At origin gate — decide in the chat."
-          : runPhase === "checkin"
-            ? "Still in check-in — start it from the setup panel."
-            : "Starting up…",
+    // No dashboard yet: a warming cycle's launch is already in flight.
+    noneReason: admission === undefined ? "Starting up…" : admission.refusal || null,
+    pauseNote: pause
+      ? `Paused by ${pause.cause}${pause.detail ? ` (${pause.detail})` : ""} — ${pause.next_step}`
+      : null,
     toggle,
   };
 }

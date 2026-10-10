@@ -3,46 +3,48 @@ import {
   benchReading,
   campaignLineParts,
   campaignModels,
-  campaignTitle,
   campaignVendors,
 } from "../campaign-summary";
 import type { RunGroup } from "../campaign-forest";
-import type { BenchScore, CampaignRunsWith, CampaignSummary, CycleListEntry } from "@/lib/api";
+import type { BenchScore, CampaignRunsWith, CampaignSummary, LineStanding } from "@/lib/api";
+import { pairedReading } from "@/lib/test-fixtures";
 
-// `rounds_closed` counts rounds after the origin, the unit `max_rounds` bounds. The row is a NAME
-// and a reading, never a config dump.
+const CAMPAIGN_ID = "spreadsheetbench-s10__00b7d7";
 
-function cycle(over: Partial<CycleListEntry> = {}): CycleListEntry {
+function line(over: Partial<LineStanding> = {}): LineStanding {
   return {
-    campaign_id: "spreadsheetbench-s10__00b7d7",
-    cycle_id: "cycle_root",
-    is_root: true,
+    holder: { campaign_id: CAMPAIGN_ID, cycle_id: "cycle_root" },
+    status: { label: "Running", mark: "running" },
     run_phase: "running",
+    producer_attached: true,
+    stop_reason: null,
+    standing: null,
     rounds_closed: 3,
-    updated_at: "2026-09-17T00:00:00Z",
+    max_rounds: 6,
+    rounds_line: "served rounds",
+    rounds_cap_note: null,
+    human_intervened: false,
     ...over,
-  } as CycleListEntry;
+  };
 }
 
 function run(over: {
   runsWith?: CampaignRunsWith | null;
-  root?: CycleListEntry;
-  answering?: CycleListEntry;
+  line?: Partial<LineStanding>;
   label?: string;
 }): RunGroup {
-  const root = over.root ?? cycle();
+  const served = line(over.line);
   return {
     campaign: {
-      campaign_id: root.campaign_id,
+      campaign_id: CAMPAIGN_ID,
       dataset_name: "spreadsheetbench-s10",
       label: over.label ?? "",
+      line: served,
+      updated_at: "2026-09-17T00:00:00Z",
       runs_with: over.runsWith === undefined ? null : over.runsWith,
     } as CampaignSummary,
-    root,
-    answering: over.answering ?? root,
+    line: served,
     branches: [],
-    updatedAt: "2026-09-17T00:00:00Z",
-    bestAccuracy: null,
   };
 }
 
@@ -52,7 +54,6 @@ const runsWith = (
 ): CampaignRunsWith => ({ params, vendors: [], optimizer: "potter", max_rounds });
 
 describe("campaignLineParts", () => {
-  // No served setting reaches the row: models ride the vendor mark, the rest the hover card.
   it("carries no resolved setting at all — the card is where a setup is read", () => {
     const parts = campaignLineParts(
       run({
@@ -68,38 +69,14 @@ describe("campaignLineParts", () => {
         ),
       }),
     );
-    expect(parts).toEqual(["R3/6", expect.stringContaining("ago")]);
-  });
-
-  it("counts rounds against the declared cap while the root answers", () => {
-    const parts = campaignLineParts(run({ runsWith: runsWith([], 6) }));
-    expect(parts).toContain("R3/6");
-  });
-
-  // `R0` would read as a run that went nowhere, not one declared never to leave its origin.
-  it("says origin when the cap declares no round after C0", () => {
-    const parts = campaignLineParts(
-      run({ runsWith: runsWith([], 0), root: cycle({ rounds_closed: 0 }) }),
-    );
-    expect(parts).toContain("origin");
-  });
-
-  it("drops the cap when a FORK answers — the cap on screen would be the root's", () => {
-    const parts = campaignLineParts(
-      run({
-        runsWith: runsWith([], 0),
-        answering: cycle({ cycle_id: "cycle_fork", is_root: false, rounds_closed: 2 }),
-      }),
-    );
-    expect(parts).toContain("R2");
-    expect(parts).not.toContain("origin");
+    expect(parts).toEqual(["served rounds", expect.stringContaining("ago")]);
   });
 
   it("says nothing about rounds while the campaign is still at its check-in", () => {
     const parts = campaignLineParts(
-      run({ runsWith: runsWith([], 6), root: cycle({ run_phase: "checkin", rounds_closed: 0 }) }),
+      run({ runsWith: runsWith([], 6), line: { run_phase: "checkin", rounds_closed: 0 } }),
     );
-    expect(parts.some((p) => p.startsWith("R") || p === "origin")).toBe(false);
+    expect(parts).not.toContain("served rounds");
   });
 
   it("says the pipeline is unreadable rather than printing an empty setup", () => {
@@ -131,49 +108,70 @@ describe("campaignModels / campaignVendors", () => {
 });
 
 describe("benchReading", () => {
-  // Two silences, two remedies: a split holding nothing out never grades; one that does, will.
-  it("tells nothing held out apart from a pass not taken", () => {
+  const status = (state: BenchScore["status"]["state"], sentence: string): BenchScore["status"] => ({
+    state,
+    trigger: "at_end",
+    sentence,
+    can_grade: false,
+    refusal: sentence,
+    subject: null,
+    held_by: null,
+    stop: null,
+    scored: null,
+    expected: null,
+    reads_before: null,
+  });
+
+  it("says a bench that is not graded in its served status, never a blank", () => {
     const unheld: BenchScore = {
       bench_size: 0,
       scorer_id: "default_hit",
       headline: "accuracy",
+      status: status("not_held", "The campaign's dataset_split holds no bench rows out."),
       origin: null,
       selected: null,
-      missing_reason: "nothing held out: the campaign's dataset_split declares no bench rows",
-      lift: { accuracy: null, composite: null },
+      vs_origin: { ...pairedReading(0, [0, 0]), state: "not_held", coverage: null, headline: null, beside: [] },
+      cost: { lift_per_usd: null, absent: "no_lift" },
+      line: "The campaign's dataset_split holds no bench rows out.",
     };
-    expect(benchReading(unheld, null).sub).toBe(unheld.missing_reason);
-    expect(benchReading(null, "graded when the run ends").sub).toBe("graded when the run ends");
+    expect(benchReading(unheld).sub).toBe(unheld.line);
+    expect(benchReading(null).sub).toBeUndefined();
   });
 
-  // The served `headline` picks the column; the composite, a 0–1 score, never prints as a percent.
-  it("reads the served headline column, with the other column beside it", () => {
+  it("prints the served level in its column's unit over the served line", () => {
     const banded = (value: number) => ({ value, ci_lo: null, ci_hi: null });
-    const reading = { sp_hash: "s", headline: "accuracy" as const, n_scored: 10 };
+    const reading = { sp_hash: "s", headline: "accuracy" as const, n: 10 };
     const graded: BenchScore = {
       bench_size: 10,
       scorer_id: "default_hit",
       headline: "accuracy",
-      origin: { ...reading, round: 0, accuracy: banded(0.0), composite: banded(0.2) },
-      selected: { ...reading, round: 3, accuracy: banded(0.5), composite: banded(0.62) },
-      missing_reason: null,
-      lift: { accuracy: banded(0.5), composite: banded(0.42) },
+      status: { ...status("read", "graded"), refusal: "The line's selection is already graded." },
+      origin: {
+        ...reading,
+        round: 0,
+        accuracy: banded(0.0),
+        composite: banded(0.2),
+        level: banded(0.0),
+      },
+      selected: {
+        ...reading,
+        round: 3,
+        accuracy: banded(0.5),
+        composite: banded(0.62),
+        level: banded(0.5),
+      },
+      vs_origin: pairedReading(0.5, [0.2, 0.8], { rateA: 0 }),
+      cost: { lift_per_usd: 1.25, absent: null },
+      line: "accuracy 0.500 selected (round 3) · 0.000 origin · lift +0.500 · 10 held-out rows",
     };
-    const stat = benchReading(graded, null);
+    const stat = benchReading(graded);
     expect(stat.value).toBe("50%");
-    expect(stat.sub?.startsWith("accuracy · origin 0% · lift +0.500 · composite 0.62")).toBe(true);
-    const composite = benchReading({ ...graded, headline: "composite" }, null);
+    expect(stat.sub).toBe(graded.line);
+    const composite = benchReading({
+      ...graded,
+      headline: "composite",
+      selected: { ...graded.selected!, headline: "composite", level: banded(0.62) },
+    });
     expect(composite.value).toBe("0.62");
-  });
-});
-
-describe("campaignTitle", () => {
-  // The id tail renders exactly while it is all that tells one dataset's runs apart.
-  it("keeps the id tail while nothing human distinguishes the campaign", () => {
-    expect(campaignTitle(run({}).campaign).suffix).toBe("00b7d7");
-  });
-
-  it("drops the id tail once the campaign carries a label", () => {
-    expect(campaignTitle(run({ label: "Sheets agent, alibaba pin" }).campaign).suffix).toBeNull();
   });
 });

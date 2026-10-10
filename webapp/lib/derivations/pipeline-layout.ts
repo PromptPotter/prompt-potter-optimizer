@@ -1,8 +1,5 @@
 import type { PipelineViewEdge, PipelineViewNode } from "@/lib/types";
 
-// A looping pipeline as a two-row serpentine, read boustrophedon in running order. The order is
-// read off the served graph — nothing placed by hand, nothing inferred from an id.
-
 export interface PlacedNode {
   x: number;
   y: number;
@@ -22,13 +19,12 @@ export interface GridLayout {
 
 export interface GridOpts {
   cell: number;
-  /** Must clear a row's label AND the model under it. */
+  // Must clear a row's label AND the model under it.
   rowH: number;
   padTop: number;
   padBottom: number;
 }
 
-/** [] when the graph does not loop. */
 export function cycleOf(nodes: PipelineViewNode[], edges: PipelineViewEdge[]): string[] {
   const ids = new Set(nodes.map((n) => n.id));
   const loop = edges.find((e) => e.kind === "loop" && ids.has(e.from) && ids.has(e.to));

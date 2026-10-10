@@ -1,27 +1,47 @@
 import { describe, expect, it } from "vitest";
 import {
-  bestObserveTarget,
   candidateObserveConfig,
-  latestClosedTarget,
   liveCandidateObserveConfig,
   liveObserveConfig,
   observeOptions,
+  originPoint,
+  resolveObserveSubject,
+  type ObserveSelection,
+  type ObserveSubject,
 } from "../searchPoint";
 import type { DashboardSnapshot } from "@/lib/poll";
-import type { LiveCandidate } from "@/lib/api/types";
+import type { ArmPointer, LiveCandidate, ServedRound } from "@/lib/api/types";
 import {
+  armNode,
+  armReading,
   currentRound,
   dash,
   liveRow,
+  ownLevel,
+  pairedReading,
   roundDoc,
+  runStanding,
   scored,
   servedLabel,
   summaryCandidate,
   summaryRound,
 } from "@/lib/test-fixtures";
 
-const liveDash = (candidates: Partial<LiveCandidate>[]): DashboardSnapshot =>
-  dash({ current_round: currentRound({ round: 1, candidates: candidates.map(liveRow) }) });
+const live = (
+  round: number,
+  label: string,
+  over: Partial<LiveCandidate> = {},
+  reading: Parameters<typeof armReading>[0] = {},
+): LiveCandidate =>
+  liveRow({ reading: armReading({ ...reading, arm: { round, label } }), ...over });
+
+const liveDash = (candidates: (Partial<LiveCandidate> & { label: string })[]): DashboardSnapshot =>
+  dash({
+    current_round: currentRound({
+      round: 1,
+      candidates: candidates.map(({ label, ...over }) => live(1, label, over)),
+    }),
+  });
 
 describe("liveObserveConfig", () => {
   it("returns null with no live candidates", () => {
@@ -72,8 +92,7 @@ describe("liveCandidateObserveConfig", () => {
   });
 });
 
-// C0 resolves through the same POSITIONAL join as every candidate: a resume re-scores the origin
-// under a new lineage id, while `round_0000.json` keeps the first run's.
+// A resume re-scores the origin under a new lineage id, while `round_0000.json` keeps the first run's.
 describe("the origin as an ordinary candidate", () => {
   const round0 = roundDoc({
     round: 0,
@@ -122,96 +141,244 @@ describe("candidateObserveConfig", () => {
   });
 });
 
-// Both targets read served facts only (a crown, a position): neither may re-rank, and a round
-// that crowned nobody must not have one invented for it.
-describe("bestObserveTarget — the parent", () => {
-  const crowned = (round: number, winnerIdx: number, n: number) =>
-    summaryRound({
-      round,
-      candidates: Array.from({ length: n }, (_, i) =>
-        summaryCandidate({
-          candidate_id: `r${round}c${i}`,
-          label: servedLabel(round, i),
-          is_selected: i === winnerIdx,
+// `winnerIdx` -1 is a round that held; it still serves the arm its reading is taken off.
+const crowned = (
+  round: number,
+  winnerIdx: number,
+  n: number,
+  over: Partial<ServedRound> = {},
+  leadingIdx = winnerIdx,
+) => {
+  const arm = (i: number): ArmPointer => ({
+    round,
+    label: servedLabel(round, i),
+    candidate_id: `r${round}c${i}`,
+  });
+  return summaryRound({
+    round,
+    leading: leadingIdx >= 0 ? arm(leadingIdx) : null,
+    selected: winnerIdx >= 0 ? [arm(winnerIdx)] : [],
+    candidates: Array.from({ length: n }, (_, i) =>
+      summaryCandidate({
+        reading: armReading({
+          arm: arm(i),
+          own: ownLevel((round * 10 + i) / 100),
+          election: { held: true, selected: i === winnerIdx, leading: i === leadingIdx },
         }),
-      ),
-    });
+      }),
+    ),
+    ...over,
+  });
+};
 
-  it("takes the MOST RECENT served crown", () => {
-    const t = bestObserveTarget(dash({ rounds: [crowned(0, 0, 1), crowned(1, 2, 3), crowned(2, 1, 3)] }));
-    expect(t?.round).toBe(2);
-    expect(t?.courseLabel).toBe("C2.2");
-    expect(t?.candidateId).toBe("r2c1");
+const NO_PICK: ObserveSelection = { candidate: null, round: null, observe: null };
+const asked = (observe: ObserveSelection["observe"]): ObserveSelection => ({ ...NO_PICK, observe });
+
+describe("resolveObserveSubject — best", () => {
+  const best = (snap: DashboardSnapshot | null) => resolveObserveSubject(snap, false, asked("best"));
+
+  it("takes the served winner, not the newest crown it could find itself", () => {
+    const s = best(
+      dash({
+        rounds: [crowned(0, 0, 1), crowned(1, 2, 3), crowned(2, 1, 3)],
+        run_standing: runStanding(1, "C1.3"),
+      }),
+    );
+    expect(s.state).toBe("best");
+    expect(s.point).toMatchObject({ round: 1, label: "C1.3" });
+    expect(s.point?.row?.reading.arm.candidate_id).toBe("r1c2");
   });
 
-  it("skips a round that crowned nobody and keeps walking back", () => {
-    const uncrowned = summaryRound({
-      round: 3,
-      candidates: [summaryCandidate({ candidate_id: "r3c0" }), summaryCandidate({ candidate_id: "r3c1" })],
-    });
-    const t = bestObserveTarget(dash({ rounds: [crowned(2, 0, 2), uncrowned] }));
-    expect(t?.round).toBe(2);
+  it("badges the origin as `origin`, a promoted winner as `best`", () => {
+    const rounds = [crowned(0, 0, 1), crowned(1, 0, 3)];
+    expect(best(dash({ rounds, run_standing: runStanding(0, "C0") })).point?.title).toBe("origin · C0");
+    expect(best(dash({ rounds, run_standing: runStanding(1, "C1.1") })).point?.title).toBe(
+      "best · C1.1",
+    );
   });
 
-  it("skips an empty (L2/L3-terminal) round rather than reading it as a round with no winner", () => {
-    const t = bestObserveTarget(dash({ rounds: [crowned(1, 0, 2), summaryRound({ round: 2 })] }));
-    expect(t?.round).toBe(1);
-  });
-
-  it("badges a sole-arm crown as `origin`, a contested one as `best`", () => {
-    expect(bestObserveTarget(dash({ rounds: [crowned(0, 0, 1)] }))?.label).toBe("origin · C0");
-    expect(bestObserveTarget(dash({ rounds: [crowned(1, 0, 3)] }))?.label).toBe("best · C1.1");
-  });
-
-  it("returns null before anything is crowned", () => {
-    expect(bestObserveTarget(null)).toBeNull();
-    expect(bestObserveTarget(dash({}))).toBeNull();
-    expect(bestObserveTarget(dash({ rounds: [summaryRound({ round: 0 })] }))).toBeNull();
+  it("has no point before anything is measured", () => {
+    for (const snap of [null, dash({}), dash({ rounds: [summaryRound({ round: 0 })] })]) {
+      const s = resolveObserveSubject(snap, false, NO_PICK);
+      expect(s.point).toBeNull();
+      expect(s.reading).toBeNull();
+      expect(s.round).toBeNull();
+      expect(s.options).toEqual([]);
+    }
   });
 });
 
-describe("latestClosedTarget — the newest searchpoint that closed", () => {
-  it("takes the LAST candidate of the last round with candidates — winner or not", () => {
-    const t = latestClosedTarget(
-      dash({
-        rounds: [
-          summaryRound({
-            round: 1,
-            candidates: [
-              summaryCandidate({ candidate_id: "a", label: servedLabel(1, 0), is_selected: true }),
-            ],
-          }),
-          summaryRound({
-            round: 2,
-            candidates: [
-              summaryCandidate({ candidate_id: "b", label: servedLabel(2, 0), is_selected: true }),
-              summaryCandidate({ candidate_id: "c", label: servedLabel(2, 1) }),
-            ],
-          }),
-        ],
-      }),
-    );
-    expect(t?.courseLabel).toBe("C2.2");
-    expect(t?.candidateId).toBe("c");
-    expect(t?.label).toBe("latest · C2.2");
+describe("resolveObserveSubject — every state resolves its row by label", () => {
+  const rounds = [
+    crowned(0, 0, 1),
+    crowned(1, 1, 3, { improved: true }),
+    crowned(2, -1, 3, { improved: false, verdict_reason: "no arm cleared the parent" }, 1),
+  ];
+  const run_standing = runStanding(1, "C1.2");
+  // `observed` is served: `served_dashboard.py::_observed`
+  const closed = dash({
+    rounds,
+    run_standing,
+    observed: { round: 2, label: "C2.3", candidate_id: "r2c2" },
+    round_axis: { completed: [0, 1, 2], live: null, position: 2 },
+  });
+  const running = dash({
+    rounds,
+    run_standing,
+    observed: { round: 3, label: "C3.2", candidate_id: "" },
+    round_axis: { completed: [0, 1, 2], live: 3, position: 3 },
+    current_round: currentRound({
+      round: 3,
+      candidates: [
+        live(3, "C3.1", {}, { own: ownLevel(0.5) }),
+        live(
+          3,
+          "C3.2",
+          {},
+          {
+            own: ownLevel(0.75),
+            vs_reference: pairedReading(0.15, [0.02, 0.28], { rateA: 0.6 }),
+          },
+        ),
+      ],
+    }),
+  });
+  const joined = (s: ObserveSubject) => {
+    const arm = s.point?.row?.reading.arm;
+    return arm !== undefined && arm.round === s.point?.round && arm.label === s.point?.label;
+  };
+  const level = (s: ObserveSubject) => s.point?.row?.reading.own?.accuracy?.value;
+
+  it("best: the last crown, with ITS round's reading while a later round held", () => {
+    const s = resolveObserveSubject(closed, false, NO_PICK);
+    expect(s.state).toBe("best");
+    expect(s.point).toMatchObject({ round: 1, label: "C1.2", title: "best · C1.2" });
+    expect(joined(s)).toBe(true);
+    expect(s.point?.row?.reading.election.selected).toBe(true);
+    expect(s.reading).toMatchObject({ round: 1, improved: true });
+    expect(s.verdict).toMatchObject({ round: 2, improved: false });
+    expect(s.round).toBe(1);
+    expect(s.live).toBe(false);
   });
 
-  it("returns null with no closed round", () => {
-    expect(latestClosedTarget(null)).toBeNull();
-    expect(latestClosedTarget(dash({ rounds: [summaryRound({ round: 0 })] }))).toBeNull();
+  it("latest at rest: the served observed arm, and that round's verdict", () => {
+    const s = resolveObserveSubject(closed, false, asked("latest"));
+    expect(s.point).toMatchObject({ round: 2, label: "C2.3", title: "latest · C2.3" });
+    expect(joined(s)).toBe(true);
+    expect(s.reading).toMatchObject({ round: 2, improved: false });
+    expect(s.verdict).toBeNull();
+  });
+
+  it("latest while live: the in-flight row, its accuracy in hand, and no closed reading", () => {
+    const s = resolveObserveSubject(running, true, NO_PICK);
+    expect(s.state).toBe("latest");
+    expect(s.point).toMatchObject({ round: 3, label: "C3.2", title: "live — C3.2" });
+    expect(joined(s)).toBe(true);
+    expect(s.point?.row?.source).toBe("inflight");
+    expect(level(s)).toBe(0.75);
+    expect(s.reading).toBeNull();
+    expect(s.round).toBe(3);
+    expect(s.live).toBe(true);
+  });
+
+  it("latest while live: whichever arm the server observes, never one picked here", () => {
+    const measuring = dash({
+      ...running,
+      observed: { round: 3, label: "C3.1", candidate_id: "" },
+    });
+    expect(resolveObserveSubject(measuring, true, NO_PICK).point).toMatchObject({
+      round: 3,
+      label: "C3.1",
+      title: "live — C3.1",
+    });
+  });
+
+  it("round:the arm the picked round's reading is taken off — its crown, else the served leader", () => {
+    const one = resolveObserveSubject(closed, false, { ...NO_PICK, round: 1 });
+    expect(one.state).toBe("round");
+    expect(one.point).toMatchObject({ round: 1, label: "C1.2", title: "round 1 · C1.2" });
+    expect(joined(one)).toBe(true);
+    const held = resolveObserveSubject(closed, false, { ...NO_PICK, round: 2 });
+    expect(held.point).toMatchObject({ round: 2, label: "C2.2" });
+    expect(joined(held)).toBe(true);
+    expect(held.reading?.round).toBe(2);
+    expect(held.verdict).toBe(held.reading);
+    const zero = resolveObserveSubject(closed, false, { ...NO_PICK, round: 0 });
+    expect(zero.point).toMatchObject({ round: 0, label: "C0", title: "round 0 · C0" });
+    expect(joined(zero)).toBe(true);
+  });
+
+  it("selected: a closed pick and an in-flight pick both find their row", () => {
+    const pick = (snap: DashboardSnapshot, live: boolean, round: number, label: string) =>
+      resolveObserveSubject(snap, live, { candidate: { round, label }, round, observe: null });
+    const past = pick(closed, false, 1, "C1.1");
+    expect(past.state).toBe("selected");
+    expect(past.point).toMatchObject({ round: 1, label: "C1.1", title: "selected · C1.1" });
+    expect(past.point?.row?.reading.arm.candidate_id).toBe("r1c0");
+    expect(past.reading?.round).toBe(1);
+    const now = pick(running, true, 3, "C3.1");
+    expect(now.point?.row?.source).toBe("inflight");
+    expect(joined(now)).toBe(true);
+    expect(level(now)).toBe(0.5);
+    expect(now.live).toBe(true);
+  });
+
+  it("an asked-for state wins while it has a target, and is dropped when it has none", () => {
+    expect(resolveObserveSubject(running, true, asked("best")).point?.label).toBe("C1.2");
+    expect(resolveObserveSubject(closed, false, asked("selected")).state).toBe("best");
+    expect(
+      resolveObserveSubject(closed, false, { ...NO_PICK, round: 2, observe: "best" }).point,
+    ).toMatchObject({ round: 1, label: "C1.2" });
+  });
+
+  it("while the live round has seeded nothing, shows the parent and keeps the round on the live one", () => {
+    const generating = dash({
+      ...closed,
+      current_round: currentRound({ round: 3 }),
+      round_axis: { completed: [0, 1, 2], live: 3, position: 3 },
+    });
+    const s = resolveObserveSubject(generating, true, NO_PICK);
+    expect(s.state).toBe("best");
+    expect(s.point?.round).toBe(1);
+    expect(s.reading?.round).toBe(1);
+    expect(s.round).toBe(3);
+    expect(s.live).toBe(true);
+    expect(resolveObserveSubject(generating, true, asked("best")).round).toBe(1);
+  });
+
+  it("ignores `current_round` rows that linger after a stop", () => {
+    const s = resolveObserveSubject(running, false, NO_PICK);
+    expect(s.state).toBe("best");
+    expect(s.live).toBe(false);
+  });
+});
+
+describe("originPoint — the origin as the served tree names it", () => {
+  const snap = dash({ rounds: [crowned(0, 0, 1), crowned(1, 0, 2)] });
+
+  it("addresses the origin by the arm key its own course speaks", () => {
+    const p = originPoint(snap, armNode({ id: "r0c0", label: "C0" }));
+    expect(p).toMatchObject({ round: 0, label: "C0", title: "origin · C0" });
+    expect(p?.row?.reading.arm.candidate_id).toBe("r0c0");
+  });
+
+  it("is null until the tree names one — never round 0's first row", () => {
+    expect(originPoint(snap, null)).toBeNull();
   });
 });
 
 describe("observeOptions", () => {
   it("DROPS unavailable states rather than disabling them, and keeps one order", () => {
-    expect(observeOptions({ best: true, latest: true, selected: false })).toEqual([
+    const none = { best: false, latest: false, round: false, selected: false };
+    expect(observeOptions({ ...none, best: true, latest: true })).toEqual([
       { value: "best", label: "Best" },
       { value: "latest", label: "Most recent" },
     ]);
-    expect(observeOptions({ best: false, latest: true, selected: true })).toEqual([
+    expect(observeOptions({ ...none, latest: true, round: true, selected: true }, 4)).toEqual([
       { value: "latest", label: "Most recent" },
+      { value: "round", label: "Round 4" },
       { value: "selected", label: "Selected" },
     ]);
-    expect(observeOptions({ best: false, latest: false, selected: false })).toEqual([]);
+    expect(observeOptions(none)).toEqual([]);
   });
 });

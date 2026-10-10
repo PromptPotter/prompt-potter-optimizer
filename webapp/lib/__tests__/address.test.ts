@@ -22,7 +22,7 @@ describe("formatAddress", () => {
         kind: "cycle",
         path: [{ campaignId: "justlogic__cf67b3", cycleId: "cycle_ee7bb41bbde0" }],
         tab: "dashboard",
-        candidateId: null, cell: null,
+        candidateId: null, at: null, cell: null,
       }),
     ).toBe("#/c/justlogic__cf67b3/ee7bb41bbde0/dashboard");
   });
@@ -33,7 +33,7 @@ describe("formatAddress", () => {
         kind: "cycle",
         path: [{ campaignId: "justlogic__cf67b3", cycleId: "cycle_ee7bb41bbde0" }],
         tab: "chat",
-        candidateId: null, cell: null,
+        candidateId: null, at: null, cell: null,
       }),
     ).toBe("#/c/justlogic__cf67b3/ee7bb41bbde0");
   });
@@ -47,9 +47,26 @@ describe("formatAddress", () => {
           { campaignId: "justlogic__cc22dd", cycleId: "cycle_inner0000" },
         ],
         tab: "dashboard",
-        candidateId: "sp_9f2", cell: null,
+        candidateId: "sp_9f2", at: null, cell: null,
       }),
     ).toBe("#/c/pp-self__aa11bb/outer0000/justlogic__cc22dd/inner0000/dashboard/k/sp_9f2");
+  });
+
+  it("writes the moment after the candidate, and names the default view before it", () => {
+    const path = [{ campaignId: "justlogic__cf67b3", cycleId: "cycle_ee7bb41bbde0" }];
+    expect(
+      formatAddress({ kind: "cycle", path, tab: "chat", candidateId: null, at: 512, cell: null }),
+    ).toBe("#/c/justlogic__cf67b3/ee7bb41bbde0/chat/t/512");
+    expect(
+      formatAddress({
+        kind: "cycle",
+        path,
+        tab: "dashboard",
+        candidateId: "sp_9f2",
+        at: 512,
+        cell: { answer: "ab12" },
+      }),
+    ).toBe("#/c/justlogic__cf67b3/ee7bb41bbde0/dashboard/k/sp_9f2/t/512/x/ab12");
   });
 
   it("addresses an account pane", () => {
@@ -67,7 +84,7 @@ describe("parseAddress round trip", () => {
         kind: "cycle",
         path: [{ campaignId: "justlogic__cf67b3", cycleId: "cycle_ee7bb41bbde0" }],
         tab: "chat",
-        candidateId: null, cell: null,
+        candidateId: null, at: null, cell: null,
       },
     ],
     [
@@ -76,7 +93,7 @@ describe("parseAddress round trip", () => {
         kind: "cycle",
         path: [{ campaignId: "justlogic__cf67b3", cycleId: "cycle_ee7bb41bbde0" }],
         tab: "compare",
-        candidateId: null, cell: null,
+        candidateId: null, at: null, cell: null,
       },
     ],
     [
@@ -85,7 +102,27 @@ describe("parseAddress round trip", () => {
         kind: "cycle",
         path: [{ campaignId: "justlogic__cf67b3", cycleId: "cycle_ee7bb41bbde0" }],
         tab: "dashboard",
-        candidateId: "sp_9f2a1c", cell: null,
+        candidateId: "sp_9f2a1c", at: null, cell: null,
+      },
+    ],
+    [
+      "pinned, a replayed moment",
+      {
+        kind: "cycle",
+        path: [{ campaignId: "justlogic__cf67b3", cycleId: "cycle_ee7bb41bbde0" }],
+        tab: "dashboard",
+        candidateId: null, at: 4096, cell: null,
+      },
+    ],
+    [
+      "pinned, a candidate, a moment at offset zero and a cell",
+      {
+        kind: "cycle",
+        path: [{ campaignId: "justlogic__cf67b3", cycleId: "cycle_ee7bb41bbde0" }],
+        tab: "chat",
+        candidateId: "sp_9f2a1c",
+        at: 0,
+        cell: { answer: "9f2a1c0b7d3e4f5a.ab12cd34ef56" },
       },
     ],
     [
@@ -97,17 +134,16 @@ describe("parseAddress round trip", () => {
           { campaignId: "justlogic__cc22dd", cycleId: "cycle_inner0000" },
         ],
         tab: "compare",
-        candidateId: null, cell: null,
+        candidateId: null, at: null, cell: null,
       },
     ],
     [
-      // Fork/diag separators ride on top of the prefix; the strip must leave them intact.
       "a fork cycle id",
       {
         kind: "cycle",
         path: [{ campaignId: "justlogic__cf67b3", cycleId: "cycle_ee7bb41_fork_9a2f" }],
         tab: "dashboard",
-        candidateId: null, cell: null,
+        candidateId: null, at: null, cell: null,
       },
     ],
     [
@@ -116,12 +152,12 @@ describe("parseAddress round trip", () => {
         kind: "cycle",
         path: [{ campaignId: "justlogic__cf67b3", cycleId: "cycle_chk_a1b2c3d4e5f6" }],
         tab: "chat",
-        candidateId: null, cell: null,
+        candidateId: null, at: null, cell: null,
       },
     ],
     [
       "following, a cell open on the default view",
-      { kind: "follow", tab: "chat", cell: { runId: "C1.1_ab12cd34", sampleId: 7 } },
+      { kind: "follow", tab: "chat", cell: { answer: "9f2a1c0b7d3e4f5a.ab12cd34ef56" } },
     ],
     [
       "pinned, a parked candidate and a cell open on the default view",
@@ -130,7 +166,8 @@ describe("parseAddress round trip", () => {
         path: [{ campaignId: "justlogic__cf67b3", cycleId: "cycle_ee7bb41bbde0" }],
         tab: "chat",
         candidateId: "sp_9f2a1c",
-        cell: { runId: "C1.1_ab12cd34", sampleId: 7 },
+        at: null,
+        cell: { answer: "9f2a1c0b7d3e4f5a.ab12cd34ef56" },
       },
     ],
     [
@@ -140,7 +177,8 @@ describe("parseAddress round trip", () => {
         path: [{ campaignId: "justlogic__cf67b3", cycleId: "cycle_ee7bb41bbde0" }],
         tab: "measurements",
         candidateId: null,
-        cell: { runId: "C1.1_ab12cd34", sampleId: 0 },
+        at: null,
+        cell: { answer: "9f2a1c0b7d3e4f5a.ab12cd34ef56" },
       },
     ],
     ["an account pane", { kind: "account", pane: "storage" }],
@@ -167,21 +205,25 @@ describe("parseAddress tolerates what a person types", () => {
       kind: "cycle",
       path: [{ campaignId: "a__b", cycleId: "cycle_deadbeef" }],
       tab: "chat",
-      candidateId: null, cell: null,
+      candidateId: null, at: null, cell: null,
     });
   });
 });
 
 describe("parseAddress refuses what is not an address", () => {
   const bad = [
-    "#/c", // named a cycle and gave none
-    "#/c/a__b", // a hop missing its cycle
-    "#/c/a__b/deadbeef/justlogic__cc22dd", // a second hop missing its cycle
-    "#/c/a__b/deadbeef/k", // `k` with no candidate
-    "#/c/a__b/deadbeef/dashboard/leftover", // trailing junk
-    "#/c/a__b/../dashboard", // traversal segment
-    "#/c/a__b/dead beef", // not a valid id component
-    "#/account/billing", // not a pane we have
+    "#/c",
+    "#/c/a__b",
+    "#/c/a__b/deadbeef/justlogic__cc22dd",
+    "#/c/a__b/deadbeef/k",
+    "#/c/a__b/deadbeef/dashboard/t",
+    "#/c/a__b/deadbeef/dashboard/t/-4",
+    "#/c/a__b/deadbeef/dashboard/t/12/k/sp_9f2", // the moment follows the candidate
+    "#/dashboard/t/12", // a followed view has no moment
+    "#/c/a__b/deadbeef/dashboard/leftover",
+    "#/c/a__b/../dashboard",
+    "#/c/a__b/dead beef",
+    "#/account/billing",
     "#/account/activity/extra",
     "#/nosuchview",
     "#/dashboard/extra",

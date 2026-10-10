@@ -1,10 +1,8 @@
 "use client";
-// The measurement log for the unit in view — `GET /datasets/{name}/cells`, the sole source for
-// every list of measured cells. A live unit re-reads on a poll; a stopped one reads once.
 
 import { useMemo, useState } from "react";
 import {
-  fetchCells,
+  cellsRead,
   type CellCandidate,
   type CellRow,
   type CellsFilter,
@@ -13,13 +11,16 @@ import {
   type HardSampleOrder,
   type HardSamplesScope,
 } from "../api";
-import { encodeCyclePath, encodeDescend, pathRoot, type CyclePath } from "../ids";
+import { encodeCyclePath, type CyclePath } from "../ids";
+import { useMomentAt } from "../workspace";
 import { useRead } from "./useRead";
 
-export type SeriesTotals = Pick<CellsResponse, "total_measurements" | "total_hits" | "mean_fitness">;
+export type SeriesTotals = Pick<
+  CellsResponse,
+  "total_measurements" | "total_hits" | "mean_fitness" | "never_hit" | "partly_hit" | "always_hit"
+>;
 
 interface ScopeSlice {
-  // Served in `hard_sample_rank` order; never re-sort.
   items: DatasetItem[];
   candidates: CellCandidate[];
   cells: CellRow[];
@@ -64,11 +65,12 @@ function sliceFrom(r: CellsResponse): ScopeSlice {
       total_measurements: r.total_measurements,
       total_hits: r.total_hits,
       mean_fitness: r.mean_fitness,
+      never_hit: r.never_hit,
+      partly_hit: r.partly_hit,
+      always_hit: r.always_hit,
     },
   };
 }
-
-const SEP = "\u001f";
 
 const LIVE_REFRESH_MS = 8000;
 
@@ -76,50 +78,18 @@ export function useCells(
   path: CyclePath | null,
   datasetName: string | null,
   scope: HardSamplesScope,
-  // Null = no override; the server resolves the dataset's declared key and echoes it on `order`.
   order: HardSampleOrder | null,
   live: boolean,
   filter: CellsFilter = {},
 ): CellsState {
-  const { candidateId, round, status } = filter;
-  // ROOT hop + `descend` tail, so an L4 inner drill-in reads the inner sandbox.
-  const root = path ? pathRoot(path) : null;
-  const rootCampaignId = root?.campaignId ?? null;
-  const rootCycleId = root?.cycleId ?? null;
-  const descend = path ? encodeDescend(path) : "";
   const unitKey = path ? encodeCyclePath(path) : null;
 
-  // Parked until `datasetName` lands from its own, later read.
+  const at = useMomentAt(path);
   const read = useRead(
-    unitKey && rootCampaignId && rootCycleId && datasetName
-      ? {
-          key: [
-            unitKey,
-            datasetName,
-            scope,
-            order ?? "",
-            candidateId ?? "",
-            round ?? "",
-            status ?? "",
-          ].join(SEP),
-          conditional: (signal, etag) =>
-            fetchCells(
-              datasetName,
-              signal,
-              etag,
-              scope,
-              rootCampaignId,
-              rootCycleId,
-              descend,
-              order ?? undefined,
-              { candidateId, round, status },
-            ),
-        }
-      : null,
-    { surface: "cells", expects: "gone", intervalMs: live ? LIVE_REFRESH_MS : undefined },
+    path && datasetName ? cellsRead(datasetName, path, scope, order, filter, at) : null,
+    { expects: "gone", intervalMs: live ? LIVE_REFRESH_MS : undefined },
   );
 
-  // A failed refresh leaves the measured rows on screen alone, hence `kept`.
   const own = read.status === "ready" ? read.data : read.status === "idle" ? null : read.kept;
   // The last body this unit showed, so a slice still in flight dims it rather than blanking.
   const [shown, setShown] = useState<{ unit: string; body: CellsResponse } | null>(null);

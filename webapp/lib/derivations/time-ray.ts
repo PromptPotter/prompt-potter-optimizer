@@ -1,127 +1,50 @@
-// The time-ray shaped for rendering. The server bounds the payload (`RAY_PAYLOAD_FIELDS`); this
-// bounds the pixels. Curation rides `projectionToActivity`, the chat's own translator.
-
-import type { RayItem } from "@/lib/api/types";
-import { RECENT_STEP_S, WEDGED_AFTER_S } from "@/lib/api/types.generated";
-import { projectionToActivity, type ActivityItem } from "@/lib/chat/activity";
-import { candidateLabel } from "@/lib/candidate-label";
+import type { ActivityItem, ProducerReading, RayItem } from "@/lib/api/types";
+import type { RunPhase, RunStatus } from "@/lib/api/types.generated";
 import { fmtDuration } from "@/lib/format";
 import { encodeCyclePath, type CyclePath } from "@/lib/ids";
+import { STATUS_MARK, phaseParked, phaseWalks, type RunPhaseTone } from "@/lib/run-phase";
 
 export interface RayStep {
   // Never a window index, which shifts when a new cycle is discovered.
   key: string;
   path: CyclePath;
   pathKey: string;
-  /** In `path`'s OWN ledger: a step below the viewed course is an address to navigate to, never
-   *  a moment to fold this course to. */
+  // In `path`'s OWN ledger: below the viewed course it is an address to navigate to, never a moment to fold to.
   offset: number;
-  at: number;
+  ts: string;
+  // served: `RayItem.gap_before_s`, heartbeats included
   gapBeforeS: number;
   cluster: number;
   activity: ActivityItem;
   round: number | null;
-  /** The minting course's label (`course_label`), never `candidate_id`, which is re-minted per run. */
   candidateLabel: string | null;
-}
-
-function rec(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
-}
-function str(value: unknown): string | undefined {
-  return typeof value === "string" ? value : undefined;
-}
-function num(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function toPath(item: RayItem): CyclePath {
   return item.path.map((h) => ({ campaignId: h.campaign_id, cycleId: h.cycle_id }));
 }
 
-// A `detail` (an L4 inner "rX/Y · best Z%") IS progress; a bare heartbeat proves only attachment.
-function isHeartbeat(item: RayItem): boolean {
-  return item.kind === "llm_call_progress" && !str(item.payload.detail);
-}
-
-// Apart from `projectionToActivity`: that yields a line to read, this an address, and a display
-// tweak must not break a click.
-function addressOf(item: RayItem): { round: number | null; candidateLabel: string | null } {
-  const p = item.payload;
-  if (item.kind === "candidate_minted") {
-    return { round: num(p.round) ?? null, candidateLabel: str(p.label) ?? null };
-  }
-  if (item.kind === "snapshot") {
-    const round = num(p.round) ?? null;
-    const event = str(p.event);
-    if (event === "candidate_started") {
-      const idx = num(p.candidate_idx);
-      return {
-        round,
-        candidateLabel: idx == null ? null : candidateLabel(round ?? 0, idx),
-      };
-    }
-    if (event === "candidate_scored") {
-      return { round, candidateLabel: str(rec(rec(p.payload).scores).label) ?? null };
-    }
-    return { round, candidateLabel: null };
-  }
-  if (item.kind === "phase") {
-    const rr = rec(rec(p.payload).round_result);
-    return { round: num(p.round) ?? num(rr.round) ?? null, candidateLabel: null };
-  }
-  return { round: num(p.round) ?? null, candidateLabel: null };
-}
-
-/** Only steps BELOW `rootPathKey` cluster: the root's own events are the story being told. */
+// Only steps BELOW `rootPathKey` cluster: the root's own events are the story being told.
 export function raySteps(items: readonly RayItem[], rootPathKey: string): RayStep[] {
   const steps: RayStep[] = [];
-  // Across ALL items: a heartbeat resets the silence clock without becoming a step.
-  let lastAt: number | null = null;
-  // The candidate a held-out pass is grading, per ledger: its row ticks carry no slot, so only
-  // the pass's own bracket says whose they are.
-  const benchOf = new Map<string, string>();
 
   for (const item of items) {
-    const raw = Date.parse(item.ts);
-    // Inherits its predecessor's time, the server clamp's repair: the sequence is the authority.
-    const parsed: number = Number.isFinite(raw) ? raw : (lastAt ?? 0);
-    const gapBeforeS = lastAt === null ? 0 : Math.max(0, (parsed - lastAt) / 1000);
-    lastAt = parsed;
-
-    if (isHeartbeat(item)) continue;
-    if (item.kind === "phase" && str(item.payload.phase) === "bench") {
-      const key = encodeCyclePath(toPath(item));
-      const label = str(rec(rec(item.payload.payload).view).label);
-      if (str(item.payload.event) === "enter" && label) benchOf.set(key, label);
-      else if (str(item.payload.event) === "exit") benchOf.delete(key);
-    }
-    const activity = projectionToActivity({
-      kind: item.kind,
-      sequence: item.offset,
-      payload: item.payload,
-    });
+    // A bare heartbeat ends a silence without becoming a step.
+    const activity = item.activity;
     if (!activity) continue;
 
     const path = toPath(item);
     const pathKey = encodeCyclePath(path);
     const prev = steps[steps.length - 1];
-    const graded = benchTick(item, benchOf.get(pathKey));
-    if (graded && item.kind === "snapshot") {
-      activity.label = `${graded} bench ${activity.label.replace(/^scoring /, "")}`;
-    }
+    const address = { activity, round: activity.round, candidateLabel: activity.candidate };
 
-    // Fold into the newest (furthest-along) step, keeping the gap before the run began.
     if (prev && prev.pathKey === pathKey && pathKey !== rootPathKey) {
       steps[steps.length - 1] = {
         ...prev,
-        key: prev.key,
         offset: item.offset,
-        at: parsed,
+        ts: item.ts,
         cluster: prev.cluster + 1,
-        activity,
-        ...addressOf(item),
-        ...(graded ? { candidateLabel: graded } : {}),
+        ...address,
       };
       continue;
     }
@@ -131,119 +54,80 @@ export function raySteps(items: readonly RayItem[], rootPathKey: string): RaySte
       path,
       pathKey,
       offset: item.offset,
-      at: parsed,
-      gapBeforeS,
+      ts: item.ts,
+      gapBeforeS: item.gap_before_s,
       cluster: 1,
-      activity,
-      ...addressOf(item),
-      ...(graded ? { candidateLabel: graded } : {}),
+      ...address,
     });
   }
   return steps;
 }
 
-// Opens and closes `benchOf` on the pass's bracket, and answers the graded candidate's label for
-// the bracket's header and for each slotless row tick inside it.
-function benchTick(item: RayItem, open: string | undefined): string | null {
-  const p = item.payload;
-  if (item.kind === "phase" && str(p.phase) === "bench") {
-    return str(p.event) === "enter" ? (str(rec(rec(p.payload).view).label) ?? null) : null;
-  }
-  if (open == null || item.kind !== "snapshot" || str(p.event) !== "sample_scored") return null;
-  return (num(p.candidate_idx) ?? 0) < 0 ? open : null;
-}
-
-export type RayHeadState =
-  | "gate"
-  | "running"
-  | "waiting"
-  | "wedged"
-  | "paused"
-  | "finished"
-  | "detached"
-  | "idle";
-
 export interface RayHead {
-  state: RayHeadState;
+  tone: RunPhaseTone;
+  wedged: boolean;
   label: string;
   detail: string;
   target: CyclePath | null;
 }
 
-/** Every long await heartbeats (`infrastructure/llm/heartbeat.py`), so a wedged run reads `running`
- *  forever. `wedged` is display-only (I6); a held `gate` and a served-open cell are silent legitimately. */
 export function rayHead(
   steps: readonly RayStep[],
   items: readonly RayItem[],
-  runPhase: string | null | undefined,
-  terminalLabel: string,
-  nowMs: number,
+  run: { run_phase: RunPhase; status: RunStatus; producer: ProducerReading } | null,
   rootPathKey: string,
-  // `dashboard.json::waiting_on` / `waiting_since`: the open cell the round's next step waits on.
-  openCell: { on: string; since: number } | null,
-): RayHead {
+  // served: `dashboard.json::waiting_on`
+  waitingOn: string | null,
+): RayHead | null {
+  if (run === null) return null;
   const newestStep = steps[steps.length - 1];
   const target = newestStep && newestStep.pathKey !== rootPathKey ? newestStep.path : null;
 
-  if (runPhase === "gate") {
-    return { state: "gate", label: "Held", detail: "awaiting your decision", target: null };
-  }
-  if (runPhase === "terminal") {
-    return { state: "finished", label: terminalLabel, detail: "", target: null };
-  }
-  if (runPhase === "detached") {
-    return { state: "detached", label: "Detached", detail: "producer gone", target: null };
-  }
-  if (runPhase === "paused") {
-    return { state: "paused", label: "Paused", detail: "resumable", target: null };
-  }
-  if (runPhase !== "running") {
-    return { state: "idle", label: terminalLabel, detail: "", target: null };
-  }
-
-  const sinceProgressS = newestStep ? (nowMs - newestStep.at) / 1000 : Infinity;
-  if (openCell && sinceProgressS > RECENT_STEP_S) {
+  const { run_phase: runPhase, status, producer } = run;
+  const tone = STATUS_MARK[status.mark].tone;
+  if (!phaseWalks(runPhase)) {
     return {
-      state: "running",
-      label: "Measuring",
-      detail: `${openCell.on} · open ${fmtDuration(Math.max(0, nowMs / 1000 - openCell.since))}`,
-      target,
+      tone,
+      wedged: false,
+      label: status.label,
+      detail: phaseParked(runPhase, producer.attached),
+      target: null,
     };
   }
-  if (sinceProgressS > WEDGED_AFTER_S) {
-    const mins = Number.isFinite(sinceProgressS) ? `${Math.round(sinceProgressS / 60)}m` : "";
+
+  if (producer.stalled) {
+    return { tone, wedged: true, label: producer.label, detail: producer.stalled, target };
+  }
+  const recent = producer.stepping;
+  if (!recent && waitingOn && producer.open_for_s != null) {
     return {
-      state: "wedged",
-      label: "Wedged",
-      detail: mins ? `no progress for ${mins}` : "no progress recorded",
+      tone,
+      wedged: false,
+      label: producer.label,
+      detail: `${waitingOn} · open ${fmtDuration(producer.open_for_s)}`,
       target,
     };
   }
 
-  // Sound within one window: a completion is always appended after its start.
-  const rootItems = items.filter(
-    (i) => encodeCyclePath(toPath(i)) === rootPathKey && !isHeartbeat(i),
+  // The root's newest line still reads `running`: its call is open, and a child holds the head.
+  const rootNewest = items.findLast(
+    (i) => i.activity !== null && encodeCyclePath(toPath(i)) === rootPathKey,
   );
-  const openCall = rootItems[rootItems.length - 1];
-  const awaitingCall =
-    openCall?.kind === "llm_call_start" &&
-    !rootItems.some(
-      (i) => i.kind === "llm_call" && str(i.payload.call_id) === str(openCall.payload.call_id),
-    );
-  if (awaitingCall && target) {
+  if (rootNewest?.activity?.kind === "running" && target) {
     return {
-      state: "waiting",
-      label: "Waiting",
+      tone: "quiet",
+      wedged: false,
+      label: producer.label_on_child,
       detail: newestStep?.activity.label ?? "on a child run",
       target,
     };
   }
 
   return {
-    state: "running",
-    label: "Running",
-    detail:
-      newestStep && sinceProgressS <= RECENT_STEP_S ? newestStep.activity.label : "no recent step",
+    tone,
+    wedged: false,
+    label: producer.label,
+    detail: newestStep && recent ? newestStep.activity.label : "no recent step",
     target,
   };
 }

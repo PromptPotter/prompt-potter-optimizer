@@ -1,16 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { isRoundUnfiled } from "@/lib/hooks/useRoundSource";
-import type { DashboardSnapshot } from "@/lib/poll";
+import { isRoundUnfiled } from "@/lib/hooks/useRound";
+import { currentRound, dash as dashboard, summaryRound } from "@/lib/test-fixtures";
 
-// `current_round.round` lingers on a filed round until the next one scores, so the guard keys
-// off the round's presence in `rounds[]`.
+// `current_round.round` lingers on a filed round until the next one scores.
 
-function dash(currentRoundNum: number, filedRounds: number[]): DashboardSnapshot {
-  return {
-    current_round: { round: currentRoundNum },
-    rounds: filedRounds.map((round) => ({ round, candidates: [] })),
-  } as unknown as DashboardSnapshot;
-}
+const dash = (currentRoundNum: number, filedRounds: number[]) =>
+  dashboard({
+    current_round: currentRound({ round: currentRoundNum }),
+    rounds: filedRounds.map((round) => summaryRound({ round })),
+  });
 
 describe("isRoundUnfiled", () => {
   it("reads a round in rounds[] as filed even when it equals current_round.round", () => {

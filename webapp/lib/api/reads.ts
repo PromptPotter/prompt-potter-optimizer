@@ -1,8 +1,6 @@
-// Every read endpoint. Response shapes come from `./types` (generated); each hand-written
-// exception says why at its declaration.
-
-import { API, jget, jgetIfModified, jgetIfNoneMatch, jpost, type Conditional } from "./client";
+import { API, jget, jgetIfModified, jgetIfNoneMatch, jpost } from "./client";
 import { encodeCyclePath, encodeDescend, pathRoot, type CyclePath } from "../ids";
+import type { ReadDescriptor } from "../read-cache";
 import type {
   ActiveSessionResponse,
   ActivityResponse,
@@ -25,7 +23,7 @@ import type {
   FilesResponse,
   ForkPreviewResponse,
   HardSamplesScope,
-  LineageNode,
+  CourseNode,
   MachineStatusResponse,
   OptimizerKnobsResponse,
   OptimizerRoster,
@@ -34,8 +32,12 @@ import type {
   OriginListResponse,
   QuotaStatus,
   RayResponse,
+  RoundAudit,
+  RoundResult,
+  ServedDashboard,
   SubjectReading,
   UserSettings,
+  WarmingDashboard,
   WorkspaceStorageResponse,
 } from "./types";
 
@@ -44,331 +46,232 @@ export type ActivityGroupBy = ActivityResponse["group_by"];
 export type HardSampleOrder = CellsResponse["order"];
 export type CellStatus = CellsResponse["cells"][number]["status"];
 
-export function fetchActive(signal?: AbortSignal): Promise<ActiveSessionResponse> {
-  return jget<ActiveSessionResponse>(`${API}/sessions/active`, signal);
+const SEP = "\x1f";
+const enc = encodeURIComponent;
+
+function once<T>(name: string, url: string): ReadDescriptor<T> {
+  return {
+    id: `${name}${SEP}${url}`,
+    load: async (signal) => ({ kind: "ok", data: await jget<T>(url, signal), validator: null }),
+  };
 }
 
-export function fetchHealth(signal?: AbortSignal): Promise<HealthResponse> {
-  return jget<HealthResponse>(`${API}/health`, signal);
+// An ETag wherever the body depends on the query (masks, windows): a date cannot say so.
+function byEtag<T>(name: string, url: string): ReadDescriptor<T> {
+  return {
+    id: `${name}${SEP}${url}`,
+    load: (signal, etag) => jgetIfNoneMatch<T>(url, etag, signal),
+  };
 }
 
-export function fetchMe(signal?: AbortSignal): Promise<MeResponse> {
-  return jget<MeResponse>(`${API}/auth/me`, signal);
+export function activeRead(): ReadDescriptor<ActiveSessionResponse> {
+  return once("active", `${API}/sessions/active`);
 }
 
-export function fetchUserSettings(signal?: AbortSignal): Promise<UserSettings> {
-  return jget<UserSettings>(`${API}/auth/user-settings`, signal);
+export function healthRead(): ReadDescriptor<HealthResponse> {
+  return once("health", `${API}/health`);
 }
 
-export function fetchQuotaStatus(signal?: AbortSignal): Promise<QuotaStatus> {
-  return jget<QuotaStatus>(`${API}/auth/quota-status`, signal);
+export function meRead(): ReadDescriptor<MeResponse> {
+  return once("me", `${API}/auth/me`);
 }
 
-export function fetchActivity(
+export function userSettingsRead(): ReadDescriptor<UserSettings> {
+  return once("user-settings", `${API}/auth/user-settings`);
+}
+
+export function quotaRead(): ReadDescriptor<QuotaStatus> {
+  return once("quota", `${API}/auth/quota-status`);
+}
+
+export function activityRead(
   window: ActivityWindow,
-  groupBy: ActivityGroupBy = "model",
-  signal?: AbortSignal,
-): Promise<ActivityResponse> {
-  return jget<ActivityResponse>(
-    `${API}/auth/activity?window=${encodeURIComponent(window)}&group_by=${encodeURIComponent(groupBy)}`,
-    signal,
-  );
+  groupBy: ActivityGroupBy,
+): ReadDescriptor<ActivityResponse> {
+  return once("activity", `${API}/auth/activity?window=${enc(window)}&group_by=${enc(groupBy)}`);
 }
 
-export function fetchDatasetIndex(signal?: AbortSignal): Promise<DatasetIndexResponse> {
-  return jget<DatasetIndexResponse>(`${API}/datasets`, signal);
+export function datasetIndexRead(): ReadDescriptor<DatasetIndexResponse> {
+  return once("datasets", `${API}/datasets`);
 }
 
-export function fetchOrigins(signal?: AbortSignal): Promise<OriginListResponse> {
-  return jget<OriginListResponse>(`${API}/origins`, signal);
+export function originsRead(): ReadDescriptor<OriginListResponse> {
+  return once("origins", `${API}/origins`);
 }
 
-export function fetchPipeline(
-  optimizer: string,
-  signal?: AbortSignal,
-): Promise<OptimizerPipelineResponse> {
-  return jget<OptimizerPipelineResponse>(
-    `${API}/optimizer-pipeline?optimizer=${encodeURIComponent(optimizer)}`,
-    signal,
-  );
+export function optimizerPipelineRead(optimizer: string): ReadDescriptor<OptimizerPipelineResponse> {
+  return once("optimizer-pipeline", `${API}/optimizer-pipeline?optimizer=${enc(optimizer)}`);
 }
 
-export function fetchOptimizerRoster(signal?: AbortSignal): Promise<OptimizerRoster> {
-  return jget<OptimizerRoster>(`${API}/optimizers`, signal);
+export function optimizerRosterRead(): ReadDescriptor<OptimizerRoster> {
+  return once("optimizer-roster", `${API}/optimizers`);
 }
 
-// `at` takes the `parse_subject` grammar (absent = campaign root); the server refuses a scoring
-// mask there, because a mask cannot change what config a point RAN.
-export function fetchCampaignPipeline(
+// `at` takes the `parse_subject` grammar (absent = campaign root); the server refuses a mask there.
+export function campaignPipelineRead(
   campaignId: string,
-  at?: string | null,
-  signal?: AbortSignal,
-  etag: string | null = null,
-): Promise<Conditional<CampaignPipelineResponse>> {
-  const q = at ? `?at=${encodeURIComponent(at)}` : "";
-  return jgetIfNoneMatch<CampaignPipelineResponse>(
-    `${API}/campaigns/${encodeURIComponent(campaignId)}/pipeline${q}`,
-    etag,
-    signal,
-  );
+  at: string | null,
+): ReadDescriptor<CampaignPipelineResponse> {
+  const q = at ? `?at=${enc(at)}` : "";
+  return byEtag("campaign-pipeline", `${API}/campaigns/${enc(campaignId)}/pipeline${q}`);
 }
 
 // One-shot: topology is bound into the cycle identity hash and never changes mid-loop.
-export function fetchDatasetPipeline(
-  name: string,
-  signal?: AbortSignal,
-): Promise<DatasetPipelineResponse> {
-  return jget<DatasetPipelineResponse>(
-    `${API}/datasets/${encodeURIComponent(name)}/pipeline`,
-    signal,
-  );
+export function datasetPipelineRead(name: string): ReadDescriptor<DatasetPipelineResponse> {
+  return once("dataset-pipeline", `${API}/datasets/${enc(name)}/pipeline`);
 }
 
-export function fetchBackends(signal?: AbortSignal): Promise<BackendResponse[]> {
-  return jget<BackendResponse[]>(`${API}/backends`, signal);
+export function backendsRead(): ReadDescriptor<BackendResponse[]> {
+  return once("backends", `${API}/backends`);
 }
 
-export function fetchBackendHealth(
-  backendId: string,
-  signal?: AbortSignal,
-): Promise<BackendHealthResponse> {
-  return jget<BackendHealthResponse>(`${API}/backends/${encodeURIComponent(backendId)}/health`, signal);
+export function backendHealthRead(backendId: string): ReadDescriptor<BackendHealthResponse> {
+  return once("backend-health", `${API}/backends/${enc(backendId)}/health`);
 }
 
-export function fetchMachineStatus(signal?: AbortSignal): Promise<MachineStatusResponse> {
-  return jget<MachineStatusResponse>(`${API}/machine-status`, signal);
+export function machineStatusRead(): ReadDescriptor<MachineStatusResponse> {
+  return once("machine-status", `${API}/machine-status`);
 }
 
-// `dashboard.json` is per-session, not a campaign or cycle file: read it via `fetchDashboardByPath`.
-export function fetchCycleFile(
-  campaignId: string,
-  cycleId: string,
-  scope: string,
-  path: string,
-  signal?: AbortSignal,
-): Promise<FileContentResponse> {
-  const url =
-    `${API}/campaigns/${encodeURIComponent(campaignId)}` +
-    `/cycles/${encodeURIComponent(cycleId)}/file` +
-    `?scope=${encodeURIComponent(scope)}&path=${encodeURIComponent(path)}`;
-  return jget<FileContentResponse>(url, signal);
-}
-
-// Hops below the root (an L4 inner loop) ride `?descend=`, which the server walks through each
-// hop's `.inner/` sandbox.
 export function cyclePathUrl(path: CyclePath, suffix: string): string {
   const root = pathRoot(path);
-  const base =
-    `${API}/campaigns/${encodeURIComponent(root.campaignId)}` +
-    `/cycles/${encodeURIComponent(root.cycleId)}${suffix}`;
+  const base = `${API}/campaigns/${enc(root.campaignId)}/cycles/${enc(root.cycleId)}${suffix}`;
   const descend = encodeDescend(path);
   if (!descend) return base;
   const sep = suffix.includes("?") ? "&" : "?";
-  return `${base}${sep}descend=${encodeURIComponent(descend)}`;
+  return `${base}${sep}descend=${enc(descend)}`;
 }
 
-// Use this rather than `fetchCycleFile` for a file of the viewed LEAF: the id form cannot reach an
-// inner cycle.
-export function fetchCycleFileByPath(
+// `dashboard.json` is not a cycle file — read it through `dashboardRead`.
+export function cycleFileRead(
   path: CyclePath,
   scope: string,
   filePath: string,
-  signal?: AbortSignal,
-): Promise<FileContentResponse> {
-  const suffix =
-    `/file?scope=${encodeURIComponent(scope)}&path=${encodeURIComponent(filePath)}`;
-  return jget<FileContentResponse>(cyclePathUrl(path, suffix), signal);
+): ReadDescriptor<FileContentResponse> {
+  return once("file", cyclePathUrl(path, `/file?scope=${enc(scope)}&path=${enc(filePath)}`));
 }
 
-export function fetchFiles(
-  campaignId: string,
-  cycleId: string,
-  signal?: AbortSignal,
-): Promise<FilesResponse> {
-  return jget<FilesResponse>(
-    `${API}/campaigns/${encodeURIComponent(campaignId)}` +
-      `/cycles/${encodeURIComponent(cycleId)}/files`,
-    signal,
-  );
+export function roundRead(
+  path: CyclePath,
+  round: number,
+  at: number | null = null,
+): ReadDescriptor<RoundResult> {
+  return once("round", cyclePathUrl(path, `/rounds/${round}${at == null ? "" : `?at=${at}`}`));
 }
 
-// The server walks `descend` from the ROOT hop, so both root ids ride along whatever the scope.
-// Absent `order` = the dataset's `CampaignConfig.hard_sample_order`; label from the echo, never this.
-function hardSamplesParams(
-  limit: number,
-  scope: HardSamplesScope,
-  campaignId?: string,
-  cycleId?: string,
-  descend?: string,
-  order?: HardSampleOrder,
-): URLSearchParams {
-  const params = new URLSearchParams({ limit: String(limit), scope });
-  if (order) params.set("order", order);
-  if ((scope === "campaign" || scope === "cycle") && campaignId) {
-    params.set("campaign_id", campaignId);
-  }
-  if (scope === "cycle" && cycleId) params.set("cycle_id", cycleId);
-  if (descend) {
-    params.set("descend", descend);
-    if (campaignId) params.set("campaign_id", campaignId);
-    if (cycleId) params.set("cycle_id", cycleId);
-  }
-  return params;
+export function roundAuditRead(path: CyclePath, round: number): ReadDescriptor<RoundAudit | null> {
+  return once("round-audit", cyclePathUrl(path, `/rounds/${round}/audit`));
 }
 
-// Server-side filters: a preset's totals come back narrowed along with its rows.
+export function filesRead(campaignId: string, cycleId: string): ReadDescriptor<FilesResponse> {
+  return once("files", `${API}/campaigns/${enc(campaignId)}/cycles/${enc(cycleId)}/files`);
+}
+
 export interface CellsFilter {
   candidateId?: string;
   round?: number;
   status?: CellStatus;
 }
 
-export function fetchCells(
+// The server walks `descend` from the ROOT hop, so both root ids ride along whatever the scope.
+export function cellsRead(
   name: string,
-  signal: AbortSignal | undefined,
-  etag: string | null,
+  path: CyclePath,
   scope: HardSamplesScope,
-  campaignId?: string,
-  cycleId?: string,
-  descend?: string,
-  order?: HardSampleOrder,
+  // Null is the dataset's `CampaignConfig.hard_sample_order`; label from the echo.
+  order: HardSampleOrder | null,
   filter: CellsFilter = {},
+  // The server replays the CYCLE scope alone and refuses `at` elsewhere.
+  at: number | null = null,
   limit = 1000,
-): Promise<Conditional<CellsResponse>> {
-  const params = hardSamplesParams(limit, scope, campaignId, cycleId, descend, order);
+): ReadDescriptor<CellsResponse> {
+  const root = pathRoot(path);
+  const descend = encodeDescend(path);
+  const params = new URLSearchParams({ limit: String(limit), scope });
+  if (order) params.set("order", order);
+  if (scope === "campaign" || scope === "cycle" || descend) {
+    params.set("campaign_id", root.campaignId);
+  }
+  if (scope === "cycle" || descend) params.set("cycle_id", root.cycleId);
+  if (descend) params.set("descend", descend);
   if (filter.candidateId) params.set("candidate_id", filter.candidateId);
   if (filter.round != null) params.set("round", String(filter.round));
   if (filter.status) params.set("status", filter.status);
-  return jgetIfNoneMatch<CellsResponse>(
-    `${API}/datasets/${encodeURIComponent(name)}/cells?${params.toString()}`,
-    etag,
-    signal,
-  );
+  if (at != null && scope === "cycle") params.set("at", String(at));
+  return byEtag("cells", `${API}/datasets/${enc(name)}/cells?${params.toString()}`);
 }
 
-export function fetchCell(
-  name: string,
-  runId: string,
-  sampleId: number,
-  signal?: AbortSignal,
-): Promise<Cell> {
-  return jget<Cell>(
-    `${API}/datasets/${encodeURIComponent(name)}/cells/${encodeURIComponent(runId)}/${sampleId}`,
-    signal,
-  );
+export function cellRead(name: string, answer: string): ReadDescriptor<Cell> {
+  return once("cell", `${API}/datasets/${enc(name)}/cells/${enc(answer)}`);
 }
 
-// A cycle with no dashboard yet answers 200 `{warming_up: true}`. `at` folds the ledger up to that
-// leaf-cycle offset (`RayItem.offset`'s space) instead of reading the materialized head.
-export function fetchDashboardByPath(
-  path: CyclePath,
-  ifModifiedSince?: string | null,
-  signal?: AbortSignal,
-  at?: number | null,
-): Promise<Conditional<Record<string, unknown>>> {
-  return jgetIfModified<Record<string, unknown>>(
-    cyclePathUrl(path, at == null ? "/dashboard" : `/dashboard?at=${at}`),
-    ifModifiedSince,
-    signal,
-  );
+export type DashboardBody = ServedDashboard | WarmingDashboard;
+
+export function isWarming(body: DashboardBody): body is WarmingDashboard {
+  return "warming_up" in body;
 }
 
-// `encodeCyclePath`, not `encodeDescend`: a forest names a STORE, so every hop in `at` is a
-// descent, while a leaf ENTITY's descend drops the root hop.
-export function fetchCampaigns(
-  dataset?: string,
-  signal?: AbortSignal,
-  lifecycle?: LifecycleFilter,
-  at: CyclePath = [],
-  etag: string | null = null,
-): Promise<Conditional<CampaignListResponse>> {
+// `at` is a leaf-cycle ledger offset (`RayItem.offset`); one file, so it validates on `Last-Modified`.
+export function dashboardRead(path: CyclePath, at: number | null): ReadDescriptor<DashboardBody> {
+  const url = cyclePathUrl(path, at == null ? "/dashboard" : `/dashboard?at=${at}`);
+  return {
+    id: `dashboard${SEP}${url}`,
+    load: (signal, validator) => jgetIfModified<DashboardBody>(url, validator, signal),
+  };
+}
+
+export function campaignsRead(lifecycle: LifecycleFilter): ReadDescriptor<CampaignListResponse> {
+  const qs = lifecycle !== "active" ? `?lifecycle=${enc(lifecycle)}` : "";
+  return byEtag("campaigns", `${API}/campaigns${qs}`);
+}
+
+export function cyclesRead(
+  filter: { campaign?: string; attached?: boolean } = {},
+): ReadDescriptor<CyclesResponse> {
   const params = new URLSearchParams();
-  if (dataset) params.set("dataset", dataset);
-  if (lifecycle && lifecycle !== "active") params.set("lifecycle", lifecycle);
-  if (at.length) params.set("descend", encodeCyclePath(at));
+  if (filter.campaign) params.set("campaign", filter.campaign);
+  if (filter.attached) params.set("attached", "true");
   const qs = params.toString();
-  return jgetIfNoneMatch<CampaignListResponse>(
-    `${API}/campaigns${qs ? `?${qs}` : ""}`,
-    etag,
-    signal,
-  );
+  return byEtag("cycles", `${API}/cycles${qs ? `?${qs}` : ""}`);
 }
 
-export function fetchCycles(
-  signal?: AbortSignal,
-  at: CyclePath = [],
-  etag: string | null = null,
-): Promise<Conditional<CyclesResponse>> {
-  const qs = at.length ? `?descend=${encodeURIComponent(encodeCyclePath(at))}` : "";
-  return jgetIfNoneMatch<CyclesResponse>(`${API}/cycles${qs}`, etag, signal);
+export function campaignStorageRead(campaignId: string): ReadDescriptor<CampaignStorageResponse> {
+  return byEtag("campaign-storage", `${API}/campaigns/${enc(campaignId)}/storage`);
 }
 
-export function fetchCampaignStorage(
-  campaignId: string,
-  signal?: AbortSignal,
-  etag: string | null = null,
-): Promise<Conditional<CampaignStorageResponse>> {
-  return jgetIfNoneMatch<CampaignStorageResponse>(
-    `${API}/campaigns/${encodeURIComponent(campaignId)}/storage`,
-    etag,
-    signal,
-  );
+export function workspaceStorageRead(): ReadDescriptor<WorkspaceStorageResponse> {
+  return byEtag("workspace-storage", `${API}/workspace/storage`);
 }
 
-export function fetchWorkspaceStorage(
-  signal?: AbortSignal,
-  etag: string | null = null,
-): Promise<Conditional<WorkspaceStorageResponse>> {
-  return jgetIfNoneMatch<WorkspaceStorageResponse>(`${API}/workspace/storage`, etag, signal);
+export function storageByDatasetRead(): ReadDescriptor<DatasetStorageResponse> {
+  return byEtag("storage-by-dataset", `${API}/workspace/storage-by-dataset`);
 }
 
-export function fetchStorageByDataset(
-  signal?: AbortSignal,
-  etag: string | null = null,
-): Promise<Conditional<DatasetStorageResponse>> {
-  return jgetIfNoneMatch<DatasetStorageResponse>(
-    `${API}/workspace/storage-by-dataset`,
-    etag,
-    signal,
-  );
+export function optimizerKnobsRead(optimizer: string): ReadDescriptor<OptimizerKnobsResponse> {
+  return once("optimizer-knobs", `${API}/optimizers/${enc(optimizer)}/knobs`);
 }
 
-export function fetchOptimizerKnobs(
-  optimizer: string,
-  signal?: AbortSignal,
-): Promise<OptimizerKnobsResponse> {
-  return jget<OptimizerKnobsResponse>(
-    `${API}/optimizers/${encodeURIComponent(optimizer)}/knobs`,
-    signal,
-  );
+export function configMapRead(campaignId: string): ReadDescriptor<ConfigMapResponse> {
+  return once("config-map", `${API}/campaigns/${enc(campaignId)}/config-map`);
 }
 
-export function fetchConfigMap(
-  campaignId: string,
-  signal?: AbortSignal,
-): Promise<ConfigMapResponse> {
-  return jget<ConfigMapResponse>(
-    `${API}/campaigns/${encodeURIComponent(campaignId)}/config-map`,
-    signal,
-  );
-}
-
-// A read despite the POST: its subject is an overlay that exists nowhere on disk yet. The verdict
-// is `fork-cycle`'s own, and the browser must not re-derive it (`frontend-surface-contract.md::I9`).
-export function fetchForkPreview(
+// A read despite the POST: its subject is an overlay that exists nowhere on disk yet.
+export function forkPreviewRead(
   campaignId: string,
   pipelineOverlay: Record<string, unknown>,
-  signal?: AbortSignal,
-): Promise<ForkPreviewResponse> {
-  return jpost<ForkPreviewResponse>(
-    `${API}/campaigns/${encodeURIComponent(campaignId)}/fork-preview`,
-    { pipeline_overlay: pipelineOverlay },
-    signal,
-  );
+): ReadDescriptor<ForkPreviewResponse> {
+  const url = `${API}/campaigns/${enc(campaignId)}/fork-preview`;
+  return {
+    id: `fork-preview${SEP}${url}${SEP}${JSON.stringify(pipelineOverlay)}`,
+    load: async (signal) => ({
+      kind: "ok",
+      data: await jpost<ForkPreviewResponse>(url, { pipeline_overlay: pipelineOverlay }, signal),
+      validator: null,
+    }),
+  };
 }
 
-// The subject address grammar is spelled here and nowhere else in the browser; every other module
-// passes the opaque string. `inside` = the hops ABOVE the leaf, on the `?descend=` codec.
+// The browser's only spelling of the subject grammar; `inside` is the hops ABOVE the leaf.
 export function subjectKey(
   kind: SubjectReading["kind"],
   ids: readonly string[],
@@ -378,7 +281,6 @@ export function subjectKey(
   return inside.length > 0 ? `${address};in=${encodeCyclePath(inside)}` : address;
 }
 
-// A reading's ids name only its leaf; a join against the lineage tree needs this whole path.
 export function readingPath(reading: SubjectReading): CyclePath {
   return [
     ...reading.inside.map((h) => ({ campaignId: h.campaign_id, cycleId: h.cycle_id })),
@@ -392,8 +294,7 @@ export function candidateSubject(path: CyclePath, candidateId: string): string {
   return subjectKey("candidate", [leaf.campaignId, leaf.cycleId, candidateId], path.slice(0, -1));
 }
 
-// `;` separates because it cannot appear in a safe-AST formula, which is why the server splits on
-// it. A blank value drops its segment, so clearing both returns the channel to the record.
+// `;` separates because it cannot appear in a safe-AST formula; the server splits on it.
 export function withMask(
   address: string,
   mask: { lens?: string | null; samples?: string | null },
@@ -423,7 +324,8 @@ export function maskedSubject(
   );
 }
 
-export function fetchEvidence(
+// Subjects are sorted into the id, so one selection is one read whatever order it was picked in.
+export function evidenceRead(
   subjects: readonly string[],
   opts: {
     ranking?: boolean;
@@ -432,52 +334,51 @@ export function fetchEvidence(
     metric?: string;
     grid?: string;
   } = {},
-  signal?: AbortSignal,
-  etag: string | null = null,
-): Promise<Conditional<Evidence>> {
-  const qs = subjects.map((s) => `subject=${encodeURIComponent(s)}`);
+): ReadDescriptor<Evidence> {
+  const qs = [...subjects].sort().map((s) => `subject=${enc(s)}`);
   if (opts.ranking) qs.push("ranking=true");
   if (opts.winnerChain) qs.push("winner_chain=true");
   if (opts.config) qs.push("config=true");
-  // A catalogue key or a composed `expr:…`, opaque here — the server owns both spellings, and
-  // `components/compare/MetricPicker.tsx` is the one place the browser spells the prefix.
-  if (opts.metric) qs.push(`metric=${encodeURIComponent(opts.metric)}`);
-  // `row,col` over two of the served `factors`. Sent rather than grouped here because the cell is
-  // POOLED — an aggregate, and this layer computes none (webapp/CLAUDE.md § Scoring authority).
-  if (opts.grid) qs.push(`grid=${encodeURIComponent(opts.grid)}`);
-  return jgetIfNoneMatch<Evidence>(`${API}/evidence?${qs.join("&")}`, etag, signal);
+  if (opts.metric) qs.push(`metric=${enc(opts.metric)}`);
+  if (opts.grid) qs.push(`grid=${enc(opts.grid)}`);
+  return byEtag("evidence", `${API}/evidence?${qs.join("&")}`);
 }
 
-// An ETag, not a date: the validator covers the lens/samples mask, so a masked read gets its own
-// 304. No `depth` parameter: the recursion bound is the server's (`_MAX_COURSE_DEPTH`).
-export function fetchLineageTree(
+// `lens` is `score:<formula>` or `abort:<variant>`; `samples` is ignored under `abort:`.
+export interface TreeMask {
+  lens: string | null;
+  samples: readonly number[] | null;
+}
+
+// `cycle` owns the ledger `at` is an offset into: the viewed leaf, not the tree's root.
+export interface TreeMoment {
+  at: number;
+  cycle: CyclePath;
+}
+
+export function treeRead(
   path: CyclePath,
-  opts: { lens?: string | null; samples?: number[] | null } = {},
-  etag?: string | null,
-  signal?: AbortSignal,
-): Promise<Conditional<LineageNode>> {
-  // `lens` is `score:<formula>` or `abort:<variant>` (a PoBB abort-contributor switch-off);
-  // `samples` composes with `score:` and is ignored under `abort:`.
-  const { lens = null, samples = null } = opts;
+  mask: TreeMask | null,
+  moment: TreeMoment | null = null,
+): ReadDescriptor<CourseNode> {
   const params = new URLSearchParams();
-  if (lens) params.set("lens", lens);
-  if (samples && samples.length > 0) params.set("samples", samples.join(","));
+  if (mask?.lens) params.set("lens", mask.lens);
+  if (mask?.samples && mask.samples.length > 0) params.set("samples", mask.samples.join(","));
+  if (moment) {
+    params.set("at", String(moment.at));
+    params.set("at_cycle", encodeCyclePath(moment.cycle));
+  }
   const q = params.toString();
-  return jgetIfNoneMatch<LineageNode>(cyclePathUrl(path, `/tree${q ? `?${q}` : ""}`), etag, signal);
+  return byEtag("tree", cyclePathUrl(path, `/tree${q ? `?${q}` : ""}`));
 }
 
-// Also the replay endpoint: the SSE tail seeks to EOF and has no `since=`. Windowed newest-first,
-// delivered oldest-first; `before` is a prior `cursor_prev`.
-export function fetchTimeRay(
+// Windowed newest-first, delivered oldest-first; `before` is a prior `cursor_prev`.
+export function rayRead(
   path: CyclePath,
-  opts: { limit?: number; before?: string | null } = {},
-  etag?: string | null,
-  signal?: AbortSignal,
-): Promise<Conditional<RayResponse>> {
-  const { limit = null, before = null } = opts;
-  const params = new URLSearchParams();
-  if (limit != null) params.set("limit", String(limit));
+  limit: number,
+  before: string | null = null,
+): ReadDescriptor<RayResponse> {
+  const params = new URLSearchParams({ limit: String(limit) });
   if (before) params.set("before", before);
-  const q = params.toString();
-  return jgetIfNoneMatch<RayResponse>(cyclePathUrl(path, `/ray${q ? `?${q}` : ""}`), etag, signal);
+  return byEtag("ray", cyclePathUrl(path, `/ray?${params.toString()}`));
 }

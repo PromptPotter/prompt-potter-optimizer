@@ -1,5 +1,3 @@
-// The wire types, re-exported from `types.generated.ts`: change the Pydantic model and regenerate.
-
 export type {
   AbilityReading,
   ArmOutcome,
@@ -27,19 +25,26 @@ export type {
   OrderConfound,
   MetricSpec,
   PairwiseComparison,
+  CloseSpend,
+  RunStanding,
+  LivesReading,
+  MachineNotice,
+  ProducerReading,
+  RunAdmission,
   MetricReading,
   HeadToHead,
-  HeadlineLift,
   HeadToHeadRow,
   Evidence,
   CommandAcceptedBody,
   NodeSearchNarrowing,
+  ParamIntent,
   CycleHop,
   BandedValue,
   BenchPassProgress,
   BenchReading,
   BenchScore,
   CycleListEntry,
+  LineStanding,
   CyclesResponse,
   DatasetItem,
   DatasetPipelineResponse,
@@ -55,15 +60,34 @@ export type {
   FilesResponse,
   BackendWarning,
   CatchUpLogEntry,
-  BackpressureReading,
+  ServedBackpressure,
   DashboardError,
   LineageDivergence,
-  LineageNode,
-  LiveDashboardState,
+  ArmNode,
+  CourseNode,
+  ForkStamp,
+  LensShift,
+  MainLineStep,
+  ArmReading,
+  ArmPanel,
+  ArmSpend,
+  ArmAbility,
+  ArmElection,
+  ArmPointer,
+  SampleWalk,
+  ServedDashboard,
+  WarmingDashboard,
   LoopWarning,
+  NodeBlock,
+  RoundAudit,
   RunLimits,
   CurrentRound,
   DashboardCandidate,
+  LiftEstimate,
+  MeasuredLift,
+  Measurand,
+  PairGuard,
+  PairedReading,
   LiveCandidate,
   ModelCapability,
   NodeConfigParam,
@@ -72,27 +96,33 @@ export type {
   OptimizerFact,
   OptimizerLimit,
   OptimizerPipelineResponse,
+  StartPrompt,
   PipelineView,
   PipelineViewEdge,
   PipelineViewNode,
-  OverlapMember,
+  LineRate,
   OverlapReading,
+  RoundAdvance,
   PanelPrecision,
   RayItem,
   RayResponse,
   ProjectionEnvelope,
-  NonActivityKind,
+  ActivityItem,
+  ActivityState,
+  ActivityDecision,
+  DecisionAction,
   DashboardSample,
   RoundResult,
-  RoundSummary,
-  RoundSummaryCandidate,
+  ServedRound,
   ScoreboardRow,
   ScoredCandidate,
+  SheetRow,
   ValidationFailure,
   VerifyPassProgress,
   VerifyReading,
   SpendBucket,
   SpendRollup,
+  PrefixReading,
   KindSpend,
   MeteredSpend,
   LifetimeSpend,
@@ -116,6 +146,7 @@ export type {
   DatasetStorageResponse,
   ForkPreviewResponse,
   MachineHolder,
+  MachineRefusal,
   MachineStatusResponse,
   KnobRow,
   ManifestNodeOverlay,
@@ -130,21 +161,45 @@ export type {
   UserSettings,
   WorkspaceStorageEntry,
   WorkspaceStorageResponse,
+  CheckinReopenResponse,
+  DatasetReplaced,
+  DraftCampaignWire,
+  DraftDependency,
+  FieldGap,
+  OptimizationOverrides,
+  OriginLastResolution,
+  OriginQuestion,
+  OriginReadiness,
+  OriginResolution,
+  RaisedCommand,
+  ResolveOriginResponse,
+  StartCheckinResponse,
 } from "./types.generated";
 
 import type {
+  ArmNode,
   CampaignPipelineResponse,
+  CellsResponse,
+  CourseNode,
   CycleListEntry,
-  LiveDashboardState,
+  DraftCampaignWire,
+  EditDraftPatch,
+  ServedDashboard,
 } from "./types.generated";
 
-// Hand-written: `HeatmapScope` reaches the wire only as a query param. No workspace scope, since
-// samples differ per dataset.
-export type HardSamplesScope = "cycle" | "campaign" | "dataset";
+// The two kinds strictly alternate, each typed to hold only the other: narrow on `kind` once.
+export type LineageNode = CourseNode | ArmNode;
+
+export type DraftPatch = Partial<EditDraftPatch>;
+
+export type Provenance = DraftCampaignWire["field_provenance"][string];
+
+// served: `domain/cells.py::HeatmapScope`
+export type HardSamplesScope = CellsResponse["scope"];
 
 export type MintKind = CycleListEntry["mint_kind"];
 
-export type MeasuredUnit = LiveDashboardState["measured_unit"];
+export type MeasuredUnit = ServedDashboard["measured_unit"];
 
 // provider → model → capability; the provider key is the node's own `provider` value, "" for none.
 export type CapabilityMenu = CampaignPipelineResponse["model_capabilities"];

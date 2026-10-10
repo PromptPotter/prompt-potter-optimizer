@@ -31,8 +31,7 @@ describe("CyclePath", () => {
     expect(decodeCyclePath("camp::cy~broken")).toBeNull();
     expect(decodeCyclePath("bad/slash::cy")).toBeNull();
     expect(decodeCyclePath("camp::cy space")).toBeNull();
-    // All-dots components pass the id charset but are traversal segments the
-    // server rejects (`store/io.py::validate_path_component`).
+    // All-dots passes the id charset but is a traversal segment (`store/io.py::validate_path_component`).
     expect(decodeCyclePath("..::..")).toBeNull();
   });
 

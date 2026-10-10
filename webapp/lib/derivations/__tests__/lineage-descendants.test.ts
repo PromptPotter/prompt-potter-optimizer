@@ -1,40 +1,33 @@
 import { describe, expect, it } from "vitest";
 import { descendantsOf } from "../lineage-descendants";
-import { mainLine } from "../lineage-candidates";
-import type { LineageNode } from "@/lib/api";
+import { indexLineage, mainLineOf } from "../lineage-candidates";
+import type { CourseNode } from "@/lib/api";
+import { armNode, courseNode } from "@/lib/test-fixtures";
 
 // A missed descendant fails SILENTLY: a channel keeps rendering a measurement an edit invalidated.
-// Pinned: a losing arm nothing was built on, and a FORK reachable by `parent_ids` alone.
-
-function node(
-  over: Partial<LineageNode> & Pick<LineageNode, "kind" | "id">,
-): LineageNode {
-  return { children: [], parent_ids: [], ...over } as unknown as LineageNode;
-}
-
-// One campaign: root course c0 with C0 → (R1.1 winner, R1.2 loser) → R2.1 under the winner, plus a
-// fork course branching off R1.1 and minting F1.1.
-function family(): LineageNode {
-  return node({
-    kind: "course",
+function family(): CourseNode {
+  return courseNode({
     id: "cyc_root",
     children: [
-      node({ kind: "candidate", id: "C0" }),
-      node({ kind: "candidate", id: "R1.1", parent_ids: ["C0"] }),
-      node({ kind: "candidate", id: "R1.2", parent_ids: ["C0"] }),
-      node({ kind: "candidate", id: "R2.1", parent_ids: ["R1.1"] }),
-      node({
-        kind: "course",
-        id: "cyc_fork",
-        children: [node({ kind: "candidate", id: "F1.1", parent_ids: ["R1.1"] })],
+      armNode({ id: "C0" }),
+      armNode({
+        id: "R1.1",
+        parent_ids: ["C0"],
+        children: [
+          courseNode({
+            id: "cyc_inner",
+            children: [armNode({ id: "F1.1", parent_ids: ["R1.1"] })],
+          }),
+        ],
       }),
+      armNode({ id: "R1.2", parent_ids: ["C0"] }),
+      armNode({ id: "R2.1", parent_ids: ["R1.1"] }),
     ],
   });
 }
 
 describe("descendantsOf", () => {
-  it("takes the whole line under an edited point, across a fork", () => {
-    // The fork left at R1.1, so its candidate descends from it — reachable by `parent_ids` alone.
+  it("takes the whole line under an edited point, across courses", () => {
     expect([...descendantsOf(family(), ["R1.1"])].sort()).toEqual(["F1.1", "R1.1", "R2.1"]);
   });
 
@@ -53,47 +46,39 @@ describe("descendantsOf", () => {
   });
 
   it("terminates on a tree that cycles", () => {
-    // A parent edge pointing back up must not hang the tab; `out` doubles as the visited set.
-    const cyclic = node({
-      kind: "course",
+    const cyclic = courseNode({
       id: "c",
       children: [
-        node({ kind: "candidate", id: "A", parent_ids: ["B"] }),
-        node({ kind: "candidate", id: "B", parent_ids: ["A"] }),
+        armNode({ id: "A", parent_ids: ["B"] }),
+        armNode({ id: "B", parent_ids: ["A"] }),
       ],
     });
     expect([...descendantsOf(cyclic, ["A"])].sort()).toEqual(["A", "B"]);
   });
 });
 
-// A held round is a fact about the line, not an absence: it must read as held, never be dropped.
-// The parents here name ids no node carries, as a resume's re-mint leaves them.
-describe("mainLine", () => {
-  const cand = (id: string, round: number, won: boolean, held = true): LineageNode =>
-    node({
-      kind: "candidate",
-      id,
-      round,
-      parent_ids: ["re-minted"],
-      election_held: held,
-      is_selected: won,
-    });
-  const course = [
-    cand("C0", 0, true),
-    cand("R1.1", 1, true),
-    cand("R1.2", 1, false),
-    cand("R2.1", 2, false),
-    cand("R3.1", 3, true),
-    cand("R4.1", 4, false),
-    cand("R5.1", 5, false, false),
+describe("mainLineOf", () => {
+  const origin = armNode({ id: "C0" });
+  // A repair left two rows on one id: the line names the row, so the id decides nothing.
+  const retired = armNode({ id: "R1.1", label: "retired", superseded_by: "cyc_fork" }, 1);
+  const live = armNode({ id: "R1.1", label: "live" }, 1);
+  const head = armNode({ id: "R3.1" }, 3);
+  head.main_line = [
+    { round: 0, rows: [origin.row] },
+    { round: 1, rows: [live.row] },
+    { round: 2, rows: [] },
+    { round: 3, rows: [head.row] },
+    { round: 4, rows: [] },
   ];
-  const line = (head: LineageNode | undefined) => {
-    if (!head) throw new Error("fixture");
-    return mainLine(course, head).map((s) => (s.kind === "held" ? `held@${s.round}` : s.node.id));
-  };
+  const root = courseNode({
+    id: "cyc_root",
+    children: [origin, retired, live, armNode({ id: "R1.2" }, 1), head],
+  });
+  const line = mainLineOf(indexLineage(root), head).map((s) =>
+    s.kind === "held" ? `held@${s.round}` : s.node.label,
+  );
 
-  it("reads the crowns from the origin and names every held round, to any head", () => {
-    expect(line(course[4])).toEqual(["C0", "R1.1", "held@2", "R3.1", "held@4"]);
-    expect(line(course[6])).toEqual(["C0", "R1.1", "held@2", "R3.1", "held@4", "R5.1"]);
+  it("reads the served crowns from the origin and names every held round", () => {
+    expect(line).toEqual(["C0", "live", "held@2", "R3.1", "held@4"]);
   });
 });

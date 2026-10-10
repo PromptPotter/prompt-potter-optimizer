@@ -1,6 +1,4 @@
 "use client";
-// The dataset roster for the unit in view, its measured cells, and the scope + ranking controls —
-// one context so non-adjacent consumers share one fetch, scope and ranking. The facade over `useCells`.
 
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
 import type {
@@ -23,17 +21,14 @@ interface HardSamples {
   candidates: CellCandidate[];
   cells: CellRow[];
   totals: SeriesTotals | null;
-  /** The SERVER's echo; `null` while a read is in flight. Not `order` — `sampleOrder` in this
-   *  tree is the scoring WALK. */
+  /** The SERVER's echo; `null` while a read is in flight. */
   rankedBy: HardSampleOrder | null;
   /** The control moves on click, while every LABEL names the served order until the rows land. */
   rankedByPick: HardSampleOrder | null;
   setRankedBy: (o: HardSampleOrder) => void;
-  /** The optimizer's picker runs on the dataset scope regardless of this toggle
-   *  (the sampler's round-subset fit). */
+  /** The optimizer's picker runs on the dataset scope regardless of this toggle. */
   scope: HardSamplesScope;
   setScope: (s: HardSamplesScope) => void;
-  /** A prior (unit, scope) with a fetch in flight — dim it, never blank it. */
   stale: boolean;
   /** Consumers MUST render it: an empty roster and a broken read spell `items` the same way. */
   error: string | null;
@@ -51,8 +46,6 @@ export function HardSamplesProvider({
   children: ReactNode;
 }) {
   const [scope, setScope] = useState<HardSamplesScope>("campaign");
-  // `null` sends no override, so the server resolves the dataset's declared `hard_sample_order`;
-  // the browser never restates that default.
   const [rankedByPick, setRankedBy] = useState<HardSampleOrder | null>(null);
   const { isLive } = useCycleStream();
   const p = useCells(path, datasetName, scope, rankedByPick, isLive);

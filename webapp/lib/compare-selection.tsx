@@ -1,6 +1,4 @@
 "use client";
-// WHICH CHANNELS the Compare tab reads: a TOP-LEVEL campaign plus the point inside it. The campaign
-// rides beside the address, never parsed out of it — `lib/api/reads.ts` is the one speller.
 // Not in `view-memory.tsx`: that record is per campaign, and a comparison spans several.
 
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
@@ -12,8 +10,7 @@ export interface CompareChannel {
   subject: string;
 }
 
-/** The branch that ANSWERS for the campaign, read at its last crowned winner. After a supersede
- *  that is a fork, so `campaign-forest.ts::buildForest` resolves the cycle for every surface. */
+/** After a supersede the answering branch is a fork: `campaign-forest.ts::buildForest` resolves it. */
 export function defaultChannel(campaignId: string, answeringCycleId: string): CompareChannel {
   return { rootCampaignId: campaignId, subject: subjectKey("course", [campaignId, answeringCycleId]) };
 }
@@ -26,7 +23,6 @@ interface CompareSelection {
   toggleCampaign: (rootCampaignId: string, subject: string) => void;
   addCampaigns: (channels: readonly CompareChannel[]) => void;
   addSubject: (channel: CompareChannel) => void;
-  /** The whole board at once, in this order: what was on it is dropped. */
   show: (channels: readonly CompareChannel[]) => void;
   /** IN PLACE, so the channel keeps its position and its colour. */
   replace: (from: string, to: string) => void;

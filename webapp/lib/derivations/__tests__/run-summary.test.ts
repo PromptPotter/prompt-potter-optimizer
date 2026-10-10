@@ -1,133 +1,79 @@
 import { describe, expect, it } from "vitest";
+import { READING_STATE_LABELS } from "@/lib/api/types.generated";
 import { runSummary } from "../run-summary";
-import { dash, servedLabel, summaryCandidate, summaryRound } from "@/lib/test-fixtures";
+import {
+  armReading,
+  dash,
+  pairedReading,
+  runStanding,
+  servedLabel,
+  summaryCandidate,
+  summaryRound,
+} from "@/lib/test-fixtures";
+
+const arm = (round: number, idx: number, changes_description = "") =>
+  summaryCandidate({
+    reading: armReading({
+      arm: { round, label: servedLabel(round, idx), candidate_id: `r${round}c${idx}` },
+      changes_description,
+    }),
+  });
 
 describe("runSummary", () => {
   const finished = dash({
     cycle_id: "cycle_9",
     stop_reason: "lives_exhausted",
-    bench_score: {
-      bench_size: 10,
-      scorer_id: "default_hit",
-      headline: "accuracy",
-      origin: null,
-      selected: null,
-      missing_reason: null,
-      lift: {
-        accuracy: { value: 0.2, ci_lo: 0.05, ci_hi: 0.35 },
-        composite: { value: 0.12, ci_lo: 0.02, ci_hi: 0.22 },
-      },
-    },
+    next_step: "Raise the lives and resume.",
     rounds: [
-      summaryRound({
-        round: 0,
-        candidates: [
-          summaryCandidate({
-            candidate_id: "c0",
-            label: servedLabel(0, 0),
-            accuracy: 0.62,
-            is_selected: true,
-          }),
-        ],
-      }),
-      // Closed but empty — an L2/L3-terminal round measured nothing.
+      summaryRound({ round: 0, candidates: [arm(0, 0)] }),
       summaryRound({ round: 1 }),
       summaryRound({
         round: 2,
-        candidates: [
-          summaryCandidate({ candidate_id: "a", label: servedLabel(2, 0) }),
-          summaryCandidate({
-            candidate_id: "b",
-            label: servedLabel(2, 1),
-            accuracy: 0.74,
-            reference_accuracy: 0.6,
-            changes_description: "step-by-step thinking style",
-            is_selected: true,
-          }),
-        ],
+        candidates: [arm(2, 0, "a losing arm's edit"), arm(2, 1, "step-by-step thinking style")],
       }),
     ],
+    run_standing: runStanding(2, "C2.2", {
+      vs_origin: pairedReading(0.12, [0.01, 0.23], { rateA: 0.5 }),
+    }),
   });
 
-  it("snapshots the champion off the most recent served crown", () => {
+  it("snapshots the served winner against its origin, never its own round's level", () => {
     const s = runSummary(finished);
-    expect(s?.championLabel).toBe("C2.2");
-    expect(s?.accuracy).toBe(0.74);
-    // The floor it was JUDGED against, not round 0's full-set rate.
-    expect(s?.parentAccuracy).toBe(0.6);
+    expect(s?.winnerLabel).toBe("C2.2");
+    expect(s?.vsOrigin).toBe("50% → 62%");
     expect(s?.changes).toBe("step-by-step thinking style");
   });
 
-  it("counts only rounds that closed WITH candidates", () => {
+  it("takes the served count of closed rounds", () => {
     expect(runSummary(finished)?.rounds).toBe(2);
   });
 
-  it("carries the SERVED bench lift and stop reason verbatim", () => {
+  it("carries the served status word, the next step and the cycle it froze verbatim", () => {
     const s = runSummary(finished);
-    expect(s?.benchLift).toBe(0.2);
-    expect(s?.stopReason).toBe("lives_exhausted");
+    expect(s?.state).toBe(finished.status.label);
+    expect(s?.nextStep).toBe("Raise the lives and resume.");
     expect(s?.cycleId).toBe("cycle_9");
   });
 
-  it("leaves an unstamped origin floor null rather than reading it as zero", () => {
-    const s = runSummary(
-      dash({
-        rounds: [
-          summaryRound({
-            round: 1,
-            candidates: [summaryCandidate({ candidate_id: "x", accuracy: 0.5, is_selected: true })],
-          }),
-        ],
-      }),
-    );
-    expect(s?.accuracy).toBe(0.5);
-    expect(s?.parentAccuracy).toBeNull();
-  });
-
-  // The fact that keeps "Best = origin" from reading as a broken surface: a run where
-  // two challengers were tried and both lost is NOT a run where nothing was tried.
-  it("reports the last closed round's verdict, skipping an empty one", () => {
-    expect(runSummary(finished)?.lastRound).toEqual({
-      round: 2,
-      improved: null,
-      verdictReason: null,
-      facts: [],
-    });
+  it("names the origin when every challenger lost", () => {
     const lost = runSummary(
       dash({
+        run_standing: runStanding(0, "C0", { rounds_closed: 1 }),
         rounds: [
-          summaryRound({
-            round: 0,
-            candidates: [
-              summaryCandidate({ candidate_id: "c0", label: servedLabel(0, 0), is_selected: true }),
-            ],
-          }),
-          summaryRound({
-            round: 1,
-            improved: false,
-            candidates: [
-              summaryCandidate({ candidate_id: "a", label: servedLabel(1, 0) }),
-              summaryCandidate({ candidate_id: "b", label: servedLabel(1, 1) }),
-            ],
-          }),
+          summaryRound({ round: 0, candidates: [arm(0, 0)] }),
+          summaryRound({ round: 1, improved: false, candidates: [arm(1, 0), arm(1, 1)] }),
         ],
       }),
     );
-    expect(lost?.lastRound).toEqual({
-      round: 1,
-      improved: false,
-      verdictReason: null,
-      facts: [],
-    });
-    // …and the champion correctly walks back to the origin, which is the pairing the
-    // surface has to render as one sentence.
-    expect(lost?.championLabel).toBe("C0");
+    expect(lost?.winnerLabel).toBe("C0");
+    expect(lost?.rounds).toBe(1);
+    expect(lost?.vsOrigin).toBe(READING_STATE_LABELS.same_individual);
   });
 
-  it("returns null without a cycle, and a champion-less summary before any crown", () => {
+  it("returns null without a cycle, and a winner-less summary before round 0 closes", () => {
     expect(runSummary(null)).toBeNull();
     const bare = runSummary(dash({}));
-    expect(bare?.championLabel).toBeNull();
-    expect(bare?.rounds).toBe(0);
+    expect(bare?.winnerLabel).toBeNull();
+    expect(bare?.rounds).toBeNull();
   });
 });

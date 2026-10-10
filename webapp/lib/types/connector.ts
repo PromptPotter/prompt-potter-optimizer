@@ -1,6 +1,3 @@
-// The connector state: one join of `/backends` and the campaign's resolved pipeline, made in
-// `lib/hooks/useConnector.ts` and nowhere else.
-
 import type {
   BackendHealthResponse,
   BackendResponse,
@@ -14,35 +11,33 @@ import type { PipelineView } from "./pipeline";
 
 export type PipelineStatus = "unbound" | "loading" | "ok" | "error";
 
+export interface NodeSchemaReading {
+  // Never infer the read's state from a null map: an in-flight read and an empty node both hold no rows.
+  status: PipelineStatus;
+  config: Record<string, NodeConfigParam[]> | null;
+  output: Record<string, NodeOutputSchema | null> | null;
+  // Served (`is_single_node`), never counted off the rows: they cover every DECLARED node.
+  isSingleNode: boolean;
+}
+
 export interface ConnectorView {
   connector: string | null;
   backendType: string | null;
-  // Served (`CampaignPipelineResponse.self_optimization`): an L4 unit has no HTTP backend and no
-  // per-sample roster, so those panels branch on this. False until the resolution lands.
+  // served: `CampaignPipelineResponse.self_optimization`; false until the resolution lands.
   selfOptimization: boolean;
-  // The optimizer manifest the course runs; null until the resolution lands.
   optimizer: string | null;
-  // That optimizer's knob values per node as the course runs them; null until it lands.
   optimizerKnobs: Record<string, Record<string, unknown>> | null;
   view: PipelineView | null;
-  // Never infer the read's state from `view` being null.
-  pipelineStatus: PipelineStatus;
+  schema: NodeSchemaReading;
   active: BackendResponse | null;
   others: BackendResponse[];
   baseUrl: string | null;
   isTls: boolean | null;
-  isLive: boolean;
-  // Real reachability, distinct from `isLive` (is the optimizer scoring through it right now).
+  // Real reachability, distinct from the stream's `isLive` (is the optimizer scoring through it now).
   health: BackendHealthResponse | null;
-  nodeConfigSchema: Record<string, NodeConfigParam[]> | null;
   // Null is UNKNOWN: an unread node must not draw as shut.
   reach: Record<string, NodeReach> | null;
-  // Served, not counted off the config rows: those cover every DECLARED node, and a check-in
-  // declares its connector's whole pipeline while running one step.
-  isSingleNode: boolean;
-  nodeOutputSchema: Record<string, NodeOutputSchema | null> | null;
   // Empty is UNKNOWN (an unresolved catalogue), never "this model supports nothing".
   modelCapabilities: CapabilityMenu;
-  // Served, never guessed from a node name.
   nests: NestedPipelineRef | null;
 }

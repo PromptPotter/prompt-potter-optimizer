@@ -1,121 +1,69 @@
-// The one reader of the served `/tree` genealogy (`round-candidates.ts` owns `dashboard.json`).
-// `id` and `label` are minted on the node — never re-derived from a list position.
-
-import type { LineageNode } from "@/lib/api";
+import type { ArmNode, ArmPointer, CourseNode, LineageNode } from "@/lib/api";
 import { selectedCandidateOf, type SelectedCandidate } from "@/lib/types";
 import { encodeCyclePath, nodeAddress, type CyclePath } from "@/lib/ids";
+import { metricLevel, type DisplayMetric } from "./headline-stats";
 
-// The one served-path → CyclePath conversion; no surface re-maps one by hand.
 export function pathOf(node: LineageNode): CyclePath {
   return node.path.map((h) => ({ campaignId: h.campaign_id, cycleId: h.cycle_id }));
 }
 
-export function candidatesOf(course: LineageNode | undefined): LineageNode[] {
-  return (course?.children ?? []).filter((c) => c.kind === "candidate");
-}
-
 export interface RetiredGroup {
   branch: string;
-  candidates: LineageNode[];
+  candidates: ArmNode[];
 }
 
-// Grouped by BRANCH: two cuts retire two different tails, and one row for both would say a
-// single correction did it.
-export function splitRetired(rows: readonly LineageNode[]): {
-  live: LineageNode[];
-  retired: RetiredGroup[];
-} {
-  const byBranch = new Map<string, LineageNode[]>();
-  const live: LineageNode[] = [];
-  for (const cand of rows) {
-    if (!cand.superseded_by) live.push(cand);
-    else byBranch.set(cand.superseded_by, [...(byBranch.get(cand.superseded_by) ?? []), cand]);
+// Grouped by BRANCH: two cuts retire two different tails.
+export function splitRetired<N extends LineageNode>(
+  rows: readonly N[],
+): { live: N[]; retired: RetiredGroup[] } {
+  const byBranch = new Map<string, ArmNode[]>();
+  const live: N[] = [];
+  for (const node of rows) {
+    if (node.kind === "candidate" && node.superseded_by) {
+      byBranch.set(node.superseded_by, [...(byBranch.get(node.superseded_by) ?? []), node]);
+    } else live.push(node);
   }
   return { live, retired: [...byBranch].map(([branch, candidates]) => ({ branch, candidates })) };
 }
 
-export type MainLineStep = { kind: "step"; node: LineageNode } | { kind: "held"; round: number };
-
-// The main line to a head, origin first: each round's crowns, a crownless election as held, then the
-// head. Read off crowns, never `parent_ids`: a parent edge names the id at mint, which resume re-mints.
-export function mainLine(candidates: readonly LineageNode[], head: LineageNode): MainLineStep[] {
-  const upTo = head.round ?? 0;
-  const crowned = new Map<number, LineageNode[]>();
-  const elected = new Set<number>();
-  for (const c of candidates) {
-    if (c.round === null || !c.election_held) continue;
-    elected.add(c.round);
-    if (!c.is_selected) continue;
-    const picks = crowned.get(c.round);
-    if (picks) picks.push(c);
-    else crowned.set(c.round, [c]);
-  }
-  const steps: MainLineStep[] = [];
-  for (const r of [...new Set([...elected, upTo])].sort((a, b) => a - b)) {
-    const picks = crowned.get(r);
-    if (r === upTo) steps.push({ kind: "step", node: head });
-    else if (r < upTo && picks) steps.push(...picks.map((node) => ({ kind: "step" as const, node })));
-    else if (r > upTo && picks) break;
-    else steps.push({ kind: "held", round: r });
-  }
-  return steps;
-}
-
-// A fork is never one of these: it is not a node, its candidates sit on the parent's timeline.
-export function childCourses(candidate: LineageNode | undefined): LineageNode[] {
-  return (candidate?.children ?? []).filter((c) => c.kind === "course");
-}
-
-export function walkCourses(root: LineageNode): LineageNode[] {
-  const out: LineageNode[] = [];
-  const visit = (node: LineageNode): void => {
-    if (node.kind === "course") out.push(node);
-    for (const child of node.children) visit(child);
+export function walkCourses(root: CourseNode): CourseNode[] {
+  const out: CourseNode[] = [];
+  const visit = (course: CourseNode): void => {
+    out.push(course);
+    for (const arm of course.children) arm.children.forEach(visit);
   };
   visit(root);
   return out;
 }
 
-export function countDescendants(root: LineageNode): number {
+export function countDescendants(root: CourseNode): number {
   return walkCourses(root).length - 1;
 }
 
-// Keyed on `path`, never a label or bare cycle_id (both repeat across courses and `.inner/`
-// sandboxes). A fork is not a node, so its attempts carrying its path are its only trace.
-export function candidatesAtPath(root: LineageNode, path: CyclePath): LineageNode[] {
-  const want = encodeCyclePath(path);
-  const out: LineageNode[] = [];
-  const visit = (node: LineageNode): void => {
-    if (node.kind === "candidate" && encodeCyclePath(pathOf(node)) === want) out.push(node);
-    for (const child of node.children) visit(child);
-  };
-  visit(root);
-  return out;
-}
-
-// Unique tree-wide (course ids collide across sandboxes); it IS the sidebar's node address,
-// which `ownerOfNodeAddress` reads back.
+// Unique tree-wide (course ids collide across sandboxes); `ownerOfNodeAddress` reads it back.
 export function nodeKeyOf(node: LineageNode): string {
   return nodeAddress(pathOf(node), node.id);
 }
 
-// A tree node as a selection: `course_label` is the label the minting course's documents speak.
 export function selectedNodeOf(node: LineageNode, cycleId: string): SelectedCandidate {
-  return selectedCandidateOf(cycleId, node.round ?? 0, node.id, node.course_label);
+  return node.kind === "candidate"
+    ? selectedCandidateOf(cycleId, node.reading.arm.round, node.id, node.reading.arm.label)
+    : selectedCandidateOf(cycleId, 0, node.id, node.label);
 }
 
-// `course` is null at a fork's address (a fork is not a node); `candidates` follows
-// `candidatesAtPath`.
+// `course` is null at a fork's address: a fork is not a node, and its arms are its only trace.
 export interface LineageAddress {
-  course: LineageNode | null;
-  candidates: LineageNode[];
+  course: CourseNode | null;
+  candidates: ArmNode[];
 }
 export type LineageIndex = ReadonlyMap<string, LineageAddress>;
 
-export function indexLineage(root: LineageNode | null): LineageIndex {
+// Keyed on `path`: a label or bare cycle_id repeats across courses and `.inner/` sandboxes.
+export function indexLineage(root: CourseNode | null): LineageIndex {
   const index = new Map<string, LineageAddress>();
   if (!root) return index;
-  const at = (key: string): LineageAddress => {
+  const at = (node: LineageNode): LineageAddress => {
+    const key = encodeCyclePath(pathOf(node));
     let entry = index.get(key);
     if (!entry) {
       entry = { course: null, candidates: [] };
@@ -123,68 +71,86 @@ export function indexLineage(root: LineageNode | null): LineageIndex {
     }
     return entry;
   };
-  const visit = (node: LineageNode): void => {
-    const key = encodeCyclePath(pathOf(node));
-    if (node.kind === "course") at(key).course = node;
-    else if (node.kind === "candidate") at(key).candidates.push(node);
-    for (const child of node.children) visit(child);
+  const visit = (course: CourseNode): void => {
+    at(course).course = course;
+    for (const arm of course.children) {
+      at(arm).candidates.push(arm);
+      arm.children.forEach(visit);
+    }
   };
   visit(root);
   return index;
 }
 
-// A candidate by its lineage id, anywhere in the tree. A repair leaves two nodes on one id, so the
-// one still on a line answers.
-export function candidateById(index: LineageIndex, id: string): LineageNode | null {
-  let retired: LineageNode | null = null;
-  for (const { candidates } of index.values()) {
-    for (const c of candidates) {
-      if (c.id !== id) continue;
-      if (!c.superseded_by) return c;
-      retired = c;
-    }
-  }
-  return retired;
+export function candidatesAtPath(index: LineageIndex, path: CyclePath | null): ArmNode[] {
+  return (path && index.get(encodeCyclePath(path))?.candidates) || [];
 }
 
-// The origin of the timeline `node` is on, as the tree names it (`origin_id`) — never a walk up
-// `parent_ids`, and never the label a round-0 arm happens to wear.
-export function originOf(index: LineageIndex, node: LineageNode | undefined): LineageNode | null {
-  return node?.origin_id ? candidateById(index, node.origin_id) : null;
+function findArm(index: LineageIndex, named: (arm: ArmNode) => boolean): ArmNode | null {
+  for (const { candidates } of index.values()) {
+    const arm = candidates.find(named);
+    if (arm) return arm;
+  }
+  return null;
+}
+
+export function armOfRow(index: LineageIndex, row: number | null): ArmNode | null {
+  return row === null ? null : findArm(index, (c) => c.row === row);
+}
+
+export function armOfId(index: LineageIndex, id: string): ArmNode | null {
+  return findArm(index, (c) => c.id === id && c.answers_for_id);
+}
+
+export function armAt(
+  index: LineageIndex,
+  path: CyclePath | null,
+  arm: Pick<ArmPointer, "round" | "label">,
+): ArmNode | null {
+  return (
+    candidatesAtPath(index, path).find(
+      (c) => c.reading.arm.round === arm.round && c.reading.arm.label === arm.label,
+    ) ?? null
+  );
+}
+
+export type LineStep = { kind: "step"; node: ArmNode } | { kind: "held"; round: number };
+
+export function mainLineOf(index: LineageIndex, head: ArmNode): LineStep[] {
+  return head.main_line.flatMap<LineStep>((step) => {
+    if (step.rows.length === 0) return [{ kind: "held", round: step.round }];
+    return step.rows.flatMap<LineStep>((row) => {
+      const node = armOfRow(index, row);
+      return node ? [{ kind: "step", node }] : [];
+    });
+  });
+}
+
+// As the tree names it (`origin_row`): never a walk up `parent_ids`, never a round-0 label.
+export function originOf(index: LineageIndex, node: LineageNode | undefined): ArmNode | null {
+  return node ? armOfRow(index, node.origin_row) : null;
 }
 
 // At a fork's address there is no course, so the attempts it contributed answer for it.
-export function originAt(index: LineageIndex, path: CyclePath | null): LineageNode | null {
+export function originAt(index: LineageIndex, path: CyclePath | null): ArmNode | null {
   const here = path ? index.get(encodeCyclePath(path)) : undefined;
   return originOf(index, here?.course ?? here?.candidates[0]);
 }
 
-// Served tree only: a `dashboard.json` row id is positional (`r{round}_{idx}`) and never
-// matches a `nodeKeyOf` key. θ rides its own map because it is a logit, not a percent.
 export interface NodeOverlays {
   valueByKey: ReadonlyMap<string, number | null>;
   thetaByKey: ReadonlyMap<string, number | null>;
 }
 
-export function nodeOverlays(
-  courses: readonly LineageNode[],
-  composite: boolean,
-): NodeOverlays {
+export function nodeOverlays(courses: readonly CourseNode[], metric: DisplayMetric): NodeOverlays {
   const valueByKey = new Map<string, number | null>();
   const thetaByKey = new Map<string, number | null>();
   for (const course of courses) {
-    for (const cand of candidatesOf(course)) {
-      const key = nodeKeyOf(cand);
-      // Every node paints what IT measured, never the round's cumulative frontier.
-      valueByKey.set(key, composite ? cand.composite_fitness : (cand.accuracy ?? null));
-      thetaByKey.set(key, cand.stamps_theta ? cand.theta : null);
+    for (const arm of course.children) {
+      const key = nodeKeyOf(arm);
+      valueByKey.set(key, metricLevel(metric, arm.reading));
+      thetaByKey.set(key, metricLevel("ability", arm.reading));
     }
   }
   return { valueByKey, thetaByKey };
-}
-
-// A badge, never the name.
-export function cutFromLabel(node: LineageNode, siblings: readonly LineageNode[]): string | null {
-  if (node.course_kind === null) return null;
-  return siblings.find((s) => s.id === node.parent_ids[0])?.label ?? null;
 }

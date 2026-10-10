@@ -53,11 +53,11 @@ describe("questionPatch / questionOptions (resolver answer-back loop)", () => {
   });
 
   it("rejects un-applicable answers so the caller skips them", () => {
-    expect(questionPatch("max_rounds", "lots")).toBeNull(); // non-numeric
-    expect(questionPatch("max_rounds", "999")).toBeNull(); // out of 1..100
-    expect(questionPatch("column.query", "  ")).toBeNull(); // blank
-    expect(questionPatch("backend.node_config", "x")).toBeNull(); // not string-applicable
-    expect(questionPatch("nonsense", "x")).toBeNull(); // unknown field
+    expect(questionPatch("max_rounds", "lots")).toBeNull();
+    expect(questionPatch("max_rounds", "999")).toBeNull();
+    expect(questionPatch("column.query", "  ")).toBeNull();
+    expect(questionPatch("backend.node_config", "x")).toBeNull();
+    expect(questionPatch("nonsense", "x")).toBeNull();
   });
 
   it("grounds a column question's options in the uploaded headers", () => {
