@@ -36,7 +36,7 @@ from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import all_verifier_graded
-from promptpotter.infrastructure.backend import BackendClient, build_backend_client
+from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.llm.capabilities import ensure_model_capabilities
 from promptpotter.infrastructure.store.dataset_access import (
     dataset_experiment,
@@ -287,7 +287,7 @@ def _resolve_backend_id(
 
 
 def complete_registries(*, every_treatment: bool = True) -> None:
-    """A process running ONE campaign passes ``False``: its own treatment is read at the mint."""
+    """Every process calls it once, before it reads a ledger; one running ONE campaign passes ``False``."""
     table = connectors.registered()
     judge_registry.registered()
     optimizers.registered()
@@ -314,8 +314,6 @@ async def init_services(
     program: object | None = None,
 ) -> Session:
     """*stores* is the ONE way to relocate the tree: the L4 inner runner passes a sandboxed one."""
-    complete_registries(every_treatment=False)
-
     if stores is None:
         stores = build_stores(identity, projects_root=DEFAULT_PROJECTS_ROOT)
 
@@ -326,7 +324,7 @@ async def init_services(
     connector = connectors.get(backend_type)
     experiment = dataset_experiment(dataset_config_dir, connector)
     _verify_package_cache_scope(connector, experiment, dataset_name)
-    client = build_backend_client(
+    client = BackendClient(
         connector, backend_url, workload=InProcessWorkload(experiment=experiment, program=program)
     )
     logger.info("Backend: %s", backend_url)

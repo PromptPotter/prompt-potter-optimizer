@@ -5,9 +5,13 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
 
+from promptpotter.application.scoring.closed_rounds import campaign_scorer, closed_round
 from promptpotter.application.served_dashboard import served_dashboard
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath
+from promptpotter.domain.dashboard_rows import sample_status
+from promptpotter.domain.results import RoundResult
 from promptpotter.domain.round_audit import RoundAudit
+from promptpotter.domain.scoring import CellSheet, ground_truth_text
 from promptpotter.infrastructure.projections.audit_trail import load_round_audits
 from promptpotter.infrastructure.projections.event_stream import CycleLedgerTail
 from promptpotter.infrastructure.runtime_flags import run_phase_validator_epoch
@@ -39,6 +43,7 @@ __all__ = [
     "cycle_event_frames",
     "open_family_ray",
     "round_audit",
+    "served_round",
     "view_cycle",
 ]
 
@@ -88,6 +93,48 @@ def round_audit(cycle: ViewedCycle, round_num: int) -> RoundAudit | None:
     """``None`` where none is on disk: a round still open, or one that ran no optimizer call."""
     [audit] = load_round_audits(cycle.dir, [round_num])
     return audit
+
+
+@dataclass(frozen=True)
+class _MarkedSheet(CellSheet):
+    def wire(self) -> list[dict[str, object]]:
+        return [
+            {
+                **cell.wire(),
+                "status": sample_status(cell.facts, cell.grade),
+                "ground_truth_text": ground_truth_text(cell.facts.ground_truth),
+            }
+            for cell in self.cells
+        ]
+
+
+def served_round(
+    stores: Stores, hop: CycleHop, round_num: int, moment: Moment | None = None
+) -> RoundResult | None:
+    """A served projection: the round a resume, a fork and the round file read carries no ``status``."""
+    graded_under = campaign_scorer(stores, hop.campaign_id)
+    closed = (
+        None
+        if graded_under is None
+        else closed_round(stores, hop, round_num, graded_under, moment=moment)
+    )
+    if closed is None:
+        return None
+
+    def marked(sheet: CellSheet) -> CellSheet:
+        return _MarkedSheet(sheet.scorer_id, sheet.cells)
+
+    def each(arms: dict[str, CellSheet]) -> dict[str, CellSheet]:
+        return {k: marked(v) for k, v in arms.items()}
+
+    return closed.model_copy(
+        update={
+            "results": marked(closed.results),
+            "all_candidate_results": each(closed.all_candidate_results),
+            "reference_results": each(closed.reference_results),
+            "overlap_results": each(closed.overlap_results),
+        }
+    )
 
 
 async def cycle_event_frames(cycle: ViewedCycle) -> AsyncIterator[str]:

@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
-from promptpotter.application.commands.payloads import OriginGateDecisionPayload
 from promptpotter.application.initialization.session import Session
-from promptpotter.application.initialization.wiring import init_services
+from promptpotter.application.initialization.wiring import complete_registries, init_services
 from promptpotter.application.jobs.launcher.admission import probe_backend
 from promptpotter.application.jobs.mint import (
     fresh_campaign_id,
@@ -24,12 +22,14 @@ from promptpotter.application.maintenance.archive_maintenance import (
     restore_measurement_archive,
 )
 from promptpotter.application.run_observers import build_run_observers
-from promptpotter.application.runner.entry import RunMode, run_optimization
+from promptpotter.application.runner.entry import run_optimization
 from promptpotter.application.runner.grade_bench import grade_line_bench
+from promptpotter.application.views.readout import StatusFn
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.config.settings import DEFAULT_BACKEND_ID, DEFAULT_BACKEND_URL
 from promptpotter.domain.campaign import ArmRequest
+from promptpotter.domain.command_kinds import OriginGateDecisionPayload
 from promptpotter.domain.results import CycleResult
 from promptpotter.infrastructure.identity.migration import registered_or_default_identity
 from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
@@ -39,7 +39,7 @@ from promptpotter.shared.errors import NotFoundError
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.domain.cycle_paths import CycleHop
-    from promptpotter.domain.launch_limits import LaunchLimits
+    from promptpotter.domain.launch_limits import LaunchLimits, RunMode
     from promptpotter.domain.phases import GateDecision
     from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.store.stores import Stores
@@ -56,9 +56,6 @@ __all__ = [
     "submit_gate_decision",
 ]
 
-# A host's readout-line sink. ``None`` is silent; the readout is on disk either way.
-StatusFn = Callable[[str], None]
-
 
 async def open_session(
     dataset_name: str,
@@ -74,6 +71,7 @@ async def open_session(
     *program* rides the backend client as ``InProcessWorkload.program``, for an in-process backend.
     """
     setup_logging()
+    complete_registries(every_treatment=False)
     if stores is None:
         stores = build_stores(registered_or_default_identity(), projects_root=DEFAULT_PROJECTS_ROOT)
     down = await probe_backend(backend_type_of_dataset(stores, dataset_name), backend_url)

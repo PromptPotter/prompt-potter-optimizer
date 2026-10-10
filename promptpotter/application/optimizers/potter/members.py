@@ -9,11 +9,11 @@ from promptpotter.application.intelligence.adaptive_queue_mechanism import (
     build_round_order,
     parent_grades,
 )
-from promptpotter.application.intelligence.exploration import (
+from promptpotter.application.intelligence.indexes.axis import NOISE_THRESHOLD
+from promptpotter.application.intelligence.rasch import (
     build_observations,
     select_round_subset,
 )
-from promptpotter.application.intelligence.indexes.axis import NOISE_THRESHOLD
 from promptpotter.application.optimizers import nodes
 from promptpotter.application.optimizers.potter.couplings import ADAPTIVE_QUEUE, POBB
 from promptpotter.application.optimizers.potter.dispatch.bundle import injection_registry

@@ -6,7 +6,7 @@ from statistics import fmean
 from typing import TYPE_CHECKING, NamedTuple
 
 from promptpotter.application.runner.termination import RUN_STOPS, run_stop_reason
-from promptpotter.application.scoring.cells import walked_rows
+from promptpotter.application.scoring.closed_rounds import walked_rows
 from promptpotter.application.scoring.formula import cell_channels_of
 from promptpotter.application.scoring.paired import (
     MemberRows,
@@ -66,7 +66,7 @@ if TYPE_CHECKING:
 
     from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.initialization.session import Session
-    from promptpotter.application.run_observers import RunCallbacks
+    from promptpotter.application.run_callbacks import RunCallbacks
     from promptpotter.domain.results import RoundOutcome, RoundResult
     from promptpotter.domain.scoring import CellSheet, Scorer
     from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition

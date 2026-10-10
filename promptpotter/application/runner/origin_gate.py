@@ -10,8 +10,8 @@ import time
 from typing import TYPE_CHECKING, Literal, get_args
 
 from promptpotter.application.datasets.loaders import sample_dataset
-from promptpotter.application.origin import rescore_parent
-from promptpotter.application.run_phase_control import declare_run_phase
+from promptpotter.application.run_observers import declare_run_phase
+from promptpotter.application.runner.measurement import rescore_parent
 from promptpotter.application.runner.round import emit_origin_round
 from promptpotter.application.runner.termination import origin_gate_tripped
 from promptpotter.domain.phases import GateDecision, RunPhase, StopReason
@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.campaign_config import CampaignConfig, OriginGateMode
     from promptpotter.application.initialization.session import Session
-    from promptpotter.application.run_observers import RunCallbacks
+    from promptpotter.application.run_callbacks import RunCallbacks
     from promptpotter.domain.sample import Sample
 
 logger = logging.getLogger(__name__)

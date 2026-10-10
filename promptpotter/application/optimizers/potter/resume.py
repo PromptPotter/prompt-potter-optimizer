@@ -15,7 +15,7 @@ from promptpotter.application.optimizers.potter.records import (
     PotterRoundState,
 )
 from promptpotter.application.optimizers.potter.state import potter_state
-from promptpotter.application.run_observers import RunCallbacks
+from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.scoring.selection import (
     elect_round_winner,
     paired_p_best,

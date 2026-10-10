@@ -10,7 +10,7 @@ from promptpotter.application.bench.resume_and_fork.resume import (
     resume_with_divergence_check,
 )
 from promptpotter.application.datasets.authored import scorer_of
-from promptpotter.application.initialization.session import Session, open_cycle_ledger
+from promptpotter.application.initialization.session import Session
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.pipeline_resolve import (
     configure_and_apply_pipeline,
@@ -33,7 +33,7 @@ from promptpotter.domain.l4.inner_origin import inner_origin_of
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.phases import STOP_REASON_INFO, CampaignPhase, StopLoop
 from promptpotter.domain.pipeline_overlay import node_config_items
-from promptpotter.domain.scoring import MeasuredCell, all_verifier_graded
+from promptpotter.domain.scoring import all_verifier_graded
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.spend_book import (
     bind_spend_book,
@@ -52,7 +52,7 @@ from promptpotter.shared.hashing import dataset_hash
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.origin import CampaignOrigin
-    from promptpotter.application.run_observers import RunCallbacks
+    from promptpotter.application.run_callbacks import RunCallbacks
     from promptpotter.application.scoring.search_point_scorer import ScoredWalk
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint
@@ -186,7 +186,7 @@ def measured_cell_usd(
         on_models, dataset_name=session.dataset_name, newest=_PRICED_RUNS
     ):
         # An archive row carries no grade, and the price is no formula's reading.
-        cost = cell_channels_of(MeasuredCell.from_wire(m.row), None).get("cost")
+        cost = cell_channels_of(m.cell, None).get("cost")
         if cost is not None:
             total += cost
             cells += 1
@@ -350,7 +350,9 @@ def _finalize_loop_state(
         session.state.cycle_id = resolved_cycle_id
         # Idempotent — runner/entry.py may have pre-opened the ledger.
         if session.state.ledger is None:
-            session.state.ledger = open_cycle_ledger(session, resolved_cycle_id)
+            session.state.ledger = CycleEventLog.open(
+                CycleDir(session.store.campaigns.cycle_dir(session.hop))
+            )
         # The first moment the lock from `Cycle.start` has a cycle id to be written under.
         cycle.difficulty.persist(round_num=len(cycle.rounds) - 1)
     session.scoring.degradation_checks = build_degradation_checks(config)

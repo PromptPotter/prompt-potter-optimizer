@@ -74,7 +74,7 @@ from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.infrastructure.llm.json_parse import OptimizerPromptParseError
 from promptpotter.infrastructure.llm.telemetry import emit_round_warning
-from promptpotter.shared import truncate
+from promptpotter.shared.answer_text import truncate
 
 if TYPE_CHECKING:
     from pydantic import BaseModel

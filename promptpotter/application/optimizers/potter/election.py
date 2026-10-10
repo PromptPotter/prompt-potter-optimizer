@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from promptpotter.application.bench.node_context import NodeContext
-    from promptpotter.application.intelligence.exploration import RoundAbilities
+    from promptpotter.application.intelligence.rasch import RoundAbilities
     from promptpotter.application.optimizers.nodes import Measured, Proposals
     from promptpotter.application.optimizers.potter.knobs import ThetaElectionKnobs
 

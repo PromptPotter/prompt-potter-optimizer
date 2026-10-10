@@ -5,7 +5,9 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal, NamedTuple
 
-from promptpotter.application.intelligence.exploration import (
+from promptpotter.application.initialization.session import Session
+from promptpotter.application.intelligence.hard_sample_archive import build_archive_observations
+from promptpotter.application.intelligence.rasch import (
     ORIGIN_ABILITY_ID,
     Observation,
     dedup_observations,
@@ -15,7 +17,6 @@ from promptpotter.application.intelligence.exploration import (
     graduate_ruler_model,
     observations_from_results,
 )
-from promptpotter.application.intelligence.hard_sample_archive import build_archive_observations
 from promptpotter.domain.results import RoundResult, measured_cells, merge_known_outcomes
 from promptpotter.domain.ruler import (
     AbilityReading,
@@ -31,7 +32,6 @@ from promptpotter.shared.measurement_context import instrument_mode
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
-    from promptpotter.application.initialization.session import Session
 
 logger = logging.getLogger(__name__)
 

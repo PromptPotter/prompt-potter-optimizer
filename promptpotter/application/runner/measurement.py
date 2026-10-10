@@ -1,13 +1,13 @@
 from __future__ import annotations
 
+import logging
 import math
 from functools import partial
 from typing import TYPE_CHECKING
 
 from promptpotter.application.bench.node_context import NodeContext, measure_as_parent
-from promptpotter.application.intelligence.exploration import candidate_abilities
+from promptpotter.application.intelligence.rasch import candidate_abilities
 from promptpotter.application.optimizers.nodes import Measured
-from promptpotter.application.origin import rescore_parent
 from promptpotter.application.scoring.candidate_report import (
     arm_id,
     arm_theta_caveat,
@@ -29,6 +29,7 @@ from promptpotter.application.scoring.search_point_scorer import (
     close_walk,
     open_walk,
     reread_cells,
+    score_search_point,
 )
 from promptpotter.application.scoring.selection import distinct_valid_cells
 from promptpotter.domain.paired_reading import (
@@ -41,6 +42,7 @@ from promptpotter.domain.phases import StopLoop
 from promptpotter.domain.results import (
     ArmOutcome,
     CandidateProposal,
+    ReferenceReading,
     ScoredCandidate,
     candidate_label,
     is_electable,
@@ -73,14 +75,69 @@ if TYPE_CHECKING:
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.paired_reading import PairedReading
     from promptpotter.domain.phases import StopReason
-    from promptpotter.domain.results import ReferenceReading
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import CellSheet, GradedCell
     from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.domain.validators import StopRule
     from promptpotter.infrastructure.ledger import CycleEventLog
 
-__all__ = ["measure_population"]
+logger = logging.getLogger(__name__)
+
+__all__ = ["measure_population", "rescore_parent"]
+
+
+async def rescore_parent(
+    cycle: Cycle,
+    scoring_set: list[Sample],
+    *,
+    force_fresh: bool = False,
+) -> ReferenceReading:
+    session = cycle.session
+    tr = cycle.tracking
+    assert tr.current_sp is not None
+    scored = await score_search_point(
+        tr.current_sp,
+        scoring_set,
+        session,
+        label=MeasurementRole.PARENT,
+        sample_index=cycle.sample_index,
+        # Ticked, not silenced: a silent whole-panel walk serves `between_samples` and reads as hung.
+        slot=ArmSlot(NO_ROUND_SLOT, 0, cycle.opt_sp.id),
+        measured=MeasuredCandidate(
+            idx=0,
+            candidate_id=cycle.opt_sp.id,
+            label=cycle.rounds[-1].label,
+            role=MeasurementRole.PARENT,
+        ),
+        force_fresh=force_fresh,
+    )
+    # A partial pass is kept: `read_pair` pairs each candidate on the cells both scored.
+    if scored.stopped is not None:
+        logger.warning(
+            "Round parent %s stopped after %d/%d cells (%s); its floor covers only those.",
+            cycle.rounds[-1].label,
+            len(scored.sheet),
+            len(scoring_set),
+            scored.stopped,
+        )
+    return ReferenceReading(
+        opt_sp=cycle.opt_sp,
+        results=scored.sheet,
+        # The gateway's OWN scores: re-running `compute_composite_fitness` drops the evaluators.
+        report=build_score_report(
+            cycle.opt_sp,
+            (),
+            None,
+            scored.scores,
+            scored.sheet.cells,
+            scoring_set,
+            # The parent INDIVIDUAL's label, off the round it won — it reaches disk.
+            label=cycle.rounds[-1].label,
+            sp_hash=tr.current_sp.sp_hash(session.pipeline_schema),
+            outcome=walk_outcome(scored),
+            resolved_pipeline_params=tr.current_sp.config_params,
+        ),
+    )
 
 
 async def measure_population(

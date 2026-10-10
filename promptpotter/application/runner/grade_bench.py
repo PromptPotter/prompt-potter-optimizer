@@ -9,7 +9,7 @@ from promptpotter.application.initialization.loop_start import arm_diagnostic_sc
 from promptpotter.application.initialization.wiring import bind_cycle_session
 from promptpotter.application.jobs.quota import paid_verb
 from promptpotter.application.optimizer_manifest import select_optimizer
-from promptpotter.application.run_observers import RunCallbacks
+from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.runner.bench import bench_selection
 from promptpotter.application.runner.campaign_result import (
     bank_campaign_result,

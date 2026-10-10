@@ -2,14 +2,18 @@ from __future__ import annotations
 
 import functools
 import importlib
-import pkgutil
 import typing
 
-from promptpotter.application.optimizers.nodes import LlmNode, NodeMember, OptimizerRuntime
+from promptpotter.application.optimizers.nodes import (
+    BUILTIN_PACKAGES,
+    LlmNode,
+    NodeMember,
+    OptimizerRuntime,
+)
 from promptpotter.domain.pipeline_schema import MEMBER_KINDS, NodeKind
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.hashing import shapes_optimizer_prompt
-from promptpotter.shared.plugin_registry import load_plugins, load_registry, lookup
+from promptpotter.shared.plugin_registry import load_registry, lookup
 
 if typing.TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
@@ -21,8 +25,6 @@ __all__ = [
     "RUNTIME_ENTRY_POINT_GROUP",
     "llm_nodes",
     "member",
-    "other_optimizer_packages",
-    "register_round_payloads",
     "registered",
     "runtime",
     "runtime_origins",
@@ -69,29 +71,9 @@ def _validate_runtime(obj: object, origin: str) -> OptimizerRuntime:
     return obj
 
 
-_BUILTIN_PACKAGES = frozenset(pkg.name for pkg in pkgutil.iter_modules(__path__) if pkg.ispkg)
-
-# A payload missing here reads back as an unparsable round.
-_PAYLOAD_MODULES = {"capo": "state", "gepa": "state", "levi": "state", "potter": "records"}
-assert _PAYLOAD_MODULES.keys() == _BUILTIN_PACKAGES, (
-    "built-in optimizers and their payload modules disagree: "
-    f"{sorted(_PAYLOAD_MODULES.keys() ^ _BUILTIN_PACKAGES)}"
-)
-
-
-def _builtin_modules(submodules: Mapping[str, str]) -> Iterator[typing.Any]:
-    for package, submodule in sorted(submodules.items()):
-        yield importlib.import_module(f"{__name__}.{package}.{submodule}")
-
-
-def register_round_payloads() -> None:
-    """No member is imported: the payloads are all a reader of banked rounds needs."""
-    for _ in (*_builtin_modules(_PAYLOAD_MODULES), *load_plugins(RUNTIME_ENTRY_POINT_GROUP)):
-        pass
-
-
 def _members() -> Iterator[typing.Any]:
-    return _builtin_modules(dict.fromkeys(_BUILTIN_PACKAGES, "members"))
+    for package in sorted(BUILTIN_PACKAGES):
+        yield importlib.import_module(f"{__name__}.{package}.members")
 
 
 def _builtins() -> Iterator[tuple[str, object]]:
@@ -136,8 +118,3 @@ def runtime(name: str) -> OptimizerRuntime:
 
 def runtime_origins() -> Mapping[str, str]:
     return _load_runtimes()[1]
-
-
-def other_optimizer_packages(module: str) -> frozenset[str]:
-    own = module.removeprefix(f"{__name__}.").split(".")[0]
-    return frozenset(f"{__name__}.{package}" for package in _BUILTIN_PACKAGES - {own})

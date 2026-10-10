@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.intelligence import exploration
+from promptpotter.application.intelligence import rasch
 from promptpotter.application.runner.inner import ruler
 from promptpotter.application.runner.inner.spawn import inner_cell_envelope_s, run_inner_cycle
 from promptpotter.application.runner.inner.tasks import (
@@ -39,7 +39,7 @@ MAX_CELLS_IN_FLIGHT = 4
 
 def measurement_modules() -> tuple[ModuleType, ...]:
     """Never ``APP_VERSION``: it voids every banked cell on each release, measurement changed or not."""
-    return (exploration, metrics, selection, proxies, ruler)
+    return (rasch, metrics, selection, proxies, ruler)
 
 
 def _measurement_source_digest() -> str:

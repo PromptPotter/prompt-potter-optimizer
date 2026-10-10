@@ -9,7 +9,7 @@ from promptpotter.application.bench.resume_and_fork.fork_siblings import (
 )
 from promptpotter.application.bench.resume_and_fork.replayers import ReplayMismatch
 from promptpotter.application.bench.round_analysis import compute_round_diagnostics
-from promptpotter.application.run_observers import RunCallbacks
+from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.scoring.candidate_report import build_score_report
 from promptpotter.application.scoring.row_diagnostics import count_degraded_samples
 from promptpotter.application.scoring.search_point_scorer import score_search_point

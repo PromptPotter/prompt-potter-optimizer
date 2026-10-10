@@ -19,7 +19,7 @@ from promptpotter.application.optimizer_manifest import (
 )
 from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.run_phase_control import RunControl
-from promptpotter.application.runner.entry import RunMode, run_optimization
+from promptpotter.application.runner.entry import run_optimization
 from promptpotter.application.runner.inner.spawn_context import (
     InnerSpawnContext,
     inner_spawn_context,
@@ -43,7 +43,7 @@ from promptpotter.domain.l4.proxies import (
     mean_parent_level_se,
     parent_level_series,
 )
-from promptpotter.domain.launch_limits import LaunchLimits
+from promptpotter.domain.launch_limits import LaunchLimits, RunMode
 from promptpotter.domain.phases import REFUSAL_STOPS, StopReason
 from promptpotter.domain.results import ArmOutcome, candidate_label
 from promptpotter.domain.run_records import SpawnedBy

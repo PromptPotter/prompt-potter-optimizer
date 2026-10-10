@@ -16,7 +16,7 @@ from promptpotter.application.views.render.primitives import (
 from promptpotter.domain.candidate_diff import flatten_sp_summary
 from promptpotter.domain.connector import MeasuredUnit, unit_count
 from promptpotter.domain.results import ArmOutcome, ScoredCandidate
-from promptpotter.shared import truncate
+from promptpotter.shared.answer_text import truncate
 from promptpotter.shared.composite import render_composite_fitness_oneliner
 
 

@@ -23,7 +23,7 @@ from promptpotter.domain.phase_views import (
 from promptpotter.domain.results import RoundResult, RunStanding
 from promptpotter.domain.spend import MeteredSpend
 from promptpotter.domain.wounds import collapse_reason
-from promptpotter.shared import truncate
+from promptpotter.shared.answer_text import truncate
 
 if TYPE_CHECKING:
     from promptpotter.application.bench.cycle import Cycle

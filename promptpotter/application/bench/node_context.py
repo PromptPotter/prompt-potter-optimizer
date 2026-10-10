@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     from promptpotter.application.intelligence.indexes.sample import SampleIndex
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.optimizers.nodes import RoundContext, WorkingState
-    from promptpotter.application.run_observers import RunCallbacks
+    from promptpotter.application.run_callbacks import RunCallbacks
     from promptpotter.domain.connector import MeasuredUnit
     from promptpotter.domain.opt_search_point import EvidenceGrounding
     from promptpotter.domain.optimizer_state import RoundPayload

@@ -28,9 +28,6 @@ def active_pointer(stores: Stores) -> ActivePointer:
 
 class CyclesResponse(StrictModel):
     tenant_id: str
-    active_campaign_id: str | None = Field(
-        description="Active campaign per active_session.json; null when no session is active."
-    )
     active_cycle_id: str | None = Field(
         description="Active cycle per active_session.json; null when no session is active."
     )
@@ -44,7 +41,6 @@ def list_cycles(
     pointer = active_pointer(leaf)
     return CyclesResponse(
         tenant_id=leaf.tenant_id,
-        active_campaign_id=pointer.campaign_id,
         active_cycle_id=pointer.cycle_id,
         cycles=sorted(
             (

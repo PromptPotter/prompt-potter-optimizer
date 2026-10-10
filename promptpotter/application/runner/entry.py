@@ -17,7 +17,7 @@ from promptpotter.application.initialization.loop_start import (
     populate_session_scoring,
 )
 from promptpotter.application.initialization.session import Session
-from promptpotter.application.intelligence.exploration import parent_level_trajectory
+from promptpotter.application.intelligence.rasch import parent_level_trajectory
 from promptpotter.application.optimizer_manifest import (
     bind_optimizer,
     select_optimizer,
@@ -31,9 +31,10 @@ from promptpotter.application.pipeline_resolve import apply_node_overlay
 from promptpotter.application.run_observers import (
     RunObservers,
     build_run_observers,
+    declare_run_stop,
     declare_run_wiring,
 )
-from promptpotter.application.run_phase_control import RunControl, declare_run_stop
+from promptpotter.application.run_phase_control import FlightGauge, RunControl
 from promptpotter.application.runner.bench import bench_selection, own_level
 from promptpotter.application.runner.campaign_result import (
     bank_campaign_result,
@@ -52,7 +53,7 @@ from promptpotter.application.runner.termination import (
     run_stop_reason,
 )
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
-from promptpotter.application.scoring.query_loop import NEXT_CELL, FlightGauge
+from promptpotter.application.scoring.query_loop import NEXT_CELL
 from promptpotter.application.scoring.sample_measurement import cell_bound
 from promptpotter.application.views.ingress import run_spend_view
 from promptpotter.config.settings import APP_VERSION
@@ -60,7 +61,7 @@ from promptpotter.domain.bench import BenchScore, partition_bank
 from promptpotter.domain.campaign import ceiling_meter
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.export import PromptExport, build_prompt_export
-from promptpotter.domain.launch_limits import HeldLimits, refuse_arm_halt
+from promptpotter.domain.launch_limits import HeldLimits, RunMode, refuse_arm_halt
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.phases import STOP_REASON_INFO, PauseCause, StopOutcome, StopReason
 from promptpotter.domain.pipeline_overlay import (
@@ -105,16 +106,6 @@ from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.hashing import dataset_hash
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class RunMode:
-    """Launch-SHAPE flags only: a bound on how far the run goes is a limit (``HeldLimits``)."""
-
-    no_divergence_check: bool = False
-    fork_on_divergence: bool = False
-    diag: bool = False
-    resume_from_round_override: int | None = None
 
 
 def _arm_spend_book(
@@ -473,7 +464,7 @@ async def _run_single_cycle(
             no_divergence_check=mode.no_divergence_check,
             fork_on_divergence=mode.fork_on_divergence,
             cycle_id=session.state.cycle_id or None,
-            resume_from_round_override=mode.resume_from_round_override,
+            resume_from_round_override=mode.from_round,
             session=session,
         )
 
@@ -850,4 +841,4 @@ def _finalize_run(
     observers.drain_all(interrupted=interrupted_round is not None)
 
 
-__all__ = ["RunMode", "run_optimization"]
+__all__ = ["run_optimization"]

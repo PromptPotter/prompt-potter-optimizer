@@ -1,3 +1,0 @@
-from promptpotter.application.optimizers import register_round_payloads
-
-register_round_payloads()

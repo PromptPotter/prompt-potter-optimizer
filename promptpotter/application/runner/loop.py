@@ -9,7 +9,7 @@ from promptpotter.application.bench.node_context import NodeContext
 from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizers.nodes import RoundContext
-from promptpotter.application.run_observers import RunCallbacks
+from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.runner.inner.ruler import refresh_inner_rulers
 from promptpotter.application.runner.origin_gate import run_origin_gate
 from promptpotter.application.runner.round import (

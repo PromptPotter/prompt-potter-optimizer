@@ -11,7 +11,7 @@ from promptpotter.application.views.render.primitives import (
 )
 from promptpotter.domain.results_health import is_deprecated, terminal_node
 from promptpotter.domain.scoring import is_hit
-from promptpotter.shared import (
+from promptpotter.shared.answer_text import (
     extract_boxed_number,
     extract_gsm8k_number,
     extract_last_bold,

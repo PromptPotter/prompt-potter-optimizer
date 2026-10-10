@@ -18,7 +18,7 @@ from promptpotter.application.optimizers.nodes import (
     RoundOpening,
     round_state,
 )
-from promptpotter.application.run_observers import RunCallbacks
+from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.runner.bench import grade_round_selection, reserve_selection_pass
 from promptpotter.application.runner.measurement import measure_population
 from promptpotter.application.runner.output import (

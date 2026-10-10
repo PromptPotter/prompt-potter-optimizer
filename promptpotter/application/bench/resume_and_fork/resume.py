@@ -16,7 +16,7 @@ from promptpotter.application.bench.resume_and_fork.replayers import (
 )
 from promptpotter.application.knobs import DiffScope, classify_config_diff
 from promptpotter.application.pipeline_resolve import frozen_config
-from promptpotter.application.scoring.cells import closed_rounds
+from promptpotter.application.scoring.closed_rounds import closed_rounds
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.results import round_document_digest
 from promptpotter.domain.run_records import ForkSpec, ForkTrigger

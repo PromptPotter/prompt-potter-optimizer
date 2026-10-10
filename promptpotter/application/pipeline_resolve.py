@@ -32,6 +32,7 @@ from promptpotter.application.datasets.prompts import (
     load_node_prompt,
 )
 from promptpotter.application.evidence.subjects import SubjectSpec, parse_subject
+from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizer_manifest import (
     StartPrompt,
     resolve_optimizer,
@@ -92,7 +93,6 @@ from promptpotter.shared.hashing import stable_hash
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from promptpotter.application.initialization.session import Session
     from promptpotter.connectors.protocol import Connector
     from promptpotter.domain.campaign import Campaign
     from promptpotter.domain.pipeline_schema import PipelineSchema

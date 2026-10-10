@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, TypedDict
 
-from promptpotter.application.intelligence.exploration import graded_response
+from promptpotter.application.intelligence.rasch import graded_response
 from promptpotter.application.optimizers.nodes import RaceSnapshot
 from promptpotter.application.scoring.selection import (
     PairedPosterior,

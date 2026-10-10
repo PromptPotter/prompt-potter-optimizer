@@ -3,8 +3,10 @@ from __future__ import annotations
 import logging
 import re
 import time
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.initialization.session import Session
 from promptpotter.application.scoring.formula import split_scoring_block
 from promptpotter.application.views.render.ansi import (
     render_round_verdict,
@@ -88,13 +90,14 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from promptpotter.application.campaign_config import CampaignConfig
-    from promptpotter.application.embedded_run import StatusFn
-    from promptpotter.application.initialization.session import Session
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.scoring import Grade, MeasuredCell
 
 
 logger = logging.getLogger(__name__)
+
+# A host's readout-line sink. ``None`` is silent; the readout is on disk either way.
+StatusFn = Callable[[str], None]
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -551,4 +554,4 @@ class ReadoutProjection(Projection):
         self._write(_node_bottom())
 
 
-__all__ = ["ReadoutProjection"]
+__all__ = ["ReadoutProjection", "StatusFn"]

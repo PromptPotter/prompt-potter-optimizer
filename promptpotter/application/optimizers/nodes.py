@@ -5,12 +5,15 @@ from __future__ import annotations
 import functools
 import hashlib
 import json
+import pkgutil
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol
 
-from promptpotter.application import optimizers
+from promptpotter.application.campaign_config import CampaignConfig, Estimand
+from promptpotter.application.initialization.session import Session
 from promptpotter.domain.optimizer_state import OptimizerState, RoundPayload
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.results import rounds_without_advance
@@ -21,7 +24,6 @@ from promptpotter.shared.hashing import module_source_digest
 
 if TYPE_CHECKING:
     import asyncio
-    from pathlib import Path
     from types import ModuleType
 
     from pydantic import BaseModel
@@ -29,11 +31,9 @@ if TYPE_CHECKING:
     from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.bench.resume_and_fork.replayers import Replayer
-    from promptpotter.application.campaign_config import CampaignConfig, Estimand
-    from promptpotter.application.initialization.session import Session
     from promptpotter.application.knobs import CouplingSeverity
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
-    from promptpotter.application.run_observers import RunCallbacks
+    from promptpotter.application.run_callbacks import RunCallbacks
     from promptpotter.application.scoring.query_loop import BlockRace, Walk
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.dashboard_rows import OptimizerLimit
@@ -59,6 +59,7 @@ if TYPE_CHECKING:
     CatchUpFn = Callable[[JobSearchPoint, Sample, str], CatchUp]
 
 __all__ = [
+    "BUILTIN_PACKAGES",
     "Adapter",
     "BankedState",
     "CheckResult",
@@ -240,12 +241,19 @@ def standing_opening(ctx: RoundContext) -> RoundOpening:
     )
 
 
+_PACKAGE = __name__.rpartition(".")[0]
+BUILTIN_PACKAGES = frozenset(
+    pkg.name for pkg in pkgutil.iter_modules([str(Path(__file__).parent)]) if pkg.ispkg
+)
+
+
 @functools.cache
 def _source_digest(sources: tuple[ModuleType, ...], covered: tuple[ModuleType, ...]) -> str:
-    shapers = optimizer_prompt_shapers(
-        sources, covered=covered, foreign=optimizers.other_optimizer_packages(sources[-1].__name__)
+    own = sources[-1].__name__.removeprefix(f"{_PACKAGE}.").split(".")[0]
+    foreign = frozenset(f"{_PACKAGE}.{package}" for package in BUILTIN_PACKAGES - {own})
+    return module_source_digest(
+        *sources, *optimizer_prompt_shapers(sources, covered=covered, foreign=foreign)
     )
-    return module_source_digest(*sources, *shapers)
 
 
 class OptimizerRuntime(ABC):

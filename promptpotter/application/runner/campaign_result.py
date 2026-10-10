@@ -13,7 +13,7 @@ from promptpotter.application.runner.bench import (
     read_bench,
     score_on_bench,
 )
-from promptpotter.application.scoring.cells import cycle_instrument
+from promptpotter.application.scoring.closed_rounds import cycle_instrument
 from promptpotter.domain.bench import BenchPasses, BenchScore, LineRun
 from promptpotter.domain.campaign import ArmCost, Campaign, CampaignResult, Launch
 from promptpotter.domain.cycle_paths import CycleHop
@@ -30,7 +30,7 @@ from promptpotter.infrastructure.store.read_model import LedgerSpan
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
-    from promptpotter.application.run_observers import RunCallbacks
+    from promptpotter.application.run_callbacks import RunCallbacks
     from promptpotter.domain.phases import StopReason
     from promptpotter.domain.scoring import Scorer
     from promptpotter.domain.search_point import JobSearchPoint

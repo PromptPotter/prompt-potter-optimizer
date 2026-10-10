@@ -1,18 +1,18 @@
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, cast
 
+from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.phases import (
     REFUSAL_STOPS,
     GateDecision,
     PauseCause,
     RunPhase,
-    StopOutcome,
     StopReason,
-    stop_reason_outcome,
 )
-from promptpotter.domain.run_records import RunPhaseRecord
 from promptpotter.infrastructure.llm.spend_book import SpendBook, unbounded_spend_book
 from promptpotter.infrastructure.llm.telemetry import emit_command_ack
 from promptpotter.infrastructure.runtime_flags import requested_lookahead, standing_controls
@@ -21,10 +21,55 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import Control
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from promptpotter.application.initialization.session import Session
-    from promptpotter.domain.phase_views import RunSpendView
+__all__ = ["Flight", "FlightGauge", "RunControl"]
 
-__all__ = ["RunControl", "declare_run_phase", "declare_run_stop"]
+
+@dataclass(frozen=True)
+class Flight:
+    """``waiting`` is the ``(sample_id, launched_at)`` call a DECISION is held on under in-order absorption."""
+
+    out: int = 0
+    allowed: int = 0
+    most: int = 0
+    waiting: tuple[int, float] | None = None
+    backpressure: BackpressureReading | None = None
+    # ``None`` where no book bounds them; against a reserve it is the WORST case.
+    affordable: int | None = None
+    cell_usd: float | None = None
+
+
+class FlightGauge:
+    """Read at most once per ``every`` seconds: a full horizon is a bounds sweep, too dear per launch."""
+
+    def __init__(self, emit: Callable[[Flight], None], *, every: float = 0.5) -> None:
+        self._emit = emit
+        self._every = every
+        self._reader: Callable[[], Flight] | None = None
+        self._published = Flight()
+        self._due: asyncio.TimerHandle | None = None
+
+    def open(self, reader: Callable[[], Flight]) -> None:
+        if self._reader is not None:
+            raise RuntimeError("a scoring phase is already publishing on this gauge")
+        self._reader = reader
+        self.touch()
+
+    def close(self) -> None:
+        self._reader = None
+        self._publish()
+
+    def touch(self) -> None:
+        if self._due is None and self._reader is not None:
+            self._due = asyncio.get_running_loop().call_later(self._every, self._publish)
+
+    def _publish(self) -> None:
+        if self._due is not None:
+            self._due.cancel()
+            self._due = None
+        reading = self._reader() if self._reader is not None else Flight()
+        if reading != self._published:
+            self._published = reading
+            self._emit(reading)
 
 
 @dataclass(frozen=True)
@@ -107,27 +152,3 @@ class RunControl:
     def spend_used_usd(self) -> float:
         """In the meter's units; a FLOOR while unpriced tokens are outstanding."""
         return self.book.usd_metered
-
-
-def declare_run_phase(session: Session, phase: Literal[RunPhase.RUNNING, RunPhase.GATE]) -> None:
-    ledger = session.state.ledger
-    if ledger is not None:
-        ledger.append(RunPhaseRecord(run_phase=phase))
-
-
-def declare_run_stop(
-    session: Session,
-    stop_reason: StopReason,
-    *,
-    interrupted_by: PauseCause,
-    spend: RunSpendView | None = None,
-) -> None:
-    """Declared where the run ENDS, never at the checkpoint that raised it: a second site, a second record."""
-    ledger = session.state.ledger
-    if ledger is None:
-        return
-    if stop_reason_outcome(stop_reason) is not StopOutcome.PAUSED:
-        ledger.append(RunPhaseRecord.stop(stop_reason, spend=spend))
-        return
-    cause, detail = session.control.take_pause() or (interrupted_by, "")
-    ledger.append(RunPhaseRecord.stop(stop_reason, cause=cause, detail=detail, spend=spend))
