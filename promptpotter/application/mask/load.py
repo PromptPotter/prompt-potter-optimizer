@@ -1,17 +1,7 @@
-"""Load the realized record from disk — pure read, never re-runs. Round ``N``'s parent is ``N-1``'s winner, so a
-fork's first round reaches into the parent CYCLE; a genuinely absent parent makes no claim rather than a fake one.
-
-Every arm is read the way the loop reads it: its round-document rows graded by ``rescore_results``
-under a ``CellScorer``, then folded by ``fold_cells``. A ``score:F`` lens is the cycle's own scoring
-block with ``per_cell`` replaced — the ``ConfigOverrides`` a fork applying it runs under — so a
-masked reading is what a fresh run under ``F`` reports, not a formula over round aggregates."""
-
 from __future__ import annotations
 
-from typing import Any, cast
-
 from promptpotter.application.campaign_config import CampaignConfig, apply_config_overrides
-from promptpotter.application.datasets.authored import config_cell_scorer
+from promptpotter.application.datasets.authored import scorer_of
 from promptpotter.application.mask.record import (
     Lens,
     MaskCandidate,
@@ -22,184 +12,156 @@ from promptpotter.application.mask.record import (
     SpineCycle,
 )
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
+from promptpotter.application.scoring.cells import closed_rounds
 from promptpotter.application.scoring.formula import (
     origin_anchors,
     parse_dials,
     realize_dials,
-    rescore_results,
     split_scoring_block,
 )
 from promptpotter.application.scoring.metrics import fold_cells
-from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.cycle_listing import CycleIndex
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.results import (
     ArmOutcome,
+    RoundResult,
     ScoredCandidate,
     is_electable,
     measured_cells,
     merge_known_outcomes,
 )
-from promptpotter.domain.run_records import ConfigOverrides
-from promptpotter.domain.scoring import CellScorer, QueryMeasurement, anchored_criterion_dials
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
-    scan_ledger_decisions,
-    scan_ledger_elections,
-    scan_ledger_round_closes,
+from promptpotter.domain.run_records import ConfigOverrides, ResumeCheckpointRecord
+from promptpotter.domain.scoring import (
+    NO_CELLS,
+    CellSheet,
+    GradedCell,
+    Scorer,
+    anchored_criterion_dials,
 )
-from promptpotter.infrastructure.store.io import read_json_tolerant
+from promptpotter.infrastructure.ledger import ledger_chain
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_standing_rounds
 from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
+from promptpotter.infrastructure.store.read_model import LedgerSpan
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.judges import judge_instrument
+from promptpotter.judges.registry import judge_instrument
 from promptpotter.shared.errors import NotFoundError
 
 
 def lens_overrides(formula: str | None) -> ConfigOverrides:
-    """What a ``score:<formula>`` lens IS: the fork override applying it. ``None`` reads each cycle
-    under its own scorer — a sample-set mask alone, or an ``abort:`` lens."""
     return ConfigOverrides(scoring={"per_cell": formula}) if formula else ConfigOverrides()
 
 
-def _dial_anchors(config: CampaignConfig, origin_rows: list[dict[str, Any]]) -> dict[str, float]:
-    """What a ``dials:`` lens is anchored on: the origin's own measured levels, under the anchors
-    the campaign's criterion already carries — so a lens left at the active weights reads the
-    record back exactly."""
+def _dial_anchors(config: CampaignConfig, origin_rows: list[GradedCell]) -> dict[str, float]:
+    """The criterion's own anchors win, so a lens left at the active weights reads the record back exactly."""
     spec = split_scoring_block(config.scoring, judge_instrument=judge_instrument(config.judges))
     active = anchored_criterion_dials(spec.per_cell) if spec.per_cell else None
     locked = {name: d.anchor for name, d in (active or {}).items() if d.anchor is not None}
     return {**origin_anchors(origin_rows), **locked}
 
 
-def read_rows(rows: list[dict[str, Any]], scorer: CellScorer) -> MaskReading | None:
-    """*rows* graded and folded under *scorer*, on copies — the round document keeps its own grades.
-    ``None`` where no row carries a verdict, which is no reading rather than a 0.0 floor."""
-    graded = rescore_results([dict(r) for r in rows], scorer)
-    folded = fold_cells(cast("list[QueryMeasurement]", graded))
-    if folded["composite_fitness"] is None:
+def read_rows(sheet: CellSheet, scorer: Scorer) -> MaskReading | None:
+    """``None`` where no row carries a verdict: no reading, never a 0.0 floor."""
+    graded = sheet if sheet.scorer_id == scorer.id else scorer.sheet(cell.facts for cell in sheet)
+    folded = fold_cells(graded)
+    if folded.composite_fitness is None:
         return None
     return MaskReading(
-        composite_fitness=folded["composite_fitness"],
-        accuracy=folded["accuracy"],
+        composite_fitness=folded.composite_fitness,
+        accuracy=folded.accuracy,
         n_scored=len(measured_cells(graded)),
     )
 
 
-def _cycle_edge(index: dict[str, Any]) -> tuple[str | None, int | None]:
-    """``(parent_cycle_id, fork_from_round)`` off a cycle manifest — read by both loaders below,
-    so it is spelled once rather than in whichever of them was written first."""
-    fork = index.get("fork")
-    from_round = fork.get("from_round") if isinstance(fork, dict) else None
-    return (
-        index.get("parent_cycle_id") or None,
-        from_round if isinstance(from_round, int) else None,
-    )
+def _cycle_edge(index: CycleIndex) -> tuple[str | None, int | None]:
+    return index.parent_cycle_id, None if index.fork is None else index.fork.from_round
 
 
 def load_lineage_spine(stores: Stores, campaign_id: str) -> list[SpineCycle]:
-    """The campaign's rounds and edges, folded from each cycle's LEDGER — no round file opened,
-    because a layer waits on this to fork and the four scalars per round are all it needs."""
+    """Folded from each cycle's LEDGER, no round file opened: a layer waits on this to fork."""
     cycles: list[SpineCycle] = []
     for entry in stores.campaigns.enumerate_cycles():
         if entry.campaign_id != campaign_id:
             continue
         cid = entry.cycle_id
-        cdir = cycle_dir_for(stores.base_dir, CycleHop(campaign_id=campaign_id, cycle_id=cid))
-        index = read_json_tolerant(CycleLayout(cdir).manifest)
-        if not isinstance(index, dict):
+        hop = CycleHop(campaign_id=campaign_id, cycle_id=cid)
+        cdir = cycle_dir_for(stores.base_dir, hop)
+        index = stores.campaigns.load(hop)
+        if index is None:
             continue
         parent, from_round = _cycle_edge(index)
-        closes = scan_ledger_round_closes(CycleLayout(cdir).ledger)
+        # The cycle's OWN closes: a fork's lifted rounds are its parent's simulations.
+        own = scan_standing_rounds([LedgerSpan(CycleLayout(cdir).ledger)])
         cycles.append(
             SpineCycle(
                 cycle_id=cid,
                 parent_cycle_id=parent,
                 fork_from_round=from_round,
-                # A round that never CLOSED contributes no ability, and inventing 0.0 for it
-                # would hand UCB a real-looking datum for a simulation that never finished.
+                # A round that never closed is absent: a 0.0 would hand UCB a real-looking datum.
                 theta_by_round={
-                    rnd: close.ability.theta
-                    for rnd, close in closes.items()
-                    if close.ability is not None
+                    rnd: held.close.ability.theta
+                    for rnd, held in own.rounds.items()
+                    if held.close.ability is not None
                 },
             )
         )
     return cycles
 
 
-def _mask_eligible(sc: ScoredCandidate, rows: list[dict[str, Any]]) -> bool:
-    """The election's OWN admission rule, plus a guard against candidates whose composite was
-    force-zeroed POST-formula: a re-grade of their rows cannot reproduce that.
-
-    ``is_electable``, not ``is_leader_eligible`` — its docstring names this exact caller and
-    says why: the weaker test "lets a collapsed arm top a round that refused to crown it", so a
-    lens fed the realizing criterion could report a divergence the run would never have made."""
+def _mask_eligible(sc: ScoredCandidate, sheet: CellSheet) -> bool:
+    """``is_electable``, never ``is_leader_eligible``, which lets a collapsed arm top a round that refused it."""
     return (
-        is_electable(sc, rows)
+        is_electable(sc, sheet.cells)
         and sc.outcome is not ArmOutcome.INVALID
         and not sc.validation_failures
     )
 
 
+def _masked(sheet: CellSheet, samples: frozenset[int]) -> CellSheet:
+    return sheet.where(lambda cell: cell.sample_id in samples)
+
+
 def _arm_rows(
-    round_file: dict[str, Any], samples: frozenset[int] | None
-) -> list[tuple[ScoredCandidate, list[dict[str, Any]]]]:
-    """Each arm beside its rows on disk, cut to the sample-set mask. `.get`, not a subscript: this
-    walk is tolerant by contract, and the subscript raised on a document missing the key."""
-    all_rows = round_file.get("all_candidate_results") or {}
-    out: list[tuple[ScoredCandidate, list[dict[str, Any]]]] = []
-    for cs in round_file.get("candidate_scores", []):
-        if not isinstance(cs, dict) or not cs.get("candidate_id"):
-            continue
-        sc = ScoredCandidate.model_validate(cs)
-        rows = list(all_rows.get(sc.candidate_id) or [])
-        if samples is not None:
-            rows = [r for r in rows if r.get("sample_id") in samples]
-        out.append((sc, rows))
+    closed: RoundResult, samples: frozenset[int] | None
+) -> list[tuple[ScoredCandidate, CellSheet]]:
+    out: list[tuple[ScoredCandidate, CellSheet]] = []
+    for sc in closed.candidate_scores:
+        sheet = closed.all_candidate_results.get(sc.candidate_id, NO_CELLS)
+        out.append((sc, sheet if samples is None else _masked(sheet, samples)))
     return out
 
 
 def _parent(
-    round_file: dict[str, Any],
+    closed: RoundResult,
     samples: frozenset[int] | None,
-    carried: list[dict[str, Any]] | None,
-) -> list[dict[str, Any]] | None:
-    """The rows of the bar this round's arms were held to, cut to the same mask they were.
-
-    Unmasked it is *carried* — round ``N-1``'s elected winner's own rows. Under a SAMPLE-SET mask
-    every arm is read on the selected cells, so a carried full-set bar would flip rounds on the
-    mask's asymmetry alone; the parent's own rows on THIS round's subset (``reference_results``)
-    stand instead.
-
-    A round with no such rows cannot answer on a subset at all — round 0 has no parent — and nor
-    can one whose arms were read against several individuals (``lift_reference: parents``), which
-    has no single bar. ``None`` then, which ``masked_election`` reads as ``decidable=False``."""
+    carried: CellSheet | None,
+) -> CellSheet | None:
+    """Under a sample-set mask a carried full-set bar flips rounds on the mask's asymmetry alone."""
     if samples is None or carried is None:
         return carried
-    references = list(round_file["reference_results"].values())
+    references = list(closed.reference_results.values())
     if len(references) != 1:
         return None
-    return [r for r in references[0] if r.get("sample_id") in samples] or None
+    return _masked(references[0], samples) or None
 
 
 def _mask_candidate(
     sc: ScoredCandidate,
-    rows: list[dict[str, Any]],
-    scorer: CellScorer,
+    sheet: CellSheet,
+    scorer: Scorer,
     winner_label: str,
 ) -> MaskCandidate:
-    """The crown comes off the ledger's ELECTION record, joined on ``label`` — never re-derived
-    from the document's own ``scoreboard[]`` on ``candidate_id``, a key the tree refuses because a
-    resume re-mints it. A held round crowns nobody: its ``winner_label`` is empty."""
+    """The crown joins on ``label``: ``candidate_id`` names an individual, not the arm a round crowned."""
     return MaskCandidate(
         candidate_id=sc.candidate_id,
-        reading=read_rows(rows, scorer),
+        reading=read_rows(sheet, scorer),
         is_selected=bool(winner_label) and sc.label == winner_label,
-        is_eligible=_mask_eligible(sc, rows),
+        is_eligible=_mask_eligible(sc, sheet),
         abort=_abort_contributor(sc),
     )
 
 
 def _abort_contributor(sc: ScoredCandidate) -> str | None:
-    """Which PoBB gate stopped this candidate early; ``None`` if it ran to term. Read off the
-    gate PoBB named, never inferred from the outcome, which cannot tell a collapse from an ε cut."""
+    """Never inferred from the outcome, which cannot tell a collapse from an ε cut."""
     return sc.elimination_context.get("gate")
 
 
@@ -211,42 +173,37 @@ def load_mask_record(
     lens: Lens | None,
     with_replay: bool = False,
 ) -> MaskRecord:
-    """Every cycle, each arm graded under *lens* (``score:`` / ``dials:``) or, with none or an
-    ``abort:`` one, its cycle's own scorer. *with_replay* reads through the TYPED loader, which raises."""
     campaign = stores.campaigns.load_campaign(campaign_id)
     if campaign is None:
         raise NotFoundError(f"Campaign '{campaign_id}' not found")
     entries = [e for e in stores.campaigns.enumerate_cycles() if e.campaign_id == campaign_id]
 
-    # Pass 1: each cycle's round files + tree edges + the crowns its LEDGER recorded. The rows
-    # come from the document because nothing else holds them; the election does not.
-    files: dict[str, dict[int, dict[str, Any]]] = {}
+    files: dict[str, dict[int, RoundResult]] = {}
     edges: dict[str, tuple[str | None, int | None]] = {}
     crowns: dict[str, dict[int, str]] = {}
-    decisions: dict[str, dict[int, list[dict[str, Any]]]] = {}
+    decisions: dict[str, dict[int, list[ResumeCheckpointRecord]]] = {}
     for e in entries:
         cid = e.cycle_id
-        cdir = cycle_dir_for(stores.base_dir, CycleHop(campaign_id=campaign_id, cycle_id=cid))
-        index = read_json_tolerant(CycleLayout(cdir).manifest)
-        if not isinstance(index, dict):
+        hop = CycleHop(campaign_id=campaign_id, cycle_id=cid)
+        cdir = cycle_dir_for(stores.base_dir, hop)
+        index = stores.campaigns.load(hop)
+        if index is None:
             continue
         edges[cid] = _cycle_edge(index)
-        decisions[cid] = scan_ledger_decisions(CycleLayout(cdir).ledger) if with_replay else {}
+        decisions[cid] = (
+            scan_standing_rounds(ledger_chain(CycleDir(cdir))).decisions if with_replay else {}
+        )
+        # Off the cycle's OWN elections; a round a fork lifted is crowned where its parent ran it.
         crowns[cid] = {
             rnd: next(iter(election.selected_labels), "")
-            for rnd, election in scan_ledger_elections(CycleLayout(cdir).ledger).items()
+            for rnd, election in scan_standing_rounds(
+                [LedgerSpan(CycleLayout(cdir).ledger)]
+            ).elections.items()
         }
-        by_round: dict[int, dict[str, Any]] = {}
-        for r in index.get("rounds") or []:
-            rn = r.get("round") if isinstance(r, dict) else None
-            if not isinstance(rn, int):
-                continue
-            rf = read_json_tolerant(CycleLayout(cdir).round_file(rn))
-            if isinstance(rf, dict):
-                by_round[rn] = rf
-        files[cid] = by_round
+        own = scorer_of(resolve_campaign_config(stores, campaign, hop), verifier_graded=False)
+        files[cid] = {closed.round: closed for closed in closed_rounds(stores, hop, own)}
 
-    # Order parents before children so a fork inherits its branch-point winner.
+    # Parents before children, so a fork inherits its branch-point winner.
     order: list[str] = []
     seen: set[str] = set()
 
@@ -264,13 +221,12 @@ def load_mask_record(
 
     formula = lens.body if lens is not None and lens.kind == "score" else None
     if lens is not None and lens.kind == "dials":
-        # The campaign's ONE origin: round 0 of the cycle nothing was forked from.
         root = next((cid for cid in order if edges[cid][0] not in files), None)
-        origin_file = files[root].get(0, {}) if root is not None else {}
+        origin_file = files[root].get(0) if root is not None else None
         origin_rows = [
-            row
-            for rows in (origin_file.get("all_candidate_results") or {}).values()
-            for row in rows
+            cell
+            for sheet in (origin_file.all_candidate_results if origin_file else {}).values()
+            for cell in sheet
         ]
         formula = realize_dials(
             parse_dials(lens.body),
@@ -278,33 +234,29 @@ def load_mask_record(
         )
     overrides = lens_overrides(formula)
 
-    # Pass 2: thread the carried-forward winner's ROWS. A round's parent is the winner at the end
-    # of the prior round; when it holds (no candidate winner) it carries unchanged. Rows rather
-    # than a reading, so a fork grades its branch-point winner under the formula in effect HERE.
-    winner_at: dict[tuple[str, int], list[dict[str, Any]] | None] = {}
-    # The known-outcomes pool threads the SAME way the parent does — inherited across the
-    # fork edge from the branch point, then folded round by round. Each round is handed the
-    # pool as it stood BEFORE it ran, which is what the live election saw (`Cycle.absorb_round`
-    # merges the round's own rows only after it finished).
-    pool_at: dict[tuple[str, int], list[dict[str, Any]]] = {}
+    # ROWS, never a reading: a fork grades its branch-point winner under the formula in effect HERE.
+    winner_at: dict[tuple[str, int], CellSheet | None] = {}
+    # Each round is handed the pool as it stood BEFORE it ran, which is what the live election reads.
+    pool_at: dict[tuple[str, int], list[GradedCell]] = {}
     cycles: list[MaskCycle] = []
     for cid in order:
         parent, from_round = edges.get(cid, (None, None))
-        carried: list[dict[str, Any]] | None = None
-        pool: list[dict[str, Any]] = []
+        carried: CellSheet | None = None
+        pool: list[GradedCell] = []
         if parent is not None and from_round is not None:
             carried = winner_at.get((parent, from_round))
             pool = list(pool_at.get((parent, from_round), pool))
         hop = CycleHop(campaign_id=campaign_id, cycle_id=cid)
-        scorer, _ = config_cell_scorer(
-            apply_config_overrides(resolve_campaign_config(stores, campaign, hop), overrides)
+        scorer = scorer_of(
+            apply_config_overrides(resolve_campaign_config(stores, campaign, hop), overrides),
+            verifier_graded=False,
         )
         rounds: list[MaskRound] = []
         for rn in sorted(files[cid]):
             round_file = files[cid][rn]
             winner_label = crowns.get(cid, {}).get(rn, "")
             arms = _arm_rows(round_file, samples)
-            candidates = [_mask_candidate(sc, rows, scorer, winner_label) for sc, rows in arms]
+            candidates = [_mask_candidate(sc, sheet, scorer, winner_label) for sc, sheet in arms]
             parent_rows = _parent(round_file, samples, carried)
             rounds.append(
                 MaskRound(
@@ -312,25 +264,18 @@ def load_mask_record(
                     round=rn,
                     candidates=candidates,
                     parent=None if parent_rows is None else read_rows(parent_rows, scorer),
-                    # Through the store's typed read, not a second ``model_validate`` here:
-                    # that one is the sole typed read of a round document, and it RAISES on a
-                    # file the current models cannot parse. Correct for a replay, which
-                    # re-derives from the document — while the summary fields above stay
-                    # tolerant, so a scoring or abort lens still serves a drifted cycle.
-                    round_data=stores.campaigns.load_round_file(hop, rn) if with_replay else None,
+                    round_data=round_file if with_replay else None,
                     known_outcomes=pool if with_replay else [],
                     decisions=decisions.get(cid, {}).get(rn, []),
                 )
             )
             crowned = next((c for c in candidates if c.is_selected), None)
-            won = (round_file.get("all_candidate_results") or {}).get(
-                crowned.candidate_id if crowned else ""
-            )
+            won = round_file.all_candidate_results.get(crowned.candidate_id if crowned else "")
             if won:
-                carried = list(won)
+                carried = won
             winner_at[(cid, rn)] = carried
             if with_replay:
-                pool = merge_known_outcomes(pool, list(round_file.get("results") or []))
+                pool = merge_known_outcomes(pool, round_file.results)
             pool_at[(cid, rn)] = pool
         cycles.append(
             MaskCycle(

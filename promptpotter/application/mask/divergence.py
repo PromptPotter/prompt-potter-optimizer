@@ -1,6 +1,3 @@
-"""``find_divergences`` — the one shared tree fold: the FIRST node per branch where the verdict flips, its subtree
-marked counterfactual. It builds no second tree, because past the divergence nothing was ever measured."""
-
 from __future__ import annotations
 
 from collections import defaultdict
@@ -13,8 +10,7 @@ from promptpotter.domain.strict_model import StrictModel
 
 
 class VerdictOutcome(StrictModel):
-    """A verdict's answer for one round. ``alternative_candidate_id`` names the one-step counterfactual only when it was
-    MEASURED and so is nameable; ``None`` when the round would not have diverged, or held on origin."""
+    """``alternative_candidate_id`` names the one-step counterfactual only where it was MEASURED, else ``None``."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -22,16 +18,10 @@ class VerdictOutcome(StrictModel):
     alternative_candidate_id: str | None = None
 
 
-# A verdict is a strategy callable bound (via a factory) with whatever its math
-# needs — a pipeline schema + the swapped criterion for the scoring verdict, a
-# variant config for the abort verdict. The fold knows none of that.
 Verdict = Callable[[MaskRound], VerdictOutcome]
 
 
 class Divergence(StrictModel):
-    """The first round on a branch the criterion would have forked. Rendered as a MARKER on that node, not dimmed; its
-    descendant subtree is what gets dimmed."""
-
     model_config = ConfigDict(frozen=True)
 
     cycle_id: str
@@ -40,9 +30,7 @@ class Divergence(StrictModel):
 
 
 class DivergenceResult(StrictModel):
-    """The fold's output. ``divergences`` are the markers; ``divergent`` are the dimmed
-    counterfactual ``(cycle_id, round)`` coordinates STRICTLY after each one — a coordinate rather
-    than a ``::r`` key its only consumer would parse straight back into this pair."""
+    """``divergences`` are the markers; ``divergent`` the dimmed ``(cycle_id, round)`` coordinates STRICTLY after each."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -51,8 +39,6 @@ class DivergenceResult(StrictModel):
 
 
 def find_divergences(record: MaskRecord, verdict: Verdict) -> DivergenceResult:
-    """Per-branch and tree-recursive. A fork rooted BEFORE the divergence stays in the invariant prefix and is analyzed for
-    its own; a fork rooted at or after it is wholly counterfactual."""
     children: dict[str, list[MaskCycle]] = defaultdict(list)
     ids = {c.cycle_id for c in record.cycles}
     for c in record.cycles:
@@ -88,7 +74,6 @@ def _walk(
                     )
                 )
         else:
-            # Strictly after the divergence point — counterfactual, dimmed.
             divergent.append((cycle.cycle_id, rnd.round))
 
     for child in sorted(children.get(cycle.cycle_id, []), key=lambda c: c.cycle_id):
@@ -100,8 +85,7 @@ def _walk(
         if rooted_after:
             _mark_subtree_divergent(child, children, divergent)
         else:
-            # Rooted before the divergence (or no divergence here, or unknown
-            # root round → honest: can't prove counterfactual) → analyze it.
+            # An unknown root round lands here too: it cannot be proven counterfactual.
             _walk(child, children, verdict, divergences, divergent)
 
 

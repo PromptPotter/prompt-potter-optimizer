@@ -57,16 +57,9 @@ class FactorReading(StrictModel):
     honest contrast on the other."""
 
     key: str
-    # Which keyspace the factor came out of. Derived from the key rather than declared: a
-    # ``node.param`` dot is what `build_candidate_flat` already uses to keep the two apart. It
-    # matters because they are different KINDS of thing — a config leaf is what an experiment
-    # varies deliberately, a prompt field is usually what the optimizer is varying FOR you, and
-    # offering both as grid axes with no distinction invites reading a treatment as a control.
     kind: Literal["dataset", "config", "prompt_field"]
     levels: list[FactorLevel]
     poolable: bool
-    # Other factors that cut this selection into the IDENTICAL partition of subjects, so no
-    # evidence here can separate them. Symmetric, so both members name each other.
     confounded_with: list[str]
     note: str
 
@@ -103,8 +96,7 @@ class FactorGridReading(StrictModel):
 
     row_key: str
     col_key: str
-    # Only coordinates a subject actually occupies. A ragged grid's empty cell is the ABSENCE of a
-    # run, and minting a row for it would report a combination nobody measured.
+    # Occupied coordinates only: an empty cell is the absence of a run, never a row.
     cells: list[FactorCell]
     marginalised: list[str]
     poolable: bool
@@ -118,16 +110,7 @@ _UNSET_LEVEL = "(unset)"
 def levels_by_subject(
     rows: list[SubjectReading], configs: Mapping[str, dict[str, str]]
 ) -> dict[str, dict[str, str]]:
-    """``{subject key: {factor: level}}`` over the keys this selection actually VARIES on.
-
-    Two keyspaces, one question: the dataset a subject ran on, and every ``node.param`` / prompt
-    field of the config it ran under. A key every subject answers the same way is dropped — it is
-    a constant, and a grid axis with one column is a column.
-
-    A key only SOME subjects carry is kept, at :data:`_UNSET_LEVEL` for the rest. That is the third
-    band the compare pane already draws rather than a hole to fill: "this arm has no such param" is
-    a finding about the arm, and collapsing it into "same as the others" is how a factorial read
-    would report a difference it never ran."""
+    """A key only some subjects carry stays, at `_UNSET_LEVEL` for the rest: a missing param is a finding."""
     candidates: dict[str, dict[str, str]] = {}
     for row in rows:
         flat = {_DATASET_FACTOR: row.dataset_name or _UNSET_LEVEL}
@@ -144,13 +127,10 @@ def levels_by_subject(
 
 
 def _poolable(rows: list[SubjectReading], spec: MetricSpec) -> bool:
-    """Whether this metric's readings may be POOLED across the selection. A property of the metric
-    against the roster, never of the factor being read — see :data:`_POOLABLE_UNITS`."""
     return spec.unit in _POOLABLE_UNITS or len({r.dataset_name for r in rows}) == 1
 
 
 def _pool_note(spec: MetricSpec, poolable: bool) -> str:
-    """Why the values are absent, for a surface that still has a grouping to lay out."""
     if poolable:
         return ""
     return (
@@ -164,13 +144,7 @@ def _pool_note(spec: MetricSpec, poolable: bool) -> str:
 def _pool(
     members: list[str], by_key: Mapping[str, SubjectReading], poolable: bool
 ) -> tuple[float | None, float | None, float | None, int]:
-    """Pool the CELLS of every subject in one group, never their means — ``{subject|cell: value}``,
-    so two subjects that happen to share a cell id on different datasets stay two readings rather
-    than one overwriting the other, and a group measured on more cells earns the tighter interval
-    instead of being averaged down to a peer that measured three.
-
-    The ONE pooling path. A level marginal and a grid cell are the same arithmetic over different
-    groupings, and a second spelling would be a second chance to weight it differently."""
+    """Pools cells, never subject means; keyed `subject|cell` so one cell id on two datasets stays two readings."""
     return merge_cells(
         {
             f"{s}|{cell}": v
@@ -187,20 +161,11 @@ def factors(
     levels: Mapping[str, dict[str, str]],
     spec: MetricSpec,
 ) -> list[FactorReading]:
-    """The factorial read: each varying key, its levels, and the marginal at each level.
-
-    Which factor to put on a grid, and which to fix or marginalise away, is the READER's choice and
-    is why every factor is served rather than the two that fit on a screen. Serving them all is
-    also what makes 3 factors cost no more surface than 2: collapsing an axis is choosing a
-    marginal that is already here, not asking for a different read."""
     poolable = _poolable(rows, spec)
     note = _pool_note(spec, poolable)
     by_key = {r.key: r for r in rows}
     keys = sorted({k for lv in levels.values() for k in lv})
 
-    # The partition each factor cuts the roster into, as a canonical frozenset of subject groups.
-    # Two factors with the same partition are indistinguishable HERE however different they are in
-    # principle — this compares what the evidence can separate, never what the names mean.
     partitions: dict[str, frozenset[frozenset[str]]] = {}
     for key in keys:
         buckets: dict[str, set[str]] = {}
@@ -245,7 +210,8 @@ def factors(
                 note=note,
             )
         )
-    return out
+    # Separable first: the order served is the order a grid axis is offered in.
+    return sorted(out, key=lambda factor: len(factor.confounded_with))
 
 
 def grid_reading(
@@ -254,9 +220,6 @@ def grid_reading(
     spec: MetricSpec,
     axes: tuple[str, str],
 ) -> FactorGridReading:
-    """Pool every (row, column) coordinate of the requested projection, over the same ``_pool`` the
-    level marginals use — so a row of the grid and that level's marginal are one arithmetic read at
-    two groupings, and cannot disagree."""
     row_key, col_key = axes
     if row_key == col_key:
         raise ValueError(

@@ -1,49 +1,32 @@
-"""Per-sample formula compiler. Restricted ``eval`` alone is bypassable — the AST allowlist (no attribute access,
-comprehensions, lambdas, walrus or subscript) is the actual boundary."""
+"""Restricted ``eval`` alone is bypassable: the AST allowlist is the actual boundary."""
 
 from __future__ import annotations
 
 import ast
-import hashlib
 import math
 import statistics
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from types import SimpleNamespace
-from typing import Any, Literal, NamedTuple, cast
+from typing import Any, Literal, NamedTuple
 
 from promptpotter.application.scoring.formula.matchers import SCORING_FUNCTIONS
-from promptpotter.domain.l4.proxies import OUTER_PROXY_KEYS
 from promptpotter.domain.results_health import is_degraded
 from promptpotter.domain.scoring import (
     DEFAULT_SCORER_ID,
-    CellScorer,
+    TURN_SCALAR_KEYS,
     Dial,
     DialKind,
-    QueryMeasurement,
+    GradedCell,
+    MeasuredCell,
+    Scorer,
+    ScoringFormulaError,
     ScoringSpec,
+    ScoringTermMissingError,
     anchored_criterion,
-    recorded_cost_s,
 )
-from promptpotter.domain.spend import TokenAccount
-from promptpotter.shared.errors import PayloadInvalidError, is_error_result
-
-# The L4 recursion's measurand, in logits: one inner campaign's mean-over-rounds lift over its OWN
-# origin. Absent on an ordinary campaign, where a cell is a sample and has no origin of its own.
-_LIFT_KEY = OUTER_PROXY_KEYS[0]
-
-
-class ScoringFormulaError(Exception):
-    """A formula raised or returned a non-numeric while scoring. Deterministic — a formula↔trace contract bug, never one
-    odd sample — so it MUST halt loud: swallowing it to ``0.0`` silently zeroed an entire campaign's fitness."""
-
-
-class ScoringTermMissingError(ScoringFormulaError):
-    """The formula names a term the measurement does not carry. Distinct from its parent because the readers want opposites:
-    the parent is a contract bug every cell fails, while this one is PER-CELL — a grading that fails
-    past its retry omits its term while the cell beside it grades fine. So neither reader halts on
-    it: ``rescore_results`` resolves the row to UNSCORED and keeps the paid measurement — under a
-    lens too, which reads through it."""
-
+from promptpotter.domain.spend import StepUsage, TokenAccount, bill_or_rate_usd
+from promptpotter.shared.errors import PayloadInvalidError
+from promptpotter.shared.hashing import stable_hash
 
 SAFE_BUILTINS = {
     "__builtins__": {
@@ -62,9 +45,7 @@ SAFE_BUILTINS = {
 }
 
 
-# AST allowlist — no Attribute (kills ``().__class__...``), comprehensions, lambdas, walrus, subscript.
-# Names are unrestricted (per-sample namespace varies per dataset); every Call must resolve to a name
-# in SAFE_BUILTINS ∪ SCORING_FUNCTIONS ∪ namespace.
+# No Attribute (kills ``().__class__...``), comprehension, lambda, walrus or subscript.
 _ALLOWED_AST_NODES: frozenset[type[ast.AST]] = frozenset(
     {
         ast.Expression,
@@ -100,8 +81,6 @@ _ALLOWED_AST_NODES: frozenset[type[ast.AST]] = frozenset(
 )
 
 
-# Every name a formula may CALL: the safe builtins plus the registered matchers. Spelled off the
-# two tables rather than listed, so a helper added to either is callable without a second edit.
 _CALLABLE_NAMES: frozenset[str] = frozenset(SAFE_BUILTINS["__builtins__"]) | frozenset(
     SCORING_FUNCTIONS
 )
@@ -116,11 +95,7 @@ def validate_ast(tree: ast.AST, *, source: str) -> None:
                 f"in {source}. Allowed: arithmetic, comparisons, calls to the "
                 "registered scoring helpers, namespace name lookups."
             )
-        # A CALL target must be a registered callable, refused HERE rather than at eval: a record's
-        # namespace carries floats and strings, never a callable, so this is decidable at compile
-        # time. At eval it arrives as `NameError` and so as `ScoringTermMissingError`, which makes a
-        # MISTYPED FUNCTION indistinguishable from a term one record lacks — every cell resolves
-        # UNSCORED and the campaign reports having graded nothing.
+        # Refused here: at eval a mistyped function reads as a term the record lacks.
         if isinstance(node, ast.Call) and (
             not isinstance(node.func, ast.Name) or node.func.id not in _CALLABLE_NAMES
         ):
@@ -132,18 +107,12 @@ def validate_ast(tree: ast.AST, *, source: str) -> None:
 
 
 class CompiledExpression(NamedTuple):
-    """A validated formula plus the names it reads. ``evaluate`` returns a FINITE float or raises."""
-
     names: frozenset[str]
     evaluate: Callable[[dict[str, Any], str], float]
 
 
 def compile_expression(formula: str, *, source: str) -> CompiledExpression:
-    """The one safe-eval path in the package: parse, allow-list, compile, and classify what goes wrong.
-
-    The classification is the load-bearing half and the reason this is not three functions — a term the
-    record does not carry raises ``ScoringTermMissingError`` so a read-side caller can report *unscorable*,
-    while everything else raises the parent so the live scorer halts loud."""
+    """A term the record lacks raises ``ScoringTermMissingError``, which a read side reports as *unscorable*."""
     tree = ast.parse(formula, f"<{source}>", "eval")
     validate_ast(tree, source=source)
     code = compile(tree, f"<{source}>", "eval")
@@ -182,8 +151,7 @@ def compile_expression(formula: str, *, source: str) -> CompiledExpression:
 
 
 def clamp_unit_score(raw: Any, *, formula: str, subject: str) -> float:
-    """The ONE gate every formula result passes, per-sample and per-round. NaN must never reach the clamp: ``min(1.0, nan)``
-    short-circuits to its first argument, so a ``0/0`` anywhere would silently score a PERFECT sample."""
+    """NaN must never reach the clamp: ``min(1.0, nan)`` is 1.0, scoring a ``0/0`` as PERFECT."""
     try:
         value = float(raw)
     except (TypeError, ValueError) as exc:
@@ -200,96 +168,65 @@ def clamp_unit_score(raw: Any, *, formula: str, subject: str) -> float:
     return max(0.0, min(1.0, value))
 
 
-def _number(value: object) -> float | None:
-    return float(value) if isinstance(value, int | float) and not isinstance(value, bool) else None
+def _number(value: float | None) -> float | None:
+    return None if value is None else float(value)
 
 
-def _step_tokens_sum(pipeline_data: Mapping[str, Any], *keys: str) -> float | None:
-    steps = pipeline_data.get("step_tokens")
-    if not isinstance(steps, dict) or not steps:
+def _step_cost(steps: Mapping[str, StepUsage]) -> float | None:
+    """``None`` where any node carries neither figure: a partial sum reads as the whole cost."""
+    costs = [bill_or_rate_usd(usage.cost_usd, usage.rate_priced_usd) for usage in steps.values()]
+    if not costs or any(cost is None for cost in costs):
         return None
-    total = 0.0
-    for entry in steps.values():
-        if not isinstance(entry, dict):
-            return None
-        for key in keys:
-            number = _number(entry.get(key))
-            if number is None:
-                return None
-            total += number
-    return total
+    return sum(cost for cost in costs if cost is not None)
+
+
+def _step_tokens(steps: Mapping[str, StepUsage]) -> float | None:
+    account = TokenAccount.from_step_tokens(steps)
+    return None if account is None else float(account.total)
 
 
 def _own_else_steps(own: float | None, steps: float | None) -> float | None:
-    """Two homes, never a fallback chain: a row is EITHER an inner campaign, whose cost the spawn
-    site forwards, OR a pipeline sample, whose cost rides ``step_tokens`` — no outer node is
-    ``is_llm``, so the two cannot both answer. ``is None`` rather than ``or``, because a cell that
-    genuinely cost 0.0 is a MEASUREMENT."""
+    """``is None`` rather than ``or``: a cell that genuinely cost 0.0 is a MEASUREMENT."""
     return own if own is not None else steps
 
 
-# THE per-cell numeric vocabulary, one reader per name. `CELL_CHANNELS` derives from this table
-# rather than being authored beside it — the set IS the type, so a channel added here reaches the
-# evidence picker and the per-cell composite with nothing else to remember.
-#
-# `latency` is `recorded_cost_s`, which sums `step_timings` — the cache-surviving half. A replayed
-# row's `total_time` is zeroed by `query_loop.py::_materialize_cached`, so reading THAT would price
-# every cached cell as instantaneous.
-_CHANNEL_READERS: dict[str, Callable[[Mapping[str, Any], Mapping[str, Any]], float | None]] = {
-    "fitness": lambda row, _pd: _number(row.get("fitness")),
-    # Named for the field, never shortened to `rank`: the per-sample formula already binds it under
-    # this name (`rr(ground_truth_rank)`), and one field answering to two names in two namespaces
-    # is the synonym the root CLAUDE.md forbids.
-    "ground_truth_rank": lambda row, _pd: _number(row.get("ground_truth_rank")),
-    "latency": lambda row, _pd: recorded_cost_s(cast("QueryMeasurement", row)),
-    # Beside `latency` and not with the L4 block below, because the envelope that measures it bounds
-    # EVERY backend's cell: a slow reading means nothing until read against the box it ran on.
-    "unworked": lambda _row, pd: _number(pd.get("unworked_s")),
-    # The seed's own trajectory. `lift` is what the outer loop SCORES — the mean over the round
-    # budget — while `final_lift` is where it actually ended and `peak_lift` the best it reached;
-    # a run can score well and end badly, and only carrying all three can show it.
-    "lift": lambda _row, pd: _number(pd.get(_LIFT_KEY)),
-    "origin": lambda _row, pd: _number(pd.get("inner_origin_level")),
-    "final_lift": lambda _row, pd: _number(pd.get("inner_final_lift")),
-    "peak_lift": lambda _row, pd: _number(pd.get("inner_peak_lift")),
-    "rounds": lambda _row, pd: _number(pd.get("inner_rounds_ran")),
-    "round_budget": lambda _row, pd: _number(pd.get("inner_round_budget")),
-    "cost": lambda _row, pd: _own_else_steps(
-        _number(pd.get("inner_spend_usd")), _step_tokens_sum(pd, "cost_usd")
+_CHANNEL_READERS: dict[str, Callable[[MeasuredCell, float | None], float | None]] = {
+    "fitness": lambda _facts, fitness: _number(fitness),
+    "ground_truth_rank": lambda facts, _fitness: _number(facts.ground_truth_rank),
+    # `cost_s`, never `total_time`: a replayed row's `total_time` is zeroed.
+    "latency": lambda facts, _fitness: facts.cost_s,
+    "unworked": lambda facts, _fitness: facts.pipeline.unworked_s,
+    "lift": lambda facts, _fitness: facts.pipeline.mean_round_delta,
+    "origin": lambda facts, _fitness: facts.pipeline.inner_origin_level,
+    "final_lift": lambda facts, _fitness: facts.pipeline.inner_final_lift,
+    "peak_lift": lambda facts, _fitness: facts.pipeline.inner_peak_lift,
+    "rounds": lambda facts, _fitness: _number(facts.pipeline.inner_rounds_ran),
+    "round_budget": lambda facts, _fitness: _number(facts.pipeline.inner_round_budget),
+    "cost": lambda facts, _fitness: _own_else_steps(
+        facts.pipeline.inner_sent_usd, _step_cost(facts.pipeline.step_tokens)
     ),
-    "tokens": lambda _row, pd: _own_else_steps(
-        _number(pd.get("inner_tokens")), _step_tokens_sum(pd, "input", "output")
+    "tokens": lambda facts, _fitness: _own_else_steps(
+        _number(facts.pipeline.inner_tokens), _step_tokens(facts.pipeline.step_tokens)
     ),
-    # Characters, not tokens: no tokenizer ships, and CAPO's length ratio reads the same over
-    # chars as over the chars/4 estimate `_compute_step_tokens` falls back to.
-    "target_prompt_chars": lambda _row, pd: _number(pd.get("target_prompt_chars")),
+    # Characters, not tokens: no tokenizer ships.
+    "target_prompt_chars": lambda facts, _fitness: _number(facts.pipeline.target_prompt_chars),
 }
 
-# The three health facts a cell answers about ITSELF, as 0/1 so a composite can price them — at
-# round scope they are one rate over the panel and which prompt provoked it cannot be recovered.
-#
-# Deliberately NOT channels: a predicate answers for ANY mapping (`is_error_result({})` is False),
-# so in the table above `cell_channels_of` would claim a health reading for a row carrying no
-# measurement, and the evidence side would score a cell it cannot read at a fabricated 0.
-_ROW_HEALTH: dict[str, Callable[[Mapping[str, Any]], float]] = {
-    "errored": lambda row: float(is_error_result(row)),
-    "degraded": lambda row: float(is_degraded(row)),
-    "cached": lambda row: float(bool(row.get("cached", False))),
+# Deliberately NOT channels: a predicate answers for ANY cell, measured or not.
+_ROW_HEALTH: dict[str, Callable[[MeasuredCell], float]] = {
+    "errored": lambda facts: float(facts.errored),
+    "degraded": lambda facts: float(is_degraded(facts)),
+    "cached": lambda facts: float(facts.cached),
 }
 
 CELL_CHANNELS: tuple[str, ...] = tuple(_CHANNEL_READERS)
 
 
 class CellTerm(NamedTuple):
-    """How a ``per_cell`` term is TAUGHT — the scoring-mask editor's vocabulary, never a reading."""
-
     direction: Literal["high", "low"]
     description: str
-    # How a DIAL weights it (`domain/scoring.py::anchored_criterion`): `anchored` is an unbounded
-    # cost read against the origin's own level, `unit` a 0/1 flag. `None` reaches a criterion
-    # through a typed expression only.
+    # ``None`` reaches a criterion through a typed expression only.
     dial: DialKind | None = None
-    # Whether the scoring form shows its dial before the operator asks for more.
     primary: bool = False
 
 
@@ -327,53 +264,34 @@ assert all(term.direction == "low" for term in CELL_TERMS.values() if term.dial 
 )
 
 
-def cell_channels_of(result: Mapping[str, Any]) -> dict[str, float]:
-    """Every channel this ONE row can answer. A key absent from the result is a channel the row
-    cannot answer, and every caller downstream treats it that way."""
-    pipeline_data = result.get("pipeline_data")
-    pd: Mapping[str, Any] = pipeline_data if isinstance(pipeline_data, dict) else {}
+def cell_channels_of(facts: MeasuredCell, fitness: float | None) -> dict[str, float]:
+    """A key absent from the result is a channel the cell cannot answer."""
     out: dict[str, float] = {}
     for name, read in _CHANNEL_READERS.items():
-        value = read(result, pd)
+        value = read(facts, fitness)
         if value is not None:
             out[name] = value
     return out
 
 
-def cell_namespace(result: dict[str, Any]) -> dict[str, Any]:
-    """A term is bound only where the row CARRIES it. Binding a 0 for an absent count scores the row
-    against a measurement nobody took; leaving it out is what raises ``ScoringTermMissingError``, the
-    verdict this module's own contract promises and the read side renders as *unscorable*.
-
-    Deliberately WIDER than ``cell_channels_of``: a dataset's per-sample formula reaches whatever its
-    own trace carries (``mean_round_delta``), while the declared channels are the tight vocabulary a
-    comparison across campaigns can rely on.
-
-    ``ground_truth_rank`` is the exception and stays bound at ``None`` — that is a value, meaning the
-    truth was not in the ranking, which is what ``rr`` scores as a miss."""
-    pd = result.get("pipeline_data") or {}
-
-    # No ``hit`` and no grade here: a formula reads the cell's facts, never another formula's
-    # reading of them. Ask the matchers instead; they are the arm that decides a label.
+def cell_namespace(facts: MeasuredCell) -> dict[str, Any]:
+    """An absent term stays unbound: a bound 0 would score a measurement nobody took."""
+    # ``ground_truth_rank`` is bound even at ``None``, which ``rr`` scores as a miss.
     ns: dict[str, Any] = {
-        "ground_truth_rank": result.get("ground_truth_rank"),
-        "error": result.get("error"),
-        "predicted": result.get("predicted", ""),
-        "ground_truth": result.get("ground_truth", ""),
+        "ground_truth_rank": facts.ground_truth_rank,
+        "error": facts.error,
+        "predicted": facts.predicted,
+        "ground_truth": facts.ground_truth,
         **SCORING_FUNCTIONS,
     }
-    if "n_candidates" in result:
-        ns["n_candidates"] = result["n_candidates"]
-    # Bound only where the row HAS entries: a formula naming `input_tokens` on a row that carries
-    # none must raise `ScoringTermMissingError` rather than score it at zero. The fold itself is
-    # `TokenAccount`'s — this was one of three hand-written copies of it, and the only one that
-    # summed the counts as well as the cache reads.
-    if account := TokenAccount.from_step_tokens(pd):
+    if facts.n_candidates is not None:
+        ns["n_candidates"] = facts.n_candidates
+    if account := TokenAccount.from_step_tokens(facts.pipeline.step_tokens):
         ns["input_tokens"] = account.input
         ns["output_tokens"] = account.output
 
-    for key, val in pd.items():
-        if isinstance(val, dict):
+    for key, val in facts.pipeline.terms().items():
+        if isinstance(val, Mapping):
             ns[key] = SimpleNamespace(**val)
         elif key not in ns:
             ns[key] = val
@@ -393,59 +311,41 @@ CELL_INTRINSIC_NAMES: frozenset[str] = frozenset(
         *SCORING_FUNCTIONS,
     }
 )
-"""What :func:`cell_namespace` binds ITSELF, before the ``pipeline_data`` splat.
+"""A ``pipeline_data`` key colliding with one of these is SILENTLY dropped by ``cell_namespace``'s splat."""
 
-A ``pipeline_data`` key colliding with one of these is **silently dropped** by that splat's
-``elif key not in ns`` — so a per-sample evaluator claiming one would materialize a value no
-formula could ever reach. ``evaluators.py::_validate_evaluator`` refuses that name at import.
-Asserted against the real function below rather than maintained by hand."""
-
-_INTRINSIC_PROBE: dict[str, Any] = {
-    # Maximal: `n_candidates` and the token pair are each bound only when the row carries their
-    # source, so a thinner probe would under-report and let a real collision through.
-    "n_candidates": 0,
-    "pipeline_data": {"step_tokens": {"_": {}}},
-}
+_INTRINSIC_PROBE = MeasuredCell.from_wire(
+    {
+        "sample_id": 0,
+        # Maximal: a thinner probe would under-report and let a real collision through.
+        "n_candidates": 0,
+        "pipeline_data": {"step_tokens": {"_": {}}},
+    }
+)
 
 assert (
-    set(cell_namespace(_INTRINSIC_PROBE)) - set(_INTRINSIC_PROBE["pipeline_data"])
+    set(cell_namespace(_INTRINSIC_PROBE)) - set(_INTRINSIC_PROBE.pipeline.terms())
     == CELL_INTRINSIC_NAMES
 ), "CELL_INTRINSIC_NAMES drifted from what cell_namespace binds"
+assert not (TURN_SCALAR_KEYS & CELL_INTRINSIC_NAMES), (
+    "a projected turn scalar colliding with an intrinsic is dropped by cell_namespace's splat, "
+    "silently, leaving a key no formula can reach"
+)
 
 
-def objective_namespace(result: dict[str, Any]) -> dict[str, Any]:
-    """What the per-cell COMPOSITE reads: the declared channels and row health, plus everything
-    the per-sample formula already reaches.
-
-    The per-sample side wins every collision, so one term cannot mean two things across the two
-    formulas. Prefer ``latency`` to the ``total_time`` the ``pipeline_data`` splat also binds: a
-    replayed row has ``total_time`` zeroed by ``query_loop.py::_materialize_cached``."""
-    health = {name: read(result) for name, read in _ROW_HEALTH.items()}
-    return {**cell_channels_of(result), **health, **cell_namespace(result)}
+def objective_namespace(facts: MeasuredCell, fitness: float) -> dict[str, Any]:
+    """The per-sample side wins every collision: one term never means two things across formulas."""
+    health = {name: read(facts) for name, read in _ROW_HEALTH.items()}
+    return {**cell_channels_of(facts, fitness), **health, **cell_namespace(facts)}
 
 
 _LABEL_TERM = "ground_truth"
 
-# The share of the composite a cell would score SOLVED that it keeps when missed, so a miss is
-# ranked by what it cost. Part of the grading function, so `auto_scorer_id` hashes it.
+# The share of its SOLVED composite a missed cell keeps; `auto_scorer_id` hashes it.
 MISS_COST_SHARE = 0.2
 
 
 def _refuse_label_formula(formula: str, names: frozenset[str], *, source: str) -> None:
-    """A formula reading the LABEL, armed against a bank that has none, does not merely score
-    badly — it scores WRONG, and in the flattering direction.
-
-    ``label_match(predicted, ground_truth)`` strips and lowercases both sides, so with the label
-    empty every cell whose prediction is also empty compares equal and takes a PERFECT 1.0. That
-    is the launcher's own default formula shape (``jobs/launcher/draft_build.py``), so a
-    verifier-graded dataset drafted through the browser arrives armed this way with nothing
-    between it and a fabricated 100%.
-
-    Refuses rather than returning a number, on ``seed_screen.py::class_floor``'s precedent: the
-    verdict here is undefined, not unknown, and a ``None`` would say the second. Typed like its
-    arm-time sibling ``_verify_required_observation_keys`` so the webapp reads a 422 it must not
-    retry rather than a 500 it will.
-    """
+    """``label_match`` scores an empty prediction against the empty label as a PERFECT 1.0."""
     if _LABEL_TERM not in names:
         return
     raise PayloadInvalidError(
@@ -465,14 +365,9 @@ def compile_scorer(
     per_cell: str | None = None,
     *,
     verifier_graded: bool,
-) -> CellScorer:
-    """The two per-cell numbers, compiled together. ``per_cell`` absent ⇒ the objective IS the
-    fitness, which is what makes adopting this cost nothing on a campaign that declares no
-    composite: the same float, computed once and stamped twice.
-
-    ``verifier_graded`` is the BANK's fact, which only the caller holding the samples can answer;
-    what a formula READS is this module's. Joined here because refusing needs both — and REQUIRED,
-    because a default ``False`` is a guard that reads as armed at every call site that forgot it."""
+    judge_instrument: str | None = None,
+) -> Scorer:
+    """``verifier_graded`` has no default: ``False`` would read as armed wherever a caller forgot it."""
     if not per_sample:
         raise ValueError(
             "compile_scorer: scoring formula is required. "
@@ -485,21 +380,23 @@ def compile_scorer(
     if verifier_graded:
         _refuse_label_formula(per_sample, compiled.names, source="per_sample scoring formula")
 
-    def _fitness(result: dict[str, Any]) -> float:
-        query = str(result.get("query", "?"))[:80]
-        value = compiled.evaluate(cell_namespace(result), f"query {query!r}")
+    scorer_id = auto_scorer_id(per_sample, per_cell, judge_instrument=judge_instrument)
+
+    def _fitness(facts: MeasuredCell) -> float:
+        query = facts.query[:80]
+        value = compiled.evaluate(cell_namespace(facts), f"query {query!r}")
         return clamp_unit_score(value, formula=per_sample, subject=f"query {query!r}")
 
     if not per_cell:
-        return CellScorer(fitness=_fitness, objective=_fitness)
+        return Scorer(id=scorer_id, per_cell=None, fitness=_fitness, objective=None)
 
     composite = compile_expression(per_cell, source="per_cell scoring formula")
     if verifier_graded:
         _refuse_label_formula(per_cell, composite.names, source="per_cell scoring formula")
 
-    def _objective(result: dict[str, Any]) -> float:
-        subject = f"query {str(result.get('query', '?'))[:80]!r}"
-        namespace = objective_namespace(result)
+    def _objective(facts: MeasuredCell, fitness: float) -> float:
+        subject = f"query {facts.query[:80]!r}"
+        namespace = objective_namespace(facts, fitness)
         charged = clamp_unit_score(
             composite.evaluate(namespace, subject), formula=per_cell, subject=subject
         )
@@ -511,31 +408,25 @@ def compile_scorer(
         # Written as a step from `charged`, so a solved cell returns its composite bit-for-bit.
         return charged + MISS_COST_SHARE * (solved - charged)
 
-    return CellScorer(fitness=_fitness, objective=_objective)
+    return Scorer(id=scorer_id, per_cell=per_cell, fitness=_fitness, objective=_objective)
 
 
 def auto_scorer_id(
     per_sample: str | None, per_cell: str | None, *, judge_instrument: str | None
 ) -> str:
-    """Stable id over the WHOLE grading function; ``None``/empty ``per_sample`` → ``default_hit``.
-
-    ``per_cell`` is half of it — the composite IS ``objective`` — and grades cached under this id
-    are what a δ ruler is fit on (`hard_sample_archive`), so an id naming only ``per_sample``
-    hands one arm the other's grades. The judges are the rest: a formula reads the terms they
-    banked, so the same text over another grader is another grading function
-    (``judges.judge_instrument``). Either absent, the payload is unchanged."""
+    """``per_cell`` and the judges are in the id: a δ ruler is fit on the grades cached under it."""
     if not per_sample:
         return DEFAULT_SCORER_ID
-    payload = f"{per_sample}\x1f{per_cell}\x1f{MISS_COST_SHARE}" if per_cell else per_sample
-    if judge_instrument is not None:
-        payload = f"{payload}\x1f{judge_instrument}"
-    h = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:10]
-    return f"auto_{h}"
+    formula = {
+        "per_sample": per_sample,
+        "per_cell": per_cell or None,
+        "miss_cost_share": MISS_COST_SHARE if per_cell else None,
+        "judge": judge_instrument,
+    }
+    return f"auto_{stable_hash(formula, length=8)}"
 
 
-# A scoring block's DECLARED criterion: how much each term weighs, with no anchor yet. It becomes
-# ``per_cell`` once the origin is measured (`application/origin.py::lock_criterion`), and the same
-# text is a ``dials:`` lens's payload.
+# Becomes ``per_cell`` once the origin is measured (`application/origin.py::lock_criterion`).
 DIALS_KEY = "dials"
 
 
@@ -550,8 +441,7 @@ def _refuse_dials(text: str, why: str) -> PayloadInvalidError:
 
 
 def parse_dials(text: str) -> dict[str, float]:
-    """``tokens=0.08,latency=0.1`` as ``{term: weight}``. Refuses a term no dial can weigh —
-    reading it as weight 0 would score a criterion the operator did not declare."""
+    """Refuses a term no dial can weigh: read as weight 0 it would score an undeclared criterion."""
     weights: dict[str, float] = {}
     for part in filter(None, (p.strip() for p in text.split(","))):
         name, sep, raw = (piece.strip() for piece in part.partition("="))
@@ -571,20 +461,17 @@ def parse_dials(text: str) -> dict[str, float]:
 
 
 def spell_dials(weights: Mapping[str, float]) -> str:
-    """*weights* in the one spelling :func:`parse_dials` reads back — vocabulary order, a dial at
-    zero dropped — so two declarations of one criterion are one string."""
+    """Vocabulary order, a zero dial dropped: two declarations of one criterion are one string."""
     return ",".join(f"{name}={weights[name]}" for name in CELL_TERMS if weights.get(name))
 
 
-def origin_anchors(rows: list[dict[str, Any]]) -> dict[str, float]:
-    """The level each anchored term is read against: its MEDIAN over the origin's cells that carry
-    it, so the origin's typical cell sits at the anchor and one runaway cell cannot lift it out of
-    reach of every other. A term no cell carries, or that the origin measured at zero, gets none."""
+def origin_anchors(rows: Iterable[GradedCell]) -> dict[str, float]:
+    """The MEDIAN, so one runaway cell cannot lift the anchor out of reach of every other."""
     carried: dict[str, list[float]] = {}
-    for row in rows:
-        if is_error_result(row):
+    for cell in rows:
+        if cell.facts.errored:
             continue
-        for name, value in cell_channels_of(row).items():
+        for name, value in cell_channels_of(cell.facts, cell.grade.fitness).items():
             if CELL_TERMS[name].dial == "anchored":
                 carried.setdefault(name, []).append(value)
     levels = {name: statistics.median(values) for name, values in carried.items()}
@@ -592,7 +479,6 @@ def origin_anchors(rows: list[dict[str, Any]]) -> dict[str, float]:
 
 
 def realize_dials(weights: Mapping[str, float], anchors: Mapping[str, float]) -> str:
-    """The ``per_cell`` formula *weights* spell once each anchored term has its *anchors* level."""
     dials: dict[str, Dial] = {}
     for name, weight in weights.items():
         if not weight:

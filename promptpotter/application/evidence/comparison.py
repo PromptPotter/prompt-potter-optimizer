@@ -2,53 +2,95 @@ from __future__ import annotations
 
 import math
 from collections import Counter
+from collections.abc import Mapping
 from typing import Literal, NamedTuple, get_args
 
-from promptpotter.application.evidence.metric_catalogue import MetricSpec, catalogue_for
+from pydantic import Field
+
+from promptpotter.application.evidence.metric_catalogue import (
+    CUSTOM_METRIC_KEY,
+    MetricSpec,
+    catalogue_for,
+)
 from promptpotter.application.evidence.subjects import SubjectReading
-from promptpotter.domain.dashboard_rows import SidedInterval
+from promptpotter.application.scoring.paired import (
+    MemberRows,
+    as_family,
+    flipped_keys,
+    grade_measurands,
+    read_pair,
+)
+from promptpotter.domain.paired_reading import (
+    ROUND_LIFT_SPEC,
+    CellSetName,
+    Measurand,
+    MeasurandKind,
+    MeasurandUnit,
+    PairedReading,
+)
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.shared.measurement_context import RoleScope
 from promptpotter.shared.statistics import (
-    cells_for_exact_verdict,
-    exact_p_floor,
-    exact_paired_reading,
-    holm_adjusted,
     min_detectable_effect,
     rank_correlation,
     two_way_effect_sds,
 )
 
-# |rho| at or above this and the roster's ordering IS its chronology — see `OrderConfound`.
 _ORDER_CONFOUND_RHO = 0.9
 
 ComparabilityReason = Literal["one_ruler", "rulers_differ", "ruler_unstamped", "datasets_differ"]
 
 
-class PairwiseComparison(SidedInterval):
-    """One unordered pair, blocked on the cells BOTH subjects scored — pairing removes cell
-    difficulty instead of carrying it as noise, which is the same reason ``reference_lift``
-    pairs rather than differencing two means.
+class SubjectMember(NamedTuple):
+    rows: MemberRows
+    masked: bool
 
-    ``a`` precedes ``b`` in the roster's oldest-first order, so ``median_shift = b - a`` has one
-    reading across the whole table. Its interval and both p-values are ``None`` below two shared
-    cells: nothing was tested there, which a ``1.0`` would misreport as a test that found nothing.
 
-    The test is EXACT (``exact_paired_reading``), never Student-t: at the widths a panel runs, a t
-    p can sit below what any exact test on that many pairs is able to return, which is resolution
-    taken from the assumed tail rather than from the cells. ``EvidencePower.exact_p_floor`` says
-    which verdicts the width can reach at all, before a cell is spent.
-    """
+def pair_subjects(a: SubjectMember, b: SubjectMember, measurand: Measurand) -> PairedReading:
+    return read_pair(
+        a=a.rows,
+        b=b.rows,
+        cell_set=CellSetName.MEASURED_BY_BOTH,
+        cells=None,
+        masked=a.masked or b.masked,
+        dataset_hash=None,
+        measurands=[measurand],
+        spec=ROUND_LIFT_SPEC,
+        scope=RoleScope.REPORT,
+        instrument_id=a.rows.instrument_id,
+    )
+
+
+def metric_measurand(spec: MetricSpec, scorer_id: str) -> Measurand:
+    return Measurand(
+        kind=MeasurandKind.EXPR if spec.key == CUSTOM_METRIC_KEY else MeasurandKind.CHANNEL,
+        key=spec.expression,
+        scorer_id=scorer_id,
+        binary=False,
+        unit=MeasurandUnit.SCORE,
+    )
+
+
+class PairwiseComparison(StrictModel):
+    """One unordered pair of the roster. ``a`` precedes ``b`` in its oldest-first order — by cycle,
+    then by round within one — so every lift here reads parent-to-descendant across the table.
+    Every pair is served: one that shares too little says so in its reading's ``state``."""
 
     subject_a: str
     subject_b: str
-    # Hodges-Lehmann: the median of the pairwise Walsh averages, not the mean of the differences.
-    # One outlier cell moves the mean by 1/n of itself and moves this by nothing.
-    median_shift: float
-    p_value: float | None
-    # Holm-Bonferroni across every pair in THIS read that carries a p. Served beside the raw value
-    # rather than replacing it, so the correction is visible instead of baked in.
-    p_adjusted: float | None
-    n_cells: int
+    reading: PairedReading = Field(
+        description="`subject_b` over `subject_a` under the selected metric, on the cells both "
+        "scored under it. Its headline's `family` is Holm across this table's pairs.",
+    )
+    hit: PairedReading = Field(
+        description="The same pair on the hit grade, whatever metric the read selected, on the "
+        "cells both graded: its headline's `flips` are what a level nets against each other.",
+    )
+    gained: list[int] = Field(
+        description="The cells `hit` counts as gained — `subject_a` missed, `subject_b` hit — "
+        "as sample ids in `subject_b`'s numbering.",
+    )
+    lost: list[int] = Field(description="The cells `hit` counts as lost, numbered the same way.")
 
 
 class MetricReading(StrictModel):
@@ -57,17 +99,8 @@ class MetricReading(StrictModel):
 
     spec: MetricSpec
     catalogue: list[MetricSpec]
-    # The channel names an expression may use ON THIS SELECTION — served rather than documented,
-    # so a composed metric cannot name a term the selection would silently read as zero. It is the
-    # INTERSECTION: a channel only some subjects carry would compare one side against nothing.
     namespace: list[str]
-    # The cells EVERY subject SCORED under this metric — a subset of the measured intersection,
-    # because a cell can be measured and still be unreadable here. The PAIRING and the variance
-    # split are over this set, and only this set.
     scored_cells: list[str]
-    # Every cell ANY subject reached, scored or not. The cell-wise charts plot THIS axis: on the
-    # intersection a subject that came up short simply is not on the board, and a comparison
-    # narrowed to what everyone answered cannot show who failed to answer.
     covered_cells: list[str]
     pairwise: list[PairwiseComparison]
     n_tests: int
@@ -90,10 +123,8 @@ class Comparability(StrictModel):
     reason: ComparabilityReason
     datasets: list[str]
     n_rulers: int
-    # The sentence BOTH surfaces render, so neither keeps a per-reason map that can go an arm out
-    # of step with the other's — including the one reason that QUALIFIES rather than disqualifies
-    # the column, which a map indexed defensively drops in silence.
     note: str
+    roster_note: str | None
 
 
 class EvidenceVariance(StrictModel):
@@ -116,12 +147,8 @@ class EvidencePower(StrictModel):
     """What this instrument can and cannot resolve, at the width it is currently run.
 
     ``cells_for_largest_gap`` prices the question actually on the table — how many cells per subject
-    it would take to resolve the biggest gap the roster already shows.
-
-    The last two are the harder limit and they answer a different question. Effect size decides the
-    first three; ``exact_p_floor`` is what the WIDTH alone permits, so a panel below
-    ``cells_for_corrected_verdict`` cannot produce a Holm-corrected result however large the effect —
-    a clean sweep of every cell included. Buy width to that line before buying it for power.
+    it would take to resolve the biggest gap the roster already shows. What a pair's WIDTH permits
+    at any effect size is that pair's own ``estimate.p_floor``.
     """
 
     paired_se: float
@@ -129,8 +156,6 @@ class EvidencePower(StrictModel):
     largest_subject_gap: float
     cells_per_subject: int
     cells_for_largest_gap: int | None
-    exact_p_floor: float
-    cells_for_corrected_verdict: int
 
 
 class ArmReplicate(StrictModel):
@@ -158,20 +183,20 @@ class OrderConfound(StrictModel):
     level_vs_order: float | None
     spend_vs_order: float | None
     n_subjects: int
-    # The VERDICT, served rather than left to a threshold each reader picks: a near-perfect rank
-    # correlation means the roster's ordering is also its chronology and the two cannot be told
-    # apart. Deliberately strict — this disqualifies a comparison, so it fires only on a monotone.
     order_confounded: bool
 
 
 def metric_reading(
-    spec: MetricSpec, rows: list[SubjectReading], available: frozenset[str]
+    spec: MetricSpec,
+    rows: list[SubjectReading],
+    available: frozenset[str],
+    *,
+    members: Mapping[str, SubjectMember],
+    measurand: Measurand,
 ) -> MetricReading:
-    """The vocabulary the selection was read under, plus every pairwise test over it. The
-    per-subject half lives on the roster rows themselves."""
     scored = [r for r in rows if r.values]
     shared = sorted(set.intersection(*(set(r.values) for r in scored))) if scored else []
-    pairwise = _pairwise(scored)
+    pairwise = _pairwise(scored, members, measurand)
     return MetricReading(
         spec=spec,
         catalogue=list(catalogue_for(available)),
@@ -179,39 +204,33 @@ def metric_reading(
         scored_cells=shared,
         covered_cells=sorted({c for r in rows for c in (*r.values, *r.unscorable_cells)}),
         pairwise=pairwise,
-        n_tests=sum(1 for p in pairwise if p.p_value is not None),
+        n_tests=sum(1 for p in pairwise if p.reading.headline is not None),
     )
 
 
-def _pairwise(rows: list[SubjectReading]) -> list[PairwiseComparison]:
-    """Every unordered pair, each blocked on the cells BOTH scored — strictly more evidence than
-    the roster-wide intersection, and the honest paired n for that one comparison, which is why it
-    is served per row."""
+def _pairwise(
+    rows: list[SubjectReading], members: Mapping[str, SubjectMember], measurand: Measurand
+) -> list[PairwiseComparison]:
+    pairs = [(a.key, b.key) for i, a in enumerate(rows) for b in rows[i + 1 :]]
+    readings = as_family(
+        [pair_subjects(members[a], members[b], measurand) for a, b in pairs],
+        f"pairwise:{measurand.key}",
+    )
+    (hit,) = (m for m in grade_measurands(measurand.scorer_id) if m.binary)
     out: list[PairwiseComparison] = []
-    for i, a in enumerate(rows):
-        for b in rows[i + 1 :]:
-            cells = sorted(set(a.values) & set(b.values))
-            if not cells:
-                continue
-            shift, lo, hi, p_value, n = exact_paired_reading(
-                [b.values[c] for c in cells], [a.values[c] for c in cells]
+    for (a, b), reading in zip(pairs, readings, strict=True):
+        numbered = {key: cell.sample_id for key, cell in members[b].rows.sheet.by_key().items()}
+        flips = flipped_keys(members[a].rows.by_key(), members[b].rows.by_key())
+        out.append(
+            PairwiseComparison(
+                subject_a=a,
+                subject_b=b,
+                reading=reading,
+                hit=pair_subjects(members[a], members[b], hit),
+                gained=[numbered[key] for key in flips.gained],
+                lost=[numbered[key] for key in flips.lost],
             )
-            out.append(
-                PairwiseComparison(
-                    subject_a=a.key,
-                    subject_b=b.key,
-                    median_shift=shift,
-                    ci_lo=lo,
-                    ci_hi=hi,
-                    p_value=p_value,
-                    p_adjusted=None,
-                    n_cells=n,
-                )
-            )
-    tested = [i for i, r in enumerate(out) if r.p_value is not None]
-    adjusted = holm_adjusted([out[i].p_value or 0.0 for i in tested])
-    for slot, i in enumerate(tested):
-        out[i] = out[i].model_copy(update={"p_adjusted": adjusted[slot]})
+        )
     return out
 
 
@@ -222,8 +241,6 @@ class _RowVerdict(NamedTuple):
 
 
 def _row_verdicts(rows: list[SubjectReading]) -> list[_RowVerdict]:
-    """Each subject against the rest of the selection — the majority dataset first, then the
-    majority ruler. A dataset name is compared as stored: an unnamed row shares a question with none."""
     if not rows:
         return []
     majority_dataset = Counter(r.dataset_name for r in rows).most_common(1)[0][0]
@@ -240,8 +257,7 @@ def _row_verdicts(rows: list[SubjectReading]) -> list[_RowVerdict]:
                 f"selection is on {majority_dataset or 'a different one'} — they share no "
                 f"question, so nothing here pairs and only its own level is readable.",
             )
-        # UNKNOWN on either side, which is not a yes: an unstamped origin may sit on any scale,
-        # and a selection where nothing is stamped can vouch for none of it.
+        # Unknown, never a yes: an unstamped origin may sit on any scale.
         if row.ability is None or row.ability.ruler_id is None or majority is None:
             return _RowVerdict(None, "ruler_unstamped", "")
         if not row.ability.comparable_to(majority):
@@ -257,8 +273,6 @@ def _row_verdicts(rows: list[SubjectReading]) -> list[_RowVerdict]:
 
 
 def stamp_comparable(rows: list[SubjectReading]) -> list[SubjectReading]:
-    """Each subject's OWN verdict, served so no surface picks the odd row out of `comparability`'s
-    selection-wide reason for itself."""
     return [
         r.model_copy(update={"comparable": v.comparable, "comparable_note": v.note})
         for r, v in zip(rows, _row_verdicts(rows), strict=True)
@@ -285,8 +299,7 @@ def replicates(rows: list[SubjectReading]) -> list[ArmReplicate]:
     return out
 
 
-# The selection's verdict and sentence per reason, in PRECEDENCE order: the first reason any row
-# carries is the selection's. Different datasets are different measurands, so that one leads.
+# In PRECEDENCE order: the first reason any row carries is the selection's.
 _SELECTION_VERDICT: dict[ComparabilityReason, tuple[bool | None, str]] = {
     "datasets_differ": (
         False,
@@ -315,8 +328,10 @@ assert set(_SELECTION_VERDICT) == set(get_args(ComparabilityReason))
 
 
 def comparability(rows: list[SubjectReading]) -> Comparability:
-    carried = {v.reason for v in _row_verdicts(rows)}
-    # An empty selection vouches for nothing, which is UNKNOWN rather than a yes.
+    verdicts = _row_verdicts(rows)
+    carried = {v.reason for v in verdicts}
+    notes = {v.note for v in verdicts}
+    # An empty selection is UNKNOWN, never a yes.
     reason: ComparabilityReason = "ruler_unstamped"
     for candidate in _SELECTION_VERDICT:
         if candidate in carried:
@@ -331,12 +346,15 @@ def comparability(rows: list[SubjectReading]) -> Comparability:
             {r.ability.ruler_id for r in rows if r.ability and r.ability.ruler_id is not None}
         ),
         note=note,
+        roster_note=(
+            next(iter(notes))
+            if len(notes) == 1 and all(v.comparable is False for v in verdicts)
+            else None
+        ),
     )
 
 
 def variance(by_subject: dict[str, dict[str, float]]) -> EvidenceVariance | None:
-    """One column per SUBJECT, not per arm id: two campaigns sharing an arm are replicates and
-    each is its own reading, which is exactly what the residual is estimated from."""
     decomposed = two_way_effect_sds(by_subject)
     if decomposed is None:
         return None
@@ -355,13 +373,9 @@ def variance(by_subject: dict[str, dict[str, float]]) -> EvidenceVariance | None
 
 
 def power(
-    decomposition: EvidenceVariance | None, rows: list[SubjectReading], *, n_tests: int
+    decomposition: EvidenceVariance | None, rows: list[SubjectReading]
 ) -> EvidencePower | None:
-    """The paired SE of a two-arm contrast: pairing removes the cell effect — the term that is
-    largest here — and leaves the residual on both arms, hence ``residual * sqrt(2 / cells)``.
-
-    Beside it the width limit, which no SE can see: an exact test on this many cells has a smallest
-    reachable p, and *n_tests* is the correction it has to clear."""
+    """Pairing removes the cell effect and leaves the residual on both arms: SE = residual * sqrt(2 / cells)."""
     levels = [r.value for r in rows if r.value is not None]
     if decomposition is None or len(levels) < 2 or decomposition.n_cells < 1:
         return None
@@ -378,8 +392,6 @@ def power(
         largest_subject_gap=gap,
         cells_per_subject=decomposition.n_cells,
         cells_for_largest_gap=needed,
-        exact_p_floor=exact_p_floor(decomposition.n_cells),
-        cells_for_corrected_verdict=cells_for_exact_verdict(n_tests),
     )
 
 
@@ -411,9 +423,12 @@ __all__ = [
     "MetricReading",
     "OrderConfound",
     "PairwiseComparison",
+    "SubjectMember",
     "comparability",
+    "metric_measurand",
     "metric_reading",
     "order_confound",
+    "pair_subjects",
     "power",
     "replicates",
     "stamp_comparable",

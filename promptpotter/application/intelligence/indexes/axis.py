@@ -6,8 +6,7 @@ from dataclasses import dataclass, field
 from itertools import combinations, pairwise
 from typing import TYPE_CHECKING, Annotated, Any
 
-from promptpotter.application.scoring.metrics import CellFold
-from promptpotter.domain.scoring import is_hit
+from promptpotter.domain.results import CellFold
 from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
@@ -19,11 +18,14 @@ def _is_forbidden_axis(axis: str) -> bool:
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from promptpotter.application.intelligence.indexes.sample import (
         FailureCluster,
         SampleIndex,
         SampleRecord,
     )
+    from promptpotter.domain.results import RoundResult
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +43,7 @@ def _value_preview(value: Any) -> str:
 def _fmt_axis_rankings(
     rankings: list[AxisImpact], peaked_axes: frozenset[str] | None = None
 ) -> str:
-    """The top-axes line, with peakedness tagged INLINE. Split across two lines it let L1 read
-    "highest effect ⇒ mutate" without ever seeing that the parent's value IS the measured peak."""
+    """Peakedness is tagged INLINE: on its own line L1 reads "highest effect ⇒ mutate" past it."""
     peaked = peaked_axes or frozenset()
     parts: list[str] = []
     for a in rankings:
@@ -104,8 +105,7 @@ class AxisImpact:
 
 @dataclass
 class RunRecord:
-    run_id: str
-    name: str
+    individual: str
     accuracy: float
     composite: float
     total: int
@@ -118,22 +118,15 @@ def _collect(*items: tuple[str, str | None]) -> dict[str, str] | None:
 
 
 class AxisIndex:
-    """Derived axis-keyed view (axis → value → [accuracy]) over the runs a ``SampleIndex`` read,
-    plus the per-sample flips between consecutive rounds of the cycle reading it."""
-
     def __init__(self, sample_index: SampleIndex) -> None:
         self.sample_index = sample_index
         self._axis_values: dict[str, dict[str, list[float]]] = defaultdict(
             lambda: defaultdict(list),
         )
-        self._axis_seen_runs: set[str] = set()
         self._axis_failure_group_deltas: dict[str, dict[str, float]] = {}
         self._top_runs: list[RunRecord] = []
         self._flips: list[dict[str, Any]] = []
-        # The sample index's `generation` last folded here; `None` until the first refresh.
         self._folded: int | None = None
-
-    # ----- axis analytics -----
 
     @shapes_optimizer_prompt
     def peaked_axes(self) -> frozenset[str]:
@@ -188,12 +181,8 @@ class AxisIndex:
                 return "peaked"
         return "flat"
 
-    # ----- digest construction (single entry-point, layer-agnostic) -----
-
     @shapes_optimizer_prompt
     def digest(self) -> dict[str, str] | None:
-        """Layer-agnostic axis-keyed digest — one payload into every L1/L2/L3 prompt. Per-layer filtering,
-        if it ever returns, lives in the renderers and not here."""
         rankings5 = self.axis_rankings()[:5]
         top_vals_str: str | None = None
         if rankings5:
@@ -232,9 +221,7 @@ class AxisIndex:
                 fg_lines.append(f"{a.axis} → {', '.join(parts)}")
 
         flips = self._flips[-50:] if rankings5 else []
-        # Counted by sample_id, the cell's identity — `record_flips_from_rounds` detects them
-        # that way. Bucketing by the raw query text merged two samples that phrase the same
-        # question into one inflated volatility score. The text is the LABEL, not the key.
+        # Counted by sample_id: two samples may phrase the same question, so the text is only a LABEL.
         flip_counts = Counter(f["sample_id"] for f in flips)
         flip_labels = {f["sample_id"]: str(f.get("query", "")) for f in flips}
         volatile = [
@@ -244,8 +231,7 @@ class AxisIndex:
         return _collect(
             ("axis_rankings", _fmt_axis_rankings(rankings5, peaked) if rankings5 else None),
             ("top_values", top_vals_str),
-            # One cluster partitions nothing — on a single-node pipeline it is "every failure is
-            # in the node", at 100%.
+            # One cluster partitions nothing: on a single-node pipeline it is the node, at 100%.
             (
                 "failure_clusters",
                 _fmt_clusters(clusters, with_counts=True) if len(clusters) > 1 else None,
@@ -281,8 +267,6 @@ class AxisIndex:
             for f in recent
         ]
         return f"{len(positive)} queries improved (last {len(recent)}):\n" + "\n".join(parts)
-
-    # ----- failure-group correlation -----
 
     def _recompute_failure_group_correlations(self) -> None:
         clusters = self.sample_index.failure_clusters(5)
@@ -325,19 +309,13 @@ class AxisIndex:
 
         self._axis_failure_group_deltas = new_deltas
 
-    # ----- refresh -----
-
     def refresh(self) -> None:
-        """Fold what the sample index read at its last refresh; a no-op until it reads again, so
-        the digest moves exactly when the archive view it is derived from does."""
         if self._folded == self.sample_index.generation:
             return
+        # Folded WHOLE each time: a configuration's reading moves as its population grows.
+        self._axis_values = defaultdict(lambda: defaultdict(list))
         for entry, reading in self.sample_index.runs:
-            run_id = entry.get("run_id", "")
-            if run_id in self._axis_seen_runs:
-                continue
             self._fold_entry(self._axis_values, entry, reading)
-            self._axis_seen_runs.add(run_id)
         self._recompute_failure_group_correlations()
         self._refresh_top_runs(self.sample_index.runs)
         self._folded = self.sample_index.generation
@@ -345,47 +323,37 @@ class AxisIndex:
     def _refresh_top_runs(
         self, entries: list[tuple[dict[str, Any], CellFold]], k: int = 10
     ) -> None:
-        """Top-K by (composite_fitness, accuracy) desc. Only the modal ``total`` count is kept: an 8/20
-        composite is not comparable with a 20/20 one, and mixing them inflates the leaderboard. A
-        one-cell run reads that cell, not a configuration, and backfills mint enough of them to
-        become the mode, so they are excluded."""
-        all_totals = [scores["total"] for _, scores in entries if scores["total"] > 1]
+        """Only the modal ``total`` is kept: an 8/20 composite is not comparable with a 20/20 one."""
+        all_totals = [scores.total for _, scores in entries if scores.total > 1]
         if not all_totals:
             self._top_runs = []
             return
         modal_total = Counter(all_totals).most_common(1)[0][0]
 
-        # One run can have several archive entries (e.g. per-sample backfill rows);
-        # collapse to the best record per run_id so the leaderboard never lists the
-        # same run twice (wasted bytes + a misleading panel for L1/L2).
-        best_by_run: dict[str, RunRecord] = {}
+        scored: list[RunRecord] = []
         for entry, scores in entries:
-            total = scores["total"]
+            total = scores.total
             if total != modal_total:
                 continue
-            # An absence is not a measurement: a run that read no cell must not enter the
-            # leaderboard as a 0% run (the rule `noise_floor.py` already states).
-            accuracy, composite = scores["accuracy"], scores["composite_fitness"]
+            # An absence is not a measurement: a configuration that read no cell never enters at 0%.
+            accuracy, composite = scores.accuracy, scores.composite_fitness
             if accuracy is None or composite is None:
                 continue
-            run_id = entry.get("run_id", "")
-            rec = RunRecord(
-                run_id=run_id,
-                name=entry.get("name", ""),
-                accuracy=accuracy,
-                composite=composite,
-                total=total,
+            scored.append(
+                RunRecord(
+                    individual=str(entry.get("prompt_fields_id") or entry["config_key"]),
+                    accuracy=accuracy,
+                    composite=composite,
+                    total=total,
+                )
             )
-            prev = best_by_run.get(run_id)
-            if prev is None or (rec.composite, rec.accuracy) > (prev.composite, prev.accuracy):
-                best_by_run[run_id] = rec
-        scored = sorted(best_by_run.values(), key=lambda r: (-r.composite, -r.accuracy))
+        scored.sort(key=lambda r: (-r.composite, -r.accuracy))
         self._top_runs = scored[:k]
 
     def top_runs(self, k: int = 3) -> list[RunRecord]:
         return self._top_runs[:k]
 
-    def record_flips_from_rounds(self, rounds: list[Any], round_num: int) -> None:
+    def record_flips_from_rounds(self, rounds: Sequence[RoundResult], round_num: int) -> None:
         if len(rounds) < 2 or not (rounds[-2].results and rounds[-1].results):
             return
         desc = (
@@ -393,24 +361,19 @@ class AxisIndex:
             if rounds[-1].candidate_scores
             else ""
         )
-        prev_hits: dict[int, bool] = {}
-        for r in rounds[-2].results:
-            sid = r.get("sample_id")
-            if sid is not None:
-                prev_hits[sid] = is_hit(r.get("fitness"))
+        prev_hits = {sid: cell.hit for sid, cell in rounds[-2].results.on_ruler.items()}
 
         count = 0
-        for r in rounds[-1].results:
-            sid = r.get("sample_id")
-            if sid is None or sid not in prev_hits:
+        for sid, cell in rounds[-1].results.on_ruler.items():
+            if sid not in prev_hits:
                 continue
-            new_hit = is_hit(r.get("fitness"))
+            new_hit = cell.hit
             old_hit = prev_hits[sid]
             if new_hit != old_hit:
                 self._flips.append(
                     {
                         "sample_id": sid,
-                        "query": r.get("query", ""),
+                        "query": cell.facts.query,
                         "round": round_num,
                         "changes_description": desc[:80],
                         "old_hit": old_hit,
@@ -421,17 +384,14 @@ class AxisIndex:
         if count:
             logger.debug("Round %d: %d query flips recorded", round_num, count)
 
-    # ----- helpers -----
-
     @staticmethod
     def _fold_entry(
         axis_values: dict[str, dict[str, list[float]]],
         entry: dict[str, Any],
         scores: CellFold,
     ) -> None:
-        """An entry with no accuracy — an outer L4 cell, whose measurand is ``mean_round_delta`` — is
-        skipped, never folded as 0.0, which manufactures ``effect_size`` against every real arm."""
-        recorded = scores["accuracy"]
+        """An entry with no accuracy is skipped: folded as 0.0 it manufactures ``effect_size``."""
+        recorded = scores.accuracy
         if recorded is None:
             return
         accuracy = float(recorded)

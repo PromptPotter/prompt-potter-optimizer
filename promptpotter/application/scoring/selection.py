@@ -1,16 +1,4 @@
-"""Which candidate WINS, and which is cut — the θ-ranked election plus the closed-form elimination
-posterior, and the paired-cell substrate both stand on. ONE rule, three callers: the live scorer
-(``l1_score``), the resume divergence replayer and the A/B replay, so a resumed run can never
-re-elect a different winner under an unchanged scorer.
-
-One rule is not enough on its own — the PARENT has to travel with it. The rule ranks each arm
-against ``parent_results``, and a caller passing a different panel re-elects differently with the
-scorer untouched. So the live election records the parent it used (``parent_cells``) and both
-replayers read it; none of them may reconstruct one.
-
-``mean_fitness_ci`` lives here rather than with the fitness gateway because it reads
-``_mean_fitness_by_cell``, whose docstring forbids adding the scoreable filter that
-``elect_round_winner`` relies on being absent."""
+"""The live election and both replayers read the parent it RECORDED (``parent_cells``); none reconstructs one."""
 
 from __future__ import annotations
 
@@ -18,181 +6,93 @@ from collections.abc import Collection, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from promptpotter.application.intelligence.exploration import (
-    PARENT_ABILITY_ID,
-    Observation,
     candidate_abilities,
-    fit_theta_given_delta,
+    fit_theta,
     graded_response,
     theta_bounds_given_delta,
     theta_lift_over_parent,
 )
-from promptpotter.application.scoring.classification import scoreable_rows
-from promptpotter.domain.scoring import is_graded
+from promptpotter.domain.scoring import CellSheet, Grade, GradedCell, MeasuredCell
 from promptpotter.shared.statistics import (
     discordant_counts,
     mean_ci,
     p_exceeds,
-    paired_reading,
     sign_posterior,
 )
 
 if TYPE_CHECKING:
-    from promptpotter.application.intelligence.exploration import RaschPosterior
+    from promptpotter.application.intelligence.exploration import RoundAbilities
     from promptpotter.domain.results import RoundResult
     from promptpotter.domain.ruler import DeltaRuler
-    from promptpotter.domain.scoring import CellGrade, QueryMeasurement
+    from promptpotter.domain.scoring import GradeColumn
 
 __all__ = [
-    "PairedLift",
     "PairedPosterior",
+    "closest_to_bar",
     "distinct_valid_cells",
     "elect_round_winner",
     "elimination_p_best",
     "elimination_p_best_bounds",
+    "level_band",
     "lift_over_bar",
-    "matched_parent_lift",
-    "mean_fitness_ci",
-    "paired_fitness",
     "paired_p_best",
     "parent_cells",
     "parent_selection_bias",
     "priors_covering",
+    "readable_lifts",
+    "recorded_parent",
 ]
 
 
-def mean_fitness_ci(
-    results: list[QueryMeasurement], *, grade: CellGrade
-) -> tuple[float | None, float | None]:
-    """Brackets the scoreable population, since that is the number it is drawn beside. A DECISION
-    grades an errored row 0.0 (the arm was asked and produced nothing); an interval drawn beside a
-    point estimate must bracket the population that estimate came from — hence the filter here and
-    deliberately not inside ``_mean_fitness_by_cell``."""
-    per_cell = list(_mean_fitness_by_cell(scoreable_rows(results), grade=grade).values())
-    band = mean_ci(per_cell)
+def level_band(
+    sheet: CellSheet, column: GradeColumn
+) -> tuple[float | None, float | None, float | None]:
+    values = list(sheet.column(column).values())
+    if not values:
+        return (None, None, None)
+    level = sum(values) / len(values)
+    band = mean_ci(values)
     if band is None:
-        return (None, None)
+        return (level, None, None)
     _, ci_lo, ci_hi = band
-    # Clipped to the metric's own support: PoBB's ``1/(4n)`` SE floor gives an arm whose cells
-    # all scored 0.0 a band reaching below zero, which the quantity cannot hold.
-    return (min(max(ci_lo, 0.0), 1.0), min(max(ci_hi, 0.0), 1.0))
+    # Clipped to the metric's support: the SE floor gives an all-0.0 arm a band reaching below zero.
+    return (level, min(max(ci_lo, 0.0), 1.0), min(max(ci_hi, 0.0), 1.0))
 
 
-# ---------------------------------------------------------------------------
-# Round-winner election — difficulty-adjusted ability (θ) ranking shared by the
-# live scorer (``l1_score``) and the resume divergence replayer. ONE rule, two
-# callers: a resumed run can never re-elect a different winner under an unchanged
-# scorer. ``paired_fitness`` remains the origin-overlap guard + the recorded
-# p_value diagnostic in ``l1_score``; the *ranking* is θ, not its mean.
-# ---------------------------------------------------------------------------
+def distinct_valid_cells(sheet: CellSheet) -> int:
+    return len(sheet.scoreable)
 
 
-def _mean_fitness_by_cell(rows: list[QueryMeasurement], *, grade: CellGrade) -> dict[Any, float]:
-    """Un-predicated ON PURPOSE — this is the origin-overlap population, not the display one, and
-    ``elect_round_winner`` relies on an errored row counting as a 0.0 cell. Do not add the filter."""
-    acc: dict[Any, list[float]] = {}
-    for r in rows:
-        sid = r.get("sample_id")
-        if sid is not None:
-            acc.setdefault(sid, []).append(float(r.get(grade, 0.0) or 0.0))
-    return {sid: sum(v) / len(v) for sid, v in acc.items()}
-
-
-def distinct_valid_cells(results: list[QueryMeasurement]) -> int:
-    """Counted per CELL, not per row, so replicate rows can never falsely satisfy
-    ``coverage_floor``; a cell with one errored and one clean row still counts."""
-
-    return len({sid for r in scoreable_rows(results) if (sid := r.get("sample_id")) is not None})
-
-
-def paired_fitness(
-    candidate_results: list[QueryMeasurement],
-    parent_results: list[QueryMeasurement],
-    *,
-    grade: CellGrade,
-) -> tuple[list[float], list[float]]:
-    """The matched pairs the round-significance test runs on. Sorted by ``sample_id`` so a replay
-    is deterministic. Every caller pairs against the PARENT — the origin only at round 0."""
-    cand_by_sid = _mean_fitness_by_cell(candidate_results, grade=grade)
-    parent_by_sid = _mean_fitness_by_cell(parent_results, grade=grade)
-    cand_fit: list[float] = []
-    parent_fit: list[float] = []
-    for sid in sorted(cand_by_sid.keys() & parent_by_sid.keys(), key=lambda s: (s is None, s)):
-        cand_fit.append(cand_by_sid[sid])
-        parent_fit.append(parent_by_sid[sid])
-    return cand_fit, parent_fit
-
-
-class PairedLift(NamedTuple):
-    """One arm over its reference on the cells both graded: the lift, its interval and its
-    two-sided p from ONE posterior over ONE population."""
-
-    lift: float
-    ci_lo: float
-    ci_hi: float
-    p_value: float
-    n_cells: int
-
-
-def matched_parent_lift(
-    candidate_results: list[QueryMeasurement],
-    parent_results: list[QueryMeasurement],
-    *,
-    grade: CellGrade,
-) -> PairedLift | None:
-    """The reading against the PARENT ON THE CELLS BOTH MEASURED; ``None`` below two shared cells.
-    Every surface quoting one arm's lift, interval or significance reads THIS, never a second pairing."""
-    # One pair has no spread, and an interval drawn from it claims a precision nobody bought.
-    # ``scoreable_rows`` on both arms, matching ``mean_fitness_ci`` — the two intervals sit on one
-    # row and must bracket one population. A cell either arm errored on drops the PAIR, which is what
-    # makes the panel a narrowed comparison rather than a smaller one; ``n_cells`` cannot say which.
-
-    cand_fit, parent_fit = paired_fitness(
-        scoreable_rows(candidate_results), scoreable_rows(parent_results), grade=grade
-    )
-    lift, ci_lo, ci_hi, p_value, n_cells = paired_reading(cand_fit, parent_fit)
-    if ci_lo is None or ci_hi is None or p_value is None:
-        return None
-    return PairedLift(lift, ci_lo, ci_hi, p_value, n_cells)
-
-
-def parent_cells(parent_results: list[QueryMeasurement]) -> list[dict[str, Any]]:
-    """The parent panel an election ranked against, projected to the fields
-    ``elect_round_winner`` reads off it: the cell, whether it errored, and its grade — which is
-    ``objective``, not ``fitness``.
-
-    **Both grades, and the pair is not redundancy.** A round is won on θ, which
-    ``candidate_abilities`` fits through ``exploration.py::graded_response`` — that reader takes
-    ``objective``, RAISES on its absence, and is the one place a cost or latency term reaches the
-    election at all; ``fitness`` is what the paired lift beside it reads. ``objective`` is carried
-    only where the row has it, so a genuinely ungraded cell still raises rather than reading as a
-    miss.
-
-    Recorded beside the decision because nothing else on the round document carries it — on a WON
-    round ``RoundResult.results`` holds the winner's rows, not the parent's — so a replayer had to
-    reconstruct the parent, and every reconstruction picked a different one than live used."""
+def parent_cells(parent_results: CellSheet) -> list[dict[str, Any]]:
+    """θ reads ``objective``, the paired lift ``fitness``; an absent ``objective`` stays absent, never a miss."""
     return [
         {
-            "sample_id": sid,
-            "fitness": r.get("fitness"),
-            "error_category": r.get("error_category"),
-            **({"objective": r["objective"]} if "objective" in r else {}),
+            "sample_id": cell.sample_id,
+            "fitness": cell.grade.fitness,
+            "error_category": cell.facts.error_category,
+            **({"objective": cell.grade.objective} if cell.grade.objective is not None else {}),
         }
-        for r in parent_results
-        if (sid := r.get("sample_id")) is not None
+        for cell in parent_results
     ]
 
 
-# E[max of k standard normals], k = 1..6. Beyond that the table saturates slowly and the last
-# entry is used — a round with seven electable arms is not a shape this loop produces.
+def recorded_parent(cells: Sequence[dict[str, Any]]) -> CellSheet:
+    """Each grade stands AS RECORDED: the sheet names no scorer and is never re-graded."""
+    return CellSheet("", tuple(_recorded_cell(row) for row in cells))
+
+
+def _recorded_cell(row: Mapping[str, Any]) -> GradedCell:
+    facts = MeasuredCell.from_wire(row)
+    grade = Grade(row.get("fitness"), row.get("objective"), None)
+    return GradedCell(facts, grade, not facts.errored)
+
+
+# E[max of k standard normals], k = 1..6; the last entry stands for any wider round.
 _EXPECTED_MAX_Z: tuple[float, ...] = (0.0, 0.0, 0.5642, 0.8463, 1.0294, 1.1630, 1.2672)
 
 
 def parent_selection_bias(rounds: Sequence[RoundResult]) -> float:
-    """How much of the standing parent's θ is the selection that crowned it, in logits.
-
-    A winner is the MAXIMUM over the round's electable arms, so its θ carries that round's largest
-    noise draw — and ``rescore_parent`` replays its cached rows, so the inflation never washes out.
-    Corrects the BAR only: the challengers are unselected draws and carry no such term."""
+    """A winner is the MAX over its round's arms, so its θ carries the largest noise draw; corrects the BAR only."""
     for rr in reversed(rounds):
         if not rr.selected_labels:
             continue
@@ -201,84 +101,87 @@ def parent_selection_bias(rounds: Sequence[RoundResult]) -> float:
         if not se:
             return 0.0
         k = min(max(rr.electable_count, 1), len(_EXPECTED_MAX_Z) - 1)
-        # ONE arm's SE, not the paired √2 one: θ̂_parent is common to all k comparisons, so it
-        # shifts every lift equally and is never what the max selects on. A correction that
-        # over-corrects buys back exactly the noise-crowning it exists to stop.
+        # ONE arm's SE, not the paired √2 one: θ̂_parent is common to all k comparisons.
         return _EXPECTED_MAX_Z[k] * se
     return 0.0
 
 
 def lift_over_bar(
-    abilities: RaschPosterior, candidate_id: str, parent_bias: float
+    abilities: RoundAbilities, candidate_id: str, parent_bias: float
 ) -> tuple[float, float] | None:
-    """What ADMISSION reads, as its two halves: θ over the parent's, and the share of the parent's
-    selection bias this arm has earned back. Split so a verdict can state both; admission needs the
-    first positive on its own. ``None`` where either arm was never fit.
-
-    The credit is EARNED, not granted: it corrects a bar read at the parent's SE, so an arm read
-    less precisely carries a wider draw of its own and a flat credit would be worth most to the
-    noisiest arm in the round — the one that needs it least."""
+    """``(θ lift, bias credit)``; the credit scales by SE_parent/SE_arm, a flat one favouring the noisiest arm."""
     lift = theta_lift_over_parent(abilities, candidate_id)
     if lift is None:
         return None
-    se_parent = abilities.theta_se.get(PARENT_ABILITY_ID) or 0.0
+    se_parent = abilities.parent[1] if abilities.parent is not None else 0.0
     se_cand = abilities.theta_se.get(candidate_id) or 0.0
     return lift, parent_bias * (min(1.0, se_parent / se_cand) if se_parent and se_cand else 1.0)
 
 
+def readable_lifts(
+    candidate_ids: Sequence[str],
+    results_by_id: Mapping[str, CellSheet],
+    parent_results: CellSheet,
+    coverage_floor: int,
+    abilities: RoundAbilities,
+    parent_bias: float,
+) -> dict[str, tuple[float, float]]:
+    reads: dict[str, tuple[float, float]] = {}
+    for cid in candidate_ids:
+        cand_results = results_by_id.get(cid)
+        # An arm thin for a reason OTHER than elimination (an operator skip); PoBB's `n_min` IS this floor.
+        if cand_results is None or distinct_valid_cells(cand_results) < coverage_floor:
+            continue
+        # About the WALK, not a statistic: an errored row still shares the cell, where the θ fit drops it.
+        if not cand_results.on_ruler.keys() & parent_results.on_ruler.keys():
+            continue
+        read = lift_over_bar(abilities, cid, parent_bias)
+        if read is not None:
+            reads[cid] = read
+    return reads
+
+
+def closest_to_bar(reads: Mapping[str, tuple[float, float]], *, beside: str = "") -> str:
+    """On the raw θ lift ADMISSION takes, never lift plus credit; the first walked holds a tie."""
+    return max((cid for cid in reads if cid != beside), key=lambda cid: reads[cid][0], default="")
+
+
 def elect_round_winner(
     candidate_ids: list[str],
-    results_by_id: Mapping[str, list[QueryMeasurement]],
-    parent_results: list[QueryMeasurement],
+    results_by_id: Mapping[str, CellSheet],
+    parent_results: CellSheet,
     coverage_floor: int,
     ruler: DeltaRuler | None,
     *,
     parent_bias: float,
-) -> tuple[str, RaschPosterior]:
-    """ADMISSION is the point-estimate lift — raw θ strictly above the parent's. The RANK is
-    ``P(θ_cand > θ_parent)``, the same quantity ``elimination_p_best`` cuts on, so the two cannot
-    disagree about what better means. The overlap guard and the θ-lift guard cover different holes:
-    one grades an errored row 0.0, the fit drops it."""
+) -> tuple[str, RoundAbilities]:
+    """ADMISSION is raw θ strictly above the parent's; the RANK is ``P(θ_cand > θ_parent)``, which PoBB cuts on."""
 
     abilities = candidate_abilities(
-        {cid: list(results_by_id.get(cid) or []) for cid in candidate_ids},
+        {cid: results_by_id[cid] for cid in candidate_ids if cid in results_by_id},
         parent_results,
         ruler,
     )
 
-    theta_parent = abilities.theta.get(PARENT_ABILITY_ID)
-    se_parent = abilities.theta_se.get(PARENT_ABILITY_ID) or 0.0
+    theta_parent, se_parent = abilities.parent or (None, 0.0)
     # The bar is what the parent can DO, not the draw that crowned it (`parent_selection_bias`).
     if theta_parent is not None:
         theta_parent -= parent_bias
 
     best_rank: tuple[float, int] = (0.0, 0)
     winner_id = ""
-    for cid in candidate_ids:
-        cand_results = list(results_by_id.get(cid) or [])
-        n_cells = distinct_valid_cells(cand_results)
-        # Catches an arm thin for a reason OTHER than elimination (an operator skip). PoBB never
-        # cuts below its own `n_min`, which IS this floor, so no cut arm is stopped here.
-        if n_cells < coverage_floor:
+    reads = readable_lifts(
+        candidate_ids, results_by_id, parent_results, coverage_floor, abilities, parent_bias
+    )
+    for cid, read in reads.items():
+        # No SE margin: subtracting one turns a wide-posterior gain negative; uncertainty is the RANK's.
+        if read[0] <= 0.0:
             continue
-        cand_fit, _ = paired_fitness(cand_results, parent_results, grade="fitness")
-        if not cand_fit:
-            continue
-        # ADMISSION is the bare point lift, no SE margin — subtracting one shrinks the estimate
-        # itself, turning a wide-posterior gain negative. Uncertainty belongs in the RANK below.
-        # The raw lift alone admits: the earned credit (never negative) is reported, and never
-        # admits an arm that ties or trails the parent.
-        read = lift_over_bar(abilities, cid, parent_bias)
-        if read is None or read[0] <= 0.0:
-            continue
-        # RANK: the lift over the noise it cleared, because a bare gap cannot say whether the
-        # round could TELL the arms apart — a thin arm out-points a full panel on a margin
-        # inside its own SE.
         theta_c = abilities.theta.get(cid)
         if theta_c is None or theta_parent is None:
             continue
         p_better = p_exceeds(theta_c, abilities.theta_se.get(cid) or 0.0, theta_parent, se_parent)
-        rank = (p_better, n_cells)
+        rank = (p_better, distinct_valid_cells(results_by_id[cid]))
         if rank > best_rank:
             best_rank = rank
             winner_id = cid
@@ -291,58 +194,39 @@ def elimination_p_best(
     candidate_sample_ids: Sequence[int],
     ruler: DeltaRuler | None,
 ) -> tuple[float, dict[str, float]]:
-    """Scores on the SAME θ the round-winner election ranks by, so elimination and election cannot
-    disagree on what better means. Closed-form, so the resume replayer re-derives the cut exactly.
-
-    Then BOUNDED by what the discordant pairs can support, which the rank deliberately is not. A
-    threshold asks an ABSOLUTE question, so it banks every logit the normal-θ posterior drew from
-    concordant cells and from the θ prior — and a prefix holding one discordant cell then reads as
-    decisive, which is a fact about the round ORDER rather than about any arm. A rank asks a
-    relative question, where the bound is common to the round and cancels except where the
-    discordant counts differ; there it reorders rather than corrects. So it stops here, at the one
-    caller that compares against a bar (`docs/methods/candidate-elimination.md` § The θ rule)."""
+    """A stopping rule, not a verdict: ``P(θ_cand > θ_prior)`` CAPPED by what the discordant pairs support."""
     if not paired_prior_grades:
         return 1.0, {}
 
     sids = [int(s) for s in candidate_sample_ids]
-    # The ONE sanctioned provisional read: this runs DURING the round, on cells `calibrate_ruler`
-    # cannot have absorbed yet — extension needs the round's grades, which do not exist while the
-    # round is still buying them. Misses stand at the ruler's own centre, and since both arms are
-    # scored on the identical cell list they see the identical δ vector, so a constant
-    # misspecification cannot favour one of them.
+    # The one sanctioned provisional δ: cells the ruler has not absorbed stand at its centre for BOTH arms.
     entries = ruler.entries_covering(sids) if ruler is not None else None
-    cand_obs = [
-        Observation("__cand__", sid, float(g))
-        for sid, g in zip(sids, candidate_grades, strict=True)
-    ]
-    theta_c, se_c = fit_theta_given_delta(cand_obs, entries).get("__cand__", (0.0, 0.0))
+
+    def read(grades: Sequence[float]) -> tuple[float, float]:
+        on_cells = {sid: float(g) for sid, g in zip(sids, grades, strict=True)}
+        fitted = fit_theta(on_cells, entries)
+        if fitted is None:
+            raise ValueError("elimination_p_best: a reading needs at least one graded cell")
+        return fitted
+
+    theta_c, se_c = read(candidate_grades)
 
     per_prior: dict[str, float] = {}
     for pid, grades in paired_prior_grades.items():
-        prior_obs = [Observation(pid, sid, float(g)) for sid, g in zip(sids, grades, strict=True)]
-        theta_p, se_p = fit_theta_given_delta(prior_obs, entries).get(pid, (0.0, 0.0))
-        # The SAME comparison `elect_round_winner` ranks on — one reading of "better". What follows
-        # is not a second one: the bound never changes the SIDE of 0.5, so an arm this function cuts
-        # is still an arm that function would refuse to crown. It caps only how far the reading may
-        # sit FROM 0.5, and the docstring says why only a threshold takes that cap.
+        theta_p, se_p = read(grades)
         p = p_exceeds(theta_c, se_c, theta_p, se_p)
         per_prior[pid] = _capped(p, sign_posterior(*discordant_counts(candidate_grades, grades)))
     return min(per_prior.values()), per_prior
 
 
-def priors_covering[P: Mapping[Any, float]](
-    priors: Mapping[str, P], cells: Collection[Any]
+def priors_covering[P: Mapping[int, float]](
+    priors: Mapping[str, P], cells: Collection[int]
 ) -> dict[str, P]:
-    """The priors PoBB may pair an arm with on ``cells``: those holding every one — a prior short
-    of a cell stays out rather than being read on a substituted grade."""
     return {pid: grades for pid, grades in priors.items() if all(c in grades for c in cells)}
 
 
 class PairedPosterior(NamedTuple):
-    """An arm's posterior of being best beside the pairing it was fit on: the graded cells in walk
-    order, the arm's grade on each, and every covering prior's on the same cells."""
-
-    cells: list[str]
+    cells: list[int]
     grades: list[float]
     priors: dict[str, list[float]]
     p_best: float
@@ -350,35 +234,25 @@ class PairedPosterior(NamedTuple):
 
 
 def paired_p_best(
-    rows: Sequence[QueryMeasurement],
-    priors: Mapping[str, Mapping[str, float]],
+    rows: Sequence[GradedCell],
+    priors: Mapping[str, Mapping[int, float]],
     ruler: DeltaRuler | None,
 ) -> PairedPosterior | None:
-    """:func:`elimination_p_best` over the rows that carry a verdict — a backend error is no
-    evidence of inability — against :func:`priors_covering` them; ``None`` where either is empty."""
-    graded = [r for r in rows if is_graded(r)]
-    cells = [str(r["sample_id"]) for r in graded]
+    """Over rows carrying a verdict only: a backend error is no evidence of inability."""
+    graded = [cell for cell in rows if cell.scored]
+    cells = [cell.ruler_key for cell in graded]
     paired = {
         pid: [grades[c] for c in cells] for pid, grades in priors_covering(priors, cells).items()
     }
     if not graded or not paired:
         return None
-    own = [graded_response(r) for r in graded]
-    p_best, p_better = elimination_p_best(own, paired, [int(c) for c in cells], ruler)
+    own = [graded_response(cell) for cell in graded]
+    p_best, p_better = elimination_p_best(own, paired, cells, ruler)
     return PairedPosterior(cells, own, paired, p_best, p_better)
 
 
 def _capped(p: float, bound: float) -> float:
-    """``p`` held on its side of 0.5 and no further from it than ``bound`` supports — which is
-    ``median(p, bound, 0.5)``, so it rises with both."""
-    # The paired posterior's mass on the SIDE θ read — not its DISTANCE from 0.5, which is what
-    # made this bound direction-blind. `sign_posterior` is symmetric about the split, so
-    # `|bound - 0.5|` answered the same for 3 wins as for 3 losses: lost-3-of-3 licensed 0.9375
-    # and lost-1-of-1 licensed 0.75, i.e. adverse cells bought WIDTH. `p_best` is the number
-    # `lock_in` tests (`pobb/checks.py`), so that let an arm every discordant cell went against
-    # stop the round on the strength of θ alone — the panel-vs-shared-cell gap, made actionable.
-    # Agreeing pairs and no pairs at all read exactly as before; only a CONTRADICTING one moves,
-    # and it moves to 0.5 — no claim, and still no crossing of the side the rank owns.
+    # The bound's mass on the SIDE θ read, not `|bound - 0.5|`, which reads 3 losses as 3 wins.
     support = bound if p > 0.5 else 1.0 - bound
     reach = min(abs(p - 0.5), max(0.0, support - 0.5))
     return 0.5 + reach if p > 0.5 else 0.5 - reach
@@ -392,14 +266,7 @@ def elimination_p_best_bounds(
     *,
     settled: Collection[str],
 ) -> tuple[float, float]:
-    """``(low, high)`` around every value :func:`elimination_p_best` can return over ``cells`` once
-    the grades missing from ``candidate`` and ``priors`` arrive — each anywhere in [0, 1], or an
-    error that drops the cell. Only ``settled`` priors are sure to stay paired; any other may drop
-    out, which can only RAISE the minimum, so ``high`` is taken over the settled ones alone.
-
-    Bounded from the reading's two inputs rather than by trying completions: each prior's reading
-    rises with the θ gap and with the sign bound, the gap's extremes are exact and its noise has a
-    floor, and the discordant counts are extreme at their corners."""
+    """``high`` is over ``settled`` priors alone: any other may drop out, which can only RAISE the minimum."""
     sids = [int(s) for s in cells]
     entries = ruler.entries_covering(sids) if ruler is not None else None
     known = {s: candidate[s] for s in sids if s in candidate}

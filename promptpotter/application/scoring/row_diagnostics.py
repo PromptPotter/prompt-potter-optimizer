@@ -1,27 +1,22 @@
-"""Per-sample diagnostics — what the round-analysis panel and the terminal MISS line read off one
-measured row. Reporting, not scoring: nothing here feeds ``composite_fitness``, and the rank it
-computes is the 0-based *position* those surfaces print, off the 1-based ``find_rank`` walk.
-
-Split from ``metrics.py``, which had grown a bag name over three concerns with near-disjoint
-callers: this one is read by ``round_analysis``, ``sample_measurement`` and the live phase view."""
+"""Reporting, not scoring; diagnostics print the 0-based POSITION off the 1-based ``find_rank``."""
 
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Sequence
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.pipeline_schema import NodeRole
 from promptpotter.domain.results_health import is_degraded
-from promptpotter.domain.scoring import extract_item_label, is_verifier_graded
+from promptpotter.domain.scoring import PipelineData, extract_item_label, is_verifier_graded
 from promptpotter.shared import text_list_items, text_list_rank
-from promptpotter.shared.errors import is_error_result
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 shapes_optimizer_prompt(__name__)
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
+    from promptpotter.domain.scoring import GradedCell, MeasuredCell
 
 __all__ = [
     "cell_feedback",
@@ -36,20 +31,13 @@ __all__ = [
 def rank_ground_truth(
     ranked: Sequence[Any], predicted: str, ground_truth: str
 ) -> tuple[int | None, int]:
-    """Where the held-out item landed in one measured row, and how many candidates it was ranked
-    among — the ONE answer both the measurement producer and ``compare_rerun`` read.
-
-    Two shapes reach here. A node emitting ITEMS is walked as objects. A node emitting its whole
-    ordered list as a single text blob (``llm_only``) is read the way the scorer reads it, since
-    ``predicted`` IS that list — walked as one object it reports not-found and a single candidate
-    for every row of a pipeline that is answering correctly."""
+    # A node emitting its whole list as ONE text blob (``llm_only``): ``predicted`` IS that list.
     if len(ranked) == 1 and "\n" in predicted:
         return text_list_rank(predicted, ground_truth), len(text_list_items(predicted))
     return find_rank(list(ranked), ground_truth), len(ranked)
 
 
 def find_rank(items: list[Any], ground_truth: str) -> int | None:
-    """1-based rank, or ``None`` — diagnostics report the position 0-based."""
     if not items or not ground_truth:
         return None
     for i, c in enumerate(items):
@@ -58,56 +46,45 @@ def find_rank(items: list[Any], ground_truth: str) -> int | None:
     return None
 
 
-def count_degraded_samples(results: Sequence[Mapping[str, Any]]) -> int:
-    return sum(1 for r in results if is_degraded(r))
+def count_degraded_samples(results: Iterable[GradedCell]) -> int:
+    return sum(1 for cell in results if is_degraded(cell.facts))
 
 
-def judge_readings(row: Mapping[str, Any]) -> list[tuple[str, str, str]]:
-    """``(term, label, why)`` per judge term that banked a reason on this cell, in banked order.
-    Keyed off ``_why``: a grading that failed carries a reason and no label."""
-    pd = row.get("pipeline_data") or {}
+def judge_readings(facts: MeasuredCell) -> list[tuple[str, str, str]]:
     return [
-        (term, str(pd.get(f"{term}_label") or "NOT GRADED"), str(pd[key]))
-        for key in pd
-        if key.endswith("_why") and pd[key] and (term := key.removesuffix("_why"))
+        (term, reading.label or "NOT GRADED", reading.why)
+        for term, reading in facts.pipeline.judge_readings.items()
+        if reading.why
     ]
 
 
-def cell_feedback(row: Mapping[str, Any]) -> str:
-    """What the scorer can say about one cell beyond its number: the failure, the verdict it was
-    graded to, the expected answer where one exists, and every judge's reason."""
-    if is_error_result(row):
-        return f"The run failed ({row['error_category']}): {row['error']}"
-    if "unscored" in row:
-        return f"Not graded: {row['unscored']}"
-    lines = [f"Score: {float(row['objective']):.3f}"]
-    if row["fitness"] != row["objective"]:
-        lines.append(f"Correctness: {float(row['fitness']):.3f}")
-    if not is_verifier_graded(row["ground_truth"]):
-        lines.append(f"Expected answer: {row['ground_truth']}")
-    lines += [f"Judge ({term}): {label} — {why}" for term, label, why in judge_readings(row)]
+def cell_feedback(cell: GradedCell) -> str:
+    facts, grade = cell.facts, cell.grade
+    if facts.errored:
+        return f"The run failed ({facts.error_category}): {facts.error}"
+    if grade.unscored is not None:
+        return f"Not graded: {grade.unscored}"
+    if grade.fitness is None or grade.objective is None:
+        raise KeyError(f"cell_feedback: the cell at slot {facts.sample_id} carries no grade")
+    lines = [f"Score: {grade.objective:.3f}"]
+    if grade.fitness != grade.objective:
+        lines.append(f"Correctness: {grade.fitness:.3f}")
+    if not facts.verifier_graded:
+        lines.append(f"Expected answer: {facts.ground_truth}")
+    lines += [f"Judge ({term}): {label} — {why}" for term, label, why in judge_readings(facts)]
     return "\n".join(lines)
 
 
-# ---------------------------------------------------------------------------
-# Per-sample diagnostics — typed mixed values (bool/int/str/None), keyed off
-# ``PipelineNode.role``.
-# ---------------------------------------------------------------------------
-
-
 def extract_sample_diagnostics(
-    result: Mapping[str, Any],
+    facts: MeasuredCell,
     pipeline_schema: PipelineSchema,
 ) -> dict[str, float | bool | int | str | None]:
-    """The NODE-derived keys only: `terminal_node`, the error flag and the degradation flag are
-    read off the row itself by every consumer, so this does not re-pack them."""
-    pd = result.get("pipeline_data") or {}
-    gt = result.get("ground_truth", "")
+    pd = facts.pipeline
+    gt = facts.ground_truth
     diag: dict[str, float | bool | int | str | None] = {}
-    if not pd:
+    if pd == PipelineData():
         return diag
 
-    # Namespace a node's diagnostics by step name only when ≥2 nodes share its role.
     role_counts = Counter(s.role for s in pipeline_schema.nodes)
     for step in pipeline_schema.nodes:
         extracted = _extract_node_diagnostics(step, pd, gt)
@@ -120,13 +97,12 @@ def extract_sample_diagnostics(
 
 
 def _diag_candidate_source(
-    node: PipelineNode, pd: Mapping[str, Any], gt: str
+    node: PipelineNode, pd: PipelineData, gt: str
 ) -> dict[str, float | bool | int | str | None]:
-    """Diagnostics report the ground-truth position 0-based; :func:`find_rank` is the canonical
-    1-based walk. ``gt_in_source`` is ABSENT rather than ``False`` where there is no label."""
-    candidates = node.ranking_in(pd) or []
+    candidates = node.ranking_in(pd.observations) or []
     rank = find_rank(candidates, gt)
     pos = rank - 1 if rank is not None else None
+    # ``gt_in_source`` is ABSENT rather than ``False`` where there is no label.
     return {
         "gt_in_source": None if is_verifier_graded(gt) else pos is not None,
         "n_source_candidates": len(candidates),
@@ -135,18 +111,14 @@ def _diag_candidate_source(
 
 
 def _diag_ranker(
-    node: PipelineNode, pd: Mapping[str, Any], gt: str
+    node: PipelineNode, pd: PipelineData, gt: str
 ) -> dict[str, float | bool | int | str | None]:
-    candidates = node.ranking_in(pd) or []
+    candidates = node.ranking_in(pd.observations) or []
     rank = find_rank(candidates, gt)
     pos = rank - 1 if rank is not None else None
     top_score_gap: float | None = None
     if len(candidates) >= 2:
-        # Two shapes reach here, both across the highway contract: TermNorm emits scored dicts
-        # keyed `relevance_score` (its fuzzy arm converts its own `(term, score)` tuples before
-        # they leave), and `llm_only` emits bare answer strings, which carry no score. Nothing
-        # emits a `similarity` key or a bare tuple. An item without a score contributes none —
-        # a gap between a real score and an invented 0.0 is not a gap.
+        # An item without a score contributes none: a gap against an invented 0.0 is not a gap.
         scores = [
             float(c["relevance_score"])
             for c in candidates[:2]
@@ -154,9 +126,7 @@ def _diag_ranker(
         ]
         if len(scores) == 2:
             top_score_gap = scores[0] - scores[1]
-    # A width-1 ranking has no ranking to report, and a labelless cell has nothing to rank
-    # AGAINST, so in both the fact is absent rather than False — which is what the panel's
-    # `is not None` guard reads.
+    # A width-1 ranking and a labelless cell both leave the fact ABSENT rather than False.
     ranked = len(candidates) >= 2 and not is_verifier_graded(gt)
     return {
         "gt_in_ranked": (pos is not None) if ranked else None,
@@ -167,24 +137,21 @@ def _diag_ranker(
 
 
 def _diag_enricher(
-    node: PipelineNode, pd: Mapping[str, Any], _gt: str
+    node: PipelineNode, pd: PipelineData, _gt: str
 ) -> dict[str, float | bool | int | str | None]:
-    n = sum(1 for m in node.observation_mappings if pd.get(m.pipeline_key) is not None)
+    n = sum(1 for m in node.observation_mappings if pd.observations.get(m.pipeline_key) is not None)
     return {"n_enriched_fields": n}
 
 
 def _diag_cache(
-    node: PipelineNode, pd: Mapping[str, Any], _gt: str
+    node: PipelineNode, pd: PipelineData, _gt: str
 ) -> dict[str, float | bool | int | str | None]:
-    timings = pd.get("step_timings") or {}
-    return {"cache_hit": timings.get(node.name) is not None}
+    return {"cache_hit": node.name in pd.step_timings}
 
 
 def _extract_node_diagnostics(
-    node: PipelineNode, pd: Mapping[str, Any], gt: str
+    node: PipelineNode, pd: PipelineData, gt: str
 ) -> dict[str, float | bool | int | str | None] | None:
-    """Explicit match rather than a string-keyed table, so grepping a diagnostic's name lands on
-    its call site."""
     match node.role:
         case NodeRole.CANDIDATE_SOURCE:
             return _diag_candidate_source(node, pd, gt)

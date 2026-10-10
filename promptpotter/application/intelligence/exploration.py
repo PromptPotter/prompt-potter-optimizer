@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import logging
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -18,36 +17,36 @@ from promptpotter.domain.ruler import (
     anchor_id_of,
     ruler_entry,
 )
-from promptpotter.domain.scoring import is_graded
+from promptpotter.shared.hashing import stable_hash
 
 if TYPE_CHECKING:
     from promptpotter.domain.results import RoundResult
     from promptpotter.domain.sample import Sample
-    from promptpotter.domain.scoring import QueryMeasurement
+    from promptpotter.domain.scoring import CellSheet, GradedCell
 
 logger = logging.getLogger(__name__)
 
 # C0 inside the δ-calibrating fit; the archive's copies of the origin fold onto this one id.
 ORIGIN_ABILITY_ID = "__origin__"
-# The ROUND'S PARENT inside a joint ability fit — the origin at round 0, the prior winner after.
-PARENT_ABILITY_ID = "__parent__"
 
 __all__ = [
     "ORIGIN_ABILITY_ID",
-    "PARENT_ABILITY_ID",
     "Observation",
     "RaschPosterior",
+    "RoundAbilities",
     "build_observations",
     "candidate_abilities",
     "dedup_observations",
     "extend_ruler",
     "fit_rasch",
     "fit_rasch_2pl",
+    "fit_theta",
     "fit_theta_given_delta",
     "graded_response",
     "graduate_ruler_model",
     "observations_from_results",
     "parent_level_trajectory",
+    "responses_of",
     "select_round_subset",
     "theta_bounds_given_delta",
     "theta_lift_over_parent",
@@ -55,37 +54,25 @@ __all__ = [
 
 
 class Observation(NamedTuple):
-    """One (candidate, CELL) response — the atom of every fit below.
-
-    ``response`` is the sample's GRADED per-sample fitness ∈ [0,1], never a binarized ``hit`` — the
-    cross-entropy MAP is valid for any y ∈ [0,1], so a graded backend keeps its gradient. A cell
-    graded in STEPS composes those steps into that one number through the scoring formula; the
-    steps never arrive here as separate rows (:func:`dedup_observations`).
-
-    ``sample_id`` is an ``int`` and that is load-bearing rather than incidental: it is a CELL id,
-    so a step index cannot be spelled into it without changing this type."""
+    """``response`` is the GRADED fitness in [0,1], never a binarized hit; ``sample_id`` is a CELL id."""
 
     candidate_id: str
     sample_id: int
     response: float
 
 
-def graded_response(result: Mapping[str, Any]) -> float:
-    """One reader for STAMPED rows, so every θ/δ fit sees the same graded signal the composite does.
-
-    ``objective``, never ``fitness``: a round is won on θ, so this is the ONE place a cost, latency
-    or reliability term reaches the election at all (``domain/scoring.py::CellScorer``).
-
-    A row with no ``objective`` RAISES rather than defaulting — absence means the row never went
-    through ``rescore_results``, and a default reads that as a cell the arm got WRONG, which is
-    what fits a ruler on an all-zeros matrix."""
-    if "objective" not in result:
+def graded_response(cell: GradedCell) -> float:
+    """``objective``, never ``fitness``: the one place a formula's cost term reaches the election."""
+    if cell.grade.objective is None:
         raise KeyError(
-            "graded_response: row carries no 'objective'. Only rows stamped by "
-            "``rescore_results`` may be read here; grade an archive row with the reading "
-            "campaign's CellScorer."
+            f"graded_response: the cell at slot {cell.sample_id} carries no objective. Only a "
+            "cell ``Scorer.grade`` scored may be read here."
         )
-    return min(max(float(result["objective"] or 0.0), 0.0), 1.0)
+    return min(max(cell.grade.objective, 0.0), 1.0)
+
+
+def responses_of(sheet: CellSheet) -> dict[int, float]:
+    return {cell.ruler_key: graded_response(cell) for cell in sheet.scoreable}
 
 
 def parent_level_trajectory(
@@ -93,18 +80,10 @@ def parent_level_trajectory(
     winners: Sequence[AbilityReading | None],
     ruler: DeltaRuler | None,
 ) -> tuple[tuple[float, float] | None, list[tuple[float, float]]]:
-    """Origin ability plus the per-round ability of the PARENT the search stood on, in logits on
-    the locked ruler — a round that crowned nobody carries the previous one forward. Why the
-    parent rather than the proposals: ``specs/l4-outer-loop.md`` § The measurand.
-
-    Readings, not bare pairs: these levels are differenced, and that is only a difference if they
-    share a scale — ``comparable_to`` is what a bare ``(θ, θ_se)`` cannot be asked. An off-scale
-    round carries the previous level forward, exactly as a round that crowned nobody does."""
+    """The PARENT's level per round; a round off the origin's scale carries the previous one forward."""
     if origin is None or origin.se is None or ruler is None or not ruler.delta:
         return None, []
     if origin.ruler_id != ruler.anchor_id:
-        # No reference on this scale ⇒ nothing to difference against; the L4 law reads it as
-        # no evidence.
         logger.warning(
             "origin ability sits on %s, not the cycle's ruler %s — no level series on this scale",
             origin.scale(),
@@ -121,34 +100,23 @@ def parent_level_trajectory(
     return origin_pair, out
 
 
-# Broad EB starting priors — first inner MAP fit is barely regularized.
 _INIT_SIGMA_THETA = 1.5
 _INIT_SIGMA_DELTA = 2.0
 
-# Weak inverse-gamma hyperprior on each variance — stops σ → 0 collapse under
-# sparse data; washes out against real n.
+# Weak inverse-gamma hyperprior on each variance: stops σ → 0 under sparse data.
 _EB_NU0 = 1.0
 _EB_S0_SQ = 1.0
 
-# The largest logit ONE Newton step may move a parameter. Every fit below is a MAP estimate on a
-# strictly log-concave posterior, so the root is unique and a bounded step always reaches it while
-# an unbounded one need not: where p saturates, the observed information collapses to the prior
-# term alone and `grad / info` jumps tens of logits into the opposite saturation. It bites the arms
-# furthest from the centre hardest — the ones that BEAT it — so an undamped fit reads improvement
-# as collapse.
+# Where p saturates, an unbounded step jumps into the opposite saturation, hardest on the arms furthest above centre.
 _MAX_NEWTON_STEP = 1.0
 
-# Panel slots held for the cells δ is least sure of, out of `sp_budget_round`; `_with_ruler_learning`
-# states what each end costs. A first estimate off one ruler, worth re-fitting on a second dataset.
+# Panel slots held for the cells δ is least sure of; a first estimate off one ruler.
 _RULER_LEARNING_SLOTS = 4
 
 
 def _newton_step(
     grad: NDArray[np.floating[Any]] | float, info: NDArray[np.floating[Any]] | float
 ) -> NDArray[np.floating[Any]]:
-    """One DAMPED Newton step — information floored so it cannot divide by zero, step bounded so it
-    cannot leave the region that information was measured in. Every fit here steps through this;
-    spelled per site, the bound is one a new fit forgets."""
     return np.clip(grad / np.maximum(info, 1e-9), -_MAX_NEWTON_STEP, _MAX_NEWTON_STEP)
 
 
@@ -160,26 +128,17 @@ class RaschPosterior:
     theta_se: dict[str, float]
     delta: dict[int, float]
     delta_se: dict[int, float]
-    n_obs_per_candidate: dict[str, int] = field(default_factory=dict)
-    n_obs_per_sample: dict[int, int] = field(default_factory=dict)
     n_iterations: int = 0
     converged: bool = False
     sigma_theta: float = _INIT_SIGMA_THETA
     sigma_delta: float = _INIT_SIGMA_DELTA
     mu_delta: float = 0.0
-    # 2PL only: per-sample discrimination aᵢ (signal-to-noise). Empty under 1PL
-    # (a≡1 implicitly). ``ruler()`` folds it back into the one ``Ruler`` the seam reads.
+    # Empty under 1PL (a ≡ 1).
     discrimination: dict[int, float] = field(default_factory=dict)
     discrimination_se: dict[int, float] = field(default_factory=dict)
 
     def anchored(self, calibration_model: CalibrationModel) -> DeltaRuler:
-        """LOCK this fit as a cycle's ruler. Carries the priors the fit converged to, which the one-shot
-        version discarded — without them an extension cannot regularize a new cell the way the anchored
-        ones were, and the scale bends. The anchor id is stamped HERE, once, and never recomputed.
-
-        It carries no round: the anchor is a fact about the δ scale, and the round the lock happened
-        on is already the ``RulerRecord``'s own — stamping it twice invited a reader to compare a
-        ruler to the round that minted it, which an anchored extension deliberately makes untrue."""
+        """Carries the fit's priors, without which an extension bends the scale; the anchor id is stamped once, here."""
         return DeltaRuler(
             delta=dict(self.delta),
             delta_se=dict(self.delta_se),
@@ -190,6 +149,13 @@ class RaschPosterior:
             calibration_model=calibration_model,
             anchor_id=anchor_id_of(self.delta, self.mu_delta, self.sigma_delta, calibration_model),
         )
+
+
+@dataclass
+class RoundAbilities(RaschPosterior):
+    """``parent`` is its ``(θ, se)`` on the arms' δ; ``None`` is an absence, never a logit-0 floor."""
+
+    parent: tuple[float, float] | None = None
 
 
 def _map_fit(
@@ -221,7 +187,6 @@ def _map_fit(
         p = 1.0 / (1.0 + np.exp(-np.clip(eta, -50, 50)))
         w = p * (1.0 - p)
 
-        # Theta Newton step (prior N(0, σ_θ²)).
         grad_theta = np.bincount(rows, weights=responses - p, minlength=n_c) - inv_var_theta * theta
         info_theta = np.bincount(rows, weights=w, minlength=n_c) + inv_var_theta
         theta = theta + _newton_step(grad_theta, info_theta)
@@ -230,14 +195,12 @@ def _map_fit(
         p = 1.0 / (1.0 + np.exp(-np.clip(eta, -50, 50)))
         w = p * (1.0 - p)
 
-        # Delta Newton step (prior N(μ_δ, σ_δ²); sign flipped — likelihood is θ_c − δ_s).
         grad_delta = -np.bincount(cols, weights=responses - p, minlength=n_s) - inv_var_delta * (
             delta - mu_delta
         )
         info_delta = np.bincount(cols, weights=w, minlength=n_s) + inv_var_delta
         delta = delta + _newton_step(grad_delta, info_delta)
 
-        # Anchor mean(theta) == 0 for identifiability.
         shift = float(theta.mean())
         theta -= shift
         delta -= shift
@@ -268,7 +231,6 @@ def fit_rasch(
     eb_max_iter: int = 20,
     eb_tol: float = 1e-3,
 ) -> RaschPosterior:
-    """Hierarchical 1PL Rasch by EB (Laplace-EM, Type-II MLE). Hyperparameters estimated, not configured."""
     if not observations:
         return RaschPosterior(theta={}, theta_se={}, delta={}, delta_se={})
 
@@ -292,7 +254,6 @@ def fit_rasch(
         theta, delta, se_theta, se_delta, iteration, converged = _map_fit(
             rows, cols, responses, n_c, n_s, sigma_theta, sigma_delta, mu_delta, max_iter, tol
         )
-        # EM M-step on Gaussian variance — posterior 2nd moment + hyperprior reg.
         new_mu_delta = float(delta.mean())
         new_var_theta = (
             float(np.sum(theta * theta + se_theta * se_theta)) + _EB_NU0 * _EB_S0_SQ
@@ -313,16 +274,8 @@ def fit_rasch(
         if change < eb_tol:
             break
 
-    # Final inner fit at converged hyperparameters.
     theta, delta, se_theta, se_delta, iteration, converged = _map_fit(
         rows, cols, responses, n_c, n_s, sigma_theta, sigma_delta, mu_delta, max_iter, tol
-    )
-
-    n_obs_c = dict(
-        zip(candidate_ids, np.bincount(rows, minlength=n_c).astype(int).tolist(), strict=True)
-    )
-    n_obs_s = dict(
-        zip(sample_ids, np.bincount(cols, minlength=n_s).astype(int).tolist(), strict=True)
     )
 
     return RaschPosterior(
@@ -330,8 +283,6 @@ def fit_rasch(
         theta_se=dict(zip(candidate_ids, se_theta.tolist(), strict=True)),
         delta=dict(zip(sample_ids, delta.tolist(), strict=True)),
         delta_se=dict(zip(sample_ids, se_delta.tolist(), strict=True)),
-        n_obs_per_candidate=n_obs_c,
-        n_obs_per_sample=n_obs_s,
         n_iterations=iteration,
         converged=converged,
         sigma_theta=sigma_theta,
@@ -348,18 +299,7 @@ def fit_theta_given_delta(
     max_iter: int = 50,
     tol: float = 1e-4,
 ) -> dict[str, tuple[float, float]]:
-    """Fixed δ decouples the candidates. ``theta_se`` carries the √φ dispersion correction.
-
-    ``delta=None`` is the COLD ruler — flat δ=0, a=1, so θ degenerates to logit-accuracy. That is
-    legitimate (round 0 has one arm, and logit-accuracy depends on no fit, so it is comparable
-    across cycles) and it is the ONLY state in which a cell may go ungraded.
-
-    A ruler that is not ``None`` reads θ on the cells it CARRIES and no other: an observation off
-    it enters no fit, and an arm holding none on it has no entry in the result. Never δ=0 for the
-    hole — zero is a POSITION on this scale, not a neutral value, so a ruler centred well above it
-    would read an unmeasured cell as easier than anything ever measured. That an arm answered
-    cells its θ does not count is served, as ``ThetaCaveat.UNMEASURED_DELTA``.
-    """
+    """``delta=None`` is the cold ruler (θ = logit-accuracy); a cell off a live ruler enters no fit, never at δ=0."""
     graded = _cell_parameters({o.sample_id for o in observations}, delta)
 
     by_c: dict[str, list[tuple[float, float, float]]] = {}
@@ -368,31 +308,47 @@ def fit_theta_given_delta(
             continue
         by_c.setdefault(o.candidate_id, []).append((*cell, o.response))
 
-    out: dict[str, tuple[float, float]] = {}
+    return {
+        cid: _fit_one(rows, sigma_theta=sigma_theta, max_iter=max_iter, tol=tol)
+        for cid, rows in by_c.items()
+    }
+
+
+def fit_theta(
+    responses: Mapping[int, float],
+    delta: Ruler | None,
+    *,
+    sigma_theta: float = _INIT_SIGMA_THETA,
+) -> tuple[float, float] | None:
+    graded = _cell_parameters(responses.keys(), delta)
+    rows = [(*graded[sid], y) for sid, y in responses.items() if sid in graded]
+    return _fit_one(rows, sigma_theta=sigma_theta, max_iter=50, tol=1e-4) if rows else None
+
+
+def _fit_one(
+    rows: Sequence[tuple[float, float, float]], *, sigma_theta: float, max_iter: int, tol: float
+) -> tuple[float, float]:
     inv_var = 1.0 / (sigma_theta * sigma_theta)
-    for cid, rows in by_c.items():
-        d_arr = np.fromiter((d for d, _, _ in rows), dtype=np.float64)
-        a_arr = np.fromiter((a for _, a, _ in rows), dtype=np.float64)
-        h_arr = np.fromiter((y for _, _, y in rows), dtype=np.float64)
-        theta = 0.0
-        for _ in range(max_iter):
-            p = 1.0 / (1.0 + np.exp(-np.clip(a_arr * (theta - d_arr), -50, 50)))
-            grad = float(np.sum(a_arr * (h_arr - p))) - inv_var * theta
-            info = float(np.sum(a_arr * a_arr * p * (1.0 - p))) + inv_var
-            step = float(_newton_step(grad, info))
-            theta += step
-            if abs(step) < tol:
-                break
+    d_arr = np.fromiter((d for d, _, _ in rows), dtype=np.float64)
+    a_arr = np.fromiter((a for _, a, _ in rows), dtype=np.float64)
+    h_arr = np.fromiter((y for _, _, y in rows), dtype=np.float64)
+    theta = 0.0
+    for _ in range(max_iter):
         p = 1.0 / (1.0 + np.exp(-np.clip(a_arr * (theta - d_arr), -50, 50)))
+        grad = float(np.sum(a_arr * (h_arr - p))) - inv_var * theta
         info = float(np.sum(a_arr * a_arr * p * (1.0 - p))) + inv_var
-        # Dispersion shrunk toward the nominal 1.0, the same inverse-gamma the two σ above use.
-        # Never a pooled φ̄: that makes an arm's SE depend on which arms shared its round.
-        var = np.clip(p * (1.0 - p), 1e-6, None)
-        dof = max(len(rows) - 1, 1)
-        raw_phi = float(np.sum((h_arr - p) ** 2 / var)) / dof
-        phi = (dof * raw_phi + _EB_NU0 * _EB_S0_SQ) / (dof + _EB_NU0)
-        out[cid] = (theta, float(np.sqrt(phi) / np.sqrt(max(info, 1e-9))))
-    return out
+        step = float(_newton_step(grad, info))
+        theta += step
+        if abs(step) < tol:
+            break
+    p = 1.0 / (1.0 + np.exp(-np.clip(a_arr * (theta - d_arr), -50, 50)))
+    info = float(np.sum(a_arr * a_arr * p * (1.0 - p))) + inv_var
+    # Never a pooled φ̄: that makes an arm's SE depend on which arms shared its round.
+    var = np.clip(p * (1.0 - p), 1e-6, None)
+    dof = max(len(rows) - 1, 1)
+    raw_phi = float(np.sum((h_arr - p) ** 2 / var)) / dof
+    phi = (dof * raw_phi + _EB_NU0 * _EB_S0_SQ) / (dof + _EB_NU0)
+    return theta, float(np.sqrt(phi) / np.sqrt(max(info, 1e-9)))
 
 
 def _cell_parameters(
@@ -412,20 +368,15 @@ def theta_bounds_given_delta(
     open_cells: Collection[int],
     delta: Ruler | None,
 ) -> tuple[float, float, float]:
-    """``(θ_low, θ_high, se_floor)`` around what :func:`fit_theta_given_delta` can return for ONE
-    arm once ``open_cells`` resolve — each to any grade in [0, 1], or to an error that drops it.
-
-    The MAP rises with every response, and dropping a cell leaves the root where grading it at its
-    own fitted p would, so the all-0 and all-1 fits bound θ exactly. The SE moves both ways — its
-    dispersion grows with misfit — so it is floored instead: φ by the least misfit the measured
-    cells can show anywhere in that interval, the information by each cell at its most informative
-    θ inside it."""
+    """The MAP rises with every response, so the all-0 and all-1 fills bound θ; the SE is only FLOORED."""
     params = _cell_parameters({*measured, *open_cells}, delta)
 
     def fit(fill: float) -> float:
-        obs = [Observation("", sid, y) for sid, y in measured.items()]
-        obs += [Observation("", sid, fill) for sid in open_cells]
-        return fit_theta_given_delta(obs, delta).get("", (0.0, 0.0))[0]
+        filled = {**measured, **dict.fromkeys(open_cells, fill)}
+        fitted = fit_theta(filled, delta)
+        if fitted is None:
+            raise ValueError("theta_bounds_given_delta: no cell on the ruler to bound θ over")
+        return fitted[0]
 
     low, high = fit(0.0) - _FIT_SLACK, fit(1.0) + _FIT_SLACK
 
@@ -435,8 +386,6 @@ def theta_bounds_given_delta(
     d, a = (np.array([params[s][k] for s in params], dtype=np.float64) for k in (0, 1))
     p = p_at(np.clip(d, low, high), d, a)
     info = 1.0 / (_INIT_SIGMA_THETA * _INIT_SIGMA_THETA) + float(np.sum(a * a * p * (1.0 - p)))
-    # Misfit is unimodal in p with its zero at p = y, so each cell's least lies at y clamped into
-    # the p range the interval allows.
     on = [s for s in measured if s in params]
     y = np.fromiter((measured[s] for s in on), dtype=np.float64, count=len(on))
     dm, am = (np.array([params[s][k] for s in on], dtype=np.float64) for k in (0, 1))
@@ -456,37 +405,11 @@ def extend_ruler(
     max_iter: int = 50,
     tol: float = 1e-4,
 ) -> DeltaRuler:
-    """δ for cells the ruler does not yet carry, fit against arm abilities read ON the frozen ruler.
-
-    Fixed-common-item calibration: the anchored cells give every arm a θ on the existing scale, and
-    each new cell's δ is then the one value that explains its responses at those θ. The anchor never
-    moves — existing δ, ``mu_delta``, ``sigma_delta``, ``calibration_model`` and ``anchor_id`` are
-    carried verbatim, and ``mean(theta) == 0`` is NEVER re-imposed (that is ``_map_fit``'s job, and
-    re-imposing it here is exactly how the scale would drift).
-
-    ``history`` is what the same arms answered EARLIER, under the ids they answer under now, and
-    the link reads both: an arm's θ is fit on every anchored cell it holds across the two, so which
-    cells a selector re-reads its parent on this round decides nothing here. The caller scopes it —
-    a cycle passes its OWN closed rounds, never the workspace archive, so a run links exactly as a
-    fresh run of itself would.
-
-    Swept to a FIXPOINT — never coordinate ascent. A sweep reads each arm on the ruler as it
-    stands and links the cells those arms answered; the next reaches a cell whose only arms that
-    sweep put on the scale. A δ once written never moves: re-fitting it is how the anchor drifts.
-
-    A cell no anchored arm answered STAYS OFF the ruler, and the ruler comes back unchanged where
-    that is every new cell. A provisional δ would be a fabricated value written permanently into
-    the scale — the transient read that legitimately needs one is ``DeltaRuler.entries_covering``.
-    Such a cell enters no θ, is counted by ``DeltaRuler.unlinked`` into the served caveat, and
-    links in the first later call whose history holds an anchored arm that answered it.
-    """
+    """Fixed-common-item link: a written δ never moves or re-anchors, and a cell no anchored arm answered stays OFF it."""
     seen = dedup_observations(history, observations)
     inv_var = 1.0 / (ruler.sigma_delta * ruler.sigma_delta)
     while True:
-        # `_INIT_SIGMA_THETA`, not `ruler.sigma_theta`, so this link is regularized exactly as the
-        # election's own θ read is. The ruler CARRIES the fit's converged σ_θ and nothing passes it
-        # yet: doing so moves every θ in the repo and belongs in its own commit with its own
-        # before/after, not smuggled in here where it would be indistinguishable from the extension.
+        # `_INIT_SIGMA_THETA`, not `ruler.sigma_theta`: regularized as the election's own θ read is.
         theta = fit_theta_given_delta(seen, ruler.entries())
 
         by_s: dict[int, list[tuple[float, float]]] = {}
@@ -503,8 +426,6 @@ def extend_ruler(
         for sid, rows in by_s.items():
             t_arr = np.fromiter((t for t, _ in rows), dtype=np.float64)
             y_arr = np.fromiter((y for _, y in rows), dtype=np.float64)
-            # Seeded at the ruler's own centre and pulled by N(μ_δ, σ_δ²) — the same prior the
-            # anchored cells were fit under, which is why `sigma_delta` rides the ruler at all.
             d = ruler.mu_delta
             for _ in range(max_iter):
                 p = 1.0 / (1.0 + np.exp(-np.clip(t_arr - d, -50, 50)))
@@ -519,15 +440,12 @@ def extend_ruler(
             delta[sid] = d
             delta_se[sid] = float(1.0 / np.sqrt(max(info, 1e-9)))
 
-        # A new cell keeps a ≡ 1 even under 2PL: one round's three-to-six arms cannot identify a
-        # discrimination, and `_LOG_A_CLIP` would happily let a separable cell run to ±3.
+        # A new cell keeps a ≡ 1 even under 2PL: one round's arms cannot identify a discrimination.
         ruler = ruler.model_copy(update={"delta": delta, "delta_se": delta_se})
 
 
-# Prior on log-discrimination (2PL): log(aₛ) ~ N(0, σ_a²) shrinks aₛ → 1, so the
-# 2PL collapses to 1PL absent evidence and the scale (a vs θ/δ spread) is identified.
+# log(aₛ) ~ N(0, σ_a²): collapses 2PL to 1PL absent evidence and identifies a against θ/δ spread.
 _SIGMA_LOG_A = 0.5
-# Clip log(a) so a stays in ≈[0.05, 20] — guards a runaway sample with separable responses.
 _LOG_A_CLIP = 3.0
 
 
@@ -537,8 +455,6 @@ def fit_rasch_2pl(
     max_iter: int = 100,
     tol: float = 1e-4,
 ) -> RaschPosterior:
-    """Warm-started from the 1PL fit; ``log aₛ`` keeps a > 0 and its prior pins the a-vs-θ degeneracy.
-    Not gated on its own — ``graduate_ruler_model`` decides per-dataset whether it is adopted."""
     if not observations:
         return RaschPosterior(theta={}, theta_se={}, delta={}, delta_se={})
 
@@ -568,7 +484,6 @@ def fit_rasch_2pl(
         old_theta, old_delta, old_log_a = theta.copy(), delta.copy(), log_a.copy()
         a = np.exp(log_a)
 
-        # θ step — ∂η/∂θ = aₛ.
         p = 1.0 / (1.0 + np.exp(-np.clip(a[cols] * (theta[rows] - delta[cols]), -50, 50)))
         grad_t = (
             np.bincount(rows, weights=a[cols] * (responses - p), minlength=n_c)
@@ -579,7 +494,6 @@ def fit_rasch_2pl(
         )
         theta = theta + _newton_step(grad_t, info_t)
 
-        # δ step — ∂η/∂δ = −aₛ.
         p = 1.0 / (1.0 + np.exp(-np.clip(a[cols] * (theta[rows] - delta[cols]), -50, 50)))
         grad_d = -np.bincount(
             cols, weights=a[cols] * (responses - p), minlength=n_s
@@ -589,7 +503,6 @@ def fit_rasch_2pl(
         )
         delta = delta + _newton_step(grad_d, info_d)
 
-        # log-a step — η = aₛ(θ−δ), ∂η/∂log a = η; Gauss-Newton info ≈ Σ w·η².
         eta = a[cols] * (theta[rows] - delta[cols])
         p = 1.0 / (1.0 + np.exp(-np.clip(eta, -50, 50)))
         grad_la = (
@@ -623,15 +536,13 @@ def fit_rasch_2pl(
     se_theta = 1.0 / np.sqrt(np.maximum(info_t, 1e-9))
     se_delta = 1.0 / np.sqrt(np.maximum(info_d, 1e-9))
     se_log_a = 1.0 / np.sqrt(np.maximum(info_la, 1e-9))
-    se_a = a * se_log_a  # delta method: a = exp(log a)
+    se_a = a * se_log_a
 
     return RaschPosterior(
         theta=dict(zip(candidate_ids, theta.tolist(), strict=True)),
         theta_se=dict(zip(candidate_ids, se_theta.tolist(), strict=True)),
         delta=dict(zip(sample_ids, delta.tolist(), strict=True)),
         delta_se=dict(zip(sample_ids, se_delta.tolist(), strict=True)),
-        n_obs_per_candidate=base.n_obs_per_candidate,
-        n_obs_per_sample=base.n_obs_per_sample,
         n_iterations=iteration,
         converged=converged,
         sigma_theta=base.sigma_theta,
@@ -652,8 +563,8 @@ def _full_loglik(observations: list[Observation], post: RaschPosterior) -> float
     return sum(
         _logp(
             o.response,
-            post.theta.get(o.candidate_id, 0.0),
-            post.delta.get(o.sample_id, 0.0),
+            post.theta[o.candidate_id],
+            post.delta[o.sample_id],
             post.discrimination.get(o.sample_id, 1.0),
         )
         for o in observations
@@ -661,15 +572,11 @@ def _full_loglik(observations: list[Observation], post: RaschPosterior) -> float
 
 
 def _fold_of(o: Observation, n_folds: int) -> int:
-    """A stable hash of the observation's OWN identity, never its position: stride folds make the
-    verdict a function of walk order, and collapse outright on a stream sorted by candidate."""
-    digest = hashlib.blake2b(f"{o.candidate_id}\x00{o.sample_id}".encode(), digest_size=8).digest()
-    return int.from_bytes(digest, "big") % n_folds
+    """Hashed on the observation's identity, never its position: stride folds follow walk order."""
+    return int(stable_hash([o.candidate_id, o.sample_id]), 16) % n_folds
 
 
 def _cv_loglik(observations: list[Observation], n_folds: int) -> tuple[float, float] | None:
-    """Scored only on responses whose candidate AND sample were seen in training. The primary
-    graduation test — held-out fit cannot reward 2PL for overfitting in-sample."""
     n = len(observations)
     if n < n_folds * 4:
         return None
@@ -690,9 +597,9 @@ def _cv_loglik(observations: list[Observation], n_folds: int) -> tuple[float, fl
             ll_1 += _logp(o.response, f1.theta[o.candidate_id], f1.delta[o.sample_id], 1.0)
             ll_2 += _logp(
                 o.response,
-                f2.theta.get(o.candidate_id, 0.0),
-                f2.delta.get(o.sample_id, 0.0),
-                f2.discrimination.get(o.sample_id, 1.0),
+                f2.theta[o.candidate_id],
+                f2.delta[o.sample_id],
+                f2.discrimination[o.sample_id],
             )
             n_eval += 1
     if n_eval == 0:
@@ -707,8 +614,6 @@ def graduate_ruler_model(
     margin: float = 0.01,
     n_folds: int = 5,
 ) -> tuple[CalibrationModel, RaschPosterior]:
-    """Two gates: a cheap BIC pre-check on the full fit, then cross-validated held-out log-likelihood
-    by a per-response ``margin`` (hysteresis). ``enable=False`` or too-sparse data ⇒ always 1PL."""
     base = fit_rasch(observations)
     if not enable or len(base.delta) < 2:
         return "1PL", base
@@ -717,29 +622,23 @@ def graduate_ruler_model(
     n_obs, n_s = len(observations), len(full_2pl.delta)
     bic_gain = 2.0 * (_full_loglik(observations, full_2pl) - _full_loglik(observations, base))
     if bic_gain <= n_s * float(np.log(max(n_obs, 2))):
-        return "1PL", base  # extra discrimination params don't pay for themselves
+        return "1PL", base
 
     cv = _cv_loglik(observations, n_folds)
     if cv is None:
         return "1PL", base
     ll_1, ll_2 = cv
-    # Per-response held-out gain must clear the hysteresis margin.
     n_eval_proxy = max(n_obs // n_folds, 1)
     if (ll_2 - ll_1) > margin * n_eval_proxy:
         return "2PL", full_2pl
     return "1PL", base
 
 
-def observations_from_results(
-    results_by_id: Mapping[str, Sequence[Mapping[str, Any]]],
-) -> list[Observation]:
-    """The ONE walk from ``{candidate_id: rows}`` to observations, over the rows carrying a verdict
-    (``is_graded``): two fits that skip different sets disagree about the scale in silence."""
+def observations_from_results(sheets_by_id: Mapping[str, CellSheet]) -> list[Observation]:
     return [
-        Observation(candidate_id=cid, sample_id=int(sid), response=graded_response(r))
-        for cid, results in results_by_id.items()
-        for r in results
-        if (sid := r.get("sample_id")) is not None and is_graded(r)
+        Observation(candidate_id=cid, sample_id=sid, response=response)
+        for cid, sheet in sheets_by_id.items()
+        for sid, response in responses_of(sheet).items()
     ]
 
 
@@ -748,16 +647,7 @@ def build_observations(rounds: list[RoundResult]) -> list[Observation]:
 
 
 def dedup_observations(*groups: Sequence[Observation]) -> list[Observation]:
-    """A cell measured twice is one piece of evidence, not two — the second is almost always a cache
-    replay, so LAST wins and callers pass groups oldest-first.
-
-    **This is also where the step/item line is held — owned by**
-    ``docs/methods/verdict-resolution.md`` § Phase 3: the cell stays the atom, and per-step terms
-    reach θ only through the composite.
-
-    Collapsing rather than raising is deliberate: at this seam a replay and a step-split are
-    indistinguishable, so the fit cannot tell them apart and must not try. What keeps the invariant
-    real is that EVERY path into a fit passes through here."""
+    """LAST wins, so callers pass groups oldest-first; every path into a fit passes through here."""
     cells: dict[tuple[str, int], Observation] = {}
     for group in groups:
         for o in group:
@@ -766,42 +656,29 @@ def dedup_observations(*groups: Sequence[Observation]) -> list[Observation]:
 
 
 def candidate_abilities(
-    results_by_id: Mapping[str, list[QueryMeasurement]],
-    parent_results: list[QueryMeasurement],
+    results_by_id: Mapping[str, CellSheet],
+    parent_results: CellSheet,
     ruler: DeltaRuler | None,
-) -> RaschPosterior:
-    """The PARENT is folded in as a pseudo-candidate under ``PARENT_ABILITY_ID`` so it shares the arms'
-    scale; holding δ at the bank is what makes θ cross-round and cross-subset comparable.
-
-    ``parent_results`` is the parent RE-SCORED on this round's panel, never C0's banked rows —
-    an arm is crowned on a lift over what it must actually beat.
-
-    DEDUPED, and this is the fit that most needs it: ``observations_from_results`` emits one
-    observation per ROW, so a cell re-measured within a round (the stale-data ladder re-enters
-    ``measure_sample``) would otherwise reach the θ that decides the election as two independent
-    draws — and these are the SEs PoBB cuts on."""
-    obs = dedup_observations(
-        observations_from_results({**results_by_id, PARENT_ABILITY_ID: parent_results})
-    )
-    fit = fit_theta_given_delta(obs, ruler.entries() if ruler is not None else None)
-    split = {sid: ruler_entry(v) for sid, v in (ruler.entries() if ruler else {}).items()}
-    return RaschPosterior(
+) -> RoundAbilities:
+    """``parent_results`` is the parent RE-SCORED on this round's panel, never C0's banked rows."""
+    entries = ruler.entries() if ruler is not None else None
+    fit = fit_theta_given_delta(observations_from_results(results_by_id), entries)
+    split = {sid: ruler_entry(v) for sid, v in (entries or {}).items()}
+    return RoundAbilities(
         theta={cid: t for cid, (t, _) in fit.items()},
         theta_se={cid: se for cid, (_, se) in fit.items()},
         delta={sid: d for sid, (d, _) in split.items()},
         delta_se={},
         discrimination={sid: a for sid, (_, a) in split.items() if a != 1.0},
+        parent=fit_theta(responses_of(parent_results), entries),
     )
 
 
-def theta_lift_over_parent(abilities: RaschPosterior, candidate_id: str) -> float | None:
-    """``None`` when either arm was never fit — a parent whose samples all errored has no entry, and
-    defaulting it to 0.0 invents a logit-0 floor nobody measured. Absent is not a number."""
+def theta_lift_over_parent(abilities: RoundAbilities, candidate_id: str) -> float | None:
     theta_c = abilities.theta.get(candidate_id)
-    theta_parent = abilities.theta.get(PARENT_ABILITY_ID)
-    if theta_c is None or theta_parent is None:
+    if theta_c is None or abilities.parent is None:
         return None
-    return theta_c - theta_parent
+    return theta_c - abilities.parent[0]
 
 
 def select_round_subset(
@@ -813,20 +690,8 @@ def select_round_subset(
     anchor_floor: int = 0,
     leader_ids: Collection[str] | None = None,
 ) -> list[Sample]:
-    """Which cells this round buys, ordered on the cycle's LOCKED ruler.
-
-    Never ``fit_rasch`` here: a fresh re-anchoring per round makes the δ that CHOOSES the samples
-    a different scale from the δ that SCORES them. The L1 panel is already forbidden that
-    (``optimizers/potter/CLAUDE.md``); selection is bound by the same rule.
-
-    Cold ruler ⇒ the deterministic bank prefix, unchanged: a δ fit needs at least TWO arms or
-    selecting on it is a difficulty ratchet, and freezing the subset is what lets the ruler warm.
-
-    ``leader_ids`` names the arms this round is DECIDING BETWEEN, and the target θ is the best of
-    those. *observations* deliberately carries the whole archive — a θ fit wants every arm — but the
-    max over it is the best searchpoint ever run on the dataset, which is not in this race, and
-    targeting it calibrates the panel to an arm nobody ran.
-    """
+    """Never ``fit_rasch`` here: the δ that CHOOSES the cells is the locked δ that SCORES them."""
+    # `leader_ids` bounds the target θ to this race: *observations* carries the whole archive.
     if budget <= 0 or not bank:
         return []
     if budget >= len(bank):
@@ -865,12 +730,7 @@ def select_round_subset(
 def _with_ruler_learning(
     decided: list[int], budget: int, delta_se_map: dict[int, float]
 ) -> list[int]:
-    """Reserve the last ``_RULER_LEARNING_SLOTS`` of the panel for the cells δ is least sure of.
-
-    The panel's job is to separate the arms, so the bulk is bought on decision information alone —
-    but a pure-decision panel converges on one difficulty and STOPS BEING A READING (a band under
-    ``BAND_COLLAPSE_LOGITS``, where θ is logit-accuracy plus a constant). A handful of max-SE cells
-    holds the band open; more buys no further span and only makes the panel easier."""
+    """A pure-decision panel converges on one difficulty, where θ is logit-accuracy plus a constant."""
     slots = min(_RULER_LEARNING_SLOTS, max(budget - 1, 0))
     if slots <= 0 or budget >= len(decided):
         return decided
@@ -885,12 +745,7 @@ def _with_ruler_learning(
 def _with_anchor_block(
     ranked: list[int], budget: int, ruler: DeltaRuler, anchor_floor: int
 ) -> list[int]:
-    """Reserve enough already-anchored cells for the next extension to equate against.
-
-    ``delta_learning_gain`` rises with δ's SE, so an unmeasured cell outranks a measured one by
-    construction — correct while the ruler is cold, catastrophic once it is locked: the subset
-    walks off the ruler entirely and extension has nothing left to link through. The acquisition
-    ordering is left alone; only the tail is repaired, lowest-ranked first."""
+    """Unmeasured cells outrank anchored ones by construction, so a locked ruler's subset walks off it."""
     picked = ranked[:budget]
     floor = min(anchor_floor, len(ruler.delta.keys() & set(ranked)), budget)
     have = sum(1 for sid in picked if sid in ruler.delta)

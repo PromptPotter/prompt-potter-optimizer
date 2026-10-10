@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import json
-import os
 from collections.abc import Hashable, Mapping, Sequence
 from functools import partial
 from pathlib import Path
@@ -17,9 +14,12 @@ from promptpotter.application.evidence.comparison import (
     EvidenceVariance,
     MetricReading,
     OrderConfound,
+    SubjectMember,
     comparability,
+    metric_measurand,
     metric_reading,
     order_confound,
+    pair_subjects,
     power,
     replicates,
     stamp_comparable,
@@ -56,22 +56,35 @@ from promptpotter.application.evidence.subjects import (
 )
 from promptpotter.application.mask.load import load_mask_record
 from promptpotter.application.mask.scenario import scenario_spine
+from promptpotter.application.scoring.cells import campaign_scorer, cycle_instrument, walked_rows
 from promptpotter.application.scoring.formula.compiler import ScoringFormulaError
+from promptpotter.application.scoring.paired import MemberRows, as_family
 from promptpotter.domain.candidate_diff import build_candidate_flat, flatten_sp_summary
-from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.dashboard_rows import SidedInterval
-from promptpotter.domain.l4.inner_origin import instrument_of
+from promptpotter.domain.cycle_listing import CycleIndex
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop, CyclePath
+from promptpotter.domain.paired_reading import (
+    ArmPointer,
+    Measurand,
+    MemberAddress,
+    PairedReading,
+)
+from promptpotter.domain.results import IndividualWalk, individual_cells
 from promptpotter.domain.ruler import AbilityReading
+from promptpotter.domain.scoring import CellSheet, GradedCell, WalkedCell
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.projections.live_dashboard.state import served_spend
+from promptpotter.infrastructure.ledger import ledger_chain
+from promptpotter.infrastructure.projections.cycle_index import read_cycle_index
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
-    scan_ledger_candidates,
-    scan_ledger_elections,
+    ArmWalk,
+    StandingRounds,
+    scan_ledger_spend,
+    scan_ledger_spend_by_round,
+    scan_ledger_walks,
+    scan_standing_rounds,
 )
 from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import (
-    ROUND_GLOB,
     CampaignLayout,
     CycleLayout,
     campaign_cycles_dir,
@@ -80,21 +93,15 @@ from promptpotter.infrastructure.store.read_model import derived, file_sig
 from promptpotter.infrastructure.store.stores import descend_store
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import BadRequestError, NotFoundError
-from promptpotter.shared.statistics import exact_paired_reading, paired_diff_posterior, sample_sd
+from promptpotter.shared.hashing import stable_hash
+from promptpotter.shared.measurement_context import RoleScope
+from promptpotter.shared.statistics import sample_sd
 
 if TYPE_CHECKING:
     from promptpotter.application.scoring.formula.compiler import CompiledExpression
     from promptpotter.domain.campaign import Campaign
+    from promptpotter.domain.scoring import Scorer
     from promptpotter.infrastructure.store.stores import Stores
-
-
-class CellEffect(NamedTuple):
-    """One environment cell's paired (candidate − origin) effect. INTERNAL to ``_finalize`` — the
-    two numbers a surface renders, ``n_cells`` and ``n_measurements``, are folded from it here."""
-
-    cell: str
-    mean_d: float
-    n: int
 
 
 class EffectProvenance(StrictModel):
@@ -106,7 +113,7 @@ class EffectProvenance(StrictModel):
     candidate_id: str
 
 
-class RankedEdit(SidedInterval):
+class RankedEdit(StrictModel):
     """One SEARCHPOINT measured against its own campaign's origin — a prompt edit, a node-config
     edit, an optimizer-prompt edit on the recursion; the arithmetic does not care which.
 
@@ -115,32 +122,27 @@ class RankedEdit(SidedInterval):
     one at all: that overlay is empty for a prompt-only candidate, which is the whole of what L1
     proposes on a campaign optimizing prompts.
 
-    **Rows POOL WITHIN ONE CAMPAIGN and never across two.** ``_config_of`` states why: a
+    **Rows POOL WITHIN ONE CAMPAIGN and never across two.** A
     searchpoint is read through a delta against its parent, and two campaigns share no parent to
     take one against — so a cross-campaign pool is a number lined up on nothing, and that is a
     claim withdrawn rather than a capability lost. Do not re-add it as an improvement. Within one
-    campaign the pool is real: a repair re-measures a searchpoint without re-minting it.
+    campaign the pool is real: individuals sharing a searchpoint share its cells, which are filed
+    by content, so they are one member of the pair.
     """
 
     sp_hash: str
-    # The other half of the identity. Two campaigns that ran the same searchpoint hold the same
-    # `sp_hash` and are two rows here, so a table keyed on the hash alone collides them — and the
-    # anchor each is measured against is its own campaign's origin, which is what makes them two
-    # readings rather than one pooled.
     campaign_id: str
     label: str
-    # Neither the edit's own text nor its per-cell breakdown rides here: a {node: {field: prose}}
-    # map per ranked edit is the largest thing this read can put on the wire, and no surface opens
-    # it. `sp_hash` names the searchpoint and `provenance` says where to read it.
     provenance: list[EffectProvenance]
-    anchor_effect: float  # mean of the PER-CELL paired diffs — one point per cell, not per
-    # occurrence, so an over-measured cell cannot outweigh uniform goodness (see _finalize)
-    n_cells: int
-    n_measurements: int
+    reading: PairedReading = Field(
+        description="The searchpoint over its campaign's origin under the selected metric, on the "
+        "cells both scored. Its headline's `family` is Holm across the edits ranked here. An "
+        "edit whose reading is not `read` is listed after them, unranked.",
+    )
 
 
 class EditSpread(StrictModel):
-    """How far apart the ranked edits actually are — the SD of ``anchor_effect`` across them.
+    """How far apart the ranked edits actually are — the SD of their lifts over the origin.
 
     **Not a signal-to-noise ratio, and deliberately not one.** The noise half would be repeated
     readings of ONE (edit, cell), and the instrument cannot produce them: measurements are
@@ -180,58 +182,29 @@ class Evidence(StrictModel):
     """The whole read for one selection of subjects — recomputed on every fetch."""
 
     generated_at: str
-    # The comparison's ONE scorer, which grades its bench headlines and every cell's `fitness`:
-    # the one each subject's campaign declares, and a selection declaring two is refused.
     scorer_id: str
-    # Oldest first — the confound reads off this order. Identity AND the metric reading in one
-    # row, so nothing downstream joins two lists on `key`.
     subjects: list[SubjectReading]
     comparability: Comparability
-    # The HEADLINE, read off the result of each campaign an unmasked campaign or course subject
-    # stands for — the held-out bench set, not the search rows everything below pools.
     head_to_head: HeadToHead | None = None
-    # WHICH number everything below is about — the picker's vocabulary, the merged per-subject
-    # intervals and every pairwise test, all under one selection. Non-optional: the default always
-    # resolves, so there is no state where a chart is drawn under no named metric.
     metric: MetricReading
-    # Subject keys that were ASKED for and answered nothing — nothing of that name, no round
-    # document at the head they address, or a head whose rows carry no channel. Served because the
-    # roster is otherwise the only evidence they were dropped, and a subject that silently thins a
-    # selection is the channel-level twin of scoring an unread cell as zero.
     unread_subjects: list[str] = Field(default_factory=list)
-    # How the `config` maps on the roster line up. `None` unless they were asked for.
     config_keys: ConfigKeys | None = None
-    # What this selection VARIES on, discovered rather than declared, with the marginal at each
-    # level. Empty where every subject ran the same way — which is a reading, not a gap: a roster
-    # with no factor is a replicate set, and `replicates` below is the surface for that.
     factors: list[FactorReading] = Field(default_factory=list)
-    # The one 2-D face asked for, cells pooled. `None` unless a projection was named — the factors
-    # above already carry every marginal, and which pair to cross is the reader's question.
     grid: FactorGridReading | None = None
     replicates: list[ArmReplicate] = Field(default_factory=list)
     variance: EvidenceVariance | None = None
     power: EvidencePower | None = None
     order_confound: OrderConfound | None = None
     ranking_computed: bool = False
-    # Ranked desc by anchor_effect.
     edits: list[RankedEdit] = Field(default_factory=list)
     spread: EditSpread = Field(default_factory=EditSpread)
 
 
-def _arm_hash(optimizer_prompt_hashes: dict[str, Any]) -> str:
-    """The CONFIGURATION identity two campaigns are replicates of one another under. Recomputed
-    per read, so nothing on disk keys on the value."""
-    canonical = json.dumps(optimizer_prompt_hashes, sort_keys=True, ensure_ascii=False)
-    return hashlib.sha1(canonical.encode("utf-8")).hexdigest()[:12]
-
-
 class _Accum:
-    def __init__(self, label: str) -> None:
-        self.label = label
+    def __init__(self, arm: ArmPointer) -> None:
+        self.arm = arm
         self.provenance: list[EffectProvenance] = []
-        # cell -> paired (candidate_fit, origin_fit) lists across occurrences
-        self.cand_by_cell: dict[str, list[float]] = {}
-        self.orig_by_cell: dict[str, list[float]] = {}
+        self.cells: dict[str, GradedCell] = {}
 
 
 def _dataset_name(manifest: dict[str, Any]) -> str:
@@ -245,8 +218,7 @@ def _dataset_of(campaign_dir: Path) -> str:
 
 
 def campaigns_on_dataset(stores: Stores, dataset_name: str) -> list[str]:
-    """Campaign ids bound to *dataset_name*, read off each manifest rather than off the directory
-    name — a name-shaped guess silently skips an A/B arm, a fork, a rename."""
+    """Read off each manifest: a directory-name match skips an A/B arm, a fork, a rename."""
     return [
         child.name
         for child in stores.campaigns.iter_campaign_dirs()
@@ -255,8 +227,6 @@ def campaigns_on_dataset(stores: Stores, dataset_name: str) -> list[str]:
 
 
 def _named(stores: Stores, spec: SubjectSpec) -> SubjectSpec:
-    """*spec* with its campaign half resolved through the store's matcher. One that matches nothing
-    is left as typed and rides ``unread_subjects``; an address inside a sandbox names that tree's ids."""
     if spec.inside:
         return spec
     matches = stores.campaigns.match_campaign_ids(spec.campaign_id)
@@ -279,8 +249,6 @@ def select_evidence(
     include_config: bool = False,
     metric: str = MEASURAND,
 ) -> Evidence:
-    """The read as an entry point ASKS for it, so the route and the terminal pool one selection.
-    *dataset* ADDS one campaign subject per campaign bound to it, beside any named."""
     specs = [_named(stores, parse_subject(raw)) for raw in subjects]
     if dataset:
         named = {s.key for s in specs}
@@ -307,26 +275,51 @@ def select_evidence(
 
 
 class _ChainPoint(NamedTuple):
-    """One MEASURED step of a branch: which candidate, at which round, the rows it left, and its
-    own ``candidate_scores`` entry — the document is already open, so carrying the entry costs a
-    reference and saves every consumer a second read of the same file."""
-
     round: int
     candidate_id: str
     label: str
-    rows: list[dict[str, Any]]
-    scores: dict[str, Any]
+    sheet: CellSheet
+    arm: ArmWalk
+
+
+class _Cycle(NamedTuple):
+    stores: Stores
+    walked: StandingRounds
+    walks: list[IndividualWalk[WalkedCell]]
+    scorer: Scorer
+
+    def sheet(self, individual_id: str) -> CellSheet:
+        measured = individual_cells(self.walks, individual_id, RoleScope.REPORT)
+        return walked_rows(self.stores, measured, self.scorer).standing()
+
+    def point(
+        self, round_num: int, *, label: str = "", candidate_id: str = ""
+    ) -> _ChainPoint | None:
+        for (rnd, _), arm in self.walked.arms.items():
+            found, named = arm.candidate_id, arm.label
+            if rnd != round_num or not found:
+                continue
+            if (label and named != label) or (candidate_id and found != candidate_id):
+                continue
+            return _ChainPoint(
+                round=round_num,
+                candidate_id=found,
+                label=named or found,
+                sheet=self.sheet(found),
+                arm=arm,
+            )
+        return None
+
+
+def _open_cycle(stores: Stores, campaign_id: str, cycle_dir: Path) -> _Cycle | None:
+    graded_under = campaign_scorer(stores, campaign_id)
+    if graded_under is None:
+        return None
+    chain = list(ledger_chain(CycleDir(cycle_dir)))
+    return _Cycle(stores, scan_standing_rounds(chain), scan_ledger_walks(chain), graded_under)
 
 
 class _Head(NamedTuple):
-    """Where one subject's numbers come from — always ONE searchpoint's rows, whichever kind
-    addressed it. ``label`` is what to call the CHANNEL, which is not the same thing: a course is
-    named by its branch, and the searchpoint it currently reads at is ``point``.
-
-    ``chain`` is the branch behind the head where a LENS produced one — the counterfactual winners,
-    which are not the crowned ones and cannot be re-derived from the ledger. ``None`` means the
-    winner-chain walk reads the crowns instead."""
-
     cycle_dir: Path
     label: str
     dataset_name: str
@@ -340,7 +333,7 @@ class _Head(NamedTuple):
 
 class _CycleFacts(NamedTuple):
     arm_id: str | None
-    instrument_id: str | None
+    instrument_id: str
     ability: AbilityReading | None
     spend_usd: float | None
     rounds_scored: int
@@ -348,7 +341,7 @@ class _CycleFacts(NamedTuple):
 
 
 class _SubjectRead(NamedTuple):
-    """Everything one subject takes off disk. Shared between fetches, so it is read-only."""
+    """Memoised across fetches (`derived`): never mutate one."""
 
     head: _Head
     channels: dict[str, dict[str, float]]
@@ -365,30 +358,14 @@ def subject_evidence(
     metric: str = MEASURAND,
     grid: tuple[str, str] | None = None,
 ) -> Evidence:
-    """Reduce the named subjects into one evidence read, under one metric. *specs* may span
-    datasets, and may name something that no longer exists — an absent one is simply not in the
-    roster. *metric* is a catalogue key or ``expr:<formula>``; one this selection cannot answer
-    raises ``ValueError`` for the route to turn into a 400.
-
-    EVERY metric is a fact about one CELL, read off the row that stands for it — on the recursion
-    a cell is a whole inner campaign, so its lift, its origin, its cost and its round count are
-    that seed's own. Nothing here opens a second document to derive a number the cell already
-    carries.
-
-    ONE metric then reaches everything: the roster's merged estimates, the pairwise tests, the
-    variance decomposition, the resolving power, the run-order confound and the edit ranking, so
-    no two numbers on the page can be about different quantities.
-    """
     wanted: dict[str, SubjectSpec] = {s.key: s for s in specs}
     located = {key: at for key, spec in wanted.items() if (at := _at(stores, spec)) is not None}
-    # Only a subject with rows declares the comparison's scorer: one that measured nothing has no
-    # cell to read under it.
     answering = {
         key: (leaf_stores, campaign_dir)
         for key, (leaf_stores, campaign_dir) in located.items()
         if derived(
             ("evidence_answers", campaign_dir, key),
-            sig=_files_read(wanted[key], campaign_dir),
+            sig=_files_read(leaf_stores, wanted[key], campaign_dir),
             compute=partial(_answers, leaf_stores, wanted[key], campaign_dir),
         )
     }
@@ -415,7 +392,7 @@ def subject_evidence(
             if spec.lens
             else derived(
                 ("evidence_subject", campaign_dir, spec.key),
-                sig=_files_read(spec, campaign_dir),
+                sig=_files_read(leaf_stores, spec, campaign_dir),
                 compute=read,
             )
         )
@@ -426,23 +403,18 @@ def subject_evidence(
     heads = {key: found.head for key, found in reads.items()}
     channels_by_subject = {key: found.channels for key, found in reads.items()}
 
-    # An unmeasured selection is not a metric problem, so it may not be answered as one: two
-    # ordinary actions reach here — ticking a campaign whose origin has not run, mistyping an id
-    # — and neither has a vocabulary to be wrong about.
     if grader is None or not heads:
         raise ValueError(
             f"None of {', '.join(sorted(wanted)) or 'the subjects named'} has scored rows to read. "
             "A campaign answers here once its origin has run, a course once its branch has, a "
             "candidate once it has been measured; one that does not exist answers never."
         )
-    # WHICH metric is decidable only once the rows are in hand: the measurand is the seed's own
-    # lift where the cells carry one and the cell's own fitness where they do not, and a metric
-    # nothing in this selection answers is never offered.
     available = available_channels(channels_by_subject)
     spec_metric, compiled = resolve_metric(metric, available)
 
     rows = [
         _reading_row(
+            leaves[key],
             wanted[key],
             head,
             compiled,
@@ -453,53 +425,34 @@ def subject_evidence(
         )
         for key, head in heads.items()
     ]
-    rows.sort(key=lambda r: (r.created_at, r.key))
+    rows.sort(key=lambda r: (r.created_at, r.round, r.key))
     rows = stamp_comparable(rows)
-    # Computed for EVERY read, not behind `include_config`: that flag gates serving the whole
-    # resolved map on each row, which is bulk, while a coordinate over the varying keys alone is
-    # small and is what makes the roster a grid. The source is the same `_config_of` either way,
-    # off searchpoints already in hand — no document is opened for it.
+    # Not behind `include_config`: that flag gates serving the map, and the factors need levels on every read.
     levels = levels_by_subject(rows, {k: _config_of(h.point) for k, h in heads.items()})
     rows = [r.model_copy(update={"levels": levels[r.key]}) for r in rows]
 
-    # Campaign subjects only: an edit is ranked against its own campaign's ORIGIN, which is the
-    # anchor a course or a candidate does not define — both sit inside a campaign whose origin is
-    # already a subject the operator can tick. The key carries that campaign, so nothing pools
-    # across two of them: there is no shared parent for either delta to be taken against.
-    accums: dict[tuple[str, str], _Accum] = {}
+    members = {key: _member(wanted[key], found.head, found.cycle) for key, found in reads.items()}
+    measurand = metric_measurand(spec_metric, grader.scorer.id)
+    unranked: list[RankedEdit] = []
     if include_ranking:
         for row in (r for r in rows if r.kind == "campaign"):
             head = heads[row.key]
-            hop = CycleHop(campaign_id=row.campaign_id, cycle_id=head.cycle_dir.name)
-            # A campaign subject resolves to round 0's origin, so its own `sp_hash` IS the anchor —
-            # no document is opened to find it, and every round is walked including round 0.
-            anchor = str(head.point.scores.get("sp_hash") or "")
-            for round_file in sorted(CycleLayout(head.cycle_dir).rounds.glob(ROUND_GLOB)):
-                _accumulate_round(
-                    read_json_tolerant(round_file, {}),
-                    row.values,
-                    hop,
-                    accums,
-                    compiled,
-                    anchor_hash=anchor,
-                )
+            report = head.point.arm.report
+            anchor = "" if report is None else report.sp_hash
+            cycle = _open_cycle(leaves[row.key], row.campaign_id, head.cycle_dir)
+            if cycle is not None:
+                unranked += _campaign_edits(cycle, members[row.key], measurand, anchor_hash=anchor)
 
-    edits = sorted(
-        (_finalize(campaign, sp_hash, acc) for (campaign, sp_hash), acc in accums.items()),
-        key=lambda r: r.anchor_effect,
-        reverse=True,
-    )
+    edits = _ranked(unranked, f"edits:{measurand.key}")
     scored = {r.key: r.values for r in rows if r.values}
-    # Read before the envelope: the width a corrected verdict needs depends on how many tests the
-    # correction spans, so `power` cannot be built without the count `metric` arrives at.
-    reading = metric_reading(spec_metric, rows, available)
+    reading = metric_reading(spec_metric, rows, available, members=members, measurand=measurand)
     return Evidence(
         generated_at=utcnow_iso(),
-        scorer_id=grader.scorer_id,
+        scorer_id=grader.scorer.id,
         subjects=rows,
         comparability=comparability(rows),
         head_to_head=head_to_head(
-            [HeadToHeadEntry(r, leaves[r.key]) for r in _campaign_channels(rows)], grader
+            [HeadToHeadEntry(r, leaves[r.key]) for r in _campaign_channels(rows)], grader, wanted
         ),
         metric=reading,
         unread_subjects=sorted(set(wanted) - set(heads)),
@@ -512,7 +465,7 @@ def subject_evidence(
         grid=grid_reading(rows, levels, spec_metric, grid) if grid else None,
         replicates=replicates(rows),
         variance=(decomposition := variance(scored)),
-        power=power(decomposition, rows, n_tests=reading.n_tests),
+        power=power(decomposition, rows),
         order_confound=order_confound(rows),
         ranking_computed=include_ranking,
         edits=edits,
@@ -521,8 +474,7 @@ def subject_evidence(
 
 
 def _campaign_channels(rows: list[SubjectReading]) -> list[SubjectReading]:
-    """One unmasked row per campaign, oldest first: its campaign subject, else its first course.
-    Either reads the campaign's result, so a second would pair the campaign with itself."""
+    """One row per campaign: each reads that campaign's result, so a second pairs it with itself."""
     chosen: dict[tuple[str, ...], SubjectReading] = {}
     for r in rows:
         if r.kind == "candidate" or r.mask is not None:
@@ -534,18 +486,8 @@ def _campaign_channels(rows: list[SubjectReading]) -> list[SubjectReading]:
     return [r for r in rows if r.key in picked]
 
 
-# --- resolving a subject to the rows it stands for ---------------------------------------------
-
-
 def _at(stores: Stores, spec: SubjectSpec) -> tuple[Stores, Path] | None:
-    """The tree a subject lives in, and its campaign directory there. ``None`` where either is
-    absent — a subject nothing answers rides ``unread_subjects``, so a mistyped id or a sandbox
-    since deleted must not fail the whole read for every other channel in it.
-
-    A sandbox is structurally an ordinary projects tree, so once ``descend_store`` has stepped
-    into it every resolver below works unchanged — which is why an L4 inner run needed no second
-    walker, only an address that could name one.
-    """
+    """`None`, never a raise: one mistyped id or deleted sandbox must not fail every other subject."""
     try:
         leaf = descend_store(stores, spec.inside)
     except (BadRequestError, NotFoundError):
@@ -556,54 +498,72 @@ def _at(stores: Stores, spec: SubjectSpec) -> tuple[Stores, Path] | None:
     return None if campaign_dir is None else (leaf, campaign_dir)
 
 
-def _files_read(spec: SubjectSpec, campaign_dir: Path) -> Hashable:
-    """The signature of every file a subject WITHOUT a lens reads: the campaign manifest and, in
-    the one cycle it sits in, the index, the ledger, the dashboard and each round document."""
+def _files_read(stores: Stores, spec: SubjectSpec, campaign_dir: Path) -> Hashable:
+    """A fork's inherited prefix is unsigned on purpose: nothing before a cut is rewritten."""
     manifest = CampaignLayout(campaign_dir).manifest
     cycle_id = spec.cycle_id or str(read_json_tolerant(manifest, {}).get("root_cycle_id", ""))
     layout = CycleLayout(campaign_cycles_dir(campaign_dir) / cycle_id)
-    try:
-        with os.scandir(layout.rounds) as it:
-            rounds = sorted((e.name, (st := e.stat()).st_size, st.st_mtime_ns) for e in it)
-    except OSError:
-        rounds = []
-    signed = (manifest, layout.manifest, layout.ledger, layout.dashboard)
-    return (*(file_sig(path) for path in signed), *rounds)
+    signed = (manifest, layout.ledger)
+    return (stores.archive.signature(), *(file_sig(path) for path in signed))
 
 
 def _answers(stores: Stores, spec: SubjectSpec, campaign_dir: Path) -> bool:
     head = _resolve_head(stores, spec, campaign_dir)
-    return head is not None and bool(head.point.rows)
+    return head is not None and bool(head.point.sheet)
 
 
 def _read_subject(stores: Stores, spec: SubjectSpec, campaign_dir: Path) -> _SubjectRead | None:
     head = _resolve_head(stores, spec, campaign_dir)
     if head is None:
         return None
-    channels = cell_channels(head.point.rows)
+    channels = cell_channels(head.point.sheet)
     if not channels:
         return None
-    # The rows are spent: every later reading of this point is off `channels`.
-    spent = head._replace(point=head.point._replace(rows=[]))
-    return _SubjectRead(spent, channels, _cycle_facts(head.cycle_dir))
+    return _SubjectRead(head, channels, _cycle_facts(head.cycle_dir, head.dataset_name))
+
+
+def _member(spec: SubjectSpec, head: _Head, cycle: _CycleFacts) -> SubjectMember:
+    hop = CycleHop(campaign_id=spec.campaign_id, cycle_id=head.cycle_dir.name)
+    point = head.point
+    arm = ArmPointer(round=point.round, label=point.label, candidate_id=point.candidate_id)
+    return SubjectMember(
+        _member_rows((*spec.inside, hop), arm, point.sheet, cycle.instrument_id),
+        masked=spec.samples is not None,
+    )
+
+
+def _member_rows(
+    path: CyclePath, arm: ArmPointer, sheet: CellSheet, instrument_id: str
+) -> MemberRows:
+    return MemberRows(
+        address=MemberAddress(
+            path=path,
+            individual_id=arm.candidate_id,
+            arm=arm,
+            pass_role=None,
+        ),
+        sheet=sheet,
+        bought=0,
+        cut=False,
+        scope=RoleScope.REPORT,
+        instrument_id=instrument_id,
+        dataset_hash=None,
+        cell_set_id=None,
+    )
 
 
 def _resolve_head(stores: Stores, spec: SubjectSpec, campaign_dir: Path) -> _Head | None:
-    """The rows a subject's numbers come from, or ``None`` where nothing on disk answers it."""
     manifest = read_json_tolerant(CampaignLayout(campaign_dir).manifest, {})
     dataset_name = _dataset_name(manifest)
     if spec.kind == "campaign":
-        # The campaign's ROOT cycle — C0 — named by the manifest, never whichever sibling a
-        # directory walk happened to reach last. A forked campaign holds `cycle_x` beside
-        # `cycle_x_fork_y`, so walking them read the FORK's origin under the campaign's name with
-        # nothing on either surface saying which cycle the row came from. A fork is addressable
-        # here as its own `course:` subject instead.
+        # The root cycle by the manifest, never a directory walk: a fork sits beside it as `cycle_x_fork_y`.
         cycle_dir = campaign_cycles_dir(campaign_dir) / str(manifest.get("root_cycle_id", ""))
-        origin = _point_at(cycle_dir, 0, label="")
+        cycle = _open_cycle(stores, spec.campaign_id, cycle_dir)
+        origin = cycle.point(0) if cycle is not None else None
         if origin is None:
             return None
         c0 = _masked(origin, spec.samples)
-        c0_index = read_json_tolerant(CycleLayout(cycle_dir).manifest, {})
+        c0_index = read_cycle_index(cycle_dir)
         return _Head(
             cycle_dir=cycle_dir,
             label=spec.campaign_id,
@@ -611,89 +571,74 @@ def _resolve_head(stores: Stores, spec: SubjectSpec, campaign_dir: Path) -> _Hea
             created_at=str(manifest.get("created_at", "")),
             point=c0,
             authorship=_authorship(cycle_dir, c0, c0_index),
-            human_intervened=bool(c0_index.get("human_intervened", False)),
+            human_intervened=c0_index is not None and c0_index.human_intervened,
         )
 
     cycle_dir = campaign_cycles_dir(campaign_dir) / spec.cycle_id
-    if not CycleLayout(cycle_dir).rounds.is_dir():
+    cycle = _open_cycle(stores, spec.campaign_id, cycle_dir)
+    if cycle is None:
         return None
-    index = read_json_tolerant(CycleLayout(cycle_dir).manifest, {})
+    index = read_cycle_index(cycle_dir)
     scenario, chain = (None, None)
     if spec.lens:
-        # Under a lens the head is the last point the record still speaks for — the counterfactual
-        # winner at the round the two readings part, or the branch's own if they never do. The
-        # chain has to be walked to find it: each round's decision depends on the one before it.
-        resolved = _scenario(stores, spec, cycle_dir)
+        resolved = _scenario(stores, spec, cycle)
         if resolved is None:
             return None
         scenario, chain = resolved
         point: _ChainPoint | None = chain[-1]
+    elif spec.kind == "course":
+        stands = cycle.walked.standing
+        picked = None if stands is None else stands.selection
+        point = cycle.point(0) if picked is None else cycle.point(picked.round, label=picked.label)
     else:
-        point = (
-            _course_head(cycle_dir)
-            if spec.kind == "course"
-            else _candidate_point(cycle_dir, spec.candidate_id)
-        )
+        point = _candidate_point(cycle, spec.candidate_id)
     if point is None:
         return None
     masked = _masked(point, spec.samples)
     return _Head(
         cycle_dir=cycle_dir,
-        # The cycle names the branch; the candidate names itself. A course's own `cycle_id` rather
-        # than its campaign's, because two courses of one campaign are exactly what this compares.
         label=spec.cycle_id if spec.kind == "course" else point.label,
         dataset_name=dataset_name,
-        created_at=str(index.get("created_at", "")),
+        created_at="" if index is None else index.created_at,
         point=masked,
         authorship=_authorship(cycle_dir, masked, index),
-        human_intervened=bool(index.get("human_intervened", False)),
+        human_intervened=index is not None and index.human_intervened,
         scenario=scenario,
         chain=chain,
     )
 
 
-def _authorship(cycle_dir: Path, point: _ChainPoint, index: dict[str, Any]) -> str:
+def _authorship(cycle_dir: Path, point: _ChainPoint, index: CycleIndex | None) -> str:
     source = next(
         (
-            c.source
-            for c in scan_ledger_candidates(CycleLayout(cycle_dir).ledger)
+            c.lineage.source
+            for c in scan_standing_rounds(ledger_chain(CycleDir(cycle_dir))).candidates()
             if c.candidate_id == point.candidate_id
         ),
         "",
     )
-    fork = index.get("fork")
-    fork = fork if isinstance(fork, dict) else {}
-    return authorship_of(source, str(fork.get("issued_by") or ""))
+    fork = None if index is None else index.fork
+    return authorship_of(source, "" if fork is None else fork.issued_by)
 
 
 def _masked(point: _ChainPoint, samples: frozenset[int] | None) -> _ChainPoint:
-    """The same searchpoint read over a SUBSET of what it was measured on — "seventeen of the
-    twenty-eight", the operator's own question. Rows are dropped, never re-derived: every value
-    that survives is one this candidate actually recorded on that sample."""
     if samples is None:
         return point
-    return point._replace(rows=[r for r in point.rows if r.get("sample_id") in samples])
+    return point._replace(sheet=point.sheet.where(lambda cell: cell.sample_id in samples))
 
 
 def _scenario(
-    stores: Stores, spec: SubjectSpec, cycle_dir: Path
+    stores: Stores, spec: SubjectSpec, cycle: _Cycle
 ) -> tuple[ScenarioReading, list[_ChainPoint]] | None:
-    """This branch as the lens would have run it: the counterfactual winner chain, plus what it
-    says about the record. ``None`` where the branch has no readable chain at all.
-
-    The chain's points are the arms the run MEASURED — the fold picks among them and invents
-    none — so a channel plotted from it plots measurements, under a criterion that would have
-    carried a different one of them forward.
-    """
     try:
         record = load_mask_record(stores, spec.campaign_id, spec.samples, lens=spec.lens)
     except ScoringFormulaError as exc:
         raise ValueError(f"The lens on {spec.key!r} cannot grade this branch: {exc}") from exc
-    cycle = next((c for c in record.cycles if c.cycle_id == spec.cycle_id), None)
-    if cycle is None:
+    recorded = next((c for c in record.cycles if c.cycle_id == spec.cycle_id), None)
+    if recorded is None:
         return None
-    steps = scenario_spine(cycle)
-    points = [p for s in steps if (p := _point_at(cycle_dir, s.round, candidate_id=s.candidate_id))]
+    steps = scenario_spine(recorded)
+    points = [p for s in steps if (p := cycle.point(s.round, candidate_id=s.candidate_id))]
     if not points:
         return None
     last = steps[-1]
@@ -704,22 +649,16 @@ def _scenario(
             scenario_winner_id=last.candidate_id,
             winner_changed=parted,
             first_divergent_round=last.round if parted else None,
-            # Every step but the one the walk returned on — a round the fold could not decide is
-            # still a round the two readings agreed about.
             invariant_rounds=len(steps) - 1 if parted else len(steps),
-            # Off the CYCLE, not the chain: the chain stops at the parting, and the denominator is
-            # how many rounds this branch has for that prefix to be a fraction of.
-            total_rounds=len(cycle.rounds),
-            n_samples_scored=len(_masked(points[-1], spec.samples).rows),
+            # The cycle's, not the chain's: the chain stops at the parting.
+            total_rounds=len(recorded.rounds),
+            n_samples_scored=len(_masked(points[-1], spec.samples).sheet),
             note=_SCENARIO_NOTE,
         ),
         [_masked(p, spec.samples) for p in points],
     )
 
 
-# Served rather than documented, on the `Comparability.note` pattern: the honest limit of a lens is
-# exactly what a surface forgets to restate, and a chart of counterfactual winners is read as a
-# counterfactual RUN unless the reading says otherwise.
 _SCENARIO_NOTE = (
     "This re-ranks the RECORD under the formula you named — it does not re-run the campaign. "
     "θ is not re-fitted and no election is replayed, so the round named here is where the two "
@@ -729,131 +668,48 @@ _SCENARIO_NOTE = (
 )
 
 
-def _crowns(cycle_dir: Path) -> dict[int, str]:
-    """``round -> the label its election crowned``. A round that HELD (empty label) or never
-    elected at all is absent: neither moved the branch's head, and only the ledger separates
-    them from a round that crowned somebody."""
-    return {
-        rnd: election.selected_labels[0]
-        for rnd, election in scan_ledger_elections(CycleLayout(cycle_dir).ledger).items()
-        if election.selected_labels
-    }
-
-
-def _point_in_doc(
-    doc: dict[str, Any], round_num: int, *, label: str = "", candidate_id: str = ""
-) -> _ChainPoint | None:
-    """One arm of one round document, addressed the way its caller HAS it.
-
-    By LABEL for a crown, because that is the key the ledger's election records and the one a
-    resume does not re-mint — joining a crown on ``candidate_id`` resolves to nothing after one.
-    By ID for a counterfactual or an addressed searchpoint. Neither takes the round's FIRST arm,
-    which at round 0 is the origin and the only one there is.
-    """
-    rows_by_id = doc.get("all_candidate_results") or {}
-    if not rows_by_id:
-        return None
-    entries = {
-        str(cs.get("candidate_id") or ""): cs
-        for cs in doc.get("candidate_scores") or []
-        if isinstance(cs, dict)
-    }
-    if label:
-        found = next(
-            (cid for cid, cs in entries.items() if cid and str(cs.get("label") or "") == label),
-            None,
-        )
-    else:
-        found = candidate_id or next(iter(rows_by_id))
-    rows = rows_by_id.get(found) if found else None
-    if found is None or not isinstance(rows, list):
-        return None
-    entry = entries.get(found) or {}
-    return _ChainPoint(
-        round=round_num,
-        candidate_id=found,
-        label=str(entry.get("label") or "") or found,
-        rows=list(rows),
-        scores=entry,
-    )
-
-
-def _point_at(
-    cycle_dir: Path, round_num: int, *, label: str = "", candidate_id: str = ""
-) -> _ChainPoint | None:
-    return _point_in_doc(
-        read_json_tolerant(CycleLayout(cycle_dir).round_file(round_num), {}),
-        round_num,
-        label=label,
-        candidate_id=candidate_id,
-    )
-
-
-def _course_head(cycle_dir: Path) -> _ChainPoint | None:
-    """A branch reads at its HEAD — the last winner it elected, or its origin where no round has
-    crowned one yet. Not the best candidate ever measured on it: the branch is what the run
-    actually carried forward, and a course whose rounds all held is honestly still at C0."""
-    crowns = _crowns(cycle_dir)
-    last = max(crowns) if crowns else 0
-    return _point_at(cycle_dir, last, label=crowns.get(last, ""))
-
-
-def _candidate_point(cycle_dir: Path, candidate_id: str) -> _ChainPoint | None:
-    """One searchpoint, read off the LAST round document carrying it — a repair re-measures a
-    candidate in place without re-minting it, so the newest document holds the rows that stand."""
-    for round_file in sorted(CycleLayout(cycle_dir).rounds.glob(ROUND_GLOB), reverse=True):
-        doc = read_json_tolerant(round_file, {})
-        point = _point_in_doc(doc, int(doc.get("round", 0) or 0), candidate_id=candidate_id)
-        if point is not None and point.rows:
+def _candidate_point(cycle: _Cycle, candidate_id: str) -> _ChainPoint | None:
+    for round_num in sorted({rnd for rnd, _ in cycle.walked.arms}, reverse=True):
+        point = cycle.point(round_num, candidate_id=candidate_id)
+        if point is not None and point.sheet:
             return point
     return None
 
 
 def _winner_chain(
+    stores: Stores,
     head: _Head,
     spec: SubjectSpec,
     compiled: CompiledExpression,
     channels: dict[str, dict[str, float]],
 ) -> list[WinnerChainPoint]:
-    """The branch standing behind a head: the origin, every winner before it, then the head itself.
-    Each point is read on ITS OWN cells — the subsets move between rounds, so restricting the chain
-    to the head's cells would redraw earlier rounds on evidence they never had.
-
-    Under a lens the chain is already resolved (the counterfactual winners, which no ledger holds)
-    and ENDS at the round the two readings part; otherwise it is the crowns, off the elections."""
+    """Each point reads its OWN cells: subsets move between rounds, so the head's would redraw earlier ones."""
     if head.chain is not None:
-        return [_winner_chain_point(p, cell_channels(p.rows), compiled) for p in head.chain]
-    crowns = _crowns(head.cycle_dir)
+        return [_winner_chain_point(p, cell_channels(p.sheet), compiled) for p in head.chain]
+    cycle = _open_cycle(stores, spec.campaign_id, head.cycle_dir)
+    crowns = cycle.walked.crowns if cycle is not None else {}
     at = head.point.round
     rounds = [r for r in sorted({0, *(r for r in crowns if r < at)}) if r != at]
     points = [
         _masked(p, spec.samples)
         for r in rounds
-        if (p := _point_at(head.cycle_dir, r, label=crowns.get(r, ""))) is not None
+        if cycle is not None and (p := cycle.point(r, label=crowns.get(r, ""))) is not None
     ]
     return [
-        *(_winner_chain_point(p, cell_channels(p.rows), compiled) for p in points),
+        *(_winner_chain_point(p, cell_channels(p.sheet), compiled) for p in points),
         _winner_chain_point(head.point, channels, compiled),
     ]
 
 
 def _config_of(point: _ChainPoint) -> dict[str, str]:
-    """One searchpoint as a flat ``key -> rendered value`` map, over the two disjoint keyspaces
-    `build_candidate_flat` already owns: ``node.param`` from the RESOLVED config, then the bare
-    prompt fields on top.
-
-    Resolved, never the sparse ``pipeline_overlay``: a delta is relative to a parent, and
-    two searchpoints from different campaigns share none — lined up on their deltas, a panel
-    would show two lists with nothing in common and call it a comparison.
-
-    ``lineage`` is dropped for the reason `connectors/promptpotter.py::_identity_config` drops it:
-    it is IDENTITY, not configuration, and it differs between any two candidates by construction —
-    carried, it would report a difference on every pair no matter what they were configured with.
-    """
-    entry = point.scores
-    fields = {k: v for k, v in (entry.get("prompt_fields") or {}).items() if k != "lineage" and v}
+    # The report restates what the arm announced before its first cell, so either names it.
+    searchpoint = point.arm.report or point.arm.announced
+    prompt_fields = {} if searchpoint is None else searchpoint.prompt_fields
+    # `lineage` is identity, not configuration: it differs between any two candidates.
+    fields = {k: v for k, v in prompt_fields.items() if k != "lineage" and v}
     return build_candidate_flat(
-        flatten_sp_summary(entry.get("resolved_pipeline_params")), {"prompt_fields": fields}
+        flatten_sp_summary(None if searchpoint is None else searchpoint.resolved_pipeline_params),
+        {"prompt_fields": fields},
     )
 
 
@@ -876,14 +732,7 @@ def _winner_chain_point(
 def _score_cells(
     compiled: CompiledExpression, channels: dict[str, dict[str, float]]
 ) -> tuple[dict[str, float], list[str]]:
-    """``({cell: value}, unscorable_cells)``. A cell the metric cannot read is dropped and NAMED:
-    ``ScoringTermMissingError`` is a term the row never carried and its parent a division by zero or
-    a non-finite result, and both mean unscorable here — never a value of zero.
-
-    Named rather than counted, because the two ways a cell can be blank on a chart are different
-    facts: this subject MEASURED it and the metric cannot read it, or this subject never measured
-    it at all. A count answers neither per cell, and a surface with only a count has to render both
-    the same."""
+    """Catches the parent error: a missing term and a non-finite result are both unscorable, never 0."""
     values: dict[str, float] = {}
     missed: list[str] = []
     for cell, row_channels in channels.items():
@@ -894,13 +743,10 @@ def _score_cells(
     return (values, sorted(missed))
 
 
-# What a reader asks of any searchpoint beside the selected metric: the terms a composite fitness
-# prices a cell on. Channel names, so each resolves through `cell_channels_of` like the metric does.
 SIDE_CHANNELS: tuple[str, ...] = ("cost", "latency", "tokens", "target_prompt_chars")
 
 
 def _cell_means(channels: dict[str, dict[str, float]]) -> dict[str, float]:
-    """``channel -> mean over the cells that carry it``, over the same cells the level is read on."""
     means: dict[str, float] = {}
     for channel in SIDE_CHANNELS:
         carried = [cell[channel] for cell in channels.values() if channel in cell]
@@ -909,25 +755,8 @@ def _cell_means(channels: dict[str, dict[str, float]]) -> dict[str, float]:
     return means
 
 
-def _spend_to_round(by_round: Mapping[str, SpendRollup]) -> dict[str, float]:
-    """``round -> USD this cycle had spent by the END of it``, cumulative and filled forward.
-
-    Folded FORWARD off the served per-round atom (``dashboard.json::spend_by_round``), never off
-    the ledger a second time: the projection banks every ``TokenUsageRecord`` into its own round as
-    it banks it into the cycle total, so a walk here would be a second arithmetic for one number —
-    and the one that disagrees is always the one nobody is watching.
-
-    CUMULATIVE, where the served atom is PER ROUND, because cumulative is the number this reading
-    shows and the atom is what it is summed from; the reverse does not hold. Filled forward so
-    every round from 0 to the last that billed has an entry: a round that spent nothing still HAS a
-    cost-to-here, and leaving it out would make a lookup miss where the honest answer is "the same
-    as the round before".
-
-    The cycle's HISTORY, as its dashboard folds it (``ledger.py::ledger_chain``), so on a fork the
-    rounds before the cut carry what the parent spent on them — the same roll-up as
-    ``cycle_spend_usd`` beside it, read per round.
-    """
-    per_round = {int(key): rollup.total_used_usd for key, rollup in by_round.items()}
+def _spend_to_round(by_round: Mapping[int, SpendRollup]) -> dict[str, float]:
+    per_round = {rnd: rollup.total_used_usd for rnd, rollup in by_round.items()}
     if not per_round:
         return {}
     running = 0.0
@@ -938,30 +767,26 @@ def _spend_to_round(by_round: Mapping[str, SpendRollup]) -> dict[str, float]:
     return out
 
 
-def _cycle_facts(cycle_dir: Path) -> _CycleFacts:
-    layout = CycleLayout(cycle_dir)
-    doc = read_json_tolerant(layout.round_file(0), {})
-    spend, spend_by_round = served_spend(read_json_tolerant(layout.dashboard, {})) or (None, {})
-    # The configuration the cycle ran under IS the arm — its hashes are stamped on round 0
-    # precisely so a campaign paused before round 1 still names what it measured.
-    hashes = (doc.get("optimizer_state") or {}).get("prompt_hashes")
-    # `None` on any backend declaring no measurement identity — every campaign shares that absence,
-    # so the arm alone is the whole grouping there.
-    instrument = instrument_of(doc.get("pipeline_params"))
-    raw = doc.get("ability")
+def _cycle_facts(cycle_dir: Path, dataset_name: str) -> _CycleFacts:
+    chain = ledger_chain(CycleDir(cycle_dir))
+    standing = scan_standing_rounds(chain).rounds
+    origin = standing[0].close if 0 in standing else None
+    spend_by_round = scan_ledger_spend_by_round(chain)
+    hashes = origin.optimizer_state.prompt_hashes if origin else None
     return _CycleFacts(
-        # An UNSTAMPED round is an UNKNOWN arm, never the origin's: on one hash, `replicates`
-        # reports every unstamped campaign as a replicate of the rest over a shared absence.
-        arm_id=_arm_hash(dict(hashes)) if isinstance(hashes, dict) and hashes else None,
-        instrument_id=str(instrument) if isinstance(instrument, str) else None,
-        ability=AbilityReading.model_validate(raw) if isinstance(raw, dict) else None,
-        spend_usd=spend.total_used_usd if spend else None,
-        rounds_scored=max(len(list(layout.rounds.glob(ROUND_GLOB))) - 1, 0),
+        # Unstamped is `None`, never a shared hash: `replicates` would pair every unstamped campaign.
+        arm_id=stable_hash(dict(hashes)) if hashes else None,
+        instrument_id=cycle_instrument(dataset_name, standing),
+        ability=origin.ability if origin else None,
+        # No bill at all priced nothing (`None`); bills summing to 0 measured it.
+        spend_usd=scan_ledger_spend(chain).spend.total_used_usd if spend_by_round else None,
+        rounds_scored=max(len(standing) - 1, 0),
         spend_to_round=_spend_to_round(spend_by_round),
     )
 
 
 def _reading_row(
+    stores: Stores,
     spec: SubjectSpec,
     head: _Head,
     compiled: CompiledExpression,
@@ -971,14 +796,8 @@ def _reading_row(
     include_winner_chain: bool,
     include_config: bool,
 ) -> SubjectReading:
-    """One roster row. The arm, the instrument, the ruler and the spend are facts about the CYCLE
-    the subject sits in, so a course and a candidate read them off their own cycle rather than off
-    the campaign's root — two courses of one campaign can sit on different rulers."""
     values, unscorable = _score_cells(compiled, channels)
-    # Straight off the point's own report, and left ABSENT where it carries none: a 0 here is the
-    # measurement "every cell was earned", which is the opposite claim (`evidence/CLAUDE.md`).
-    banked = head.point.scores.get("cached_samples")
-    replayed = banked if isinstance(banked, int) and not isinstance(banked, bool) else None
+    arm = head.point.arm
     value, ci_lo, ci_hi, n_cells = merge_cells(values)
     return SubjectReading(
         key=spec.key,
@@ -990,8 +809,6 @@ def _reading_row(
         label=head.label,
         dataset_name=head.dataset_name,
         created_at=head.created_at,
-        # Stamped against the whole selection one pass later — a verdict about how this row sits
-        # with the others cannot be reached while the others are still being built.
         comparable=None,
         comparable_note="",
         mask=(
@@ -1003,9 +820,8 @@ def _reading_row(
             else None
         ),
         scenario=head.scenario,
-        # A campaign is its origin and nothing precedes it; the other two stand on a branch.
         winner_chain=(
-            _winner_chain(head, spec, compiled, channels)
+            _winner_chain(stores, head, spec, compiled, channels)
             if include_winner_chain and spec.kind != "campaign"
             else None
         ),
@@ -1013,7 +829,9 @@ def _reading_row(
         arm_id=cycle.arm_id,
         authorship=head.authorship,
         human_intervened=head.human_intervened,
-        cached_samples=replayed,
+        status=arm.state,
+        expected_samples=arm.walk_length if arm.report is None else arm.report.expected_samples,
+        cached_samples=None if arm.report is None else arm.report.cached_samples,
         instrument_id=cycle.instrument_id,
         ability=cycle.ability,
         round=head.point.round,
@@ -1030,46 +848,45 @@ def _reading_row(
     )
 
 
+def _lift(edit: RankedEdit) -> float | None:
+    headline = edit.reading.headline
+    return None if headline is None else headline.estimate.value
+
+
 def _edit_spread(rows: list[RankedEdit]) -> EditSpread:
-    return EditSpread(edit_effect_sd=sample_sd([r.anchor_effect for r in rows]), n_edits=len(rows))
+    lifts = [lift for r in rows if (lift := _lift(r)) is not None]
+    return EditSpread(edit_effect_sd=sample_sd(lifts), n_edits=len(lifts))
 
 
-def _accumulate_round(
-    doc: dict[str, Any],
-    origin_values: dict[str, float],
-    hop: CycleHop,
-    accums: dict[tuple[str, str], _Accum],
-    compiled: CompiledExpression,
-    *,
-    anchor_hash: str,
-) -> None:
-    """An edit is worth whatever the SELECTED metric says it is — seconds, dollars, rounds, lift.
-    A candidate row is a cell like any other (on the recursion, its own inner campaign), so every
-    channel the roster can answer, the ranking can answer too.
+def _ranked(edits: list[RankedEdit], family_id: str) -> list[RankedEdit]:
+    def rank(edit: RankedEdit) -> tuple[bool, float, str]:
+        lift = _lift(edit)
+        return (lift is None, 0.0 if lift is None else -lift, edit.label)
 
-    Keyed ``(campaign, sp_hash)``, and the ANCHOR is excluded by equality with round 0's own hash —
-    which searchpoint a row IS, rather than a guess off an empty overlay that reads every
-    prompt-only candidate as the origin. No round is skipped, round 0 included.
-    """
-    round_num = int(doc.get("round", 0) or 0)
-    for cand in doc.get("candidate_scores") or []:
-        cand_id = str(cand.get("candidate_id", ""))
-        sp_hash = str(cand.get("sp_hash") or "")
-        # An unstamped row names no searchpoint, so it groups with NOTHING — pooling every one of
-        # them under `""` would rank the absence itself, the way an unstamped `arm_id` would.
+    ordered = sorted(edits, key=rank)
+    stamped = as_family([r.reading for r in ordered], family_id)
+    return [
+        r.model_copy(update={"reading": reading})
+        for r, reading in zip(ordered, stamped, strict=True)
+    ]
+
+
+def _campaign_edits(
+    cycle: _Cycle, origin: SubjectMember, measurand: Measurand, *, anchor_hash: str
+) -> list[RankedEdit]:
+    address = origin.rows.address
+    hop = address.path[-1]
+    accums: dict[str, _Accum] = {}
+    pooled: set[str] = set()
+    for (round_num, _), arm in cycle.walked.arms.items():
+        cand_id = arm.candidate_id
+        sp_hash = "" if arm.report is None else arm.report.sp_hash
         if not cand_id or not sp_hash or sp_hash == anchor_hash:
             continue
-        cand_cells, _ = _score_cells(
-            compiled, cell_channels((doc.get("all_candidate_results") or {}).get(cand_id) or [])
+        acc = accums.setdefault(
+            sp_hash,
+            _Accum(ArmPointer(round=round_num, label=arm.label, candidate_id=cand_id)),
         )
-        paired = {c: cand_cells[c] for c in cand_cells if c in origin_values}
-        if not paired:
-            continue
-        key = (hop.campaign_id, sp_hash)
-        acc = accums.get(key)
-        if acc is None:
-            acc = _Accum(str(cand.get("label") or sp_hash))
-            accums[key] = acc
         acc.provenance.append(
             EffectProvenance(
                 campaign_id=hop.campaign_id,
@@ -1078,44 +895,32 @@ def _accumulate_round(
                 candidate_id=cand_id,
             )
         )
-        for cell, cand_fit in paired.items():
-            acc.cand_by_cell.setdefault(cell, []).append(cand_fit)
-            acc.orig_by_cell.setdefault(cell, []).append(origin_values[cell])
-
-
-def _finalize(campaign_id: str, sp_hash: str, acc: _Accum) -> RankedEdit:
-    """Aggregate one edit into its ranked row — **per cell, then across cells**, so the SE comes from
-    n = CELLS and a cell measured five times cannot outweigh five cells measured once."""
-    per_cell: list[CellEffect] = []
-    cell_cand: list[float] = []
-    cell_orig: list[float] = []
-    n_meas = 0
-    for cell in sorted(acc.cand_by_cell):
-        cand_vals = acc.cand_by_cell[cell]
-        orig_vals = acc.orig_by_cell[cell]
-        mean_d, _se_d, n = paired_diff_posterior(cand_vals, orig_vals)
-        per_cell.append(CellEffect(cell=cell, mean_d=mean_d, n=n))
-        n_meas += n
-        # ONE paired point per cell — the cell's own mean level. Equal-length lists make
-        # the elementwise paired mean identical to the difference of means, so this is
-        # exactly ``mean_d`` re-expressed as a (candidate, origin) pair for stage two.
-        cell_cand.append(sum(cand_vals) / len(cand_vals))
-        cell_orig.append(sum(orig_vals) / len(orig_vals))
-
-    # The same exact test the pairwise table runs, so the two readings on one page cannot hold an
-    # edit to different standards — and a single wild cell cannot carry an edit up the ranking.
-    anchor, ci_lo, ci_hi, _p, _n = exact_paired_reading(cell_cand, cell_orig)
-    return RankedEdit(
-        sp_hash=sp_hash,
-        campaign_id=campaign_id,
-        label=acc.label,
-        provenance=acc.provenance,
-        anchor_effect=anchor,
-        ci_lo=ci_lo,
-        ci_hi=ci_hi,
-        n_cells=len(per_cell),
-        n_measurements=n_meas,
-    )
+        if cand_id in pooled:
+            continue
+        pooled.add(cand_id)
+        acc.cells.update((cell.key, cell) for cell in cycle.sheet(cand_id))
+    return [
+        RankedEdit(
+            sp_hash=sp_hash,
+            campaign_id=hop.campaign_id,
+            label=acc.arm.label,
+            provenance=acc.provenance,
+            reading=pair_subjects(
+                origin,
+                SubjectMember(
+                    _member_rows(
+                        address.path,
+                        acc.arm,
+                        CellSheet(cycle.scorer.id, tuple(acc.cells.values())),
+                        origin.rows.instrument_id,
+                    ),
+                    masked=False,
+                ),
+                measurand,
+            ),
+        )
+        for sp_hash, acc in accums.items()
+    ]
 
 
 __all__ = [

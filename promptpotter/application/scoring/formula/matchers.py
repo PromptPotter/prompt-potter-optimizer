@@ -1,5 +1,4 @@
-"""The LABEL arm of a two-arm extraction seam — it parses answer prose and decides HIT/MISS. The SHAPE arm is NOT
-in this repo: the backend destructures ``answer_field`` first, so check there when scoring looks wrong."""
+"""The LABEL arm only: the backend destructures ``answer_field`` first, outside this repo."""
 
 from __future__ import annotations
 
@@ -28,8 +27,6 @@ def _rr(k: int | None) -> float:
 
 
 def _aime_match(predicted: str, ground_truth: str) -> float:
-    """Match AIME integers in [0, 999]. Extraction is the SHARED ``extract_boxed_number`` — the same value the display side
-    renders — so this keeps only the int coercion, the overflow guard and the range semantics."""
     try:
         gt = int(ground_truth.strip())
     except (ValueError, AttributeError):
@@ -46,21 +43,12 @@ def _aime_match(predicted: str, ground_truth: str) -> float:
 
 
 def _list_rr(predicted: str, ground_truth: str) -> float:
-    """Reciprocal rank of ``ground_truth`` within a LIST the model returned, else 0.0.
-
-    The recommendation shape: the answer is not one label but an ordered set, and the held-out
-    item is either somewhere in it or not. Graded rather than binary on purpose — naming the
-    right film first and naming it tenth are different answers, and a hit/miss matcher would
-    hand the optimizer the same number for both."""
     rank = text_list_rank(predicted, ground_truth)
     return 1.0 / rank if rank else 0.0
 
 
 def _label_match(predicted: str, ground_truth: str) -> float:
-    """The LAST bold span, compared to the label under a benchmark grader's tolerances — the rules
-    of google-deepmind/bbeh ``evaluate.py`` (``preprocess_sample`` + ``fuzzy_match``), which are
-    generic to any labelled task: ``(D)`` equals ``D``, ``5.0`` equals ``5``, and quotes, brackets,
-    a trailing ``.`` or ``?`` and LaTeX wrappers do not decide a hit."""
+    """The tolerances are google-deepmind/bbeh ``evaluate.py``'s (``preprocess_sample`` + ``fuzzy_match``)."""
     p = extract_last_bold(predicted).strip().strip("_").strip().lower()
     p = p.replace(", ", ",").replace("**", "").split("\n")[0].removesuffix(".")
     if p.startswith("$") and p.endswith("$"):
@@ -99,17 +87,7 @@ SCORING_FUNCTIONS: dict[str, Callable[..., Any]] = {
 }
 
 
-# The answer-format contract each extract-then-compare matcher imposes on the
-# committed prompt. This is where extractability is DECIDED — the matcher reads a
-# label out of the raw model output — so the contract lives with the matcher, not
-# the backend (TermNorm's ``llm_only`` passes the raw answer straight through; it's
-# the ``shared`` extractors (``extract_last_bold`` / ``extract_gsm8k_number``) that
-# isolate the label). Fed to the
-# origin check-in resolver (``origin_resolve.build_origin_consultation``) so it
-# authors an ``answer_format`` the chosen scorer can actually read — told, not
-# gated: an empty format is a legal origin the optimizer evolves, and round-0
-# health is what catches an unscoreable one. Matchers that compare the raw text
-# (no extraction step) carry no entry — the output IS the label.
+# Told to the origin check-in, not gated; a matcher comparing the raw text carries no entry.
 EXTRACTION_NOTES: Annotated[dict[str, str], shapes_optimizer_prompt] = {
     "label_match": (
         "Scoring matches the answer after taking the LAST bolded span (the "
@@ -139,8 +117,6 @@ EXTRACTION_NOTES: Annotated[dict[str, str], shapes_optimizer_prompt] = {
 
 @shapes_optimizer_prompt
 def extraction_note_for_scoring(scoring: str) -> str:
-    """The answer-format contract the committed prompt must satisfy — the union of notes for every matcher the formula
-    names. Empty when no extract-then-compare matcher is used, since the raw output is then compared as-is."""
     return " ".join(note for name, note in EXTRACTION_NOTES.items() if name in scoring)
 
 

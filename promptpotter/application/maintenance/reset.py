@@ -1,6 +1,3 @@
-"""Drop campaigns + sessions; PRESERVE every paid cache (``layout.py::SHARED_CACHE_DIRS``) and every
-config tier. The L4 inner sandboxes are the one drop target OUTSIDE the tenant dir (``layout.py``)."""
-
 from __future__ import annotations
 
 import logging
@@ -28,12 +25,10 @@ logger = logging.getLogger(__name__)
 __all__ = ["ResetPlan", "SandboxDrop", "TenantReset", "apply_reset", "plan_reset"]
 
 
-# Top-level names ``reset`` removes; everything else is preserved by default. A head-to-head
-# manifest names campaigns, so it goes with them.
-_DROP_NAMES = ("campaigns", "sessions", "head_to_heads")
+# A head-to-head manifest names campaigns, so it goes with them.
+_DROP_NAMES = ("campaigns", "head_to_heads")
 
-# Preserved names, EXHAUSTIVE so anything left over surfaces as "unrecognized". `SHARED_CACHE_DIRS`
-# is real LLM spend, SPLICED so a cache added there is never destroyed by `reset`.
+# Exhaustive, so a leftover surfaces as unrecognized; `SHARED_CACHE_DIRS` is spliced so a new cache is never destroyed.
 _PRESERVE_NAMES = (
     *SHARED_CACHE_DIRS,
     "diagnostics",
@@ -50,8 +45,6 @@ _PRESERVE_NAMES = (
 
 @dataclass(frozen=True, slots=True)
 class TenantReset:
-    """One tenant workspace's top level, sorted into what a reset takes and what it leaves."""
-
     workspace: WorkspaceDir
     drop: tuple[Path, ...]
     preserve: tuple[Path, ...]
@@ -64,27 +57,20 @@ class TenantReset:
 
 
 class SandboxDrop(NamedTuple):
-    """One inner sandbox plus the owner it banks INTO."""
-
     sandbox: Path
     owner: SandboxOwner
 
 
 @dataclass(frozen=True, slots=True)
 class ResetPlan:
-    """What a reset would do, read off disk and applied by :func:`apply_reset` unchanged — the
-    dry run and the real one are one plan, so a preview cannot describe a different removal."""
-
     projects_root: Path
     tenants: tuple[TenantReset, ...]
     sandboxes: tuple[SandboxDrop, ...]
-    # No usable owner record names no workspace to bank into, so these are KEPT — the posture
-    # `jobs/reaper.py::reclaim_orphan_sandboxes` takes over the same tree.
+    # Kept: no owner record names no workspace to bank into (as `jobs/reaper.py::reclaim_orphan_sandboxes`).
     unattributable_sandboxes: tuple[Path, ...]
 
     @property
     def drops(self) -> list[str]:
-        """Every path the plan removes, in removal order."""
         return [
             *(str(p) for tenant in self.tenants for p in tenant.drop),
             *(tenant.pointer_label for tenant in self.tenants if tenant.holds_pointer),
@@ -114,8 +100,7 @@ def _plan_tenant(workspace: WorkspaceDir) -> TenantReset:
 
 
 def plan_reset(projects_root: Path, *, tenant_id: str | None) -> ResetPlan:
-    """*tenant_id* ``None`` plans every tenant. A named one is the caller's resolved identity, never
-    a literal ``default``: the first web sign-in RENAMES ``projects/default/``."""
+    """A named tenant is the caller's resolved identity, never a literal `default`: the first web sign-in renames it."""
     if tenant_id is not None:
         workspaces = [tenant_workspace(projects_root, tenant_id)]
     elif projects_root.is_dir():
@@ -144,8 +129,6 @@ def plan_reset(projects_root: Path, *, tenant_id: str | None) -> ResetPlan:
 
 
 def _remove(path: Path) -> None:
-    """The two ROBUST deleters: a tenant tree nests ``.inner/``-depth paths a plain ``rmtree``
-    cannot remove at all."""
     if path.is_dir() and not path.is_symlink():
         rmtree_robust(path)
     elif path.exists() or path.is_symlink():
@@ -154,8 +137,7 @@ def _remove(path: Path) -> None:
 
 def apply_reset(plan: ResetPlan) -> None:
     for tenant in plan.tenants:
-        # Money first — every ledger lives inside `campaigns/`, so banking after the drop banks
-        # nothing, and an account's ceiling becomes re-earnable by running a dev verb.
+        # Money first: every ledger lives inside `campaigns/`, so banking after the drop banks nothing.
         CampaignStore(tenant.workspace).bank_all_before_removal()
         for path in tenant.drop:
             _remove(path)
@@ -164,8 +146,7 @@ def apply_reset(plan: ResetPlan) -> None:
         if tenant.holds_pointer:
             clear_active_pointer(tenant.workspace)
             logger.info("reset: cleared active-session pointer for %s", tenant.workspace.name)
-    # After the campaign trees: the sandbox residue is what its cycles have NOT already forwarded
-    # onto an outer ledger, so outer totals then residue sum to everything exactly once.
+    # After the campaign trees: outer totals, then the sandbox residue not already forwarded, sum exactly once.
     for target in plan.sandboxes:
         store = CampaignStore(tenant_workspace(plan.projects_root, target.owner.tenant_id))
         store.delete_inner_sandbox(target.sandbox, campaign_id=target.owner.campaign_id)

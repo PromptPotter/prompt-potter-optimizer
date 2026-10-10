@@ -1,13 +1,12 @@
-"""MCTS backprop + UCB over the lineage. Only a cycle's OWN rounds are nodes — a fork's copied prefix inflates every
-ancestor's visits. The value is θ (subsets differ), and Q is min-max normalized since UCB1 assumes [0, 1]."""
-
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass
 
 from promptpotter.application.mask.record import SpineCycle
-from promptpotter.config.settings import UCB_EXPLORATION_C
+
+# UCB1's regret-optimal constant for rewards in [0, 1]; NOT a knob: one rewind costs a cycle.
+UCB_EXPLORATION_C: float = math.sqrt(2)
 
 NodeKey = tuple[str, int]
 """A logical tree node: ``(cycle_id, round)`` — the cycle that FIRST produced it."""
@@ -15,8 +14,7 @@ NodeKey = tuple[str, int]
 
 @dataclass(frozen=True)
 class NodeStats:
-    """One lineage node's backpropagated N, W, Q. ``visits`` is the size of the subtree rooted here, across every fork —
-    a high ``q`` with few ``visits`` is exactly what the exploration term exists to surface."""
+    """``visits`` is the size of the subtree rooted here, across every fork."""
 
     cycle_id: str
     round: int
@@ -25,12 +23,11 @@ class NodeStats:
 
     @property
     def q(self) -> float:
-        """Mean subtree value. ``visits`` is >= 1 for every node the fold emits."""
+        """``visits`` is >= 1 for every node the fold emits."""
         return self.value_sum / self.visits
 
 
 def _canonical_rounds(cycle: SpineCycle) -> list[int]:
-    """A cycle's OWN rounds — the inherited prefix belongs to the parent, not here."""
     cut = cycle.fork_from_round
     rounds = sorted(cycle.theta_by_round)
     if cycle.parent_cycle_id is None or cut is None:
@@ -39,7 +36,6 @@ def _canonical_rounds(cycle: SpineCycle) -> list[int]:
 
 
 def _parent_of(cycle: SpineCycle, rnd: int, first_round: int) -> NodeKey | None:
-    """The tree edge above *rnd*: the prior round on this spine, else the branch-point."""
     if rnd > first_round:
         return (cycle.cycle_id, rnd - 1)
     cut = cycle.fork_from_round
@@ -49,8 +45,6 @@ def _parent_of(cycle: SpineCycle, rnd: int, first_round: int) -> NodeKey | None:
 
 
 def accumulate_node_stats(spine: list[SpineCycle]) -> dict[NodeKey, NodeStats]:
-    """Backpropagate every round's θ up to its ancestors; each round is one simulation. An ancestor's statistics answer
-    "what did re-expanding from here yield, everywhere it was tried?" — which no per-cycle counter can."""
     parents: dict[NodeKey, NodeKey | None] = {}
     own: dict[NodeKey, float] = {}
     for cycle in spine:
@@ -64,8 +58,7 @@ def accumulate_node_stats(spine: list[SpineCycle]) -> dict[NodeKey, NodeStats]:
             parents[key] = _parent_of(cycle, rnd, first)
 
     stats = {k: NodeStats(k[0], k[1], visits=1, value_sum=v) for k, v in own.items()}
-    # Walk each node's ancestor chain once. Depth is a lineage's length (tens), so the
-    # O(nodes x depth) walk is cheaper than materializing a child adjacency map.
+    # Depth is a lineage's length (tens), so the walk beats materializing a child adjacency map.
     for key, value in own.items():
         seen: set[NodeKey] = {key}
         cur = parents.get(key)
@@ -82,7 +75,6 @@ def accumulate_node_stats(spine: list[SpineCycle]) -> dict[NodeKey, NodeStats]:
 def _ancestors(
     stats: dict[NodeKey, NodeStats], spine: list[SpineCycle], node: NodeKey
 ) -> list[NodeKey]:
-    """*node*'s strict ancestors, nearest first — the rewind targets on offer."""
     by_cycle = {c.cycle_id: c for c in spine}
     out: list[NodeKey] = []
     cur: NodeKey | None = node
@@ -107,17 +99,14 @@ def select_rewind_round(
     cycle_id: str,
     current_round: int,
 ) -> int | None:
-    """The UCB1 pick: which ancestor round to re-expand from. The ABSOLUTE round number is valid in the current cycle's coordinates,
-    since a fork carries the parent's rounds under their original numbers. ``None`` ⇒ the caller must not fork."""
+    """The round is in the current cycle's coordinates; ``None`` ⇒ the caller must not fork."""
     stats = accumulate_node_stats(spine)
     node: NodeKey = (cycle_id, current_round)
     candidates = [a for a in _ancestors(stats, spine, node) if a[1] < current_round]
     if not candidates:
         return None
 
-    # θ is in logits; UCB1's bonus assumes [0, 1]. Normalize across the forest so the
-    # exploration constant means what it says. A degenerate forest (every node the same
-    # θ) collapses to pure exploration — correct: nothing distinguishes the arms.
+    # θ is in logits and UCB1 assumes [0, 1]; a one-θ forest collapses to pure exploration.
     values = [s.q for s in stats.values()]
     lo, hi = min(values), max(values)
     span = hi - lo

@@ -1,5 +1,4 @@
-"""Between-round CAT primitives + the round-static scoring-order builder. Both terms of the
-acquisition score and the round order: ``docs/methods/verdict-resolution.md``."""
+"""Both terms of the acquisition score and the round order: ``docs/methods/verdict-resolution.md``."""
 
 from __future__ import annotations
 
@@ -7,11 +6,12 @@ import math
 from collections.abc import Iterable, Mapping, Sequence
 from typing import TYPE_CHECKING
 
-from promptpotter.domain.scoring import is_hit
+from promptpotter.domain.scoring import ROW_GRADES, is_hit
 from promptpotter.shared import sigmoid
 
 if TYPE_CHECKING:
     from promptpotter.domain.ruler import DeltaRuler
+    from promptpotter.domain.scoring import GradedCell
 
 __all__ = [
     "build_round_order",
@@ -19,6 +19,7 @@ __all__ = [
     "decision_order",
     "delta_learning_gain",
     "marginal_hit_probability",
+    "parent_grades",
     "pick_value",
     "update_theta_posterior",
 ]
@@ -32,7 +33,6 @@ def _normal_cdf(x: float) -> float:
 
 
 def _binary_entropy(p: float) -> float:
-    """Binary (Shannon) entropy in nats; 0 at ``p ∈ {0, 1}``."""
     if p <= 0.0 or p >= 1.0:
         return 0.0
     return -p * math.log(p) - (1.0 - p) * math.log(1.0 - p)
@@ -52,8 +52,7 @@ def marginal_hit_probability(
 def update_theta_posterior(
     mu: float, var: float, delta_s: float, se_delta_s: float, hit: bool
 ) -> tuple[float, float]:
-    """One Newton-step Gaussian update on ``θ_c`` given ``(δ_s, se_δ_s, hit)``: a 1PL likelihood
-    marginalized over δ_s via probit. As ``se_delta_s → 0`` this is the plain 1PL Laplace update."""
+    """One Newton step on a 1PL likelihood marginalized over δ_s via probit, not a full fit."""
     scale = math.sqrt(1.0 + _PROBIT_SCALE * se_delta_s * se_delta_s)
     p = sigmoid((mu - delta_s) / scale)
     score = ((1.0 if hit else 0.0) - p) / scale
@@ -76,7 +75,6 @@ def decision_information_gain(
     mu_miss, var_miss = update_theta_posterior(mu_c, var_c, delta_s, se_delta_s, False)
     p_hit = _normal_cdf((mu_hit - mu_s) / math.sqrt(var_hit + var_s))
     p_miss = _normal_cdf((mu_miss - mu_s) / math.sqrt(var_miss + var_s))
-    # Probit ``E[σ(N(m, v))] ≈ σ(m / √(1 + π·v/8))`` over joint (candidate, sample) variance.
     m = mu_c - delta_s
     v = var_c + se_delta_s * se_delta_s
     p_bar = sigmoid(m / math.sqrt(1.0 + _PROBIT_SCALE * v))
@@ -110,17 +108,18 @@ def pick_value(
     ) + delta_learning_gain(mu_c, var_c, delta_s, se_delta_s)
 
 
+def parent_grades(parent_rows: Iterable[GradedCell]) -> dict[int, float]:
+    """CORRECTNESS, not the composite: ``is_hit`` reads every sub-1.0 ``per_cell`` composite as a miss."""
+    return {cell.sample_id: ROW_GRADES["fitness"].read(cell) for cell in parent_rows if cell.scored}
+
+
 def build_round_order(
     parent_grades: Mapping[int, float],
     ruler: DeltaRuler | None,
     sample_ids: Sequence[int],
 ) -> list[int]:
-    # The parent's grade is THREE-state and `is_hit` answers two, so `None` — never answered — has
-    # its own stratum: read as a miss, a panel sharing no cell with the parent is all
-    # win-opportunities sorted ascending and leads with its easiest cell.
-    # An unmeasured δ stands at the ruler's own CENTRE, never 0.0: zero is a position on this
-    # scale, and the miss stratum sorts ascending. A cold ruler is flat, so everything ties there
-    # and the order falls back to sample id.
+    # `None` (never answered) has its own stratum: read as a miss, an unshared panel leads with its easiest cell.
+    # An unmeasured δ stands at the ruler's CENTRE, never 0.0, which is a position on this scale.
     miss_stratum: list[int] = []
     hit_stratum: list[int] = []
     unknown_stratum: list[int] = []
@@ -139,8 +138,7 @@ def build_round_order(
 
     miss_stratum.sort(key=lambda sid: (_delta(sid), sid))
     hit_stratum.sort(key=lambda sid: (-_delta(sid), sid))
-    # No evidence either way, so neither end is the useful one: a cell discriminates most where
-    # its δ sits nearest the scale's centre.
+    # No evidence either way: a cell discriminates most where its δ sits nearest the centre.
     unknown_stratum.sort(key=lambda sid: (abs(_delta(sid) - centre), sid))
 
     order: list[int] = []
@@ -175,21 +173,7 @@ def decision_order(
     delta_se_map: dict[int, float],
     sample_ids: Iterable[int],
 ) -> list[int]:
-    """Rank ``sample_ids`` on ``decision_information_gain`` ALONE — what separates the arms in
-    front of us, with nothing spent on refining δ. On the SUM, ``delta_learning_gain`` dominates
-    and the panel buys whatever the ruler knows least; the ruler gets its cells as the reserved
-    tail :func:`_with_ruler_learning` cuts instead.
-
-    Both maps are TOTAL over ``sample_ids`` — the caller substitutes the ruler's own centre and
-    population SE for an unabsorbed cell, and a default here would be a second, wronger answer to
-    that. Ties break on sid: arbitrary, but reproducible for the resume replayer.
-
-    **δ is fit ACROSS arms and this reads it as if it predicted THIS one**, so the gain overstates
-    what a draw buys: at δ ≈ θ a cell is a coin flip for the ruler's population and very nearly
-    deterministic for one model at ``temperature 0`` under two wordings. Most cells come back
-    unanimous whatever is bought — the width a round can read is set by how far apart the ARMS
-    are, not by which cells are drawn. Weighting the gain by a cell's own separation history is
-    the obvious repair and ranks at chance on banked rounds; do not re-derive it here."""
+    """On ``decision_information_gain`` ALONE: summed, ``delta_learning_gain`` dominates; it overstates ONE arm's draw."""
     return sorted(
         sample_ids,
         key=lambda sid: (

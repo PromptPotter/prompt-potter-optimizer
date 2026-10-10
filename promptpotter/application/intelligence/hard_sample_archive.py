@@ -1,5 +1,3 @@
-"""Cross-cycle hard-sample artifact — archive-sourced peer of :mod:`hard_sample_sorter`."""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -9,125 +7,83 @@ from promptpotter.application.intelligence.exploration import (
     Observation,
     dedup_observations,
 )
-from promptpotter.application.intelligence.hard_sample_sorter import (
-    build_hard_samples_artifact_from_observations,
-)
-from promptpotter.application.scoring.formula import rescore_results
-from promptpotter.domain.measurement_provenance import entry_grade, meets_grade
-from promptpotter.domain.scoring import is_graded
+from promptpotter.domain.measurement_provenance import meets_grade
 from promptpotter.infrastructure.store import archive_queries
 from promptpotter.infrastructure.store.read_model import derived
 
 if TYPE_CHECKING:
-    from promptpotter.domain.scoring import CellScorer
+    from promptpotter.domain.scoring import Scorer
     from promptpotter.infrastructure.store.stores import Stores
 
-__all__ = [
-    "build_archive_hard_samples_artifact",
-    "build_archive_observations",
-]
+__all__ = ["build_archive_observations"]
 
-# The one provenance grade every δ fit is built from — deliberate, full-LLM-path
-# measurements, not connector noise. The ruler PoBB kills candidates with and the
-# heatmap the operator reads must be the same scale, so this is not a knob.
+# Not a knob: the ruler PoBB cuts with and the heatmap the operator reads must be the same scale.
 _RULER_GRADE = "A"
 
 
-def _run_cells(
+def _population_cells(
     stores: Stores,
-    run_id: str,
-    sig: tuple[int, int] | None,
+    entry: dict[str, Any],
+    sig: list[list[Any]],
     *,
-    scorer: CellScorer,
-    scorer_id: str,
-) -> tuple[tuple[int, float], ...]:
-    """Keyed by archive dir and scorer beside the run: the archive is tenant-scoped, the grade is
-    the READER's formula, and a run's detail GROWS under the scoring walk."""
+    scorer: Scorer,
+) -> tuple[tuple[int, float, str], ...]:
+    """``(sample_id, objective, grade)``; memoized by archive dir AND scorer: the grade is the READER's formula."""
 
-    def grade() -> tuple[tuple[int, float], ...]:
-        detail = archive_queries.load_run(stores, run_id)
-        if detail is None:
+    def grade() -> tuple[tuple[int, float, str], ...]:
+        held = archive_queries.load_population(stores, entry)
+        if held is None:
             return ()
-        rows = rescore_results([dict(item) for item in detail.get("measurements", [])], scorer)
         return tuple(
-            (int(sid), float(row["objective"]))
-            for row in rows
-            if (sid := row.get("sample_id")) is not None and is_graded(row)
+            (cell.sample_id, float(objective), cell.facts.provenance or "C")
+            for cell in scorer.read(held["measurements"])
+            if cell.scored and (objective := cell.grade.objective) is not None
         )
 
-    key = ("run_cells", stores.archive.base_dir, run_id, scorer_id)
-    return derived(key, sig=sig, compute=grade) or ()
+    # A controlled line's memory moves without its files moving, so it is never memoized.
+    if archive_queries.memory_scoped():
+        return grade()
+    key = (
+        "population_cells",
+        stores.archive.base_dir,
+        entry["config_key"],
+        entry.get("dataset_name"),
+        scorer.id,
+    )
+    return derived(key, sig=tuple(map(tuple, sig)) or None, compute=grade) or ()
 
 
 def build_archive_observations(
     stores: Stores,
     *,
     dataset_name: str | None,
-    scorer: CellScorer,
-    scorer_id: str,
+    scorer: Scorer,
     sample_ids: frozenset[int] | None,
     origin_sp_hash: str | None = None,
 ) -> list[Observation]:
-    """Measurement store → ``Observation`` triples. **The candidate is the SEARCHPOINT, not the run** — keying on
-    ``content_hash`` turns one prompt re-scored on N subsets into N candidates. Grade A only, by construction.
-
-    **The archive stores MEASUREMENTS; the grade is the READING campaign's** — *scorer* grades every
-    row, so one ruler is one formula, and a cell that formula cannot grade reaches no δ.
-
-    *sample_ids* is the reading campaign's search pool: the archive is filed by dataset, so a row of
-    that campaign's bench set sits here too and must reach no ruler it selects on. ``None`` reads all."""
+    """*sample_ids* is the SEARCH pool: the archive is filed by dataset, so bench rows sit here and must reach no ruler."""
     obs: list[Observation] = []
-    sigs = archive_queries.run_signatures(stores)
-    # A run the sample fold already graded under this formula, and that has not grown since.
+    sigs = archive_queries.population_signatures(stores, dataset_name=dataset_name)
     folded = {
-        row["run_id"]: row["graded"]
+        row.config_key: row.graded
         for row in archive_queries.sample_fold_rows(stores, dataset_name=dataset_name or "")
-        if row.get("fk") == scorer_id
-        and "graded" in row
-        and list(sigs.get(row["run_id"]) or ()) == list(row.get("sig") or ())
+        if row.fk == scorer.id and sigs.get(row.config_key) == row.sig
     }
-    entries = archive_queries.list_runs(stores, dataset_name=dataset_name)
-    for entry in sorted(entries, key=lambda e: (e.get("created_at") or "", e.get("run_id") or "")):
-        if not meets_grade(entry_grade(entry), _RULER_GRADE):
-            continue
+    for entry in archive_queries.list_populations(stores, dataset_name=dataset_name):
         candidate_id = (entry.get("prompt_fields_id") or "").strip()
-        run_id = entry.get("run_id")
-        if not candidate_id or not run_id:
+        if not candidate_id:
             continue
         if origin_sp_hash and candidate_id == origin_sp_hash:
             candidate_id = ORIGIN_ABILITY_ID
+        key = entry["config_key"]
+        cells = (
+            folded[key]
+            if key in folded
+            else _population_cells(stores, entry, sigs.get(key) or [], scorer=scorer)
+        )
         obs.extend(
             Observation(candidate_id, sample_id, response)
-            for sample_id, response in (
-                folded[run_id]
-                if run_id in folded
-                else _run_cells(
-                    stores, run_id, sigs.get(run_id), scorer=scorer, scorer_id=scorer_id
-                )
-            )
-            if sample_ids is None or sample_id in sample_ids
+            for sample_id, response, grade in cells
+            if meets_grade(grade, _RULER_GRADE) and (sample_ids is None or sample_id in sample_ids)
         )
     return dedup_observations(obs)
-
-
-def build_archive_hard_samples_artifact(
-    stores: Stores,
-    *,
-    dataset_name: str | None,
-    scorer: CellScorer,
-    scorer_id: str,
-    top_k_candidates: int | None = 40,
-    top_k_samples: int | None = 40,
-) -> dict[str, Any]:
-    return build_hard_samples_artifact_from_observations(
-        build_archive_observations(
-            stores,
-            dataset_name=dataset_name,
-            scorer=scorer,
-            scorer_id=scorer_id,
-            sample_ids=None,
-        ),
-        cycle_id=None,
-        top_k_candidates=top_k_candidates,
-        top_k_samples=top_k_samples,
-    )

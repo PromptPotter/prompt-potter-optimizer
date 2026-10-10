@@ -1,9 +1,7 @@
-"""The ``ab`` verb's session half: open a session on ANY campaign by id and replay it. The replay itself is
-``bench/resume_and_fork/ab_replay.py``, beside the replayers it shares with resume."""
+"""The ``ab`` verb's session half; the replay itself is ``bench/resume_and_fork/ab_replay.py``."""
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from promptpotter.application.bench.resume_and_fork.ab_replay import (
@@ -26,13 +24,10 @@ async def ab_replay_campaign(
     *,
     stores: Stores,
     hop: CycleHop,
-    log: Callable[[str], None] | None = None,
 ) -> AbReport:
-    """Replay *hop*'s whole campaign under the current engine + scorer, on the config a resume of it would read.
-    Zero LLM calls; *hop*'s round 0 is the origin the δ ruler is calibrated on."""
     campaign = stores.campaigns.load_campaign(hop.campaign_id)
     if campaign is None:
         raise AbReplayError(f"campaign {hop.campaign_id!r} has no manifest on disk.")
     session, campaign_config = await bind_cycle_session(stores, campaign, hop)
-    arm_diagnostic_scoring(session, campaign_config, source=RunSource.AB, log=log)
+    arm_diagnostic_scoring(session, campaign_config, source=RunSource.AB)
     return ab_replay_cycle(hop, session, campaign_config)

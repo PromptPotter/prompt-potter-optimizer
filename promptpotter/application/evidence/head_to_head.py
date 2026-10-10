@@ -1,68 +1,226 @@
-"""Each campaign's bench headline in one table, guarded by whether the bench sets are one quantity.
-The held-out set IS the comparability guard: `docs/architecture.md` § The bench score."""
-
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import TYPE_CHECKING, NamedTuple
+from collections.abc import Callable, Collection, Sequence
+from enum import StrEnum
+from typing import TYPE_CHECKING, NamedTuple, Self
 
-from promptpotter.application.datasets.authored import config_cell_scorer
+from pydantic import ConfigDict, Field, model_validator
+
+from promptpotter.application.datasets.authored import scorer_of
 from promptpotter.application.evidence.subjects import SubjectReading
-from promptpotter.application.jobs.quota import declare_run_ceiling
+from promptpotter.application.jobs.quota import next_launch_ceiling
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
-from promptpotter.application.runner.bench import bench_rows
-from promptpotter.application.runner.campaign_result import headline_under, read_line_spend
-from promptpotter.application.scoring.classification import scoreable_rows
-from promptpotter.application.scoring.selection import paired_fitness
-from promptpotter.domain.bench import (
-    BENCH_HEADLINE,
-    COLUMN_GRADE,
-    BenchColumn,
-    BenchReading,
-    BenchScore,
-    DatasetSplit,
-    bench_missing_reason,
-)
+from promptpotter.application.runner.bench import bench_members, pair_on_bench, read_bench
+from promptpotter.application.runner.campaign_result import bench_line, line_passes, line_run
+from promptpotter.application.scoring.paired import MemberRows, as_family
+from promptpotter.domain.bench import BENCH_HEADLINE, BenchColumn, BenchScore
 from promptpotter.domain.campaign import (
     Arm,
     ArmBudget,
+    BenchSet,
     Campaign,
     HeadToHeadRecord,
-    Instrument,
-    bench_instrument,
+    bench_set_of,
     ceiling_meter,
 )
+from promptpotter.domain.cycle_listing import RunStatus
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.dashboard_rows import SidedInterval
-from promptpotter.domain.launch_limits import LaunchLimits
-from promptpotter.domain.phases import StopOutcome, StopReason, stop_reason_outcome
+from promptpotter.domain.paired_reading import PairedReading, ReadingState
 from promptpotter.domain.spend import MeteredSpend, SpendRollup
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.store.archive_queries import bench_reads
-from promptpotter.infrastructure.store.campaign_store.store import cycle_ending
-from promptpotter.infrastructure.store.io import read_json_tolerant
-from promptpotter.infrastructure.store.layout import CycleLayout
+from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.shared.clock import epoch_seconds
-from promptpotter.shared.statistics import holm_adjusted, paired_reading
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
-    from promptpotter.domain.scoring import CellScorer, QueryMeasurement
+    from promptpotter.domain.scoring import Scorer
     from promptpotter.infrastructure.store.stores import Stores
 
 
-class HeadlineLift(SidedInterval):
-    """A bench's lift in its headline column, with the side of 0 its band sits on: the one lift a
-    surface leads with, so none picks the column or reads the sign."""
+class GuardState(StrEnum):
+    """Whether the bench headlines a guard is taken over are one quantity."""
 
-    value: float
+    CONTROLLED = "controlled"
+    UNCONTROLLED = "uncontrolled"
+    DIFFERS = "differs"
 
-    @classmethod
-    def of(cls, bench: BenchScore | None) -> HeadlineLift | None:
-        if bench is None or (lift := bench.headline_lift) is None:
-            return None
-        return cls(**lift.model_dump())
+
+GUARD_STATE_INFO: dict[GuardState, str] = {
+    GuardState.CONTROLLED: (
+        "One quantity, as declared: every campaign is an arm of one head-to-head, on its bank, "
+        "split, held-out rows, scorer, target model, origin and budget, with one optimizer model "
+        "set and no operator's steer."
+    ),
+    GuardState.UNCONTROLLED: (
+        "One quantity, undeclared: nothing read here differs, and a campaign that is no arm of a "
+        "head-to-head could read other campaigns' measurements and take an operator's steer."
+    ),
+    GuardState.DIFFERS: (
+        "Not one quantity: what graded or bounded these headlines differs, so a gap between two "
+        "is not the optimizer's alone."
+    ),
+}
+assert GUARD_STATE_INFO.keys() == set(GuardState)
+
+GUARD_STATE_LABELS: dict[GuardState, str] = {
+    GuardState.CONTROLLED: "controlled",
+    GuardState.UNCONTROLLED: "not controlled",
+    GuardState.DIFFERS: "differs",
+}
+assert GUARD_STATE_LABELS.keys() == set(GuardState)
+
+
+class GuardDifference(StrEnum):
+    """One thing two bench headlines can differ on. The first seven are ``BenchSet``'s fields."""
+
+    INSTRUMENT_ID = "instrument_id"
+    DATASET_HASH = "dataset_hash"
+    SPLIT = "split"
+    BENCH_ROWS = "bench_rows"
+    SCORER_ID = "scorer_id"
+    MODELS = "models"
+    ORIGIN = "origin"
+    BUDGET = "budget"
+    OPTIMIZER_MODELS = "optimizer_models"
+    HUMAN_INTERVENED = "human_intervened"
+    ORIGIN_READING = "origin_reading"
+
+
+GUARD_DIFFERENCE_INFO: dict[GuardDifference, str] = {
+    GuardDifference.INSTRUMENT_ID: (
+        "Different instruments measured the cells: another dataset, or another inner origin under it."
+    ),
+    GuardDifference.DATASET_HASH: "The banks hold different rows.",
+    GuardDifference.SPLIT: "The banks were split differently.",
+    GuardDifference.BENCH_ROWS: (
+        "Different rows were held out, so the headlines are graded on different cells."
+    ),
+    GuardDifference.SCORER_ID: "Different scorers graded the headlines.",
+    GuardDifference.MODELS: "The target pipelines ran different models.",
+    GuardDifference.ORIGIN: "The campaigns started from different origins.",
+    GuardDifference.BUDGET: "The campaigns ran under different budgets.",
+    GuardDifference.OPTIMIZER_MODELS: (
+        "The optimizers called different models, so a gap between two headlines is the model's "
+        "as much as the method's."
+    ),
+    GuardDifference.HUMAN_INTERVENED: (
+        "An operator steered, skipped or model-overrode a cycle on a campaign's line."
+    ),
+    GuardDifference.ORIGIN_READING: (
+        "Campaigns on one bench set read the same origin apart beyond its own noise under one "
+        "formula, so the backend or a judge moved between them — a change no stamp names."
+    ),
+}
+assert GUARD_DIFFERENCE_INFO.keys() == set(GuardDifference)
+assert set(BenchSet.model_fields) <= {d.value for d in GuardDifference}
+
+
+class PairGuard(StrictModel):
+    """The comparability guard: whether the bench headlines it is taken over — a pair's, a row's
+    against the table's standard, the whole table's — are one quantity. It LABELS a comparison
+    and refuses none: a pair that differs is still read, and says on what."""
+
+    model_config = ConfigDict(frozen=True)
+
+    state: GuardState
+    sentence: str = Field(description="`state` in words, with what differs behind it.")
+    head_to_head_id: str | None = Field(
+        description="The declared head-to-head the headlines were read against; `None` where no "
+        "campaign read is an arm of one."
+    )
+    controlled: bool = Field(
+        description="Every campaign it is taken over is an arm of that head-to-head."
+    )
+    differs_on: list[GuardDifference]
+
+    @model_validator(mode="after")
+    def _state_fits(self) -> Self:
+        expected = (
+            GuardState.DIFFERS
+            if self.differs_on
+            else GuardState.CONTROLLED
+            if self.controlled
+            else GuardState.UNCONTROLLED
+        )
+        if self.state is not expected:
+            raise ValueError(f"a guard that reads {expected.value} cannot say {self.state.value}")
+        return self
+
+
+class GuardMember(NamedTuple):
+    arm: Arm | None
+    # `None` where the line drew no partition: nothing is held out for it to be graded on.
+    bench_set: BenchSet | None
+    budget: ArmBudget
+    optimizer_models: tuple[str, ...]
+    human_intervened: bool
+
+
+def _apart(values: Sequence[object]) -> bool:
+    return any(value != values[0] for value in values[1:])
+
+
+def pair_guard(
+    members: Sequence[GuardMember],
+    record: HeadToHeadRecord | None,
+    *,
+    origin_read_apart: bool,
+) -> PairGuard:
+    bench_sets = [m.bench_set for m in members if m.bench_set is not None]
+    budgets = [m.budget for m in members]
+    if record is not None:
+        bench_sets.append(record.bench_set)
+        budgets.append(record.budget)
+    differs_on = [
+        GuardDifference(field)
+        for field in BenchSet.model_fields
+        if _apart([getattr(bench_set, field) for bench_set in bench_sets])
+    ]
+    if _apart(budgets):
+        differs_on.append(GuardDifference.BUDGET)
+    if len({m.optimizer_models for m in members}) > 1:
+        differs_on.append(GuardDifference.OPTIMIZER_MODELS)
+    if any(m.human_intervened for m in members):
+        differs_on.append(GuardDifference.HUMAN_INTERVENED)
+    if origin_read_apart:
+        differs_on.append(GuardDifference.ORIGIN_READING)
+    controlled = (
+        bool(members)
+        and record is not None
+        and all(
+            m.arm is not None and m.arm.head_to_head_id == record.head_to_head_id for m in members
+        )
+    )
+    state = (
+        GuardState.DIFFERS
+        if differs_on
+        else GuardState.CONTROLLED
+        if controlled
+        else GuardState.UNCONTROLLED
+    )
+    sentence = GUARD_STATE_INFO[state]
+    if differs_on:
+        sentence += f" Differs on: {', '.join(d.value for d in differs_on)}."
+    return PairGuard(
+        state=state,
+        sentence=sentence,
+        head_to_head_id=None if record is None else record.head_to_head_id,
+        controlled=controlled,
+        differs_on=differs_on,
+    )
+
+
+VERDICT_ABSENT_INFO: dict[ReadingState, str] = {
+    ReadingState.UNDER_TWO_CELLS: (
+        "No verdict: a head-to-head needs two campaigns with a graded bench set."
+    ),
+    ReadingState.PENDING: (
+        "No verdict yet: a declared arm of this head-to-head has no bench headline, so the "
+        "graded rows are not the comparison that was declared."
+    ),
+}
+assert VERDICT_ABSENT_INFO.keys() <= set(ReadingState)
 
 
 class HeadToHeadRow(StrictModel):
@@ -71,134 +229,75 @@ class HeadToHeadRow(StrictModel):
     subject: str
     campaign_id: str
     optimizer: str
-    # Every model its optimizer's llm nodes call, sorted: a stronger one is a lift no manifest made.
     optimizer_models: list[str]
-    # The head-to-head the campaign was minted an arm of; `None` for an undeclared campaign.
     arm: Arm | None
-    # An arm of THIS table's declared head-to-head, read against that declaration.
-    controlled: bool
+    guard: PairGuard
     treatment_digest: str | None
-    # The budget the line's cycle runs under — its config's, with any cap an operator set on it.
     budget: ArmBudget
-    # What that budget counts of `spend`; `None` beside a `None` spend.
     spend_metered: MeteredSpend | None
-    # A cycle on its line was steered, skipped or model-overridden by an operator.
     human_intervened: bool
-    # The line holder's `index.json::stop_reason`; `None` while that cycle has not ended.
-    stop_reason: StopReason | None
-    # Its class off `STOP_REASON_INFO`; a `failed` arm ended on no result, whatever `bench` holds.
-    outcome: StopOutcome | None
-    # `None` until the line banks an origin's pass; `missing_reason` where it holds nothing out.
-    # Its `selected` is `None` until the line grades its selection.
-    bench: BenchScore | None
-    # `None` where `bench` carries no lift in its headline column.
-    headline_lift: HeadlineLift | None
-    # Why `bench` is `None`; `None` beside one.
-    bench_missing_reason: str | None
-    bench_set: Instrument | None
-    # Against the declared instrument, else the row most others share one with; `None` for a row
-    # with no headline.
-    comparable: bool | None
-    # The campaign's line, every cycle and launch on it (`CampaignResult.cost`); `None` for a
-    # campaign whose line has banked no result yet.
+    status: RunStatus
+    bench: BenchScore
+    bench_set: BenchSet | None
     spend: SpendRollup | None
     calls: int | None
-    # Each launch's clock less its origin gate and its cells' unworked time, summed.
     worked_s: float | None
     rounds: int
-    # Each over `HeadToHead.ratio_reference`'s, `None` where either lacks it. INCURRED, never the
-    # bill: an arm replaying a sibling's cells is billed nothing for them.
     incurred_usd_ratio: float | None
-    # The `optimizer` kind alone — the optimizer's own calls, the spend arms differ on by manifest.
     optimizer_incurred_usd_ratio: float | None
     worked_ratio: float | None
-    # Bench lift per USD the SEARCH incurred (`BenchScore.lift_per_usd`); `None` without a lift,
-    # or where the search carries tokens no rate priced.
-    lift_per_incurred_usd: float | None
-    # Campaigns whose run overlapped this one's: while both ran they shared the content-addressed
-    # cache, so a cell's bill and clock went to whichever reached it first.
     concurrent_with: list[str]
-    # Individuals the archive has graded on these held-out rows, this read's own included: each
-    # one chosen off a headline spends the holdout, so a high count reads optimistic. `None` = no
-    # bench set.
-    bench_reads: int | None
 
 
 class SelectionPair(StrictModel):
-    """Two campaigns' selections paired on the bench rows both scored, in the headline column.
-    ``shift = b - a``: ``BenchScore.lift``'s arithmetic with ``a`` where the origin stands."""
+    """Two campaigns' selections paired on the bench rows both scored."""
 
-    campaign_a: str
-    campaign_b: str
-    shift: float
-    ci_lo: float | None
-    ci_hi: float | None
-    p_value: float | None
-    # Holm across every pair in this table that carries a p.
-    p_adjusted: float | None
-    n_rows: int
+    reading: PairedReading
+    guard: PairGuard
 
 
 class HeadToHead(StrictModel):
-    """The campaigns' bench headlines side by side, and whether one instrument graded them all."""
+    """The campaigns' bench headlines side by side, and whether one bench set graded them all."""
 
     rows: list[HeadToHeadRow]
-    # The head-to-head whose declaration this table reads: the one most arms in it name.
-    head_to_head_id: str | None
-    # The column every row's headline, its lift per USD and every pair is read in.
+    covers_selection: bool
+    optimizers_differ: bool
+    guard: PairGuard
     headline: BenchColumn
-    # `None` below two graded rows, and while an arm of the declared head-to-head is ungraded: the
-    # table is not yet the comparison that was declared.
     verdict: bool | None
-    # `Instrument` fields, plus `budget`, `optimizer_models` and `human_intervened` where rows
-    # differ on them, and `origin_reading` where campaigns on one set read one origin apart.
-    differs_on: list[str]
-    # Only campaigns on ONE instrument, budget and optimizer model set, unsteered, with distinct
-    # treatments pair
-    # (`_one_instrument`); any other pair is refused.
+    verdict_absent: ReadingState | None
     pairs: list[SelectionPair]
-    # The oldest row carrying a spend and a worked clock, which every row's `*_ratio` divides by.
     ratio_reference: str | None
-    # `verdict` in one sentence.
     verdict_line: str
-    # Why a row that is no arm of the declared head-to-head is NOT CONTROLLED; `None` where none is.
-    uncontrolled_note: str | None
-    # The rest qualifying the verdict, one sentence each.
     notes: list[str]
+
+    @model_validator(mode="after")
+    def _verdict_or_why_not(self) -> Self:
+        if (self.verdict is None) is (self.verdict_absent is None):
+            raise ValueError("a head-to-head gives its verdict, or says why it gives none")
+        return self
 
 
 class HeadToHeadEntry(NamedTuple):
-    """The subject standing for one campaign — its own, or a course on it — and its tree."""
-
     reading: SubjectReading
     stores: Stores
 
 
 class Grader(NamedTuple):
-    """The ONE scorer a read grades every row under, the search rows and the bench passes alike."""
-
-    scorer: CellScorer
-    scorer_id: str
-    # The head-to-head whose declared scorer it is; `None` where no campaign read is an arm.
+    scorer: Scorer
     record: HeadToHeadRecord | None
 
 
 class _Graded(NamedTuple):
     row: HeadToHeadRow
-    # Each pass's graded rows; `None` where the pass read nothing.
-    origin_rows: list[QueryMeasurement] | None
-    selected_rows: list[QueryMeasurement] | None
-    # Each launch's start and finish, epoch seconds.
+    origin: MemberRows | None
+    selected: MemberRows | None
+    sample_keys: list[str]
     windows: list[tuple[float, float]]
 
 
-_ORIGIN_READING = "origin_reading"
-_OPTIMIZER_MODELS = "optimizer_models"
-
-
 def _declared(campaigns: list[tuple[Stores, Campaign]]) -> HeadToHeadRecord | None:
-    """The record most arms here name, ties to the oldest arm's; ``None`` where no arm is here. An
-    arm of another record is a foreign row, never a veto."""
+    """The record most arms name; a tie goes to the oldest arm's, so *campaigns* is oldest first."""
     named = [c.arm.head_to_head_id for _, c in campaigns if c.arm is not None]
     if not named:
         return None
@@ -208,13 +307,10 @@ def _declared(campaigns: list[tuple[Stores, Campaign]]) -> HeadToHeadRecord | No
 
 
 def comparison_grader(campaigns: list[tuple[Stores, Campaign]]) -> Grader:
-    """*campaigns* oldest first. The comparison's one scorer is the one every campaign declares,
-    and a head-to-head they are arms of declares it too; campaigns declaring different ones share
-    none, and the read refuses rather than grade one under another's formula."""
     graders = {
-        scorer_id: scorer
-        for scorer, scorer_id in (
-            config_cell_scorer(resolve_campaign_config(stores, c, c.root_hop))
+        scorer.id: scorer
+        for scorer in (
+            scorer_of(resolve_campaign_config(stores, c, c.root_hop), verifier_graded=False)
             for stores, c in campaigns
         )
     }
@@ -224,19 +320,20 @@ def comparison_grader(campaigns: list[tuple[Stores, Campaign]]) -> Grader:
             "and share none, so no column reads them as one quantity. Compare subjects one "
             "formula grades."
         )
-    ((scorer_id, scorer),) = graders.items()
+    (scorer,) = graders.values()
     record = _declared(campaigns)
-    if record is not None and scorer_id != record.instrument.scorer_id:
+    if record is not None and scorer.id != record.bench_set.scorer_id:
         raise ValueError(
-            f"head-to-head {record.head_to_head_id} declares scorer {record.instrument.scorer_id}; "
-            f"its arm's config grades as {scorer_id}"
+            f"head-to-head {record.head_to_head_id} declares scorer {record.bench_set.scorer_id}; "
+            f"its arm's config grades as {scorer.id}"
         )
-    return Grader(scorer, scorer_id, record)
+    return Grader(scorer, record)
 
 
-def head_to_head(entries: list[HeadToHeadEntry], grader: Grader) -> HeadToHead | None:
-    """Entries arrive oldest first, read under the read's one *grader* and against the instrument
-    of the head-to-head it declares."""
+def head_to_head(
+    entries: list[HeadToHeadEntry], grader: Grader, asked: Collection[str]
+) -> HeadToHead | None:
+    """*entries* oldest first: the ratio reference and the reference-row tie both read that order."""
     if not entries:
         return None
     campaigns = [_campaign(entry) for entry in entries]
@@ -244,39 +341,37 @@ def head_to_head(entries: list[HeadToHeadEntry], grader: Grader) -> HeadToHead |
         resolve_campaign_config(e.stores, c, c.root_hop)
         for e, c in zip(entries, campaigns, strict=True)
     ]
-    scorer, scorer_id, record = grader
+    scorer, record = grader
     read = [
-        _read(e, c, config, scorer, scorer_id, record)
+        _read(e, c, config, scorer, record)
         for e, c, config in zip(entries, campaigns, configs, strict=True)
     ]
     base = next(
         (g.row for g in read if g.row.spend is not None and g.row.worked_s is not None), None
     )
-    graded = [g for g in read if g.row.bench is not None and g.row.bench_set is not None]
-    # With nothing declared, the row most others share an instrument with; ties go to the oldest.
-    reference = max(graded, key=lambda g: sum(_one_instrument(g, o) for o in graded), default=None)
-    sets = [g.row.bench_set for g in graded] + ([] if record is None else [record.instrument])
-    differs_on = sorted(
-        field
-        for field in Instrument.model_fields
-        if len({repr(getattr(bench_set, field)) for bench_set in sets}) > 1
+    graded = [g for g in read if g.row.bench.graded is not None]
+    reference = (
+        max(graded, key=lambda g: sum(_agree(g, o, None) for o in graded), default=None)
+        if record is None
+        else None
     )
-    if len({repr(g.row.budget) for g in graded}) > 1:
-        differs_on.append("budget")
-    if len({tuple(g.row.optimizer_models) for g in graded}) > 1:
-        differs_on.append(_OPTIMIZER_MODELS)
-    if any(g.row.human_intervened for g in graded):
-        differs_on.append("human_intervened")
-    if any(
-        a.row.bench_set == b.row.bench_set and not _read_alike(a, b)
-        for i, a in enumerate(graded)
-        for b in graded[i + 1 :]
-    ):
-        differs_on.append(_ORIGIN_READING)
+    guard = _guard(graded, record)
     ungraded_arms = [
-        g.row.campaign_id for g in read if g.row.controlled and g.row.bench_set is None
+        g.row.campaign_id
+        for g in read
+        if g.row.bench.graded is None
+        and record is not None
+        and g.row.arm is not None
+        and g.row.arm.head_to_head_id == record.head_to_head_id
     ]
-    verdict = None if len(graded) < 2 else False if differs_on else None if ungraded_arms else True
+    verdict_absent = (
+        ReadingState.UNDER_TWO_CELLS
+        if len(graded) < 2
+        else ReadingState.PENDING
+        if ungraded_arms and guard.state is not GuardState.DIFFERS
+        else None
+    )
+    verdict = None if verdict_absent is not None else guard.state is not GuardState.DIFFERS
     concurrent = {
         g.row.campaign_id: [o.row.campaign_id for o in read if o is not g and _overlapped(g, o)]
         for g in read
@@ -285,36 +380,61 @@ def head_to_head(entries: list[HeadToHeadEntry], grader: Grader) -> HeadToHead |
         rows=[
             g.row.model_copy(
                 update={
-                    "comparable": None
-                    if g.row.bench is None or g.row.bench_set is None
-                    else _on_declared(g, record)
-                    if record is not None
-                    else reference is not None and _one_instrument(g, reference),
+                    "guard": g.row.guard
+                    if reference is None or g.row.bench.graded is None
+                    else _guard([g, reference], None),
                     "concurrent_with": concurrent[g.row.campaign_id],
                     **_ratios(g.row, base),
                 }
             )
             for g in read
         ],
-        head_to_head_id=None if record is None else record.head_to_head_id,
+        covers_selection=set(asked) <= {g.row.subject for g in read},
+        optimizers_differ=len({g.row.optimizer for g in read}) > 1,
+        guard=guard,
         headline=BENCH_HEADLINE,
         verdict=verdict,
-        differs_on=differs_on,
-        pairs=_pairs(graded),
+        verdict_absent=verdict_absent,
+        pairs=_pairs(graded, record),
         ratio_reference=None if base is None else base.campaign_id,
-        verdict_line=_verdict_line(verdict, len(graded), ungraded_arms),
-        uncontrolled_note=None
-        if record is None or all(g.row.controlled for g in read)
-        else f"Ran as no arm of head-to-head {record.head_to_head_id}, so its search could read "
-        "other campaigns' measurements and take an operator's steer.",
+        verdict_line=_verdict_line(guard, verdict_absent, len(graded), ungraded_arms),
         notes=_notes(
             verdict,
-            differs_on,
+            guard,
             len(read) - len(graded) - len(ungraded_arms),
             [cid for cid, others in concurrent.items() if others],
-            declared=record,
+            uncontrolled=[
+                g.row.campaign_id for g in read if g.row.guard.state is GuardState.UNCONTROLLED
+            ],
         ),
     )
+
+
+def _member(g: _Graded) -> GuardMember:
+    row = g.row
+    return GuardMember(
+        arm=row.arm,
+        bench_set=row.bench_set,
+        budget=row.budget,
+        optimizer_models=tuple(row.optimizer_models),
+        human_intervened=row.human_intervened,
+    )
+
+
+def _guard(graded: Sequence[_Graded], record: HeadToHeadRecord | None) -> PairGuard:
+    return pair_guard(
+        [_member(g) for g in graded],
+        record,
+        origin_read_apart=any(
+            a.row.bench_set == b.row.bench_set and not _read_alike(a, b)
+            for i, a in enumerate(graded)
+            for b in graded[i + 1 :]
+        ),
+    )
+
+
+def _agree(a: _Graded, b: _Graded, record: HeadToHeadRecord | None) -> bool:
+    return _guard([a, b], record).state is not GuardState.DIFFERS
 
 
 def _ratios(row: HeadToHeadRow, base: HeadToHeadRow | None) -> dict[str, float | None]:
@@ -337,53 +457,15 @@ def _overlapped(a: _Graded, b: _Graded) -> bool:
     return any(sa < eb and sb < ea for sa, ea in a.windows for sb, eb in b.windows)
 
 
-def _origin(g: _Graded) -> BenchReading | None:
-    return None if g.row.bench is None else g.row.bench.origin
-
-
-def _on_declared(g: _Graded, record: HeadToHeadRecord) -> bool:
-    return (
-        g.row.bench_set == record.instrument
-        and g.row.budget == record.budget
-        and not g.row.human_intervened
-    )
-
-
-def _one_instrument(a: _Graded, b: _Graded) -> bool:
-    """One bench set, budget and optimizer model set, neither run steered, and their shared origin
-    read alike."""
-    return (
-        a.row.bench_set == b.row.bench_set
-        and a.row.bench is not None
-        and b.row.bench is not None
-        and a.row.budget == b.row.budget
-        and a.row.optimizer_models == b.row.optimizer_models
-        and not (a.row.human_intervened or b.row.human_intervened)
-        and _read_alike(a, b)
-    )
-
-
 def _read_alike(a: _Graded, b: _Graded) -> bool:
-    """One formula grades every row here, so a shared origin read apart on its rows is the
-    backend or a judge that moved — which no stamp names."""
-    oa, ob = _origin(a), _origin(b)
-    if oa is None or ob is None or oa.sp_hash != ob.sp_hash:
+    if a.origin is None or b.origin is None:
         return True
-    if a.origin_rows is None or b.origin_rows is None:
-        return True
-    _gap, lo, hi, _p, _n = _paired(a.origin_rows, b.origin_rows)
-    return lo is None or hi is None or lo <= 0.0 <= hi
+    gap = _across(a.origin, b.origin, a.sample_keys).headline
+    return gap is None or gap.estimate.side == "spans"
 
 
-def _paired(
-    a_rows: list[QueryMeasurement], b_rows: list[QueryMeasurement]
-) -> tuple[float, float | None, float | None, float | None, int]:
-    # The rows both SCORED, as `BenchScore.lift` reads them: paired raw, a cell either campaign
-    # left ungraded would enter as a 0.0 and shift the pair on an outage.
-    b_grades, a_grades = paired_fitness(
-        scoreable_rows(b_rows), scoreable_rows(a_rows), grade=COLUMN_GRADE[BENCH_HEADLINE]
-    )
-    return paired_reading(b_grades, a_grades)
+def _across(a: MemberRows, b: MemberRows, sample_keys: list[str]) -> PairedReading:
+    return pair_on_bench(a, b, sample_keys=sample_keys, instrument_id=a.instrument_id)
 
 
 def _campaign(entry: HeadToHeadEntry) -> Campaign:
@@ -395,17 +477,15 @@ def _campaign(entry: HeadToHeadEntry) -> Campaign:
     return campaign
 
 
-def _ending(stores: Stores, campaign: Campaign) -> tuple[StopReason | None, StopOutcome | None]:
-    """How the cycle holding the campaign's line ended, off its own index."""
-    index = stores.campaigns.load(stores.campaigns.line_holder(campaign.root_hop))
-    reason = None if index is None else cycle_ending(index)
-    return reason, None if reason is None else stop_reason_outcome(reason)
+def _status(stores: Stores, campaign: Campaign) -> RunStatus:
+    holder = stores.campaigns.line_holder(campaign.root_hop)
+    index = stores.campaigns.load(holder)
+    run = derive_run_state(stores.campaigns.cycle_dir(holder))
+    return RunStatus.of(run.run_phase, None if index is None else index.stop_reason)
 
 
 def _held_budget(stores: Stores, config: CampaignConfig, hop: CycleHop) -> ArmBudget:
-    """The line's knobs (an arm's are its record's, ``campaign_config.py::under_record``) under the
-    standing ceiling its launch declares. An arm whose cap was moved is off its budget."""
-    ceiling, _ = declare_run_ceiling(config, stores=stores, hop=hop, requested=LaunchLimits())
+    ceiling = next_launch_ceiling(config, stores=stores, hop=hop)
     rounds = stores.campaigns.read_run_limits(hop).rounds
     return config.optimization.arm_budget.model_copy(
         update={
@@ -419,56 +499,40 @@ def _read(
     entry: HeadToHeadEntry,
     campaign: Campaign,
     config: CampaignConfig,
-    scorer: CellScorer,
-    scorer_id: str,
+    scorer: Scorer,
     record: HeadToHeadRecord | None,
 ) -> _Graded:
-    """Everything but the instrument's inputs is the campaign's result: its passes read under the
-    one scorer, and the cost of its whole line, whichever cycle the line ended on."""
     reading, stores = entry
     result = stores.campaigns.load_result(campaign.campaign_id)
-    hop = (
-        campaign.root_hop
-        if result is None
-        else CycleHop(campaign_id=campaign.campaign_id, cycle_id=result.cycle_id)
-    )
-    layout = CycleLayout(stores.campaigns.cycle_dir(hop))
+    hop = stores.campaigns.line_holder(campaign.root_hop)
     selected = select_optimizer(config.optimization)
-    passes = None if result is None else result.bench
-    bench = (
-        None
-        if result is None
-        else headline_under(stores, result, config, scorer, scorer_id=scorer_id)
-    )
-    origin_rows, selected_rows = (
-        (None, None) if passes is None else bench_rows(stores, passes, scorer, scorer_id=scorer_id)
+    optimizer_models = sorted({selected.model(node) for node in selected.llm_nodes})
+    passes = line_passes(stores, campaign.campaign_id)
+    line = bench_line(stores, campaign, hop, config, run=line_run(stores, hop))
+    bench = read_bench(stores, passes, scorer, line=line)
+    origin_pass, selected_pass = (
+        (None, None) if passes is None else bench_members(stores, passes, scorer, line=line)
     )
 
-    partition = read_json_tolerant(layout.bank_partition, {})
-    bench_ids = frozenset(int(i) for i in partition.get("bench_ids") or [])
-    origin_params = read_json_tolerant(layout.round_file(0), {}).get("pipeline_params")
+    drawn = stores.campaigns.read_bank_partition(hop)
+    origin_round = stores.campaigns.standing_rounds(hop).rounds.get(0)
     bench_set = (
-        bench_instrument(
+        None
+        if drawn is None or campaign.root_content_hash is None
+        else bench_set_of(
             dataset_name=campaign.dataset_name,
-            dataset_hash=read_json_tolerant(layout.export, {}).get("dataset_hash"),
-            split=DatasetSplit.model_validate(partition["split"]) if partition["split"] else None,
-            bench_ids=bench_ids,
-            scorer_id=scorer_id,
-            origin_params=origin_params,
-            origin=origin,
+            dataset_hash=drawn.dataset_hash,
+            split=drawn.split,
+            bench_ids=drawn.bench_ids,
+            scorer_id=scorer.id,
+            origin_params=None if origin_round is None else origin_round.close.pipeline_params,
+            origin=campaign.root_content_hash,
         )
-        if (origin := campaign.root_content_hash) is not None
-        and partition
-        and bench is not None
-        and bench.selected is not None
-        else None
     )
     cost = None if result is None else result.cost
     budget = _held_budget(stores, config, hop)
-    stop_reason, outcome = _ending(stores, campaign)
-    # Live off the line's ledgers, the fold the campaign card's bill reads: the banked cost is the
-    # last ended launch's, so a running arm's would lag its own bill.
-    spend = None if cost is None else read_line_spend(stores, campaign)
+    # Live off the line's ledgers: the banked cost is the last ended launch's, so a running arm's lags.
+    spend = None if cost is None else line.spend
     windows = [
         (start, end)
         for run in ([] if cost is None else cost.launches)
@@ -480,28 +544,30 @@ def _read(
             subject=reading.key,
             campaign_id=reading.campaign_id,
             optimizer=config.optimization.optimizer,
-            optimizer_models=sorted({selected.model(node) for node in selected.llm_nodes}),
+            optimizer_models=optimizer_models,
             arm=campaign.arm,
-            # A row's own fact: an arm of the read's record, on its budget and — once graded — its
-            # instrument.
-            controlled=record is not None
-            and campaign.arm is not None
-            and campaign.arm.head_to_head_id == record.head_to_head_id
-            and budget == record.budget
-            and (bench_set is None or bench_set == record.instrument),
+            guard=pair_guard(
+                [
+                    GuardMember(
+                        arm=campaign.arm,
+                        bench_set=bench_set,
+                        budget=budget,
+                        optimizer_models=tuple(optimizer_models),
+                        human_intervened=reading.human_intervened,
+                    )
+                ],
+                record,
+                origin_read_apart=False,
+            ),
             treatment_digest=None if campaign.treatment is None else campaign.treatment.digest,
             budget=budget,
             spend_metered=None
             if spend is None
             else MeteredSpend.of(spend, ceiling_meter(campaign.arm)),
             human_intervened=reading.human_intervened,
-            stop_reason=stop_reason,
-            outcome=outcome,
+            status=_status(stores, campaign),
             bench=bench,
-            headline_lift=HeadlineLift.of(bench),
-            bench_missing_reason=None if bench is not None else bench_missing_reason(stop_reason),
             bench_set=bench_set,
-            comparable=None,
             spend=spend,
             calls=None if cost is None else cost.calls,
             worked_s=None if cost is None else cost.worked_s,
@@ -509,96 +575,79 @@ def _read(
             incurred_usd_ratio=None,
             optimizer_incurred_usd_ratio=None,
             worked_ratio=None,
-            lift_per_incurred_usd=None
-            if bench is None or spend is None
-            else bench.lift_per_usd(spend),
             concurrent_with=[],
-            bench_reads=None
-            if bench_set is None
-            else bench_reads(stores, dataset_name=campaign.dataset_name, sample_ids=bench_ids),
         ),
-        origin_rows=origin_rows,
-        selected_rows=selected_rows,
+        origin=origin_pass,
+        selected=selected_pass,
+        sample_keys=[] if passes is None else passes.origin.sample_keys,
         windows=windows,
     )
 
 
-def _pairs(graded: list[_Graded]) -> list[SelectionPair]:
-    out: list[SelectionPair] = []
+def _pairs(graded: list[_Graded], record: HeadToHeadRecord | None) -> list[SelectionPair]:
+    read: list[tuple[PairedReading, PairGuard]] = []
     for i, a in enumerate(graded):
         for b in graded[i + 1 :]:
-            if not _one_instrument(a, b) or a.selected_rows is None or b.selected_rows is None:
+            if a.selected is None or b.selected is None:
                 continue
-            # Two arms running one treatment contrast no optimizer.
-            if a.row.controlled and b.row.treatment_digest == a.row.treatment_digest:
+            digest = a.row.treatment_digest
+            if digest is not None and digest == b.row.treatment_digest:
                 continue
-            shift, lo, hi, p_value, n = _paired(a.selected_rows, b.selected_rows)
-            if not n:
-                continue
-            out.append(
-                SelectionPair(
-                    campaign_a=a.row.campaign_id,
-                    campaign_b=b.row.campaign_id,
-                    shift=shift,
-                    ci_lo=lo,
-                    ci_hi=hi,
-                    p_value=p_value,
-                    p_adjusted=None,
-                    n_rows=n,
-                )
-            )
-    tested = [i for i, pair in enumerate(out) if pair.p_value is not None]
-    adjusted = holm_adjusted([out[i].p_value or 0.0 for i in tested])
-    for slot, i in enumerate(tested):
-        out[i] = out[i].model_copy(update={"p_adjusted": adjusted[slot]})
-    return out
+            read.append((_across(a.selected, b.selected, a.sample_keys), _guard([a, b], record)))
+    tested = iter(
+        as_family(
+            [pair for pair, guard in read if guard.state is not GuardState.DIFFERS],
+            "bench" if record is None else record.head_to_head_id,
+        )
+    )
+    return [
+        SelectionPair(
+            reading=pair if guard.state is GuardState.DIFFERS else next(tested), guard=guard
+        )
+        for pair, guard in read
+    ]
 
 
-def _verdict_line(verdict: bool | None, n_graded: int, ungraded_arms: list[str]) -> str:
-    if verdict is None and n_graded >= 2:
-        return (
-            f"No verdict yet: no bench headline for {', '.join(ungraded_arms)}, declared arm(s) "
-            "of this head-to-head, so the graded rows are not the comparison that was declared."
-        )
-    if verdict is None:
-        return f"No verdict: a head-to-head needs two campaigns with a graded bench set; {n_graded} here."
-    if verdict:
-        return (
-            "Comparable: one bank, split, held-out row set, scorer, target model, origin, budget "
-            "and optimizer model set, so the selected column is one quantity."
-        )
-    return "Not comparable: these headlines are NOT one quantity, and no pair is read across two."
+def _verdict_line(
+    guard: PairGuard, absent: ReadingState | None, n_graded: int, ungraded_arms: list[str]
+) -> str:
+    if absent is None:
+        return guard.sentence
+    counted = (
+        f"Ungraded: {', '.join(ungraded_arms)}."
+        if absent is ReadingState.PENDING
+        else f"{n_graded} here."
+    )
+    return f"{VERDICT_ABSENT_INFO[absent]} {counted}"
 
 
 def _notes(
     verdict: bool | None,
-    differs_on: list[str],
+    guard: PairGuard,
     n_outside: int,
     concurrent: list[str],
     *,
-    declared: HeadToHeadRecord | None,
+    uncontrolled: list[str],
 ) -> list[str]:
     notes = []
-    if declared is not None:
+    if guard.head_to_head_id is not None:
         notes.append(
-            f"Read against head-to-head {declared.head_to_head_id}'s declared instrument, scorer "
-            "and budget."
+            f"Read against head-to-head {guard.head_to_head_id}'s declared bench set and budget."
+        )
+    if guard.head_to_head_id is not None and uncontrolled:
+        notes.append(
+            f"NOT CONTROLLED: {', '.join(uncontrolled)}. Ran as no arm of head-to-head "
+            f"{guard.head_to_head_id}, so its search could read other campaigns' measurements "
+            "and take an operator's steer."
         )
     if verdict is True:
         notes.append("Every pair below is read on the same rows.")
     if verdict is False:
-        notes.append("A row off the declared or most shared instrument is marked.")
-    if _ORIGIN_READING in differs_on:
         notes.append(
-            "`origin_reading`: campaigns on one bench set read the same origin apart beyond its "
-            "own noise under one formula, so the backend or a judge moved between them — a change "
-            "no stamp names."
+            "A row off the declared or most shared bench set is marked, and a pair across two "
+            "is read and labelled, outside the correction."
         )
-    if _OPTIMIZER_MODELS in differs_on:
-        notes.append(
-            "`optimizer_models`: the optimizers called different models, so a gap between two "
-            "headlines is the model's as much as the method's."
-        )
+    notes += [f"`{d.value}`: {GUARD_DIFFERENCE_INFO[d]}" for d in guard.differs_on]
     if n_outside > 0:
         notes.append(
             f"{n_outside} campaign(s) carry no bench headline — nothing held out, or the "
@@ -615,12 +664,20 @@ def _notes(
 
 
 __all__ = [
+    "GUARD_DIFFERENCE_INFO",
+    "GUARD_STATE_INFO",
+    "GUARD_STATE_LABELS",
+    "VERDICT_ABSENT_INFO",
     "Grader",
+    "GuardDifference",
+    "GuardMember",
+    "GuardState",
     "HeadToHead",
     "HeadToHeadEntry",
     "HeadToHeadRow",
-    "HeadlineLift",
+    "PairGuard",
     "SelectionPair",
     "comparison_grader",
     "head_to_head",
+    "pair_guard",
 ]

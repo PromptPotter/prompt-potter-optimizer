@@ -1,21 +1,14 @@
-"""The scoring walk — one search point's pass over its panel — and :func:`run_walks`, the one loop
-that drives every walk of a scoring phase: prior-cache reuse, stale-data recovery, error
-classification into an abort reason, look-ahead within the armed depth, and decisions in walk
-order or at a block race's closes. The gateway turns a decided walk into the archived run."""
-
 from __future__ import annotations
 
 import asyncio
 import contextvars
-import enum
 import logging
 import sys
 import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING, Any, Protocol
 
-from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.application.scoring.sample_measurement import (
     cell_bound,
     emit_replayed_step_tokens,
@@ -29,57 +22,55 @@ from promptpotter.domain.phases import (
     StopCategory,
     StopLoop,
     StopReason,
+    WalkEnd,
 )
 from promptpotter.domain.results_health import is_deprecated
-from promptpotter.domain.scoring import CellScorer, QueryMeasurement
-from promptpotter.domain.spend import StepTokenUsage
+from promptpotter.domain.scoring import GradedCell, MeasuredCell, Scorer
 from promptpotter.domain.validators import StopRule, StopSignal
 from promptpotter.infrastructure.backend import CELL
+from promptpotter.infrastructure.llm.send_pacing import HELD_POLL_S
 from promptpotter.infrastructure.llm.spend_book import (
     SendBound,
     bound_spend_book,
     filed,
 )
-from promptpotter.infrastructure.llm.telemetry import emit_priced_key
-from promptpotter.infrastructure.runtime_flags import effective_lookahead
-from promptpotter.shared.errors import (
-    ErrorCategory,
-    SendRefusedError,
-    error_category,
-    graceful,
-    is_error_result,
+from promptpotter.infrastructure.llm.telemetry import (
+    emit_priced_key,
+    emit_sample_scored,
+    emit_sample_started,
 )
+from promptpotter.infrastructure.runtime_flags import effective_lookahead
+from promptpotter.shared.errors import ErrorCategory, SendRefusedError, graceful
+from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.intelligence.indexes.sample import SampleIndex
-    from promptpotter.application.scoring.metrics import ScoreSummary
+    from promptpotter.domain.results import ScoreSummary
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint
+    from promptpotter.domain.validators import CatchUps
     from promptpotter.infrastructure.store.measurement_archive import CellClaim
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "ArmSlot",
     "BlockRace",
-    "CatchUps",
     "Flight",
     "FlightGauge",
     "QueryLoopResult",
     "Walk",
-    "WalkEnd",
     "run_walks",
 ]
 
 
-# The stops that still wait out the calls already sent — see :func:`run_walks`.
 _BUDGET_STOPS = frozenset(
     reason for reason, info in STOP_REASON_INFO.items() if info.category is StopCategory.BUDGET
 )
 
 
 def _budget_refusal(category: ErrorCategory | None) -> StopReason | None:
-    """The budget stop a refusal of this category is, ``None`` for any other."""
     stop = REFUSAL_STOPS.get(category) if category is not None else None
     return stop if stop in _BUDGET_STOPS else None
 
@@ -93,8 +84,7 @@ def _budget_stop(stop: BaseException) -> StopReason | None:
 
 
 def _dearest(bounds: Sequence[SendBound | None]) -> SendBound | None:
-    """The bound every cell of a phase is counted at: the largest any of its walks may send, and
-    unbounded where any is. ``None`` where no cell is held whole (``Connector.holds_own_sends``)."""
+    """``None`` where no cell is held whole (``Connector.holds_own_sends``)."""
     held = [b for b in bounds if b is not None]
     if not held:
         return None
@@ -104,76 +94,38 @@ def _dearest(bounds: Sequence[SendBound | None]) -> SendBound | None:
         input_tokens=max(b.input_tokens for b in held),
         output_tokens=None if None in outputs else max(o for o in outputs if o is not None),
         usd=None if None in costs else max(c for c in costs if c is not None),
+        unpriced=tuple(dict.fromkeys(name for b in held for name in b.unpriced)),
     )
 
 
+NEXT_CELL = "the next cell"
+
 MAX_CONSECUTIVE_ERRORS: int = 3
-"""Abort a walk after this many consecutive client/pipeline errors — a
-runaway backend shouldn't burn the round's compute budget."""
-
-# The cell categories whose cause every later cell shares, so one halts the walk.
-_WALK_STOPS: dict[ErrorCategory, StopReason] = {
-    ErrorCategory.CONNECTION: StopReason.BACKEND_UNREACHABLE,
-    **REFUSAL_STOPS,
-}
-
-# How many calls a round may hold in flight is the BACKEND's to declare
-# (`Connector.max_cells_in_flight`), not a constant here. It was a fixed 2 while the depth was
-# pinned off `execution` — a transport fact answering a cost question, wrongly.
-
-
-class CatchUps(Protocol):
-    """The PoBB catch-up calls a round pairs its cells with — `pobb/checks.py::PoBBCheck`, seen from
-    a layer that may not import it. Started in free slots, committed as each cell is taken."""
-
-    def start_backfill(self, sample: Sample, room: int) -> list[asyncio.Future[Any]]: ...
-
-    def owed_backfills(self, sample: Sample) -> int: ...
-
-    def backfills_in_flight(self) -> list[asyncio.Future[Any]]: ...
-
-    def backfills_for(self, sample: Sample) -> list[asyncio.Future[Any]]: ...
-
-    def commit_backfills(self, sample: Sample) -> None: ...
-
-    def bank_backfills(self, samples: Sequence[Sample]) -> None: ...
-
-    def discard_backfills(self) -> None: ...
 
 
 class BlockRace(Protocol):
-    """A race that decides its walks together: every live walk takes a block of ``block_size``
-    cells, then ``close`` reads all their rows and names the walks it stops, by walk index."""
-
     @property
     def block_size(self) -> int: ...
 
-    def close(self, rows: Mapping[int, list[QueryMeasurement]]) -> Mapping[int, StopSignal]: ...
+    def close(self, rows: Mapping[int, Sequence[GradedCell]]) -> Mapping[int, StopSignal]: ...
 
 
 @dataclass(frozen=True)
 class Flight:
-    """Calls out, calls the stop rules allow out now, and the most that could ever be out.
-    ``waiting`` is the call a DECISION is held on — ``(sample_id, launched_at)`` — because in-order
-    absorption lets one slow call stall a round whose other calls are all back. ``backpressure`` is
-    the provider holding calls that are out but not yet sent."""
+    """``waiting`` is the ``(sample_id, launched_at)`` call a DECISION is held on under in-order absorption."""
 
     out: int = 0
     allowed: int = 0
     most: int = 0
     waiting: tuple[int, float] | None = None
     backpressure: BackpressureReading | None = None
-    # How many MORE cells the spend book admits beside those out, and what one holds against the
-    # limit that binds; ``None`` where no book bounds them. Against a reserve it is the WORST case.
+    # ``None`` where no book bounds them; against a reserve it is the WORST case.
     affordable: int | None = None
     cell_usd: float | None = None
 
 
 class FlightGauge:
-    """What the scoring phase has out, what its stop rules allow out right now, and the most it could
-    ever hold, published at most once per ``every`` seconds: the reading is asked for only then,
-    because a full horizon is a bounds sweep, too dear to take at every launch. One phase publishes
-    at a time — a second opening is a scheduler inside a scheduler, which nothing may build."""
+    """Read at most once per ``every`` seconds: a full horizon is a bounds sweep, too dear per launch."""
 
     def __init__(self, emit: Callable[[Flight], None], *, every: float = 0.5) -> None:
         self._emit = emit
@@ -206,19 +158,6 @@ class FlightGauge:
             self._emit(reading)
 
 
-class WalkEnd(enum.StrEnum):
-    """Why ONE walk ended before its last cell, the round going on. A run's ending is a
-    ``StopReason`` and is raised: a pause always, a budget stop unless the caller keeps the cut."""
-
-    # The operator's early-abort: the partial is accepted.
-    SKIP = "skip"
-    STOP_RULE = "stop_rule"
-    BUDGET = "budget"
-    CLIENT_ERROR = "client_error"
-    PIPELINE_ERROR = "pipeline_error"
-    CONSECUTIVE_ERRORS = "consecutive_errors"
-
-
 _ABORTS_AT_ONCE: dict[ErrorCategory, WalkEnd] = {
     ErrorCategory.CLIENT: WalkEnd.CLIENT_ERROR,
     ErrorCategory.PIPELINE: WalkEnd.PIPELINE_ERROR,
@@ -229,113 +168,75 @@ _ABORTS_AT_ONCE: dict[ErrorCategory, WalkEnd] = {
 class QueryLoopResult:
     """A decided walk: ``ended_on`` is ``None`` once it took every cell."""
 
-    results: list[QueryMeasurement]
+    results: list[GradedCell]
     ended_on: WalkEnd | None = None
     stop_signal: StopSignal | None = None
 
 
-def _with_running(result: QueryMeasurement, running: ScoreSummary, run_id: str) -> QueryMeasurement:
-    """A shallow copy carrying the candidate's running fitness and the archive run the row lands
-    in — the ledger's copy. The persisted results keep the clean result, not this copy: an archived
-    row is already filed under its run."""
-    out = dict(result)
-    out["_running"] = running
-    out["run_id"] = run_id
-    return cast(QueryMeasurement, out)
+def _emit_cached_step_tokens(facts: MeasuredCell) -> None:
+    emit_replayed_step_tokens(facts.pipeline.step_tokens, facts.pipeline.step_timings)
 
 
-def _materialize_cached(item: QueryMeasurement) -> QueryMeasurement:
-    """A banked row as a replay: flagged cached, and its elapsed clock zeroed — nothing was spent."""
-    r: dict[str, Any] = {**item, "cached": True}
-    pd = r.get("pipeline_data")
-    if isinstance(pd, dict):
-        r["pipeline_data"] = {**pd, "total_time": 0.0}
-    return cast(QueryMeasurement, r)
+class WalkRecorder(Protocol):
+    def scores(self, results: Sequence[GradedCell]) -> ScoreSummary: ...
 
-
-def _graded(row: QueryMeasurement, scorer: CellScorer) -> QueryMeasurement:
-    """Every row the walk holds, fresh or replayed, is graded HERE under the run's own scorer. A
-    ``ScoringFormulaError`` is a formula contract bug and halts the run; it never becomes a row."""
-    rescore_results([cast("dict[str, Any]", row)], scorer)
-    return row
-
-
-def _emit_cached_step_tokens(row: QueryMeasurement) -> None:
-    """Meter a measurement-cache hit off the tokens the archived row already carries. Replaying them costs nothing, but the
-    search still made the call, so the ledger has to say so."""
-
-    pd = row.get("pipeline_data")
-    if not isinstance(pd, dict):
-        return
-    step_tokens = pd.get("step_tokens")
-    if not isinstance(step_tokens, dict) or not step_tokens:
-        return
-    step_timings = pd.get("step_timings")
-    emit_replayed_step_tokens(
-        cast("Mapping[str, StepTokenUsage]", step_tokens),
-        step_timings if isinstance(step_timings, dict) else {},
-    )
-
-
-class RunRecorder(Protocol):
-    """The archive run a walk's rows land in — the gateway's, seen from the loop it drives."""
-
-    def scores(self, results: list[QueryMeasurement]) -> ScoreSummary:
-        """The candidate's running fitness over ``results``, which rides out on the sample
-        snapshot so a live surface shows it moving."""
+    def take(self, cell: GradedCell) -> GradedCell:
+        """A measured sample is on disk iff it was TAKEN; a discarded look-ahead acquisition is not."""
         ...
 
-    def persist(self, results: list[QueryMeasurement]) -> ScoreSummary:
-        """Write what ``results`` holds and the run does not, and return :meth:`scores` over them.
-        A sample is on disk iff it was TAKEN — a discarded look-ahead acquisition is not."""
-        ...
+    def bank(self, cells: Sequence[GradedCell]) -> None: ...
 
-    def bank(self, results: list[QueryMeasurement], rows: list[QueryMeasurement]) -> None:
-        """Keep ``rows`` — back and not yet taken — as priors of this run: the walk resumed from
-        a stop replays each when it reaches it."""
-        ...
+    def provenance(self, facts: MeasuredCell) -> str: ...
 
-    def close(self, results: list[QueryMeasurement], scores: ScoreSummary) -> None:
-        """The run's closing write, once the walk is decided."""
-        ...
+
+@dataclass(frozen=True)
+class ArmSlot:
+    """``idx`` is ``NO_ROUND_SLOT`` for a pass that is no arm of the round."""
+
+    idx: int
+    total: int
+    individual_id: str
 
 
 @dataclass
 class QueryLoopState:
-    """Read-only context threaded through per-sample processing."""
-
     search_point: JobSearchPoint
     session: Session
-    # The archive run this walk's rows land in — half of every cell's address ``(run_id,
-    # sample_id)``, stamped onto the live copy so a surface can open the cell before the round closes.
-    run_id: str
-    cached_sample_results: dict[int, QueryMeasurement]
-    on_sample_scored: Callable[[QueryMeasurement, int, int], None] | None
+    cached_sample_results: dict[int, MeasuredCell]
+    # ``None``: the walk writes no sample record — it is no pass a live surface draws.
+    slot: ArmSlot | None
+    role: str
     sample_index: SampleIndex | None
-    # The cached entry itself, so display can show the original DEPR row before the retry row.
-    deprecated_samples: dict[int, QueryMeasurement]
-    recorder: RunRecorder
-    # A cell no prior covers: the row another walk banked or is measuring, else this walk's hold on
-    # it. ``None`` where nothing is archived or the walk re-measures on purpose.
-    claim_cell: (
-        Callable[[Sample], Awaitable[tuple[QueryMeasurement | None, CellClaim | None]]] | None
-    )
-    # Each sample's cell (`ReplayFeed.cell_key`); empty where nothing is archived to replay.
+    deprecated_samples: dict[int, MeasuredCell]
+    recorder: WalkRecorder
+    # ``None`` where nothing is archived or the walk re-measures on purpose.
+    claim_cell: Callable[[Sample], Awaitable[tuple[MeasuredCell | None, CellClaim | None]]] | None
     cell_keys: Mapping[int, str]
-    # The campaign's priced set (`SessionState.priced_keys`), shared by every walk and grown
-    # as each takes one, so a replay is metered the first time the campaign reads that cell only.
+    # Shared by every walk, so a replay is metered the first time the campaign reads that cell only.
     counted: set[str]
-    # The replays already priced when the walk opened: none waits on the ceiling and no spend stop
-    # lands on one.
+    # Replays already priced when the walk opened: none waits on the ceiling or takes a spend stop.
     rereads: frozenset[int]
 
     @property
-    def scorer(self) -> CellScorer:
+    def scorer(self) -> Scorer:
         return self.session.scoring.require_scorer()
 
+    def sample_scored(
+        self, cell: GradedCell, idx: int, total: int, *, running: ScoreSummary | None
+    ) -> None:
+        if (slot := self.slot) is not None:
+            emit_sample_scored(
+                candidate_idx=slot.idx,
+                candidate_total=slot.total,
+                individual_id=slot.individual_id,
+                role=MeasurementRole(self.role),
+                sample_idx=idx,
+                sample_total=total,
+                cell=cell,
+                running=running,
+            )
+
     def priced(self, sample: Sample) -> None:
-        """Mark this sample's cell priced — billed fresh or metered as a replay. Said on the ledger
-        the first time, which is where a later launch learns it."""
         cell = self.cell_keys.get(sample.id)
         if cell is not None and cell not in self.counted:
             self.counted.add(cell)
@@ -343,58 +244,44 @@ class QueryLoopState:
 
 
 def _armed_cells(session: Session) -> int:
-    """What the operator ASKED for, clamped to what the backend declares it can hold — the request
-    alone would let the browser outrun the box, the ceiling alone would widen every walk unbidden.
-
-    **Sample look-ahead is LIVE, and every part of it looks removable.** It defaults off and no
-    committed campaign enables it, so a reader concludes the branch never fires; it fires on every
-    dataset the moment the operator presses the control — ``promptpotter-self`` included, where one
-    press releases a GROUP of inner campaigns. Four pieces move together or not at all: the
-    ``.runtime/sample_lookahead.json`` write/poll/consume triple, the launch/take split below,
-    ``dashboard.json::sample_lookahead`` + ``sample_lookahead_discards`` with the two connector
-    declarations beside them, and the ``campaign.lookahead`` cap. **Never "recover" an acquisition
-    past a cut** — recording it makes the run's rows depend on in-flight depth, forcing a
-    ``human_intervened`` stamp and devaluing the campaign; that discard is the design. A STOP is
-    not a cut: it banks what each walk was sure to take (:meth:`Walk.bank`). Why it is
-    browser-only with no CLI verb: ``docs/operations/access-model.md`` § host-admin ↔ user."""
+    """Sample look-ahead is LIVE though it defaults off: any dataset, the moment the operator arms it."""
     return effective_lookahead(
         session.control.sample_lookahead(), session.backend_client.max_cells_in_flight
     )
 
 
 async def _maybe_recover_degraded(
-    result: QueryMeasurement,
+    result: MeasuredCell,
     sample: Sample,
     ctx: QueryLoopState,
-) -> QueryMeasurement:
+) -> MeasuredCell:
 
     if not is_deprecated(result):
         return result
     recovered, _step = await execute_stale_data_protocol(
         sample,
-        cast(dict[str, Any], result),
+        result,
         ctx.session,
         pipeline_params=ctx.search_point.pipeline_params,
         sample_index=ctx.sample_index,
     )
-    return cast(QueryMeasurement, recovered)
+    return recovered
 
 
 @dataclass
 class _Acquired:
-    """Carries no side effect a reader could order against: every append, persist, callback and
-    ledger write belongs to :meth:`Walk.take`."""
+    """Carries no side effect: every append, persist and ledger write belongs to :meth:`Walk.take`."""
 
     sample: Sample
     idx: int
-    result: QueryMeasurement
-    fresh: bool  # False ⇒ replayed from the prior cache (nothing to persist)
-    deprecated_display: QueryMeasurement | None = None
+    result: GradedCell
+    fresh: bool
+    deprecated_display: GradedCell | None = None
     # Held until the row is on disk or discarded, so no other walk measures the cell meanwhile.
     claim: CellClaim | None = None
 
 
-def _returned_row(cell: asyncio.Task[_Acquired]) -> QueryMeasurement | None:
+def _returned_row(cell: asyncio.Task[_Acquired]) -> GradedCell | None:
     if not cell.done() or cell.cancelled() or cell.exception() is not None:
         return None
     return cell.result().result
@@ -422,14 +309,13 @@ async def _acquire(sample: Sample, idx: int, ctx: QueryLoopState, claiming: set[
         finally:
             claiming.discard(idx)
     if cached is not None:
-        # Can re-measure for real, so a hit gets a slot like anything else.
-        cached_r = await _maybe_recover_degraded(_materialize_cached(cached), sample, ctx)
-        return _Acquired(sample=sample, idx=idx, result=_graded(cached_r, ctx.scorer), fresh=False)
+        cached_r = await _maybe_recover_degraded(cached.replayed(), sample, ctx)
+        return _Acquired(sample=sample, idx=idx, result=ctx.scorer.grade(cached_r), fresh=False)
 
-    deprecated_display: QueryMeasurement | None = None
+    deprecated_display: GradedCell | None = None
     if (cached_deprecated := ctx.deprecated_samples.get(sample.id)) is not None:
         # Graded here, rendered at the take: a display call from a cell prints out of walk order.
-        deprecated_display = _graded(_materialize_cached(cached_deprecated), ctx.scorer)
+        deprecated_display = ctx.scorer.grade(cached_deprecated.replayed())
 
     try:
         result = await measure_sample(
@@ -439,10 +325,10 @@ async def _acquire(sample: Sample, idx: int, ctx: QueryLoopState, claiming: set[
         )
         result = await _maybe_recover_degraded(result, sample, ctx)
         if sample.id in ctx.deprecated_samples:
-            cast(dict[str, Any], result)["retry_of_deprecated_cache"] = True
+            result = replace(result, retry_of_deprecated_cache=True)
         if claim is not None:
-            claim.publish(cast(dict[str, Any], result))
-        result = _graded(result, ctx.scorer)
+            claim.publish(result.wire(), grade=ctx.recorder.provenance(result))
+        graded = ctx.scorer.grade(result)
     except BaseException:
         if claim is not None:
             claim.release()
@@ -450,52 +336,39 @@ async def _acquire(sample: Sample, idx: int, ctx: QueryLoopState, claiming: set[
     return _Acquired(
         sample=sample,
         idx=idx,
-        result=result,
+        result=graded,
         fresh=True,
         deprecated_display=deprecated_display,
         claim=claim,
     )
 
 
-LaunchEvent = tuple[str, int, int, int, int, int | None]
+LaunchEvent = tuple["Sample", int, int, int | None]
 
 
 @dataclass
 class Walk:
-    """One search point's pass over its panel, in the order GIVEN — the sampler orders the
-    round's panel once, so walking it as-given IS the round order. Passive: :func:`run_walks`
-    launches its cells, takes them in walk order and decides it, so every walk of a phase answers
-    to one loop and no walk reads another's state across an await.
-
-    ``submitted`` is how far LAUNCHING reached and ``len(results)`` how far TAKING did; look-ahead
-    is the gap between them. A cell frees its slot the moment it RETURNS, not when its turn to be
-    taken comes, so a slow cell at the head holds one slot rather than the whole window."""
+    """A cell frees its slot when it RETURNS, not when taken; no walk reads another's state across an await."""
 
     dataset: list[Sample]
     ctx: QueryLoopState
     checks: Sequence[StopRule]
-    on_sample_starting: Callable[[str, int, int, int, int, int | None], None] | None
-    # The walk's own context — the candidate it measures — copied once per cell, because a cell's
-    # throttle give-back and envelope deadline bind to the task it runs in.
+    # Copied once per cell: a cell's throttle give-back and envelope deadline bind to its task.
     context: contextvars.Context
-    results: list[QueryMeasurement] = field(default_factory=list)
+    # Rows an operator's skip let this walk take, replayed on resumption.
+    skip_at: int | None = None
+    results: list[GradedCell] = field(default_factory=list)
     consecutive_errors: int = 0
     submitted: int = 0
     running: dict[int, asyncio.Task[_Acquired]] = field(default_factory=dict)
-    # The running cells still waiting on another process's claim: nothing sent, so every stop and
-    # end cancels them. Each keeps its slot, which its send takes if the holder drops the cell.
+    # Running cells still waiting on another process's claim: nothing sent, so every stop cancels them.
     claiming: set[int] = field(default_factory=set)
     finished: dict[int, asyncio.Task[_Acquired]] = field(default_factory=dict)
     launched_at: dict[int, float] = field(default_factory=dict)
-    # Launch events of a walk measuring ahead of its turn, released at it, so each candidate's
-    # events still open with its announcement. ``None`` once released.
+    # Launch events of a walk measuring ahead of its turn; ``None`` once released.
     held: list[LaunchEvent] | None = field(default_factory=list)
-    # The taken cell whose catch-ups the walk still waits on before it can be judged.
     settling: Sample | None = None
     outcome: QueryLoopResult | None = None
-    # How many rows an operator's skip already let this walk take before a stop interrupted the
-    # phase — replayed on resumption, so the skip outlives the pause that followed it.
-    skip_at: int | None = None
     # The rows at which a block race next closes, where it may stop this walk. ``None`` outside one.
     boundary: int | None = None
 
@@ -503,17 +376,18 @@ class Walk:
     def n(self) -> int:
         return len(self.dataset)
 
+    def enter_block(self, end: int) -> None:
+        self.boundary = min(self.n, end)
+
     def launch(self, armed: int, horizon: int | None) -> tuple[Sample, asyncio.Task[_Acquired]]:
         idx = self.submitted
         sample = self.dataset[idx]
-        # The depth the round is RUNNING at, not how many happen to be in flight this instant: a
-        # window is empty at the start of every candidate, so reporting the latter unlights the
-        # operator's armed indicator once per candidate.
-        event: LaunchEvent = (sample.query, idx, self.n, sample.id, armed, horizon)
+        # `armed` is the depth the round RUNS at, never the in-flight count, empty at each candidate's start.
+        event: LaunchEvent = (sample, idx, armed, horizon)
         if self.held is not None:
             self.held.append(event)
-        elif self.on_sample_starting is not None:
-            self.on_sample_starting(*event)
+        else:
+            self._started(event)
         cell = asyncio.create_task(
             _acquire(sample, idx, self.ctx, self.claiming),
             name=f"scoring:{sample.id}",
@@ -526,60 +400,63 @@ class Walk:
 
     def release(self) -> None:
         held, self.held = self.held or [], None
-        if self.on_sample_starting is not None:
-            for event in held:
-                self.on_sample_starting(*event)
+        for event in held:
+            self._started(event)
+
+    def _started(self, event: LaunchEvent) -> None:
+        if (slot := self.ctx.slot) is not None:
+            sample, idx, armed, horizon = event
+            emit_sample_started(
+                candidate_idx=slot.idx,
+                candidate_total=slot.total,
+                sample_idx=idx,
+                sample_total=self.n,
+                sample_id=sample.id,
+                query=sample.query,
+                sample_lookahead=armed,
+                stop_horizon=horizon,
+            )
 
     def collect(self) -> None:
         for idx in [idx for idx, cell in self.running.items() if cell.done()]:
             self.finished[idx] = self.running.pop(idx)
 
     def head(self) -> asyncio.Task[_Acquired] | None:
-        """The returned cell next in walk order — only it may be taken."""
         return None if self.settling is not None else self.finished.get(len(self.results))
 
     def take(self, cell: asyncio.Task[_Acquired]) -> QueryLoopResult | None:
-        """The only writer of the rows, persister of one, and the fault verdict: an abort, ``None``
-        to go on. Raises the cell's own error in its turn, never in its race."""
+        """The only writer of the rows; raises the cell's own error in its turn, never in its race."""
         acq = cell.result()
         del self.finished[acq.idx]
         ctx, n = self.ctx, self.n
         cell_key = ctx.cell_keys.get(acq.sample.id)
         if not acq.fresh:
-            # Only if it STAYED a replay: the stale-data protocol may have re-measured for real,
-            # and that path already emitted its own fresh records.
-            if acq.result.get("cached") and (cell_key is None or cell_key not in ctx.counted):
-                _emit_cached_step_tokens(acq.result)
-        elif acq.deprecated_display is not None and ctx.on_sample_scored is not None:
-            ctx.on_sample_scored(acq.deprecated_display, acq.idx, n)
+            # Only if it STAYED a replay: the stale-data protocol may have re-measured for real.
+            if acq.result.facts.cached and (cell_key is None or cell_key not in ctx.counted):
+                _emit_cached_step_tokens(acq.result.facts)
+        elif acq.deprecated_display is not None:
+            ctx.sample_scored(acq.deprecated_display, acq.idx, n, running=None)
         ctx.priced(acq.sample)
 
-        self.results.append(acq.result)
         try:
-            recorder = ctx.recorder
-            running = recorder.persist(self.results) if acq.fresh else recorder.scores(self.results)
+            # Before the snapshot below, which names the cell by its answer's address.
+            taken = ctx.recorder.take(acq.result)
+            self.results.append(taken)
+            running = ctx.recorder.scores(self.results)
         finally:
             if acq.claim is not None:
                 acq.claim.release()
 
-        # Asked of every row, not only fresh ones: a replay never carries an error, but the
-        # stale-data protocol re-measures a replayed cell. The backend already spent its own
-        # bounded retries, so the next cell meets the same outage — halt, and the unreached cell
-        # stays a hole for `resume`.
-        category = error_category(acq.result)
-        if category is not None and (stop := _WALK_STOPS.get(category)) is not None:
-            logger.warning("%s: %s", STOP_REASON_INFO[stop].label, acq.result.get("error"))
+        # Asked of every row, replays included: the stale-data protocol re-measures a replayed cell.
+        category = taken.facts.error_category
+        if category is not None and (stop := REFUSAL_STOPS.get(category)) is not None:
+            logger.warning("%s: %s", STOP_REASON_INFO[stop].label, taken.facts.error)
             raise StopLoop(stop, unmeasured=n - len(self.results) + 1)
 
         if acq.fresh:
-            if is_error_result(acq.result):
-                if reason := self._abort_reason(acq.result):
-                    # The failed sample is already in the rows, so the remainder is the untouched
-                    # tail — COUNTED, never written as rows. Stamping a cell nothing ever sent with
-                    # `predicted: "ERROR"` gave absence the shape of failure, and every reader
-                    # downstream then drew conclusions about the pipeline from cells that never
-                    # ran, while the honest verdicts (`origin_unmeasured` / `origin_incomplete`)
-                    # went unreachable because the padding kept the denominator full.
+            if taken.facts.errored:
+                if reason := self._abort_reason(taken):
+                    # The untouched tail is counted, never written as rows, which would keep the denominator full.
                     logger.warning(
                         "Aborting scoring: %s after query %d/%d. %d cells not attempted.",
                         reason,
@@ -591,12 +468,11 @@ class Walk:
             else:
                 self.consecutive_errors = 0
 
-        if ctx.on_sample_scored is not None:
-            ctx.on_sample_scored(_with_running(acq.result, running, ctx.run_id), acq.idx, n)
+        ctx.sample_scored(taken, acq.idx, n, running=running)
         return None
 
-    def _abort_reason(self, result: QueryMeasurement) -> WalkEnd | None:
-        cat = error_category(result)
+    def _abort_reason(self, result: GradedCell) -> WalkEnd | None:
+        cat = result.facts.error_category
         if cat is not None and (at_once := _ABORTS_AT_ONCE.get(cat)) is not None:
             return at_once
         self.consecutive_errors += 1
@@ -605,9 +481,7 @@ class Walk:
         return None
 
     def judge(self) -> QueryLoopResult | None:
-        """The stop rules over the rows taken — cached rows too, or a candidate whose priors already
-        dominate it runs one extra real query — else complete once every cell is taken, unless a
-        block race's last close still decides it."""
+        """Cached rows are judged too, or a candidate its priors already dominate runs one extra real query."""
         for check in self.checks:
             if (signal := check.check(self.results)) is not None:
                 return QueryLoopResult(self.results, ended_on=WalkEnd.STOP_RULE, stop_signal=signal)
@@ -615,10 +489,11 @@ class Walk:
             return QueryLoopResult(self.results)
         return None
 
+    def launch_horizon(self, last: int) -> int | None:
+        """Index ``i`` may launch while no cut is possible before ``i`` rows, so a cut wastes one cell at most."""
+        return self.horizon(last - 2)
+
     def horizon(self, last: int) -> int | None:
-        """The fewest taken rows at which a stop rule could cut, looking no further than walk index
-        ``last``. Launching index ``i`` needs no possible cut before ``i`` rows, so a cut wastes at
-        most the one cell past it — the fault aborts aside, which no rule can foresee."""
         head = len(self.results)
         if last < head:
             return None
@@ -637,27 +512,21 @@ class Walk:
             end += 1
         return end - start
 
-    def rows(self) -> list[QueryMeasurement]:
-        """Every row the walk has, taken or only returned."""
+    def rows(self) -> list[GradedCell]:
         returned = (_returned_row(cell) for cell in self.finished.values())
         return [*self.results, *(row for row in returned if row is not None)]
 
     def flight(self) -> Flight:
-        """Out now; what the stop rules let this walk hold, counted over the whole remaining panel;
-        and what it could hold were nothing ever cut."""
         settled = len(self.results) + len(self.finished)
         horizon = self.horizon(self.n - 1)
         limit = self.n if horizon is None else min(self.n, horizon + 1)
         return Flight(len(self.running), limit - settled, self.n - settled)
 
     def bank(self) -> list[Sample]:
-        """Keep the cells back and not taken that this walk was sure to take — those below its
-        horizon, up to the first error, which may abort it — and name them. A walk resumed after a
-        stop replays each when it reaches it, so the rows it takes are still the serial walk's. A
-        decided walk banks nothing: it will never take what lies past its cut."""
+        """Only cells this walk was SURE to take: below its horizon and before the first error."""
         self.collect()
         horizon = self.horizon(self.n - 1)
-        rows: list[QueryMeasurement] = []
+        rows: list[GradedCell] = []
         paid: list[Sample] = []
         samples: list[Sample] = []
         for idx in sorted(self.finished):
@@ -667,15 +536,14 @@ class Walk:
             if cell.cancelled() or cell.exception() is not None:
                 continue
             acq = cell.result()
-            if is_error_result(acq.result):
+            if acq.result.facts.errored:
                 break
             if acq.fresh:
                 rows.append(acq.result)
                 paid.append(acq.sample)
             samples.append(acq.sample)
         if rows:
-            self.ctx.recorder.bank(self.results, rows)
-            # Billed already, and the resumed walk meets each as a replay.
+            self.ctx.recorder.bank(rows)
             for sample in paid:
                 self.ctx.priced(sample)
         return samples
@@ -683,10 +551,7 @@ class Walk:
     def end(
         self, outcome: QueryLoopResult | None, *, cancel: bool
     ) -> list[asyncio.Task[_Acquired]]:
-        """Decide the walk and hand back its calls still running. A cell in flight or returned and
-        not taken is DISCARDED, never written: recording it makes the run's rows depend on the
-        in-flight depth, which forces a `human_intervened` stamp. ``cancel`` stops the running ones,
-        which saves anything only where it stops their work — see :func:`run_walks`."""
+        """A cell in flight or returned-not-taken is DISCARDED: written, the rows depend on in-flight depth."""
         self.outcome = outcome
         if self.running or self.finished:
             cause = "the phase ended" if outcome is None else (outcome.ended_on or "complete")
@@ -728,33 +593,7 @@ async def run_walks(
     on_turn: Callable[[int, int | None], None] | None = None,
     on_decided: Callable[[int], None] | None = None,
 ) -> StopReason | None:
-    """Drive a scoring phase: every walk measures at once, and they are taken and decided one at a
-    time, in order, so every row, cut, prior and event lands where a serial phase lands it.
-
-    Only the walk whose TURN it is takes cells, answers a skip and is decided. ``on_turn(i, block)``
-    opens its turn before its held launches are released — ``block`` the 0-based block it walks under
-    a block race, else ``None``; ``on_decided(i)`` runs once it is decided, before the next turn
-    opens. A ``None`` walk has nothing to measure and is decided on its turn.
-
-    **Under a block race the turns cycle per block.** Each live walk in index order takes the block
-    and hands the turn on; once all have, ``blocks.close`` decides them together on the rows they
-    share, and the survivors start the next block — so a cut never waits on an arm's place in line.
-
-    **The depth bounds every call the phase has out** — its cells, the PoBB catch-ups that pair
-    them, and discarded calls still winding down — which a whole inner campaign per call makes a
-    memory bound. Slots go in one order: the catch-ups the walk on turn waits on, then its own
-    cells, then the other live walks in index order, which leave one slot free; and no call starts
-    that the spend book cannot hold beside every call out (:func:`_dearest`). A pause is raised; a
-    pause that already cancelled a call is the same pause.
-
-    **A budget stop is raised too, unless ``keep_cut``.** Then every walk still undecided is decided
-    on the rows it took, less the cell the ceiling refused, and the stop is returned — ``None``
-    where the phase ran to its end.
-
-    **A sent call is cancelled only where that stops what it bills**
-    (``Connector.cancel_stops_billing``). Elsewhere the backend finishes it and the provider bills
-    it whether or not anyone waits, so it is left to land, counted against the depth, before the
-    phase ends — or stops, where what it returns is banked."""
+    """Rows, cuts and events land where a SERIAL phase lands them; ``keep_cut`` returns a budget stop, not raises."""
     phase = _ScoringPhase(walks, session, backfills, blocks, on_turn, on_decided)
     phase.cell = _dearest(
         [
@@ -774,9 +613,7 @@ async def run_walks(
         return None
     except BaseException as stop:
         budget = _budget_stop(stop)
-        # A pause or a spent ceiling first waits out the calls already sent, which bill anyway; an
-        # unreachable backend or a provider's refusal lands nothing more, and a cancellation aimed
-        # at this phase is answered at once.
+        # A pause or a spent ceiling first waits out the calls already sent, which bill anyway.
         if not phase.cancels and (isinstance(stop, KeyboardInterrupt) or budget is not None):
             await phase.land()
         phase.bank()
@@ -785,16 +622,12 @@ async def run_walks(
         phase.keep_cut()
         return budget
     finally:
-        # Not awaited — an `await` here can swallow a CancelledError aimed at this coroutine, and
-        # answering a cancellation with a normal return tells the canceller it succeeded while the
-        # work runs on: the L4 cell wall clock is enforced only if the CancelledError comes back.
+        # Not awaited: an `await` here can swallow a CancelledError aimed at this coroutine.
         phase.discard()
 
 
 @dataclass(frozen=True)
 class _TurnState:
-    """Where the walk on turn stands at one step, and which stop is asked of it."""
-
     head: asyncio.Task[_Acquired] | None
     settle: Sample | None
     settled: bool
@@ -811,8 +644,6 @@ class _TurnState:
 
 @dataclass
 class _ScoringPhase:
-    """What the steps of one :func:`run_walks` call share: whose turn it is and every call out."""
-
     walks: Sequence[Walk | None]
     session: Session
     backfills: CatchUps | None
@@ -831,13 +662,11 @@ class _ScoringPhase:
         self.cancels = self.session.backend_client.cancel_stops_billing
         self.book = bound_spend_book()
         self.label = filed(CELL)
-        # A pass the book's ceilings do not meter — a bench pass on a controlled arm — is neither
-        # admitted against them nor stopped by them.
+        # A pass the book's ceilings do not meter is neither admitted against them nor stopped by them.
         self.unbounded = self.book is not None and not self.book.binds(self.label.kind)
 
     def affordable(self) -> int:
-        # At the book's own price for a cell, and every call out counted at it here rather than
-        # read back off the book: a cell launched this step has not placed its own hold yet.
+        # Calls out are counted here, not read off the book: a cell launched this step holds nothing yet.
         book, cell, label = self.book, self.cell, self.label
         if book is None or cell is None or self.unbounded:
             return sys.maxsize
@@ -847,6 +676,7 @@ class _ScoringPhase:
         return [walk for walk in self.walks if walk is not None and walk.outcome is None]
 
     def out(self) -> int:
+        # A catch-up and a cancelled call still draining count too, or `max_cells_in_flight` understates peak RSS.
         cells = sum(len(walk.running) for walk in self.live())
         catching = len(self.backfills.backfills_in_flight()) if self.backfills is not None else 0
         return cells + len(self.draining) + catching
@@ -861,7 +691,7 @@ class _ScoringPhase:
 
     def reach(self, walk: Walk) -> None:
         if self.blocks is not None:
-            walk.boundary = min(walk.n, (self.block + 1) * self.blocks.block_size)
+            walk.enter_block((self.block + 1) * self.blocks.block_size)
 
     def announce(self, i: int) -> None:
         self.announced.add(i)
@@ -898,8 +728,6 @@ class _ScoringPhase:
             self.conclude(self.turn)
 
     def close_block(self) -> bool:
-        """Every live walk took the block: the race decides them together, and a walk through its
-        whole panel completes. False once no walk is left."""
         assert self.blocks is not None
         racing = {
             i: walk
@@ -924,8 +752,6 @@ class _ScoringPhase:
         return bool(self.live())
 
     async def step(self) -> bool:
-        """One step of the walk on turn: honour a stop, else take what is back, else launch and
-        wait. False once no walk is left."""
         walk = self.walks[self.turn]
         assert walk is not None
         if self.gauge is not None:
@@ -943,12 +769,9 @@ class _ScoringPhase:
             return self.judged(walk)
         if now.head is not None:
             return self.take_head(walk, now.head)
-        # Re-read every step, so a press landing mid-walk TOPS THE WINDOW UP rather than waiting
-        # for it to drain. Nothing is spent here: the round that scored under the depth spends
-        # it (`runner/measurement.py`).
         if not now.stopping:
             self.launch(walk, armed)
-        await self.wait(walk)
+        await self.wait(walk, armed)
         return True
 
     def turn_state(self, walk: Walk) -> _TurnState:
@@ -961,13 +784,9 @@ class _ScoringPhase:
             started = backfills.backfills_for(settle)
             unstarted = backfills.owed_backfills(settle)
         cut = (head is not None and head.cancelled()) or any(c.cancelled() for c in started)
-        # Answered only by the walk whose turn it is — the skip names the candidate on screen —
-        # so nothing measuring for it can spend the press. A cancelled call is the pause's own
-        # doing: the throttle wait polls the same flag.
+        # A cancelled call is the pause's own doing: the throttle wait polls the same flag.
         skip = session.control.skip_requested()
         pause = cut or session.control.pause_requested()
-        # Same cadence as the pause, because the round-boundary gate cannot fire until the round
-        # closes — and for an L4 outer round every sample is an entire inner CAMPAIGN.
         tripped = session.control.budget_tripped()
         if self.unbounded or walk.rereads_ahead(len(walk.results)):
             tripped = None
@@ -979,15 +798,17 @@ class _ScoringPhase:
             skip=skip,
             pause=pause,
             tripped=tripped,
-            # A returned cell, or a catch-up already started, is paid for — kept before a stop is
-            # honoured, so the stop lands a row later, as if pressed a moment later. Keeping starts
-            # nothing: while a stop waits, only what is already out is waited on.
+            # A returned cell or a started catch-up is paid for, so it is kept before a stop is honoured.
             keeping=(settle is not None and unstarted == 0) or head is not None,
         )
 
     def honour_stop(self, walk: Walk, now: _TurnState) -> bool:
         if now.skip:
-            self.session.control.spend_skip()
+            session = self.session
+            if session.control.spend_skip() and session.state.cycle_id:
+                # Stamped where a searchpoint is actually cut, never at the press.
+                session.store.campaigns.record_intervention(session.hop, kind="skip")
+                session.human_intervened = True
             logger.info(
                 "Operator skip after query %d/%d; accepting partial searchpoint.",
                 len(walk.results),
@@ -995,8 +816,6 @@ class _ScoringPhase:
             )
             return self.decide(walk, QueryLoopResult(walk.results, ended_on=WalkEnd.SKIP))
         if now.pause or now.tripped is None:
-            # Between samples, where every TAKEN result is already on disk, so this exits
-            # cleanly and `resume` continues into the remaining samples.
             logger.debug("Pause after query %d/%d.", len(walk.results), walk.n)
             raise KeyboardInterrupt("graceful")
         logger.warning(
@@ -1025,8 +844,6 @@ class _ScoringPhase:
         return self.advance()
 
     def judged(self, walk: Walk) -> bool:
-        """Decide the walk on turn where its rules say so, or hand the turn on at a block's end.
-        False once no walk is left."""
         if (verdict := walk.judge()) is not None:
             return self.decide(walk, verdict)
         if walk.boundary is not None and len(walk.results) == walk.boundary:
@@ -1054,7 +871,7 @@ class _ScoringPhase:
             last = min(last, walk.boundary)
         if last < walk.submitted:
             return
-        horizon = walk.horizon(last - 2)
+        horizon = walk.launch_horizon(last)
         while (
             room > 0 and walk.submitted <= last and (horizon is None or walk.submitted <= horizon)
         ):
@@ -1063,7 +880,12 @@ class _ScoringPhase:
             if backfills is not None:
                 room -= len(backfills.start_backfill(sample, min(room, self.affordable())))
 
-    async def wait(self, walk: Walk) -> None:
+    async def depth_raised(self, armed: int) -> None:
+        """Polled: the press is a command another process records on the ledger, which no signal carries."""
+        while _armed_cells(self.session) <= armed:
+            await asyncio.sleep(HELD_POLL_S)
+
+    async def wait(self, walk: Walk, armed: int) -> None:
         book, cell, label = self.book, self.cell, self.label
         calls = self.outstanding()
         if not calls:
@@ -1073,19 +895,27 @@ class _ScoringPhase:
                     len(walk.results),
                     walk.n,
                 )
-                # Refused with the ceiling that binds, and the sums that say why.
-                book.hold(book.held_at(label, cell), cell, label.kind, what="the next cell")
+                # Raises the refusal `hold` would, naming the ceiling that binds, and holds nothing.
+                book.refuse_unless_room(book.held_at(label, cell), cell, NEXT_CELL)
             raise RuntimeError(
                 f"scoring phase stalled: nothing out and nothing to take at query "
                 f"{len(walk.results)}/{walk.n}"
             )
-        await asyncio.wait(calls, return_when=asyncio.FIRST_COMPLETED)
+        watched = set[asyncio.Future[Any]](calls)
+        raised: asyncio.Future[None] | None = None
+        if armed < self.session.backend_client.max_cells_in_flight:
+            raised = asyncio.ensure_future(self.depth_raised(armed))
+            watched.add(raised)
+        try:
+            await asyncio.wait(watched, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            if raised is not None:
+                raised.cancel()
         for walking in self.live():
             walking.collect()
         self.draining.difference_update([call for call in self.draining if call.done()])
 
     async def land(self) -> None:
-        """Wait out every call already sent, starting none, so each one's cost is on the record."""
         for walking in self.live():
             walking.drop_claim_waits()
         if calls := self.outstanding():
@@ -1097,8 +927,6 @@ class _ScoringPhase:
         self.draining.clear()
 
     def bank(self) -> None:
-        # The phase stops rather than decides, so its walks resume later: keep what came back that
-        # each was sure to take, and the catch-ups paired with those cells or with one it took.
         for walk in self.live():
             with graceful("Could not bank a stopped walk's returned cells"):
                 sure = walk.bank()
@@ -1115,7 +943,11 @@ class _ScoringPhase:
                 self.announce(i)
             if walk is not None:
                 # The cell the ceiling refused was taken as a row before it stopped the phase.
-                kept = [row for row in walk.results if _budget_refusal(error_category(row)) is None]
+                kept = [
+                    cell
+                    for cell in walk.results
+                    if _budget_refusal(cell.facts.error_category) is None
+                ]
                 walk.end(QueryLoopResult(kept, ended_on=WalkEnd.BUDGET), cancel=True)
             self.conclude(i)
 

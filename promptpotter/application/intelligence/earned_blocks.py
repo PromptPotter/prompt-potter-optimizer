@@ -1,42 +1,32 @@
-"""Field values that MEASURED credible lift, tagged by answer-space signature so a block earned on one task shape
-never lands on another. The long task-specific fields are excluded — that is where prompt bloat accumulates."""
-
 from __future__ import annotations
 
-import re
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.config.settings import ANSWER_SPACE_CAP
 from promptpotter.domain.candidate_diff import candidate_delta
+from promptpotter.domain.cycle_paths import CycleDir
+from promptpotter.domain.scoring import ANSWER_SPACE_CAP, MeasuredCell
+from promptpotter.infrastructure.ledger import ledger_chain
+from promptpotter.infrastructure.store.archive_queries import walked_answers
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_standing_rounds
 from promptpotter.infrastructure.store.io import read_json_optional
-from promptpotter.infrastructure.store.layout import (
-    ROUND_GLOB,
-    CampaignLayout,
-    CycleLayout,
-    campaign_cycles_dir,
-)
-from promptpotter.shared.instrument import instrument_mode
+from promptpotter.infrastructure.store.layout import CampaignLayout, campaign_cycles_dir
+from promptpotter.shared.measurement_context import instrument_mode
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
+    from promptpotter.domain.results import ScoredCandidate
+    from promptpotter.domain.run_records import RoundClosedRecord
     from promptpotter.infrastructure.store.stores import Stores
 
 __all__ = ["answer_space_signature", "earned_library_for", "mine_earned_blocks"]
 
-# The short, reusable framing fields — the only ones a block library should carry. The long
-# fields (instruction, problem_description) are task-specific detail, not transferable material.
+# The long fields (instruction, problem_description) are task-specific, not transferable.
 _REUSABLE_FIELDS: frozenset[str] = frozenset(
     {"persona", "task_intent", "thinking_style", "answer_format"}
 )
 
-# A run whose distinct ground truths exceed the enumerable cap has an open answer space
-# (free-text / ranking). **That is the ABSENCE of a shape, not a shape** — so it is keyed by the
-# dataset that produced it and transfers nowhere else; shared, it makes every free-text task in
-# the workspace one bucket and serves one dataset's blocks to another as material to reuse. A
-# closed label set IS a shape and still transfers, which is the whole value of the mechanism.
+# An open answer space is the ABSENCE of a shape: keyed by its dataset, it transfers nowhere else.
 OPEN_ANSWER_SPACE = "OPEN"
 
 
@@ -51,77 +41,56 @@ class EarnedBlock:
 
 
 def answer_space_signature(labels: Iterable[Any], *, dataset: str) -> str:
-    """The task-fit key for a set of ground-truth labels: sorted distinct labels, or ``OPEN`` scoped
-    to *dataset* above the cap. The one place a run's fit key is derived, so a block earned under a
-    signature and a cycle looking one up draw the same line — and the one place the open case is
-    prevented from becoming a shape it is not."""
     distinct = {label for label in labels if isinstance(label, str) and label}
     if not distinct or len(distinct) > ANSWER_SPACE_CAP:
         return f"{OPEN_ANSWER_SPACE}:{dataset}"
     return "|".join(sorted(distinct))
 
 
-def _answer_space_signature(round_doc: dict[str, Any], dataset: str) -> str:
+def _answer_space_signature(stores: Stores, closed: RoundClosedRecord, dataset: str) -> str:
+    walked = {cell[0]: cell for cells in closed.cells.arms.values() for cell in cells}
     return answer_space_signature(
         (
-            row.get("ground_truth")
-            for rows in (round_doc.get("all_candidate_results") or {}).values()
-            for row in rows or []
+            MeasuredCell.from_wire(row).ground_truth
+            for row in walked_answers(stores, walked.values())
         ),
         dataset=dataset,
     )
 
 
-# `_credible_lift`'s interval bound as it sits in a round file, read before the document is
-# parsed: most rounds earned nothing.
-_LIFT_BOUND = re.compile(rb'"reference_lift_ci_lo": *(-?[0-9][0-9.eE+-]*)')
-
-
-def _may_have_earned(round_file: Path) -> bool:
-    try:
-        raw = round_file.read_bytes()
-    except OSError:
-        return False
-    return any(float(bound) > 0 for bound in _LIFT_BOUND.findall(raw))
-
-
-def _credible_lift(cand: dict[str, Any]) -> float | None:
-    """The paired ``reference_lift`` over a MATCHED parent whose interval clears zero. Accuracy,
-    never the composite: blocks pool across campaigns, and each formula prices cells its own way."""
-    if cand.get("reference_accuracy") is None:
+def _credible_lift(cand: ScoredCandidate) -> float | None:
+    """Accuracy, never the composite: blocks pool across campaigns, each pricing cells its own way."""
+    lift = cand.vs_reference.on_whole_set if cand.vs_reference else None
+    if lift is None or lift.estimate.ci_lo <= 0:
         return None
-    lift, ci_lo = cand.get("reference_lift"), cand.get("reference_lift_ci_lo")
-    if not isinstance(lift, (int, float)) or not isinstance(ci_lo, (int, float)) or ci_lo <= 0:
-        return None
-    return float(lift)
+    return lift.estimate.value
 
 
 def _accumulate(
-    round_doc: dict[str, Any], dataset: str, acc: dict[tuple[str, str, str], list[float]]
+    stores: Stores,
+    closed: RoundClosedRecord,
+    dataset: str,
+    acc: dict[tuple[str, str, str], list[float]],
+    fields_of: Mapping[str, dict[str, Any]],
 ) -> None:
-    fit = _answer_space_signature(round_doc, dataset)
-    # The round's own ``prompt_fields`` IS the parent every candidate in it was mutated from —
-    # the same anchor ``mutation_memory`` diffs against. A ``ScoredCandidate`` persists its
-    # RESOLVED ``prompt_fields`` (never the L1 ``prompt_fields_updates`` delta, which lives only
-    # on the generate schema), so "what it changed" is candidate-vs-parent through the ONE shared
-    # delta rule (:func:`candidate_delta`) — reading a key the serialized candidate never carries
-    # mined nothing, silently, on every real run.
-    parent = round_doc.get("prompt_fields") or {}
-    for cand in round_doc.get("candidate_scores") or []:
-        fields = cand.get("prompt_fields")
-        if not isinstance(fields, dict):
+    earned = [(cand, lift) for cand in closed.candidate_scores if (lift := _credible_lift(cand))]
+    if not earned:
+        return
+    fit = _answer_space_signature(stores, closed, dataset)
+    # Diffed against the individual the lift was READ against: a round's arms may have several parents.
+    for cand, lift in earned:
+        assert cand.vs_reference is not None and cand.vs_reference.a is not None
+        reference = fields_of.get(cand.vs_reference.a.address.individual_id)
+        if reference is None:
             continue
-        lift = _credible_lift(cand)
-        if lift is None:
-            continue
-        for field, text in candidate_delta(fields, parent, None, None).prompt.items():
+        delta = candidate_delta(cand.prompt_fields, reference, None, None)
+        for field, text in delta.prompt.items():
             if field in _REUSABLE_FIELDS and (block := text.strip()):
                 acc[(fit, field, block)].append(lift)
 
 
 def mine_earned_blocks(stores: Stores) -> dict[str, list[EarnedBlock]]:
-    """Earned blocks keyed by answer-space fit. **Empty under instrument mode** — it reads the campaign TREE, which
-    the archive's evidence epoch never sees, so ungated an inner cell #39 gets a richer prompt than cell #1."""
+    """Empty under instrument mode: it reads the campaign TREE, which the evidence epoch never sees."""
     if instrument_mode() is not None:
         return {}
 
@@ -130,20 +99,18 @@ def mine_earned_blocks(stores: Stores) -> dict[str, list[EarnedBlock]]:
         cycles_dir = campaign_cycles_dir(campaign_dir)
         if not cycles_dir.is_dir():
             continue
-        # The manifest, never the directory name: `<dataset>__<hash>` is a rendering of the id, and
-        # a dataset whose own name carries `__` would split at the wrong place.
+        # The manifest, never the directory name: a dataset name carrying `__` splits wrong.
         manifest = read_json_optional(CampaignLayout(campaign_dir).manifest)
         dataset = str((manifest or {}).get("dataset_name") or campaign_dir.name)
-        for cycle_dir in sorted(cycles_dir.iterdir()):
-            rounds_dir = CycleLayout(cycle_dir).rounds
-            if not rounds_dir.is_dir():
-                continue
-            for round_file in sorted(rounds_dir.glob(ROUND_GLOB)):
-                if not _may_have_earned(round_file):
-                    continue
-                doc = read_json_optional(round_file)
-                if isinstance(doc, dict):
-                    _accumulate(doc, dataset, acc)
+        for cycle_dir in sorted(p for p in cycles_dir.iterdir() if p.is_dir()):
+            standing = scan_standing_rounds(ledger_chain(CycleDir(cycle_dir)))
+            fields_of = {
+                cand.candidate_id: cand.prompt_fields
+                for held in standing.rounds.values()
+                for cand in held.close.candidate_scores
+            }
+            for held in standing.rounds.values():
+                _accumulate(stores, held.close, dataset, acc, fields_of)
 
     by_fit: dict[str, list[EarnedBlock]] = defaultdict(list)
     for (fit, field, block), lifts in acc.items():
@@ -156,8 +123,6 @@ def mine_earned_blocks(stores: Stores) -> dict[str, list[EarnedBlock]]:
 def earned_library_for(
     stores: Stores, fit_signature: str, *, per_field_cap: int = 3
 ) -> dict[str, tuple[str, ...]]:
-    """The ``guidance`` library for one run — earned and FITTING only. Empty when nothing cleared the bar on this
-    answer-space shape, which is the correct silence for a task with no transferable history yet."""
     earned = mine_earned_blocks(stores).get(fit_signature, [])
     by_field: dict[str, list[str]] = defaultdict(list)
     for block in earned:

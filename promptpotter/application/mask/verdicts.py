@@ -1,5 +1,4 @@
-"""Verdict strategies — each lives beside the math it asks, selected by the lens. The FOLD is what is
-shared, which is why ``replay`` lives in ``resume_and_fork/ab_replay.py`` with the replayers."""
+"""``replay`` lives in ``resume_and_fork/ab_replay.py`` with the replayers: the FOLD is what is shared."""
 
 from __future__ import annotations
 
@@ -11,12 +10,7 @@ from promptpotter.domain.results import ScoreboardRankKey, scoreboard_rank_key
 
 
 class MaskedElection(NamedTuple):
-    """What the record's scorer would have made of ONE round, against a stated parent floor.
-
-    ``decidable`` is False where the parent itself has no reading: there is then no floor to
-    reproduce the "parent held" case against, and every caller must say nothing rather than guess.
-    ``winner_id`` is ``None`` for "the parent held" — a real outcome, not an absence.
-    """
+    """``winner_id`` ``None`` is "the parent held", a real outcome; no parent reading is ``decidable`` False."""
 
     decidable: bool
     winner_id: str | None
@@ -27,18 +21,11 @@ def _key(reading: MaskReading) -> ScoreboardRankKey:
 
 
 def masked_election(rnd: MaskRound, parent: MaskReading | None) -> MaskedElection:
-    """The one-round ranking every mask consumer shares — the divergence verdict against the
-    RECORDED parent, the scenario spine against the counterfactual one it threaded forward. Both
-    must order candidates identically or a divergence marker and the chain it explains would
-    disagree about the same round.
-
-    The eligible filter is the realized one (``is_electable``); the ordering is
-    ``scoreboard_rank_key`` over each arm's reading. An arm with none is skipped, never scored 0.
-    """
+    """Shared by the divergence verdict and the scenario spine, which must order one round identically."""
     if parent is None:
         return MaskedElection(decidable=False, winner_id=None)
     best_key = _key(parent)
-    leader_id: str | None = None  # the parent holds until a challenger beats it
+    leader_id: str | None = None
     for c in rnd.candidates:
         if not c.is_eligible or c.reading is None:
             continue
@@ -50,17 +37,9 @@ def masked_election(rnd: MaskRound, parent: MaskReading | None) -> MaskedElectio
 
 
 def make_scoring_verdict() -> Verdict:
-    """The scoring verdict over a record read under a swapped criterion: **re-ranks the RECORD, it
-    does not re-run the election.** The ordering is :func:`masked_election`'s, where the election
-    ranks Rasch θ-lift over the parent behind a coverage floor.
-
-    That gap is not closable here: θ under another formula must be re-fit from per-sample grades
-    against a re-calibrated δ ruler — ``ab_replay``'s substrate (``with_replay=True`` plus an
-    archive read), not a cheaper version of it. So a divergence means "under this formula the
-    crowned candidate is no longer the best-scoring one", where ``ab`` answers if the RUN moved."""
+    """Re-ranks the RECORD, never re-runs the election: whether the RUN moves under the formula is ``ab``'s."""
 
     def verdict(rnd: MaskRound) -> VerdictOutcome:
-        # Round 0 holds no election, so there is nothing it could have decided differently.
         if rnd.round == 0:
             return VerdictOutcome(diverged=False)
         recorded_winner = next((c.candidate_id for c in rnd.candidates if c.is_selected), None)
@@ -75,8 +54,7 @@ def make_scoring_verdict() -> Verdict:
 
 
 def make_abort_verdict(suppress: frozenset[str]) -> Verdict:
-    """The abort verdict. Suppressing a contributor that DID fire is record-computable; ADDING one the run lacked
-    is not — that needs the per-step ``p_best`` stream, and belongs on the real-run sibling-cycle path."""
+    """Suppressing a contributor that DID fire is record-computable; ADDING one needs the ``p_best`` stream."""
 
     def verdict(rnd: MaskRound) -> VerdictOutcome:
         if rnd.round == 0:

@@ -1,74 +1,71 @@
-"""Single-sample pipeline execution + scoring; {{var}} interpolation excludes ground_truth."""
-
 from __future__ import annotations
 
 import asyncio
 import logging
 import re
 import time
-from collections.abc import Callable, Mapping
-from typing import TYPE_CHECKING, Any, cast
+from collections.abc import Mapping
+from dataclasses import replace
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
 from promptpotter.application.scoring.cell_envelope import CellEnvelope
 from promptpotter.application.scoring.classification import terminal_ranking
 from promptpotter.application.scoring.evaluators import materialize_sample_values
-from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.application.scoring.row_diagnostics import rank_ground_truth
-from promptpotter.config.settings import NO_RESULT
 from promptpotter.domain.l4.proxies import (
     INNER_FACT_KEYS,
     PARENT_LEVEL_SE_KEY,
 )
-from promptpotter.domain.pipeline_schema import WebSpendBound
+from promptpotter.domain.pipeline_schema import LLMSpendBound, WebSpendBound
 from promptpotter.domain.results_health import classify_result, is_deprecated, terminal_node
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import (
-    CellScorer,
-    QueryMeasurement,
+    NO_RESULT,
+    PIPELINE_KEYS,
+    MeasuredCell,
+    PipelineData,
+    RerunComparison,
+    Scorer,
     extract_item_label,
-    is_hit,
     turn_scalars,
 )
-from promptpotter.domain.spend import StepTokenUsage, TokenAccount
+from promptpotter.domain.spend import StepUsage, TokenAccount
+from promptpotter.infrastructure.llm.base import hold_ceiling
 from promptpotter.infrastructure.llm.heartbeat import heartbeat
-from promptpotter.infrastructure.llm.pricing import rate_ceiling
-from promptpotter.infrastructure.llm.spend_book import FRAMING_TOKENS, Billed, SendBound
-from promptpotter.infrastructure.llm.telemetry import _CURRENT_ROUND, emit_token_usage
-from promptpotter.shared.errors import (
-    CellUnscoreableError,
-    ErrorCategory,
-    SendRefusedError,
-    is_provider_credit_refusal,
+from promptpotter.infrastructure.llm.send_failure import failed_send
+from promptpotter.infrastructure.llm.spend_book import (
+    FRAMING_TOKENS,
+    Billed,
+    Reported,
+    SendBound,
 )
+from promptpotter.infrastructure.llm.telemetry import (
+    _CURRENT_ROUND,
+    emit_token_usage,
+    rate_priced_usd,
+)
+from promptpotter.shared.errors import CellUnscoreableError, ErrorCategory, SendRefusedError
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.intelligence.indexes.sample import SampleIndex
-    from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
+    from promptpotter.domain.pipeline_schema import NodeSpendBound, PipelineNode, PipelineSchema
+    from promptpotter.infrastructure.backend import CellBilling
 
 logger = logging.getLogger(__name__)
 
 STALE_DATA_LOAD_PROTOCOL: tuple[str, ...] = ("rerun", "sampleswitch")
-"""Step order for handling a degraded cached query. ``execute_stale_data_protocol``
-walks this in order; first step that returns a non-degraded result wins."""
 
 RERUN_TRIGGER_COUNT: int = 3
-"""Number of degradation sightings (cached + historical) before rerunning."""
 
 SAMPLESWITCH_MIN_DEGRADATION_RATE: float = 0.5
-"""Historical degradation rate at which sampleswitch short-circuits to the
-cached deprecated answer instead of re-evaluating."""
 
-# TARGET-prompt interpolation — the `{{var}}` slots a dataset row fills on its way to the
-# backend. NOT the dispatch-hub `injection_table()` registry, which fills `{{slot}}`s in the
-# OPTIMIZER's prompts. Same syntax, two populations, two regexes (the other is
-# `dispatch/facade.py`); a signal for an L1/L2/L3 prompt goes there, never here.
+# TARGET-prompt `{{var}}` slots a dataset row fills; the OPTIMIZER's `{{slot}}`s are `dispatch/facade.py`'s.
 _TEMPLATE_VAR_RE = re.compile(r"\{\{(\w+)\}\}")
 
-# Never interpolated into a prompt — answer leakage. Keep it naming the field that carries
-# how well a row was answered, which has been renamed under it before.
+# Never interpolated into a prompt: answer leakage.
 _EXCLUDED_FIELDS: frozenset[str] = frozenset(
     {
         "ground_truth",
@@ -80,7 +77,6 @@ _EXCLUDED_FIELDS: frozenset[str] = frozenset(
 
 
 def interpolate_prompt(text: str, variables: dict[str, Any]) -> str:
-    """Replace {{key}} from variables; skip _EXCLUDED_FIELDS; missing keys left as-is."""
     expected = set(_TEMPLATE_VAR_RE.findall(text))
     if not expected:
         return text
@@ -124,100 +120,66 @@ def interpolate_pipeline_params(
 
 __all__ = ["execute_stale_data_protocol", "measure_sample"]
 
-# Wire-response keys always kept on pipeline_data, whatever the pipeline schema.
-# ``reasoning_trace`` is the task model's chain-of-thought (head-capped at the backend); the
-# critique tier reads it to diagnose WHERE a deduction broke.
-#
-# ``pipeline_params`` is deliberately NOT here: it is constant across a run, and the archive
-# already lifts it onto the index entry (`measurement_archive.py::_summary`), which is where
-# its one reader takes it from (`intelligence/indexes/axis.py`). Per-sample it was the same
-# ~3 KB blob re-stored on every row — 44% of a run file, addressable without it.
+# Kept whatever the schema declares; ``pipeline_params`` is NOT here: the archive lifts it onto the index entry.
 _INFRA_KEYS: frozenset[str] = frozenset(
     {
-        "step_timings",
-        "step_tokens",
         "total_time",
         "diagnostics",
         "reasoning_trace",
-        # The cell's conversation, where the backend has one. An infra key like the trace beside
-        # it: a dataset does not declare an `observation_mapping` for how its backend talks, and
-        # a formula must never read a turn — see `domain/scoring.py::TurnRecord`.
         "turns",
         "outcome_note",
-        # Where an episode's wall clock went, by harness phase (`PipelineData.step_phases`).
         "step_phases",
-        # L4: the arm's own half of a paired cell difference (`domain/l4/proxies.py`). It rides
-        # here rather than as a declared observation because the panel reads it and the scoring
-        # formula must not — see the emit site in `runner/inner/spawn.py`.
+        # An infra key, not a declared observation: the panel reads it and the formula must not.
         PARENT_LEVEL_SE_KEY,
-        # L4: what the inner campaign knows about ITSELF (`domain/l4/proxies.py`). Infra keys, so
-        # they need no dataset `observation_mapping` — an undeclared observation is dropped here
-        # silently — the trap `initialization/wiring.py::_verify_required_observation_keys`
-        # exists to catch.
         *INNER_FACT_KEYS,
     }
 )
-
-
-# Which wire keys `_compute_step_tokens` copies onto the entry it re-seeds, and the type each must
-# arrive as. DECLARED, and asserted TOTAL over `StepTokenUsage`, so a key added to that type and
-# not to this table fails at import rather than vanishing from every row it was reported on.
-_WIRE_SEEDED: dict[str, type] = {
-    "cost_usd": float,
-    "model": str,
-    "served_by": str,
-    "finish_reason": str,
-    "reasoning": int,
-    "cache_read": int,
-}
-
-# The keys this function answers for ITSELF: the two counts, its own `estimated` verdict, and
-# `provider` — the overlay routed the call, so whoever we configured is whoever billed us.
-_SEAM_OWNED: frozenset[str] = frozenset({"input", "output", "estimated", "provider"})
-
-assert set(_WIRE_SEEDED) | _SEAM_OWNED == set(StepTokenUsage.__annotations__), (
-    "every StepTokenUsage key is either copied from the wire (_WIRE_SEEDED) or answered by "
-    "_compute_step_tokens itself (_SEAM_OWNED) — one that is neither is dropped in silence"
+assert _INFRA_KEYS <= PIPELINE_KEYS, (
+    "an infra key PipelineData does not declare is filed as a dataset observation"
 )
-# The union above is satisfied by a key listed in BOTH, which would read as copied and be
-# overwritten. So: disjoint too.
-assert _SEAM_OWNED.isdisjoint(_WIRE_SEEDED), (
-    f"{sorted(_SEAM_OWNED & set(_WIRE_SEEDED))} is listed as both copied and answered here — "
-    f"a key has one source, and the seam's would silently win"
-)
+
+_SPEND_KEYS = ("step_tokens", "step_timings")
+
+
+PricedPair = tuple[str | None, str | None]
+"""The ``(model, provider)`` one node's sends are priced as (``BackendClient.priced_as``)."""
+
+_UNROUTED: PricedPair = (None, None)
+
+
+def priced_pairs(session: Session, wire_params: Mapping[str, Any]) -> dict[str, PricedPair]:
+    priced_as = session.backend_client.priced_as
+    return {name: priced_as(cfg) for name, cfg in wire_params.items() if isinstance(cfg, Mapping)}
+
+
+def _reply_spend(data: Mapping[str, Any], pairs: Mapping[str, PricedPair]) -> PipelineData:
+    spent = PipelineData.from_wire({key: data.get(key) for key in _SPEND_KEYS})
+    return replace(spent, step_tokens=_reported_usage(spent.step_tokens, pairs))
 
 
 def _step_parts(
-    step_tokens: Mapping[str, StepTokenUsage], step_timings: Mapping[str, Any]
+    step_tokens: Mapping[str, StepUsage], step_timings: Mapping[str, float]
 ) -> list[Billed]:
-    """One sample's per-node backend usage, one billed part per node that used anything. A step
-    with no tokens still counts when it carries a fixed cost — spend is the headline."""
-    parts: list[Billed] = []
-    for node_name, entry in step_tokens.items():
-        cost_usd = entry.get("cost_usd")
-        if entry["input"] == 0 and entry["output"] == 0 and not cost_usd:
-            continue
-        raw_dur = step_timings.get(node_name)
-        parts.append(
-            Billed(
-                TokenAccount.from_step_entry(entry),
-                cost_usd,
-                served_by=entry.get("served_by"),
-                model=entry.get("model"),
-                node=str(node_name),
-                provider=entry.get("provider"),
-                duration_s=float(raw_dur) if isinstance(raw_dur, (int, float)) else 0.0,
-            )
+    return [
+        Billed(
+            usage.account,
+            usage.cost_usd,
+            served_by=usage.served_by,
+            model=usage.model,
+            node=node_name,
+            provider=usage.provider,
+            duration_s=step_timings.get(node_name, 0.0),
+            rate_priced_usd=usage.rate_priced_usd,
         )
-    return parts
+        for node_name, usage in step_tokens.items()
+        if usage.input or usage.output or usage.cost_usd
+    ]
 
 
 def emit_replayed_step_tokens(
-    step_tokens: Mapping[str, StepTokenUsage], step_timings: Mapping[str, Any]
+    step_tokens: Mapping[str, StepUsage], step_timings: Mapping[str, float]
 ) -> None:
-    """Meter a replayed row's per-node backend usage, flagged ``cached``: it spent no money, but the
-    search still made the call, so leaving it unmetered prices our cache history. A fresh cell is
-    metered where it was admitted (:func:`cell_billing`)."""
+    """A replay states what the row RECORDED: its reported cost, else the rate stamped when measured."""
     for part in _step_parts(step_tokens, step_timings):
         emit_token_usage(
             node=part.node or "backend",
@@ -228,26 +190,51 @@ def emit_replayed_step_tokens(
             provider=part.provider,
             served_by=part.served_by,
             cost_usd=part.cost_usd,
+            recorded_rate_usd=part.rate_priced_usd,
             cached=True,
         )
 
 
-def cell_billing(
-    pipeline_schema: PipelineSchema, wire_params: dict[str, Any]
-) -> Callable[[dict[str, Any]], list[Billed] | None]:
-    """What a cell's reply ``data`` says each node billed — ``None`` where it reports no usage at
-    all, which is charged the cell's whole bound. A node's guessed usage is no report, so it bills
-    nothing here: a backend reports every node it ran (``backend-integration.md``)."""
+def _ran_last(pipeline_schema: PipelineSchema, ran: Mapping[str, Any]) -> str | None:
+    reached = [node.name for node in pipeline_schema.nodes if ran.get(node.name) is not None]
+    return reached[-1] if reached else None
 
-    def billed(data: dict[str, Any]) -> list[Billed] | None:
+
+def _uncounted_attempts(
+    reported: Mapping[str, StepUsage], each: Mapping[str, SendBound], *, refused_on: str | None
+) -> SendBound | None:
+    """A node's usage accounts for ONE attempt; nothing says the retried others billed nothing."""
+    input_tokens = output_tokens = 0
+    usd: float | None = 0.0
+    for name, entry in reported.items():
+        bound = each.get(name)
+        if bound is None or entry.attempts is None:
+            continue
+        priced = bool(entry.input or entry.output or entry.cost_usd)
+        left = entry.attempts - priced - (name == refused_on)
+        if left <= 0:
+            continue
+        input_tokens += left * bound.input_tokens
+        output_tokens += left * (bound.output_tokens or 0)
+        usd = None if usd is None or bound.usd is None else usd + left * bound.usd
+    if not (input_tokens or output_tokens):
+        return None
+    return SendBound(input_tokens=input_tokens, output_tokens=output_tokens, usd=usd)
+
+
+def cell_billing(
+    pipeline_schema: PipelineSchema,
+    pairs: Mapping[str, PricedPair],
+    each: Mapping[str, SendBound],
+) -> CellBilling[PipelineData]:
+    """``None`` where the reply reports no usage at all, which is charged the cell's whole bound."""
+
+    def billed(data: dict[str, Any], refused: bool) -> tuple[Reported | None, PipelineData]:
+        spent = _reply_spend(data, pairs)
         if not isinstance(data.get("step_tokens"), dict):
-            return None
-        reported = {
-            name: entry
-            for name, entry in _compute_step_tokens(data, pipeline_schema, wire_params).items()
-            if not entry["estimated"]
-        }
-        parts = _step_parts(reported, data.get("step_timings") or {})
+            return None, spent
+        reported = spent.step_tokens
+        parts = _step_parts(reported, spent.step_timings)
         web = data.get("web_cost")
         usd = web.get("usd") if isinstance(web, dict) else None
         if isinstance(usd, int | float) and not isinstance(usd, bool) and usd:
@@ -256,28 +243,64 @@ def cell_billing(
                 "web_search",
             )
             parts.append(Billed(TokenAccount(), float(usd), node=searched))
-        return parts
+        refused_on = _ran_last(pipeline_schema, reported) if refused else None
+        unknown = _uncounted_attempts(reported, each, refused_on=refused_on)
+        return Reported(tuple(parts), unknown), spent
 
     return billed
 
 
+async def _attempt_bound(
+    spend: LLMSpendBound, cfg: Mapping[str, Any], priced_as: PricedPair
+) -> SendBound:
+    reply = int(cfg.get("max_tokens") or spend.max_tokens)
+    reads = spend.input_tokens + FRAMING_TOKENS
+    model, provider = priced_as
+    ceiling = await hold_ceiling(model, provider, hosts=spend.hosts) if model and provider else None
+    if ceiling is None:
+        return SendBound(
+            input_tokens=reads,
+            output_tokens=reply,
+            usd=None,
+            unpriced=(f"{model or 'no model'} ({provider or 'no provider'})",),
+        )
+    tier = ceiling.at(reads)
+    usd = ceiling.per_request + reads * tier.input + reply * tier.output
+    return SendBound(input_tokens=reads, output_tokens=reply, usd=usd)
+
+
+def _node_spends(
+    session: Session, wire_params: Mapping[str, Any]
+) -> list[tuple[PipelineNode, Mapping[str, Any], NodeSpendBound | None]]:
+    client = session.backend_client
+    spends = []
+    for node in session.pipeline_schema.nodes:
+        raw_cfg = wire_params.get(node.name)
+        cfg = raw_cfg if isinstance(raw_cfg, Mapping) else {}
+        spends.append((node, cfg, client.node_spend_bound(node, cfg)))
+    return spends
+
+
+async def attempt_bounds(session: Session, wire_params: Mapping[str, Any]) -> dict[str, SendBound]:
+    priced_as = session.backend_client.priced_as
+    return {
+        node.name: await _attempt_bound(spend, cfg, priced_as(cfg))
+        for node, cfg, spend in _node_spends(session, wire_params)
+        if isinstance(spend, LLMSpendBound)
+    }
+
+
 async def cell_bound(session: Session, wire_params: Mapping[str, Any]) -> SendBound | None:
-    """The most one cell can bill: the bound each node's backend serves, priced at the dearest the
-    model this configuration runs it on can charge. ``None`` for a backend whose own sends are
-    each admitted and that derives no bound for the cell they make up. A backend bounding nothing,
-    or an LLM node it serves no bound for, leaves the cell unbounded — and an unbounded cell
-    cannot run under a ceiling."""
+    """``None`` where the backend's own sends are each admitted; a node with no served bound leaves it UNBOUNDED."""
     client = session.backend_client
     if client.holds_own_sends and not client.derives_spend_bounds:
         return None
     usd = 0.0
     input_tokens = output_tokens = 0
-    bounded = priced = True
+    bounded = True
+    unpriced: tuple[str, ...] = ()
     served = False
-    for node in session.pipeline_schema.nodes:
-        raw_cfg = wire_params.get(node.name)
-        cfg = raw_cfg if isinstance(raw_cfg, Mapping) else {}
-        spend = client.node_spend_bound(node, cfg)
+    for node, cfg, spend in _node_spends(session, wire_params):
         if spend is None:
             bounded = bounded and not node.is_llm
             continue
@@ -285,105 +308,89 @@ async def cell_bound(session: Session, wire_params: Mapping[str, Any]) -> SendBo
         if isinstance(spend, WebSpendBound):
             usd += spend.queries * spend.usd_per_query
             continue
-        reply = int(cfg.get("max_tokens") or spend.max_tokens)
-        reads = spend.input_bytes + FRAMING_TOKENS
-        input_tokens += spend.attempts * reads
-        output_tokens += spend.attempts * reply
-        model, provider = cfg.get("model"), cfg.get("provider")
-        ceiling = (
-            await rate_ceiling(model, provider, hosts=spend.hosts)
-            if isinstance(model, str) and isinstance(provider, str)
-            else None
-        )
-        if ceiling is None:
-            priced = False
+        each = await _attempt_bound(spend, cfg, client.priced_as(cfg))
+        input_tokens += spend.attempts * each.input_tokens
+        output_tokens += spend.attempts * (each.output_tokens or 0)
+        if each.usd is None:
+            unpriced += tuple(name for name in each.unpriced if name not in unpriced)
         else:
-            tier = ceiling.at(reads)
-            usd += spend.attempts * (ceiling.per_request + reads * tier.input + reply * tier.output)
+            usd += spend.attempts * each.usd
     if not (served and bounded):
-        return SendBound(input_tokens=input_tokens, output_tokens=None, usd=None)
+        return SendBound(input_tokens=input_tokens, output_tokens=None, usd=None, unpriced=unpriced)
     return SendBound(
-        input_tokens=input_tokens, output_tokens=output_tokens, usd=usd if priced else None
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        usd=None if unpriced else usd,
+        unpriced=unpriced,
     )
 
 
 def _compute_step_tokens(
-    resp_data: dict[str, Any],
+    reported: Mapping[str, StepUsage],
+    resp_data: Mapping[str, Any],
     pipeline_schema: PipelineSchema,
-    wire_params: dict[str, Any],
-) -> dict[str, StepTokenUsage]:
-    """Per-LLM-node token counts, seeded from the backend's own ``step_tokens`` and falling back to
-    a chars/4 heuristic. Every entry carries the node's ``model`` — the overlay always pinned one."""
-    raw = resp_data.get("step_tokens")
-    reported = raw if isinstance(raw, dict) else {}
-    out = {
-        node_name: _reported_usage(entry, node_name, wire_params)
-        for node_name, entry in reported.items()
-        if isinstance(entry, dict)
-    }
+    wire_params: Mapping[str, Any],
+    pairs: Mapping[str, PricedPair],
+) -> dict[str, StepUsage]:
+    out = dict(reported)
     for node in pipeline_schema.nodes:
         if node.is_llm and node.name not in out:
-            out[node.name] = _estimated_usage(node, resp_data, wire_params)
+            out[node.name] = _estimated_usage(
+                node, resp_data, wire_params, pairs.get(node.name, _UNROUTED)
+            )
     return out
 
 
-def _configured(wire_params: Mapping[str, Any], node_name: str, key: str) -> str | None:
-    """A string the dataset overlay pinned for this node. Neither ``model`` nor ``provider`` is
-    guessable downstream: the provider is half of a price, so dropping it bills the wrong vendor."""
-    cfg = wire_params.get(node_name)
-    value = cfg.get(key) if isinstance(cfg, dict) else None
-    return value if isinstance(value, str) else None
-
-
 def _reported_usage(
-    entry: Mapping[str, Any], node_name: str, wire_params: Mapping[str, Any]
-) -> StepTokenUsage:
-    # The connector's own entry is REBUILT here rather than carried, so a key absent
-    # from `_WIRE_SEEDED` is dropped however faithfully the connector reported it.
-    seeded: dict[str, Any] = {
-        "input": int(entry.get("input") or 0),
-        "output": int(entry.get("output") or 0),
-        "estimated": False,
+    reported: Mapping[str, StepUsage], pairs: Mapping[str, PricedPair]
+) -> dict[str, StepUsage]:
+    return {
+        node_name: _at_our_rate(
+            replace(
+                usage,
+                estimated=False,
+                model=usage.model or pairs.get(node_name, _UNROUTED)[0],
+                # The provider we configured billed us, never the wire's, which may answer a slug.
+                provider=pairs.get(node_name, _UNROUTED)[1],
+            )
+        )
+        for node_name, usage in reported.items()
     }
-    # What each key buys, and what omitting one costs: `backend-integration.md`
-    # § Optional `step_tokens` fields.
-    for key, kind in _WIRE_SEEDED.items():
-        value = entry.get(key)
-        # A bool is an `int` to `isinstance`, and it is never a count.
-        if not isinstance(value, bool) and isinstance(value, str if kind is str else (int, float)):
-            seeded[key] = kind(value)
-    if "model" not in seeded and (model := _configured(wire_params, node_name, "model")):
-        seeded["model"] = model
-    # `_SEAM_OWNED`, so never the wire's — TermNorm's `spend.backend.model` answers a
-    # provider slug here.
-    provider = _configured(wire_params, node_name, "provider")
-    if provider is not None:
-        seeded["provider"] = provider
-    return cast("StepTokenUsage", seeded)
+
+
+def _at_our_rate(usage: StepUsage) -> StepUsage:
+    return replace(
+        usage,
+        rate_priced_usd=rate_priced_usd(
+            usage.account,
+            model=usage.model,
+            provider=usage.provider,
+            cost_usd=usage.cost_usd,
+            recorded=usage.rate_priced_usd,
+        ),
+    )
 
 
 def _estimated_usage(
-    node: PipelineNode, resp_data: Mapping[str, Any], wire_params: Mapping[str, Any]
-) -> StepTokenUsage:
+    node: PipelineNode,
+    resp_data: Mapping[str, Any],
+    wire_params: Mapping[str, Any],
+    priced_as: PricedPair,
+) -> StepUsage:
     node_cfg = wire_params.get(node.name) or {}
     in_text = (node_cfg.get("prompt") if isinstance(node_cfg, dict) else None) or ""
     out_text = " ".join(_observed_texts(node, resp_data))
-    estimated: StepTokenUsage = {
-        "input": len(in_text) // 4,
-        "output": len(out_text) // 4,
-        "estimated": True,
-    }
-    model = _configured(wire_params, node.name, "model")
-    if model is not None:
-        estimated["model"] = model
-    provider = _configured(wire_params, node.name, "provider")
-    if provider is not None:
-        estimated["provider"] = provider
-    return estimated
+    model, provider = priced_as
+    return StepUsage(
+        input=len(in_text) // 4,
+        output=len(out_text) // 4,
+        estimated=True,
+        model=model,
+        provider=provider,
+    )
 
 
 def _observed_texts(node: PipelineNode, resp_data: Mapping[str, Any]) -> list[str]:
-    """What the node's LLM observations carry in this reply, one string per answer it gave."""
     texts: list[str] = []
     for mapping in node.observation_mappings:
         value = resp_data.get(mapping.pipeline_key) if mapping.is_llm else None
@@ -406,25 +413,19 @@ def _error_result(
     error_msg: str,
     *,
     category: ErrorCategory,
-) -> QueryMeasurement:
-    """``category`` is the typed error channel and owns "this sample errored"; ``error`` is the human
-    message. Ungraded like every row here: the walk grades it, and a charged error is a verdict."""
-    return QueryMeasurement(
+) -> MeasuredCell:
+    return MeasuredCell(
         sample_id=sample.id,
         sample_key=sample.key,
         query=sample.query,
         ground_truth=sample.ground_truth or "",
         predicted="ERROR",
-        cached=False,
         error=error_msg or "unknown error",
         error_category=category,
-        pipeline_data=None,
     )
 
 
 def _extract_upstream_detail(exc: httpx.HTTPStatusError) -> str:
-    """Pull the structured upstream summary out of a backend error body, so the operator sees what
-    the provider actually complained about instead of a bare ``502 Bad Gateway``."""
     body_text = (exc.response.text or "").strip()
     if not body_text:
         return ""
@@ -447,18 +448,13 @@ def _extract_upstream_detail(exc: httpx.HTTPStatusError) -> str:
     return body_text[:300]
 
 
-# TermNorm's typed 422 codes for a model that ANSWERED but left nothing gradeable after its repair
-# turns (`llm_providers.py`) — an answer cut at the candidate's own `max_tokens`, or one that is not
-# the declared JSON. That is what THIS configuration produced, so it is a measured miss: never a
-# hole (a round halts before electing on one) and never a stop for the walk.
+# The model ANSWERED and left nothing gradeable: a measured MISS of this configuration, never a hole.
 _OUTPUT_FAILURE_CODES = frozenset(
     {"json_parse_failed", "schema_validation_failed", "output_truncated"}
 )
 
 
 def _answered_nothing(exc: httpx.HTTPStatusError) -> dict[str, Any] | None:
-    """The response ``data`` of a cell whose model answered nothing gradeable — no answer, and the
-    tokens it was billed for — or ``None`` where the error is not that."""
     try:
         detail = exc.response.json().get("detail")
     except Exception:
@@ -468,25 +464,17 @@ def _answered_nothing(exc: httpx.HTTPStatusError) -> dict[str, Any] | None:
     return {"step_tokens": detail.get("step_tokens") or {}}
 
 
-def _classify_http_error(exc: httpx.HTTPStatusError) -> tuple[ErrorCategory, str]:
-    """Never a 429: ``BackendClient.run_query`` answers every one with the run's backpressure, which
-    re-sends the cell or refuses the run. A throttle is the provider's load, never a row charged to
-    the candidate."""
-    code = exc.response.status_code
-    upstream = _extract_upstream_detail(exc)
-    tail = f" :: {upstream}" if upstream else ""
-    if 400 <= code < 500:
-        if is_provider_credit_refusal(exc.response.text):
-            return ErrorCategory.PROVIDER_CREDIT, f"HTTP {code} — provider credit refused{tail}"
-        return ErrorCategory.CLIENT, f"HTTP {code} — caller config rejected by backend{tail}"
-    return ErrorCategory.SERVER, f"HTTP {code} — backend transient error{tail}"
+_HTTP_FAILURE_WORDS: dict[ErrorCategory, str] = {
+    ErrorCategory.PROVIDER_CREDIT: "provider credit refused",
+    ErrorCategory.PROVIDER_THROTTLED: "provider throttled",
+    ErrorCategory.CLIENT: "caller config rejected by backend",
+    ErrorCategory.SERVER: "backend transient error",
+}
 
 
 def _without_identity(
     pipeline_params: dict[str, Any], identity_keys: Mapping[str, frozenset[str]]
 ) -> dict[str, Any]:
-    """What a backend is SENT. The identity layer says what a cell was measured UNDER and is no
-    backend's tunable, so it stops here — before the bound, the envelope and the wire adapter."""
     return {
         node: {k: v for k, v in cfg.items() if k not in owned}
         if (owned := identity_keys.get(node)) and isinstance(cfg, dict)
@@ -499,23 +487,19 @@ async def measure_sample(
     sample: Sample,
     session: Session,
     pipeline_params: dict[str, Any] | None = None,
-) -> QueryMeasurement:
+) -> MeasuredCell:
     """One cell's FACTS — ungraded; the walk grades every row it takes, fresh or replayed."""
-    # The ONE place a labelless cell becomes a row. `QueryMeasurement.ground_truth` is `str`, and
-    # everything downstream of here — the matcher, the rank, the archive — reads it as one; a
-    # verifier-graded cell says so by carrying `""`, which no answer matches.
+    # A verifier-graded cell carries `""`, which no answer matches.
     ground_truth = sample.ground_truth or ""
     pipeline_schema = session.pipeline_schema
     try:
         wire_params = interpolate_pipeline_params(
             _without_identity(pipeline_params or {}, session.identity_keys), sample.model_dump()
         )
-        data, envelope = await _send_cell(sample, session, wire_params)
+        pairs = priced_pairs(session, wire_params)
+        data, spent, envelope = await _send_cell(sample, session, wire_params, pairs)
 
-        # The head of the TERMINAL ranker's output, read through the schema rather than a
-        # hardcoded key: candidate_ranking when token_matching is terminal, final_ranking when
-        # an llm_ranking/llm_only node is.
-        ranked = terminal_ranking({"pipeline_data": data}, pipeline_schema)
+        ranked = terminal_ranking(data, pipeline_schema)
         predicted = _predicted(data, ranked, session.backend_client.answer_key)
         if predicted == "ERROR":
             return _error_result(
@@ -525,50 +509,45 @@ async def measure_sample(
             )
         gt_rank, n_candidates = rank_ground_truth(ranked, predicted, ground_truth)
 
-        pd = _observations(data, ranked, pipeline_schema)
-        # The envelope's own final reading, taken AFTER its scope closed. Here and not in a
-        # connector: this is the one seam that HOLDS an envelope, so every backend gets the answer.
+        pd = _observations(data, ranked, pipeline_schema, spent)
+        # The envelope's final reading, taken AFTER its scope closed.
         if envelope.budget_s is not None:
             pd["unworked_s"] = envelope.unworked
         pd.update(_candidate_and_sample_facts(sample, pipeline_schema, pipeline_params or {}))
-        # Metered where the cell was admitted (`BackendClient.run_query`); a replay of this row
-        # meters itself off what is banked here.
-        step_tokens = _compute_step_tokens(data, pipeline_schema, wire_params)
-        if step_tokens:
-            pd["step_tokens"] = step_tokens
-
-        result: dict[str, Any] = {
-            "sample_id": sample.id,
-            "sample_key": sample.key,
-            "query": sample.query,
-            "predicted": predicted,
-            "ground_truth": ground_truth,
-            "cached": False,
-            "error": None,
-            "error_category": None,
-            "n_candidates": n_candidates,
-            "ground_truth_rank": gt_rank,
-            "pipeline_data": pd,
-        }
-
-        # TOP-LEVEL into `pipeline_data`, exactly where a backend's own observation lands — that
-        # is what makes a per-sample evaluator addressable from a scoring formula. Nested under an
-        # `evaluators` key it was not: `cell_namespace` turns a dict into a `SimpleNamespace`, and
-        # the AST allowlist bans attribute access, so the value was materialized into a shape no
-        # formula could name. `validate_campaign_evaluator` refuses a name that would collide here.
-        #
-        # Banked HERE, and that is the contract: a replay never re-enters this function, so a value
-        # not written into the row now is one the formula raises `ScoringTermMissingError` on for
-        # every later cache hit. For an LLM-backed evaluator it is also what stops a re-bill —
-        # which is per TERM, so a multi-step schema's three gradings are three banked keys.
-        pd.update(
-            await materialize_sample_values(
-                pipeline_schema,
-                result,  # type: ignore[arg-type]
-                extra=session.scoring.judges,
-            )
+        result = MeasuredCell(
+            sample_id=sample.id,
+            sample_key=sample.key,
+            query=sample.query,
+            ground_truth=ground_truth,
+            predicted=predicted,
+            pipeline=replace(
+                PipelineData.from_wire(pd),
+                step_timings=spent.step_timings,
+                step_tokens=_compute_step_tokens(
+                    spent.step_tokens, data, pipeline_schema, wire_params, pairs
+                ),
+            ),
+            ground_truth_rank=gt_rank,
+            n_candidates=n_candidates,
         )
-        return result  # type: ignore[return-value]
+
+        # Banked HERE and top-level: a replay never re-enters this function, and a formula names no nested value.
+        terms = await materialize_sample_values(
+            pipeline_schema, result, extra=session.scoring.judges
+        )
+        if declared := PIPELINE_KEYS & terms.values.keys():
+            raise ValueError(
+                f"evaluator terms {sorted(declared)} carry the names of `PipelineData` fields: "
+                "banked beside them, each would be read back as the field"
+            )
+        return replace(
+            result,
+            pipeline=replace(
+                result.pipeline,
+                observations={**result.pipeline.observations, **terms.values},
+                judge_readings=terms.judged,
+            ),
+        )
     except SendRefusedError:
         # A refused send is refused for every cell after it: a stop, never a row.
         raise
@@ -577,17 +556,20 @@ async def measure_sample(
 
 
 async def _send_cell(
-    sample: Sample, session: Session, wire_params: dict[str, Any]
-) -> tuple[dict[str, Any], CellEnvelope]:
-    """The reply's ``data`` and the envelope the cell ran under, closed."""
+    sample: Sample,
+    session: Session,
+    wire_params: dict[str, Any],
+    pairs: Mapping[str, PricedPair],
+) -> tuple[dict[str, Any], PipelineData, CellEnvelope]:
     query = sample.query
     client = session.backend_client
     bound = await cell_bound(session, wire_params)
     envelope = CellEnvelope(
-        client.cell_envelope_s(sample, wire_params), label=f"{sample.id}:{query[:40]}"
+        client.cell_envelope_s(sample, wire_params),
+        attempts=client.cell_attempts,
+        label=f"{sample.id}:{query[:40]}",
     )
-    # Created UNCONDITIONALLY and OUTSIDE the envelope scope: this loop carries the envelope's
-    # only sighting of a machine sleep, and its teardown must not unwind inside the timeout.
+    # Unconditional and OUTSIDE the envelope scope: the envelope's only sighting of a machine sleep rides it.
     heartbeat_task = asyncio.create_task(
         heartbeat(
             session.state.ledger,
@@ -601,11 +583,15 @@ async def _send_cell(
     try:
         async with envelope:
             try:
-                resp = await client.run_query(
+                data, spent = await client.run_query(
                     sample,
                     pipeline_params=wire_params,
                     bound=bound,
-                    billed=cell_billing(session.pipeline_schema, wire_params),
+                    billed=cell_billing(
+                        session.pipeline_schema,
+                        pairs,
+                        await attempt_bounds(session, wire_params),
+                    ),
                 )
             except httpx.HTTPStatusError as exc:
                 if (answered := _answered_nothing(exc)) is None:
@@ -615,10 +601,8 @@ async def _send_cell(
                     query[:60],
                     _extract_upstream_detail(exc),
                 )
-                resp = {"data": answered}
+                data, spent = answered, _reply_spend(answered, pairs)
     finally:
-        # Cancel whether the query succeeded or raised — an in-flight task survives and
-        # keeps appending progress records against a closed call.
         heartbeat_task.cancel()
         try:
             await heartbeat_task
@@ -629,37 +613,25 @@ async def _send_cell(
                 "heartbeat task for backend scoring raised on teardown",
                 exc_info=True,
             )
-    return resp.get("data", {}), envelope
+    return data, spent, envelope
 
 
 def _predicted(data: Mapping[str, Any], ranked: list[Any], answer_key: str | None) -> str:
-    # Where the backend DECLARED an answer key, that is the answer — the ranking is not
-    # consulted, because two sources for one fact is how they come to disagree. A backend
-    # declaring none keeps the ranking as its only source, which is every ranked-label one.
-    # Either way an absent answer is `NO_RESULT`, and that sentinel is the honest reading:
-    # the pipeline ran and emitted nothing nameable (`domain/results.py`).
     if answer_key is not None:
         return str(data.get(answer_key) or "").strip() or NO_RESULT
     return extract_item_label(ranked[0]) if ranked else NO_RESULT
 
 
 def _observations(
-    data: Mapping[str, Any], ranked: list[Any], pipeline_schema: PipelineSchema
+    data: Mapping[str, Any], ranked: list[Any], pipeline_schema: PipelineSchema, spent: PipelineData
 ) -> dict[str, Any]:
-    """What the backend reported for this cell, as ``pipeline_data`` opens."""
-    # `result_ranking` is the canonical derived terminal ranking the scorer reads; the raw per-node observation keys are copied below for their own diagnostics.
     pd: dict[str, Any] = {"result_ranking": ranked}
     for key in pipeline_schema.observation_keys | _INFRA_KEYS:
         val = data.get(key)
         if val is not None:
             pd[key] = val
-    # Here, not in a connector: every backend that emits `turns` earns the same terms.
     pd.update(turn_scalars(pd.get("turns")))
-    reached = data.get("terminal_node")
-    if reached is None:
-        timings = pd.get("step_timings") or {}
-        timed = [node.name for node in pipeline_schema.nodes if timings.get(node.name) is not None]
-        reached = timed[-1] if timed else None
+    reached = data.get("terminal_node") or _ran_last(pipeline_schema, spent.step_timings)
     if reached is not None:
         pd["terminal_node"] = reached
     return pd
@@ -668,57 +640,52 @@ def _observations(
 def _candidate_and_sample_facts(
     sample: Sample, pipeline_schema: PipelineSchema, pipeline_params: Mapping[str, Any]
 ) -> dict[str, Any]:
-    """The facts a formula or a judge reads that no backend reports."""
     facts: dict[str, Any] = {}
-    # Off the node `to_job_search_point` renders the candidate onto, and off `pipeline_params`
-    # rather than `wire_params`, so no sample's own length reaches a prompt-length term.
+    # Off `pipeline_params`, never `wire_params`: no sample's own length may reach a prompt-length term.
     prompt_nodes = pipeline_schema.prompt_node_names()
     node_cfg = pipeline_params.get(prompt_nodes[0]) if prompt_nodes else None
     if isinstance(node_cfg, dict) and isinstance(node_cfg.get("prompt"), str):
         facts["target_prompt_chars"] = len(node_cfg["prompt"])
-    # The bare question, where the dataset declared one distinct from `query` — banked so a
-    # JUDGE can read it, since a judge is handed this row and never the `Sample`. Absent on
-    # every dataset where the two are the same string, which is what keeps the judges'
-    # fallback to `query` the normal path rather than a special case.
+    # Banked so a JUDGE can read it: a judge is handed this row and never the `Sample`.
     if sample.question:
         facts["question"] = sample.question
     return facts
 
 
-def _unmeasured(sample: Sample, exc: Exception) -> QueryMeasurement:
-    """The row a cell that raised is banked as: the error's category decides what the walk does."""
+def _unmeasured(sample: Sample, exc: Exception) -> MeasuredCell:
     query = sample.query
-    if isinstance(exc, httpx.HTTPStatusError):
-        category, error_msg = _classify_http_error(exc)
-        logger.warning("measure_sample for %s: %s", query[:60], error_msg)
-        return _error_result(sample, error_msg, category=category)
-    if isinstance(exc, httpx.TransportError):
-        error_msg = f"{type(exc).__name__}: {exc} — Backend may be down or unreachable."
-        logger.warning("measure_sample CONNECTION for %s: %s", query[:60], error_msg)
-        return _error_result(sample, error_msg, category=ErrorCategory.CONNECTION)
     if isinstance(exc, CellUnscoreableError):
-        # The cell RAN and there is nothing to grade. The exception's own category says WHICH of the
-        # two — a cut we made, or a reward the backend never produced — and a repair reads them apart.
-        # What it paid was billed where it was admitted: an ungraded cell is not a free one.
         logger.warning("measure_sample %s for %s: %s", exc.category.value, query[:60], exc)
         return _error_result(sample, str(exc), category=exc.category)
-    # Named by TYPE: a bare `TimeoutError()` has no message, and banked as its `str` it read
-    # "unknown error" on every surface while the cause sat one attribute away.
+    # Never a backend 429: `BackendClient.run_query` answers each with the run's backpressure.
+    category = failed_send(exc).failure or ErrorCategory.UNKNOWN
+    if isinstance(exc, httpx.HTTPStatusError):
+        upstream = _extract_upstream_detail(exc)
+        error_msg = (
+            f"HTTP {exc.response.status_code} — {_HTTP_FAILURE_WORDS[category]}"
+            f"{f' :: {upstream}' if upstream else ''}"
+        )
+        logger.warning("measure_sample for %s: %s", query[:60], error_msg)
+        return _error_result(sample, error_msg, category=category)
+    if category is ErrorCategory.CONNECTION:
+        error_msg = f"{type(exc).__name__}: {exc} — Backend may be down or unreachable."
+        logger.warning("measure_sample CONNECTION for %s: %s", query[:60], error_msg)
+        return _error_result(sample, error_msg, category=category)
+    # Named by TYPE: a bare `TimeoutError()` has no message.
     failure = f"{type(exc).__name__}: {exc}"
     logger.warning("measure_sample failed for %s: %s", query[:60], failure, exc_info=exc)
-    return _error_result(sample, failure, category=ErrorCategory.UNKNOWN)
+    return _error_result(sample, failure, category=category)
 
 
 def compare_rerun(
-    cached_result: Mapping[str, Any], rerun_result: Mapping[str, Any], scorer: CellScorer
-) -> dict[str, Any]:
-    cached, rerun = rescore_results([dict(cached_result), dict(rerun_result)], scorer)
-    cached_hit = is_hit(cached.get("fitness"))
-    rerun_hit = is_hit(rerun.get("fitness"))
+    cached_result: MeasuredCell, rerun_result: MeasuredCell, scorer: Scorer
+) -> RerunComparison:
+    cached_hit = scorer.grade(cached_result).hit
+    rerun_hit = scorer.grade(rerun_result).hit
     hit_change = f"{'HIT' if cached_hit else 'MISS'}->{'HIT' if rerun_hit else 'MISS'}"
 
-    cached_rank = cached_result.get("ground_truth_rank")
-    rerun_rank = rerun_result.get("ground_truth_rank")
+    cached_rank = cached_result.ground_truth_rank
+    rerun_rank = rerun_result.ground_truth_rank
     rank_change = (
         f"{cached_rank}->{rerun_rank}"
         if cached_rank is not None and rerun_rank is not None
@@ -733,15 +700,10 @@ def compare_rerun(
 
 
 def _rerun_would_repeat_token_budget_failure(
-    cached_result: Mapping[str, Any],
+    cached_result: MeasuredCell,
     rerun_pipeline_params: dict[str, Any] | None,
 ) -> bool:
-    """Skip the rerun when the cached failure was a binding token budget and the rerun's cap is no
-    larger: the ladder exists for TRANSIENT failures, and a config-fundamental one will not recover."""
-
-    # Through the same helper ``classify_result`` stamps its codes with, never re-derived: these
-    # membership tests are string matches on ``f"{node}:…"``, so a second spelling of the node
-    # makes them MISS silently and the ladder pays for a rerun guaranteed to fail identically.
+    # The helper `classify_result` stamps its codes with: a second spelling of the node misses silently.
     node = terminal_node(cached_result)
     if node is None:
         return False
@@ -753,18 +715,13 @@ def _rerun_would_repeat_token_budget_failure(
     if not budget_exhausted:
         return False
 
-    cached_step = ((cached_result.get("pipeline_data") or {}).get("step_tokens") or {}).get(
-        node
-    ) or {}
-    cached_completion = int(cached_step.get("output", 0))
+    cached_step = cached_result.pipeline.step_tokens.get(node)
+    cached_completion = cached_step.output if cached_step is not None else 0
     if cached_completion <= 0:
-        # No reliable cap signal — be conservative and let the rerun happen.
         return False
 
     rerun_max_tokens = ((rerun_pipeline_params or {}).get(node) or {}).get("max_tokens")
     if rerun_max_tokens is None:
-        # No override, so the rerun takes a backend default that may be larger or smaller
-        # than the cached cap. Conservative: let it run.
         return False
 
     return int(rerun_max_tokens) <= cached_completion
@@ -772,14 +729,12 @@ def _rerun_would_repeat_token_budget_failure(
 
 async def execute_stale_data_protocol(
     sample: Sample,
-    cached_result: dict[str, Any],
+    cached_result: MeasuredCell,
     session: Session,
     *,
     pipeline_params: dict[str, Any] | None = None,
     sample_index: SampleIndex | None = None,
-) -> tuple[dict[str, Any], str]:
-    """Walk the stale-data ladder for a degraded cached query, returning ``(result, step_taken)``.
-    Observation counts come from ``sample_index``, constant within a round — no mutable state."""
+) -> tuple[MeasuredCell, str]:
     result = cached_result
 
     for step in STALE_DATA_LOAD_PROTOCOL:
@@ -789,26 +744,25 @@ async def execute_stale_data_protocol(
             historical = sample_index.degradation_count(sample.id) if sample_index else 0
             effective_count = historical + 1
             if effective_count < RERUN_TRIGGER_COUNT:
-                return {
-                    **cached_result,
-                    "cached": cached_result.get("cached", False),
-                    "degraded_observed": True,
-                    "degraded_obs_count": effective_count,
-                    "degraded_obs_threshold": RERUN_TRIGGER_COUNT,
-                }, "below_threshold"
+                return replace(
+                    cached_result,
+                    degraded_observed=True,
+                    degraded_obs_count=effective_count,
+                    degraded_obs_threshold=RERUN_TRIGGER_COUNT,
+                ), "below_threshold"
 
             if _rerun_would_repeat_token_budget_failure(cached_result, pipeline_params):
-                return {
-                    **cached_result,
-                    "cached": cached_result.get("cached", False),
-                    "config_fundamental_skip": True,
-                    "skip_reason": "rerun_max_tokens_le_cached_completion",
-                }, "skipped_config_fundamental"
+                return replace(
+                    cached_result, config_fundamental_skip=True
+                ), "skipped_config_fundamental"
 
-            result = dict(await measure_sample(sample, session, pipeline_params=pipeline_params))
-            result["retry_of_degraded"] = True
-            result["rerun_comparison"] = compare_rerun(
-                cached_result, result, session.scoring.require_scorer()
+            rerun = await measure_sample(sample, session, pipeline_params=pipeline_params)
+            result = replace(
+                rerun,
+                retry_of_degraded=True,
+                rerun_comparison=compare_rerun(
+                    cached_result, rerun, session.scoring.require_scorer()
+                ),
             )
             if not is_deprecated(result):
                 return result, "rerun"
@@ -818,7 +772,6 @@ async def execute_stale_data_protocol(
                 sample_index
                 and sample_index.degradation_rate(sample.id) >= SAMPLESWITCH_MIN_DEGRADATION_RATE
             ):
-                result = {**cached_result, "cached": True, "switched_out": True}
-                return result, "sampleswitch"
+                return replace(cached_result, cached=True, switched_out=True), "sampleswitch"
 
-    return {**result, "persistently_degraded": True}, "exhausted"
+    return replace(result, persistently_degraded=True), "exhausted"

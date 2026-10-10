@@ -1,14 +1,4 @@
-"""Measure which reasoning rungs a model actually honours — the only way to fill
-``registry._MODEL_PROFILES``, since no catalogue publishes a value set.
-
-Runs through ``get_llm_client().chat`` rather than a raw request, so what it reports is what THIS
-repo sends, ``PROVIDER_DEFAULT_EFFORT``'s omission included; a parallel implementation would
-measure a wire nothing uses.
-
-Fenced like ``noise_floor``: no config field, no L1 injection, nothing on the ledger but its
-bills. The loop never learns this verb exists — it reads the profiles a human committed after
-reading the output.
-"""
+"""Through ``get_llm_client().chat``, never a raw request: that would measure a wire nothing uses."""
 
 from __future__ import annotations
 
@@ -16,41 +6,35 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from promptpotter.application.initialization.loop_start import diagnostic_trace
+from promptpotter.application.jobs.quota import paid_verb
 from promptpotter.infrastructure.llm.capabilities import STANDARD_EFFORT_LADDER
 from promptpotter.infrastructure.llm.openai_compat import PROVIDER_DEFAULT_EFFORT
 from promptpotter.infrastructure.llm.registry import get_llm_client, normalize_model_id
 from promptpotter.infrastructure.llm.request import ChatRequest
-from promptpotter.infrastructure.llm.spend_book import (
-    CallLabel,
-    spending_under,
-    unbounded_spend_book,
-)
+from promptpotter.infrastructure.llm.send_failure import failed_send
+from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS, SendBudget, under_budget
+from promptpotter.infrastructure.llm.spend_book import CallLabel
+from promptpotter.shared.errors import ERROR_IS_CHARGED, ErrorCategory
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.llm.base import LLMClientBase
     from promptpotter.infrastructure.store.stores import Stores
 
-# One terse-answer task. The measurand is the reasoning token COUNT, not the answer, so the prompt
-# only has to be something a reasoning model will think about and a terse one will not.
+# The measurand is the reasoning token COUNT, never the answer.
 _PROMPT = (
     "A company buys oak boards and metal angles to resell unmodified. Which ledger account: "
     "4000, 4200, 6000, or 1500? Answer with the 4-digit code only, nothing else."
 )
 
-# Bounds one probe's spend. A refusing rung costs nothing; a runaway one is the case being measured,
-# and 3000 output tokens on the cheapest reasoning models is a fraction of a cent.
 _MAX_TOKENS = 3000
 
-# Rungs are INDISTINCT when max/min across the ranked ones is this small. Spread, never ORDER: no
-# measured model orders its ladder monotonically, so an ordering test flags every one of them — and
-# an unordered ladder is still not an identical one.
+# Spread (max/min), never ORDER: no measured model orders its ladder monotonically.
 _INDISTINCT_SPREAD = 1.5
 
 
 @dataclass(frozen=True)
 class RungReading:
-    """What one rung did. ``reasoning`` is ``None`` where the call failed — distinct from 0, which
-    is a model that ran and thought nothing."""
+    """``reasoning`` is ``None`` where the call failed; 0 is a model that ran and thought nothing."""
 
     rung: str
     reasoning: int | None
@@ -64,16 +48,20 @@ class RungReading:
 
 async def _one(client: LLMClientBase, model: str, rung: str | None) -> RungReading:
     try:
-        resp = await client.chat(
-            ChatRequest(
-                messages=[{"role": "user", "content": _PROMPT}],
-                model=model,
-                max_tokens=_MAX_TOKENS,
-                reasoning_effort=rung,
-            ),
-            label=CallLabel("probe_reasoning", "diagnostic"),
-        )
+        with under_budget(SendBudget(None, attempts=SEND_ATTEMPTS)):
+            resp = await client.chat(
+                ChatRequest(
+                    messages=[{"role": "user", "content": _PROMPT}],
+                    model=model,
+                    max_tokens=_MAX_TOKENS,
+                    reasoning_effort=rung,
+                ),
+                label=CallLabel("probe_reasoning", "diagnostic"),
+            )
     except Exception as exc:
+        # A throttle, an outage or a spent ceiling is no refusal: read as one, it writes a wrong profile.
+        if not ERROR_IS_CHARGED[failed_send(exc).failure or ErrorCategory.UNKNOWN]:
+            raise
         return RungReading(rung or "(unset)", None, None, refused=str(exc)[:160])
     return RungReading(rung or "(unset)", resp.usage.reasoning, resp.usage.output)
 
@@ -85,25 +73,20 @@ async def probe_reasoning(
     provider: str = "openrouter",
     rungs: tuple[str, ...] = STANDARD_EFFORT_LADDER,
 ) -> list[RungReading]:
-    """Every rung plus an unset baseline, serially — concurrent probes hit one endpoint's rate
-    limit and a 429 would read as a refusal, which is the one answer this must not fabricate.
-    The bills land on the workspace's ledger: the probe answers for no campaign."""
+    """Serial on purpose: concurrent probes share one rate limit, and a 429 reads as a refusal."""
     client = get_llm_client(provider)
-    # Bound by `_MAX_TOKENS` per rung, not by a ceiling; the book still admits each send.
-    with spending_under(unbounded_spend_book()), diagnostic_trace(stores, None):
-        readings = [await _one(client, model, None)]
-        for rung in rungs:
-            readings.append(await _one(client, model, rung))
+    async with paid_verb(stores=stores, bucket="probe-reasoning", hop=None):
+        with diagnostic_trace(stores, None):
+            readings = [await _one(client, model, None)]
+            for rung in rungs:
+                readings.append(await _one(client, model, rung))
     return readings
 
 
 def profile_suggestion(model: str, readings: list[RungReading]) -> str:
-    """The `_MODEL_PROFILES` row these readings support — printed for a human to paste, never
-    written. The table ships in the wheel as evidence, and evidence with no author is a cache."""
     refused = sorted(r.rung for r in readings if not r.ok and r.rung != "(unset)")
 
-    # RANKED rungs only. `default` reproduces the unset baseline by definition and `none` is the
-    # floor by definition; including either manufactures a verdict out of what the rung already means.
+    # `default` IS the unset baseline and `none` the floor: ranking either manufactures a verdict.
     ranked = [
         r
         for r in readings
@@ -115,8 +98,6 @@ def profile_suggestion(model: str, readings: list[RungReading]) -> str:
     measured = len(counts) > 1 and min(counts) > 0
     tight = measured and max(counts) / min(counts) <= _INDISTINCT_SPREAD
 
-    # An all-default row narrows nothing and reads identically to absence at every call site, so
-    # the honest suggestion is no row at all rather than one that looks like recorded evidence.
     if not refused and not measured:
         return f"# {normalize_model_id(model)}: nothing measured to record — add no row."
 
@@ -124,8 +105,7 @@ def profile_suggestion(model: str, readings: list[RungReading]) -> str:
     if refused:
         inner = ", ".join(f'"{r}"' for r in refused)
         lines.append(f"        refuses_efforts=frozenset({{{inner}}}),")
-    # Emitted only where the ranked rungs actually answered, so an unreadable probe leaves the
-    # field absent (UNMEASURED) rather than writing the empty set, which claims all-distinct.
+    # Absent (UNMEASURED) where no ranked rung answered: the empty set claims all-distinct.
     if measured:
         rungs = sorted(r.rung for r in ranked) if tight else []
         inner = "{" + ", ".join(f'"{r}"' for r in rungs) + "}" if rungs else ""
