@@ -1,5 +1,3 @@
-"""Manually refresh the cached LiteLLM model price table. Exits 0 on success, 1 on failure."""
-
 from __future__ import annotations
 
 import logging

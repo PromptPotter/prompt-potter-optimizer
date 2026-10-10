@@ -166,7 +166,7 @@ say "building webapp (static export → $WEBAPP_DIR/out/)"
 brand_export_webapp   # Next inlines NEXT_PUBLIC_* at build time — the rebuild IS the rename
 cd "$WEBAPP_DIR"
 npm install
-npm run build:deploy   # full shipped artifact: React Compiler + source maps
+npm run build
 cd ..
 
 # --- 7. smoke ------------------------------------------------------------

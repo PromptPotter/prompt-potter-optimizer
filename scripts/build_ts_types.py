@@ -1,33 +1,53 @@
-"""Generate TS interfaces from the Pydantic models in :data:`EXPORTED_MODELS`
-→ ``webapp/lib/api/types.generated.ts``. CI re-runs this; non-empty diff fails."""
-
 from __future__ import annotations
 
+import dataclasses
 import enum
 import json
 import sys
 import textwrap
 import types
 import typing
+from collections.abc import Mapping
 from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter
 from pydantic.fields import ComputedFieldInfo, FieldInfo
 
 # ruff: noqa: E402 -- we import from promptpotter after adjusting sys.path
 _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO))
 
+from promptpotter.application.bench.task_context import OriginNextAction, OriginQuestion
+from promptpotter.application.campaign_listing import CampaignListResponse, CampaignSummary
+from promptpotter.application.commands.origin_resolving import ResolveOriginResponse
 from promptpotter.application.commands.payloads import (
     CommandAcceptedBody,
+    DatasetReplaced,
+    EditDraftCampaignPayload,
     OriginGateDecisionPayload,
     StartCheckinPayload,
+    StartRunPayload,
 )
 from promptpotter.application.config_map import (
     ConfigCoupling,
     ConfigEstimandGroup,
     ConfigKnob,
     ConfigMapResponse,
+)
+from promptpotter.application.cycle_files import FileContentResponse, FileEntry, FilesResponse
+from promptpotter.application.cycle_listing import CyclesResponse
+from promptpotter.application.datasets.draft_build import DraftCampaignWire, DraftDependency
+from promptpotter.application.datasets.draft_campaign import (
+    EditDraftPatch,
+    NodeOutputEdit,
+    OptimizationOverrides,
+)
+from promptpotter.application.datasets.origin_readiness import (
+    FieldGap,
+    OriginLastResolution,
+    OriginReadiness,
+    OriginResolution,
+    RaisedCommand,
 )
 from promptpotter.application.evidence.comparison import (
     ArmReplicate,
@@ -45,9 +65,9 @@ from promptpotter.application.evidence.grid import (
     FactorReading,
 )
 from promptpotter.application.evidence.head_to_head import (
-    HeadlineLift,
     HeadToHead,
     HeadToHeadRow,
+    PairGuard,
     SelectionPair,
 )
 from promptpotter.application.evidence.metric_catalogue import MetricSpec
@@ -65,6 +85,14 @@ from promptpotter.application.evidence.subjects import (
     WinnerChainPoint,
 )
 from promptpotter.application.jobs.account_activity import ActivityBucket, ActivityResponse
+from promptpotter.application.jobs.capacity import (
+    MachineHolder,
+    MachineNotice,
+    MachineQueueEntry,
+    MachineRefusal,
+    MachineStatusResponse,
+)
+from promptpotter.application.jobs.launcher.checkin import StartCheckinResponse
 from promptpotter.application.jobs.quota import QuotaStatus
 from promptpotter.application.maintenance.archive_maintenance import ArchiveReport
 from promptpotter.application.maintenance.storage_report import (
@@ -80,24 +108,43 @@ from promptpotter.application.optimizer_manifest import (
     OptimizerEntry,
     OptimizerKnobsResponse,
     OptimizerRoster,
+    StartPrompt,
 )
-from promptpotter.application.origin import OriginEntry
+from promptpotter.application.origin import DatasetIndexEntry, OriginEntry
 from promptpotter.application.pipeline_resolve import (
     CampaignPipelineResponse,
     CampaignRunsWith,
     DatasetPipelineResponse,
+    OptimizerPipelineResponse,
     RunsWithParam,
     VendorModels,
 )
-from promptpotter.domain.backend import BackpressureReading
+from promptpotter.application.served_dashboard import (
+    RoundAxis,
+    SampleWalk,
+    ServedDashboard,
+    VerifyPassProgress,
+    WarmingDashboard,
+)
+from promptpotter.domain.activity import (
+    ActivityDecision,
+    ActivityItem,
+    ActivityState,
+    DecisionAction,
+    DecisionFact,
+)
+from promptpotter.domain.backend import ServedBackpressure
 from promptpotter.domain.bench import (
     BandedValue,
-    BenchColumns,
     BenchReading,
     BenchScore,
+    BenchStatus,
     DatasetSplit,
+    LiftCost,
+    OwnLevel,
+    PassStop,
 )
-from promptpotter.domain.campaign import Arm, ArmBudget, Instrument
+from promptpotter.domain.campaign import Arm, ArmBudget, BenchSet
 from promptpotter.domain.cells import (
     Cell,
     CellCandidate,
@@ -106,24 +153,44 @@ from promptpotter.domain.cells import (
     CellsResponse,
     DatasetItem,
 )
-from promptpotter.domain.cycle_listing import CycleListEntry, SpawnedBy
+from promptpotter.domain.cycle_listing import CycleListEntry, LineStanding, RunStatus
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.dashboard_rows import (
     DashboardCandidate,
     DashboardSample,
     LiveCandidate,
     OptimizerLimit,
-    RoundSummary,
-    RoundSummaryCandidate,
-    RunStanding,
+    RunLimits,
+    ServedRound,
 )
 from promptpotter.domain.l4.proxies import PanelPrecision
 from promptpotter.domain.opt_search_point import (
     EvidenceGrounding,
     IndividualLineage,
     OptSearchPoint,
+    Variation,
 )
 from promptpotter.domain.optimizer_state import OptimizerState
+from promptpotter.domain.paired_reading import (
+    ArmPointer,
+    CellSet,
+    Coverage,
+    EstimatorSpec,
+    FlipCounts,
+    LiftEstimate,
+    Measurand,
+    MeasuredLift,
+    MemberAddress,
+    PairedReading,
+    PairMember,
+    TestFamily,
+)
+from promptpotter.domain.phases import (
+    PauseReading,
+    ProducerAlert,
+    ProducerReading,
+    RunAdmission,
+)
 from promptpotter.domain.pipeline_schema import (
     ManifestNodeOverlay,
     ModelCapability,
@@ -132,25 +199,61 @@ from promptpotter.domain.pipeline_schema import (
     NodeOutputSchema,
     NodeReach,
     NodeSearchNarrowing,
+    ParamIntent,
     PipelineView,
     PipelineViewEdge,
     PipelineViewNode,
 )
 from promptpotter.domain.projection_envelope import ProjectionEnvelope
 from promptpotter.domain.results import (
+    ArmAbility,
+    ArmElection,
+    ArmPanel,
+    ArmReading,
+    ArmSpend,
+    DegradationContext,
     DegradationHealth,
     DiagnosticRunRecord,
+    LineRate,
+    LivesReading,
     OptimizerFact,
-    OverlapMember,
     OverlapReading,
     RoundResult,
+    RunStanding,
     ScoreboardRow,
     ScoredCandidate,
     VerifyReading,
 )
-from promptpotter.domain.ruler import AbilityReading
-from promptpotter.domain.run_records import ConfigOverrides, CycleSeed, ForkRemainder
-from promptpotter.domain.spend import KindSpend, MeteredSpend, SpendBucket, SpendRollup
+from promptpotter.domain.round_audit import (
+    LoopWarning,
+    NodeBlock,
+    NodeInput,
+    NodeOutput,
+    RoundAudit,
+)
+from promptpotter.domain.ruler import AbilityReading, RulerStanding
+from promptpotter.domain.run_records import ConfigOverrides, CycleSeed, ForkRemainder, SpawnedBy
+from promptpotter.domain.scoring import (
+    SHEET_ROW,
+    Diagnostics,
+    JudgeReading,
+    NodeWarning,
+    PipelineData,
+    RerunComparison,
+    TurnRecord,
+)
+from promptpotter.domain.spend import (
+    CloseSpend,
+    KindSpend,
+    MeteredSpend,
+    PrefixReading,
+    SpendBucket,
+    SpendCeilings,
+    SpendRollup,
+    StepUsage,
+    TokenAccount,
+)
+from promptpotter.domain.wire_record import record_of
 from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure
 from promptpotter.infrastructure.projections.live_dashboard.state import (
     BackendWarning,
@@ -158,27 +261,20 @@ from promptpotter.infrastructure.projections.live_dashboard.state import (
     CatchUpLogEntry,
     CurrentRound,
     DashboardError,
-    LiveDashboardState,
-    LoopWarning,
     RacingBlock,
-    RunLimits,
-    VerifyPassProgress,
 )
 from promptpotter.infrastructure.store.account_spend import LifetimeSpend
 from promptpotter.infrastructure.store.family_ray_queries import RayItem, RayResponse
 from promptpotter.infrastructure.store.lineage_queries import (
+    ArmNode,
+    CourseNode,
+    ForkStamp,
+    LensShift,
     LineageDivergence,
-    LineageNode,
+    MainLineStep,
 )
 from promptpotter.main import HealthResponse
-from promptpotter.presentation.api.routers.active import (
-    ActiveSessionResponse,
-    CyclesResponse,
-    MachineHolder,
-    MachineQueueEntry,
-    MachineStatusResponse,
-    OptimizerPipelineResponse,
-)
+from promptpotter.presentation.api.routers.active import ActiveSessionResponse
 from promptpotter.presentation.api.routers.auth import (
     ConnectedAccount,
     MeResponse,
@@ -188,75 +284,104 @@ from promptpotter.presentation.api.routers.backends import (
     BackendHealthResponse,
     BackendResponse,
 )
-from promptpotter.presentation.api.routers.campaigns.files import (
-    FileContentResponse,
-    FileEntry,
-    FilesResponse,
-)
 from promptpotter.presentation.api.routers.campaigns.manifests import (
-    CampaignListResponse,
-    CampaignSummary,
+    CheckinReopenResponse,
     ForkPreviewResponse,
 )
-from promptpotter.presentation.api.routers.datasets.index import (
-    DatasetIndexEntry,
-    DatasetIndexResponse,
-)
+from promptpotter.presentation.api.routers.datasets.index import DatasetIndexResponse
 from promptpotter.presentation.api.routers.diagnostics import DiagnosticRunListResponse
 from promptpotter.presentation.api.routers.origins import OriginListResponse
 
-EXPORTED_MODELS: list[type[BaseModel]] = [
-    # Nested types first so the TS file reads top-down.
+EXPORTED_MODELS: list[type] = [
+    # The emitter does not recurse: register every nested type, before its container.
     ArchiveReport,
     AbilityReading,
+    VerifyReading,
+    ArmPanel,
+    PrefixReading,
+    ArmSpend,
+    ArmAbility,
+    ArmElection,
+    ArmReading,
     DashboardCandidate,
     DashboardSample,
-    RoundSummaryCandidate,
     DegradationHealth,
     PanelPrecision,
-    OverlapMember,
     OverlapReading,
+    LineRate,
     OptimizerFact,
-    RoundSummary,
+    ServedRound,
     DiagnosticRunRecord,
-    # --- the round document (`rounds/round_NNNN.json` IS `RoundResult.model_dump()`,
-    # served through the per-cycle `file?path=` route). Nested graph, dependencies first. ---
     ValidationFailure,
     RuntimeFailure,
+    DegradationContext,
     ScoredCandidate,
     ScoreboardRow,
     EvidenceGrounding,
+    Variation,
     IndividualLineage,
     OptimizerState,
     OptSearchPoint,
+    record_of(StepUsage),
+    TurnRecord,
+    record_of(NodeWarning),
+    record_of(Diagnostics),
+    record_of(JudgeReading),
+    record_of(PipelineData),
+    RerunComparison,
+    SHEET_ROW,
     RoundResult,
     SpendBucket,
     SpendRollup,
     KindSpend,
     MeteredSpend,
-    LifetimeSpend,  # nested in CampaignSummary and QuotaStatus
-    ForkRemainder,  # nested in LiveDashboardState
-    # --- dashboard.json IS `LiveDashboardState` (the webapp polls it every 2s). It was
-    # hand-declared webapp-side with an index signature that typechecked anything. ---
-    BackpressureReading,
+    LifetimeSpend,
+    ForkRemainder,
+    ServedBackpressure,
     BackendWarning,
     LoopWarning,
     DashboardError,
     OptimizerLimit,
+    SpendCeilings,
     RunLimits,
+    CloseSpend,
+    LivesReading,
     RunStanding,
     CatchUpLogEntry,
     RacingBlock,
     LiveCandidate,
+    TokenAccount,
+    NodeInput,
+    NodeOutput,
+    NodeBlock,
+    RoundAudit,
     CurrentRound,
     BenchPassProgress,
-    VerifyReading,  # nested in DashboardCandidate
     VerifyPassProgress,
-    LiveDashboardState,
-    # --- datasets router ---
+    ArmPointer,
+    ProducerAlert,
+    ProducerReading,
+    RunAdmission,
+    PauseReading,
+    SampleWalk,
+    RoundAxis,
+    ServedDashboard,
+    WarmingDashboard,
+    MemberAddress,
+    PairMember,
+    CellSet,
+    Measurand,
+    EstimatorSpec,
+    LiftEstimate,
+    TestFamily,
+    FlipCounts,
+    MeasuredLift,
+    Coverage,
+    PairedReading,
     DatasetItem,
     CellCandidate,
     CellRow,
+    RulerStanding,
     CellsResponse,
     CellSpan,
     Cell,
@@ -264,37 +389,35 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     NodeConfigParam,
     NodeOutputSchema,
     NodeReach,
-    PipelineViewNode,  # nested in PipelineView — the emitter does not recurse
+    PipelineViewNode,
     PipelineViewEdge,
     PipelineView,
-    NestedPipelineRef,  # nested in DatasetPipelineResponse — the emitter does not recurse
+    NestedPipelineRef,
     DatasetPipelineResponse,
-    # --- active router ---
     ActiveSessionResponse,
-    SpawnedBy,  # nested in CycleListEntry — the emitter does not recurse, so register it
-    BandedValue,  # nested in BenchColumns and BenchReading
-    BenchColumns,
-    BenchReading,  # nested in BenchScore, which nests in CampaignSummary
+    SpawnedBy,
+    BandedValue,
+    OwnLevel,
+    BenchReading,
+    PassStop,
+    BenchStatus,
+    LiftCost,
     BenchScore,
     CycleListEntry,
+    RunStatus,
+    LineStanding,
     CyclesResponse,
-    # --- commands middleware ---
     CommandAcceptedBody,
-    # The Start verb's payload, so the browser's launch ceilings are the wire's own three fields
-    # rather than a hand-kept list that a fourth `LaunchLimits` field would not reach.
     StartCheckinPayload,
-    # --- campaigns/manifests router ---
-    RunsWithParam,  # nested in CampaignRunsWith — the emitter does not recurse
-    VendorModels,  # nested in CampaignRunsWith
-    CampaignRunsWith,  # nested in CampaignSummary
-    Arm,  # nested in CampaignSummary and HeadToHeadRow
+    StartRunPayload,
+    RunsWithParam,
+    VendorModels,
+    CampaignRunsWith,
+    Arm,
     CampaignSummary,
     CampaignListResponse,
-    # What ONE campaign runs at one searchpoint (`frontend-surface-contract.md::I9`).
     CampaignPipelineResponse,
-    # The fork gate's own babysit verdict, so the browser never re-derives it.
     ForkPreviewResponse,
-    # --- cross-subject evidence (application/evidence) — nested types first ---
     EffectProvenance,
     EditSpread,
     RankedEdit,
@@ -315,63 +438,58 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     SubjectReading,
     PairwiseComparison,
     MetricReading,
-    DatasetSplit,  # nested in Instrument
-    Instrument,
-    ArmBudget,  # nested in HeadToHeadRow
-    HeadlineLift,  # nested in HeadToHeadRow
+    DatasetSplit,
+    BenchSet,
+    ArmBudget,
+    PairGuard,
     HeadToHeadRow,
     SelectionPair,
     HeadToHead,
     Evidence,
-    # --- campaigns/files router ---
     FileEntry,
     FilesResponse,
     FileContentResponse,
-    # --- the lineage tree (store/lineage_queries) ---
-    CycleHop,  # nested in LineageNode.path AND RayItem.path — the emitter does not recurse
+    CycleHop,
     LineageDivergence,
-    LineageNode,
-    # --- the time-ray (store/family_ray_queries) ---
+    ForkStamp,
+    LensShift,
+    MainLineStep,
+    ArmNode,
+    CourseNode,
     RayItem,
     RayResponse,
-    # --- the SSE frame. Hand-mirrored in `chat/activity.ts` until now, with `kind: string`,
-    # so the translator's switch was exhaustive over nothing. ---
     ProjectionEnvelope,
-    # --- verify router ---
+    ActivityItem,
+    DecisionFact,
+    DecisionAction,
+    ActivityDecision,
+    ActivityState,
     DiagnosticRunListResponse,
-    # --- auth router: the account modal (Profile / Security / Activity / Preferences).
-    # Hand-mirrored in `reads.ts` until now, which is how `MeResponse` grew `capabilities`
-    # and `terms_*` in two places at once. ---
     ConnectedAccount,
     MeResponse,
     QuotaStatus,
     UserSettings,
     ActivityBucket,
     ActivityResponse,
-    # --- backends + machine status ---
     HealthResponse,
     BackendResponse,
     BackendHealthResponse,
     MachineHolder,
+    MachineNotice,
     MachineQueueEntry,
+    MachineRefusal,
     MachineStatusResponse,
-    # The optimizer's own manifest. Generated rather than hand-written in `components/workflow/
-    # types.ts`, which said so in its own comment: the route returned a bare dict, so there was no
-    # `response_model` to generate it from.
+    StartPrompt,
     OptimizerPipelineResponse,
-    # --- dataset + origin registries (the "New campaign" pickers) ---
     DatasetIndexEntry,
     DatasetIndexResponse,
     OriginEntry,
     OriginListResponse,
-    # --- storage rollups. The webapp had a `StorageLeaves` mixin the server does not have;
-    # generating these flat deletes it rather than mirroring a shape nothing declares. ---
     CampaignStorageResponse,
     WorkspaceStorageEntry,
     WorkspaceStorageResponse,
     DatasetStorageEntry,
     DatasetStorageResponse,
-    # --- campaign manifest detail + the two self-describing schemas the panels render ---
     OptimizerKnobsResponse,
     NodeKnobs,
     KnobRow,
@@ -381,14 +499,29 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     ConfigEstimandGroup,
     ConfigCoupling,
     ConfigMapResponse,
-    # --- the fork seed + the one command payload the browser needs a member of. Hand-declaring
-    # these in `commands.ts` is what lets a wire field go unrepresented and a closed set be
-    # re-spelled by hand. ---
     ConfigOverrides,
-    ManifestNodeOverlay,  # nested in ConfigOverrides.nodes — the emitter does not recurse
-    NodeSearchNarrowing,  # nested in CycleSeed.optimizer_narrowing — the emitter does not recurse
+    ManifestNodeOverlay,
+    NodeSearchNarrowing,
     CycleSeed,
     OriginGateDecisionPayload,
+    OptimizationOverrides,
+    ParamIntent,
+    NodeOutputEdit,
+    EditDraftPatch,
+    EditDraftCampaignPayload,
+    FieldGap,
+    OriginReadiness,
+    DraftDependency,
+    DraftCampaignWire,
+    OriginQuestion,
+    OriginNextAction,
+    OriginLastResolution,
+    RaisedCommand,
+    OriginResolution,
+    ResolveOriginResponse,
+    CheckinReopenResponse,
+    StartCheckinResponse,
+    DatasetReplaced,
 ]
 
 _OUT_PATH = _REPO / "webapp" / "lib" / "api" / "types.generated.ts"
@@ -396,6 +529,11 @@ _OUT_PATH = _REPO / "webapp" / "lib" / "api" / "types.generated.ts"
 
 def _is_none_type(t: typing.Any) -> bool:
     return t is type(None)
+
+
+def _array_of(member: typing.Any) -> str:
+    rendered = _emit_type(member)
+    return f"({rendered})[]" if " | " in rendered else f"{rendered}[]"
 
 
 def _emit_type(annotation: typing.Any) -> str:
@@ -409,17 +547,22 @@ def _emit_type(annotation: typing.Any) -> str:
         return "boolean"
     if _is_none_type(annotation):
         return "null"
+    if isinstance(annotation, typing.TypeAliasType):
+        return _emit_type(annotation.__value__)
 
-    # An enum is its value set. Emitting `unknown` (the old fall-through) let the webapp
-    # hand-write the union instead — and its `run_phase` union was missing two of the six
-    # RunPhase members. A name-set the compiler didn't derive goes stale in silence.
     if isinstance(annotation, type) and issubclass(annotation, enum.Enum):
         return " | ".join(
             repr(m.value) if isinstance(m.value, str) else str(m.value) for m in annotation
         )
 
+    if typing.is_typeddict(annotation):
+        return str(annotation.__name__)
+
     origin = typing.get_origin(annotation)
     args = typing.get_args(annotation)
+
+    if origin in (typing.Required, typing.NotRequired):
+        return _emit_type(args[0])
 
     if origin in (typing.Union, types.UnionType):
         has_none = any(_is_none_type(a) for a in args)
@@ -428,15 +571,16 @@ def _emit_type(annotation: typing.Any) -> str:
         return f"{rendered} | null" if has_none else rendered
 
     if origin is typing.Literal:
-        return " | ".join(repr(a) if isinstance(a, str) else str(a) for a in args)
+        # `json.dumps` for a non-string: a Python `True` is not a TypeScript literal.
+        return " | ".join(repr(a) if isinstance(a, str) else json.dumps(a) for a in args)
 
     if origin in (list, set, frozenset):
         (inner,) = args
-        return f"{_emit_type(inner)}[]"
+        return _array_of(inner)
 
     if origin is tuple:
         if len(args) == 2 and args[1] is Ellipsis:
-            return f"{_emit_type(args[0])}[]"
+            return _array_of(args[0])
         rendered = ", ".join(_emit_type(a) for a in args)
         return f"[{rendered}]"
 
@@ -446,8 +590,14 @@ def _emit_type(annotation: typing.Any) -> str:
         return f"Record<string, {_emit_type(v_type)}>"
 
     if isinstance(annotation, type) and issubclass(annotation, BaseModel):
-        # A model declaring no field is a base whose registered subclass fills the wire.
         return annotation.__name__ if annotation.model_fields else "Record<string, unknown>"
+
+    if isinstance(annotation, type) and "__get_pydantic_core_schema__" in vars(annotation):
+        declared = TypeAdapter(annotation).json_schema(mode="serialization")
+        return f"{declared['items']['$ref'].rpartition('/')[2]}[]"
+
+    if dataclasses.is_dataclass(annotation) and annotation in EXPORTED_MODELS:
+        return str(annotation.__name__)
 
     return "unknown"
 
@@ -460,36 +610,22 @@ def _emit_field(name: str, info: FieldInfo, annotation: typing.Any) -> str:
     if description:
         wrapped = textwrap.fill(description, width=78, subsequent_indent="   * ")
         comment_block = f"  /** {wrapped} */\n"
-    # The ALIAS is the wire name where one is declared — a producer dumping `by_alias`
-    # sends it, so emitting the Python attribute would type a key the browser never sees
-    # (`from_` for `from`, which is a reserved word and the reason the alias exists).
     return f"{comment_block}  {info.alias or name}: {ts_type};"
 
 
 def _resolved_hints(model: type[BaseModel]) -> dict[str, typing.Any]:
-    """Field annotations with forward refs resolved.
-
-    ``model_fields[...].annotation`` can still hold a bare ``ForwardRef`` when the
-    referent is defined below the model in its own module (pydantic resolves it inside
-    the core schema, but never writes it back). Emitting that yields ``unknown``.
-    """
+    """``model_fields[...].annotation`` can hold a bare ``ForwardRef``, which emits ``unknown``."""
     return typing.get_type_hints(model)
 
 
 def _computed_return_type(model: type[BaseModel], name: str) -> typing.Any:
-    """A computed field's return type, read off the underlying property.
-
-    ``ComputedFieldInfo.return_type`` is ``PydanticUndefined`` under
-    ``from __future__ import annotations`` (the annotation is still a string), so go to
-    the getter and resolve it there.
-    """
+    """``ComputedFieldInfo.return_type`` is undefined under ``from __future__ import annotations``."""
     prop = getattr(model, name)
     fget = getattr(prop, "fget", None) or prop
     return typing.get_type_hints(fget).get("return", typing.Any)
 
 
 def _emit_computed_field(model: type[BaseModel], name: str, info: ComputedFieldInfo) -> str:
-    """A ``@computed_field`` — ``model_dump`` emits it, so it is part of the wire type."""
     ts_type = _emit_type(_computed_return_type(model, name))
     doc = (info.description or "").strip()
     comment_block = ""
@@ -500,22 +636,11 @@ def _emit_computed_field(model: type[BaseModel], name: str, info: ComputedFieldI
 
 
 def _emit_enum_union(enum_cls: type[enum.Enum], note: str) -> str:
-    """Emit a domain StrEnum as a NAMED TS union.
-
-    The inline unions Pydantic fields already produce are anonymous, so a webapp map over
-    the vocabulary has nothing to key on and falls back to ``Record<string, …>`` — which
-    accepts any subset silently. A named type lets the mirror say ``Record<RunPhase, …>``
-    and makes a missing member a compile error instead of a blank render. That is not
-    hypothetical: ``gate`` sat in ``RunPhase`` while the dock's in-flight set and label map
-    were both keyed on ``string``, and a held origin gate rendered as an ordinary run.
-    """
     members = " | ".join(repr(m.value) for m in enum_cls)
     return f"// {note}\nexport type {enum_cls.__name__} = {members};"
 
 
 def _emit_lifecycle_filter() -> str:
-    """Emit ``LifecycleFilter``, the ``?lifecycle=`` set ``GET /campaigns`` and the store's one
-    filter gateway both take — a query param, so no response model carries it."""
     from promptpotter.domain.campaign import LifecycleFilter
 
     members = " | ".join(repr(m) for m in typing.get_args(LifecycleFilter.__value__))
@@ -524,7 +649,6 @@ def _emit_lifecycle_filter() -> str:
 
 
 def _emit_arm_outcomes_ended_early() -> str:
-    """Emit ``ArmOutcome.ended_early`` as the member list the webapp's stopped-walk badge reads."""
     from promptpotter.domain.results import ArmOutcome
 
     members = ", ".join(repr(o.value) for o in ArmOutcome if o.ended_early)
@@ -536,10 +660,6 @@ def _emit_arm_outcomes_ended_early() -> str:
 
 
 def _emit_command_kinds() -> str:
-    """Emit ``ALL_DISPATCHED_KINDS`` as a named union so ``postCommand`` can be narrowed.
-
-    Same argument as ``_emit_stop_reason_tables``: against a `kind: string` parameter a renamed
-    verb reaches the operator as a runtime ``command_kind_unknown`` 404, not a compile error."""
     from promptpotter.domain.command_kinds import ALL_DISPATCHED_KINDS
 
     members = " | ".join(repr(k) for k in sorted(ALL_DISPATCHED_KINDS))
@@ -547,33 +667,7 @@ def _emit_command_kinds() -> str:
     return f"// {note}\nexport type CommandKind = {members};"
 
 
-def _emit_non_activity_kinds() -> str:
-    """Emit the complement of ``RENDERS_AS_ACTIVITY`` (domain/projection_envelope.py) as a named
-    union. It is what lets the translator's default arm PROVE nothing renderable fell through it:
-    flip a kind to activity-bearing without writing its case and the assignment stops compiling.
-    A bare ``default: return null`` cannot — it swallows a new kind in silence, on the one surface
-    whose whole job is to not be silent."""
-    from promptpotter.domain.projection_envelope import NON_ACTIVITY_KINDS
-
-    members = " | ".join(repr(k) for k in sorted(NON_ACTIVITY_KINDS))
-    note = (
-        "Kinds no activity item is ever made of — the ray drops them and the translator\n"
-        "// returns null. Complement of domain/projection_envelope.py::RENDERS_AS_ACTIVITY."
-    )
-    return f"// {note}\nexport type NonActivityKind = {members};"
-
-
 def _emit_stop_reason_tables() -> str:
-    """Emit ``STOP_REASON_INFO`` (domain/phases.py) as TS consts — the single label, next-step,
-    outcome AND category source, mirrored to the webapp without hand-maintained drift. All four ride
-    the mirror rather than ``dashboard.json`` because they are properties of the REASON, not of a
-    cycle; serving them per poll would ship the same twenty strings every two seconds.
-
-    **All four are keyed on the named ``StopReason`` union and TOTAL over it**, so a reason the
-    table gains is a compile error at every map the browser keeps beside these, and an index needs
-    no ``||`` default — a ``Record<string, …>`` answers ``undefined`` for a renamed member and the
-    surface papers over it with the raw value. ``""`` is a stated next step: nothing is owed.
-    """
     from promptpotter.domain.phases import STOP_REASON_INFO, StopCategory, StopOutcome, StopReason
 
     def table(column: str) -> str:
@@ -586,17 +680,6 @@ def _emit_stop_reason_tables() -> str:
     category_union = " | ".join(repr(c.value) for c in StopCategory)
     return (
         _emit_enum_union(StopReason, "Why a cycle ended (domain/phases.py::StopReason).") + "\n\n"
-        "// Operator-facing label per terminal reason. Mirror of\n"
-        "// domain/phases.py::STOP_REASON_INFO — the single label source.\n"
-        "export const STOP_REASON_LABELS: Record<StopReason, string> = {\n"
-        f"{table('label')}\n"
-        "};\n\n"
-        "// What the operator does now, per terminal reason — the same table's `next_step`, so the\n"
-        '// browser advises exactly what the terminal, log.md and review.md advise. `""` states\n'
-        "// that nothing is owed; it is not a gap.\n"
-        "export const STOP_REASON_NEXT_STEPS: Record<StopReason, string> = {\n"
-        f"{table('next_step')}\n"
-        "};\n\n"
         "// Whether a stop SUCCEEDED, and the only half of the table that decides anything —\n"
         "// `StopOutcome`, where `paused` is the one non-terminal member. Ask it rather than\n"
         "// matching names: a hand-listed set of crash names rots in both directions.\n"
@@ -613,9 +696,244 @@ def _emit_stop_reason_tables() -> str:
     )
 
 
+def _emit_run_phase_tables() -> str:
+    from promptpotter.domain.phases import DASHBOARD_STATE_PAUSE_WORDS, RUN_PHASE_INFO
+
+    columns = (
+        "label",
+        "walks",
+        "settled",
+        "authoring",
+        "awaits_operator",
+        "dock_priority",
+        "parked",
+        "parked_attached",
+    )
+    rows = "\n".join(
+        f"  {phase.value!r}: {{ "
+        + ", ".join(f"{column}: {json.dumps(getattr(info, column))}" for column in columns)
+        + " },"
+        for phase, info in RUN_PHASE_INFO.items()
+    )
+    words = "\n".join(
+        f"  {state.value!r}: {json.dumps(said)},"
+        for state, said in DASHBOARD_STATE_PAUSE_WORDS.items()
+    )
+    return (
+        "// What each run phase IS. Mirror of domain/phases.py::RUN_PHASE_INFO — the single\n"
+        "// source of a phase's label and facts; the terminal reads the same rows.\n"
+        "export interface RunPhaseInfo {\n"
+        "  label: string;\n"
+        "  walks: boolean;\n"
+        "  settled: boolean;\n"
+        "  authoring: boolean;\n"
+        "  awaits_operator: boolean;\n"
+        "  dock_priority: number;\n"
+        "  parked: string;\n"
+        "  parked_attached: string;\n"
+        "}\n"
+        "export const RUN_PHASE_INFO: Record<RunPhase, RunPhaseInfo> = {\n"
+        f"{rows}\n"
+        "};\n\n"
+        "// What a run asked to pause is finishing, per `dashboard.json::state`. Mirror of\n"
+        '// domain/phases.py::DASHBOARD_STATE_PAUSE_WORDS; `""` names nothing worth saying.\n'
+        "export const DASHBOARD_STATE_PAUSE_WORDS: Record<DashboardState, string> = {\n"
+        f"{words}\n"
+        "};"
+    )
+
+
+def _emit_reading_state_tables() -> str:
+    from promptpotter.domain.paired_reading import (
+        READING_STATE_INFO,
+        ReadingState,
+        ReadingStateKind,
+    )
+
+    def table(column: str) -> str:
+        return "\n".join(
+            f"  {state.value!r}: {str(getattr(info, column))!r},"
+            for state, info in READING_STATE_INFO.items()
+        )
+
+    return (
+        _emit_enum_union(
+            ReadingState,
+            "Whether a pair was read, and why not (domain/paired_reading.py::ReadingState).",
+        )
+        + "\n\n"
+        + _emit_enum_union(
+            ReadingStateKind,
+            "What kind of answer a ReadingState is: waiting is not a fault, refused is not absent.",
+        )
+        + "\n\n"
+        "// The served label and sentence per state. Mirror of\n"
+        "// domain/paired_reading.py::READING_STATE_INFO — the single wording source.\n"
+        "export const READING_STATE_LABELS: Record<ReadingState, string> = {\n"
+        f"{table('label')}\n"
+        "};\n\n"
+        "export const READING_STATE_SENTENCES: Record<ReadingState, string> = {\n"
+        f"{table('sentence')}\n"
+        "};\n\n"
+        "export const READING_STATE_KINDS: Record<ReadingState, ReadingStateKind> = {\n"
+        f"{table('kind')}\n"
+        "};"
+    )
+
+
+def _emit_round_advance_tables() -> str:
+    from promptpotter.domain.results import ROUND_ADVANCE_INFO, RoundAdvance
+
+    def table(column: str) -> str:
+        return "\n".join(
+            f"  {advance.value!r}: {str(getattr(info, column))!r},"
+            for advance, info in ROUND_ADVANCE_INFO.items()
+        )
+
+    return (
+        _emit_enum_union(
+            RoundAdvance,
+            "What a closed round did to the best-so-far line (domain/results.py::RoundAdvance).",
+        )
+        + "\n\n"
+        "// The served label and sentence per advance. Mirror of\n"
+        "// domain/results.py::ROUND_ADVANCE_INFO — the single wording source.\n"
+        "export const ROUND_ADVANCE_LABELS: Record<RoundAdvance, string> = {\n"
+        f"{table('label')}\n"
+        "};\n\n"
+        "export const ROUND_ADVANCE_SENTENCES: Record<RoundAdvance, string> = {\n"
+        f"{table('sentence')}\n"
+        "};"
+    )
+
+
+def _emit_spend_tables() -> str:
+    from promptpotter.domain.spend import (
+        CEILING_METER_LABELS,
+        PREFIX_STATE_TITLES,
+        RATE_PRICED_LABEL,
+        SPEND_KIND_LABELS,
+    )
+
+    meter_keys = " | ".join(repr(m) for m in CEILING_METER_LABELS)
+    meters = "\n".join(f"  {meter!r}: {word!r}," for meter, word in CEILING_METER_LABELS.items())
+    kinds = " | ".join(repr(k) for k in SPEND_KIND_LABELS)
+    rows = "\n".join(
+        f"  {{ key: {key!r}, label: {label!r} }}," for key, label in SPEND_KIND_LABELS.items()
+    )
+    states = " | ".join(repr(s) for s in PREFIX_STATE_TITLES)
+    titles = "\n".join(f"  {state!r}: {title!r}," for state, title in PREFIX_STATE_TITLES.items())
+    return (
+        "// Who spent it (domain/spend.py::TokenUsageKind).\n"
+        f"export type SpendKind = {kinds};\n\n"
+        "// Each kind's word, in display order. Mirror of domain/spend.py::SPEND_KIND_LABELS.\n"
+        "export const SPEND_KINDS: readonly { key: SpendKind; label: string }[] = [\n"
+        f"{rows}\n"
+        "];\n\n"
+        "// A provider prefix-cache reading's state (domain/spend.py::PrefixState).\n"
+        f"export type PrefixState = {states};\n\n"
+        "// What each state means. Mirror of domain/spend.py::PREFIX_STATE_TITLES.\n"
+        "export const PREFIX_STATE_TITLES: Record<PrefixState, string> = {\n"
+        f"{titles}\n"
+        "};\n\n"
+        "// The word beside a figure a ceiling counted. Mirror of "
+        "domain/spend.py::CEILING_METER_LABELS.\n"
+        f"export const CEILING_METER_LABELS: Record<{meter_keys}, string> = {{\n"
+        f"{meters}\n"
+        "};\n\n"
+        "// The word beside a figure our rate table priced, which is never spent. Mirror of "
+        "domain/spend.py::RATE_PRICED_LABEL.\n"
+        f"export const RATE_PRICED_LABEL = {RATE_PRICED_LABEL!r};"
+    )
+
+
+def _emit_theta_caveat_table() -> str:
+    from promptpotter.domain.ruler import THETA_CAVEAT_INFO
+
+    members = " | ".join(repr(c.value) for c in THETA_CAVEAT_INFO)
+    rows = "\n".join(
+        f"  {caveat.value!r}: {{ head: {json.dumps(info.head, ensure_ascii=False)}, "
+        f"body: {json.dumps(info.body, ensure_ascii=False)} }},"
+        for caveat, info in THETA_CAVEAT_INFO.items()
+    )
+    return (
+        "// What each θ caveat says. Mirror of domain/ruler.py::THETA_CAVEAT_INFO — the single\n"
+        "// wording; the terminal prints the same `head`.\n"
+        f"export const THETA_CAVEAT_INFO: Record<{members}, {{ head: string; body: string }}> = {{\n"
+        f"{rows}\n"
+        "};"
+    )
+
+
+def _emit_label_tables() -> str:
+    from promptpotter.application.evidence.head_to_head import GUARD_STATE_LABELS
+    from promptpotter.application.evidence.subjects import SUBJECT_KIND_LABELS
+    from promptpotter.domain.dashboard_rows import SAMPLE_MOVEMENT_LABELS
+    from promptpotter.domain.results import ARM_VERDICT_LABELS
+    from promptpotter.domain.run_records import MINT_KIND_LABELS
+
+    def table(name: str, owner: str, labels: Mapping[typing.Any, str]) -> str:
+        members = " | ".join(repr(str(member)) for member in labels)
+        rows = "\n".join(
+            f"  {str(member)!r}: {json.dumps(label, ensure_ascii=False)},"
+            for member, label in labels.items()
+        )
+        return (
+            f"// Mirror of {owner}::{name} — the single wording.\n"
+            f"export const {name}: Record<{members}, string> = {{\n{rows}\n}};"
+        )
+
+    return "\n\n".join(
+        [
+            table("ARM_VERDICT_LABELS", "domain/results.py", ARM_VERDICT_LABELS),
+            table("GUARD_STATE_LABELS", "application/evidence/head_to_head.py", GUARD_STATE_LABELS),
+            table("MINT_KIND_LABELS", "domain/run_records.py", MINT_KIND_LABELS),
+            table("SAMPLE_MOVEMENT_LABELS", "domain/dashboard_rows.py", SAMPLE_MOVEMENT_LABELS),
+            table("SUBJECT_KIND_LABELS", "application/evidence/subjects.py", SUBJECT_KIND_LABELS),
+        ]
+    )
+
+
+def _emit_display_metrics() -> str:
+    from promptpotter.domain.results import DISPLAY_METRIC_INFO
+
+    members = " | ".join(repr(m) for m in DISPLAY_METRIC_INFO)
+    rows = "\n".join(
+        f"  {{ id: {metric!r}, label: {info.label!r}, glyph: {info.glyph!r},"
+        f" title: {info.title!r} }},"
+        for metric, info in DISPLAY_METRIC_INFO.items()
+    )
+    labels = "\n".join(
+        f"  {metric!r}: {info.label!r}," for metric, info in DISPLAY_METRIC_INFO.items()
+    )
+    return (
+        "// A column every arm carries (domain/results.py::DisplayMetric).\n"
+        f"export type DisplayMetric = {members};\n\n"
+        "// Each column's words, in pick order. Mirror of domain/results.py::DISPLAY_METRIC_INFO.\n"
+        "export const DISPLAY_METRICS: readonly {\n"
+        "  id: DisplayMetric;\n  label: string;\n  glyph: string;\n  title: string;\n}[] = [\n"
+        f"{rows}\n"
+        "];\n\n"
+        "export const DISPLAY_METRIC_LABELS: Record<DisplayMetric, string> = {\n"
+        f"{labels}\n"
+        "};"
+    )
+
+
+def _emit_verify_strategy_labels() -> str:
+    from promptpotter.domain.results import VERIFY_STRATEGY_LABELS
+
+    rows = "\n".join(f"  {name!r}: {label!r}," for name, label in VERIFY_STRATEGY_LABELS.items())
+    return (
+        "// How a verify pass's pick of fresh cells reads, by strategy. Mirror of\n"
+        "// domain/results.py::VERIFY_STRATEGY_LABELS.\n"
+        'export const VERIFY_STRATEGY_LABELS: Record<VerifyReading["strategy"], string> = {\n'
+        f"{rows}\n"
+        "};"
+    )
+
+
 def _emit_abort_lens_labels() -> str:
-    """Emit ``ABORT_LENS_LABELS`` (``pobb/checks.py``) as the browser's abort-lens picklist, IN
-    ORDER: the dict's order is the order the operator reads."""
     from promptpotter.application.optimizers.potter.pobb.checks import ABORT_LENS_LABELS
 
     rows = "\n".join(f"  {variant!r}: {label!r}," for variant, label in ABORT_LENS_LABELS.items())
@@ -630,8 +948,6 @@ def _emit_abort_lens_labels() -> str:
 
 
 def _emit_cell_term_meta() -> str:
-    """Emit what a ``per_cell`` formula can name (``evaluators.py::cell_terms_meta``) as a TS const —
-    the scoring-mask editor's vocabulary, so a hand copy cannot go stale beside the compiler's."""
     from promptpotter.application.scoring.evaluators import cell_terms_meta
 
     rows = "\n".join(
@@ -655,20 +971,35 @@ def _emit_cell_term_meta() -> str:
     )
 
 
-def _emit_prompt_string_fields() -> str:
-    """Emit ``PROMPT_STRING_FIELDS`` (config/settings.py) — the decomposition field SET.
+def _emit_pipeline_schema_words() -> str:
+    from promptpotter.domain.pipeline_schema import (
+        MOVABLE_AGENT_LABELS,
+        SCHEMA_DESCRIPTION_PREFIX,
+    )
 
-    Hand-mirrored at ``webapp/lib/prompt-fields.ts`` under a header saying it "MUST stay in
-    sync", which is the note a copy carries instead of a mechanism. MEMBERSHIP only: each prompt
-    kind orders its own render (``PromptTemplate.RENDER_ORDER``), so this sequence is a grid
-    order for the editor and never a render order.
-    """
-    from promptpotter.config.settings import PROMPT_STRING_FIELDS
+    agents = " | ".join(json.dumps(a) for a in MOVABLE_AGENT_LABELS)
+    rows = "\n".join(
+        f"  {agent}: {json.dumps(label, ensure_ascii=False)},"
+        for agent, label in MOVABLE_AGENT_LABELS.items()
+    )
+    return (
+        "// Who may move a search axis, worded. Mirror of\n"
+        "// domain/pipeline_schema.py::MOVABLE_AGENT_LABELS.\n"
+        f"export const MOVABLE_AGENT_LABELS: Record<{agents}, string> = {{\n"
+        f"{rows}\n"
+        "};\n\n"
+        "// domain/pipeline_schema.py::SCHEMA_DESCRIPTION_PREFIX.\n"
+        f"export const SCHEMA_DESCRIPTION_PREFIX = {json.dumps(SCHEMA_DESCRIPTION_PREFIX)};"
+    )
+
+
+def _emit_prompt_string_fields() -> str:
+    from promptpotter.domain.search_point import PROMPT_STRING_FIELDS
 
     rows = "\n".join(f"  {name!r}," for name in PROMPT_STRING_FIELDS).replace("'", '"')
     return (
         "// The PromptTemplate decomposition field SET. Mirror of\n"
-        "// config/settings.py::PROMPT_STRING_FIELDS — canonical MEMBERSHIP only, since each\n"
+        "// domain/search_point.py::PROMPT_STRING_FIELDS — canonical MEMBERSHIP only, since each\n"
         "// prompt kind orders its own render (PromptTemplate.RENDER_ORDER). Don't hand-list these.\n"
         "export const PROMPT_STRING_FIELDS = [\n"
         f"{rows}\n"
@@ -676,45 +1007,17 @@ def _emit_prompt_string_fields() -> str:
     )
 
 
-def _emit_run_freshness() -> str:
-    """Emit ``RUN_FRESH_S`` (``infrastructure/runtime_flags.py``) — the staleness window that splits
-    a live producer from a vanished one.
-
-    The browser's status banner hand-copied the ``30``, so the two answered the same question in two
-    languages: a change to the server's window would have left the banner calling a reaped cycle
-    live, with nothing anywhere to say the numbers had parted."""
-    from promptpotter.infrastructure.runtime_flags import (
-        RECENT_STEP_S,
-        RUN_FRESH_S,
-        WEDGED_AFTER_S,
-    )
+def _emit_recent_step() -> str:
+    from promptpotter.infrastructure.runtime_flags import RECENT_STEP_S
 
     return (
-        "// Seconds of silence after which a cycle's producer is treated as vanished. Mirror of\n"
-        "// infrastructure/runtime_flags.py::RUN_FRESH_S, which owns it and derives `run_phase`\n"
-        "// from it. Don't hand-copy this threshold.\n"
-        f"export const RUN_FRESH_S = {RUN_FRESH_S};\n\n"
-        "// The time-ray head's two windows over the gap since the last non-heartbeat step: how\n"
-        "// long a step stays what the run is doing, and how long a running cycle may be silent\n"
-        "// before it reads wedged. Mirror of infrastructure/runtime_flags.py, which owns both.\n"
-        f"export const RECENT_STEP_S = {RECENT_STEP_S};\n"
-        f"export const WEDGED_AFTER_S = {WEDGED_AFTER_S};"
+        "// The shortest silence between two ray steps worth marking. Mirror of\n"
+        "// infrastructure/runtime_flags.py::RECENT_STEP_S, the window a producer reads `live` in.\n"
+        f"export const RECENT_STEP_S = {RECENT_STEP_S};"
     )
 
 
 def _emit_cycle_path_grammar() -> str:
-    """Emit the cycle-address grammar (``domain/cycle_paths.py``) — two separators and two
-    charset patterns.
-
-    Hand-authored twice: ``lib/ids.ts`` re-declared all four, and ``store/io.py`` kept its own
-    third spelling of the charset. Nothing could catch a drift — the browser's own test locks
-    the TS side against hardcoded strings, so a Python-side change would have passed every gate
-    while deep addresses silently resolved to a different cycle.
-
-    The patterns are emitted as literal regexes, which only works because the Python source is
-    spelled in the character-class form JS also accepts; the guard below refuses anything
-    needing translation rather than emitting something subtly different.
-    """
     from promptpotter.domain.cycle_paths import (
         ALL_DOTS_PATTERN,
         HOP_SEP,
@@ -741,9 +1044,7 @@ def _emit_cycle_path_grammar() -> str:
         "//  - This decoder validates the charset inline; the Python one defers to\n"
         "//    descend_store, which must validate anyway because it also receives hops the\n"
         "//    codec never produced. The browser has no such downstream boundary.\n"
-        # `json.dumps`, not `!r`: a Python repr picks single quotes and would emit a JS string
-        # the file's own style forbids — and a blanket quote-swap afterwards would rewrite the
-        # apostrophes in the comment above it.
+        # `json.dumps`, not `!r`: a Python repr picks single quotes, which the file's style forbids.
         f"export const CYCLE_PATH_HOP_SEP = {json.dumps(HOP_SEP)};\n"
         f"export const CYCLE_PATH_UNIT_SEP = {json.dumps(UNIT_SEP)};\n"
         f"export const ID_COMPONENT_RE = /{ID_COMPONENT_PATTERN}/;\n"
@@ -751,25 +1052,51 @@ def _emit_cycle_path_grammar() -> str:
     )
 
 
-def _emit_interface(model: type[BaseModel]) -> str:
+def _doc_block(owner: type) -> str:
+    doc = (owner.__doc__ or "").strip().splitlines()
+    return f"/** {doc[0]} */\n" if doc else ""
+
+
+def _emit_record(record: type) -> str:
+    # A dataclass serializes every field, so none is optional on the wire.
+    is_dataclass = dataclasses.is_dataclass(record)
+    hints = typing.get_type_hints(record, include_extras=not is_dataclass)
+    if is_dataclass:
+        hints = {f.name: hints[f.name] for f in dataclasses.fields(record)}
+    # `__optional_keys__` misses a `NotRequired` spelled under `from __future__ import annotations`.
+    optional = set(vars(record).get("__optional_keys__", ())) | {
+        name for name, hint in hints.items() if typing.get_origin(hint) is typing.NotRequired
+    }
+    body_lines = [
+        f"  {name}{'?' if name in optional else ''}: {_emit_type(hint)};"
+        for name, hint in sorted(hints.items(), key=lambda item: item[0] in optional)
+    ]
+    if getattr(record, "__pydantic_config__", {}).get("extra") == "allow":
+        body_lines.append("  [key: string]: unknown;")
+    return (
+        f"{_doc_block(record)}export interface {record.__name__} {{\n"
+        + "\n".join(body_lines)
+        + "\n}"
+    )
+
+
+def _emit_interface(model: type) -> str:
+    if not issubclass(model, BaseModel):
+        return _emit_record(model)
     hints = _resolved_hints(model)
     body_lines = [
         _emit_field(name, info, hints.get(name, info.annotation))
         for name, info in model.model_fields.items()
     ]
-    # Computed fields ARE on the wire (``model_dump`` emits them) but live outside
-    # ``model_fields`` — omitting them hands the webapp a type that is missing keys the
-    # server always sends.
     body_lines += [
         _emit_computed_field(model, name, info)
         for name, info in model.model_computed_fields.items()
     ]
     if model.model_config.get("extra") == "allow":
         body_lines.append("  [key: string]: unknown;")
-    doc = (model.__doc__ or "").strip().splitlines()
-    doc_line = doc[0] if doc else ""
-    doc_block = f"/** {doc_line} */\n" if doc_line else ""
-    return f"{doc_block}export interface {model.__name__} {{\n" + "\n".join(body_lines) + "\n}"
+    return (
+        f"{_doc_block(model)}export interface {model.__name__} {{\n" + "\n".join(body_lines) + "\n}"
+    )
 
 
 _HEADER = """\
@@ -781,7 +1108,7 @@ _HEADER = """\
 
 
 def main() -> int:
-    from promptpotter.domain.phases import DashboardState, RunPhase
+    from promptpotter.domain.phases import DashboardState, ProducerState, RunPhase
     from promptpotter.domain.results import ArmOutcome
 
     blocks = [_emit_interface(model) for model in EXPORTED_MODELS]
@@ -796,6 +1123,12 @@ def main() -> int:
     )
     blocks.append(
         _emit_enum_union(
+            ProducerState,
+            "What a cycle's producer is doing now (domain/phases.py::ProducerState).",
+        )
+    )
+    blocks.append(
+        _emit_enum_union(
             DashboardState,
             "The fine-grained activity axis, `dashboard.json::state` "
             "(domain/phases.py::DashboardState).",
@@ -803,11 +1136,19 @@ def main() -> int:
     )
     blocks.append(_emit_lifecycle_filter())
     blocks.append(_emit_command_kinds())
-    blocks.append(_emit_non_activity_kinds())
     blocks.append(_emit_stop_reason_tables())
+    blocks.append(_emit_run_phase_tables())
+    blocks.append(_emit_reading_state_tables())
+    blocks.append(_emit_round_advance_tables())
+    blocks.append(_emit_spend_tables())
+    blocks.append(_emit_theta_caveat_table())
+    blocks.append(_emit_label_tables())
+    blocks.append(_emit_pipeline_schema_words())
+    blocks.append(_emit_display_metrics())
+    blocks.append(_emit_verify_strategy_labels())
     blocks.append(_emit_abort_lens_labels())
     blocks.append(_emit_cell_term_meta())
-    blocks.append(_emit_run_freshness())
+    blocks.append(_emit_recent_step())
     blocks.append(_emit_cycle_path_grammar())
     blocks.append(_emit_prompt_string_fields())
     content = _HEADER + "\n\n".join(blocks) + "\n"

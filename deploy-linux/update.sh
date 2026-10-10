@@ -96,7 +96,7 @@ fi
 # install upstream at the next deploy.
 [[ -f "$ENV_FILE" ]] && brand_write_env "$ENV_FILE"
 brand_export_webapp
-[[ -d "$INSTALL_DIR/$WEBAPP_DIR" ]] && ( cd "$INSTALL_DIR/$WEBAPP_DIR" && npm install --silent && npm run build:deploy )
+[[ -d "$INSTALL_DIR/$WEBAPP_DIR" ]] && ( cd "$INSTALL_DIR/$WEBAPP_DIR" && npm install --silent && npm run build )
 sudo systemctl restart "$SERVICE_NAME"
 # The admin bot is a SEPARATE unit running the SAME checkout, so a sync that touched its code
 # leaves it on the old one until something restarts it — and nothing did. Silent, because a bot

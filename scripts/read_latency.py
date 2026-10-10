@@ -3,10 +3,7 @@
     python scripts/read_latency.py --campaign C --cycle Y --dataset D            # a running server
     python scripts/read_latency.py --campaign C --cycle Y --dataset D --in-process  # this checkout, fresh
 
-Each read is issued ``--n`` times unconditionally, then once more carrying the validator the server
-handed back, so a route's 200 cost and its 304 cost sit on one line. ``app`` is the server's own
-``Server-Timing``; wall minus app is queueing and transfer. ``--in-process`` drives the same routes
-through the ASGI app with no socket, which is what a freshly started server would answer."""
+``app`` is the server's own ``Server-Timing``; wall minus app is queueing and transfer."""
 
 from __future__ import annotations
 

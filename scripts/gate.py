@@ -1,28 +1,9 @@
-"""Every check CI runs, in one invocation — the single declaration of the gate.
-
-Root ``CLAUDE.md``, the PR template, ``.githooks/pre-commit`` and ``ci.yml`` are all
-callers of this file, so no check runs in one of them and not at the desk.
-
-Two properties the shape buys, neither of them speed:
-
-- **Nothing masks anything.** GitHub steps fail-fast, so a red ``ruff`` would hide
-  the other results. Every selected check runs here, always, and the verdict names
-  all of them.
-- **The tools run from the already-resolved interpreter** (``sys.executable -m``),
-  so the ~3.5s ``uv run`` toll is paid once for the whole gate instead of once
-  per tool, and the independent checks run concurrently.
-
-One kind is not in the default run: ``--release`` selects the advisory checks, which
-need the network and answer a question only a release asks. They live here anyway, so
-the desk and ``publish.yml`` read one declaration rather than two.
-
-Success is one line — a check prints only when it fails (or under
-``GITHUB_ACTIONS``, where the per-check timing is the point).
-"""
-
 from __future__ import annotations
 
 import argparse
+import ast
+import ctypes
+import dataclasses
 import json
 import os
 import re
@@ -30,41 +11,139 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import tomllib
 from collections.abc import Callable, Sequence
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
+
+import tests_owning
+from kept_verdict import ENGINE_RUNTIME, OFFLINE_RUN, OFFLINE_RUN_READS, KeptVerdicts, reads
 
 _REPO = Path(__file__).resolve().parents[1]
 _WEBAPP = _REPO / "webapp"
 _PINNED = _REPO / ".venv"
 _REEXEC = "PROMPTPOTTER_GATE_REEXEC"
 
-# One parallelism budget, divided: _POOL checks run at once and each check that
-# parallelises internally takes _SLICE, so peak demand is bounded by construction.
-# Sized independently, three of them each assumed the whole box — vitest forked
-# `availableParallelism() - 1`, Turbopack claims every core — and the contention
-# starved a vitest worker's own startup mid-gate. Every parallel check reads this.
-_JOBS = os.cpu_count() or 2
-_POOL = 4
-_SLICE = max(1, _JOBS // _POOL)
 
-# (returncode, output to show if it failed).
+def _free_memory_mb() -> int:
+    if sys.platform == "win32":
+
+        class Status(ctypes.Structure):
+            _fields_ = (
+                ("length", ctypes.c_ulong),
+                ("load", ctypes.c_ulong),
+                ("total_physical", ctypes.c_ulonglong),
+                ("free_physical", ctypes.c_ulonglong),
+                ("total_page_file", ctypes.c_ulonglong),
+                ("free_page_file", ctypes.c_ulonglong),
+                ("total_virtual", ctypes.c_ulonglong),
+                ("free_virtual", ctypes.c_ulonglong),
+                ("free_extended_virtual", ctypes.c_ulonglong),
+            )
+
+        status = Status(length=ctypes.sizeof(Status))
+        ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status))
+        return int(status.free_physical) >> 20
+    else:
+        try:
+            meminfo = Path("/proc/meminfo").read_text(encoding="ascii")
+            return int(re.search(r"MemAvailable:\s+(\d+) kB", meminfo)[1]) >> 10  # type: ignore[index]
+        except (OSError, TypeError):  # no procfs (macOS): half of what is installed
+            return (os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")) >> 21
+
+
+_KILL_ON_JOB_CLOSE = 0x2000
+_EXTENDED_LIMIT_INFORMATION = 9
+_job: int | None = None  # held open for the life of the process: closing it is what ends the tree
+
+
+def end_children_with_this_process() -> None:
+    """Windows only: POSIX reaps a foreground tree through its process group."""
+    global _job
+    if sys.platform != "win32":
+        return
+
+    class Basic(ctypes.Structure):
+        _fields_ = (
+            ("per_process_user_time", ctypes.c_longlong),
+            ("per_job_user_time", ctypes.c_longlong),
+            ("limit_flags", ctypes.c_ulong),
+            ("minimum_working_set", ctypes.c_size_t),
+            ("maximum_working_set", ctypes.c_size_t),
+            ("active_process_limit", ctypes.c_ulong),
+            ("affinity", ctypes.c_size_t),
+            ("priority_class", ctypes.c_ulong),
+            ("scheduling_class", ctypes.c_ulong),
+        )
+
+    class Extended(ctypes.Structure):
+        _fields_ = (
+            ("basic", Basic),
+            ("io_counters", ctypes.c_ulonglong * 6),
+            ("process_memory_limit", ctypes.c_size_t),
+            ("job_memory_limit", ctypes.c_size_t),
+            ("peak_process_memory", ctypes.c_size_t),
+            ("peak_job_memory", ctypes.c_size_t),
+        )
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateJobObjectW.restype = ctypes.c_void_p
+    kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+    kernel32.SetInformationJobObject.argtypes = (
+        ctypes.c_void_p,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        ctypes.c_ulong,
+    )
+    kernel32.AssignProcessToJobObject.argtypes = (ctypes.c_void_p, ctypes.c_void_p)
+    limits = Extended()
+    limits.basic.limit_flags = _KILL_ON_JOB_CLOSE
+    job = kernel32.CreateJobObjectW(None, None)
+    if not (
+        job
+        and kernel32.SetInformationJobObject(
+            job, _EXTENDED_LIMIT_INFORMATION, ctypes.byref(limits), ctypes.sizeof(limits)
+        )
+        and kernel32.AssignProcessToJobObject(job, kernel32.GetCurrentProcess())
+    ):
+        raise ctypes.WinError(ctypes.get_last_error())
+    _job = job
+
+
+def memory_budget_mb() -> int:
+    return max(_free_memory_mb() - 1024, 512)
+
+
+_CORES = os.cpu_count() or 2
+_MEMORY_MB = memory_budget_mb()
+# Peak commit of one campaign process `offline_run.py::main` forks, rounded up.
+OFFLINE_CHILD_MB = 120
+OFFLINE_CHILDREN = min(8, _CORES)
+
 Outcome = tuple[int, str]
+
+_LINTED = (".ts", ".tsx", ".js", ".jsx", ".mjs")
+# Anything else under `webapp/` is in no module graph, so it narrows nothing.
+_WEB_MODULES = ("webapp/app/", "webapp/components/", "webapp/lib/")
 
 
 @dataclass(frozen=True)
 class Sel:
-    """What the run is scoped to. Empty file lists outside ``--staged`` mode."""
-
     staged: bool
     py_files: tuple[str, ...]
     web_files: tuple[str, ...]
+    changed: tuple[str, ...] | None = None
+    # ``None`` is the whole check.
+    narrowed: tuple[str, ...] | None = None
 
     @classmethod
-    def build(cls, staged: bool) -> Sel:
+    def build(cls, staged: bool, changed: bool) -> Sel:
+        if changed:
+            _, tracked = _run(["git", "diff", "--name-only", "HEAD"], _REPO)
+            _, untracked = _run(["git", "ls-files", "-o", "--exclude-standard"], _REPO)
+            return cls(False, (), (), tuple(filter(None, (tracked + "\n" + untracked).split("\n"))))
         if not staged:
             return cls(False, (), ())
         _, out = _run(["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"], _REPO)
@@ -76,7 +155,7 @@ class Sel:
             tuple(
                 n[len("webapp/") :]
                 for n in names
-                if n.startswith("webapp/") and n.endswith((".ts", ".tsx", ".js", ".jsx", ".mjs"))
+                if n.startswith("webapp/") and n.endswith(_LINTED)
             ),
         )
 
@@ -105,18 +184,9 @@ def _node(exe: str, *args: str) -> list[str]:
 
 
 def _generated(script: str, *paths: str) -> Callable[[Sel], Outcome]:
-    """Regenerate a surface, then fail if the generator moved it.
-
-    All three come off the Pydantic models. Ungated, a drifted model ships a stale
-    schema the webapp typechecks against and the LLM is asked to fill. The comparison is
-    against the file's own prior CONTENT, never the index: a model edit leaves the
-    regenerated file correct but unstaged, and asking git would then fail on a tree that
-    is already right and only go green on `git add`. Snapshot-vs-output is the same
-    verdict on CI's clean checkout and stops firing here once the file is regenerated.
-    """
-
     def check(_sel: Sel) -> Outcome:
         targets = [_REPO / path for path in paths]
+        # Prior CONTENT, never the index: a model edit leaves the regenerated file right but unstaged.
         before = [t.read_bytes() if t.exists() else None for t in targets]
         rc, out = _run([sys.executable, f"scripts/{script}"], _REPO)
         if rc:
@@ -129,25 +199,11 @@ def _generated(script: str, *paths: str) -> Callable[[Sel], Outcome]:
     return check
 
 
-def _scan(
-    files: Sequence[Path],
-    needle: re.Pattern[str],
-    *,
-    allow_path: re.Pattern[str] | None = None,
-) -> list[str]:
-    """Grep with an exemption: an allowed PATH is a file exempt whatever it says
-    (`_MAY_IMPORT_POTTER`). Honouring the pattern against line text would exempt any line that
-    merely names one of those files — a comment pointing at one would hide a real violation.
-
-    Split on ``\\n`` rather than ``splitlines()``, which also breaks on five of the characters
-    ``_CONTROL_CHAR`` hunts and would consume them as line terminators. ``read_text`` already
-    translates newlines, so the two agree everywhere else.
-    """
+def _scan(files: Sequence[Path], needle: re.Pattern[str]) -> list[str]:
     hits = []
     for path in files:
         rel = path.relative_to(_REPO).as_posix()
-        if allow_path is not None and allow_path.search(rel):
-            continue
+        # Not `splitlines()`: it breaks on five of the characters `_CONTROL_CHAR` hunts.
         for num, line in enumerate(path.read_text(encoding="utf-8").split("\n"), 1):
             if needle.search(line):
                 hits.append(f"{rel}:{num}: {line.strip()}")
@@ -158,29 +214,103 @@ def _sources(root: Path, *patterns: str) -> list[Path]:
     return sorted(p for pattern in patterns for p in root.rglob(pattern))
 
 
-_IMPORTS_PRESENTATION = re.compile(r"(?:from|import) promptpotter\.presentation")
-
-
-# The bench reaches an optimizer only through the registry (`application/optimizers/__init__.py`)
-# and the contract it checks (`optimizers/nodes.py`).
-_IMPORTS_POTTER = re.compile(r"(?:from|import) promptpotter\.application\.optimizers\.potter\b")
-_MAY_IMPORT_POTTER = re.compile(r"^promptpotter/application/optimizers/")
+_IMPORTS_POTTER = ("", ("application/optimizers/potter/",), "application/optimizers/")
+# `auth.py` is exempt: the Identity adapter, whose subject is the infrastructure it wraps.
+_ROUTER_IMPORTS_INFRASTRUCTURE = (
+    "presentation/api/routers/",
+    ("infrastructure/",),
+    "presentation/api/routers/auth.py",
+)
+_LAYERING: tuple[tuple[str, tuple[str, ...], str], ...] = (
+    ("application/", ("presentation/",), ""),
+    ("shared/", ("!shared/",), ""),
+    ("domain/", ("infrastructure/", "connectors/", "application/", "presentation/"), ""),
+    ("infrastructure/", ("application/", "presentation/"), ""),
+    # `infrastructure/` reads the connector table, so a connector importing `application/` is a cycle.
+    ("connectors/", ("application/", "presentation/"), ""),
+    _ROUTER_IMPORTS_INFRASTRUCTURE,
+    _IMPORTS_POTTER,
+)
 
 
 def _layering(_: Sel) -> Outcome:
-    hits = _scan(_sources(_REPO / "promptpotter" / "application", "*.py"), _IMPORTS_PRESENTATION)
-    if hits:
-        return 1, "application must not import presentation:\n" + "\n".join(hits)
-    hits = _scan(
-        _sources(_REPO / "promptpotter", "*.py"), _IMPORTS_POTTER, allow_path=_MAY_IMPORT_POTTER
-    )
-    return (1, "the bench must not import potter:\n" + "\n".join(hits)) if hits else (0, "")
+    package = "promptpotter/"
+    imports: dict[str, list[str]] = {}
+    for path in _sources(_REPO / package, "*.py"):
+        rel = path.relative_to(_REPO).as_posix()
+        reached = tests_owning._imported(
+            ast.parse(path.read_text(encoding="utf-8")),
+            tests_owning._module_name(rel),
+            path.name == "__init__.py",
+        )
+        imports[rel[len(package) :]] = sorted(target[len(package) :] for target in reached)
+    hits = [
+        f"{who or package}* must not import {' or '.join(banned)} — {source} imports {target}"
+        for who, banned, exempt in _LAYERING
+        for source, targets in imports.items()
+        if source.startswith(who) and not (exempt and source.startswith(exempt))
+        for target in targets
+        if target != "__init__.py" and reads(target, banned)
+    ]
+    return (1, "\n".join(hits)) if hits else (0, "")
 
 
-# A control character makes git call the whole FILE binary — the stat line reads `Bin 13089 ->
-# 14743` and no diff is rendered for it, in review or in `git show`. Not a style rule: one NUL used
-# as a key separator shipped a permanently stale freshness gate, and the diff that would have shown
-# it did not exist. CR is absent deliberately — `read_text` translates line endings.
+# Verbs name their handlers as strings (`campaign_runner.py::COMMANDS`) so the parser loads no use case.
+_LOADED = "loaded: "
+_HELP_PROBE = f"""
+import runpy, sys
+sys.argv = ["promptpotter", "--help"]
+try:
+    runpy.run_module("promptpotter", run_name="__main__")
+except SystemExit:
+    pass
+for name in sorted(sys.modules):
+    if name.startswith("promptpotter.application"):
+        print({_LOADED!r} + name)
+"""
+
+
+def _help_imports(_: Sel) -> Outcome:
+    rc, out = _run([sys.executable, "-X", "utf8", "-c", _HELP_PROBE], _REPO)
+    if rc:
+        return rc, out
+    loaded = [line[len(_LOADED) :] for line in out.splitlines() if line.startswith(_LOADED)]
+    if loaded:
+        return 1, "`python -m promptpotter --help` imports the use-case layer:\n" + "\n".join(
+            f"  {name}" for name in loaded
+        )
+    return 0, ""
+
+
+# A handler named as a string is imported only on dispatch, so a dangling row parses and type-checks.
+_HANDLER_PROBE = """
+import importlib
+from promptpotter.application.commands import dispatcher
+from promptpotter.presentation.cli import campaign_runner
+for table, package, rows in (
+    ("COMMANDS", campaign_runner._COMMANDS_PACKAGE, campaign_runner.COMMANDS),
+    ("HANDLER_FOR_KIND", dispatcher._HANDLER_PACKAGE, dispatcher.HANDLER_FOR_KIND),
+):
+    for key, target in rows.items():
+        module, _, name = target.partition(":")
+        try:
+            resolved = callable(getattr(importlib.import_module(f"{package}.{module}"), name))
+        except (ImportError, AttributeError) as exc:
+            print(f"  {table}[{key!r}] -> {target}: {exc}")
+        else:
+            if not resolved:
+                print(f"  {table}[{key!r}] -> {target}: not callable")
+"""
+
+
+def _handler_tables(_: Sel) -> Outcome:
+    rc, out = _run([sys.executable, "-X", "utf8", "-c", _HANDLER_PROBE], _REPO)
+    if rc:
+        return rc, out
+    return (1, "a handler table names what does not resolve:\n" + out) if out.strip() else (0, "")
+
+
+# CR is absent deliberately: `read_text` translates line endings.
 _CONTROL_CHAR = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 
@@ -189,8 +319,6 @@ def _undiffable(_: Sel) -> Outcome:
         *_sources(_REPO / "promptpotter", "*.py"),
         *_sources(_REPO / "scripts", "*.py"),
         *_sources(_REPO / "tests", "*.py"),
-        # `.css` too: the byte makes any FILE binary, and a stylesheet is authored beside the
-        # component it dresses, so leaving it out would leave the same hole one directory over.
         *(
             p
             for root in ("components", "lib", "app")
@@ -205,17 +333,13 @@ def _undiffable(_: Sel) -> Outcome:
     )
 
 
-# An instruction file loads into every session beneath it. A CAP, not a ratchet: prose moves
-# freely under it, and only a page grown past it has to be trimmed or split.
 _INSTRUCTION_MAX_WORDS = 7000
 _INSTRUCTION_FILES = ("*CLAUDE.md", ".claude/skills/*.md")
 
 _FENCE = re.compile(r"^(```|~~~).*?^\1[^\n]*$", re.DOTALL | re.MULTILINE)
 _BACKTICKED = re.compile(r"`([^`\n]+)`")
 _LINK_TARGET = re.compile(r"\]\(([^)\s]+)\)")
-# A path CLAIM: slash-separated segments ending in a file extension or a slash. A glob, a URL, an
-# absolute or home path and a route are none of these, and neither is a path with a placeholder
-# in it, in either spelling the pages use: `{name}` / `<name>`, or a run of N (`round_NNNN.json`).
+# Slash-separated segments ending in an extension or a slash; a glob, URL, route or placeholder is none.
 _PATH_CLAIM = re.compile(r"(?:\.{1,2}/)*[\w.@-]+(?:/[\w.@-]+)*(?:/|\.[A-Za-z]\w{0,4})")
 _PATH_TAIL = re.compile(r"(::|#|:\d).*$")
 _NUMBER_PLACEHOLDER = re.compile(r"N{3,}")
@@ -233,12 +357,6 @@ def _path_claims(text: str) -> set[str]:
 
 
 def _instruction_files(_: Sel) -> Outcome:
-    """The word cap, and every path an instruction file names resolves.
-
-    A path resolves on disk beside the file or at the repo root, or as the tail of a tracked
-    path: a layer page names its own modules from where it sits (`store/stores.py`). One git
-    ignores is the operator's own tree and is not ours to check.
-    """
     code, listed = _run(["git", "ls-files", "-z", *_INSTRUCTION_FILES], _REPO)
     if code:
         return code, listed
@@ -252,8 +370,7 @@ def _instruction_files(_: Sel) -> Outcome:
             tails.update("/".join(parts[start:end]) for start in range(end))
 
     over: list[str] = []
-    # Each unresolved claim, under both spellings git may know it by: from the root, and from
-    # the file's own directory (`webapp/.gitignore` ignores `out/` there).
+    # Both spellings git may know a claim by: from the root, and from the file's own directory.
     unresolved: dict[tuple[str, str], set[str]] = {}
     for rel in filter(None, listed.split("\0")):
         text = (_REPO / rel).read_text(encoding="utf-8")
@@ -262,8 +379,7 @@ def _instruction_files(_: Sel) -> Outcome:
         here = (_REPO / rel).parent
         for claim in _path_claims(text):
             if claim.startswith("../"):
-                # The file's own link: it resolves from where the file sits or not at all, and
-                # one that climbs out of the repo names a sibling checkout no clone can vouch for.
+                # One that climbs out of the repo names a sibling checkout no clone can vouch for.
                 target = Path(os.path.normpath(here / claim))
                 if target.is_relative_to(_REPO) and not target.exists():
                     unresolved[rel, claim] = set()
@@ -281,8 +397,7 @@ def _instruction_files(_: Sel) -> Outcome:
         )
         if answer.returncode not in (0, 1):  # 1 is "none of them is ignored"
             return answer.returncode, answer.stderr.decode(errors="replace")
-        # Verbose, for the PATTERN: git on Windows reports a directory that does not exist as
-        # matched by an empty one, which would exempt exactly the claims this check is for.
+        # `--verbose` for the PATTERN: git on Windows reports a missing directory as matched by an empty one.
         fields = answer.stdout.decode().split("\0")  # source, line, pattern, path — per path
         ignored = {
             path for pattern, path in zip(fields[2::4], fields[3::4], strict=False) if pattern
@@ -299,21 +414,11 @@ def _instruction_files(_: Sel) -> Outcome:
     return (1, "\n".join(failures)) if failures else (0, "")
 
 
-# What ruff lints when the run is not scoped to staged files. ``scripts/`` is here for the
-# reason ``_mypy`` states below — a tracked module outside the package is still shipped code —
-# and it was absent, which made the two modes disagree: ``--staged`` passes the staged paths
-# verbatim, so the hook lints a script the full run never looks at. An import-order violation
-# in this very file passed `gate.py` and was then rejected by `gate.py --staged` seconds later.
+# `--staged` lints staged paths verbatim, so a directory missing here is linted by the hook only.
 _RUFF_TARGETS = ("promptpotter/", "scripts/", "tests/", "examples/")
 
 
 def _ruff(*argv: str) -> Callable[[Sel], Outcome]:
-    """One ruff invocation over the staged paths, or over the whole target set.
-
-    Both modes of both subcommands spelled once: as two near-identical functions the target
-    lists were free to drift from each other as well as from the staged half.
-    """
-
     def check(sel: Sel) -> Outcome:
         paths = sel.py_files if sel.staged else _RUFF_TARGETS
         return _run(_py("ruff", *argv, *paths), _REPO)
@@ -322,41 +427,22 @@ def _ruff(*argv: str) -> Callable[[Sel], Outcome]:
 
 
 def _tsc(_sel: Sel) -> Outcome:
-    # Whole-program either way: a staged file can break a type in a file nobody
-    # staged. `next build` checks neither this nor eslint — next.config sets
-    # `typescript.ignoreBuildErrors` and Next 16 dropped build-time linting.
-    # The staged mode used to pass its own --tsBuildInfoFile, which bought a
-    # SECOND incremental store neither mode ever warmed; tsconfig already sets
-    # `incremental`, so one script serves both and `npx` stops re-resolving.
+    # `next build` checks neither this nor eslint: next.config sets `typescript.ignoreBuildErrors`.
     return _run(_node("npm", "run", "typecheck"), _WEBAPP)
 
 
 def _eslint(sel: Sel) -> Outcome:
-    # Empty outside --staged, where bare `eslint` means the whole tree — so the
-    # scoped and full runs are one call. `npm run lint` carries --cache: a warm
-    # full-tree lint is ~11s against ~30s cold, and a staged run pays eslint's
-    # ~10s startup either way, cache or none.
-    return _run(_node("npm", "run", "lint", "--", *sel.web_files), _WEBAPP)
+    # `web_files` is empty outside --staged, where bare `eslint` means the whole tree.
+    return _run(_node("npm", "run", "lint", "--", *sel.web_files, *(sel.narrowed or ())), _WEBAPP)
 
 
 def _playwright(_sel: Sel) -> Outcome:
-    """The browser, on the one world any machine can honestly walk: the COLD tier.
-
-    ``walk`` reads the operator's own ``.promptpotter/``, and every spec needing a campaign
-    skips itself when discovery finds none — so a ``walk`` where there is no workspace exits 0
-    having asserted almost nothing. ``spend`` costs real money. ``cold`` mints its throwaway
-    world at startup (``e2e/serve.mjs``), so it asserts the same thing here and on a runner:
-    the zero-campaign path a brand-new account meets.
-
-    Behind ``next-build`` because the browser only ever sees ``out/``. A missing Chromium is
-    named by Playwright's own error, with the install command in it.
-    """
+    # Only `cold`: `walk` reads the operator's own `.promptpotter/` and `spend` costs real money.
     return _run(_node("npx", "playwright", "test", "--project=cold"), _WEBAPP)
 
 
 def _lock_satisfies(requirer: str, dep: str, entries: frozenset[str]) -> bool:
-    """npm walks node_modules up from the requirer, so a copy nested under an UNRELATED package
-    does not satisfy it — which is exactly the shape that reaches CI looking present."""
+    # npm walks node_modules UP from the requirer: a copy nested under an unrelated package is no match.
     prefix = requirer
     while True:
         if (f"{prefix}/node_modules/{dep}" if prefix else f"node_modules/{dep}") in entries:
@@ -368,14 +454,7 @@ def _lock_satisfies(requirer: str, dep: str, entries: frozenset[str]) -> bool:
 
 
 def _lockfile(_: Sel) -> Outcome:
-    """Every requirement in the lock has a package satisfying it.
-
-    A lock resolved on Windows keeps the win32 optional variants and prunes the rest, so the
-    requirements survive and the packages that answer them do not. `npm ci` ACCEPTS that on
-    Windows and rejects it on Linux, which makes CI the first thing to notice and leaves no local
-    command able to. This is the platform-free equivalent, and it is why the repair must run on
-    Linux (`npm install --package-lock-only`) rather than here.
-    """
+    # `npm ci` accepts a Windows-resolved lock on Windows and rejects it on Linux; this is platform-free.
     packages = json.loads((_WEBAPP / "package-lock.json").read_text(encoding="utf-8"))["packages"]
     entries = frozenset(packages)
     unsatisfied = sorted(
@@ -396,11 +475,7 @@ def _lockfile(_: Sel) -> Outcome:
     return 0, ""
 
 
-# A release is where the dependency posture stops being ours: the wheel carries the dashboard
-# bundle, and a published version can be neither recalled nor re-uploaded. The checks below
-# reach the network, which is why they are their own kind — but none may SKIP when it cannot
-# answer. A guard that reports nothing instead of nothing-to-report is how v0.8.14 shipped a day
-# before six advisories surfaced against the lock it had already frozen.
+# No release check may SKIP when it cannot answer: a published version cannot be recalled.
 _SEVERITY_ORDER = ("critical", "high", "medium", "low")
 _ALERT_FIELDS = (
     r'.[] | "\(.security_advisory.severity)\t\(.dependency.package.ecosystem)/'
@@ -409,22 +484,12 @@ _ALERT_FIELDS = (
 
 
 def _npm_audit(_: Sel) -> Outcome:
-    """The dashboard lock against npm's advisory database.
-
-    ``--package-lock-only`` reads the lock rather than an install, so this answers before
-    ``npm ci`` and judges the file that is actually frozen into the release. ``--audit-level``
-    sets the EXIT CODE only — the report still lists every severity, so a moderate is seen
-    here and blocks nothing, while ``_advisories`` is the exhaustive half. ``--omit=dev``
-    because the question is what the wheel carries: lint and test tooling is never in the
-    bundle, and an unpatched advisory there (``braces``, under the ESLint preset) would hold
-    every release for a package no user receives.
-    """
+    # `--audit-level` sets the exit code only; `--omit=dev` because the wheel carries no dev tooling.
     audit = ("audit", "--package-lock-only", "--omit=dev", "--audit-level=high")
     return _run(_node("npm", *audit), _WEBAPP)
 
 
-# No release to move to, so there is nothing to bump: each names what keeps it out of reach, and
-# goes the day its fix ships. `diskcache` is dismissed on the Security tab for the same reason.
+# No fixed release exists to bump to; each goes the day its fix ships.
 _PIP_AUDIT_UNPATCHED = (
     "PYSEC-2026-2447",  # diskcache — reached only through the `dspy` extra
 )
@@ -432,14 +497,6 @@ _PIP_AUDIT = "pip-audit@2.10.1"
 
 
 def _pip_audit(_: Sel) -> Outcome:
-    """The Python lock against PyPI's advisory database — every extra, as a consumer may ask.
-
-    The scan that does not wait for GitHub to notice: Dependabot had raised no alert on
-    ``fsspec``, ``jupyter-server`` or ``multidict`` while this already named a fix for each.
-    It reads ``uv.lock`` through an export rather than an install, so it judges the frozen
-    file, and the scanner runs as a ``uv`` tool so it is never a dependency of the lock it
-    audits.
-    """
     uv = shutil.which("uv")
     if not uv:
         return 1, "`uv` is not on PATH, so the Python lock cannot be exported to audit."
@@ -450,18 +507,13 @@ def _pip_audit(_: Sel) -> Outcome:
         if rc:
             return rc, out
         ignored = [arg for vuln in _PIP_AUDIT_UNPATCHED for arg in ("--ignore-vuln", vuln)]
+        # A `uv` tool, so the scanner is never a dependency of the lock it audits.
         audit = [uv, "tool", "run", "--quiet", _PIP_AUDIT, "--requirement", frozen]
         return _run([*audit, "--no-deps", "--disable-pip", *ignored], _REPO)
 
 
 def _advisories(_: Sel) -> Outcome:
-    """Every open Dependabot alert on the repository — both ecosystems, dismissals honoured.
-
-    The two scans above each read one advisory database; this reads what GitHub holds against
-    the repository, where a dismissal is recorded once and honoured here. ``publish.yml`` runs
-    the scans instead of this: a workflow's GITHUB_TOKEN is not documented to read Dependabot
-    alerts, so enforcing it there is a PAT away — never a silent pass.
-    """
+    # `publish.yml` runs the two scans above instead: its GITHUB_TOKEN cannot read Dependabot alerts.
     gh = shutil.which("gh")
     if not gh:
         return 1, (
@@ -505,33 +557,81 @@ def _advisories(_: Sel) -> Outcome:
     )
 
 
+# Too narrow is the one way `_Green` can lie, so widen on any doubt: `_TREE` costs only a rerun.
+_TREE = ("",)
+_ENGINE = ("!webapp/",)
+_GATE = ("scripts/gate.py", "scripts/kept_verdict.py")
+_WEBAPP_READS = ("webapp/", "tests/fixtures/", *_GATE)
+_ENGINE_RUNTIME = (*ENGINE_RUNTIME, *_GATE)
+
+
 @dataclass(frozen=True)
 class Check:
     name: str
     kind: str  # "py" — CI's `check` job; "web" — its `webapp` job; "release" — publish.yml
     run: Callable[[Sel], Outcome]
     staged: bool = False  # in the pre-commit fast set
-    after: str = ""  # a check this one reads the output of — see `_chains`
+    landing: bool = False  # proves a landing rather than an edit, so `--changed` leaves it out
+    # Starts only once that check has ended — also how two checks sharing `webapp/.next` stay apart.
+    after: str = ""
+    # Empty is its kind's prefixes; `!prefix` is everything outside one.
+    reads: tuple[str, ...] = ()
+    # A file it BUILDS: its verdict is kept only while that file stands.
+    builds: str = ""
+    # Directories it reads of what its `after` built; their content is in its key.
+    product: tuple[str, ...] = ()
+    # MEASURED alone, warm, over its whole process tree: busiest cores and peak memory.
+    cores: int = 1
+    memory_mb: int = 150
+    # Returns `None` where ownership cannot be told, and then the whole check runs.
+    narrow: Callable[[Sequence[str]], tuple[str, ...] | None] | None = None
+
+    def inputs(self) -> tuple[str, ...] | None:
+        if self.kind == "release":  # the answer lives on the network
+            return None
+        return self.reads or (_ENGINE if self.kind == "py" else _WEBAPP_READS)
+
+
+def _web_modules(changed: Sequence[str]) -> tuple[str, ...] | None:
+    if not all(
+        path.startswith(_WEB_MODULES) and path.endswith((".ts", ".tsx")) for path in changed
+    ):
+        return None
+    return tuple(path[len("webapp/") :] for path in changed if (_REPO / path).is_file())
+
+
+def _vitest(sel: Sel) -> Outcome:
+    if sel.narrowed:
+        related = ("vitest", "related", "--run", "--passWithNoTests", *sel.narrowed)
+        return _run(_node("npx", *related), _WEBAPP)
+    return _run(_node("npm", "run", "test"), _WEBAPP)
+
+
+def _pytest(sel: Sel) -> Outcome:
+    # `tests_owning.py` owns the fallback: where it cannot say what owns a change, it runs every test.
+    owning = [sys.executable, "scripts/tests_owning.py"]
+    if sel.narrowed is not None:
+        return _run([*owning, "--run", *sel.narrowed], _REPO)
+    return _run([*owning, "--record"], _REPO)
+
+
+_HASHED_BY_THE_RECORD = re.compile(r"(promptpotter/.*|tests/[^/]*)\.py")
+
+
+def _moved_under_test(changed: Sequence[str]) -> tuple[str, ...] | None:
+    # The record hashes package and suite modules itself; `_GATE` files own no test's verdict.
+    return tuple(
+        path for path in changed if path not in _GATE and not _HASHED_BY_THE_RECORD.fullmatch(path)
+    )
 
 
 _BBEH_DIR = "docs/research/bbeh-comparison"
 
 
 def _mypy(_sel: Sel) -> Outcome:
-    """Every tracked module that imports ``promptpotter``, not just the package.
-
-    The harnesses outside it were unchecked and each had rotted against a rename: the BBEH
-    runner passed a kwarg no signature accepted and read a field off a NamedTuple that has
-    none, ``render_review.py`` named ``RoundResult.opt_search_point`` after it became
-    ``opt_sp``. None of them raised until someone ran them, and ruff cannot see an attribute
-    that is not there. ``shared_config`` is followed but not a target: it stays import-safe
-    for Colab, so it imports nothing of ours.
-
-    Once per platform we run on, because mypy checks only the ``sys.platform`` branch it is
-    told it is on: Windows-only ``subprocess`` flags read clean at the desk and red on CI. The
-    foreign pass keeps its own cache, or the two would evict each other on every run.
-    """
     targets = ("promptpotter/", "scripts/", f"{_BBEH_DIR}/bbeh_potter_runner.py")
+    # mypy checks only the `sys.platform` branch it is told; a shared cache would evict per pass.
+    # The warm `.mypy_cache/` is TRUSTED: delete it only on a suspected false green against CI.
     for platform in _PLATFORMS:
         foreign = () if platform == sys.platform else ("--cache-dir", f".mypy_cache/{platform}")
         rc, out = _run(
@@ -549,12 +649,6 @@ _EXTRA_ARG = re.compile(r"--extra[ =]([\w-]+)")
 
 
 def _extras(_: Sel) -> Outcome:
-    """Every extra a workflow, a deploy script or this gate syncs is one ``pyproject.toml`` has.
-
-    ``uv sync --extra NAME`` fails at install on a name that is gone, and each caller spells
-    its own list — so an extra deleted at the desk, where only ``_PINNED_EXTRAS`` is synced,
-    turned every CI job red before a single check ran.
-    """
     declared = tomllib.loads((_REPO / "pyproject.toml").read_text(encoding="utf-8"))
     known = set(declared["project"]["optional-dependencies"])
     callers = [
@@ -576,29 +670,43 @@ def _extras(_: Sel) -> Outcome:
 CHECKS: tuple[Check, ...] = (
     Check("ruff-format", "py", _ruff("format", "--check"), staged=True),
     Check("ruff-check", "py", _ruff("check"), staged=True),
-    Check("deptry", "py", lambda _: _run(_py("deptry", "."), _REPO)),
-    Check("mypy", "py", _mypy),
+    Check("deptry", "py", lambda _: _run(_py("deptry", "."), _REPO), cores=2),
+    Check("mypy", "py", _mypy, memory_mb=300),
     Check("extras", "py", _extras, staged=True),
     Check("layering", "py", _layering, staged=True),
-    Check("instruction-files", "py", _instruction_files, staged=True),
-    # "py" so it runs without `webapp/node_modules`, which is routinely absent — a guard that
-    # cannot run on the machine that would trip it is not a guard.
-    Check("undiffable", "py", _undiffable, staged=True),
+    Check("help-imports", "py", _help_imports, reads=_ENGINE_RUNTIME),
+    Check("handler-tables", "py", _handler_tables, reads=_ENGINE_RUNTIME),
+    Check("instruction-files", "py", _instruction_files, staged=True, reads=_TREE),
+    Check(
+        "surface-ledger",
+        "py",
+        lambda _: _run([sys.executable, "scripts/complexity_ledger.py", "--check"], _REPO),
+        staged=True,
+        reads=(
+            "promptpotter/",
+            "tests/",
+            "examples/",
+            "scripts/complexity_ledger.py",
+            "docs/specs/openapi.generated.json",
+            "pyproject.toml",
+        ),
+    ),
+    # "py" so it runs without `webapp/node_modules`, which is routinely absent.
+    Check("undiffable", "py", _undiffable, staged=True, reads=_TREE),
     Check(
         "ts-types",
         "py",
         _generated("build_ts_types.py", "webapp/lib/api/types.generated.ts"),
         staged=True,
+        reads=(*_ENGINE, "webapp/lib/api/types.generated.ts"),
     ),
-    # "web", not "py" like its siblings: this one reads `simple-icons` out of `webapp/node_modules`,
-    # so it cannot run on a machine that has not installed the webapp's deps. A brand mark is an
-    # asset rather than a schema — the check is here so a mark can never change shape without
-    # showing up in a diff someone reads.
+    # "web", unlike its siblings: it reads `simple-icons` out of `webapp/node_modules`.
     Check(
         "vendor-marks",
         "web",
         _generated("build_vendor_marks.py", "webapp/components/ui/vendor-marks.generated.ts"),
         staged=True,
+        reads=(*_WEBAPP_READS, "scripts/"),
     ),
     Check(
         "optimizer-schemas",
@@ -616,42 +724,62 @@ CHECKS: tuple[Check, ...] = (
         _generated("build_openapi.py", "docs/specs/openapi.generated.json"),
         staged=True,
     ),
-    # No `--cov`: `fail_under = 0`, so the coverage table asserts nothing and is
-    # pure display on every run. `pytest --cov` still works when the number is
-    # wanted deliberately. `-n` lives here rather than in `addopts` so an ad-hoc
-    # single-test run does not pay worker startup for one assertion.
-    Check("pytest", "py", lambda _: _run(_py("pytest", "tests/", "-n", str(_SLICE)), _REPO)),
-    Check("lockfile", "web", _lockfile, staged=True),
-    Check("eslint", "web", _eslint, staged=True),
-    # tsconfig `include`s `.next/types`, which `next build` deletes and regenerates: run
-    # concurrently, tsc either read that directory mid-rewrite (TS2307 on 3 of 6 runs) or won
-    # the race and typechecked the PREVIOUS build's route signatures. Behind it, both ways.
-    Check("tsc", "web", _tsc, staged=True, after="next-build"),
-    # vitest.config.ts keeps its own `maxWorkers` for a standalone `npm run test`;
-    # under the gate the budget decides, because here it shares the box.
     Check(
-        "vitest",
-        "web",
-        lambda _: _run(_node("npm", "run", "test", "--", f"--maxWorkers={_SLICE}"), _WEBAPP),
+        "pytest",
+        "py",
+        _pytest,
+        reads=(*_ENGINE_RUNTIME, "tests/", "scripts/tests_owning.py"),
+        memory_mb=300,
+        narrow=_moved_under_test,
     ),
-    # DEPLOY_BUILD=1 validates the shipped artifact: React Compiler pass + source
-    # maps. Bare `npm run build` is the local preview path, and skips both. The env
-    # var is set here rather than through the `build:deploy` script, whose bash
-    # inline-env prefix makes it unrunnable on Windows — so the check could not fire
-    # on the one machine that runs it before CI does. GATE_JOBS rides the same
-    # channel to cap Turbopack, which otherwise takes every core beside three
-    # other checks; the operator's bare preview build sets neither and stays whole.
+    # The script keeps its own green under this name and these inputs, so a run by hand answers for it.
+    Check(
+        OFFLINE_RUN,
+        "py",
+        lambda _: _run(
+            [sys.executable, "scripts/offline_run.py"],
+            _REPO,
+            PROMPTPOTTER_HOME=str(_REPO / ".gate_cache" / OFFLINE_RUN),
+        ),
+        landing=True,
+        reads=OFFLINE_RUN_READS,
+        cores=OFFLINE_CHILDREN,
+        memory_mb=min(OFFLINE_CHILDREN * OFFLINE_CHILD_MB, _MEMORY_MB),
+    ),
+    Check("lockfile", "web", _lockfile, staged=True),
+    Check("eslint", "web", _eslint, staged=True, cores=2, memory_mb=400, narrow=_web_modules),
+    # tsconfig includes `.next/types`, which `next build` rewrites: concurrent, tsc reads it mid-rewrite.
+    Check(
+        "tsc",
+        "web",
+        _tsc,
+        staged=True,
+        after="next-build",
+        product=("webapp/.next/types",),
+        cores=2,
+        memory_mb=500,
+    ),
+    Check("vitest", "web", _vitest, memory_mb=500, narrow=_web_modules),
+    # Next exposes no core cap that binds Turbopack, so it is weighed at the whole box and runs alone.
     Check(
         "next-build",
         "web",
-        lambda _: _run(
-            _node("npm", "run", "build"), _WEBAPP, DEPLOY_BUILD="1", GATE_JOBS=str(_SLICE)
-        ),
+        lambda _: _run(_node("npm", "run", "build"), _WEBAPP),
+        builds="webapp/out/index.html",
+        cores=_CORES,
+        memory_mb=1100,
     ),
-    # Not `staged`: it opens a browser and boots two uvicorns, which no pre-commit should.
-    Check("playwright", "web", _playwright, after="next-build"),
-    # Neither is `staged`, and neither runs by default: the everyday gate stays offline and the
-    # pre-commit hook pays for nothing it cannot use. `--release` is what asks for them.
+    Check(
+        "playwright",
+        "web",
+        _playwright,
+        landing=True,
+        after="next-build",
+        product=("webapp/out",),
+        reads=(*_WEBAPP_READS, *_ENGINE_RUNTIME),
+        cores=8,
+        memory_mb=1100,
+    ),
     Check("npm-audit", "release", _npm_audit),
     Check("pip-audit", "release", _pip_audit),
     Check("advisories", "release", _advisories),
@@ -664,59 +792,99 @@ class Result:
     rc: int
     out: str
     secs: float
+    key: str | None
+    kept: bool = False  # green on these inputs already, so not run
+    at: float = 0.0  # seconds into the gate it started, so the table shows what overlapped
 
 
-def _chains(checks: Sequence[Check]) -> list[list[Check]]:
-    """The selection, grouped into serial chains that each occupy ONE pool slot.
+class _Green:
+    """A scoped run (`--staged`, or a narrowed check) keeps nothing: it checked less than its key names."""
 
-    A check declaring ``after`` runs on its predecessor's worker, immediately behind it, so
-    ordering costs no concurrency and needs no second budget; a predecessor the selection
-    dropped (``--only``, ``--staged``) leaves the dependent standing alone.
-    """
-    names = {c.name for c in checks}
-    chains = [[c] for c in checks if c.after not in names]
-    for chain in chains:
-        i = 0
-        while i < len(chain):
-            chain += [c for c in checks if c.after == chain[i].name]
-            i += 1
-    scheduled = sum(len(chain) for chain in chains)
-    if scheduled != len(checks):
-        # A cycle in `after` leaves every member headless, so it schedules NOTHING and the run
-        # still prints green over the checks that did survive — a verdict short of the checks it
-        # claims. Raise instead: the one failure mode of this function has no other symptom.
-        raise SystemExit(
-            f"gate: {len(checks) - scheduled} check(s) reachable from no chain head — "
-            "`after` describes a cycle."
-        )
-    return chains
+    def __init__(self, kept: KeptVerdicts) -> None:
+        self._kept = kept
+
+    def key(self, check: Check) -> str | None:
+        prefixes = check.inputs()
+        if prefixes is None:
+            return None
+        return self._kept.key(prefixes, check.product)
+
+    def holds(self, check: Check, key: str | None) -> bool:
+        standing = not check.builds or (_REPO / check.builds).exists()
+        return key is not None and standing and self._kept.holds(check.name, key)
+
+    def record(self, results: Sequence[Result]) -> None:
+        self._kept.record({r.check.name: None if r.rc else r.key for r in results})
 
 
-def _execute(check: Check, sel: Sel) -> Result:
-    started = time.monotonic()
+def _execute(check: Check, sel: Sel, green: _Green | None, started: float) -> Result:
+    key = None if green is None else green.key(check)
+    if green is not None and green.holds(check, key):
+        return Result(check, 0, "", 0.0, key, kept=True)
+    if sel.changed is not None and check.narrow is not None:
+        mine = [path for path in sel.changed if reads(path, check.inputs() or ())]
+        sel = dataclasses.replace(sel, narrowed=check.narrow(mine))
+    began = time.monotonic()
     try:
         rc, out = check.run(sel)
     except Exception as exc:  # a broken check is a red check, never a silent skip
         rc, out = 1, f"{type(exc).__name__}: {exc}"
-    return Result(check, rc, out, time.monotonic() - started)
+    if sel.narrowed is not None or (green is not None and green.key(check) != key):
+        key = None  # narrowed, or edited while it ran: the verdict is for no tree anyone can name
+    return Result(check, rc, out, time.monotonic() - began, key, at=began - started)
 
 
-# Spelled once: the message a missing `uv` prints and the argv it would have run are the
-# same list, and they drifted the moment one grew an extra the other did not. `api` is here
-# because mypy type-checks `main.py` and the routers — from an engine-only install it cannot
-# resolve fastapi, and reports it as a first-party error. `harbor` is here because this env is
-# where the verdict is TAKEN: without it `import harbor` fails here while succeeding at the desk,
-# which is the drift this function exists to stop, pointing the other way.
-_PINNED_EXTRAS = ("dev", "api", "harbor")
+def _schedule(checks: Sequence[Check], sel: Sel, green: _Green | None) -> list[Result]:
+    names = {c.name for c in checks}
+    waiting = sorted(checks, key=lambda c: (c.cores, c.memory_mb), reverse=True)
+    running: dict[str, Check] = {}
+    done: dict[str, Result] = {}
+    turn = threading.Condition()
+    started = time.monotonic()
+
+    def work(check: Check) -> None:
+        result = _execute(check, sel, green, started)
+        with turn:
+            del running[check.name]
+            done[check.name] = result
+            turn.notify()
+
+    with turn:
+        while waiting or running:
+            for check in [c for c in waiting if c.after not in names or c.after in done]:
+                cores = sum(c.cores for c in running.values()) + check.cores
+                memory = sum(c.memory_mb for c in running.values()) + check.memory_mb
+                # `running and`: a check heavier than the whole budget is still admitted, alone.
+                if running and (cores > _CORES or memory > _MEMORY_MB):
+                    continue
+                waiting.remove(check)
+                running[check.name] = check
+                threading.Thread(target=work, args=(check,), daemon=True).start()
+            if not running:
+                raise SystemExit(
+                    f"gate: {len(waiting)} check(s) wait on each other — `after` describes a cycle."
+                )
+            turn.wait()
+    return [done[c.name] for c in checks]
+
+
+def _widest(results: Sequence[Result]) -> tuple[int, int, list[str]]:
+    ran = [r for r in results if not r.kept]
+    widest: tuple[int, int, list[str]] = (0, 0, [])
+    for moment in ran:  # the peak begins where some check does
+        beside = [r for r in ran if r.at <= moment.at < r.at + r.secs]
+        memory = sum(r.check.memory_mb for r in beside)
+        if memory > widest[1]:
+            widest = (sum(r.check.cores for r in beside), memory, [r.check.name for r in beside])
+    return widest
+
+
+# `api`: mypy resolves fastapi. `harbor`, `dspy`: a test skipped for a missing extra never ran.
+_PINNED_EXTRAS = ("dev", "api", "harbor", "dspy")
 
 
 def _reexec_pinned() -> None:
-    """The gate picks its own interpreter, because a verdict must not depend on the caller.
-
-    Launched from another interpreter, ``mypy`` resolves different stubs than ``uv.lock`` pins,
-    so one commit reads green in CI and red at the desk. Only the Python half needs it: the
-    webapp checks shell out to node, and CI's `webapp` job has no uv.
-    """
+    # From another interpreter, `mypy` resolves different stubs than `uv.lock` pins.
     if Path(sys.prefix) == _PINNED or os.environ.get(_REEXEC):
         return
     uv = shutil.which("uv")
@@ -735,9 +903,9 @@ def _reexec_pinned() -> None:
 
 
 def main() -> int:
-    # A failing check's output is whatever the tool prints, and tools print ✖ and →.
-    # On a cp1252 console that raised while REPORTING the failure, losing the verdict.
+    # Tools print ✖ and →, which raise on a cp1252 console while REPORTING the failure.
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+    end_children_with_this_process()
     parser = argparse.ArgumentParser(description="Run every check CI runs.")
     parser.add_argument("--py", action="store_true", help="only the Python half (CI's `check` job)")
     parser.add_argument(
@@ -748,8 +916,15 @@ def main() -> int:
         action="store_true",
         help="the pre-release advisory checks (network-bound; never in the default run)",
     )
-    parser.add_argument(
+    scope = parser.add_mutually_exclusive_group()
+    scope.add_argument(
         "--staged", action="store_true", help="the pre-commit fast set, scoped to staged files"
+    )
+    scope.add_argument(
+        "--changed",
+        action="store_true",
+        help="while iterating: the checks that read a file changed since HEAD, and inside "
+        "pytest, vitest and eslint only what owns one",
     )
     parser.add_argument("--only", metavar="NAME", help="one check by name")
     args = parser.parse_args()
@@ -762,41 +937,64 @@ def main() -> int:
         if not checks:
             parser.error(f"no such check: {args.only} (have: {', '.join(c.name for c in CHECKS)})")
 
-    # Staged mode pays for what was staged: a webapp-only commit runs no Python half
-    # (and so never waits on uv), a Python-only commit runs no node half.
-    sel = Sel.build(args.staged)
+    sel = Sel.build(args.staged, args.changed)
     if args.staged:
         empty = {"py"} if not sel.py_files else set()
         empty |= {"web"} if not sel.web_files else set()
         checks = [c for c in checks if c.kind not in empty]
+    if sel.changed is not None and not args.only:
+        checks = [
+            c
+            for c in checks
+            if not c.landing and any(reads(path, c.inputs() or ()) for path in sel.changed)
+        ]
+    if not args.staged:
+        # `--only tsc` brings `next-build` along, so it never reads a build older than its sources.
+        named = {c.name: c for c in CHECKS}
+        for check in list(checks):
+            while check.after and named[check.after] not in checks:
+                check = named[check.after]
+                checks.append(check)
     if any(c.kind == "py" for c in checks):
         _reexec_pinned()
 
+    kept_verdicts = None if args.staged else KeptVerdicts.open()
+    green = None if kept_verdicts is None else _Green(kept_verdicts)
     started = time.monotonic()
-    with ThreadPoolExecutor(max_workers=_POOL) as pool:
-        runs = list(pool.map(lambda chain: [_execute(c, sel) for c in chain], _chains(checks)))
-    results = [r for run in runs for r in run]
+    results = _schedule(checks, sel, green)
     total = time.monotonic() - started
+    if green is not None:
+        green.record([r for r in results if not r.kept])
     failed = [r for r in results if r.rc]
+    kept = sum(r.kept for r in results)
+    unchanged = f", {kept} unchanged since green" if kept else ""
+    cores, memory, together = _widest(results)
+    width = (
+        f"; widest {'+'.join(together)} at {cores} of {_CORES} cores, "
+        f"{memory / 1024:.1f} of a {_MEMORY_MB / 1024:.1f} GB budget"
+        if together
+        else ""
+    )
 
-    # The table is the evidence, so it prints when something needs explaining —
-    # and in CI, where the per-check timing is what the log is for.
     if failed or os.environ.get("GITHUB_ACTIONS"):
         for r in results:
-            print(f"{r.check.name:<20}{'FAIL' if r.rc else 'ok':>5}{r.secs:>8.1f}s")
+            verdict = "FAIL" if r.rc else "kept" if r.kept else "ok"
+            span = "" if r.kept else f"  from {r.at:>6.1f}s"
+            print(f"{r.check.name:<20}{verdict:>5}{r.secs:>8.1f}s{span}")
     for r in failed:
         print(f"\n--- {r.check.name} ---\n{r.out}")
-    scope = "staged" if args.staged else "+".join(sorted(kinds))
+    label = "staged" if args.staged else "+".join(sorted(kinds)) + ("/changed" * args.changed)
     if failed:
-        print(f"\ngate[{scope}]: {len(results)} checks, {len(failed)} failed, {total:.1f}s")
+        print(
+            f"\ngate[{label}]: {len(results)} checks, {len(failed)} failed{unchanged}, "
+            f"{total:.1f}s{width}"
+        )
         return 1
-    # The total is max(slowest chain, sum of work / _POOL), so naming the slowest is naming
-    # the wall — without it a green run reports a number nobody can act on. A chain holds one
-    # slot, so the wall is a chain's total and never a single check inside it.
-    slowest = max(runs, key=lambda run: sum(r.secs for r in run), default=[])
-    named = "+".join(r.check.name for r in slowest)
-    wall = f" (slowest {named} {sum(r.secs for r in slowest):.1f}s)" if slowest else ""
-    print(f"gate[{scope}]: {len(results)} checks green in {total:.1f}s{wall}")
+    slowest = max(results, key=lambda r: r.secs, default=None)
+    wall = (
+        f" (slowest {slowest.check.name} {slowest.secs:.1f}s)" if slowest and slowest.secs else ""
+    )
+    print(f"gate[{label}]: {len(results)} checks green in {total:.1f}s{wall}{unchanged}{width}")
     return 0
 
 

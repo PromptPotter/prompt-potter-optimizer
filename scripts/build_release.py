@@ -1,36 +1,9 @@
 """Build the release wheel: stage the two derived asset trees, then ``uv build``.
 
-Most of what the package reads at runtime is committed inside ``promptpotter/`` and
-ships because ``pyproject.toml`` names it. Two things cannot work that way, because
-they are **build artifacts**, not sources:
-
-* **the dashboard** — ``webapp/out``, ~1.7 MB of Next.js export that exists only
-  after ``npm run build`` in ``webapp/``;
-* **the benchmark datasets** — ``datasets/``, where each dataset's ``cache.json``
-  is gitignored and regenerable (~6.8 MB of HuggingFace rows) while the ~270 KB of
-  definitions beside it is exactly what a fresh install needs to have something to
-  run.
-
-``pyproject.toml`` declares both under ``package-data``. This script is what makes
-those declarations true. Skip it and the globs match nothing **quietly**: the mount
-in ``main.py`` guards on ``.exists()``, so the wheel serves an API with no dashboard
-and resolves no dataset, and neither failure says anything out loud.
-
-Two rules the staging follows, both to avoid a second copy of a rule that already
-exists somewhere else:
-
-* **datasets are selected by ``git ls-files``**, not by a hand-written exclude list.
-  The cache/definition split is already encoded in ``.gitignore`` (``datasets/*/
-  cache.json``, minus the hand-authored ``email-tagging`` demo rows); re-stating it
-  here would give it a second home to drift from.
-* **a missing ``webapp/out`` is a hard error.** It is the one input this script
-  cannot derive, and shipping without it is precisely the silent degradation above.
-  Build the webapp first, or say ``--no-webapp`` and mean it.
-
-Staging targets are gitignored and cleared on every run — and so are ``build/``,
-``dist/`` and the egg-info, because clearing the staging tree alone does not make this
-script idempotent (``_clear_build_state`` says why, and it was measured, not assumed).
-A stale file from a previous release cannot ride along.
+``webapp/out`` and ``datasets/`` are build artifacts ``pyproject.toml`` declares as package-data:
+unstaged, its globs match nothing QUIETLY and the wheel serves an API with no dashboard or dataset.
+Datasets are selected by ``git ls-files``, so ``.gitignore`` stays the one cache/definition split.
+A missing ``webapp/out`` is a hard error: build the webapp first, or say ``--no-webapp``.
 """
 
 from __future__ import annotations
@@ -57,33 +30,13 @@ def _clear(dst: Path) -> None:
 
 
 def stage_webapp() -> int:
-    """Copy the exported dashboard into the package, minus its source maps. Returns the file count.
-
-    ``next.config.ts`` emits ``.map`` files under ``DEPLOY_BUILD=1`` so a live DevTools session on
-    the deployed dashboard resolves React errors to a component and line. That box runs from a
-    checkout and reads ``webapp/out`` directly, so it keeps them; the wheel is the one consumer
-    that must not, because a browser fetches a map only when DevTools is open and they were **55%
-    of the download** (1.9 MiB of 3.5). Filtering here rather than in ``next.config.ts`` because
-    the same flag gates the React Compiler pass, which the wheel does want.
-
-    The minified ``.js`` keeps its ``//# sourceMappingURL=`` comments, which costs one silent 404
-    in DevTools — do not "fix" that by shipping the maps again.
-    """
+    """The `.js` keeps its `sourceMappingURL` comments, one silent 404 in DevTools: never "fixed" by shipping the maps."""
     _clear(_WEBAPP_DST)
     shutil.copytree(_WEBAPP_SRC, _WEBAPP_DST, ignore=shutil.ignore_patterns("*.map"))
     return sum(1 for p in _WEBAPP_DST.rglob("*") if p.is_file())
 
 
 def stage_datasets() -> int:
-    """Copy the *tracked* dataset files into the package. Returns the file count.
-
-    Tracked-only is the whole point: it ships the definitions (``campaign.yaml``,
-    ``pipeline.yaml``, ``prompts/``, ``task_description.md``)
-    and leaves the regenerable HuggingFace caches behind. A benchmark whose cache
-    is absent is already a handled case — ``application/datasets/loaders.py::
-    resolve_dataset_items`` fetches and re-persists it on first use, the same path
-    a fresh clone takes.
-    """
     listing = subprocess.run(
         ["git", "ls-files", "-z", "datasets/"],
         cwd=_REPO,
@@ -97,28 +50,13 @@ def stage_datasets() -> int:
         src = _REPO / rel
         if not src.is_file():  # tracked but deleted in the working tree
             continue
-        # `datasets/CLAUDE.md` is a CONTRACT for whoever edits this repo, not dataset content.
-        # Copied in, it becomes a second on-disk `CLAUDE.md` stating the same rules — and one
-        # that no git-based tool can see, because the staged tree is gitignored, while every
-        # tool an agent actually uses (Glob/Grep/Read) finds it immediately. Its links are
-        # repo-relative, so from `promptpotter/assets/benchmarks/` all ten resolve into
-        # directories that do not exist. An installed user gains nothing; a reader gains a
-        # duplicate of the one thing this repo most often gets wrong (one fact, many copies).
-        # A dataset's own build script (`screen-taste-v0/build_rows.py`) is how its rows were CUT,
-        # not something an install runs, and `assets/` is data: a `.py` there is uncounted surface
-        # the complexity ledger refuses.
+        # A staged `CLAUDE.md` is found by Grep with links that resolve nowhere; a `.py` under `assets/` the complexity ledger refuses.
         if src.name == "CLAUDE.md" or src.suffix == ".py":
             continue
         dst = _DATASETS_DST / Path(rel).relative_to("datasets")
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dst)
-        # A staged copy is gitignored, so every git-based scan is blind to it while Glob/Grep/Read
-        # find it immediately — the same asymmetry the CLAUDE.md skip above exists for. Every
-        # staged `dataset.md` had drifted from its source by the time anyone checked, and the
-        # stale copy was the LARGER one, so a grep for any dataset concept returned two plausible
-        # hits and the wrong one read as fuller. `_read_title` scans for the first `# ` line, so a
-        # leading comment costs it nothing. NOT applied to `task_description.md`: that file is L1's
-        # framing and reaches the model, where a banner would be prompt text.
+        # NOT applied to `task_description.md`: that file reaches the model, where a banner is prompt text.
         if dst.name == "dataset.md":
             dst.write_text(
                 f"{_STAGED_BANNER}\n\n{src.read_text(encoding='utf-8')}", encoding="utf-8"
@@ -154,7 +92,7 @@ def main() -> int:
     elif not _WEBAPP_SRC.is_dir():
         print(
             f"error: {_WEBAPP_SRC.relative_to(_REPO)} does not exist.\n"
-            "       Build it first:  cd webapp && npm ci && npm run build:deploy\n"
+            "       Build it first:  cd webapp && npm ci && npm run build\n"
             "       Or pass --no-webapp to ship an API-only wheel deliberately.",
             file=sys.stderr,
         )
@@ -172,74 +110,29 @@ def main() -> int:
 
 
 def _clear_build_state() -> None:
-    """The clean room ``pyproject.toml`` describes, applied on every run.
-
-    Clearing the staging targets is NOT enough to keep a deleted file out of the wheel,
-    which is the opposite of what this script's docstring used to promise. setuptools
-    copies sources into ``build/lib`` incrementally and never removes what vanished, and
-    ``*.egg-info/SOURCES.txt`` caches the file manifest across builds — so a file dropped
-    from ``webapp/out`` or untracked from ``datasets/`` keeps shipping until someone
-    deletes those two by hand. Reproduced: a planted ``leaked.env`` was staged, caught,
-    removed from the source, and shipped again on the very next build. That is the exact
-    remedy ``_wheel_problem`` prints ("remove the file and rebuild"), so leaving it out
-    made the scanner's own instruction wrong.
-
-    ``dist/`` goes too, so the verifier reads the wheel THIS run produced. Without it the
-    check picks the newest file in a directory nothing prunes, and a wheel rejected by an
-    earlier run sits there until a later, passing run vouches for the directory it is
-    still in — while ``uv publish`` / ``twine upload dist/*`` glob the directory, not the
-    wheel we approved.
-    """
+    """setuptools never removes a vanished source from `build/lib` or the egg-info manifest, and publish globs `dist/`."""
     for path in (_REPO / "build", _REPO / "dist", *_REPO.glob("*.egg-info")):
         _clear(path)
 
 
-# Credential shapes, checked against the built wheel. Deliberately high-signal: the
-# benchmark datasets are English prose about secrets and keys, so a bare "secret" or
-# "sk-" would cry wolf every build and be switched off within a week.
-#
-# Every prefix carries the charset and length that follow it, for the same reason. A bare
-# ``AKIA`` is four bytes; scanned across 1.7 MB of minified Next.js it is a coin toss, and
-# the build it fails offers no override — the message can only tell the operator to go and
-# edit this list, which is how a check gets deleted instead of narrowed. Anchored, a hit is
-# a credential. ``promptpotter/config/log_redaction.py`` keeps its own patterns for log
-# lines; that one redacts and this one REFUSES, so they stay apart deliberately.
+# High-signal on purpose: dataset prose and minified JS match any bare prefix, so each carries its charset and length.
 _SECRET_NAMES = (".env", ".pem", ".key", ".p12", ".pfx", "id_rsa", "id_ed25519", ".keystore")
 _SECRET_PATTERNS: tuple[re.Pattern[bytes], ...] = (
-    re.compile(rb"-----BEGIN [A-Z ]+-----"),  # any PEM private key / certificate block
-    re.compile(rb"sk-or-v1-[a-f0-9]{16,}"),  # OpenRouter
-    re.compile(rb"sk-ant-[A-Za-z0-9_-]{20,}"),  # Anthropic
-    re.compile(rb"sk-proj-[A-Za-z0-9_-]{20,}"),  # OpenAI project keys
-    re.compile(rb"gsk_[A-Za-z0-9]{20,}"),  # Groq
+    re.compile(rb"-----BEGIN [A-Z ]+-----"),
+    re.compile(rb"sk-or-v1-[a-f0-9]{16,}"),
+    re.compile(rb"sk-ant-[A-Za-z0-9_-]{20,}"),
+    re.compile(rb"sk-proj-[A-Za-z0-9_-]{20,}"),
+    re.compile(rb"gsk_[A-Za-z0-9]{20,}"),
     re.compile(rb"ghp_[A-Za-z0-9]{36}"),
     re.compile(rb"github_pat_[A-Za-z0-9_]{20,}"),
-    re.compile(rb"AKIA[0-9A-Z]{16}"),  # AWS access key id
-    re.compile(rb"xoxb-[0-9]{9,}-[0-9A-Za-z-]{10,}"),  # Slack bot token
-    # A .env line that actually carries a value; an empty `KEY=` in a sample file is not a leak.
+    re.compile(rb"AKIA[0-9A-Z]{16}"),
+    re.compile(rb"xoxb-[0-9]{9,}-[0-9A-Za-z-]{10,}"),
     re.compile(rb"(OPENROUTER|ANTHROPIC|GROQ|OPENAI)_API_KEY=[^\s\"']{8,}"),
 )
 
 
 def _verify_wheel(*, expect_webapp: bool) -> int:
-    """Re-open the wheel we just built and check the artifact, not the intent.
-
-    **Did the trees we staged arrive?** Staging puts files on disk; whether they SHIP is
-    decided separately, by ``pyproject.toml``'s ``package-data`` globs. That list is
-    load-bearing (delete it in a clean room and the wheel drops to one non-.py file), so
-    a typo in it silently drops a tree.
-
-    **Is anything in there that must never be published?** Two of those globs are
-    wildcards over trees this script stages — ``assets/benchmarks`` takes whatever
-    ``git ls-files datasets/`` returns, ``assets/webapp`` whatever ``npm run build``
-    emitted, and a Next.js build inlines ``NEXT_PUBLIC_*`` values into its bundle. Both
-    are wide open by construction, and publishing to an index is irreversible. So the
-    payload is scanned before the wheel is handed over, by name and by content.
-
-    **A wheel that fails any of this is deleted, not reported.** ``dist/`` is what the
-    publish commands glob, so leaving a rejected artifact there and returning 1 hands over
-    exactly the thing the check exists to withhold — the operator has to notice the exit
-    code, and nothing downstream does.
-    """
+    """A wheel that fails is DELETED, not just reported: `dist/` is what the publish commands glob."""
     wheels = list((_REPO / "dist").glob("*.whl"))
     if len(wheels) != 1:
         found = ", ".join(sorted(w.name for w in wheels)) or "nothing"
@@ -264,16 +157,10 @@ def _verify_wheel(*, expect_webapp: bool) -> int:
 
 
 def _wheel_problem(wheel: Path, *, expect_webapp: bool) -> tuple[str | None, int]:
-    """What disqualifies *wheel* from being published, and how many files were scanned.
-
-    Returns the message rather than printing it, so the one caller can delete the artifact
-    and report in the same breath — three earlier ``return 1`` sites each left it on disk.
-    """
     with zipfile.ZipFile(wheel) as z:
         names = z.namelist()
 
-    # One probe per package-data glob, each naming a file that glob is the only way to ship.
-    # A tree-level probe would pass on a glob that ships one of its three files.
+    # One probe per package-data glob: a tree-level probe passes on a glob that ships one of its three files.
     required = {
         "assets/benchmarks": "promptpotter/assets/benchmarks/",
         "assets/optimizers/*/*.yaml": "promptpotter/assets/optimizers/potter/pipeline.yaml",
@@ -293,16 +180,12 @@ def _wheel_problem(wheel: Path, *, expect_webapp: bool) -> tuple[str | None, int
             "this is a package-data glob in pyproject.toml that matches nothing.",
             0,
         )
-    # Caches are 6.8 MB of regenerable rows and must never ride along; email-tagging's are
-    # hand-authored demo samples and are the one deliberate exception (see .gitignore).
+    # email-tagging's caches are hand-authored demo samples, the one deliberate exception (see .gitignore).
     leaked = [n for n in names if n.endswith("cache.json") and "email-tagging" not in n]
     if leaked:
         return f"{wheel.name} carries HuggingFace caches: {leaked}", 0
 
-    # Our own sources are reviewed and version-controlled; the staged trees are not, and
-    # ``assets/benchmarks`` ships whatever ``git ls-files datasets/`` returns — including a
-    # ``.py`` helper the day a dataset grows one. So the exemption is for OUR modules, not
-    # for the extension.
+    # `.py` is exempt only outside `assets/`: `assets/benchmarks` ships whatever `git ls-files datasets/` returns.
     payload = [
         n
         for n in names

@@ -69,13 +69,17 @@ dspy = [
     # raises naming this extra.
     #
     # It is the sole reason `diskcache` (GHSA-w8v5-vhqr-4h9v, unpatched — 5.6.3 is both the last
-    # release and the affected one) is in `uv.lock`, and dspy 3.3.1 still requires it, so there is
+    # release and the affected one) is in `uv.lock`, and dspy 3.4.0 still requires it, so there is
     # no skinny-shaped swap. `uv lock` resolves EVERY declared extra, so a lock scanner sees this
     # whether or not anyone installs it — the alert is not evidence the surface is reachable.
     # Deleting the extra would drop exactly 4 packages (dspy, gepa, orjson, diskcache) and break
     # `pip install promptpotter[dspy]`, which README + ADR-0006 + `docs/developer/dspy-optimizer.md`
     # publish. Dismiss the alert; do not trade the published install path for it.
-    "dspy>=3.0.0",
+    #
+    # 3.4 is the floor the connector's billing is verified on: an LM is an ENGINE there
+    # (`dspy.LM(engine=...)`), its failures are DSPy's own typed errors, and `import dspy` no
+    # longer loads litellm. A custom LM before it subclasses `BaseLM.forward`, which 3.5 removes.
+    "dspy>=3.4.0",
 ]
 harbor = [
     # why kept: the `harbor` connector, which runs one containerized agent episode per measured
@@ -157,7 +161,6 @@ dev = [
     "pytest>=8.0.0",          # why kept: test runner
     "pytest-asyncio>=0.24.0", # why kept: async fixtures for LLM call tests
     "pytest-cov>=6.0",        # why kept: coverage instrumentation
-    "pytest-xdist>=3.6",      # why kept: the suite is the gate's longest check, and single-process it left 15 cores idle
     "ruff>=0.3.0",            # why kept: lint + format
     "mypy>=1.10.0",           # why kept: static type-check (CI gate)
     "deptry>=0.20.0",         # why kept: dependency audit (CI gate)
@@ -325,6 +328,8 @@ extend_exclude = [
     "notebooks/bbeh_potter.ipynb",
     "examples/.*",  # each a distribution of its own, with its own dependency list
 ]
+# `scripts/` is a directory of programs, not a package: one imports a sibling by its bare name.
+known_first_party = ["gate", "kept_verdict", "tests_owning"]
 
 # CI installs neither `observability` nor `all`, so deptry cannot read the
 # distribution's metadata and falls back to assuming the module is named after the
@@ -344,7 +349,6 @@ DEP002 = [
     "pytest",
     "pytest-asyncio",
     "pytest-cov",
-    "pytest-xdist",
     "ruff",
     "mypy",
     "deptry",
@@ -360,4 +364,6 @@ DEP001 = ["openpyxl", "datasets", "langfuse", "anthropic", "IPython"]
 # Imported directly and deliberately left transitive: `infrastructure/llm/litellm_sends.py` wraps
 # the entry point HARBOR calls, so it must be the litellm Harbor resolved — a pin of our own could
 # split the two, and the meter would wrap a copy the agent never sends through.
-DEP003 = ["litellm"]
+# `pydantic_core` likewise: pydantic pins it to one exact version, so the `core_schema` a model
+# builds (`domain/scoring.py::CellSheet`) must be the one pydantic resolved.
+DEP003 = ["litellm", "pydantic_core"]

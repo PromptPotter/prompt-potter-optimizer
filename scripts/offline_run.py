@@ -17,17 +17,28 @@ import json
 import os
 import random
 import re
+import shutil
+import signal
 import socket
 import subprocess
 import sys
 import time
 import urllib.error
 import urllib.request
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, get_args
 from urllib.parse import urlsplit
 
 import httpx
+import yaml
+from gate import (
+    OFFLINE_CHILD_MB,
+    OFFLINE_CHILDREN,
+    end_children_with_this_process,
+    memory_budget_mb,
+)
+from kept_verdict import OFFLINE_RUN, OFFLINE_RUN_READS, KeptVerdicts
 
 from promptpotter.application import optimizers
 from promptpotter.application.campaign_config import (
@@ -41,7 +52,7 @@ from promptpotter.application.datasets.authored import (
     dataset_campaign_path,
     read_campaign_config_file,
 )
-from promptpotter.application.embedded_run import open_session, run_campaign
+from promptpotter.application.embedded_run import grade_line_bench, open_session, run_campaign
 from promptpotter.application.evidence.read import subject_evidence
 from promptpotter.application.evidence.subjects import SubjectSpec
 from promptpotter.application.initialization.wiring import complete_registries
@@ -55,57 +66,67 @@ from promptpotter.application.pipeline_resolve import (
     resolve_campaign_config,
 )
 from promptpotter.application.runner.entry import RunMode
+from promptpotter.application.runner.inner.connector import measurement_modules
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, benchmark_datasets_root
-from promptpotter.config.settings import PROMPT_STRING_FIELDS, Settings
-from promptpotter.connectors.promptpotter import measurement_modules
-from promptpotter.domain.bench import BenchScore
+from promptpotter.config.settings import Settings
+from promptpotter.domain.bench import BenchScore, BenchTrigger
 from promptpotter.domain.campaign import ArmRequest
 from promptpotter.domain.launch_limits import LaunchLimits
-from promptpotter.domain.phases import StopReason
+from promptpotter.domain.phases import RunPhase, StopOutcome, StopReason, stop_reason_outcome
 from promptpotter.domain.sample import Sample
+from promptpotter.domain.search_point import PROMPT_STRING_FIELDS
 from promptpotter.domain.spend import SpendRollup
-from promptpotter.infrastructure.store.archive_queries import list_runs, scope_memory_to_own_runs
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_run_ids
+from promptpotter.infrastructure.projections.cycle_index import read_cycle_index
+from promptpotter.infrastructure.runtime_flags import derive_run_state
+from promptpotter.infrastructure.store.archive_queries import (
+    list_populations,
+    load_population,
+    scope_memory_to_own_answers,
+)
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_answers
 from promptpotter.infrastructure.store.io import rmtree_robust
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.stores import build_stores
+from promptpotter.presentation.cli import campaign_runner
 from promptpotter.shared.errors import ConflictError
 from promptpotter.shared.hashing import module_source_digest
 from promptpotter.shared.identity import default_identity
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from promptpotter.application.initialization.session import Session
     from promptpotter.domain.cycle_paths import CycleHop
+    from promptpotter.domain.paired_reading import PairedReading
     from promptpotter.infrastructure.store.stores import Stores
 
 DATASET = "justlogic-d234"
 BACKEND_URL = "http://127.0.0.1:8000"
 STAMP = "offline-run.json"
-# `--controlled`'s two workspaces: the arms beside a foreign campaign, and the arms alone.
 CONTROLLED = ("controlled", "controlled-bare")
-# The pause-and-resume workspace, inside its optimizer's.
 RESUMED = "resumed"
-RESUME_APPENDS = ("phases", "candidates_minted", "rulers")
+INTERRUPTED = {1: "interrupted", 2: "interrupted-twice"}
+# Past the origin's panel, inside the first round's walk.
+INTERRUPT_AT_CELL = 25
+RESUME_APPENDS = ("phases", "run_phases", "candidates_minted", "rulers")
 NOT_A_KEY = "offline-run-not-a-key"
 PROVIDER_KEYS = ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY")
 LABEL = "OFFLINE — fake optimizer LLM and fake backend; every number is synthetic"
 LABELS = ("TRUE", "FALSE", "Uncertain")
 
-# Bench knobs every optimizer runs under; each optimizer's own knobs are its manifest's.
 BENCH: dict[str, Any] = {
     "sp_budget_origin": 14,
     "dataset_split": {"bench": 10, "demo": 10},
 }
-# A round's panel, where the optimizer's sampler sizes it with one knob (`Sampler.size_knob`).
 ROUND_CELLS = 20
-# Scale-downs of a paper configuration to a bank of a few hundred rows, so a race cuts and an
-# archive fills within a few rounds. An optimizer absent here runs as its manifest declares.
+# Paper configurations scaled to a few-hundred-row bank, so a race cuts within a few rounds.
 SCALED: dict[str, dict[str, dict[str, Any]]] = {
     "capo": {
         "blocks": {"config": {"block_size": 5, "max_blocks": 4}},
         "paired_t": {"config": {"alpha": 0.2}},
         "population": {"config": {"size": 4}},
-        "capo_crossover": {"config": {"crossovers": 2}},
+        "capo_init": {"config": {"size": 4, "k_max": 2}},
+        "mating": {"config": {"offspring": 2}},
         "few_shot": {"config": {"k_max": 2}},
     },
     "gepa": {"minibatch": {"config": {"pareto_size": 20}}},
@@ -115,7 +136,6 @@ SCALED: dict[str, dict[str, dict[str, Any]]] = {
         "map_elites": {"config": {"centroids": 8, "cvt_samples": 400}},
     },
 }
-# A listed answer carries this many prompts.
 LISTED = 15
 
 WORDS = [
@@ -139,10 +159,6 @@ def long_path(p: Path) -> str:
     return "\\\\?\\" + s if os.name == "nt" and not s.startswith("\\\\?\\") else s
 
 
-# ---------------------------------------------------------------------------------------------
-# Fake optimizer LLM (OpenAI chat-completions wire, any host)
-# ---------------------------------------------------------------------------------------------
-
 _MARKER = re.compile(r"Variant ([\w.]+):")
 
 
@@ -151,9 +167,6 @@ def _variant(tag: str, rng: random.Random) -> str:
 
 
 class SchemaFiller:
-    """A deterministic MINIMAL instance of a JSON schema: required properties only, first enum
-    value, minItems items."""
-
     def __init__(self, schema: dict[str, Any], *, node: str, idx: int) -> None:
         self.node = node
         self.idx = idx
@@ -202,11 +215,7 @@ class SchemaFiller:
 
 
 class FakeLLM:
-    """An answer is a function of its node's CALL ORDINAL (and the marker a rephrase keeps), never
-    of the prompt's wording, so a change to how a prompt renders moves the request capture and not
-    what the run decides. A structured call names its node in its response schema; a paper
-    preset's text call is the llm node whose manifest template its prompt opens with, answered in
-    the form that template asks for."""
+    """An answer follows its node's CALL ORDINAL, never the prompt's wording."""
 
     def __init__(self, capture: Path, templates: dict[str, str]) -> None:
         self.capture = capture
@@ -266,8 +275,7 @@ class FakeLLM:
         fresh = _variant(f"{node}.{idx}", rng)
         template = self.templates[node]
         if "<prompt>" in template:
-            # A template rephrasing the individual's own instruction keeps its parent's marker,
-            # so the rephrase keeps the parent's skill.
+            # Rephrasing the individual's own instruction keeps its parent's marker, so its skill.
             parents = _MARKER.findall(prompt) if "{{instruction}}" in template else []
             return f"<prompt>{_variant(parents[-1], rng) if parents else fresh}</prompt>"
         if "```" in template:
@@ -333,10 +341,6 @@ class FakeLLM:
         return v
 
 
-# ---------------------------------------------------------------------------------------------
-# Fake TermNorm backend
-# ---------------------------------------------------------------------------------------------
-
 LLM_ONLY_NODE: dict[str, Any] = {
     "type": "llm",
     "runtime": "backend",
@@ -381,20 +385,23 @@ LLM_ONLY_NODE: dict[str, Any] = {
 
 
 class FakeBackend:
-    # P(correct) = k/10 off the prompt's marker. Potter's scripted: a round-1 win, two stalls that
-    # fire L2 and L3, a round-4 win; any other marker draws k from its own name.
+    # P(correct) = k/10 by marker. Potter's script: round-1 win, two stalls (L2, L3), round-4 win.
     SKILL: ClassVar[dict[str | None, int]] = {
         None: 3,
         "g0v0": 1, "g0v1": 7, "g0v2": 2, "g1v0": 2, "g1v1": 4, "g1v2": 3,
         "g2v0": 3, "g2v1": 1, "g2v2": 5, "g3v0": 9, "g3v1": 2, "g3v2": 1,
     }  # fmt: skip
 
-    def __init__(self, samples: list[Sample]) -> None:
+    def __init__(self, samples: list[Sample], *, interrupts: int = 0) -> None:
         self.truth = {s.query: s.ground_truth for s in samples}
         self.cells = 0
+        self.interrupts = interrupts
 
     def matches(self, payload: dict[str, Any]) -> dict[str, Any]:
         self.cells += 1
+        if self.cells == INTERRUPT_AT_CELL:
+            for _ in range(self.interrupts):
+                signal.raise_signal(signal.SIGINT)
         query = payload["query"]
         node_cfg = payload["node_config"]["llm_only"]
         cfg_key = json.dumps(node_cfg, sort_keys=True, ensure_ascii=False)
@@ -432,10 +439,6 @@ class FakeBackend:
             },
         }
 
-
-# ---------------------------------------------------------------------------------------------
-# The network, answered in-process
-# ---------------------------------------------------------------------------------------------
 
 OPENROUTER_ENDPOINTS = {
     "data": {
@@ -526,11 +529,6 @@ def install_network(router: Router) -> None:
     socket.getaddrinfo = _refuse_resolve
 
 
-# ---------------------------------------------------------------------------------------------
-# One optimizer's campaign (a child process: the patches and the home are process-wide)
-# ---------------------------------------------------------------------------------------------
-
-
 def synthetic_rows(n: int) -> list[Sample]:
     """JustLogic-shaped rows: no dataset download, and nothing licensed lands in the home."""
     rows = []
@@ -550,16 +548,18 @@ def synthetic_rows(n: int) -> list[Sample]:
     return rows
 
 
-def campaign_config(optimizer: str, rounds: int, *, pinned: bool = False) -> CampaignConfig:
+def campaign_config(
+    optimizer: str, rounds: int, *, bench_trigger: BenchTrigger, pinned: bool = False
+) -> CampaignConfig:
     """*pinned* seeds every optimizer's draws alike, which arms of one head-to-head must share."""
     raw = dict(
         read_campaign_config_file(dataset_campaign_path(benchmark_datasets_root() / DATASET))
     )
-    raw.update(BENCH)
+    raw.update(BENCH, bench_trigger=bench_trigger)
     opt = raw["optimization"]
     # The template's node overlay is written for the optimizer it selects, and only that one.
     templated = opt.get("optimizer", OptimizationConfig.model_fields["optimizer"].default)
-    opt.update(max_rounds=rounds, spend_budget_usd=1000.0, origin_gate="off", optimizer=optimizer)
+    opt.update(max_rounds=rounds, ceiling={"usd": 1000.0}, origin_gate="off", optimizer=optimizer)
     if optimizer != templated:
         opt["nodes"] = SCALED.get(optimizer, {})
     if optimizer != templated or pinned:
@@ -582,18 +582,15 @@ def text_templates(config: CampaignConfig) -> dict[str, str]:
 
 
 async def rebound_session(stores: Stores, hop: CycleHop) -> tuple[Session, CampaignConfig]:
-    """A fresh session bound to the cycle at *hop* off disk alone, as a launch of an existing cycle
-    binds one (`initialization/wiring.py::bind_cycle_session`)."""
     campaign = stores.campaigns.load_campaign(hop.campaign_id)
     assert campaign is not None
     session = await open_session(
-        DATASET, backend_url=BACKEND_URL, backend_id=DATASET, stores=stores, on_status=print
+        DATASET, backend_url=BACKEND_URL, backend_id=DATASET, stores=stores
     )
     config = resolve_campaign_config(stores, campaign, hop)
-    configure_and_apply_pipeline(session, config, log=print)
+    configure_and_apply_pipeline(session, config)
     session.campaign_id = hop.campaign_id
     session.state.cycle_id = hop.cycle_id
-    session.session_id = stores.campaigns.session_id_of(hop)
     return session, config
 
 
@@ -607,13 +604,12 @@ async def run_one(
     arm: ArmRequest | None = None,
     framing: bool = True,
     pause_after: int | None = None,
+    bench_trigger: BenchTrigger = "at_end",
 ) -> tuple[Path, str]:
-    """*out* holds its requests and decisions, the workspace itself by default; the archive is the
-    workspace's, so campaigns run in one process share it as a tenant's do. *pause_after* stops the
-    run at that round's boundary and ends it on a session rebuilt from disk."""
+    """The archive is the workspace's, never *out*'s: campaigns in one process share it."""
     out = workspace if out is None else out
     (out / "requests").mkdir(parents=True)
-    config = campaign_config(optimizer, rounds, pinned=arm is not None)
+    config = campaign_config(optimizer, rounds, bench_trigger=bench_trigger, pinned=arm is not None)
     if not framing:
         config = config.model_copy(update={"task_framing": "off"})
     samples = synthetic_rows(rows)
@@ -625,22 +621,24 @@ async def run_one(
     stores = build_stores(default_identity(), projects_root=DEFAULT_PROJECTS_ROOT)
     stores.tenant_datasets.save_benchmark_rows(DATASET, samples)
     session = await open_session(
-        DATASET, backend_url=BACKEND_URL, backend_id=DATASET, stores=stores, on_status=print
+        DATASET, backend_url=BACKEND_URL, backend_id=DATASET, stores=stores
     )
-    configure_and_apply_pipeline(session, config, log=print)
+    configure_and_apply_pipeline(session, config)
     result = await run_campaign(
         session,
         list(session.samples),
         config,
         readout_sink=print,
-        limits=LaunchLimits(),
-        mode=RunMode(stop_after_rounds=pause_after),
+        limits=LaunchLimits(step_rounds=pause_after),
+        mode=RunMode(),
         arm=arm,
     )
     await session.backend_client.aclose()
     if pause_after is not None:
         if result.stop_reason != StopReason.PAUSED:
             raise SystemExit(f"offline run: {optimizer} ended {result.stop_reason}, never paused")
+        # The resume reads its rounds off the ledger and the archive: their checkouts are gone.
+        shutil.rmtree(CycleLayout(stores.campaigns.cycle_dir(session.hop)).rounds)
         session, config = await rebound_session(stores, session.hop)
         result = await run_campaign(
             session,
@@ -651,20 +649,33 @@ async def run_one(
             mode=RunMode(),
         )
         await session.backend_client.aclose()
+    if stop_reason_outcome(result.stop_reason).exit_code:
+        raise SystemExit(f"offline run: {optimizer} ended {result.stop_reason}")
     searched = {key for node in session.pipeline_schema.declared_nodes for key in node.param_keys}
     if arm is not None and (beside := sorted(searched - set(PROMPT_STRING_FIELDS))):
         raise SystemExit(f"offline run: arm {arm.arm_key} searched {beside} beside its prompt")
-    stores.campaigns.update_campaign(session.campaign_id, {"label": LABEL})
+    stores.campaigns.update_campaign(session.campaign_id, label=LABEL)
     cycle = Path(stores.campaigns.cycle_dir(session.hop))
     dashboard = json.loads((cycle / "dashboard.json").read_text(encoding="utf-8"))
-    if billed := SpendRollup.model_validate(dashboard["spend"]).total_used_usd:
+    spend = SpendRollup.model_validate(dashboard["spend"])
+    if billed := spend.total_used_usd:
         raise SystemExit(f"offline run billed ${billed}: a fake answered with a cost")
-    decisions = extract(cycle, result.bench)
+    bench, searched_cells = result.bench, backend.cells
+    # An arm is minted `at_end` whatever its config says, so only an ordinary campaign waits.
+    if bench_trigger == "manual" and arm is None:
+        sent = spend.by_kind["bench"]
+        if sent.incurred_usd or sent.input_tokens or sent.output_tokens:
+            raise SystemExit(f"offline run: a manual launch of {optimizer} sent bench cells")
+        if bench is None or bench.status.state != "not_asked" or not bench.status.can_grade:
+            raise SystemExit(f"offline run: a manual launch of {optimizer} serves {bench}")
+        bench = await grade_line_bench(stores=stores, hop=session.hop)
+    decisions = extract(cycle, bench)
     decisions["harness"] = {
         "stop_reason": str(result.stop_reason),
         "unrouted": sorted(router.unrouted),
         "llm_calls": dict(sorted(llm.calls.items())),
-        "backend_cells": backend.cells,
+        "backend_cells": searched_cells,
+        "bench_cells_asked_for": backend.cells - searched_cells,
     }
     (out / "decisions.json").write_text(
         json.dumps(decisions, indent=1, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8"
@@ -672,13 +683,71 @@ async def run_one(
     return cycle, session.campaign_id
 
 
+def run_terminal(
+    optimizer: str, workspace: Path, verb: str, *, rounds: int, rows: int, interrupts: int
+) -> None:
+    config = campaign_config(optimizer, rounds, bench_trigger="at_end")
+    samples = synthetic_rows(rows)
+    requests = workspace / f"requests-{verb}"
+    requests.mkdir()
+    llm = FakeLLM(requests, text_templates(config))
+    install_network(Router(llm, FakeBackend(samples, interrupts=interrupts)))
+    stores = build_stores(default_identity(), projects_root=DEFAULT_PROJECTS_ROOT)
+    stores.tenant_datasets.save_benchmark_rows(DATASET, samples)
+    declared = workspace / "campaign.yaml"
+    declared.write_text(
+        yaml.safe_dump({"campaign_config": config.model_dump(mode="json", exclude_unset=True)}),
+        encoding="utf-8",
+    )
+    new = ["new", DATASET, f"--config={declared}", f"--backend-url={BACKEND_URL}"]
+    sys.argv = ["promptpotter", *(new if verb == "new" else [verb])]
+    # A child of a pool thread may inherit SIGINT ignored; a terminal's process never does.
+    signal.signal(signal.SIGINT, signal.default_int_handler)
+    campaign_runner.main()
+
+
+def _commands(ledger: Path) -> dict[str, list[dict[str, Any]]]:
+    records = _jsonl(ledger)
+    applied = {
+        r["command_id"]
+        for r in records
+        if r.get("record_type") == "command_ack" and r.get("status") == "applied"
+    }
+    out: dict[str, list[dict[str, Any]]] = {}
+    for r in records:
+        if r.get("record_type") == "command" and r["command_id"] in applied:
+            out.setdefault(r["kind"], []).append(r["payload"])
+    return out
+
+
+def interrupted(
+    spawn_terminal: Callable[[Path, str, int], int], workspace: Path, interrupts: int
+) -> tuple[bool, str]:
+    workspace.mkdir()
+    if (rc := spawn_terminal(workspace, "new", interrupts)) != StopOutcome.PAUSED.exit_code:
+        return False, f"`new` under {interrupts} SIGINT exited {rc}, not as a pause does"
+    (cycle,) = (Path(long_path(workspace)) / "projects").glob("*/campaigns/*/cycles/*")
+    stopped = derive_run_state(cycle)
+    jobs = [json.loads(p.read_text(encoding="utf-8")) for p in (workspace / "jobs").glob("*.json")]
+    if stopped.producer.attached or any(j["released_at"] is None for j in jobs):
+        return False, f"`new` exited 130 still holding its cycle or its slot ({stopped})"
+    if interrupts == 1 and stopped.run_phase is not RunPhase.PAUSED:
+        return False, f"one SIGINT left the cycle {stopped.run_phase}, not paused"
+    (mint,) = _commands(cycle.parents[3] / ".workspace" / "events.jsonl")["mint-campaign"]
+    if not mint["campaign_config"] or mint["backend_url"] != BACKEND_URL:
+        return False, f"the mint-campaign record carries no config or backend: {sorted(mint)}"
+    if rc := spawn_terminal(workspace, "resume", 0):
+        return False, f"`resume` after {interrupts} SIGINT exited {rc}"
+    ended = derive_run_state(cycle)
+    started = _commands(cycle / ".runtime" / "ledger.jsonl").get("start-run", [])
+    if ended.run_phase is not RunPhase.TERMINAL or len(started) != 1:
+        return False, f"`resume` left the cycle {ended.run_phase} on {len(started)} start-run"
+    return True, f"exit 130 {stopped.run_phase}, slot released; `resume` ran it to its end"
+
+
 async def run_controlled(
     workspace: Path, arm_names: list[str], *, rounds: int, rows: int, foreign: bool
 ) -> None:
-    """*arm_names* as arms of one head-to-head, in order, after, with *foreign*, an undeclared
-    potter campaign on the dataset whose origin differs (framing off). Asserts what M5 promises: a
-    steer on an arm is refused, an arm's MEMORY holds no foreign run, and the evidence reads the
-    arms under the declared scorer with the foreign origin marked."""
     subjects = []
     if foreign:
         _, cid = await run_one(
@@ -712,14 +781,19 @@ async def run_controlled(
     def filed(campaign_id: str) -> set[str]:
         campaign = stores.campaigns.load_campaign(campaign_id)
         assert campaign is not None
-        return scan_ledger_run_ids(
+        return scan_ledger_answers(
             CycleLayout(stores.campaigns.cycle_dir(hop)).ledger
             for hop in stores.campaigns.line(campaign.root_hop)
         )
 
     def memory(campaign_id: str) -> set[str]:
-        scope_memory_to_own_runs(filed(campaign_id))
-        return {e["run_id"] for e in list_runs(stores, dataset_name=DATASET)}
+        scope_memory_to_own_answers(filed(campaign_id))
+        return {
+            row["answer"]
+            for entry in list_populations(stores, dataset_name=DATASET)
+            if (held := load_population(stores, entry)) is not None
+            for row in held["measurements"]
+        }
 
     foreign_only = set().union(*(filed(c) for c in subjects)) - set().union(
         *(filed(c) for _, c in arms.values())
@@ -727,32 +801,40 @@ async def run_controlled(
     for name, (_, cid) in arms.items():
         seen = contextvars.copy_context().run(memory, cid)
         if seen & foreign_only or not seen <= filed(cid):
-            raise SystemExit(f"offline run: arm {name}'s memory reads a run it did not file")
-        print(f"arm {name}: memory holds {len(seen)} own runs, none of {len(foreign_only)} foreign")
+            raise SystemExit(f"offline run: arm {name}'s memory reads an answer it did not walk")
+        print(
+            f"arm {name}: memory holds {len(seen)} own answers, none of {len(foreign_only)} foreign"
+        )
     ev = subject_evidence(stores, [SubjectSpec("campaign", c) for c in subjects])
     table = ev.head_to_head
     assert table is not None
     (workspace / "head_to_head.json").write_text(table.model_dump_json(indent=1), encoding="utf-8")
     print(
-        f"head-to-head {table.head_to_head_id}: scorer {ev.scorer_id}, differs_on "
-        f"{table.differs_on}, pairs {[(p.campaign_a, p.campaign_b) for p in table.pairs]}, "
-        f"controlled {[(r.optimizer, r.controlled) for r in table.rows]}"
+        f"head-to-head {table.guard.head_to_head_id}: scorer {ev.scorer_id}, differs_on "
+        f"{[d.value for d in table.guard.differs_on]}, pairs "
+        f"{[(*_pair_ends(p.reading), p.guard.state.value) for p in table.pairs]}, "
+        f"guard {[(r.optimizer, r.guard.state.value) for r in table.rows]}"
     )
 
 
-# ---------------------------------------------------------------------------------------------
-# decisions.json — every DECISION a run made, run-independent
-# ---------------------------------------------------------------------------------------------
-# Read as dicts with `.get`, deliberately: a dump taken before a reshape must still load after
-# it, so a moved field reads as a diff rather than a crash.
+def _pair_ends(pair: PairedReading) -> tuple[str, ...]:
+    return tuple(m.address.path[-1].campaign_id for m in (pair.a, pair.b) if m is not None)
 
+
+def _graded(bench: dict[str, Any] | None) -> bool:
+    return bench is not None and bench["status"]["state"] == "read"
+
+
+# decisions.json is read as dicts with `.get`: a dump taken before a reshape must load after it.
 FLOAT_DP = 6
 DROP_KEYS = {
     "timestamp", "created_at", "updated_at", "started_at", "finished_at", "at_offset", "offset",
-    "wall_clock", "duration_s", "elapsed_s", "call_id", "run_id", "sp_hash", "content_hash",
+    "wall_clock", "duration_s", "elapsed_s", "call_id", "answer", "answers", "sp_hash", "content_hash",
     "rendered_prompt_hash", "prompt_fields_id", "ruler_id", "anchor_id", "prompt_hashes",
-    "optimizer_prompt_hashes", "version", "parent_session_id", "session_id", "sample_key",
+    "optimizer_prompt_hashes", "version", "sample_key",
     "backend_url", "latency", "latency_ms", "total_time", "step_timings",
+    # A fact about the holdout, which a campaign beside this one moves and no decision reads.
+    "reads_before",
 }  # fmt: skip
 _HEX32 = re.compile(r"^[0-9a-f]{32}$")
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
@@ -765,8 +847,6 @@ _WIN_PATH = re.compile(r"(?:\\\\\?\\)?[A-Za-z]:[\\/][^\s'\"<>|]*")
 
 
 class Canon:
-    """Ids to candidate labels; timestamps, offsets, paths and hashes out; floats rounded."""
-
     def __init__(self, ids: dict[str, str]) -> None:
         self.ids = ids
         # Prose names a candidate by an id prefix ("crossover 2dda4b+917e53", "parent c27b1862").
@@ -808,28 +888,14 @@ def _id_map(ledger: list[dict[str, Any]], rounds: list[dict[str, Any]]) -> dict[
         for c in d.get("candidate_scores") or []:
             if c.get("candidate_id") and c.get("label"):
                 ids.setdefault(c["candidate_id"], c["label"])
-    # A search point a LAYER re-mints without a label (L2/L3 rewrap the parent the next round
-    # mutates) is named by its lineage: "<parent label>~<source node>".
-    for _ in range(3):
-        for d in rounds:
-            lin = (d.get("opt_sp") or {}).get("lineage") or {}
-            oid = lin.get("id")
-            if not isinstance(oid, str) or oid in ids:
-                continue
-            parents = lin.get("parent_ids") or []
-            plabel = next((ids[p] for p in parents if p in ids), None)
-            if plabel is None and parents:
-                continue
-            ids[oid] = f"{plabel or 'root'}~{str(lin.get('source') or '').split(':')[-1] or '?'}"
-    # A rewrapped parent no persisted document names is named by the round it parents.
     for r in ledger:
         if r.get("record_type") == "candidate_minted":
-            for pid in r.get("parent_ids") or []:
+            for pid in (r.get("lineage") or {}).get("parent_ids") or []:
                 ids.setdefault(pid, f"parent@R{r.get('round')}")
     for d in rounds:
         for c in d.get("candidate_scores") or []:
-            if c.get("reference_id"):
-                ids.setdefault(c["reference_id"], f"parent@R{d.get('round')}")
+            if reference := ((c.get("vs_reference") or {}).get("a") or {}).get("address"):
+                ids.setdefault(reference["individual_id"], f"parent@R{d.get('round')}")
     return ids
 
 
@@ -844,15 +910,14 @@ CANDIDATE_KEYS = (
     "pipeline_overlay", "accuracy", "composite_fitness", "total", "evaluators", "scored_samples",
     "expected_samples", "cached_samples", "input_tokens", "output_tokens", "outcome",
     "validation_failures", "runtime_failures", "elimination_context", "degradation_context",
-    "reference_id", "reference_accuracy", "reference_composite", "reference_lift",
-    "reference_lift_ci_lo", "reference_lift_ci_hi", "theta", "theta_se", "theta_caveat",
-    "mean_fitness_ci_lo", "mean_fitness_ci_hi",
+    "vs_reference", "theta", "theta_se", "theta_caveat", "mean_fitness_ci_lo",
+    "mean_fitness_ci_hi",
 )  # fmt: skip
 ROUND_KEYS = (
-    "round", "label", "accuracy", "composite_fitness", "total", "improved", "p_value",
-    "verdict_reason", "separable", "degraded_samples", "not_attempted", "unscored", "deprecated",
-    "candidates_scored", "electable_count", "status", "prompt_fields", "pipeline_params",
-    "evaluators", "overlap", "overlap_results", "selected_labels", "optimizer_state",
+    "round", "label", "accuracy", "composite_fitness", "total", "improved", "verdict_reason",
+    "degraded_samples", "not_attempted", "unscored", "deprecated", "candidates_scored",
+    "electable_count", "status", "prompt_fields", "pipeline_params", "evaluators", "overlap",
+    "overlap_results", "selected_labels", "optimizer_state",
 )  # fmt: skip
 
 
@@ -862,16 +927,20 @@ def _round(d: dict[str, Any], ids: dict[str, str]) -> dict[str, Any]:
     out["ability"] = {k: ability.get(k) for k in ("theta", "se", "ruler_n", "caveat")}
     health = d.get("health") or {}
     out["health"] = {k: health.get(k) for k in ("grade", "cause", "suggested_action")}
-    board = {r.get("candidate_id") or r.get("label"): r for r in d.get("scoreboard") or []}
+    readings = [r["reading"] for r in d.get("scoreboard") or []]
+    board = {r["arm"]["candidate_id"] or r["arm"]["label"]: r for r in readings}
     cands = []
     for c in d.get("candidate_scores") or []:
-        row = board.get(c.get("candidate_id")) or board.get(c.get("label")) or {}
+        row = board.get(c.get("candidate_id")) or board.get(c.get("label"))
         cands.append(
-            {**{k: c.get(k) for k in CANDIDATE_KEYS}, "is_selected": row.get("is_selected")}
+            {
+                **{k: c.get(k) for k in CANDIDATE_KEYS},
+                "is_selected": None if row is None else row["election"]["selected"],
+            }
         )
     out["candidates"] = sorted(cands, key=lambda c: str(c["label"]))
     out["scoreboard_order"] = [
-        ids.get(r.get("candidate_id") or "", r.get("label")) for r in d.get("scoreboard") or []
+        ids.get(r["arm"]["candidate_id"], r["arm"]["label"]) for r in readings
     ]
     out["parent_cells"] = _cells(d.get("results"))
     out["arm_cells"] = {
@@ -888,9 +957,15 @@ LEDGER_KEYS: dict[str, tuple[str, tuple[str, ...]]] = {
     "election": ("elections", ("round", "selected_labels", "fit")),
     "candidate_minted": (
         "candidates_minted",
-        ("round", "idx", "label", "parent_ids", "source", "changes_description"),
+        ("round", "idx", "label", "lineage"),
     ),
     "phase": ("phases", ("round", "phase", "event")),
+    "round_entered": ("rounds_entered", ("round",)),
+    "round_closed": (
+        "rounds_closed",
+        ("round", "label", "accuracy", "composite_fitness", "improved", "electable_count"),
+    ),
+    "run_phase": ("run_phases", ("run_phase", "stop_reason")),
     "llm_call": ("optimizer_calls", ("round", "node", "candidate_idx")),
     "round_warning": ("round_warnings", ("round", "kind", "severity", "detail")),
     "ruler": ("rulers", ("round",)),
@@ -914,11 +989,8 @@ def _ledger(ledger: list[dict[str, Any]], canon: Canon) -> dict[str, Any]:
             continue
         name, keys = LEDGER_KEYS[kind]
         entry = {k: r.get(k) for k in keys}
-        payload = r.get("payload") or {}
-        if kind == "phase" and r.get("event") == "terminal":
-            entry["payload"] = {k: v for k, v in payload.items() if k != "view"}
-        elif kind == "llm_call":
-            entry["repairs"] = len(payload.get("schema_repair_errors") or [])
+        if kind == "llm_call":
+            entry["repairs"] = len((r.get("payload") or {}).get("schema_repair_errors") or [])
         elif kind == "ruler":
             entry.update({k: (r.get("ruler") or {}).get(k) for k in RULER_KEYS})
         out[name].append(_as_sets(canon(entry)) if kind == "decision" else canon(entry))
@@ -938,12 +1010,15 @@ def extract(cycle: Path, bench: BenchScore | None) -> dict[str, Any]:
         json.loads(p.read_text(encoding="utf-8")) for p in sorted((cycle / "rounds").glob("*.json"))
     ]
     ledger = _jsonl(cycle / ".runtime" / "ledger.jsonl")
-    index = json.loads((cycle / "index.json").read_text(encoding="utf-8"))
+    folded = read_cycle_index(cycle)
+    assert folded is not None, f"{cycle.name} ran without minting its cycle"
+    index = folded.model_dump(mode="json")
     ids = _id_map(ledger, rounds)
     canon = Canon(ids)
-    final = index.get("final") or {}
+    final = index["final"] or {}
     run = {
-        **{k: index.get(k) for k in ("stop_reason", "n_rounds", "best_round")},
+        "stop_reason": index["stop_reason"],
+        "n_rounds": len(index["rounds"]),
         **{
             k: final.get(k)
             for k in (
@@ -952,9 +1027,8 @@ def extract(cycle: Path, bench: BenchScore | None) -> dict[str, Any]:
                 "result_pipeline_params",
             )
         },
-        # The headline the run returned, read off the passes its campaign's result banks.
         "bench": None if bench is None else bench.model_dump(mode="json"),
-        "round_index": index.get("rounds"),
+        "round_index": index["rounds"],
     }  # fmt: skip
     return {
         "run": canon(run),
@@ -963,13 +1037,7 @@ def extract(cycle: Path, bench: BenchScore | None) -> dict[str, Any]:
     }
 
 
-# ---------------------------------------------------------------------------------------------
-# The entry: guard the home, then one child process per optimizer
-# ---------------------------------------------------------------------------------------------
-
-
 def digests() -> dict[str, str]:
-    """The L4 identity digests: the estimator's source, and each optimizer's treatment."""
     complete_registries()
     out = {"estimator": module_source_digest(*measurement_modules())}
     for name in sorted(optimizers.runtimes()):
@@ -977,17 +1045,29 @@ def digests() -> dict[str, str]:
     return out
 
 
-def claim_home() -> Path:
-    """The home named explicitly, empty or an earlier offline run's — never a real workspace."""
+def named_home() -> Path:
     named = os.environ.get("PROMPTPOTTER_HOME")
     if not named:
         raise SystemExit("offline run: set PROMPTPOTTER_HOME to the directory it may write into")
-    home = Path(named.removeprefix("\\\\?\\")).expanduser().resolve()
+    return Path(named.removeprefix("\\\\?\\")).expanduser().resolve()
+
+
+def stands_green(home: Path, run: str, key: str | None) -> bool:
+    try:
+        stamp = json.loads((home / STAMP).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return key is not None and (stamp.get("run"), stamp.get("green")) == (run, key)
+
+
+def claim_home(home: Path, stamp: dict[str, object]) -> Path:
+    """Stamped before anything else is written, so a killed run leaves a claimable home."""
     if home.is_dir() and any(home.iterdir()):
         if not (home / STAMP).is_file():
             raise SystemExit(f"offline run: {home} holds files and no {STAMP}; refusing to write")
         rmtree_robust(home)
     home.mkdir(parents=True, exist_ok=True)
+    (home / STAMP).write_text(json.dumps(stamp, indent=1) + "\n", encoding="utf-8")
     return home
 
 
@@ -1003,11 +1083,23 @@ def child_env(home: Path) -> dict[str, str]:
     return env
 
 
-def decided(workspace: Path) -> dict[str, Any]:
-    """A run's decisions less the ledger streams a resume appends its own init records to."""
+def decided(workspace: Path, *, after: int) -> dict[str, Any]:
+    """Less what a resume legitimately moves: its init records and the checkouts it deleted."""
     doc: dict[str, Any] = json.loads((workspace / "decisions.json").read_text(encoding="utf-8"))
     kept = {k: v for k, v in doc["ledger"].items() if k not in RESUME_APPENDS}
-    return {**doc, "ledger": kept}
+    return {**doc, "ledger": kept, "rounds": [r for r in doc["rounds"] if r["round"] > after]}
+
+
+def moved_against(workspace: Path, earlier: Path) -> str:
+    if not (earlier / "decisions.json").is_file():
+        return f"no run in {earlier}"
+
+    def held(home: Path) -> dict[str, object]:
+        requests = {p.name: p.read_bytes() for p in sorted((home / "requests").iterdir())}
+        return {"decisions": (home / "decisions.json").read_bytes(), "requests": requests}
+
+    now, then = held(workspace), held(earlier)
+    return ", ".join(f"{part} {'UNMOVED' if now[part] == then[part] else 'MOVED'}" for part in now)
 
 
 def main() -> int:
@@ -1025,8 +1117,22 @@ def main() -> int:
         action="store_true",
         help="run two arms of one head-to-head beside a foreign campaign, and without it",
     )
+    ap.add_argument(
+        "--bench-trigger",
+        choices=get_args(BenchTrigger),
+        default="at_end",
+        help="`manual` runs every campaign as the default config does, fails on a bench cell "
+        "sent before the pass is asked for, then asks for it",
+    )
+    ap.add_argument(
+        "--against",
+        type=Path,
+        help="an earlier run's home: print per optimizer whether its decisions and requests moved",
+    )
     ap.add_argument("--child", help=argparse.SUPPRESS)
     ap.add_argument("--pause-after", type=int, help=argparse.SUPPRESS)
+    ap.add_argument("--terminal", choices=("new", "resume"), help=argparse.SUPPRESS)
+    ap.add_argument("--interrupts", type=int, default=0, help=argparse.SUPPRESS)
     args = ap.parse_args()
     if args.digests:
         print(json.dumps(digests(), indent=1))
@@ -1046,39 +1152,82 @@ def main() -> int:
                 )
             )
             return 0
+        if args.terminal:
+            run_terminal(
+                args.child,
+                workspace,
+                args.terminal,
+                rounds=args.rounds,
+                rows=args.rows,
+                interrupts=args.interrupts,
+            )
+            return 0
         one = run_one(
-            args.child, workspace, rounds=args.rounds, rows=args.rows, pause_after=args.pause_after
+            args.child,
+            workspace,
+            rounds=args.rounds,
+            rows=args.rows,
+            pause_after=args.pause_after,
+            bench_trigger=args.bench_trigger,
         )
         print(asyncio.run(one)[0])
         return 0
 
-    home = claim_home()
+    asked = [f"--{k}={v}" for k, v in sorted(vars(args).items()) if v != ap.get_default(k)]
+    run = " ".join([OFFLINE_RUN, *(a for a in asked if not a.startswith("--against="))])
+    kept = KeptVerdicts.open()
+    key = None if kept is None else kept.key(OFFLINE_RUN_READS)
+    home = named_home()
+    if args.against is None and stands_green(home, run, key):
+        print(f"offline run: unchanged since green -- {home}")
+        return 0
+    stamp: dict[str, object] = {"offline": True, "note": LABEL, "run": run}
+    claim_home(home, stamp)
+    end_children_with_this_process()
     complete_registries()
     arm_names = args.optimizer or ["potter", "capo"]
     names = list(CONTROLLED) if args.controlled else args.optimizer or sorted(optimizers.runtimes())
-    stamp = {"offline": True, "note": LABEL, "workspaces": names}
+    stamp["workspaces"] = names
     (home / STAMP).write_text(json.dumps(stamp, indent=1) + "\n", encoding="utf-8")
-    # One workspace each: the archive and the δ ruler pool across campaigns in a workspace, so a
-    # shared one would let one optimizer's run move another's decisions.
-    child_args = ["--rounds", str(args.rounds), "--rows", str(args.rows)]
+    # One workspace each: a shared archive and δ ruler let one optimizer's run move another's.
+    child_args = [
+        "--rounds", str(args.rounds), "--rows", str(args.rows),
+        "--bench-trigger", args.bench_trigger,
+    ]  # fmt: skip
     if args.controlled:
         child_args += [f"--optimizer={name}" for name in arm_names]
     t0 = time.monotonic()
 
-    def spawn(name: str, workspace: Path, *extra: str) -> subprocess.Popen[bytes]:
-        workspace.mkdir()
-        with (workspace / "run.log").open("w", encoding="utf-8") as log:
-            return subprocess.Popen(
+    width = min(OFFLINE_CHILDREN, memory_budget_mb() // OFFLINE_CHILD_MB)
+    pool = ThreadPoolExecutor(max(1, width))
+
+    def run_child(name: str, workspace: Path, log: str, *extra: str) -> int:
+        with (workspace / log).open("w", encoding="utf-8") as out:
+            return subprocess.run(
                 [sys.executable, __file__, "--child", name, *child_args, *extra],
                 cwd=workspace,
                 env=child_env(workspace),
-                stdout=log,
+                stdout=out,
                 stderr=subprocess.STDOUT,
-            )
+            ).returncode
+
+    def spawn(name: str, workspace: Path, *extra: str) -> Future[int]:
+        workspace.mkdir()
+        return pool.submit(run_child, name, workspace, "run.log", *extra)
+
+    def terminal(workspace: Path, verb: str, interrupts: int) -> int:
+        flags = (f"--terminal={verb}", f"--interrupts={interrupts}")
+        return run_child(names[0], workspace, f"{verb}.log", *flags)
 
     children = {name: spawn(name, home / name) for name in names}
-    # The same campaign in a workspace of its own, paused at a round boundary and ended on a
-    # session rebuilt from disk: it must decide what the uninterrupted one decided.
+    stopped = (
+        {}
+        if args.controlled
+        else {
+            count: pool.submit(interrupted, terminal, home / names[0] / leg, count)
+            for count, leg in INTERRUPTED.items()
+        }
+    )
     pause_after = min(1, args.rounds - 1)
     resumed = (
         {}
@@ -1091,7 +1240,7 @@ def main() -> int:
     failed = 0
     for name, child in children.items():
         workspace = home / name
-        if rc := child.wait():
+        if rc := child.result():
             failed += 1
             print(f"{name}: FAILED (exit {rc}) -- {workspace / 'run.log'}")
             continue
@@ -1099,23 +1248,37 @@ def main() -> int:
             continue
         run = json.loads((workspace / "decisions.json").read_text(encoding="utf-8"))["run"]
         (cycle,) = (workspace / "projects").glob("*/campaigns/*/cycles/*")
-        failed += run["bench"] is None
         bench = run["bench"]
-        lift = None if bench is None else bench["lift"][bench["headline"]]
-        headline = "NO BENCH HEADLINE" if lift is None else f"{lift['value']:+.3f}"
+        failed += not _graded(bench)
+        lift = None if bench is None else bench["vs_origin"]["headline"]
+        headline = (
+            f"{lift['estimate']['value']:+.3f}"
+            if lift is not None
+            else "NO BENCH HEADLINE"
+            if bench is None
+            else f"none ({bench['vs_origin']['state']})"
+        )
         print(f"{name}: {run['stop_reason']}, bench lift {headline} -- {cycle}")
-        if rc := resumed[name].wait():
+        if args.against is not None:
+            print(
+                f"{name}: against {args.against}: {moved_against(workspace, args.against / name)}"
+            )
+        if rc := resumed[name].result():
             failed += 1
             print(f"{name}: RESUME FAILED (exit {rc}) -- {workspace / RESUMED / 'run.log'}")
             continue
-        again = decided(workspace / RESUMED)
-        same = decided(workspace) == again
+        again = decided(workspace / RESUMED, after=pause_after)
+        same = decided(workspace, after=pause_after) == again
         # A pause at the origin's boundary replays round 0 on resume, which re-records it.
-        failed += again["run"]["bench"] is None or (pause_after > 0 and not same)
+        failed += not _graded(again["run"]["bench"]) or (pause_after > 0 and not same)
         print(
             f"{name}: paused after round {pause_after} and resumed, decisions "
             f"{'UNMOVED' if same else 'MOVED'}"
         )
+    for count, leg in stopped.items():
+        ok, said = leg.result()
+        failed += not ok
+        print(f"{names[0]}: `new` under {count} SIGINT: {said if ok else 'FAILED -- ' + said}")
     if args.controlled and not failed:
         beside, bare = (home / name for name in CONTROLLED)
         for arm in (f"arm-{name}" for name in arm_names):
@@ -1127,6 +1290,13 @@ def main() -> int:
         lines = (beside / "run.log").read_text(encoding="utf-8").splitlines()
         print("\n".join(line for line in lines if line.startswith(("skip on", "arm ", "head-to-"))))
     print(f"wall clock {time.monotonic() - t0:.0f}s")
+    # Filed only where the sources read the same after the run as before it.
+    if not failed and kept is not None and key == kept.key(OFFLINE_RUN_READS):
+        (home / STAMP).write_text(
+            json.dumps({**stamp, "green": key}, indent=1) + "\n", encoding="utf-8"
+        )
+        if run == OFFLINE_RUN:  # the gate's check of the same name stands on this run too
+            kept.record({OFFLINE_RUN: key})
     return 1 if failed else 0
 
 
