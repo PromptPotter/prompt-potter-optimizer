@@ -1,100 +1,133 @@
-"""``RunControl``, what steers a run from outside it, and the phase transitions the runner — SOLE
-declarer of ``running`` / ``paused`` — puts on the ledger, so every surface reads one truth."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Literal, cast
 
-from promptpotter.domain.phases import CONTROL_PHASE, REFUSAL_STOPS, RunPhase, StopReason
-from promptpotter.domain.run_records import PhaseRecord
+from promptpotter.domain.phases import (
+    REFUSAL_STOPS,
+    GateDecision,
+    PauseCause,
+    RunPhase,
+    StopOutcome,
+    StopReason,
+    stop_reason_outcome,
+)
+from promptpotter.domain.run_records import RunPhaseRecord
 from promptpotter.infrastructure.llm.spend_book import SpendBook, unbounded_spend_book
-from promptpotter.infrastructure.runtime_flags import read_sample_lookahead, spend_sample_lookahead
-from promptpotter.infrastructure.store.layout import CycleLayout
+from promptpotter.infrastructure.llm.telemetry import emit_command_ack
+from promptpotter.infrastructure.runtime_flags import requested_lookahead, standing_controls
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import Controls
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
     from pathlib import Path
 
     from promptpotter.application.initialization.session import Session
-    from promptpotter.application.views.view_models import RunSpendView
+    from promptpotter.domain.phase_views import RunSpendView
 
-__all__ = ["RunControl", "declare_run_phase"]
+__all__ = ["RunControl", "declare_run_phase", "declare_run_stop"]
 
 
 @dataclass(frozen=True)
 class RunControl:
-    """The operator's flags on one cycle, an enclosing run's stop, and the spend ceiling, as the
-    run polls them. Unbound it steers nothing; ``runner/entry.py`` binds one per cycle."""
+    """Every ``take_*`` / ``spend_*`` acks on the run's own ledger: call inside the launch that bound it."""
 
-    # ``None`` until a cycle exists: every flag is pressed on a cycle's directory.
     cycle_dir: Path | None = None
-    # An L4 spawner's stop, which reaches the cycle instrumenting it. Its look-ahead depth does
-    # not: inherited, one arming would multiply concurrency at every nested level.
-    enclosing_pause: Callable[[], bool] | None = None
-    # The run's own book — the one home of what it counts against its ceiling. Unbound it holds
-    # no ceiling, so it trips nothing.
+    # Outermost first. Their pause stops this run; their look-ahead never reaches it — inherited,
+    # one arming would multiply concurrency at every nested level.
+    enclosing: tuple[Path, ...] = ()
     book: SpendBook = field(default_factory=unbounded_spend_book)
-    # A look-ahead depth held for the whole run and never spent, where no round exists to spend
-    # one (a screen); ``None`` reads the cycle's flag.
+    # Held for the whole run and never spent (a screen has no round); ``None`` reads the inbox.
     held_lookahead: int | None = None
 
+    def _inbox(self) -> Controls:
+        return Controls() if self.cycle_dir is None else standing_controls(self.cycle_dir)
+
     def pause_requested(self) -> bool:
-        """A pause is a CLEAN EXIT, never an in-process hold. Poll it only where work already done
-        is on disk, so pausing cannot lose an accumulated datapoint."""
-        if self.cycle_dir is not None and CycleLayout(self.cycle_dir).pause_flag.is_file():
+        """A pause is a CLEAN EXIT: poll it only where work already done is on disk."""
+        if self._inbox().pause is not None:
             return True
-        return self.enclosing_pause is not None and self.enclosing_pause()
+        return any(standing_controls(outer).pause is not None for outer in self.enclosing)
+
+    def take_pause(self) -> tuple[PauseCause, str] | None:
+        """``None`` where nothing on a ledger asked: a signal or a cancellation, which the caller names."""
+        asked = self._inbox().pause
+        if asked is not None:
+            emit_command_ack(
+                command_id=asked.command_id,
+                status="applied",
+                effect={"run_phase": RunPhase.PAUSED.value},
+            )
+            who = f" by {asked.issued_by}" if asked.issued_by else ""
+            return PauseCause.COMMAND, f"pause-cycle{who}"
+        for outer in reversed(self.enclosing):
+            if standing_controls(outer).pause is not None:
+                return PauseCause.ENCLOSING, f"enclosing run {outer.name} was paused"
+        return None
 
     def skip_requested(self) -> bool:
-        return self.cycle_dir is not None and CycleLayout(self.cycle_dir).skip_flag.is_file()
+        return bool(self._inbox().skips)
 
-    def spend_skip(self) -> None:
-        """One-shot: the walk that honours the skip removes it, so exactly one searchpoint is cut."""
-        if self.cycle_dir is not None:
-            CycleLayout(self.cycle_dir).skip_flag.unlink(missing_ok=True)
+    def spend_skip(self) -> bool:
+        skips = self._inbox().skips
+        if not skips:
+            return False
+        emit_command_ack(command_id=skips[0], status="applied", effect={"skipped": 1})
+        return True
+
+    def take_gate_decision(self) -> GateDecision | None:
+        standing = self._inbox().gate_decisions
+        if not standing:
+            return None
+        command_id, decision = standing[0]
+        emit_command_ack(command_id=command_id, status="applied", effect={"decision": decision})
+        return cast("GateDecision", decision)
 
     def sample_lookahead(self) -> int:
         if self.held_lookahead is not None:
             return self.held_lookahead
-        return 1 if self.cycle_dir is None else read_sample_lookahead(self.cycle_dir)
+        return requested_lookahead(self._inbox())
 
     def spend_sample_lookahead(self) -> None:
-        """Spent by the ROUND that scored under the depth, the one loop every armable walk sits in."""
-        if self.held_lookahead is None and self.cycle_dir is not None:
-            spend_sample_lookahead(self.cycle_dir)
+        """One ack per round removes a plain press and leaves an ``auto`` one standing."""
+        if self.held_lookahead is not None:
+            return
+        asked = self._inbox().lookahead
+        if asked is not None and not asked.taken:
+            emit_command_ack(
+                command_id=asked.command_id,
+                status="applied",
+                effect={"cells": asked.cells, "auto": asked.auto},
+            )
 
     def budget_tripped(self) -> StopReason | None:
-        """The stop a phase reads between samples and the loop at a round boundary. Whether a call
-        may be SENT is the book's own answer, at the send."""
+        """Read between samples and at a round boundary; whether a call may be SENT is the book's."""
         refused = self.book.exhausted()
         return None if refused is None else REFUSAL_STOPS[refused]
 
     def spend_used_usd(self) -> float:
-        """A FLOOR while unpriced tokens are outstanding."""
-        return self.book.usd_spent
+        """In the meter's units; a FLOOR while unpriced tokens are outstanding."""
+        return self.book.usd_metered
 
 
-def declare_run_phase(
+def declare_run_phase(session: Session, phase: Literal[RunPhase.RUNNING, RunPhase.GATE]) -> None:
+    ledger = session.state.ledger
+    if ledger is not None:
+        ledger.append(RunPhaseRecord(run_phase=phase))
+
+
+def declare_run_stop(
     session: Session,
-    phase: Literal[RunPhase.RUNNING, RunPhase.PAUSED, RunPhase.GATE, RunPhase.TERMINAL],
+    stop_reason: StopReason,
     *,
-    stop_reason: StopReason | None = None,
+    interrupted_by: PauseCause,
     spend: RunSpendView | None = None,
 ) -> None:
-    """Append a control ``PhaseRecord`` so the projection flips ``run_phase``; no-op before the ledger is bound.
-    ``PAUSED`` is declared where a paused exit ENDS (``runner/entry.py``), never at the checkpoint
-    that raised it: every checkpoint converges there, so a second site is a second record.
-
-    ``TERMINAL`` carries the reason, and it belongs here for the same purpose the rest do: it was
-    pushed straight into the projection by ``LiveDashboardProjection.mark_stopped``, a side door past the
-    ledger, so a cycle could STOP and the record of it existed only in that projection's own output
-    and in ``index.json``. A reader folding the ledger saw a run still going."""
+    """Declared where the run ENDS, never at the checkpoint that raised it: a second site, a second record."""
     ledger = session.state.ledger
     if ledger is None:
         return
-    payload: dict[str, Any] = {} if stop_reason is None else {"stop_reason": stop_reason.value}
-    # Where a run ends, what it spent rides as the record's view, which the readout prints.
-    if spend is not None:
-        payload["view"] = spend
-    ledger.append(PhaseRecord(phase=CONTROL_PHASE, event=str(phase), payload=payload))
+    if stop_reason_outcome(stop_reason) is not StopOutcome.PAUSED:
+        ledger.append(RunPhaseRecord.stop(stop_reason, spend=spend))
+        return
+    cause, detail = session.control.take_pause() or (interrupted_by, "")
+    ledger.append(RunPhaseRecord.stop(stop_reason, cause=cause, detail=detail, spend=spend))

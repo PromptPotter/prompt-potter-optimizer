@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import json
 import logging
-from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple, cast
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
 from pydantic import Field
 
@@ -33,21 +32,22 @@ from promptpotter.application.scoring.candidate_report import (
     is_transient_scoring_abort,
     walk_outcome,
 )
+from promptpotter.application.scoring.cells import closed_round
 from promptpotter.application.scoring.formula import (
     DIALS_KEY,
     origin_anchors,
     parse_dials,
     realize_dials,
-    rescore_results,
 )
 from promptpotter.application.scoring.metrics import INVALID_SCORES, compute_composite_fitness
+from promptpotter.application.scoring.query_loop import ArmSlot
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.bench import partition_bank
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.phases import CampaignPhase, emit_phase
+from promptpotter.domain.phases import CampaignPhase
 from promptpotter.domain.pipeline_overlay import overlay_is_locked_axis_only
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.results import (
@@ -61,11 +61,11 @@ from promptpotter.domain.run_records import (
     CandidateMintedRecord,
     CycleSeed,
     OriginSource,
+    ScoringLockedRecord,
 )
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.store.campaign_store.store import origin_accuracy_of
 from promptpotter.infrastructure.store.dataset_access import (
     DatasetAccessError,
     is_dataset_dir,
@@ -78,7 +78,7 @@ from promptpotter.shared.errors import (
     PayloadInvalidError,
     StoredConfigInvalidError,
 )
-from promptpotter.shared.instrument import (
+from promptpotter.shared.measurement_context import (
     NO_ROUND_SLOT,
     MeasuredCandidate,
     MeasurementRole,
@@ -87,15 +87,19 @@ from promptpotter.shared.instrument import (
 if TYPE_CHECKING:
     from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.run_observers import RunCallbacks
+    from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.domain.scoring import CellSheet
 
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "CampaignOrigin",
+    "DatasetIndexEntry",
     "OriginEntry",
     "canonical_origin_campaign",
     "establish_campaign_origin",
+    "list_datasets",
     "list_origins",
     "prospective_origin_id",
     "rescore_parent",
@@ -108,12 +112,8 @@ async def rescore_parent(
     cycle: Cycle,
     scoring_set: list[Sample],
     *,
-    callbacks: RunCallbacks,
     force_fresh: bool = False,
 ) -> ReferenceReading:
-    """Score the round's parent on THIS round's ``scoring_set``, so election compares on the SAME
-    samples. Without it ``matched_parent_stats`` intersects disjoint sets and returns a fake floor."""
-
     session = cycle.session
     tr = cycle.tracking
     assert tr.current_sp is not None
@@ -123,48 +123,39 @@ async def rescore_parent(
         session,
         label=MeasurementRole.PARENT,
         sample_index=cycle.sample_index,
-        # Ticked, not silenced. This is the LONGEST phase of a held round — the parent walks the
-        # whole panel while the candidates stopped wherever PoBB cut them — so a silenced one
-        # serves `between_samples` throughout, which on a `measured_unit="cell"` connector is tens
-        # of minutes of a live run reading as hung.
-        on_sample_scored=partial(callbacks.on_sample_scored, NO_ROUND_SLOT, 0),
-        on_sample_starting=partial(callbacks.on_sample_started, NO_ROUND_SLOT, 0),
+        # Ticked, not silenced: a silent whole-panel walk serves `between_samples` and reads as hung.
+        slot=ArmSlot(NO_ROUND_SLOT, 0, cycle.opt_sp.id),
         measured=MeasuredCandidate(
             idx=0,
-            candidate_id=cycle.opt_sp.lineage.id,
+            candidate_id=cycle.opt_sp.id,
             label=cycle.rounds[-1].label,
             role=MeasurementRole.PARENT,
         ),
         force_fresh=force_fresh,
     )
-    # Kept: `matched_parent_stats` pairs each candidate on the cells both reached, and the report
-    # carries the shortfall as `scored_samples < expected_samples`. A held round's headline is
-    # this pass, though, so the shortfall is said aloud rather than left for a reader to count.
+    # A partial pass is kept: `read_pair` pairs each candidate on the cells both scored.
     if scored.stopped is not None:
         logger.warning(
             "Round parent %s stopped after %d/%d cells (%s); its floor covers only those.",
             cycle.rounds[-1].label,
-            len(scored.results),
+            len(scored.sheet),
             len(scoring_set),
             scored.stopped,
         )
     return ReferenceReading(
         opt_sp=cycle.opt_sp,
-        results=cast("list[dict[str, Any]]", scored.results),
-        # The gateway's OWN answer — never re-run `compute_composite_fitness` over the same
-        # rows, which drops the evaluator namespace on the way.
+        results=scored.sheet,
+        # The gateway's OWN scores: re-running `compute_composite_fitness` drops the evaluators.
         report=build_score_report(
             cycle.opt_sp,
             (),
             None,
             scored.scores,
-            scored.results,
+            scored.sheet.cells,
             scoring_set,
-            # The parent INDIVIDUAL's label (``C0``, ``C3.1``, …), off the round it won — it
-            # reaches disk, so a synthesized round name here would name no candidate.
+            # The parent INDIVIDUAL's label, off the round it won — it reaches disk.
             label=cycle.rounds[-1].label,
             sp_hash=tr.current_sp.sp_hash(session.pipeline_schema),
-            run_id=scored.run_id,
             outcome=walk_outcome(scored),
             resolved_pipeline_params=tr.current_sp.config_params,
         ),
@@ -172,40 +163,25 @@ async def rescore_parent(
 
 
 class CampaignOrigin(NamedTuple):
-    """The scored origin. ``report`` is C0's measurement in the one shape every individual's takes —
-    the same object deposited on the ledger, so round 0's row cannot be a second computation.
-    ``framing`` is the campaign's, read once here and frozen for the run."""
-
     resolved_origin: OptSearchPoint | None
     report: ScoredCandidate
-    origin_results: list[Any] | None
+    origin_results: CellSheet | None
     framing: TaskDecomposition
-    # The scoring block this measurement LOCKED, where the campaign declared dials: the run
-    # continues under it. ``None`` where there was nothing to lock.
+    # ``None`` where the campaign declared no dials to lock.
     locked_scoring: dict[str, str] | None = None
 
 
 def lock_criterion(
-    session: Session, campaign_config: CampaignConfig, origin_rows: list[dict[str, Any]]
+    session: Session, campaign_config: CampaignConfig, origin_rows: CellSheet
 ) -> dict[str, str] | None:
-    """Turn a scoring block's DECLARED dials into the ``per_cell`` formula they spell, anchored on
-    what the origin just measured, and freeze it into the campaign manifest.
-
-    Once, and it never moves: every later cycle of the campaign reads a plain ``per_cell`` off the
-    manifest, so a fork or a resume is graded on the same anchors as the rounds before it. ``None``
-    where the block declares no dials — a hand-written ``per_cell`` is already locked."""
+    """Locked once: ``pipeline_resolve.py::resolve_campaign_config`` reads the record back."""
     block = campaign_config.scoring
     if not isinstance(block, dict) or DIALS_KEY not in block:
         return None
     formula = realize_dials(parse_dials(block[DIALS_KEY]), origin_anchors(origin_rows))
     locked = {k: v for k, v in block.items() if k != DIALS_KEY} | {"per_cell": formula}
-    campaign = session.store.campaigns.load_campaign(session.hop.campaign_id)
-    # A fork's seed can declare dials over a campaign already locked: those belong to that
-    # cycle's seed, and writing them here would re-grade every sibling.
-    if campaign is not None and campaign.config.get("scoring") == block:
-        session.store.campaigns.update_campaign(
-            campaign.campaign_id, {"config": {**campaign.config, "scoring": locked}}
-        )
+    if (ledger := session.state.ledger) is not None:
+        ledger.append(ScoringLockedRecord(declared=dict(block), locked=locked))
     return locked
 
 
@@ -217,32 +193,28 @@ def try_inherit_fork_origin(
     sp: JobSearchPoint,
     framing: TaskDecomposition,
 ) -> CampaignOrigin | None:
-    """Inherit an operator fork's C0 from its branch-point candidate — a no-edit fork or a
-    model/provider-only steer. Re-scoring would re-roll a different number and the lineage would jump."""
+    """Re-scoring a no-edit or model/provider-only fork re-rolls C0 and the lineage jumps."""
     if seed is None:
         return None
-    # Overlay gate — `render()` below compares the PROMPT and says nothing about the pipeline
-    # the fork RUNS under. A non-locked param edit (temperature, effort, …) changes what the
-    # origin measures → re-score. A model/provider-only steer is the sanctioned babysit path:
-    # C0 is inherited exact and grade C carries the "measured off the origin's model" caveat.
+    # A non-locked param edit changes what the origin measures → re-score.
     if seed.pipeline_overlay and not overlay_is_locked_axis_only(seed.pipeline_overlay):
         return None
 
     store = session.store.campaigns
     index = store.load(session.hop)
-    if not isinstance(index, dict):
+    if index is None or index.fork is None or index.parent_cycle_id is None:
         return None
-    fork = index.get("fork")
-    parent = index.get("parent_cycle_id")
-    if not isinstance(fork, dict) or not isinstance(parent, str) or not parent:
-        return None
-    from_round = fork.get("from_round")
-    from_candidate_id = fork.get("from_candidate_id")
-    if not isinstance(from_round, int) or not isinstance(from_candidate_id, str):
+    parent = index.parent_cycle_id
+    from_round = index.fork.from_round
+    from_candidate_id = index.fork.from_candidate_id
+    if from_round is None or from_candidate_id is None:
         return None
 
-    parent_round = store.load_round_file(
-        CycleHop(campaign_id=session.campaign_id, cycle_id=parent), from_round
+    parent_round = closed_round(
+        session.store,
+        CycleHop(campaign_id=session.campaign_id, cycle_id=parent),
+        from_round,
+        session.scoring.require_scorer(),
     )
     if parent_round is None:
         return None
@@ -253,17 +225,14 @@ def try_inherit_fork_origin(
     if cand is None:
         return None
 
-    # Identity gate: an operator edit changes the render or the shots → re-score.
+    # An operator edit changes the render or the shots → re-score.
     if resolved_origin.prompt_field_dict() != cand.prompt_fields:
         return None
 
     origin_acc = cand.accuracy
-    # The branch-point candidate's recorded per-sample rows, which is what makes the inherited
-    # C0 a faithful copy rather than an empty shell: the strict origin gate assesses round 0 on
-    # real samples, and round-1 hard-sample seeding inherits the origin's per-sample δ evidence.
-    inherited_results = list(parent_round.all_candidate_results.get(from_candidate_id) or [])
-    if not inherited_results:
-        inherited_results = list(parent_round.results)
+    inherited_results = (
+        parent_round.all_candidate_results.get(from_candidate_id) or parent_round.results
+    )
     logger.info(
         "Fork %s: inheriting C0 from branch-point candidate %s (parent %s round %d) "
         "acc=%.4f, %d per-sample rows — skipping origin re-score, straight to L1",
@@ -274,16 +243,12 @@ def try_inherit_fork_origin(
         origin_acc,
         len(inherited_results),
     )
-    # The OSP object, not a prompt-field dict, so the inherited C0 keeps the lineage the seed
-    # stamped — same shape the re-score path produces.
+    # The OSP object, not a prompt-field dict, so the inherited C0 keeps the seed's lineage.
     return CampaignOrigin(
         resolved_origin=resolved_origin,
-        # The branch-point candidate's whole report, re-identified onto this fork's C0:
-        # composite, evaluators, counts and whisker are the parent's measurement or they
-        # are a new one. A model steer moves the searchpoint those rows now stand for.
         report=cand.model_copy(
             update={
-                "candidate_id": resolved_origin.lineage.id,
+                "candidate_id": resolved_origin.id,
                 "label": candidate_label(0, 0),
                 "sp_hash": sp.sp_hash(session.pipeline_schema),
                 "resolved_pipeline_params": sp.config_params,
@@ -294,7 +259,6 @@ def try_inherit_fork_origin(
     )
 
 
-# The seed declares its own provenance; the resolver stamps it.
 _SEED_ORIGIN_LINEAGE = {
     OriginSource.FORK_SEED: "Operator-steered fork — edited searchpoint as origin",
     OriginSource.CAMPAIGN_ORIGIN: "Fresh campaign minted from a chosen prior origin",
@@ -307,9 +271,9 @@ def resolve_origin_opt_search_point(
     dataset_dir: Path | None = None,
     *,
     seed: CycleSeed | None = None,
+    pipeline_params: dict[str, Any] | None,
+    schema: PipelineSchema,
 ) -> OptSearchPoint:
-    """Resolve the origin OptSearchPoint by precedence: a seed with non-empty prompt fields wins
-    outright and short-circuits the dataset lookup, then ``{dataset_dir}/prompts``, then empty."""
     names = prompt_node_names or []
     origin: OptSearchPoint | None = None
 
@@ -333,7 +297,7 @@ def resolve_origin_opt_search_point(
             changes_description="Origin (no prompt node active — param-only optimization)"
         )
 
-    return origin
+    return origin.configured(pipeline_params, schema)
 
 
 async def establish_campaign_origin(
@@ -344,23 +308,18 @@ async def establish_campaign_origin(
     seed: CycleSeed | None,
     listener: RunCallbacks,
 ) -> CampaignOrigin:
-    """The single origin-establishment seam — the OSP is resolved exactly once and shared by the
-    inherited, the unmeasured and the scored branch, which return the same shape."""
-
     resolved_origin = resolve_origin_opt_search_point(
         prompt_node_names=session.pipeline_schema.prompt_node_names(),
         dataset_dir=session.dataset_config_dir,
         seed=seed,
+        pipeline_params=session.pipeline_params,
+        schema=session.pipeline_schema,
     )
-    # The SAME read identity uses. Handed the framing instead, this seam could be given a value
-    # the cycle id never saw.
+    # The SAME read identity uses; handed in, it could be a value the cycle id never saw.
     framing = campaign_framing(session.store, campaign_config, session.dataset_name)
     pipeline_schema = session.pipeline_schema
     sp = resolved_origin.to_job_search_point(
-        base_pipeline_params=session.pipeline_params,
-        schema=pipeline_schema,
-        framing=framing,
-        demo=session.scoring.require_partition().demo,
+        schema=pipeline_schema, framing=framing, demo=session.scoring.require_partition().demo
     )
     inherited = try_inherit_fork_origin(
         session, seed, resolved_origin=resolved_origin, sp=sp, framing=framing
@@ -368,10 +327,7 @@ async def establish_campaign_origin(
     if inherited is not None:
         return inherited
 
-    # Never sniff the searchpoint shape to guess "is there a program here?" — the L4 outer
-    # origin's prose and node configs are both empty because its program IS the inner recursion,
-    # and the skip that guess produced is indistinguishable downstream from a crash. An
-    # unscoreable origin is caught LOUD by the round-0 origin gate, never hidden here.
+    # Never infer "no program" from an empty searchpoint: the L4 outer origin's is empty too.
     if not dataset:
         if isinstance(campaign_config.scoring, dict) and DIALS_KEY in campaign_config.scoring:
             raise PayloadInvalidError(
@@ -379,12 +335,9 @@ async def establish_campaign_origin(
                 "measured cells — this origin measures none. Declare 'per_cell' instead.",
                 code="pipeline_config_invalid",
             )
-        # The resolved origin still travels — dropping it hands back a blank
-        # OptSearchPoint(instruction="").
         return CampaignOrigin(
             resolved_origin=resolved_origin,
-            # Unmeasured reports as unmeasured in the shape a measured one uses: `total=0`
-            # is the no-evidence marker, where a bare 0.0 reads as a real floor of zero.
+            # `total=0` is the no-evidence marker; a bare 0.0 reads as a real floor of zero.
             report=build_score_report(
                 resolved_origin,
                 (),
@@ -394,7 +347,6 @@ async def establish_campaign_origin(
                 [],
                 label=candidate_label(0, 0),
                 sp_hash=sp.sp_hash(pipeline_schema),
-                run_id=None,
                 outcome=ArmOutcome.MEASURED,
                 resolved_pipeline_params=sp.config_params,
             ),
@@ -407,31 +359,21 @@ async def establish_campaign_origin(
     if session.index_terms:
         await session.backend_client.init_session(session.index_terms)
     elif session.backend_client.execution == "remote_http":
-        # Only a wired backend can be broken by an empty term index; an `in_process` one has no
-        # `/matches` to fail.
         logger.warning("No session terms available — /matches calls will fail.")
 
-    # ci=0/ct=1 ⇒ dashboard ticks per-sample during origin like L1.
-    emit_phase(listener.on_phase, CampaignPhase.ORIGIN, "enter", round=0)
+    listener.on_phase(CampaignPhase.ORIGIN, "enter", round=0)
 
-    # C0 is a minted candidate like any other — named on the ledger before it is measured.
     if (ledger := session.state.ledger) is not None:
         ledger.append(
             CandidateMintedRecord(
                 round=0,
                 idx=0,
-                candidate_id=resolved_origin.lineage.id,
-                parent_ids=list(resolved_origin.lineage.parent_ids),
+                candidate_id=resolved_origin.id,
                 label=candidate_label(0, 0),
-                changes_description=resolved_origin.lineage.changes_description,
-                source=resolved_origin.lineage.source,
+                lineage=resolved_origin.lineage,
             )
         )
 
-    # C0 announces itself exactly as an L1 candidate does — same call, same two emissions, so
-    # round 0 carries a walk axis and a readable searchpoint like any other round. `n_priors=0`
-    # is a fact rather than a default: C0 is the first arm, so nothing has been measured for
-    # PoBB to catch up on, and there is no `pipeline_overlay` because nothing proposed a delta.
     listener.announce_candidate(
         0,
         0,
@@ -442,10 +384,8 @@ async def establish_campaign_origin(
     )
 
     try:
-        # The origin is the campaign's whole reference, so a transient-transport abort must not
-        # bank a corrupted floor — re-score once fresh. A config-deterministic abort is NOT
-        # retried; it is a real fault the operator must fix. A pass that stays partial is graded
-        # by coverage (`origin_gate`), which is why nothing here reads `stopped`.
+        # A transient abort must not bank a corrupted floor: re-score once fresh. A pass that stays
+        # partial is graded by coverage (`origin_gate`), which is why nothing here reads `stopped`.
         for attempt in range(2):
             scored = await score_search_point(
                 sp,
@@ -454,67 +394,52 @@ async def establish_campaign_origin(
                 label=MeasurementRole.ORIGIN,
                 measured=None,
                 force_fresh=attempt > 0,
-                on_sample_starting=partial(listener.on_sample_started, 0, 1),
-                on_sample_scored=partial(listener.on_sample_scored, 0, 1),
+                slot=ArmSlot(0, 1, resolved_origin.id),
             )
             if not is_transient_scoring_abort(scored.signal):
                 break
             logger.warning(
                 "Origin scoring hit a transient transport abort — re-scoring once fresh."
             )
-        locked_scoring = lock_criterion(
-            session, campaign_config, cast("list[dict[str, Any]]", scored.results)
-        )
+        sheet, scores = scored.sheet, scored.scores
+        locked_scoring = lock_criterion(session, campaign_config, sheet)
         if locked_scoring is not None:
-            # The rows were graded on correctness alone, the only criterion an unmeasured origin
-            # has. Re-grade them under the one they just anchored — nothing is re-measured.
+            # Re-GRADED under the criterion these rows just anchored; nothing is re-measured.
             populate_session_scoring(
                 session,
                 campaign_config.model_copy(update={"scoring": locked_scoring}),
                 source=RunSource.ORIGIN,
             )
-            rescore_results(
-                cast("list[dict[str, Any]]", scored.results), session.scoring.require_scorer()
-            )
-            scored.scores.update(compute_composite_fitness(scored.results, pipeline_schema))
-        # Candidate 0 of round 0, measured ONCE. This object is both what the ledger receives
-        # and what round 0's row is built from — never re-derive either from these rows.
+            sheet = session.scoring.require_scorer().sheet(cell.facts for cell in sheet)
+            scores = compute_composite_fitness(sheet, pipeline_schema)
+        # Both what the ledger receives and round 0's row — never re-derive either from these rows.
         report = build_score_report(
             resolved_origin,
             (),
             None,
-            scored.scores,
-            scored.results,
+            scores,
+            sheet.cells,
             scoring_set,
             label=candidate_label(0, 0),
             sp_hash=sp.sp_hash(pipeline_schema),
-            run_id=scored.run_id,
             outcome=walk_outcome(scored),
             resolved_pipeline_params=sp.config_params,
         )
-        listener.on_candidate_scored(0, 1, report.model_dump())
+        listener.on_candidate_scored(0, 1, report)
     finally:
-        emit_phase(listener.on_phase, CampaignPhase.ORIGIN, "exit", round=0)
+        listener.on_phase(CampaignPhase.ORIGIN, "exit", round=0)
 
     return CampaignOrigin(
         resolved_origin=resolved_origin,
         report=report,
-        origin_results=scored.results,
+        origin_results=sheet,
         framing=framing,
         locked_scoring=locked_scoring,
     )
 
 
 def prospective_origin_id(stores: Stores, dataset_dir: Path, dataset_name: str) -> str | None:
-    """The dataset's CURRENT committed config-aware origin id — the same hash a fresh mint would
-    stamp, computed from disk with no Session.
-
-    The PROSPECTIVE twin of ``pipeline_resolve.resolve_pipeline_for_campaign``, and deliberately
-    NOT that function: it answers for a dataset that has no campaign yet, so there is no campaign
-    layer to apply and no manifest to freeze. What the two share is the merge primitive
-    ``resolve_pipeline_config_params``, which is what keeps this id from diverging from the one a
-    real run stamps. It lived in the origins ROUTER, which put a hash computation behind an
-    adapter no other entry point could reach."""
+    """Not ``resolve_pipeline_for_campaign``: a dataset with no campaign has no manifest to freeze."""
     try:
         experiment = experiment_outside_run(dataset_dir)
         schema = parse_pipeline_response(
@@ -537,6 +462,8 @@ def prospective_origin_id(stores: Stores, dataset_dir: Path, dataset_name: str) 
         opt_sp = resolve_origin_opt_search_point(
             prompt_node_names=schema.prompt_node_names(),
             dataset_dir=dataset_dir,
+            pipeline_params=base_pp,
+            schema=schema,
         )
         items = resolve_dataset_items(stores, dataset_name)
         if not items:
@@ -546,7 +473,6 @@ def prospective_origin_id(stores: Stores, dataset_dir: Path, dataset_name: str) 
             opt_sp,
             schema,
             list(partition.search),
-            base_pp,
             framing=campaign_framing(stores, cfg, dataset_name),
             demo=partition.demo,
         ).removeprefix("cycle_")
@@ -560,10 +486,41 @@ def prospective_origin_id(stores: Stores, dataset_dir: Path, dataset_name: str) 
         NotFoundError,
         PayloadInvalidError,
     ):
-        # A SURVEY over every tenant dataset: an unreadable neighbour, or an outer one whose inner
-        # benchmark does not resolve, drops itself, never the list. Direct reads still raise.
+        # A SURVEY: an unreadable neighbour drops itself, never the list. Direct reads still raise.
         logger.exception("origins: prospective origin id failed for %s", dataset_name)
         return None
+
+
+class DatasetIndexEntry(StrictModel):
+    """One row in the dataset registry — backs the Dashboard ``New campaign`` view.
+
+    Wire shape pinned in ``docs/specs/api-openapi.yaml::DatasetIndexEntry``.
+    """
+
+    name: str = Field(description="Slug used as the path segment under `datasets/`.")
+    title: str | None = Field(default=None, description="Display title (from `dataset.md`).")
+    tier: Literal["yours", "install"] = Field(
+        description=(
+            "``yours`` = user-owned Origin under ``projects/{tenant}/datasets/{slug}/``. "
+            "``install`` = content that ships with the product at ``datasets/{slug}/`` "
+            "(benchmarks, demos, ``promptpotter-self``) — tracked in git, so readable by "
+            "anyone using the install. A ``yours`` slug shadows an ``install`` one."
+        ),
+    )
+    n_samples: int | None = Field(
+        default=None,
+        description=(
+            "Sample bank size from ``cache.json``; ``null`` when the cache has not been "
+            "materialized, which is not the same as a dataset holding zero usable rows."
+        ),
+    )
+
+
+def list_datasets(stores: Stores) -> list[DatasetIndexEntry]:
+    return [
+        DatasetIndexEntry(name=ref.name, title=ref.title, tier=ref.tier, n_samples=ref.n_samples)
+        for ref in list_readable_datasets(stores)
+    ]
 
 
 class OriginEntry(StrictModel):
@@ -581,7 +538,8 @@ class OriginEntry(StrictModel):
         description="Active campaigns minted from this origin (0 = prepared, not yet run)",
     )
     origin_accuracy: float | None = Field(
-        default=None, description="The origin's C0 score, from the canonical campaign's index.json"
+        default=None,
+        description="The origin's C0 score, as the root cycle's standing round 0 closed",
     )
     prepared: bool = Field(
         default=False, description="True = a ready dataset config with no campaign yet"
@@ -590,8 +548,7 @@ class OriginEntry(StrictModel):
 
 
 def _campaigns_by_origin(stores: Stores) -> dict[str, list[Campaign]]:
-    """Every active campaign in the tenant, grouped by origin. Tenant-scoped and NOT owner-filtered:
-    a CLI-minted campaign's owner id differs from a browser OIDC session's within the SAME tenant."""
+    """NOT owner-filtered: a CLI mint's owner id differs from a browser session's in ONE tenant."""
     by_origin: dict[str, list[Campaign]] = {}
     for campaign in stores.campaigns.list_campaigns(None, lifecycle="active", owner_user_id=None):
         by_origin.setdefault(campaign.origin_id, []).append(campaign)
@@ -603,8 +560,7 @@ def _canonical(group: list[Campaign]) -> Campaign:
 
 
 def canonical_origin_campaign(stores: Stores, origin_id: str) -> Campaign | None:
-    """The earliest active campaign on *origin_id* — the one a reuse reads its config and seed
-    from. ``None`` for a *prepared* origin, which has no campaign yet."""
+    """``None`` for a *prepared* origin, which has no campaign yet."""
     group = _campaigns_by_origin(stores).get(origin_id)
     return _canonical(group) if group else None
 
@@ -613,8 +569,6 @@ def _campaign_backed_origins(stores: Stores, n_samples: dict[str, int | None]) -
     out: list[OriginEntry] = []
     for origin_id, group in _campaigns_by_origin(stores).items():
         canonical = _canonical(group)
-        # A campaign outlives its dataset, and reuse has nothing to run without one. The SAME
-        # resolver the reuse asks, so the list and the action cannot disagree.
         try:
             readable_dataset_dir(stores, canonical.dataset_name)
         except DatasetAccessError:
@@ -624,12 +578,13 @@ def _campaign_backed_origins(stores: Stores, n_samples: dict[str, int | None]) -
                 canonical.dataset_name,
             )
             continue
-        # The best origin score across the origin's campaigns: origin scoring is
-        # nondeterministic at the backend, so runs of one origin vary.
+        # The BEST across the origin's campaigns: origin scoring is nondeterministic at the backend.
         scores = [
-            score
+            origin.accuracy
             for c in group
-            if (score := origin_accuracy_of(stores.campaigns.load(c.root_hop) or {})) is not None
+            if (index := stores.campaigns.load(c.root_hop)) is not None
+            for origin in index.rounds[:1]
+            if origin.round == 0 and origin.accuracy is not None
         ]
         out.append(
             OriginEntry(
@@ -646,8 +601,6 @@ def _campaign_backed_origins(stores: Stores, n_samples: dict[str, int | None]) -
 
 
 def list_origins(stores: Stores) -> list[OriginEntry]:
-    """Every runnable origin in the tenant: each ready dataset's CURRENT config-aware origin while
-    that exact config has no campaign yet, then the campaign-backed ones, newest first."""
     datasets = list_readable_datasets(stores)
     campaign_backed = _campaign_backed_origins(stores, {r.name: r.n_samples for r in datasets})
     taken = {o.origin_id for o in campaign_backed}
@@ -656,8 +609,6 @@ def list_origins(stores: Stores) -> list[OriginEntry]:
         if ref.tier != "yours" or not ref.n_samples:
             continue
         dataset_dir = stores.tenant_datasets.dataset_dir(ref.name)
-        # Ready = a prompts/ dir (any node-named or `default.yaml` prompt, resolved as the mint
-        # resolves it) beside a pipeline.yaml — never one filename.
         if not has_dataset_prompts(dataset_dir) or not is_dataset_dir(dataset_dir):
             continue
         origin_id = prospective_origin_id(stores, dataset_dir, ref.name)

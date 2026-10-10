@@ -1,22 +1,21 @@
-"""The embedded launch entry — a host Python program driving one campaign inside its own event loop.
-
-Peer of ``jobs/launcher/mint_and_start.py``, which hands the run to its own process and takes
-a machine slot or queues for one; this one blocks in the caller's loop and takes no slot. Two steps
-rather than one because every caller does its own work between them — build the config, resolve the
-pipeline, slice the trainset.
-
-Not to be confused with ``Connector.execution = "in_process"``, which is the BACKEND running inside
-our process; this is us running inside someone else's program.
-"""
+"""The embedded launch entry: a host program drives one campaign in its own loop, holding no slot."""
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
+from promptpotter.application.commands.payloads import OriginGateDecisionPayload
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.initialization.wiring import init_services
-from promptpotter.application.jobs.mint import fresh_campaign_id, mint_framed_cycle
+from promptpotter.application.jobs.launcher.admission import probe_backend
+from promptpotter.application.jobs.mint import (
+    fresh_campaign_id,
+    mint_framed_cycle,
+    refuse_drifted_resume,
+)
 from promptpotter.application.jobs.quota import unadmitted_limits
 from promptpotter.application.maintenance.archive_maintenance import (
     compact_measurement_archive,
@@ -26,31 +25,29 @@ from promptpotter.application.maintenance.archive_maintenance import (
 )
 from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.runner.entry import RunMode, run_optimization
-from promptpotter.application.runner.origin_gate import submit_gate_decision
+from promptpotter.application.runner.grade_bench import grade_line_bench
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.config.settings import DEFAULT_BACKEND_ID, DEFAULT_BACKEND_URL
 from promptpotter.domain.campaign import ArmRequest
 from promptpotter.domain.results import CycleResult
 from promptpotter.infrastructure.identity.migration import registered_or_default_identity
+from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
 from promptpotter.infrastructure.store.stores import build_stores
+from promptpotter.shared.errors import NotFoundError
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
+    from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.launch_limits import LaunchLimits
+    from promptpotter.domain.phases import GateDecision
     from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.store.stores import Stores
 
-# `submit_gate_decision` is re-exported under its OWN name because this module IS the embedded
-# surface — a capability it does not name is one a host program cannot find, and a second spelling
-# for it would be a synonym rather than a channel. A host with no TTY and no HTTP client had no
-# third way to answer: `origin_gate` defaults to `strict`, `_spawn_stdin_reader` returns None off a
-# Jupyter/harness stdin, and `_await_gate_decision` then polls forever.
-# The archive-maintenance passes are re-exported for the same reason: a host driving campaigns in
-# its own loop owns the measurement archive they fill, and reclaiming it through the CLI would mean
-# leaving the process that has the `Stores` already built.
+# This module IS the embedded surface: a capability it does not name is one a host cannot find.
 __all__ = [
     "compact_measurement_archive",
+    "grade_line_bench",
     "open_session",
     "purge_cold_store",
     "reindex_measurement_archive",
@@ -59,8 +56,7 @@ __all__ = [
     "submit_gate_decision",
 ]
 
-# Where a host program's lines go. ``None`` is silent, the right default for a library; the run
-# readout is on disk either way, and ``run_campaign(readout_sink=print)`` shows it too.
+# A host's readout-line sink. ``None`` is silent; the readout is on disk either way.
 StatusFn = Callable[[str], None]
 
 
@@ -69,28 +65,44 @@ async def open_session(
     *,
     backend_url: str = DEFAULT_BACKEND_URL,
     backend_id: str = DEFAULT_BACKEND_ID,
-    on_status: StatusFn | None = None,
     stores: Stores | None = None,
     program: object | None = None,
 ) -> Session:
-    """*stores* names the workspace and, through its identity, whose it is; unset, it is the local
-    operator's own — the one the terminal and an auth-off web session resolve."""
+    """Open a session on *dataset_name*; raises ``BackendUnreachableError`` where its backend is down.
+
+    *stores* names the workspace and whose it is; unset, the local operator's own.
+    *program* rides the backend client as ``InProcessWorkload.program``, for an in-process backend.
+    """
     setup_logging()
     if stores is None:
         stores = build_stores(registered_or_default_identity(), projects_root=DEFAULT_PROJECTS_ROOT)
-    session = await init_services(
+    down = await probe_backend(backend_type_of_dataset(stores, dataset_name), backend_url)
+    if down is not None:
+        raise down
+    return await init_services(
         dataset_name=dataset_name,
         backend_url=backend_url,
         backend_id=backend_id,
-        on_status=on_status,
         identity=stores.identity,
         stores=stores,
         program=program,
     )
-    if on_status is not None:
-        on_status(f"Dataset    : {dataset_name} ({len(session.samples)} queries)")
-        on_status(f"Session terms: {len(session.index_terms)}")
-    return session
+
+
+async def submit_gate_decision(stores: Stores, hop: CycleHop, decision: GateDecision) -> None:
+    """Answer a cycle holding at its origin gate.
+
+    Raises ``ConflictError`` where it is not holding: an early decision is refused, never kept.
+    """
+    await CommandDispatcher(stores).dispatch_cycle_command(
+        CommandCall(
+            OriginGateDecisionPayload(
+                campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, decision=decision
+            ),
+            uuid.uuid4().hex,
+        ),
+        expected_version=None,
+    )
 
 
 async def run_campaign(
@@ -104,10 +116,12 @@ async def run_campaign(
     mode: RunMode,
     arm: ArmRequest | None = None,
 ) -> CycleResult:
-    """Mint through ``mint_framed_cycle``, the prologue ``new`` and the web mint run, then run the
-    loop from its origin. With no slot there is no admission: the run holds its declaration as-is —
-    the config's budget under *limits*' — composed exactly as every admitted launch composes it, and
-    ``LaunchLimits()`` adds nothing to the config's own."""
+    """Mint a campaign and run it from its origin, or resume the cycle *session* is bound to.
+
+    *limits* set the run's budget over the config's own; a host holds no slot, so none is admitted.
+    *readout_sink* receives each readout line as it is written.
+    Blocks at round 0 under ``origin_gate: strict`` until ``submit_gate_decision`` answers.
+    """
     if not session.campaign_id:
         minted = await mint_framed_cycle(
             session,
@@ -119,6 +133,11 @@ async def run_campaign(
             limits=limits,
         )
         campaign_config = minted.campaign_config
+    else:
+        campaign = session.store.campaigns.load_campaign(session.campaign_id)
+        if campaign is None:
+            raise NotFoundError(f"campaign not found: {session.campaign_id}")
+        refuse_drifted_resume(session, campaign_config, campaign, session.hop)
     held = unadmitted_limits(
         campaign_config,
         stores=session.store,

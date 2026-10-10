@@ -1,15 +1,6 @@
-"""Which optimizer a campaign runs: the manifest ``optimization.optimizer`` names, with the
-campaign's ``optimization.nodes`` overlay laid on — plus the bench's own check-in node beside it.
-
-Resolved off the config wherever one is in hand, and bound per task (:func:`bind_optimizer`) for
-the calls deep inside a round that hold none — beside the other per-task bindings on those calls:
-the determinism clamp, the outer's prompt overrides an L4 inner cell runs under, and the manifest
-an L4 outer's inner cells select (:func:`bind_inner_optimizer`)."""
-
 from __future__ import annotations
 
 import contextvars
-import copy
 import functools
 import json
 from collections.abc import Mapping
@@ -46,11 +37,12 @@ from promptpotter.shared.plugin_registry import BUILT_IN
 
 if TYPE_CHECKING:
     from promptpotter.application.optimizers.nodes import (
-        OptimizerPacing,
         OptimizerRuntime,
         Sampler,
         Selector,
     )
+    from promptpotter.domain.dashboard_rows import OptimizerLimit
+    from promptpotter.domain.results import DisplayMetric
 
 shapes_optimizer_prompt(__name__)
 
@@ -61,6 +53,7 @@ __all__ = [
     "OptimizerKnobsResponse",
     "OptimizerRoster",
     "SelectedOptimizer",
+    "StartPrompt",
     "bind_inner_optimizer",
     "bind_optimizer",
     "bound_inner_optimizer",
@@ -110,10 +103,18 @@ def _parse(document: Mapping[str, Any], schemas: Mapping[str, Any]) -> PipelineS
     return parse_pipeline_response({**document, "resolved_schemas": dict(schemas)})
 
 
+class StartPrompt(StrictModel):
+    fields: dict[str, Any] = Field(description="The prompt body, by decomposition field")
+    version: str = Field(description="The `prompt_version` the node's config names")
+    versions_declared: int = Field(
+        description="How many versions the manifest declares for the node's prompt family — a "
+        "surface showing this one says so where there are more"
+    )
+
+
 @dataclass(frozen=True)
 class SelectedOptimizer:
-    """One campaign's optimizer. ``document`` is the manifest as authored; ``schema`` is it parsed
-    with the overlay applied, which is the configuration the run executes."""
+    """``document`` is the manifest as authored; ``schema`` is it parsed with the overlay applied."""
 
     name: str
     document: Mapping[str, Any]
@@ -127,7 +128,6 @@ class SelectedOptimizer:
 
     @property
     def paper(self) -> str | None:
-        """The citation a paper preset reproduces: its declared knob values are that paper's."""
         cited = self.document.get("paper")
         return str(cited) if cited else None
 
@@ -138,22 +138,18 @@ class SelectedOptimizer:
         return node
 
     @property
-    def stamps_theta(self) -> bool:
-        """``Selector.stamps_theta``, read before a ``RoundPlan`` exists — round 0's origin
-        document stamps it too."""
+    def elects_on(self) -> DisplayMetric:
         walk = self.schema.pipelines["default"]
         name = next(n for n in walk if self.node(n).kind is NodeKind.SELECTOR)
-        return cast("Selector", optimizers.member(name)).stamps_theta
+        return cast("Selector", optimizers.member(name)).elects_on
 
     @property
     def sampler(self) -> Sampler:
-        """The member ``default`` draws each round's panel with."""
         walk = self.schema.pipelines["default"]
         name = next(n for n in walk if self.node(n).kind is NodeKind.SAMPLER)
         return cast("Sampler", optimizers.member(name))
 
     def round_cells(self, pool: int) -> int:
-        """The cells a round draws off a search pool of ``pool`` rows (``Sampler.draws``)."""
         return self.sampler.draws(self, pool)
 
     def round_cells_ceiling(self, pool: int) -> int:
@@ -163,8 +159,7 @@ class SelectedOptimizer:
         return dict(self.node(name).current_config)
 
     def call_config(self, name: str) -> dict[str, Any]:
-        """*name*'s config less its member's knobs: what shapes the call itself. A knob's edit is
-        the diff classifier's to scope (``knobs.py::classify_config_diff``), never a prompt hash's."""
+        """Less the member's knobs: a knob's edit is the diff classifier's to scope, never a prompt hash's."""
         table = optimizers.registered()
         knobs = table[name].knobs.model_fields if name in table else {}
         return {k: v for k, v in self.node_config(name).items() if k not in knobs}
@@ -176,6 +171,12 @@ class SelectedOptimizer:
     def knobs(self, name: str) -> StrictModel:
         return _knobs(name, self.node(name).kind, self.node_config(name))
 
+    def knobs_of[T: StrictModel](self, name: str, kind: type[T]) -> T:
+        knobs = self.knobs(name)
+        if not isinstance(knobs, kind):
+            raise TypeError(f"{name}'s knobs are {type(knobs).__name__}, not {kind.__name__}")
+        return knobs
+
     def declared_knobs(self, name: str) -> StrictModel:
         return _knobs(name, self.node(name).kind, self.file_config(name))
 
@@ -184,24 +185,58 @@ class SelectedOptimizer:
         return optimizers.runtime(self.name)
 
     @property
-    def pacing(self) -> OptimizerPacing:
-        return self.runtime.pacing(self)
+    def arms_per_round(self) -> int:
+        return self.runtime.arms(self)
+
+    @property
+    def limits(self) -> tuple[OptimizerLimit, ...]:
+        return self.runtime.limits(self)
 
     @property
     def phases(self) -> frozenset[str]:
-        """The phases this optimizer brackets on the ledger beside the bench's own."""
-        return frozenset(p.phase for p in self.runtime.phases)
+        stated = optimizers.llm_nodes()
+        return frozenset(
+            member.phase.phase
+            for node in self.llm_nodes
+            if (member := stated.get(node)) is not None and member.phase is not None
+        )
+
+    @property
+    def steered_axes(self) -> dict[str, set[str]]:
+        stated = optimizers.llm_nodes()
+        out: dict[str, set[str]] = {}
+        for node in self.llm_nodes:
+            for target, keys in (stated[node].steers if node in stated else {}).items():
+                out.setdefault(target, set()).update(keys)
+        return out
+
+    def outer_levers(self, node: str) -> dict[str, str]:
+        member = optimizers.llm_nodes().get(node)
+        return {} if member is None else dict(member.outer_levers)
+
+    def start_prompts(self) -> dict[str, StartPrompt]:
+        out: dict[str, StartPrompt] = {}
+        declared = [str(key) for key in self.document.get("resolved_prompts") or {}]
+        for node in self.schema.declared_nodes:
+            config = node.current_config
+            body = _prompt_body(self.document, config)
+            if body is not None:
+                family = str(config.get("prompt_family"))
+                out[node.name] = StartPrompt(
+                    fields=body,
+                    version=str(config.get("prompt_version") or ""),
+                    versions_declared=sum(k.partition("/")[0] == family for k in declared),
+                )
+        return out
 
     def prompt_hashes(self) -> dict[str, str]:
-        """Per llm node, what shapes the call it sends under the bound L4 edit. A round banks these,
-        and a resume diverges at the first round whose stamp the optimizer loaded now does not match."""
+        """Under the bound L4 edit; a resume diverges at the first round whose banked stamp differs."""
         return {
             node: self._node_digest(node, declared_node_override(node)) for node in self.llm_nodes
         }
 
     @property
     def member_nodes(self) -> tuple[str, ...]:
-        """Every declared node an implementation answers, in declaration order."""
         table = optimizers.registered()
         return tuple(n.name for n in self.schema.declared_nodes if n.name in table)
 
@@ -226,24 +261,26 @@ class SelectedOptimizer:
             [
                 {**body, **fields} if body is not None and fields else body,
                 renames,
-                self.runtime.override_levers(node, declared),
+                _resolved_levers(node, declared),
                 self.resolved_schemas.get(schema_key) if schema_key else None,
                 cfg,
             ]
         )
 
     def treatment(self) -> Treatment:
-        """Off the manifest, its overlay and its code — never the L4 edit an inner cell runs it
-        under, which that cell's identity hashes beside it."""
+        """Never the L4 edit an inner cell runs under, which that cell's identity hashes beside it."""
         return Treatment(
             optimizer=self.name,
             version=self.version,
             prompt_hashes={node: self._node_digest(node, {}) for node in self.llm_nodes},
             knobs={node: self.knobs(node).model_dump(mode="json") for node in self.member_nodes},
-            # The L4 law is covered, not hashed: prompt code reads it only on the recursion, whose
-            # fingerprint hashes it with the estimator (`connectors/promptpotter.py`).
             source=self.runtime.source_digest(proxies),
         )
+
+
+def _resolved_levers(node: str, declared: Mapping[str, Any]) -> dict[str, Any]:
+    member = optimizers.llm_nodes().get(node)
+    return {} if member is None else member.resolved_levers(declared)
 
 
 def _resolved_key(family: object, version: object) -> str | None:
@@ -273,15 +310,12 @@ def optimizer_prompt(
 def running_prompt(
     node: str, config: Mapping[str, Any], document: Mapping[str, Any]
 ) -> OptimizerPromptTemplate:
-    """The prompt *node* runs under *config*, with an L4 inner cell's prompt-field edit laid on."""
     template = optimizer_prompt(node, config, document)
     if fields := resolve_node_override(node).prompt_fields:
         template = template.model_copy(update=fields)
     return template
 
 
-# What an optimizer llm node's config may name beside its member's knobs: what `llm_call` sends or
-# routes on, and the prompt and output schema the node resolves.
 _CALL_CONFIG_KEYS: frozenset[str] = (
     WHO_ANSWERS_KEYS
     | PARAM_SCOPE_KEYS
@@ -322,10 +356,15 @@ def _select(
         )
     if taken := sorted(set(declared) & {n.name for n in checkin_manifest().schema.declared_nodes}):
         raise ValueError(f"optimizer {name!r} declares {taken}, which the bench's check-in owns.")
-    overlaid = copy.deepcopy(dict(document))
-    for node, config in overlay.items():
-        block = overlaid["nodes"][node]
-        block["config"] = {**(block.get("config") or {}), **config}
+    overlaid = {
+        **document,
+        "nodes": {
+            node: {**block, "config": {**(block.get("config") or {}), **overlay[node]}}
+            if node in overlay
+            else block
+            for node, block in declared.items()
+        },
+    }
     schemas = _read_schemas(shipped / "resolved_schemas.json")
     selected = SelectedOptimizer(
         name=name,
@@ -343,8 +382,6 @@ def _select(
 
 
 def resolve_optimizer(name: str, nodes: Mapping[str, ManifestNodeOverlay]) -> SelectedOptimizer:
-    """The one resolution every surface shares — a run, a draft edit, a fork, a mint, a served menu
-    — so an overlay refused in one place is refused in all, and refused as the caller's input."""
     try:
         shipped = optimizers.runtime(name).manifest_dir
     except KeyError as exc:
@@ -398,8 +435,7 @@ class NodeKnobs(StrictModel):
 
 
 class OptimizerKnobsResponse(StrictModel):
-    """Every knob an optimizer manifest's nodes take, served so a settings surface draws a
-    control per knob and writes `optimization.nodes.{node}.config.{key}`."""
+    """Every knob an optimizer manifest's nodes take, each written to `optimization.nodes.{node}.config.{key}`."""
 
     optimizer: str = Field(description="The manifest name, as `optimization.optimizer` names it")
     version: str = Field(description="The manifest's own version")
@@ -407,8 +443,6 @@ class OptimizerKnobsResponse(StrictModel):
 
 
 def _knob_type(kind: Mapping[str, Any]) -> KnobType:
-    """The JSON Schema type a knob's model declares, as the closed set a settings surface picks a
-    widget by. One outside it is refused here, where it would otherwise draw no control."""
     declared = kind.get("type") or ("object" if "properties" in kind else "string")
     for known in _KNOB_TYPES:
         if known == declared:
@@ -469,9 +503,7 @@ class OptimizerEntry(StrictModel):
 
 
 class OptimizerRoster(StrictModel):
-    """The optimizers this install can run, the default first.
-
-    One per runtime the registry holds: the menu `optimization.optimizer` accepts, never a list."""
+    """The optimizers this install can run, the default first: one per runtime the registry holds."""
 
     default: str = Field(description="What a campaign naming no `optimization.optimizer` runs")
     optimizers: list[OptimizerEntry] = Field(description="The roster, the default first")
@@ -528,8 +560,7 @@ def bound_optimizer() -> SelectedOptimizer:
     return selected
 
 
-# The manifest an L4 outer's inner cells select, bound at `publish_inner_spawn_context`: what the
-# outer's arms mutate, never the outer's own. `None` off the recursion.
+# The manifest an L4 outer's inner cells select, never the outer's own; `None` off the recursion.
 _INNER: contextvars.ContextVar[SelectedOptimizer | None] = contextvars.ContextVar(
     "inner_optimizer", default=None
 )
@@ -544,8 +575,6 @@ def bound_inner_optimizer() -> SelectedOptimizer | None:
 
 
 def llm_node_document(node: str) -> tuple[PipelineNode, Mapping[str, Any], Mapping[str, Any]]:
-    """The node, the config it runs and the document declaring it: the check-in's own when the
-    check-in declares it, else the bound optimizer's. A manifest may not declare a check-in node."""
     checkin = checkin_manifest()
     if (held := checkin.schema.get_node(node)) is not None:
         return held, held.current_config, checkin.document
@@ -557,11 +586,7 @@ def llm_node_config(node: str) -> dict[str, Any]:
     return dict(llm_node_document(node)[1])
 
 
-# The L4 inner-cycle runner binds the OUTER's per-node MUTATIONS here (inside the inner asyncio
-# task), keyed by optimizer node → a partial `PromptTemplate`-field dict plus the
-# `output_schema_field_names` / `model` levers `resolve_node_override` resolves, and any lever the
-# node's own optimizer resolves (`OptimizerRuntime.override_levers`). A ContextVar — not a
-# global — so every recursion level carries its own. `None` = no override.
+# The OUTER's per-node mutations, bound inside the inner task so each recursion level carries its own.
 _OPTIMIZER_PROMPT_OVERRIDES: contextvars.ContextVar[dict[str, dict[str, Any]] | None] = (
     contextvars.ContextVar("optimizer_prompt_overrides", default=None)
 )
@@ -571,8 +596,6 @@ def set_optimizer_prompt_overrides(overrides: dict[str, dict[str, Any]] | None) 
     _OPTIMIZER_PROMPT_OVERRIDES.set(overrides or None)
 
 
-# This cycle's `OptimizationConfig.determinism`, bound at `runner/entry.py::run_optimization`. A
-# ContextVar like its neighbour: each L4 level runs in its own task, so no pin crosses a level.
 _DETERMINISM: contextvars.ContextVar[DeterminismClamp | None] = contextvars.ContextVar(
     "determinism_clamp", default=None
 )
@@ -583,8 +606,7 @@ def set_determinism_clamp(clamp: DeterminismClamp | None) -> None:
 
 
 def get_optimizer_config_overrides() -> dict[str, Any] | None:
-    """The campaign's decoding + route clamp, applied LAST so it beats both the node's file config
-    and any per-call override. An unpinned field is ABSENT, never a ``None`` that would erase one."""
+    """An unpinned field is ABSENT, never a ``None`` that would erase the value it is laid over."""
     clamp = _DETERMINISM.get()
     if clamp is None:
         return None
@@ -593,8 +615,7 @@ def get_optimizer_config_overrides() -> dict[str, Any] | None:
 
 @dataclass(frozen=True)
 class ResolvedNodeOverride:
-    """``model`` / ``provider`` are the SINGLE inner-optimizer model the outer carrier node set,
-    returned for EVERY node so one choice fans across the whole inner optimizer at apply time."""
+    """``model`` / ``provider`` are the ONE choice the outer's carrier node set, returned for every node."""
 
     prompt_fields: dict[str, Any]
     schema_field_names: dict[str, str]
@@ -603,14 +624,11 @@ class ResolvedNodeOverride:
 
 
 def declared_node_override(node: str) -> dict[str, Any]:
-    """One node's override as the outer DECLARED it — what an optimizer reads its own levers off."""
     raw = (_OPTIMIZER_PROMPT_OVERRIDES.get() or {}).get(node)
     return raw if isinstance(raw, dict) else {}
 
 
 def _single_model(overrides: dict[str, Any]) -> tuple[str | None, str | None]:
-    """The one inner-optimizer ``(model, provider)`` the outer carrier node set — fanned onto
-    every node. Empty on every normal cycle and for an outer optimizer prompt SET (prose only)."""
     for nd in overrides.values():
         if isinstance(nd, dict) and isinstance(nd.get("model"), str) and nd["model"]:
             prov = nd.get("provider")
@@ -619,9 +637,7 @@ def _single_model(overrides: dict[str, Any]) -> tuple[str | None, str | None]:
 
 
 def _resolved_prompt_parts(raw: dict[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:
-    """One node's prompt fields and the rename map that SURVIVES its declaration. A rename target is
-    dropped when it is a non-identifier, a self-rename, or a duplicate; a collision is rejected at
-    the apply site. A bad L4 mutation must score poorly, never break the run."""
+    """An unusable rename is DROPPED, never raised: a bad L4 mutation must score poorly, not break the run."""
     prompt_fields = {k: v for k, v in raw.items() if k in PromptTemplate.model_fields}
     names: dict[str, str] = {}
     rename_raw = raw.get("output_schema_field_names")
@@ -647,14 +663,7 @@ def resolve_node_override(node: str) -> ResolvedNodeOverride:
 
 
 def resolved_overrides(overrides: dict[str, dict[str, Any]]) -> dict[str, Any]:
-    """What a declaration RESOLVES to — the identity `inner_campaign_id` hashes. Everything the
-    resolvers drop (a key no template carries, a rename that could not be applied, an optimizer's
-    own lever landing back where it started) is dropped here too, so two declarations that render
-    ONE prompt hash alike, and one inner campaign continues the rounds the other banked.
-
-    The model rides OUTSIDE the per-node map because that is where it renders: `_single_model` fans
-    one carrier node's choice onto every node, so WHICH node declared it is not a fact about the
-    configuration — `{a: {model: X}}` and `{b: {model: X}}` are one inner optimizer."""
+    """The identity `inner_campaign_id` hashes: what the resolvers drop is dropped here, so declarations rendering ONE prompt hash alike."""
     nodes: dict[str, dict[str, Any]] = {}
     for node, raw in overrides.items():
         if not isinstance(raw, dict):
@@ -663,10 +672,7 @@ def resolved_overrides(overrides: dict[str, dict[str, Any]]) -> dict[str, Any]:
         resolved: dict[str, Any] = dict(prompt_fields)
         if names:
             resolved["output_schema_field_names"] = names
-        # Asked of every runtime: the outer cannot know which manifest the inner cell selects,
-        # and each answers only for the nodes its own manifest declares.
-        for runtime in optimizers.runtimes().values():
-            resolved.update(runtime.override_levers(node, raw))
+        resolved.update(_resolved_levers(node, raw))
         if resolved:
             nodes[node] = resolved
     model, provider = _single_model(overrides)
