@@ -1,20 +1,11 @@
-"""The prologue every launch runs before anything irreversible, in two steps that different
-callers wait in different places for: ``request_launch`` accepts (per-user quotas, then a machine
-slot or a place in the queue) and ``admit_and_hold`` holds it through the backend probe and the
-account wallet. One owner, so a capacity or wallet rule taught here reaches every way in rather
-than the one being edited; the slot-release discipline that failing any of it owes lives here too."""
-
 from __future__ import annotations
 
 import asyncio
 import logging
 import time
-import traceback
-from collections.abc import Awaitable, Callable
-from typing import Any, NoReturn
+from typing import TYPE_CHECKING, NoReturn
 
 from promptpotter import connectors
-from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.jobs.quota import (
     admit_launch,
     check_launch_quotas,
@@ -24,58 +15,37 @@ from promptpotter.application.jobs.registry import (
     UNRESOLVED_HOP,
     Job,
     JobRegistry,
-    JobStatus,
 )
 from promptpotter.application.runner.termination import run_stop_reason
 from promptpotter.config.settings import settings
 from promptpotter.domain.connector import BackendUnreachableError
-from promptpotter.domain.cycle_paths import CycleDir, CycleHop
-from promptpotter.domain.launch_limits import HeldLimits, LaunchLimits
+from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.launch_limits import HeldLimits
 from promptpotter.domain.phases import (
-    STOP_REASON_INFO,
+    PauseCause,
+    RunPhase,
     StopOutcome,
     StopReason,
     stop_reason_outcome,
 )
-from promptpotter.infrastructure.projections.live_dashboard.projection import (
-    LiveDashboardProjection,
-)
+from promptpotter.domain.run_records import ErrorRecord, RunPhaseRecord
+from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.infrastructure.store.user_store import User
-from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import ConflictError, MachineBusyError
+from promptpotter.shared.errors import ConflictError, CycleBusyError, MachineBusyError
+from promptpotter.shared.identity import acting_principal_id
+
+if TYPE_CHECKING:
+    from promptpotter.application.jobs.launcher.launch import LaunchRequest
 
 logger = logging.getLogger(__name__)
 
-# How often a waiting launch re-asks. Short enough that a freed slot is taken while the operator
-# is still looking at the screen, long enough that a queue of them is not a busy-loop on the
-# machine-wide admission lock every run has to take.
+# Each ask takes the machine-wide admission lock.
 _QUEUE_POLL_S = 2.0
-
-# Detached queued launches, held so the event loop cannot collect one mid-wait.
-_DETACHED: set[asyncio.Task[Any]] = set()
-
-# Sole bridge from the StopReason outcome table to JobRegistry's lifecycle vocabulary; there is no
-# per-reason reconciler, and every surface that ends a run reads it here — a private copy is how a
-# cycle comes to read "failed" on one surface and "completed" on another.
-_JOB_STATUS_BY_OUTCOME: dict[StopOutcome, JobStatus] = {
-    StopOutcome.SUCCESS: "completed",
-    StopOutcome.HALTED: "stopped",
-    StopOutcome.FAILED: "failed",
-    # A pause exits the worker but the cycle stays resumable — a fresh start-run mints a new
-    # job to continue it.
-    StopOutcome.PAUSED: "stopped",
-}
-
-
-def job_status_for(stop_reason: StopReason) -> JobStatus:
-    """What a finished run's job is stamped, given why the run stopped."""
-    return _JOB_STATUS_BY_OUTCOME[stop_reason_outcome(stop_reason)]
 
 
 def launch_interrupted(exc: BaseException) -> bool:
-    """True when the launch stopped because someone ASKED — the pause flag's synthetic
-    ``KeyboardInterrupt``, a Ctrl+C's ``CancelledError``, a host cancel. None is visible to ``except Exception``."""
+    """Someone ASKED the launch to stop; neither type is visible to ``except Exception``."""
     return isinstance(exc, KeyboardInterrupt | asyncio.CancelledError)
 
 
@@ -86,60 +56,55 @@ def release_slot(
     *,
     stores: Stores,
     hop: CycleHop | None,
-    session_id: str = "",
-    admitted: bool = True,
 ) -> None:
-    """The ONE path a failed launch leaves by: the machine slot handed back, the cycle *hop* names
-    stamped — ``stopped``, not ``failed``, where ADMISSION refused it. Called inside the ``except``."""
-    if admitted or launch_interrupted(exc):
+    """A launch that never reached its admission (``Job.admitted_at``) was REFUSED, whatever raised."""
+    job = job_registry.get(job_id)
+    if (job is not None and job.admitted_at is not None) or launch_interrupted(exc):
         stop_reason = run_stop_reason(exc)
     else:
         stop_reason = StopReason.NOT_ADMITTED
-    job_registry.mark_finished(job_id, status=job_status_for(stop_reason), stop_reason=stop_reason)
-    if hop is None:
-        return
-    info = STOP_REASON_INFO[stop_reason]
+    job_registry.release(job_id, refusal=str(exc) if stop_reason is StopReason.NOT_ADMITTED else "")
     # Best-effort — it must never mask *exc*.
     try:
-        LiveDashboardProjection.write_launch_stop(
-            CycleDir(stores.campaigns.cycle_dir(hop)),
-            hop=hop,
-            session_id=session_id,
-            exc=exc,
-            stop_reason=stop_reason,
+        if hop is None:
+            if job is not None and job.hop != UNRESOLVED_HOP:
+                stores.campaigns.release_claim(job.hop, job_id=job_id, detail=str(exc))
+            return
+        stores.campaigns.declare_stop(
+            hop,
+            RunPhaseRecord.stop(
+                stop_reason,
+                cause=(
+                    PauseCause.CANCELLED
+                    if isinstance(exc, asyncio.CancelledError)
+                    else PauseCause.INTERRUPT
+                ),
+                detail="the launch was interrupted before it held a run",
+            ),
+            error=(
+                None
+                if stop_reason_outcome(stop_reason) is StopOutcome.PAUSED
+                else ErrorRecord(
+                    kind="launch_failed",
+                    message=str(exc) or type(exc).__name__,
+                    stop_reason=stop_reason,
+                )
+            ),
         )
-        # A crash gets ``finished_at``; an interrupt gets the paused declaration above and none,
-        # since a ``finished_at`` unresumes a pause.
-        if info.outcome is not StopOutcome.PAUSED:
-            stores.campaigns.mark_finished(
-                hop,
-                stop_reason=stop_reason,
-                finished_at=utcnow_iso(),
-                crash_traceback=traceback.format_exc() if info.has_traceback else None,
-            )
     except Exception:
-        logger.exception("failed to record launch stop for %s/%s", hop.campaign_id, hop.cycle_id)
+        logger.exception("failed to record launch stop for job %s", job_id)
 
 
-async def probe_backend(backend_type: str, backend_url: str) -> None:
-    """Resolve the connector and run its reachability probe. A connector opts out by leaving
-    ``Connector.preflight = None``; the ``BackendUnreachableError`` raised here becomes a 503.
-
-    **Every launch ingress asks the CONNECTOR, never a bare wire probe.** An `in_process`
-    connector has no wire, so a bare probe refuses a campaign over a backend it never touches —
-    `promptpotter-self` is the one that cannot survive it.
-
-    An empty ``backend_type`` is the tolerant answer ``dataset_access.backend_type_of_dataset`` gives when
-    a campaign has outlived its dataset dir. There is no declared connector to ask, so there is no
-    probe — and ``connectors.get`` is strict, so resolving it would raise past every caller's
-    ``BackendUnreachableError`` handler."""
+async def probe_backend(backend_type: str, backend_url: str) -> BackendUnreachableError | None:
+    # A campaign that outlived its dataset dir: ``connectors.get`` is strict and would raise.
     if not backend_type:
-        return
+        return None
     connector = connectors.get(backend_type)
     if connector.preflight is None:
-        return
+        return None
     if (down := await connector.preflight(backend_url)) is not None:
-        raise BackendUnreachableError(connector.name, backend_url, down)
+        return BackendUnreachableError(connector.name, backend_url, down)
+    return None
 
 
 def _user_of(stores: Stores) -> User:
@@ -156,34 +121,54 @@ def request_launch(
     job_registry: JobRegistry,
     dataset_name: str,
     hop: CycleHop = UNRESOLVED_HOP,
-    rate_limited: bool = True,
 ) -> Job:
-    """Accept one launch: check what the CALLER may start, then take a machine slot or join the
-    queue for one. Returns the job either way — ``status`` says which.
-
-    Both counts come off the same on-disk jobs, so they are read under ONE gate. Split across two,
-    a pair of simultaneous launches each read the user's last free slot and both take it; inside
-    it the reservation is written before either can look again, and before any ``await``.
-
-    The per-user ceilings still REFUSE rather than queue, and that asymmetry is the point: the
-    machine being full is temporary and nobody's fault, while an account at its own limit is a
-    fact about that account which waiting cannot change.
-
-    ``hop`` stays :data:`UNRESOLVED_HOP` where the ids do not exist yet (a fresh mint); the caller
-    binds them with ``update_target`` once the mint resolves them."""
     user = _user_of(stores)
+    # ONE gate: the quota count and the slot count come off the same on-disk jobs.
     with job_registry.admission_gate():
-        check_launch_quotas(user=user, job_registry=job_registry, rate_limited=rate_limited)
-        return job_registry.request_slot(
-            user_id=str(stores.identity.user_id), dataset_name=dataset_name, hop=hop
+        check_launch_quotas(user=user, stores=stores, job_registry=job_registry, hop=hop)
+        if hop != UNRESOLVED_HOP:
+            _refuse_taken_cycle(stores, job_registry, hop)
+        job = job_registry.request_slot(
+            user_id=str(stores.identity.user_id),
+            principal_id=acting_principal_id(stores.identity),
+            dataset_name=dataset_name,
+            hop=hop,
         )
+        if hop != UNRESOLVED_HOP:
+            claim_cycle(stores, job_registry, job, hop)
+        return job
 
 
-def refuse_as_busy(job_registry: JobRegistry, job: Job) -> NoReturn:
-    """Answer a full box with a 409 instead of a place in line, for the one caller that asked not
-    to wait. It is a REFUSAL, so the queue entry goes with it: leaving one behind starts the run
-    later, which is what ``--no-wait`` says not to do."""
-    job_registry.cancel_queued(job.job_id, user_id=job.user_id)
+def _refuse_taken_cycle(stores: Stores, job_registry: JobRegistry, hop: CycleHop) -> None:
+    run = derive_run_state(stores.campaigns.cycle_dir(hop))
+    if not run.producer.attached:
+        return
+    claim = stores.campaigns.launch_claim(hop)
+    holder = job_registry.running_job_for(hop) if claim is None else job_registry.get(claim.job_id)
+    raise CycleBusyError(
+        job_id="unregistered" if holder is None else holder.job_id,
+        status=run.run_phase.value,
+        holder_user="" if holder is None else holder.user_id,
+        campaign_id=hop.campaign_id,
+        cycle_id=hop.cycle_id,
+        started_at=None if holder is None else holder.started_at,
+    )
+
+
+def claim_cycle(stores: Stores, job_registry: JobRegistry, job: Job, hop: CycleHop) -> None:
+    if job.stage is RunPhase.RUNNING:
+        raise RuntimeError(f"job {job.job_id} is running: its cycle is held, not claimed")
+    stores.campaigns.claim_launch(
+        hop,
+        stage=job.stage,
+        job_id=job.job_id,
+        claimant_lock=job_registry.claimant_lock(),
+    )
+
+
+def refuse_as_busy(stores: Stores, job_registry: JobRegistry, job: Job) -> NoReturn:
+    # A REFUSAL takes its queue entry with it: one left behind starts the run later.
+    withdraw_queued(stores, job_registry, job.job_id, principal_id=job.principal_id)
     holder = job_registry.holder()
     raise MachineBusyError(
         holder_user="" if holder is None else holder.user_id,
@@ -193,21 +178,22 @@ def refuse_as_busy(job_registry: JobRegistry, job: Job) -> NoReturn:
     )
 
 
+def withdraw_queued(
+    stores: Stores, job_registry: JobRegistry, job_id: str, *, principal_id: str
+) -> bool:
+    job = job_registry.get(job_id)
+    if not job_registry.cancel_queued(job_id, principal_id=principal_id):
+        return False
+    if job is not None and job.hop != UNRESOLVED_HOP:
+        stores.campaigns.release_claim(job.hop, job_id=job_id, detail="withdrawn from the queue")
+    return True
+
+
 async def await_slot(job_registry: JobRegistry, job: Job) -> None:
-    """Block until this queued launch is first in line and a slot is free.
-
-    A poll, not a signal, because the freeing event happens in whichever process owned the run
-    that ended — possibly a terminal one — and the only thing both sides share is the jobs dir.
-    ``claim_next`` is the atomic half; this is just how often we ask.
-
-    ``QUEUE_MAX_WAIT_S`` bounds it: an unbounded queue is a promise the box may never keep, and a
-    launch that waited all night is not one the operator still wants."""
+    """A poll, not a signal: the slot frees in another process, and only the jobs dir is shared."""
     deadline = time.monotonic() + settings.QUEUE_MAX_WAIT_S
     while not await asyncio.to_thread(job_registry.claim_next, job.job_id):
         if time.monotonic() >= deadline:
-            job_registry.mark_finished(
-                job.job_id, status="stopped", stop_reason=StopReason.NOT_ADMITTED
-            )
             raise ConflictError(
                 f"This launch waited {settings.QUEUE_MAX_WAIT_S / 3600:.0f}h for a free slot and "
                 f"was withdrawn. Nothing ran and nothing was spent; start it again when the "
@@ -217,122 +203,45 @@ async def await_slot(job_registry: JobRegistry, job: Job) -> None:
         await asyncio.sleep(_QUEUE_POLL_S)
 
 
-async def launch(
-    *,
-    stores: Stores,
-    job_registry: JobRegistry,
-    dataset_name: str,
-    run: Callable[[Job], Awaitable[Any]],
-    hop: CycleHop = UNRESOLVED_HOP,
-    rate_limited: bool = True,
-) -> Job:
-    """Accept a launch and run it — **inline when a slot was free, detached when it had to queue**.
+async def admit_and_hold(
+    request: LaunchRequest, *, stores: Stores, job_registry: JobRegistry, job: Job
+) -> HeldLimits:
+    """The request's config is resolved IN here, after the queue wait, so the ceiling admitted is the one the run starts under."""
+    user = _user_of(stores)
+    # A fresh mint has no cycle yet: nothing to claim, and no seed or standing ceiling to read.
+    hop = None if request.hop == UNRESOLVED_HOP else request.hop
+    if job.queued:
+        await await_slot(job_registry, job)
+        promoted = job_registry.get(job.job_id)
+        if hop is not None and promoted is not None:
+            claim_cycle(stores, job_registry, promoted, hop)
 
-    The ONE seam every non-terminal launch takes, because the branch is identical everywhere and
-    getting it wrong is invisible from the call site: an applier that simply awaited a queued
-    launch would hold its HTTP request open until the box drained, and the operator would read a
-    hung browser rather than "queued, position 2".
-
-    The terminal does not come through here — it has somewhere to wait (a person is watching it),
-    so it calls :func:`request_launch` and :func:`admit_and_hold` itself and blocks."""
-    job = request_launch(
+    t0 = time.perf_counter()
+    if (down := await probe_backend(*request.backend(stores))) is not None:
+        raise down
+    t_probe = time.perf_counter()
+    declared, operator = declare_run_ceiling(
+        request.campaign_config(stores), stores=stores, hop=hop, requested=request.limits.ceiling
+    )
+    # Offloaded: the wallet read scans every cycle ledger and must not block the event loop.
+    ceiling, reserve = await asyncio.to_thread(
+        admit_launch,
+        declared=declared,
+        user=user,
         stores=stores,
         job_registry=job_registry,
-        dataset_name=dataset_name,
+        job_id=job.job_id,
         hop=hop,
-        rate_limited=rate_limited,
     )
-    if job.status == "queued":
-        _detach(run(job), what=f"queued launch {job.job_id} ({dataset_name})")
-    else:
-        await run(job)
-    return job
+    held = HeldLimits.admitted(request.limits, ceiling, operator, reserve=reserve)
+    # Before the caller's first await: a concurrent launch on this account reads a stamped reservation.
+    job_registry.mark_admitted(job.job_id, reserve)
+    t_caps = time.perf_counter()
 
-
-def _detach(coro: Awaitable[Any], *, what: str) -> None:
-    """Run a queued launch's remainder in the background. The reference is held because the loop
-    collects a task nobody keeps, and the result is READ because nobody awaits it — an exception
-    here would otherwise surface as a warning at interpreter shutdown, hours after the launch the
-    operator is still waiting for silently died."""
-    task = asyncio.ensure_future(coro)
-    _DETACHED.add(task)
-    task.add_done_callback(_DETACHED.discard)
-    task.add_done_callback(lambda t: _report_detached(t, what))
-
-
-def _report_detached(task: asyncio.Task[Any], what: str) -> None:
-    if task.cancelled():
-        logger.info("%s was cancelled", what)
-        return
-    exc = task.exception()
-    if exc is not None:
-        logger.error("%s failed: %s", what, exc, exc_info=exc)
-
-
-async def admit_and_hold(
-    *,
-    stores: Stores,
-    job_registry: JobRegistry,
-    job: Job,
-    verb: str,
-    dataset_name: str,
-    backend_type: str,
-    backend_url: str,
-    requested: LaunchLimits,
-    config: Callable[[], CampaignConfig],
-    hop: CycleHop | None,
-) -> HeldLimits:
-    """Hold *job*'s slot through the irreversible half of a launch, and return what the run HOLDS —
-    its declaration (*config* → seed → standing ceiling → *requested*) admitted against the account.
-    A queued job waits here for its turn first.
-
-    *config* is resolved in here rather than handed in, so a campaign config that cannot load
-    releases the slot as not admitted instead of stranding it.
-
-    The held ceiling is the run's config and the dashboard's number at once, and its reserve the
-    job's reservation, so the caller hands both to the runner and nothing downstream re-composes
-    either.
-
-    Nothing here touches a cycle, so a failure answers for the machine slot alone and leaves the
-    campaign re-startable once the account has room again — which is why the whole prologue runs
-    BEFORE the mint, and why its own failure path releases the slot rather than stamping a cycle."""
-    user = _user_of(stores)
-    if job.status == "queued":
-        await await_slot(job_registry, job)
-
-    try:
-        t0 = time.perf_counter()
-        await probe_backend(backend_type, backend_url)
-        t_probe = time.perf_counter()
-        declared, operator = declare_run_ceiling(
-            config(), stores=stores, hop=hop, requested=requested
-        )
-        # The wallet read globs + reads every cycle ledger — offload so the scan never blocks the
-        # single event loop on the launch path.
-        ceiling, reserve = await asyncio.to_thread(
-            admit_launch,
-            declared=declared,
-            user=user,
-            stores=stores,
-            job_registry=job_registry,
-            job_id=job.job_id,
-            hop=hop,
-        )
-        held = HeldLimits.admitted(requested, ceiling, operator, reserve=reserve)
-        # Before the caller's first await, so a concurrent launch on this account reads a stamped
-        # reservation rather than an unquotable one.
-        job_registry.set_caps(job.job_id, cap_usd=reserve.usd, cap_tokens=reserve.tokens)
-        t_caps = time.perf_counter()
-    except BaseException as exc:
-        release_slot(job_registry, job.job_id, exc, stores=stores, hop=None, admitted=False)
-        raise
-
-    # Pre-202 phase timing — the operator waits on the synchronous part of a launch, so where it
-    # goes lands on disk. The caller times its own `init_services`, the third of the three.
     logger.info(
         "admission[%s %s]: probe=%.2fs wallet=%.2fs (job %s)",
-        verb,
-        dataset_name,
+        request.verb,
+        request.dataset_name,
         t_probe - t0,
         t_caps - t_probe,
         job.job_id,
@@ -343,11 +252,11 @@ async def admit_and_hold(
 __all__ = [
     "admit_and_hold",
     "await_slot",
-    "job_status_for",
-    "launch",
+    "claim_cycle",
     "launch_interrupted",
     "probe_backend",
     "refuse_as_busy",
     "release_slot",
     "request_launch",
+    "withdraw_queued",
 ]

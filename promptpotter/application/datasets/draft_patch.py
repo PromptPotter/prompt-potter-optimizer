@@ -1,33 +1,30 @@
-"""The sparse mutation vocabulary for a :class:`DraftCampaign`, and the rules that apply one.
-
-**Every ingress edits an origin through here** — the browser's Advanced block, the two
-candidate-library uploads, and the CLI's ``--set``. It sits in ``application/`` because a rule
-parked in ``presentation/api/routers/`` is one no CLI verb can import without dragging FastAPI in,
-and the adapter that cannot reach it writes a narrower copy instead.
-
-Appending the ``CommandRecord`` is ``commands/checkin_dispatch.py::dispatch_draft_patch``'s job.
-This module owns only what an edit MEANS.
-"""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-from pydantic import Field, ValidationError
+from pydantic import ValidationError
 
 from promptpotter.application.campaign_config import merge_config_layers
 from promptpotter.application.datasets.csv_ingest import candidate_library_from_rows
 from promptpotter.application.datasets.draft_campaign import (
+    EditDraftPatch,
+    NodeOutputEdit,
     OptimizationOverrides,
     load_checkin_draft,
     rendered_pipeline_json,
 )
 from promptpotter.application.optimizer_manifest import resolve_optimizer
+from promptpotter.application.pipeline_resolve import draft_config_rows
 from promptpotter.application.scoring.formula import SCORING_FUNCTIONS, parse_dials, spell_dials
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
-from promptpotter.domain.pipeline_schema import description_key, description_path
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.pipeline_schema import (
+    OUTPUT_SCHEMA_KEY,
+    SCHEMA_TOGGLE_PARAM,
+    description_key,
+    description_path,
+    narrowing_of,
+)
 from promptpotter.shared.errors import ConflictError, NotFoundError, PayloadInvalidError
 
 if TYPE_CHECKING:
@@ -36,58 +33,14 @@ if TYPE_CHECKING:
     from promptpotter.infrastructure.store.stores import Stores
 
 __all__ = [
-    "SETTABLE_SCALARS",
     "DraftPatchPlan",
-    "EditDraftPatch",
     "apply_draft_patch",
     "candidate_library_from_column",
     "plan_draft_patch",
 ]
 
 
-class EditDraftPatch(StrictModel):
-    """Sparse mutation payload — only declared fields ride through."""
-
-    slug: str | None = Field(
-        default=None, min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9_-]*$"
-    )
-    connector: str | None = Field(default=None, min_length=1, max_length=64)
-    scoring_matcher: str | None = Field(default=None, min_length=1, max_length=64)
-    # ``term=weight`` dials; the empty string clears them back to correctness alone.
-    scoring_dials: str | None = Field(default=None, max_length=512)
-    raw_task_description: str | None = Field(default=None, min_length=1, max_length=16384)
-    pipeline_overlay: dict[str, Any] | None = None
-    # Written by the setup-panel mode toggle; read by commit's `committed_pipeline_json`
-    # and by `draft_active_steps`.
-    pipeline_steps: list[str] | None = None
-    column_query: str | None = Field(default=None, max_length=256)
-    column_ground_truth: str | None = Field(default=None, max_length=256)
-    # Replaces the draft's fields wholesale — the editor sends the full PromptTemplate object.
-    origin_prompt_fields: dict[str, Any] | None = None
-    # Merged onto the draft's current overrides then validated against OptimizationOverrides and
-    # the selected manifest, so the editor can send one knob or several — `nodes` key by key.
-    optimization_overrides: dict[str, Any] | None = None
-    # From the operator's upload or derived from one of the draft's own columns
-    # (`routers/datasets/ingest.py`); both ride this patch.
-    candidate_library: list[str] | None = Field(default=None, min_length=1)
-
-
-# The fields a caller can carry as ONE raw token — what the CLI's `FIELD=VALUE` can express, and
-# what a `--set` vocabulary is derived from rather than re-listed. Membership is decided by TYPE:
-# a list or dict field has no flat form on a command line, and the browser sends those as JSON.
-SETTABLE_SCALARS: frozenset[str] = frozenset(
-    name for name, f in EditDraftPatch.model_fields.items() if f.annotation == (str | None)
-)
-
-
 class DraftPatchPlan(NamedTuple):
-    """What one patch WILL do, resolved against the draft it targets but not yet written.
-
-    Split from the write so the dispatcher can project the origin, record the command, and only
-    then apply — and so every refusal (slug taken, column not uploaded, knob out of range) is
-    raised before anything is recorded as having happened.
-    """
-
     changes: dict[str, Any]
     provenance: dict[str, Provenance]
     column_query: str | None
@@ -95,7 +48,6 @@ class DraftPatchPlan(NamedTuple):
 
 
 def plan_draft_patch(stores: Stores, draft: DraftCampaign, patch: EditDraftPatch) -> DraftPatchPlan:
-    """Resolve *patch* against *draft*, raising rather than writing a half-applied edit."""
     changes: dict[str, Any] = {}
     provenance: dict[str, Provenance] = {}
 
@@ -114,11 +66,9 @@ def plan_draft_patch(stores: Stores, draft: DraftCampaign, patch: EditDraftPatch
             f"{sorted(SCORING_FUNCTIONS)}."
         )
     if patch.scoring_dials is not None:
-        # Stored in the one canonical spelling, so two drafts declaring the same criterion mint
-        # the same block.
+        # Canonical spelling, so two drafts declaring the same criterion mint the same block.
         changes["scoring_dials"] = spell_dials(parse_dials(patch.scoring_dials))
 
-    # Config + the authored prompt are not gated — just set the value.
     for patch_val, draft_attr in (
         (patch.connector, "connector"),
         (patch.scoring_matcher, "scoring_matcher"),
@@ -129,22 +79,30 @@ def plan_draft_patch(stores: Stores, draft: DraftCampaign, patch: EditDraftPatch
         if patch_val is not None:
             changes[draft_attr] = patch_val
 
-    # A declared output contract is checked by the one parser that reads it: an `answer_field`
-    # outside its `output_schema` raises there, and unchecked here it failed the draft's own read.
-    if patch.pipeline_overlay is not None:
+    overlay = patch.pipeline_overlay
+    if patch.node_output is not None:
+        overlay = _authored_contract(
+            draft.pipeline_overlay if overlay is None else overlay, patch.node_output
+        )
+    if patch.node_narrowing is not None:
+        rows = draft_config_rows(draft, workspace=stores.base_dir)
+        overlay = dict(draft.pipeline_overlay if overlay is None else overlay)
+        for node, intents in patch.node_narrowing.items():
+            try:
+                narrowing = narrowing_of(rows.get(node, []), intents)
+            except ValueError as exc:
+                raise PayloadInvalidError(f"patch.node_narrowing.{node}: {exc}") from exc
+            overlay[node] = {**_block(overlay.get(node)), "optimizer": narrowing.model_dump()}
+    if overlay is not None:
         try:
             before = parse_pipeline_response(rendered_pipeline_json(draft))
             after = parse_pipeline_response(
-                rendered_pipeline_json(draft.patch(pipeline_overlay=patch.pipeline_overlay))
+                rendered_pipeline_json(draft.patch(pipeline_overlay=overlay))
             )
         except ValueError as exc:
             raise PayloadInvalidError(f"patch.pipeline_overlay: {exc}") from exc
-        changes["pipeline_overlay"] = _narrowing_follows_schema(
-            patch.pipeline_overlay, before, after
-        )
+        changes["pipeline_overlay"] = _narrowing_follows_schema(overlay, before, after)
 
-    # Merge so one knob can change without resetting the rest, then validate the result: unknown
-    # keys, an out-of-range max_rounds, and a node knob its manifest refuses all reject here.
     if patch.optimization_overrides is not None:
         merged = merge_config_layers(
             {"optimization": dict(draft.optimization_overrides)},
@@ -161,14 +119,10 @@ def plan_draft_patch(stores: Stores, draft: DraftCampaign, patch: EditDraftPatch
         resolve_optimizer(overrides.optimizer, overrides.nodes)
         changes["optimization_overrides"] = overrides.model_dump(mode="json")
 
-    # The task framing IS gated — an operator edit CONFIRMS it, which is what opens the
-    # origin-readiness gate for a field left PROPOSED or UNSET.
     if patch.raw_task_description is not None:
         changes["raw_task_description"] = patch.raw_task_description
         provenance["task_description"] = Provenance.CONFIRMED
 
-    # Each column must be a member of the uploaded headers; confirming flips its provenance so
-    # the origin-readiness gate opens.
     for label, col in (
         ("column_query", patch.column_query),
         ("column_ground_truth", patch.column_ground_truth),
@@ -186,14 +140,42 @@ def plan_draft_patch(stores: Stores, draft: DraftCampaign, patch: EditDraftPatch
     )
 
 
+def _block(value: object) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _authored_contract(overlay: dict[str, Any], edit: NodeOutputEdit) -> dict[str, Any]:
+    prev = _block(overlay.get(edit.node))
+    config = _block(prev.get("config"))
+    fields = list(_block(edit.output_schema.get("properties")))
+    first = not _block(config.get(OUTPUT_SCHEMA_KEY))
+    named = [f for f in (edit.answer_field, config.get("answer_field")) if f in fields]
+    # The LAST field: fields generate in order, reasoning first.
+    fallback = ["answer"] if "answer" in fields else fields[-1:]
+    config[OUTPUT_SCHEMA_KEY] = edit.output_schema
+    config.pop("answer_field", None)
+    for field in (named or fallback)[:1]:
+        config["answer_field"] = field
+    block = {**prev, "config": config}
+    if first:
+        # A narrowing written before any schema existed could only tick `text`: re-open the axis.
+        config[SCHEMA_TOGGLE_PARAM] = "json"
+        if "optimizer" in prev:
+            optimizer = _block(prev["optimizer"])
+            allowed = _block(optimizer.get("param_allowed_values"))
+            allowed.pop(SCHEMA_TOGGLE_PARAM, None)
+            optimizer["param_allowed_values"] = allowed
+            keys = optimizer.get("param_keys")
+            if isinstance(keys, list) and SCHEMA_TOGGLE_PARAM not in keys:
+                optimizer["param_keys"] = [*keys, SCHEMA_TOGGLE_PARAM]
+            block["optimizer"] = optimizer
+    return {**overlay, edit.node: block}
+
+
 def _narrowing_follows_schema(
     overlay: dict[str, Any], before: PipelineSchema, after: PipelineSchema
 ) -> dict[str, Any]:
-    """A stored ``param_keys`` list names each description key by PATH, so an edited output schema
-    would leave it naming fields that are gone and holding every field that is new. It follows
-    instead: a surviving path keeps its state, a removed one drops, a new top-level field opens —
-    as on a node with no list — and a new nested one takes its parent's, the lock's inheritance.
-    A rename is a removal plus an addition."""
+    """A stored ``param_keys`` names description keys by PATH, so it follows an edited schema."""
     out = dict(overlay)
     for name, block in overlay.items():
         opt = block.get("optimizer") if isinstance(block, dict) else None
@@ -214,8 +196,6 @@ def _narrowing_follows_schema(
 
 
 def candidate_library_from_column(stores: Stores, draft_id: str, column: str) -> tuple[str, ...]:
-    """The distinct values of one of the draft's own columns, as candidate-library terms — the
-    "build from the dataset" derivation, for any ingress to hand to ``dispatch_draft_patch``."""
     draft = load_checkin_draft(stores, draft_id)
     if draft is None:
         raise NotFoundError(f"draft {draft_id!r} not found.", code="command_target_not_found")
@@ -237,7 +217,6 @@ def candidate_library_from_column(stores: Stores, draft_id: str, column: str) ->
 
 
 def apply_draft_patch(draft: DraftCampaign, plan: DraftPatchPlan) -> DraftCampaign:
-    """The planned edit, folded onto *draft*. Pure — the caller persists what comes back."""
     updated = draft.apply_resolution(values=plan.changes, provenance=plan.provenance)
     if plan.column_query is not None or plan.column_ground_truth is not None:
         updated = updated.confirm_columns(

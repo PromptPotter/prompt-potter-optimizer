@@ -1,6 +1,3 @@
-"""Tabular blob → ``Table`` → ``list[Sample]`` for the operator-uploaded ingest path. The
-HuggingFace loaders own the signed-download path; this one owns untrusted file content."""
-
 from __future__ import annotations
 
 import csv
@@ -24,13 +21,11 @@ Sized one order of magnitude above any benchmark we ship; revisit when a
 genuine large-dataset onboarding flow surfaces.
 """
 
-# Top-level JSON object keys that may wrap a record list ({"data": [...]}).
 _JSON_RECORD_KEYS = ("data", "rows", "items", "records", "examples")
 
 
 class IngestError(PayloadInvalidError):
-    """``reason`` is a stable code declared in ``api-openapi.yaml::ErrorEnvelope``. A
-    :class:`PayloadInvalidError`, so the central ``PotterError`` handler maps it with no arm."""
+    """``reason`` is a stable code declared in ``api-openapi.yaml::ErrorEnvelope``."""
 
     code = "ingest_failed"
 
@@ -41,21 +36,14 @@ class IngestError(PayloadInvalidError):
 
 @dataclass(frozen=True, slots=True)
 class Table:
-    """Header-agnostic: no column has been read as input or target yet, and whitespace-only
-    cells are kept as-is."""
-
     headers: tuple[str, ...]
     rows: tuple[dict[str, str], ...]
 
 
-# Operator-facing list of what ingest reads — kept in one place so the picker
-# hint, the unsupported-format error, and the docs stay in sync.
 SUPPORTED_FORMATS_HINT = "Drop a CSV, TSV, JSON, JSONL, or Excel (.xlsx) file."
 
 
 def format_from_filename(filename: str) -> str:
-    """An unrecognised extension maps to ``"unknown"`` so :func:`read_tabular` refuses it with
-    a file-type message instead of a UTF-8 decode error."""
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     if ext in ("csv", "txt", ""):
         return "csv"
@@ -71,8 +59,6 @@ def format_from_filename(filename: str) -> str:
 
 
 def read_tabular(blob: bytes, *, fmt: str = "csv") -> Table:
-    """Header-agnostic — column identity is the origin check-in's job, gated at mint, not here.
-    UTF-8 with BOM tolerated (Excel CSV exports ship one)."""
     if fmt == "xlsx":
         return _read_xlsx(blob)
     if fmt in ("csv", "tsv"):
@@ -112,7 +98,7 @@ def _read_delimited(text: str, delimiter: str) -> Table:
         for row in reader:
             cells = {name: (row.get(name) or "").strip() for name in fieldnames}
             if not any(cells.values()):
-                continue  # skip blank trailing rows
+                continue
             if len(rows) >= MAX_SAMPLES:
                 raise IngestError(
                     reason="too_large",
@@ -146,7 +132,6 @@ def _records_from_json(doc: Any) -> list[dict[str, Any]]:
             val = doc.get(key)
             if isinstance(val, list):
                 return [r for r in val if isinstance(r, dict)]
-        # Object-of-columns: every value a list, all the same length → transpose.
         cols = {k: v for k, v in doc.items() if isinstance(v, list)}
         if cols and len(cols) == len(doc):
             lengths = {len(v) for v in cols.values()}
@@ -200,7 +185,6 @@ def _records_to_table(records: list[dict[str, Any]]) -> Table:
     if not rows:
         raise IngestError(reason="empty", message="Upload parsed but has zero data rows.")
 
-    # Backfill every row to the full header set so the Table is rectangular.
     full = [{h: row.get(h, "") for h in headers} for row in rows]
     return Table(headers=tuple(headers), rows=tuple(full))
 
@@ -214,9 +198,7 @@ def _stringify_cell(value: Any) -> str:
 
 
 def _read_xlsx(blob: bytes) -> Table:
-    """Gated by ``settings.HARDENED_MODE`` — Excel is a macro / zip-bomb / XXE vector, so a
-    hardened deployment refuses rather than parses it."""
-
+    # Excel is a macro / zip-bomb / XXE vector.
     if settings.HARDENED_MODE:
         raise IngestError(
             reason="hardened_blocked",
@@ -224,7 +206,7 @@ def _read_xlsx(blob: bytes) -> Table:
         )
 
     try:
-        import openpyxl  # lazy: an extra since 0.8.11, and off the hot CSV/JSON path
+        import openpyxl  # lazy: an extra, and off the hot CSV/JSON path
     except ModuleNotFoundError:
         raise IngestError(
             reason="unsupported_format",
@@ -256,19 +238,7 @@ def _read_xlsx(blob: bytes) -> Table:
 def materialize_samples(
     table: Table, *, query_col: str, ground_truth_col: str, order_seed: str | None
 ) -> list[Sample]:
-    """Belt-and-suspenders: the origin gate should already have rejected a column that is not a
-    member of ``table.headers``.
-
-    ``order_seed`` decorrelates the minted ``Sample.id`` sequence from the upload's row order;
-    ``None`` keeps the file as delivered. An uploaded bank is routinely GROUPED BY LABEL, and the
-    round-subset ranker ties across never-measured samples and breaks that tie on ascending id — so
-    a label-ordered id sequence hands each round a disjoint single-label panel and cross-round
-    accuracy stops being a series. Seeded rather than random: ids are minted ONCE here and read back
-    from the committed ``cache.json`` forever after, and ``sample_id`` keys every per-sample history
-    (δ, hit rates, hard samples), so the permutation must be reproducible from what is on disk.
-    Re-seeding an EXISTING dataset is therefore a re-cut, not an edit — it repoints every slot's
-    history at a different question, so it belongs on a new dataset rather than in place.
-    """
+    """``order_seed`` unties ids from a label-grouped upload; seeded, since ids key every history."""
     for label, col in (("query", query_col), ("ground_truth", ground_truth_col)):
         if col not in table.headers:
             raise IngestError(
@@ -279,8 +249,7 @@ def materialize_samples(
                 ),
             )
 
-    # Validated in FILE order so a rejection quotes the row number the operator sees in their own
-    # file; the permutation below only decides which id each surviving row is minted under.
+    # Validated in FILE order so a rejection quotes the operator's own row number.
     pairs: list[tuple[str, str]] = []
     for ordinal, row in enumerate(table.rows, start=1):
         query = row.get(query_col, "")
@@ -301,8 +270,6 @@ def materialize_samples(
 
 
 def _dedup_terms(values: Iterable[str]) -> tuple[str, ...]:
-    """The shared shape of a candidate library however it is sourced — a dropped file or a
-    dataset column — so the two never diverge."""
     seen: dict[str, None] = {}
     for value in values:
         term = value.strip()
@@ -312,8 +279,6 @@ def _dedup_terms(values: Iterable[str]) -> tuple[str, ...]:
 
 
 def parse_candidate_library(blob: bytes, filename: str) -> tuple[str, ...]:
-    """An UNQUOTED-comma ``.csv`` splits mid-entry, which is why the operator-facing hint steers
-    comma-laden lists to per-line ``.txt`` or Excel rather than raw CSV."""
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     if ext in ("txt", ""):
         return _dedup_terms(_decode(blob).splitlines())
@@ -322,8 +287,6 @@ def parse_candidate_library(blob: bytes, filename: str) -> tuple[str, ...]:
 
 
 def read_candidate_library_file(dataset_config_dir: Path) -> tuple[str, ...]:
-    """The single file-read seam, so the runtime term-index union and the reopened draft parse
-    identically. Absent file → ``()``: the pool is the answers alone, degenerate but runnable."""
     path = dataset_config_dir / CANDIDATE_LIBRARY_FILE
     if not path.is_file():
         return ()
@@ -331,8 +294,6 @@ def read_candidate_library_file(dataset_config_dir: Path) -> tuple[str, ...]:
 
 
 def candidate_library_from_rows(rows: Iterable[dict[str, Any]], column: str) -> tuple[str, ...]:
-    """The alternative to a file drop when the targets already live in the data. Same dedup
-    shape as :func:`parse_candidate_library`."""
     return _dedup_terms(str(row.get(column, "")) for row in rows)
 
 
@@ -345,8 +306,6 @@ enumerating verbatim into the origin prompt."""
 def closed_label_set(
     values: Iterable[str], *, n_rows: int, max_enum: int = MAX_ENUMERATED_LABELS
 ) -> tuple[str, ...] | None:
-    """``None`` for an open-ended column — there is no small fixed answer space to enumerate.
-    The single cardinality gate is the closed-vs-open detector; no scorer special-casing."""
     distinct = sorted({v.strip() for v in values if v and v.strip()})
     if not 2 <= len(distinct) <= max_enum:
         return None

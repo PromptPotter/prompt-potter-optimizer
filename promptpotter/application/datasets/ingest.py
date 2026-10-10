@@ -1,6 +1,3 @@
-"""``ingest_draft`` — the single orchestration seam both ingest surfaces call, which is what makes
-CLI/web parity real. The first action mints a durable check-in, so ``draft_id`` IS its ``campaign_id``."""
-
 from __future__ import annotations
 
 import asyncio
@@ -17,6 +14,7 @@ from promptpotter.application.datasets.csv_ingest import (
     format_from_filename,
     read_tabular,
 )
+from promptpotter.application.datasets.draft_build import overlay_from_campaign_config
 from promptpotter.application.datasets.draft_campaign import (
     DEFAULT_MAX_ROUNDS,
     DEFAULT_SCORING_MATCHER,
@@ -32,7 +30,6 @@ from promptpotter.application.datasets.prompts import (
     load_dataset_prompt,
 )
 from promptpotter.application.jobs.launcher.checkin import create_checkin_campaign
-from promptpotter.application.jobs.launcher.draft_build import overlay_from_campaign_config
 from promptpotter.application.origin import canonical_origin_campaign
 from promptpotter.application.scoring.formula import (
     DIALS_KEY,
@@ -58,11 +55,7 @@ from promptpotter.infrastructure.store.layout import validate_dataset_name
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import NotFoundError
 
-# Per-file upload cap. 25 MB comfortably holds ``MAX_SAMPLES`` 500-byte rows
-# plus headroom; rejects the obvious DOS shapes (multi-hundred-MB blobs) before
-# UTF-8 decode. The web boundary enforces it on the wire; the CLI reads a local
-# file the operator already chose, so it relies on the per-row cap in
-# ``read_tabular`` instead.
+# Enforced by the web boundary only; the CLI relies on the per-row cap in ``read_tabular``.
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 
 logger = logging.getLogger(__name__)
@@ -71,18 +64,6 @@ logger = logging.getLogger(__name__)
 async def fetch_backend_nodes(
     connector_name: str, *, backend_url: str = DEFAULT_BACKEND_URL
 ) -> dict[str, Any]:
-    """The backend's own ``GET /pipeline::nodes``, read ONCE per check-in and stored on the draft.
-
-    This is the half a draft cannot derive. ``optimizer.param_keys`` — which params are search
-    AXES — is declared by the service and by nothing else, so a setup screen built from the
-    connector seed alone concludes that nothing is movable and draws a lock the run does not
-    enforce. Fetched here, at the surface that already owns backend wiring, rather than inside
-    the pure projection that renders it.
-
-    An in-process connector has no service to ask and its manifest IS the declaration; a probe
-    that fails returns ``{}``, which the wire reports as ``schema_source: unreachable`` instead
-    of letting an empty answer read as a locked one.
-    """
     connector = connectors.get(connector_name)
     if connector.execution == "in_process":
         return {}
@@ -101,20 +82,12 @@ async def fetch_backend_nodes(
 
 
 async def refresh_capabilities(stores: Stores) -> None:
-    """Refresh this tenant's model-capability snapshot on the same beat as the pipeline probe.
-
-    Best-effort by construction: the refresh keeps any prior snapshot when the catalogue cannot be
-    read, and a missing snapshot resolves to UNKNOWN rather than to "unsupported". So a check-in
-    never blocks on a third party's uptime, and never narrows an axis because of it either.
-    """
     await refresh_model_capabilities(Path(stores.base_dir))
 
 
 def _column_label_sets(
     headers: list[str], rows: list[dict[str, str]]
 ) -> dict[str, tuple[str, ...]]:
-    """Per-column closed label set over the FULL upload, not the truncated preview — the answer space the
-    origin gate needs. Only a column reading as a fixed taxonomy carries an entry."""
     n = len(rows)
     return {
         header: labels
@@ -138,12 +111,10 @@ async def ingest_draft(
     slug: str | None = None,
     backend_url: str = DEFAULT_BACKEND_URL,
 ) -> DraftCampaign:
-    """``SlugTakenError`` is raised BEFORE the check-in campaign is minted, so a collision leaves no
-    orphan. The backend's node declaration is read HERE: without it a draft draws locks no run enforces."""
-
     table = read_tabular(blob, fmt=format_from_filename(filename or "upload.csv"))
     base_slug = (slug or default_slug_from_filename(filename or "upload")).lower()
-    validate_dataset_name(base_slug)  # raises ValueError on a bad slug
+    validate_dataset_name(base_slug)
+    # Raised before the check-in campaign is minted, so a collision leaves no orphan.
     if stores.tenant_datasets.slug_exists(base_slug):
         raise SlugTakenError(base_slug, stores.tenant_datasets.suggest_free_slug(base_slug))
     await refresh_capabilities(stores)
@@ -160,10 +131,6 @@ async def ingest_draft(
         column_label_sets=_column_label_sets(list(table.headers), list(table.rows)),
     )
     draft = draft.patch(backend_nodes=backend_nodes)
-    # Mint the check-in campaign + stash the raw rows + headers under it;
-    # materialization to Samples waits until the column mapping is confirmed (at
-    # Start). The resolution block lets an operator open checkin/cache.json and
-    # see what still blocks mint.
     _campaign_id, _cycle_id, keyed = create_checkin_campaign(
         stores,
         draft=draft,
@@ -182,12 +149,6 @@ async def draft_from_dataset(
     overrides: dict[str, Any] | None = None,
     origin_campaign: Campaign | None = None,
 ) -> DraftCampaign:
-    """Build a fully-confirmed draft straight from an authored dataset's files, then mint a check-in. The
-    node config rides through as ``pipeline_overlay``, PRESERVING the backend model/provider.
-    ``origin_campaign`` anchors an origin REUSE: its frozen config layers over the dataset file's
-    nodes, the order a run resolves in, so the draft opens on what that origin ran — and the
-    backend's node declaration is read off ITS connector, not what the shared file says today."""
-
     items = resolve_dataset_items(stores, dataset_name)
     rows: list[dict[str, str]] = [
         {"query": str(it["query"]), "ground_truth": str(it["ground_truth"])}
@@ -207,47 +168,33 @@ async def draft_from_dataset(
         )
 
     await refresh_capabilities(stores)
+    # An origin reuse reads the node declaration off ITS connector, not the shared file's.
     backend_nodes = await fetch_backend_nodes(
         origin_campaign.backend_type
         if origin_campaign is not None
         else backend_type_of_dataset(stores, dataset_name)
     )
 
-    # One validated parse of the dataset's config files. The `or` ladders below fire only where
-    # the authored file leaves a field empty. The optimizer LLM is install-global
-    # (`promptpotter/assets/optimizers/potter/pipeline.yaml`), so no draft carries provider/model.
     authored = read_authored_dataset(dataset_dir)
     cc = authored.campaign_config
     task = authored.task_description
-    # The matcher is read off `per_sample`, never off the block's own text: a block that also
-    # declares a composite is a mapping, and its repr names no matcher.
     spec = split_scoring_block(cc.scoring, judge_instrument=None)
     matcher = (spec.per_sample or "").split("(", 1)[0].strip() or DEFAULT_SCORING_MATCHER
-    # A hand-pinned anchored `per_cell` arrives as the dials it spells: its pin stood in for the
-    # origin's level, which this campaign measures for itself.
     declared = parse_dials(cc.scoring.get(DIALS_KEY, "")) if isinstance(cc.scoring, dict) else {}
     pinned = anchored_criterion_dials(spec.per_cell) if spec.per_cell else None
     dials = spell_dials(declared or {name: d.weight for name, d in (pinned or {}).items()})
-    # `is not None`, never `or`: 0 is a MEANINGFUL value here — "measure the origin and stop" —
-    # and `or` would silently promote it to the default, handing the operator unbounded rounds
-    # when they asked for none. `None` (authored as unlimited) has no draft representation, so it
-    # takes the default; that is a deliberate draft starting point, not a coerced answer.
+    # `is not None`, never `or`: 0 means "measure the origin and stop".
     authored_rounds = cc.optimization.max_rounds
     max_rounds = authored_rounds if authored_rounds is not None else DEFAULT_MAX_ROUNDS
     connector = authored.backend_type or DEFAULT_CONNECTOR
     pipeline_overlay = authored.pipeline_nodes
     if origin_campaign is not None:
-        # A merge, not a replacement: the origin's config is sparse, and the dataset still owns
-        # every node it never touched.
+        # A merge, not a replacement: the origin's frozen config is sparse.
         pipeline_overlay = merge_node_blocks(
             pipeline_overlay,
             overlay_from_campaign_config(load_campaign_config(origin_campaign.config)),
         )
 
-    # The authored dataset's own starting prompt rides through as the draft's
-    # ``origin_prompt_fields`` (its six string fields), so committing a
-    # demo/benchmark/owned Origin preserves the prompt the optimizer evolves
-    # from — a fresh CSV upload instead gets the check-in's decomposition.
     origin_prompt_fields: dict[str, Any] = {}
     prompt_names = list_dataset_prompts(dataset_dir)
     if prompt_names:
@@ -257,21 +204,13 @@ async def draft_from_dataset(
         except FileNotFoundError:
             origin_prompt_fields = {}
 
-    # Keep the canonical slug — an existing dataset (demo / benchmark / owned)
-    # is NOT a new dataset, so it must not uniquify into a `{slug}-N` clone. The
-    # `dataset:{name}` source_file marks this draft as derived, and the commit
-    # path mints against this canonical dataset instead of materializing a folder.
     slug = dataset_name.lower()
-    # The check-in model reads the preview with its labels, so it is drawn from the rows the
-    # dataset's own split leaves to the search: no bench row reaches the origin's author.
+    # The check-in model reads the preview's labels, so no bench row may reach it.
     preview = [
         {"query": s.query, "ground_truth": str(s.ground_truth)}
         for s in partition_bank(bank_samples(items), cc.dataset_split).search
     ]
 
-    # headers ["query","ground_truth"] auto-confirm the column mapping in
-    # new_draft(); the config knobs auto-confirm there too. We then state the
-    # task framing + override the knob VALUES from the dataset's own config.
     draft = new_draft(
         tenant_id=stores.identity.tenant_id,
         slug=slug,
@@ -287,12 +226,7 @@ async def draft_from_dataset(
             "connector": connector,
             "scoring_matcher": matcher,
             "scoring_dials": dials,
-            # The campaign-config knobs as one object. Preserve the dataset's round
-            # ceiling, its optimizer and that optimizer's overlay, so reusing an Origin
-            # carries its config instead of resetting to stock — an ablation arm reset to the
-            # full ladder would measure a different thing under the same Origin's name. Built
-            # off the default dump (not validated) so a dataset's higher ceiling passes
-            # through — the 1-100 bound gates only the operator edit path.
+            # Not validated: a dataset's ceiling may exceed the bound on the operator edit path.
             "optimization_overrides": {
                 **OptimizationOverrides().model_dump(mode="json"),
                 "max_rounds": max_rounds,
@@ -301,15 +235,8 @@ async def draft_from_dataset(
             },
             "pipeline_overlay": pipeline_overlay,
             "origin_prompt_fields": origin_prompt_fields,
-            # Preserve the dataset's own pipeline (full Research+Match, llm_only, …)
-            # so reuse doesn't reset to the connector default.
             "pipeline_steps": authored.active_steps,
-            # Reuse re-probes rather than inheriting: the committed dataset carries only the
-            # overlay, and the service may have moved since it was written.
             "backend_nodes": backend_nodes,
-            # The origin HOLDS its candidate library — carry the committed value so
-            # reopening surfaces the dependency as already FULFILLED (not Missing),
-            # and a re-mint re-persists it through the one origin-write seam.
             "candidate_library": authored.candidate_library,
         },
         provenance={"task_description": Provenance.CONFIRMED},
@@ -326,9 +253,15 @@ async def draft_from_dataset(
     return keyed
 
 
+async def draft_from_dataset_name(*, stores: Stores, dataset_name: str) -> DraftCampaign:
+    return await draft_from_dataset(
+        stores=stores,
+        dataset_dir=readable_dataset_dir(stores, dataset_name),
+        dataset_name=dataset_name,
+    )
+
+
 async def draft_from_origin(*, stores: Stores, origin_id: str) -> DraftCampaign:
-    """Open a campaign-backed origin as a prefilled check-in: the canonical campaign's dataset, under
-    what that campaign RAN. Marked ``reused_origin_id``, so starting it seeds C0 from the origin."""
     campaign = canonical_origin_campaign(stores, origin_id)
     if campaign is None:
         raise NotFoundError(f"Origin '{origin_id}' not found", code="command_target_not_found")
@@ -349,6 +282,7 @@ __all__ = [
     "MAX_UPLOAD_BYTES",
     "SlugTakenError",
     "draft_from_dataset",
+    "draft_from_dataset_name",
     "draft_from_origin",
     "fetch_backend_nodes",
     "ingest_draft",

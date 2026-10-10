@@ -1,6 +1,4 @@
-"""What every account on this install has spent and produced — the operator-admin read owned by
-[`0004-operator-admin-channels.md`](../../../docs/adr/0004-operator-admin-channels.md); never an
-inbound API route. It takes the projects root because a ``Stores`` is scoped to one tenant."""
+"""The operator-admin read (ADR-0004), never an inbound API route; a ``Stores`` is one tenant's, hence the root."""
 
 from __future__ import annotations
 
@@ -20,23 +18,17 @@ from promptpotter.infrastructure.store.user_store import User, UserStore
 
 
 class AccountUsage(NamedTuple):
-    """One account's row: who, what they spent, and what they produced. ``ceilings`` reads ``None``
-    for the host, who spends their own money; ``quota.overrun`` says how far past it went.
-    ``cycles`` counts ledger FILES, so a cycle that died before its first append is not among them.
-    ``unreadable`` set means the row could not be summed and every other field is a placeholder."""
-
     user_id: str
     email: str | None
     spent: UserSpend
     ceilings: SpendCeilings
     campaigns: int
     cycles: int
+    # Set means the row could not be summed and every other field is a placeholder.
     unreadable: str = ""
 
 
 def read_install_spend(projects_root: Path) -> list[AccountUsage]:
-    """Every account on this install, costliest first. ``user.json`` is what makes a tenant dir an
-    account — a directory without one is a workspace nobody has signed into, and it is skipped."""
     rows: list[AccountUsage] = []
     if not projects_root.is_dir():
         return rows
@@ -49,31 +41,23 @@ def read_install_spend(projects_root: Path) -> list[AccountUsage]:
                 continue
             rows.append(_account_row(user, tenant_dir))
         except Exception as exc:
-            # One torn file must not blind the operator to every OTHER account: a raise here is
-            # `/spend` answering nothing at all, which is how the report stops being read. The
-            # `user.json` READ is inside the guard for the same reason — it is a strict-model
-            # validate, so a stale-schema file raises before there is a row to place. The dir name
-            # is the account id (the first web sign-in renames `projects/default/` to
-            # `projects/{user_id}/`), which is the one identifier still readable when `user.json`
-            # is itself the torn file.
+            # One torn file must not blind `/spend` to every OTHER account; the dir name is the account id.
             rows.append(
                 AccountUsage(
                     user_id=tenant_dir.name,
                     email=None,
                     spent=UserSpend(0.0, 0, 0),
-                    ceilings=SpendCeilings(None, None),
+                    ceilings=SpendCeilings(),
                     campaigns=0,
                     cycles=0,
                     unreadable=f"{type(exc).__name__}: {exc}",
                 )
             )
-    rows.sort(key=lambda r: (r.spent.used_usd, r.spent.used_tokens), reverse=True)
+    rows.sort(key=lambda r: (r.spent.sent_usd, r.spent.used_tokens), reverse=True)
     return rows
 
 
 def _account_row(user: User, tenant_dir: Path) -> AccountUsage:
-    """The host arm is :func:`is_host_tenant_dir` — the walk's reading of the same exemption the
-    live gate applies, so the operator is not reported overrun on money that was always theirs."""
     campaigns = CampaignStore(WorkspaceDir(tenant_dir))
     return AccountUsage(
         user_id=user.user_id,

@@ -1,11 +1,8 @@
-"""The two check-in transitions: drop/pick mints a real disk-backed CHECKIN campaign (sidebar,
-active pointer, restart-survivable); Start commits it. The tails differ ONLY in run-invocation."""
-
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from promptpotter.application.datasets.draft_campaign import (
     DraftCampaign,
@@ -13,7 +10,7 @@ from promptpotter.application.datasets.draft_campaign import (
     default_campaign_config,
     load_checkin_draft,
 )
-from promptpotter.application.datasets.origin_readiness import resolution_block
+from promptpotter.application.datasets.origin_readiness import save_checkin_draft
 from promptpotter.application.initialization.session import (
     finalize_checkin_to_active,
     mint_checkin_skeleton,
@@ -21,7 +18,6 @@ from promptpotter.application.initialization.session import (
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.launcher.admission import (
     admit_and_hold,
-    launch,
     release_slot,
 )
 from promptpotter.application.jobs.launcher.mint_and_start import (
@@ -32,19 +28,17 @@ from promptpotter.application.jobs.launcher.mint_and_start import (
     materialize_and_write_origin,
     persist_origin_candidate_library,
 )
-from promptpotter.application.jobs.launcher.run_job import JobSpec, spawn_job
+from promptpotter.application.jobs.launcher.run_job import HeldRun
 from promptpotter.application.jobs.mint import resolve_cycle_plan, write_plan_seed
-from promptpotter.config.settings import DEFAULT_BACKEND_URL
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.launch_limits import LaunchLimits
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.runtime_flags import is_checkin
 from promptpotter.infrastructure.store.dataset_access import readable_dataset_dir
-from promptpotter.infrastructure.store.stores import Stores
+from promptpotter.infrastructure.store.stores import Stores, owned_campaign
 from promptpotter.shared.identity import CAMPAIGN_CREATE_CAP, require_capability
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
-
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.jobs.registry import Job, JobRegistry
@@ -60,47 +54,27 @@ def create_checkin_campaign(
     source_file: str = "",
     headers: tuple[str, ...] = (),
 ) -> tuple[str, str, DraftCampaign]:
-    """Transition (a) — mint the CHECKIN skeleton, re-key ``draft`` to the new ``campaign_id``, persist
-    it. The bank lands FIRST: ``write_resolution`` patches ``cache.json`` and no-ops without one.
-
-    **The capability gate is HERE, at the mint, not on the routes above it.** A check-in campaign is
-    durable disk the moment it exists, and four ingresses reach this one function — `/datasets/ingest`,
-    `/datasets/{name}/draft`, `/origins/{id}/draft` and CLI `new <file>`. Gating each of them spells
-    the same rule four times and leaves the fifth unguarded; `mint-campaign` already answers to
-    `campaign.create` at the dispatcher, so a second door onto the same act answers to it too."""
+    # Gated HERE, at the mint, not on the routes above it: every ingress reaches this one function.
     require_capability(stores.identity, CAMPAIGN_CREATE_CAP, subject="check-in mint")
-    _session_id, campaign_id, cycle_id = mint_checkin_skeleton(
-        stores, slug=draft.slug, backend_type=draft.connector
-    )
+    hop = mint_checkin_skeleton(stores, slug=draft.slug, backend_type=draft.connector)
+    campaign_id = hop.campaign_id
+    # The bank lands FIRST: ``write_resolution`` patches ``cache.json`` and no-ops without one.
     stores.checkin.write_bank(
         campaign_id, bank_items, source_file=source_file or draft.source_file, headers=headers
     )
-    return campaign_id, cycle_id, save_checkin_draft(stores, draft.patch(draft_id=campaign_id))
+    return campaign_id, hop.cycle_id, save_checkin_draft(stores, draft.patch(draft_id=campaign_id))
 
 
-def save_checkin_draft(
-    stores: Stores, draft: DraftCampaign, *, resolution: dict[str, Any] | None = None
-) -> DraftCampaign:
-    """The single write-back seam every draft-mutating handler rides. It writes BOTH ``draft.json`` and
-    the derived ``cache.json::resolution``, so no caller can refresh one and leave the other stale."""
-    stores.checkin.write_draft(draft.draft_id, draft.to_disk())
-    stores.checkin.write_resolution(draft.draft_id, resolution or resolution_block(draft))
-    return draft
+class StartCheckinResponse(StrictModel):
+    """What a Start answers: the campaign, the cycle its loop runs and the job holding its slot."""
 
-
-@dataclass(frozen=True, slots=True)
-class PreparedCheckinRun:
-    session: Session
-    campaign_config: CampaignConfig
-    train_data: list[Any]
+    campaign_id: str
+    cycle_id: str
+    job_id: str
 
 
 def load_checkin_for_start(stores: Stores, campaign_id: str) -> tuple[CycleHop, DraftCampaign]:
-    """Load + gate a check-in for Start. An incomplete origin raises ``OriginIncompleteError`` → 422
-    with the open gaps, leaving the campaign in check-in."""
-    campaign = stores.campaigns.load_campaign(campaign_id)
-    if campaign is None or campaign.owner_user_id != str(stores.identity.user_id):
-        raise LaunchError(f"campaign not found or not owned: {campaign_id}")
+    campaign = owned_campaign(stores, campaign_id)
     if not is_checkin(stores.campaigns.cycle_dir(campaign.root_hop)):
         raise LaunchError(f"campaign {campaign_id} is not in check-in — its origin is committed")
     draft = load_checkin_draft(stores, campaign_id)
@@ -110,15 +84,35 @@ def load_checkin_for_start(stores: Stores, campaign_id: str) -> tuple[CycleHop, 
     return campaign.root_hop, draft
 
 
-async def prepare_checkin_run(
-    stores: Stores,
-    *,
-    hop: CycleHop,
-    draft: DraftCampaign,
-    make_session: Callable[[str], Awaitable[Session]],
-) -> PreparedCheckinRun:
-    """The single irreversible Start body: commit the origin, build the session, flip to ``active``.
-    Run-invocation-agnostic — preflight, the machine slot and the run itself are the caller's."""
+@dataclass(frozen=True, slots=True)
+class CheckinStart:
+    verb: ClassVar[str] = "start-checkin"
+
+    hop: CycleHop
+    draft: DraftCampaign
+    limits: LaunchLimits
+    backend_url: str
+    backend_id: str
+
+    @property
+    def dataset_name(self) -> str:
+        return self.draft.slug
+
+    def backend(self, stores: Stores) -> tuple[str, str]:
+        return self.draft.connector, self.backend_url
+
+    def campaign_config(self, stores: Stores) -> CampaignConfig:
+        """Read BEFORE Start commits, so admission sees the ceiling the run will hold."""
+        canonical = dataset_source_of(self.draft.source_file)
+        if canonical is None:
+            return default_campaign_config(self.draft)
+        return dataset_campaign_config(
+            readable_dataset_dir(stores, canonical), optimization=self.draft.optimization_overrides
+        )
+
+
+async def _commit_checkin(stores: Stores, request: CheckinStart) -> Session:
+    hop, draft = request.hop, request.draft
     canonical = dataset_source_of(draft.source_file)
     if canonical is None:
         if stores.tenant_datasets.slug_exists(draft.slug):
@@ -131,8 +125,7 @@ async def prepare_checkin_run(
         materialize_and_write_origin(stores, draft, bank_items=list(bank["items"]))
         dataset_name = draft.slug
         pipeline_overlay: dict[str, Any] = {}
-        # A fresh upload COMMITS its own `pipeline.yaml`, whose `pipelines.default` already IS the
-        # draft's chain — so there is nothing to exclude.
+        # A fresh upload commits its own `pipeline.yaml`, whose default already IS the draft's chain.
         pipeline_steps: list[str] = []
         origin_override = None
     else:
@@ -141,17 +134,18 @@ async def prepare_checkin_run(
         pipeline_overlay = draft.pipeline_overlay
         # A REUSED dataset writes no file, so the draft's chain reaches the run only here.
         pipeline_steps = list(draft.pipeline_steps)
-        # Whenever THIS turn authored an origin, not only when it reused one. Gated on
-        # `reused_origin_id` the override was dropped in the case that needs it: a fresh origin
-        # over an existing slug never reaches `materialize_and_write_origin` (that writes the
-        # dataset, which later campaigns share), so the run silently measured whatever
-        # `prompts/default.yaml` the FIRST campaign on that slug committed — a prompt nobody in
-        # this check-in saw, under the first campaign's identity, so the cache replayed it too.
-        # `committed_prompt_fields` rather than the raw dict, or the label enumeration is lost.
+        # An origin authored over an existing slug writes no dataset: only the override carries it.
         authored = any(str(value).strip() for value in draft.origin_prompt_fields.values())
+        # `committed_prompt_fields` rather than the raw dict, or the label enumeration is lost.
         origin_override = draft.committed_prompt_fields() if authored else None
 
-    session = await make_session(dataset_name)
+    session = await init_services(
+        backend_url=request.backend_url,
+        backend_id=request.backend_id,
+        dataset_name=dataset_name,
+        identity=stores.identity,
+        stores=stores,
+    )
 
     dataset_root = readable_dataset_dir(stores, dataset_name)
     campaign_config = build_cycle_config(
@@ -163,134 +157,39 @@ async def prepare_checkin_run(
         pipeline_steps=pipeline_steps,
     )
 
-    train_data = session.samples
-    plan = resolve_cycle_plan(session, campaign_config, train_data, origin_override=origin_override)
-
-    finalize_checkin_to_active(
-        session,
-        campaign_config,
-        hop=hop,
-        session_id=stores.campaigns.session_id_of(hop),
-        cycle_plan=plan,
-        dataset_size=len(train_data),
+    plan = resolve_cycle_plan(
+        session, campaign_config, session.samples, origin_override=origin_override
     )
+
+    finalize_checkin_to_active(session, campaign_config, hop=hop, cycle_plan=plan)
     write_plan_seed(stores, hop, plan)
-
-    return PreparedCheckinRun(
-        session=session,
-        campaign_config=campaign_config,
-        train_data=train_data,
-    )
+    return session
 
 
-def _checkin_campaign_config(stores: Stores, draft: DraftCampaign) -> CampaignConfig:
-    """The campaign declaration Start is about to commit, read BEFORE it commits, so admission sees
-    the ceiling the run will hold: a reused dataset's own file, or the draft's floor that
-    ``default_campaign_json`` writes for a fresh upload. The overlay ``build_cycle_config``
-    adds later moves no budget arm."""
-    canonical = dataset_source_of(draft.source_file)
-    if canonical is None:
-        return default_campaign_config(draft)
-    return dataset_campaign_config(
-        readable_dataset_dir(stores, canonical), optimization=draft.optimization_overrides
-    )
-
-
-async def start_checkin_campaign(
-    *,
-    stores: Stores,
-    job_registry: JobRegistry,
-    hop: CycleHop,
-    draft: DraftCampaign,
-    limits: LaunchLimits,
-    backend_url: str = DEFAULT_BACKEND_URL,
-) -> dict[str, str]:
-    """Transition (b), web tail — take the machine slot (or a place in line), then start the run
-    in its own process. ``(hop, draft)`` come from :func:`load_checkin_for_start`: a slot requested
-    before that gate queues an incomplete origin."""
-    job = await launch(
-        stores=stores,
-        job_registry=job_registry,
-        dataset_name=draft.slug,
-        hop=hop,
-        run=lambda job: _start_checkin_run(
-            stores=stores,
-            job_registry=job_registry,
-            job=job,
-            hop=hop,
-            draft=draft,
-            limits=limits,
-            backend_url=backend_url,
-        ),
-    )
-    return {"campaign_id": hop.campaign_id, "cycle_id": job.cycle_id, "job_id": job.job_id}
-
-
-async def _start_checkin_run(
-    *,
-    stores: Stores,
-    job_registry: JobRegistry,
-    job: Job,
-    hop: CycleHop,
-    draft: DraftCampaign,
-    limits: LaunchLimits,
-    backend_url: str,
-) -> None:
-    """Everything a check-in Start does once its slot is HELD — which, for a queued launch, is
-    after the wait. Nothing before this point touches the campaign, so a launch sitting in the
-    queue leaves the check-in exactly as the operator left it."""
-    held = await admit_and_hold(
-        stores=stores,
-        job_registry=job_registry,
-        job=job,
-        verb="start-checkin",
-        dataset_name=draft.slug,
-        backend_type=draft.connector,
-        backend_url=backend_url,
-        requested=limits,
-        config=lambda: _checkin_campaign_config(stores, draft),
-        hop=hop,
-    )
-
-    async def make_session(dataset_name: str) -> Session:
-        return await init_services(
-            backend_url=backend_url, dataset_name=dataset_name, identity=stores.identity
-        )
-
+async def hold_checkin_start(
+    request: CheckinStart, *, stores: Stores, job_registry: JobRegistry, job: Job
+) -> HeldRun:
+    """Nothing before the slot is HELD touches the campaign: a refusal leaves the check-in as it was."""
+    hop = request.hop
+    # The cycle a failure stamps: none until admission passed, since nothing before it wrote one.
+    committing: CycleHop | None = None
     try:
-        prepared = await prepare_checkin_run(
-            stores,
-            hop=hop,
-            draft=draft,
-            make_session=make_session,
-        )
+        held = await admit_and_hold(request, stores=stores, job_registry=job_registry, job=job)
+        committing = hop
+        session = await _commit_checkin(stores, request)
     except BaseException as exc:
-        # `prepare_checkin_run` flips checkin → active before its last await, so an interrupt
-        # there leaves an `active` campaign with no producer. The CYCLE needs stamping too, or
-        # it derives `detached` and `load_checkin_for_start` can no longer re-start it.
-        release_slot(job_registry, job.job_id, exc, stores=stores, hop=hop)
+        # `_commit_checkin` flips to `active` before its last await: an interrupt stamps the CYCLE too.
+        release_slot(job_registry, job.job_id, exc, stores=stores, hop=committing)
         raise
 
-    spawn_job(
-        job_registry,
-        JobSpec.of(
-            stores=stores,
-            job_registry=job_registry,
-            job_id=job.job_id,
-            hop=prepared.session.hop,
-            session_id=prepared.session.session_id,
-            limits=held,
-            backend_url=backend_url,
-        ),
-        stores=stores,
-    )
     logger.info("start-checkin: started %s/%s (job %s)", hop.campaign_id, hop.cycle_id, job.job_id)
+    return HeldRun.of(job_registry, job.job_id, session, held)
 
 
 __all__ = [
-    "PreparedCheckinRun",
+    "CheckinStart",
+    "StartCheckinResponse",
     "create_checkin_campaign",
-    "prepare_checkin_run",
-    "save_checkin_draft",
-    "start_checkin_campaign",
+    "hold_checkin_start",
+    "load_checkin_for_start",
 ]

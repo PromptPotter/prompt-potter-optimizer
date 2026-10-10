@@ -1,26 +1,35 @@
-"""Per-user quota + abuse-limit gates fired from the launcher. A launch is admitted at the ceiling it
-declares or refused outright, and reserves it — with a margin for the calls out when it is reached
-— for as long as it runs."""
-
 from __future__ import annotations
 
+import asyncio
 import logging
 import threading
 import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import NamedTuple
 
 from pydantic import Field
 
 from promptpotter.application.campaign_config import CampaignConfig
-from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.application.jobs.registry import UNRESOLVED_HOP, JobRegistry
 from promptpotter.config.settings import settings
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.launch_limits import HeldLimits, LaunchLimits, RoundsCap
-from promptpotter.domain.spend import BudgetChange, SpendCeilings, bill_is_floor, declare_ceiling
+from promptpotter.domain.spend import (
+    RATE_PRICED_LABEL,
+    SpendCeilings,
+    bill_is_floor,
+    declare_ceiling,
+)
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.identity.migration import registered_user_id
 from promptpotter.infrastructure.identity.paths import default_identity_paths
-from promptpotter.infrastructure.llm.spend_book import SpendBook, unbounded_spend_book
+from promptpotter.infrastructure.llm.spend_book import (
+    SpendBook,
+    spending_under,
+    unbounded_spend_book,
+)
+from promptpotter.infrastructure.runtime_flags import derive_run_state, is_checkin
 from promptpotter.infrastructure.store.account_spend import (
     ZERO_SPEND,
     LifetimeSpend,
@@ -31,7 +40,7 @@ from promptpotter.infrastructure.store.account_spend import (
 )
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.infrastructure.store.user_store import User
-from promptpotter.shared.errors import PayloadInvalidError, PotterError
+from promptpotter.shared.errors import ConflictError, PayloadInvalidError, PotterError
 from promptpotter.shared.identity import (
     CAMPAIGN_BUDGET_CAP,
     TERMINAL_IDENTITY_ID,
@@ -52,9 +61,7 @@ class QuotaExceededError(PotterError):
         self.code = code
 
 
-# Token bucket, sized by ``USER_RATE_BURST`` / ``USER_RATE_PER_MIN``. Process-wide module state;
-# it survives the request scope but not a restart, which is what abuse-bound rather than
-# audit-bound means.
+# Process-wide: survives the request scope, not a restart — abuse-bound, not audit-bound.
 _rate_buckets: dict[str, tuple[float, float]] = {}  # bucket key → (tokens, last_refill_ts)
 _rate_lock = threading.Lock()
 
@@ -74,24 +81,19 @@ def _consume_rate_token(bucket: str) -> bool:
 
 
 def check_launch_quotas(
-    *,
-    user: User,
-    job_registry: JobRegistry,
-    rate_limited: bool = True,
+    *, user: User, stores: Stores, job_registry: JobRegistry, hop: CycleHop
 ) -> None:
-    """Per-USER limits only: rate, concurrent cycles, campaigns per day. The MACHINE's own ceiling
-    rides ``JobRegistry.request_slot``; this runs BEFORE it, under the same gate, so it counts the
-    caller's prior launches and not this one."""
+    """Runs BEFORE ``JobRegistry.request_slot``, same gate: it counts prior launches, not this one."""
+    rate_limited = not spends_the_hosts_own_key(stores) and (
+        hop == UNRESOLVED_HOP or is_checkin(stores.campaigns.cycle_dir(hop))
+    )
     if rate_limited and not _consume_rate_token(user.user_id):
         raise QuotaExceededError(
             code="rate_limited",
             message="Too many campaign launches; slow down and retry shortly.",
         )
 
-    # A queued launch counts. The ceiling means "cycles this account has in flight", and one
-    # waiting for a slot is in flight to the person who pressed — so counting only the running ones
-    # lets an account queue without bound. It also buys the starvation bound the drain order rests
-    # on: the whole queue can never exceed `max_concurrent_cycles × users`.
+    # A queued launch counts, or an account queues without bound and the drain order can starve.
     in_flight = len(job_registry.list_running(user_id=user.user_id)) + len(
         job_registry.list_queued(user_id=user.user_id)
     )
@@ -119,11 +121,9 @@ def check_launch_quotas(
 
 
 def overrun(ceilings: SpendCeilings, spent: UserSpend) -> tuple[float, int]:
-    """What went past *ceilings* anyway. Admission bounds what a run may DECLARE, not what a round
-    boundary overshoots or an unpriced call turns out to have cost — so this is the residue neither
-    arm could refuse, and it is the OPERATOR's number: ``/quota-status`` never serves it."""
+    """The OPERATOR's number: ``/quota-status`` never serves it."""
     return (
-        0.0 if ceilings.usd is None else max(0.0, spent.used_usd - ceilings.usd),
+        0.0 if ceilings.usd is None else max(0.0, spent.sent_usd - ceilings.usd),
         0 if ceilings.tokens is None else max(0, spent.used_tokens - ceilings.tokens),
     )
 
@@ -135,12 +135,9 @@ class AccountWallet(NamedTuple):
     spent: UserSpend
     ceilings: SpendCeilings
     headroom: SpendCeilings
-    # Another live run on this account was admitted but has not yet stamped what it holds, so the
-    # headroom above is quoted at zero rather than quoted twice. It names WHY it is zero: a
-    # contended account has money and needs a retry, an exhausted one has neither.
+    # Headroom is quoted at zero, not twice: a contended account has money and needs a retry.
     contended: bool = False
-    # The excluded cycle's own history, which `headroom` makes room for: that cycle's book counts
-    # it toward its ceiling, so a ceiling reaching no further than it buys nothing new.
+    # The excluded cycle's own history, which `headroom` makes room for.
     history: UserSpend = ZERO_SPEND
 
     @property
@@ -164,15 +161,7 @@ def read_account_wallet(
     excluding_job_id: str | None = None,
     excluding_hop: CycleHop | None = None,
 ) -> AccountWallet:
-    """A running cycle holds its whole reserve until it finishes: counting only what is on
-    the ledger admits two concurrent launches against one remainder and lets the pair spend double
-    the ceiling. Its spend-so-far is therefore counted twice, which errs toward refusing — the safe
-    direction for a wallet the account cannot top up. A stopped run's unreported sends bind the
-    headroom as well, at their bounds: nobody learned what they cost.
-
-    *excluding_hop* quotes the headroom as how far THAT cycle's ceiling may reach: its history
-    (``account_spend.py::history_spend``, a fork's inherited prefix included) is in the account's
-    spend and counted again by its own book, so it is handed back once."""
+    """A running cycle's spend-so-far is counted twice (ledger + reserve): it errs toward refusing."""
     ceilings = lifetime_ceilings(user=user, spends_own_key=spends_the_hosts_own_key(stores))
     spent = sum_user_spend(ledgers=account_ledgers(stores.campaigns))
     if ceilings.usd is None and ceilings.tokens is None:
@@ -218,8 +207,9 @@ class QuotaStatus(StrictModel):
     spend_lifetime: LifetimeSpend
     spend_budget_usd_total: float | None
     spend_budget_used_share: float | None = Field(
-        description="How full the USD meter draws: `spend_lifetime.billed_usd` over "
-        "`spend_budget_usd_total`, at most 1. `None` where no ceiling bounds the account."
+        description="How full the USD meter draws: `spend_lifetime.billed_usd` plus its "
+        "`rate_priced_usd`, over `spend_budget_usd_total`, at most 1. `None` where no ceiling "
+        "bounds the account."
     )
     allowance_spent: bool = Field(
         description="Admission's own answer: the next launch is refused for want of allowance. "
@@ -241,6 +231,10 @@ class QuotaStatus(StrictModel):
         description="Whether this caller may move `max_concurrent_cycles` through "
         "`set-concurrent-cycles`. False on the host's key, where the host sets it."
     )
+    machine_binds: str | None = Field(
+        description="`max_concurrent_cycles` above the machine's `MACHINE_RUN_CAPACITY`, in "
+        "words; null where the account's own limit is the one that binds."
+    )
     campaigns_today: int
     max_campaigns_per_day: int
 
@@ -252,9 +246,18 @@ def _used_share(used: float, ceiling: float | None) -> float | None:
     return min(1.0, used / ceiling) if ceiling > 0 else 1.0
 
 
+def _machine_binds(limit: int) -> str | None:
+    ceiling = settings.MACHINE_RUN_CAPACITY
+    if limit <= ceiling:
+        return None
+    return (
+        f"This account's limit of {limit} is above the machine's {ceiling}, so the machine is "
+        "what binds."
+    )
+
+
 def quota_status(*, stores: Stores, job_registry: JobRegistry) -> QuotaStatus:
-    """The counts :func:`check_launch_quotas` gates the next launch on, beside the RESOLVED ceilings
-    (:func:`lifetime_ceilings`). Usage is uncapped, so an account past its ceiling reads its overage."""
+    """Usage is uncapped, so an account past its ceiling reads its overage."""
     user = stores.users.get_or_create(
         user_id=str(stores.identity.user_id),
         tenant_id=str(stores.identity.tenant_id),
@@ -265,7 +268,7 @@ def quota_status(*, stores: Stores, job_registry: JobRegistry) -> QuotaStatus:
     return QuotaStatus(
         spend_lifetime=LifetimeSpend.of(spent),
         spend_budget_usd_total=ceilings.usd,
-        spend_budget_used_share=_used_share(spent.used_usd, ceilings.usd),
+        spend_budget_used_share=_used_share(spent.sent_usd, ceilings.usd),
         allowance_spent=wallet.exhausted,
         tokens_used_total=spent.used_tokens,
         token_budget_total=ceilings.tokens,
@@ -274,6 +277,7 @@ def quota_status(*, stores: Stores, job_registry: JobRegistry) -> QuotaStatus:
         concurrent_queued=len(job_registry.list_queued(user_id=user.user_id)),
         max_concurrent_cycles=user.max_concurrent_cycles,
         max_concurrent_cycles_writable=concurrent_cycles_writable(stores),
+        machine_binds=_machine_binds(user.max_concurrent_cycles),
         campaigns_today=len(job_registry.list_created_today(user_id=user.user_id)),
         max_campaigns_per_day=user.max_campaigns_per_day,
     )
@@ -288,21 +292,7 @@ def admit_launch(
     job_id: str,
     hop: CycleHop | None,
 ) -> tuple[SpendCeilings, SpendCeilings]:
-    """**One host-wallet gate in two units** — owned by
-    [`0003-spend-and-tenancy.md`](../../../docs/adr/0003-spend-and-tenancy.md) § D1; every launch
-    admits through here, and what it returns is the run's ceiling and the reserve its bills may
-    never pass (:func:`_reserve`) — nothing downstream re-bounds either.
-
-    *declared* is the run's WHOLE declaration (:func:`declare_run_ceiling`: config, seed, standing
-    operator ceiling, launch flag), never a launch flag alone: a gate that admits only the flag
-    reserves one number while the run enforces another. A declaration the account cannot
-    cover is refused WHOLE rather than clamped down, because a clamped launch starts, spends and
-    halts mid-campaign — the outcome the ceiling exists to prevent, not to cause. An arm declaring
-    nothing declares the headroom under whatever bounds the DECLARATION — for a metered account,
-    one step of it (:func:`_launch_step`).
-
-    ``job_id`` is this launch's own reservation, which the wallet must not count against it; *hop*
-    is the cycle a resume continues, ``None`` for a fresh mint."""
+    """Refused WHOLE, never clamped: a clamped launch starts, spends and halts mid-campaign."""
     wallet = read_account_wallet(
         user=user,
         stores=stores,
@@ -327,8 +317,7 @@ def admit_launch(
     room = wallet.headroom
     tokens = declared.tokens
     if declared.usd is None:
-        # A grant bounds what may be DECLARED, so declaring nothing declares the headroom under it
-        # — never the grant itself, which would refuse an account that can still afford the run.
+        # Declaring nothing declares the headroom under the grant, never the grant itself.
         usd = _lowest(room.usd, delegated, step)
     else:
         usd = _lowest(declared.usd, delegated)
@@ -356,18 +345,13 @@ def admit_launch(
     return ceiling, _reserve(ceiling, room, delegated)
 
 
-def admit_spend(*, stores: Stores, bucket: str) -> SpendBook:
-    """Paid calls OUTSIDE any run — the origin resolver's turn, a ``verify-candidate`` — on the
-    host's key, and the book they spend under: this account's headroom beside every run it holds.
-    Nothing is reserved, because the book itself refuses a call that would pass the headroom.
-    ``bucket`` keys the rate meter apart from the launch one, or a conversation would starve the
-    verb it leads to."""
+def _admit_spend(*, stores: Stores, bucket: str) -> SpendBook:
+    """Nothing is reserved: the book itself refuses a call that would pass the headroom."""
     user = stores.users.get_or_create(
         user_id=str(stores.identity.user_id), tenant_id=str(stores.identity.tenant_id)
     )
     spends_own_key = spends_the_hosts_own_key(stores)
-    # Exempt in the RATE arm too: the free-tier meter exists to bound a stranger on the host's
-    # key, and counting the host's own calls per minute meters them against their own money.
+    # The host is exempt in the RATE arm too: the meter bounds a stranger on the host's key.
     if not spends_own_key and not _consume_rate_token(f"{bucket}:{user.user_id}"):
         raise QuotaExceededError(
             code="rate_limited",
@@ -393,18 +377,29 @@ def admit_spend(*, stores: Stores, bucket: str) -> SpendBook:
         raise QuotaExceededError(
             code="spend_ceiling_reached",
             message=(
-                f"This account has spent its allowance (${wallet.spent.used_usd:.2f} / "
-                f"{wallet.spent.used_tokens:,} tokens billed{unreported}), so nothing further "
+                f"This account has used its allowance (${wallet.spent.used_usd:.2f} billed, "
+                f"${wallet.spent.rate_priced_usd:.2f} {RATE_PRICED_LABEL}, "
+                f"{wallet.spent.used_tokens:,} tokens{unreported}), so nothing further "
                 "runs on the host's key."
             ),
         )
-    return SpendBook(
-        usd_cap=lambda: headroom.usd,
-        tokens_cap=lambda: headroom.tokens,
-        usd_reserve=lambda: headroom.usd,
-        tokens_reserve=lambda: headroom.tokens,
-        meters="bill",
-    )
+    return SpendBook(declared=headroom, reserved=headroom, meters="bill")
+
+
+@asynccontextmanager
+async def paid_verb(
+    *, stores: Stores, bucket: str, hop: CycleHop | None
+) -> AsyncIterator[SpendBook]:
+    """A cycle a producer holds is refused: a second biller is money its ceiling never sees."""
+    if hop is not None and derive_run_state(stores.campaigns.cycle_dir(hop)).producer.attached:
+        raise ConflictError(
+            f"cycle {hop.cycle_id} has a run in flight. Pause it or let it end, then ask again.",
+            code="producer_live",
+        )
+    # Offloaded: admission globs every cycle ledger.
+    book = await asyncio.to_thread(_admit_spend, stores=stores, bucket=bucket)
+    with spending_under(book):
+        yield book
 
 
 def declare_run_ceiling(
@@ -412,51 +407,23 @@ def declare_run_ceiling(
     *,
     stores: Stores,
     hop: CycleHop | None,
-    requested: LaunchLimits,
-) -> tuple[SpendCeilings, BudgetChange]:
-    """The run's WHOLE budget declaration, and the operator's part of it — the ONE composition, read
-    before anything is admitted so the wallet bounds the number the run will actually hold.
-
-    Four layers, each SETTING its arms over the last: the campaign's knob, the fork seed's
-    override, the cycle's standing operator ceiling (its ledger's ``RunLimitsRecord``, what
-    ``set-limits`` or an earlier launch flag left) and this launch's flag. Every layer may raise as
-    well as lower because none of them is the authority — :func:`admit_launch` is, applied to what
-    this returns. Composed
-    AFTER admission, the knob becomes a bound under the launch flag rather than a layer beneath it,
-    and no launch can raise a dataset's ceiling.
-
-    Lives here rather than beside ``launcher/admission.py::admit_and_hold``, its admitted caller,
-    because :func:`unadmitted_limits` serves the L4 inner spawn too, and the launcher package
-    imports ``connectors``, which reaches back into the runner.
-
-    *hop* is ``None`` for a fresh mint, which has no seed and no standing ceiling yet."""
-    seed = BudgetChange(None, None)
-    standing = BudgetChange(None, None)
+    requested: SpendCeilings,
+) -> tuple[SpendCeilings, SpendCeilings]:
+    """Composed BEFORE admission: after it, the knob is a bound no launch flag can raise.
+    Second is the arms an operator gesture declared, standing or *requested*."""
+    seed = SpendCeilings()
+    standing = SpendCeilings()
     if hop is not None:
         cycle_seed = stores.campaigns.read_cycle_seed(hop)
         if cycle_seed is not None:
-            overrides = cycle_seed.config_overrides
-            seed = BudgetChange(overrides.spend_budget_usd, overrides.token_budget)
+            seed = cycle_seed.config_overrides.ceiling
         standing = stores.campaigns.read_run_limits(hop).ceiling
-    opt = config.optimization
-    declared = declare_ceiling(
-        SpendCeilings(opt.spend_budget_usd, opt.token_budget), seed, standing, requested.budgets
-    )
-    operator = declare_ceiling(SpendCeilings(None, None), standing, requested.budgets)
-    return declared, BudgetChange(*operator)
+    operator = declare_ceiling(standing, requested)
+    return declare_ceiling(config.optimization.ceiling, seed, operator), operator
 
 
-def next_launch_limits(
-    config: CampaignConfig, *, stores: Stores, hop: CycleHop
-) -> dict[str, float | int | None]:
-    """The ceilings a halted cycle's next launch declares, as ``run_limits`` updates: what its
-    dashboard serves in place of the last launch's, which only a running cycle still holds."""
-    ceiling, _ = declare_run_ceiling(config, stores=stores, hop=hop, requested=LaunchLimits())
-    return {
-        "spend_budget_usd": ceiling.usd,
-        "token_budget": ceiling.tokens,
-        "max_rounds": config.optimization.max_rounds or None,
-    }
+def next_launch_ceiling(config: CampaignConfig, *, stores: Stores, hop: CycleHop) -> SpendCeilings:
+    return declare_run_ceiling(config, stores=stores, hop=hop, requested=SpendCeilings())[0]
 
 
 def unadmitted_limits(
@@ -466,29 +433,22 @@ def unadmitted_limits(
     hop: CycleHop | None,
     requested: LaunchLimits,
 ) -> HeldLimits:
-    """The declaration held as-is, for the launch entries that hold no slot BY DESIGN — a host
-    program's embedded run and an L4 inner cell, whose root already holds the book it spends under.
-    Same composition as ``launcher/admission.py::admit_and_hold``, so a budget means one thing on
-    every way in."""
-    declared, operator = declare_run_ceiling(config, stores=stores, hop=hop, requested=requested)
-    return HeldLimits.admitted(requested, declared, operator, reserve=SpendCeilings(None, None))
+    """For the entries that hold no slot BY DESIGN: an embedded run and an L4 inner cell."""
+    declared, operator = declare_run_ceiling(
+        config, stores=stores, hop=hop, requested=requested.ceiling
+    )
+    return HeldLimits.admitted(requested, declared, operator, reserve=SpendCeilings())
 
 
 def clamp_budget_change(
     *,
-    requested: BudgetChange,
+    requested: SpendCeilings,
     user: User,
     stores: Stores,
     job_registry: JobRegistry,
     hop: CycleHop,
-) -> tuple[BudgetChange, BudgetChange]:
-    """Moving a RUNNING cycle's ceiling clamps where a launch refuses: the campaign is already
-    admitted, so the only question is how far the operator may move it, and lowering one must always
-    work. The cycle's own reservation is excluded, or it would be denied headroom it holds itself.
-    Returns the move and the reserve that moves with it (:func:`_reserve`).
-
-    Only a SUPPLIED arm composes: folded into an absent one, a delegate's grant becomes a ceiling
-    the caller asked to leave alone, and the file merge downstream makes it stick."""
+) -> tuple[SpendCeilings, SpendCeilings]:
+    """Clamps where a launch refuses, and only a SUPPLIED arm composes: an absent one stays absent."""
     held = job_registry.running_job_for(hop)
     wallet = read_account_wallet(
         user=user,
@@ -497,8 +457,7 @@ def clamp_budget_change(
         excluding_job_id=None if held is None else held.job_id,
         excluding_hop=hop,
     )
-    # Refuse rather than clamp: a contended wallet quotes zero headroom, and clamping to it would
-    # write a $0 ceiling that halts the very run the operator was funding.
+    # Refuse rather than clamp: a contended wallet's zero would write a $0 ceiling on a funded run.
     if wallet.contended:
         raise _contended("this cycle's ceiling")
     delegated = _delegated_spend_ceiling(stores)
@@ -511,15 +470,14 @@ def clamp_budget_change(
     tokens = requested.tokens
     if tokens is not None and room.tokens is not None:
         tokens = min(tokens, room.tokens)
-    change = BudgetChange(usd, tokens)
-    return change, BudgetChange(*_reserve(change, room, delegated))
+    change = SpendCeilings(usd, tokens)
+    return change, _reserve(change, room, delegated)
 
 
 def _reserve(
-    ceiling: SpendCeilings | BudgetChange, headroom: SpendCeilings, delegated: float | None
+    ceiling: SpendCeilings, headroom: SpendCeilings, delegated: float | None
 ) -> SpendCeilings:
-    """What a run stopping at *ceiling* may never be billed past — the ONE rule, for a launch and a
-    ceiling moved mid-run. ``None`` on an arm no account bounds, or one *ceiling* leaves alone."""
+    """``None`` on an arm no account bounds, or one *ceiling* leaves alone."""
     usd = _lowest(headroom.usd, delegated)
     tokens = headroom.tokens
     return SpendCeilings(
@@ -533,36 +491,28 @@ def hold_run_limits(
     job_registry: JobRegistry,
     stores: Stores,
     hop: CycleHop,
-    change: BudgetChange,
-    reserve: BudgetChange,
+    change: SpendCeilings,
+    reserve: SpendCeilings,
     rounds: RoundsCap | None,
 ) -> None:
-    """Each lands on its OWN prior, the job's reservation first: the account commits the money
-    before the mirror lets the run hold it. *rounds* ``None`` keeps the standing round cap."""
-    held = BudgetChange(None, None)
+    """The job's reservation lands first: the account commits the money before the run holds it."""
+    held = SpendCeilings()
     job = job_registry.running_job_for(hop)
     if job is not None:
-        held = BudgetChange(
-            job.cap_usd if reserve.usd is None else reserve.usd,
-            job.cap_tokens if reserve.tokens is None else reserve.tokens,
-        )
-        job_registry.set_caps(job.job_id, cap_usd=held.usd, cap_tokens=held.tokens)
+        held = declare_ceiling(job.reserve, reserve)
+        job_registry.set_reserve(job.job_id, held)
     prior = stores.campaigns.read_run_limits(hop)
     stores.campaigns.write_run_limits(
         hop,
-        BudgetChange(
-            prior.usd if change.usd is None else change.usd,
-            prior.tokens if change.tokens is None else change.tokens,
-        ),
+        declare_ceiling(prior.ceiling, change),
         rounds=prior.rounds if rounds is None else rounds,
+        pause_at_round=prior.pause_at_round,
         reserve=held,
     )
 
 
 def _contended(subject: str) -> QuotaExceededError:
-    """Another launch on this account holds a reservation nothing can yet quote — the
-    ``reserve``→``set_caps`` window. Retryable within seconds, so it says so: an exhausted ceiling
-    is the other reason a wallet answers zero and it is not retryable at all."""
+    """The ``request_slot``→``mark_admitted`` window: retryable, as an exhausted ceiling is not."""
     return QuotaExceededError(
         code="launch_contended",
         message=(
@@ -573,8 +523,6 @@ def _contended(subject: str) -> QuotaExceededError:
 
 
 def _refused(wallet: AccountWallet, reason: str) -> QuotaExceededError:
-    """Every refusal names the overrun, which is where the operator reads that a ceiling was
-    CROSSED rather than merely reached."""
     over_usd, over_tokens = overrun(wallet.ceilings, wallet.spent)
     if over_usd or over_tokens:
         reason += f" It is already ${over_usd:.4f} / {over_tokens:,} tokens past its ceiling."
@@ -590,15 +538,7 @@ def _refused(wallet: AccountWallet, reason: str) -> QuotaExceededError:
 def _outstanding_reservations(
     job_registry: JobRegistry, *, user_id: str, excluding_job_id: str | None
 ) -> tuple[float, int] | None:
-    """What this account's OTHER in-flight runs may still spend, or ``None`` when one of them was
-    admitted and has not yet stamped what it holds.
-
-    Counting that window — ``request_slot`` to ``set_caps`` — as holding nothing quotes two
-    launches on one account the same remainder, and the pair spends twice the ceiling, silently and
-    irreversibly. ``None`` is the fail-closed answer, and it costs the second launch a retry a few
-    seconds later. **Exclusion is by job, never by hop**: a launch reserves its slot before the mint
-    resolves its ids, so every concurrent mint shares :data:`UNRESOLVED_HOP` and a hop cannot tell
-    the caller's own reservation from the one it must refuse."""
+    """``None`` fails closed on an admitted, unstamped sibling. Exclusion is by job, never by hop."""
     running = job_registry.list_running(user_id=user_id)
     own = next((j for j in running if j.job_id == excluding_job_id), None)
     mine = None if own is None else (own.created_at, own.job_id)
@@ -607,22 +547,18 @@ def _outstanding_reservations(
     for job in running:
         if job.job_id == excluding_job_id:
             continue
-        if job.cap_usd is None and job.cap_tokens is None:
-            # Only an EARLIER unstamped sibling blocks. Refusing on any of them would have two
-            # simultaneous launches refuse each other and neither run; yielding to the older one
-            # leaves exactly one winner, and the younger is safe to ignore because it reads this
-            # same rule and yields back. Ties break on the job id, which both readers see alike.
+        if job.admitted_at is None:
+            # Only an EARLIER unstamped sibling blocks, or two simultaneous launches refuse each other.
             if mine is None or (job.created_at, job.job_id) < mine:
                 return None
             continue
-        usd += job.cap_usd or 0.0
-        tokens += job.cap_tokens or 0
+        usd += job.reserve.usd or 0.0
+        tokens += job.reserve.tokens or 0
     return usd, tokens
 
 
 def _grace_bounded(remaining: float, spent: UserSpend) -> float:
-    """An account whose USD total is known to be understated may still declare the grace and never
-    more — a CEILING on the remainder, so an already-exhausted one gets nothing."""
+    """A CEILING on the remainder, so an already-exhausted account gets nothing."""
     if bill_is_floor(spent.unpriced_tokens):
         return min(remaining, settings.UNPRICED_GRACE_USD)
     return remaining
@@ -634,11 +570,9 @@ def _lowest(*values: float | None) -> float | None:
 
 
 def lifetime_ceilings(*, user: User, spends_own_key: bool) -> SpendCeilings:
-    """The total-spend ceilings this account answers to. Free-tier metering exists to bound a
-    STRANGER spending the host's provider key, so the person running the box is exempt in both arms
-    — metering them would cap the operator against their own money."""
+    """The host is exempt in both arms: metering bounds a STRANGER on the host's key."""
     if spends_own_key:
-        return SpendCeilings(None, None)
+        return SpendCeilings()
     usd = user.spend_budget_usd_total
     tokens = user.token_budget_total
     return SpendCeilings(
@@ -648,32 +582,21 @@ def lifetime_ceilings(*, user: User, spends_own_key: bool) -> SpendCeilings:
 
 
 def _is_host(*, terminal: bool, user_id: str) -> bool:
-    """The one definition of "this is the operator of the box, not a free-tier signup". The host is
-    reached two ways — from the terminal, or as the identity that CLAIMED the box — and only the
-    second is the same question for every caller. **How the terminal is detected is passed IN, and
-    that is the whole security boundary:** a live identity proves it by carrying no issuer, a
-    directory walk by the un-renamed ``projects/default/``. Merging the two detectors would let an
-    identity that merely omits an issuer resolve as the operator, which is the trap the anonymous
-    tier is specced around (``docs/specs/roadmap.md``)."""
+    """Terminal detection is passed IN: merged, an identity omitting an issuer reads as the host."""
     claimed = registered_user_id(default_identity_paths().default_claim_marker)
     return terminal or (claimed is not None and user_id == claimed)
 
 
 def spends_the_hosts_own_key(stores: Stores) -> bool:
-    """The LIVE-identity reading: metering exists to bound a stranger spending the host's provider
-    key, so the person running the box is exempt. On-disk twin: :func:`is_host_tenant_dir`."""
     return _is_host(terminal=stores.identity.issuer is None, user_id=str(stores.identity.user_id))
 
 
 def is_host_tenant_dir(user_id: str) -> bool:
-    """The DIRECTORY-walk reading, for the cross-tenant install report, which has tenant dirs rather
-    than sessions and no issuer surviving on disk. Live twin: :func:`spends_the_hosts_own_key`."""
+    """The DIRECTORY-walk reading: no issuer survives on disk."""
     return _is_host(terminal=user_id == TERMINAL_IDENTITY_ID, user_id=user_id)
 
 
 def concurrent_cycles_writable(stores: Stores) -> bool:
-    """On the host's key an account's concurrency is the host's bound on that person, written in
-    ``user.json`` alone; only an account spending its own key moves its own, at ``campaign.budget``."""
     return spends_the_hosts_own_key(stores) and has_capability(stores.identity, CAMPAIGN_BUDGET_CAP)
 
 
@@ -704,14 +627,7 @@ def set_concurrent_cycles(*, stores: Stores, limit: int) -> User:
 
 
 def _launch_step(user: User, wallet: AccountWallet, delegated: float | None) -> float | None:
-    """The most ONE run on the ANONYMOUS grant may declare, whatever its headroom. The offer is
-    denominated in runs, and a single run declaring the rest of the grant leaves the others
-    unfunded — so the ceiling divides into steps and each launch takes one.
-
-    It rations that grant and nothing else, so three accounts fall outside it: the operator of the
-    box, who is not metered at all; a DELEGATED principal, whose attenuated ceiling (ADR-0005) is a
-    narrower authority granted on purpose; and one the operator hand-raised on ``user.json``, where
-    stepping the allowance they just wrote would quietly undo it."""
+    """Rations the ANONYMOUS grant only: the host, a delegate and a hand-raised account are outside."""
     if (
         wallet.ceilings.usd is None
         or delegated is not None
@@ -731,7 +647,6 @@ __all__ = [
     "QuotaExceededError",
     "QuotaStatus",
     "admit_launch",
-    "admit_spend",
     "check_launch_quotas",
     "clamp_budget_change",
     "concurrent_cycles_writable",
@@ -739,8 +654,9 @@ __all__ = [
     "hold_run_limits",
     "is_host_tenant_dir",
     "lifetime_ceilings",
-    "next_launch_limits",
+    "next_launch_ceiling",
     "overrun",
+    "paid_verb",
     "quota_status",
     "read_account_wallet",
     "set_concurrent_cycles",

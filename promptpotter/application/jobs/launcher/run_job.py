@@ -1,5 +1,4 @@
-"""``spawn_job`` is the server's half of a run in its OWN process, ``run_job`` the process's. The
-``JobSpec`` rides stdin, never a file: an identity rebuilt from a tenant name is the HOST's."""
+"""The ``JobSpec`` rides stdin, never a file: an identity rebuilt from a tenant name is the HOST's."""
 
 from __future__ import annotations
 
@@ -7,23 +6,27 @@ import asyncio
 import logging
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.initialization.wiring import bind_cycle_session, complete_registries
 from promptpotter.application.jobs.capacity import resolve_run_capacity
 from promptpotter.application.jobs.launcher.admission import (
-    job_status_for,
+    claim_cycle,
     launch_interrupted,
     release_slot,
 )
 from promptpotter.application.jobs.registry import JobRegistry
-from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
+from promptpotter.application.pipeline_resolve import (
+    configure_and_apply_pipeline,
+    resolve_campaign_config,
+)
 from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.runner.entry import RunMode, run_optimization
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.launch_limits import HeldLimits
-from promptpotter.domain.spend import BudgetChange, SpendCeilings
+from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.shared.errors import NotFoundError
@@ -36,12 +39,10 @@ if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.run_observers import RunObservers
     from promptpotter.domain.results import CycleResult
-    from promptpotter.domain.sample import Sample
 
 logger = logging.getLogger(__name__)
 
 # Out of the server's process group, so its Ctrl+C or a service stop signal is the server's alone.
-# The `pause` verb stays the one way to stop a run.
 _DETACHED: dict[str, Any]
 if sys.platform == "win32":
     _DETACHED = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW}
@@ -57,10 +58,7 @@ class JobSpec(StrictModel):
     job_id: str
     campaign_id: str
     cycle_id: str
-    # The session a mint or a check-in start already bound; a plain start reads the cycle's own.
-    session_id: str | None
-    backend_url: str
-    stop_after_rounds: int | None
+    mode: RunMode
     jobs_dir: str
     projects_root: str
     shared_root: str
@@ -73,13 +71,7 @@ class JobSpec(StrictModel):
     access_state: AccessState
     claims: dict[str, Any]
     capabilities: list[str]
-    halt_at_accuracy: float | None
-    ceiling_usd: float | None
-    ceiling_tokens: int | None
-    operator_usd: float | None
-    operator_tokens: int | None
-    reserve_usd: float | None
-    reserve_tokens: int | None
+    limits: HeldLimits
 
     @classmethod
     def of(
@@ -89,19 +81,15 @@ class JobSpec(StrictModel):
         job_registry: JobRegistry,
         job_id: str,
         hop: CycleHop,
-        session_id: str | None,
         limits: HeldLimits,
-        backend_url: str,
-        stop_after_rounds: int | None = None,
+        mode: RunMode,
     ) -> JobSpec:
         identity = stores.identity
         return cls(
             job_id=job_id,
             campaign_id=hop.campaign_id,
             cycle_id=hop.cycle_id,
-            session_id=session_id,
-            backend_url=backend_url,
-            stop_after_rounds=stop_after_rounds,
+            mode=mode,
             jobs_dir=str(job_registry.jobs_dir),
             projects_root=str(stores.projects_root),
             shared_root=str(stores.shared_root),
@@ -114,13 +102,7 @@ class JobSpec(StrictModel):
             access_state=identity.access_state,
             claims=dict(identity.claims),
             capabilities=sorted(identity.capabilities),
-            halt_at_accuracy=limits.halt_at_accuracy,
-            ceiling_usd=limits.ceiling.usd,
-            ceiling_tokens=limits.ceiling.tokens,
-            operator_usd=limits.operator.usd,
-            operator_tokens=limits.operator.tokens,
-            reserve_usd=limits.reserve.usd,
-            reserve_tokens=limits.reserve.tokens,
+            limits=limits,
         )
 
     @property
@@ -140,19 +122,8 @@ class JobSpec(StrictModel):
             capabilities=frozenset(self.capabilities),
         )
 
-    @property
-    def limits(self) -> HeldLimits:
-        return HeldLimits(
-            halt_at_accuracy=self.halt_at_accuracy,
-            ceiling=SpendCeilings(self.ceiling_usd, self.ceiling_tokens),
-            operator=BudgetChange(self.operator_usd, self.operator_tokens),
-            reserve=SpendCeilings(self.reserve_usd, self.reserve_tokens),
-        )
-
 
 def spawn_job(job_registry: JobRegistry, spec: JobSpec, *, stores: Stores) -> None:
-    """Start *spec*'s run in its own process and leave a watcher as the job's task, so a child
-    that dies before it finishes its job is reaped by the next read like any torn task."""
     log_path = Path(spec.jobs_dir) / "logs" / f"{spec.job_id}.log"
     try:
         log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -169,21 +140,17 @@ def spawn_job(job_registry: JobRegistry, spec: JobSpec, *, stores: Stores) -> No
         child.stdin.close()
     except BaseException as exc:
         # No process took the job, so nothing else will ever hand its slot back or stamp its cycle.
-        release_slot(
-            job_registry,
-            spec.job_id,
-            exc,
-            stores=stores,
-            hop=spec.hop,
-            session_id=spec.session_id or "",
-        )
+        release_slot(job_registry, spec.job_id, exc, stores=stores, hop=spec.hop)
         raise
 
     async def watch() -> None:
-        # Polled, never `to_thread(child.wait)`: a thread parked on a run that outlives the
-        # server would hold the server's own exit until that run ended.
+        # Polled, never `to_thread(child.wait)`: a parked thread would hold the server's exit until the run ended.
         while child.poll() is None:
             await asyncio.sleep(_WATCH_POLL_S)
+        # Releases only the claim of a child that died before taking the job over; one that ran has consumed it.
+        stores.campaigns.release_claim(
+            spec.hop, job_id=spec.job_id, detail="its process exited before the run began"
+        )
 
     job_registry.attach_task(spec.job_id, asyncio.create_task(watch(), name=f"job-{spec.job_id}"))
     logger.info("job %s runs in process %s (log %s)", spec.job_id, child.pid, log_path)
@@ -194,21 +161,23 @@ async def run_held_job(
     job_id: str,
     session: Session,
     campaign_config: CampaignConfig,
-    train_data: list[Sample],
     *,
     mode: RunMode,
     limits: HeldLimits,
     readout_sink: Callable[[str], None] | None = None,
 ) -> tuple[CycleResult, RunObservers]:
-    """Run *session*'s cycle on the slot *job_id* holds, and finish the job with it — the one tail
-    of every launch that holds a machine slot. *limits* is what admission HELD."""
     job_registry.mark_started(job_id)
     try:
         observers = build_run_observers(
             session=session, campaign_config=campaign_config, readout_sink=readout_sink
         )
+    except BaseException as exc:
+        # `hop=None`: nothing of this launch reached the cycle, whose own producer may still be running it.
+        release_slot(job_registry, job_id, exc, stores=session.store, hop=None)
+        raise
+    try:
         result = await run_optimization(
-            train_data,
+            session.samples,
             campaign_config,
             session=session,
             observers=observers,
@@ -216,21 +185,79 @@ async def run_held_job(
             limits=limits,
         )
     except BaseException as exc:
-        # An interrupt is the pause flag's SYNTHETIC one (`scoring/search_point_scorer.py`), its
-        # pause already declared. Anything else fired OUTSIDE the runner's try, so this stamps it.
+        # An interrupt is the pause flag's SYNTHETIC one, its pause already declared; anything else
+        # fired OUTSIDE the runner's try, so this stamps it.
         release_slot(
             job_registry,
             job_id,
             exc,
             stores=session.store,
             hop=None if launch_interrupted(exc) else session.hop,
-            session_id=session.session_id,
         )
         raise
-    job_registry.mark_finished(
-        job_id, status=job_status_for(result.stop_reason), stop_reason=result.stop_reason
-    )
+    job_registry.release(job_id)
     return result, observers
+
+
+@dataclass(frozen=True, slots=True)
+class HeldRun:
+    """A launch past everything that can refuse it: its machine slot held and its ceiling admitted
+    (``launcher.admission``), its cycle on disk, a session bound to that cycle. Every way in to a
+    run arrives here by one of the three ``hold_*`` preambles, and what is left is the
+    run-invocation — the ONE thing an entry point owns: :meth:`detach` or :meth:`run_inline`."""
+
+    job_registry: JobRegistry
+    job_id: str
+    session: Session
+    campaign_config: CampaignConfig
+    limits: HeldLimits
+
+    @classmethod
+    def of(
+        cls,
+        job_registry: JobRegistry,
+        job_id: str,
+        session: Session,
+        limits: HeldLimits,
+    ) -> HeldRun:
+        """For a preamble that MINTS the manifest: the config it reads back as, which a detached run rebuilds, not the one it was made from."""
+        stores, hop = session.store, session.hop
+        campaign = stores.campaigns.load_campaign(hop.campaign_id)
+        assert campaign is not None, "a preamble minted or loaded it"
+        return cls(
+            job_registry=job_registry,
+            job_id=job_id,
+            session=session,
+            campaign_config=resolve_campaign_config(stores, campaign, hop),
+            limits=limits,
+        )
+
+    def detach(self, *, mode: RunMode) -> None:
+        spawn_job(
+            self.job_registry,
+            JobSpec.of(
+                stores=self.session.store,
+                job_registry=self.job_registry,
+                job_id=self.job_id,
+                hop=self.session.hop,
+                limits=self.limits,
+                mode=mode,
+            ),
+            stores=self.session.store,
+        )
+
+    async def run_inline(
+        self, *, mode: RunMode, readout_sink: Callable[[str], None] | None
+    ) -> tuple[CycleResult, RunObservers]:
+        return await run_held_job(
+            self.job_registry,
+            self.job_id,
+            self.session,
+            self.campaign_config,
+            mode=mode,
+            limits=self.limits,
+            readout_sink=readout_sink,
+        )
 
 
 async def _bound_session(spec: JobSpec, stores: Stores) -> tuple[Session, CampaignConfig]:
@@ -238,58 +265,48 @@ async def _bound_session(spec: JobSpec, stores: Stores) -> tuple[Session, Campai
     campaign = stores.campaigns.load_campaign(hop.campaign_id)
     if campaign is None:
         raise NotFoundError(f"campaign not found: {hop.campaign_id}")
-    session, campaign_config = await bind_cycle_session(
-        stores, campaign, hop, backend_url=spec.backend_url
-    )
-    configure_and_apply_pipeline(session, campaign_config, log=lambda *_a, **_k: None)
-    session.session_id = spec.session_id or stores.campaigns.session_id_of(hop)
+    session, campaign_config = await bind_cycle_session(stores, campaign, hop)
+    configure_and_apply_pipeline(session, campaign_config)
     return session, campaign_config
 
 
-async def run_job(spec: JobSpec) -> None:
-    """The run's own process: take the job over, rebuild the session, run to its stop."""
-    projects_root = Path(spec.projects_root)
+async def run_job(spec: JobSpec) -> StopOutcome | None:
     stores = build_stores(
         spec.identity,
-        projects_root=projects_root,
+        projects_root=Path(spec.projects_root),
         benchmarks_root=Path(spec.benchmarks_root),
         shared_root=Path(spec.shared_root),
     )
-    job_registry = JobRegistry(
-        Path(spec.jobs_dir), capacity=resolve_run_capacity, projects_root=projects_root
-    )
+    job_registry = JobRegistry(Path(spec.jobs_dir), capacity=resolve_run_capacity)
     if not job_registry.adopt(spec.job_id):
         logger.warning("job %s was cleared before its process started — not running", spec.job_id)
-        return
+        return None
+    adopted = job_registry.get(spec.job_id)
+    if adopted is not None:
+        # The claim now lives and dies with THIS process: a run killed before it declares itself leaves the cycle free.
+        claim_cycle(stores, job_registry, adopted, spec.hop)
     try:
         session, campaign_config = await _bound_session(spec, stores)
     except BaseException as exc:
         logger.exception("job %s could not bind its session", spec.job_id)
-        release_slot(
-            job_registry,
-            spec.job_id,
-            exc,
-            stores=stores,
-            hop=spec.hop,
-            session_id=spec.session_id or "",
-        )
-        return
+        release_slot(job_registry, spec.job_id, exc, stores=stores, hop=spec.hop)
+        return StopOutcome.FAILED
 
     try:
-        await run_held_job(
+        result, _observers = await run_held_job(
             job_registry,
             spec.job_id,
             session,
             campaign_config,
-            session.samples,
-            mode=RunMode(stop_after_rounds=spec.stop_after_rounds),
+            mode=spec.mode,
             limits=spec.limits,
         )
     except (KeyboardInterrupt, asyncio.CancelledError):
-        # A pause: `run_held_job` answered for the job, and the process exits clean.
-        pass
+        return StopOutcome.PAUSED
     except Exception:
         logger.exception("job %s failed", spec.job_id)
+        return StopOutcome.FAILED
+    return stop_reason_outcome(result.stop_reason)
 
 
 def main() -> None:
@@ -298,10 +315,11 @@ def main() -> None:
     )
     spec = JobSpec.model_validate_json(sys.stdin.buffer.read())
     complete_registries(every_treatment=False)
-    asyncio.run(run_job(spec))
+    if (outcome := asyncio.run(run_job(spec))) is not None and (code := outcome.exit_code):
+        sys.exit(code)
 
 
 if __name__ == "__main__":
     main()
 
-__all__ = ["JobSpec", "run_held_job", "spawn_job"]
+__all__ = ["HeldRun", "JobSpec", "run_held_job", "spawn_job"]
