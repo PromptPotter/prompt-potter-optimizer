@@ -262,7 +262,7 @@ def _origin_gate(address: CyclePath, health: DegradationHealth | None) -> Activi
             DecisionAction(
                 label=label,
                 variant=variant,
-                kind="origin-gate-decision",
+                kind=CommandKind.ORIGIN_GATE_DECISION,
                 payload={**command_address(address), "decision": decision},
             )
             for decision, (label, variant) in _GATE_ACTIONS.items()

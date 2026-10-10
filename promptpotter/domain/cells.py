@@ -266,12 +266,7 @@ class DatasetItem(StrictModel):
     n_measured: int = Field(
         default=0,
         description="GRADED cells of this sample in scope (errored and unscored cells excluded) "
-        "— the denominator of the two below.",
-    )
-    n_hits: int = Field(
-        default=0,
-        description="Of those, how many maxed out the active scorer (`domain.scoring.is_hit`). "
-        "Structurally 0 on a graded scorer; read `mean_fitness` there.",
+        "— the denominator of `mean_fitness` and `hit_spread`.",
     )
     mean_fitness: float | None = Field(
         default=None, description="Mean graded fitness over those cells; null when none."
@@ -291,7 +286,6 @@ class CellsResponse(StrictModel):
 
     name: str
     scope: HeatmapScope
-    row_count: int
     order: HardSampleOrder = Field(
         description="The key `samples` are ranked by — the request's `order` when it named one, "
         "else the dataset's `CampaignConfig.hard_sample_order`; `difficulty` wherever the scope "
@@ -299,13 +293,10 @@ class CellsResponse(StrictModel):
     )
     ruler: RulerStanding = Field(
         description="The ONE δ ruler every `delta`, `pick_score` and `p_hat` below is read on: "
-        "the ruler of the cycle `ruler_cycle_id` names in cycle and campaign scope; in dataset "
-        "scope one anchored per request on the dataset's archived cells, which no θ was read on."
-    )
-    ruler_cycle_id: str | None = Field(
-        description="The cycle this scope reads, whose ruler `ruler` is and whose walks `cells` "
-        "are: the requested cycle in cycle scope, the one campaign scope names "
-        "(`application/scoring/cells.py::campaign_scope_cycle`). Null in dataset scope."
+        "the ruler of the cycle the scope reads, whose walks `cells` are — the requested cycle in "
+        "cycle scope, the one campaign scope names "
+        "(`application/scoring/measurement_log.py::campaign_scope_cycle`); in dataset scope one "
+        "anchored per request on the dataset's archived cells, which no θ was read on."
     )
     samples: list[DatasetItem]
     candidates: list[CellCandidate]

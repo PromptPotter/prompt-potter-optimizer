@@ -49,7 +49,6 @@ from promptpotter.shared.hashing import shapes_optimizer_prompt
 from promptpotter.shared.measurement_context import MeasurementRole
 
 __all__ = [
-    "LOOP_COMMAND_KINDS",
     "MAX_AUTO_REBASES",
     "MINT_KIND_LABELS",
     "OPERATOR_ORIGIN_SOURCES",
@@ -536,11 +535,6 @@ class LLMCallRecord(StrictModel):
 
 
 CommandAckStatus = Literal["accepted", "applied", "rejected"]
-
-# Carried out by a cycle's RUNNING loop, folded off its ledger (`scan_ledger_controls`).
-LOOP_COMMAND_KINDS = frozenset(
-    {"pause-cycle", "skip-searchpoint", "set-sample-lookahead", "origin-gate-decision"}
-)
 
 
 class CommandRecord(StrictModel):

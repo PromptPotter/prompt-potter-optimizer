@@ -261,12 +261,8 @@ class MeasuredCell:
     # A ``None`` rank beside a count is a value: the truth was not in the ranking.
     ground_truth_rank: int | None = field(default=None, metadata=BY_HAND)
     n_candidates: int | None = None
-    # The archive's address, ``{cell file}.{answer id}``; these are ``None`` where nothing was filed.
+    # The archive's address, ``{cell file}.{answer id}``; ``None`` where nothing was filed.
     answer: str | None = None
-    role: str | None = None
-    source: str | None = None
-    provenance: str | None = None
-    created_at: str | None = None
     retry_of_deprecated_cache: bool = False
     retry_of_degraded: bool = False
     rerun_comparison: RerunComparison | None = None
@@ -353,21 +349,12 @@ _CELL = WireRecord.of(
 )
 
 
-def measured_facts(row: Mapping[str, object]) -> dict[str, object]:
-    return {k: v for k, v in row.items() if k not in GRADE_KEYS}
-
-
-# What `archive_maintenance.py` may move to the cold store; the two asserts run OPPOSITE ways.
-
-# On disk in quantity and written by no code path: naming them lets a compaction move them.
-ABANDONED_ROW_KEYS: frozenset[str] = frozenset({"hit", "scored"})
-
+# What `archive_maintenance.py` may move to the cold store.
 # No ranking may join: a row cannot tell a MOVED ranking from an empty one, so it grades a miss.
 UNREAD_PIPELINE_KEYS: frozenset[str] = frozenset(
     {"reasoning_trace", "total_time", "turns", "step_phases"}
 )
 
-assert not (ABANDONED_ROW_KEYS & _CELL.keys), "an abandoned key that got declared is no longer one"
 assert UNREAD_PIPELINE_KEYS <= PIPELINE_KEYS, "an unread key must be one PipelineData declares"
 
 
@@ -410,7 +397,7 @@ SHEET_ROW: type = typed_record(
     "One row of a :class:`CellSheet` on the wire, as :meth:`GradedCell.wire` writes it.\n\n"
     "The cell's facts beside its grade — ``unscored``, or ``fitness`` and ``objective``, never\n"
     "both. ``status`` is the served round's mark and ``ground_truth_text`` its label as shown\n"
-    "(``application/scoring/cells.py::served_round``), on every row it serves; a round file\n"
+    "(``application/cycle_reads.py::served_round``), on every row it serves; a round file\n"
     "carries neither.",
     {
         **get_type_hints(record_of(MeasuredCell), include_extras=True),
@@ -817,7 +804,6 @@ def is_answer_collapsed(cells: Sequence[GradedCell]) -> bool:
 
 
 __all__ = [
-    "ABANDONED_ROW_KEYS",
     "DEFAULT_SCORER_ID",
     "GRADE_KEYS",
     "HIT_THRESHOLD",
@@ -855,6 +841,5 @@ __all__ = [
     "is_answer_collapsed",
     "is_hit",
     "is_verifier_graded",
-    "measured_facts",
     "modal_answer_share",
 ]

@@ -9,6 +9,14 @@ from typing import Literal
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 
+def sigmoid(x: float) -> float:
+    x = float(x)
+    if x >= 0:
+        return 1.0 / (1.0 + math.exp(-x))
+    ex = math.exp(x)
+    return ex / (1.0 + ex)
+
+
 @shapes_optimizer_prompt
 def _beta_fraction(a: float, b: float, x: float) -> float:
     """The continued fraction of the incomplete beta function, by modified Lentz."""
@@ -377,6 +385,7 @@ __all__ = [
     "paired_mean_t",
     "rank_correlation",
     "sample_sd",
+    "sigmoid",
     "sign_posterior",
     "t_critical",
     "two_way_effect_sds",
