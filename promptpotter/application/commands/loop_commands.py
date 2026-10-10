@@ -8,13 +8,13 @@ from promptpotter.application.commands.dispatcher import Applier, refused_on_an_
 
 if TYPE_CHECKING:
     from promptpotter.application.commands.dispatcher import CommandDispatcher
-    from promptpotter.application.commands.payloads import (
+    from promptpotter.domain.campaign import Campaign
+    from promptpotter.domain.command_kinds import (
         OriginGateDecisionPayload,
         PauseCyclePayload,
         SetSampleLookaheadPayload,
         SkipSearchpointPayload,
     )
-    from promptpotter.domain.campaign import Campaign
     from promptpotter.domain.cycle_paths import CycleHop
 
 __all__ = ["origin_gate_decision", "pause_cycle", "set_sample_lookahead", "skip_searchpoint"]

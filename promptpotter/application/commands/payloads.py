@@ -8,76 +8,28 @@ from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.datasets.draft_campaign import EditDraftPatch, OptimizationOverrides
 from promptpotter.config.settings import DEFAULT_BACKEND_ID, DEFAULT_BACKEND_URL
 from promptpotter.domain.campaign import ArmRequest
-from promptpotter.domain.command_kinds import ALL_DISPATCHED_KINDS
-from promptpotter.domain.launch_limits import LaunchLimits, RoundsCap
-from promptpotter.domain.phases import (
-    INNER_GATE_REFUSAL,
-    INNER_LAUNCH_REFUSAL,
-    INNER_PAUSE_REFUSAL,
-    INNER_SKIP_REFUSAL,
-    GateDecision,
+from promptpotter.domain.command_kinds import (
+    LOOP_TAKEN,
+    CampaignPayload,
+    CommandKind,
+    CommandPayload,
+    CyclePayload,
 )
+from promptpotter.domain.launch_limits import LaunchLimits, RoundsCap, RunMode
+from promptpotter.domain.phases import INNER_LAUNCH_REFUSAL
 from promptpotter.domain.results import VerifyStrategy
 from promptpotter.domain.spend import SpendCeilings
 from promptpotter.domain.strict_model import StrictModel, WireInt
 from promptpotter.infrastructure.store.layout import validate_dataset_name
 from promptpotter.shared.errors import PayloadInvalidError
 
-__all__ = ["KIND_OF_PAYLOAD", "PAYLOAD_MODEL_FOR_KIND", "CommandAcceptedBody", "CommandPayload"]
-
-
-class CommandPayload(StrictModel):
-    """Base of every payload on the generic ``POST /commands/{kind}`` route. ``StrictModel`` forbids
-    extras, so THE MODEL IS the accepted-key set — there is no list to fall out of step with it."""
-
-
-class CampaignPayload(CommandPayload):
-    campaign_id: str = Field(min_length=1, max_length=128)
-
+__all__ = ["KIND_OF_PAYLOAD", "PAYLOAD_MODEL_FOR_KIND", "CommandAcceptedBody"]
 
 _OUTER_OWNS_TREE = "An inner run's cycles live and die with the outer campaign."
 
 
-class CyclePayload(CampaignPayload):
-    """A cycle's address: the root hop, plus the ``?descend=`` tail the reads take. Every
-    cycle-scoped kind is ADDRESSED alike; ``inner_refusal`` is each kind's own answer to whether
-    it acts on an inner run, and ``dispatcher.py::dispatch_cycle_command`` is its one reader. A
-    run verb's answer is the sentence its cycle's served admission carries
-    (``domain/phases.py::RunState.inner``), so the control and the refusal say one thing."""
-
-    cycle_id: str = Field(min_length=1, max_length=128)
-    # Excluded: the dispatcher spends it resolving the leaf, so a recorded tail addresses it twice.
-    descend: str | None = Field(default=None, max_length=512, exclude=True)
-
-    # ``None`` = acts on an inner run. Undeclared here, so a new kind fails at import until it answers.
-    inner_refusal: ClassVar[str | None]
-
-
-class RunShape(StrictModel):
-    """The SHAPE a run of an existing cycle takes — the fields of ``runner/entry.py::RunMode`` a
-    caller may choose, so the terminal's resume flags and the wire are one vocabulary, read by
-    ``launching.py::run_mode_of``. How far a run goes is no shape: it is a limit (``LaunchLimits``)."""
-
-    from_round: WireInt | None = Field(
-        default=None,
-        ge=0,
-        description="Rewind in place to this round before running; unset continues the ledger.",
-    )
-    no_divergence_check: bool = Field(
-        default=False, description="Accept a replay that diverges from the record."
-    )
-    fork_on_divergence: bool = Field(
-        default=False, description="Branch a sibling cycle where the replay diverges, and run it."
-    )
-    diag: bool = Field(
-        default=False,
-        description="The diagnostic shape; a `start-run` of a cycle that finished one runs a "
-        "counted sibling.",
-    )
-
-
-class ForkCyclePayload(CyclePayload, RunShape):
-    """The cut, and the shape of the fork's first run (``RunShape``) — one act, so one command.
+class ForkCyclePayload(CyclePayload, RunMode):
+    """The cut, and the shape of the fork's first run (``RunMode``) — one act, so one command.
     A parent a producer still holds is paused by the applier once the fork's run is admitted."""
 
     inner_refusal: ClassVar[str | None] = INNER_LAUNCH_REFUSAL
@@ -99,39 +51,12 @@ class ForkCyclePayload(CyclePayload, RunShape):
     )
 
 
-class SkipSearchpointPayload(CyclePayload):
-    inner_refusal: ClassVar[str | None] = INNER_SKIP_REFUSAL
-
-
 class DeleteCyclePayload(CyclePayload):
     inner_refusal: ClassVar[str | None] = _OUTER_OWNS_TREE
 
 
 class CleanupEmptyCyclesPayload(CyclePayload):
     inner_refusal: ClassVar[str | None] = _OUTER_OWNS_TREE
-
-
-class PauseCyclePayload(CyclePayload):
-    inner_refusal: ClassVar[str | None] = INNER_PAUSE_REFUSAL
-
-    reason: str = Field(default="", max_length=512)
-
-
-class SetSampleLookaheadPayload(CyclePayload):
-    # Throughput is what an inner run answers for itself: the outer's depth is never inherited.
-    inner_refusal: ClassVar[str | None] = None
-
-    cells: WireInt = Field(ge=1, description="1 disarms.")
-    auto: bool = Field(
-        default=False,
-        description="As deep as the stop rules allow, every round, until pressed off.",
-    )
-
-
-class OriginGateDecisionPayload(CyclePayload):
-    inner_refusal: ClassVar[str | None] = INNER_GATE_REFUSAL
-
-    decision: GateDecision
 
 
 class ChangeRunLimitsPayload(CyclePayload):
@@ -168,9 +93,9 @@ class ChangeRunLimitsPayload(CyclePayload):
         return data
 
 
-class StartRunPayload(CyclePayload, LaunchLimits, RunShape):
+class StartRunPayload(CyclePayload, LaunchLimits, RunMode):
     """A run of an existing cycle: what bounds it (``LaunchLimits``) and the shape it takes
-    (``RunShape``)."""
+    (``RunMode``)."""
 
     inner_refusal: ClassVar[str | None] = INNER_LAUNCH_REFUSAL
 
@@ -399,44 +324,13 @@ WorkspacePayload = (
     | MintCampaignPayload
 )
 
+# Resolved by NAME (`CommandKind.payload_name`): a kind whose model is missing fails right here.
+KIND_OF_PAYLOAD: dict[type[CommandPayload], CommandKind] = {
+    LOOP_TAKEN.get(kind) or globals()[kind.payload_name]: kind for kind in CommandKind
+}
 PAYLOAD_MODEL_FOR_KIND: dict[str, type[CommandPayload]] = {
-    "fork-cycle": ForkCyclePayload,
-    "skip-searchpoint": SkipSearchpointPayload,
-    "delete-cycle": DeleteCyclePayload,
-    "cleanup-empty-cycles": CleanupEmptyCyclesPayload,
-    "pause-cycle": PauseCyclePayload,
-    "set-sample-lookahead": SetSampleLookaheadPayload,
-    "origin-gate-decision": OriginGateDecisionPayload,
-    "change-run-limits": ChangeRunLimitsPayload,
-    "start-run": StartRunPayload,
-    "step-cycle": StepCyclePayload,
-    "verify-candidate": VerifyCandidatePayload,
-    "grade-bench": GradeBenchPayload,
-    "archive-campaign": ArchiveCampaignPayload,
-    "delete-campaign": DeleteCampaignPayload,
-    "unarchive-campaign": UnarchiveCampaignPayload,
-    "set-campaign-label": SetCampaignLabelPayload,
-    "register-backend": RegisterBackendPayload,
-    "mint-campaign": MintCampaignPayload,
-    "cancel-queued-run": CancelQueuedRunPayload,
-    "set-concurrent-cycles": SetConcurrentCyclesPayload,
-    "replace-dataset": ReplaceDatasetPayload,
-    "compact-archive": CompactArchivePayload,
-    "edit-draft-campaign": EditDraftCampaignPayload,
-    "resolve-origin": ResolveOriginPayload,
-    "start-checkin": StartCheckinPayload,
+    kind: model for model, kind in KIND_OF_PAYLOAD.items()
 }
-if set(PAYLOAD_MODEL_FOR_KIND) != ALL_DISPATCHED_KINDS:
-    raise RuntimeError(
-        "PAYLOAD_MODEL_FOR_KIND out of sync with the dispatched command set: "
-        f"{ALL_DISPATCHED_KINDS.symmetric_difference(PAYLOAD_MODEL_FOR_KIND)}"
-    )
-
-KIND_OF_PAYLOAD: dict[type[CommandPayload], str] = {
-    model: kind for kind, model in PAYLOAD_MODEL_FOR_KIND.items()
-}
-if len(KIND_OF_PAYLOAD) != len(PAYLOAD_MODEL_FOR_KIND):
-    raise RuntimeError("two command kinds share one payload type; give each its own.")
 _unanswered = sorted(
     kind
     for kind, model in PAYLOAD_MODEL_FOR_KIND.items()
@@ -457,7 +351,3 @@ class CommandAcceptedBody(StrictModel):
     """The 202 response shape declared in ``api-openapi.yaml``."""
 
     command_id: str = Field(description="Stable id of the appended `CommandRecord`.")
-    correlation_id: str = Field(description="Echo of the request's `Idempotency-Key`.")
-    ledger_sequence: int = Field(
-        description="Offset at which the `CommandRecord` was appended.", ge=0
-    )

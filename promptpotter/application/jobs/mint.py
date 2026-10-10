@@ -13,7 +13,6 @@ from promptpotter.application.bench.task_context import (
 )
 from promptpotter.application.campaign_config import under_record
 from promptpotter.application.datasets.authored import scorer_of
-from promptpotter.application.initialization.session import mint_campaign
 from promptpotter.application.jobs.quota import paid_verb
 from promptpotter.application.knobs import DiffScope, classify_config_diff
 from promptpotter.application.optimizer_manifest import select_optimizer
@@ -27,7 +26,12 @@ from promptpotter.application.preflight import (
     check_search_pool_holds_round,
     refuse_below_reasoning_floor,
 )
-from promptpotter.application.runner.campaign_ids import build_origin_cycle_id, mint_campaign_id
+from promptpotter.application.run_observers import declare_run_wiring
+from promptpotter.application.runner.campaign_ids import (
+    build_origin_cycle_id,
+    mint_campaign_id,
+    mint_checkin_cycle_id,
+)
 from promptpotter.domain.bench import BankPartition, partition_bank
 from promptpotter.domain.campaign import (
     Arm,
@@ -44,6 +48,12 @@ from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
 from promptpotter.domain.run_records import CycleSeed, OriginSource
 from promptpotter.domain.search_point import PROMPT_STRING_FIELDS
 from promptpotter.infrastructure.ledger import CycleEventLog
+from promptpotter.infrastructure.projections.live_dashboard.projection import (
+    LiveDashboardProjection,
+)
+from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
+from promptpotter.infrastructure.store.io import validate_path_component
+from promptpotter.infrastructure.store.session_pointer import save_active_pointer
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ConflictError, PayloadInvalidError
 from promptpotter.shared.hashing import dataset_hash
@@ -320,6 +330,124 @@ def fresh_campaign_id(session: Session, campaign_config: CampaignConfig) -> str:
     return mint_campaign_id(resolved_dataset_name(session, campaign_config))
 
 
+def _declare_frozen_wiring(
+    session: Session, campaign_config: CampaignConfig, hop: CycleHop
+) -> None:
+    """Runs AHEAD of the record taking the cycle past check-in, so no read finds it stateless."""
+    ledger = CycleEventLog.open(CycleDir(session.store.campaigns.cycle_dir(hop)))
+    declare_run_wiring(session, campaign_config, ledger, tracing=None)
+
+
+def _mint_campaign(
+    session: Session,
+    campaign_config: CampaignConfig,
+    *,
+    hop: CycleHop,
+    treatment: Treatment,
+    arm: Arm | None,
+) -> None:
+    """``hop.campaign_id`` is the CALLER's, so an L4 inner spawn lands back on a campaign it ran."""
+
+    target_hash = hop.cycle_id.removeprefix("cycle_")
+    validate_path_component(target_hash)
+    now = utcnow_iso()
+    dataset_name = resolved_dataset_name(session, campaign_config)
+    validate_path_component(hop.campaign_id)
+    root_cycle = hop.cycle_id
+
+    campaigns = session.store.campaigns
+    campaigns.create_campaign(
+        Campaign(
+            campaign_id=hop.campaign_id,
+            dataset_name=dataset_name,
+            created_at=now,
+            root_cycle_id=root_cycle,
+            root_content_hash=target_hash,
+            treatment=treatment,
+            arm=arm,
+            backend_id=session.backend_id,
+            backend_url=session.backend_client.base_url,
+            backend_type=backend_type_of_dataset(session.store, dataset_name),
+            owner_user_id=str(session.identity.user_id),
+            lifecycle_status="active",
+            lifecycle_changed_at=now,
+            config=campaign_config.frozen(arm=arm is not None),
+        )
+    )
+
+    _declare_frozen_wiring(session, campaign_config, hop)
+    campaigns.mint_cycle(hop)
+
+    session.campaign_id = hop.campaign_id
+    session.state.cycle_id = root_cycle
+
+    save_active_pointer(session.store.base_dir, hop)
+
+    # So the mint → loop-start window serves `dashboard.json` off the campaign's own declarations.
+    LiveDashboardProjection.for_session(session.hop, tenant_root=session.tenant_root)
+
+    logger.info("Minted fresh campaign %s — cycle %s", hop.campaign_id, root_cycle)
+
+
+def mint_checkin_skeleton(stores: Stores, *, slug: str, backend_type: str) -> CycleHop:
+    """Claims NO active pointer: an unrun check-in would pull a watching workspace off authoring."""
+
+    now = utcnow_iso()
+    hop = CycleHop(campaign_id=mint_campaign_id(slug), cycle_id=mint_checkin_cycle_id())
+
+    stores.campaigns.create_campaign(
+        Campaign(
+            campaign_id=hop.campaign_id,
+            dataset_name=slug,
+            created_at=now,
+            root_cycle_id=hop.cycle_id,
+            backend_id="",
+            backend_type=backend_type,
+            owner_user_id=str(stores.identity.user_id),
+            lifecycle_changed_at=now,
+            config={},
+        )
+    )
+    stores.campaigns.mint_cycle(hop, checkin=True)
+
+    logger.info("Minted check-in campaign %s — cycle %s", hop.campaign_id, hop.cycle_id)
+    return hop
+
+
+def finalize_checkin_to_active(
+    session: Session,
+    campaign_config: CampaignConfig,
+    *,
+    hop: CycleHop,
+    cycle_plan: CyclePlan,
+) -> None:
+    """The cycle id stays the provisional ``cycle_chk_*``: drift reads ``root_content_hash``."""
+
+    target_hash = cycle_plan.cycle_id.removeprefix("cycle_")
+
+    session.store.campaigns.update_campaign(
+        hop.campaign_id,
+        root_content_hash=target_hash,
+        treatment=cycle_plan.treatment.model_dump(mode="json"),
+        backend_id=session.backend_id,
+        backend_url=session.backend_client.base_url,
+        # Re-read, not trusted from the skeleton: the check-in writes `pipeline.yaml` in between.
+        backend_type=backend_type_of_dataset(session.store, session.dataset_name or ""),
+        config=campaign_config.frozen(arm=False),
+    )
+    session.campaign_id = hop.campaign_id
+    session.state.cycle_id = hop.cycle_id
+
+    # The store's OWN workspace: a sandboxed inner cycle (L4) never stamps the outer tenant's.
+    save_active_pointer(session.store.base_dir, hop)
+
+    _declare_frozen_wiring(session, campaign_config, hop)
+    session.store.campaigns.close_checkin(hop)
+    LiveDashboardProjection.for_session(session.hop, tenant_root=session.tenant_root)
+
+    logger.info("Check-in campaign %s started — cycle %s", hop.campaign_id, hop.cycle_id)
+
+
 def _mint_runnable(
     session: Session,
     campaign_config: CampaignConfig,
@@ -336,7 +464,7 @@ def _mint_runnable(
     )
     # Never sweep the inner sandbox here: its key carries the campaign id, so only ANOTHER's dies.
     hop = CycleHop(campaign_id=campaign_id, cycle_id=plan.cycle_id)
-    mint_campaign(session, campaign_config, hop=hop, treatment=plan.treatment, arm=arm_of)
+    _mint_campaign(session, campaign_config, hop=hop, treatment=plan.treatment, arm=arm_of)
     write_plan_seed(session.store, hop, plan)
     return MintedCycle(
         cycle_id=hop.cycle_id,
@@ -440,7 +568,9 @@ async def mint_framed_cycle(
 __all__ = [
     "ConfigDriftError",
     "CyclePlan",
+    "finalize_checkin_to_active",
     "fresh_campaign_id",
+    "mint_checkin_skeleton",
     "mint_framed_cycle",
     "prepare_fresh_cycle",
     "refuse_drifted_resume",

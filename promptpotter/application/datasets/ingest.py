@@ -30,7 +30,7 @@ from promptpotter.application.datasets.prompts import (
     load_dataset_prompt,
 )
 from promptpotter.application.jobs.launcher.checkin import create_checkin_campaign
-from promptpotter.application.origin import canonical_origin_campaign
+from promptpotter.application.origin_listing import canonical_origin_campaign
 from promptpotter.application.scoring.formula import (
     DIALS_KEY,
     parse_dials,
@@ -45,7 +45,7 @@ from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.pipeline_parsing import merge_node_blocks
 from promptpotter.domain.scoring import anchored_criterion_dials
-from promptpotter.infrastructure.backend import build_backend_client
+from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.llm.capabilities import refresh_model_capabilities
 from promptpotter.infrastructure.store.dataset_access import (
     backend_type_of_dataset,
@@ -67,7 +67,7 @@ async def fetch_backend_nodes(
     connector = connectors.get(connector_name)
     if connector.execution == "in_process":
         return {}
-    client = build_backend_client(connector, backend_url, workload=PROBE_WORKLOAD)
+    client = BackendClient(connector, backend_url, workload=PROBE_WORKLOAD)
     try:
         resp = await client.fetch_pipeline()
     except (KeyboardInterrupt, asyncio.CancelledError):

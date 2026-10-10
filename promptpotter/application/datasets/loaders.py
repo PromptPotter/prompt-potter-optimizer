@@ -10,10 +10,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.config.paths import benchmark_datasets_root
-from promptpotter.domain.sample import Sample
+from promptpotter.domain.sample import ArchiveEntry, Sample
 from promptpotter.infrastructure.store.dataset_access import readable_dataset_rows
 from promptpotter.infrastructure.store.measurement_archive import config_key
-from promptpotter.shared import GSM8K_ANSWER_RE
+from promptpotter.shared.answer_text import GSM8K_ANSWER_RE
 from promptpotter.shared.hashing import ADDRESS_HEX, stable_hash
 
 if TYPE_CHECKING:
@@ -241,17 +241,15 @@ def archive_entry(
     *,
     dataset_name: str | None,
     pipeline_schema: PipelineSchema,
-) -> dict[str, Any]:
+) -> ArchiveEntry:
     sp_h = search_point.sp_hash(pipeline_schema)
-    entry: dict[str, Any] = {
-        "dataset_name": dataset_name,
-        "prompt_fields_id": sp_h,
-        "rendered_prompt_hash": stable_hash(search_point.render(), length=ADDRESS_HEX),
-    }
-    if search_point.pipeline_params:
-        entry["node_configs"] = pipeline_schema.node_configs(search_point.pipeline_params)
-        entry["pipeline_params"] = search_point.pipeline_params
-    entry["config_key"] = config_key(
-        entry.get("node_configs") or [("", {"prompt_fields_id": sp_h})]
+    params = search_point.pipeline_params
+    node_configs = pipeline_schema.node_configs(params) if params else []
+    return ArchiveEntry(
+        config_key=config_key(node_configs or [("", {"prompt_fields_id": sp_h})]),
+        prompt_fields_id=sp_h,
+        rendered_prompt_hash=stable_hash(search_point.render(), length=ADDRESS_HEX),
+        node_configs=node_configs,
+        pipeline_params=params,
+        dataset_name=dataset_name,
     )
-    return entry

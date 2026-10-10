@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import importlib
 import inspect
-import logging
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -14,19 +13,21 @@ from promptpotter.application.commands.payloads import (
     KIND_OF_PAYLOAD,
     CheckinPayload,
     CommandAcceptedBody,
-    CommandPayload,
     CompactArchivePayload,
-    CyclePayload,
     DatasetReplaced,
     DeleteCyclePayload,
     LifecyclePayload,
-    PauseCyclePayload,
     ReplaceDatasetPayload,
     SetCampaignLabelPayload,
     WorkspacePayload,
 )
 from promptpotter.application.jobs.registry import JobRegistry
-from promptpotter.domain.command_kinds import ALL_DISPATCHED_KINDS
+from promptpotter.domain.command_kinds import (
+    CommandKind,
+    CommandPayload,
+    CyclePayload,
+    PauseCyclePayload,
+)
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, decode_cycle_path
 from promptpotter.domain.run_records import CommandAckRecord, CommandAckStatus, CommandRecord
 from promptpotter.domain.strict_model import StrictModel
@@ -45,16 +46,7 @@ from promptpotter.shared.errors import (
     NotFoundError,
     PayloadInvalidError,
 )
-from promptpotter.shared.identity import (
-    CAMPAIGN_BUDGET_CAP,
-    CAMPAIGN_CREATE_CAP,
-    CAMPAIGN_LIFECYCLE_CAP,
-    CAMPAIGN_LOOKAHEAD_CAP,
-    CAMPAIGN_RUN_CAP,
-    CAMPAIGN_STEP_CAP,
-    acting_principal_id,
-    require_capability,
-)
+from promptpotter.shared.identity import acting_principal_id, require_capability
 
 if TYPE_CHECKING:
     from promptpotter.application.jobs.launcher.launch import Inline
@@ -92,11 +84,7 @@ def _find_idempotent_command(
     return applied
 
 
-logger = logging.getLogger(__name__)
-
 __all__ = [
-    "CAP_FOR_KIND",
-    "HANDLER_FOR_KIND",
     "Applier",
     "CommandCall",
     "CommandDispatcher",
@@ -105,76 +93,7 @@ __all__ = [
     "refused_on_an_arm",
 ]
 
-
-CAP_FOR_KIND: dict[str, str] = {
-    "archive-campaign": CAMPAIGN_LIFECYCLE_CAP,
-    "delete-campaign": CAMPAIGN_LIFECYCLE_CAP,
-    "unarchive-campaign": CAMPAIGN_LIFECYCLE_CAP,
-    "delete-cycle": CAMPAIGN_LIFECYCLE_CAP,
-    "cleanup-empty-cycles": CAMPAIGN_LIFECYCLE_CAP,
-    "skip-searchpoint": CAMPAIGN_STEP_CAP,
-    "pause-cycle": CAMPAIGN_STEP_CAP,
-    "origin-gate-decision": CAMPAIGN_STEP_CAP,
-    "step-cycle": CAMPAIGN_STEP_CAP,
-    # A verify SPENDS on real cells, so it sits with the verbs that buy measurement, not the step verbs.
-    "verify-candidate": CAMPAIGN_RUN_CAP,
-    "grade-bench": CAMPAIGN_RUN_CAP,
-    "start-run": CAMPAIGN_RUN_CAP,
-    "fork-cycle": CAMPAIGN_RUN_CAP,
-    "start-checkin": CAMPAIGN_RUN_CAP,
-    "change-run-limits": CAMPAIGN_BUDGET_CAP,
-    "mint-campaign": CAMPAIGN_CREATE_CAP,
-    # WHOSE launch it is, `JobRegistry.cancel_queued` checks against the principal the job was filed under.
-    "cancel-queued-run": CAMPAIGN_RUN_CAP,
-    # Holding the rung is not enough on the host's key: `quota.py::set_concurrent_cycles`.
-    "set-concurrent-cycles": CAMPAIGN_BUDGET_CAP,
-    "register-backend": CAMPAIGN_CREATE_CAP,
-    "edit-draft-campaign": CAMPAIGN_CREATE_CAP,
-    "resolve-origin": CAMPAIGN_CREATE_CAP,
-    # The label is how every other surface addresses the campaign to a human.
-    "set-campaign-label": CAMPAIGN_LIFECYCLE_CAP,
-    # A dataset slug is in the measurement cache key: repointing one re-addresses every campaign on it.
-    "replace-dataset": CAMPAIGN_LIFECYCLE_CAP,
-    # Its purge step destroys paid spend.
-    "compact-archive": CAMPAIGN_LIFECYCLE_CAP,
-    "set-sample-lookahead": CAMPAIGN_LOOKAHEAD_CAP,
-}
-
 _HANDLER_PACKAGE = "promptpotter.application.commands"
-HANDLER_FOR_KIND: dict[str, str] = {
-    "pause-cycle": "loop_commands:pause_cycle",
-    "origin-gate-decision": "loop_commands:origin_gate_decision",
-    "skip-searchpoint": "loop_commands:skip_searchpoint",
-    "set-sample-lookahead": "loop_commands:set_sample_lookahead",
-    "start-run": "launching:start_run",
-    "step-cycle": "launching:step_cycle",
-    "fork-cycle": "launching:fork_cycle",
-    "mint-campaign": "launching:mint_campaign",
-    "start-checkin": "launching:start_checkin",
-    "verify-candidate": "measuring:verify_candidate",
-    "grade-bench": "measuring:grade_bench",
-    "change-run-limits": "limits_and_queue:change_run_limits",
-    "set-concurrent-cycles": "limits_and_queue:set_concurrent_cycles",
-    "cancel-queued-run": "limits_and_queue:cancel_queued_run",
-    "delete-cycle": "cycle_cleanup:delete_cycle",
-    "cleanup-empty-cycles": "cycle_cleanup:cleanup_empty_cycles",
-    "archive-campaign": "workspace_edits:campaign_lifecycle",
-    "unarchive-campaign": "workspace_edits:campaign_lifecycle",
-    "delete-campaign": "workspace_edits:campaign_lifecycle",
-    "set-campaign-label": "workspace_edits:set_campaign_label",
-    "register-backend": "workspace_edits:register_backend",
-    "replace-dataset": "workspace_edits:replace_dataset",
-    "compact-archive": "archive_compaction:compact_archive",
-    "edit-draft-campaign": "draft_editing:edit_draft_campaign",
-    "resolve-origin": "origin_resolving:resolve_origin",
-}
-
-for _table_name, _table in (("CAP_FOR_KIND", CAP_FOR_KIND), ("HANDLER_FOR_KIND", HANDLER_FOR_KIND)):
-    if set(_table) != ALL_DISPATCHED_KINDS:
-        raise RuntimeError(
-            f"{_table_name} out of sync with the dispatched command set: "
-            f"{ALL_DISPATCHED_KINDS.symmetric_difference(_table)}"
-        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -183,7 +102,7 @@ class CommandCall[P: CommandPayload]:
     idempotency_key: str
 
     @property
-    def kind(self) -> str:
+    def kind(self) -> CommandKind:
         return KIND_OF_PAYLOAD[type(self.payload)]
 
 
@@ -259,7 +178,7 @@ class CommandDispatcher:
         return derive_run_state(self.stores.campaigns.cycle_dir(hop))
 
     def _applier(self, call: CommandCall[Any], *target: object) -> Applier[Any]:
-        module, _, name = HANDLER_FOR_KIND[call.kind].partition(":")
+        module, _, name = call.kind.handler.partition(":")
         handler: Callable[..., Applier[Any]] = getattr(
             importlib.import_module(f"{_HANDLER_PACKAGE}.{module}"), name
         )
@@ -367,11 +286,7 @@ class CommandDispatcher:
             existing = _find_idempotent_command(ledger, idempotency_key)
             if existing is not None:
                 return CommandOutcome(
-                    accepted=CommandAcceptedBody(
-                        command_id=existing.command_id,
-                        correlation_id=idempotency_key,
-                        ledger_sequence=existing.offset,
-                    ),
+                    accepted=CommandAcceptedBody(command_id=existing.command_id),
                     result=applier.replay(),
                 )
 
@@ -379,7 +294,7 @@ class CommandDispatcher:
         token = set_cycle_ledger(ledger)
         applied: list[R] = []
         try:
-            offset = emit_command(
+            emit_command(
                 command_id=command_id,
                 kind=kind,
                 payload=call.payload.model_dump(mode="json"),
@@ -415,11 +330,7 @@ class CommandDispatcher:
             )
 
         return CommandOutcome(
-            accepted=CommandAcceptedBody(
-                command_id=command_id,
-                correlation_id=idempotency_key,
-                ledger_sequence=offset if offset is not None else 0,
-            ),
+            accepted=CommandAcceptedBody(command_id=command_id),
             result=applied[0],
         )
 
@@ -433,16 +344,12 @@ class CommandDispatcher:
         )
         emit_command(
             command_id=command_id,
-            kind=KIND_OF_PAYLOAD[PauseCyclePayload],
+            kind=CommandKind.PAUSE_CYCLE,
             payload=payload.model_dump(mode="json"),
             idempotency_key=command_id,
             issued_by_user_id=acting_principal_id(self.stores.identity),
         )
         emit_command_ack(command_id=command_id, status="accepted")
 
-    def _require_capability_for(self, kind: str) -> None:
-        cap = CAP_FOR_KIND.get(kind)
-        if cap is None:
-            logger.warning("command %r has no capability and is unwritable", kind)
-            raise NotFoundError("Not found", code="not_found")
-        require_capability(self.stores.identity, cap, subject=f"command {kind!r}")
+    def _require_capability_for(self, kind: CommandKind) -> None:
+        require_capability(self.stores.identity, kind.capability, subject=f"command {kind.value!r}")

@@ -16,7 +16,7 @@ from promptpotter.application.jobs.launcher.mint_and_start import (
 )
 from promptpotter.application.jobs.launcher.run_job import HeldRun
 from promptpotter.application.jobs.registry import Job, JobRegistry
-from promptpotter.application.runner.entry import RunMode
+from promptpotter.domain.launch_limits import RunMode
 from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)

@@ -23,14 +23,14 @@ from promptpotter.application.pipeline_resolve import (
     resolve_campaign_config,
 )
 from promptpotter.application.run_observers import build_run_observers
-from promptpotter.application.runner.entry import RunMode, run_optimization
+from promptpotter.application.runner.entry import run_optimization
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.launch_limits import HeldLimits
+from promptpotter.domain.launch_limits import HeldLimits, RunMode
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.shared.errors import NotFoundError
-from promptpotter.shared.identity import AccessState, IdentityContext, Issuer, TenantId, UserId
+from promptpotter.shared.identity import IdentityContext
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -56,75 +56,18 @@ class JobSpec(StrictModel):
     which roots the admitting stores addressed."""
 
     job_id: str
-    campaign_id: str
-    cycle_id: str
+    hop: CycleHop
     mode: RunMode
-    jobs_dir: str
-    projects_root: str
-    shared_root: str
-    benchmarks_root: str
-    user_id: str
-    tenant_id: str
-    issuer: str | None
-    email: str | None
-    provider: str | None
-    access_state: AccessState
-    claims: dict[str, Any]
-    capabilities: list[str]
+    identity: IdentityContext
     limits: HeldLimits
-
-    @classmethod
-    def of(
-        cls,
-        *,
-        stores: Stores,
-        job_registry: JobRegistry,
-        job_id: str,
-        hop: CycleHop,
-        limits: HeldLimits,
-        mode: RunMode,
-    ) -> JobSpec:
-        identity = stores.identity
-        return cls(
-            job_id=job_id,
-            campaign_id=hop.campaign_id,
-            cycle_id=hop.cycle_id,
-            mode=mode,
-            jobs_dir=str(job_registry.jobs_dir),
-            projects_root=str(stores.projects_root),
-            shared_root=str(stores.shared_root),
-            benchmarks_root=str(stores.benchmarks_root),
-            user_id=str(identity.user_id),
-            tenant_id=str(identity.tenant_id),
-            issuer=None if identity.issuer is None else str(identity.issuer),
-            email=identity.email,
-            provider=identity.provider,
-            access_state=identity.access_state,
-            claims=dict(identity.claims),
-            capabilities=sorted(identity.capabilities),
-            limits=limits,
-        )
-
-    @property
-    def hop(self) -> CycleHop:
-        return CycleHop(campaign_id=self.campaign_id, cycle_id=self.cycle_id)
-
-    @property
-    def identity(self) -> IdentityContext:
-        return IdentityContext(
-            user_id=UserId(self.user_id),
-            tenant_id=TenantId(self.tenant_id),
-            issuer=None if self.issuer is None else Issuer(self.issuer),
-            email=self.email,
-            provider=self.provider,
-            access_state=self.access_state,
-            claims=self.claims,
-            capabilities=frozenset(self.capabilities),
-        )
+    jobs_dir: Path
+    projects_root: Path
+    shared_root: Path
+    benchmarks_root: Path
 
 
 def spawn_job(job_registry: JobRegistry, spec: JobSpec, *, stores: Stores) -> None:
-    log_path = Path(spec.jobs_dir) / "logs" / f"{spec.job_id}.log"
+    log_path = spec.jobs_dir / "logs" / f"{spec.job_id}.log"
     try:
         log_path.parent.mkdir(parents=True, exist_ok=True)
         with open(log_path, "ab") as log:
@@ -232,19 +175,22 @@ class HeldRun:
             limits=limits,
         )
 
-    def detach(self, *, mode: RunMode) -> None:
-        spawn_job(
-            self.job_registry,
-            JobSpec.of(
-                stores=self.session.store,
-                job_registry=self.job_registry,
-                job_id=self.job_id,
-                hop=self.session.hop,
-                limits=self.limits,
-                mode=mode,
-            ),
-            stores=self.session.store,
+    def job_spec(self, mode: RunMode) -> JobSpec:
+        stores = self.session.store
+        return JobSpec(
+            job_id=self.job_id,
+            hop=self.session.hop,
+            mode=mode,
+            identity=stores.identity,
+            limits=self.limits,
+            jobs_dir=self.job_registry.jobs_dir,
+            projects_root=stores.projects_root,
+            shared_root=stores.shared_root,
+            benchmarks_root=stores.benchmarks_root,
         )
+
+    def detach(self, *, mode: RunMode) -> None:
+        spawn_job(self.job_registry, self.job_spec(mode), stores=self.session.store)
 
     async def run_inline(
         self, *, mode: RunMode, readout_sink: Callable[[str], None] | None
@@ -261,11 +207,10 @@ class HeldRun:
 
 
 async def _bound_session(spec: JobSpec, stores: Stores) -> tuple[Session, CampaignConfig]:
-    hop = spec.hop
-    campaign = stores.campaigns.load_campaign(hop.campaign_id)
+    campaign = stores.campaigns.load_campaign(spec.hop.campaign_id)
     if campaign is None:
-        raise NotFoundError(f"campaign not found: {hop.campaign_id}")
-    session, campaign_config = await bind_cycle_session(stores, campaign, hop)
+        raise NotFoundError(f"campaign not found: {spec.hop.campaign_id}")
+    session, campaign_config = await bind_cycle_session(stores, campaign, spec.hop)
     configure_and_apply_pipeline(session, campaign_config)
     return session, campaign_config
 
@@ -273,11 +218,11 @@ async def _bound_session(spec: JobSpec, stores: Stores) -> tuple[Session, Campai
 async def run_job(spec: JobSpec) -> StopOutcome | None:
     stores = build_stores(
         spec.identity,
-        projects_root=Path(spec.projects_root),
-        benchmarks_root=Path(spec.benchmarks_root),
-        shared_root=Path(spec.shared_root),
+        projects_root=spec.projects_root,
+        benchmarks_root=spec.benchmarks_root,
+        shared_root=spec.shared_root,
     )
-    job_registry = JobRegistry(Path(spec.jobs_dir), capacity=resolve_run_capacity)
+    job_registry = JobRegistry(spec.jobs_dir, capacity=resolve_run_capacity)
     if not job_registry.adopt(spec.job_id):
         logger.warning("job %s was cleared before its process started — not running", spec.job_id)
         return None

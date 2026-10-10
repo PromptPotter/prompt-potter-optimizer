@@ -33,10 +33,9 @@ from promptpotter.application.pipeline_resolve import (
     resolve_campaign_config,
     resolve_pipeline_for_campaign,
 )
-from promptpotter.application.runner.entry import RunMode
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.launch_limits import LaunchLimits
+from promptpotter.domain.launch_limits import LaunchLimits, RunMode
 from promptpotter.domain.pipeline_overlay import steers_disallowed_model
 from promptpotter.domain.pipeline_schema import ParamIntent, narrowing_of
 from promptpotter.domain.run_records import CycleSeed, OriginSource
@@ -53,7 +52,6 @@ if TYPE_CHECKING:
     from promptpotter.application.commands.payloads import (
         ForkCyclePayload,
         MintCampaignPayload,
-        RunShape,
         StartCheckinPayload,
         StartRunPayload,
         StepCyclePayload,
@@ -69,7 +67,6 @@ __all__ = [
     "fork_cycle",
     "launch",
     "mint_campaign",
-    "run_mode_of",
     "start_checkin",
     "start_run",
     "step_cycle",
@@ -83,15 +80,6 @@ async def launch(dispatcher: CommandDispatcher, request: LaunchRequest, mode: Ru
         job_registry=dispatcher.job_registry,
         mode=mode,
         inline=dispatcher.inline,
-    )
-
-
-def run_mode_of(run: RunShape) -> RunMode:
-    return RunMode(
-        resume_from_round_override=run.from_round,
-        no_divergence_check=run.no_divergence_check,
-        fork_on_divergence=run.fork_on_divergence,
-        diag=run.diag,
     )
 
 
@@ -136,7 +124,7 @@ def _declined(dispatcher: CommandDispatcher, hop: CycleHop) -> Applier[object] |
 
 
 def _diag_target(stores: Stores, hop: CycleHop, mode: RunMode) -> CycleHop:
-    if not mode.diag or mode.resume_from_round_override is not None:
+    if not mode.diag or mode.from_round is not None:
         return hop
     index = stores.campaigns.load(hop)
     final = None if index is None else index.final
@@ -153,12 +141,11 @@ def start_run(
 ) -> Applier[object]:
     if declined := _declined(dispatcher, hop):
         return declined
-    mode = run_mode_of(payload)
     return Applier.silent(
         lambda: launch(
             dispatcher,
-            ExistingCycle(_diag_target(dispatcher.stores, hop, mode), campaign, payload),
-            mode,
+            ExistingCycle(_diag_target(dispatcher.stores, hop, payload), campaign, payload),
+            payload,
         )
     )
 
@@ -193,8 +180,6 @@ def fork_cycle(
         )
         raise NotFoundError("Not found", code="not_found")
 
-    fork_mode = run_mode_of(payload)
-
     async def _apply_fork() -> Launched:
         new_cycle_id = mint_operator_fork(
             stores=stores,
@@ -209,7 +194,7 @@ def fork_cycle(
         try:
             # Declare no limits — the seed's reconciled ones govern at the runner seam.
             launched = await launch(
-                dispatcher, ExistingCycle(fork, campaign, LaunchLimits()), fork_mode
+                dispatcher, ExistingCycle(fork, campaign, LaunchLimits()), payload
             )
         except BaseException:
             # A start raises only BEFORE the run exists, so the stub is idle.
