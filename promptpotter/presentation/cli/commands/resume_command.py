@@ -9,10 +9,9 @@ import uuid
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
-from promptpotter.application.commands.launching import run_mode_of
 from promptpotter.application.commands.payloads import (
     ForkCyclePayload,
-    RunShape,
+    MintCampaignPayload,
     StartRunPayload,
 )
 from promptpotter.application.initialization.wiring import init_services
@@ -20,6 +19,7 @@ from promptpotter.application.jobs.mint import ConfigDriftError
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.launch_limits import RunMode
 from promptpotter.domain.pipeline_overlay import (
     permitted_models_for_campaign,
     steers_disallowed_model,
@@ -54,8 +54,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger("promptpotter.presentation.cli")
 
 
-def _run_shape(args: argparse.Namespace, *, fork_on_divergence: bool) -> RunShape:
-    return RunShape(
+def _run_mode(args: argparse.Namespace, *, fork_on_divergence: bool) -> RunMode:
+    return RunMode(
         from_round=args.resume_from_round,
         no_divergence_check=args.no_divergence_check,
         fork_on_divergence=fork_on_divergence,
@@ -69,7 +69,7 @@ def _start_run(
     return StartRunPayload(
         campaign_id=hop.campaign_id,
         cycle_id=hop.cycle_id,
-        **_run_shape(args, fork_on_divergence=fork_on_divergence).model_dump(),
+        **_run_mode(args, fork_on_divergence=fork_on_divergence).model_dump(),
         **launch_limits_from_args(args).model_dump(),
     )
 
@@ -107,7 +107,7 @@ async def _dispatch_fork(
                 seed=seed,
                 keep_rounds=keep_rounds,
                 reason=reason,
-                **_run_shape(args, fork_on_divergence=args.fork_on_divergence).model_dump(),
+                **_run_mode(args, fork_on_divergence=args.fork_on_divergence).model_dump(),
             ),
         )
     except (ConfigDriftError, BackendUnreachableError):
@@ -230,7 +230,7 @@ async def _run_loop(args: argparse.Namespace, ctx: SessionCtx, held: HeldRun) ->
     cycle_result: CycleResult
     try:
         cycle_result = await run_inline(
-            held, mode=run_mode_of(_run_shape(args, fork_on_divergence=fork_on_divergence))
+            held, mode=_run_mode(args, fork_on_divergence=fork_on_divergence)
         )
     except ResumeDivergenceError as div:
         if fork_on_divergence:
@@ -256,7 +256,7 @@ async def _run_loop(args: argparse.Namespace, ctx: SessionCtx, held: HeldRun) ->
         # The refused run handed its slot back; the re-run is a launch — and a command — of its own.
         rerun = _start_run(args, ctx.hop, fork_on_divergence=True)
         held = await _dispatch_held(args, ctx, rerun)
-        cycle_result = await run_inline(held, mode=run_mode_of(rerun))
+        cycle_result = await run_inline(held, mode=rerun)
 
     return cycle_result_command(held.session, cycle_result)
 
@@ -275,27 +275,14 @@ async def _pivot_to_fresh(
     if not answer:
         raise SystemExit("Cancelled. Revert the config edits and retry `resume`.")
     return await mint_and_run(
-        argparse.Namespace(
-            command="new",
-            dataset=drift.dataset_name,
-            dataset_name=None,
-            config=None,
-            task_file=None,
-            task_text=None,
-            slug=None,
-            sets=[],
-            arm=None,
+        ctx.store,
+        MintCampaignPayload(
+            dataset_name=drift.dataset_name,
             backend_url=ctx.campaign.backend_url,
             backend_id=ctx.campaign.backend_id,
-            diag=False,
-            no_wait=args.no_wait,
-            halt_at_accuracy=args.halt_at_accuracy,
-            spend_budget_usd=args.spend_budget_usd,
-            token_budget=args.token_budget,
-            tenant=args.tenant,
-            verbose=args.verbose,
-            json_output=args.json_output,
-        )
+            **launch_limits_from_args(args).model_dump(),
+        ),
+        inline_launch(args),
     )
 
 

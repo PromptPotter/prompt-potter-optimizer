@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import Query, Request, Response
 
-from promptpotter.application.scoring.cells import measurement_log, open_cell
+from promptpotter.application.scoring.measurement_log import measurement_log, open_cell
 from promptpotter.domain.cells import Cell, CellsResponse, HeatmapScope
 from promptpotter.domain.results import HardSampleOrder
 from promptpotter.domain.scoring import SampleStatus

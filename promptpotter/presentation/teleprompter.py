@@ -31,14 +31,13 @@ from promptpotter.application.datasets.loaders import samples_from_dicts
 from promptpotter.application.embedded_run import open_session, run_campaign
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
-from promptpotter.application.runner.entry import RunMode
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.connectors.dspy_module import (
     SCORE_KEY,
     DspyProgram,
     dataset_pipeline,
 )
-from promptpotter.domain.launch_limits import LaunchLimits
+from promptpotter.domain.launch_limits import LaunchLimits, RunMode
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.infrastructure.identity.migration import registered_or_default_identity
 from promptpotter.infrastructure.store.dataset_access import dataset_pipeline_path

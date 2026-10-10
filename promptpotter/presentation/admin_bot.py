@@ -7,6 +7,7 @@ from typing import Any
 
 import httpx
 
+from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.application.jobs.install_spend import read_install_spend
 from promptpotter.application.jobs.quota import overrun
 from promptpotter.config.logging import setup_logging
@@ -294,6 +295,7 @@ def run_bot(token: str, chat_id: str, passphrase: str | None) -> None:
 
 def main() -> int:
     setup_logging()
+    complete_registries(every_treatment=False)
     token = settings.ADMIN_BOT_TELEGRAM_TOKEN.strip()
     chat_id = settings.ADMIN_BOT_CHAT_ID.strip()
     passphrase = settings.ADMIN_BOT_PASSPHRASE.strip() or None

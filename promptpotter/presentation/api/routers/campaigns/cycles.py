@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from fastapi import Query, Request, Response
 
-from promptpotter.application.cycle_reads import round_audit, view_cycle
+from promptpotter.application.cycle_reads import round_audit, served_round, view_cycle
 from promptpotter.application.mask.record import parse_lens, parse_sample_ids
 from promptpotter.application.mask.tree_lens import CourseNode, lensed_tree
-from promptpotter.application.scoring.cells import served_round
 from promptpotter.application.served_dashboard import (
     ServedDashboard,
     WarmingDashboard,

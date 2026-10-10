@@ -17,16 +17,15 @@ from pydantic import ValidationError
 from promptpotter import connectors
 from promptpotter.application.bench.resume_and_fork.replayers import replayers
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
-from promptpotter.application.commands.payloads import (
-    CyclePayload,
-    OriginGateDecisionPayload,
-    PauseCyclePayload,
-)
-from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.application.jobs.launcher.launch import Inline, Launched
 from promptpotter.application.jobs.reaper import sweep_dead_cycles
 from promptpotter.config.first_run import ensure_api_key
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
+from promptpotter.domain.command_kinds import (
+    CyclePayload,
+    OriginGateDecisionPayload,
+    PauseCyclePayload,
+)
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.phases import GateDecision, stop_reason_outcome
 from promptpotter.infrastructure.store.io import write_text
@@ -41,7 +40,7 @@ if TYPE_CHECKING:
 
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.jobs.launcher.run_job import HeldRun
-    from promptpotter.application.runner.entry import RunMode
+    from promptpotter.domain.launch_limits import RunMode
     from promptpotter.domain.results import CycleResult
 
 logger = logging.getLogger("promptpotter.presentation.cli")
@@ -49,7 +48,6 @@ logger = logging.getLogger("promptpotter.presentation.cli")
 
 def prepare_launch(args: argparse.Namespace) -> None:
     """Runs BEFORE the loop exists: a prompt or refusal here never meets a run's Ctrl+C handler."""
-    complete_registries(every_treatment=False)
     # A CLI-only install has no periodic sweep: a launch is where a dead producer's cycle is recorded.
     sweep_dead_cycles(DEFAULT_PROJECTS_ROOT)
     # argparse bounds none of these: refuse an out-of-range ceiling through the wire's own model.

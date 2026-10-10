@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from promptpotter.application import origin
-from promptpotter.application.origin import DatasetIndexEntry
+from promptpotter.application import origin_listing
+from promptpotter.application.origin_listing import DatasetIndexEntry
 from promptpotter.application.pipeline_resolve import (
     DatasetPipelineResponse,
     resolve_pipeline_for_dataset,
@@ -20,7 +20,7 @@ class DatasetIndexResponse(StrictModel):
 @datasets_router.get("", response_model=DatasetIndexResponse)
 def list_datasets(stores: StoresDep) -> DatasetIndexResponse:
     """Every dataset this identity may read: its own tenant origins, then install content."""
-    return DatasetIndexResponse(datasets=origin.list_datasets(stores))
+    return DatasetIndexResponse(datasets=origin_listing.list_datasets(stores))
 
 
 @datasets_router.get("/{name}/pipeline", response_model=DatasetPipelineResponse)

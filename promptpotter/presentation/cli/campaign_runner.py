@@ -16,11 +16,12 @@ if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
 
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.config.settings import settings
-from promptpotter.domain.command_kinds import ALL_DISPATCHED_KINDS
+from promptpotter.domain.command_kinds import CommandKind
 from promptpotter.domain.phases import StopOutcome
 from promptpotter.infrastructure.store.layout import tenant_workspace
 from promptpotter.infrastructure.store.session_pointer import active_pointer_exists
-from promptpotter.presentation.cli.parsers import build_parser, identity_from_args, parser_verbs
+from promptpotter.presentation.cli.commands.verbs import VERBS
+from promptpotter.presentation.cli.parsers import build_parser, identity_from_args
 from promptpotter.shared.errors import (
     PotterError,
     RequestTooLargeError,
@@ -38,38 +39,8 @@ __all__ = ["main"]
 
 _COMMANDS_PACKAGE = "promptpotter.presentation.cli.commands"
 
-COMMANDS: dict[str, str] = {
-    "new": "new:cmd_new",
-    "resume": "resume_command:cmd_resume",
-    "ab": "ab:cmd_ab",
-    "reset": "reset:cmd_reset",
-    "reindex": "reindex:cmd_reindex",
-    "restamp": "restamp:cmd_restamp",
-    "compact-archive": "maintenance:cmd_compact_archive",
-    "verify": "verify:cmd_verify",
-    "noise-floor": "noise_floor:cmd_noise_floor",
-    "seed-screen": "seed_screen:cmd_seed_screen",
-    "decision-bank": "decision_bank:cmd_decision_bank",
-    "evidence": "evidence:cmd_evidence",
-    "cycles": "cycles:cmd_cycles",
-    "machine-status": "machine_status:cmd_machine_status",
-    "probe-reasoning": "probe_reasoning:cmd_probe_reasoning",
-    "archive": "lifecycle:cmd_archive",
-    "delete": "lifecycle:cmd_delete",
-    "unarchive": "lifecycle:cmd_unarchive",
-    "pause": "lifecycle:cmd_pause",
-    "rename": "lifecycle:cmd_rename",
-    "set-limits": "lifecycle:cmd_set_limits",
-    "skip-searchpoint": "lifecycle:cmd_cycle_verb",
-    "origin-gate": "lifecycle:cmd_origin_gate",
-    "step-cycle": "lifecycle:cmd_step_cycle",
-    "bench": "bench:cmd_bench",
-    "delete-cycle": "lifecycle:cmd_cycle_verb",
-    "cleanup-empty-cycles": "lifecycle:cmd_cycle_verb",
-    "replace-dataset": "lifecycle:cmd_replace_dataset",
-    "cancel-queued": "lifecycle:cmd_cancel_queued",
-    "set-concurrent-cycles": "lifecycle:cmd_set_concurrent_cycles",
-}
+COMMANDS: dict[str, str] = {verb.name: verb.handler for verb in VERBS}
+_PARSER = build_parser(VERBS)
 
 
 def _handler(verb: str) -> Callable[[argparse.Namespace], Coroutine[Any, Any, CommandResult]]:
@@ -80,55 +51,12 @@ def _handler(verb: str) -> Callable[[argparse.Namespace], Coroutine[Any, Any, Co
     return handler
 
 
-# Each half fails QUIETLY alone: a handler-less parser row is a bare `KeyError`, a parser-less handler an unknown verb.
-_PARSER = build_parser()
-_declared = parser_verbs(_PARSER)
-if _declared != COMMANDS.keys():
-    raise RuntimeError(
-        "CLI verb drift between COMMANDS and parsers.py — "
-        f"parser-only: {sorted(_declared - COMMANDS.keys())}, "
-        f"handler-only: {sorted(COMMANDS.keys() - _declared)}"
-    )
-
-# TOTAL over the dispatched set: a new kind names its verb or declares the gap, so none lands browser-only in silence.
-CLI_VERB_FOR_KIND: dict[str, str | None] = {
-    "archive-campaign": "archive",
-    "delete-campaign": "delete",
-    "unarchive-campaign": "unarchive",
-    "delete-cycle": "delete-cycle",
-    "cleanup-empty-cycles": "cleanup-empty-cycles",
-    "skip-searchpoint": "skip-searchpoint",
-    "origin-gate-decision": "origin-gate",
-    "step-cycle": "step-cycle",
-    "grade-bench": "bench",
-    "pause-cycle": "pause",
-    "change-run-limits": "set-limits",
-    "set-campaign-label": "rename",
-    "replace-dataset": "replace-dataset",
-    "edit-draft-campaign": "new",
-    "resolve-origin": "new",
-    "start-checkin": "new",
-    "cancel-queued-run": "cancel-queued",
-    "set-concurrent-cycles": "set-concurrent-cycles",
-    "verify-candidate": "verify",
-    "compact-archive": "compact-archive",
-    "fork-cycle": "resume",
-    "mint-campaign": "new",
-    "start-run": "resume",
-    # Reached by the verb named, but written by init wiring rather than through the command.
-    "register-backend": "new",
-    # Browser-only ON PURPOSE: the absence IS the boundary (root `CLAUDE.md` § Conventions).
-    "set-sample-lookahead": None,
-}
+# TOTAL by construction: the verb is a column of the kind's own row, so none lands browser-only in silence.
+CLI_VERB_FOR_KIND: dict[CommandKind, str | None] = {kind: kind.cli_verb for kind in CommandKind}
 _named_verbs = {v for v in CLI_VERB_FOR_KIND.values() if v is not None}
-if set(CLI_VERB_FOR_KIND) != ALL_DISPATCHED_KINDS:
-    raise RuntimeError(
-        "command kind unclassified for the terminal — name the verb that reaches it, or declare "
-        f"the gap: {sorted(ALL_DISPATCHED_KINDS.symmetric_difference(CLI_VERB_FOR_KIND))}"
-    )
 if not _named_verbs <= COMMANDS.keys():
     raise RuntimeError(
-        f"CLI_VERB_FOR_KIND names verbs that do not exist: {sorted(_named_verbs - COMMANDS.keys())}"
+        f"CommandKind names verbs that do not exist: {sorted(_named_verbs - COMMANDS.keys())}"
     )
 
 
@@ -156,6 +84,9 @@ def main() -> None:
         # Appended to the ORIGINAL argv, so `resume`'s defaults populate without dropping the globals before the verb.
         args = parser.parse_args([*sys.argv[1:], "resume"])
 
+    # Named as a string like the handlers: `--help` loads no use case.
+    wiring = importlib.import_module("promptpotter.application.initialization.wiring")
+    wiring.complete_registries(every_treatment=False)
     # A launch verb's handler runs its preamble and THEN answers the coroutine: all of it happens here, outside the runner.
     run = _handler(args.command)(args)
 

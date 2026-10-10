@@ -11,18 +11,20 @@ from promptpotter.application.commands.payloads import (
     CancelQueuedRunPayload,
     ChangeRunLimitsPayload,
     CleanupEmptyCyclesPayload,
-    CyclePayload,
     DeleteCampaignPayload,
     DeleteCyclePayload,
     LifecyclePayload,
-    OriginGateDecisionPayload,
-    PauseCyclePayload,
     ReplaceDatasetPayload,
     SetCampaignLabelPayload,
     SetConcurrentCyclesPayload,
-    SkipSearchpointPayload,
     StepCyclePayload,
     UnarchiveCampaignPayload,
+)
+from promptpotter.domain.command_kinds import (
+    CyclePayload,
+    OriginGateDecisionPayload,
+    PauseCyclePayload,
+    SkipSearchpointPayload,
 )
 from promptpotter.domain.launch_limits import RoundsCap
 from promptpotter.domain.phases import GateDecision

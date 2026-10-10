@@ -5,7 +5,7 @@ from pydantic import Field
 
 from promptpotter.application.datasets.draft_build import DraftCampaignWire, draft_wire
 from promptpotter.application.datasets.ingest import draft_from_origin
-from promptpotter.application.origin import OriginEntry, list_origins
+from promptpotter.application.origin_listing import OriginEntry, list_origins
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.presentation.api.deps import StoresDep
 

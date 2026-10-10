@@ -3,51 +3,35 @@
 from __future__ import annotations
 
 import argparse
-from typing import TYPE_CHECKING, get_args
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
-from promptpotter.config.settings import (
-    DEFAULT_BACKEND_ID,
-    DEFAULT_BACKEND_URL,
-    settings,
-)
-from promptpotter.domain.cycle_paths import CyclePath, decode_cycle_path
-from promptpotter.domain.launch_limits import LaunchLimits, RoundsCap
-from promptpotter.domain.phases import GateDecision
-from promptpotter.domain.results import RescoreCount, VerifyStrategy, rescore_count
+from promptpotter.config.settings import settings
+from promptpotter.domain.launch_limits import LaunchLimits
 from promptpotter.infrastructure.identity.migration import registered_or_default_identity
-from promptpotter.infrastructure.store.layout import SHARED_CACHE_DIRS
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from promptpotter.shared.identity import IdentityContext
 
 
-def _rounds_cap_arg(raw: str) -> RoundsCap:
-    if raw.strip().lower() == "none":
-        return RoundsCap(max_rounds=None)
-    try:
-        return RoundsCap(max_rounds=int(raw))
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError(
-            f"expected a round count >= 0 or `none`, got {raw!r}"
-        ) from exc
+class Arg:
+    def __init__(self, *flags: str, **spec: Any) -> None:
+        self.flags = flags
+        self.spec = spec
 
 
-def _rescore_count_arg(raw: str) -> RescoreCount:
-    try:
-        return rescore_count(int(raw))
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError(f"expected a rescore count >= 2, got {raw!r}") from exc
+@dataclass(frozen=True)
+class Verb:
+    name: str
+    handler: str
+    help: str
+    args: tuple[Arg, ...] = ()
 
 
-def _inside_arg(raw: str) -> CyclePath:
-    try:
-        return decode_cycle_path(raw)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError(str(exc)) from exc
-
-
-def _add_global_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
+GLOBAL_ARGS = (
+    Arg(
         "--tenant",
         default=None,
         help=(
@@ -55,36 +39,36 @@ def _add_global_args(parser: argparse.ArgumentParser) -> None:
             "registered developer (default-tenant claim marker) or anonymous "
             "'default' if never registered. Pass a slug to override."
         ),
-    )
-    parser.add_argument(
+    ),
+    Arg(
         "-v",
         "--verbose",
         action="store_true",
         help="Verbose logs (timestamps, module tags, every INFO line)",
-    )
-    parser.add_argument(
+    ),
+    Arg(
         "--json",
         action="store_true",
         dest="json_output",
         help="Emit machine-readable JSON instead of human-formatted text",
-    )
+    ),
+)
 
-
-def _add_runtime_halts(p: argparse.ArgumentParser) -> None:
-    p.add_argument(
+RUNTIME_HALTS = (
+    Arg(
         "--no-wait",
         action="store_true",
         help="Refuse instead of waiting when every run slot on the machine is taken.",
-    )
-    p.add_argument(
+    ),
+    Arg(
         "--halt-at",
         dest="halt_at_accuracy",
         type=float,
         default=None,
         metavar="ACC",
         help="Halt when the optimizer's declared pick has accuracy ≥ ACC (e.g. 0.66).",
-    )
-    p.add_argument(
+    ),
+    Arg(
         "--spend-budget",
         dest="spend_budget_usd",
         type=float,
@@ -92,8 +76,8 @@ def _add_runtime_halts(p: argparse.ArgumentParser) -> None:
         metavar="USD",
         help="Halt when cumulative cycle spend (optimizer + backend) ≥ USD. Sets the "
         "cycle's ceiling, raise or lower, over the dataset's; kept for later resumes.",
-    )
-    p.add_argument(
+    ),
+    Arg(
         "--token-budget",
         dest="token_budget",
         type=int,
@@ -101,352 +85,20 @@ def _add_runtime_halts(p: argparse.ArgumentParser) -> None:
         metavar="N",
         help="Halt when cumulative cycle tokens (optimizer + backend, in + out) ≥ N. "
         "The model-portable twin of --spend-budget; whichever trips first halts.",
-    )
+    ),
+)
+
+ACTIVE_CAMPAIGN = Arg("--campaign", default="", help="Campaign id (default: the active one).")
+ACTIVE_CYCLE = Arg("--cycle", default="", help="Cycle id (default: the active one).")
+CAMPAIGN_ID = Arg("campaign_id", help="Target campaign id ({dataset}__{rand6_hex})")
 
 
-def _add_new_args(p_new: argparse.ArgumentParser) -> None:
-    p_new.add_argument(
-        "dataset",
-        nargs="?",
-        default=None,
-        help="Dataset name under ./datasets/ OR a path to a raw file (CSV). "
-        "A name reads datasets/<name>/{pipeline,campaign}.yaml; a file is "
-        "ingested → origin-resolved → committed as a tenant dataset → run. "
-        "Omit (name form) only if you pass --dataset-name explicitly.",
-    )
-    p_new.add_argument(
-        "--dataset-name",
-        default=None,
-        help="Explicit dataset name (alternative to positional). Required if "
-        "no positional dataset is given.",
-    )
-    p_new.add_argument(
-        "--config",
-        default=None,
-        help="Campaign config JSON override (defaults to datasets/<name>/campaign.yaml).",
-    )
-    p_new.add_argument(
-        "--task-file", default=None, help="Override datasets/<name>/task_description.md"
-    )
-    p_new.add_argument(
-        "--task-text", default=None, help="Override datasets/<name>/task_description.md inline"
-    )
-    p_new.add_argument(
-        "--slug",
-        default=None,
-        help="(file form) Dataset slug under projects/{tenant}/datasets/ "
-        "(default: derived from the filename).",
-    )
-    p_new.add_argument(
-        "--set",
-        dest="sets",
-        action="append",
-        default=[],
-        metavar="FIELD=VALUE",
-        help="Repeatable. Both forms take the campaign knobs — `--set optimizer=capo`, "
-        "`--set max_rounds=3`, `--set nodes.<node>.<knob>=VALUE`. The file form also "
-        "confirms an origin field, e.g. `--set task_description='map names to codes'` or "
-        "`--set column.query=input`, applied before the resolver runs.",
-    )
-    p_new.add_argument("--backend-url", default=DEFAULT_BACKEND_URL)
-    p_new.add_argument("--backend-id", default=DEFAULT_BACKEND_ID)
-    p_new.add_argument(
-        "--arm",
-        default=None,
-        metavar="HEAD_TO_HEAD:KEY",
-        help="Mint as a controlled arm of a head-to-head, declared by its first arm off that "
-        "arm's instrument and budget; a later arm on any other is refused.",
-    )
-
-    p_new.add_argument(
-        "--diag",
-        dest="diag",
-        action="store_true",
-        help="Diagnostic mode: origin → 1 full scored round → force "
-        "task-framing refinement (regardless of stall) → 1 generation-only "
-        "round 2 (refinement overrides applied, no scoring) → halt. "
-        "index.json::final.mode lands as 'diag'.",
-    )
-
-    _add_runtime_halts(p_new)
+def _declare(parser: argparse.ArgumentParser, args: Iterable[Arg]) -> None:
+    for arg in args:
+        parser.add_argument(*arg.flags, **arg.spec)
 
 
-def _add_resume_args(p_resume: argparse.ArgumentParser) -> None:
-    p_resume.add_argument(
-        "--campaign",
-        default="",
-        help="Campaign id, 6-hex suffix, or unambiguous prefix (default: the active one). Its "
-        "cycle's own session is resumed; the active pointer is not consulted.",
-    )
-    p_resume.add_argument(
-        "--cycle",
-        default="",
-        help="Cycle id (default: the active one, or the named campaign's only cycle).",
-    )
-    p_resume.add_argument(
-        "--from",
-        dest="resume_from_round",
-        type=int,
-        default=None,
-        metavar="ROUND",
-        help="Resume after round N (archives rounds > N, reloads trial_N). "
-        "Omit to pick up from the latest completed round.",
-    )
-    p_resume.add_argument(
-        "--no-check",
-        dest="no_divergence_check",
-        action="store_true",
-        help="On resume, rescore but skip the decision-replay halt.",
-    )
-    p_resume.add_argument(
-        "--fork-on-divergence",
-        dest="fork_on_divergence",
-        action="store_true",
-        help="On divergence, mint a sibling cycle (with parent_cycle_id) "
-        "and re-run the divergent round under the current scorer.",
-    )
-    p_resume.add_argument(
-        "--diag",
-        dest="diag",
-        action="store_true",
-        help="Diagnostic mode (see `new --diag`). On a previously-completed "
-        "diag cycle, branches off a counted sibling.",
-    )
-    p_resume.add_argument(
-        "--rewind",
-        dest="rewind_to_round",
-        type=int,
-        default=None,
-        metavar="ROUND",
-        help="Mint a sibling cycle at ROUND (OPERATOR_REWIND trigger), retarget "
-        "the active pointer, and start optimization on the fork. Parent cycle is "
-        "preserved intact. Contrast with `--from N` which rewinds in place.",
-    )
-    p_resume.add_argument(
-        "--rewind-reason",
-        dest="rewind_reason",
-        type=str,
-        default="",
-        metavar="STR",
-        help="One-line audit-trail reason recorded on the OPERATOR_REWIND fork; "
-        "ignored unless `--rewind ROUND` is set.",
-    )
-    p_resume.add_argument(
-        "--steer",
-        dest="steer",
-        action="append",
-        default=None,
-        metavar="NODE.PARAM=VALUE",
-        help="Mint an operator-steered fork whose seed overlay sets one node param "
-        "(repeatable) — any key the served node-config rows carry: "
-        "`--steer llm_only.model=gpt-5`, `--steer llm_only.temperature=0.2`, "
-        '`--steer llm_only.output_schema=\'{"type":"object",...}\'`. A value is read '
-        "in the param's declared type, so a number, bool or object is spelled as JSON. "
-        "Steering a node to a gateway or to a model it does not permit is a babysit act: "
-        "it requires the `campaign.babysit` capability and grades the fork's runs C. CLI "
-        "twin of the web steer-fork (`POST /commands/fork-cycle`), same seam + gate.",
-    )
-    p_resume.add_argument(
-        "--steer-max-rounds",
-        dest="steer_max_rounds",
-        type=int,
-        default=None,
-        metavar="N",
-        help="Round ceiling for a `--steer` fork (default: the rounds the parent's cap has "
-        "left; its spend cap likewise). Ignored unless `--steer` is set.",
-    )
-    _add_runtime_halts(p_resume)
-
-
-def _add_verify_args(p_verify: argparse.ArgumentParser) -> None:
-    p_verify.add_argument(
-        "subject",
-        help="The searchpoint, as `evidence` addresses one: "
-        "'candidate:<campaign>/<cycle>/<candidate_id>', with ';in=<c::y~…>' for an L4 inner "
-        "cycle. The id is `candidate_id` on the round file's `candidate_scores` row.",
-    )
-    p_verify.add_argument(
-        "--strategy",
-        dest="strategy",
-        choices=get_args(VerifyStrategy),
-        default="random",
-        help="Which unseen cells to buy: 'random', or 'hard' — the highest-δ cells on the "
-        "cycle's ruler first, which read BELOW the candidate's level by construction, so the "
-        "paired lift is the number to read there.",
-    )
-    p_verify.add_argument(
-        "--samples",
-        dest="samples",
-        type=int,
-        default=None,
-        help="Number of additional samples to score. Default: DERIVED — the per-candidate "
-        "round budget, lifted by the rounds run since this cycle's last verification and "
-        "capped by what is still unmeasured. A larger explicit count is REFUSED, naming the "
-        "budget. Samples this candidate already has in the cross-cycle archive are skipped.",
-    )
-    p_verify.add_argument(
-        "--seed",
-        dest="seed",
-        type=int,
-        default=None,
-        help="RNG seed for reproducible sample picks (default: random).",
-    )
-
-
-def _add_decision_bank_args(p: argparse.ArgumentParser) -> None:
-    p.add_argument(
-        "dataset",
-        help="Dataset whose campaigns' closed rounds are the bank (e.g. 'justlogic-d234').",
-    )
-    p.add_argument(
-        "--campaign",
-        dest="campaigns",
-        action="append",
-        default=[],
-        help="Restrict the bank to this campaign id; repeat for several (default: every one).",
-    )
-    p.add_argument(
-        "--base",
-        dest="base",
-        default=None,
-        help="YAML of optimizer overrides the BASE arm proposes under, `{node: {prompt field: "
-        "text, model: …}}` — the shape an L4 arm declares. Default: the optimizer as each "
-        "campaign's manifest resolves it. A `model` pins one proposer model across the bank.",
-    )
-    p.add_argument(
-        "--variant",
-        dest="variant",
-        default=None,
-        help="YAML of optimizer overrides for the arm under test, same shape. Omitted, the base "
-        "is graded against ITSELF under the next seed — the instrument's own noise floor.",
-    )
-    p.add_argument(
-        "--seed",
-        dest="seed",
-        type=int,
-        default=0,
-        help="Seed both arms' proposers draw with (default 0). Re-running one seed replays its "
-        "base generations and their cells from the caches.",
-    )
-    p.add_argument(
-        "--cells",
-        dest="cells",
-        type=int,
-        default=None,
-        help="Cap each decision's panel at its first N cells (default: every cell the round "
-        "read its parent on).",
-    )
-    p.add_argument(
-        "--max-usd",
-        dest="max_usd",
-        type=float,
-        default=None,
-        help="The run's spend ceiling; a send that does not fit is refused before it leaves. "
-        "OMITTED = DRY RUN: nothing is sent, and the calls, cells and dollar bound are printed.",
-    )
-    p.add_argument(
-        "--parallel",
-        dest="parallel",
-        type=int,
-        default=1,
-        help="Cells to hold in flight within each proposal's pass (default 1), clamped to the "
-        "backend's own ceiling.",
-    )
-
-
-def _add_seed_screen_args(p: argparse.ArgumentParser) -> None:
-    p.add_argument(
-        "dataset",
-        help="ANY dataset whose seeded bank draws are being screened (e.g. 'justlogic-d234'). "
-        "Not an L4-only verb: it resolves that dataset's own campaign.yaml and origin, so a "
-        "screen needs no inner loop and no self-optimizing campaign.",
-    )
-    p.add_argument(
-        "--seeds",
-        dest="seeds",
-        type=int,
-        nargs="+",
-        required=True,
-        help="Candidate seed indices to measure (e.g. --seeds 0 1 2 3 4 5).",
-    )
-    p.add_argument(
-        "--n-samples",
-        dest="n_samples",
-        type=int,
-        default=40,
-        help="Rows per bank (default 40) — match the panel's `n_samples_origin`, or the "
-        "screen measures a bank nobody will run.",
-    )
-    p.add_argument(
-        "--repeat",
-        dest="repeat",
-        type=int,
-        default=3,
-        help="Independent origin passes per bank (default 3). They run force_fresh — "
-        "the archive is content-addressed, so replays would report a spread of exactly zero. "
-        "NOT 1: the verdict compares an exact floor against an origin carrying ~0.08 SE at 40 "
-        "rows, so one pass cannot settle a bank near its line. Costs repeat x --n-samples "
-        "calls; raise it further for any bank reported UNSETTLED.",
-    )
-    p.add_argument(
-        "--parallel",
-        dest="parallel",
-        type=int,
-        default=1,
-        help="Rows to hold in flight within each pass (default 1, sequential). A screen has no "
-        "round and no cycle, so this is a LAUNCH parameter held for the whole run rather than a "
-        "press the browser arms and a round spends — that control belongs to `new`/`resume`, "
-        "which have a round to spend it at. Clamped to the backend's own ceiling.",
-    )
-
-
-def _add_noise_floor_args(p_noise_floor: argparse.ArgumentParser) -> None:
-    p_noise_floor.add_argument(
-        "campaign",
-        help="Campaign id, 6-hex suffix, or unambiguous prefix "
-        "(e.g. 'promptpotter-self__ca6d4d' or 'ca6d4d').",
-    )
-    p_noise_floor.add_argument(
-        "--cycle",
-        dest="cycle",
-        default=None,
-        help="Cycle id (full or prefix) when the campaign has more than one cycle. "
-        "Omit when the campaign has exactly one cycle.",
-    )
-    p_noise_floor.add_argument(
-        "--k",
-        dest="k",
-        type=_rescore_count_arg,
-        default=rescore_count(3),
-        help="Number of force_fresh re-scores of the cached origin (default 3, at least 2). "
-        "kx real spend — on a pp-self cycle each re-score re-runs the full inner "
-        "recursion, so keep k small.",
-    )
-
-
-def _add_reset_args(p_reset: argparse.ArgumentParser) -> None:
-    scope = p_reset.add_mutually_exclusive_group()
-    scope.add_argument(
-        "--all-tenants",
-        dest="all_tenants",
-        action="store_true",
-        help="Reset every tenant under .promptpotter/projects/ "
-        "(default: only the tenant named by --tenant).",
-    )
-    p_reset.add_argument(
-        "--yes",
-        action="store_true",
-        help="Skip the y/N confirmation prompt. Required for non-interactive use.",
-    )
-    p_reset.add_argument(
-        "--dry-run",
-        dest="dry_run",
-        action="store_true",
-        help="List the paths that would be removed; touch nothing. Recommended first run.",
-    )
-
-
-def build_parser() -> argparse.ArgumentParser:
+def build_parser(verbs: Iterable[Verb]) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m promptpotter",
         description=f"{settings.BRAND_SHORT_NAME} optimization CLI. Bare invocation runs "
@@ -455,471 +107,11 @@ def build_parser() -> argparse.ArgumentParser:
         "origin-resolves. Reads happen by opening the artifact tree "
         "(campaigns/{campaign_id}/) directly.",
     )
-    _add_global_args(parser)
+    _declare(parser, GLOBAL_ARGS)
     sub = parser.add_subparsers(dest="command", required=False)
-
-    p_new = sub.add_parser(
-        "new",
-        help="Mint a fresh campaign from a dataset NAME or a raw FILE (CSV). A "
-        "name uses an authored datasets/<name>/; a file is ingested → "
-        "origin-resolved → committed as a tenant dataset → run (headless parity "
-        "with the web onboarding). Every invocation mints a brand-new campaign "
-        "(campaign_id is timestamp-derived — collision-free, no discriminator).",
-    )
-    _add_new_args(p_new)
-
-    p_resume = sub.add_parser(
-        "resume",
-        help="Continue the active campaign. Bare `resume` picks up where it "
-        "left off; flags handle rewind / divergence / diagnostic modes.",
-    )
-    _add_resume_args(p_resume)
-
-    p_ab = sub.add_parser(
-        "ab",
-        help="Deterministic A/B replay of a campaign (the active one, or --campaign): "
-        "re-derive every recorded decision (winner / eliminations / L2-L3 triggers) under "
-        "the CURRENT engine + scorer, and report where the change stops carrying over — "
-        "which branches survive it and where a fork is needed. Zero LLM calls — run a "
-        "cycle under one engine/scorer, then `ab` under another to diff.",
-    )
-    p_ab.add_argument(
-        "--campaign",
-        default="",
-        help="Campaign id, 6-hex suffix, or unambiguous prefix (default: the active one).",
-    )
-    p_ab.add_argument(
-        "--cycle",
-        default="",
-        help="Cycle whose round 0 calibrates the δ ruler (default: the active cycle, or the "
-        "named campaign's root cycle).",
-    )
-    _add_reset_args(
-        sub.add_parser(
-            "reset",
-            help="Drop campaigns/ + active_session.json for the "
-            "selected tenant; preserve the paid caches ("
-            + ", ".join(f"{d}/" for d in SHARED_CACHE_DIRS)
-            + "). The escape hatch for cycles "
-            "obsoleted by code changes — per-sample measurements survive so the "
-            "next `new` hits cache immediately.",
-        )
-    )
-
-    _add_verify_args(
-        sub.add_parser(
-            "verify",
-            help="Re-score one campaign candidate on search cells it has never met and bank "
-            "the pass on its cycle's ledger. Use to doublecheck whether a confidence-locked "
-            "candidate's verdict generalises beyond the round's leader-locked sample budget. "
-            "Moves no round and no election.",
-        )
-    )
-
-    sub.add_parser(
-        "reindex",
-        help="Rebuild the measurement index (measurements/index.jsonl) from the detail "
-        "files and GC orphaned runs. The index is derived, so this loses nothing — use "
-        "after a crash mid-append or to reclaim orphaned bytes. Pure disk work, zero spend.",
-    )
-
-    p_compact = sub.add_parser(
-        "compact-archive",
-        help="Count what the archive holds (`inventory`), move the fields nothing reads out of "
-        "candidate measurement rows into a gzip cold store beside them (`compact`), put them back "
-        "(`restore`), or delete the store (`purge-cold`). `inventory` writes nothing and refuses "
-        "nothing: runs, cells, bytes and replay rate by dataset, run-label family and age, plus "
-        "the index rows carrying no detail file, which is what makes every other count an upper "
-        "bound. It is what a reclaim is sized against, so it is taken BEFORE a bulk delete — the "
-        "delete destroys its own evidence. "
-        "A measurement row is paid LLM spend, so `compact` never drops a field — "
-        "it moves `hit`/`scored`/`objective` plus pipeline_data's `reasoning_trace`, "
-        "`result_ranking`, `final_ranking` and `total_time`, and stamps the run header with what "
-        "left. Only `panel` runs (a candidate's own walk) are touched: `origin` and `parent` "
-        "serve the overwhelming majority of cache replays. Refuses while any cycle can still append. Dry-run by default; "
-        "`purge-cold --apply` is the ONE irreversible step. Pure disk work, zero spend.",
-    )
-    p_compact.add_argument(
-        "mode",
-        choices=["inventory", "compact", "restore", "purge-cold"],
-        help="Which step to run.",
-    )
-    p_compact.add_argument(
-        "--dataset",
-        default=None,
-        help="Scope to one dataset (default: every dataset).",
-    )
-    p_compact.add_argument(
-        "--apply",
-        action="store_true",
-        help="Write (default: report only). `inventory` never writes and ignores it.",
-    )
-
-    p_restamp = sub.add_parser(
-        "restamp",
-        help="Bring on-disk data onto today's shape. (1) Prune knobs the engine no longer "
-        "has from every CampaignConfig — the minted snapshots and the dataset templates; "
-        "every dropped key is reported with the value its file held. (2) Re-project each "
-        "finished cycle's ledger onto the current record shape, dropping what the archive "
-        "and the round files already hold. A cycle with a live producer is left alone. (3) "
-        "REPORT whether every banked round file still loads, grouped by what drifted — "
-        "read-only, because "
-        "pruning cannot restore a renamed field's value, so a repair there would be silently "
-        "wrong. The sanctioned remedy after a field rename or a record-shape change, and (3) is "
-        "how you find out you need one. Dry-run by default. Pure disk work, zero spend.",
-    )
-    p_restamp.add_argument(
-        "--apply", action="store_true", help="Rewrite the files (default: report only)."
-    )
-
-    p_evidence = sub.add_parser(
-        "evidence",
-        help="What a SET of subjects jointly says: the campaigns' bench headlines head-to-head, "
-        "never paired where one bench set did not grade them all, then the roster, whether their "
-        "levels are comparable at all, the cell/subject/residual decomposition, what the "
-        "selection can resolve at its current width, the run-order confound, and (with --ranking) "
-        "the measured edits. Read-only, zero spend, no LLM calls; naming a leader, never adopting one.",
-    )
-    p_evidence.add_argument(
-        "dataset",
-        nargs="?",
-        default="",
-        help="Pool every campaign on this dataset, beside any --subject names.",
-    )
-    p_evidence.add_argument(
-        "--subject",
-        dest="subject",
-        action="append",
-        default=[],
-        help="What to pool, repeated for a set: 'campaign:<id>' (its root origin), "
-        "'course:<campaign>/<cycle>' (one branch, at its last elected winner) or "
-        "'candidate:<campaign>/<cycle>/<candidate>' (one searchpoint). The campaign id accepts "
-        "the same short prefix every other verb does. May span datasets, which the comparability "
-        "line then reports on. An L4 inner run names the sandbox "
-        "chain it lives in, same codec as the API's '?descend=': "
-        "';in=<outer_campaign>::<outer_cycle>', one hop per level. A mask rides the same "
-        "address, ';'-separated: ';samples=3,7,11' reads every value over those samples only, and "
-        "';lens=score:<formula>' (courses only) re-decides the branch's elections under another "
-        "criterion — so the record and the counterfactual pool as two channels of one read.",
-    )
-    p_evidence.add_argument(
-        "--config",
-        dest="config",
-        action="store_true",
-        help="Also line the searchpoints up on WHAT THEY ARE — one row per configured key over "
-        "each one's resolved node config and prompt fields, differing keys only. Off by default: "
-        "a prompt field is the largest thing this read carries.",
-    )
-    p_evidence.add_argument(
-        "--winner-chain",
-        dest="winner_chain",
-        action="store_true",
-        help="Also print the branch behind each course / candidate subject — the winner chain "
-        "from its origin to its head, each point read on its own cells. OFF by default: every "
-        "point past the origin opens a round file.",
-    )
-    p_evidence.add_argument(
-        "--metric",
-        dest="metric",
-        # No default here: `cmd_evidence` supplies MEASURAND, so the name has one copy.
-        default=None,
-        help="Which number to compare on. Unset reads each cell's own headline: the seed's lift "
-        "over its origin on the recursion, the sample's fitness elsewhere. The rest are offered "
-        "only where the selection carries them — the read prints its own 'Offered here:' line — "
-        "and 'expr:<formula>' composes over the names on that same line, e.g. "
-        "'expr:lift / latency'.",
-    )
-    p_evidence.add_argument(
-        "--grid",
-        dest="grid",
-        default=None,
-        metavar="ROW,COL",
-        help="Cross two of the factors this selection varies on and print the pooled cell at each "
-        "coordinate — 'which combination is fastest', rather than which level is on average. Names "
-        "come from the factor block this read already prints, e.g. "
-        "'--grid dataset,llm_only.model'. Every OTHER factor is marginalised into the cells and "
-        "named as such; to hold one fixed instead, narrow the selection to its level. Two axes at "
-        "any number of factors — a third is a decision about that factor, never a third dimension.",
-    )
-    p_evidence.add_argument(
-        "--ranking",
-        dest="ranking",
-        action="store_true",
-        help="Also rank the measured edits, in the selected metric. OFF by default: it is the "
-        "widest walk here — everything else reads one round-0 document per campaign, while this "
-        "opens every round of every campaign selected.",
-    )
-    p_evidence.add_argument(
-        "--top",
-        dest="top",
-        type=int,
-        default=10,
-        help="Ranking rows to print (default 10). The full read is always in --json.",
-    )
-
-    _add_seed_screen_args(
-        sub.add_parser(
-            "seed-screen",
-            help="Debug diagnostic (NOT a loop feature): score each candidate seed's bank "
-            "with the dataset origin and report its constant-answer floor, its reasoning "
-            "margin (origin - floor) and the disqualifier — a bank whose floor EXCEEDS "
-            "its origin pays a candidate for collapsing to one label. Real spend: "
-            "--n-samples target calls per seed, no optimizer calls. Never invoked by "
-            "the loop itself.",
-        )
-    )
-
-    _add_decision_bank_args(
-        sub.add_parser(
-            "decision-bank",
-            help="Debug diagnostic (NOT a loop feature): replay every closed round's propose "
-            "step under two optimizer-prompt arms and measure each arm's proposals on the "
-            "cells that round read its parent on — a paired, one-round reading of a prompt "
-            "variant. A DRY RUN unless --max-usd is passed. Mints no cycle.",
-        )
-    )
-
-    _add_noise_floor_args(
-        sub.add_parser(
-            "noise-floor",
-            help="Debug diagnostic (NOT a loop feature): re-score a campaign's cached "
-            "origin --k times with force_fresh and report the mean+CI spread — the "
-            "backend's own run-to-run noise. On a pp-self cycle this measures the "
-            "true inner-recursion noise floor. kx real spend; does not mutate the "
-            "source cycle and is never invoked by the loop itself.",
-        )
-    )
-
-    p_probe = sub.add_parser(
-        "probe-reasoning",
-        help="Debug diagnostic (NOT a loop feature): ask ONE model which reasoning rungs it "
-        "honours and print the `registry._MODEL_PROFILES` row the readings support. A "
-        "catalogue publishes that `reasoning_effort` EXISTS and never which values it takes, "
-        "so this is the only way that table gets filled. ~6 cheap calls of real spend; writes "
-        "nothing but its bills, and the loop never invokes it.",
-    )
-    p_probe.add_argument(
-        "model", help="Model id, e.g. openai/gpt-oss-20b (a :nitro suffix is fine)"
-    )
-    p_probe.add_argument(
-        "--provider",
-        default="openrouter",
-        help="Which gateway answers (default: openrouter).",
-    )
-
-    p_pause = sub.add_parser(
-        "pause",
-        help="Ask a running cycle to stop at its next checkpoint (resumable by `resume`). "
-        "Fires the same pause-cycle command the webapp's pause control does, so the "
-        "interrupt is recorded on the cycle's ledger. Defaults to the active cycle.",
-    )
-    p_pause.add_argument("--campaign", default="", help="Campaign id (default: the active one).")
-    p_pause.add_argument("--cycle", default="", help="Cycle id (default: the active one).")
-    p_pause.add_argument(
-        "--reason", default="", help="Optional operator-supplied reason, recorded with the command."
-    )
-
-    p_set_limits = sub.add_parser(
-        "set-limits",
-        help="Raise or lower an EXISTING cycle's spend / token / round ceiling — the same "
-        "change-run-limits command the webapp fires. This is how a budget- or round-halted "
-        "cycle is continued: set a higher ceiling, then `resume`. The launch flags only shape a "
-        "launch. Spend is clamped against your account allowance; read the armed value off the "
-        "dashboard.",
-    )
-    p_set_limits.add_argument(
-        "--campaign", default="", help="Campaign id (default: the active one)."
-    )
-    p_set_limits.add_argument("--cycle", default="", help="Cycle id (default: the active one).")
-    p_set_limits.add_argument(
-        "--max-usd",
-        dest="max_usd",
-        type=float,
-        default=None,
-        help="New USD ceiling. 0 halts after the current round. Omit to leave it untouched.",
-    )
-    p_set_limits.add_argument(
-        "--max-tokens",
-        dest="max_tokens",
-        type=int,
-        default=None,
-        help="New token ceiling — the unit that survives an unpriced model. 0 halts after the "
-        "current round. Omit to leave it untouched.",
-    )
-    p_set_limits.add_argument(
-        "--max-rounds",
-        dest="rounds_cap",
-        type=_rounds_cap_arg,
-        default=None,
-        metavar="N|none",
-        help="New L1 round cap, read at the next round boundary. `none` lifts it, so the spend "
-        "ceiling governs. Omit to leave it untouched.",
-    )
-
-    for verb, summary in (
-        (
-            "archive",
-            "Flag a campaign archived — hides from the default sidebar, restorable by "
-            "unarchive. The tree does not move.",
-        ),
-        (
-            "delete",
-            "Destructively remove a campaign (no recovery); --keep-results spares the keepsake. "
-            "Measurements still cache-hit for siblings.",
-        ),
-        ("unarchive", "Restore an archived campaign to 'active'."),
-    ):
-        p = sub.add_parser(verb, help=summary)
-        p.add_argument("campaign_id", help="Target campaign id ({dataset}__{rand6_hex})")
-        if verb != "unarchive":
-            p.add_argument(
-                "--reason",
-                default="",
-                help="Optional operator-supplied reason for the transition.",
-            )
-        if verb == "delete":
-            p.add_argument(
-                "--keep-results",
-                dest="keep_results",
-                action="store_true",
-                help="Spare the keepsake tier (manifest + reports + the shallow langfuse loop "
-                "trace); drop only the heavy resume/audit/mirror tiers.",
-            )
-
-    p_rename = sub.add_parser(
-        "rename",
-        help="Give a campaign an operator name, shown wherever it is named to a human. "
-        "Display only — the campaign id still addresses it. An empty name restores the "
-        "dataset-name fallback.",
-    )
-    p_rename.add_argument("campaign_id", help="Target campaign id ({dataset}__{rand6_hex})")
-    # Optional, not a positional `''`: PowerShell drops an empty argument before argparse sees it.
-    p_rename.add_argument(
-        "label", nargs="?", default="", help="The new name; omit it to clear the name."
-    )
-
-    p_skip = sub.add_parser(
-        "skip-searchpoint",
-        help="Cut the candidate currently being scored, at its next sample boundary. The round "
-        "carries on with the rest. Defaults to the active cycle.",
-    )
-    p_skip.add_argument("--campaign", default="", help="Campaign id (default: the active one).")
-    p_skip.add_argument("--cycle", default="", help="Cycle id (default: the active one).")
-
-    p_gate = sub.add_parser(
-        "origin-gate",
-        help="Answer a cycle holding at the round-0 origin gate — the same origin-gate-decision "
-        "command the webapp modal fires. A run launched without a TTY has no prompt to type "
-        "into, so this is its terminal answer. Defaults to the active cycle.",
-    )
-    p_gate.add_argument(
-        "decision",
-        choices=get_args(GateDecision),
-        help="proceed into L1 anyway, rescore the origin force-fresh, or abort the cycle.",
-    )
-    p_gate.add_argument("--campaign", default="", help="Campaign id (default: the active one).")
-    p_gate.add_argument("--cycle", default="", help="Cycle id (default: the active one).")
-
-    p_step = sub.add_parser(
-        "step-cycle",
-        help="Let a paused cycle run a bounded number of rounds, then stop again.",
-    )
-    p_step.add_argument("--campaign", default="", help="Campaign id (default: the active one).")
-    p_step.add_argument("--cycle", default="", help="Cycle id (default: the active one).")
-    p_step.add_argument(
-        "--rounds", dest="rounds", type=int, default=1, help="How many rounds to run (default 1)."
-    )
-
-    p_bench = sub.add_parser(
-        "bench",
-        help="Grade the campaign's origin and its selection on the held-out bench rows and bank "
-        "the headline — the pass a `bench_trigger: manual` campaign (the default) sends only "
-        "when asked. Reuses a pass the line already holds; refuses a cycle with a run in flight, "
-        "one beside the campaign's line, a split holding nothing out and a selection already "
-        "graded — the served status's own answer (`bench_score.status`). Spends: two passes over "
-        "the bench rows. Defaults to the active campaign's line.",
-    )
-    p_bench.add_argument("--campaign", default="", help="Campaign id (default: the active one).")
-    p_bench.add_argument(
-        "--cycle", default="", help="Cycle id (default: the cycle holding the campaign's line)."
-    )
-
-    p_cleanup = sub.add_parser(
-        "cleanup-empty-cycles",
-        help="Remove the stub cycles a mint left behind when it never reached round 0.",
-    )
-    p_cleanup.add_argument("--campaign", default="", help="Campaign id (default: the active one).")
-    p_cleanup.add_argument("--cycle", default="", help="Cycle id (default: the active one).")
-
-    p_del_cycle = sub.add_parser(
-        "delete-cycle",
-        help="Remove ONE named stub cycle — the singular of `cleanup-empty-cycles`. Refuses a "
-        "cycle that holds rounds, and refuses one with a live producer (pause it first).",
-    )
-    p_del_cycle.add_argument(
-        "--campaign", default="", help="Campaign id (default: the active one)."
-    )
-    # REQUIRED here alone: an active-pointer fallback would make the likeliest typo the delete.
-    p_del_cycle.add_argument("--cycle", required=True, help="Cycle id to remove.")
-
-    p_replace = sub.add_parser(
-        "replace-dataset",
-        help="Version a dataset slug and repoint what referenced it — the terminal half of what "
-        "the browser offers on a slug collision, where ingest otherwise asks for a new name.",
-    )
-    p_replace.add_argument("slug", help="The dataset slug to replace.")
-
-    p_cancel_q = sub.add_parser(
-        "cancel-queued",
-        help="Withdraw a launch waiting for a machine slot. A terminal run leaves the queue by "
-        "Ctrl+C; this reaches the ones that cannot, such as a browser launch behind a full box.",
-    )
-    p_cancel_q.add_argument("job_id", help="The queued job id, as `machine-status` lists it.")
-
-    p_cycles = sub.add_parser(
-        "cycles",
-        help="Every cycle with its run state (`run_phase`) — derived at each read and written to "
-        "no file, so this is where a terminal reads which runs are live. Read-only, zero spend.",
-    )
-    p_cycles.add_argument("--campaign", default="", help="Only this campaign's cycles.")
-    p_cycles.add_argument(
-        "--attached", action="store_true", help="Only cycles a producer process holds."
-    )
-    p_cycles.add_argument(
-        "--inside",
-        type=_inside_arg,
-        default=(),
-        metavar="CAMPAIGN::CYCLE[~…]",
-        help="List an L4 inner run's cycles instead: the sandbox chain it lives in, one hop per "
-        "level, same codec as the API's '?descend=' and `evidence`'s ';in='. The only verb that "
-        "takes it — every run-control verb acts on the outer run, and `verify` / `evidence` "
-        "address an inner searchpoint through their subject.",
-    )
-
-    sub.add_parser(
-        "machine-status",
-        help="How many campaigns the machine runs and admits, and where your queued launches "
-        "stand in line. Read-only, zero spend.",
-    )
-
-    p_concurrency = sub.add_parser(
-        "set-concurrent-cycles",
-        help="How many campaigns this account may hold at once, queued launches included. At most "
-        "the machine's MACHINE_RUN_CAPACITY; an account on the host's key cannot move its own.",
-    )
-    p_concurrency.add_argument("limit", type=int, help="The new limit (1 or more).")
-
+    for verb in verbs:
+        _declare(sub.add_parser(verb.name, help=verb.help), verb.args)
     return parser
-
-
-def parser_verbs(parser: argparse.ArgumentParser) -> frozenset[str]:
-    """``campaign_runner`` asserts ``COMMANDS`` against this: a verb with no parser row is unreachable."""
-    return frozenset(
-        name
-        for action in parser._actions
-        if isinstance(action, argparse._SubParsersAction)
-        for name in action.choices
-    )
 
 
 def identity_from_args(args: argparse.Namespace) -> IdentityContext:
@@ -935,4 +127,15 @@ def launch_limits_from_args(args: argparse.Namespace) -> LaunchLimits:
     )
 
 
-__all__ = ["build_parser", "identity_from_args", "launch_limits_from_args", "parser_verbs"]
+__all__ = [
+    "ACTIVE_CAMPAIGN",
+    "ACTIVE_CYCLE",
+    "CAMPAIGN_ID",
+    "GLOBAL_ARGS",
+    "RUNTIME_HALTS",
+    "Arg",
+    "Verb",
+    "build_parser",
+    "identity_from_args",
+    "launch_limits_from_args",
+]

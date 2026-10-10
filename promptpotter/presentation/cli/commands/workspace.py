@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     import argparse
     from collections.abc import Awaitable
 
-    from promptpotter.application.commands.payloads import CyclePayload
+    from promptpotter.domain.command_kinds import CyclePayload
 
 __all__ = [
     "cycle_scoped",

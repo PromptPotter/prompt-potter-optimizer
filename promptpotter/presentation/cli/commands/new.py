@@ -30,11 +30,12 @@ from promptpotter.application.datasets.draft_campaign import (
 )
 from promptpotter.application.datasets.ingest import SlugTakenError, ingest_draft
 from promptpotter.application.datasets.origin_readiness import origin_readiness
+from promptpotter.application.datasets.origin_resolve import FINDING_PATCH_KEYS
 from promptpotter.application.jobs.launcher.mint_and_start import dataset_campaign_config
-from promptpotter.application.runner.entry import RunMode
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.campaign import ArmRequest
 from promptpotter.domain.connector import BackendUnreachableError
+from promptpotter.domain.launch_limits import RunMode
 from promptpotter.infrastructure.store.dataset_access import (
     DatasetAccessError,
     backend_type_of_dataset,
@@ -62,22 +63,19 @@ if TYPE_CHECKING:
 
     from promptpotter.application.datasets.draft_campaign import DraftCampaign
     from promptpotter.application.datasets.origin_readiness import FieldGap, OriginLastResolution
+    from promptpotter.application.jobs.launcher.launch import Inline
     from promptpotter.application.jobs.launcher.run_job import HeldRun
     from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger("promptpotter.presentation.cli")
 
 
-_SET_ALIAS: dict[str, str] = {
-    "task_description": "raw_task_description",
-    "column.query": "column_query",
-    "column.ground_truth": "column_ground_truth",
-}
-
 _NODES = "nodes"
 _SET_KNOBS: frozenset[str] = frozenset(OptimizationOverrides.model_fields) - {_NODES}
 
-_SET_FIELDS: frozenset[str] = (SETTABLE_SCALARS - set(_SET_ALIAS.values())) | set(_SET_ALIAS)
+_SET_FIELDS: frozenset[str] = (SETTABLE_SCALARS - set(FINDING_PATCH_KEYS.values())) | set(
+    FINDING_PATCH_KEYS
+)
 
 
 def _settable() -> str:
@@ -99,7 +97,7 @@ def _sets_to_patch(sets: list[str]) -> EditDraftPatch:
             config = knobs.setdefault(_NODES, {}).setdefault(node, {"config": {}})["config"]
             config[knob] = yaml.safe_load(raw)
         elif field in _SET_FIELDS:
-            patch_raw[_SET_ALIAS.get(field, field)] = raw
+            patch_raw[FINDING_PATCH_KEYS.get(field, field)] = raw
         else:
             raise SystemExit(
                 f"ERROR: --set field {field!r} is not settable. One of: {_settable()}."
@@ -120,7 +118,7 @@ def _set_knobs(sets: list[str]) -> dict[str, Any]:
     if not sets:
         return {}
     patch = _sets_to_patch(sets)
-    spelled = {model: cli for cli, model in _SET_ALIAS.items()}
+    spelled = {model: cli for cli, model in FINDING_PATCH_KEYS.items()}
     fields = patch.model_fields_set - {"optimization_overrides"}
     if stray := sorted(spelled.get(f, f) for f in fields):
         raise SystemExit(
@@ -245,7 +243,7 @@ def _arm_request(raw: str | None) -> ArmRequest | None:
         raise SystemExit(f"ERROR: --arm {raw!r}: {exc}") from exc
 
 
-async def _hold_named_mint(args: argparse.Namespace) -> HeldRun:
+def _named_mint(args: argparse.Namespace, stores: Stores) -> MintCampaignPayload:
     declared = None
     if args.config:
         file_config = read_campaign_config_file(Path(args.config))
@@ -259,7 +257,6 @@ async def _hold_named_mint(args: argparse.Namespace) -> HeldRun:
             "(`new aime`), via `--dataset-name <name>`, or via a `--config` "
             "that names one.\n\n" + no_dataset_hint()
         )
-    stores = open_stores(args)
     knobs = _set_knobs(args.sets)
     try:
         dataset_campaign_config(
@@ -277,7 +274,7 @@ async def _hold_named_mint(args: argparse.Namespace) -> HeldRun:
     )
 
     try:
-        mint = MintCampaignPayload(
+        return MintCampaignPayload(
             dataset_name=dataset_name,
             optimization=OptimizationOverrides.model_validate(knobs) if knobs else None,
             arm=arm,
@@ -290,33 +287,40 @@ async def _hold_named_mint(args: argparse.Namespace) -> HeldRun:
         )
     except ValidationError as exc:
         raise SystemExit(f"ERROR: {exc.errors()[0].get('msg', exc)}") from None
-    outcome = await CommandDispatcher(
-        stores, inline=inline_launch(args)
-    ).dispatch_workspace_command(CommandCall(mint, uuid.uuid4().hex))
-    held = held_run(outcome.result)
-    checkin_line("campaign", f"minted {held.session.campaign_id}")
-    return held
 
 
 def cmd_new(args: argparse.Namespace) -> Coroutine[Any, Any, CommandResult]:
     prepare_launch(args)
-    return mint_and_run(args)
+    return _new(args)
 
 
-async def mint_and_run(args: argparse.Namespace) -> CommandResult:
+async def _new(args: argparse.Namespace) -> CommandResult:
     setup_logging(style="full" if args.verbose else "cli")
+    if not (args.dataset and Path(args.dataset).is_file()):
+        stores = open_stores(args)
+        return await mint_and_run(stores, _named_mint(args, stores), inline_launch(args))
+    if args.arm is not None:
+        raise SystemExit("ERROR: --arm mints a committed dataset's campaign, not a raw file")
     try:
-        if args.dataset and Path(args.dataset).is_file():
-            if args.arm is not None:
-                raise SystemExit(
-                    "ERROR: --arm mints a committed dataset's campaign, not a raw file"
-                )
-            held = await _hold_ingested_checkin(args)
-        else:
-            held = await _hold_named_mint(args)
+        held = await _hold_ingested_checkin(args)
     except BackendUnreachableError as exc:
         return backend_unreachable_result(exc)
+    return await _run_origin(held, diag=args.diag)
 
+
+async def mint_and_run(stores: Stores, mint: MintCampaignPayload, inline: Inline) -> CommandResult:
+    try:
+        outcome = await CommandDispatcher(stores, inline=inline).dispatch_workspace_command(
+            CommandCall(mint, uuid.uuid4().hex)
+        )
+    except BackendUnreachableError as exc:
+        return backend_unreachable_result(exc)
+    held = held_run(outcome.result)
+    checkin_line("campaign", f"minted {held.session.campaign_id}")
+    return await _run_origin(held, diag=mint.diag)
+
+
+async def _run_origin(held: HeldRun, *, diag: bool) -> CommandResult:
     session = held.session
     dataset_name = session.dataset_name or "?"
     backend_type = backend_type_of_dataset(session.store, dataset_name)
@@ -327,7 +331,7 @@ async def mint_and_run(args: argparse.Namespace) -> CommandResult:
     logger.info("Campaign: %s", session.store.campaigns.campaign_root_dir(session.campaign_id))
 
     checkin_line("origin", "launching origin scoring")
-    result = await run_inline(held, mode=RunMode(diag=args.diag))
+    result = await run_inline(held, mode=RunMode(diag=diag))
     return cycle_result_command(session, result)
 
 
