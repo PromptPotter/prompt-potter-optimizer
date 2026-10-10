@@ -1,25 +1,7 @@
-"""Compose and parse one L1_GENERATE call.
-
-The prompt is built by ``DispatchHub.fill`` over the ``injection_table()`` registry: ``fill`` takes no
-layout and resolves the node's own via ``node_layout(node, memory)``, which routes to
-``PotterState.memory.l1_layout`` for this node and to the override channel for the ``editor="l4"``
-nodes. Two homes because the two edits have different lifetimes; one reader, so no caller
-re-derives the choice.
-
-``task_context`` (the campaign's frozen framing) and ``plan`` (L3 strategy, on potter's memory)
-surface alongside the panels — this node is fan-in, reading both layers' outputs in one round.
-
-``no_op_variant`` is checked at two boundaries, through ONE ``candidate_delta``:
-``L1Variant._reject_empty_mutation`` so its message rides the schema-repair retry back to the model,
-and ``l1_invariants`` after the call returned, where it can only drop the candidate.
-
-Contract: ``application/optimizers/potter/CLAUDE.md``.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.bench.llm_call import (
     LLMCallContext,
@@ -36,28 +18,26 @@ from promptpotter.application.optimizers.potter.dispatch.l1_wire_schema import (
 )
 from promptpotter.application.optimizers.potter.dispatch.prompts import (
     load_optimizer_prompt,
+    node_layout,
 )
 from promptpotter.application.optimizers.potter.dispatch.schemas import (
     L1GenerateOutput,
     VariantEvidenceGrounding,
     build_l1_response_model,
 )
-from promptpotter.application.optimizers.potter.knobs import potter_knobs
-from promptpotter.application.optimizers.potter.records import POTTER_MANIFEST
-from promptpotter.domain.opt_search_point import EvidenceGrounding, OptSearchPoint, node_source
+from promptpotter.domain.opt_search_point import EvidenceGrounding
 from promptpotter.domain.optimizer_state import (
     PARSE_FAILURE_MALFORMED,
     PARSE_FAILURE_TOOLING,
     PARSE_FAILURE_WRONG_TYPE,
 )
 from promptpotter.domain.results import CandidateProposal
-from promptpotter.domain.wounds import ValidationFailure
 from promptpotter.infrastructure.llm.json_parse import OptimizerPromptParseError
 from promptpotter.infrastructure.llm.telemetry import emit_round_warning
-from promptpotter.shared import truncate
 
 if TYPE_CHECKING:
-    from promptpotter.application.bench.cycle import Cycle
+    from promptpotter.application.bench.node_context import NodeContext
+    from promptpotter.application.optimizers.potter.knobs import L1GenerateKnobs
     from promptpotter.application.optimizers.potter.state import PotterState
 
 import logging
@@ -66,8 +46,7 @@ logger = logging.getLogger(__name__)
 
 
 def _parse_evidence_grounding(raw: VariantEvidenceGrounding | None) -> EvidenceGrounding | None:
-    """Permissive parse — ``field`` is a plain ``str`` (a provider may ignore the enum) and ``raw`` may be ``None``. A
-    missing grounding surfaces downstream as a behaviour-check failure."""
+    """Permissive on purpose: a missing grounding is a behaviour-check failure, never a parse one."""
     if raw is None:
         logger.warning(
             "l1_generate: variant emitted without evidence_grounding — "
@@ -79,8 +58,7 @@ def _parse_evidence_grounding(raw: VariantEvidenceGrounding | None) -> EvidenceG
 
 @dataclass(frozen=True)
 class L1Generation:
-    """One round's proposals and what the call that made them offered — both ``None`` where the
-    proposals came back off disk. ``parse_failure`` is the ROUND's reason, never a candidate's."""
+    """``citable`` and ``exploration_budget`` are ``None`` where the proposals came back off disk."""
 
     proposals: list[CandidateProposal]
     parse_failure: str | None = None
@@ -89,39 +67,38 @@ class L1Generation:
 
 
 async def l1_generate(
-    cycle: Cycle,
+    ctx: NodeContext[L1GenerateKnobs],
     state: PotterState,
     *,
     n_variants: int,
-    creativity: float,
-    round_num: int = 0,
+    temperature: float,
 ) -> L1Generation:
     if n_variants <= 0:
         raise ValueError(f"n_variants must be >0, got {n_variants}")
 
-    model = cycle.optimizer.model("l1_generate")  # for warning/diagnostic surfaces only
-    opt_sp = cycle.opt_sp
-    pipeline_schema = cycle.session.pipeline_schema
+    session = state.session
+    round_num = ctx.round_num
+    model = ctx.optimizer.model("l1_generate")
+    opt_sp = ctx.parent
+    pipeline_schema = session.pipeline_schema
 
-    bundle = build_bundle(cycle, state)
+    bundle = build_bundle(ctx, state)
     filled = DispatchHub.fill(load_optimizer_prompt("l1_generate"), bundle, node="l1_generate")
     breakdown = filled.breakdown
-    # What L1 may cite IS what L1 was shown. The wire schema's enum is the one place the menu is
-    # stated, so the prompt and the check cannot disagree about which panels exist this round.
     budget = bundle.cycle_slice.exploration_budget
     citable = citable_fields(
-        state.memory.l1_layout, exploration_budget=budget, rendered=filled.rendered
+        node_layout("l1_generate", state.memory),
+        exploration_budget=budget,
+        rendered=filled.rendered,
     )
     prompt_vars: dict[str, str] = {"n_variants": str(n_variants), **filled.injection_vars}
 
-    schema_field_rename = potter_knobs(cycle.optimizer).l1_generate.schema_field_rename
+    schema_field_rename = ctx.knobs.schema_field_rename
     output_schema = (
         build_l1_response_schema(
             pipeline_schema,
             citable_fields=citable,
             inner_optimizer=bundle.inner_optimizer,
-            # The write half of the same derivation `citable` is the read half of: a slot whose
-            # panel produced nothing is not offered, so L1 cannot edit an axis it was never shown.
             silent_panels=breakdown.silent,
             schema_field_rename=schema_field_rename,
             n_variants=n_variants,
@@ -129,40 +106,31 @@ async def l1_generate(
         if pipeline_schema
         else None
     )
-    # The wire schema advertises renamed keys; the response model aliases them back. Both read
-    # the SAME `effective_l1_field_names` — a disagreement would fail every parse, every round.
-    assert cycle.tracking.current_sp is not None
+    parent_point = ctx.parent_point
+    assert parent_point is not None
     response_model = build_l1_response_model(
         effective_l1_field_names(),
         parent_prompt=opt_sp.prompt_fields(),
-        # The baseline `detect_invariants` reads too: the parent's resolved, folded config.
-        parent_params=cycle.tracking.current_sp.pipeline_params,
+        parent_params=parent_point.pipeline_params,
         parent_shot_ids=opt_sp.shot_ids,
     )
     try:
         generated, _prompt, _repairs = await run_optimizer_node(
             template_name="l1_generate",
             prompt_vars=prompt_vars,
-            temperature=creativity,
+            temperature=temperature,
             response_model=response_model,
             response_schema=output_schema,
             context=LLMCallContext(
-                ledger=cycle.session.state.ledger,
+                ledger=session.state.ledger,
                 round_num=round_num,
-                cache=cycle.session.store.optimizer_reuse,
+                cache=session.store.optimizer_reuse,
                 injections=breakdown,
             ),
             template=filled.template,
         )
     except OptimizerPromptParseError as parse_err:
-        # Schema-noncompliant after one repair retry. Split provider-degraded (empty) vs
-        # structurally wrong — both wound the same channel but `reason` steers L2's heal
-        # direction, and TOOLING additionally drops the round from L4 outer scoring
-        # (`domain/l4/proxies.py::_is_evidential`), so the split decides whether this round
-        # is evidence at all. `is_empty` reads the FIRST attempt and refuses to call a
-        # truncation "provider degraded" — an optimizer prompt that outgrew max_tokens owns its
-        # failure. Truncation is called by name below: it is the one cause with an obvious
-        # operator fix (shrink the optimizer prompt or raise the node's max_tokens).
+        # TOOLING drops the round from L4 outer scoring; a truncation never is: a prompt that outgrew max_tokens owns its failure.
         is_empty = parse_err.is_empty
         truncated = parse_err.first_finish_reason == "length"
         reason = PARSE_FAILURE_TOOLING if is_empty else PARSE_FAILURE_MALFORMED
@@ -180,14 +148,6 @@ async def l1_generate(
             cause,
             parse_err.failing_chars,
             parse_err.diagnosis(),
-        )
-        state.memory.wounds.validation_failures.append(
-            ValidationFailure(
-                axis="l1_generate.output",
-                value=truncate(parse_err.raw, 300),
-                allowed=[],
-                reason=reason,
-            )
         )
         emit_round_warning(
             kind="l1_zero_candidates",
@@ -207,23 +167,13 @@ async def l1_generate(
             detail={"reason": reason, "model": model, **parse_err.warning_detail()},
         )
         return L1Generation([], reason, citable, budget)
-    # The repair-retry path can leak a raw str/dict/list past validation when JSON parses but
-    # doesn't bind. Route unexpected types to the wound channel so the round completes cleanly
-    # (zero candidates → L2 heals next round) instead of crashing on `.variants`.
+    # The repair-retry path can leak a raw str/dict/list when JSON parses but does not bind.
     if not isinstance(generated, L1GenerateOutput):
         logger.error(
             "L1 R%d: l1_generate response decoded as %s instead of L1GenerateOutput — "
             "treating as parse failure, returning zero candidates",
             round_num,
             type(generated).__name__,
-        )
-        state.memory.wounds.validation_failures.append(
-            ValidationFailure(
-                axis="l1_generate.output",
-                value=truncate(str(generated), 300),
-                allowed=[],
-                reason=PARSE_FAILURE_WRONG_TYPE,
-            )
         )
         emit_round_warning(
             kind="l1_zero_candidates",
@@ -241,19 +191,19 @@ async def l1_generate(
 
     population: list[CandidateProposal] = []
     for v in variants_list[:n_variants]:
-        # A node name absent from the active schema (hallucinated) is NOT pre-filtered here: it
-        # flows to the one validation producer (``validate_overrides`` via ``parse_population``),
-        # which records it as a non-fatal ``hallucinated_node`` wound, and
-        # ``merge_pipeline_params`` strips it from the wire.
-        child = OptSearchPoint.derive(
-            [opt_sp],
-            changes_description=v.changes_description,
-            source=node_source(POTTER_MANIFEST, "l1_generate"),
-            evidence_grounding=_parse_evidence_grounding(v.evidence_grounding),
-            **v.prompt_fields_updates,
-            **({} if v.shot_ids is None else {"shot_ids": v.shot_ids}),
+        # A hallucinated node name is NOT pre-filtered: ``bench/children.py::overlay_failures`` owns it.
+        changes: dict[str, Any] = dict(v.prompt_fields_updates)
+        if v.shot_ids is not None:
+            changes["shot_ids"] = v.shot_ids
+        population.append(
+            ctx.child(
+                [opt_sp],
+                overlay=v.pipeline_overlay,
+                changes_description=v.changes_description,
+                evidence_grounding=_parse_evidence_grounding(v.evidence_grounding),
+                **changes,
+            )
         )
-        population.append(CandidateProposal(opt_sp=child, pipeline_overlay=v.pipeline_overlay))
 
     return L1Generation(population, None, citable, budget)
 

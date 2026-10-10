@@ -1,14 +1,13 @@
-"""Bundle types — the per-call state every renderer reads. Stays ``Cycle``-free by contract so renderer tests can construct one
-directly; the ``Cycle``-snapshot path lives in ``facade.py``."""
+"""``Cycle``-free by contract; the ``Cycle``-snapshot path lives in ``facade.py``."""
 
 from __future__ import annotations
 
 import enum
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.optimizers.potter.records import L2L3Memory
+from promptpotter.application.optimizers.potter.records import L2L3Memory, Ladder
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.optimizer_state import CritiqueReadout
@@ -17,6 +16,7 @@ from promptpotter.domain.results import ArmOutcome, RoundResult
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.ruler import AbilityReading, DeltaRuler
 from promptpotter.domain.sample import Sample
+from promptpotter.domain.scoring import CellSheet, GradedCell
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.value_tree import Delivery
 from promptpotter.shared.hashing import shapes_optimizer_prompt
@@ -27,34 +27,16 @@ if TYPE_CHECKING:
     from promptpotter.application.optimizers.potter.knobs import PromptBlockCatalogue
     from promptpotter.application.optimizers.potter.pobb.checks import EliminationGate
 
-# Every constant below decides what a prompt RECEIVES, so every optimizer's source digest hashes
-# this module: one shaping a prompt from outside it pools corpora the fingerprint keeps apart.
+# Every optimizer's source digest hashes this module: its constants decide what a prompt receives.
 shapes_optimizer_prompt(__name__)
 
-# What the DISCRETIONARY panels may spend. The mandatory floor and the static template are spent
-# before one is placed and neither is bounded here: the floor is the dataset's — on the recursion it
-# is the inner optimizer prompts — so a whole-prompt ceiling can only guess at it, and guessing low
-# refuses the node its own subject. A runaway is `char_cap`'s job, at render.
-OPTIMIZER_DISCRETIONARY_CHARS: dict[str, int] = {
-    # Room for two whole transcripts behind the frame: the generator writes a method from them.
-    "l1_generate": 11_000,
-    # A whole sample transcript is indivisible, so this allowance alone decides how many the
-    # distiller sees; set where two still fit beside the frame.
-    "l1_critique": 7_500,
-    "l2_context": 5_500,
-    "l3_plan": 6_400,
-}
-
-
-# Declared to the model in the wire schema so it can aim at a length rather than be trimmed to one.
-# A cap on growth, not pressure to compress; a field with no entry is emitted unbounded.
+# A field with no entry is emitted unbounded.
 OPTIMIZER_PROMPT_FIELD_MAX_CHARS: dict[str, int] = {
     "instruction": 3_200,
 }
 
 SCHEMA_DESCRIPTION_MAX_CHARS = 400
 
-# `L3PlanOutput.plan`'s bound at production, and the body of the `plan` panel's rail at render.
 L3_PLAN_MAX_CHARS = 800
 
 SCHEMA_DESCRIPTIONS_INSTRUCTION = (
@@ -85,11 +67,7 @@ LAYOUT_SCHEMA_INSTRUCTION = (
 )
 
 
-# Per-injection caps — bound LLM-authored output to keep individual blocks tight.
 AXES_ENUM_PREVIEW = 4
-# How many arms `precision` quotes an interval for. The leader and its nearest rivals answer
-# "is this separable"; the tail is already in `mutation_memory` and repeating it here would spend
-# the frame's whole budget on the arms least likely to win.
 PRECISION_ARM_ROWS = 3
 NEAR_MISS_RENDER_CAP = 2
 SAMPLE_RENDER_CAP = 2
@@ -98,16 +76,8 @@ TRANSCRIPT_QUERY_CAP = 1200
 TRANSCRIPT_REASONING_CAP = 2200
 TRANSCRIPT_PREDICTED_CAP = 60
 INNER_NARRATIVE_CAP = 1150
-# How many cells keep the WHOLE story. A cell that is doing fine narrates the same thing every
-# round, so it is near-identical bytes; an optimizer prompt edit is aimed at the cells that are
-# NOT, which lead and keep their detail while the rest cost a line each.
 INNER_NARRATIVE_FULL_CELLS = 3
 INNER_NARRATIVE_SUMMARY_CAP = 160
-# How many cells render AT ALL. Only the depth was tiered before, so every seed still cost a
-# section and the panel grew with the panel's WIDTH: measured at ~315 chars/seed, which is 1.9k
-# at six seeds and ~7.6k at the pp-self default of twenty-four. The tail is the weakest evidence
-# by the panel's own ranking, and where nothing separates from the origin the header already says
-# the order carries no information — so the tail is filler in exactly the round it is longest.
 INNER_NARRATIVE_RENDER_CAP = 6
 MISS_QUERY_CAP = 100
 MISS_PREDICTED_CAP = 60
@@ -115,41 +85,19 @@ MISS_GT_CAP = 40
 MISS_NOTE_CAP = 120
 MEMORY_ROUND_CAP = 4
 MEMORY_FIELD_CAP = 2
-# Chars of each changed field's EDIT — the words it wrote and cut, never a stem of the new value,
-# which for an edit keeping the parent's opening is the parent's own text. Short by design: the
-# row exists so the generator RECOGNISES a prior attempt, not to reproduce it, and a small one is
-# what lets every retained round fit — so the anti-re-proposal record stays COMPLETE.
 MEMORY_VALUE_CAP = 90
-# How many edits must lose one parent-solved cell before it is evidence about EDITING rather than
-# a noisy cell's chance flip — and so earns a line in `mutation_memory` and a transcript.
+# One loss is a noisy cell's chance flip; from here it is evidence about EDITING.
 LOST_CELL_MIN = 2
-# Worst-N nodes the evidence_health panel lists — enough to show a dead enricher
-# plus a couple of collateral nodes, never a full pipeline dump.
 NODE_FAILURE_RENDER_CAP = 3
-# `runtime_failures` signal only emits first-seen failures in the last K rounds; older entries
-# collapse to a suppression line so long campaigns + small models stay within budget.
 RUNTIME_FAILURE_RECENCY_WINDOW = 6
-# Its parse-time peer: `validation_failures` accumulates on the searchpoint with no window of
-# its own, so the render grew with the cycle. Most-RECENT K, because a wound heals in the round
-# after it was made — an older one has already been answered or has stopped mattering.
 VALIDATION_RENDER_CAP = 8
-# Chars of each label the `answer_distribution` tallies show. A classification label is short;
-# anything longer is a hedging model's run-on answer, and the panel's question — which label
-# dominates — is answered by the stem.
 ANSWER_LABEL_STEM = 40
-# How many PREDICTED buckets that panel lists before collapsing the tail to a count. Only the
-# head carries the collapse signal; the ground-truth line beside it is a value space and is
-# never row-limited.
 ANSWER_TALLY_ROWS = 5
-# Demo rows the shot menu lists per round beside the parent's own shots; the window rotates
-# through the pool across rounds, so a 200-row pool is offered whole without being sent whole.
 DEMO_POOL_RENDER_CAP = 12
 DEMO_QUERY_STEM = 80
 
 
 class InjectionKind(enum.StrEnum):
-    """Kind tag for each registered injection. See package docstring."""
-
     MEASUREMENT = "measurement"
     DERIVED = "derived"
     TRACE = "trace"
@@ -157,22 +105,13 @@ class InjectionKind(enum.StrEnum):
 
     @property
     def divisible(self) -> bool:
-        """Whether a composition may place SOME of this panel's sections and leave the rest.
-
-        Evidence thins gracefully — three misses instead of six is a smaller sample of the same
-        story — and state does not: half of the artifact under edit (TRACE) or half an instruction
-        (DIRECTIVE) is a different and wrong thing, not a smaller one. Every mutation is a
-        WHOLE-field replacement, so a field the generator cannot see is one it overwrites blind.
-        Asked of the kind every signal already declares rather than of a set of names, which
-        silently skips whatever it failed to list.
-        """
+        """Evidence thins to a smaller sample of the same story; half a TRACE or DIRECTIVE is a different, wrong thing."""
         return self in (InjectionKind.MEASUREMENT, InjectionKind.DERIVED)
 
 
 @dataclass(frozen=True)
 class _Injection:
-    """One registry entry. Neither ``char_cap`` nor ``citable`` has a default — a new signal must decide both.
-    ``citable`` is False for the value-space menus and the prompt under edit: citing those grounds a mutation in itself."""
+    """``citable`` is False for value-space menus and the prompt under edit: citing those grounds a mutation in itself."""
 
     name: str
     kind: InjectionKind
@@ -183,44 +122,26 @@ class _Injection:
 
 @dataclass(frozen=True)
 class CycleSlice:
-    """Frozen cycle-state snapshot for renderers — keeps them ``Cycle``-free + unit-testable.
-    ``pipeline_params`` snapshotted so wound renderers filter ACCUMULATED rows by current backend config."""
-
-    # No accuracy here, deliberately: cycle tracking's `current`/`best` are subset-relative and lag
-    # the round being rendered, so a panel carrying them holds a second, staler copy of the
-    # EVOLUTION column. The series is `RoundDiagnostics.evolution_rows`, which carries `elected`.
+    # No accuracy here: cycle tracking's `current`/`best` are subset-relative and lag the round rendered.
     round_num: int
-    # Closed rounds since the last advance (`escalation/state.py::l1_stall_depth`), which no fire
-    # resets — never the FSM's pacing counter.
+    # Closed rounds since the last advance, which no fire resets — never the ladder's pacing count.
     l1_stall_depth: int
-    l2_round: int
-    l2_stall_count: int
-    l3_round: int
-    l3_stall_count: int
-    # `tight`/`normal`/`wide`, widening with `l1_stall_depth` — the value the escalation_panel
-    # renders and l1_generate's rules cite, computed once in `build_bundle`.
+    ladder: Ladder
     exploration_budget: str
     pipeline_params: dict[str, dict[str, Any]] = field(default_factory=dict)
-    # The ACTIVE composite-fitness formula, so a node can state what it is optimizing rather than
-    # infer it from a column. Resolved once here because the resolution chain reads `Session`.
     composite_formula: str | None = None
-    # `frozen` (campaign-start prefix) or `adaptive` (acquisition re-picks per round). The real
-    # predicate is `per_round_resubset and ruler is not None`, and a renderer deriving that for
-    # itself is how a panel and the sampler come to disagree about what chose the rows.
+    # `frozen` | `adaptive`, resolved once: a renderer deriving it disagrees with the sampler.
     subset_mode: str | None = None
     sp_budget_round: int | None = None
     max_rounds: int | None = None
     spend_budget_usd: float | None = None
-    # A FLOOR while unpriced tokens are outstanding — `SpendRollup` says so, and a panel quoting
-    # it must not round the word "spent" into a certainty the rollup does not carry.
+    # What the cap has counted — a FLOOR while unpriced tokens are outstanding, never "spent".
     spend_used_usd: float | None = None
 
 
 @dataclass(frozen=True)
 class ArmDigest:
-    """One scored arm, narrowed to what a panel may quote. Deliberately not `ScoredCandidate`, which
-    carries `prompt_fields` and `resolved_pipeline_params` — a panel that can reach a rival's whole
-    prompt will eventually quote it, and ``bundle.py`` is contractually light."""
+    """Deliberately not `ScoredCandidate`: a panel that can reach a rival's whole prompt will quote it."""
 
     label: str
     mean_fitness_ci_lo: float | None
@@ -228,25 +149,19 @@ class ArmDigest:
     scored_samples: int
     expected_samples: int
     outcome: ArmOutcome
-    # WHICH of PoBB's gates stopped it, where PoBB did.
     gate: EliminationGate | None
 
 
 @dataclass(frozen=True)
 class RoundDigest:
-    """Post-scoring readouts for one round. The FAILURE renderers read ``bundle.memory`` instead, because failures
-    accumulate across rounds while these do not."""
+    """One round's readouts; the FAILURE renderers read ``bundle.memory``, which accumulates across rounds."""
 
     diagnostics: RoundDiagnostics | None
     critique: CritiqueReadout | None
     l1_yield: float = 1.0
-    # The round's stamped ``health.node_failure_rates``, and nothing else of the grade.
     node_failure_rates: dict[str, float] = field(default_factory=dict)
-    # Which samples THIS round scored — the freshness key for ``sample_transcripts``.
-    latest_sample_ids: frozenset[Any] = field(default_factory=frozenset)
-    # The round BEFORE this one, for "did the subset move?".
-    prev_sample_ids: frozenset[Any] = field(default_factory=frozenset)
-    # THIS round's numbers: every panel that states an objective or a precision reads these.
+    latest_sample_ids: frozenset[int] = field(default_factory=frozenset)
+    prev_sample_ids: frozenset[int] = field(default_factory=frozenset)
     composite_fitness: float | None = None
     evaluators: dict[str, float] = field(default_factory=dict)
     ability: AbilityReading | None = None
@@ -258,9 +173,6 @@ class RoundDigest:
 
 @dataclass(frozen=True)
 class InjectionBundle:
-    """Per-call state container — every signal renderer reads off this. ``origin_per_sample`` is the frozen round-0
-    snapshot behind ``origin_strengths``; the live cumulative results drive the failure panels."""
-
     opt_sp: OptSearchPoint
     memory: L2L3Memory
     framing: TaskDecomposition
@@ -268,49 +180,29 @@ class InjectionBundle:
     cycle_slice: CycleSlice
     digest: RoundDigest
     axes: AxisIndex | None
-    # Picks the block-library header (guidance = reuse-or-invent, restrict = library-only) or
-    # renders nothing when off.
     prompt_block_catalogue: PromptBlockCatalogue
-    # Gates its injection, so L2/L3 prompts are bit-for-bit identical to a no-rebase ablation.
     rebase_capability: bool
-    # Same, for a no-terminate ablation.
     terminate_capability: bool
-    # Already unlocked ⇒ the rebase_capability directive drops the unlock clause, since there
-    # is nothing left to ask for.
     schema_field_rename: bool
-    # The most shots a variant may carry; 0 silences the shot menu as an empty `demo_pool` does,
-    # which withdraws the `shot_ids` slot with it.
+    # 0 silences the shot menu as an empty `demo_pool` does, withdrawing the `shot_ids` slot.
     shot_k_max: int
-    origin_per_sample: list[dict[str, Any]] = field(default_factory=list)
-    # EVERY scored sample, hits included, not just the misses: the failure panels filter it,
-    # but ``answer_distribution`` needs the hits too, because a pipeline collapsed onto one
-    # label is only visible against the labels it is NOT emitting.
-    trajectory_results: list[dict[str, Any]] = field(default_factory=list)
-    # The cycle's LOCKED ruler, and the only per-sample difficulty a panel may quote:
-    # `hard_samples.json`'s δ is re-fitted and re-anchored on every regeneration, so it moves
-    # under the reader. Empty while the ruler is still cold.
+    origin_per_sample: CellSheet = field(default_factory=lambda: CellSheet(""))
+    # Hits included: a pipeline collapsed onto one label shows only against the labels it is NOT emitting.
+    trajectory_results: Sequence[GradedCell] = ()
+    # `None` while the cycle's locked ruler is cold.
     ruler: DeltaRuler | None = None
-    # Every round measured so far, the one under render LAST. Each carries its parent prompt, every
-    # candidate's evolved one and both sides' rows, so "what was tried, how did it score and which
-    # of the parent's solved cells did it break" is a diff away.
+    # The round under render LAST.
     measured_rounds: list[RoundResult] = field(default_factory=list)
-    # Mined for this task's answer-space shape at cycle start. `guidance` renders these and
-    # falls back to the task-agnostic PromptWizard set when empty.
+    # Empty falls back to the task-agnostic block set.
     earned_blocks: dict[str, tuple[str, ...]] = field(default_factory=dict)
-    # The L1 panels that render nothing for this bundle, probed once by `build_bundle`. L2's layout
-    # menu and its wire enum leave them out: moving one changes no byte L1 reads.
+    # L1 panels rendering nothing for this bundle: L2's layout menu and wire enum leave them out.
     silent_l1_panels: frozenset[str] = frozenset()
-    # The round under render IS the origin, so `origin_per_sample` and `trajectory_results` are
-    # the same rows. Any panel differencing the two would render a cell against itself.
+    # `origin_per_sample` and `trajectory_results` are then the same rows: difference them and a cell meets itself.
     is_origin_round: bool = False
-    # `Connector.measured_unit` — every panel counting rows renders through it.
     measured_unit: MeasuredUnit = "sample"
-    # `Connector.prompt_delivery` under this campaign's params — the channel the candidate reaches
-    # the model by, which is what makes it a skill body or a message.
     prompt_delivery: Delivery = "request"
-    # The campaign's demo pool.
     demo_pool: tuple[Sample, ...] = ()
-    # The manifest whose prompts an L4 outer edits (`bound_inner_optimizer`); `None` off the recursion.
+    # `None` off the L4 recursion.
     inner_optimizer: SelectedOptimizer | None = None
 
     @property
@@ -320,13 +212,7 @@ class InjectionBundle:
 
 @dataclass(frozen=True)
 class Item:
-    """One placeable unit of a panel — a row, a header, a paragraph.
-
-    The unit the COMPOSITION works in, and the reason a panel never budgets itself: one large
-    block can only be starved whole, where rows thin. ``trusted=False`` marks dataset-derived
-    text — a sample query, a model echo, a ground truth — and the fence around it is the
-    composition's to emit, so a renderer never mentions one.
-    """
+    """``trusted=False`` marks dataset-derived text; the fence around it is the composition's to emit."""
 
     text: str
     trusted: bool = True
@@ -334,8 +220,6 @@ class Item:
 
 Renderer = Callable[[InjectionBundle], list[Item]]
 
-# Filled by the @signal decorator at each renderer's definition site. `registry.injection_table()`
-# imports the renderer modules to trigger registration, then snapshots this.
 _REGISTRY: dict[str, _Injection] = {}
 
 
@@ -346,9 +230,6 @@ def signal(
     char_cap: int | None,
     citable: bool,
 ) -> Callable[[Renderer], Renderer]:
-    """Register a renderer into the injection registry at its definition site, so the slot key and its body are one grep
-    apart. The function is returned unchanged; a duplicate key raises at IMPORT, loud rather than last-wins."""
-
     def deco(fn: Renderer) -> Renderer:
         if name in _REGISTRY:
             raise ValueError(f"duplicate injection signal {name!r}")
@@ -359,8 +240,7 @@ def signal(
 
 
 def injection_registry() -> dict[str, _Injection]:
-    """Snapshot of every ``@signal``-registered injection. Call only after every renderer module is imported — which
-    ``registry.injection_table()`` does, then raises on an orphan before anything reads the table."""
+    """Complete only after every renderer module is imported, which ``registry.injection_table()`` does."""
     return dict(_REGISTRY)
 
 

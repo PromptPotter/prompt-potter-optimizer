@@ -36,6 +36,8 @@ nodes:
       max_tokens: 16384
       provider: openrouter
       model: qwen/qwen3-8b
+      # The paper's prompt is one text: the reply replaces the whole prompt.
+      rewrites: prompt
       # The parent's softmax temperatures, one drawn per call (App. A, App. B).
       sampler_temperatures: [0.3, 0.7, 1.0, 1.2]
       # One inspiration, dropped 20% of the time (App. B, Table 5).
@@ -56,6 +58,7 @@ nodes:
       max_tokens: 4096
       provider: openrouter
       model: google/gemini-3-flash-preview
+      rewrites: prompt
       # Every 10 evaluations, over k = 3 clusters of the occupied cells (App. B, App. F).
       interval: 10
       n_clusters: 3

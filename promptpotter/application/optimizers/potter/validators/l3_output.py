@@ -1,5 +1,4 @@
-"""Soft signals on L3-parsed output; the HARD layout validators live in ``dispatch/layout.py``. Outcomes land in
-``PotterState.memory.wounds.l3_guard_breaches`` and surface to L3's next fire as self-healing evidence."""
+"""Soft signals; the HARD layout validators live in ``dispatch/layout.py``."""
 
 from __future__ import annotations
 

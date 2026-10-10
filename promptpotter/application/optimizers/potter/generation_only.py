@@ -1,71 +1,63 @@
-"""Generation-only round — L1 variants without scoring, the round ``--diag`` ends on; the round
-document carries ``generation_only``, no scoreboard and no accuracy."""
-
 from __future__ import annotations
 
-from promptpotter.application.bench.cycle import Cycle
+from promptpotter.application.bench.node_context import NodeContext
 from promptpotter.application.optimizers.nodes import RoundContext, round_state
+from promptpotter.application.optimizers.potter.knobs import L1GenerateKnobs
 from promptpotter.application.optimizers.potter.l1.candidate_source import propose_l1_population
 from promptpotter.application.optimizers.potter.l1.stats import round_facts
-from promptpotter.application.optimizers.potter.state import PotterState
-from promptpotter.application.run_observers import RunCallbacks
+from promptpotter.application.optimizers.potter.state import potter_state
 from promptpotter.application.runner.output import (
     write_hard_samples_artifacts,
     write_log_md,
     write_review_md,
 )
 from promptpotter.application.runner.round import announce_opening, announce_population
-from promptpotter.domain.results import RoundResult
-from promptpotter.domain.run_records import PhaseRecord
-from promptpotter.shared.errors import graceful
+from promptpotter.domain.paired_reading import ReadingState
+from promptpotter.domain.results import OverlapReading, RoundResult
 
 
-async def run_generation_only_round(
-    cycle: Cycle, state: PotterState, cb: RunCallbacks, round_num: int
-) -> None:
+async def run_generation_only_round(ctx: RoundContext) -> None:
+    cycle, cb, round_num = ctx.cycle, ctx.callbacks, ctx.round_num
     session = cycle.session
     cb.set_round(round_num)
-    if (ledger := session.state.ledger) is not None:
-        ledger.append(PhaseRecord(phase="round", event="enter", round=round_num))
+    cb.on_round_entered(round_num)
 
-    ctx = RoundContext(cycle=cycle, round_num=round_num, callbacks=cb)
-    opening = announce_opening(ctx, "l1_generate")
-    population = await propose_l1_population(round_num, cycle, state)
+    opening = announce_opening(ctx)
+    population = await propose_l1_population(
+        NodeContext[L1GenerateKnobs](ctx, "l1_generate"), potter_state(cycle.working_state)
+    )
     candidates = population.proposals
     announce_population(ctx, opening, candidates, n_cells=0)
 
+    generated = RoundResult(
+        round=round_num,
+        # Nothing was scored, so the round ends on the parent it opened with.
+        label=cycle.rounds[-1].label,
+        generation_only=True,
+        accuracy=None,
+        composite_fitness=None,
+        total=0,
+        improved=False,
+        elects_on=cycle.optimizer.elects_on,
+        overlap=OverlapReading.unpaired(ReadingState.NOT_ASKED, round_num, False),
+        prompt_fields=cycle.opt_sp.prompt_field_dict(),
+        candidates_scored=0,
+        selected_labels=[],
+        leading_label=None,
+        opt_sp=cycle.opt_sp,
+        optimizer_state=round_state(
+            cycle.optimizer, cycle.working_state.round_payload(), cycle.population
+        ),
+    )
+    cb.on_round_close(generated.model_copy(update={"optimizer_facts": round_facts(generated)}))
     if session.state.cycle_id:
-        with graceful("Generation-only round_data write failed"):
-            # A generation-only round IS a round, `generation_only` telling every reader it is
-            # unscored: no rate is stamped, and `health` and the matched-parent pair stay None.
-            generated = RoundResult(
-                round=round_num,
-                label="diag_gen_only",
-                generation_only=True,
-                accuracy=None,
-                composite_fitness=None,
-                total=0,
-                improved=False,
-                prompt_fields=cycle.opt_sp.prompt_field_dict(),
-                candidates_scored=0,
-                selected_labels=[],
-                opt_sp=cycle.opt_sp,
-                optimizer_state=round_state(cycle.optimizer, population.payload),
-            )
-            generated.optimizer_facts = round_facts(generated)
-            session.store.campaigns.save_round_file(session.hop, generated)
         write_hard_samples_artifacts(session, cycle)
         write_log_md(session, cycle.config)
-        write_review_md(session, cycle)
-
-    if (ledger := session.state.ledger) is not None:
-        ledger.append(
-            PhaseRecord(
-                phase="round",
-                event="complete",
-                round=round_num,
-                payload={"generation_only": True, "n_candidates": len(candidates)},
-            )
+        write_review_md(
+            session,
+            accuracy_ceiling=cycle.config.accuracy_ceiling,
+            optimizer=cycle.optimizer,
+            framing=cycle.framing,
         )
 
 

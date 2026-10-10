@@ -1,6 +1,4 @@
-"""Potter's knobs, one typed model per node that owns them. Every value lives in
-``assets/optimizers/potter/pipeline.yaml`` and a campaign's ``optimization.nodes`` overlay moves it;
-none carries a default here, so the manifest is the one place a number comes from."""
+"""No knob carries a default here: the manifest is the one place a number comes from."""
 
 from __future__ import annotations
 
@@ -22,7 +20,6 @@ __all__ = [
     "EscalationKnobs",
     "EscalationLadder",
     "L1GenerateKnobs",
-    "LivesConfig",
     "PoBBKnobs",
     "PotterKnobs",
     "PromptBlockCatalogue",
@@ -30,14 +27,11 @@ __all__ = [
     "potter_knobs",
 ]
 
-# The prompt-block-library modes — named once, so every surface offering the knob references this
-# closed set instead of re-spelling it.
 PromptBlockCatalogue = Literal["guidance", "restrict", "off"]
 
 
 class EscalationLadder(StrEnum):
-    """How far up the L1 → L2 → L3 ladder a cycle may climb. The two predicates are the ONE
-    question every fire site asks, so no site re-derives depth from a patience."""
+    """The two predicates are the ONE question every fire site asks, so no site re-derives depth from a patience."""
 
     L1 = "l1"
     L1_L2 = "l1_l2"
@@ -52,26 +46,7 @@ class EscalationLadder(StrEnum):
         return self is EscalationLadder.FULL
 
 
-class LivesConfig(StrictModel):
-    """Improvement-banked round budget: banks a life each round that improves, loses one each round
-    that doesn't, on the SAME ``improved`` verdict. ``max_rounds`` and spend stay the ceilings."""
-
-    start: Annotated[int, Knob(Scope.POLICY, Estimand.CONTROLLER, Estimand.SPEND)] = Field(
-        2,
-        ge=1,
-        description="Lives a run starts with (a fully-stalling run does exactly this many L1 rounds).",
-    )
-    cap: Annotated[int, Knob(Scope.POLICY, Estimand.CONTROLLER, Estimand.SPEND)] = Field(
-        4,
-        ge=1,
-        description="Bank ceiling — lives never exceed this no matter how long the improving streak runs.",
-    )
-
-
 class AdaptiveQueueKnobs(StrictModel):
-    """The sampler's. Turn resubset off to freeze the sample basis at campaign start: one fixed
-    subset, fixed order, identical for every round and candidate."""
-
     sp_budget_round: Annotated[int, Knob(Scope.POLICY, Estimand.SELECTION)] = Field(
         ge=1,
         description="Per-round eval budget — how many cells each candidate is scored on per "
@@ -98,8 +73,6 @@ class AdaptiveQueueKnobs(StrictModel):
 
 
 class L1GenerateKnobs(StrictModel):
-    """The proposer's own knobs, which ride beside its call config in the manifest."""
-
     n_variants: Annotated[int, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
         ge=1, description="Candidates per round"
     )
@@ -124,7 +97,7 @@ class L1GenerateKnobs(StrictModel):
                 "``restrict`` narrows the field's value space to the *whole* library (which "
                 "it therefore renders in full) — an off-library value is a forbidden value, "
                 "rejected by "
-                "``validate_overrides`` exactly as a forbidden axis is (synthetic-0, no "
+                "L1's reject posture exactly as a forbidden axis is (synthetic-0, no "
                 "backend spend, healed via the L2 wound). ``off`` renders nothing, so the "
                 "prompt is bit-for-bit identical to a no-library ablation run."
             ),
@@ -151,8 +124,7 @@ class L1GenerateKnobs(StrictModel):
 
 
 class PoBBKnobs(StrictModel):
-    """The eliminator's. Its first decision point is the bench's ``elimination_n_min``, which the
-    δ ruler's warmth shares, so aggression lives here and never there."""
+    """Its first decision point is the bench's ``elimination_n_min``, which the δ ruler's warmth shares: aggression lives HERE."""
 
     epsilon: Annotated[float, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(
         gt=0.0,
@@ -193,8 +165,7 @@ class PoBBKnobs(StrictModel):
             "Off → the rule never fires and candidates run their full budget."
         ),
     )
-    # Not dead though off everywhere: `LEADER_LOCKED` and the `abort:lock_in_off` lens exercise
-    # lock-in, so deleting it removes a shipped analysis feature.
+    # Off everywhere yet not dead: the `abort:lock_in_off` lens exercises lock-in.
     leader_lock_in: Annotated[bool, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(
         description=(
             "Crown a decisive leader EARLY: stop measuring a candidate as the winner "
@@ -210,8 +181,6 @@ class ThetaElectionKnobs(StrictModel):
 
 
 class EscalationKnobs(StrictModel):
-    """The controller's: when potter escalates, how far, and when it stops on its own."""
-
     l1_patience: Annotated[int, Knob(Scope.POLICY, Estimand.CONTROLLER)] = Field(
         ge=0, description="Consecutive non-improving L1 rounds before L2 fires."
     )
@@ -226,7 +195,7 @@ class EscalationKnobs(StrictModel):
         ge=0,
         description=(
             "Consecutive non-improving L3 fires before the cycle stops on "
-            "``CONVERGED``. ``None`` replans without limit, leaving the round and "
+            "``OPTIMIZER_EXHAUSTED``. ``None`` replans without limit, leaving the round and "
             "spend ceilings as the only stops."
         ),
     )
@@ -244,16 +213,6 @@ class EscalationKnobs(StrictModel):
             "``rebase_capability`` / ``terminate_capability`` also have), so the arms "
             "differ in what the loop DOES and in nothing it says: a stalled ``l1`` round "
             "simply continues until ``max_rounds`` / ``lives`` / spend binds."
-        ),
-    )
-    # No `Knob` — the walk descends into LivesConfig, so `start` + `cap` are the knobs.
-    lives: LivesConfig | None = Field(
-        description=(
-            "Opt-in improvement-banked round budget ('hearts'): +1 life per improving round, "
-            "-1 per non-improving one, stop at 0, banked up to ``cap``. ``None`` → "
-            "``max_rounds`` governs. ``max_rounds`` still caps from above, so a lives run "
-            "wanting the full bank sets ``max_rounds: null``. Potter's, because the bank moves "
-            "on potter's own ``improved`` verdict — its selector's."
         ),
     )
     rebase_capability: Annotated[bool, Knob(Scope.POLICY, Estimand.CONTROLLER)] = Field(
@@ -291,8 +250,6 @@ class EscalationKnobs(StrictModel):
 
 @dataclass(frozen=True)
 class PotterKnobs:
-    """Every potter knob a campaign runs under, by the node that owns it."""
-
     adaptive_queue: AdaptiveQueueKnobs
     l1_generate: L1GenerateKnobs
     pobb: PoBBKnobs

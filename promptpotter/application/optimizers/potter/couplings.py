@@ -1,5 +1,3 @@
-"""The couplings potter's members declare between their knobs and the campaign's."""
-
 from __future__ import annotations
 
 from promptpotter.application.campaign_config import Estimand
@@ -9,7 +7,7 @@ from promptpotter.shared.hashing import shapes_optimizer_prompt
 # Their prose reaches the optimizer prompt's `confounds` panel.
 shapes_optimizer_prompt(__name__)
 
-__all__ = ["ADAPTIVE_QUEUE", "ESCALATION", "POBB"]
+__all__ = ["ADAPTIVE_QUEUE", "POBB"]
 
 
 ADAPTIVE_QUEUE = (
@@ -56,8 +54,7 @@ ADAPTIVE_QUEUE = (
             "unexplained — but the number read first is still the subset-relative one. Set "
             "display_metric='ability' under resubset."
         ),
-        # `inert`, not `info`: nothing co-moves — one knob's display choice wastes the other's
-        # invariance, which is exactly what inert names.
+        # `inert`, not `info`: nothing co-moves; one knob's display choice wastes the other's invariance.
         severity="inert",
         predicate=lambda c, k, d: bool(k.per_round_resubset) and c.display_metric != "ability",
     ),
@@ -128,32 +125,6 @@ POBB = (
         predicate=lambda c, k, d: (
             (not k.leader_lock_in)
             and (k.lock_in != d.lock_in or k.lock_in_n_min != d.lock_in_n_min)
-        ),
-    ),
-)
-
-
-ESCALATION = (
-    MemberCoupling(
-        name="lives_no_headroom",
-        knobs=("lives",),
-        bench_knobs=("optimization.max_rounds",),
-        estimand=Estimand.CONTROLLER,
-        relation=(
-            "lives stops a stalling run early, but only when the bank can empty before the "
-            "calendar cap does."
-        ),
-        consequence=(
-            "lives.start ≥ max_rounds, so hearts can never run out first: the run stops on "
-            "the calendar and reports `lives_exhausted` for it. Lower lives.start to brake a "
-            "stalling run early, or raise max_rounds to give it room — leaving both equal "
-            "makes the stop reason unreadable."
-        ),
-        severity="inert",
-        predicate=lambda c, k, d: (
-            k.lives is not None
-            and c.optimization.max_rounds is not None
-            and k.lives.start >= c.optimization.max_rounds
         ),
     ),
 )

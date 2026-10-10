@@ -25,7 +25,7 @@ nodes:
   l1_generate:
     type: llm
     # Menus the operator picks from; they open no search axis (`param_keys` stays empty, and
-    # L2's reach is `dispatch/schemas.py::L2_NODE_AXES`). `model` falls back to `available_models`.
+    # L2's reach is its own member's `steers`). `model` falls back to `available_models`.
     optimizer: &node_menus
       param_allowed_values:
         # Mirrors `capabilities.py::STANDARD_EFFORT_LADDER`.
@@ -115,7 +115,7 @@ nodes:
       model: openai/gpt-6-luna
     description: >-
       L3 Plan: rewrites the strategy. Fires on L2 stall.
-  # The stall ladder: picks each round's pipeline below, and when potter stops.
+  # The stall ladder: picks each round's pipeline below, and when the ladder gives up.
   escalation:
     type: controller
     config:
@@ -123,7 +123,6 @@ nodes:
       l2_patience: 2
       l3_patience: 1
       escalation_ladder: full
-      lives: null
       rebase_capability: true
       terminate_capability: true
 pipelines:
@@ -275,7 +274,7 @@ resolved_prompts:
     instruction: |-
       PRIMARY: pull ONE lever below, grounded in a named data point — or pull none and say why. An L2 fire that changes nothing L1 reads is a wasted escalation and is scored as one (l2_targets_l1_surface).
         l1_layout — change WHICH panels L1 sees, when a panel is empty, redundant, or crowding out the evidence the failures actually need.
-        l1_overrides — rare; creativity / n_variants only, when the stall is breadth-shaped rather than direction-shaped.
+        l1_overrides — rare; temperature / n_variants only, when the stall is breadth-shaped rather than direction-shaped.
 
       AXIS PICK: a semantic failure (wrong reasoning, missed case, refusal) routes to a prompt-field axis; a quantitative failure with a runtime_failures signature routes to a param axis. Name it in axis_targeted.
 
@@ -434,7 +433,7 @@ resolved_prompts:
     instruction: |-
       PRIMARY: pull ONE lever below, grounded in a named data point — or pull none and say why. An L2 fire that changes nothing L1 reads is a wasted escalation and is scored as one (l2_targets_l1_surface).
         l1_layout — change WHICH panels L1 sees, when a panel is empty, redundant, or crowding out the evidence the failures actually need. Name the panels you mean to move and the slot each moves to; the ones you omit stay where they are.
-        l1_overrides — rare; creativity / n_variants only, when the stall is breadth-shaped rather than direction-shaped.
+        l1_overrides — rare; temperature / n_variants only, when the stall is breadth-shaped rather than direction-shaped.
 
       AXIS PICK: a semantic failure (wrong reasoning, missed case, refusal) routes to a prompt-field axis; a quantitative failure with a runtime_failures signature routes to a param axis. Name it in axis_targeted.
 

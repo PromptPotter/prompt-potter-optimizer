@@ -1,7 +1,3 @@
-"""Narrative-state renderers — persistent state from prior LLM calls
-(L3 plan, L3→L2 note, current prompt, L1 critique) plus the operator's frozen task framing.
-"""
-
 from __future__ import annotations
 
 import json
@@ -17,6 +13,7 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
 from promptpotter.application.optimizers.potter.dispatch.layout import (
     L1_LAYOUT_SLOTS,
     NODE_LAYOUTS,
+    resolve_node_layout,
 )
 from promptpotter.application.optimizers.potter.dispatch.prompts import (
     effective_optimizer_prompts,
@@ -26,11 +23,11 @@ from promptpotter.application.views.render.optimizer_prompt_text import (
     critique_axes,
     format_l1_critique_for_prompt,
 )
-from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.connector import unit_plural
 from promptpotter.domain.pipeline_schema import SCHEMA_RENAME_PARAM
 from promptpotter.domain.results_health import evidence_starved_node
 from promptpotter.domain.run_records import MAX_AUTO_REBASES
+from promptpotter.domain.search_point import PROMPT_STRING_FIELDS
 from promptpotter.domain.value_tree import visibility_of
 
 logger = logging.getLogger(__name__)
@@ -42,13 +39,11 @@ _PLAN_HEADER = "PLAN:\n"
 @signal(
     "plan",
     kind=InjectionKind.TRACE,
-    # A RAIL that agrees with production's bound: without the header's width it re-cuts a legal
-    # full-length plan UNMARKED, which then reads downstream as a complete strategy.
+    # Without the header's width the cap re-cuts a legal full-length plan UNMARKED.
     char_cap=L3_PLAN_MAX_CHARS + len(_PLAN_HEADER),
     citable=True,
 )
 def _r_plan(b: InjectionBundle) -> list[Item]:
-    """L3's strategic plan text — read by every prompt; persistent until next L3 fire."""
     plan = b.memory.plan
     return [Item(f"{_PLAN_HEADER}{plan}" if plan else "")]
 
@@ -60,7 +55,6 @@ def _r_plan(b: InjectionBundle) -> list[Item]:
     citable=False,
 )
 def _r_l3_to_l2_note(b: InjectionBundle) -> list[Item]:
-    """Sticky L3→L2 directive — mounted only in L2's template, absent from L1."""
     note = b.memory.wounds.l3_note
     return [Item(f"L3 NOTE TO L2:\n{note}" if note else "")]
 
@@ -89,28 +83,15 @@ _OPTIMIZER_PROMPT_HEADER = (
 @signal(
     "rendered_prompt",
     kind=InjectionKind.TRACE,
-    # The cap is a runaway backstop, NOT a budget knob — this is the exact prompt
-    # under edit, so it must never arrive truncated (a cut-off prompt makes the
-    # generator mis-edit or hallucinate the missing tail, and every mutation here is
-    # a WHOLE-field replacement). Sized above the recursion's own bundle, which is an
-    # order of magnitude past a single evolved target prompt: the sixteen editable
-    # optimizer prompt fields measure ~10k at the origin. Only true runaway trips.
+    # A runaway backstop, NOT a budget knob: a WHOLE-field replacement must never see it truncated.
     char_cap=16000,
-    # The prompt under edit is the SUBJECT of a mutation, never its evidence.
     citable=False,
 )
 def _r_rendered_prompt(b: InjectionBundle) -> list[Item]:
-    """The artifact under edit — a target prompt, inner optimizer prompts, or both; each half empty where
-    it is not the mutation surface. An L4 outer point is INERT: its levers ride ``pipeline_params``."""
     sections: list[str] = []
-    # Field by field, and each field's OWN value — the two boundaries the override schema keys
-    # on, and a generator cannot attribute what it cannot see. Shown as one blob it swept in
-    # neighbouring fields (26% of banked candidates carried a duplicated paragraph, the worst
-    # 2.13x its parent); shown SPLICED, a replacement absorbs the operator's framing as prose,
-    # which the next render splices around again.
+    # Field by field: as one blob a replacement sweeps in neighbours, SPLICED it absorbs the framing.
     if fields := b.opt_sp.render_fields():
-        # A HELD field still renders — the fields you replace must fit around it — but is named as
-        # the operator's; the override slot has no key for it.
+        # A HELD field still renders: the fields replaced must fit around it.
         schema = b.pipeline_schema
         held = (
             set(PROMPT_STRING_FIELDS) - set(schema.open_prompt_fields())
@@ -127,8 +108,7 @@ def _r_rendered_prompt(b: InjectionBundle) -> list[Item]:
     )
     if inner:
         sections.append(_OPTIMIZER_PROMPT_HEADER)
-        # One section per node·field: the cap's truncation drops whole tail sections,
-        # so a runaway costs whole fields rather than slicing one mid-contract.
+        # One section per node·field, so the cap drops whole fields, never one mid-contract.
         sections.extend(
             f"[{node}.{field}]\n{text or '(empty — nothing to carry forward)'}"
             for node, fields in inner.items()
@@ -144,7 +124,7 @@ def _r_rendered_prompt(b: InjectionBundle) -> list[Item]:
     citable=False,
 )
 def _r_l1_overrides(b: InjectionBundle) -> list[Item]:
-    overrides = b.memory.l1_overrides
+    overrides = b.memory.steered("l1_generate")
     return [Item(f"CURRENT L1 CONFIG: {json.dumps(overrides)}" if overrides else "")]
 
 
@@ -155,14 +135,9 @@ def _r_l1_overrides(b: InjectionBundle) -> list[Item]:
     citable=False,
 )
 def _r_l1_layout(b: InjectionBundle) -> list[Item]:
-    """The OTHER lever's current value, the sibling ``l1_overrides`` has. An edit MOVES one panel, so
-    what L2 needs to read is where each already sits — including the ones sitting nowhere, which are
-    the only ones a move can gain the prompt. Listed panel → slot, the direction an edit is keyed:
-    shown slot → panels, an optimizer answers with slot names as keys and the edit is refused.
-
-    A panel that renders nothing is listed in NEITHER half, as `l1_layout`'s own enum leaves it
-    out: placed or not, it is nothing L1 reads today."""
-    layout = b.memory.l1_layout
+    """Listed panel → slot, as an edit is keyed: shown slot → panels, the answer comes back slot-keyed and is refused."""
+    steered = b.memory.steered_layout("l1_generate")
+    layout = resolve_node_layout("l1_generate") if steered is None else steered
     lines = [
         f'  "{panel}": "{slot}"'
         for slot in L1_LAYOUT_SLOTS
@@ -183,16 +158,11 @@ def _r_l1_layout(b: InjectionBundle) -> list[Item]:
 @signal(
     "task_context",
     kind=InjectionKind.TRACE,
-    char_cap=None,  # verbatim BY CONTRACT — see below
-    # Citable because the operator's framing is real evidence a variant can be grounded in
-    # ("the framing records that anti-hedging backfires here"). It is NOT citable because
-    # anything instructs L1 to cite it: the CHAIN-BIND rule that once did was deleted with
-    # the channel it named — task_context is frozen and never carries an axis directive.
+    # Never truncated: a renderer cannot know which half of an authored sentence matters.
+    char_cap=None,
     citable=True,
 )
 def _r_task_context(b: InjectionBundle) -> list[Item]:
-    """The operator's framing, rendered VERBATIM — this panel never truncates, because a renderer cannot
-    know which half of an authored sentence matters. The budget is enforced at mint, where a human is."""
     tc = b.framing
     if not tc:
         return []
@@ -206,8 +176,7 @@ def _r_task_context(b: InjectionBundle) -> list[Item]:
 @signal(
     "critique",
     kind=InjectionKind.TRACE,
-    # Sized for failure_highlights <=3x320c + priority_fix 320c + axes — the
-    # distiller's whole output quota; an 800 cap silently re-truncated it.
+    # The distiller's whole output quota: failure_highlights <=3x320c + priority_fix 320c + axes.
     char_cap=2000,
     citable=True,
 )
@@ -234,9 +203,6 @@ _SKILL_TIERS_TEXT = (
     citable=False,
 )
 def _r_skill_tiers(b: InjectionBundle) -> list[Item]:
-    """The search order for a skill body, rendered only where the candidate IS one — the prompt
-    reaches the model as an artifact it must open. On every other target the tiers describe
-    nothing the layer can act on."""
     if visibility_of(b.prompt_delivery) != "on_demand":
         return []
     return [Item(_SKILL_TIERS_TEXT)]
@@ -254,7 +220,6 @@ _REBASE_CAPABILITY_TEXT = (
     "Default: omit — a fork costs a whole cycle."
 )
 
-# Rendered only where the unlock would change something — see `_r_rebase_capability`.
 _SCHEMA_RENAME_UNLOCK_TEXT = (
     " On that same fork_proposal you may set unlock_schema_field_rename = true, which "
     "lets the fork's L1 RENAME a field on the optimizer's own output schema (today it "
@@ -274,8 +239,6 @@ _SCHEMA_RENAME_UNLOCK_TEXT = (
     citable=False,
 )
 def _r_rebase_capability(b: InjectionBundle) -> list[Item]:
-    """The ``fork_proposal`` escape hatch, empty when the capability is off so an ablation body is
-    bit-for-bit identical. Reachability is read off the DECLARED param, never off a node name."""
     if not b.rebase_capability or b.cycle_slice.exploration_budget == ExplorationBudget.TIGHT:
         return []
     schema = b.pipeline_schema
@@ -295,7 +258,6 @@ _TERMINATE_CAPABILITY_TEXT = (
     "stalled-but-healthy search (rewind or keep refining for those). Default: omit."
 )
 
-# The starvation coaching, rendered only in the round it describes — see `_r_terminate_capability`.
 _TERMINATE_STARVED_TEXT = (
     " THIS ROUND, EVALUATE IT FIRST, BEFORE ANY REFINEMENT: '{node}' failed across ~all of this "
     "round's {unit} (a backend quota or rate-limit exhausted), so the measurement itself is "
@@ -313,8 +275,6 @@ _TERMINATE_STARVED_TEXT = (
     citable=False,
 )
 def _r_terminate_capability(b: InjectionBundle) -> list[Item]:
-    """The ``terminate_proposal`` instruction; off ⇒ empty string, so an ablation body is bit-for-bit
-    identical. Its starvation coaching is gated a second time on a round that HAS a starved node."""
     if not b.terminate_capability:
         return []
     starved = evidence_starved_node(b.digest.node_failure_rates)

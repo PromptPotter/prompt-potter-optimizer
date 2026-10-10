@@ -1,5 +1,4 @@
-"""L2 behaviour checks — dataset-INDEPENDENT, which is what makes the metric a usable anchor for iterating the optimizer prompt across
-datasets. The registry is the SoT; a check for something ``extra="forbid"`` already makes unreachable is noise."""
+"""Dataset-INDEPENDENT checks, so the metric anchors optimizer-prompt iteration across datasets."""
 
 from __future__ import annotations
 
@@ -11,40 +10,25 @@ from promptpotter.application.optimizers.potter.validators.behavior_base import 
     CheckFn,
     ValidatorContext,
 )
+from promptpotter.domain.round_audit import RoundAudit
 
 __all__ = ["run_all_l2_checks"]
 
 
-# An L2 rationale below this is a stub, not a diagnosis — mirrors the
-# l3_plan length floor in `l3_output.py`.
 L2_RATIONALE_FLOOR_CHARS = 40
 
-# A sample reference (`#17`) or a MEASUREMENT (`0.42`, `12%`, `3/20`). A bare integer is not a
-# citation: `\d` alone passed "round 2", so every rationale mentioning a round number scored anchored.
+# A bare integer is not a citation: `\d` alone passes "round 2".
 _EVIDENCE_RE = re.compile(r"#\d+|\d+\.\d+|\d+\s*%|\d+\s*/\s*\d+")
 
 
-def extract_l2_output(round_dict: dict[str, Any] | None) -> dict[str, Any]:
-    """The parsed ``l2_context`` response on a round dict. Empty dict when L2 did not fire this round, or the response
-    was malformed."""
-    if not round_dict:
-        return {}
-    nodes = round_dict.get("nodes") or {}
-    node = nodes.get("l2_context") or {}
-    response = ((node.get("output") or {}).get("response")) or {}
+def extract_l2_output(audit: RoundAudit) -> dict[str, Any]:
+    block = audit.nodes.get("l2_context")
+    response = None if block is None else block.output.response
     return response if isinstance(response, dict) else {}
 
 
-def l2_fired(round_dict: dict[str, Any] | None) -> bool:
-    return bool(extract_l2_output(round_dict))
-
-
-# --- checks ----------------------------------------------------------------
-
-
-def _check_rationale_substantive(round_dict: dict[str, Any], ctx: ValidatorContext) -> CheckResult:
-    """L2's ``rationale`` must carry real diagnostic content, not a stub."""
-    rationale = str(extract_l2_output(round_dict).get("rationale") or "").strip()
+def _check_rationale_substantive(audit: RoundAudit, ctx: ValidatorContext) -> CheckResult:
+    rationale = str(extract_l2_output(audit).get("rationale") or "").strip()
     if len(rationale) >= L2_RATIONALE_FLOOR_CHARS:
         return CheckResult("l2_rationale_substantive", True, f"rationale {len(rationale)} chars")
     return CheckResult(
@@ -54,10 +38,8 @@ def _check_rationale_substantive(round_dict: dict[str, Any], ctx: ValidatorConte
     )
 
 
-def _check_evidence_anchored(round_dict: dict[str, Any], ctx: ValidatorContext) -> CheckResult:
-    """L2's refinement must be EVIDENCE-ANCHORED — a targeted axis or a cited sample / number, never a speculative
-    "maybe try X". The contract is stated in ``promptpotter/CLAUDE.md``."""
-    out = extract_l2_output(round_dict)
+def _check_evidence_anchored(audit: RoundAudit, ctx: ValidatorContext) -> CheckResult:
+    out = extract_l2_output(audit)
     axis = str(out.get("axis_targeted") or "").strip()
     if axis:
         return CheckResult("l2_evidence_anchored", True, f"axis_targeted={axis!r}")
@@ -70,10 +52,9 @@ def _check_evidence_anchored(round_dict: dict[str, Any], ctx: ValidatorContext) 
     )
 
 
-def _check_targets_l1_surface(round_dict: dict[str, Any], ctx: ValidatorContext) -> CheckResult:
-    """An L2 fire must change something L1 READS — ``l1_layout`` or ``l1_overrides``. **This is the instrument deciding whether
-    the L2 call earns its cost.** ``axis_targeted`` is not a surface: it is prose, and L1 reads its axes from measurement."""
-    out = extract_l2_output(round_dict)
+def _check_targets_l1_surface(audit: RoundAudit, ctx: ValidatorContext) -> CheckResult:
+    """``axis_targeted`` is not a surface: it is prose, and L1 reads its axes from measurement."""
+    out = extract_l2_output(audit)
     if not out:
         return CheckResult("l2_targets_l1_surface", True, "L2 did not fire")
     touched = [name for name in ("l1_layout", "l1_overrides") if out.get(name)]
@@ -82,8 +63,6 @@ def _check_targets_l1_surface(round_dict: dict[str, Any], ctx: ValidatorContext)
     return CheckResult("l2_targets_l1_surface", False, "L2 fired but changed nothing L1 reads")
 
 
-# --- registry --------------------------------------------------------------
-
 L2_CHECK_REGISTRY: dict[str, CheckFn] = {
     "l2_rationale_substantive": _check_rationale_substantive,
     "l2_evidence_anchored": _check_evidence_anchored,
@@ -91,9 +70,8 @@ L2_CHECK_REGISTRY: dict[str, CheckFn] = {
 }
 
 
-def run_all_l2_checks(round_dict: dict[str, Any], ctx: ValidatorContext) -> list[CheckResult]:
-    """Run every L2 behaviour check in registry order. EMPTY when L2 did not fire this round — there is nothing to score,
-    and an absent fire must not count as a conformance failure."""
-    if not l2_fired(round_dict):
+def run_all_l2_checks(audit: RoundAudit, ctx: ValidatorContext) -> list[CheckResult]:
+    """EMPTY when L2 did not fire: an absent fire is not a conformance failure."""
+    if not extract_l2_output(audit):
         return []
-    return [fn(round_dict, ctx) for fn in L2_CHECK_REGISTRY.values()]
+    return [fn(audit, ctx) for fn in L2_CHECK_REGISTRY.values()]

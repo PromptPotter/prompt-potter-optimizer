@@ -258,7 +258,7 @@
           },
           "l1_overrides": {
             "additionalProperties": true,
-            "description": "Optional runtime knobs; only 'creativity' and 'n_variants' are read.",
+            "description": "Optional runtime knobs; only 'temperature' and 'n_variants' are read.",
             "title": "L1 Overrides",
             "type": "object"
           },

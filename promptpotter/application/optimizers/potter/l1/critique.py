@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application.bench.llm_call import (
     LLMCallContext,
@@ -20,11 +20,14 @@ from promptpotter.application.optimizers.potter.records import PotterRoundState
 from promptpotter.domain.optimizer_state import CritiqueReadout
 from promptpotter.domain.phases import StopLoop, StopReason
 from promptpotter.infrastructure.llm.telemetry import emit_round_warning
-from promptpotter.shared.errors import SendRefusedError, graceful
+from promptpotter.shared.errors import SendRefusedError
 
 if TYPE_CHECKING:
-    from promptpotter.application.bench.cycle import Cycle
+    from collections.abc import Sequence
+
+    from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.optimizers.potter.state import PotterState
+    from promptpotter.domain.results import RoundResult
 
 logger = logging.getLogger(__name__)
 
@@ -36,42 +39,28 @@ __all__ = [
 
 
 CRITIQUE_RESEND_ATTEMPTS = 3
-"""Distillations one round will buy before the cycle halts. Each is a whole call — the client's
-backpressure and 5xx retries sit INSIDE one attempt and do not count against this."""
+"""Each is a whole call: the client's backpressure and 5xx retries sit INSIDE one attempt and do not count against this."""
 
 
-def critique_owed(cycle: Cycle) -> bool:
-    """Whether the prior round closed without the critique its next generation is owed — the
-    re-send `ensure_prior_critique` makes, or the halt it takes instead."""
-    prior = cycle.rounds[-1] if cycle.rounds else None
+def critique_owed(rounds: Sequence[RoundResult]) -> bool:
+    prior = rounds[-1] if rounds else None
     if prior is None or prior.round == 0 or not prior.results:
         return False
     return not prior.optimizer_state.payload_as(PotterRoundState).critique
 
 
-async def ensure_prior_critique(cycle: Cycle, state: PotterState) -> None:
-    """Re-send the previous round's critique when it has none, and HALT if it never arrives.
-
-    ``critique`` is ``L1_MANDATORY``: without one the generator is asked to fix a prompt nothing
-    told it how to fix, so running the round anyway spends a full panel on a choice made blind.
-    Two ways the panel comes up empty, both covered here and neither stated on any other channel —
-    the producer skips the last round of an invocation, which a ``resume`` walks straight past,
-    and a terminal provider failure there is absorbed so the round can still close.
-
-    The stop is ``PAUSED``, the same resumable halt a holed panel takes: nothing is lost, and the
-    operator resumes into a round that re-sends against a provider that has recovered."""
-    if not critique_owed(cycle):
+async def ensure_prior_critique(ctx: NodeContext[Any], state: PotterState) -> None:
+    """HALTS (``PAUSED``, resumable) where the re-send never arrives: without its critique the round spends a panel on a blind choice."""
+    if not critique_owed(ctx.rounds):
         return
-    prior = cycle.rounds[-1]
-    payload = prior.optimizer_state.payload_as(PotterRoundState)
-    session = cycle.session
+    prior = ctx.rounds[-1]
+    critique: CritiqueReadout | None = None
     last: Exception | None = None
     for attempt in range(1, CRITIQUE_RESEND_ATTEMPTS + 1):
         try:
-            payload.critique = await run_l1_critique(cycle, state)
+            critique = await run_l1_critique(ctx, state)
             break
-        # A refused send — an empty account, a quota, the ceiling — is decided: re-sent, it is
-        # refused again, and swallowed it halts as a PAUSE that `resume` re-enters forever.
+        # A refused send is decided: swallowed, it halts as a PAUSE that `resume` re-enters forever.
         except (KeyboardInterrupt, asyncio.CancelledError, SendRefusedError):
             raise
         except Exception as exc:
@@ -83,7 +72,7 @@ async def ensure_prior_critique(cycle: Cycle, state: PotterState) -> None:
                 CRITIQUE_RESEND_ATTEMPTS,
                 exc,
             )
-    if not payload.critique:
+    if not critique:
         emit_round_warning(
             kind="l1_critique_unavailable",
             message=(
@@ -99,18 +88,17 @@ async def ensure_prior_critique(cycle: Cycle, state: PotterState) -> None:
             },
         )
         raise StopLoop(StopReason.PAUSED)
-    # On disk, or the next resume re-sends a call this one already paid for — and the round file
-    # would keep saying the generator had no steer when it did.
-    if session.state.cycle_id:
-        with graceful(f"round {prior.round} critique re-send not persisted"):
-            session.store.campaigns.save_round_file(session.hop, prior)
+    # On the ledger, or the next resume re-sends a call this one already paid for.
+    ctx.restate(
+        prior.optimizer_state.payload_as(PotterRoundState).model_copy(update={"critique": critique})
+    )
     logger.info("Round %d critique distilled late; this round's generator reads it.", prior.round)
 
 
-async def run_l1_critique(cycle: Cycle, state: PotterState) -> CritiqueReadout:
-    """The critique of the cycle's last round. The output is materialized to a dict so persistence
-    does not drag Pydantic into the domain serialization path."""
-    bundle = build_bundle(cycle, state)
+async def run_l1_critique(ctx: NodeContext[Any], state: PotterState) -> CritiqueReadout:
+    """Materialized to a dict so persistence does not drag Pydantic into the domain serialization path."""
+    session = state.session
+    bundle = build_bundle(ctx, state)
     filled = DispatchHub.fill(load_optimizer_prompt("l1_critique"), bundle, node="l1_critique")
 
     result, _prompt, _repairs = await run_optimizer_node(
@@ -119,9 +107,9 @@ async def run_l1_critique(cycle: Cycle, state: PotterState) -> CritiqueReadout:
         template=filled.template,
         response_model=L1CritiqueOutput,
         context=LLMCallContext(
-            ledger=cycle.session.state.ledger,
-            round_num=cycle.rounds[-1].round,
-            cache=cycle.session.store.optimizer_reuse,
+            ledger=session.state.ledger,
+            round_num=ctx.rounds[-1].round,
+            cache=session.store.optimizer_reuse,
             injections=filled.breakdown,
         ),
     )

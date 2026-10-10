@@ -1,94 +1,81 @@
-"""The escalation POLICY, whole: what a round is judged on, the rules that judge it, and the
-first-match router over them — (predicate, action, priority); higher wins, ties by list order. A
-predicate is False when its signal is unavailable, so early cycles fall through rather than firing
-blind. State mutation lives in ``EscalationFSM.observe_round``, which is this module's only
-caller."""
+"""A predicate is False when its signal is unavailable, so an early cycle falls through, never fires blind."""
 
 from __future__ import annotations
 
+import enum
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from promptpotter.application.optimizers.potter.escalation.state import EscalationEvent, NextAction
+from promptpotter.domain.phases import StopReason
 
 if TYPE_CHECKING:
     from promptpotter.application.optimizers.potter.knobs import EscalationLadder
 
 
+class NextAction(enum.StrEnum):
+    CONTINUE = "continue"
+    FIRE_L2 = "fire_l2"
+    FIRE_L3 = "fire_l3"
+    STOP_L3_PATIENCE = "stop_l3_patience"
+
+
+NEXT_ACTION_STOP: dict[NextAction, StopReason] = {
+    NextAction.STOP_L3_PATIENCE: StopReason.OPTIMIZER_EXHAUSTED,
+}
+
+# The manifest walk a fire takes (`pipeline.yaml::pipelines`).
+NEXT_ACTION_WALK: dict[NextAction, str] = {
+    NextAction.FIRE_L2: "l2_escalation",
+    NextAction.FIRE_L3: "l3_escalation",
+}
+assert set(NextAction) == {NextAction.CONTINUE, *NEXT_ACTION_STOP, *NEXT_ACTION_WALK}
+
+
+@dataclass(frozen=True)
+class EscalationEvent:
+    next_action: NextAction
+    # ``None`` where the FSM decided alone.
+    rule: str | None = None
+
+    @property
+    def stop_reason(self) -> StopReason | None:
+        return NEXT_ACTION_STOP.get(self.next_action)
+
+
 @dataclass(frozen=True)
 class EscalationInputs:
-    """Frozen snapshot of all escalation-rule predicate inputs. Optional fields are populated only
-    when the corresponding derived state exists (e.g. AxisIndex initialised); rules must handle None.
-    """
-
-    # The number the round was WON on — ``composite_fitness``, the same float the high-water
-    # ratchet and the stall ladder read. ``None`` satisfies no threshold.
-    current_objective: float | None
     l1_stall_count: int
     l1_patience: int
-    # How deep the ladder runs. Undefaulted: it decides whether a fire is even reachable, and a
-    # caller that omitted it would have that decision live in an absent argument.
     escalation_ladder: EscalationLadder
-    # Could this round's arms be told apart? ``None`` is "unreadable either way", which is not
-    # "read and told nothing apart".
-    separable: bool | None = None
-    # None until AxisIndex is initialised; the controller counts it (`Escalation.observe`).
+    # ``None`` until AxisIndex is initialised.
     axes_with_positive_yield: int | None = None
-    # A candidate this round dropped a mandatory backend placeholder (e.g. {{combined_text}}).
-    # Structural breakage → immediate L2 re-frame, bypassing l1_patience (the "patience 0" path).
     l1_mandatory_breach: bool = False
-    # l1_generate produced ZERO parseable candidates this round (empty/truncated provider output
-    # or a schema-validation failure — `RoundResult.l1_parse_failure` set). Same class of fault as
-    # a mandatory-placeholder breach: l1_generate's output is structurally unusable, and re-running
-    # the identical optimizer prompt next round reproduces it. Heal L2 now instead of grinding l1_patience
-    # dead rounds. Shares the `l1_generate_unusable` rule; the loud `l1_zero_candidates` round
-    # warning already carries the malformed-vs-tooling detail L2 reads.
     l1_zero_candidates: bool = False
-    # A node failed across ~all of the round's samples (evidence-starvation — accumulated, not
-    # one fluke). A weak preemptor brings L2 in to diagnose; L2 self-heals or requests human
-    # action. It NEVER stops the loop here — the stop authority stays with the LLM tier.
+    # NEVER stops the loop here: the stop authority stays with the LLM tier.
     evidence_starved: bool = False
 
 
-PredicateFn = Callable[[EscalationInputs], bool]
+@dataclass(frozen=True)
+class LadderInputs:
+    escalation_ladder: EscalationLadder
+    l2_stall_count: int
+    l2_patience: int
+    l3_stall_count: int
+    l3_patience: int | None
+    l1_layout_refused: bool = False
 
 
 @dataclass(frozen=True)
-class EscalationRule:
-    """Declarative rule; evaluated highest-priority first, first match wins.
-    Fall-through = low-priority + ``when=lambda s: True``."""
-
+class EscalationRule[S]:
     name: str
-    when: PredicateFn
+    when: Callable[[S], bool]
     fire: NextAction
     priority: int = 0
 
 
-# objective_exhausted preempts so a round with nothing left to win terminates instead of firing L2.
-#   It reads the OBJECTIVE because that is what elects a round: where the objective prices tokens,
-#   100% correct at 3x the tokens is no ceiling and the search still has somewhere to go. And a
-#   ceiling only counts if the round RESOLVED — unresolved falls through to the patience rules,
-#   which is what an unresolved round is;
-# l1_generate_unusable preempts patience — l1_generate's output is structurally unusable this
-#   round (a dropped mandatory placeholder OR zero parseable candidates), a fault no amount of
-#   patience fixes because the identical optimizer prompt reproduces it; heal L2 now;
-# l1_evidence_starved preempts patience — a node starved across ~all samples is accumulated
-#   evidence of a systemic fault no L1 param move can fix; bring L2 in to diagnose (it never stops);
-# l2_axis_yield_drought preempts patience when AxisIndex shows no productive axes;
-# l1_only_ladder preempts every FIRE_L2 rule below it — the L1-only ablation arm, where a stall
-#   is simply another L1 round. It sits UNDER objective_exhausted because an arm that spent the
-#   objective still has nothing left to search;
-# l1_patience=0 collapses "fire L2 every round" via the l1_to_l2 fall-through.
-DEFAULT_ESCALATION_RULES: list[EscalationRule] = [
-    EscalationRule(
-        name="objective_exhausted",
-        when=lambda s: (
-            s.current_objective is not None and s.current_objective >= 1.0 and s.separable is True
-        ),
-        fire=NextAction.STOP_PERFECT,
-        priority=100,
-    ),
+# Every rule above `l1_continue` preempts patience; `l1_only_ladder` preempts every FIRE_L2 below it.
+DEFAULT_ESCALATION_RULES: list[EscalationRule[EscalationInputs]] = [
     EscalationRule(
         name="l1_only_ladder",
         when=lambda s: not s.escalation_ladder.fires_l2,
@@ -132,21 +119,82 @@ DEFAULT_ESCALATION_RULES: list[EscalationRule] = [
 ]
 
 
-def decide_escalation(inputs: EscalationInputs) -> EscalationEvent:
-    """Post-round router: priority-sort, first match wins, pure."""
-    for rule in sorted(DEFAULT_ESCALATION_RULES, key=lambda r: -r.priority):
+L2_PATIENCE_SPENT = "l2_patience_spent"
+L1_LAYOUT_REFUSED = "l1_layout_refused"
+
+CLIMB_RULES: list[EscalationRule[LadderInputs]] = [
+    EscalationRule(
+        name="l2_within_patience",
+        when=lambda s: not s.escalation_ladder.fires_l3 or s.l2_stall_count < s.l2_patience,
+        fire=NextAction.FIRE_L2,
+        priority=30,
+    ),
+    EscalationRule(
+        name=L2_PATIENCE_SPENT,
+        when=lambda s: s.l3_patience is None or s.l3_stall_count < s.l3_patience,
+        fire=NextAction.FIRE_L3,
+        priority=20,
+    ),
+    EscalationRule(
+        name="l3_patience_spent",
+        when=lambda s: True,
+        fire=NextAction.STOP_L3_PATIENCE,
+        priority=10,
+    ),
+]
+
+HEAL_RULES: list[EscalationRule[LadderInputs]] = [
+    EscalationRule(
+        name=L1_LAYOUT_REFUSED,
+        when=lambda s: s.escalation_ladder.fires_l3 and s.l1_layout_refused,
+        fire=NextAction.FIRE_L3,
+        priority=20,
+    ),
+    EscalationRule(
+        name="l2_landed",
+        when=lambda s: True,
+        fire=NextAction.CONTINUE,
+        priority=10,
+    ),
+]
+
+
+def _first_match[S](rules: list[EscalationRule[S]], inputs: S) -> EscalationEvent:
+    for rule in sorted(rules, key=lambda r: -r.priority):
         if rule.when(inputs):
             return EscalationEvent(next_action=rule.fire, rule=rule.name)
     raise RuntimeError(
-        "No escalation rule matched observe_round inputs "
-        f"(rules={[r.name for r in DEFAULT_ESCALATION_RULES]}); "
+        f"No escalation rule matched (rules={[r.name for r in rules]}); "
         "the rule set must include a fall-through with priority < all conditional rules."
     )
 
 
+def decide_escalation(inputs: EscalationInputs) -> EscalationEvent:
+    return _first_match(DEFAULT_ESCALATION_RULES, inputs)
+
+
+def decide_climb(inputs: LadderInputs) -> EscalationEvent:
+    return _first_match(CLIMB_RULES, inputs)
+
+
+def decide_heal(inputs: LadderInputs) -> EscalationEvent:
+    return _first_match(HEAL_RULES, inputs)
+
+
 __all__ = [
+    "CLIMB_RULES",
     "DEFAULT_ESCALATION_RULES",
+    "HEAL_RULES",
+    "L1_LAYOUT_REFUSED",
+    "L2_PATIENCE_SPENT",
+    "NEXT_ACTION_STOP",
+    "NEXT_ACTION_WALK",
+    "EscalationEvent",
     "EscalationInputs",
     "EscalationRule",
+    "LadderInputs",
+    "NextAction",
+    "decide_climb",
     "decide_escalation",
+    "decide_heal",
 ]

@@ -1,17 +1,12 @@
-"""The REJECT posture over ``l1_generate``'s output: every check here answers a ``ValidatorOutcome``
-that routes back up as a ``ValidationFailure`` and the layer heals (`../CLAUDE.md` § A validator
-either REJECTS or SCORES). Deterministic twins of constraints the emitted schema already declares —
-both layers run because not every provider enforces structured output with full fidelity.
-
-The schema those constraints are declared in is emitted one package over
-(`dispatch/l1_wire_schema.py`); the round-local collapse gates that reject a candidate without
-consulting the schema at all are `l1_invariants.py`."""
+"""Twins of constraints the wire schema declares: not every provider enforces structured output."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application import optimizers
+from promptpotter.application.bench.children import DROPPED_MANDATORY_PLACEHOLDER
 from promptpotter.application.optimizers.potter.dispatch import prompts as _opt_prompts
 from promptpotter.application.optimizers.potter.dispatch.layout import (
     NODE_LAYOUTS,
@@ -19,10 +14,10 @@ from promptpotter.application.optimizers.potter.dispatch.layout import (
 )
 from promptpotter.application.pipeline_resolve import missing_template_vars
 from promptpotter.config.prompt_blocks import prompt_blocks
-from promptpotter.domain.opt_search_point import TEMPLATE_TOKEN_RE, OptSearchPoint, PromptTemplate
+from promptpotter.domain.opt_search_point import TEMPLATE_TOKEN_RE, PromptTemplate
 from promptpotter.domain.pipeline_overlay import node_config_items
-from promptpotter.domain.pipeline_schema import SCHEMA_OWNED_FIELDS, PipelineSchema
-from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS, WHO_ANSWERS_KEYS
+from promptpotter.domain.pipeline_schema import PipelineSchema
+from promptpotter.domain.search_point import WHO_ANSWERS_KEYS
 from promptpotter.domain.validators import LLMOutputValidator, ValidatorOutcome
 from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure
 
@@ -31,164 +26,15 @@ if TYPE_CHECKING:
     from promptpotter.application.optimizers.potter.knobs import PromptBlockCatalogue
 
 __all__ = [
-    "DROPPED_MANDATORY_PLACEHOLDER",
     "L1_CONFIG_NOT_IN_RUNTIME_FAILURES",
     "L1_INNER_LAYOUT_APPLIES",
+    "L1_INNER_PLACEHOLDERS_INTACT",
     "L1_INNER_STEER_IS_LEGAL",
     "L1_PROMPT_BLOCKS_IN_LIBRARY",
     "L1_PROMPT_FIELDS_OPEN",
     "L1_PROMPT_FIELD_NOT_GUTTED",
-    "L1_PROMPT_PLACEHOLDERS_INTACT",
-    "L1_SCHEMA_COMPLIANCE",
     "L1_SHOTS_IN_DEMO_POOL",
-    "validate_overrides",
 ]
-
-# A dropped mandatory backend placeholder is structural, not a tunable miss, so it fires L2 at
-# patience 0. One name for the validator below and `members.py::Escalation.observe`, which reads it.
-DROPPED_MANDATORY_PLACEHOLDER = "dropped_mandatory_placeholder"
-
-
-_JSON_TYPE_TO_PY: dict[str, tuple[type, ...]] = {
-    "string": (str,),
-    "integer": (int,),
-    "number": (int, float),
-    "boolean": (bool,),
-    "object": (dict,),
-    "array": (list,),
-}
-
-
-def _matches_declared_type(value: Any, declared: str) -> bool:
-    py_types = _JSON_TYPE_TO_PY.get(declared)
-    if py_types is None:
-        return True  # type we don't model → unconstrained here (schema gates structure)
-    # JSON Schema: booleans are NOT integers/numbers, even though Python
-    # says `isinstance(True, int)`. Treat bool as exclusive to "boolean".
-    if isinstance(value, bool):
-        return declared == "boolean"
-    return isinstance(value, py_types)
-
-
-def validate_overrides(
-    pipeline_overlay: dict[str, dict[str, Any]],
-    pipeline_schema: PipelineSchema,
-) -> list[ValidationFailure]:
-    """The deterministic twin of the emitted schema's constraints: both layers run because not
-    every provider enforces structured output with full fidelity."""
-    failures: list[ValidationFailure] = []
-    emittable = pipeline_schema.node_param_keys()
-    for node_name, node_params in pipeline_overlay.items():
-        if not isinstance(node_params, dict):
-            continue
-        node = pipeline_schema.get_node(node_name)
-        if node is None:
-            # L1 named a node absent from the active schema. The wire schema declares the
-            # node-name properties + ``additionalProperties: false``, but the client sends
-            # ``strict=False``, so the provider is never FORCED to honour them — this is the
-            # deterministic backstop. ``merge_pipeline_params`` drops nodes outside
-            # ``active_steps``, so recording it ROUTES the signal without changing what runs,
-            # and it is NON-FATAL (the reason-aware synthetic-0 gate in
-            # ``runner/measurement.py`` lets the candidate's real edits score) and rides
-            # ``l1_wounds``. The node-name twin of ``validate_l1_layout``'s
-            # unknown-placeholder wound.
-            failures.append(
-                ValidationFailure(
-                    axis=node_name,
-                    value=node_name,
-                    allowed=sorted(pipeline_schema.active_steps),
-                    reason="hallucinated_node",
-                )
-            )
-            continue
-        node_types = node.param_types
-        node_emittable = emittable.get(node_name, set())
-        for param, value in node_params.items():
-            if param in SCHEMA_OWNED_FIELDS or param in PARAM_FORBIDDEN_KEYS:
-                failures.append(
-                    ValidationFailure(
-                        axis=f"{node_name}.{param}",
-                        value=str(value),
-                        allowed=[],
-                        reason="forbidden_axis",
-                    )
-                )
-                continue
-            # After the forbidden axes, so a leaked `provider` keeps its specific reason.
-            if param not in node_emittable:
-                failures.append(
-                    ValidationFailure(
-                        axis=f"{node_name}.{param}",
-                        value=str(value),
-                        allowed=sorted(node_emittable),
-                        reason="unknown_param",
-                    )
-                )
-                continue
-            declared_type = node_types.get(param)
-            if (
-                declared_type
-                and value is not None
-                and not _matches_declared_type(value, declared_type)
-            ):
-                failures.append(
-                    ValidationFailure(
-                        axis=f"{node_name}.{param}",
-                        value=f"{value!r} ({type(value).__name__})",
-                        allowed=[declared_type],
-                        reason="type_mismatch",
-                    )
-                )
-                continue
-            # Judged against the model THIS candidate would run on — its own proposal where it
-            # moved one, else the inherited pick, because the two axes move together. `allowed is
-            # not None`, never truthiness: `[]` is a declared axis with nothing legal left.
-            proposed = node_params.get("model")
-            allowed = pipeline_schema.param_options(
-                node, param, model=proposed if isinstance(proposed, str) else None
-            )
-            if allowed is not None and value is not None and value not in allowed:
-                # Three facts, three reasons: no such model, a value the node never declared, and
-                # one the node declared that this model will not take.
-                declared = node.param_allowed_values.get(param) or ()
-                failures.append(
-                    ValidationFailure(
-                        axis=f"{node_name}.{param}",
-                        value=str(value),
-                        allowed=list(allowed),
-                        reason=(
-                            "not_in_available_models"
-                            if param == "model"
-                            else "not_accepted_by_model"
-                            if value in declared
-                            else "not_in_param_allowed_values"
-                        ),
-                    )
-                )
-    return failures
-
-
-def _check_l1_schema_compliance(
-    source_output: dict[str, dict[str, Any]],
-    *,
-    pipeline_schema: PipelineSchema,
-    **_: Any,
-) -> ValidatorOutcome | None:
-    if not source_output or not pipeline_schema:
-        return None
-    failures = validate_overrides(source_output, pipeline_schema)
-    if not failures:
-        return None
-    return ValidatorOutcome(
-        validator_id=L1_SCHEMA_COMPLIANCE.id,
-        evidence={"failures": failures},
-    )
-
-
-L1_SCHEMA_COMPLIANCE: LLMOutputValidator = LLMOutputValidator(
-    id="l1_schema_compliance",
-    check=_check_l1_schema_compliance,
-)
 
 
 def _check_l1_prompt_blocks_in_library(
@@ -197,8 +43,7 @@ def _check_l1_prompt_blocks_in_library(
     prompt_block_catalogue: PromptBlockCatalogue,
     **_: Any,
 ) -> ValidatorOutcome | None:
-    """Reads the candidate's prompt DELTA (``candidate_delta``), not the resulting OSP: the parent's
-    fields are the dataset's authored origin, so checking the merge rejects every round-1 candidate."""
+    """Reads the DELTA: the parent's fields are the authored origin, so the merge rejects every round-1 arm."""
     if prompt_block_catalogue != "restrict" or not source_output:
         return None
     library = prompt_blocks()
@@ -234,8 +79,6 @@ def _check_l1_prompt_fields_open(
     pipeline_schema: PipelineSchema,
     **_: Any,
 ) -> ValidatorOutcome | None:
-    """The twin of the wire slot, which offers only ``open_prompt_fields()``: a field the campaign
-    HELD is the operator's, and a proposal rewriting it is rejected rather than scored."""
     prompt_nodes = pipeline_schema.prompt_node_names()
     if not source_output or not prompt_nodes:
         return None
@@ -271,8 +114,7 @@ def _check_l1_shots_in_demo_pool(
     k_max: int,
     **_: Any,
 ) -> ValidatorOutcome | None:
-    """Reads a variant's NEW shot list, never an inherited one. An id outside the demo pool is a
-    scored row — the search's or the bench's — pasted into the prompt as a worked answer."""
+    """An id outside the demo pool is a SCORED row pasted into the prompt as a worked answer."""
     shots: list[int] = source_output["shot_ids"]
     failures = [
         ValidationFailure(axis="shot_ids", value=str(i), allowed=[], reason="shot_not_in_demo_pool")
@@ -313,13 +155,7 @@ def _check_l1_config_in_runtime_failures(
     pipeline_params: Mapping[str, Any] | None = None,
     **_: Any,
 ) -> ValidatorOutcome | None:
-    """Reads the CYCLE's runtime wounds, which sibling-fork inheritance populates from prior
-    cycles' terminal wounds, so this fires even on round 1 of a fresh fork.
-
-    A wound convicts a ``(responder, param, value)``, never a value on its own — keyed on the value
-    alone it strikes legal cells out of the search, since one endpoint's 400 says nothing about the
-    next model's. ``WHO_ANSWERS_KEYS`` is the responder identity the wound PANEL already filters on
-    (``injections/wounds.py``), so enforcement and prose convict the same thing."""
+    """A wound convicts a ``(responder, param, value)``: one endpoint's 400 says nothing of the next model's."""
     failures_list = list(runtime_failures)
     if not source_output or not failures_list:
         return None
@@ -365,8 +201,7 @@ L1_CONFIG_NOT_IN_RUNTIME_FAILURES: LLMOutputValidator = LLMOutputValidator(
 def _optimizer_template_failures(
     pipeline_params: dict[str, Any], inner: SelectedOptimizer
 ) -> list[ValidationFailure]:
-    """PERMANENT, not transitional: these ports sit mid-sentence, so they can never move to the
-    layout channel. Checks the MERGED params — a child inherits token-less prose without re-proposing it."""
+    """Checks the MERGED params: a child inherits token-less prose without re-proposing it."""
     failures: list[ValidationFailure] = []
     for node_name, cfg in node_config_items(pipeline_params):
         prose = {
@@ -392,59 +227,31 @@ def _optimizer_template_failures(
     return failures
 
 
-def _check_l1_prompt_placeholders_intact(
+def _check_l1_inner_placeholders_intact(
     source_output: Mapping[str, Any],
     *,
     inner_optimizer: SelectedOptimizer | None,
-    opt_sp: OptSearchPoint | None = None,
-    pipeline_schema: PipelineSchema | None = None,
     **_: Any,
 ) -> ValidatorOutcome | None:
-    """A mutation may DEGRADE what flows through a channel (measurable — the proxy goes negative),
-    never delete the channel itself (unmeasurable). Mint's ``missing_template_vars`` in-loop twin."""
-    if opt_sp is None or pipeline_schema is None:
+    if not isinstance(source_output, dict) or inner_optimizer is None:
         return None
-    failures: list[ValidationFailure] = []
-    prompt_nodes = pipeline_schema.prompt_node_names()
-    if prompt_nodes:
-        node = pipeline_schema.get_node(prompt_nodes[0])
-        if node is not None and node.prompt_info is not None:
-            declared = node.prompt_info.template_variables
-            missing = missing_template_vars(opt_sp.render(), declared) if declared else []
-            if missing:
-                failures.append(
-                    ValidationFailure(
-                        axis=f"{prompt_nodes[0]}.prompt",
-                        value="dropped:" + ",".join(missing),
-                        allowed=list(declared),
-                        reason=DROPPED_MANDATORY_PLACEHOLDER,
-                    )
-                )
-    if isinstance(source_output, dict) and inner_optimizer is not None:
-        failures.extend(_optimizer_template_failures(source_output, inner_optimizer))
+    failures = _optimizer_template_failures(source_output, inner_optimizer)
     if not failures:
         return None
     return ValidatorOutcome(
-        validator_id=L1_PROMPT_PLACEHOLDERS_INTACT.id,
+        validator_id=L1_INNER_PLACEHOLDERS_INTACT.id,
         evidence={"failures": failures},
     )
 
 
-L1_PROMPT_PLACEHOLDERS_INTACT: LLMOutputValidator = LLMOutputValidator(
-    id="l1_prompt_placeholders_intact",
-    check=_check_l1_prompt_placeholders_intact,
+L1_INNER_PLACEHOLDERS_INTACT: LLMOutputValidator = LLMOutputValidator(
+    id="l1_inner_placeholders_intact",
+    check=_check_l1_inner_placeholders_intact,
 )
 
 
-# The steers an L4 override may not make, as (reason, phrases). PHRASE lists, and deliberately not
-# token lists: the thing being matched is free prose an LLM wrote, so there is no typed predicate to
-# ask instead, and single tokens misfire on legitimate steers — "stop proposing the same axis in
-# consecutive rounds" is exactly the edit this loop wants and carries both a stop word and a round
-# word. A table rather than a validator apiece because the finding is one finding: the override
-# reached outside the inner node's own level or its own job, and each new family is a row.
+# PHRASES, never tokens: "stop proposing the same axis in consecutive rounds" is a legal steer.
 _FORBIDDEN_INNER_STEERS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    # Ends the loop instead of searching it better. Every entry names the loop itself as the
-    # thing being ended, so a stop word aimed at anything smaller passes.
     (
         "steers_inner_stopping",
         (
@@ -469,11 +276,7 @@ _FORBIDDEN_INNER_STEERS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "stop iterating",
         ),
     ),
-    # Reasons one level up from where it runs. A seed IS one whole inner run, so an inner node can
-    # no more iterate seeds than it can iterate tokens: the quantifier names a collection that
-    # exists only in the OUTER loop's view, and the rule is inert wherever the edit is pasted.
-    # Quantified forms only — the bare word "seed" is legitimate prose one level up and in
-    # "seed prompt", and matching it would convict the sentence that explains the level.
+    # Quantified forms only: a seed IS one whole inner run, and bare "seed" is legal ("seed prompt").
     (
         "steers_across_seeds",
         (
@@ -497,26 +300,7 @@ def _check_l1_inner_steer_is_legal(
     inner_optimizer: SelectedOptimizer | None,
     **_: Any,
 ) -> ValidatorOutcome | None:
-    """An edit may make the inner loop search BETTER or WORSE — measurable either way. It may not
-    change how many rounds that loop runs, nor address a level the node it lands in cannot see;
-    neither is a search move at all.
-
-    Stopping: ``mean_round_delta`` is the mean improvement ACROSS the inner rounds, so a prompt that
-    stops the loop as soon as gains thin scores higher by dropping the flat tail out of the average
-    — with no better search behind it. That is the measurand's denominator being edited rather than
-    the thing it measures, and it outscores real work every time. Round budget is the OUTER loop's
-    (``max_rounds`` / ``lives`` / the spend ceiling), the same way ``model`` is the operator's.
-
-    Level: an edit keyed to the seed panel renders nothing one level down, so it costs a candidate
-    and measures the parent. It is not wrong the way a bad hypothesis is wrong — it is unrunnable,
-    which the round has no way to report as anything but a flat result.
-
-    The sibling of ``_check_l1_prompt_placeholders_intact``: that one forbids DELETING a channel,
-    this one forbids writing prose no channel can carry. Reads the DELTA, never the merge — a child
-    inheriting a parent's prose has proposed nothing, and checking the merge would convict it for
-    its ancestor. Scoped to the recursion, whose every prompt override IS an inner optimizer prompt
-    (the L4 identity refuses any other): on an ordinary campaign the same words in a target prompt
-    steer a task rather than a loop, and mean nothing here."""
+    """A prompt that stops the loop early drops the flat tail out of ``mean_round_delta``'s average."""
     if not source_output or inner_optimizer is None:
         return None
     failures: list[ValidationFailure] = []
@@ -552,12 +336,6 @@ L1_INNER_STEER_IS_LEGAL: LLMOutputValidator = LLMOutputValidator(
 )
 
 
-# An override REPLACES its field whole, so a short replacement for a long parent is a deletion
-# of every contract the parent carried — and the generator is told to carry them forward, or to
-# say in `changes_description` what it dropped and why. Nothing can read that prose, so the
-# measurable half is the collapse itself. Both constants are first estimates off the only gutted
-# candidates on disk (two at ~14% of their parent); a genuine tightening lands far above them,
-# and the floor keeps short fields — a 132-char `thinking_style` — out of reach entirely.
 _GUTTABLE_MIN_CHARS = 1000
 _GUT_RATIO = 0.35
 
@@ -565,9 +343,6 @@ _GUT_RATIO = 0.35
 def _parent_field_text(
     inner: SelectedOptimizer, node: str, field: str, pipeline_params: Mapping[str, Any] | None
 ) -> str:
-    """What this field says BEFORE the candidate's edit — the parent's own override where it made
-    one, else *inner*'s template. The same two-step the run resolves, so the length compared
-    against is the text the generator was shown as CURRENT INNER OPTIMIZER PROMPTS."""
     parent = (pipeline_params or {}).get(node)
     if isinstance(parent, Mapping):
         inherited = parent.get(field)
@@ -585,13 +360,7 @@ def _check_l1_prompt_field_not_gutted(
     pipeline_params: Mapping[str, Any] | None = None,
     **_: Any,
 ) -> ValidatorOutcome | None:
-    """Reject a replacement so much shorter than what it replaces that it cannot have carried the
-    parent's contracts forward. Distinct from ``_check_l1_prompt_placeholders_intact``, which
-    catches only the contracts spelled as ``{{slots}}``: everything else an inner optimizer prompt
-    declares — the output shape, the forbidden moves, the evidence it must ground on — is ordinary
-    prose, and deleting it raises nothing and reads as a bold edit.
-
-    Scoped to the recursion and to the DELTA for the same reasons as the steer table above."""
+    """An override REPLACES its field whole, so a short one deletes the contracts the parent's prose carried."""
     if not source_output or inner_optimizer is None:
         return None
     failures: list[ValidationFailure] = []
@@ -632,14 +401,7 @@ def _check_l1_inner_layout_applies(
     source_output: Mapping[str, Any],
     **_: Any,
 ) -> ValidatorOutcome | None:
-    """A layout edit that does not apply is not a weak hypothesis — it is no hypothesis. The inner
-    cycle renders the node's floor, so the arm measures the PARENT's information flow and reports a
-    lever that was never pulled as one that did nothing. Convicting the PROPOSAL is what makes that
-    reportable: the apply site sits inside the inner campaign's own task, below every wound channel,
-    so it could reach a log line and nothing else while the arm paid a full campaign to render the
-    floor. ``resolve_layout_override`` is the ONE derivation, shared with that apply site, so the
-    boundary that rejects and the boundary that renders cannot disagree. Scoped to ``NODE_LAYOUTS``
-    and to the DELTA for the same reasons as the steer table above."""
+    """Convicted on the PROPOSAL: the apply site sits inside the inner task, below every wound channel."""
     if not source_output:
         return None
     failures: list[ValidationFailure] = []
@@ -648,14 +410,14 @@ def _check_l1_inner_layout_applies(
         if spec is None or not isinstance(node_params, dict) or "layout" not in node_params:
             continue
         axis, edit = f"{node_name}.layout", node_params["layout"]
-        if spec.editor != "l4":
-            # `l1_generate`'s layout is L2's in-campaign surface, so an L4 override naming it edits
-            # nothing. Convicted rather than raised: it is a proposal like any other.
+        offered = {n for n in NODE_LAYOUTS if "layout" in optimizers.llm_nodes()[n].outer_levers}
+        if node_name not in offered:
+            # Convicted rather than raised: it is a proposal like any other.
             failures.append(
                 ValidationFailure(
                     axis=axis,
                     value=str(edit)[:80],
-                    allowed=sorted(n for n, s in NODE_LAYOUTS.items() if s.editor == "l4"),
+                    allowed=sorted(offered),
                     reason="layout_node_not_l4_editable",
                 )
             )

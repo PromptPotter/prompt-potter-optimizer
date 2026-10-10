@@ -1,5 +1,3 @@
-"""Mid-round elimination — PoBBCheck (Russo 2016 stop rule)."""
-
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -15,9 +13,8 @@ from promptpotter.application.scoring.selection import (
     paired_p_best,
     priors_covering,
 )
-from promptpotter.config.settings import NO_RESULT
 from promptpotter.domain.results import ArmOutcome
-from promptpotter.domain.scoring import is_answer_collapsed, is_graded
+from promptpotter.domain.scoring import NO_RESULT, is_answer_collapsed
 from promptpotter.domain.validators import StopSignal
 from promptpotter.shared.statistics import discordant_counts
 
@@ -25,30 +22,21 @@ if TYPE_CHECKING:
     from promptpotter.application.optimizers.potter.knobs import PoBBKnobs
     from promptpotter.domain.ruler import DeltaRuler
     from promptpotter.domain.sample import Sample
-    from promptpotter.domain.scoring import QueryMeasurement
+    from promptpotter.domain.scoring import GradedCell
 
 
-def _graded(rows: Iterable[QueryMeasurement]) -> dict[str, float]:
-    """Each cell's grade; a row carrying no verdict carries no outcome for the θ fit."""
-    return {
-        str(sid): graded_response(r)
-        for r in rows
-        if (sid := r.get("sample_id")) is not None and is_graded(r)
-    }
+def _graded(cells: Iterable[GradedCell]) -> dict[int, float]:
+    return {cell.ruler_key: graded_response(cell) for cell in cells if cell.scored}
 
 
 class EliminationGate(StrEnum):
-    """WHICH gate stopped the candidate, named here because only the producer knows: re-derived
-    downstream from whichever keys survived, a collapse cut reads as an ε cut. These are the
-    mask's abort contributors."""
+    """Named by the producer: re-derived downstream from whichever keys survived, a collapse cut reads as an ε cut."""
 
-    EPSILON = "epsilon"  # posterior fell below ε — measurement stopped, NOT a verdict
-    LOCK_IN = "lock_in"  # the opposite verdict: far enough ahead to stop buying
-    COLLAPSED = "collapsed"  # one label for every sample — the ABSENCE of a measurement
+    EPSILON = "epsilon"  # measurement stopped, NOT a verdict
+    LOCK_IN = "lock_in"
+    COLLAPSED = "collapsed"  # the ABSENCE of a measurement
 
 
-# The operator's word for switching one gate off, keyed by the `abort:` lens variant
-# (`ABORT_LENS_SUPPRESS` below, derived from the same enum).
 ABORT_LENS_LABELS: dict[str, str] = {
     f"{EliminationGate.EPSILON.value}_off": "No ε-elimination",
     f"{EliminationGate.LOCK_IN.value}_off": "No lock-in",
@@ -56,18 +44,12 @@ ABORT_LENS_LABELS: dict[str, str] = {
     "all_off": "No early abort",
 }
 
-# Abort-lens variants → the gate(s) each switches off (the mask's abort verdict; see
-# docs/operations/mask-projection.md). DERIVED from `EliminationGate`, so a gate added there is
-# switchable rather than silently unsuppressable.
 ABORT_LENS_SUPPRESS: dict[str, frozenset[str]] = {
     **{f"{g.value}_off": frozenset({g.value}) for g in EliminationGate},
     "all_off": frozenset(g.value for g in EliminationGate),
 }
 
-# The picklist the browser offers must be exactly what `mask/tree_lens.py` accepts. A LABEL cannot be
-# derived — it is copy — so the key set is asserted instead: the browser's options are emitted
-# from `ABORT_LENS_LABELS` by `scripts/build_ts_types.py`, and a gate without a word for it would
-# otherwise be served and unofferable.
+# The browser's picklist is emitted from the labels and must be exactly what `mask/tree_lens.py` accepts.
 assert set(ABORT_LENS_LABELS) == set(ABORT_LENS_SUPPRESS), (
     "abort-lens vocabulary drift: "
     f"unlabelled {sorted(set(ABORT_LENS_SUPPRESS) - set(ABORT_LENS_LABELS))}, "
@@ -76,9 +58,7 @@ assert set(ABORT_LENS_LABELS) == set(ABORT_LENS_SUPPRESS), (
 
 
 class EliminationContext(TypedDict, total=False):
-    """PoBB's ``ScoredCandidate.elimination_context`` for an arm it cut or locked. ``gate`` says
-    which of the rest EXIST: a collapse carries the two depths alone, lock-in adds the posterior
-    and the prior that bounds it, and ε its bar."""
+    """``gate`` says which keys EXIST: a collapse carries the two depths alone, lock-in adds posterior and bounding prior, ε its bar."""
 
     gate: EliminationGate
     p_best: float
@@ -92,8 +72,7 @@ class EliminationContext(TypedDict, total=False):
 
 @dataclass(frozen=True)
 class PoBBStop(StopSignal):
-    """``fit`` is the pairing the posterior was read on — what the decision archives and a replay
-    re-fits — and ``None`` on a collapse, which read none."""
+    """``fit`` is the pairing a replay re-fits, and ``None`` on a collapse, which read none."""
 
     check_result: EliminationContext
     fit: PairedPosterior | None
@@ -101,8 +80,7 @@ class PoBBStop(StopSignal):
 
 
 class PoBBCheck:
-    """Paired-sample PoBB stop rule over the priors it is handed, each read on the candidate's
-    exact cells. ``docs/methods/candidate-elimination.md``."""
+    """Each prior is read on the candidate's exact cells; ``docs/methods/candidate-elimination.md``."""
 
     name = "elimination"
 
@@ -114,10 +92,8 @@ class PoBBCheck:
         n_samples: int,
         ruler: DeltaRuler | None,
     ) -> None:
-        # The cycle's FIXED δ ruler — the SAME scale the round-winner election reads, so
-        # elimination θ and election θ agree (``None`` ⇒ flat, where the ruler is still cold).
+        # The SAME δ scale the round-winner election reads; ``None`` ⇒ flat, the ruler still cold.
         self.ruler = ruler
-        # The bench's `elimination_n_min`: the fewest cells an arm is judged on, at either end.
         self.n_min = n_min
         self.epsilon = knobs.epsilon
         self.epsilon_floor = knobs.epsilon_floor
@@ -126,9 +102,8 @@ class PoBBCheck:
         self.epsilon_elimination = knobs.epsilon_elimination
         self.leader_lock_in = knobs.leader_lock_in
         self.n_samples = n_samples
-        # Each prior's GRADED response per cell, in the order the priors joined: on a graded
-        # backend a binarized hit is degenerate, so the θ fit reads the grade itself.
-        self.priors_by_sample: dict[str, dict[str, float]] = {}
+        # The GRADED response, never a binarized hit, which is degenerate on a graded backend.
+        self.priors_by_sample: dict[str, dict[int, float]] = {}
         self._current_id: str = ""
         self._on_snapshot: Callable[[RaceSnapshot], None] | None = None
 
@@ -144,39 +119,23 @@ class PoBBCheck:
         self._current_id = candidate_id
         self._on_snapshot = on_snapshot
 
-    def register_completed(self, results: Iterable[QueryMeasurement], *, candidate_id: str) -> None:
+    def register_completed(self, results: Iterable[GradedCell], *, candidate_id: str) -> None:
         self.priors_by_sample[candidate_id] = _graded(results)
 
-    def extend_prior(self, candidate_id: str, rows: Iterable[QueryMeasurement]) -> None:
+    def extend_prior(self, candidate_id: str, rows: Iterable[GradedCell]) -> None:
         self.priors_by_sample[candidate_id].update(_graded(rows))
 
     def epsilon_at(self, n: int) -> float:
-        """The ε bar at depth *n*: ``epsilon_floor`` at ``n_min``, ramping linearly up to
-        ``epsilon`` over the next ``n_min`` cells and holding it to the end — flat wherever the
-        floor is not below ``epsilon``, so a config that sets neither eliminates on one scalar."""
         if self.epsilon <= self.epsilon_floor:
             return self.epsilon
         scale = min(1.0, max(0.0, (n - self.n_min) / max(self.n_min, 1)))
         return self.epsilon_floor + (self.epsilon - self.epsilon_floor) * scale
 
-    def check(self, results: list[QueryMeasurement]) -> StopSignal | None:
+    def check(self, results: Sequence[GradedCell]) -> StopSignal | None:
         n = len(results)
         if n < self.n_min:
             return None
-        # A constant answerer is cut HERE, not at the election. ``is_answer_collapsed`` is the
-        # absence of a measurement, not a low score, and the two are not interchangeable: an arm
-        # answering one label to everything scores whatever share of the subset carries that
-        # label — on a three-way task that can sit near 0.33, comfortably above the ε floor — so
-        # the posterior never fires and the arm measures its full budget before ``l1_score``
-        # drops it from ``electable`` anyway. Measured live 2026-07-28: an arm answering
-        # "Uncertain" 12/12 against 6 TRUE / 6 FALSE spent twelve samples to establish something
-        # the fourth had already shown. Asking the question at ``n_min`` (the same evidence floor
-        # the posterior waits for — no second constant, and by then a genuine reasoner emitting
-        # one label while truths vary is unlikely) turns it into what a human does: see a
-        # candidate that has stopped answering the question, and move on.
-        #
-        # The collapse is still CHARGED, not hidden — the arm keeps its rows, so
-        # the outer loop sees it structurally, via elimination rather than a graded charge.
+        # Cut HERE, not by the posterior: one label for everything can score above the ε floor.
         if is_answer_collapsed(results):
             return PoBBStop(
                 self.name,
@@ -192,18 +151,13 @@ class PoBBCheck:
         fit = paired_p_best(results, self.priors_by_sample, self.ruler)
         if fit is None:
             return None
-        # The prior the minimum is read against — the same metric the round-winner election
-        # ranks by, taken over every prior the arm is paired with.
         leader_id = min(fit.p_better, key=lambda k: fit.p_better[k])
 
         paired_breakdown: dict[str, dict[str, float]] = {
             pid: {
                 "p_better": float(p_better),
-                # The graded cells the fit read, never `n`: `n` counts errored rows too and rides
-                # the snapshot as `n_samples`.
+                # The graded cells the fit read, never `n`, which counts errored rows too.
                 "n_paired": float(len(fit.cells)),
-                # Concordant cells cannot say which arm is better, so this is the width
-                # `p_better` was entitled to, beside the width it was measured over.
                 "n_discordant": float(sum(discordant_counts(fit.grades, fit.priors[pid]))),
             }
             for pid, p_better in fit.p_better.items()
@@ -228,14 +182,12 @@ class PoBBCheck:
             "total_queries": self.n_samples,
             "n_priors": len(fit.priors),
         }
-        # Leader lock-in: stop measuring when P(cand > every prior) ≥ lock_in.
         if self.leader_lock_in and n >= self.lock_in_n_min and fit.p_best >= self.lock_in:
             return PoBBStop(
                 self.name, ArmOutcome.LOCKED_IN, context, fit=fit, paired_breakdown=paired_breakdown
             )
 
-        # ε is the ONLY futility gate and tests the bar adoption does: the priors include the
-        # round's parent (`potter/race.py`), and crowning needs a strictly positive θ lift over it.
+        # ε is the ONLY futility gate; the priors include the round's parent (`potter/race.py`).
         bar = self.epsilon_at(n)
         if not self.epsilon_elimination or fit.p_best >= bar:
             return None
@@ -249,36 +201,29 @@ class PoBBCheck:
 
     def earliest_stop(
         self,
-        results: list[QueryMeasurement],
-        upcoming: Sequence[tuple[Sample, QueryMeasurement | None]],
+        results: Sequence[GradedCell],
+        upcoming: Sequence[tuple[Sample, GradedCell | None]],
         *,
-        unresolved: Mapping[str, Iterable[QueryMeasurement]] | None = None,
+        unresolved: Mapping[str, Iterable[GradedCell]] | None = None,
     ) -> int | None:
-        """Each gate of :meth:`check`, asked of every completion at once. Priors already short of a
-        measured cell stay out, as they do there: the backfill that could cover it has run.
-        ``unresolved`` are candidates ahead of this one still being walked, with the rows each has
-        back so far. Each may yet become a prior or never become one, so it is graded where its
-        rows say and anything anywhere else, and never counted on."""
-        measured = [r for r in results if is_graded(r)]
-        grades = {int(r.get("sample_id", 0)): graded_response(r) for r in measured}
+        """An ``unresolved`` candidate may never become a prior: graded where its rows say, anything elsewhere, never counted on."""
+        measured = [cell for cell in results if cell.scored]
+        grades = _graded(measured)
         cells = list(grades)
-        said = {str(r.get("predicted") or "") for r in measured}
-        priors = {
-            pid: {int(s): g for s, g in held.items()}
-            for pid, held in priors_covering(self.priors_by_sample, [str(s) for s in cells]).items()
-        }
+        said = {cell.facts.predicted for cell in measured}
+        priors = priors_covering(self.priors_by_sample, cells)
         pending = {
-            pid: {int(s): g for s, g in _graded(rows).items()}
+            pid: _graded(rows)
             for pid, rows in (unresolved or {}).items()
             if pid not in self.priors_by_sample
         }
         priors.update(pending)
         for m, (sample, row) in enumerate(upcoming, start=len(results) + 1):
-            if row is None or is_graded(row):
+            if row is None or row.scored:
                 cells.append(sample.id)
-            if row is not None and is_graded(row):
+            if row is not None and row.scored:
                 grades[sample.id] = graded_response(row)
-                said.add(str(row.get("predicted") or ""))
+                said.add(row.facts.predicted)
             if m < self.n_min:
                 continue
             # Collapse needs one answer everywhere; a second, or an empty one, rules it out for good.

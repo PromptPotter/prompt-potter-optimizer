@@ -1,14 +1,12 @@
-"""Potter's half of resume and fork: how each of its decision kinds is gated and re-derived, what
-its nodes were handed per round, and re-distilling the critique a repair left stale. The generic
-half — replay, repair, fork — is ``bench/resume_and_fork/``, which reaches this only
-through ``OptimizerRuntime``."""
+"""Potter's half of resume and fork; the generic half, ``bench/resume_and_fork/``, reaches it only through ``OptimizerRuntime``."""
 
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.bench.resume_and_fork.decisions import GatingMode
+from promptpotter.application.bench.node_context import NodeContext
+from promptpotter.application.optimizers.nodes import RoundContext
 from promptpotter.application.optimizers.potter.dispatch.facade import build_bundle, node_packages
 from promptpotter.application.optimizers.potter.l1.critique import run_l1_critique
 from promptpotter.application.optimizers.potter.pobb.checks import EliminationGate
@@ -17,9 +15,13 @@ from promptpotter.application.optimizers.potter.records import (
     PotterRoundState,
 )
 from promptpotter.application.optimizers.potter.state import potter_state
-from promptpotter.application.scoring.selection import elect_round_winner, paired_p_best
-from promptpotter.domain.run_records import CheckpointKind
-from promptpotter.domain.scoring import is_answer_collapsed
+from promptpotter.application.run_observers import RunCallbacks
+from promptpotter.application.scoring.selection import (
+    elect_round_winner,
+    paired_p_best,
+    recorded_parent,
+)
+from promptpotter.domain.scoring import NO_CELLS, is_answer_collapsed
 from promptpotter.infrastructure.llm.telemetry import reset_current_round, set_current_round
 from promptpotter.shared.errors import graceful
 
@@ -32,34 +34,19 @@ if TYPE_CHECKING:
     from promptpotter.application.optimizers.potter.state import PotterState
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.results import RoundResult
-    from promptpotter.domain.scoring import QueryMeasurement
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["POTTER_CHECKPOINT_GATING", "POTTER_REPLAYERS", "rederive_critiques", "round_packages"]
-
-
-POTTER_CHECKPOINT_GATING: dict[CheckpointKind, GatingMode] = {
-    PotterCheckpointKind.ROUND_WINNER: GatingMode.REPLAYED,
-    PotterCheckpointKind.ELIMINATION_CUT: GatingMode.REPLAYED,
-    PotterCheckpointKind.LEADER_LOCK_IN: GatingMode.REPLAYED,
-    # A trigger is a fold over the cycle's escalation history, which no replayer holds:
-    # `docs/developer/dispatch-hub.md` § Trigger.
-    PotterCheckpointKind.L2_ESCALATION_TRIGGER: GatingMode.ARCHIVAL,
-    PotterCheckpointKind.L3_ESCALATION_TRIGGER: GatingMode.ARCHIVAL,
-}
+__all__ = ["POTTER_REPLAYERS", "rederive_critiques", "round_packages"]
 
 
 def _replay_round_winner(
     ctx: ReplayContext, inputs_ref: dict[str, Any], data: dict[str, Any]
 ) -> str:
-    """Re-derive the round winner through the SAME ``elect_round_winner`` the live scorer ran, against
-    the SAME parent — READ from the decision, never reconstructed: the rule ranks each arm against
-    the parent panel, so a reconstructed panel re-elects differently under an unchanged scorer."""
+    """The parent is READ from the decision: a reconstructed panel re-elects differently under an unchanged scorer."""
     parent = data.get("parent_cells")
     if parent is None:
-        # Never fall back to a reconstruction — guessing quietly is the defect itself.
         raise ValueError(
             "this ROUND_WINNER decision carries no `parent_cells`, so the panel its election "
             "ranked against is unrecoverable and the winner cannot be re-derived"
@@ -67,13 +54,11 @@ def _replay_round_winner(
     all_results = ctx.round_data.all_candidate_results
     candidate_ids = [str(c) for c in (inputs_ref.get("candidate_ids") or [])]
     coverage_floor = int(inputs_ref["coverage_floor"])
-    # Read, never re-derived: it is a function of the round HISTORY, which this replay does not
-    # hold, so recomputing it is the same defect as reconstructing the parent panel above. A
-    # record missing it RAISES.
+    # `parent_bias` is read, never re-derived: a function of the round HISTORY this replay does not hold.
     winner_id, _ = elect_round_winner(
         candidate_ids,
-        cast("dict[str, list[QueryMeasurement]]", all_results),
-        cast("list[QueryMeasurement]", parent),
+        all_results,
+        recorded_parent(parent),
         coverage_floor,
         ctx.ruler,
         parent_bias=float(inputs_ref["parent_bias"]),
@@ -84,35 +69,28 @@ def _replay_round_winner(
 def _pobb_replay_snapshot(
     ctx: ReplayContext, inputs_ref: dict[str, Any], data: dict[str, Any]
 ) -> float | None:
-    """Re-derive ``p_best`` on the cycle's fixed δ ruler through the pairing the live check ran, over
-    what its decision archived. ``None`` where a cell it fit on is no longer among the arm's rows."""
-    rows = {
-        str(r["sample_id"]): r
-        for r in ctx.round_data.all_candidate_results.get(inputs_ref["candidate_id"]) or []
-    }
-    cells = [str(s) for s in data["candidate_sample_ids"]]
+    """``None`` where a cell the live check fit on is no longer among the arm's rows."""
+    arm = ctx.round_data.all_candidate_results.get(inputs_ref["candidate_id"], NO_CELLS)
+    rows = {cell.ruler_key: cell for cell in arm}
+    cells = [int(s) for s in data["candidate_sample_ids"]]
     if any(cell not in rows for cell in cells):
         return None
-    fit = paired_p_best(
-        cast("list[QueryMeasurement]", [rows[cell] for cell in cells]),
-        data["prior_histories"],
-        ctx.ruler,
-    )
+    priors = {
+        pid: {int(cell): float(grade) for cell, grade in grades.items()}
+        for pid, grades in data["prior_histories"].items()
+    }
+    fit = paired_p_best([rows[cell] for cell in cells], priors, ctx.ruler)
     return None if fit is None else fit.p_best
 
 
 def _replay_elimination_cut(
     ctx: ReplayContext, inputs_ref: dict[str, Any], data: dict[str, Any]
 ) -> bool:
-    """Dispatches on the gate the PRODUCER named, never on the ε rule alone: a collapse cut returns
-    before ``elimination_p_best`` is reached, so it holds no posterior and re-deriving it under ε
-    tests a real ``p_best`` against a bar nobody set — which no collapse can re-derive as true."""
+    """Dispatches on the gate the PRODUCER named: a collapse cut holds no posterior, so ε would test it against a bar nobody set."""
     if inputs_ref.get("gate") == EliminationGate.COLLAPSED:
-        # Re-asked, not re-derived under ε: on a labelled round the answer and its truths decide
-        # it and rescoring touches neither, while a labelless one reads `fitness` — so a formula
-        # that now solves every cell retires the cut, which is the verdict this replay exists for.
+        # Re-asked: a labelless round reads `fitness`, so a formula that now solves every cell retires the cut.
         cid = str(inputs_ref.get("candidate_id", ""))
-        rows = ctx.round_data.all_candidate_results.get(cid) or []
+        rows = ctx.round_data.all_candidate_results.get(cid, NO_CELLS).cells
         return is_answer_collapsed(rows[: int(inputs_ref["queries_scored"])])
     p_best = _pobb_replay_snapshot(ctx, inputs_ref, data)
     if p_best is None:
@@ -132,6 +110,7 @@ def _replay_leader_lock_in(
     return p_best >= float(inputs_ref["lock_in"])
 
 
+# The two escalation triggers are archived: each folds the cycle's escalation history, which no replayer holds.
 POTTER_REPLAYERS: dict[str, Replayer] = {
     PotterCheckpointKind.ROUND_WINNER: _replay_round_winner,
     PotterCheckpointKind.ELIMINATION_CUT: _replay_elimination_cut,
@@ -139,19 +118,22 @@ POTTER_REPLAYERS: dict[str, Replayer] = {
 }
 
 
-def _seat_on(cycle: Cycle, rounds: list[RoundResult], rr: RoundResult) -> PotterState:
-    """Re-seat the cycle where *rr*'s critique read it: on the rounds up to *rr*, *rr* the last."""
+def _seat_on(
+    cycle: Cycle, rounds: list[RoundResult], rr: RoundResult
+) -> tuple[NodeContext[Any], PotterState]:
     cycle.replay_priors([*(p for p in rounds if p.round < rr.round), rr])
-    return potter_state(cycle.working_state)
+    ledger = cycle.session.state.ledger
+    assert ledger is not None, "a resume replays its rounds under the run's observers"
+    seat = RoundContext(cycle=cycle, round_num=rr.round, callbacks=RunCallbacks(ledger=ledger))
+    return NodeContext(seat, "l1_critique"), potter_state(cycle.working_state)
 
 
 def round_packages(cycle: Cycle, rounds: list[RoundResult]) -> dict[int, dict[str, str]]:
-    """``{round: {node: package fingerprint}}``, each rebuilt at ITS OWN point in the run — a bundle
-    carries the cumulative trajectory, so one full rebuild would move round 0's bundle too."""
+    """Each rebuilt at ITS OWN point in the run: a bundle carries the cumulative trajectory, so one full rebuild moves round 0's."""
 
     out: dict[int, dict[str, str]] = {}
     for rr in rounds:
-        out[rr.round] = node_packages(build_bundle(cycle, _seat_on(cycle, rounds, rr)))
+        out[rr.round] = node_packages(build_bundle(*_seat_on(cycle, rounds, rr)))
     cycle.replay_priors(rounds)  # leave the caller the full trajectory it walked in with
     return out
 
@@ -160,25 +142,31 @@ async def rederive_critiques(
     campaign_store: CampaignStore,
     hop: CycleHop,
     cycle: Cycle,
-    drifted: list[RoundResult],
-) -> None:
-    """Re-distil the critique of each round whose package drifted, in place on disk. Measurements and
-    winner untouched, so this is a repair, not a rewind; round 0's comes from the ORIGIN path."""
+    rounds: list[RoundResult],
+    drifted: list[int],
+) -> list[RoundResult]:
+    """A repair, not a rewind: measurements and winner untouched; round 0's comes from the ORIGIN path."""
 
-    saved = list(cycle.rounds)
+    restated = list(rounds)
     try:
-        for rr in drifted:
+        for slot, rr in enumerate(rounds):
             payload = rr.optimizer_state.payload_as(PotterRoundState)
-            if not payload.critique or rr.round == 0:
+            if rr.round not in drifted or not payload.critique or rr.round == 0:
                 continue
-            state = _seat_on(cycle, saved, rr)
-            # `emit_token_usage` stamps from this ContextVar, which outside the round loop
-            # still holds whatever the last round set.
+            seat = _seat_on(cycle, restated, rr)
+            # Outside the round loop this ContextVar still holds whatever the last round set.
             token = set_current_round(rr.round)
             try:
                 with graceful(f"round {rr.round} critique re-derivation failed"):
-                    payload.critique = await run_l1_critique(cycle, state)
-                    campaign_store.save_round_file(hop, rr)
+                    state = rr.optimizer_state.model_copy(
+                        update={
+                            "payload": payload.model_copy(
+                                update={"critique": await run_l1_critique(*seat)}
+                            )
+                        }
+                    )
+                    restated[slot] = rr.model_copy(update={"optimizer_state": state})
+                    campaign_store.restate_optimizer_state(hop, restated[slot])
                     logger.warning(
                         "Round %d critique re-distilled: its input package drifted when the "
                         "round was repaired, so the recorded one described evidence that no "
@@ -188,4 +176,5 @@ async def rederive_critiques(
             finally:
                 reset_current_round(token)
     finally:
-        cycle.replay_priors(saved)
+        cycle.replay_priors(restated)
+    return restated
