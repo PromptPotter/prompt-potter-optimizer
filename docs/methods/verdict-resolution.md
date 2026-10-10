@@ -49,7 +49,7 @@ signal-chased subset and raw accuracy drifts — whoever drew the easier samples
 root instead of patching the symptom downstream.
 
 **Responses are graded, not Bernoulli.** `Observation.response` is the continuous per-sample fitness
-∈ [0,1] — the same score `accuracy` and `paired_fitness` read — never a binarized hit. The logistic
+∈ [0,1] — the same score `accuracy` and a paired lift read — never a binarized hit. The logistic
 MAP maximizes cross-entropy `Σ y·log p + (1−y)·log(1−p)`, valid for any `y ∈ [0,1]`, so a binary
 dataset is bit-identical to the old hit path while a graded backend (reciprocal-rank matching, the
 L4 outer proxy) keeps its gradient instead of collapsing to an all-miss θ where every posterior ties.
@@ -112,8 +112,8 @@ high-water, as its own signal.
 
 **Every one is SERVED as a `ThetaCaveat` member, so the screen and the optimizer's
 `confounds` panel read one verdict rather than each deciding.** Which carrier each rides — the
-round's `AbilityReading.caveat` for the scale states, the candidate row for the 0% floor — is that
-enum's docstring's. A sound round can carry a pinned arm, and a pinned arm can sit on a sound ruler.
+round's `AbilityReading.caveat` for the scale states, the candidate row for the 0% floor — is
+stated on that enum's members. A sound round can carry a pinned arm, and a pinned arm can sit on a sound ruler.
 
 - **The 0% floor** (`floor_pinned`, per-ARM). An arm that misses every cell gives the fit no
   information, so θ pins to the same constant regardless of which samples it saw — every zero arm
@@ -170,7 +170,7 @@ enum's docstring's. A sound round can carry a pinned arm, and a pinned arm can s
   too little simply had no bar. It is a rate, not an ability, so it needs
   no ruler and no adjustment — which is the point: it is what remains readable when the scale
   underneath θ has collapsed. It is REPORT-ONLY and deliberately so; fed to the election it would
-  identify the parent better than the arms it judges. Round documents, `log.md`, `review.md`,
+  identify the parent better than the arms it judges. Round files, `log.md`, `review.md`,
   the round-close terminal line and the candidates chart's `overlap` series all render the same
   reading, under that one name. It does not repair the acquisition — it measures around it.
 - **A ruler HOLE is never graded.** δ=0 is a *position* on the scale rather than a neutral value:
@@ -183,9 +183,11 @@ enum's docstring's. A sound round can carry a pinned arm, and a pinned arm can s
 
 ## What an arm's lift is read against — `lift_reference`
 
-Every arm's `reference_*` numbers — the blocked lift and its interval, the matched floor — and
-the round's `p_value` are read against ONE individual per arm, named by
-`ScoredCandidate.reference_id`, with its rows banked in `RoundResult.reference_results`. Which
+Every arm's `vs_reference` reading — the blocked lift and its interval, the matched floor —
+is read against ONE individual per arm, the reading's side `a`
+(`ScoredCandidate.vs_reference`), with its rows banked in `RoundResult.reference_results`. On a
+HELD round the parent's panel is therefore banked twice, on purpose: deduplicating it is the wrong
+fix, and a repair re-measures the arms, never the bar. Which
 individual is a campaign-level choice, `OptimizationConfig.lift_reference`, and both values run
 under every optimizer so a comparison of the two readings is one knob apart:
 
@@ -207,8 +209,8 @@ under every optimizer so a comparison of the two readings is one knob apart:
 Neither value moves what an optimizer's selector reads: potter elects on θ against the round's
 best-so-far and CAPO keeps its population on its own length-penalised objective, whichever lift is
 reported. What
-moves is every number above. The round's `separable` reads neither: it is the pick's lead over C0
-on the origin panel (`OverlapReading.lead_interval`), and it drives potter's stall ladder. Under `parents`
+moves is every number above. The round's `overlap.advance` reads neither: it is the pick's lead over C0
+on the origin panel (`OverlapReading.lead`), and it drives potter's stall ladder. Under `parents`
 arms read against several individuals leave a sample-set mask no single bar to re-derive
 (`mask/load.py::_parent`), so a masked election there is undecidable rather than guessed.
 
@@ -222,24 +224,33 @@ provisional, and say so rather than passing it on.
 
 - **The bar is a bare point estimate.** `selection.py::elect_round_winner` admits on a raw θ
   lift over the parent above zero — the earned `parent_selection_bias` credit only reorders
-  admitted arms — with no interval and no multiplicity correction — and `runner/round.py::_round_result` sets `improved = bool(winner_id)`. With three arms,
+  admitted arms, and the winner's own selection bias never washes out because `rescore_parent`
+  replays its cached rows — with no interval and no multiplicity correction — and `runner/round.py::_round_result` sets `improved = bool(winner_id)`. With three arms,
   P(at least one positive | every arm identical to the parent) is **0.875 per round**.
 - **Separability is read against C0, not the parent.** One round's interval over its parent
-  spans 0 for almost any real edit at panel width (`separable=True` in 6 of 508 rounds banked
-  under that rule), so `separable` asks whether the round's pick leads C0 on the origin panel by
-  an interval clear of 0 and tops every earlier pick there. It gates the L1 patience reset and is
+  spans 0 for almost any real edit at panel width, so a round closes `advanced` (`domain/results.py::round_advance`) only where
+  its pick leads C0 on the origin panel by an interval clear of 0 and tops every earlier pick
+  there. That one `RoundAdvance` gates the L1 patience reset and is
   the clock a result quotes (`index.json::final.rounds_to_separable`) — it does NOT gate adoption,
-  which stays `improved`. The panel is fixed, so the LEAD accumulates across rounds; its width
-  does not shrink.
-- **The right toolkit exists and is only PARTLY on this path.** `holm_adjusted`,
-  `exact_paired_reading`, `exact_p_floor`, `cells_for_exact_verdict`, `min_detectable_effect`,
-  `panel_precision` are wired to `application/evidence/`, the offline read verb, and to nothing
-  the election calls. One member crossed over: `sign_posterior` bounds the ELIMINATION threshold
+  which stays `improved`. A pick whose owed reading was NOT TAKEN — it failed, was refused, or has not
+  landed — closes `unread`, which neither resets patience nor counts as a stall; only a panel
+  holding no pair to read lets the promotion stand alone (`advanced_unpaired`). The panel is fixed, so the LEAD accumulates across rounds; its
+  width does not shrink.
+- **The right toolkit exists and is only PARTLY on this path.** `holm_adjusted` and `p_floor`
+  reach every pair `application/scoring/paired.py::read_pair` takes — the corrected family, and
+  the floor an exact sign test could reach on the cells that differ. **The floor gates the
+  claim**: a pair's `p_value` is `max(Student-t p, p_floor)`, and its `side` is `spans` wherever
+  `p_floor` is above the spec's `alpha`, whatever the t interval says
+  (`domain/paired_reading.py::interval_side`) — Student-t over a few `{-1, 0, 1}` differences
+  reads below what any exact test on them can, so a round separates only where enough cells
+  differ to carry it. `exact_paired_reading` the `decision-bank` verb, `min_detectable_effect` and `panel_precision`
+  the reads; none reaches anything the election calls. One member crossed over: `sign_posterior` bounds the ELIMINATION threshold
   (`candidate-elimination.md` § The θ rule, step 4), because a bar is absolute and a rank is not.
   The election still ranks on the unbounded posterior, and deliberately — bounding it moved a
   banked crown across a 0.0007 gap.
-- **At the current width it could not pass anyway.** `cells_for_exact_verdict(3) = 7` against a
-  6-cell panel, so no Holm-corrected exact verdict is reachable at α=0.05 at ANY effect size.
+- **At the current width it could not pass anyway.** `exact_p_floor(6) = 0.031` on a 6-cell
+  panel, which Holm across three arms takes to 0.094, so no Holm-corrected exact verdict is
+  reachable at α=0.05 at ANY effect size.
 
 **Why it is still open rather than fixed.** Every number a bar could be designed against predates
 the shared inner ruler (`runner/inner/ruler.py`, below), so redesigning it now would be tuning to
@@ -342,7 +353,10 @@ slots to the cells δ is least sure of, which holds the band open, and `_with_an
 already-anchored cells into the tail until the next ruler extension has enough to equate against.
 Summed, `delta_learning_gain` dominated — an unmeasured sample carries the population `σ_δ`, so
 unmeasured samples outranked measured ones and tied with each other, draining the bank in stored
-order. Cold start → bank-order prefix. The scoring-set floor is `elimination_n_min`.
+order. Term 1 still overstates what a draw buys for ONE arm, because δ is fit across arms; weighting
+it by a cell's own separation history is the obvious repair and ranks at chance on banked rounds —
+the width a round can read is set by how far apart the arms are, not by which cells are drawn.
+Cold start → bank-order prefix. The scoring-set floor is `elimination_n_min`.
 
 **On by default — but warm-gated.** `mechanisms.selection.per_round_resubset` (default `True`):
 while the δ ruler is still cold the subset stays frozen to the campaign-start prefix
@@ -380,8 +394,8 @@ pure-tie kill a handful of extra samples and buys a regression probe inside the 
 `elimination_n_min` window, plus steady loss accrual for regressors.
 
 It is a **pure function** of (parent grades, ruler, sample ids), so a resumed round re-derives the
-identical order with no recorded sidecar. The hard-samples artifact's `pick_score.sample_order` is
-this same order built from the best candidate — the order the engine will actually execute next round.
+identical order with no recorded sidecar. The hard-samples artifact's `round_order` is this same
+function called on the frontier's grades and the cycle's ruler, over the samples the cycle has measured.
 
 **Why static beats adaptive here:** an ability re-fit after every measurement empirically front-loads
 the parent's hit set — the zero-information region, where every early paired comparison TIES, `p_best`
@@ -414,12 +428,23 @@ Beside them, deterministic triage reads each sample's failure streak: **zero-sig
 always-miss) is naturally deprioritized by `p(1−p)→0` with no physical removal; **chronically
 failing** is surfaced to Critique and L2/L3; **intermittent** is kept — it has the discrimination.
 
-The post-evolution fit is rewritten at every round-end finalize into two `hard_samples.json` files,
-one per scope: `campaigns/{id}/cycles/{id}/hard_samples.json` (this cycle's rounds) and
-`campaigns/{id}/hard_samples.json` (those folded with the campaign's archive observations). The
-active scoring set is in-memory only — restored on resume by re-running both mutations against the
-rebuilt observation history. **Dataset scope is never persisted**: it is cross-campaign, so no
-campaign owns it, and `GET /datasets/{name}/cells?scope=dataset` folds it from the archive per request.
+**The hard-sample view fits nothing.** Every round's close rewrites `hard_samples.json`
+(`domain/cells.py::HardSamples`): the cycle's graded cells laid on the cycle's ONE ruler
+(`Cycle.difficulty.ruler`) and the abilities the bench stamped — each arm's `ScoredCandidate.theta`,
+the frontier's `RoundResult.ability`. A δ there is the ruler's δ, and a sample the ruler does not
+carry is served in its `DeltaState` (`domain/ruler.py`) with no δ, no pick score and no `p_hat` —
+never 0.0, which is a position on the scale. There is ONE file,
+`campaigns/{id}/cycles/{id}/hard_samples.json`, and a cycle that has not written one answers with
+its ledger's ruler over no cells. **Campaign scope names the cycle it reads**
+(`application/scoring/cells.py::campaign_scope_cycle`): its cells, δ, sample order and ruler are
+all that one cycle's, served as `CellsResponse.ruler_cycle_id`. Every surface reads the view in one ranking
+(`hard_sample_sorter.py::rank_hard_samples`). The active scoring set is in-memory only — restored
+on resume by re-running both mutations against the rebuilt observation history. **Dataset scope is
+never persisted**: it is cross-campaign, so no campaign owns it, and
+`GET /datasets/{name}/cells?scope=dataset` anchors a ruler per request on the dataset's archived
+cells alone (`bench/difficulty.py::calibrate_delta_ruler`). No θ was read on that anchor, and a
+campaign locking its own adds its origin rows and its partition, so the two ids differ. That scope
+holds no stamped ability, so it serves δ and no pick score, and ranks on difficulty.
 
 ---
 
@@ -432,8 +457,8 @@ campaign owns it, and `GET /datasets/{name}/cells?scope=dataset` folds it from t
 - Between-round subset pick — `intelligence/exploration.py::select_round_subset`, off the LOCKED
   ruler (still **1PL**: feeding graduated discrimination `aₛ` in here is open,
   [`../specs/roadmap.md`](../specs/roadmap.md) § Fitness comparability).
-- Persisted ranking writer — `intelligence/hard_sample_sorter.py::build_hard_samples_artifact_from_observations`,
-  the one caller of the two-term `pick_value`. The between-round pick deliberately does NOT use it
+- Persisted view — `intelligence/hard_sample_sorter.py::build_hard_samples`, the one caller of
+  the two-term `pick_value`; its ranking is `::rank_hard_samples`. The between-round pick deliberately does NOT use it
   (§ The acquisition score — the two terms are spent separately).
 
 ## Phase 2 sketch — origin-relative weighting (not shipped)
@@ -474,7 +499,7 @@ Three things gate it, none of them theory:
 
 **The enabling condition costs nothing and is the only thing that must not be skipped: bank each
 step's term separately.** The parts persist as named keys in `pipeline_data` (archive row + round
-file), compaction moves only fields declared *unread*, and `rescore_results` re-grades archived rows
+file), compaction moves only fields declared *unread*, and `Scorer.grade` re-grades archived rows
 under the current formula — so re-weighting, or fitting a testlet model later, is a **re-read of
 banked data rather than a re-measure**. Collapse to a scalar and discard the parts and that door
 shuts permanently.

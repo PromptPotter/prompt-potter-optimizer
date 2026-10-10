@@ -87,7 +87,9 @@ and records each change to an **identity-zone append-only audit log**
 First instance: a Telegram bot (`promptpotter/presentation/admin_bot.py`) run as a
 systemd service, long-polling `getUpdates`, dropping any update whose `chat.id` is not
 the configured operator's, supporting `/block`, `/unblock`, `/blocked` over the blocklist
-writers in `infrastructure/identity/blocklist.py`.
+writers in `infrastructure/identity/blocklist.py`. The same charter covers the one-shot
+notices the API process fires when an account first exists (`notify_operator`,
+`forward_new_account_to_crm`): outbound-only, best-effort, no inbound door.
 
 This is the most secure option *and* the cheapest to self-host: no Cloudflare Access
 config, no SSH conduit, no exposed endpoint — one systemd unit and three env vars.

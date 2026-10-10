@@ -2,7 +2,7 @@
 
 PromptPotter optimizing **its own optimizer prompts**. The outer cycle is a normal cycle — same loop,
 escalation, PoBB, dashboard — and each outer *sample* runs a whole inner campaign on a pinned benchmark
-seed. Connector `connectors/promptpotter.py`; dataset `datasets/promptpotter-self/`; CLI/headless only.
+seed. Connector `application/runner/inner/connector.py`; dataset `datasets/promptpotter-self/`; CLI/headless only.
 The goal is a **distributable `promptpotter-self`**: an operator runs `new`, watches the optimizer improve
 its own prompts, at bounded and visible cost.
 
@@ -29,7 +29,7 @@ by its wall clock against a fixed anchor; the reason is the comment beside it in
   reaching the same place in the last round.
 - **The denominator is the round BUDGET**, holding the last adopted level forward across rounds a cell
   never ran (`domain/l4/proxies.py::parent_level_series`). Dividing by the series length makes the denominator a
-  per-cell quantity, and since a panel's `lives` (`inner_depth_nodes`) stops a *stalling* cell, the short series is the one that
+  per-cell quantity, and since a panel's `inner_lives` stops a *stalling* cell, the short series is the one that
   lifted early and went quiet — it would be divided by its own brake.
 - **No difficulty denominator.** Every level is a θ on ONE δ ruler shared by every cell of the panel, so two
   levels already sit on one interval scale across seeds of different origin strength. Per-cell difficulty is
@@ -41,7 +41,8 @@ by its wall clock against a fixed anchor; the reason is the comment beside it in
 - **The row carries the seed's whole trajectory, and only ONE term of it scores.** An outer cell's
   `pipeline_data` holds `mean_round_delta` (the scored measurand) plus `InnerCellFacts`
   (`domain/l4/proxies.py`): that seed's origin level, where it ended, its peak, its round count,
-  its stop reason and its own spend. Those are REPORTING channels — what `evidence`'s Compare read
+  its stop reason and what its sends cost (`inner_sent_usd`: each at its provider's bill, else at
+  our rate, so a provider reporting no bill never reads as free). Those are REPORTING channels — what `evidence`'s Compare read
   and any panel may ask about a cell — and none of them is a scoring term; the bullet below records
   that peak and endpoint were measured as candidates for the measurand and lost.
 
@@ -90,7 +91,7 @@ exposed to.
   replayed row is READ on the shared ruler above: same rows, same θ. Manufacturing a noise term measures how noisy an LLM is on an identical
   request, which is not a quantity the loop can act on. Depth on a specific candidate is `verify`'s job — it
   re-scores on MORE samples without touching the cycle.
-- **A cell that failed is not a cell that scored zero** (`domain/scoring.py::is_graded`). An outer cell carries no
+- **A cell that failed is not a cell that scored zero** (`domain/scoring.py::Scorer.grade`). An outer cell carries no
   label, so an errored one has no verdict. The election grades it 0.0 on purpose — the overlap guard needs that —
   but a published interval may not: at L4 a floored cell reads as "drove the inner loop maximally down".
 - **Absolute outer numbers never travel across runs.** Only a candidate's delta against its OWN run's origin
@@ -103,12 +104,15 @@ exposed to.
   stated invariant rather than a property of today's code, and the evidence that keeping the instrument
   out of reach is cheap and works: [`../research/external-constraints.md`](../research/external-constraints.md)
   § Ranked, item 1 and § L4.
-- **`connectors/promptpotter.py::_identity_config` enumerates the inner-origin fingerprint.** Read it before
+- **`application/runner/inner/connector.py::_identity_config` enumerates the inner-origin fingerprint.** Read it before
   assuming a file is safe to touch: a dispatch *renderer* and an *estimator* move it exactly as an inner
   node's prompt body does. It resolves once per init, so a mid-flight edit is invisible to the RUNNING cycle
   and lands on the next `resume` — the case that silently re-partitions a corpus.
 - **No knob changes mid-run.** The baselines are read per inner mint; an edit splits the run into two
   fingerprint families.
+- **The model/provider pair is the panel's ENVIRONMENT axis**, held by the INNER dataset declining to list
+  `model` in its `optimizer.param_keys`: the engine would search it, and the instrument must not move
+  under the arms it measures.
 - **`max_inner_rounds ≥ 2`.** At 1 the trajectory is length-1 and the formula's two weighted delta terms
   silently double-count one measurement.
 - **`lives.start` sits well below `max_inner_rounds`.** Set near it, the bank cannot drain before the
@@ -127,14 +131,14 @@ exposed to.
   to ignore the panel is NOT the fix — the model ignores the clause.
 - **`L1Variant` is `extra="forbid"`.** A field a prompt set declares but the model lacks fails *every* outer
   variant at validation: the Pydantic model, both `answer_format`s and `resolved_schemas` move in ONE commit.
-- **`token_budget` stays `null`.** The rollup lands each inner campaign's tokens on the outer ledger as
+- **`ceiling.tokens` stays `null`.** The rollup lands each inner campaign's tokens on the outer ledger as
   backend cost, so a normal-campaign token default trips after a couple of cells while the USD budget sits
-  untouched. `spend_budget_usd` is the meaningful cap.
+  untouched. `ceiling.usd` is the meaningful cap.
 
 ## Cost
 
 Geometric: one outer round is `(1 origin + n_variants) × n_inner_tasks` fresh inner campaigns, each a full
-campaign whose optimizer calls are individually slow. **`spend_budget_usd` is a cap, not an estimate** — and
+campaign whose optimizer calls are individually slow. **`ceiling.usd` is a cap, not an estimate** — and
 a cap too small to finish a round buys nothing, because an unclosed round scores no candidate. This page
 quotes no figure; re-measure before quoting a price to anyone.
 
@@ -170,11 +174,11 @@ power half on demand. How to act on them is the `potter-self` skill's.
   carries a different `inner_origin`, so none replayed another's cells and each re-measured its
   origin under the engine revision of its day. The fingerprint was narrowed on 2026-08-15 to what
   the inner optimizer nodes resolve to plus the estimator's own source (§ Invariants,
-  `_identity_config`); the mint counts the prior campaigns a novel instrument matches before the
-  spend (`jobs/mint.py::_warn_on_novel_instrument`). A test pinning the fingerprint's VALUE is not
+  `_identity_config`); run init's preflight counts the prior campaigns a novel instrument matches
+  (`application/preflight.py::_check_instrument_replays`). A test pinning the fingerprint's VALUE is not
   the guard — it moved on a third of all commits and was removed twice; the prompt half is walked
   (`registry.py::renderer_modules`), so only the estimator roster
-  (`connectors/promptpotter.py::measurement_modules`) can lose a member quietly.
+  (`application/runner/inner/connector.py::measurement_modules`) can lose a member quietly.
 - **Seed retirement.** Of the first six seeds three were retired, one of them on the collapse
   criterion (`seed_screen.py::rewards_collapse`); `inner_tasks.yaml` records the grounds per seat.
 

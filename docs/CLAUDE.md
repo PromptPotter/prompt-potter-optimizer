@@ -34,7 +34,7 @@ This file is the **index for AI/agent readers** over `docs/`. The operator-facin
 | Does my change move what the loop decides, or what an optimizer sends? A peer's campaign tree without spend? | [`developer/offline-run.md`](developer/offline-run.md) |
 | What model + `reasoning_effort` for this dataset? | [`operations/dataset-reasoning-matrix.md`](operations/dataset-reasoning-matrix.md) (canonical — NOT self-optimizing campaign NOTES.md) |
 | What's the full access/security model — boundaries, enforcement, deploy checklist? | [`operations/access-model.md`](operations/access-model.md) |
-| How do I freeze a buggy cycle as a test fixture? | Vitest only — [`../webapp/CLAUDE.md`](../webapp/CLAUDE.md) § Testing posture. The pytest frozen manifests were deleted: [`../tests/CLAUDE.md`](../tests/CLAUDE.md) § Frozen cycle fixtures says why, and where the guarantee went instead. |
+| How do I freeze a buggy cycle as a test fixture? | You do not: a fixture is built from the generated types — [`../webapp/CLAUDE.md`](../webapp/CLAUDE.md) § Testing posture. [`../tests/CLAUDE.md`](../tests/CLAUDE.md) § Frozen cycle fixtures says why, and where the on-disk guarantee lives instead. |
 | I changed the formula / a PoBB setting / the engine — do my measurements still carry over, or must I fork? | [`operations/mask-projection.md`](operations/mask-projection.md) |
 
 ## L4 — the recursion case

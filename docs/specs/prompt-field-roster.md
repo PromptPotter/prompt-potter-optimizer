@@ -10,7 +10,7 @@ spec says where each is pinned today, what it costs to unpin, and which half is 
 
 The SET is a module constant and the ORDER is a class variable, and a check marries them:
 
-- `config/settings.py::PROMPT_STRING_FIELDS` — six keys, module-level, `list[str]`.
+- `domain/search_point.py::PROMPT_STRING_FIELDS` — six keys, module-level, `list[str]`.
 - `domain/opt_search_point.py::PromptTemplate.RENDER_ORDER` — a `ClassVar[tuple[str, ...]]`.
   `render_fields()` walks it; `render()` joins the result with blank lines.
 - `_check_render_order`, fired from `PromptTemplate.__init_subclass__`, raises if
@@ -20,7 +20,7 @@ The SET is a module constant and the ORDER is a class variable, and a check marr
 **The order is already per-class, and there are already two of them.** `PromptTemplate`'s is the
 TARGET prompt's — `PROMPT_STRING_FIELDS` order, inside the measurement archive's key, so moving it
 re-cuts every banked cell. `OptimizerPromptTemplate` overrides it for the optimizer prompt, ending at
-`dispatch/layout.py::VOLATILE_SLOT` — why is owned by its own docstring. So the seam this spec asks for
+`dispatch/layout.py::VOLATILE_SLOT` — why is [`dispatch-hub.md`](../developer/dispatch-hub.md) § L1 layout's. So the seam this spec asks for
 **exists for the order and is load-bearing**; what it does not have is a per-CAMPAIGN value, only a
 per-class one. The set has no seam at all.
 

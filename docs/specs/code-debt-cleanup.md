@@ -31,17 +31,6 @@ is the history layer. **Never the root of a patch just shipped** — that root s
 
 ## Open — multi-arc, no blocker
 
-- **`domain/results_health.py::compute_degradation_health` is one 65-statement function, and
-  reshaping it moves every optimizer's identity.** The module is `shapes_optimizer_prompt`, so its
-  source is hashed into `treatment.source`: a behaviour-identical decomposition still mints potter,
-  CAPO, GEPA and LEVI as new instruments, which breaks comparison with a banked head-to-head.
-  Action: apply the written refactor (a private `_RoundCounts`, `_grade`, `_suggested_action` as
-  one `match` on the cause; proven equal to the original over every grade and cause) in the same
-  commit that next re-runs the head-to-head, never on its own. **Rides with:** the next
-  head-to-head re-run, or any change to `results_health.py` that already moves the digest.
-  **Re-test:** `ruff check --select C901 --config 'lint.mccabe.max-complexity=10'
-  promptpotter/domain/results_health.py` — a hit on `compute_degradation_health` means still open;
-  the patch is `.scratch/results_health-refactor.patch`.
 A leading `NEXT` marks the one to take up cold when nothing else is in hand.
 
 - **NEXT — the prompt cache is a cost lever only on a route that stays on ONE host, and nothing
@@ -57,34 +46,6 @@ A leading `NEXT` marks the one to take up cold when nothing else is in hand.
   the per-node table in an unpinned campaign's `review.md` (`domain/spend.py::SpendRollup.by_node`)
   beside a pinned one on the same model — a prefix-cache share well below the pinned one means the
   default route still scatters.
-
-- **Raising the in-flight depth takes effect only when a call LANDS.**
-  `application/scoring/query_loop.py::run_walks` re-reads `_armed_cells` every step, then blocks
-  on `asyncio.wait(calls, return_when=FIRST_COMPLETED)`, so a press that widens the window waits
-  for whatever is already out — on Harbor a whole agent episode, minutes.
-  Operator: a press applying at once is **the only behaviour that should exist**, not a UX nicety.
-  Action: the wait also wakes on the depth rising (`.runtime/sample_lookahead.json` is written by
-  another process, so a short poll alongside the calls, armed only while the depth is below
-  `max_cells_in_flight`), and the fill that follows is the one already there. **Rides with:** any
-  change to `run_walks`, the look-ahead flag, or the Harbor scoring path. **Re-test:** launch any
-  harbor dataset, set the depth above 1 in the browser while the first cell is out, and count open
-  `spend_hold` records in the cycle's `.runtime/ledger.jsonl` — one until that cell lands means
-  this is still open.
-
-- **A phase VIEW is on-disk shape, and nothing treats it as one.** Resume folds the seed cycle's
-  ledger through `projections/live_dashboard/projection.py::resolve_resume_state`, so every key
-  `_apply_phase` reads off `payload.view` is a persisted contract — while a view is declared in
-  `application/views/view_models.py` as a display dataclass and changed as freely as one. Adding
-  `BenchEnterView` made every cycle paused before it unresumable (`KeyError: 'subject'` at init),
-  and `maintenance/restamp.py::compact_cycle_ledgers` cannot repair it: the old record never held
-  the fact. The offline run's pause-and-resume leg writes and folds with ONE tree, so it fails on a
-  fold reading what its own writer does not persist and stays green on a key added against a
-  ledger an earlier build wrote. Owed is
-  a design answer, not a tolerant read: either the fold reads only declared record fields and views
-  stay display-only, or a view change is priced as a persistence change at the writer. **Rides
-  with:** any new or changed phase view. **Re-test:**
-  `grep -n 'view\[' promptpotter/infrastructure/projections/live_dashboard/projection.py` — a hit
-  means the fold still reads a view, so a paused cycle is stranded by the next key it adds.
 
 - **The responsive walk records no Lighthouse score, and sizes the candidates card at no width.**
   The six-width sweep (`e2e/walk/responsive.spec.ts`) catches content DELETED by an
@@ -107,26 +68,6 @@ A leading `NEXT` marks the one to take up cold when nothing else is in hand.
   supervises that run, asked what share of its L2/L3 optimizer calls needed a parse repair — a
   number closes this; no number leaves it standing.
 
-- **The `prompt_info` trap has no GUARD, and the obvious one is wrong.** A node that omits it scores
-  every variant identically as no-skill and raises nothing — stated at the decision point,
-  [`../developer/adding-a-surface.md`](../developer/adding-a-surface.md) § 5. Requiring
-  `prompt_info` whenever `optimizer.param_keys` names a prompt field would trip on every L4 run,
-  since `promptpotter-self` deliberately declares the first without the second, so what is owed is a
-  design answer rather than a check. **Rides with:** the next connector added, or any edit to where
-  a node's `param_keys` are validated. **Re-test:** grep `promptpotter/` for a raise naming
-  `prompt_info`; while none exists, the no-skill shape still passes silently.
-
-- **DSPy cells cannot run under a spend ceiling.** It serves no `spend_bound`, so
-  `scoring/sample_measurement.py::cell_bound` leaves every cell unbounded and the spend book refuses
-  it — loudly, before it is sent. Action: declare `Connector.sent_spend_bound` from the student
-  node's own config, as harbor does, and check the input against it before the call. **Rides
-  with:** the next change to `connectors/dspy_module.py`. **Re-test:** a dspy campaign under a USD
-  ceiling — every cell refused with "no rate bounds what it may cost" means this is still open.
-
-- **No gate stops a router importing `promptpotter.infrastructure.store`**, so a route that picks WHICH rows or in WHAT ORDER stays unreachable from every other entry point (`presentation/CLAUDE.md` § Out-of-bounds). Action: move each router's composition into `application/` (template: `routers/datasets/leaderboard.py` → `application/scoring/cells.py::measurement_log`), then add the import ban to the gate. **Rides with:** any change to one of those routers — each takes its own module off the list. **Re-test:** `grep -rl --include=*.py promptpotter.infrastructure.store promptpotter/presentation/api/routers` — a non-empty list means the gate cannot land yet.
-
-- **`webapp/lib/derivations/round-samples.ts` re-walks the sample mark with three arms** (ERR / HIT / MISS) over raw round-file rows, where `domain/dashboard_rows.py::sample_status` has four — so a historical UNSC row reads as a wrong answer. Action: serve the mark on the row the client reads (the round file's `all_candidate_results`, or route the reader through `/cells`, which already serves `CellRow.status`), then delete the client ladder. **Rides with:** any change to `round-samples.ts` or the round-file result row. **Re-test:** `grep -n '"UNSC"' webapp/lib/derivations/round-samples.ts` — empty while the client ladder still has three arms.
-
 - **The dashboard is a single-page React app that carries Next.js as its build tool.**
   `webapp/next.config.ts` sets `output: "export"`, so no Next server runs anywhere: FastAPI serves
   `webapp/out`. The source reaches the framework through `next/dynamic` in
@@ -146,7 +87,7 @@ A leading `NEXT` marks the one to take up cold when nothing else is in hand.
   hooks and a11y plugins while keeping the barrel-import rule in `webapp/eslint.config.mjs`. Then
   everything keyed to Next's commands and output: the `next-build` check and its `tsc` /
   `playwright` ordering in `scripts/gate.py`, the `.next/types` include in `tsconfig.json`,
-  `webapp/e2e/serve.mjs`, `scripts/build_release.py::_WEBAPP_SRC`, `build:deploy` in `publish.yml`,
+  `webapp/e2e/serve.mjs`, `scripts/build_release.py::_WEBAPP_SRC`, the build step in `publish.yml`,
   the eslint cache step in `ci.yml`, the `/serve` skill and `webapp/CLAUDE.md`. Keep the output
   directory named `out` and most of that list falls away. Unverified: whether the rebuilt ESLint
   set brings `braces` back through its own `micromatch` — settle that FIRST, since it decides
@@ -163,23 +104,25 @@ Filed at the operator's ask rather than under the multi-arc bar above. A leading
 means nobody has established that the item is real, solvable or worth its cost: answer that first,
 and delete the entry if the answer is no.
 
-**The ruler and the peers**
-
 **Spend**
 
-- **Hold bounds leave three gaps.** `_billed_most` is not seeded on resume; `reserved()` does not
-  hold `held_at(...)`, so a walk can plan a cell its reservation refuses; and `scoring/
-  query_loop.py::Walk.end` drops a paid look-ahead cell that crossed a block decision. **Rides
-  with:** any change to `spend_book.py`, `quota.py` or `run_walks`. **Re-test:** resume an arm and
-  read its first `spend_hold` against the ledger's billed maximum for that label.
-- **INVESTIGATE — the bench pass runs serial at look-ahead depth 1**, which is clock, not dollars.
-  Whether the held-out pass should ride the depth the search uses is undecided. **Rides with:**
-  any change to `runner/bench.py`. **Re-test:** time one bench pass against its cell count.
+- **A reserved cell's bill is on no ledger, so a re-armed book holds its first such cell whole.**
+  A cell that reserves (`Connector.holds_own_sends`) writes no hold of its own, so
+  `spend_book.py::unreported_on` can re-teach a book its sends and never the cell they made up.
+  **Blocker:** a per-cell record is stored shape — it rides the stored-shape batch below.
+  **Re-test:** `grep -n "emit_spend_hold" promptpotter/infrastructure/llm/spend_book.py` — none
+  inside `reserved` means a resumed harbor run still opens one cell deep under a tight ceiling.
+- **The bench pass runs at look-ahead depth 1 because the depth is a press a ROUND spends.** Both
+  passes go through `run_walks` and read `_armed_cells` like a round, but `runner/bench.py` runs
+  them outside any round — before the loop and after it — where no press stands unless the
+  operator makes one during the pass, or `campaign.lookahead` is `auto`. **Blocker:** the
+  operator's call on whether a pass takes a depth of its own; look-ahead is browser-only, so no
+  config key may carry it. **Re-test:** time one bench pass against its cell count.
 
 **Run state and the tree**
 
 - **A resume from a pause at the origin's boundary runs round 0 again.** The cells replay, so the
-  round document comes back with every cell `cached` and no token counts, the ledger holds a
+  round file comes back with every cell `cached` and no token counts, the ledger holds a
   second round-0 election, and potter sends `l1_critique` a second time. A pause one round later
   resumes with every decision equal. Unknown whether the second round 0 is the intended warm
   restamp or a boundary the resume fold misses. **Rides with:** any change to
@@ -189,15 +132,6 @@ and delete the entry if the answer is no.
 - **INVESTIGATE — two items filed with their re-tests in `.scratch/debug-arc-seed.md`**: errored
   cells (`finish_reason=error` then a schema repair) and whether their rate differs by arm; and
   potter's round-5 L2 layout refusal.
-
-**Webapp — the control-plane session's files**
-
-- **Late — a node's schema reading travels as three props.** `schema` / `schemaStatus` /
-  `outputSchema` are drilled side by side into every `NodeSurface` host
-  (`components/shell/searchpoint/LeaderSummary.tsx::ConfigBox` is one), so a fourth fact about the
-  schema is an edit at each host. Action: one reading object. **Rides with:** any change to
-  `NodeSurface`'s props or to a host that passes them. **Re-test:**
-  `grep -rln schemaStatus webapp/components` — the count of hosts still passing it loose.
 
 ## Bypasses — one defect class, held for ONE holistic pass
 
@@ -210,25 +144,23 @@ A pass already rewriting one of these symbols may take its entry, but takes the 
 never a local patch. **Re-test:** each entry's command; a hit means it still stands.
 
 **Shape 1 — a send made ON OUR BEHALF re-derives what `_admitted_send` decides for our own.**
-TermNorm over HTTP, terminus-2 and DSPy through litellm reach the spend book as a status code and
-bare token counts, so each path invents its own worst case, failure category and settlement.
-Remedy: one typed per-attempt outcome (sent · may-have-billed · usage-or-unknown · failure
-category · retry-after) that our clients emit and every relay must produce, read by ONE classifier
-and ONE settle rule (unknown ⇒ the whole bound); one retry budget and one time budget passed down
-through every nested loop.
-- `application/scoring/sample_measurement.py::cell_billing` settles a relayed timed-out attempt
-  at $0 (`StepTokenUsage` drops TermNorm's `attempts`) — a possibly-billed send the ceiling never
-  sees. Silent. `grep -n '"attempts"' promptpotter/domain/spend.py` (empty).
-- `infrastructure/llm/pricing.py::_fetch_route_ceiling` returns `None` for a FAILED catalogue fetch
-  as for an unpriceable route, so an OpenRouter outage stops a capped run as `SPEND_BUDGET` with
-  advice that cannot help, and re-fetches on every send. Loud, wrong reason. `grep -n -A3 "except
-  (urllib.error.URLError, OSError, TimeoutError, json.JSONDecodeError)" promptpotter/infrastructure/llm/pricing.py`.
-- `connectors/dspy_module.py::_in_process_run` calls its student through litellm with none of the
-  typed cell errors harbor raises, so a 429 or an empty account becomes UNKNOWN rows (the spend
-  half is the DSPy entry above). `grep -c "CellThrottledError\|CellSendRefusedError"
-  promptpotter/connectors/dspy_module.py` (0).
-- Smaller, same shape: `diagnostics/probe_reasoning.py` reads every exception as "refuses this effort";
-  `tracing/langfuse_client.py` runs a second private 429 loop beside `decide_429_wait`.
+The classifier and the settle rule are one (`infrastructure/llm/spend_book.py::SendOutcome`,
+`Admission.close`); what stands is the half no edit on this side reaches: a relay's own retry loop
+runs on its own budget and reports its attempts as a count.
+- TermNorm reports `attempts` per node and ONE usage sum, so an answered repair turn and a 5xx it
+  retried read the same, and `scoring/sample_measurement.py::_uncounted_attempts` holds both as
+  unreported. Owed by `backend-api/core/llm_providers.py::llm_call`: per node, how many attempts
+  left and reported no usage (today only a timeout says so, by voiding the whole cell). **Re-test:**
+  `grep -n "unreported" backend-api/core/pipeline_context.py` in the TermNorm checkout — a per-node
+  count beside `attempts` closes it, and `_uncounted_attempts` then reads that count instead.
+- A unit of work's one budget (`send_pacing.py::SendBudget`) stops at the relay's door: TermNorm's
+  `_MAX_ATTEMPTS` and terminus-2 × litellm each still count under one of our attempts, and a
+  remote cell waits out `Connector.cell_wait_s` rather than the budget's clock. **Blocker:** each
+  loop is the relay's own code, and handing a remote cell the budget's clock turns a timed-out
+  cell from an unreported send into a `HALTED` cut — a decision change that wants the operator.
+  **Re-test:** `grep -n "_MAX_ATTEMPTS = " <termnorm>/backend-api/core/llm_providers.py` — a
+  literal means that budget is still its own; and ask the operator whether a remote cell ends on
+  the budget's clock.
 
 **Shape 2 — an act or a reading lives in ONE adapter, so the entry points disagree.** The
 canonical mechanisms are ones an adapter may call, not the only path an act can take. Remedy:
@@ -236,23 +168,15 @@ every operator act runs one application pipeline (validate → admit → apply �
 exemptions are parameters rather than skipped calls; every reading an operator acts on is one
 served field behind one read facade; `presentation/` imports facades only, and no route returns
 an untyped dict.
-- The config-drift gate on resume (`presentation/cli/commands/resume_command.py`, `root_content_hash`
-  against the recomputed cycle id) is CLI-only: web Resume, `step-cycle` and a fork's launch
-  continue a cycle under an edited `pipeline.yaml`, starting prompt or framing. Silent. `grep -rn
-  root_content_hash promptpotter/application/jobs promptpotter/application/runner promptpotter/application/bench/resume_and_fork` (empty).
-- `application/views/render/phase.py::render_progress_table` differences θ across rounds and
-  advises a "Plateau" stop without `AbilityReading.comparable_to` or the served caveat, where the
-  browser filters by ruler. `grep -n "theta - prev\|comparable_to" promptpotter/application/views/render/phase.py`.
-- The check-in wire is hand-declared in `webapp/lib/api/draft-types.ts` (`DraftCampaignWire`,
-  `DraftPatch`, the `ProvenanceTag` union) because the routes return `dict[str, Any]`; a field or
-  `Provenance` member added in Python compiles green and renders blank. `grep -n "export type
-  ProvenanceTag" webapp/lib/api/draft-types.ts`.
-- "Is the backend up?" has three answers: launch admission asks `connector.preflight`, the health
-  route (`presentation/api/routers/backends.py`) a bare `GET /status` (a URL no in-process connector
-  serves), the embedded launch nothing. `grep -n check_status promptpotter/presentation/api/routers/backends.py`.
-- The `/potter-run` skill reads `run_phase` off `dashboard.json`, where it is `exclude=True` and
-  never written, and no CLI verb serves `derive_run_phase` or the machine queue `cancel-queued`
-  needs. `grep -n run_phase .claude/skills/potter-run/SKILL.md`.
+- The CLI's own compositions still import `promptpotter.infrastructure` past its composition root
+  (`build_stores`): `cli/campaign_runner.py` (the first-run check), `cli/commands/resume_command.py`
+  (`is_checkin`), `reset.py` and `cli/parsers.py` (`SHARED_CACHE_DIRS`),
+  `new.py` (the dataset gateway), `launch.py` (the latest-readout pointer), `verify.py` (its own
+  `descend_store`, where `pipeline_resolve.py::resolve_pipeline_at` descends for its caller), and
+  beside the CLI `teleprompter.py`, `terminal/completion.py` and `admin_bot.py`. Each moves into
+  the application function its verb already calls, as the routers did; the gate then takes
+  `presentation/cli` under the rule `gate.py::_layering` holds the routers to.
+  `grep -rnE "^(from|import) promptpotter\.infrastructure" promptpotter/presentation --include=*.py | grep -vE "api/|store\.stores import (Stores|build_stores|Stores, build_stores)$"`.
 
 ## Blocked — named blocker
 
@@ -262,14 +186,13 @@ an untyped dict.
   - *Authorship.* The author's display name is stored beside `issued_by`, so "Steered by" stops
     serving the issuer id; the authoring act and issuer ride the candidate's ledger record
     (`authorship_of` reads every C0 as `origin`).
-  - *Round document.* `RoundResult.health` is required (`generation_only.py` writes `None`, and
+  - *Round file.* `RoundResult.health` is required (`generation_only.py` writes `None`, and
     `dispatch/facade.py` tolerates it); `RoundResult.subset_mode`; `RuntimeFailure.node`;
-    `ability.unlinked` / `pinned_share`; a ledger discriminator for restamped rounds;
-    `creativity` → `temperature` in stored `l1_overrides`.
+    `ability.unlinked` / `pinned_share`; a ledger discriminator for restamped rounds.
   - *Served rows that re-derive.* The crown on `DashboardCandidate` / `ScoreboardRow`;
-    `reference_lift_side` on `ScoreboardRow` (then `liftSeparates` goes); the headline pick on the
-    stored `BenchScore`; `LiveDashboardState.champion`; `electable_count` + `overlap` on
-    `ElectionRecord`; `verdict` on `PanelPrecision`; `RunSpendView` nests `MeteredSpend`.
+    the headline pick on the
+    stored `BenchScore`; `electable_count` + `overlap` on
+    `ElectionRecord`; `verdict` on `PanelPrecision`.
   - *Race lineage.* The race parent id `R{n}_winner` becomes the lineage id (the ELIMINATION_CUT /
     LEADER_LOCK_IN records, `race_catch_up`, `elimination_context`).
   - *Cell identity.* Harbor's `_REASONING_CHANNEL` still spells `openrouter:` and is hashed into
@@ -289,7 +212,7 @@ an untyped dict.
   Claude model and this is one pass.
 
 - **Concurrent sibling cycles of one campaign each spend up to the whole ceiling.**
-  `spend_budget_usd` binds a CYCLE (`runner/entry.py::_arm_spend_book` seeds its book off that
+  `optimization.ceiling` binds a CYCLE (`runner/entry.py::_arm_spend_book` seeds its book off that
   cycle's folded history), so two forks launched side by side are each admitted the full ceiling
   and the campaign can spend twice it. **Blocker:** a decision only the operator can make — whether
   the ceiling is the campaign's or the cycle's. The campaign's answer is one book per campaign,
@@ -306,8 +229,8 @@ an untyped dict.
 
 
 **Archive hygiene — the reclaim, its attribution, and the map over both:**
-- **Re-test: `compact-archive inventory`**, which is what sizes the three below: runs, cells, bytes
-  and replay rate by dataset / label family / age, plus the index rows carrying no detail file,
+- **Re-test: `compact-archive inventory`**, which is what sizes the three below: configurations,
+  answers and bytes by dataset / role family / age, plus the index rows no answer stands behind,
   which is what makes every other count an upper bound. Run it before concluding a piece has
   nothing to be built against. **Build them BEFORE the next bulk delete, never after:** that is the one moment both
   halves exist at once, something to measure and a delete about to strand it.
@@ -317,7 +240,7 @@ an untyped dict.
   content-addressed rows standing (correctly — a sibling may replay them), `compact-archive` reaches
   only the fields a row does not read, and `reindex`'s GC is positive-identification-only, so every
   orphan is kept.
-- **Attribution** — `LineageNode.sp_hash` is stamped forward-only, which is right and is enough for
+- **Attribution** — `ArmNode.reading.sp_hash` is stamped forward-only, which is right and is enough for
   everything measured from here on. The DESIGN question outlives the data: an L4 outer cell should
   stamp the runs its inner campaign produced at the moment it spawns them, the only attribution that
   survives the sandbox being reclaimed. Decide it before the next L4 run banks rows nothing can name.
@@ -341,15 +264,6 @@ an untyped dict.
   fires only on `verified` aliases. Workaround: clear `measurements/`. **Re-test:** grep the package
   for `--fresh` and for any revision term on the measurement-cache key; while both miss, this stands.
 
-**A second containerized connector:**
-- **`package_cache` is honoured by harbor alone, and nothing refuses a dataset whose connector
-  ignores it.** The dataset key is already backend-neutral; what is harbor-only is the reader
-  (`harbor.py::PACKAGE_CACHE_SCOPES`). Action: a `Connector.package_cache_scopes` declaration,
-  empty by default, that run init checks the declared scope against — with one connector it would
-  have one reader and guard nothing. **Re-test:** grep `connectors/protocol.py` for
-  `package_cache_scopes`; `dbllmbench` is the second connector running cells in a container and
-  ignores the key, so this no longer waits.
-
 **Coupon + BYO build (Lane A2 — blocked on the build itself; ADR-0003 § Host coupon + BYO keys):**
 - **Re-test for all three below: grep the package for `grant.json`.** It is prose-only today, so
   while that grep reaches no code the build has not started and every premise here stands.
@@ -363,7 +277,7 @@ an untyped dict.
   the run's spend book at every admission (D1/D2 in ADR-0003). Blocker: lands *with* the coupon —
   deleting first leaves the wallet unguarded. ⚠️ Two things the replacement must carry or it is a
   regression: BOTH units (an all-USD coupon re-opens the unpriced-model blindness D1's token arm
-  covers), and the per-run **reservation** (`Job.cap_usd` / `cap_tokens`) — without it two concurrent
+  covers), and the per-run **reservation** (`Job.reserve`) — without it two concurrent
   launches are each admitted against the same remainder and the pair spends ~2× the ceiling.
 - **`domain/run_records.py::TokenUsageRecord` lacks `key_source`** → `/auth/activity`
   `group_by=api_key` (`application/jobs/account_activity.py`) groups by the recorded `provider` —
@@ -394,16 +308,10 @@ an entry point, in-process, so it never touches the inbound credential.
   `provider: groq` in any `datasets/*/pipeline.yaml`; while none pins one the path cannot fire.
 
 **Needs a live run, not a decision:**
-- **Middle — `presentation/teleprompter.py::compile_loop` has never been compiled against DSPy.**
-  Its `nodes` argument takes the campaign shape `{node: {config: {...}}}`, and DSPy is not in the
-  repo venv, so the teleprompter is type-checked and never run. A DSPy host gets the optimizer loop
-  and not every surface; what it must get is a `compile` that works. **Re-test:**
-  `pip install -e ".[dspy]"` in a scratch venv, then one `PromptPotterOpt(...).compile(student,
-  trainset=...)` on a three-row trainset — a result closes this, a raise names what to adapt.
 - **`_rebank_on_branch`'s re-bank has never been observed** — fixed to take each corrected round
   through the whole ingress, but the cycle it was measured on went with a store wipe, so the fix is
   reasoned, not seen. **Re-test:** repair a fork, then confirm each corrected round carries its own
-  `round:complete` on the branch; nothing under `tests/` asserts it.
+  `round_closed` record on the branch; nothing under `tests/` asserts it.
 - **The `seed` provenance layer has never been stamped by real data.** `pipeline_resolve.py`
   reads the CYCLE SEED's `pipeline_overlay` for it — one field name, three carriers, distinguished
   by the `source` each layer stamps (`campaign` / `seed` / `evolved`). Candidates move node

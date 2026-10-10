@@ -47,12 +47,19 @@ you edited. Each file's docstring lists its packages; its `# N.` headers are the
 | `infrastructure/store/measurement_archive.py` and `archive_queries.py`, `application/maintenance/`, `bench/resume_and_fork/`, `application/origin.py` | `test_archive.py` | replay eligibility · the archive on disk · replayed decisions and forks |
 | `infrastructure/llm/` (pricing, the spend book, wire cost), `application/jobs/quota.py`, `account_spend.py`, the runner's budget gate, judge billing | `test_spend.py` | what a call costs · what a run is billed · ceilings · spend outlives what spent it |
 | `infrastructure/store/layout.py` path builders, `config/log_redaction.py`, the dispatch fence, `infrastructure/identity/grants.py`, `application/jobs/reaper.py` | `test_security.py` | leaks · delegation · unattended deletes |
-| Anything that adds or removes a module, a knob, a served field, a test | `test_complexity_ledger.py` | the ratchet, which asserts EQUALITY in both directions |
 
-**Seven files, and the roster is that table** — a test is filed under the production code whose
+The table is for a reader. The command is `python scripts/tests_owning.py --run`: the tests that
+own everything moved since the last whole run, read off what each test RAN (its header says
+what it cannot see). Every test, where it cannot say. **Between edits** — owned by
+[`reasoning-doctrine.md`](../docs/developer/reasoning-doctrine.md) `<wall-clock>`; this suite is narrowed by it.
+
+**Six files, and the roster is that table** — a test is filed under the production code whose
 change should break it, never under the harm it prevents, and a subject with no row is a SECTION in
-its owner's file, never an eighth file. `test_files` is a ledger dimension, which is what makes the
+its owner's file, never a seventh file. `test_files` is a ledger dimension, which is what makes the
 count binding rather than advisory.
+
+**The ledger ratchet** — owned by root [`CLAUDE.md`](../CLAUDE.md) `<surface-ledger>`; here it is
+a gate check and never a test, and a test added or removed re-stamps its baseline.
 
 ## Structural invariants live in production, not tests
 
@@ -61,10 +68,10 @@ enforcing becomes a **check in the module that owns the registry** — in the ac
 it, or at import for a table built there (`application/CLAUDE.md` § Subpackages says which) — so it
 fails loud before a run spends, costs nothing to maintain, and needs no
 test to update. They exist across the package, e.g.
-`resume_checkpoint_gating` exhaustiveness (`application/bench/resume_and_fork/decisions.py`),
+one replayer per decision kind (`application/bench/resume_and_fork/replayers.py::replayers`),
 `L1_POSSIBLE ⊆ injection_table()` (`dispatch/injections/registry.py`), the `L1_MANDATORY`/origin-layout
 subset checks (`optimizers/potter/dispatch/layout.py`), the unread/abandoned row-key checks (`domain/scoring.py`),
-the divergence-hint exhaustiveness (`cli/commands/_shared.py`). Add new ones the same way — beside
+the divergence-hint exhaustiveness (`cli/commands/launch.py`). Add new ones the same way — beside
 the thing they validate, never as a repo-wide structure scan.
 
 ## Adding a test
@@ -76,8 +83,7 @@ carry it instead — an import-time assert, a raise at the seam, a type that can
 value — and prefer that. If a test it is, it rides its owner's existing section by adding a
 function, or a row to a sibling that already builds the same input — **never a new file**, and
 never a new section invented to house it. Both counts are ledger rows (`test_files`,
-`test_functions`), so the function costs a baseline edit, its invariant named in the commit body,
-and a file goes red.
+`test_functions`), so a function names its invariant in the commit body and a file goes red.
 
 ## Mock strategy
 
@@ -90,17 +96,23 @@ all stay green while the real read path breaks. It can also assert a shape the m
 produce. Build the real model via `factories.py`. A namespace is fine only for a wiring seam that
 is not a validated document — a `Stores`-shaped stub, a session object.
 
+**No test waits on the wall clock.** A test that orders work by `asyncio.sleep` or a timeout runs
+on `test_spend.py::on_jumping_clock`, whose clock jumps to the next timer: the order is the
+schedule the test wrote, not the box's load. A thread race is bounded by an event the writer sets,
+never by a fixed count of reads.
+
 ## Fixtures (`conftest.py`) + builders (`factories.py`)
 
 | Fixture | Purpose |
 |---------|---------|
-| `built_stores` | A real `Stores` rooted in `tmp_path` (default identity), used by the archive tests. |
+| `built_stores` | A real `Stores` rooted in `tmp_path` (default identity) — `factories.workspace`, the one place a test tree is built. |
 
 `factories.py` is not a test file (no `test_` prefix, collects nothing). It holds builders that
 return REAL models — `round_result`, `cycle_result`, `scored_candidate`, plus `measurement` /
 `measurements`, the one
-MEASURED-CELL row (`QueryMeasurement` is a `TypedDict`, so the dict *is* the model). Domain models
-and the few application models the dispatch seam needs.
+MEASURED-CELL wire record (`sheet()` reads each through `MeasuredCell.from_wire`). Domain models
+and the few application models the dispatch seam needs, plus the real objects more than one
+file builds: `spend_book`, `inner_sandbox`, `workspace` and `loop_session`.
 
 Each builder takes only the fields a test bends. **Add a parameter when a test needs to bend one;
 never add a builder for a shape an existing one can express** — local copies of a row drift apart,
@@ -111,11 +123,11 @@ and a new field then has to find every one.
 one float, and fixtures built on that identity hide every confusion of correctness with the
 composite (a hit threshold reading the composite, a stop reading accuracy).
 
-## Frozen cycle fixtures (`tests/fixtures/cycles/`)
+## Frozen cycle fixtures
 
-`l2_terminal/` only, and it is **Vitest's** — reached via `webapp/lib/test-utils/fixtures.ts`,
-owned by [`../webapp/CLAUDE.md`](../webapp/CLAUDE.md) § Testing posture. It sits here rather than
-under `webapp/` for that reason.
+**None, on either side.** Vitest builds the SERVED shape from the generated types
+([`../webapp/CLAUDE.md`](../webapp/CLAUDE.md) § Testing posture): a banked `dashboard.json` cast to
+a served type asserts fields the wire no longer carries.
 
 **No Python frozen manifests** — one fires on a **field rename** (axis 1), and the harm it names,
 an `extra_forbidden` **raised at load**, is loud (axis 2). An on-disk-compat guarantee belongs in

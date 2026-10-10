@@ -166,7 +166,7 @@ cell is a hole of that refusal's category, and the walk halts.
 
 **`ask` not raising is only half of it, and the other half is one frame up.** Anything else that
 throws inside `grade` — a rubric placeholder the caller does not fill, a label outside `to_score`,
-a third-party judge's own bug — would reach `measure_sample`'s catch-all and throw the backend answer away; `__init__.py::_compute`
+a third-party judge's own bug — would reach `measure_sample`'s catch-all and throw the backend answer away; `registry.py::_compute`
 catches it and returns `absent`, so **no failure in a grader can cost the measurement it grades**.
 The rule belongs to the seam, not to any one judge.
 
@@ -184,9 +184,7 @@ it depended on would be a **core** dependency. A vendor adapter belongs in an en
 
 **A label is not a score**, which is why `to_score` is declared and `_validate` refuses a judge
 whose labels and scores disagree either way — picking a numeric reading for a three-way taxonomy
-silently is how `NOT_ATTEMPTED` becomes a zero that flatters an evasive model. Per-field detail
-(including why `provenance` exists before any human rating does) lives on `protocol.py`'s own
-field docs, not here.
+silently is how `NOT_ATTEMPTED` becomes a zero that flatters an evasive model.
 
 ## Registering one
 
@@ -201,6 +199,6 @@ Registering a connector · A connector is trusted code.
 
 ## What is cached is the REPLY, not the verdict
 
-`call.py::ask` stores the model's REPLY rather than the derived verdict, which is what makes ONE cache enough — a judge whose `_parse` or `to_score` changed re-derives correctly from it, and a rubric or model edit moves the key by itself. The key shape and metering rules are that module's own header.
+`call.py::ask` stores the model's REPLY, so ONE cache is enough — a changed `_parse` or `to_score` re-derives from it, and a rubric or model edit moves the key: `hash_call` over the rendered prompt plus the stage's model / provider / temperature / max_tokens. A hit is metered too, flagged `cached`; an empty reply is never stored, since the tree is tenant-global; absent, unreadable and stale are one answer — sample again.
 
-**One judge cache, never the loop's.** `judge_reuse` is a peer tree to `optimizer_reuse`, because a grader able to read the loop's cached answers would be a ruler fed by what it measures.
+**One judge cache and one chokepoint, never the loop's** (`bench/llm_call.py` meters `kind="optimizer"`). `judge_reuse` is a peer tree to `optimizer_reuse`: a grader reading the loop's cached answers is a ruler fed by what it measures.

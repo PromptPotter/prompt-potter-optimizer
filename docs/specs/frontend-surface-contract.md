@@ -22,7 +22,7 @@ states:
              cannot perform where they are standing. Same distinction `gone` draws below,
              one state earlier: collapsed into offline, it meets a first-run account with a
              critical alert telling it to go run a CLI command.'
-  warming:   campaign selected, origin running, dashboard.json not yet written (warming_up:true).
+  warming:   campaign selected, its cycle still at check-in (warming_up:true).
   live:      logged in, campaign streaming dashboard.json.
   loading:   a fetch is in flight — transient, MUST resolve to live/empty/error.
   error:     a fetch failed for a non-auth reason (5xx, network, parse).
@@ -52,38 +52,42 @@ invariants:
                       useAuth().status==='authed'). The browser logs failed requests itself — the app
                       can't swallow that — so the cure is not firing them. The auth/me 401 is the
                       accepted floor (it's the probe that decides anon vs authed).
-  I6_run_state_server_owned: '"Is anything running?" has ONE server-owned answer: run_phase ∈
-                      {running, gate} (hasLiveProducer, webapp/lib/run-phase.ts). paused is NOT
-                      one — the worker has exited, and counting it keeps the jobs dock lit and
-                      destroys its all-quiet signal; a paused cycle stays reachable as a sidebar row
-                      wearing its phase. detached means a dead producer (the heartbeat invariant,
-                      architecture.md § Display) and never renders as running.
+  I6_run_state_server_owned: '"Is anything running?" has ONE server-owned answer: the served
+                      producer reading (domain/phases.py::ProducerReading — `producer.attached`
+                      on the dashboard, `producer_attached` on a /cycles row), derived with
+                      run_phase. A paused cycle whose worker has exited is NOT attached —
+                      counting it keeps the jobs dock lit and destroys its all-quiet signal — and
+                      stays reachable as a sidebar row wearing its phase. detached means a dead
+                      producer (the heartbeat invariant, architecture.md § Display) and never
+                      renders as running. The browser holds no set of "live" phases and
+                      subtracts no clock of its own from a served stamp: every duration it
+                      shows of a run arrives as one (`silent_for_s`, `open_for_s`).
                       Client-side connection loss (failed poll, offline, hidden tab) is presented as
                       connection state (offline / stale affordance) and MUST NOT impersonate a run
                       phase or unmount run controls while the last-known server phase is running.
                       Every "running" surface — the sidebar-edge jobs dock (and its phone stand-in,
                       the app bar back-arrow dot), workspace runningCycles — reads this one set AND
                       one shared ordering (what needs you first). A surface that RENDERS the
-                      phase goes through a map TOTAL over RunPhase (runPhaseLabel, runPhaseAction):
+                      phase reads the served table TOTAL over RunPhase (`RUN_PHASE_INFO`, generated
+                      from `domain/phases.py`), and the verb it offers is the served
+                      `run_admission` the dispatcher refuses on:
                       testing `=== "running"` renders half the vocabulary as nothing, so
                       a gate-held run — blocked on the operator, first in that ordering — reads as
                       an idle sidebar row. `isLive` (poll.tsx) is NOT this answer and never
-                      substitutes for it: it means "should transient indicators be on", which is
-                      false at the gate because nothing is being measured, while the producer is
-                      alive and polling for a decision. Read as "the run ended" it freezes **Run
-                      finished** into the chat above a card saying the run is holding.
-                      COROLLARY (the time-ray). run_phase provably cannot express running vs
-                      WEDGED: every await outlasting RUN_FRESH_S must heartbeat (heartbeat.py
-                      states the rule), so a live cycle can never go stale and a
-                      wedged process reads "running" forever. Freshness proves ATTACHMENT,
-                      never PROGRESS. The ray head derives `wedged` from the other input —
-                      progress = a non-heartbeat ledger append — gated on the server still
-                      saying `running`, over the windows runtime_flags.py owns (WEDGED_AFTER_S,
-                      RECENT_STEP_S; generated into the browser, never hand-copied), and it is a
-                      DISPLAY state: nothing writes it, it is not
-                      a RunPhase member, and it must not become one. `gate` is excluded from
-                      the test, because the origin gate legitimately heartbeats with zero
-                      progress until a human decides, and it already has a state that says so.
+                      substitutes for it: it is the served `producer.appending` — "should
+                      transient indicators be on" — which is false at the gate because nothing
+                      is being measured, while the producer is attached and polling for a
+                      decision. Read as "the run ended" it freezes **Run finished** into the chat
+                      above a card saying the run is holding.
+                      COROLLARY (wedged). run_phase provably cannot express running vs WEDGED:
+                      ATTACHMENT is the producer''s OS lock on the cycle (producer_lock.py) and
+                      no clock enters it, so a wedged process reads "running" for as long as
+                      it lives. The lock proves ATTACHMENT, never PROGRESS, so the server
+                      grades progress beside the phase (ProducerState: live, idle, wedged) off
+                      the heartbeat and the last non-heartbeat ledger append, over the windows
+                      runtime_flags.py owns. It is not a RunPhase member and must not become
+                      one; the gate (`held`) and an open cell are never wedged, because both
+                      legitimately heartbeat with zero progress.
                       SIBLING: I9 applies this same rule — ONE server-owned answer, no
                       client-side reconstruction — to "what config does this node run". Two
                       questions, one discipline; they are a family, not a duplicated mechanism.'
@@ -102,18 +106,20 @@ invariants:
                       membership is NOT an existence test, because an L4 inner hop is absent
                       from /cycles and an archived campaign is absent from the active filter
                       while both are alive. Archived is not gone. The server side of this is
-                      the same rule: `warming_up` means "no dashboard YET" and a missing cycle
+                      the same rule: `warming_up` means "still at check-in" and a missing cycle
                       dir means GONE, and one route must never answer both with the same body.'
   I8_floor_named:     'A rendered Δ NAMES which floor it cleared, and the two floors are not
                       interchangeable. ORIGIN is C0 — the campaign root, or a fork''s branch
-                      point: `origin_accuracy` on the campaign index (ForestRows, PanelCellRow,
-                      DatasetPickList, CandidatesCard), `bench_score.lift` (headline-stats,
-                      run-summary), and run_card.flips'' per-sample rows. PARENT is the round''s
+                      point: the served `RunStanding.vs_origin` pair, both rates on the
+                      origin panel (the masthead''s BEST, ForestRows, PanelCellRow,
+                      run-summary) and never either member''s own level; `origin_accuracy` on
+                      the origins listing (DatasetPickList), `bench_score.vs_origin`
+                      (headline-stats), and run_card.flips'' per-sample rows. PARENT is the round''s
                       own floor — the origin at round 0, the prior winner after: every
-                      `reference_*` field, wherever it surfaces (the searchpoint drill-in,
+                      `vs_reference` reading, wherever it surfaces (the searchpoint drill-in,
                       OuterSignalPanel, RoundFileView, run_card''s percent pair). The engine
                       elects on the parent (architecture.md § Origin, parent, and check-in), so
-                      a pane labelling a `reference_*` value "origin" states a comparison
+                      a pane labelling a `vs_reference` value "origin" states a comparison
                       the run never made.
                       Two references may share a box only when BOTH are labelled — run_card is
                       the sanctioned case and says so at its own seam.'
@@ -130,8 +136,10 @@ invariants:
                       sibling — same shape, different question — and neither is a second
                       mechanism for the other. The browser never joins a VALUE from one store
                       onto a SCHEMA from another. Every param carries a served `source` naming
-                      the layer that won it (dataset | campaign | seed | evolved | identity |
-                      unset), so a badge, a compact fold, a lock glyph or a
+                      the layer that won it (domain/pipeline_schema.py::ParamSource — `backend`
+                      is the check-in arm''s floor alone, `model_floor` a declared
+                      reasoning_effort no layer set, at the lowest rung its model accepts, and
+                      `unset` a param no layer wrote), so a badge, a compact fold, a lock glyph or a
                       "(current)" off-menu option derived from a client-side diff is the
                       violation this invariant names: a resolved config carries every param, so
                       a diffed ·evolved badge fires on all of them, and once the base is served AT
@@ -150,7 +158,7 @@ invariants:
                       campaign and the honest address is ?at=...;in=<hop>. Do not collapse them —
                       the failure is silent, rendering a benchmark''s template under a heading
                       naming a run that used something else. (2) This read is gated on
-                      load_owned and nothing else; a future demo-mode or shared-origin read is
+                      owned_campaign and nothing else; a future demo-mode or shared-origin read is
                       its OWN decision and does not inherit this one.
                       PERMISSION IS SERVED TWICE on every enumerable axis, because one list
                       cannot say both: `options` is the MENU, `permitted` the narrower set the

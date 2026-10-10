@@ -17,10 +17,22 @@ PROMPTPOTTER_HOME=.scratch/offline-home .venv/Scripts/python.exe scripts/offline
 .venv/Scripts/python.exe scripts/offline_run.py --digests
 ```
 
-`--rounds` (each campaign's `max_rounds`) and `--rows` (the synthetic bank) size it. No standing
-test runs it — it is the proof a change is run against once, by hand.
+`--rounds` (each campaign's `max_rounds`) and `--rows` (the synthetic bank) size it.
+`--bench-trigger manual` fails on a bench cell sent by the launch, then asks for the pass as an operator does (`grade_line_bench`), so
+its `decisions.json` holds the same rounds and headline as the default `at_end` run's.
 Run it from the tree under test with that tree's own venv — a worktree probe run through another
 tree's interpreter answers for that other tree.
+
+**The gate runs it** — `scripts/gate.py --only offline-run`, under the default arguments, in a
+home of its own — whenever a file the engine runs from has changed since it was last green, so an
+engine change has every optimizer run end to end and its resume proven without anyone asking; a
+docs or webapp edit reruns nothing. `--changed` leaves it out: it proves a landing, not an edit.
+
+**A green run is not taken twice.** A home that already holds the green run of the same arguments
+over the same sources — the package, `datasets/`, `examples/`, the two lock files and this script,
+by content — is left standing, and the script says `unchanged since green` and exits 0. Name a
+different home, or pass `--against`, to run it regardless; a default-argument green by hand is
+the gate check's green too (`scripts/kept_verdict.py`).
 
 `--controlled` proves the controlled comparison instead ([`../architecture.md`](../architecture.md)
 § The controlled comparison): two workspaces, each running the arms `--optimizer` names (potter and
@@ -47,7 +59,9 @@ them is the evidence read of all three.
 
 One workspace per optimizer, `<home>/<optimizer>/`, because the measurement archive and the δ ruler
 pool across the campaigns of one workspace — a shared one lets one optimizer's run move another's
-decisions. The optimizers run in parallel, one child process each. In each workspace:
+decisions. Each campaign is a child process, and as many run at once as the machine's free memory
+holds (`scripts/gate.py::memory_budget_mb`) — all of them on a box with room, one after another on
+a laptop with none. In each workspace:
 
 | Path | What it is |
 |---|---|
@@ -56,20 +70,31 @@ decisions. The optimizers run in parallel, one child process each. In each works
 | `decisions.json` | Every decision the run made, canonical: ids mapped to candidate labels; timestamps, paths and hashes dropped; floats rounded; concurrent records compared as sets. `harness` adds the stop reason, the unrouted URLs and the call counts. |
 | `run.log` | The child's stdout and stderr. |
 | `resumed/` | The same campaign in a workspace of its own, paused at a round boundary and ended on a session rebuilt from disk. |
+| `interrupted/`, `interrupted-twice/` | The first optimizer launched by the CLI's own `main` as a terminal dispatches it, under one and under two SIGINTs, then `resume`d. |
+
+**The interrupted legs are the Ctrl+C contract, run**: `new` must exit 130 with its slot released and
+its producer lock dropped — the cycle `paused` after one SIGINT — its `mint-campaign` record must
+carry the config and the backend, and `resume` must then end the cycle on a single `start-run`. The
+signal is raised inside the child at a fixed cell, since Windows cannot deliver a console Ctrl+C
+to one child; what no leg covers is the console's own delivery.
 
 **The run fails unless the resumed campaign decides what the uninterrupted one decided** — every
 round, the run's result and the bench headline equal; only the ledger streams a resume appends its
 own init records to are left out of the comparison. At `--rounds 1` the only boundary is the
 origin's, where a resume replays round 0: there the run fails on a resume that ends without a bench
-headline, and prints `MOVED` without failing on it. Both halves run one tree, so the leg catches a
+headline, and prints `MOVED` without failing on it. A campaign that ends on a failed stop
+(`domain/phases.py::stop_reason_outcome`) fails its leg whatever it wrote. Both halves run one tree, so the leg catches a
 resume that reads what its own writer does not persist, and says nothing about a ledger an earlier
 build wrote.
 
 ## Proving parity
 
-Run it on the base and on the change, each from its own tree, then:
+Run it on the base once and keep that home; every later run names it and prints, per optimizer,
+whether its decisions and its requests moved. A `MOVED` is a reading, never a failure — `diff` the
+two files to see where:
 
 ```bash
+PROMPTPOTTER_HOME=after python scripts/offline_run.py --against base
 diff -r base/<optimizer>/requests after/<optimizer>/requests   # what each optimizer call was SENT
 diff base/<optimizer>/decisions.json after/<optimizer>/decisions.json
 ```

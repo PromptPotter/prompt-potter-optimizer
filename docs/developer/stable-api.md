@@ -26,7 +26,7 @@ Four declarations are named on this page because omitting one produces WRONG NUM
 anything = "my_package.connector:CONNECTOR"
 ```
 
-The object named must be a `Connector`; **its `name` field is the registry key**, so the entry-point label is free and a package cannot claim a key its connector does not declare. No edits to `application/campaign_config.py` or `infrastructure/backend.py`. Reference impls: [`connectors/termnorm.py`](../../promptpotter/connectors/termnorm.py), [`connectors/promptpotter.py`](../../promptpotter/connectors/promptpotter.py).
+The object named must be a `Connector`; **its `name` field is the registry key**, so the entry-point label is free and a package cannot claim a key its connector does not declare. No edits to `application/campaign_config.py` or `infrastructure/backend.py`. Reference impls: [`connectors/termnorm.py`](../../promptpotter/connectors/termnorm.py), [`application/runner/inner/connector.py`](../../promptpotter/application/runner/inner/connector.py).
 
 **What a plugin is held to** — owned by [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md); all three rules are enforced when the table completes (`connectors/__init__.py::_validate` and `shared/plugin_registry.py`, the loader every entry-point group shares), and each raise names its rule. What this page promises is only that they will not tighten within v1.
 
@@ -67,7 +67,7 @@ Configured per dataset via `campaign.yaml::scoring`:
 
 Constants, name lookups, arithmetic operators (`+ - * / % **`) addressable. **Calls outside the registry are rejected at compile time** (enforced, not convention).
 
-One stable signal every measurement carries: **`fitness`** — continuous, formula-driven, `[0,1]`, written only by `rescore_results`. It feeds the optimizer, SampleIndex and every cohort read. There is no companion `hit` boolean: it was only ever `fitness >= 1.0`, so it carried nothing the number beside it did not, and on a graded formula it was constantly false. Where a surface needs the discrete word, it derives one (`domain/scoring.py::is_hit`).
+One stable signal every measurement carries: **`fitness`** — continuous, formula-driven, `[0,1]`, written only by `Scorer.grade`. It feeds the optimizer, SampleIndex and every cohort read. There is no companion `hit` boolean: it was only ever `fitness >= 1.0`, so it carried nothing the number beside it did not, and on a graded formula it was constantly false. Where a surface needs the discrete word, it derives one (`domain/scoring.py::is_hit`).
 
 ---
 
@@ -108,7 +108,7 @@ off the fields and the manifest, never off a doc.
 
 **Optimizer LLM:** provider, model, temperature, `reasoning_effort`, and `max_tokens` are per-node config in the selected manifest (`promptpotter/assets/optimizers/{name}/pipeline.yaml::nodes.{node}.config`), resolved inside `llm_call` like any other node tunable; a campaign moves one through `optimization.nodes.{node}.config`. The check-in node is the bench's own, in `promptpotter/assets/checkin/pipeline.yaml`.
 
-Constants moved out of `campaign.yaml` (they live next to their consumer): L1 candidate-generation temperature (the `creativity` arg in `l1/generate.py`, driven by `l1_overrides.creativity`, defaulting to the `l1_generate` node temperature), L2/L3 transition temperatures (the `l2_context`/`l3_plan` node temperatures), runaway-loop ceiling, in arms raced (`runner/loop.py::HARD_CAP_ARMS`), stale-data recovery ladder (`scoring/sample_measurement.py`). PoBB lock-in went the other way and stayed configurable — potter's `pobb` node `lock_in` / `lock_in_n_min` / `leader_lock_in`.
+Constants moved out of `campaign.yaml` (they live next to their consumer): L1 candidate-generation temperature (the `temperature` arg in `l1/generate.py`, driven by L2's `l1_overrides.temperature`, defaulting to the `l1_generate` node temperature), L2/L3 transition temperatures (the `l2_context`/`l3_plan` node temperatures), runaway-loop ceiling, in arms raced (`runner/loop.py::HARD_CAP_ARMS`), stale-data recovery ladder (`scoring/sample_measurement.py`). PoBB lock-in went the other way and stayed configurable — potter's `pobb` node `lock_in` / `lock_in_n_min` / `leader_lock_in`.
 
 The yield-drought escalation rule (`l2_axis_yield_drought`) is permanent — no opt-in flag. Which LAYERS potter may reach is its `escalation` node's `escalation_ladder` (`full` / `l1_l2` / `l1`), the ablation switch; the individual rules are not separately toggleable.
 
@@ -171,15 +171,15 @@ The programmatic peer of §5's verbs — `application/embedded_run.py`, for a ho
 one campaign inside its own event loop:
 
 ```python
-session = await open_session(dataset_name, *, backend_url=…, backend_id=…, on_status=None,
-                             stores=None, program=None)
+session = await open_session(dataset_name, *, backend_url=…, backend_id=…, stores=None,
+                             program=None)
 result = await run_campaign(session, train_data, campaign_config, *, readout_sink=None,
                             langfuse_session_id=None, limits, mode)
 ```
 
 `limits` is a `promptpotter.domain.launch_limits.LaunchLimits(halt_at_accuracy=…,
-spend_budget_usd=…, token_budget=…)`, the model the CLI flags and the `start-run` payload build; a
-budget it declares sets the run's over the campaign's own (no admission — the host program holds no
+ceiling=SpendCeilings(usd=…, tokens=…))`, the model the CLI flags and the `start-run` payload build; a
+ceiling it declares sets the run's over the campaign's own (no admission — the host program holds no
 slot), and `LaunchLimits()` declares none. `mode`
 is `runner/entry.py::RunMode`, and `RunMode()` is a plain run.
 
@@ -187,13 +187,13 @@ Two steps rather than one because every caller does its own work between them. I
 the same `mint_framed_cycle` prologue `new` and the web mint run, and scores the origin inside
 `run_optimization` like every other entry point, so the cycle it produces is resumable, forkable
 and diagnosable by the §5 verbs and a stop during origin scoring closes it — that is what this seam
-buys over a private loop. The origin's accuracy is `result.origin_accuracy`. `stores` names the workspace and whose it is; without it a host runs in the local operator's own,
+buys over a private loop. The origin's own level is `result.origin` (`OwnLevel`: accuracy and composite, each banded). `stores` names the workspace and whose it is; without it a host runs in the local operator's own,
 the one the terminal and an auth-off web session resolve. `program` rides the backend client as
 `InProcessWorkload.program` (§1) — the host's own code, for an in-process backend with no service.
 **`origin_gate` defaults to `strict` and a host has no TTY**, so `run_campaign` blocks at round 0
-until something answers — call
-`submit_gate_decision(cycle_dir, "rescore"|"proceed"|"abort")` from another task, or set the knob
-off. The run readout lands in the cycle's `readout.log` whatever the host passes; `readout_sink=print`
+until something answers — `await
+submit_gate_decision(stores, hop, "rescore"|"proceed"|"abort")` from another task once the cycle
+holds at its gate (one sent earlier is refused, never kept), or set the knob off. The run readout lands in the cycle's `readout.log` whatever the host passes; `readout_sink=print`
 shows it as it is written, and `presentation/terminal/completion.py::report_completion` prints
 the closing box.
 
@@ -218,14 +218,14 @@ from promptpotter.domain.export import parse_prompt_export
 export = parse_prompt_export(Path("…/export.json").read_text())
 template = export.template()          # PromptTemplate — fields by name
 prompt = export.render()              # the prompt as scored: those fields, then its shots
-export.measurement.composite_fitness  # under export.measurement.formula, never a bare number
+export.measurement.own.composite      # under export.measurement.formula, never a bare number
 ```
 
 Four rules hold it, each a defect of DSPy's own `save()` inverted (`domain/export.py` argues them):
 **fields by name** (their `load_state` zips positionally with `strict=False`, so a signature that
 gained a field reloads scrambled and raises nothing) · **provenance inside the file** — the fitness
-under its named formula, n, the lift + CI over the parent (in accuracy, beside the parent's
-accuracy as its bar — the lift over the origin is `bench.lift`, one entry per bench column), θ, the rows' hash, the
+under its named formula as the winner's `own` level with its n, the paired lift + CI over the
+parent (`vs_reference`) and over the origin on the origin panel (`vs_origin`), the held-out lift as `bench.vs_origin`, θ, the rows' hash, the
 optimizer manifest, which is the half we compute and they cannot · **an `artifact_version` a reader
 refuses on**, since we owe no back-compat · **JSON and scalars, never pickle**. `tuned_params`
 carries the node config the winner ran under, minus each node's rendered prompt — that is
@@ -250,7 +250,7 @@ counts optimization cost plus serving cost over 100k requests, and a reader of t
 Typed records on the per-cycle ledger (`.runtime/ledger.jsonl` — the
 workspace-scoped sibling at `.workspace/events.jsonl` carries workspace
 lifecycle, not cycle records). The record family — `PhaseRecord`,
-`SnapshotRecord`, `ResumeCheckpointRecord`, `TokenUsageRecord`,
+the arm-walk records (`SampleScoredRecord`, `CandidateScoredRecord`, …), `ResumeCheckpointRecord`, `TokenUsageRecord`,
 `LLMCallStartRecord`/`LLMCallRecord` — is the discriminated union in
 `domain/run_records.py`; each record's fields are its dataclass, read
 them there.
@@ -267,7 +267,7 @@ Three consequences that a surface must not re-decide:
 
 - **A cut names a `CycleHop`, not a `CyclePath`.** Descent is spent before anything folds (`resolve_cycle_path` returns a sandbox-rooted store plus the leaf), so a path would be a lie at depth ≥ 1. `CyclePath` is the WIRE address and stays `RayItem`'s.
 - **`cycle` and `hop` ride together** because they must agree; every construction site derives one from the other through `cycle_dir_for`.
-- **Every artifact stamps the cut it is of**, so the ledger is the truth and each file is a cache: `?at=<offset>` on the dashboard route re-folds any past moment off disk, and `index.json::forked_at_offset` is a cut on the *parent*.
+- **Every artifact stamps the cut it is of**, so the ledger is the truth and each file is a cache: `?at=<offset>` on the dashboard route re-folds any past moment off disk, and `index.json::forked_at_offset` is a cut on the *parent*. The scans take the same offset as a `read_model.py::Moment` (`ledger_chain(cycle_dir, moment)`): its own ledger to that line, any other ledger of the family to its last record stamped no later — which is how the round, the cycle-scope cells and the tree replay to one instant.
 
 Subscribers read via `Projection.on_record(record)` and MUST NOT write any campaign artifact beyond their declared allowlist (fails loud; see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)).
 
@@ -280,12 +280,12 @@ Sibling cycles (forks, diag) live flat under `cycles/` alongside the root, each 
 ## 8. What is NOT stable
 
 - **Internal module structure** beyond §1–§7. The dispatch hub split into `dispatch/{bundle, compose, injections, facade}` is internal — only the public symbols (`DispatchHub`, `injections`, `build_bundle`, `validate_template`) are stable.
-- **Private types** (`_Injection`, `_TEMPLATE_EXTRAS`, etc., plus any `_`-prefixed name). Package `__init__` files are namespace markers that re-export nothing — §1–§7 is the whole public surface, not whatever a package surfaces.
+- **Private types** (`_Injection` etc., plus any `_`-prefixed name). Package `__init__` files are namespace markers that re-export nothing — §1–§7 is the whole public surface, not whatever a package surfaces.
 - **`__all__`** — this document is the public surface; `__all__` is a reader's hint and nothing more. It is mechanically inert here (`implicit_reexport = true`, no `import *` anywhere), so neither runtime nor mypy consults it, and a name listed there is not thereby promised. Prune an entry nothing imports rather than reading it as a contract.
 - **Runtime dataclass shapes** not in §1–§7 (`CycleSlice`, `RoundDigest`, `InjectionBundle`, `RoundBuffer`, etc.).
 - **In-memory caches** and their invalidation strategies (optimizer LRU caches, the dispatch hub's pipeline-param-catalogue cache, etc.).
 - **Prompt templates** at `promptpotter/assets/optimizers/potter/pipeline.yaml::resolved_prompts` — data, intentionally tunable. Forks may edit; we may also edit on any release.
-- **The optimizer node types** (`application/optimizers/nodes.py`, registered under `promptpotter.optimizer_nodes`). They hand a member the live `Cycle`, so a member built on them builds on internal state.
+- **The optimizer node types** (`application/optimizers/nodes.py`, registered under `promptpotter.optimizer_nodes`) and the `NodeContext` a member is handed (`application/bench/node_context.py`). The context carries no cycle, session or store, but its roster of readings still moves with the bench.
 - **Test helpers** (`tests/factories.py`, `tests/conftest.py`).
 - **The `webapp/` layout.** The webapp + control plane ship and serve users; internal component layout stays free to move.
 - **The REST API and the events stream**, specified though they are (`docs/specs/api-openapi.yaml`, `events-asyncapi.yaml`). They carry **no inbound credential**: `presentation/api/middleware/oidc.py` derives identity from a browser SESSION COOKIE and nothing else — no bearer token, no API key anywhere on the inbound path — so a third party reaches them only by running the server with `PROMPTPOTTER_AUTH=off`, i.e. with no auth at all. That makes this a same-origin browser surface plus a local no-auth mode, not an integration surface, and saying so is the honest state: per-endpoint guarantees would promise something it cannot yet keep. (The one bearer token the repo holds runs PP→TermNorm — outbound, the other direction.)

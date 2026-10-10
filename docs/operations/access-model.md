@@ -13,7 +13,7 @@ illegible; keeping them distinct, and never collapsing the hierarchy, is the who
 |---|---|---|---|
 | **host-admin ↔ user** | Authorization (host privilege) | the operator-admin channel only (ADR-0004, chat-id lock) — no API-side capability | channel: ignored |
 | **owner ↔ delegate** | Authorization (capability) | one dispatcher gate (`_require_capability_for` over `CAP_FOR_KIND`) | 404 (existence-hiding) |
-| **user ↔ user** | Tenancy (data isolation) | structural directory rooting + one `load_owned` ownership rule | 404 |
+| **user ↔ user** | Tenancy (data isolation) | structural directory rooting + one `owned_campaign` ownership rule | 404 |
 | **loop ↔ everything** | OS privilege | systemd-hardened unit (kernel-enforced) | process denied (EACCES / cgroup) |
 
 > **A dataset read is not an authorization decision — it belongs to no boundary.**
@@ -113,12 +113,9 @@ shell, which resolves to `default_identity` carrying `OWNER_COMMAND_CAPABILITIES
 served API the isolation holds absolutely** — `deps.py::resolve_identity` builds only from the
 session — and the local shell is the separate boundary § loop ↔ everything already concedes.
 
-**Ownership within a tenant is one rule:** `CampaignStore.load_owned(campaign_id, owner_user_id)`
-returns the campaign iff it exists *and* is owned, else `None` — a missing and a cross-owner
-campaign collapse to the same 404. Its callers keep their own error text; only the ownership
-predicate lives there. **Two launch paths inline the same comparison instead** and raise
-`LaunchError` (422, not 404) — `jobs/launcher/mint_and_start.py` and `jobs/launcher/checkin.py`.
-Same existence-hiding effect, a second copy of the rule, and a third status code for one question.
+**Ownership within a tenant is one rule:** `infrastructure/store/stores.py::owned_campaign`
+returns the campaign iff it exists *and* is the caller's, else raises `NotFoundError` — a missing
+and a cross-owner campaign collapse to the same 404, for every read, command and launch.
 
 **One deliberate exception — not a bug:** `routers/origins.py` is **tenant-scoped, not
 owner-scoped** (documented in-code). A CLI-minted campaign is owned by the registered-developer
@@ -251,7 +248,7 @@ Four gates, each with a different owner, and only the first two adapt on their o
 | Gate | Set by | Adapts? |
 |---|---|---|
 | Campaigns admitted at once | `Settings.MACHINE_RUN_CAPACITY` | Yes — lowered under provider back-pressure, never raised above the ceiling |
-| Share of the provider's 60 s window | nothing — derived per call | Yes — least-served tenant next (`infrastructure/llm/rate_limit.py`) |
+| Share of the provider's 60 s window | nothing — derived per call | Yes — least-served tenant next (`infrastructure/llm/send_pacing.py`) |
 | Campaigns ONE person may hold | `user.json::max_concurrent_cycles` — the host, or `set-concurrent-cycles` by an account on its own key | No |
 | What an account may ever spend | the free-tier ceilings above, in both units | No |
 
@@ -264,8 +261,13 @@ idea to hold rather than two. It is starvation-free by arithmetic: the third gat
 entries one account can hold, so a quiet account's launch always overtakes a busy one's.
 
 Waiting is bounded by `Settings.QUEUE_MAX_WAIT_S`, and a launch can be withdrawn before it starts
-(`cancel-queued-run`, owner-only whatever capability the caller holds) — a queue with no way out is
-a trap, and `pause-cycle` cannot serve one, since a queued mint has no cycle to write a flag into.
+(`cancel-queued-run`) — a queue with no way out is a trap, and `pause-cycle` cannot serve one, since
+a queued mint has no cycle to write a flag into. **Only the principal that launched it may
+withdraw it**, whatever capability the caller holds: the job is filed under
+`acting_principal_id`, never under the account, because a delegate acts in its delegator's account
+and would otherwise own every launch there. A launch refused AFTER its wait — the backend down, the
+wallet short, the wait expired — writes its reason onto the job, and `machine-status` serves it
+back to that same principal (`refused`).
 
 **The one automatic signal is throttle stall, and it is gathered without configuration.** Every exit
 from the rate limiter reports how long that call sat blocked (`report_throttle_stall`) — as does a
@@ -278,7 +280,7 @@ one-directional property is what makes an automatic input safe here at all.
 **It reads no CPU, no memory, no load average and no disk**, and that is a decision rather than an
 omission: `os.getloadavg` is Unix-only, cgroup and `/proc` files are Linux-only, `psutil` would be a
 new dependency, and a number that silently reads zero on half the machines it runs on is worse than
-no number. `capacity.py`'s docstring owns the reasoning and names the shape an added signal takes.
+no number. A real machine signal, should one land, joins as one more term in the same `min`.
 
 **So nothing in the application stops the box running out of memory.** The guard for that is
 kernel-enforced and lives in the service unit — `MemoryMax` in § loop ↔ everything above — plus

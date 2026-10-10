@@ -50,8 +50,8 @@ Three verdicts ship, and each answers a different "what if".
 
 **A lens is scored the way the run is.** `score:F` is the cycle's own scoring block with
 `per_cell` set to `F` — `mask/load.py::lens_overrides`, the `ConfigOverrides` a fork applying it
-carries; a `dials:` lens becomes its `F` first, so the fork carries `lens_criterion` — compiled to that cycle's `CellScorer`, run over each arm's rows in the round document by
-`rescore_results` and folded by `fold_cells`. So a `lens_value` is the composite a fresh run under
+carries; a `dials:` lens becomes its `F` first, so the fork carries `lens_criterion` — compiled to that cycle's `Scorer`, run over each arm's rows in the standing round
+(`Scorer.sheet`) and folded by `fold_cells`. So a `lens_value` is the composite a fresh run under
 `F` reports for that arm, whatever `F`'s shape: `F` over a round's means is a different number the
 moment `F` is nonlinear, and it ranks arms differently. The round's evaluator map is a reading the
 dashboard shows, never a formula input.
@@ -110,6 +110,10 @@ prompt field is not: nothing ever ran at the edited value, so no measurement on 
 carries over and the honest render is unknown rather than a recomputed anything. Budget and sample
 look-ahead are the only two settings that move a RUNNING cycle in place. A surface offering the
 change is obliged to say which of the three it is.
+
+**A knob's `Scope` (`application/campaign_config.py`) says what resume does with an edit to it.**
+`POLICY` governs unevaluated rounds only, so the cycle resumes in place. `DATA` shapes the trace and
+`IDENTITY` names what runs — a new treatment — so resume runs divergence detection on both.
 
 `ab` is the one that answers question 2 out loud. It reports where the change departs the
 record, how many rounds that leaves counterfactual, and the decisions that re-derived
@@ -174,8 +178,8 @@ summary fields instead and still serves such a cycle.
   across a fork edge is re-graded under the child's scorer.
 - **A mask IS the composite, read per cell** — never a formula over a round's means, which agrees
   with the run only where the formula is linear, and the shipped length charge is not.
-- **Cost.** A lens read opens each round document of every campaign the tree spans and grades
-  every arm's rows once per request — formula evaluations only, no LLM call and no archive read.
+- **Cost.** A lens read folds the standing rounds of every campaign the tree spans, takes each
+  arm's rows from the archive and grades them once per request — formula evaluations only, no LLM call.
 - **Record unchanged.** A mask is a projection on top. The realized lineage and its winners
   never move.
 - **One scoring home.** No mask math in TypeScript; the scoring gateway stays the single one; the fold is a read-time `application/` service, never an infrastructure

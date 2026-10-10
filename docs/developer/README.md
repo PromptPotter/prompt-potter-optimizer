@@ -26,7 +26,8 @@
 ```bash
 pip install -e ".[all,dev]"            # into the repo venv
 git config core.hooksPath .githooks    # once per clone: the gate on what you staged
-python scripts/gate.py                 # every check CI runs (--py | --web | --only NAME)
+python scripts/gate.py --changed       # while editing: only the checks and tests your diff reaches
+python scripts/gate.py                 # before handing over: every check CI runs (--py | --web | --only NAME)
 ```
 
 Use the repo venv's interpreter for everything: a bare `python` imports `promptpotter` but not its dependencies. This page owns the four seams below and is not an index — which doc answers which question is [`../README.md`](../README.md), and what every PR is measured against is [`../architecture.md`](../architecture.md) §0 + §0.5.
@@ -54,7 +55,7 @@ Every optimizer LLM node — `l1_generate`, `l1_critique`, `l2_context`, `l3_pla
 |-------|--------|-----------|----------|
 | `RoundResult.critique` | L1 critique | L1 generate, L2, L3 (`critique` injection via `bundle.digest.critique`) | per round (lives on the round audit, not the memory) |
 | `Cycle.framing` | operator, at check-in (frozen for the run) | L1 generate (`task_context` injection — on that floor only) | persistent; never overwritten by any layer |
-| `PotterState.memory.l1_layout` | L2 | L1 generate (`fill`); L2 (`l1_layout` injection) | persistent (banked per round as `optimizer_state`) |
+| `PotterState.memory.steer["l1_generate"]` (`layout` + call settings) | L2 | L1 generate (`fill`); L2 (`l1_layout` injection) | persistent (banked per round as `optimizer_state`) |
 | `PotterState.memory.plan` | L3 | L1 generate, L2, L3 (`plan` injection; not on `l1_critique`'s layout) | persistent — never cleared |
 | `PotterState.memory.wounds.l3_note` | L3 | L2 (`l3_to_l2_note` injection — L2 template only) | persistent until L3 next fires |
 | `PotterState.memory.wounds.l2_guard_breaches` | L2 parser + layout validator | L3 (rendered in the merged `guard_breaches` injection) | persistent until L3 fires |
@@ -78,7 +79,7 @@ The runner asks the escalation rules engine after every round. `EscalationFSM.ob
 
 **Which rules exist, and which of them preempt patience, is owned by [`dispatch-hub.md`](dispatch-hub.md) § Trigger** — read the membership there and in `escalation/rules.py`, never from a copy on this page.
 
-Counter state lives at `PotterState.escalation` (`l1_stall_count`, `l2_stall_count`, …) — it moves at a closed round and at a fire that LANDED, each a ledger record; an L2 ask (`ask_l2_escalation`) reads a verdict and mutates nothing. In-memory during a cycle and rebuilt on resume by `EscalationFSM.from_ledger` — a fold over the rounds the resume KEEPS (a rewind's discarded rounds stay on the ledger and are cut), not re-derived from one round. Every transition is checkpointed.
+Counter state is one typed value, `PotterState.escalation.ladder` (`records.py::Ladder`) — it moves at a closed round and at a fire that LANDED; an L2 ask (`ask_l2_escalation`) reads a verdict and mutates nothing. It is banked whole, beside the memory, on the round it stands on (`PotterRoundState`): at the round's close, and restated by a fire that lands after it. A resume or a fork takes up the last standing round's — nothing is folded back. Every transition is checkpointed.
 
 Self-healing fires through a different door, bypassing the escalation ladder. **Which layer heals which wound** — owned by [`self-healing-internals.md`](self-healing-internals.md) § The wounds, mapped to the two axes.
 
@@ -108,32 +109,33 @@ It's the **bridge between optimizer and target system**. Everything above it gen
 ## 4. Cross-run memory
 
 `measurements/` is the database. `MeasurementArchive` is the only gateway. Two derived views
-(`SampleIndex`, `AxisIndex`) are folded from it by `refresh()`. `SampleIndex`'s per-run
+(`SampleIndex`, `AxisIndex`) are folded from it by `refresh()`. `SampleIndex`'s per-configuration
 derivation is persisted (`measurements/derived/sample_fold__{dataset}.jsonl`) and replayed at start, so a
-process re-reads and re-scores only runs it has not folded before; the fold is revalidated
-against the active formula and each detail's signature, and rebuilt whole if either moved.
+process re-reads and re-scores only the populations that grew since; the fold is revalidated
+against the active formula and each population's signature, and rebuilt whole if the formula moved.
 
 ```
 ON DISK (the database)                DERIVED (folded from disk)
 ──────────────────────────            ─────────────────────────────
 measurements/                       MeasurementArchive
-  index.jsonl        ← append-only                   │
-  runs/                                     ┌─────────┴─────────┐
-    {run_id}.jsonl   ← one run's log         ▼                   ▼
-                                        SampleIdx            AxisIdx
+  index.jsonl        ← configuration × dataset       │
+  configs/{config_key}.json                 ┌─────────┴─────────┐
+  cells/{config_key}.jsonl ← one line       ▼                   ▼
+                             per answer  SampleIdx            AxisIdx
                                        (per sample)    (folds both axes)
 ```
 
-Both files are append-only logs folded last-wins (`store/read_model.py`). The index keys on `run_id`; a run's log keys on `k` — one `"run"` header row (rewritten whole per save; it is the commit marker) and one `"m:{sample_id}"` row per measurement.
+**A cell is one configuration measuring one sample, and it keeps every answer it was given.** An answer is one appended line, never rewritten, addressed `{file_key}.{id}` and filed under the node-chain prefix that PRODUCED it (`terminal_node`), so every configuration sharing that prefix reads it there. A configuration × dataset's answers are its **population**; each reader declares its take over it, and the default — per sample the most recent answer, a live one over a failed or deprecated one — is `measurement_archive.py::standing`. The archive knows no run, campaign or round: a walk records the answers it took (`ScoredWalk.cells`) and the ledger names them.
 
-**Every row is FACTS, never a grade.** `append_run` writes each row through `domain/scoring.py::measured_facts`, and neither the header nor the index carries a score, so every read path — replay, the δ ruler, the indexes, the cell reads, a bench pairing — grades rows under the `CellScorer` it names (`rescore_results`). Why a grade is not a fact: [`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md).
+**Every row is FACTS, never a grade.** `file_answers` writes each row through `domain/scoring.py::measured_facts`, and the index carries no score, so every read path — replay, the δ ruler, the indexes, the cell reads, a bench pairing — grades rows under the `Scorer` it names (`Scorer.sheet`). Why a grade is not a fact: [`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md). Beside its facts an answer carries who filed it: `config_key`, `dataset_name`, `role`, `source`, its own `provenance` grade and `created_at`. **`role` is WHY the scoring pass ran** (`shared/measurement_context.py::MeasurementRole`): `panel` is a candidate's own evidence in the round's shared order and `origin` the campaign's C0, and every other one re-enters outside that order — `backfill` and `parent` a prior or the parent caught up for a paired comparison, `repair` a resume's re-measured hole, `overlap` and `verify` report-only passes that reach no election, floor, lift or acquisition, `bench` the held-out pass no optimizer reading folds. Which roles a reading may see is its `RoleScope`, part of its identity, so readings in two scopes never pair (`SCOPE_ROLES`).
 
-**Write path:** a taken cell (`Walk.take`) → `build_dataset_run_data()` (`application/datasets/loaders.py`) → `archive.append_run(run_id, data, new_measurements)` — the rows already on disk are never rewritten, so a walk of S samples costs O(S) bytes, not O(S²) — → `AxisIndex.refresh()` (`application/intelligence/indexes/axis.py`) pulls via `archive.load_since()`. `compact_run` drops superseded rows at the walk boundary; `reset_run` truncates (a `force_fresh` pass REPLACES its rows, and append-only does not overwrite); `reindex` rebuilds `index.jsonl` from `runs/`.
+**Write path:** a taken cell (`Walk.take`) → `archive_entry()` (`application/datasets/loaders.py`) names the configuration → `MeasurementArchive.file_answers(entry, rows)` appends one line per answer the cell did not hold and returns the addresses. **A replay files nothing** — the walk takes the answer already there. `reindex` rebuilds `index.jsonl` from `cells/` and `configs/`.
 
-**Read paths** (both return `list[Measurement]`, ungraded):
+**Read paths:**
 
-- `measurements_for_sample(sample_id)` — *"history of training example X"*. Exposed through `archive_queries.measurements_for_sample()`; **no caller today**, and kept anyway because architecture.md § Measurement archive (the actual database) declares both keys first-class read surfaces of the archive.
-- `measurements_for_config(predicate)` — *"runs whose config matches this subset"*. Optional `run_ids` hint keeps the scan O(K + matches).
+- `load_population(stores, entry)` / `list_populations(stores, dataset_name=)` — the EVIDENCE read: a configuration's standing answers, memory-scoped for a controlled line.
+- `walked_answers(stores, {sample_id: answer})` — the rows one walk took, whatever its cells have been answered since.
+- `measurements_for_config(predicate)` — *"answers under configurations matching this subset"*, as `Measurement`s, ungraded.
 
 The archive is tenant-global and **never backend-scoped** — no read or write takes a `backend_id`.
 
@@ -143,13 +145,13 @@ The archive is tenant-global and **never backend-scoped** — no read or write t
 
 | Change | Files |
 |---|---|
-| New field on every measurement | `Measurement` (`domain/sample.py`), `build_dataset_run_data()` (`application/datasets/loaders.py`), `_to_measurement()` (`infrastructure/store/measurement_archive.py`) |
-| New retrieval query | Method on `MeasurementArchive` parallel to `for_sample/for_config`. Pair with an index class if filtering must stay efficient. |
-| New derived index | Class with `_seen_runs` cursor + `ingest_run()` returning its per-run row, applied through ONE `replay_row()` both live and on replay; register on `AxisIndex.refresh()`. Persist via `read_model` (`infrastructure/store/read_model.py`) — never a second mechanism |
+| New field on every measurement | `Measurement` (`domain/sample.py`) and `MeasurementArchive.measurements_for_config` (`infrastructure/store/measurement_archive.py`); a new STAMP beside the facts joins `PROVENANCE_KEYS` there |
+| New retrieval query | Method on `MeasurementArchive` parallel to `measurements_for_config`. Pair with an index class if filtering must stay efficient. |
+| New derived index | Class folding each POPULATION into one row keyed by `config_key` and stamped with its signature, applied through ONE `replay_row()` both live and on replay; register on `AxisIndex.refresh()`. Persist via `archive_queries.write_sample_fold`'s shape — never a second mechanism |
 
 **The one rule:** `node_configs` is canonical identity — must be deterministic from pipeline params. Don't break determinism.
 
-**Two hashes, and they are not interchangeable.** `SearchPoint.content_hash(dataset)` is the RUN key — rendered prompt + dataset + merged params — so one prompt scored on N subsets is N runs. `PipelineSchema.sp_hash(params)` is over the schema-resolved node configs alone, so it is the same across subsets; that is why `intelligence/hard_sample_archive.py` keys the ruler's arms on it rather than on the run. It is stored on every index entry, and a caller wanting "the searchpoint" rather than "the run" reads that. **`OptSearchPoint.lineage.id` is neither** — a `uuid4` minted per individual, stable across nothing, and what `LineageNode.id` carries. Joining a tree node to an archive row on it matches nothing; the node serves `sp_hash` beside it for that, stamped on `ScoredCandidate` at the moment it is scored. **Never re-derive it downstream:** the only config a scored candidate carries forward (`resolved_pipeline_params`) is `config_params`, the node configs with each rendered `prompt` stripped, and the hash covers that prompt — so a recompute yields a well-formed id addressing no run, and nothing raises.
+**Two hashes, and they are not interchangeable.** `config_key(node_configs)` is where a configuration's cells are FILED — one per prefix of its node chain. `PipelineSchema.sp_hash(params)` names the searchpoint over the same schema-resolved node configs; it is stored on every index entry as `prompt_fields_id`, and it is what `intelligence/hard_sample_archive.py` keys the ruler's arms on. `JobSearchPoint.content_hash(dataset)` files nothing: it names a campaign's root. **`OptSearchPoint.id` is neither** — the individual's own content (its prompt fields, shots and resolved config), the same wherever and whenever it is reached, and what `ArmNode.id` carries. It leaves out the campaign's framing and the demo pool, so joining a tree node to an archive row on it matches nothing; the node serves `sp_hash` beside it for that, stamped on `ScoredCandidate` at the moment it is scored. **Never re-derive it downstream:** the only config a scored candidate carries forward (`resolved_pipeline_params`) is `config_params`, the node configs with each rendered `prompt` stripped, and the hash covers that prompt — so a recompute yields a well-formed id addressing no cell, and nothing raises.
 
 ---
 

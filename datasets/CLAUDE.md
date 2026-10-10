@@ -51,7 +51,7 @@ The roster is the directory listing; each dataset's connector is read off its ow
 
 `datasets/promptpotter-self/` is the **recursive case**: the outer cycle mutates the inner cycle's optimizer prompt template fields. **Its `pipeline.yaml` declares no nodes and no pipelines**: the connector serves the graph (`Connector.pipeline_declaration`), derived from the manifest the panel's cells run — every llm node of it, never only the ones a round runs, or an escalation node reached on a stall could never be told to improve. So any preset can be an inner, and an edit evolved on either layer lifts onto the other with no copy to keep in step.
 
-**L4 is a recursion, not a 4th `LayerStrategy`** — owned by [`../promptpotter/application/optimizers/potter/CLAUDE.md`](../promptpotter/application/optimizers/potter/CLAUDE.md) § Add no 4th LayerStrategy; here it is one more dataset, run through the `promptpotter` connector.
+**L4 is a recursion, not a 4th layer** — owned by [`../promptpotter/application/optimizers/potter/CLAUDE.md`](../promptpotter/application/optimizers/potter/CLAUDE.md) § Add no 4th layer; here it is one more dataset, run through the `promptpotter` connector.
 
 **The inner instrument is `justlogic-d234`, and a cut switch is never advice.** Each depth cut is a separate `dataset_name` with its own δ scale, so comparing "bands" across cuts reads a difference of rulers as a capability difference. A new cut is a new directory and nothing else — `justlogic_depths` reads the depths off the name — so widening difficulty means adding `justlogic-dNNN/`, never re-cutting this one.
 

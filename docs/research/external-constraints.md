@@ -93,8 +93,9 @@ an entry before quoting it; standards on this page are still moving.
   **the `description` is the routing surface**, and optimizing a skill's body without its
   description optimizes the half that selection never reads.
   - Today the harbor connector writes the frontmatter itself and holds `description` fixed,
-    deliberately: with one skill there is nothing to choose between
-    (`connectors/harbor.py::_write_skill`).
+    deliberately: with one skill there is nothing to choose between. terminus-2 finds
+    `<skills_dir>/<name>/SKILL.md` with a depth-2 `find`, and silently skips a skill whose
+    frontmatter lacks `name` / `description` or whose line endings are not LF.
   - That makes the candidate the body alone, so the spec's frontmatter rules cannot be broken by a
     mutation. The body's size limit still applies to it.
   - **The skilled agent reverses this.** With many skills, `description` has to become a search

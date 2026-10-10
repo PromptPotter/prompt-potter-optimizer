@@ -18,8 +18,14 @@ from promptpotter.application.jobs.launcher.mint_and_start import with_optimizat
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
 from promptpotter.application.runner.entry import RunMode
+from promptpotter.application.scoring.cell_envelope import CellEnvelope
 from promptpotter.application.scoring.formula import SCORING_FUNCTIONS
-from promptpotter.application.scoring.sample_measurement import cell_billing, cell_bound
+from promptpotter.application.scoring.sample_measurement import (
+    attempt_bounds,
+    cell_billing,
+    cell_bound,
+    priced_pairs,
+)
 from promptpotter.domain.launch_limits import LaunchLimits
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.sample import Sample
@@ -87,14 +93,14 @@ async def run_bbeh_campaign(
     print(f"GLOBAL OPTIMIZATION ({len(train_norm)} train samples)")
     print("=" * 60)
 
-    session = await open_session("bbeh", backend_url=backend_url, on_status=print)
+    session = await open_session("bbeh", backend_url=backend_url)
     try:
         campaign_config = build_campaign_config(
             max_rounds=max_rounds,
             n_variants=n_variants,
             sp_budget_round=sp_budget_round,
         )
-        pipeline_params = configure_and_apply_pipeline(session, campaign_config, log=print)
+        pipeline_params = configure_and_apply_pipeline(session, campaign_config)
         # The model this run actually reaches, resolved from datasets/bbeh/pipeline.yaml — never
         # shared_config's MODEL_ID, which describes the route the Colab peers take. Raise rather
         # than default: a results file naming the wrong model is worse than no results file.
@@ -114,7 +120,10 @@ async def run_bbeh_campaign(
             mode=RunMode(),
         )
         report_completion(cycle_result, session=session)
-        origin_train_acc = cycle_result.origin_accuracy
+        origin = cycle_result.origin
+        origin_train_acc = (
+            None if origin is None or origin.accuracy is None else origin.accuracy.value
+        )
         # Ask the outcome table, never a hand-authored string: the export below is only
         # meaningful for a run that finished, and every halted/failed/paused reason must skip it.
         if stop_reason_outcome(cycle_result.stop_reason) is not StopOutcome.SUCCESS:
@@ -135,16 +144,27 @@ async def run_bbeh_campaign(
         per_task_results: dict[str, Record] = {}
         # Outside the run, so under a book of its own: every cell is still admitted and metered.
         bound = await cell_bound(session, result_pipeline_params or {})
-        billed = cell_billing(session.pipeline_schema, result_pipeline_params or {})
+        billed = cell_billing(
+            session.pipeline_schema,
+            priced_pairs(session, result_pipeline_params or {}),
+            await attempt_bounds(session, result_pipeline_params or {}),
+        )
+        client = session.backend_client
         with spending_under(unbounded_spend_book()):
             for i, task in enumerate(tasks, start=1):
                 test_items = test_norm_by_task[task]
                 hits = 0
                 for ex in test_items:
-                    resp = await session.backend_client.run_query(
-                        ex, pipeline_params=result_pipeline_params, bound=bound, billed=billed
-                    )
-                    ranking = resp.get("data", {}).get("final_ranking") or []
+                    # Each cell is a unit of work of its own: its envelope opens its send budget.
+                    async with CellEnvelope(
+                        client.cell_envelope_s(ex, result_pipeline_params or {}),
+                        attempts=client.cell_attempts,
+                        label=f"{task}:{ex.id}",
+                    ):
+                        data, _spent = await client.run_query(
+                            ex, pipeline_params=result_pipeline_params, bound=bound, billed=billed
+                        )
+                    ranking = data.get("final_ranking") or []
                     predicted = ranking[0].get("candidate", "") if ranking else ""
                     hits += int(label_match(predicted, ex.ground_truth))
                 acc = hits / len(test_items) if test_items else 0.0
@@ -168,7 +188,7 @@ async def run_bbeh_campaign(
             config={
                 "optimizer": "promptpotter",
                 "max_rounds": opt_cfg.max_rounds,
-                "n_variants": select_optimizer(opt_cfg).pacing.arms_per_round,
+                "n_variants": select_optimizer(opt_cfg).arms_per_round,
                 "sp_budget_round": select_optimizer(opt_cfg).round_cells(len(train_pool)),
                 "model_id": target_model,
                 "n_train": len(train_pool),

@@ -52,7 +52,7 @@ That asymmetry is the reason these two are the optimizable ones, and it is why a
 
 ## Enforcement is provider-dependent
 
-Some providers implement structured output as **constrained decoding** — a grammar masks the token distribution, so an invalid token cannot be sampled. Others treat it as a strong suggestion and validate afterward, or not at all. Ours does both: per `VariantEvidenceGrounding`'s docstring, *"providers like Groq don't honor the enum."*
+Some providers implement structured output as **constrained decoding** — a grammar masks the token distribution, so an invalid token cannot be sampled. Others treat it as a strong suggestion and validate afterward, or not at all. Ours does both: per `VariantEvidenceGrounding`'s docstring, not every provider honours the grafted enum, so the validator enforces it.
 
 So the schema **teaches** more reliably than it **compels.** Where the grammar doesn't bind, the name, the position, and the prose are the entire mechanism — the opposite of the usual intuition.
 

@@ -21,9 +21,9 @@ operator instead of doing it themselves. The bar on any defect found while addin
 | Name | File | Wire shape | Session | Use |
 |---|---|---|---|---|
 | `termnorm` | `termnorm.py` | `{query, steps, node_config}` posted to `/matches` | `POST /sessions` handshake with terms array | TermNorm production backend |
-| `promptpotter` | `promptpotter.py` | `{query, optimizer_prompt_overrides}` → in-process inner cycle (`in_process_run` → `runner/inner/spawn.py`) | Noop (no remote service) | Optimizer-of-the-optimizer (L4) |
+| `promptpotter` | `application/runner/inner/connector.py` — application machinery, so it lives there and the table loads it by name (`__init__.py::_APPLICATION_BUILT_INS`); nothing in this package imports `application/` | `{query, optimizer_prompt_overrides}` → in-process inner cycle (`in_process_run` → `runner/inner/spawn.py`) | Noop (no remote service) | Optimizer-of-the-optimizer (L4) |
 | `dspy` | `dspy_module.py` | `{query, prompt, params}` → the caller's `dspy.Module` | Noop (no remote service) | PromptPotter as a DSPy `Teleprompter` (`presentation/teleprompter.py`) |
-| `harbor` | `harbor.py` | `{query, prompt, model_name, agent_kwargs}` → one containerized Harbor trial (`in_process_run` → `Trial.create(...).run()`) | Noop (no remote service) | Tuning an agent that works in a sandbox, graded by the task's own verifier |
+| `harbor` | `harbor.py` | `{query, prompt, model, provider, agent_kwargs}` → one containerized Harbor trial (`in_process_run` → `Trial.create(...).run()`) | Noop (no remote service) | Tuning an agent that works in a sandbox, graded by the task's own verifier |
 | `dbllmbench` | `dbllmbench.py` | `{query, prompt, config}` → one `db-llm-bench` run of that question in a container (`in_process_run` → `docker run <runner_image>`) | Noop (no remote service) | Tuning the prompt of a query-writing benchmark whose harness executes the query and grades the result |
 
 > **`import dspy` is function-local, and must stay that way.** Building the table imports every
@@ -39,11 +39,10 @@ operator instead of doing it themselves. The bar on any defect found while addin
 
 ## What the second connector taught the boundary
 
-Three things the next connector should heed. **Wire payload shape is connector-specific** — each
-decides its own outer key (`termnorm` flattens `pipeline_params` into `node_config`,
-`promptpotter` nests under `optimizer_prompt_overrides`) and the protocol just carries the
-dict through. **The session contract works for in-process backends via a noop**
-(`protocol.py::NoopSession`, which every in-process connector passes), at the cost of the HTTP shape leaking
+**Wire payload shape is connector-specific** — each decides its own outer key (`termnorm`
+flattens `pipeline_params` into `node_config`, `promptpotter` nests under
+`optimizer_prompt_overrides`). **The session contract works for in-process backends via a noop**
+(`protocol.py::NoopSession`, the `session_factory` default), at the cost of the HTTP shape leaking
 into the rest of `BackendClient`. And **`extract_experiment` is the impedance-match seam**:
 every panel-owning connector yields the same rows from a very different body, so **a new
 connector shapes its `experiment_data` to fit the loader, never the reverse**.
@@ -90,7 +89,7 @@ and moves every round.
   What a change there must keep, each stated at its site:
   - **The inner campaign runs in its own `asyncio.Task`** (`spawn.py::_run_inner_campaign`).
     `_CYCLE_LEDGER` + `_CURRENT_ROUND` (`infrastructure/llm/telemetry.py`), `_ABORT_CHECK`
-    (`infrastructure/llm/rate_limit.py`) and the optimizer-prompt overrides are per-task
+    (`infrastructure/llm/send_pacing.py`) and the optimizer-prompt overrides are per-task
     ContextVars: the child's COPY is how `_ABORT_CHECK` carries the outer's pause inward, and how
     the outer L1's mutations reach the inner optimizer and never the outer's.
   - **Sandboxes are a FLAT per-cycle registry** `<workspace>/.inner/<key>/`, never physically
@@ -117,7 +116,8 @@ and moves every round.
   kill's leftover containers and scratch are swept by the next run (`infrastructure/docker_host.py::reap_dead_producers`).
   **Never swept: the task images and the package cache**, which are what a resume is cheap on,
   **nor any container that does not name our compose overlay**, because this Docker host has other
-  tenants. **A trial that measured the machine is never a cell**: `_infrastructure_failure` retries
+  tenants. **A trial that measured the machine is never a cell**: `_infrastructure_failure` — asked
+  even when a reward exists, since a verifier whose tool download failed still grades — retries
   it and then raises `CellInfrastructureError`, which halts the walk — at once and as
   `CellSendRefusedError` when the provider account is out of credit. **Nor is one its model provider
   throttled**: `CellThrottledError` hands it to the run's backpressure (`BackendClient.run_query`),
@@ -128,7 +128,7 @@ and moves every round.
 - **`dbllmbench`** — `in_process_run` runs TypeDB's `db-llm-bench` for ONE question in a container
   built from a pinned upstream commit (`resources/dbllmbench.Dockerfile`). The retry loop, the
   scorer and everything below their template's `{{skills}}` slot stay theirs, and the candidate
-  prompt is the one skill file their runner loads (module docstring). **The dataset's
+  prompt is the one skill file their runner loads. **The dataset's
   assets are the image's**, named by path in node config, so the image tag is measurement identity
   and no dataset carries a second copy of a schema; the first cell refuses an image whose build
   commit is not the one its tag names (`_check_image`). **The harness sends from its container**, so
@@ -214,15 +214,15 @@ if the model opens the file (`protocol.py::Connector.prompt_delivery`), so arriv
 fills the required observation `SKILL_KEY`, and a round of unopened skills is a tie it never
 measured.
 
-**There is deliberately no core `turn_scalars` member for this, and that hole is not an oversight to
-fix.** A term whose value is decided by which backend you are on is not a core projection: on
-every other one it would be the constant `1.0`. The rule generalizes rather than the key — **ask of any
-new connector whether what it injects is what the model consumes**, and if the two can diverge, that
+**There is deliberately no core `turn_scalars` member for this.** A term decided by which backend
+you are on is not a core projection: on every other one it would be the constant `1.0`. **Ask of any
+new connector whether what it injects is what the model consumes** — if the two can diverge, that
 gap is a measured observation and not a diagnostic.
 
-**A per-step aggregate can flatter, and Harbor's does** (`harbor.py::_unscoreable_step` raises
-instead). Whatever the next episodic backend rolls up, ask what its roll-up does with a step that
-produced nothing — the answer is usually silence.
+**A per-step aggregate can flatter, and Harbor's does**: it drops a step with no verifier result
+from its denominator, so a crash scores UP (`harbor.py::_unscoreable_step` raises instead). A
+`min_reward` abort is deliberately not caught: every step it appended carries a verifier result.
+Ask what the next episodic backend's roll-up does with a step that produced nothing.
 
 ## The measured unit — declared, never sniffed
 
@@ -245,7 +245,7 @@ backend ([`../../docs/methods/verdict-resolution.md`](../../docs/methods/verdict
 
 **And `cell` implies NOTHING about the run's CONTROL LOOP — a flag reasoning "a cell is expensive,
 therefore…" is the one to refuse.** A connector declares what a row costs (`max_cells_in_flight`,
-`cells_hold_the_machine`, `cell_envelope_s` — each defined on its `Connector` field); how long an operator's look-ahead arming lasts is the round's
+`cells_hold_the_machine`, `cell_envelope_s`, `cell_attempts`, `cell_wait_s` — each defined on its `Connector` field); how long an operator's look-ahead arming lasts is the round's
 and the operator's to decide — no connector can see the round it is inside. Refuse a second flag
 beside `measured_unit` set by RESEMBLING the recursion rather than by any fact about the run.
 
@@ -259,7 +259,9 @@ the next.
 ## Registering a connector
 
 **A built-in is a module under this package defining `CONNECTOR` — never a `register()` call, and
-every module here but `protocol` is one.** `registered()` walks them, merges the
+every module here but `protocol` is one.** A built-in that IS application machinery lives beside
+it instead and is named in `__init__.py::_APPLICATION_BUILT_INS`, because **this package imports
+nothing from `application/`** (`scripts/gate.py::_LAYERING`). `registered()` walks both, merges the
 `promptpotter.connectors` entry points and runs `_validate` over both, once per process.
 **The connector table completes at a declared step, never at import** — owned by
 [`../application/CLAUDE.md`](../application/CLAUDE.md) § Subpackages; nothing here may read the

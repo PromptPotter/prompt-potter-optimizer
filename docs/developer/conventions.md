@@ -24,17 +24,19 @@ collects everything else.
 
 ## Prose in the source
 
-- **A docstring or `#` never restates the code as
-  semantic text.** Two gates, both must pass or it gets **deleted, not
-  shortened**, and there is no route from a failed docstring to a surviving
-  comment. (1) *Non-local* — cover the prose and read the name, signature,
+- **None by default: code carries no docstring and no `#`.** The reader is a strong
+  developer, or an AI assistant, who gets *what* and *how* from names, types and the
+  body. A line is written only where it earns its place, and the one close call that
+  goes its way is the line that saves that reader opening another file. Two gates,
+  both must pass or it gets **deleted, not shortened**, and there is no route from a
+  failed docstring to a surviving comment. (1) *Non-local* — cover the prose and read the name, signature,
   types, body, rest of file: is the fact still missing, such that a reader
   would have to open **other files** to learn it? Local dies, and that is the
   large majority — what the next line does, `Args:`/`Returns:`, what it raises
   when the `raise` is right there. (2) *Unowned* — a rule binding a **set** of
   symbols is layer documentation by definition: route it to the layer's
   CLAUDE.md or `docs/` and delete it here. What survives is the fact whose
-  evidence lives in another subsystem, compressed to **≤2 lines**, present
+  evidence lives in another subsystem, compressed to **one line**, present
   tense — a prohibition, a trap, a sentinel's absence semantics, a tiebreak, a
   security asymmetry. **An `__init__.py` gets none at all** — the path already
   names the namespace and the module map is one `ls`. A `#` is for a
@@ -43,7 +45,7 @@ collects everything else.
   percentage, a run id, an `A -> B` tally: how the code got that way is git's
   job (commit body, `CHANGELOG.md`).
 - **The webapp is in scope — `.ts`, `.tsx`, `.css`, and JSX `{/* */}` alike.** Same two gates,
-  same ≤2 lines, same past-tense smell; a component header says what the component IS and which
+  same one line, same past-tense smell; a component header says what the component IS and which
   rule binds it, never what it replaced. The one generated file (`lib/api/types.generated.ts`) is
   not prose — fix its source docstring and regenerate.
 - **A `CLAUDE.md` is billed to every session beneath it, so it holds rules binding a set of
@@ -57,7 +59,7 @@ collects everything else.
   required keyword-only arg, an `X | None`, a `Literal` over the whole state
   set, a derived property nobody can omit. **Prose defending against a bug the
   type now prevents is pure cost**, and it is the bulk of what gets written.
-  (2) **≤2 lines at the site**, for a trap no type can hold. (3) **The layer's
+  (2) **One line at the site**, for a trap no type can hold. (3) **The layer's
   `CLAUDE.md`**, for a rule binding a *set* of symbols. (4) **`docs/`**, for
   what a reader goes looking for. (5) **§ Paid corrections**, for a failure
   *shape* that will recur — generalized past the incident, one line. (6) **The
@@ -122,8 +124,8 @@ collects everything else.
   A default is fine when it is a *derivation* every caller would repeat identically
   (`compile_scorer(per_sample, per_cell=None)` → the objective IS the fitness), not when the
   right value genuinely differs per call site.
-- **A query module reads a persisted document through its MODEL, never as a dict.** A round file
-  parses as `RoundResult`, `dashboard.json` as its projection model — then direct field access is
+- **A query module reads a persisted document through its MODEL, never as a dict.** A round
+  reads back as `RoundResult`, `dashboard.json` as its projection model — then direct field access is
   the natural reading, not an aspiration defended by `.get()`/`isinstance` at every key. A dict
   walk survives only in a cross-cycle SURVEY that must outlive one corrupt neighbour
   (`read_json_tolerant`, infrastructure `CLAUDE.md` § Picking a JSON reader). Converting an
@@ -136,8 +138,8 @@ collects everything else.
   import-time completeness assert is the third acceptable form. String-keyed
   *data* tables are fine.
 - **A function-local import of our OWN package goes to module scope**, and
-  `complexity_ledger::deferred_imports` counts every one — read how many survive
-  off that baseline; `# extras: <name>` on the import line exempts one that earns
+  `scripts/complexity_ledger.py` counts every one as `deferred_imports` — read how many
+  survive off its `BASELINE`; `# extras: <name>` on the import line exempts one that earns
   it. None of the three reasons for deferring holds: scattered deferrals buy no
   startup (`-X importtime` is the real fix), *extras gating*
   ([`ADR-0006`](../adr/0006-embeddable-core-and-extras.md)) lives on the

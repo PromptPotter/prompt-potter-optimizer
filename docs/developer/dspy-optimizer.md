@@ -67,12 +67,14 @@ original is never mutated, and neither is it during scoring. The winner's proven
 on the training rows — so evaluate the returned program however you already do. It is named
 in the signature rather than dropped silently.
 
-**Your program's spend is counted.** Its calls go through litellm rather than our client, so the
-adapter tracks their usage per prediction and rolls it onto the campaign ledger — which is what
-makes `compile_loop(spend_budget_usd=…)` bound the whole compile rather than half of it. DSPy does not
-record usage for a completion its own cache served, and PromptPotter's measurement cache sits
-above that, so the only calls that go uncounted are ones DSPy replayed that we did not. For exact
-metering, `dspy.configure_cache(enable_disk_cache=False, enable_memory_cache=False)`.
+**Your program's spend is counted, call by call.** Each candidate runs on a copy of your LM
+whose every call is admitted against the campaign's ceiling before it leaves and billed with the
+usage DSPy records for it, a call that raised included — which is what makes
+`compile_loop(ceiling=…)` bound the whole compile rather than half of it. On that copy
+DSPy's own retries and reply cache are off: a resend comes from the cell's budget, and
+PromptPotter's measurement cache is the one replay. Declare `max_calls`, `max_input_tokens` and
+`max_tokens` in `Node.extra` to run under a ceiling; a program that calls its LM more than
+`max_calls` times per example is stopped there.
 
 **Your metric is the scorer.** It runs against each candidate's output and its float is what
 the campaign optimizes, so no scoring rule is restated on our side. `dspy.settings` is
@@ -110,7 +112,7 @@ loop = compile_loop(
     },
     max_rounds=5,
     elimination_n_min=4,      # samples a candidate gets before it may be pruned
-    spend_budget_usd=None,    # a ceiling the run stops at; None runs uncapped
+    ceiling={"usd": None},    # what the run stops at, in USD and tokens; a null arm is uncapped
 )
 ```
 
@@ -165,4 +167,6 @@ Because identity is positional, **the order of `trainset` is part of it.** Shuff
 it, or swap in new rows, and the rows no longer mean what the cached scores were measured
 against. Every measurement stores the example it was taken against, so a `trainset` that
 disagrees with what a name already measured is refused before the first call rather than
-silently scored from the old rows. **New rows, new name.**
+silently scored from the old rows. **New rows, new name.** The dataset directory the campaign
+resolves by that name is rewritten on every compile: it is a projection of the arguments just
+passed, never config to edit by hand.

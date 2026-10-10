@@ -18,14 +18,14 @@ tests. Add new ones the same way — never as a `test_structure` scan.
 
 | You want to add… | Recipe | What actually catches you |
 |---|---|---|
-| A telemetry event / ledger record | [§1](#1-a-ledger-record--telemetry-event) | Import-time: `_ROUTES` (`projections/base.py`) must answer for every `CycleRecord` arm; on the tracing half, `ObservabilityBridge.__init__` raises on an unrouted `Event` |
+| A telemetry event / ledger record | [§1](#1-a-ledger-record--telemetry-event) | Import-time: `_ROUTES` (`projections/base.py`) must answer for every `CycleRecord` arm — the trace is a subscriber under the same table |
 | A prompt injection (`{{slot}}`) | [§2](#2-a-prompt-injection) | Init-time: the `injection_table()` guard + `validate_template()` |
 | A dashboard / view field | [§3](#3-a-dashboard--view-field) | Breaks loud — a wrong/empty dashboard |
 | A resume / decision checkpoint | [§4](#4-a-resume--decision-checkpoint-kind) | Import-time: `decisions.py` + `replayers.py` asserts |
 | A connector (backend) | [§5](#5-a-connector-backend) | Init-time: the `registered()` registry guard |
 | An optimizer node | [§6](#6-an-optimizer-node) | `validate_template()` at prompt load |
 | A CLI verb | [§7](#7-a-cli-verb) | Import-time: the `COMMANDS` ↔ `parser_verbs` assert |
-| A control-plane command kind | [§8](#8-a-control-plane-command-kind) | Import-time: three asserts over `ALL_DISPATCHED_KINDS` — cap, payload model, **and the CLI verb** |
+| A control-plane command kind | [§8](#8-a-control-plane-command-kind) | Import-time: four asserts over `ALL_DISPATCHED_KINDS` — cap, handler, payload model, **and the CLI verb** |
 | A served READ (a GET) | [§9](#9-a-served-read) | `gate.py --only openapi` / `--only ts-types`, but **only once the route carries a `response_model`** — a read without one is invisible to both |
 | A measurement field | [developer README §4](README.md#4-cross-run-memory) | **Arm-time where a connector declares the key** (`Connector.required_observation_keys`), otherwise nothing — it is dropped at `sample_measurement.py::measure_sample` in silence. Declare it on `domain/scoring.py::QueryMeasurement` / `PipelineData`; a `pipeline_data` key also needs `_INFRA_KEYS` or a dataset `observation_mapping`, plus the compaction asserts beside those types |
 
@@ -39,7 +39,7 @@ site holds an explicit ledger handle.
 
 | If the fact originates… | Use | Why |
 |---|---|---|
-| in the **runner**, which owns the observers and threads per-cycle `ViewContext` state across events (phase enter/exit, round complete, per-candidate / per-sample snapshots) | **`RunCallbacks`** method (`application/run_observers.py`) | The runner has the ledger as an explicit dependency and the phase path is **stateful** — `from_phase_event` mutates a `ViewContext` round-over-round. Owned state, explicit injection. |
+| in the **runner**, which owns the observers and threads per-cycle `ViewContext` state across events (phase enter/exit, round complete, the per-candidate / per-sample arm-walk records) | **`RunCallbacks`** method (`application/run_observers.py`) | The runner has the ledger as an explicit dependency and the phase path is **stateful** — the view builders read a `ViewContext` carried round-over-round. Owned state, explicit injection. |
 | **deep in the async LLM / dispatch chain**, with no ledger handle in scope (token usage, an LLM-call marker, a command ack, a crash, a self-healed round warning) | **`emit_*`** helper (`infrastructure/llm/telemetry.py`) | Stateless: kwargs in, append out. Reads the ledger from the `_CYCLE_LEDGER` ContextVar (set by `build_run_observers`, reset by `drain_all`) — the ContextVar exists *because* these sites can't be handed a handle. |
 
 Do **not** fold one into the other: routing the runner's `RunCallbacks` through
@@ -61,16 +61,12 @@ each one's reason rather than here — a second list is what let the first one g
 **A missing arm does NOT break loud** — a record no fold answers for reaches no artifact and
 nothing raises, which is why the claim is checked at import rather than asserted in prose.
 
-**A tracing event is not a second home for the same fact.** `infrastructure/tracing/`
-carries the trace TOPOLOGY — campaign / round / node spans and their scores, the shape a
-remote sink renders — and every `Event` member must have a remote sink to reach. A
-mid-round fact (a candidate created or scored, a round winner, a critique, a layer
-applied) lands on the ledger and in `rounds/round_NNNN.json`, and stops there. Adding a real one is the dataclass in `tracing/events.py`, its
-row in `ObservabilityBridge._routes`, and a handler per sink named in that row.
-
-**Guard (at bridge construction):** `_routes` is the registry, and `__init__` raises when
-an `Event` member has no row — the one failure a fan-out cannot report on its own, since
-`emit` would otherwise drop it in silence.
+**A trace is a fold of the same record, not a second home for the fact.**
+`infrastructure/tracing/bridge.py::TracingProjection` is one more ledger subscriber: it carries
+the trace TOPOLOGY — campaign / round / phase / call spans and their scores, the shape a remote
+sink renders — by overriding `_handle_xxx` like any projection and calling the matching
+`tracing/events.py::TraceSink` hook on each sink. A sink overrides only the hooks it renders, so
+a record reaches a trace by one `_handle_*` there and one hook; nothing in the loop emits to it.
 
 Contract: [`application/CLAUDE.md`](../../promptpotter/application/CLAUDE.md) §
 "Per-call telemetry", [`infrastructure/CLAUDE.md`](../../promptpotter/infrastructure/CLAUDE.md)
@@ -106,38 +102,35 @@ Contract: [`dispatch-hub.md`](dispatch-hub.md) § L1 layout.
 
 ## 3. A dashboard / view field
 
-A field on a phase view (the live CLI render + `dashboard.json`). The producer
-hands the **typed** view onto the ledger fan-out and Pydantic serializes it for
-disk/SSE, so there is **no reconstructor to keep in sync**.
+A field on a phase view (the live CLI render + `dashboard.json`). A view is the
+typed `PhaseRecord.view`, so the field is **on-disk shape**: a reader folding the
+ledger and a subscriber folding live hold the same value, and there is **no
+reconstructor to keep in sync**.
 
 **Recipe:**
 
-1. Add the field to the `*View` frozen dataclass in
-   `application/views/view_models.py`.
-2. Set it in the live builder `_<phase>_<event>` in
-   `application/views/ingress.py` (`from_phase_event`).
+1. Add the field to the `*View` model in `domain/phase_views.py`.
+2. Set it where the view is built — its builder in `application/views/ingress.py`,
+   or the call site that constructs a trivial one.
 3. Render it in `application/views/render/` (`ansi.py::to_text` /
    `markdown.py::to_markdown`) and/or
-   read it where the fact is surfaced — `LiveDashboardProjection._apply_phase` reads
-   the typed view by attribute (`getattr`, presentation-agnostic).
+   read it where the fact is surfaced — `LiveDashboardProjection._handle_phase`
+   matches on the typed view.
 4. If the field also appears in post-hoc `log.md`, set it in `from_disk_log`
    (`application/runner/output.py`) — that builder reads on-disk `index.json` for
    **cross-cycle** rendering and is a genuinely separate source, not a roundtrip shim.
 
-**A field on the ROUND document is not this recipe — it is one edit.** Declare it on
-`RoundResult` (`domain/results.py`) and it reaches `rounds/round_NNNN.json` and every
-reader of that file, because the model IS the document (`save_round_file` persists
-`model_dump()`; `load_round_file` validates it back). There is no payload builder to
-mirror it into.
+**A field on the ROUND file is not this recipe — it is one edit.** Declare it on
+`RoundOutcome` (`domain/results.py`) and it rides the round's close, reaches every reader
+of a standing round, the typed round route and the `rounds/round_NNNN.json` checkout,
+because the model IS the document. There is no payload builder to mirror it into.
 
-**But the webapp does not read round files** — it reads `dashboard.json`. Which model you
+**But the webapp's live surface is not the round** — it reads `dashboard.json`. Which model you
 mirror onto decides the cost, so ask first *whose* fact it is:
 
-- **Per-CANDIDATE** (it already lives on `ScoredCandidate`) → add it to **`DashboardCandidate`**
-  and stop. Not `RoundSummaryCandidate`, which only narrows that base for a CLOSED round: a
-  field declared there reaches `dash.rounds[].candidates[]` and never the live row. The
-  projection's include-set is derived from `model_fields`, so the copy flows with **zero** edits
-  to `round_summary.py`. `build_candidate_rows` fills the live half from the slot the buffer
+- **Per-CANDIDATE** (it already lives on `ScoredCandidate`) → add it to **`ArmReading`**
+  (`domain/results.py`) and stop: a dashboard row live or closed, a scoreboard row and a tree
+  node all embed it, built by `ArmReading.of` off the score report. `build_candidate_rows` fills the live half from the slot the buffer
   holds — banked at `candidate_scored`, then folded onto by `RoundBuffer.stamp_fit` at the
   election — so **ask WHEN your fact exists**: one the scorer knows per sample rides
   `_composite`, one the election stamps rides `ElectionRecord.fit`, and a field that reaches
@@ -147,10 +140,9 @@ mirror onto decides the cost, so ask first *whose* fact it is:
 - **Per-ROUND** → mirror onto `RoundSummary` *and* hand-write the line in
   `projections/live_dashboard/round_summary.py`.
 
-Reach for the round-level route only when the fact genuinely isn't a candidate's. Note that
-`RoundSummary.improved` and `electable_count` are both served to the browser and rendered by
-nothing — the engine reads them (escalation's `compared`), but no panel does, so the served copy
-is dead surface. That is this page's own warning pointed the other way.
+Reach for the round-level route only when the fact genuinely isn't a candidate's, and only for a
+fact a panel renders: one the engine alone reads stays on `RoundOutcome`, and a served copy of it
+is dead surface.
 
 **A display field is not done until you have SEEN it render.** Every step above wires a
 declaration and a reader; none of them writes the value, and a field that nothing writes is
@@ -171,24 +163,21 @@ Contract: [`presentation/CLAUDE.md`](../../promptpotter/presentation/CLAUDE.md).
 
 ## 4. A resume / decision checkpoint kind
 
-A replayable or archival decision (a checkpoint kind + its gating mode).
+A decision a resume re-derives, or one it only archives.
 
 **Recipe:**
 
-1. Add the kind to the deciding party's `CheckpointKind` enum — `BenchCheckpointKind`
-   (`domain/run_records.py`) or the optimizer's own, in its package (potter's
-   `PotterCheckpointKind`, `optimizers/potter/records.py`) — **and** a gating
-   entry beside the party that decides it: `BENCH_CHECKPOINT_GATING`
-   (`application/bench/resume_and_fork/decisions.py`) or the optimizer runtime's
-   `checkpoint_gating` (potter's is `optimizers/potter/resume.py`). `resume_checkpoint_gating`
-   merges them — the gating SoT.
-2. If replayable, add it to that party's replayers; if archival, leave it out.
-3. Emit it through `record_decision` with the typed kind, never a bare string.
+1. Name the kind: a value of the deciding party's `CheckpointKind` enum — `BenchCheckpointKind`
+   (`domain/run_records.py`), or the optimizer's own in its package (potter's
+   `PotterCheckpointKind`, `optimizers/potter/records.py`) — or, for a plugin, its own string.
+2. A member records it with `ctx.decide(kind, inputs, outcome)` (`bench/node_context.py`), which
+   stamps its node and round; the bench's own go through `record_decision`.
+3. If a resume must re-derive it, register a replayer for the kind on the optimizer runtime's
+   `replayers`. **Registering one IS the gating**: a kind with none is archived and never compared.
 
-**Guards (no standing test), all run where the registries complete
-(`wiring.py::complete_registries`):** `resume_checkpoint_gating` raises on a kind no table
-maps; `replayers.py::replayers` raises when a `REPLAYED` kind has no replayer or an `ARCHIVAL`
-kind has one; `cli/commands/_shared.py::divergence_hint` asserts the hint lists every kind.
+**Guard (no standing test), run where the registries complete
+(`wiring.py::complete_registries`):** `replayers.py::replayers` refuses two runtimes claiming one
+kind. `cli/commands/launch.py::divergence_hint` lists the checked kinds off that table.
 
 ---
 
@@ -231,8 +220,10 @@ The hard half, and the one that has no default. Five questions, each with a cons
   alone.** A cost term needs a MEASURED anchor, and the first campaign is what measures it.
 - **What may the optimizer move?** `nodes.{node}.optimizer.param_keys` in `pipeline.yaml`. The
   prompt is a lever only if the node declares `prompt_info` — a `remote_http` backend serves that
-  over `GET /pipeline`, an `in_process` one **must declare it or every variant scores identically
-  as no-skill**, which reads as "the prompt does not matter" and raises nothing.
+  over `GET /pipeline`, an `in_process` one must declare it, or every variant would score
+  identically as no-skill: run init refuses that shape
+  (`pipeline_resolve.py::_validate_prompt_reach`). Prompt fields in `param_keys` do not stand in
+  for it unless the connector declares `prompt_fields_as_node_params`, which only the recursion does.
 - **What must it never move?** Anything that is a cost rail rather than a search axis stays
   pinned in `config` and out of `param_keys` (Harbor's `max_turns` moves a cell's cost by an
   order of magnitude). `model` and `provider` are structurally unreachable and need no decision —
@@ -280,8 +271,8 @@ Three things the recipe cannot show you:
 
 ## 6. An optimizer node
 
-One of the optimizer's own LLM nodes — its runtime's `response_models` enumerates the structured
-ones, and is the only place that count is correct. The JSON declaration format
+One of the optimizer's own LLM nodes — `optimizers.llm_nodes()` enumerates the structured
+ones (each an `LlmNode` member declaring its own `response_model`), and is the only place that count is correct. The JSON declaration format
 and registry live in [`developer/node-standard.md`](node-standard.md). A node renders a
 `PromptTemplate` through the same `DispatchHub` fill path as every other node —
 adding a slot it needs is §2.
@@ -307,9 +298,10 @@ A new `python -m promptpotter <verb>`. The CLI is a **thin shell**: parse, call 
 
 One module under `presentation/cli/commands/`, one argparse subparser, one `COMMANDS` row —
 the wiring is owned by [`presentation/CLAUDE.md`](../../promptpotter/presentation/CLAUDE.md)
-§ Layout, and an import-time assert pins the parser and the table together. Prefer a module over a
-subpackage: `lifecycle.py` holds every thin `CommandDispatcher` shell in one file, because a
-directory per verb bought a reader a hop to learn there was nothing to choose.
+§ Layout, and an import-time check pins the parser and the table together. Prefer a module over a
+subpackage: `lifecycle.py` holds the thin `CommandDispatcher` shells in one file, because a
+directory per verb bought a reader a hop to learn there was nothing to choose. A shell that
+needs an import the others do not is its own module (`bench.py`), so the rest do not pay for it.
 
 **Two decisions the wiring does not make for you.** Honor the verb's class — **write**
 (`new` / `resume`, which mint or extend a cycle), **lifecycle** (`archive` / `delete` /
@@ -320,12 +312,16 @@ and leaves the tree and every measurement where they are), **diagnostic** (`ab` 
 purpose). A maintenance verb owes two things a diagnostic does not: it is dry-run by default,
 and it refuses while a producer could still be writing what it rewrites
 (`application/maintenance/archive_maintenance.py::archive_writers`) — except `reindex`, which
-rebuilds a derived index from the detail files and deletes nothing, so it owes neither. And do
-**not** add a read verb: reads happen by opening the artifact tree. The one exception is
-`evidence`, because a comparison ACROSS subjects is in no single file. Raw-file ingest is
+rebuilds a derived index from the cell files and deletes nothing, so it owes neither. And do
+**not** add a read verb: reads happen by opening the artifact tree. **The readings in no file**
+— owned by [`persistence-and-state.md`](../operations/persistence-and-state.md) § Active session
+pointer; a read verb prints the application reading its REST peer serves. **An L4 inner run is
+addressed on the reads, never on a run-control verb** (`cycles --inside`, an `evidence` / `verify`
+subject's `;in=`): every other cycle-scoped kind declares an `inner_refusal`
+(`application/commands/payloads.py`), so its verb takes no such flag. Raw-file ingest is
 `new <file.csv>`, not an `ingest` verb.
 
-**Guard:** the import-time assert named above — `COMMANDS.keys()` must equal
+**Guard:** the import-time check named above — `COMMANDS.keys()` must equal
 `parser_verbs(build_parser())`. If the verb answers a `/commands/{kind}`, §8 owns the other half.
 
 ---
@@ -338,11 +334,12 @@ beside the dispatcher because the parties that must agree on it cannot all affor
 dispatcher: the CLI resolves command bodies lazily so `--help` does not pay for the application
 tree, and `scripts/build_ts_types.py` emits the `CommandKind` union from these names alone.
 
-Join the right `Literal` and three import-time asserts start demanding the rest of the wiring:
+Join the right `Literal` and four import-time asserts start demanding the rest of the wiring:
 
 | Add | Where | The assert that demands it |
 |---|---|---|
 | a capability | `CAP_FOR_KIND` (`application/commands/dispatcher.py`) | `set(CAP_FOR_KIND) != ALL_DISPATCHED_KINDS` — a kind with no cap is a silent unguarded verb |
+| a handler | `HANDLER_FOR_KIND` (same file) — `module:handler`, in the `application/commands/` module named for what the kind does; the dispatcher imports it when the kind is dispatched, never at its own import | the same loop, beside the capability's |
 | a payload model | `PAYLOAD_MODEL_FOR_KIND` (`application/commands/payloads.py`) | the sibling raise beside it |
 | **the terminal's half** | `CLI_VERB_FOR_KIND` (`cli/campaign_runner.py`) | totality over `ALL_DISPATCHED_KINDS`, plus every named verb being a real `COMMANDS` key |
 

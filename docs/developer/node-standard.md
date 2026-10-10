@@ -67,6 +67,12 @@ rule: a key PP does not *use* gets no model field, but the key still belongs in 
 
 The decisions the models cannot state:
 
+- **`type` is a closed vocabulary in three families** (`domain/pipeline_schema.py::NodeKind`; an
+  unlisted spelling is refused at parse). A THINKING node runs a model, so a model, a reasoning
+  rung and a temperature are its own, and the family splits on what the model DOES — `llm` answers
+  in one call, `agent` works in a tool loop — never on who runs it. A retrieval or plumbing node
+  moves data. A GATEWAY node (`measurement`) runs another PIPELINE: every tunable it appears to
+  have belongs to the pipeline it hands off to, so it carries no config of its own.
 - **`backend_type` is required and is never a `PipelineSchema` field.** The parser drops it, so
   readers take it off the raw overlay. It picks the connector at init (`dataset_access.py::declared_backend_type`
   raises when absent) and is served on `CampaignSummary.backend_type`. Whether it names the recursion connector — the ONE
@@ -108,7 +114,7 @@ The decisions the models cannot state:
   schema is a caller error to raise on, never one to guess a key out of.
 - **`param_allowed_values` drives three things at once** — L1's prompt guidance, the JSON-schema
   enum constraint on structured-output generation, and post-hoc `ValidationFailure` attachment in
-  `validate_overrides`.
+  `overlay_failures`.
 
 ## Node capabilities
 
@@ -138,23 +144,35 @@ serving the contract in [`../architecture.md`](../architecture.md) § Bench and 
 of the five — and every `llm` node the bench walks — is backed by an implementation registered
 under the node's NAME** through the one entry-point registry (`promptpotter.optimizer_nodes`), so
 `paired_t:` in a manifest resolves to the `paired_t` member; the node's `config` is that member's
-typed knobs, and a paper's configuration is a set of those values. No member sees the bench set.
-The target is that none is handed `Cycle`, a store or a live client either — only frozen `domain/`
-inputs; potter's members still read the bench's `Cycle`, their own state riding apart on
-`RoundContext.state`.
+typed knobs — every field required, so the manifest is the one place a value comes from — and a
+paper's configuration is a set of those values. No member sees the bench set.
+None is handed `Cycle`, a store or a live client either: each receives the `NodeContext` the bench
+builds for its node (`application/bench/node_context.py`) — its own knobs, typed, the round's
+readings, the optimizer's state, and the seeded draw, llm call and recorded decision the bench
+keeps. **A node shared between manifests reads that context alone**: the parent and its rows, the
+population the run carries (`ctx.population`, kept by a selector through `ctx.keep`), the closed
+rounds and the δ ruler — never `ctx.state`, which is the one optimizer's own and makes the node
+that reads it that optimizer's. A child is made through `OptSearchPoint.derive` / `edited` under
+`ctx.variation`, so its lineage names every node that wrote it and the loci each one moved. What an optimizer needs of the harness itself is its RUNTIME's (`OptimizerRuntime`, one
+base whose every member but five has a default), which the bench hands the session at `start`.
 
 | Type | Reads | Returns | Binds it |
 |---|---|---|---|
-| `llm` | its prompt, filled through the dispatch hub | its parsed response — for a proposing node, individuals, each with its `parent_ids` and `source` | proposals are validated like any candidate: forbidden keys, `validate_overrides`, the node's permitted model set |
+| `llm` | its prompt, filled through the dispatch hub | its parsed response — for a proposing node, individuals, each written through `ctx.child` (a later node's change through `ctx.edit`), the one writer of every locus, so its lineage carries its `parent_ids` and every node that wrote it | every child is admitted by the bench as it is written, once (`application/bench/children.py::admission_failures`): forbidden keys, `overlay_failures`, the node's permitted model set, the backend's mandatory placeholders |
 | `measurement` | the round's candidates, the sampler's panel, the eliminator's checks | the round's rows | the bench's scoring gateway, walked unchanged; `config` stays empty |
 | `sampler` | the search pool, the bench's per-sample difficulty, prior rows | the round's panel: ordered sample ids, cut into the blocks an eliminator decides between | draws from the search pool alone; deterministic given its inputs and seed, so resume and fork replay it |
 | `eliminator` | the panel, the candidates, rows as they land | a continue or cut per arm per block, each cut a ledger decision stamped with this node | cuts on evidence about the arm, never on a technical failure — that is the bench's `DegradationCheck`, which runs whatever the eliminator; the `none` member walks every arm to the end |
-| `selector` | the round's rows, lineage, the population or archive in `optimizer_state` | `selected: list[label]` and the next `optimizer_state` | its choice is what the optimizer keeps, never a score the bench serves |
-| `algorithm` | individuals, and the demo pool when it edits shots | new individuals with `parent_ids`, no model call and no measurement | deterministic given its inputs and seed |
-| `controller` | the round's envelope and the optimizer's own state | stop or continue, and which of the manifest's other `pipelines:` entries runs at the round boundary | the bench walks `default` alone; the entries a controller picks are the optimizer's, and a manifest without one runs `default` every round |
+| `selector` | the round's rows, lineage, the population on its context (`ctx.population`) | `selected: list[label]`, and the population it keeps (`ctx.keep`) | its choice is what the optimizer keeps, never a score the bench serves |
+| `algorithm` | individuals, and the demo pool when it edits shots | individuals it `edited` or derived under `ctx.variation`, no model call and no measurement | deterministic given its inputs and seed |
+| `controller` | the round's envelope and the optimizer's own state | which of the manifest's other `pipelines:` entries runs at the round boundary | whether the run STOPS is the bench's, for every optimizer (`runner/termination.py::standing_tripped`: lives, a perfect objective, convergence); the bench walks `default` alone; the entries a controller picks are the optimizer's, and a manifest without one runs `default` every round |
 
 An `llm` node's role is its position: before the measurement it PROPOSES, after the selector it
 ADAPTS (potter's critique). The round's phases follow the walk — PROPOSE, MEASURE, SELECT, ADAPT.
+An `algorithm` node before the measurement proposes too, and so do the nodes of a manifest's
+`initial_population` pipeline: the bench walks them where the run carries no population and keeps
+what they propose. An eliminator's `Race` stops a walk on its own rows (`rule`) or every live walk
+together at each block's close (`blocks`); its catch-ups are the calls pairing a prior with the arm
+on turn.
 
 **Three rules reject a manifest at parse** — in `parse_pipeline_response`, the same parser a
 backend's file goes through, so a special case cannot reach one side only:
@@ -176,7 +194,7 @@ The per-sample `predicted` value is the **head of the terminal ranker's output**
 - a pipeline ending at `token_matching` (a `candidate_source`) yields its `candidate_ranking`;
 - a pipeline ending at `llm_ranking` / `llm_only` (a `ranker`) yields its `final_ranking`.
 
-`final_ranking` is the *universal* answer key (the typed `PipelineData.final_ranking`), but the pipeline **shape** — which ranker terminates it — decides the source, not the key name. A pipeline with no terminal ranker emits no prediction (every sample scores `NO_RESULT`); init warns loudly when a resolved schema has no `ranker` / `candidate_source` node with an output key.
+`final_ranking` is the *universal* answer key (a node-declared key, so it rides `PipelineData.observations`), but the pipeline **shape** — which ranker terminates it — decides the source, not the key name. A pipeline with no terminal ranker emits no prediction (every sample scores `NO_RESULT`); init warns loudly when a resolved schema has no `ranker` / `candidate_source` node with an output key.
 
 ## Strict parsing — the contract is the contract
 

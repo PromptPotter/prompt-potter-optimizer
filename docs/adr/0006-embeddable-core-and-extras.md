@@ -82,6 +82,12 @@ folds back the ones an operator wants.**
 * **The reachability claim rots silently.** Nothing fails when a new core import creeps into a
   module the CLI reaches — it just makes the engine heavier. Re-measure when the import graph
   moves, rather than trusting this file's numbers.
+* **Import order decides the host's BLAS pool, both ways.** `promptpotter/__init__.py` sets
+  `OPENBLAS_NUM_THREADS=1` unless the host set it, because numpy commits a buffer per logical
+  core at LOAD and nothing of ours starts a BLAS thread. A host that imports numpy first keeps
+  its own pool and its memory — no later call returns it. A host that imports `promptpotter`
+  first gets one BLAS thread for itself and its children, and sets the variable itself to keep
+  more.
 * An embedded adapter lives here rather than in its own repo. Release coupling to a
   fast-moving host library (DSPy) is the accepted cost: a break there cuts a `promptpotter`
   release.
