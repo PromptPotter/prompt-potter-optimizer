@@ -1,6 +1,3 @@
-"""Secret-redaction filter on the root handler — the last-mile defense before stderr. Defense-in-depth: no current path stringifies a
-key, and it exists so a future careless ``logger.info("auth=%s", key)`` cannot leak one."""
-
 from __future__ import annotations
 
 import logging
@@ -10,7 +7,6 @@ from promptpotter.config.settings import settings
 
 REDACTED = "***REDACTED***"
 
-# Provider-key prefixes (defensive — catch credentials not in our settings).
 _KEY_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"sk-ant-[A-Za-z0-9_\-]{20,}"),
     re.compile(r"sk-[A-Za-z0-9_\-]{20,}"),
@@ -31,13 +27,11 @@ _SECRET_FIELDS: tuple[str, ...] = (
 
 
 def _snapshot_secret_values() -> tuple[str, ...]:
-    """Non-empty current values of secret-bearing settings fields."""
     return tuple(v for f in _SECRET_FIELDS if (v := getattr(settings, f, "")))
 
 
 class SecretRedactionFilter(logging.Filter):
-    """Replaces configured api-key values and well-known prefixes. It SNAPSHOTS settings at construction, so re-instantiate
-    the filter if env keys rotate mid-process."""
+    """Snapshots the settings' keys at construction: re-instantiate if they rotate mid-process."""
 
     def __init__(self) -> None:
         super().__init__()

@@ -1,6 +1,3 @@
-"""Every UTC timestamp mints here so the format never drifts, and every wait that must survive a MACHINE SUSPEND times itself
-here. ``Z`` suffix, not ``+00:00``. Leaf-level, so domain models may use it without reaching into infrastructure."""
-
 from __future__ import annotations
 
 import asyncio
@@ -9,6 +6,7 @@ from datetime import UTC, datetime
 
 __all__ = [
     "SUSPEND_GRACE_S",
+    "duration_words",
     "epoch_seconds",
     "iso_z",
     "sleep_measuring_suspend",
@@ -17,42 +15,41 @@ __all__ = [
 
 
 SUSPEND_GRACE_S = 60.0
-"""Overshoot above which a sleep is read as a machine suspend rather than jitter.
+"""Above the 15 s heartbeat interval, so a tick that merely ran late never reads as a suspend."""
 
-Well above ordinary event-loop lateness (milliseconds) and above the 15 s heartbeat
-interval, so a tick that merely ran late never reads as a suspend."""
+
+def duration_words(seconds: float) -> str:
+    """Must match the browser's ``fmtDuration``."""
+    if seconds < 90:
+        return f"{round(seconds)}s"
+    minutes = round(seconds / 60)
+    if minutes < 90:
+        return f"{minutes}m"
+    hours, rest = divmod(minutes, 60)
+    return f"{hours}h" if rest == 0 else f"{hours}h {rest}m"
 
 
 def iso_z(dt: datetime) -> str:
-    """*dt* as an RFC 3339 UTC string — the ONE place the ``Z`` spelling is applied to an instant the caller already has.
-    Not a second helper: that case cannot go through :func:`utcnow_iso`, and was hand-formatting the offset instead."""
     return dt.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
 def utcnow_iso() -> str:
-    """Current UTC instant as an RFC 3339 string, e.g. ``2026-06-04T12:00:00Z``."""
     return iso_z(datetime.now(UTC))
 
 
 def epoch_seconds(value: object) -> float | None:
-    """:func:`iso_z`'s inverse — a stamp as a sortable instant, ``None`` where it will not parse.
-    Parsed, never string-compared: ``utcnow_iso`` omits the fractional part at exactly zero
-    microseconds, which sorts AFTER ``...T12:00:00.5Z``.
-
-    ``OSError``/``OverflowError`` are caught beside ``ValueError`` because ``.timestamp()`` raises
-    those, not ``ValueError``, for an out-of-range datetime on Windows — one corrupt line must
-    not take down the scan reading it."""
+    """Stamps sort by this, never as strings: ``utcnow_iso`` omits a zero fractional part."""
     if not isinstance(value, str) or not value:
         return None
     try:
         return datetime.fromisoformat(value).timestamp()
+    # On Windows an out-of-range datetime raises ``OSError``/``OverflowError``, not ``ValueError``.
     except (ValueError, OSError, OverflowError):
         return None
 
 
 async def sleep_measuring_suspend(seconds: float) -> float:
-    """Sleep, returning how far WALL clock overshot — which IS the suspend duration. Measures ``time.time()`` deliberately:
-    ``monotonic``'s behaviour across S3 is the platform-dependent thing the guard cannot rest on."""
+    """``time.time()`` deliberately: ``monotonic`` across an S3 suspend is platform-dependent."""
     before = time.time()
     await asyncio.sleep(seconds)
     return max(0.0, (time.time() - before) - seconds)

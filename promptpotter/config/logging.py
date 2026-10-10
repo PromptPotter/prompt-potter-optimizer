@@ -1,5 +1,3 @@
-"""Logging configuration. Call ``setup_logging()`` once from entry points."""
-
 import asyncio
 import logging
 import re
@@ -24,21 +22,9 @@ class _CliFormatter(logging.Formatter):
 
 
 class _QuietPolls(logging.Filter):
-    """Drop successful high-frequency webapp polls from the access log — ~100+ identical 200/304s a minute crowd out real
-    signal. Only successful GETs on those routes are silenced; 4xx/5xx, POSTs and one-shot reads still log.
-
-    Every entry must name a route the app actually serves — check against ``app.openapi()["paths"]`` when
-    editing. ``active`` once stood here for a path served as ``/api/v1/sessions/active``, so the filter
-    silenced nothing while that 2 s poll and ``machine-status`` logged a line each per tick, forever."""
-
-    # `auth/quota-status` is polled every 60s by EACH pane that shows a spend figure (the sidebar
-    # rail and the usage tab), and `auth/me` on every pane mount, so an open browser logged both
-    # from a fresh ephemeral port every few seconds.
     _POLLED = re.compile(
         r"^/api/v1/(cycles|campaigns|machine-status|sessions/active|auth/(quota-status|me))(\?|$)"
     )
-    # `/tree` and `/ray` are polled every 5 s for EACH open sidebar course, `/cells`
-    # every 8 s — conditional GETs, so a quiet tick is a 304 and nothing more.
     _SUFFIX = ("/dashboard", "/health", "/tree", "/ray", "/cells")
     _QUIET_STATUS = frozenset({200, 304})
 
@@ -59,11 +45,9 @@ def setup_logging(
     *,
     style: Literal["full", "cli"] = "full",
 ) -> None:
-    """Configure the root logger to stderr. ``full`` is timestamped and module-tagged; ``cli`` is bare, and suppresses
-    deep-layer INFO so the presentation layer owns the user-facing summary."""
     root = logging.getLogger()
     if root.handlers:
-        return  # already configured (e.g. by pytest)
+        return
     handler: logging.StreamHandler[TextIO] = logging.StreamHandler(sys.stderr)
     if style == "cli":
         handler.setFormatter(_CliFormatter())
@@ -72,18 +56,16 @@ def setup_logging(
     handler.addFilter(SecretRedactionFilter())
     root.setLevel(level)
     root.addHandler(handler)
-    # Suppress noisy httpx request logging
     logging.getLogger("httpx").setLevel(logging.WARNING)
     if style == "cli":
-        # Deep layers stay quiet — campaign_runner (presentation) prints the summary.
+        # Deep layers stay quiet: the presentation layer prints the summary.
         logging.getLogger("promptpotter.application").setLevel(logging.WARNING)
         logging.getLogger("promptpotter.infrastructure").setLevel(logging.WARNING)
     logging.getLogger("uvicorn.access").addFilter(_QuietPolls())
 
 
 def silence_proactor_disconnect_noise() -> None:
-    """Swallow the benign Windows Proactor teardown ``ConnectionResetError`` (bpo-39010) and delegate everything else, so
-    real loop errors still surface. Call once, from inside the running loop."""
+    """Swallows only the benign Windows Proactor teardown `ConnectionResetError` (bpo-39010)."""
     loop = asyncio.get_running_loop()
     prior = loop.get_exception_handler()
 

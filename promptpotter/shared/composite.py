@@ -1,6 +1,3 @@
-"""``SHORT_NAMES`` (+ ``AGGREGATES``) is the single source for evaluator short codes — the regex and
-the short↔full inversion derive from it. In ``shared/`` so infrastructure need not import the registry."""
-
 from __future__ import annotations
 
 import re
@@ -18,14 +15,6 @@ __all__ = [
 ]
 
 
-# ===========================================================================
-# The short-code vocabulary — SINGLE SOURCE
-# ===========================================================================
-
-# Full evaluator name → short code. Both the short-formula inliner and the
-# value-breakdown renderer read this one map; names absent from it render as
-# themselves (so operator-defined evaluators still surface). Adding or renaming
-# an evaluator's short code is a single edit here — everything else derives.
 SHORT_NAMES: dict[str, str] = {
     "accuracy": "acc",
     "fitness": "fit",
@@ -43,12 +32,11 @@ SHORT_NAMES: dict[str, str] = {
 
 @dataclass(frozen=True)
 class _ShortAggregate:
-    """A synthesized code (``H``/``R``) rolling several evaluators into one displayed term, declared once
-    here. A DISPLAY aggregate — putting it in ``_REGISTRY`` would materialize and serve it as a term."""
+    """DISPLAY only: in the evaluator ``_REGISTRY`` it would be materialized and served as a term."""
 
     short_code: str
     members: tuple[str, ...]
-    complement: bool  # True → mean(1 - v) (health); False → mean(v) (recall)
+    complement: bool
 
 
 AGGREGATES: tuple[_ShortAggregate, ...] = (
@@ -56,10 +44,8 @@ AGGREGATES: tuple[_ShortAggregate, ...] = (
     _ShortAggregate("R", ("source_recall", "candidate_recall", "cache_hit_rate"), complement=False),
 )
 
-# short code → full evaluator name; inverse of SHORT_NAMES, for value lookup.
 _FULL_BY_SHORT: dict[str, str] = {short: full for full, short in SHORT_NAMES.items()}
 
-# Every short code that can appear in a formula — direct evaluators + aggregates.
 # Longest-first so the alternation never settles for a shorter prefix.
 _ALL_SHORT_CODES: tuple[str, ...] = tuple(
     sorted({*SHORT_NAMES.values(), *(a.short_code for a in AGGREGATES)}, key=len, reverse=True)
@@ -70,8 +56,6 @@ _NAME_RE = re.compile(r"[A-Za-z_][A-Za-z_0-9]*")
 
 
 def to_short_formula(formula: str) -> str:
-    """Translate a full-name formula into its short form via ``SHORT_NAMES``; a name with no short code
-    renders unchanged. This is how ``resolve_cell_formula``'s short form derives, with no literal."""
     return _NAME_RE.sub(lambda m: SHORT_NAMES.get(m.group(0), m.group(0)), formula)
 
 
@@ -88,8 +72,6 @@ def inline_short_formula_values(
     formula_short: str | None,
     evaluators: dict[str, float] | None,
 ) -> str | None:
-    """Inline resolved values into the short formula, so a tail of ``dashboard.json`` shows the formula
-    and its inputs on one line. ``None`` for an operator-authored formula — no template to inline into."""
     if formula_short is None:
         return None
     if not evaluators:
@@ -113,12 +95,7 @@ def inline_short_formula_values(
     return _SHORT_CODE_RE.sub(_sub, formula_short)
 
 
-# ===========================================================================
-# Composite-score rendering primitives
-# ===========================================================================
-
-# Builtins a formula may call (``compiler.py::SAFE_BUILTINS``) — excluded from name
-# discovery so they don't get spuriously rendered as evaluator values.
+# Mirrors ``compiler.py::SAFE_BUILTINS``.
 _FORMULA_BUILTINS = {
     "min",
     "max",
@@ -131,7 +108,6 @@ _FORMULA_BUILTINS = {
     "sqrt",
     "exp",
     "pow",
-    # Step-function ternary keywords that show up in custom formulas.
     "if",
     "else",
     "and",
@@ -157,7 +133,6 @@ def extract_evaluator_names(formula: str, available: set[str]) -> list[str]:
 def render_composite_fitness_oneliner(
     composite_fitness: float, reference: float | None = None
 ) -> str:
-    """``reference=None`` collapses to the bare value."""
     if reference is None:
         return f"composite_fitness={composite_fitness:.4f}"
     delta = composite_fitness - reference
@@ -193,27 +168,12 @@ def render_composite_fitness_block(
     if not formula:
         return [f"{line1}  (formula unavailable)"]
 
-    # Line 2: formula text. In short-names mode the formula carries
-    # synthesized codes (``H``, ``R``) that don't appear as keys in the
-    # ``evaluators`` dict — inline their resolved values so the operator
-    # can reconcile the formula against the breakdown without a separate
-    # legend lookup.
+    # Short-names mode carries synthesized codes (``H``, ``R``) that are no key of ``evaluators``.
     if use_short_names and evaluators:
         line2 = f"formula:  {inline_short_formula_values(formula, evaluators) or formula}"
     else:
         line2 = f"formula:  {formula}"
 
-    # Line 3: named evaluator values.
-    #
-    # Full-names mode: list evaluators that literally appear in the formula
-    # text (so a custom formula's namespace gets displayed).
-    #
-    # Short-names mode: the formula carries codes (``acc``, ``H``, ``R``)
-    # that don't match registry full names — list every evaluator from the
-    # dict with its short code. Operator sees the full input vector; the
-    # formula text above tells them which codes apply. Line 2 inlines each
-    # code's resolved value, which is why there is no legend line: the
-    # abbreviations are already reconciled where they are used.
     if not evaluators:
         return [line1, line2]
 

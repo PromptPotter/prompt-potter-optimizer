@@ -1,10 +1,8 @@
-"""Pure statistics — leaf-level, depending only on stdlib + numpy. The three distributions it reads
-(normal, Student-t, beta) are computed here."""
-
 from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
+from functools import cache
 from statistics import NormalDist
 from typing import Literal
 
@@ -36,8 +34,7 @@ def _beta_fraction(a: float, b: float, x: float) -> float:
 
 @shapes_optimizer_prompt
 def _beta_cdf(x: float, a: float, b: float, *, rest: float | None = None) -> float:
-    """The regularized incomplete beta function ``I_x(a, b)`` — the Beta(a, b) CDF at *x*. *rest*
-    is ``1 - x`` where the caller holds it exactly: near 1 the subtraction has no digits left."""
+    """*rest* is ``1 - x`` where the caller holds it exactly: near 1 the subtraction loses it."""
     rest = 1.0 - x if rest is None else rest
     if x <= 0.0:
         return 0.0
@@ -54,7 +51,6 @@ def _beta_cdf(x: float, a: float, b: float, *, rest: float | None = None) -> flo
 
 @shapes_optimizer_prompt
 def _t_sf(x: float, df: float) -> float:
-    """Student-t upper tail ``P(T > x)``."""
     scale = df + x * x
     tail = 0.5 * _beta_cdf(df / scale, df / 2.0, 0.5, rest=x * x / scale)
     return tail if x >= 0.0 else 1.0 - tail
@@ -62,7 +58,7 @@ def _t_sf(x: float, df: float) -> float:
 
 @shapes_optimizer_prompt
 def _t_ppf(p: float, df: float) -> float:
-    """Student-t quantile for ``p >= 0.5``, by bisection on the upper tail."""
+    """Valid for ``p >= 0.5`` only."""
     target = 1.0 - p
     lo, hi = 0.0, 1.0
     while _t_sf(hi, df) > target:
@@ -79,9 +75,9 @@ def _t_ppf(p: float, df: float) -> float:
 
 
 @shapes_optimizer_prompt
+@cache
 def t_critical(df: int, alpha: float = 0.05) -> float:
-    """Two-sided Student-t critical value for a mean whose SE was estimated from the same few observations — the normal
-    quantile understates the interval at the panel sizes the paired verdicts run on."""
+    """Student-t, never the normal quantile, which understates at paired panel sizes."""
     if df < 1:
         raise ValueError(f"t_critical: df must be >= 1, got {df}")
     return _t_ppf(1 - alpha / 2, df)
@@ -89,8 +85,7 @@ def t_critical(df: int, alpha: float = 0.05) -> float:
 
 @shapes_optimizer_prompt
 def min_detectable_effect(se: float, alpha: float = 0.05, power: float = 0.8) -> float:
-    """Smallest effect detectable given the estimator's OWN standard error — takes the SE, never a sample count. The ``n``-form assumes
-    binomial worst case, wrong for every caller here, and overstated the panel's MDE 3.8x."""
+    """Takes the estimator's SE, never ``n``: an ``n`` form assumes the binomial worst case."""
     if se <= 0.0:
         return 0.0
     normal = NormalDist()
@@ -98,25 +93,16 @@ def min_detectable_effect(se: float, alpha: float = 0.05, power: float = 0.8) ->
 
 
 def p_exceeds(mean_a: float, se_a: float, mean_b: float, se_b: float) -> float:
-    """``P(a > b)`` under independent normal posteriors — the point gap over the noise of the
-    DIFFERENCE, which is the noise a move actually has to clear.
-
-    What a RANKING wants wherever a raw gap misleads: a wide posterior cannot buy a place with a
-    margin it never measured, yet nothing is disqualified, since any positive gap stays above 0.5.
-    That is what separates it from subtracting an SE, which can turn a real gain negative."""
+    """Divides by the noise of the DIFFERENCE, never by either side's own SE."""
     denom = math.sqrt(se_a * se_a + se_b * se_b)
     if denom <= 1e-12:
         return 1.0 if mean_a > mean_b else 0.0
     return NormalDist().cdf((mean_a - mean_b) / denom)
 
 
-# --- PoBB: Posterior-of-Being-Best (Russo 2016 / Top-Two Thompson family) ---
-
-
 @shapes_optimizer_prompt
 def _normal_posterior(scores: list[float]) -> tuple[float, float]:
-    """Normal posterior on the population mean of *scores*. SE is clipped to the Beta-Binomial worst case, which protects the
-    small-n binary regime — 4/4 hits has empirical variance 0 and would collapse to a point mass, stopping exploration."""
+    """The SE is floored at ``1/(4n)``: 4/4 hits has variance 0 and would be a point mass."""
     n = len(scores)
     if n == 0:
         return (0.0, 1.0)
@@ -133,16 +119,11 @@ def _normal_posterior(scores: list[float]) -> tuple[float, float]:
     return (mean, max(se, se_floor))
 
 
-# --- Paired-difference posterior — cand-vs-prior on shared sample set ---
-
-
 @shapes_optimizer_prompt
 def paired_diff_posterior(
     candidate_scores: list[float],
     prior_scores: list[float],
 ) -> tuple[float, float, int]:
-    """Closed-form paired-difference posterior, for telemetry — the per-prior diff the round audit and the p_value diagnostic
-    carry, computed over a shared sample set."""
     n = len(candidate_scores)
     if len(prior_scores) != n:
         raise ValueError(
@@ -154,8 +135,6 @@ def paired_diff_posterior(
 
 
 def mean_ci(values: list[float], alpha: float = 0.05) -> tuple[float, float, float] | None:
-    """``(mean, lo, hi)`` on PoBB's posterior, Student-t bracketed — the quantile :func:`paired_reading` uses, so a level
-    and a paired difference beside it agree about zero. ``None`` below two values: one reading has no spread."""
     n = len(values)
     if n < 2:
         return None
@@ -165,76 +144,47 @@ def mean_ci(values: list[float], alpha: float = 0.05) -> tuple[float, float, flo
 
 
 @shapes_optimizer_prompt
-def paired_reading(
+def paired_mean_t(
     candidate_scores: list[float],
     prior_scores: list[float],
     *,
     tail: Literal["two", "greater"] = "two",
     alpha: float = 0.05,
 ) -> tuple[float, float | None, float | None, float | None, int]:
-    """``(mean_d, ci_lo, ci_hi, p, n)`` over one paired difference — the bracket and the test from ONE posterior, so a caller
-    cannot draw an interval and a p-value that disagree about zero.
-
-    ``two`` asks whether two arms differ, with no pre-registered direction, so reading a pair in either order gives one number;
-    ``greater`` asks whether the candidate BEAT the prior, which is directional on purpose. **The bracket is two-sided under
-    both**, so those agree about zero only under ``two`` — a document pairing a ``greater`` p with this interval reports two
-    different tests as one verdict, and in the band between the tails they disagree outright. Take both from one call, or
-    take the p alone.
-
-    Below two pairs the bracket and the test are ``None``: nothing was tested, and a ``1.0`` there would misreport that as a
-    test that found nothing. The SE is :func:`paired_diff_posterior`'s, floored at ``1/(4n)``, so ``p`` is CONSERVATIVE wherever
-    the observed spread falls below that floor."""
+    """The bracket is two-sided under BOTH tails: never pair a ``greater`` p with it as a verdict."""
     mean_d, se_d, n = paired_diff_posterior(candidate_scores, prior_scores)
     if n < 2:
         return (mean_d, None, None, None, n)
-    # `_normal_posterior` floors the SE strictly above zero, so there is no degenerate branch here.
     half = t_critical(n - 1, alpha) * se_d
-    # The tail past |t| is one number whichever way the pair was read, so the two-sided p is too.
+    # `_normal_posterior` floors the SE strictly above zero.
     t = mean_d / se_d
     beyond = _t_sf(abs(t), n - 1)
     one_sided = beyond if t >= 0.0 else 1.0 - beyond
-    return (mean_d, mean_d - half, mean_d + half, 2.0 * beyond if tail == "two" else one_sided, n)
+    p = 2.0 * beyond if tail == "two" else one_sided
+    return (mean_d, mean_d - half, mean_d + half, p, n)
 
 
 def exact_p_floor(n: int) -> float:
-    """The smallest two-sided p an exact paired test on *n* pairs can reach — the two sign draws
-    where every difference agrees. A fact about the panel's WIDTH, never about the edit under test:
-    below it no verdict exists at ANY effect size."""
     return 1.0 if n < 1 else min(1.0, 2.0 / 2.0**n)
 
 
-def cells_for_exact_verdict(n_tests: int, alpha: float = 0.05) -> int:
-    """Smallest paired *n* whose :func:`exact_p_floor` clears Holm's tightest step over *n_tests*
-    comparisons — what to BUY, in the unit a panel is bought in. Holm's first step is its
-    strictest, so a width clearing that one can in principle clear every later one."""
-    target = alpha / max(1, n_tests)
-    n = 1
-    while exact_p_floor(n) > target:
-        n += 1
-    return n
+def p_floor(candidate_scores: Sequence[float], prior_scores: Sequence[float]) -> float:
+    return exact_p_floor(sum(discordant_counts(candidate_scores, prior_scores)))
 
 
 def discordant_counts(candidate: Sequence[float], prior: Sequence[float]) -> tuple[int, int]:
-    """``(wins, losses)`` over the pairs the two arms were graded APART on. A concordant cell says
-    they met it the same way, so it carries nothing about which is better — the discordant count is
-    the width :func:`exact_p_floor` reads, and the one :func:`exact_paired_reading` refuses below."""
     wins = sum(1 for c, p in zip(candidate, prior, strict=True) if c > p)
     losses = sum(1 for c, p in zip(candidate, prior, strict=True) if c < p)
     return wins, losses
 
 
 def sign_posterior(wins: int, losses: int) -> float:
-    """``P(the candidate wins more of the discordant pairs than it loses)`` on those pairs ALONE,
-    under a uniform prior — the most any paired reading may claim at this width, and 0.5 at no
-    pairs at all. One adverse cell and no wins caps it at 0.25, two at 0.125."""
     if wins + losses == 0:
         return 0.5
     return 1.0 - _beta_cdf(0.5, wins + 1, losses + 1)
 
 
 def _signed_rank_counts(n: int) -> list[int]:
-    """``out[w]`` = how many of the ``2**n`` sign draws put ``W+`` at *w*. Built by DP, so the null
-    costs O(n**3) rather than the ``2**n`` an enumeration would spend."""
     total = n * (n + 1) // 2
     counts = [0] * (total + 1)
     counts[0] = 1
@@ -250,13 +200,7 @@ def exact_paired_reading(
     *,
     alpha: float = 0.05,
 ) -> tuple[float, float | None, float | None, float | None, int]:
-    """``(median_shift, ci_lo, ci_hi, p, n)`` — the Wilcoxon signed-rank twin of
-    :func:`paired_reading`, assuming no distribution, for a read over a handful of cells.
-
-    Estimate, bracket and test come off one set of Walsh averages, so they cannot disagree about
-    zero. ``p`` never falls below :func:`exact_p_floor` and both bracket ends are ``None`` where
-    *alpha* is unreachable at this *n* — a verdict the width cannot support is refused, never
-    borrowed from an unmeasured tail."""
+    """Wilcoxon signed-rank; both bracket ends are ``None`` where *alpha* is unreachable at *n*."""
     diffs = [c - p for c, p in zip(candidate_scores, prior_scores, strict=True)]
     nonzero = [d for d in diffs if d != 0.0]
     n = len(nonzero)
@@ -279,8 +223,7 @@ def exact_paired_reading(
     deviation = abs(2 * observed - total)
     p = min(1.0, sum(c for w, c in enumerate(counts) if abs(2 * w - total) >= deviation) / draws)
 
-    # The k-th Walsh average in from each end, k being the largest lower tail still inside alpha/2.
-    # k = 0 says this width cannot bracket at alpha at all.
+    # k = the largest lower tail still inside alpha/2; 0 says this width cannot bracket at alpha.
     cumulative = 0
     k = 0
     for w, c in enumerate(counts):
@@ -294,15 +237,7 @@ def exact_paired_reading(
 
 
 def holm_adjusted(p_values: list[float]) -> list[float]:
-    """Holm-Bonferroni step-down, returned IN INPUT ORDER with monotonicity enforced and clipped to 1.0.
-
-    An adjusted p, never a reject/keep flag — the caller renders a number rather than a verdict at an alpha nobody chose.
-    Holm rather than Bonferroni, which it uniformly dominates; rather than Benjamini-Hochberg, which controls the false
-    DISCOVERY rate over many independent hypotheses, where this corrects a handful of pairs that SHARE arms and is therefore
-    valid under the dependence those shared arms create.
-
-    This is a reporting correction and reaches nothing in the loop: candidate selection retired Holm for PoBB
-    (``docs/methods/candidate-elimination.md``) and keeps it."""
+    """In INPUT order. Holm, not Benjamini-Hochberg: pairs that SHARE arms are dependent."""
     m = len(p_values)
     if m == 0:
         return []
@@ -318,15 +253,7 @@ def holm_adjusted(p_values: list[float]) -> list[float]:
 def two_way_effect_sds(
     cells_by_arm: Mapping[str, Mapping[str, float]],
 ) -> tuple[float, float, float] | None:
-    """Additive arm + cell decomposition, returning ``(cell_sd, arm_sd, residual_sd)``.
-
-    Restricted to the cells EVERY arm measured, because an arm scored on an easier subset would
-    otherwise carry that subset's difficulty as its own effect. ``None`` below two arms or two
-    shared cells, where there is nothing to separate.
-
-    The arm SD alone decides nothing: under the null an arm MEAN still scatters by
-    ``residual_sd / sqrt(n_cells)``, so an arm SD at or below that is noise, not a ranking.
-    """
+    """``(cell_sd, arm_sd, residual_sd)`` over the cells EVERY arm measured."""
     arms = sorted(cells_by_arm)
     if len(arms) < 2:
         return None
@@ -337,37 +264,30 @@ def two_way_effect_sds(
     grand = sum(cells_by_arm[a][c] for a in arms for c in shared) / (len(arms) * len(shared))
     arm_mean = {a: sum(cells_by_arm[a][c] for c in shared) / len(shared) for a in arms}
     cell_mean = {c: sum(cells_by_arm[a][c] for a in arms) / len(arms) for c in shared}
-    # df = (arms-1)(cells-1): both margins are estimated from the same table.
     ss = sum(
         (cells_by_arm[a][c] - arm_mean[a] - cell_mean[c] + grand) ** 2 for a in arms for c in shared
     )
     residual = math.sqrt(ss / ((len(arms) - 1) * (len(shared) - 1)))
-    # Both margins hold two or more values by the guards above.
     return (_sd(list(cell_mean.values())), _sd(list(arm_mean.values())), residual)
 
 
+@shapes_optimizer_prompt
 def _sd(xs: list[float]) -> float:
     mean = sum(xs) / len(xs)
     return math.sqrt(sum((x - mean) ** 2 for x in xs) / (len(xs) - 1))
 
 
 def sample_sd(xs: list[float]) -> float | None:
-    """Sample SD (n−1). ``None`` below two points — one reading has no spread, and reporting 0.0
-    for it would claim perfect precision from a single measurement. The ONE spelling: it was
-    written out three times, and only the copy carrying this guard was right."""
     return None if len(xs) < 2 else _sd(xs)
 
 
 def rank_correlation(xs: list[float], ys: list[float]) -> float | None:
-    """Spearman ρ. ``None`` below three pairs, or where either side is constant and no ranking
-    exists to correlate."""
     if len(xs) != len(ys) or len(xs) < 3:
         return None
     return _pearson(_average_ranks(xs), _average_ranks(ys))
 
 
 def _average_ranks(values: list[float]) -> list[float]:
-    """1-based ranks, ties sharing the mean of the places they span."""
     order = sorted(range(len(values)), key=values.__getitem__)
     ranks = [0.0] * len(values)
     i = 0
@@ -398,7 +318,6 @@ def _rank_agreement(full: Sequence[float], proxy: Sequence[float]) -> float:
 
 
 def _pearson(xs: Sequence[float], ys: Sequence[float]) -> float | None:
-    """``None`` where either side is constant: a column that orders nothing has no correlation."""
     mx, my = sum(xs) / len(xs), sum(ys) / len(ys)
     sxy = sum((x - mx) * (y - my) for x, y in zip(xs, ys, strict=True))
     sxx, syy = sum((x - mx) ** 2 for x in xs), sum((y - my) ** 2 for y in ys)
@@ -413,8 +332,7 @@ def greedy_column_subset(
     separation_weight: float,
     redundancy_weight: float,
 ) -> list[int]:
-    """The ``k`` columns of a candidates × examples score matrix whose mean ranks the candidates as
-    the full mean does, added greedily by LEVI's marginal score (arXiv 2605.09764 §3.3)."""
+    """Greedy by LEVI's marginal score (arXiv 2605.09764 §3.3) over candidates × examples."""
     n_rows, n_cols = len(matrix), len(matrix[0]) if matrix else 0
     columns = [[matrix[i][j] for i in range(n_rows)] for j in range(n_cols)]
     full = [sum(row) / n_cols for row in matrix]
@@ -430,7 +348,6 @@ def greedy_column_subset(
             taken = [*chosen, j]
             proxy = [(sums[i] + columns[j][i]) / len(taken) for i in range(n_rows)]
             separation = sum(spreads[c] for c in taken) / len(taken) / widest if widest else 0.0
-            # A constant column correlates with nothing, so it adds no redundancy.
             redundancy = (
                 sum(abs(_pearson(columns[j], columns[c]) or 0.0) for c in chosen) / len(chosen)
                 if chosen
@@ -449,16 +366,15 @@ def greedy_column_subset(
 
 
 __all__ = [
-    "cells_for_exact_verdict",
     "discordant_counts",
     "exact_p_floor",
-    "exact_paired_reading",
     "greedy_column_subset",
     "holm_adjusted",
     "mean_ci",
     "min_detectable_effect",
+    "p_floor",
     "paired_diff_posterior",
-    "paired_reading",
+    "paired_mean_t",
     "rank_correlation",
     "sample_sd",
     "sign_posterior",

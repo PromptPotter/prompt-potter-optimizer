@@ -6,12 +6,9 @@ import logging
 import re
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import Annotated, Any
 
 from promptpotter.shared.hashing import shapes_optimizer_prompt
-
-if TYPE_CHECKING:
-    from promptpotter.domain.spend import StepTokenUsage
 
 logger = logging.getLogger(__name__)
 
@@ -20,89 +17,69 @@ class ErrorCategory(enum.StrEnum):
     CLIENT = "CLIENT"
     SERVER = "SERVER"
     CONNECTION = "CONNECTION"
-    # A send refused by what no retry clears — the provider account's credit, the provider's
-    # throttle outlasting every wait, or the run's spend or token ceiling. A hole, like CONNECTION:
-    # every later cell meets the same refusal.
+    # Refusals no retry clears: a hole, like CONNECTION, since every later cell meets the same one.
     PROVIDER_CREDIT = "PROVIDER_CREDIT"
     PROVIDER_THROTTLED = "PROVIDER_THROTTLED"
     SPEND_CEILING = "SPEND_CEILING"
     TOKEN_CEILING = "TOKEN_CEILING"
+    # Never sent, so not CONNECTION: the backend the cell would have reached is untouched.
+    PRICE_LIST_UNREACHABLE = "PRICE_LIST_UNREACHABLE"
+    # Not SPEND_CEILING: no amount of room admits a send no rate bounds.
+    NO_RATE = "NO_RATE"
     PIPELINE = "PIPELINE"
-    # A bound WE declared ended the cell. Re-measuring under the same declaration ends it at the
-    # same place for the same price, so a repair leaves one alone (:func:`is_repairable_hole`).
+    # A bound WE declared: re-measuring ends at the same place, so a repair leaves it alone.
     HALTED = "HALTED"
-    # The cell ran to its own end and produced nothing gradeable. Not the configuration under
-    # test failing, so never a fatal code.
     UNSCOREABLE = "UNSCOREABLE"
     UNKNOWN = "UNKNOWN"
 
 
 class CellUnscoreableError(RuntimeError):
-    """Raised where a cell answers with no verdict; ``measure_sample`` is the one catcher and banks
-    :attr:`category`, so the configuration under test is never charged.
-
-    ``spent`` (``step_tokens`` shape) is what the cell paid before it had no verdict, and the
-    catcher bills it; ``{}`` where a ledger holds it already (an L4 inner cycle)."""
+    """``spent``: ``{}`` = already ledgered or never sent; ``None`` = unknown, holds the bound."""
 
     category: ErrorCategory = ErrorCategory.UNSCOREABLE
 
-    def __init__(self, message: str, *, spent: Mapping[str, StepTokenUsage]) -> None:
+    def __init__(self, message: str, *, spent: Mapping[str, Mapping[str, object]] | None) -> None:
         super().__init__(message)
         self.spent = spent
 
 
 class CellHaltedError(CellUnscoreableError):
-    """A bound we DECLARED cut the cell, so there is no verdict AND no point re-measuring: the same
-    declaration cuts the next attempt at the same place, after paying for it again."""
-
     category = ErrorCategory.HALTED
 
 
 class CellInfrastructureError(CellUnscoreableError):
-    """The machine could not run the cell — a registry, a package mirror, the network — after the
-    backend's own bounded retries. Banked as ``CONNECTION``, which stops the walk (``query_loop``)."""
-
     category = ErrorCategory.CONNECTION
 
 
 class CellThrottledError(CellUnscoreableError):
-    """The model provider throttled the cell's own calls, where no client of ours sends them (an
-    in-process agent), so the cell measured the provider's load and nothing else. The message is
-    the provider's. ``BackendClient.run_query`` catches it and re-sends the cell under the run's
-    ``Backpressure``, so it is never a row; one reaching ``measure_sample`` would bank as a hole
-    halting the walk, the same stop the backpressure itself ends a run on."""
+    """``BackendClient.run_query`` catches it and re-sends the cell under ``Backpressure``."""
 
     category = ErrorCategory.PROVIDER_THROTTLED
 
 
 class CellSendRefusedError(CellInfrastructureError):
-    """A refusal no retry clears reached the cell — the provider account's credit, the provider's
-    throttle, or a ceiling the run holds; ``category`` names which. It is raised on the first
-    refusal and the walk halts on the hole."""
-
     def __init__(
         self,
         message: str,
         *,
         category: ErrorCategory,
-        spent: Mapping[str, StepTokenUsage],
+        spent: Mapping[str, Mapping[str, object]] | None,
     ) -> None:
         super().__init__(message, spent=spent)
         self.category = category
 
 
 def cell_failure(
-    message: str, category: ErrorCategory, *, spent: Mapping[str, StepTokenUsage]
-) -> CellInfrastructureError:
-    """The hole for a cell that measured the machine or a refusal instead of the prompt — the one
-    mapping every in-process backend raises through. A waitable throttle is ``CellThrottledError``."""
+    message: str, category: ErrorCategory, *, spent: Mapping[str, Mapping[str, object]] | None
+) -> CellUnscoreableError:
+    if category is ErrorCategory.PROVIDER_THROTTLED:
+        return CellThrottledError(message, spent=spent)
     if category is ErrorCategory.CONNECTION:
         return CellInfrastructureError(message, spent=spent)
     return CellSendRefusedError(message, category=category, spent=spent)
 
 
-# The refusals once an account's credit or a key's limit is spent: OpenRouter's three (HTTP 402 /
-# 403) and Anthropic's, which arrives as an HTTP 400 `invalid_request_error`.
+# OpenRouter's three (HTTP 402 / 403) and Anthropic's, which arrives as an HTTP 400.
 _PROVIDER_CREDIT_REFUSAL = re.compile(
     r"requires more credits|[Ii]nsufficient credits|Key limit exceeded|credit balance is too low"
 )
@@ -113,11 +90,7 @@ def is_provider_credit_refusal(detail: str) -> bool:
 
 
 class SendRefusedError(RuntimeError):
-    """One of our paid sends was refused by what no retry clears — the provider account's credit, a
-    ceiling the run holds (``infrastructure/llm/spend_book.py``, which refuses BEFORE sending), or
-    the provider's throttle outlasting every wait (``infrastructure/llm/rate_limit.py::
-    Backpressure``). Only the operator clears any of them, so a run ends on the stop ``category``
-    maps to (``domain/phases.py::REFUSAL_STOPS``) rather than crashing."""
+    """The run ENDS on the stop ``category`` maps to (``domain/phases.py::REFUSAL_STOPS``)."""
 
     def __init__(self, message: str, *, category: ErrorCategory) -> None:
         super().__init__(message)
@@ -125,9 +98,6 @@ class SendRefusedError(RuntimeError):
 
 
 class PotterError(Exception):
-    """Base for every API error — ONE flat wire envelope at ONE seam, the single FastAPI handler.
-    A subclass fixes the status FAMILY; ``code`` is the stable string, overridable per raise site."""
-
     http_status: int = 500
     code: str = "internal_error"
 
@@ -145,37 +115,27 @@ class PotterError(Exception):
 
 
 class BadRequestError(PotterError):
-    """Syntactically/semantically bad request the route rejects up front — 400."""
-
     http_status = 400
     code = "bad_request"
 
 
 class UnauthorizedError(PotterError):
-    """No valid identity on a route that requires sign-in — 401."""
-
     http_status = 401
     code = "unauthenticated"
 
 
 class NotFoundError(PotterError):
-    """Target resource doesn't exist (or isn't visible to the caller) — 404."""
-
     http_status = 404
     code = "not_found"
 
 
 class ConflictError(PotterError):
-    """Request conflicts with current state (slug taken, version clash) — 409."""
-
     http_status = 409
     code = "version_conflict"
 
 
 class MachineBusyError(PotterError):
-    """Every run slot on the machine is taken — 409, carrying the oldest live run as the holder.
-    Occupancy is not relative to who asks, so the holder may be the caller's OWN run and the
-    message stays neutral."""
+    """The holder may be the caller's OWN run, so the message stays neutral."""
 
     http_status = 409
     code = "machine_busy"
@@ -200,9 +160,6 @@ class MachineBusyError(PotterError):
 
 
 class CycleBusyError(PotterError):
-    """The cycle a launch targets already has an unfinished job — 409, naming that job. Two
-    producers on one cycle interleave one ledger and mint the same candidates twice."""
-
     http_status = 409
     code = "cycle_busy"
 
@@ -231,44 +188,35 @@ class CycleBusyError(PotterError):
 
 
 class ContentTooLargeError(PotterError):
-    """Request/target exceeds a hard size cap (too many file entries) — 413."""
-
     http_status = 413
     code = "too_large"
 
 
 class PayloadInvalidError(PotterError):
-    """Well-formed request that fails a business/shape rule — 422."""
-
     http_status = 422
     code = "payload_invalid"
 
 
 class ServiceUnavailableError(PotterError):
-    """A required dependency isn't ready (job registry, draft registry) — 503."""
-
     http_status = 503
     code = "service_unavailable"
 
 
 class StoredConfigInvalidError(PotterError):
-    """A config file the server itself persisted no longer loads — 500, because the request was fine
-    and the caller cannot fix it. ``path`` and ``reason`` are required; the remedy is ``restamp``."""
+    """500, not 422: the request was fine and the caller cannot fix a file the server persisted."""
 
     http_status = 500
     code = "stored_config_invalid"
 
     def __init__(self, *, path: str, reason: str) -> None:
         super().__init__(
-            f"{path} is no longer readable by this build: {reason}",
+            f"{path} is no longer readable by this build: {reason}. "
+            "`python -m promptpotter restamp --apply` rewrites it.",
             details={"path": path, "reason": reason},
         )
 
 
 class RequestTooLargeError(RuntimeError):
-    """A single LLM request exceeds the provider's per-minute token cap. Terminal — retrying will
-    not help, so the caller surfaces the message without a traceback."""
-
     def __init__(
         self,
         *,
@@ -295,14 +243,6 @@ class RequestTooLargeError(RuntimeError):
 
 
 class RulerUnpersistedError(PotterError):
-    """This cycle's rounds were read on a WARM δ ruler that its ledger cannot reproduce.
-
-    ``write_ruler`` appends the ``RulerRecord`` BEFORE the round document that names it, so a
-    live run cannot reach this: it means the ledger was truncated. Resuming would re-derive a
-    ruler from an archive that has grown since the lock, putting a second scale under one cycle — two ``ruler_id``s across its rounds, and
-    every θ read on the later one incomparable with the earlier. Refuse, and name the campaign.
-    """
-
     code = "ruler_unpersisted"
 
     def __init__(self, stamped_id: str, *, campaign_id: str, cycle_id: str) -> None:
@@ -316,9 +256,6 @@ class RulerUnpersistedError(PotterError):
 
 
 class ResumeDivergenceError(RuntimeError):
-    """A recorded decision re-derives differently under the active scorer: every decision is a pure
-    function of scored results. Branch with ``resume --fork-on-divergence``, or revert the formula."""
-
     def __init__(
         self,
         *,
@@ -347,21 +284,14 @@ class ResumeDivergenceError(RuntimeError):
 
 
 class PromptCompositionError(Exception):
-    """An optimizer node's prompt could not be composed. The run halts with ``RENDER_ERROR`` — the
-    composition is at fault, not the search — rather than sending a degraded prompt."""
+    """The run halts with ``RENDER_ERROR`` rather than sending a degraded prompt."""
 
 
 class OptimizerTimeoutError(TimeoutError):
-    """An optimizer call outran its wall-clock deadline (``application/bench/llm_call.py``). The run
-    halts with ``OPTIMIZER_TIMEOUT``; any other timeout is a crash and keeps its traceback."""
+    """The run halts with ``OPTIMIZER_TIMEOUT``; any other timeout is a crash."""
 
 
 class DatasetIdentityError(RuntimeError):
-    """The rows under this dataset name changed. Replay matches a sample by content and cannot be
-    fooled, but ``sample_id`` is a POSITION within a name, and the readers keyed on it — the δ
-    ruler, the sample index, hard samples — would pool two questions' history in one slot with no
-    error anywhere. Re-cut rows need a new name."""
-
     _PREVIEW = 160
 
     def __init__(
@@ -396,15 +326,12 @@ class DatasetIdentityError(RuntimeError):
 
 @shapes_optimizer_prompt
 def is_error_result(result: Mapping[str, Any]) -> bool:
-    """Detection rides the typed ``error_category`` channel — the single owner of "this sample
-    errored". ``predicted == "ERROR"`` is a display token, and ``error`` a human message."""
+    """``predicted == "ERROR"`` is a display token and ``error`` a message: neither detects."""
     return result.get("error_category") is not None
 
 
 @contextmanager
 def graceful(msg: str) -> Iterator[None]:
-    """Suppress non-interrupt exceptions with a log message. ``KeyboardInterrupt``,
-    ``asyncio.CancelledError`` and a refused send re-raise: each ends the run."""
     try:
         yield
     except (KeyboardInterrupt, asyncio.CancelledError, SendRefusedError):
@@ -415,8 +342,6 @@ def graceful(msg: str) -> Iterator[None]:
 
 @shapes_optimizer_prompt
 def error_category(result: Mapping[str, Any]) -> ErrorCategory | None:
-    """Read the typed error category off a measurement, ``None`` when clean. Tolerates the on-disk
-    round-trip form, where a persisted row carries the bare ``StrEnum`` value as a plain ``str``."""
     cat = result.get("error_category")
     if cat is None:
         return None
@@ -428,8 +353,6 @@ def error_category(result: Mapping[str, Any]) -> ErrorCategory | None:
         return None
 
 
-# Whether an error is the configuration's own doing. A provider or machine fault says nothing about
-# the prompt, nor does a cell that ran to its end with nothing to grade; the rest are its to answer.
 ERROR_IS_CHARGED: Annotated[dict[ErrorCategory, bool], shapes_optimizer_prompt] = {
     ErrorCategory.CLIENT: True,
     ErrorCategory.SERVER: False,
@@ -438,27 +361,14 @@ ERROR_IS_CHARGED: Annotated[dict[ErrorCategory, bool], shapes_optimizer_prompt] 
     ErrorCategory.PROVIDER_THROTTLED: False,
     ErrorCategory.SPEND_CEILING: False,
     ErrorCategory.TOKEN_CEILING: False,
+    ErrorCategory.PRICE_LIST_UNREACHABLE: False,
+    ErrorCategory.NO_RATE: False,
     ErrorCategory.PIPELINE: True,
     ErrorCategory.HALTED: True,
     ErrorCategory.UNSCOREABLE: False,
     ErrorCategory.UNKNOWN: True,
 }
 assert set(ERROR_IS_CHARGED) == set(ErrorCategory), "every ErrorCategory must take a side"
-
-
-@shapes_optimizer_prompt
-def is_charged_error(result: Mapping[str, Any]) -> bool:
-    """Whether the row errored for a reason the configuration under test answers for. A category
-    this build cannot read is charged: an unexplained failure is never a reason to leave a count."""
-    if not is_error_result(result):
-        return False
-    return ERROR_IS_CHARGED[error_category(result) or ErrorCategory.UNKNOWN]
-
-
-def is_repairable_hole(result: Mapping[str, Any]) -> bool:
-    """A hole a re-measure could plug. ``HALTED`` is not one: the bound that cut the cell is
-    declared, so the next attempt is cut at the same place and the measurement is paid for twice."""
-    return is_error_result(result) and error_category(result) is not ErrorCategory.HALTED
 
 
 __all__ = [
@@ -489,8 +399,6 @@ __all__ = [
     "cell_failure",
     "error_category",
     "graceful",
-    "is_charged_error",
     "is_error_result",
     "is_provider_credit_refusal",
-    "is_repairable_hole",
 ]
