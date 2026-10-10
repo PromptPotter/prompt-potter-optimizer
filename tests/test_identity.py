@@ -20,52 +20,44 @@ import pytest
 import yaml
 from factories import pipeline_schema
 
-from promptpotter.application.optimizers.potter.dispatch.layout import (
-    NODE_LAYOUTS,
-    default_l1_layout,
-)
-from promptpotter.application.optimizers.potter.records import L2L3Memory
-from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.application.bench.children import admission_failures, overlay_failures
+from promptpotter.application.optimizers.potter.dispatch.layout import NODE_LAYOUTS
+from promptpotter.application.optimizers.potter.records import L2L3Memory, Ladder
+from promptpotter.domain.opt_search_point import OptSearchPoint, Variation
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import SCHEMA_TOGGLE_PARAM, PipelineSchema
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.store.io import read_yaml, write_yaml
 
+_L1 = Variation(node="potter:l1_generate", mode="llm")
+
 # 1. Hashes — what a measurement is filed under
 
 
 def test_an_l4_override_moves_the_prompt_and_hash_of_every_preset() -> None:
-    """A layout-only L4 edit changes which evidence a node sees, so it must move
-    that node's ``optimizer_prompt_hash`` — otherwise cross-cycle audits joining
-    on the hash silently pool layout-differing inner cycles. Prose-hash behavior is
-    untouched: no override → identical hashes.
-
-    A paper preset's prompt-field edit must reach the request it sends: an inner cell under a
-    mutated CAPO prompt otherwise re-measures the parent under the arm's own id and hash."""
+    from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.optimizer_manifest import (
         resolve_optimizer,
         set_optimizer_prompt_overrides,
     )
-    from promptpotter.application.optimizers import paper_templates
     from promptpotter.application.runner.inner.spawn import inner_campaign_id
     from promptpotter.application.runner.inner.tasks import InnerTaskSpec
 
     capo = resolve_optimizer("capo", {})
-    cycle = types.SimpleNamespace(optimizer=capo)
+    round_ = types.SimpleNamespace(cycle=types.SimpleNamespace(optimizer=capo))
+    ctx: NodeContext[Any] = NodeContext(cast(Any, round_), "capo_mutate")
     values = {"task_description": "sort the list", "instruction": "Sort it."}
     mutated = {
         "capo_mutate": {"instruction": "Rephrase [{{instruction}}] to {{task_description}}."}
     }
     try:
         set_optimizer_prompt_overrides(None)
-        sent, hashes = paper_templates.fill(cycle, "capo_mutate", **values), capo.prompt_hashes()
+        sent, hashes = ctx.fill(**values), capo.prompt_hashes()
         set_optimizer_prompt_overrides(mutated)
-        assert (
-            paper_templates.fill(cycle, "capo_mutate", **values)
-            == ("Rephrase [Sort it.] to sort the list.")
-            != sent
-        ), "the mutated CAPO prompt never reached the request it sends"
+        assert ctx.fill(**values) == ("Rephrase [Sort it.] to sort the list.") != sent, (
+            "the mutated CAPO prompt never reached the request it sends"
+        )
         moved = capo.prompt_hashes()
         assert moved["capo_mutate"] != hashes["capo_mutate"]
         assert {k: v for k, v in moved.items() if k != "capo_mutate"} == {
@@ -103,25 +95,12 @@ def test_an_l4_override_moves_the_prompt_and_hash_of_every_preset() -> None:
 async def test_the_determinism_clamp_outranks_every_other_layer_and_keys_the_bank(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A campaign that PINS its draw and its route must actually run pinned, and two pins must
-    not share a banked reply.
-
-    Both halves are silent and both destroy a measurement's identity. `l1_generate` passes
-    `temperature=creativity` as a per-call override, so a clamp merged anywhere but last leaves
-    the loudest noise source running while every surface reports the campaign as pinned — the
-    run is then unreproducible and nothing says so. And hosts of one model disagree
-    SYSTEMATICALLY rather than randomly (measured: on a `justlogic-d234` query Groq answered
-    FALSE 28/28 where every other host answered Uncertain), so a `route_order` that reached the
-    wire without reaching `hash_call` would replay one route's answer under the other's name for
-    the life of the cache — unrecoverable, because the row on disk is indistinguishable from one
-    the pinned route really produced.
-    """
     from promptpotter.application.bench import llm_call as call_mod
     from promptpotter.application.campaign_config import DeterminismClamp
     from promptpotter.application.optimizer_manifest import set_determinism_clamp
     from promptpotter.infrastructure.llm.request import ChatRequest
     from promptpotter.infrastructure.llm.response import LLMResponse
-    from promptpotter.infrastructure.store.stores import LLMReuseCache
+    from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache
 
     sent: list[ChatRequest] = []
 
@@ -153,12 +132,10 @@ async def test_the_determinism_clamp_outranks_every_other_layer_and_keys_the_ban
         assert sent[0].seed == 7
         assert sent[0].route_order == ["Alibaba"]
 
-        # Same prompt, same model, a different host: a second measurement, so a second entry.
         await ask(pinned.model_copy(update={"route_order": ["Baidu"]}))
         assert len(sent) == 2, "the second route replayed the first route's banked answer"
         assert len(list((tmp_path / "optimizer_reuse").glob("*.json"))) == 2
 
-        # And an unpinned campaign is left alone rather than handed a `None` for every key.
         await ask(None)
         assert sent[2].temperature == 0.7
         assert sent[2].seed is None
@@ -168,17 +145,6 @@ async def test_the_determinism_clamp_outranks_every_other_layer_and_keys_the_ban
 
 
 def test_inner_campaign_id_separates_two_candidates_and_is_stable() -> None:
-    """A cell's inner campaign is addressed by CONTENT, and two candidates must not collide.
-
-    Silent harm, and the reason this key could not simply be the ``cycle_id``: that id is a
-    benchmark-CELL hash, so C0, C1.1 and C1.2 measuring seed-3 all derive the same one
-    (``cycle_19ab182342b7`` is shared by four campaigns on disk). The optimizer-prompt
-    overrides are the only thing that tells the candidates apart, so a key that dropped them
-    would file two candidates' inner runs under one campaign — and because
-    ``_open_inner_campaign`` CONTINUES an existing campaign, the second candidate would
-    inherit the first's banked rounds and be scored on a trajectory it never ran. No error,
-    no missing directory: just one candidate's measurement reported as another's.
-    """
     from promptpotter.application.optimizer_manifest import resolve_optimizer
     from promptpotter.application.runner.inner.spawn import inner_campaign_id
     from promptpotter.application.runner.inner.tasks import InnerTaskSpec
@@ -194,13 +160,10 @@ def test_inner_campaign_id_separates_two_candidates_and_is_stable() -> None:
         "two candidates differing only in one override field share a campaign — "
         "their measurements merge under one id with no error"
     )
-    # The origin (no overrides) is a third distinct arm, not a nameless default.
     assert (
         len({inner_campaign_id(spec, c1), inner_campaign_id(spec, c2), inner_campaign_id(spec, {})})
         == 3
     )
-    # A different cell of the SAME candidate is a different campaign too, and so is one whose
-    # inner optimizer runs another knob — an eliminator's as much as an llm node's.
     assert inner_campaign_id(spec.model_copy(update={"seed": 6}), c1) != inner_campaign_id(spec, c1)
     cut = {"pobb": ManifestNodeOverlay.model_validate({"config": {"epsilon": 0.3}})}
     as_run, as_cut = (resolve_optimizer("potter", n).treatment().digest for n in ({}, cut))
@@ -210,13 +173,6 @@ def test_inner_campaign_id_separates_two_candidates_and_is_stable() -> None:
 
 
 def test_judge_identity_moves_the_searchpoint_hash() -> None:
-    """Swapping a judge, its models, its rubric, or the TERM it is read under re-cuts the key.
-
-    An archive row is keyed on node configs. A judge that changed without moving the key would
-    have every verdict taken under the OLD grader replayed under the new one — silently, and in
-    whichever direction the new grader happens to be more lenient. Re-keying is the same fact one
-    level up: the same rubric read under a different term banks a different set of observations,
-    so a formula naming the old term would raise on rows that look eligible."""
     from promptpotter.application.pipeline_resolve import resolve_pipeline_config_params
     from promptpotter.domain.pipeline_parsing import parse_pipeline_response
     from promptpotter.judges.protocol import JudgeSpec, JudgeStage
@@ -251,18 +207,13 @@ def test_judge_identity_moves_the_searchpoint_hash() -> None:
         "none": sp_hash({}),
         "sealqa@a": sp_hash(one),
         "sealqa@b": sp_hash({"answer": spec("sealqa", "b")}),
-        # Same models, different RUBRIC — the fingerprint hashes the prompt text, so this moves
-        # even though nothing an operator wrote in the config differs.
+        # Same models, different rubric: the fingerprint hashes the judge's prompt text.
         "simpleqa@a": sp_hash({"answer": spec("simpleqa", "a")}),
-        # Same judge, same models, read under a different TERM.
         "rekeyed": sp_hash({"correctness": spec("sealqa", "a")}),
-        # A step ADDED. The cell now carries two graded observations, not one.
         "two_steps": sp_hash({"answer": spec("sealqa", "a"), "grounded": spec("simpleqa", "a")}),
     }
     assert len(set(hashes.values())) == len(hashes), f"judge identity collides: {hashes}"
     assert sp_hash(one) == hashes["sealqa@a"], "an unchanged judge must not move the key"
-    # Declaration order is the STEP order for a reader, never part of what was measured — two
-    # campaigns declaring the same graders in a different order graded the same cells identically.
     assert (
         sp_hash({"grounded": spec("simpleqa", "a"), "answer": spec("sealqa", "a")})
         == hashes["two_steps"]
@@ -270,10 +221,6 @@ def test_judge_identity_moves_the_searchpoint_hash() -> None:
 
 
 def test_unframed_ablation_renders_no_framing_where_one_is_committed(built_stores: Any) -> None:
-    """``task_framing: off`` is the framing ablation, so its arm scores the prompt WITHOUT the
-    dataset's committed framing, and its manifest keeps saying so. A leak renders the framing into
-    a run declared unframed: both arms then measure one prompt and the ablation reads as no effect,
-    with nothing on any surface to say why. A resume that dropped the declaration runs framed."""
     from promptpotter.application.bench.task_context import campaign_framing
     from promptpotter.application.campaign_config import (
         CampaignConfig,
@@ -298,10 +245,7 @@ def test_unframed_ablation_renders_no_framing_where_one_is_committed(built_store
 
 
 def test_the_inner_benchmark_is_one_directory_to_identity_and_run(built_stores: Any) -> None:
-    """A tenant copy of the inner benchmark is what the L4 fingerprint hashes AND what an inner
-    cell runs. Resolved apart, outer rows are keyed on one config and measured on another, and a
-    banked cell replays under a benchmark it never ran — every number plausible."""
-    from promptpotter.connectors.promptpotter import _identity_config
+    from promptpotter.application.runner.inner.connector import _identity_config
     from promptpotter.infrastructure.store.dataset_access import readable_dataset_dir
     from promptpotter.infrastructure.store.stores import build_stores
 
@@ -328,14 +272,65 @@ def test_the_inner_benchmark_is_one_directory_to_identity_and_run(built_stores: 
     assert readable_dataset_dir(sandbox, "innerbench") == tenant_copy, "the cell ran another tier"
 
 
+def test_the_canonical_form_every_stored_key_is_cut_from_does_not_move() -> None:
+    from promptpotter.infrastructure.store.measurement_archive import config_key
+    from promptpotter.shared.hashing import ADDRESS_HEX, stable_hash
+
+    value = {"b": 0.1, "a": {"ü": [1.5, None], "A": "Zürich 東京"}}
+    reordered = {"a": {"A": "Zürich 東京", "ü": [1.5, None]}, "b": 0.1}
+
+    assert stable_hash(value) == stable_hash(reordered) == "bff2239dc003d203"
+    assert stable_hash(value, length=ADDRESS_HEX) == "bff2239dc003d203bdf1154c1e7222c6"
+    assert config_key([("solve", value)]) == "f50c75d3792a48e09028a5e79dacd742"
+    assert stable_hash({**value, "b": 0.10000000000000002}) != stable_hash(value)
+    with pytest.raises(TypeError):
+        stable_hash({"when": Path(".")})
+
+
+def test_prose_moves_no_source_digest_and_a_code_token_does() -> None:
+    from promptpotter.shared.hashing import source_facts
+
+    def digest(text: str) -> str:
+        return "".join(unit["source"] for unit in source_facts(text)["units"])
+
+    marked = "from promptpotter.shared.hashing import shapes_optimizer_prompt\n"
+    bare = marked + (
+        "shapes_optimizer_prompt(None)\n"
+        "LIMIT = 3\n"
+        "class Arm:\n"
+        "    width: int = 2\n"
+        "    def cut(self, n):\n"
+        "        if n > LIMIT:\n"
+        "            return n - self.width\n"
+        "        return n\n"
+    )
+    documented = marked + (
+        '"""Module docstring."""\n'
+        "shapes_optimizer_prompt(None)\n"
+        "LIMIT = 3  # a comment\n"
+        '"""Attribute docstring."""\n'
+        "class Arm:\n"
+        '    """Class docstring."""\n'
+        "    width: int = 2\n"
+        '    """Attribute docstring."""\n'
+        "    def cut(self, n):\n"
+        '        """Function docstring."""\n'
+        "        if n > LIMIT:\n"
+        '            "a bare string in a branch"\n'
+        "            return n - self.width\n"
+        "        return n\n"
+    )
+    assert digest(bare) == digest(documented), "prose re-keyed a treatment"
+    assert digest(bare.replace("n > LIMIT", "n >= LIMIT")) != digest(bare)
+    assert digest(bare.replace("LIMIT = 3", "LIMIT = 4")) != digest(bare)
+    only_prose = marked + 'shapes_optimizer_prompt(None)\ndef f():\n    """Doc."""\n'
+    assert digest(only_prose) == digest(only_prose.replace('"""Doc."""', "pass"))
+
+
 # 2. The config a campaign runs
 
 
 def test_the_drafts_CHAIN_reaches_the_mint_on_a_reused_dataset(tmp_path: Path) -> None:
-    """The operator picks LLM-only and the campaign measures the full pipeline. A fresh upload
-    commits its own `pipeline.yaml`, so `pipelines.default` IS the chosen chain; a REUSED dataset
-    writes no file, and nothing else carried `draft.pipeline_steps` to the run — nor the optimizer
-    the picker chose, so the shared file's ran under the draft's name."""
     from promptpotter.application.jobs.launcher.mint_and_start import build_cycle_config
     from promptpotter.connectors import DEFAULT_CONNECTOR, get
     from promptpotter.infrastructure.store.io import write_yaml
@@ -360,27 +355,17 @@ def test_the_drafts_CHAIN_reaches_the_mint_on_a_reused_dataset(tmp_path: Path) -
     assert sorted(chosen.exclude_nodes) == ["rerank", "web_search"]
     assert schema.active_steps_excluding(chosen.exclude_nodes) == ["llm_only"]
     assert chosen.optimization.optimizer == "capo"
-    # A draft that never touched the toggle leaves the dataset's answer alone — excluding the
-    # complement of "nothing chosen" would close the whole pipeline.
+    # `pipeline_steps=[]` is "untouched": excluding its complement would close the whole pipeline.
     untouched = build_cycle_config(cast(Any, session), root, optimization={}, pipeline_steps=[])
     assert untouched.exclude_nodes == []
 
 
 def _pipeline_schema(dataset: str) -> PipelineSchema:
-    """The committed `datasets/{dataset}/pipeline.yaml`, parsed — a plain dataset's whole graph."""
     path = Path(__file__).resolve().parents[1] / "datasets" / dataset / "pipeline.yaml"
     return parse_pipeline_response(yaml.safe_load(path.read_text(encoding="utf-8")))
 
 
 def test_answering_in_TEXT_sends_no_contract_to_answer_INTO() -> None:
-    """The toggle is spent at the wire seam, and it must take `answer_field` with it: a backend
-    destructuring a slot the response never had reads "" for every sample and grades the run
-    NO_RESULT — a mechanical zero the loop would attribute to the idea under test.
-
-    And an UNMOVED node must stay byte-identical. The fold runs before the content hash, so
-    writing a resolved default here would re-key every banked measurement in the archive to say
-    nothing new.
-    """
     from promptpotter.application.pipeline_resolve import resolved_output_schemas
     from promptpotter.domain.pipeline_overlay import fold_output_contract
     from promptpotter.domain.pipeline_schema import ANSWER_AS_TEXT, description_key
@@ -389,29 +374,20 @@ def test_answering_in_TEXT_sends_no_contract_to_answer_INTO() -> None:
     base = {n.name: dict(n.current_config) for n in schema.declared_nodes}
     assert "output_schema" in base["llm_only"] and "answer_field" in base["llm_only"]
 
-    untouched = copy.deepcopy(base)
-    fold_output_contract(untouched, schema)
-    assert untouched == base, "an unmoved point must hash as it always did"
+    assert fold_output_contract(base, schema) == base, "an unmoved point must hash as it always did"
 
-    chose_text = copy.deepcopy(base)
-    chose_text["llm_only"][SCHEMA_TOGGLE_PARAM] = ANSWER_AS_TEXT
-    chose_text["llm_only"][description_key("answer")] = "IGNORED"
-    fold_output_contract(chose_text, schema)
+    steered = copy.deepcopy(base)
+    steered["llm_only"][SCHEMA_TOGGLE_PARAM] = ANSWER_AS_TEXT
+    steered["llm_only"][description_key("answer")] = "IGNORED"
+    chose_text = fold_output_contract(steered, schema)
     assert "output_schema" not in chose_text["llm_only"]
     assert "answer_field" not in chose_text["llm_only"]
-    # The description lever reaches nothing under text and must not resolve a registry schema
-    # back onto a node that just said it wants none.
     assert description_key("answer") not in chose_text["llm_only"]
 
-    # The served contract follows the same fold, so the panel says "free text" instead of showing
-    # a schema the searchpoint is not answering under.
     assert resolved_output_schemas(schema, base)["llm_only"] is not None
     text_point = {**base, "llm_only": {**base["llm_only"], SCHEMA_TOGGLE_PARAM: ANSWER_AS_TEXT}}
     assert resolved_output_schemas(schema, text_point)["llm_only"] is None
 
-    # Under a schema the description lever is its own param, and the fold writes it onto the
-    # NESTED field it names — left at the top level it reaches no request, and the round scores
-    # an edit the backend never saw.
     items = {"type": "object", "properties": {"amount": {"type": "string"}}}
     out = {"lines": {"type": "array", "items": items}, "total": {"type": "number"}}
     nested = parse_pipeline_response(
@@ -430,15 +406,15 @@ def test_answering_in_TEXT_sends_no_contract_to_answer_INTO() -> None:
         }
     )
     amount = description_key("lines.amount")
-    pp = copy.deepcopy({"llm_only": {**cast(Any, nested.get_node("llm_only")).current_config}})
-    pp["llm_only"][amount] = "Net, in CHF."
-    fold_output_contract(pp, nested)
+    declared = cast(Any, nested.get_node("llm_only")).current_config
+    pp = fold_output_contract({"llm_only": {**declared, amount: "Net, in CHF."}}, nested)
     line = pp["llm_only"]["output_schema"]["properties"]["lines"]["items"]["properties"]["amount"]
     assert line["description"] == "Net, in CHF." and amount not in pp["llm_only"]
+    # The fold leaves the declared schema it read unmutated: the parent individual still holds it.
+    assert "description" not in items["properties"]["amount"]
 
 
 def _frozen_config(**fields: Any) -> dict[str, Any]:
-    """A manifest's `config` as a mint freezes it, over the default connector's loop knobs."""
     from promptpotter.application.campaign_config import load_campaign_config
     from promptpotter.connectors import DEFAULT_CONNECTOR, get
 
@@ -450,14 +426,14 @@ def _frozen_config(**fields: Any) -> dict[str, Any]:
 def test_a_campaign_runs_the_config_it_froze_whatever_its_dataset_file_says_later(
     built_stores: Any,
 ) -> None:
-    """The dataset file seeds the NEXT campaign. Read at resume, it switched a potter campaign to
-    whatever optimizer a later edit named, and a mint's `--config` reached `campaign.json` but not
-    the loop — every surface showing one configuration while another ran."""
     from promptpotter.application.pipeline_resolve import resolve_campaign_config
     from promptpotter.domain.campaign import Campaign
-    from promptpotter.domain.run_records import ConfigOverrides, CycleSeed
+    from promptpotter.domain.cycle_paths import CycleDir
+    from promptpotter.domain.run_records import ConfigOverrides, CycleSeed, ScoringLockedRecord
+    from promptpotter.infrastructure.ledger import CycleEventLog
 
     stores = built_stores
+    dials = {"per_sample": "exact", "dials": "cost: 0.1"}
     write_yaml(
         stores.tenant_datasets.dataset_dir("ds") / "campaign.yaml",
         {"campaign_config": _frozen_config(optimization={"optimizer": "capo", "max_rounds": 3})},
@@ -471,12 +447,22 @@ def test_a_campaign_runs_the_config_it_froze_whatever_its_dataset_file_says_late
         config=_frozen_config(
             optimization={"max_rounds": 12},
             optimizer_narrowing={"a": {"param_keys": ["temperature"]}, "b": {"param_keys": ["k"]}},
+            scoring=dials,
         ),
     )
     stores.campaigns.create_campaign(campaign)
-    stores.campaigns.create(campaign.root_hop, {})
+    stores.campaigns.mint_cycle(campaign.root_hop)
     ran = resolve_campaign_config(stores, campaign, campaign.root_hop)
     assert (ran.optimization.optimizer, ran.optimization.max_rounds) == ("potter", 12)
+
+    # The criterion its origin locked rides the root's ledger, and every cycle runs under it.
+    ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(campaign.root_hop)))
+    ledger.append(ScoringLockedRecord(declared={"dials": "other"}, locked={"per_cell": "0"}))
+    assert resolve_campaign_config(stores, campaign, campaign.root_hop).scoring == dials
+    locked = {"per_sample": "exact", "per_cell": "correct - 0.1 * cost"}
+    ledger.append(ScoringLockedRecord(declared=dials, locked=locked))
+    assert resolve_campaign_config(stores, campaign, None).scoring == locked
+    assert resolve_campaign_config(stores, campaign, campaign.root_hop).scoring == locked
 
     seed = CycleSeed(
         optimizer_narrowing={"a": {"param_keys": []}},
@@ -488,11 +474,144 @@ def test_a_campaign_runs_the_config_it_froze_whatever_its_dataset_file_says_late
     assert [forked.optimizer_narrowing[n].param_keys for n in "ab"] == [[], ["k"]]
 
 
+def test_a_row_reads_as_the_search_space_its_ticks_and_padlock_drew() -> None:
+    from promptpotter.domain.pipeline_schema import NodeConfigParam, ParamIntent, narrowing_of
+
+    rows = [
+        NodeConfigParam(key="model", kind="model", options=["a", "b"], permitted=["a"]),
+        NodeConfigParam(key="effort", kind="enum", options=["low", "mid", "high"]),
+        NodeConfigParam(key="temperature", kind="number"),
+    ]
+
+    def declared(
+        key: str, ticks: list[str], *, unlocked: bool = True
+    ) -> tuple[bool, list[str] | None]:
+        intent = ParamIntent(key=key, open=unlocked, allowed=ticks)
+        out = narrowing_of(rows, [intent])
+        return key in (out.param_keys or []), out.param_allowed_values.get(key)
+
+    # Every tick on declares nothing: an absent entry IS the menu.
+    assert declared("effort", ["low", "mid", "high"]) == (True, None)
+    assert declared("effort", ["low", "high"]) == (True, ["low", "high"])
+    # One tick is a pin: shut, yet still stated, because a human fork may steer to it.
+    assert declared("model", ["a"]) == (False, ["a"])
+    assert declared("effort", ["low", "max"]) == (True, ["low", "max"])
+    # Nothing ticked is an axis with nothing legal, never one with no bound.
+    assert declared("effort", []) == (False, None)
+    assert declared("temperature", []) == (True, None)
+    assert declared("temperature", ["0.2"], unlocked=False) == (False, None)
+    # A full menu over a server-stated `permitted` is stated: the declaration replaces the node's.
+    assert declared("model", ["a", "b"]) == (True, ["a", "b"])
+
+
+def test_a_draft_edit_sent_as_rows_freezes_the_search_space_the_overlay_spelled(
+    built_stores: Any,
+) -> None:
+    from promptpotter.application.datasets.draft_campaign import (
+        EditDraftPatch,
+        draft_campaign_config,
+        new_draft,
+    )
+    from promptpotter.application.datasets.draft_patch import apply_draft_patch, plan_draft_patch
+    from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
+
+    declared = {
+        "type": "llm",
+        "config": {"model": "m", "reasoning_effort": "low", "temperature": 0.2},
+        "optimizer": {
+            "param_keys": ["reasoning_effort", "temperature"],
+            "param_allowed_values": {"reasoning_effort": ["low", "mid", "high"]},
+        },
+    }
+    draft = new_draft(
+        tenant_id=built_stores.identity.tenant_id,
+        slug="d",
+        n_samples=1,
+        sample_preview=[],
+        headers=[],
+    ).patch(backend_nodes={"llm_only": declared})
+
+    def frozen(**patch: Any) -> Any:
+        plan = plan_draft_patch(built_stores, draft, EditDraftPatch.model_validate(patch))
+        return draft_campaign_config(apply_draft_patch(draft, plan))
+
+    rows = [
+        {"key": "reasoning_effort", "open": True, "allowed": ["low", "high"]},
+        {"key": "temperature", "open": False, "allowed": []},
+    ]
+    spelled = {
+        "param_keys": ["reasoning_effort"],
+        "param_allowed_values": {"reasoning_effort": ["low", "high"]},
+    }
+    as_rows = frozen(node_narrowing={"llm_only": rows}).optimizer_narrowing
+    assert as_rows == {"llm_only": NodeSearchNarrowing(**spelled)}
+    as_overlay = frozen(pipeline_overlay={"llm_only": {"optimizer": spelled}})
+    assert as_rows == as_overlay.optimizer_narrowing
+
+    # No field named `answer`, none named by the operator: the slot is the LAST, reasoning first.
+    schema = {"type": "object", "properties": {"reasoning": {}, "code": {}}}
+    authored = frozen(node_output={"node": "llm_only", "output_schema": schema}).pipeline_overlay
+    contract = {"output_schema": schema, "answer_field": "code", "response_format": "json"}
+    assert authored == frozen(pipeline_overlay={"llm_only": {"config": contract}}).pipeline_overlay
+    assert authored["llm_only"]["answer_field"] == "code"
+
+
+def test_a_fork_closes_the_axis_its_operator_closed_on_the_forked_cycles_own_menu(
+    built_stores: Any,
+) -> None:
+    """Ticks equal to the ROOT's whole menu still close the rung only the fork's menu carries."""
+    from promptpotter.application.commands.launching import _parse_cycle_seed
+    from promptpotter.application.pipeline_resolve import resolve_campaign_config
+    from promptpotter.domain.campaign import Campaign
+    from promptpotter.domain.cycle_paths import CycleHop
+    from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
+
+    def declaring(rungs: list[str]) -> dict[str, Any]:
+        node = {
+            "type": "llm",
+            "config": {"model": "m", "reasoning_effort": "low", "temperature": 0.0},
+            "optimizer": {
+                "param_keys": ["reasoning_effort", "temperature"],
+                "param_allowed_values": {"reasoning_effort": rungs},
+            },
+        }
+        return {"nodes": {"a": node}, "pipelines": {"default": ["a"]}}
+
+    stores = built_stores
+    campaign = Campaign(
+        campaign_id="ds__000001",
+        dataset_name="ds",
+        created_at="2026-09-27T00:00:00Z",
+        root_cycle_id="cycle_root",
+        owner_user_id=str(stores.identity.user_id),
+        config=_frozen_config(),
+    )
+    stores.campaigns.create_campaign(campaign)
+    forked = CycleHop(campaign_id=campaign.campaign_id, cycle_id="cycle_fork")
+    for hop, rungs in ((campaign.root_hop, ["low", "high"]), (forked, ["low", "high", "xhigh"])):
+        stores.campaigns.mint_cycle(hop)
+        stores.campaigns.write_resolved_pipeline(hop, declaring(rungs))
+
+    rows = [
+        {"key": "reasoning_effort", "open": True, "allowed": ["low", "high"]},
+        {"key": "temperature", "open": False, "allowed": []},
+    ]
+    seed = _parse_cycle_seed(
+        {"node_narrowing": {"a": rows}},
+        resolve_campaign_config(stores, campaign, None),
+        stores,
+        campaign,
+        forked,
+    )
+    assert seed.optimizer_narrowing == {
+        "a": NodeSearchNarrowing(
+            param_keys=["reasoning_effort"],
+            param_allowed_values={"reasoning_effort": ["low", "high"]},
+        )
+    }
+
+
 def test_backend_row_names_the_endpoint_the_run_actually_reached(built_stores: Any) -> None:
-    """Every measurement a run banks is attributed to the row `init_services` resolved, and nothing
-    downstream re-reads the URL to check. So the id a caller asks for is a PREFERENCE the endpoint
-    outranks in both directions — an endpoint already registered answers under its own id, and an id
-    held by a DIFFERENT endpoint never absorbs this one."""
     from promptpotter.application.initialization.wiring import _resolve_backend_id
     from promptpotter.domain.backend import BackendConnection
 
@@ -502,13 +621,10 @@ def test_backend_row_names_the_endpoint_the_run_actually_reached(built_stores: A
         )
     )
 
-    # Same endpoint under another name: one physical endpoint keeps one row.
     resolved = _resolve_backend_id(built_stores, "local", "http://10.0.0.5:8000/", "termnorm", "n")
     assert resolved == "box"
     assert len(built_stores.backends.list_all()) == 1
 
-    # A new endpoint whose requested id is taken gets its own row, naming its own URL — the
-    # arm that used to pass an existence check and hand the run someone else's base_url.
     minted = _resolve_backend_id(built_stores, "box", "http://127.0.0.1:8000", "termnorm", "n")
     assert minted != "box"
     row = built_stores.backends.get(minted)
@@ -516,7 +632,6 @@ def test_backend_row_names_the_endpoint_the_run_actually_reached(built_stores: A
     assert row.base_url == "http://127.0.0.1:8000"
 
 
-# Bare scalars YAML 1.1 resolves to a non-string: the write-side hazard `write_yaml` must quote.
 _YAML_1_1_HAZARDS = (
     "TRUE",
     "FALSE",
@@ -541,15 +656,6 @@ _YAML_1_1_HAZARDS = (
 
 
 def test_yaml_emitter_never_reinterprets_a_string_it_wrote(tmp_path: Path) -> None:
-    """A config value that survives the write as a *different type* is silent harm.
-
-    YAML 1.1 — which PyYAML implements — resolves bare ``off``/``no``/``TRUE`` to
-    booleans and ``0755`` to an int. Two live values sit on that edge: the JustLogic
-    label enum is ``["TRUE", "FALSE"]`` and ``promptpotter-self`` sets
-    ``prompt_block_catalogue: "off"``. If the emitter ever stopped quoting them, a
-    written config would come back with a boolean where a label belongs and the
-    pipeline would grade every sample against it — no error, wrong numbers.
-    """
     path = tmp_path / "hazards.yaml"
     payload = {k: k for k in _YAML_1_1_HAZARDS} | {"nested": {"labels": list(_YAML_1_1_HAZARDS)}}
     write_yaml(path, payload)
@@ -557,8 +663,6 @@ def test_yaml_emitter_never_reinterprets_a_string_it_wrote(tmp_path: Path) -> No
 
 
 def _outer_schema(root: Path) -> PipelineSchema:
-    """`promptpotter-self`'s graph as a run declares it: served off the inner manifest, with the
-    schema levers the outer L4 campaign mutates."""
     from promptpotter.application.pipeline_resolve import (
         dataset_pipeline_declaration,
         experiment_outside_run,
@@ -574,18 +678,10 @@ def _outer_schema(root: Path) -> PipelineSchema:
 
 
 def test_emittable_params_are_declared_and_an_invented_one_is_rejected(tmp_path: Path) -> None:
-    """`node_param_keys` is the single emittable surface — and every reader must read it.
-
-    An invented PARAM is not dropped the way a hallucinated NODE is: absent a membership
-    check it merges into `pipeline_params` and rides to the wire. The round completes and
-    the candidate's fitness is attributed to an axis that does not exist. Same set, two
-    readers: a graft on one side alone is either an unhonoured edit or an unguarded one.
-    """
     from promptpotter.application.optimizer_manifest import resolve_optimizer
     from promptpotter.application.optimizers.potter.dispatch.l1_wire_schema import (
         build_l1_response_schema,
     )
-    from promptpotter.application.optimizers.potter.validators.l1_strict import validate_overrides
 
     schema = _outer_schema(tmp_path)
     emitted = build_l1_response_schema(
@@ -593,32 +689,32 @@ def test_emittable_params_are_declared_and_an_invented_one_is_rejected(tmp_path:
     )["properties"]["variants"]["items"]["properties"]["pipeline_overlay"]["properties"]
     for node, keys in schema.node_param_keys().items():
         assert set(emitted[node]["properties"]) <= keys, (
-            f"{node}: the schema declares a key `validate_overrides` rejects as unknown_param"
+            f"{node}: the schema declares a key `overlay_failures` rejects as unknown_param"
         )
 
-    # A param no node advertises is rejected, not silently merged.
     reasons = [
-        (f.axis, f.reason)
-        for f in validate_overrides({"l1_generate": {"invented_knob": 1}}, schema)
+        (f.axis, f.reason) for f in overlay_failures({"l1_generate": {"invented_knob": 1}}, schema)
     ]
     assert reasons == [("l1_generate.invented_knob", "unknown_param")]
-    # A nested param is declared `object`, so a scalar in its slot is caught rather than
-    # coerced — depth comes from the declaration, never from sniffing the value.
-    assert [f.reason for f in validate_overrides({"l1_critique": {"layout": "hdr"}}, schema)] == [
+    assert [f.reason for f in overlay_failures({"l1_critique": {"layout": "hdr"}}, schema)] == [
         "type_mismatch"
     ]
-    assert validate_overrides({"l1_critique": {"layout": {"instruction": ["plan"]}}}, schema) == []
+    assert overlay_failures({"l1_critique": {"layout": {"instruction": ["plan"]}}}, schema) == []
+
+    # A deletion is a move like any other: an emptied field is a locus the variation wrote.
+    parent = OptSearchPoint(persona="You grade.", instruction="Answer {{combined_text}}.")
+    wiped = OptSearchPoint.derive([parent], variation=_L1, persona="")
+    assert wiped.lineage.variations[0].loci == ["persona"] and wiped.lineage.parent_ids == [
+        parent.id
+    ]
+    found = admission_failures(wiped, {"l1_generate": {"invented_knob": 1}}, schema)
+    assert [f.reason for f in found] == ["unknown_param"]
 
 
 # 3. Contamination of a scored prompt
 
 
 def test_rewriting_the_prompt_panel_cannot_accumulate_the_operator_framing() -> None:
-    """The panel IS the text L1 replaces, so whatever it shows comes back as the raw field. Showing
-    a SPLICED ``problem_description`` therefore returns the operator's context inside it, and the
-    next render splices the context around that copy — a strict accumulator, no error, and every
-    candidate after it scored on the grown prompt. Ten banked rounds of one campaign carried the
-    same 58-char ``upstream_context`` while ``problem_description`` ran 906 → 5,024 chars."""
     from promptpotter.application.optimizers.potter.dispatch.bundle import (
         CycleSlice,
         InjectionBundle,
@@ -641,16 +737,13 @@ def test_rewriting_the_prompt_panel_cannot_accumulate_the_operator_framing() -> 
     )
     bundle = InjectionBundle(
         opt_sp=opt_sp,
-        memory=L2L3Memory(l1_layout=default_l1_layout()),
+        memory=L2L3Memory(),
         framing=framing,
         pipeline_schema=None,
         cycle_slice=CycleSlice(
             round_num=1,
             l1_stall_depth=0,
-            l2_round=0,
-            l2_stall_count=0,
-            l3_round=0,
-            l3_stall_count=0,
+            ladder=Ladder(),
             exploration_budget="tight",
         ),
         digest=RoundDigest(diagnostics=RoundDiagnostics(n_valid=0, samples=[]), critique=None),
@@ -667,90 +760,78 @@ def test_rewriting_the_prompt_panel_cannot_accumulate_the_operator_framing() -> 
         for label, _, body in (s.partition("\n") for s in panel.split("\n\n"))
         if label.startswith("[")
     }
-    # A generator that replaces every field with exactly what it was shown changes nothing.
-    rewritten = OptSearchPoint.derive([opt_sp], source="potter:l1_generate", **shown)
+    rewritten = OptSearchPoint.derive([opt_sp], variation=_L1, **shown)
     assert rewritten.render_target(framing, demo=()) == opt_sp.render_target(framing, demo=())
-    # The framing still reaches the target prompt, and L1 still sees it — as context, not as the
-    # field it is being asked to rewrite. Dropping either half trades this bug for a blinder one.
+    # Dropping the framing from either render trades this bug for a blinder one.
     assert upstream in opt_sp.render_target(framing, demo=())
     assert upstream in "".join(i.text for i in _r_task_context(bundle))
 
 
-def test_a_controlled_arm_remembers_only_the_runs_its_own_line_filed(built_stores: Any) -> None:
-    """An arm of a head-to-head is compared on what its OWN search found: a δ ruler, an axis
-    digest or a sample fold drawn from another campaign's runs on the dataset steers it with
-    measurements its rival never had, and nothing on screen says so. The archive stays a CACHE
-    either way; MEMORY is fenced to the runs the arm filed, and grows as it files more."""
+def test_a_controlled_arm_remembers_only_the_answers_its_own_line_walked(built_stores: Any) -> None:
     import contextvars
 
     from factories import measurements
 
     from promptpotter.infrastructure.store.archive_queries import (
-        list_runs,
-        record_measurement_run,
-        runs_since,
+        SampleFoldRow,
+        list_populations,
+        load_population,
+        note_walked,
         sample_fold_rows,
-        scope_memory_to_own_runs,
+        scope_memory_to_own_answers,
         write_sample_fold,
     )
+    from promptpotter.infrastructure.store.measurement_archive import config_key
 
-    def bank(run_id: str) -> None:
-        record_measurement_run(
-            built_stores,
-            run_id,
-            {
-                "run_id": run_id,
-                "dataset_name": "ds",
-                "prompt_fields_id": run_id,
-                "item_count": 2,
-                "content_hash": run_id,
-                "created_at": "2026-09-28T00:00:00Z",
-            },
-            measurements([1.0, 0.0]),
-        )
+    def entry(name: str) -> dict[str, Any]:
+        key = config_key([("", {"individual": name})])
+        return {"config_key": key, "dataset_name": "ds", "prompt_fields_id": name}
 
-    bank("panel_foreign")
-    write_sample_fold(built_stores, dataset_name="ds", rows=[{"run_id": "x"}], append=False)
+    def bank(name: str, grades: list[float], at: int) -> list[str]:
+        stamps = {"role": "panel", "source": "optimization_loop", "provenance": "A"}
+        stamps["created_at"] = f"2026-09-28T00:00:{at:02d}Z"
+        rows = [{**row, **stamps} for row in measurements(grades)]
+        return list(built_stores.archive.file_answers(entry(name), rows))
 
-    def inside_arm() -> tuple[set[str], set[str], list[dict[str, Any]]]:
-        scope_memory_to_own_runs({"origin_own"})
-        bank("origin_own")
-        bank("panel_own")
-        write_sample_fold(built_stores, dataset_name="ds", rows=[{"run_id": "y"}], append=True)
-        return (
-            {e["run_id"] for e in list_runs(built_stores, dataset_name="ds")},
-            {run_id for run_id, _ in runs_since(built_stores, set(), dataset_name="ds")},
-            sample_fold_rows(built_stores, dataset_name="ds"),
-        )
+    def listed() -> set[str]:
+        return {e["prompt_fields_id"] for e in list_populations(built_stores, dataset_name="ds")}
 
-    listed, since, fold = contextvars.copy_context().run(inside_arm)
-    assert listed == since == {"origin_own", "panel_own"}
+    def remembered(name: str) -> list[float]:
+        held = load_population(built_stores, entry(name))
+        return [row["hit"] for row in held["measurements"]] if held else []
+
+    bank("foreign", [1.0, 0.0], 1)
+    bank("shared", [0.0, 0.0], 2)
+
+    def fold_row(key: str) -> SampleFoldRow:
+        return SampleFoldRow(config_key=key, sp=key, fk="formula", sig=[], graded=[])
+
+    write_sample_fold(built_stores, dataset_name="ds", rows=[fold_row("x")])
+
+    def inside_arm() -> tuple[set[str], list[float], list[SampleFoldRow]]:
+        scope_memory_to_own_answers(set(bank("origin", [1.0, 0.0], 3)))
+        assert listed() == {"origin"}
+        # A replayed answer joins the arm's memory exactly as a filed one does.
+        for answer in bank("shared", [1.0, 1.0], 0):
+            note_walked(answer)
+        write_sample_fold(built_stores, dataset_name="ds", rows=[fold_row("y")])
+        return listed(), remembered("shared"), sample_fold_rows(built_stores, dataset_name="ds")
+
+    own, shared, fold = contextvars.copy_context().run(inside_arm)
+    assert own == {"origin", "shared"}
+    assert shared == [True, True], "another campaign's answer of a shared cell steered the arm"
     assert fold == []
-    # Outside the arm the tenant's whole archive is memory again, and the fold was not touched.
-    assert {e["run_id"] for e in list_runs(built_stores, dataset_name="ds")} == {
-        "panel_foreign",
-        "origin_own",
-        "panel_own",
-    }
-    assert sample_fold_rows(built_stores, dataset_name="ds") == [{"run_id": "x"}]
+    assert listed() == {"foreign", "shared", "origin"}
+    assert remembered("shared") == [False, False]
+    assert sample_fold_rows(built_stores, dataset_name="ds") == [fold_row("x")]
 
 
 def test_no_held_out_row_reaches_a_round_panel_or_an_archive_view() -> None:
-    """The headline is read on the bench set, so a bench or demo row the optimizer ever sees makes
-    it grade its own exam — and nothing says so: every number renders, only higher.
-
-    Three roads in. The round's panel is drawn from the search pool, so the partition must never
-    hand a held-out row to it. The archive is filed by DATASET: once the bench measures its rows they
-    sit beside the search's, so an archive view the optimizer reads must drop them — the sample
-    index is the one that puts a row's QUERY TEXT into the generator's prompt. And a shot pastes a
-    row into the prompt with its answer, so only a demo row may be one — never a bench row, and
-    never a search row the panel then scores against its own worked answer.
-    """
     from promptpotter.application.intelligence.exploration import (
         Observation,
         select_round_subset,
     )
-    from promptpotter.application.intelligence.indexes.sample import SampleIndex
+    from promptpotter.application.intelligence.indexes.sample import SampleFoldRow, SampleIndex
     from promptpotter.application.optimizers.capo.members import cross_shots, mutate_shots
     from promptpotter.application.optimizers.potter.validators.l1_strict import (
         L1_SHOTS_IN_DEMO_POOL,
@@ -772,8 +853,7 @@ def test_no_held_out_row_reaches_a_round_panel_or_an_archive_view() -> None:
         )
         rejected = [f.value for f in outcome.evidence["failures"]] if outcome else []
         assert rejected == [str(leak)], f"a shot naming scored row {leak} was accepted"
-    # CAPO's shot operators draw from the demo pool alone, and within `k_max`. The support, never
-    # the stream: add, drop and keep each occur, and a crossover samples the union at the mean.
+    # Asserts the SUPPORT, never the stream: add, drop and keep each occur over the seeds.
     pool = sorted(demo_ids)
     moves = set()
     for seed in range(60):
@@ -786,15 +866,12 @@ def test_no_held_out_row_reaches_a_round_panel_or_an_archive_view() -> None:
     )
     child = cross_shots([pool[:2], pool[2:6]], rng=random.Random(0))
     assert len(child) == 3 and set(child) <= demo_ids
-    # A row's CONTENT holds it out, not its slot: the same bank in another order agrees.
     assert {s.id for s in partition_bank(bank[::-1], split).bench} == {s.id for s in part.bench}
-    # A sample the bank repeats is ONE sample, so no copy of a bench row sits in the search pool.
     twins = [*bank, *(s.model_copy(update={"id": 60 + s.id}) for s in bank)]
     doubled = partition_bank(twins, split)
     assert {s.key for s in doubled.bench}.isdisjoint(s.key for s in doubled.search)
     assert len(doubled.bench) == 2 * split.bench
-    # A row a bank DECLARES bench is bench beside the ranked ones and moves no other row: widening
-    # a dataset's bench leaves its search and demo pools, so its paid cells, exactly where they were.
+    # A declared bench row moves no other row, so widening a bench keeps every paid cell's pool.
     extra = [
         Sample(id=60 + i, query=f"held {i}", ground_truth="TRUE", bench_only=True) for i in range(9)
     ]
@@ -807,20 +884,22 @@ def test_no_held_out_row_reaches_a_round_panel_or_an_archive_view() -> None:
     with pytest.raises(ValueError):
         partition_bank([*bank, bank[0].model_copy(update={"id": 60, "bench_only": True})], split)
 
-    # Archive evidence naming every held-out cell cannot pull one into the panel.
     contaminating = [Observation("bench_arm", sid, 0.0) for sid in held]
     panel = select_round_subset(list(part.search), contaminating, 20)
     assert held.isdisjoint(s.id for s in panel)
 
     index = SampleIndex(sample_ids=part.admitted_ids)
     for n in range(12):
-        index.ingest_run(
-            {
-                "run_id": f"bench_{n}",
-                "measurements": [
-                    {"sample_id": sid, "query": f"claim {sid}", "fitness": 0.0} for sid in held
-                ],
-            }
+        index.replay_row(
+            SampleFoldRow(
+                config_key=f"bench_{n}",
+                sp=f"bench_{n}",
+                fk="formula",
+                sig=[],
+                graded=[],
+                cells=[(sid, True, False, None) for sid in held],
+                new_samples=[(sid, f"claim {sid}", "TRUE") for sid in held],
+            )
         )
     assert not index.rare_hit_samples() and not index.records(), (
         "a held-out row reached the index the optimizer's panels read"
@@ -830,9 +909,6 @@ def test_no_held_out_row_reaches_a_round_panel_or_an_archive_view() -> None:
 def test_the_check_in_model_reads_no_held_out_row(
     built_stores: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The origin resolver is an LLM handed sample rows WITH their labels, and it writes the prompt
-    every optimizer starts from. A bench row in its preview is the headline's exam read by the one
-    authoring the answer sheet: every number renders, only higher, and no rerun unreads it."""
     from promptpotter.application.datasets import ingest
     from promptpotter.application.datasets.origin_resolve import build_origin_consultation
     from promptpotter.domain.bench import DatasetSplit, partition_bank
@@ -864,25 +940,13 @@ def test_the_check_in_model_reads_no_held_out_row(
 
 
 def test_the_l4_generator_is_shown_the_optimizer_prompts_it_rewrites() -> None:
-    """The generator's instruction says "CURRENT INNER OPTIMIZER PROMPTS below is the text you are
-    rewriting… carry every contract forward", so a dropped ``rendered_prompt`` leaves it rewriting
-    text it was never shown — and ``guts_inherited_contract`` rejecting it for shortening a field
-    it could not see.
-
-    Composes the real floor layout against an L4-shaped schema, so it fails if the mandatory floor
-    ever stops being admitted whatever it costs.
-
-    The subject is the manifest the INNER campaign selects, never the outer's own: a CAPO inner is
-    shown CAPO's prompts, an edit is checked against CAPO's ports, and the cell renders the edit.
-    Read off the outer's own manifest, a CAPO inner is shown nothing and no edit of it is checked.
-    """
+    """The prompts shown are the INNER campaign's manifest's, never the outer's own."""
+    from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.optimizer_manifest import (
         resolve_optimizer,
         set_optimizer_prompt_overrides,
     )
-    from promptpotter.application.optimizers import paper_templates
     from promptpotter.application.optimizers.potter.dispatch.bundle import (
-        OPTIMIZER_DISCRETIONARY_CHARS,
         CycleSlice,
         InjectionBundle,
         RoundDigest,
@@ -893,10 +957,9 @@ def test_the_l4_generator_is_shown_the_optimizer_prompts_it_rewrites() -> None:
         load_optimizer_prompt,
     )
     from promptpotter.application.optimizers.potter.l1.population import parse_population
-    from promptpotter.connectors.promptpotter import promptpotter_wire_adapter
-    from promptpotter.domain.opt_search_point import PROMPT_STRING_FIELDS, OptSearchPoint
+    from promptpotter.application.runner.inner.connector import promptpotter_wire_adapter
+    from promptpotter.domain.opt_search_point import PROMPT_STRING_FIELDS
     from promptpotter.domain.pipeline_schema import PipelineNode
-    from promptpotter.domain.results import CandidateProposal
     from promptpotter.domain.round_diagnostics import RoundDiagnostics
 
     fields = list(PROMPT_STRING_FIELDS)
@@ -920,16 +983,13 @@ def test_the_l4_generator_is_shown_the_optimizer_prompts_it_rewrites() -> None:
     schema = outer_schema(tuple(NODE_LAYOUTS))
     bundle = InjectionBundle(
         opt_sp=OptSearchPoint(),
-        memory=L2L3Memory(l1_layout=default_l1_layout()),
+        memory=L2L3Memory(),
         framing=TaskDecomposition(),
         pipeline_schema=schema,
         cycle_slice=CycleSlice(
             round_num=1,
             l1_stall_depth=0,
-            l2_round=0,
-            l2_stall_count=0,
-            l3_round=0,
-            l3_stall_count=0,
+            ladder=Ladder(),
             exploration_budget="tight",
         ),
         digest=RoundDigest(diagnostics=RoundDiagnostics(n_valid=0, samples=[]), critique=None),
@@ -944,19 +1004,16 @@ def test_the_l4_generator_is_shown_the_optimizer_prompts_it_rewrites() -> None:
 
     subject = DispatchHub.render_items("rendered_prompt", bundle)
     subject_chars = sum(len(i.text) for i in subject)
-    allowance = OPTIMIZER_DISCRETIONARY_CHARS["l1_generate"]
-    # Non-vacuous: the whole defect is that the node's own subject outweighs the budget the
-    # discretionary panels share. If it ever fits, this test proves nothing.
+    allowance = NODE_LAYOUTS["l1_generate"].discretionary_chars
     assert subject_chars > allowance, (
         f"vacuous — the inner optimizer prompts ({subject_chars}c) now fit inside the "
         f"discretionary allowance ({allowance}c), so nothing is being kept against a budget"
     )
 
     filled = DispatchHub.fill(load_optimizer_prompt("l1_generate"), bundle, node="l1_generate")
-    assert "CURRENT INNER OPTIMIZER PROMPTS" in filled.template.render(), (
+    assert len(filled.rendered["rendered_prompt"]) >= subject_chars, (
         "the generator was handed no subject — it is rewriting text it cannot see"
     )
-    assert len(filled.rendered["rendered_prompt"]) >= subject_chars
     starved = set(filled.breakdown.dropped) & NODE_LAYOUTS["l1_generate"].mandatory
     assert not starved, f"mandatory panel(s) refused by the budget: {sorted(starved)}"
 
@@ -970,14 +1027,16 @@ def test_the_l4_generator_is_shown_the_optimizer_prompts_it_rewrites() -> None:
     parent = OptSearchPoint()
     edit = {"capo_mutate": {"instruction": base + " Keep the rewrite under 80 words."}}
     severed = {"capo_mutate": {"instruction": "Rewrite the prompt."}}
-    proposals = [
-        CandidateProposal(
-            opt_sp=OptSearchPoint.derive([parent], source="potter:l1_generate"),
-            pipeline_overlay=overlay,
+    proposing = types.SimpleNamespace(
+        cycle=types.SimpleNamespace(
+            optimizer=capo, session=types.SimpleNamespace(pipeline_schema=capo_schema)
         )
+    )
+    proposals = [
+        NodeContext(cast(Any, proposing), "capo_mutate").child([parent], overlay=overlay)
         for overlay in (edit, severed)
     ]
-    _, merged = parse_population(
+    parse_population(
         proposals,
         parent,
         None,
@@ -992,15 +1051,18 @@ def test_the_l4_generator_is_shown_the_optimizer_prompts_it_rewrites() -> None:
     assert [f.reason for f in proposals[1].validation_failures] == [
         "dropped_mandatory_placeholder"
     ], "an edit severing CAPO's {{instruction}} port was measured"
+    assert proposals[0].opt_sp.lineage.variations[0].loci == ["capo_mutate.instruction"], (
+        "the overlay's locus is missing from the variation that proposed it"
+    )
 
-    payload = promptpotter_wire_adapter("justlogic-d234/seed-0", merged[0])
+    payload = promptpotter_wire_adapter(
+        "justlogic-d234/seed-0", proposals[0].opt_sp.pipeline_params
+    )
     try:
         set_optimizer_prompt_overrides(payload["optimizer_prompt_overrides"])
-        sent = paper_templates.fill(
-            types.SimpleNamespace(optimizer=capo),
-            "capo_mutate",
-            task_description="sort the list",
-            instruction="Sort it.",
+        round_ = types.SimpleNamespace(cycle=types.SimpleNamespace(optimizer=capo))
+        sent = NodeContext(cast(Any, round_), "capo_mutate").fill(
+            task_description="sort the list", instruction="Sort it."
         )
     finally:
         set_optimizer_prompt_overrides(None)

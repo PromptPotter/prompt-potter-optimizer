@@ -1,42 +1,58 @@
-"""Builders that return REAL domain models, never duck-typed stand-ins — why is
-``tests/CLAUDE.md`` § Mock strategy. Only what a test actually bends is a parameter.
-"""
-
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
+from pathlib import Path
+from types import EllipsisType, SimpleNamespace
 from typing import Any, cast
 
+from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizer_manifest import resolve_optimizer
-from promptpotter.application.optimizers.potter.dispatch.layout import default_l1_layout
 from promptpotter.application.optimizers.potter.knobs import PoBBKnobs
 from promptpotter.application.optimizers.potter.records import (
     POTTER_MANIFEST,
     L2L3Memory,
+    Ladder,
     PotterRoundState,
 )
+from promptpotter.domain.bench import (
+    BENCH_HEADLINE,
+    BandedValue,
+    BenchScore,
+    LiftCost,
+    LineRun,
+    OwnLevel,
+    bench_status,
+)
+from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
+from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.optimizer_state import OptimizerState
+from promptpotter.domain.paired_reading import PairedReading, ReadingState
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
 from promptpotter.domain.results import (
     ArmOutcome,
     CycleResult,
     DegradationHealth,
+    OverlapReading,
     RoundResult,
     ScoredCandidate,
 )
-from promptpotter.domain.spend import SpendBucket, SpendRollup
+from promptpotter.domain.sample import Sample
+from promptpotter.domain.scoring import CellSheet, Grade, GradedCell, MeasuredCell
+from promptpotter.domain.spend import SpendBucket, SpendCeilings, SpendRollup
 from promptpotter.domain.wounds import ValidationFailure
+from promptpotter.infrastructure.llm.spend_book import CeilingMeter, SpendBook
+from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
+from promptpotter.infrastructure.store.io import write_json
+from promptpotter.infrastructure.store.layout import inner_sandbox_dir, sandbox_owner_path
+from promptpotter.infrastructure.store.stores import Stores, build_stores
+from promptpotter.shared.identity import default_identity
 
-# Repeated as the ground truth of every row a factory-built round measures. Deliberately
-# only two labels: with as many distinct truths as rows the answer space reads as
-# identity-keyed and no constant answerer is detectable.
+# Two labels on purpose: with as many truths as rows, no constant answerer is detectable.
 _TRUTH = ["TRUE", "FALSE", "TRUE", "FALSE"]
 
 
 def pipeline_schema(nodes: Sequence[PipelineNode], **fields: Any) -> PipelineSchema:
-    """A schema whose chain is ``nodes``, in order — every one declared and run, which is what a
-    target pipeline with no alternative is."""
     return PipelineSchema(
         declared_nodes=list(nodes), pipelines={"default": [n.name for n in nodes]}, **fields
     )
@@ -49,19 +65,6 @@ def measurement(
     objective: float | None = None,
     **extra: Any,
 ) -> dict[str, Any]:
-    """One measured cell, stamped the way ``rescore_results`` leaves one.
-
-    ``objective`` defaults to a value that DIVERGES from ``fitness``. The identity is real — a
-    campaign declaring no ``per_cell`` formula gets ``objective == fitness`` — but a fixture built
-    on it makes every confusion between correctness and the composite green, because a site reading
-    the wrong float is then indistinguishable from one reading the right float. Pass
-    ``objective=fitness`` where a test MEANS them equal. Stamping both also keeps rows readable by
-    ``graded_response``, which RAISES on a row carrying neither rather than reading 0.0.
-
-    ``fitness=None`` builds the other row shape, one carrying no grade at all: a cell's facts as
-    the archive banks them, or with an ``error_category`` a real error row (``_error_result``) —
-    the coverage floor and the θ fit are both about that ABSENCE rather than about a low score.
-    """
     if fitness is None:
         return {"sample_id": sample_id, **extra}
     return {
@@ -76,10 +79,24 @@ def measurement(
 def measurements(
     grades: Sequence[float], sample_ids: Sequence[int] | None = None
 ) -> list[dict[str, Any]]:
-    """One arm's panel. Ids run ``0..n-1`` unless the test needs a specific set — a subset
-    disjoint from the prior's is how the paired-PoBB and subset-drift cases are built."""
     ids = range(len(grades)) if sample_ids is None else sample_ids
     return [measurement(sid, g) for sid, g in zip(ids, grades, strict=True)]
+
+
+def sheet(rows: Iterable[dict[str, Any]], scorer_id: str = "test") -> CellSheet:
+    """Each row under the grade it already carries: no formula runs."""
+
+    def graded(row: dict[str, Any]) -> GradedCell:
+        facts = MeasuredCell.from_wire(row)
+        # The grade and ``scored`` by the rule ``Scorer.grade`` applies.
+        if facts.errored:
+            return GradedCell(
+                facts, Grade(0.0, 0.0, None), facts.charged and not facts.verifier_graded
+            )
+        grade = Grade(row.get("fitness"), row.get("objective"), row.get("unscored"))
+        return GradedCell(facts, grade, grade.fitness is not None)
+
+    return CellSheet(scorer_id, tuple(graded(row) for row in rows))
 
 
 def scored_candidate(
@@ -90,9 +107,6 @@ def scored_candidate(
     invalid_reason: str | None = None,
     **overrides: Any,
 ) -> ScoredCandidate:
-    """One candidate row. ``invalid_reason`` collapses it the way the validator does —
-    ``ArmOutcome.INVALID`` plus a ``ValidationFailure``, which is where ``RoundResult`` reads
-    its collapse counts back from."""
     failures = (
         [ValidationFailure(axis="prompt_fields", value="", allowed=[], reason=invalid_reason)]
         if invalid_reason
@@ -102,12 +116,15 @@ def scored_candidate(
     return ScoredCandidate(
         **(
             {
-                "run_id": None,
                 "candidate_id": candidate_id,
                 "label": candidate_id,
                 "accuracy": accuracy,
                 "composite_fitness": accuracy,
                 "total": total,
+                "deprecated": 0,
+                "evaluators": {},
+                "mean_fitness_ci_lo": None,
+                "mean_fitness_ci_hi": None,
                 "outcome": outcome,
                 "validation_failures": failures,
             }
@@ -116,8 +133,72 @@ def scored_candidate(
     )
 
 
+def spend_book(
+    usd_cap: float | None = None,
+    *,
+    usd_reserve: float | EllipsisType | None = ...,
+    meters: CeilingMeter = "bill",
+    **spent: Any,
+) -> SpendBook:
+    return SpendBook(
+        declared=SpendCeilings(usd_cap, None),
+        reserved=SpendCeilings(usd_cap if usd_reserve is ... else usd_reserve, None),
+        meters=meters,
+        **spent,
+    )
+
+
+def workspace(root: Path) -> Stores:
+    return build_stores(
+        default_identity(), projects_root=root / "projects", benchmarks_root=root / "datasets"
+    )
+
+
+def loop_session(
+    stores: Stores, schema: PipelineSchema, samples: list[Sample], *, backend_id: str = ""
+) -> Session:
+    session = Session(
+        store=stores,
+        backend_id=backend_id,
+        backend_client=SimpleNamespace(  # type: ignore[arg-type]
+            max_cells_in_flight=1,
+            cancel_stops_billing=True,
+            holds_own_sends=True,
+            derives_spend_bounds=False,
+            measured_unit="sample",
+            backpressure=SimpleNamespace(reading=lambda: None),
+        ),
+        pipeline_schema=schema,
+        samples=samples,
+        dataset_name=schema.name,
+    )
+    session.source = RunSource.OPTIMIZATION_LOOP
+    return session
+
+
+SANDBOX_CAMPAIGN = "testds__20260101-000000"
+
+
+def inner_sandbox(stores: Stores, owner_campaign_id: str, owner_cycle_id: str) -> Path:
+    sandbox = inner_sandbox_dir(
+        stores.shared_root,
+        str(stores.tenant_id),
+        CycleHop(campaign_id=owner_campaign_id, cycle_id=owner_cycle_id),
+    )
+    write_json(
+        sandbox_owner_path(sandbox),
+        {
+            "tenant_id": str(stores.tenant_id),
+            "campaign_id": owner_campaign_id,
+            "cycle_id": owner_cycle_id,
+        },
+    )
+    inner = CampaignStore(WorkspaceDir(sandbox / "tenant"))
+    inner.mint_cycle(CycleHop(campaign_id="innerds__20260101-000000", cycle_id="inner-cycle-0"))
+    return sandbox
+
+
 def pobb_knobs(**bend: Any) -> PoBBKnobs:
-    """Potter's shipped ``pobb`` knobs, read off its manifest, with the ones a test bends."""
     shipped = cast("PoBBKnobs", resolve_optimizer("potter", {}).knobs("pobb"))
     return shipped.model_copy(update=bend)
 
@@ -125,7 +206,6 @@ def pobb_knobs(**bend: Any) -> PoBBKnobs:
 def degradation_health(
     *, samples: int = 24, degraded_rate: float = 0.0, no_result: int = 0
 ) -> DegradationHealth:
-    """The round's degradation verdict — only the three fields the L4 proxies read."""
     return DegradationHealth(
         grade="healthy" if degraded_rate == 0.0 and not no_result else "degraded",
         samples=samples,
@@ -145,7 +225,8 @@ def optimizer_state(
         manifest=POTTER_MANIFEST,
         prompt_hashes={},
         payload=PotterRoundState(
-            memory=memory or L2L3Memory(l1_layout=default_l1_layout()),
+            memory=memory or L2L3Memory(),
+            ladder=Ladder(),
             l1_parse_failure=parse_failure,
         ),
     )
@@ -166,23 +247,6 @@ def round_result(
     cut: int = 0,
     **overrides: Any,
 ) -> RoundResult:
-    """A closed round, shaped the way the loop actually writes one.
-
-    ``parse_failure`` yields ZERO candidates by construction (``l1_generate`` returned
-    ``[]``), so it is modelled on the round's optimizer state — no ``ScoredCandidate`` can carry
-    one.
-
-    ``no_op`` / ``dup`` add COLLAPSED candidates: they ride ``candidate_scores`` beside the
-    measured ones but are absent from ``candidates_scored`` and from
-    ``all_candidate_results``, so ``collapse_counts`` derives them and the mode-collapse
-    denominator (collapsed + scored) comes out right.
-
-    ``collapsed`` makes that many measured candidates answer ONE label to every sample —
-    the constant answerer built below. ``cut`` makes them *also* stop
-    after 2 rows, an arm PoBB eliminated before it earned a verdict; below
-    ``elimination_n_min`` a collapse is indistinguishable from small-n noise, which is why
-    a cut arm must not be charged as dirt.
-    """
     if parse_failure:
         candidates_scored = 0
     measured = [
@@ -194,30 +258,40 @@ def round_result(
         for reason, count in (("no_op_variant", no_op), ("duplicate_variant", dup))
         for i in range(count)
     ]
-    # Merged rather than splatted after the literals, so ``overrides`` reaches EVERY field. Spelled
-    # the other way it silently ``TypeError``s on the eight named here — the builder's contract is
-    # "bend the field you care about", and half the fields did not honour it.
+    # Merged rather than splatted after the literals, so ``overrides`` reaches EVERY field.
     base: dict[str, Any] = {
         "round": rnd,
-        "label": f"round_{rnd}",
+        "label": "C0",
         "accuracy": 0.5,
         "composite_fitness": 0.5,
         "total": 4,
         "improved": improved,
+        "elects_on": "ability",
+        # No pair read: a test that bends the advance passes the reading that derives it.
+        "overlap": OverlapReading.unpaired(
+            ReadingState.NOT_HELD if rnd else ReadingState.SAME_INDIVIDUAL,
+            rnd,
+            bool(overrides.get("improved", improved)),
+        ),
         "prompt_fields": {},
         "candidates_scored": candidates_scored,
         "candidate_scores": measured + rejected,
         "all_candidate_results": {
-            f"c{i}": [
-                {"predicted": "Uncertain" if i < collapsed or i < cut else t, "ground_truth": t}
-                for t in (_TRUTH[:2] if i < cut else _TRUTH)
-            ]
+            f"c{i}": sheet(
+                {
+                    "sample_id": sid,
+                    "predicted": "Uncertain" if i < collapsed or i < cut else t,
+                    "ground_truth": t,
+                }
+                for sid, t in enumerate(_TRUTH[:2] if i < cut else _TRUTH)
+            )
             for i in range(candidates_scored)
         },
         "health": degradation_health(
             samples=samples, degraded_rate=degraded_rate, no_result=no_result
         ),
         "selected_labels": [],
+        "leading_label": None,
         "optimizer_state": optimizer_state(parse_failure=parse_failure),
     }
     return RoundResult(**(base | overrides))
@@ -234,20 +308,38 @@ def cycle_result(
     billed: float | None = None,
     **overrides: Any,
 ) -> CycleResult:
-    """A finished cycle. ``rounds`` carries L1 rounds ONLY — round 0 is peeled off upstream
-    (``Cycle.absorb_round`` is the sole sink for a finished L1 round) — and ``levels``
-    carries one adopted level per L1 round.
-
-    ``cost`` is the INCURRED cost: what the search would cost cold, and the only divisor the
-    proxies read. ``billed`` (defaults to the same) is deliberately independent — the two
-    diverge exactly when a cycle replays the tenant-global cache.
-    """
+    """L1 rounds only in `rounds`/`levels`; `cost` is INCURRED, `billed` diverges under replay."""
+    unheld = PairedReading.unread(ReadingState.NOT_HELD)
+    bench = BenchScore.of(
+        bench_size=0,
+        scorer_id="",
+        headline=BENCH_HEADLINE,
+        status=bench_status(
+            trigger="at_end",
+            bench_size=0,
+            tolerance=0,
+            on_line=True,
+            held_by=None,
+            origin=None,
+            selected=None,
+            run=LineRun(selecting=False, ending=stop_reason, selection=None, rounds_closed=0),
+        ),
+        origin=None,
+        selected=None,
+        vs_origin=unheld,
+        cost=LiftCost.of(unheld, None),
+    )
     return CycleResult(
         rounds=rounds,
         n_rounds_after_origin=len(rounds),
         result_accuracy=0.5,
         result_round=len(rounds),
-        origin_accuracy=origin or 0.0,
+        origin=None
+        if origin is None
+        else OwnLevel(
+            accuracy=BandedValue(value=origin, ci_lo=None, ci_hi=None), composite=None, n=1
+        ),
+        bench=bench,
         origin_level=origin,
         round_levels=levels,
         result_prompt_fields={},
