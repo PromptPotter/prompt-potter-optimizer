@@ -23,7 +23,7 @@ function liveSamplesFor(dash: DashboardSnapshot | null, arm: ArmPointer): Sample
   return out;
 }
 
-// Served graded (`cells.py::served_round`): "UNSC" is not a MISS, and nothing here re-decides it.
+// Served graded (`cycle_reads.py::served_round`): "UNSC" is not a MISS, and nothing here re-decides it.
 export function historicalSamplesFor(
   roundDoc: RoundResult | null,
   round: number,

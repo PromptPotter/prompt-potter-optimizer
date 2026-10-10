@@ -27,7 +27,6 @@ export function ScoringInspector({ selected, onClose }: Props) {
   const cv = useConnector();
   const { viewedPath } = useWorkspace();
   const round = useRound(viewedPath, selected?.round ?? null);
-  const arms = round.rows.length;
   const row = selected ? round.row(selected.label) : null;
   const samples = useMemo(() => round.samples(row), [round, row]);
 
@@ -46,12 +45,7 @@ export function ScoringInspector({ selected, onClose }: Props) {
         <span className="inspector-title">Scoring · {selected.label}</span>
         <ToolbarSpacer />
         <CopyButton
-          choices={searchpointCopyChoices({
-            cfg,
-            reading: row?.reading,
-            samples,
-            arms: arms || null,
-          })}
+          choices={searchpointCopyChoices({ cfg, reading: row?.reading, samples })}
           title={`Copy ${selected.label}`}
         />
         <button
@@ -73,7 +67,6 @@ export function ScoringInspector({ selected, onClose }: Props) {
             preset={{ candidateId: selected.candidate_id, scope: "cycle", groupBy: "none" }}
           />
         }
-        arms={arms || null}
         schema={cv.schema}
         pending={
           round.unfiled

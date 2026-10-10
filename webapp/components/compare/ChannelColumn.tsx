@@ -3,12 +3,7 @@
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { ArmNode, HeadToHeadRow } from "@/lib/api";
-import {
-  BENCH_STAT_LABEL,
-  SPEND_STAT_LABEL,
-  campaignCard,
-  type RunGroup,
-} from "@/lib/derivations";
+import { campaignCard, courseStats, type RunGroup } from "@/lib/derivations";
 import { useCompareSelection } from "@/lib/compare-selection";
 import { cx } from "@/lib/cx";
 import { fmtDuration, fmtSigned, shortId } from "@/lib/format";
@@ -113,9 +108,7 @@ export function ChannelColumn({
                 facts={{
                   ...summary,
                   tags: [shortId(headline.campaign_id), ...(summary.tags ?? [])],
-                  stats: summary.stats.filter(
-                    (s) => s.label !== BENCH_STAT_LABEL && s.label !== SPEND_STAT_LABEL,
-                  ),
+                  stats: courseStats(run, model.tree.root),
                 }}
                 actions={close}
               />

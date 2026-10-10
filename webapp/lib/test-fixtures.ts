@@ -268,7 +268,6 @@ export function sampleRow(over: Partial<DashboardSample> = {}): DashboardSample 
     fitness: null,
     terminal_node: null,
     cached: false,
-    time_s: null,
     cost_s: null,
     predicted: "",
     ground_truth: "",

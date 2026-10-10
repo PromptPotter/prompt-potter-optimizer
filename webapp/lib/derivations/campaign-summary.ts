@@ -72,7 +72,7 @@ export function spendStat(metered: MeteredSpend): RowStat {
   };
 }
 
-export const BENCH_STAT_LABEL = "Bench";
+const BENCH_STAT_LABEL = "Bench";
 
 // Accuracy is a rate and the composite a 0–1 score: a score printed as a percent reads as a rate.
 function fmtBenchColumn(column: BenchScore["headline"], v: number | null | undefined): string {
@@ -120,33 +120,12 @@ export function campaignLineParts(run: RunGroup): string[] {
   return parts;
 }
 
-export function campaignCard(run: RunGroup, node: CourseNode | null): RowCardFacts {
+// What a head-to-head column does not already print: its bench and its spend are rows of their own.
+export function courseStats(run: RunGroup, node: CourseNode | null): RowStat[] {
   const { campaign, line } = run;
-  const archived = campaign.lifecycle_status === "archived";
-  const cycleId = campaign.root_cycle_id;
-  const runsWith = campaign.runs_with;
-
-  const facts: [string, string][] = [["Dataset", campaign.dataset_name]];
-  if (runsWith) facts.push(["Optimizer", runsWith.optimizer]);
-  facts.push(["Comparison", campaign.comparison]);
-  facts.push([
-    "Last activity",
-    fmtAgo(campaign.updated_at) || fmtDateTime(campaign.updated_at),
-  ]);
-  const created = fmtAgo(campaign.created_at);
-  facts.push([
-    "Created",
-    `${fmtDateTime(campaign.created_at)}${created ? ` · ${created}` : ""}`,
-  ]);
-  facts.push(["Campaign", campaign.campaign_id]);
-  facts.push(["Cycle", cycleId]);
-  if (line.holder.cycle_id !== cycleId) facts.push(["Answering", line.holder.cycle_id]);
-
   const lifetime = campaign.spend_lifetime;
   const standing = line.standing;
   const stats: RowStat[] = [
-    ...(campaign.bench ? [benchStat(campaign.bench)] : []),
-    spendStat(campaign.spend_metered),
     {
       label: "Lifetime bill",
       value: billText(lifetime.billed_usd, lifetime.bill_is_floor),
@@ -169,6 +148,36 @@ export function campaignCard(run: RunGroup, node: CourseNode | null): RowCardFac
   if (standing?.stalls_left != null && standing.stalls_left_cap != null) {
     stats.push({ label: "Lives", value: `${standing.stalls_left} / ${standing.stalls_left_cap}` });
   }
+  return stats;
+}
+
+export function campaignCard(run: RunGroup, node: CourseNode | null): RowCardFacts {
+  const { campaign, line } = run;
+  const archived = campaign.lifecycle_status === "archived";
+  const cycleId = campaign.root_cycle_id;
+  const runsWith = campaign.runs_with;
+
+  const facts: [string, string][] = [["Dataset", campaign.dataset_name]];
+  if (runsWith) facts.push(["Optimizer", runsWith.optimizer]);
+  facts.push(["Comparison", campaign.comparison]);
+  facts.push([
+    "Last activity",
+    fmtAgo(campaign.updated_at) || fmtDateTime(campaign.updated_at),
+  ]);
+  const created = fmtAgo(campaign.created_at);
+  facts.push([
+    "Created",
+    `${fmtDateTime(campaign.created_at)}${created ? ` · ${created}` : ""}`,
+  ]);
+  facts.push(["Campaign", campaign.campaign_id]);
+  facts.push(["Cycle", cycleId]);
+  if (line.holder.cycle_id !== cycleId) facts.push(["Answering", line.holder.cycle_id]);
+
+  const stats: RowStat[] = [
+    ...(campaign.bench ? [benchStat(campaign.bench)] : []),
+    spendStat(campaign.spend_metered),
+    ...courseStats(run, node),
+  ];
 
   return {
     title: campaign.display_name,

@@ -193,13 +193,10 @@ export interface DashboardSample {
   terminal_node: string | null;
   /** Measurement reused from a prior identical searchpoint, not a fresh call. */
   cached: boolean;
-  /** Recorded elapsed seconds. Null where the row never reached the pipeline —
-   * distinct from a cached replay's real 0.0. */
-  time_s: number | null;
-  /** Seconds producing this row COST, summed off `step_timings` — the half that
-   * survives the cache stamp. A replay occupies no clock, so `time_s` is 0.0
-   * and this is what the cell took when it was measured; on a fresh row the
-   * two agree. Null where the row recorded no per-node timing. */
+  /** Seconds producing this row COST, summed off `step_timings` — what the cell
+   * took when it was measured, which survives the cache stamp where a
+   * replay's own clock reads 0.0. Null where the row recorded no per-node
+   * timing. */
   cost_s: number | null;
   /** Prediction, trimmed for display. EMPTY on a verifier-graded row (see
    * ground_truth) — the pair is both halves of a comparison nobody made
@@ -643,10 +640,6 @@ export interface SheetRow {
   ground_truth_rank?: number | null;
   n_candidates?: number;
   answer?: string;
-  role?: string;
-  source?: string;
-  provenance?: string;
-  created_at?: string;
   retry_of_deprecated_cache?: boolean;
   retry_of_degraded?: boolean;
   rerun_comparison?: RerunComparison;
@@ -970,8 +963,6 @@ export interface RacingBlock {
   member: string;
   current_id: string;
   n_samples: number;
-  leader_prob: number;
-  posterior_width: number;
   top: Record<string, unknown>[];
 }
 
@@ -1470,11 +1461,8 @@ export interface DatasetItem {
    * `pick_score` is. */
   p_hat: number | null;
   /** GRADED cells of this sample in scope (errored and unscored cells excluded) —
-   * the denominator of the two below. */
+   * the denominator of `mean_fitness` and `hit_spread`. */
   n_measured: number;
-  /** Of those, how many maxed out the active scorer (`domain.scoring.is_hit`).
-   * Structurally 0 on a graded scorer; read `mean_fitness` there. */
-  n_hits: number;
   /** Mean graded fitness over those cells; null when none. */
   mean_fitness: number | null;
   /** How often those cells got the sample right: `never`, `partly` or `always` —
@@ -1538,22 +1526,18 @@ export interface RulerStanding {
 export interface CellsResponse {
   name: string;
   scope: 'cycle' | 'campaign' | 'dataset';
-  row_count: number;
   /** The key `samples` are ranked by — the request's `order` when it named one,
    * else the dataset's `CampaignConfig.hard_sample_order`; `difficulty`
    * wherever the scope holds no `pick_score` to rank on. Echoed so a client
    * labels what it is showing. */
   order: 'info_gain' | 'difficulty';
   /** The ONE δ ruler every `delta`, `pick_score` and `p_hat` below is read on: the
-   * ruler of the cycle `ruler_cycle_id` names in cycle and campaign scope; in
+   * ruler of the cycle the scope reads, whose walks `cells` are — the
+   * requested cycle in cycle scope, the one campaign scope names
+   * (`application/scoring/measurement_log.py::campaign_scope_cycle`); in
    * dataset scope one anchored per request on the dataset's archived cells,
    * which no θ was read on. */
   ruler: RulerStanding;
-  /** The cycle this scope reads, whose ruler `ruler` is and whose walks `cells`
-   * are: the requested cycle in cycle scope, the one campaign scope names
-   * (`application/scoring/cells.py::campaign_scope_cycle`). Null in dataset
-   * scope. */
-  ruler_cycle_id: string | null;
   samples: DatasetItem[];
   candidates: CellCandidate[];
   cells: CellRow[];
@@ -1972,8 +1956,6 @@ export interface LineStanding {
 
 export interface CyclesResponse {
   tenant_id: string;
-  /** Active campaign per active_session.json; null when no session is active. */
-  active_campaign_id: string | null;
   /** Active cycle per active_session.json; null when no session is active. */
   active_cycle_id: string | null;
   cycles: CycleListEntry[];
@@ -1983,10 +1965,6 @@ export interface CyclesResponse {
 export interface CommandAcceptedBody {
   /** Stable id of the appended `CommandRecord`. */
   command_id: string;
-  /** Echo of the request's `Idempotency-Key`. */
-  correlation_id: string;
-  /** Offset at which the `CommandRecord` was appended. */
-  ledger_sequence: number;
 }
 
 /** The draft says what the campaign IS; these limits bound what THIS launch spends. */
@@ -2232,7 +2210,6 @@ export interface Comparability {
   verdict: boolean | null;
   reason: 'one_ruler' | 'rulers_differ' | 'ruler_unstamped' | 'datasets_differ';
   datasets: string[];
-  n_rulers: number;
   note: string;
   roster_note: string | null;
 }
@@ -2909,7 +2886,7 @@ export interface DecisionFact {
 export interface DecisionAction {
   label: string;
   variant: 'primary' | 'ghost' | 'danger';
-  kind: 'archive-campaign' | 'delete-campaign' | 'unarchive-campaign' | 'fork-cycle' | 'skip-searchpoint' | 'delete-cycle' | 'cleanup-empty-cycles' | 'pause-cycle' | 'set-sample-lookahead' | 'origin-gate-decision' | 'change-run-limits' | 'start-run' | 'step-cycle' | 'verify-candidate' | 'grade-bench' | 'register-backend' | 'mint-campaign' | 'replace-dataset' | 'compact-archive' | 'cancel-queued-run' | 'set-concurrent-cycles' | 'edit-draft-campaign' | 'resolve-origin' | 'start-checkin' | 'set-campaign-label';
+  kind: 'pause-cycle' | 'origin-gate-decision' | 'skip-searchpoint' | 'set-sample-lookahead' | 'start-run' | 'step-cycle' | 'fork-cycle' | 'mint-campaign' | 'start-checkin' | 'verify-candidate' | 'grade-bench' | 'change-run-limits' | 'set-concurrent-cycles' | 'cancel-queued-run' | 'delete-cycle' | 'cleanup-empty-cycles' | 'archive-campaign' | 'unarchive-campaign' | 'delete-campaign' | 'set-campaign-label' | 'register-backend' | 'replace-dataset' | 'compact-archive' | 'edit-draft-campaign' | 'resolve-origin';
   /** The whole command payload, the cycle's address and `descend` tail included. */
   payload: Record<string, unknown>;
 }

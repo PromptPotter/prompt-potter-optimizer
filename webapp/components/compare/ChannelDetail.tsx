@@ -172,7 +172,6 @@ export function ChannelDetail({
                 />
               )
             }
-            arms={picked.arms}
             schema={picked.schema}
             overlay={picked.overlay}
             pending={
@@ -207,7 +206,6 @@ export function ChannelDetail({
             cfg: picked.cfg,
             reading: picked.reading,
             samples: picked.samples,
-            arms: picked.arms,
           })}
           title="Copy this searchpoint"
         />

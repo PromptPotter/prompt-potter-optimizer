@@ -143,13 +143,6 @@ export function useChannelModel(
     }),
     [pipelineStatus, pipeline],
   );
-  const arms = useMemo(() => {
-    if (!selected) return null;
-    const sibs = candidatesAtPath(index, pathOf(selected)).filter(
-      (c) => c.reading.arm.round === round,
-    );
-    return sibs.length || null;
-  }, [index, selected, round]);
   const line = useMemo(() => (selected ? mainLineOf(index, selected) : []), [index, selected]);
   const docId = selected?.id ?? null;
   const pickedReading = docId ? scoreboardReading(doc, docId) : null;
@@ -214,7 +207,6 @@ export function useChannelModel(
       reading: pickedReading,
       cfg,
       samples,
-      arms,
       overlay,
       docLoading,
       schema,

@@ -16,7 +16,6 @@ export function SearchpointDrillIn({
   benchPass,
   stats,
   measurements,
-  arms,
   schema,
   pending,
   overlay,
@@ -28,8 +27,6 @@ export function SearchpointDrillIn({
   benchPass?: BenchPassProgress | null;
   stats?: ReactNode;
   measurements?: ReactNode;
-  // `null` = the host cannot count the round's arms, a different fact from one.
-  arms: number | null;
   schema: NodeSchemaReading;
   pending: string;
   overlay?: Record<string, unknown>;
@@ -127,7 +124,13 @@ export function SearchpointDrillIn({
             {composite != null && <Fact k="composite" v={composite.toFixed(4)} />}
             <Fact
               k="winner"
-              v={!reading.election.selected ? "no" : arms === 1 ? "yes — uncontested" : "yes"}
+              v={
+                !reading.election.selected
+                  ? "no"
+                  : reading.election.crown === "uncontested"
+                    ? "yes — uncontested"
+                    : "yes"
+              }
             />
             {/* "measured on", never "cost": BACKEND spend alone — judge and optimizer carry no candidate. */}
             {reading.spend != null && (

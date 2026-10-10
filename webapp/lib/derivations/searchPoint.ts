@@ -40,12 +40,10 @@ export function searchpointCopyChoices({
   cfg,
   reading,
   samples = [],
-  arms = null,
 }: {
   cfg: ObserveConfig | null;
   reading?: ArmReading | null;
   samples?: readonly SampleRow[];
-  arms?: number | null;
 }): { key: string; label: string; data: unknown }[] {
   const label = reading?.arm.label;
   const spec = cfg
@@ -56,7 +54,7 @@ export function searchpointCopyChoices({
         prompt_fields: cfg.promptFields,
       }
     : null;
-  const scored = reading ? { ...(spec ?? { label }), arms, scored: reading } : null;
+  const scored = reading ? { ...(spec ?? { label }), scored: reading } : null;
 
   const choices: { key: string; label: string; data: unknown }[] = [];
   if (spec) choices.push({ key: "spec", label: "Searchpoint spec", data: spec });
