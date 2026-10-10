@@ -25,7 +25,7 @@ from promptpotter.infrastructure.store.layout import (
     cycle_dir_for,
 )
 from promptpotter.infrastructure.store.lineage_queries import FamilyCourse
-from promptpotter.infrastructure.store.read_model import LedgerIndex
+from promptpotter.infrastructure.store.read_model import LedgerIndex, RecordClasses
 from promptpotter.shared.clock import epoch_seconds
 
 __all__ = [
@@ -118,7 +118,7 @@ class _Tail(NamedTuple):
 
 
 class _RayTail:
-    probes: ClassVar[frozenset[str]] = frozenset()
+    records: ClassVar[RecordClasses] = ()
 
     def __init__(
         self, limit: int = MAX_RAY_LIMIT, path_and_bound: tuple[str, RayCursor] | None = None

@@ -59,7 +59,7 @@ VersionCheck = Callable[["httpx.AsyncClient", str], Awaitable[str | None]]
 # `backend_url -> why the backend is down`, `None` where it is up.
 PreflightFn = Callable[[str], Awaitable[str | None]]
 
-# Read at client construction, never at import; `None` sends no auth header.
+# Read as the client opens its connection, never at import; `None` sends no auth header.
 AuthTokenFn = Callable[[], str | None]
 
 # `(node name, node config) -> what one run of that node can bill`.

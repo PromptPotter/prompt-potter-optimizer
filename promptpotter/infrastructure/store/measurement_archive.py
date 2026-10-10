@@ -8,6 +8,7 @@ import threading
 import uuid
 from collections import OrderedDict
 from collections.abc import Iterable, Iterator
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, ClassVar, NamedTuple
 
@@ -15,8 +16,8 @@ from filelock import BaseFileLock, FileLock, Timeout
 
 from promptpotter.domain.measurement_provenance import REUSABLE_MIN_GRADE, meets_grade
 from promptpotter.domain.results_health import is_deprecated
-from promptpotter.domain.sample import Measurement
-from promptpotter.domain.scoring import MeasuredCell, PipelineData, measured_facts
+from promptpotter.domain.sample import ArchiveEntry, FiledAnswer
+from promptpotter.domain.scoring import UNREAD_PIPELINE_KEYS, MeasuredCell, PipelineData
 from promptpotter.infrastructure.store.io import (
     read_bytes_optional,
     read_json_optional,
@@ -31,25 +32,13 @@ from promptpotter.infrastructure.store.read_model import (
     append_row,
     file_sig,
     fold_jsonl_from,
-    iter_jsonl,
 )
-from promptpotter.shared.errors import is_error_result
 from promptpotter.shared.hashing import ADDRESS_HEX, stable_hash
 
 ANSWER_KEY = "answer"
-PROVENANCE_KEYS = frozenset(
-    {
-        "config_key",
-        "dataset_name",
-        "role",
-        "source",
-        "provenance",
-        "created_at",
-        "compaction",
-        "purged",
-    }
-)
 _INDEX_FOLD_KEY = "k"
+# What an entry says of its dataset and first answer, never of its configuration.
+_INDEXED_ONLY = frozenset({"dataset_name", "name", "created_at"})
 _CELLS_SUFFIX = ".jsonl"
 _COLD_SUFFIX = ".jsonl.gz"
 _FILES_MAX_BYTES = 32 << 20
@@ -63,45 +52,32 @@ def _cell_key(node_configs: list[tuple[str, dict[str, Any]]], sample_key: str) -
     return stable_hash([node_configs, sample_key], length=ADDRESS_HEX)
 
 
-def _chain(entry: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
-    return [
-        (pair[0], pair[1])
-        for pair in entry.get("node_configs") or []
-        if isinstance(pair, list | tuple) and len(pair) == 2 and isinstance(pair[1], dict)
-    ]
+def _fold_key(key: str, dataset_name: str | None) -> str:
+    return f"{key}|{dataset_name or ''}"
 
 
-def _file_keys(entry: dict[str, Any]) -> list[str]:
-    chain = _chain(entry)
-    if not chain:
-        return [entry["config_key"]]
-    return [config_key(chain[:n]) for n in range(1, len(chain) + 1)]
+def _file_keys(entry: ArchiveEntry) -> list[str]:
+    chain = entry.node_configs
+    return [config_key(chain[:n]) for n in range(1, len(chain) + 1)] or [entry.config_key]
 
 
-def _file_of(entry: dict[str, Any], row: dict[str, Any]) -> str:
-    chain = _chain(entry)
-    terminal = PipelineData.from_wire(row.get("pipeline_data") or {}).terminal_node
+def _file_of(entry: ArchiveEntry, cell: MeasuredCell) -> str:
+    terminal = cell.pipeline.terminal_node
     # A failed cell answers for the WHOLE configuration, whichever node it failed at.
-    if terminal and not is_error_result(row):
-        for n, (name, _) in enumerate(chain, start=1):
+    if terminal and not cell.errored:
+        for n, (name, _) in enumerate(entry.node_configs, start=1):
             if name == terminal:
-                return config_key(chain[:n])
-    return config_key(chain) if chain else entry["config_key"]
+                return config_key(entry.node_configs[:n])
+    return entry.config_key
 
 
 def _matches_subset(
-    run_node_configs: list[Any],
+    node_configs: list[tuple[str, dict[str, Any]]],
     predicate: dict[str, dict[str, Any]],
 ) -> bool:
     if not predicate:
         return False
-    by_name: dict[str, dict[str, Any]] = {}
-    for stored_pair in run_node_configs:
-        if not (isinstance(stored_pair, list | tuple) and len(stored_pair) == 2):
-            continue
-        n_have, c_have = stored_pair
-        if isinstance(c_have, dict):
-            by_name[n_have] = c_have
+    by_name = dict(node_configs)
     for node_name, subdict in predicate.items():
         cfg = by_name.get(node_name)
         if cfg is None:
@@ -119,33 +95,42 @@ def _tail_from(st: os.stat_result, cursor: tuple[int, int] | None) -> int:
     return offset if st.st_ino == inode and st.st_size >= offset else 0
 
 
-def _entry_matches_dataset(entry: dict[str, Any], dataset_name: str | None) -> bool:
-    return dataset_name is None or entry.get("dataset_name") == dataset_name
+def answer_of(line: str) -> FiledAnswer | None:
+    """``None`` is a line holding no JSON object; an object that is no answer raises."""
+    try:
+        row = json.loads(line)
+    except json.JSONDecodeError:
+        return None
+    return FiledAnswer.from_wire(row) if isinstance(row, dict) else None
 
 
-def answer_facts(row: dict[str, Any]) -> dict[str, Any]:
-    return {k: v for k, v in row.items() if k not in PROVENANCE_KEYS}
+def answer_line(answer: FiledAnswer) -> str:
+    return json.dumps(answer.wire(), separators=(",", ":"), ensure_ascii=False) + "\n"
 
 
-def standing(answers: Iterable[dict[str, Any]]) -> dict[int, dict[str, Any]]:
-    taken: dict[int, tuple[bool, dict[str, Any]]] = {}
-    for row in answers:
-        sid = row.get("sample_id")
-        if not isinstance(sid, int):
-            continue
-        facts = MeasuredCell.from_wire(row)
-        live = not (facts.errored or is_deprecated(facts))
+def standing(answers: Iterable[FiledAnswer]) -> dict[int, FiledAnswer]:
+    taken: dict[int, tuple[bool, FiledAnswer]] = {}
+    for answer in answers:
+        sid = answer.cell.sample_id
+        live = not (answer.cell.errored or is_deprecated(answer.cell))
         held = taken.get(sid)
         if held is None or live or not held[0]:
-            taken[sid] = (live, row)
-    return {sid: row for sid, (_, row) in taken.items()}
+            taken[sid] = (live, answer)
+    return {sid: answer for sid, (_, answer) in taken.items()}
 
 
-class ReplayableRow(NamedTuple):
-    """The row's ``sample_id`` names a slot in ``dataset_name`` and nowhere else."""
+class MovedFields(NamedTuple):
+    """What a compaction took off one answer; ``pipeline`` holds those fields and no other."""
 
-    dataset_name: str | None
-    row: dict[str, Any]
+    answer: str
+    pipeline: PipelineData
+
+
+def rejoined(answer: FiledAnswer, moved: PipelineData) -> FiledAnswer:
+    """Only FILLS: the answer on disk is the truth for what it still holds."""
+    hot = answer.cell.pipeline
+    back = {f: getattr(moved, f) for f in UNREAD_PIPELINE_KEYS if getattr(hot, f) is None}
+    return replace(answer, cell=replace(answer.cell, pipeline=replace(hot, **back)))
 
 
 class _CellFile:
@@ -156,8 +141,8 @@ class _CellFile:
 
     def _empty(self) -> None:
         # NEW containers: a reader still iterating the ones it was handed must not see them emptied.
-        self.rows: list[dict[str, Any]] = []
-        self.by_id: dict[str, dict[str, Any]] = {}
+        self.rows: list[FiledAnswer] = []
+        self.by_id: dict[str, FiledAnswer] = {}
 
     @property
     def size(self) -> int:
@@ -175,7 +160,8 @@ class _CellFile:
             return
         start = _tail_from(st, self._cursor)
         # The fold returns the newline-aligned offset, so a torn trailing line stays pending.
-        fresh, offset = fold_jsonl_from(path, ANSWER_KEY, start)
+        folded, offset = fold_jsonl_from(path, ANSWER_KEY, start)
+        fresh = {ref: FiledAnswer.from_wire(row) for ref, row in folded.items()}
         if start == 0:
             self._empty()
         self.rows.extend(fresh.values())
@@ -183,19 +169,22 @@ class _CellFile:
         self._cursor = (st.st_ino, offset)
         self._stat = sig
 
-    def append(self, path: Path, rows: list[dict[str, Any]]) -> None:
-        """Takes *rows* into the tail unread: on Windows, opening a just-appended file waits out a scan."""
+    def append(self, path: Path, answers: list[FiledAnswer]) -> None:
+        """Takes *answers* into the tail unread: on Windows, opening a just-appended file waits out a scan."""
         self.refresh(path)
         held = 0 if self._cursor is None else self._cursor[1]
         whole = self._stat is None or self._stat[1] == held
+        rows = [answer.wire() for answer in answers]
         added = append_row(path, *rows)
         st = path.stat()
         if not (whole and st.st_size == held + added and _tail_from(st, self._cursor) == held):
             return
         # Through JSON, as a reader folds them: a tuple is a list on disk.
-        fresh = [json.loads(json.dumps(row, ensure_ascii=False)) for row in rows]
+        fresh = [
+            FiledAnswer.from_wire(json.loads(json.dumps(row, ensure_ascii=False))) for row in rows
+        ]
         self.rows.extend(fresh)
-        self.by_id.update((row[ANSWER_KEY], row) for row in fresh)
+        self.by_id.update((answer.answer, answer) for answer in fresh)
         self._cursor = (st.st_ino, st.st_size)
         self._stat = (st.st_mtime_ns, st.st_size)
 
@@ -217,7 +206,7 @@ class MeasurementArchive:
     def __init__(self, base_dir: Path):
         self._base_dir = base_dir
         self._lock = threading.RLock()
-        self._rows: dict[str, dict[str, Any]] | None = None
+        self._rows: dict[str, ArchiveEntry] | None = None
         self._stat: tuple[int, int] | None = None
         self._cursor: tuple[int, int] | None = None
         self._files: OrderedDict[str, _CellFile] = OrderedDict()
@@ -252,7 +241,7 @@ class MeasurementArchive:
         self._stat = None
         self._cursor = None
 
-    def _live_rows(self) -> dict[str, dict[str, Any]]:
+    def _live_rows(self) -> dict[str, ArchiveEntry]:
         """Every read stats the file: an in-process L4 inner cycle appends to the same dir."""
         path = self._index_path()
         with self._lock:
@@ -265,7 +254,13 @@ class MeasurementArchive:
             if self._rows is not None and sig == self._stat:
                 return self._rows
             start = 0 if self._rows is None else _tail_from(st, self._cursor)
-            fresh, offset = fold_jsonl_from(path, _INDEX_FOLD_KEY, start)
+            folded, offset = fold_jsonl_from(path, _INDEX_FOLD_KEY, start)
+            fresh = {
+                fold_key: ArchiveEntry.model_validate(
+                    {k: v for k, v in row.items() if k != _INDEX_FOLD_KEY}
+                )
+                for fold_key, row in folded.items()
+            }
             # A NEW dict per change: a reader still iterating the shared one must not see it grow.
             self._rows = {**self._rows, **fresh} if start and self._rows is not None else fresh
             self._cursor = (st.st_ino, offset)
@@ -287,77 +282,82 @@ class MeasurementArchive:
                     weight -= self._files.popitem(last=False)[1].size
             return held
 
-    def file_answers(self, entry: dict[str, Any], rows: Iterable[dict[str, Any]]) -> list[str]:
-        by_file: dict[str, list[dict[str, Any]]] = {}
+    def file_answers(
+        self,
+        entry: ArchiveEntry,
+        graded: Iterable[tuple[MeasuredCell, str]],
+        *,
+        role: str,
+        source: str,
+        created_at: str,
+    ) -> list[str]:
+        """Each cell beside its provenance grade; the addresses come back in that order."""
+        by_file: dict[str, list[FiledAnswer]] = {}
         refs: list[str] = []
-        for row in rows:
-            file_key = _file_of(entry, row)
+        for cell, provenance in graded:
+            file_key = _file_of(entry, cell)
             ref = f"{file_key}.{uuid.uuid4().hex[:12]}"
             refs.append(ref)
             by_file.setdefault(file_key, []).append(
-                {
-                    **measured_facts(row),
-                    ANSWER_KEY: ref,
-                    "config_key": entry["config_key"],
-                    "dataset_name": entry.get("dataset_name"),
-                }
+                FiledAnswer(
+                    replace(cell, answer=ref),
+                    config_key=entry.config_key,
+                    dataset_name=entry.dataset_name,
+                    role=role,
+                    source=source,
+                    provenance=provenance,
+                    created_at=created_at,
+                )
             )
         if not refs:
             return refs
         with self._lock:
             # First: no answer is ever on disk under a configuration nothing describes.
-            self._register(entry, by_file)
+            self._register(entry.model_copy(update={"name": role, "created_at": created_at}))
             for file_key, filed in by_file.items():
                 self._file(file_key).append(self._cell_path(file_key), filed)
         return refs
 
-    def _register(self, entry: dict[str, Any], by_file: dict[str, list[dict[str, Any]]]) -> None:
-        key = entry["config_key"]
-        config_path = self._configs_dir() / f"{key}.json"
-        described = {k: v for k, v in entry.items() if k not in ("dataset_name", "name")}
+    def _register(self, entry: ArchiveEntry) -> None:
+        config_path = self._configs_dir() / f"{entry.config_key}.json"
         if not config_path.exists():
-            write_json(config_path, described)
-        fold_key = f"{key}|{entry.get('dataset_name') or ''}"
+            write_json(config_path, entry.model_dump(mode="json", exclude=set(_INDEXED_ONLY)))
+        fold_key = _fold_key(entry.config_key, entry.dataset_name)
         if fold_key in self._live_rows():
             return
-        first = next(iter(by_file.values()))[0]
-        append_row(
-            self._index_path(),
-            {
-                _INDEX_FOLD_KEY: fold_key,
-                **described,
-                "dataset_name": entry.get("dataset_name"),
-                "name": first.get("role") or "",
-                "created_at": first.get("created_at") or "",
-            },
-        )
+        append_row(self._index_path(), {_INDEX_FOLD_KEY: fold_key, **entry.model_dump(mode="json")})
 
-    def answer(self, ref: str) -> dict[str, Any] | None:
+    def answer(self, ref: str) -> FiledAnswer | None:
         file_key, _, _ = ref.partition(".")
         if not file_key or any(ch in ref for ch in "/\\") or ".." in ref:
             return None
         return self._file(file_key).by_id.get(ref)
 
-    def population(self, entry: dict[str, Any]) -> list[dict[str, Any]]:
-        dataset_name = entry.get("dataset_name")
+    def whole(self, answer: FiledAnswer) -> FiledAnswer:
+        """*answer* with what a compaction moved off it; a purged answer comes back as it stands."""
+        cold = self.read_cold(answer.answer.partition(".")[0]) or []
+        moved = next((m.pipeline for m in cold if m.answer == answer.answer), None)
+        return answer if moved is None else rejoined(answer, moved)
+
+    def population(self, entry: ArchiveEntry) -> list[FiledAnswer]:
         with self._lock:
             found = [
-                row
+                answer
                 for file_key in _file_keys(entry)
-                for row in self._file(file_key).rows
-                if row.get("dataset_name") == dataset_name
+                for answer in self._file(file_key).rows
+                if answer.dataset_name == entry.dataset_name
             ]
-        found.sort(key=lambda row: str(row.get("created_at") or ""))
+        found.sort(key=lambda answer: answer.created_at)
         return found
 
-    def list_all(self, *, dataset_name: str | None = None) -> list[dict[str, Any]]:
+    def list_all(self, *, dataset_name: str | None = None) -> list[ArchiveEntry]:
         entries = list(self._live_rows().values())
         if dataset_name is None:
             return entries
-        return [e for e in entries if _entry_matches_dataset(e, dataset_name)]
+        return [e for e in entries if e.dataset_name == dataset_name]
 
-    def entry(self, key: str, dataset_name: str | None) -> dict[str, Any] | None:
-        return self._live_rows().get(f"{key}|{dataset_name or ''}")
+    def entry(self, key: str, dataset_name: str | None) -> ArchiveEntry | None:
+        return self._live_rows().get(_fold_key(key, dataset_name))
 
     def cell_signatures(self) -> dict[str, tuple[int, int]]:
         out: dict[str, tuple[int, int]] = {}
@@ -374,7 +374,7 @@ class MeasurementArchive:
 
     def signature(
         self,
-        entry: dict[str, Any] | None = None,
+        entry: ArchiveEntry | None = None,
         sigs: dict[str, tuple[int, int]] | None = None,
     ) -> tuple[tuple[str, int, int], ...] | None:
         sigs = self.cell_signatures() if sigs is None else sigs
@@ -408,12 +408,15 @@ class MeasurementArchive:
         return len(content.encode("utf-8"))
 
     @staticmethod
-    def _encode_cold(rows: Iterable[dict[str, Any]]) -> bytes:
-        blob = "\n".join(json.dumps(r, separators=(",", ":"), default=str) for r in rows)
+    def _encode_cold(moved: Iterable[MovedFields]) -> bytes:
+        blob = "\n".join(
+            json.dumps({"k": m.answer, "pd": m.pipeline.wire()}, separators=(",", ":"))
+            for m in moved
+        )
         return gzip.compress(blob.encode("utf-8"), 6)
 
-    def cold_size(self, rows: Iterable[dict[str, Any]]) -> int:
-        return len(self._encode_cold(rows))
+    def cold_size(self, moved: Iterable[MovedFields]) -> int:
+        return len(self._encode_cold(moved))
 
     def cold_bytes_on_disk(self, file_key: str) -> int:
         try:
@@ -421,18 +424,19 @@ class MeasurementArchive:
         except OSError:
             return 0
 
-    def write_cold(self, file_key: str, rows: Iterable[dict[str, Any]]) -> int:
-        data = self._encode_cold(rows)
+    def write_cold(self, file_key: str, moved: Iterable[MovedFields]) -> int:
+        data = self._encode_cold(moved)
         write_bytes(self.cold_path(file_key), data)
         return len(data)
 
-    def read_cold(self, file_key: str) -> list[dict[str, Any]] | None:
+    def read_cold(self, file_key: str) -> list[MovedFields] | None:
         """``None`` = never compacted; ``[]`` = a compaction that moved nothing."""
         raw = read_bytes_optional(self.cold_path(file_key))
         if raw is None:
             return None
         text = gzip.decompress(raw).decode("utf-8")
-        return [json.loads(line) for line in text.splitlines() if line.strip()]
+        held = [json.loads(line) for line in text.splitlines() if line.strip()]
+        return [MovedFields(e["k"], PipelineData.from_wire(e["pd"])) for e in held]
 
     def drop_cold(self, file_key: str) -> int:
         path = self.cold_path(file_key)
@@ -444,52 +448,46 @@ class MeasurementArchive:
         return size
 
     def reindex(self) -> dict[str, int]:
-        first: dict[str, dict[str, Any]] = {}
+        first: dict[str, ArchiveEntry] = {}
         undescribed = 0
         for file_key in self.file_keys():
-            for row in iter_jsonl(self._cell_path(file_key)):
-                key, dataset_name = row.get("config_key"), row.get("dataset_name")
-                if not isinstance(key, str):
-                    continue
-                fold_key = f"{key}|{dataset_name or ''}"
+            for answer in self._file(file_key).rows:
+                fold_key = _fold_key(answer.config_key, answer.dataset_name)
                 held = first.get(fold_key)
-                at = str(row.get("created_at") or "")
-                if held is not None and held["created_at"] <= at:
+                if held is not None and held.created_at <= answer.created_at:
                     continue
-                described = read_json_optional(self._configs_dir() / f"{key}.json")
+                described = read_json_optional(self._configs_dir() / f"{answer.config_key}.json")
                 if not isinstance(described, dict):
                     undescribed += 1
                     continue
-                first[fold_key] = {
-                    _INDEX_FOLD_KEY: fold_key,
-                    **described,
-                    "dataset_name": dataset_name,
-                    "name": row.get("role") or "",
-                    "created_at": at,
-                }
-        indexed = sorted(first.values(), key=lambda e: (e["created_at"], e[_INDEX_FOLD_KEY]))
-        write_jsonl(self._index_path(), indexed)
+                first[fold_key] = ArchiveEntry.model_validate(
+                    {
+                        **described,
+                        "dataset_name": answer.dataset_name,
+                        "name": answer.role,
+                        "created_at": answer.created_at,
+                    }
+                )
+        indexed = sorted(first.items(), key=lambda held: (held[1].created_at, held[0]))
+        write_jsonl(
+            self._index_path(),
+            ({_INDEX_FOLD_KEY: k, **entry.model_dump(mode="json")} for k, entry in indexed),
+        )
         self._invalidate()
         return {"indexed": len(indexed), "undescribed": undescribed}
 
     def restamp_dataset(self, old_name: str, new_name: str) -> int:
-        touched = {e["config_key"] for e in self.list_all(dataset_name=old_name)}
+        touched = {e.config_key for e in self.list_all(dataset_name=old_name)}
         if not touched:
             return 0
         with self._lock:
             for file_key in self.file_keys():
-                lines = self.detail_lines(file_key)
                 out: list[str] = []
                 moved = False
-                for line in lines:
-                    try:
-                        row = json.loads(line)
-                    except json.JSONDecodeError:
-                        out.append(line)
-                        continue
-                    if isinstance(row, dict) and row.get("dataset_name") == old_name:
-                        row["dataset_name"] = new_name
-                        line = json.dumps(row, ensure_ascii=False) + "\n"
+                for line in self.detail_lines(file_key):
+                    answer = answer_of(line)
+                    if answer is not None and answer.dataset_name == old_name:
+                        line = answer_line(replace(answer, dataset_name=new_name))
                         moved = True
                     out.append(line)
                 if moved:
@@ -504,32 +502,17 @@ class MeasurementArchive:
         *,
         dataset_name: str | None = None,
         newest: int | None = None,
-    ) -> Iterator[Measurement]:
-        if not predicate:
-            return
+    ) -> Iterator[FiledAnswer]:
         matching = [
             entry
             for entry in self.list_all(dataset_name=dataset_name)
-            if (stored := entry.get("node_configs")) and _matches_subset(stored, predicate)
+            if _matches_subset(entry.node_configs, predicate)
         ]
         if newest is not None:
-            matching.sort(key=lambda entry: entry.get("created_at") or "", reverse=True)
+            matching.sort(key=lambda entry: entry.created_at, reverse=True)
             del matching[newest:]
         for entry in matching:
-            chain = _chain(entry)
-            for row in self.population(entry):
-                yield Measurement(
-                    answer=row[ANSWER_KEY],
-                    config_key=entry["config_key"],
-                    sample_id=int(row.get("sample_id", -1)),
-                    node_configs=chain,
-                    row=answer_facts(row),
-                    created_at=str(row.get("created_at") or ""),
-                )
-
-
-def _reusable(row: dict[str, Any], grade: str) -> bool:
-    return not is_error_result(row) and meets_grade(grade, REUSABLE_MIN_GRADE)
+            yield from self.population(entry)
 
 
 class CellClaim:
@@ -539,13 +522,13 @@ class CellClaim:
         self._lock = lock
         self.row_path = row_path
 
-    def publish(self, row: dict[str, Any], *, grade: str) -> None:
-        if not _reusable(row, grade) or is_deprecated(MeasuredCell.from_wire(row)):
+    def publish(self, cell: MeasuredCell, *, grade: str) -> None:
+        if cell.errored or not meets_grade(grade, REUSABLE_MIN_GRADE) or is_deprecated(cell):
             self.release()
             return
         # Windows refuses the replace while a waiter reads a past holder's row of this same cell.
         with contextlib.suppress(PermissionError):
-            write_json(self.row_path, measured_facts(row))
+            write_json(self.row_path, cell.wire())
 
     def release(self) -> None:
         # The row goes first: one standing with the lock free is no live holder's.
@@ -576,24 +559,25 @@ class ReplayFeed:
         self._seen: dict[str, int] = {}
         self._deprecated: dict[str, bool] = {}
 
-    def advance(self) -> dict[str, ReplayableRow]:
-        banked: list[dict[str, Any]] = []
+    def advance(self) -> dict[str, FiledAnswer]:
+        banked: list[FiledAnswer] = []
         with self._archive._lock:
             for file_key in self._file_keys:
                 rows = self._archive._file(file_key).rows
                 banked.extend(rows[self._seen.get(file_key, 0) :])
                 self._seen[file_key] = len(rows)
-        banked.sort(key=lambda row: str(row.get("created_at") or ""))
-        fresh: dict[str, ReplayableRow] = {}
-        for row in banked:
-            key = row.get("sample_key")
-            if not key or not _reusable(row, str(row.get("provenance") or "C")):
+        banked.sort(key=lambda answer: answer.created_at)
+        fresh: dict[str, FiledAnswer] = {}
+        for answer in banked:
+            cell = answer.cell
+            key = cell.sample_key
+            if not key or cell.errored or not meets_grade(answer.provenance, REUSABLE_MIN_GRADE):
                 continue
-            deprecated = is_deprecated(MeasuredCell.from_wire(row))
+            deprecated = is_deprecated(cell)
             if deprecated and self._deprecated.get(key) is False:
                 continue
             self._deprecated[key] = deprecated
-            fresh[key] = ReplayableRow(row.get("dataset_name"), answer_facts(row))
+            fresh[key] = answer
         return fresh
 
     def claim(self, sample_key: str) -> CellClaim | None:
@@ -611,23 +595,25 @@ class ReplayFeed:
     def cell_key(self, sample_key: str) -> str:
         return _cell_key(self._node_configs, sample_key)
 
-    def claimed_row(self, sample_key: str) -> dict[str, Any] | None:
+    def claimed_cell(self, sample_key: str) -> MeasuredCell | None:
         path = self._archive._claim_path(self._node_configs, sample_key)
         try:
-            return read_json_optional(path.with_suffix(".json"))
+            row = read_json_optional(path.with_suffix(".json"))
         except PermissionError:
             # Windows: a holder is unlinking or replacing it this instant — the next poll reads again.
             return None
+        return None if row is None else MeasuredCell.from_wire(row)
 
 
 __all__ = [
     "ANSWER_KEY",
-    "PROVENANCE_KEYS",
     "CellClaim",
     "MeasurementArchive",
+    "MovedFields",
     "ReplayFeed",
-    "ReplayableRow",
-    "answer_facts",
+    "answer_line",
+    "answer_of",
     "config_key",
+    "rejoined",
     "standing",
 ]

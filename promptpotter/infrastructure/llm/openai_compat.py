@@ -30,7 +30,7 @@ from promptpotter.infrastructure.llm.send_pacing import (
 )
 from promptpotter.infrastructure.llm.spend_book import Billed, CallLabel
 from promptpotter.infrastructure.tls import tls_context
-from promptpotter.shared import truncate
+from promptpotter.shared.answer_text import truncate
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI

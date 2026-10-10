@@ -5,10 +5,24 @@ from pathlib import Path
 from typing import Any, ClassVar, NamedTuple, get_args
 
 from promptpotter.domain.bench import BenchPasses, BenchReading
+from promptpotter.domain.command_kinds import (
+    LOOP_TAKEN,
+    LoopPayload,
+    OriginGateDecisionPayload,
+    PauseCyclePayload,
+    SetSampleLookaheadPayload,
+    SkipSearchpointPayload,
+)
 from promptpotter.domain.opt_search_point import IndividualLineage
 from promptpotter.domain.optimizer_state import OptimizerState
-from promptpotter.domain.phase_views import BenchGradedView, VerifyEnterView, VerifyGradedView
-from promptpotter.domain.phases import CampaignPhase, RunPhase
+from promptpotter.domain.phase_views import (
+    BenchGradedView,
+    InitEnterView,
+    InitExitView,
+    VerifyEnterView,
+    VerifyGradedView,
+)
+from promptpotter.domain.phases import CampaignPhase, ErrorRecord, RunPhase
 from promptpotter.domain.results import (
     ArmOutcome,
     IndividualWalk,
@@ -20,11 +34,13 @@ from promptpotter.domain.results import (
 )
 from promptpotter.domain.ruler import DeltaRuler
 from promptpotter.domain.run_records import (
-    LOOP_COMMAND_KINDS,
     CandidateMintedRecord,
     CandidateScoredRecord,
     CandidateStartedRecord,
     CandidateState,
+    CheckinClosedRecord,
+    CommandAckRecord,
+    CommandRecord,
     CycleFinalRecord,
     CycleMintedRecord,
     CycleSeed,
@@ -36,16 +52,20 @@ from promptpotter.domain.run_records import (
     ForkSpec,
     InterventionRecord,
     LaunchClaimRecord,
+    LaunchReleasedRecord,
     LedgerCandidate,
     OptimizerStateRecord,
     PhaseRecord,
     ResumeCheckpointRecord,
     RoundClosedRecord,
+    RoundEnteredRecord,
     RoundProposedRecord,
     RoundStandingRecord,
+    RulerRecord,
     RunLimitsRecord,
     RunPhaseRecord,
     RunWiringRecord,
+    SampleScoredRecord,
     ScoringLockedRecord,
     SpawnedBy,
     SpawnedRecord,
@@ -59,6 +79,7 @@ from promptpotter.infrastructure.store.read_model import (
     LedgerFold,
     LedgerIndex,
     LedgerSpan,
+    RecordClasses,
     iter_jsonl,
 )
 from promptpotter.shared.clock import epoch_seconds
@@ -66,28 +87,26 @@ from promptpotter.shared.measurement_context import MeasurementRole
 
 
 class _CycleSeed:
-    probes: ClassVar[frozenset[str]] = frozenset({"cycle_seed"})
+    records: ClassVar[RecordClasses] = (CycleSeedRecord,)
 
     def __init__(self) -> None:
         self._found: CycleSeed | None = None
 
-    def feed(self, offset: int, rec: dict[str, Any]) -> None:
-        if rec.get("record_type") == "cycle_seed":
-            self._found = CycleSeedRecord.model_validate(rec).seed
+    def feed(self, offset: int, record: CycleSeedRecord) -> None:
+        self._found = record.seed
 
     def value(self) -> CycleSeed | None:
         return self._found
 
 
 class _RunLimits:
-    probes: ClassVar[frozenset[str]] = frozenset({"run_limits"})
+    records: ClassVar[RecordClasses] = (RunLimitsRecord,)
 
     def __init__(self) -> None:
         self._found = RunLimitsRecord()
 
-    def feed(self, offset: int, rec: dict[str, Any]) -> None:
-        if rec.get("record_type") == "run_limits":
-            self._found = RunLimitsRecord.model_validate(rec)
+    def feed(self, offset: int, record: RunLimitsRecord) -> None:
+        self._found = record
 
     def value(self) -> RunLimitsRecord:
         return self._found.model_copy()
@@ -119,72 +138,67 @@ class CycleFacts(NamedTuple):
         return spec.model_copy(update={"direction": self.direction})
 
 
+_CycleFact = (
+    CycleMintedRecord
+    | CheckinClosedRecord
+    | CycleFinalRecord
+    | CycleSupersededRecord
+    | ForkGradedRecord
+    | InterventionRecord
+    | SpawnedRecord
+    | RunPhaseRecord
+    | PhaseRecord
+    | RoundStandingRecord
+    | ErrorRecord
+)
+
+
 class _CycleFacts:
-    probes: ClassVar[frozenset[str]] = frozenset(
-        {
-            "cycle_minted",
-            "checkin_closed",
-            "cycle_final",
-            "cycle_superseded",
-            "fork_graded",
-            "intervention",
-            "spawned",
-            "run_phase",
-            "phase",
-            "round_standing",
-            "error",
-        }
-    )
+    records: ClassVar[RecordClasses] = get_args(_CycleFact)
 
     def __init__(self) -> None:
         self._held = CycleFacts()
 
-    def feed(self, offset: int, rec: dict[str, Any]) -> None:
+    def feed(self, offset: int, record: _CycleFact) -> None:
         held = self._held
-        match rec.get("record_type"):
-            case "cycle_minted":
-                held = held._replace(minted=CycleMintedRecord.model_validate(rec))
-            case "checkin_closed":
+        match record:
+            case CycleMintedRecord():
+                held = held._replace(minted=record)
+            case CheckinClosedRecord():
                 held = held._replace(checkin_closed=True)
-            case "run_phase":
-                declared = RunPhaseRecord.model_validate(rec)
-                if declared.run_phase is RunPhase.TERMINAL:
-                    held = held._replace(ended=declared, paused=None)
-                else:
-                    held = held._replace(
-                        ended=None,
-                        paused=declared if declared.run_phase is RunPhase.PAUSED else None,
-                        final=None,
-                        superseded_by=None,
-                        crash_traceback=None,
-                    )
-            case "error":
-                trace = rec.get("traceback")
-                held = held._replace(crash_traceback=trace if isinstance(trace, str) else None)
-            case "cycle_final":
-                held = held._replace(final=CycleFinalRecord.model_validate(rec))
-            case "cycle_superseded":
-                moved = CycleSupersededRecord.model_validate(rec)
-                held = held._replace(superseded_by=moved.successor_cycle_id)
-            case "fork_graded":
-                held = held._replace(direction=ForkGradedRecord.model_validate(rec).direction)
-            case "intervention":
-                act = InterventionRecord.model_validate(rec)
-                held = held._replace(interventions=(*held.interventions, act))
-            case "spawned":
-                held = held._replace(spawned_by=SpawnedRecord.model_validate(rec).spawned_by)
-            case "phase":
-                view = rec.get("view")
-                formula = view.get("composite_fitness_formula") if isinstance(view, dict) else None
-                if rec.get("phase") != CampaignPhase.INIT or not isinstance(formula, str):
-                    return
+            case RunPhaseRecord(run_phase=RunPhase.TERMINAL):
+                held = held._replace(ended=record, paused=None)
+            case RunPhaseRecord():
+                held = held._replace(
+                    ended=None,
+                    paused=record if record.run_phase is RunPhase.PAUSED else None,
+                    final=None,
+                    superseded_by=None,
+                    crash_traceback=None,
+                )
+            case ErrorRecord():
+                held = held._replace(crash_traceback=record.traceback)
+            case CycleFinalRecord():
+                held = held._replace(final=record)
+            case CycleSupersededRecord():
+                held = held._replace(superseded_by=record.successor_cycle_id)
+            case ForkGradedRecord():
+                held = held._replace(direction=record.direction)
+            case InterventionRecord():
+                held = held._replace(interventions=(*held.interventions, record))
+            case SpawnedRecord():
+                held = held._replace(spawned_by=record.spawned_by)
+            case PhaseRecord(
+                phase=CampaignPhase.INIT,
+                view=InitEnterView(composite_fitness_formula=str() as formula)
+                | InitExitView(composite_fitness_formula=str() as formula),
+            ):
                 held = held._replace(formula=formula)
-            case "round_standing":
-                pass
-            case _:
+            case PhaseRecord():
                 return
-        stamp = rec.get("timestamp")
-        self._held = held._replace(updated_at=stamp if isinstance(stamp, str) else held.updated_at)
+            case RoundStandingRecord():
+                pass
+        self._held = held._replace(updated_at=record.timestamp)
 
     def value(self) -> CycleFacts:
         return self._held
@@ -211,144 +225,124 @@ class Controls(NamedTuple):
 
 
 class _Controls:
-    probes: ClassVar[frozenset[str]] = frozenset({"command", "command_ack", "run_phase"})
+    records: ClassVar[RecordClasses] = (CommandRecord, CommandAckRecord, RunPhaseRecord)
 
     def __init__(self) -> None:
         self._held = Controls()
-        self._asked: dict[str, dict[str, Any]] = {}
-        self._kinds: dict[str, str] = {}
-        self._declared = ""
+        self._asked: dict[str, CommandRecord] = {}
+        self._kinds: dict[str, type[LoopPayload]] = {}
+        self._declared: RunPhase | None = None
 
-    def feed(self, offset: int, rec: dict[str, Any]) -> None:
-        match rec.get("record_type"):
-            case "command":
-                command_id = rec.get("command_id")
-                if rec.get("kind") in LOOP_COMMAND_KINDS and isinstance(command_id, str):
-                    self._asked[command_id] = rec
-            case "command_ack":
-                command_id, status = rec.get("command_id"), rec.get("status")
-                if not isinstance(command_id, str):
-                    return
-                if status == "accepted" and (asked := self._asked.pop(command_id, None)):
-                    self._arm(command_id, asked)
-                elif status == "rejected":
-                    self._asked.pop(command_id, None)
-                elif status == "applied":
-                    if asked := self._asked.pop(command_id, None):
-                        # Applied with no accept before it: a look-ahead DISARM, nothing to take.
-                        self._arm(command_id, asked)
-                    elif kind := self._kinds.pop(command_id, None):
-                        self._take(command_id, kind)
-            case "run_phase":
-                declared = str(rec.get("run_phase", ""))
-                launched = declared == RunPhase.RUNNING and self._declared != RunPhase.GATE
+    def feed(self, offset: int, record: CommandRecord | CommandAckRecord | RunPhaseRecord) -> None:
+        match record:
+            case CommandRecord():
+                if record.kind in LOOP_TAKEN:
+                    self._asked[record.command_id] = record
+            case CommandAckRecord(command_id=command_id, status="accepted"):
+                if asked := self._asked.pop(command_id, None):
+                    self._arm(asked)
+            case CommandAckRecord(command_id=command_id, status="rejected"):
+                self._asked.pop(command_id, None)
+            case CommandAckRecord(command_id=command_id):
+                if asked := self._asked.pop(command_id, None):
+                    # Applied with no accept before it: a look-ahead DISARM, nothing to take.
+                    self._arm(asked)
+                elif kind := self._kinds.pop(command_id, None):
+                    self._take(command_id, kind)
+            case RunPhaseRecord(run_phase=declared):
+                launched = declared is RunPhase.RUNNING and self._declared is not RunPhase.GATE
                 if launched or declared in (RunPhase.PAUSED, RunPhase.TERMINAL):
                     # A stop or a new launch empties the inbox; an ``auto`` look-ahead is a mode.
                     kept = self._held.lookahead
                     kept = kept if kept is not None and kept.auto else None
                     self._held = Controls(lookahead=kept)
-                    self._kinds = {} if kept is None else {kept.command_id: _LOOKAHEAD}
+                    self._kinds = (
+                        {} if kept is None else {kept.command_id: SetSampleLookaheadPayload}
+                    )
                 self._declared = declared
 
-    def _arm(self, command_id: str, asked: dict[str, Any]) -> None:
-        kind, held = str(asked.get("kind")), self._held
-        payload = asked.get("payload")
-        payload = payload if isinstance(payload, dict) else {}
-        match kind:
-            case "pause-cycle":
+    def _arm(self, asked: CommandRecord) -> None:
+        command_id, held = asked.command_id, self._held
+        kind = LOOP_TAKEN[asked.kind]
+        match kind.model_validate(asked.payload):
+            case PauseCyclePayload():
                 if held.pause is not None:
                     return
                 held = held._replace(
-                    pause=PauseAsk(
-                        command_id,
-                        str(asked.get("issued_by_user_id") or ""),
-                        str(asked.get("timestamp") or ""),
-                    )
+                    pause=PauseAsk(command_id, asked.issued_by_user_id, asked.timestamp)
                 )
-            case "skip-searchpoint":
+            case SkipSearchpointPayload():
                 held = held._replace(skips=(*held.skips, command_id))
-            case "origin-gate-decision":
-                held = held._replace(
-                    gate_decisions=(
-                        *held.gate_decisions,
-                        (command_id, str(payload.get("decision"))),
-                    )
-                )
-            case "set-sample-lookahead":
-                cells, auto = payload.get("cells"), payload.get("auto") is True
+            case OriginGateDecisionPayload(decision=decision):
+                held = held._replace(gate_decisions=(*held.gate_decisions, (command_id, decision)))
+            case SetSampleLookaheadPayload(cells=cells, auto=auto):
                 if held.lookahead is not None:
                     self._kinds.pop(held.lookahead.command_id, None)
-                depth = cells if isinstance(cells, int) and not isinstance(cells, bool) else 1
-                armed = auto or depth > 1
+                armed = auto or cells > 1
                 held = held._replace(
-                    lookahead=LookaheadAsk(command_id, max(1, depth), auto) if armed else None
+                    lookahead=LookaheadAsk(command_id, cells, auto) if armed else None
                 )
                 if not armed:
                     self._held = held
                     return
-            case _:
-                return
         self._kinds[command_id] = kind
         self._held = held
 
-    def _take(self, command_id: str, kind: str) -> None:
+    def _take(self, command_id: str, kind: type[LoopPayload]) -> None:
         held = self._held
-        match kind:
-            case "pause-cycle":
-                held = held._replace(pause=None)
-            case "skip-searchpoint":
-                held = held._replace(skips=tuple(s for s in held.skips if s != command_id))
-            case "origin-gate-decision":
-                held = held._replace(
-                    gate_decisions=tuple(d for d in held.gate_decisions if d[0] != command_id)
-                )
-            case "set-sample-lookahead":
-                ask = held.lookahead
-                if ask is not None and ask.auto:
-                    held = held._replace(lookahead=ask._replace(taken=True))
-                else:
-                    held = held._replace(lookahead=None)
+        if kind is PauseCyclePayload:
+            held = held._replace(pause=None)
+        elif kind is SkipSearchpointPayload:
+            held = held._replace(skips=tuple(s for s in held.skips if s != command_id))
+        elif kind is OriginGateDecisionPayload:
+            held = held._replace(
+                gate_decisions=tuple(d for d in held.gate_decisions if d[0] != command_id)
+            )
+        else:
+            ask = held.lookahead
+            if ask is not None and ask.auto:
+                held = held._replace(lookahead=ask._replace(taken=True))
+            else:
+                held = held._replace(lookahead=None)
         self._held = held
 
     def value(self) -> Controls:
         return self._held
 
 
-_LOOKAHEAD = "set-sample-lookahead"
-
-
 class _LaunchClaim:
-    probes: ClassVar[frozenset[str]] = frozenset({"launch_claim", "launch_released", "run_phase"})
+    records: ClassVar[RecordClasses] = (LaunchClaimRecord, LaunchReleasedRecord, RunPhaseRecord)
 
     def __init__(self) -> None:
         self._found: LaunchClaimRecord | None = None
 
-    def feed(self, offset: int, rec: dict[str, Any]) -> None:
-        kind = rec.get("record_type")
-        if kind == "run_phase":
-            self._found = None
-        elif kind == "launch_claim":
-            self._found = LaunchClaimRecord.model_validate(rec)
-        elif self._found is not None and rec.get("job_id") == self._found.job_id:
-            self._found = None
+    def feed(
+        self, offset: int, record: LaunchClaimRecord | LaunchReleasedRecord | RunPhaseRecord
+    ) -> None:
+        match record:
+            case RunPhaseRecord():
+                self._found = None
+            case LaunchClaimRecord():
+                self._found = record
+            case LaunchReleasedRecord(job_id=job_id):
+                if self._found is not None and job_id == self._found.job_id:
+                    self._found = None
 
     def value(self) -> LaunchClaimRecord | None:
         return self._found
 
 
 class _Rulers:
-    probes: ClassVar[frozenset[str]] = frozenset({"ruler"})
+    records: ClassVar[RecordClasses] = (RulerRecord,)
 
     def __init__(self) -> None:
-        self._raw: dict[str, dict[str, Any]] = {}
+        self._held: dict[str, DeltaRuler] = {}
 
-    def feed(self, offset: int, rec: dict[str, Any]) -> None:
-        name, data = rec.get("dataset_name"), rec.get("ruler")
-        if rec.get("record_type") == "ruler" and isinstance(name, str) and isinstance(data, dict):
-            self._raw[name] = data
+    def feed(self, offset: int, record: RulerRecord) -> None:
+        self._held[record.dataset_name] = record.ruler
 
-    def value(self) -> dict[str, dict[str, Any]]:
-        return dict(self._raw)
+    def value(self) -> dict[str, DeltaRuler]:
+        return dict(self._held)
 
 
 class Progress(NamedTuple):
@@ -357,8 +351,8 @@ class Progress(NamedTuple):
 
 
 class _Progress:
-    # Screens nothing, so it rides an index of its own (``PROGRESS_FOLDS``), never LEDGER_FOLDS.
-    probes: ClassVar[frozenset[str]] = frozenset()
+    # Every line, as written, so it rides an index of its own (``PROGRESS_FOLDS``), never LEDGER_FOLDS.
+    records: ClassVar[RecordClasses] = ()
 
     def __init__(self) -> None:
         self._held = Progress()
@@ -515,8 +509,8 @@ def _scored_facts(rec: dict[str, Any]) -> MeasuredCell:
     return scored_cell(rec["result"])[0]
 
 
-def _walked_cell(rec: dict[str, Any]) -> WalkedCell | None:
-    facts = _scored_facts(rec)
+def _walked_cell(scored: SampleScoredRecord) -> WalkedCell | None:
+    facts = scored_cell(scored.result)[0]
     if not facts.sample_key or facts.answer is None:
         return None
     return facts.sample_key, facts.sample_id, facts.answer, facts.cached
@@ -534,94 +528,91 @@ def _take(taken: dict[str, WalkedCell], cell: WalkedCell) -> None:
     taken[cell[0]] = cell
 
 
+_ArmStep = (
+    CandidateMintedRecord | CandidateStartedRecord | CandidateScoredRecord | SampleScoredRecord
+)
+_RoundStep = (
+    RoundEnteredRecord
+    | ElectionRecord
+    | ResumeCheckpointRecord
+    | RoundClosedRecord
+    | RoundStandingRecord
+    | RoundProposedRecord
+    | OptimizerStateRecord
+    | _ArmStep
+)
+
+
 class _Standing:
-    probes: ClassVar[frozenset[str]] = frozenset(
-        {
-            "round_entered",
-            "candidate_minted",
-            "candidate_started",
-            "candidate_scored",
-            "sample_scored",
-            "election",
-            "decision",
-            "round_closed",
-            "round_standing",
-            "round_proposed",
-            "optimizer_state",
-        }
-    )
+    records: ClassVar[RecordClasses] = get_args(_RoundStep)
 
     def __init__(self) -> None:
         self._held = StandingRounds.none()
 
-    def feed(self, offset: int, rec: dict[str, Any]) -> None:
-        kind, rnd = rec.get("record_type"), rec.get("round")
-        if not isinstance(rnd, int):
+    def feed(self, offset: int, record: _RoundStep) -> None:
+        rnd = record.round
+        if rnd is None:
             return
         held = self._held
-        match kind:
-            case "round_entered":
-                rewound = rnd if rec.get("rewound") is True else None
+        match record:
+            case RoundEnteredRecord():
+                rewound = rnd if record.rewound else None
                 self._held = held.displaced(rnd, rewound)._replace(
                     entered=_earliest(held.entered, rnd),
                     rewound=_earliest(held.rewound, rewound),
                 )
-            case "election":
-                held.elections[rnd] = ElectionRecord.model_validate(rec)
-            case "decision":
-                made = ResumeCheckpointRecord.model_validate(rec)
-                held.decisions.setdefault(rnd, []).append(made)
-            case "round_closed":
-                close = RoundClosedRecord.model_validate(rec)
+            case ElectionRecord():
+                held.elections[rnd] = record
+            case ResumeCheckpointRecord():
+                held.decisions.setdefault(rnd, []).append(record)
+            case RoundClosedRecord():
                 before = held.rounds.get(rnd)
                 held.rounds[rnd] = StandingRound(
-                    close, offset, None if before is None else before.standing
+                    record, offset, None if before is None else before.standing
                 )
                 held.restated.pop(rnd, None)
-            case "round_standing":
-                stood = RoundStandingRecord.model_validate(rec)
+            case RoundStandingRecord():
                 if (closed := held.rounds.get(rnd)) is not None:
-                    held.rounds[rnd] = closed._replace(standing=stood.run_standing)
-            case "round_proposed":
-                held.proposals[rnd] = RoundProposedRecord.model_validate(rec)
-            case "optimizer_state":
-                restated = OptimizerStateRecord.model_validate(rec)
+                    held.rounds[rnd] = closed._replace(standing=record.run_standing)
+            case RoundProposedRecord():
+                held.proposals[rnd] = record
+            case OptimizerStateRecord():
                 if (closed := held.rounds.get(rnd)) is None:
-                    held.restated[rnd] = restated.optimizer_state
+                    held.restated[rnd] = record.optimizer_state
                 else:
                     held.rounds[rnd] = closed._replace(
                         close=closed.close.model_copy(
-                            update={"optimizer_state": restated.optimizer_state}
+                            update={"optimizer_state": record.optimizer_state}
                         )
                     )
-            case "candidate_minted" | "candidate_started" | "candidate_scored" | "sample_scored":
-                self._walk(kind, rnd, rec)
+            case _:
+                self._walk(rnd, record)
 
-    def _walk(self, kind: str, rnd: int, rec: dict[str, Any]) -> None:
+    def _walk(self, rnd: int, record: _ArmStep) -> None:
         held = self._held
-        idx = rec.get("idx") if kind == "candidate_minted" else rec.get("candidate_idx")
-        if not isinstance(idx, int):
-            return
-        cell = _walked_cell(rec) if kind == "sample_scored" else None
+        idx = record.idx if isinstance(record, CandidateMintedRecord) else record.candidate_idx
+        cell = _walked_cell(record) if isinstance(record, SampleScoredRecord) else None
         if idx < 0:
-            if cell is not None:
-                passed = (rnd, str(rec["individual_id"]), MeasurementRole(rec["role"]))
-                _take(held.passes.setdefault(passed, {}), cell)
+            if isinstance(record, SampleScoredRecord) and cell is not None:
+                _take(held.passes.setdefault((rnd, record.individual_id, record.role), {}), cell)
             return
         key = (rnd, idx)
-        if kind == "candidate_minted":
-            # A mint REPLACES its slot: the origin is minted again on every launch.
-            held.arms[key] = ArmWalk({}, CandidateMintedRecord.model_validate(rec))
-            return
-        arm = held.arms.setdefault(key, ArmWalk({}))
-        if kind == "candidate_started":
-            held.arms[key] = arm._replace(announced=CandidateStartedRecord.model_validate(rec))
-        elif kind == "candidate_scored":
-            held.arms[key] = arm._replace(report=CandidateScoredRecord.model_validate(rec).scores)
-        elif cell is not None:
-            _take(arm.cells, cell)
-            if isinstance(length := rec.get("sample_total"), int):
-                held.arms[key] = arm._replace(walk_length=length)
+        match record:
+            case CandidateMintedRecord():
+                # A mint REPLACES its slot: the origin is minted again on every launch.
+                held.arms[key] = ArmWalk({}, record)
+            case CandidateStartedRecord():
+                held.arms[key] = held.arms.setdefault(key, ArmWalk({}))._replace(announced=record)
+            case CandidateScoredRecord():
+                held.arms[key] = held.arms.setdefault(key, ArmWalk({}))._replace(
+                    report=record.scores
+                )
+            case SampleScoredRecord():
+                arm = held.arms.setdefault(key, ArmWalk({}))
+                if cell is not None:
+                    _take(arm.cells, cell)
+                    if record.sample_total is not None:
+                        held.arms[key] = arm._replace(walk_length=record.sample_total)
 
     def value(self) -> StandingRounds:
         held = self._held
@@ -637,14 +628,13 @@ class _Standing:
 
 
 class _DeclaredPhase:
-    probes: ClassVar[frozenset[str]] = frozenset({"run_phase"})
+    records: ClassVar[RecordClasses] = (RunPhaseRecord,)
 
     def __init__(self) -> None:
         self._declared = ""
 
-    def feed(self, offset: int, rec: dict[str, Any]) -> None:
-        if rec.get("record_type") == "run_phase":
-            self._declared = str(rec.get("run_phase", ""))
+    def feed(self, offset: int, record: RunPhaseRecord) -> None:
+        self._declared = record.run_phase.value
 
     def value(self) -> str:
         return self._declared
@@ -658,17 +648,16 @@ class VerifyLedger(NamedTuple):
 
 
 class _Verify:
-    probes: ClassVar[frozenset[str]] = frozenset({"phase"})
+    records: ClassVar[RecordClasses] = (PhaseRecord,)
 
     def __init__(self) -> None:
         self._graded: dict[str, tuple[VerifyPass, VerifyReading]] = {}
         self._open: VerifyEnterView | None = None
         self._passes: list[VerifyPass] = []
 
-    def feed(self, offset: int, rec: dict[str, Any]) -> None:
-        if rec.get("record_type") != "phase" or rec.get("phase") != CampaignPhase.VERIFY:
+    def feed(self, offset: int, record: PhaseRecord) -> None:
+        if record.phase != CampaignPhase.VERIFY:
             return
-        record = PhaseRecord.model_validate(rec)
         match record.view:
             case VerifyEnterView() as entered:
                 self._open = entered
@@ -695,17 +684,14 @@ class _RoundSpend(NamedTuple):
 
 
 class _Spend:
-    probes: ClassVar[frozenset[str]] = frozenset({"token_usage"})
+    records: ClassVar[RecordClasses] = (TokenUsageRecord,)
 
     def __init__(self) -> None:
         self._by_round: dict[int, SpendRollup] = {}
         self._calls = 0
         self._worked_s = 0.0
 
-    def feed(self, offset: int, rec: dict[str, Any]) -> None:
-        if rec.get("record_type") != "token_usage":
-            return
-        usage = TokenUsageRecord.model_validate(rec)
+    def feed(self, offset: int, usage: TokenUsageRecord) -> None:
         self._by_round.setdefault(usage.spend_round, SpendRollup()).bank(usage)
         if not usage.cached:
             self._calls += 1
@@ -720,31 +706,27 @@ class _Spend:
 
 
 class _RunWiring:
-    probes: ClassVar[frozenset[str]] = frozenset({"run_wiring"})
+    records: ClassVar[RecordClasses] = (RunWiringRecord,)
 
     def __init__(self) -> None:
         self._found: RunWiringRecord | None = None
 
-    def feed(self, offset: int, rec: dict[str, Any]) -> None:
-        if rec.get("record_type") == "run_wiring":
-            self._found = RunWiringRecord.model_validate(rec)
+    def feed(self, offset: int, record: RunWiringRecord) -> None:
+        self._found = record
 
     def value(self) -> RunWiringRecord | None:
         return self._found
 
 
 class _Bench:
-    probes: ClassVar[frozenset[str]] = frozenset({"phase"})
+    records: ClassVar[RecordClasses] = (PhaseRecord,)
 
     def __init__(self) -> None:
         self._graded: list[BenchGradedView] = []
 
-    def feed(self, offset: int, rec: dict[str, Any]) -> None:
-        if rec.get("record_type") != "phase" or rec.get("phase") != CampaignPhase.BENCH:
+    def feed(self, offset: int, record: PhaseRecord) -> None:
+        if record.phase != CampaignPhase.BENCH or record.event != "graded":
             return
-        if rec.get("event") != "graded":
-            return
-        record = PhaseRecord.model_validate(rec)
         if isinstance(record.view, BenchGradedView):
             self._graded.append(record.view)
 
@@ -753,14 +735,13 @@ class _Bench:
 
 
 class _ScoringLock:
-    probes: ClassVar[frozenset[str]] = frozenset({"scoring_locked"})
+    records: ClassVar[RecordClasses] = (ScoringLockedRecord,)
 
     def __init__(self) -> None:
         self._found: ScoringLockedRecord | None = None
 
-    def feed(self, offset: int, rec: dict[str, Any]) -> None:
-        if rec.get("record_type") == "scoring_locked":
-            self._found = ScoringLockedRecord.model_validate(rec)
+    def feed(self, offset: int, record: ScoringLockedRecord) -> None:
+        self._found = record
 
     def value(self) -> ScoringLockedRecord | None:
         return self._found
@@ -857,11 +838,11 @@ def scan_ledger_progress(ledger_path: Path) -> Progress:
 
 
 def scan_ledger_ruler(spans: Iterable[LedgerSpan], dataset_name: str) -> DeltaRuler | None:
-    raw: dict[str, Any] | None = None
+    ruler: DeltaRuler | None = None
     for span in spans:
         held = LedgerIndex.of(span.path, LEDGER_FOLDS).view(_Rulers, span.until)
-        raw = held.get(dataset_name, raw)
-    return None if raw is None else DeltaRuler.model_validate(raw)
+        ruler = held.get(dataset_name, ruler)
+    return ruler
 
 
 def scan_standing_rounds(spans: Iterable[LedgerSpan]) -> StandingRounds:

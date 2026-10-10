@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from contextvars import ContextVar
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from pydantic import ConfigDict, Field
@@ -11,18 +12,15 @@ from pydantic import ConfigDict, Field
 from promptpotter.domain.results import CellFold
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.io import write_jsonl
-from promptpotter.infrastructure.store.measurement_archive import (
-    ANSWER_KEY,
-    answer_facts,
-    standing,
-)
+from promptpotter.infrastructure.store.measurement_archive import standing
 from promptpotter.infrastructure.store.read_model import iter_jsonl
 from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from promptpotter.domain.scoring import WalkedCell
+    from promptpotter.domain.sample import ArchiveEntry, FiledAnswer
+    from promptpotter.domain.scoring import MeasuredCell, WalkedCell
     from promptpotter.infrastructure.store.stores import Stores
 
 __all__ = [
@@ -33,7 +31,6 @@ __all__ = [
     "memory_scoped",
     "note_walked",
     "population_signatures",
-    "read_answer",
     "sample_fold_rows",
     "scope_memory_to_own_answers",
     "walked_answers",
@@ -59,24 +56,18 @@ def note_walked(answer: str) -> None:
         own.add(answer)
 
 
-def _remembered(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _remembered(answers: list[FiledAnswer]) -> list[FiledAnswer]:
     own = _OWN_ANSWERS.get()
-    return rows if own is None else [row for row in rows if row[ANSWER_KEY] in own]
+    return answers if own is None else [answer for answer in answers if answer.answer in own]
 
 
-def read_answer(stores: Stores, answer: str) -> dict[str, Any] | None:
-    """A fresh dict: a reader grades it in place."""
-    stored = stores.archive.answer(answer)
-    return None if stored is None else dict(stored)
-
-
-def walked_answers(stores: Stores, cells: Iterable[WalkedCell]) -> list[dict[str, Any]]:
+def walked_answers(stores: Stores, cells: Iterable[WalkedCell]) -> list[MeasuredCell]:
     """``sample_id`` is the WALK's: an answer filed by another dataset holds that dataset's slot."""
-    rows: list[dict[str, Any]] = []
+    walked: list[MeasuredCell] = []
     for _, sample_id, answer, _ in cells:
         if (stored := stores.archive.answer(answer)) is not None:
-            rows.append({**answer_facts(stored), "sample_id": sample_id})
-    return rows
+            walked.append(replace(stored.cell, sample_id=sample_id))
+    return walked
 
 
 def bench_reads(stores: Stores, *, dataset_name: str, sample_ids: frozenset[int]) -> int:
@@ -84,22 +75,18 @@ def bench_reads(stores: Stores, *, dataset_name: str, sample_ids: frozenset[int]
     graded: set[str] = set()
     for entry in stores.archive.list_all(dataset_name=dataset_name):
         if any(
-            row.get("role") == MeasurementRole.BENCH and row.get("sample_id") in sample_ids
-            for row in stores.archive.population(entry)
+            answer.role == MeasurementRole.BENCH and answer.cell.sample_id in sample_ids
+            for answer in stores.archive.population(entry)
         ):
-            graded.add(str(entry.get("prompt_fields_id") or entry["config_key"]))
+            graded.add(entry.individual)
     return len(graded)
 
 
-def load_population(stores: Stores, entry: dict[str, Any]) -> dict[str, Any] | None:
-    """A fresh dict per row: a reader grades them in place."""
-    rows = _remembered(stores.archive.population(entry))
-    if not rows:
-        return None
-    return {**entry, "measurements": [dict(row) for row in standing(rows).values()]}
+def load_population(stores: Stores, entry: ArchiveEntry) -> list[FiledAnswer]:
+    return list(standing(_remembered(stores.archive.population(entry))).values())
 
 
-def list_populations(stores: Stores, *, dataset_name: str | None = None) -> list[dict[str, Any]]:
+def list_populations(stores: Stores, *, dataset_name: str | None = None) -> list[ArchiveEntry]:
     entries = stores.archive.list_all(dataset_name=dataset_name)
     if not memory_scoped():
         return entries
@@ -113,7 +100,7 @@ def population_signatures(
     out: dict[str, list[list[Any]]] = {}
     for entry in stores.archive.list_all(dataset_name=dataset_name):
         held = stores.archive.signature(entry, sigs) or ()
-        out[entry["config_key"]] = [list(part) for part in held]
+        out[entry.config_key] = [list(part) for part in held]
     return out
 
 

@@ -35,7 +35,7 @@ def _trim(text: str, n: int) -> str:
 
 def sample_row(s: WalkedSample) -> DashboardSample:
     facts, grade = s.facts, s.grade
-    time_s, cost_s = facts.elapsed_s, facts.cost_s
+    cost_s = facts.cost_s
     status: SampleStatus = sample_status(facts, grade)
     # A verifier-graded row's `predicted` is the `NO_RESULT` sentinel: served EMPTY, not as an answer.
     ground_truth = _trim(facts.ground_truth, 20)
@@ -48,7 +48,6 @@ def sample_row(s: WalkedSample) -> DashboardSample:
         fitness=grade.fitness,
         terminal_node=terminal_node(facts),
         cached=facts.cached,
-        time_s=None if time_s is None else round(time_s, 2),
         cost_s=None if cost_s is None else round(cost_s, 2),
         predicted="" if graded_by_verifier else _trim(facts.predicted, 28),
         ground_truth=ground_truth,
@@ -127,17 +126,13 @@ def build_candidate_rows(
 
 
 def build_racing_block(buffer: RoundBuffer) -> RacingBlock | None:
-    """``leader_prob`` is the best standing among CANDIDATES, never a max over one snapshot's dict."""
     if not buffer.race_standings:
         return None
     ranked = sorted(buffer.race_standings.items(), key=lambda kv: -kv[1])
-    leader_prob = ranked[0][1]
     return RacingBlock(
         member=buffer.race_member,
         current_id=buffer.race_current_id,
         n_samples=buffer.race_n_samples,
-        leader_prob=leader_prob,
-        posterior_width=1.0 - leader_prob,
         top=[{"id": cid, "p_best": p} for cid, p in ranked[:5]],
     )
 

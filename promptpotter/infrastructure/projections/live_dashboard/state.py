@@ -71,8 +71,6 @@ class RacingBlock(StrictModel):
     member: str
     current_id: str
     n_samples: int
-    leader_prob: float
-    posterior_width: float
     top: list[dict[str, Any]]
 
 

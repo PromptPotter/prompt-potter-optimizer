@@ -10,18 +10,21 @@ from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple
 from pydantic import Field
 
 from promptpotter.domain.cycle_paths import CycleDir, WorkspaceDir
-from promptpotter.domain.run_records import SpendTombstoneRecord
+from promptpotter.domain.run_records import (
+    SpendHoldRecord,
+    SpendTombstoneRecord,
+    TokenUsageRecord,
+)
 from promptpotter.domain.spend import bill_is_floor, calls_rate_priced
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.ledger import CycleEventLog, ledger_chain
 from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import (
-    HOLD_TRAIL,
     HeldSends,
     LedgerIndex,
+    RecordClasses,
     held_tokens,
-    usage_row_figures,
 )
 from promptpotter.shared.clock import epoch_seconds
 
@@ -54,8 +57,8 @@ def iter_user_token_usage(*, ledgers: Iterable[Path], since: float, until: float
     ]
 
 
-def row_figures(rec: dict[str, Any]) -> tuple[float | None, float | None]:
-    return (0.0, None) if rec.get("cached") else usage_row_figures(rec)
+def row_figures(usage: TokenUsageRecord) -> tuple[float | None, float | None]:
+    return (0.0, None) if usage.cached else (usage.cost_usd, usage.rate_priced_usd)
 
 
 class UserSpend(NamedTuple):
@@ -143,9 +146,9 @@ class LifetimeSpend(StrictModel):
         )
 
 
-def _billed_of(rec: dict[str, Any]) -> UserSpend:
-    tokens = int(rec.get("input_tokens", 0)) + int(rec.get("output_tokens", 0))
-    billed, rate_priced = row_figures(rec)
+def _billed_of(usage: TokenUsageRecord) -> UserSpend:
+    tokens = usage.input_tokens + usage.output_tokens
+    billed, rate_priced = row_figures(usage)
     if billed is None and rate_priced is None:
         return UserSpend(0.0, tokens, tokens)
     return UserSpend(billed or 0.0, tokens, 0, rate_priced_usd=rate_priced or 0.0)
@@ -161,19 +164,17 @@ def _unreported_of(hold: dict[str, Any]) -> UserSpend:
 
 
 class _Billed:
-    probes: ClassVar[frozenset[str]] = HOLD_TRAIL
+    records: ClassVar[RecordClasses] = (SpendHoldRecord, TokenUsageRecord)
 
     def __init__(self) -> None:
         self._total = ZERO_SPEND
         self._held = HeldSends()
 
-    def feed(self, offset: int, rec: dict[str, Any]) -> None:
-        kind = rec.get("record_type")
-        if kind not in HOLD_TRAIL:
-            return
-        if kind == "token_usage" and not (rec.get("cached") or rec.get("mirrored")):
-            self._total = self._total.plus(_billed_of(rec))
-        self._held.track(rec)
+    def feed(self, offset: int, record: SpendHoldRecord | TokenUsageRecord) -> None:
+        if isinstance(record, TokenUsageRecord) and not (record.cached or record.mirrored):
+            self._total = self._total.plus(_billed_of(record))
+        # `HeldSends` is the spend book's too, which folds the lines as written.
+        self._held.track(record.model_dump(mode="json"))
 
     def value(self) -> tuple[UserSpend, UserSpend]:
         held = ZERO_SPEND
@@ -187,19 +188,25 @@ class _Billed:
 
 
 class _Tombstones:
-    probes: ClassVar[frozenset[str]] = frozenset({"spend_tombstone"})
+    records: ClassVar[RecordClasses] = (SpendTombstoneRecord,)
 
     def __init__(self) -> None:
         self._by_campaign: dict[str, UserSpend] = {}
         self._subjects: set[tuple[str, str]] = set()
 
-    def feed(self, offset: int, rec: dict[str, Any]) -> None:
-        if rec.get("record_type") != "spend_tombstone":
-            return
-        campaign_id = str(rec.get("campaign_id", ""))
-        held = self._by_campaign.get(campaign_id, ZERO_SPEND)
-        self._by_campaign[campaign_id] = held.plus(_tombstone_of(rec))
-        self._subjects.add((campaign_id, str(rec.get("cycle_id", ""))))
+    def feed(self, offset: int, banked: SpendTombstoneRecord) -> None:
+        held = self._by_campaign.get(banked.campaign_id, ZERO_SPEND)
+        self._by_campaign[banked.campaign_id] = held.plus(
+            UserSpend(
+                banked.used_usd,
+                banked.used_tokens,
+                banked.unpriced_tokens,
+                banked.unreported_usd,
+                banked.unreported_tokens,
+                banked.rate_priced_usd,
+            )
+        )
+        self._subjects.add((banked.campaign_id, banked.cycle_id))
 
     def value(self) -> tuple[dict[str, UserSpend], frozenset[tuple[str, str]]]:
         return dict(self._by_campaign), frozenset(self._subjects)
@@ -210,27 +217,26 @@ def _interned(value: object) -> str | None:
 
 
 class _Usage:
-    probes: ClassVar[frozenset[str]] = frozenset({"token_usage"})
+    records: ClassVar[RecordClasses] = (TokenUsageRecord,)
 
     def __init__(self) -> None:
         self._rows: list[UsageRow] = []
         self._held: tuple[UsageRow, ...] | None = None
 
-    def feed(self, offset: int, rec: dict[str, Any]) -> None:
-        ts = epoch_seconds(rec.get("timestamp"))
-        kind = _interned(rec.get("kind"))
-        if rec.get("record_type") != "token_usage" or ts is None or kind is None:
+    def feed(self, offset: int, usage: TokenUsageRecord) -> None:
+        ts = epoch_seconds(usage.timestamp)
+        if ts is None:
             return
-        billed, rate_priced = row_figures(rec)
+        billed, rate_priced = row_figures(usage)
         self._rows.append(
             UsageRow(
                 ts=ts,
                 billed_usd=billed,
                 rate_priced_usd=rate_priced,
-                tokens=int(rec.get("input_tokens", 0)) + int(rec.get("output_tokens", 0)),
-                model=_interned(rec.get("model")),
-                provider=_interned(rec.get("provider")),
-                kind=kind,
+                tokens=usage.input_tokens + usage.output_tokens,
+                model=_interned(usage.model),
+                provider=_interned(usage.provider),
+                kind=sys.intern(usage.kind),
             )
         )
         self._held = None
@@ -269,17 +275,6 @@ def history_spend(cycle_dir: CycleDir) -> UserSpend:
         billed, _ = LedgerIndex.of(span.path, _SPEND_FOLDS).view(_Billed, span.until)
         total = total.plus(billed)
     return total
-
-
-def _tombstone_of(rec: dict[str, Any]) -> UserSpend:
-    return UserSpend(
-        float(rec.get("used_usd", 0.0)),
-        int(rec.get("used_tokens", 0)),
-        int(rec.get("unpriced_tokens", 0)),
-        float(rec.get("unreported_usd", 0.0)),
-        int(rec.get("unreported_tokens", 0)),
-        float(rec.get("rate_priced_usd", 0.0)),
-    )
 
 
 def campaign_spend(campaigns: CampaignStore, campaign_id: str) -> UserSpend:

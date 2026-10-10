@@ -6,7 +6,7 @@ import re
 import threading
 from bisect import bisect_right
 from collections import OrderedDict
-from collections.abc import Callable, Hashable, Iterator, Sequence
+from collections.abc import Callable, Hashable, Iterable, Iterator, Sequence
 from itertools import islice
 from pathlib import Path
 from typing import Any, ClassVar, NamedTuple, Protocol, cast
@@ -15,6 +15,7 @@ from filelock import FileLock
 
 from promptpotter.config.settings import LOCK_TIMEOUT
 from promptpotter.domain.spend import bill_or_rate_usd
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.io import (
     append_line,
     ensure_parent_dir,
@@ -116,14 +117,30 @@ def file_sig(path: Path) -> Signature | None:
     return st.st_ino, st.st_size, st.st_mtime_ns
 
 
+RecordClasses = tuple[type[StrictModel], ...]
+
+
 class LedgerFold[V](Protocol):
-    """`probes` screens raw lines by substring (empty: every line), so `feed` re-asserts the type; `value` is a snapshot."""
+    """`feed` takes a line VALIDATED as one of `records`; an empty roster takes every line as written, which is what reads an envelope alone. `value` is a snapshot."""
 
-    probes: ClassVar[frozenset[str]]
+    records: ClassVar[RecordClasses]
 
-    def feed(self, offset: int, rec: dict[str, Any]) -> None: ...
+    def feed(self, offset: int, record: Any) -> None: ...
 
     def value(self) -> V: ...
+
+
+def _by_record_type(folds: Iterable[LedgerFold[Any]]) -> dict[str, type[StrictModel]]:
+    return {
+        model.model_fields["record_type"].default: model for fold in folds for model in fold.records
+    }
+
+
+def _model_of(
+    models: dict[str, type[StrictModel]], rec: dict[str, Any]
+) -> type[StrictModel] | None:
+    kind = rec.get("record_type")
+    return models.get(kind) if isinstance(kind, str) else None
 
 
 class LedgerSpan(NamedTuple):
@@ -154,7 +171,7 @@ class LedgerIndex:
 
     @classmethod
     def of(cls, path: Path, roster: _Roster) -> LedgerIndex:
-        shared = all(getattr(fold, "probes", None) for fold in roster)
+        shared = all(getattr(fold, "records", None) for fold in roster)
         key = (path, None if shared else roster)
         with cls._registry_lock:
             if shared:
@@ -173,9 +190,10 @@ class LedgerIndex:
         self._folds = [make() for make in roster]
         self._by_type = {type(fold): fold for fold in self._folds}
         self._stopped: dict[type[Any], Exception] = {}
-        probes = sorted({p for fold in self._folds for p in fold.probes})
-        self._screens_all = any(not fold.probes for fold in self._folds)
-        self._screen = re.compile(b'"(' + b"|".join(re.escape(p.encode()) for p in probes) + b')"')
+        self._models = _by_record_type(self._folds)
+        self._screens_all = any(not fold.records for fold in self._folds)
+        probes = sorted(p.encode() for p in self._models)
+        self._screen = re.compile(b'"(' + b"|".join(re.escape(p) for p in probes) + b')"')
         self._prefixes: dict[tuple[Callable[[], LedgerFold[Any]], int], LedgerFold[Any]] = {}
         self._sig: Signature | None = None
         self._bytes = 0
@@ -197,12 +215,17 @@ class LedgerIndex:
 
     def _fold_prefix(self, fold: Callable[[], LedgerFold[Any]], until: int) -> LedgerFold[Any]:
         made = fold()
-        probes = tuple(f'"{p}"'.encode() for p in made.probes)
+        models = _by_record_type([made])
+        probes = tuple(f'"{p}"'.encode() for p in models)
         for line, raw in enumerate(islice(_complete_lines(self._path, 0), until)):
             if probes and not any(p in raw for p in probes):
                 continue
-            if (rec := _record_of(raw)) is not None:
+            if (rec := _record_of(raw)) is None:
+                continue
+            if not models:
                 made.feed(line, rec)
+            elif (model := _model_of(models, rec)) is not None:
+                made.feed(line, model.model_validate(rec))
         return made
 
     def _refresh(self) -> None:
@@ -232,24 +255,29 @@ class LedgerIndex:
         self._sig = sig
 
     def _feed(self, raw: bytes) -> None:
-        hits = {m.decode() for m in self._screen.findall(raw)}
-        if not hits and not self._screens_all:
+        if not self._screens_all and self._screen.search(raw) is None:
             return
         rec = _record_of(raw)
         if rec is None:
             return
+        model = _model_of(self._models, rec)
+        record: StrictModel | None = None
         for fold in self._folds:
             if type(fold) in self._stopped:
                 continue
-            if not fold.probes or not hits.isdisjoint(fold.probes):
-                try:
+            try:
+                if not fold.records:
                     fold.feed(self._lines, rec)
-                except Exception as exc:
-                    self._stopped[type(fold)] = exc
+                elif model is not None and model in fold.records:
+                    if record is None:
+                        record = model.model_validate(rec)
+                    fold.feed(self._lines, record)
+            except Exception as exc:
+                self._stopped[type(fold)] = exc
 
 
 class _Clock:
-    probes: ClassVar[frozenset[str]] = frozenset()
+    records: ClassVar[RecordClasses] = ()
 
     def __init__(self) -> None:
         self._at: list[float] = []
@@ -361,6 +389,7 @@ __all__ = [
     "LedgerIndex",
     "LedgerSpan",
     "Moment",
+    "RecordClasses",
     "Signature",
     "append_row",
     "derived",

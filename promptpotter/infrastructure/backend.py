@@ -18,9 +18,7 @@ from promptpotter.infrastructure.docker_host import claim_machine, machine_step
 from promptpotter.infrastructure.llm.pricing import inline_route
 from promptpotter.infrastructure.llm.send_failure import failed_send
 from promptpotter.infrastructure.llm.send_pacing import (
-    CELL_WAIT_S,
     HELD_POLL_S,
-    SEND_ATTEMPTS,
     Backpressure,
     SendBudget,
     drawn_budget,
@@ -48,6 +46,7 @@ from promptpotter.shared.errors import (
 )
 
 _OUTAGE_POLL_S = 5.0
+_HTTP_TIMEOUT_S = 30.0
 
 # (reply data, refused before generation) -> (what it billed, `None` = reports nothing; caller's read).
 type CellBilling[S] = Callable[[dict[str, Any], bool], tuple[Reported | None, S]]
@@ -56,20 +55,8 @@ _ANSWERED_STATUSES = frozenset({422})
 CELL = CallLabel("backend_cell", "backend")
 
 if TYPE_CHECKING:
-    from promptpotter.connectors.protocol import (
-        Connector,
-        InProcessRun,
-        InProcessWorkload,
-        PromptDelivery,
-        SentSpendBound,
-    )
-    from promptpotter.domain.connector import (
-        CellEnvelopeSeconds,
-        ConnectorExecution,
-        MeasuredUnit,
-        SessionProtocol,
-        WireAdapter,
-    )
+    from promptpotter.connectors.protocol import Connector, InProcessRun, InProcessWorkload
+    from promptpotter.domain.connector import ConnectorExecution, MeasuredUnit
     from promptpotter.domain.pipeline_schema import NodeSpendBound, PipelineNode
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.value_tree import Delivery
@@ -78,43 +65,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "BackendClient",
-    "build_backend_client",
 ]
-
-
-def build_backend_client(
-    connector: Connector, base_url: str, *, workload: InProcessWorkload
-) -> BackendClient:
-    return BackendClient(
-        base_url,
-        wire_adapter=connector.wire_adapter,
-        session=connector.session_factory(),
-        execution=connector.execution,
-        in_process_run=connector.in_process_run,
-        workload=workload,
-        max_cells_in_flight=connector.max_cells_in_flight,
-        holds_own_sends=connector.holds_own_sends,
-        sent_spend_bound=connector.sent_spend_bound,
-        model_names_provider=connector.model_names_provider,
-        cancel_stops_billing=connector.cancel_stops_billing,
-        cell_envelope=connector.cell_envelope_s,
-        cell_attempts=connector.cell_attempts,
-        cell_wait_s=connector.cell_wait_s,
-        measured_unit=connector.measured_unit,
-        answer_key=connector.answer_key,
-        prompt_delivery=connector.prompt_delivery,
-        prompt_fields_as_node_params=connector.prompt_fields_as_node_params,
-        auth_token=connector.auth_token() if connector.auth_token else None,
-        machine_slots=(
-            MachineSlots(
-                default_jobs_dir() / "machine" / connector.name,
-                connector.max_cells_in_flight,
-                compose_overlay=connector.compose_overlay,
-            )
-            if connector.cells_hold_the_machine
-            else None
-        ),
-    )
 
 
 def _reply_data(resp: httpx.Response) -> dict[str, Any] | None:
@@ -197,111 +148,95 @@ class MachineSlots:
 
 
 class BackendClient:
-    def __init__(
-        self,
-        base_url: str,
-        *,
-        wire_adapter: WireAdapter,
-        session: SessionProtocol,
-        execution: ConnectorExecution = "remote_http",
-        in_process_run: InProcessRun | None = None,
-        workload: InProcessWorkload,
-        max_cells_in_flight: int = 2,
-        holds_own_sends: bool = False,
-        sent_spend_bound: SentSpendBound | None = None,
-        model_names_provider: bool = False,
-        cancel_stops_billing: bool = False,
-        cell_envelope: CellEnvelopeSeconds | None = None,
-        cell_attempts: int = SEND_ATTEMPTS,
-        cell_wait_s: float = CELL_WAIT_S,
-        measured_unit: MeasuredUnit = "sample",
-        answer_key: str | None = None,
-        prompt_delivery: PromptDelivery,
-        prompt_fields_as_node_params: bool = False,
-        timeout: float = 30.0,
-        auth_token: str | None = None,
-        machine_slots: MachineSlots | None = None,
-    ):
+    def __init__(self, connector: Connector, base_url: str, *, workload: InProcessWorkload) -> None:
+        self._connector = connector
         self.base_url = base_url.rstrip("/")
-        self.timeout = timeout
-        self._wire_adapter: WireAdapter = wire_adapter
-        self._guard: SessionProtocol = session
-        self._execution: ConnectorExecution = execution
-        self._in_process_run: InProcessRun | None = in_process_run
-        self.workload: InProcessWorkload = workload
-        self._max_cells_in_flight = max_cells_in_flight
-        self.holds_own_sends = holds_own_sends
-        self._sent_spend_bound = sent_spend_bound
-        self._model_names_provider = model_names_provider
-        self.cancel_stops_billing = cancel_stops_billing
-        self._cell_envelope: CellEnvelopeSeconds | None = cell_envelope
-        self.cell_attempts = cell_attempts
-        self._cell_wait_s = cell_wait_s
-        self._measured_unit: MeasuredUnit = measured_unit
-        self._prompt_delivery: PromptDelivery = prompt_delivery
-        self.prompt_fields_as_node_params = prompt_fields_as_node_params
-        self._answer_key: str | None = answer_key
-        self._auth_token = auth_token or ""
-        self._http: httpx.AsyncClient | None = None
+        self.workload = workload
         self.backpressure = Backpressure("cells")
-        self._machine_slots = machine_slots
+        self._guard = connector.session_factory()
+        self._http: httpx.AsyncClient | None = None
+        self._machine_slots = (
+            MachineSlots(
+                default_jobs_dir() / "machine" / connector.name,
+                connector.max_cells_in_flight,
+                compose_overlay=connector.compose_overlay,
+            )
+            if connector.cells_hold_the_machine
+            else None
+        )
+
+    @property
+    def execution(self) -> ConnectorExecution:
+        return self._connector.execution
+
+    @property
+    def max_cells_in_flight(self) -> int:
+        return self._connector.max_cells_in_flight
+
+    @property
+    def measured_unit(self) -> MeasuredUnit:
+        return self._connector.measured_unit
+
+    @property
+    def answer_key(self) -> str | None:
+        return self._connector.answer_key
+
+    @property
+    def holds_own_sends(self) -> bool:
+        return self._connector.holds_own_sends
+
+    @property
+    def cancel_stops_billing(self) -> bool:
+        return self._connector.cancel_stops_billing
+
+    @property
+    def cell_attempts(self) -> int:
+        return self._connector.cell_attempts
+
+    @property
+    def prompt_fields_as_node_params(self) -> bool:
+        return self._connector.prompt_fields_as_node_params
 
     @property
     def derives_spend_bounds(self) -> bool:
-        return self._sent_spend_bound is not None
+        return self._connector.sent_spend_bound is not None
+
+    def cell_envelope_s(
+        self, sample: Sample, pipeline_params: dict[str, Any] | None
+    ) -> float | None:
+        envelope = self._connector.cell_envelope_s
+        return None if envelope is None else envelope(sample, pipeline_params)
+
+    def prompt_delivery(self, pipeline_params: dict[str, Any] | None) -> Delivery:
+        return self._connector.prompt_delivery(pipeline_params)
 
     def node_spend_bound(self, node: PipelineNode, cfg: Mapping[str, Any]) -> NodeSpendBound | None:
-        if self._sent_spend_bound is not None:
-            return self._sent_spend_bound(node.name, cfg)
+        if (sent := self._connector.sent_spend_bound) is not None:
+            return sent(node.name, cfg)
         return node.spend_bound
 
     def priced_as(self, cfg: Mapping[str, Any]) -> tuple[str | None, str | None]:
         model, provider = cfg.get("model"), cfg.get("provider")
         if not isinstance(model, str):
             return None, None
-        if self._model_names_provider and provider is None:
+        if self._connector.model_names_provider and provider is None:
             return inline_route(model)
         return model, provider if isinstance(provider, str) else None
 
-    def _get_http(self) -> httpx.AsyncClient:
+    @property
+    def http(self) -> httpx.AsyncClient:
         if self._http is None or self._http.is_closed:
-            headers = {"Authorization": f"Bearer {self._auth_token}"} if self._auth_token else None
+            token = self._connector.auth_token() if self._connector.auth_token else None
             self._http = httpx.AsyncClient(
-                timeout=self.timeout, headers=headers, verify=tls_context()
+                timeout=_HTTP_TIMEOUT_S,
+                headers={"Authorization": f"Bearer {token}"} if token else None,
+                verify=tls_context(),
             )
         return self._http
 
-    @property
-    def http(self) -> httpx.AsyncClient:
-        return self._get_http()
-
-    @property
-    def execution(self) -> ConnectorExecution:
-        return self._execution
-
-    @property
-    def max_cells_in_flight(self) -> int:
-        return self._max_cells_in_flight
-
-    def cell_envelope_s(
-        self, sample: Sample, pipeline_params: dict[str, Any] | None
-    ) -> float | None:
-        return None if self._cell_envelope is None else self._cell_envelope(sample, pipeline_params)
-
-    def prompt_delivery(self, pipeline_params: dict[str, Any] | None) -> Delivery:
-        return self._prompt_delivery(pipeline_params)
-
-    @property
-    def measured_unit(self) -> MeasuredUnit:
-        return self._measured_unit
-
-    @property
-    def answer_key(self) -> str | None:
-        return self._answer_key
-
     async def _get_json(self, path: str, **params: Any) -> dict[str, Any]:
         kwargs: dict[str, Any] = {"params": params} if params else {}
-        resp = await self._get_http().get(
+        resp = await self.http.get(
             f"{self.base_url}{path}",
             **kwargs,
         )
@@ -316,7 +251,7 @@ class BackendClient:
 
     async def check_status(self) -> dict[str, Any]:
         try:
-            resp = await self._get_http().get(f"{self.base_url}/status")
+            resp = await self.http.get(f"{self.base_url}/status")
             resp.raise_for_status()
             status: dict[str, Any] = resp.json()
             return status
@@ -340,7 +275,7 @@ class BackendClient:
 
     async def _reachable_within(self, down_since: float) -> bool:
         abort = get_abort_check()
-        while time.monotonic() - down_since < self._cell_wait_s:
+        while time.monotonic() - down_since < self._connector.cell_wait_s:
             if abort is not None and abort():
                 raise asyncio.CancelledError("backend outage wait aborted")
             started = time.monotonic()
@@ -355,7 +290,7 @@ class BackendClient:
         return await self._get_json("/pipeline")
 
     async def init_session(self, terms: list[str]) -> dict[str, Any]:
-        return await self._guard.set_terms(self._get_http(), self.base_url, terms)
+        return await self._guard.set_terms(self.http, self.base_url, terms)
 
     async def run_query[S](
         self,
@@ -367,9 +302,9 @@ class BackendClient:
     ) -> tuple[dict[str, Any], S]:
         """Never resends a request the backend may still be working: a read timeout is terminal."""
         query = sample.query
-        payload = self._wire_adapter(query, pipeline_params)
+        payload = self._connector.wire_adapter(query, pipeline_params)
 
-        if self._execution != "remote_http":
+        if self._connector.execution != "remote_http":
             return await self._in_process_until_admitted(
                 sample, payload, bound=bound, billed=billed
             )
@@ -391,8 +326,11 @@ class BackendClient:
         bound: SendBound | None,
         billed: CellBilling[S],
     ) -> tuple[dict[str, Any], S]:
-        if self._in_process_run is None:
-            raise RuntimeError(f"execution={self._execution!r} but no in_process_run wired")
+        run = self._connector.in_process_run
+        if run is None:
+            raise RuntimeError(
+                f"execution={self._connector.execution!r} but no in_process_run wired"
+            )
         while True:
             # Backpressure before the slot: a cell held by a cooldown must hold no machine slot.
             machine = (
@@ -403,7 +341,7 @@ class BackendClient:
             async with self.backpressure.send() as ticket, machine:
                 try:
                     result = await self._in_process_cell(
-                        self._in_process_run, sample, payload, bound=bound, billed=billed
+                        run, sample, payload, bound=bound, billed=billed
                     )
                 except CellThrottledError as exc:
                     self.backpressure.throttled(ticket, headers=None, body=str(exc))
@@ -419,7 +357,7 @@ class BackendClient:
         bound: SendBound,
         billed: CellBilling[S],
     ) -> tuple[httpx.Response, dict[str, Any] | None, S]:
-        client = self._get_http()
+        client = self.http
         sends = _CellSends(query, drawn_budget())
         while True:
             wait: float | None = None
@@ -430,7 +368,7 @@ class BackendClient:
                         resp = await client.post(
                             f"{self.base_url}/matches",
                             json=payload,
-                            timeout=self._cell_wait_s,
+                            timeout=self._connector.cell_wait_s,
                         )
                     except httpx.TransportError as exc:
                         outcome = failed_send(exc)
@@ -511,9 +449,11 @@ class BackendClient:
             logger.warning(
                 "Backend unreachable (%s); waiting up to %.0fs for it to answer",
                 error_class,
-                self._cell_wait_s,
+                self._connector.cell_wait_s,
             )
-            sends.warn("transport_error", wait_s=self._cell_wait_s, error_class=error_class)
+            sends.warn(
+                "transport_error", wait_s=self._connector.cell_wait_s, error_class=error_class
+            )
         if not await self._reachable_within(sends.down_since):
             sends.warn("transport_error", wait_s=0.0, error_class=error_class, final=True)
             raise unreachable
@@ -529,7 +469,7 @@ class BackendClient:
     ) -> tuple[dict[str, Any], S]:
         with contextlib.ExitStack() as hold:
             admission: Admission | None = None
-            if bound is not None and self.holds_own_sends:
+            if bound is not None and self._connector.holds_own_sends:
                 hold.enter_context(reserved(CELL, bound))
             elif bound is not None:
                 admission = hold.enter_context(admitted(CELL, bound, model=None, provider=None))
