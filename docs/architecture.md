@@ -516,7 +516,7 @@ pre-flight gate blocks code that introduces one without §0 backing.
 
 Sole writer: per-cycle `CycleEventLog.append`. HITL collapses into it — `inherit_from(parent,
 offset)` mints a fork at any chosen ledger offset, which is the operator-steered fork. Commands
-with no cycle target (`domain/command_kinds.py::WorkspaceScopedKind`) write a sibling **workspace
+with no cycle target (a payload that is no `domain/command_kinds.py::CyclePayload`) write a sibling **workspace
 ledger** at `projects/{tenant}/.workspace/events.jsonl`, same shape and same single-writer
 discipline; per-cycle ledgers stay canonical for anything targeting a campaign or cycle.
 
@@ -566,7 +566,7 @@ file, and nothing reaches a run that is not a `CommandRecord` on its own ledger.
 #### Control-remote
 
 Command mutations, from a signed-in principal over HTTP or from a terminal verb that dispatches
-the kind (`cli/campaign_runner.py::CLI_VERB_FOR_KIND`). Every command is appended to the canonical
+the kind (`domain/command_kinds.py::CommandKind.cli_verb`). Every command is appended to the canonical
 per-cycle ledger as a `CommandRecord` by the sole `CommandDispatcher` (`application/commands/`)
 and acknowledged by a sibling `CommandAckRecord`. **The ack says who took it.** A command the
 dispatcher applies itself is acked `applied` there. One only a running loop can take — pause, skip,

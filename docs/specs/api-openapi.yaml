@@ -2066,9 +2066,9 @@ paths:
         cycle's inner fan-out through this same route, and an L5+ descendant
         through two. There is no depth-specific read.
 
-        `active_campaign_id` / `active_cycle_id` carry the RESOLVED store's own
+        `active_cycle_id` carries the RESOLVED store's own
         pointer: the active session at the top level, the inner loop running
-        right now inside a sandbox. They are reported raw — liveness is
+        right now inside a sandbox. It is reported raw — liveness is
         `CycleListEntry.run_phase`'s job, and a consumer asking "is the pointed
         cycle live?" reads that off `cycles[]` rather than having this route
         re-derive it.
@@ -2667,7 +2667,7 @@ paths:
         **There is no 404 on this route, deliberately.** "No active session" is a
         steady state — nothing launched yet, or the workspace was cleared — so it
         answers 200 with null ids, like `/cycles` does with
-        `active_campaign_id`/`active_cycle_id`. A 404 would classify as `gone` on the
+        `active_cycle_id`. A 404 would classify as `gone` on the
         client ("stop, this address is dead") and, on a route polled every 2 s from
         boot, would log a warning per tick for the whole idle life of the server.
       tags: [Sessions]
@@ -2903,7 +2903,7 @@ components:
           additionalProperties: true
 
     # Idempotent: a second POST with the same `Idempotency-Key` returns the same
-    # `command_id` + `correlation_id` pair.
+    # `command_id`.
     CommandAcceptedBody:
       $ref: 'openapi.generated.json#/components/schemas/CommandAcceptedBody'
 

@@ -5,7 +5,7 @@ or talks to a network except through one of these seams.
 
 ## Persistence — one ingress, two projections
 
-**Sole ingress:** the per-cycle `CycleEventLog` (`ledger.py`, `cycles/{cycle_id}/.runtime/ledger.jsonl`). **There is no second ingress, ever.** The writer-side API above it is `RunCallbacks` (`application/run_observers.py`), a typed event constructor over `CycleEventLog.append`. A fork's file holds only its own appends: the parent's prefix is WALKED from the cut its `CycleMintedRecord` names, never copied. `append` is not crash-atomic, and a rewrite goes tmp + `os.replace` keeping the line count, since the line index IS `sequence`.
+**Sole ingress:** the per-cycle `CycleEventLog` (`ledger.py`, `cycles/{cycle_id}/.runtime/ledger.jsonl`). **There is no second ingress, ever.** The writer-side API above it is `RunCallbacks` (`application/run_callbacks.py`), a typed event constructor over `CycleEventLog.append`. A fork's file holds only its own appends: the parent's prefix is WALKED from the cut its `CycleMintedRecord` names, never copied. `append` is not crash-atomic, and a rewrite goes tmp + `os.replace` keeping the line count, since the line index IS `sequence`.
 
 Per-call telemetry firing from deep inside the dispatch chain uses the `emit_*` shape instead (`llm/telemetry.py`) — same canonical ledger. **Which shape a new surface takes** — owned by [`../application/CLAUDE.md`](../application/CLAUDE.md) § Conventions.
 
@@ -37,14 +37,14 @@ coalesces bursts). And it flushes **immediately, with no debounce, at round boun
 (`projection.py::_flush_pending_persist`), so a round's file is current before the next begins.
 Do not relax the swap, remove those flushes, or add a path that lets the file lag past a completed
 round. The public round file carries the same atomicity, with
-`application/scoring/cells.py::RoundFileProjection` the tree's sole writer — a ledger subscriber,
+`application/scoring/closed_rounds.py::RoundFileProjection` the tree's sole writer — a ledger subscriber,
 so a close, a restated state and a rewind each move it from the record. The model **is** the
 round file, and it has no reader in this package or above it: the file is the operator's.
 
 **A round IS its last `RoundClosedRecord`, and the round file is a checkout of it.** The close
 carries the whole outcome and the archive address of every row; a resume, a fork, the index and
 every served or rendered read take the rounds that STAND off the ledger chain (`ledger_scan.py::scan_standing_rounds`, rows
-through `application/scoring/cells.py::closed_rounds`), never off the round files. A second writer of round truth — a file a
+through `application/scoring/closed_rounds.py::closed_rounds`), never off the round files. A second writer of round truth — a file a
 resume reads, a copy a fork carries — is the bug.
 
 **`LiveDashboardProjection` RESOLVES; it does not hand the browser scalars to join** from facts written on different ledger events. Five rules, each a field or a filter rather than a convention:

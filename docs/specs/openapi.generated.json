@@ -3296,25 +3296,9 @@
             "title": "Partly Hit",
             "type": "integer"
           },
-          "row_count": {
-            "title": "Row Count",
-            "type": "integer"
-          },
           "ruler": {
             "$ref": "#/components/schemas/RulerStanding",
-            "description": "The ONE δ ruler every `delta`, `pick_score` and `p_hat` below is read on: the ruler of the cycle `ruler_cycle_id` names in cycle and campaign scope; in dataset scope one anchored per request on the dataset's archived cells, which no θ was read on."
-          },
-          "ruler_cycle_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The cycle this scope reads, whose ruler `ruler` is and whose walks `cells` are: the requested cycle in cycle scope, the one campaign scope names (`application/scoring/cells.py::campaign_scope_cycle`). Null in dataset scope.",
-            "title": "Ruler Cycle Id"
+            "description": "The ONE δ ruler every `delta`, `pick_score` and `p_hat` below is read on: the ruler of the cycle the scope reads, whose walks `cells` are — the requested cycle in cycle scope, the one campaign scope names (`application/scoring/measurement_log.py::campaign_scope_cycle`); in dataset scope one anchored per request on the dataset's archived cells, which no θ was read on."
           },
           "samples": {
             "items": {
@@ -3345,10 +3329,8 @@
         "required": [
           "name",
           "scope",
-          "row_count",
           "order",
           "ruler",
-          "ruler_cycle_id",
           "samples",
           "candidates",
           "cells",
@@ -3458,23 +3440,10 @@
             "description": "Stable id of the appended `CommandRecord`.",
             "title": "Command Id",
             "type": "string"
-          },
-          "correlation_id": {
-            "description": "Echo of the request's `Idempotency-Key`.",
-            "title": "Correlation Id",
-            "type": "string"
-          },
-          "ledger_sequence": {
-            "description": "Offset at which the `CommandRecord` was appended.",
-            "minimum": 0.0,
-            "title": "Ledger Sequence",
-            "type": "integer"
           }
         },
         "required": [
-          "command_id",
-          "correlation_id",
-          "ledger_sequence"
+          "command_id"
         ],
         "title": "CommandAcceptedBody",
         "type": "object"
@@ -3512,10 +3481,6 @@
             },
             "title": "Datasets",
             "type": "array"
-          },
-          "n_rulers": {
-            "title": "N Rulers",
-            "type": "integer"
           },
           "note": {
             "title": "Note",
@@ -3558,7 +3523,6 @@
           "verdict",
           "reason",
           "datasets",
-          "n_rulers",
           "note",
           "roster_note"
         ],
@@ -4260,18 +4224,6 @@
       "CyclesResponse": {
         "additionalProperties": false,
         "properties": {
-          "active_campaign_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Active campaign per active_session.json; null when no session is active.",
-            "title": "Active Campaign Id"
-          },
           "active_cycle_id": {
             "anyOf": [
               {
@@ -4298,7 +4250,6 @@
         },
         "required": [
           "tenant_id",
-          "active_campaign_id",
           "active_cycle_id",
           "cycles"
         ],
@@ -4384,7 +4335,7 @@
                 "type": "null"
               }
             ],
-            "description": "Seconds producing this row COST, summed off `step_timings` — the half that survives the cache stamp. A replay occupies no clock, so `time_s` is 0.0 and this is what the cell took when it was measured; on a fresh row the two agree. Null where the row recorded no per-node timing.",
+            "description": "Seconds producing this row COST, summed off `step_timings` — what the cell took when it was measured, which survives the cache stamp where a replay's own clock reads 0.0. Null where the row recorded no per-node timing.",
             "title": "Cost S"
           },
           "fitness": {
@@ -4483,18 +4434,6 @@
             ],
             "description": "The deepest pipeline node the row reached; the tape badges it. Null where the row names none.",
             "title": "Terminal Node"
-          },
-          "time_s": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Recorded elapsed seconds. Null where the row never reached the pipeline — distinct from a cached replay's real 0.0.",
-            "title": "Time S"
           }
         },
         "required": [
@@ -4667,15 +4606,9 @@
             "description": "Mean graded fitness over those cells; null when none.",
             "title": "Mean Fitness"
           },
-          "n_hits": {
-            "default": 0,
-            "description": "Of those, how many maxed out the active scorer (`domain.scoring.is_hit`). Structurally 0 on a graded scorer; read `mean_fitness` there.",
-            "title": "N Hits",
-            "type": "integer"
-          },
           "n_measured": {
             "default": 0,
-            "description": "GRADED cells of this sample in scope (errored and unscored cells excluded) — the denominator of the two below.",
+            "description": "GRADED cells of this sample in scope (errored and unscored cells excluded) — the denominator of `mean_fitness` and `hit_spread`.",
             "title": "N Measured",
             "type": "integer"
           },
@@ -11249,10 +11182,6 @@
             "title": "Current Id",
             "type": "string"
           },
-          "leader_prob": {
-            "title": "Leader Prob",
-            "type": "number"
-          },
           "member": {
             "title": "Member",
             "type": "string"
@@ -11260,10 +11189,6 @@
           "n_samples": {
             "title": "N Samples",
             "type": "integer"
-          },
-          "posterior_width": {
-            "title": "Posterior Width",
-            "type": "number"
           },
           "top": {
             "items": {
@@ -11278,8 +11203,6 @@
           "member",
           "current_id",
           "n_samples",
-          "leader_prob",
-          "posterior_width",
           "top"
         ],
         "title": "RacingBlock",
@@ -13738,7 +13661,7 @@
         "type": "object"
       },
       "SheetRow": {
-        "description": "One row of a :class:`CellSheet` on the wire, as :meth:`GradedCell.wire` writes it.\n\nThe cell's facts beside its grade — ``unscored``, or ``fitness`` and ``objective``, never\nboth. ``status`` is the served round's mark and ``ground_truth_text`` its label as shown\n(``application/scoring/cells.py::served_round``), on every row it serves; a round file\ncarries neither.",
+        "description": "One row of a :class:`CellSheet` on the wire, as :meth:`GradedCell.wire` writes it.\n\nThe cell's facts beside its grade — ``unscored``, or ``fitness`` and ``objective``, never\nboth. ``status`` is the served round's mark and ``ground_truth_text`` its label as shown\n(``application/cycle_reads.py::served_round``), on every row it serves; a round file\ncarries neither.",
         "properties": {
           "answer": {
             "title": "Answer",
@@ -13751,10 +13674,6 @@
           "config_fundamental_skip": {
             "title": "Config Fundamental Skip",
             "type": "boolean"
-          },
-          "created_at": {
-            "title": "Created At",
-            "type": "string"
           },
           "degraded_obs_count": {
             "title": "Degraded Obs Count",
@@ -13852,10 +13771,6 @@
             "title": "Predicted",
             "type": "string"
           },
-          "provenance": {
-            "title": "Provenance",
-            "type": "string"
-          },
           "query": {
             "title": "Query",
             "type": "string"
@@ -13871,20 +13786,12 @@
             "title": "Retry Of Deprecated Cache",
             "type": "boolean"
           },
-          "role": {
-            "title": "Role",
-            "type": "string"
-          },
           "sample_id": {
             "title": "Sample Id",
             "type": "integer"
           },
           "sample_key": {
             "title": "Sample Key",
-            "type": "string"
-          },
-          "source": {
-            "title": "Source",
             "type": "string"
           },
           "status": {

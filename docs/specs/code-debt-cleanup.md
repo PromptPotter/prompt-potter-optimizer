@@ -170,7 +170,7 @@ served field behind one read facade; `presentation/` imports facades only, and n
 an untyped dict.
 - The CLI's own compositions still import `promptpotter.infrastructure` past its composition root
   (`build_stores`): `cli/campaign_runner.py` (the first-run check), `cli/commands/resume_command.py`
-  (`is_checkin`), `reset.py` and `cli/parsers.py` (`SHARED_CACHE_DIRS`),
+  (`is_checkin`), `reset.py` and `cli/commands/verbs.py` (`SHARED_CACHE_DIRS`),
   `new.py` (the dataset gateway), `launch.py` (the latest-readout pointer), `verify.py` (its own
   `descend_store`, where `pipeline_resolve.py::resolve_pipeline_at` descends for its caller), and
   beside the CLI `teleprompter.py`, `terminal/completion.py` and `admin_bot.py`. Each moves into

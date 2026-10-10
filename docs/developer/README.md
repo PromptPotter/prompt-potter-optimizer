@@ -127,25 +127,25 @@ measurements/                       MeasurementArchive
 
 **A cell is one configuration measuring one sample, and it keeps every answer it was given.** An answer is one appended line, never rewritten, addressed `{file_key}.{id}` and filed under the node-chain prefix that PRODUCED it (`terminal_node`), so every configuration sharing that prefix reads it there. A configuration × dataset's answers are its **population**; each reader declares its take over it, and the default — per sample the most recent answer, a live one over a failed or deprecated one — is `measurement_archive.py::standing`. The archive knows no run, campaign or round: a walk records the answers it took (`ScoredWalk.cells`) and the ledger names them.
 
-**Every row is FACTS, never a grade.** `file_answers` writes each row through `domain/scoring.py::measured_facts`, and the index carries no score, so every read path — replay, the δ ruler, the indexes, the cell reads, a bench pairing — grades rows under the `Scorer` it names (`Scorer.sheet`). Why a grade is not a fact: [`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md). Beside its facts an answer carries who filed it: `config_key`, `dataset_name`, `role`, `source`, its own `provenance` grade and `created_at`. **`role` is WHY the scoring pass ran** (`shared/measurement_context.py::MeasurementRole`): `panel` is a candidate's own evidence in the round's shared order and `origin` the campaign's C0, and every other one re-enters outside that order — `backfill` and `parent` a prior or the parent caught up for a paired comparison, `repair` a resume's re-measured hole, `overlap` and `verify` report-only passes that reach no election, floor, lift or acquisition, `bench` the held-out pass no optimizer reading folds. Which roles a reading may see is its `RoleScope`, part of its identity, so readings in two scopes never pair (`SCOPE_ROLES`).
+**Every row is FACTS, never a grade.** A filed answer is `domain/sample.py::FiledAnswer` — a `MeasuredCell` plus who filed it — and the index carries no score, so every read path — replay, the δ ruler, the indexes, the cell reads, a bench pairing — grades rows under the `Scorer` it names (`Scorer.sheet`). Why a grade is not a fact: [`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md). Beside its facts an answer carries who filed it: `config_key`, `dataset_name`, `role`, `source`, its own `provenance` grade and `created_at`. **`role` is WHY the scoring pass ran** (`shared/measurement_context.py::MeasurementRole`): `panel` is a candidate's own evidence in the round's shared order and `origin` the campaign's C0, and every other one re-enters outside that order — `backfill` and `parent` a prior or the parent caught up for a paired comparison, `repair` a resume's re-measured hole, `overlap` and `verify` report-only passes that reach no election, floor, lift or acquisition, `bench` the held-out pass no optimizer reading folds. Which roles a reading may see is its `RoleScope`, part of its identity, so readings in two scopes never pair (`SCOPE_ROLES`).
 
-**Write path:** a taken cell (`Walk.take`) → `archive_entry()` (`application/datasets/loaders.py`) names the configuration → `MeasurementArchive.file_answers(entry, rows)` appends one line per answer the cell did not hold and returns the addresses. **A replay files nothing** — the walk takes the answer already there. `reindex` rebuilds `index.jsonl` from `cells/` and `configs/`.
+**Write path:** a taken cell (`Walk.take`) → `archive_entry()` (`application/datasets/loaders.py`) names the configuration as a `domain/sample.py::ArchiveEntry` → `MeasurementArchive.file_answers(entry, graded, ...)` appends one line per answer the cell did not hold and returns the addresses. **A replay files nothing** — the walk takes the answer already there. `reindex` rebuilds `index.jsonl` from `cells/` and `configs/`.
 
 **Read paths:**
 
 - `load_population(stores, entry)` / `list_populations(stores, dataset_name=)` — the EVIDENCE read: a configuration's standing answers, memory-scoped for a controlled line.
 - `walked_answers(stores, {sample_id: answer})` — the rows one walk took, whatever its cells have been answered since.
-- `measurements_for_config(predicate)` — *"answers under configurations matching this subset"*, as `Measurement`s, ungraded.
+- `measurements_for_config(predicate)` — *"answers under configurations matching this subset"*, as `FiledAnswer`s, ungraded.
 
 The archive is tenant-global and **never backend-scoped** — no read or write takes a `backend_id`.
 
-**Schema:** the frozen dataclass `domain/sample.py::Measurement` — read its fields there.
+**Schema:** `domain/sample.py::FiledAnswer` (the answer) and `ArchiveEntry` (the index entry) — read their fields there.
 
 **Extension seams:**
 
 | Change | Files |
 |---|---|
-| New field on every measurement | `Measurement` (`domain/sample.py`) and `MeasurementArchive.measurements_for_config` (`infrastructure/store/measurement_archive.py`); a new STAMP beside the facts joins `PROVENANCE_KEYS` there |
+| New field on every measurement | A measured FACT joins `MeasuredCell` (`domain/scoring.py`); a STAMP beside the facts joins `FiledAnswer` (`domain/sample.py`) |
 | New retrieval query | Method on `MeasurementArchive` parallel to `measurements_for_config`. Pair with an index class if filtering must stay efficient. |
 | New derived index | Class folding each POPULATION into one row keyed by `config_key` and stamped with its signature, applied through ONE `replay_row()` both live and on replay; register on `AxisIndex.refresh()`. Persist via `archive_queries.write_sample_fold`'s shape — never a second mechanism |
 

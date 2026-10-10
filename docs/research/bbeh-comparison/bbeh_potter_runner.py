@@ -17,7 +17,6 @@ from promptpotter.application.embedded_run import open_session, run_campaign
 from promptpotter.application.jobs.launcher.mint_and_start import with_optimization
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
-from promptpotter.application.runner.entry import RunMode
 from promptpotter.application.scoring.cell_envelope import CellEnvelope
 from promptpotter.application.scoring.formula import SCORING_FUNCTIONS
 from promptpotter.application.scoring.sample_measurement import (
@@ -26,7 +25,7 @@ from promptpotter.application.scoring.sample_measurement import (
     cell_bound,
     priced_pairs,
 )
-from promptpotter.domain.launch_limits import LaunchLimits
+from promptpotter.domain.launch_limits import LaunchLimits, RunMode
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.sample import Sample
 from promptpotter.infrastructure.llm.spend_book import spending_under, unbounded_spend_book

@@ -295,9 +295,9 @@ spends, never mid-campaign — lives in the validator, not in the channel it arr
 ## The credential rides the connector
 
 **`Connector.auth_token() -> str | None` is the ONLY route by which a bearer token reaches
-the wire, and `build_backend_client(connector, base_url)` (`infrastructure/backend.py`) is
-the ONLY place a `BackendClient` is constructed** — it reads the token off the connector it
-was handed. Never name a credential at a construction site: a `settings.TERMNORM_TOKEN` passed
+the wire, and a `BackendClient` (`infrastructure/backend.py`) is built from the `Connector` it
+HOLDS** — it reads each declared capability off that connector where it is used, and a caller
+reads one off the client. Never name a credential at a construction site: a `settings.TERMNORM_TOKEN` passed
 there reaches whatever `remote_http` connector was resolved, POSTing TermNorm's secret to its host. An `in_process` connector has
 no wire, so declaring a token on one fails the registry guard.
 

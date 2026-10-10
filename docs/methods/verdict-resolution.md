@@ -37,7 +37,7 @@ P(hit_{c,s} = 1) = σ(θ_c − δ_s)
 
 Candidate ability × sample difficulty, fit jointly by MAP (alternating Newton on the sparse
 observation matrix, Laplace SEs, anchored to `mean(θ) == 0` for identifiability;
-`intelligence/exploration.py::fit_rasch`). That joint fit runs ONCE, at ruler lock — every reading
+`intelligence/rasch.py::fit_rasch`). That joint fit runs ONCE, at ruler lock — every reading
 after it holds δ fixed and solves θ alone (`::fit_theta_given_delta`), or the scale moves under the
 round it judges. Two consumers: `δ_s` selects samples and ranks hardness; `θ_c` is the
 **round-winner gate**.
@@ -345,7 +345,7 @@ would measuring `(c, s)` shift our point estimate of the best candidate?", close
 observations under Laplace.
 
 **The between-round pick spends the two terms separately, not summed** — no swap thresholds.
-`select_round_subset` (`intelligence/exploration.py`) ranks the whole bank on term 1 alone
+`select_round_subset` (`intelligence/rasch.py`) ranks the whole bank on term 1 alone
 (`adaptive_queue_mechanism.py::decision_order`) against the best θ among the arms in this race, so
 *exploit* falls out of the ranking (samples on the contested band `δ_s ≈ leader θ` sort to the
 top). *Explore* is a reserved tail rather than a term: `_with_ruler_learning` gives the last few
@@ -436,8 +436,8 @@ carry is served in its `DeltaState` (`domain/ruler.py`) with no δ, no pick scor
 never 0.0, which is a position on the scale. There is ONE file,
 `campaigns/{id}/cycles/{id}/hard_samples.json`, and a cycle that has not written one answers with
 its ledger's ruler over no cells. **Campaign scope names the cycle it reads**
-(`application/scoring/cells.py::campaign_scope_cycle`): its cells, δ, sample order and ruler are
-all that one cycle's, served as `CellsResponse.ruler_cycle_id`. Every surface reads the view in one ranking
+(`application/scoring/measurement_log.py::campaign_scope_cycle`): its cells, δ, sample order and ruler are
+all that one cycle's. Every surface reads the view in one ranking
 (`hard_sample_sorter.py::rank_hard_samples`). The active scoring set is in-memory only — restored
 on resume by re-running both mutations against the rebuilt observation history. **Dataset scope is
 never persisted**: it is cross-campaign, so no campaign owns it, and
@@ -454,7 +454,7 @@ holds no stamped ability, so it serves δ and no pick score, and ranks on diffic
   `::decision_information_gain` + `::delta_learning_gain`).
 - Round order — `::build_round_order`, called once per round by potter's sampler
   (`optimizers/potter/members.py::AdaptiveQueue.draw`).
-- Between-round subset pick — `intelligence/exploration.py::select_round_subset`, off the LOCKED
+- Between-round subset pick — `intelligence/rasch.py::select_round_subset`, off the LOCKED
   ruler (still **1PL**: feeding graduated discrimination `aₛ` in here is open,
   [`../specs/roadmap.md`](../specs/roadmap.md) § Fitness comparability).
 - Persisted view — `intelligence/hard_sample_sorter.py::build_hard_samples`, the one caller of

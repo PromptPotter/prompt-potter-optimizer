@@ -12,7 +12,7 @@ illegible; keeping them distinct, and never collapsing the hierarchy, is the who
 | Boundary | Kind | Enforced by | Failure response |
 |---|---|---|---|
 | **host-admin ↔ user** | Authorization (host privilege) | the operator-admin channel only (ADR-0004, chat-id lock) — no API-side capability | channel: ignored |
-| **owner ↔ delegate** | Authorization (capability) | one dispatcher gate (`_require_capability_for` over `CAP_FOR_KIND`) | 404 (existence-hiding) |
+| **owner ↔ delegate** | Authorization (capability) | one dispatcher gate (`_require_capability_for` over `CommandKind.capability`) | 404 (existence-hiding) |
 | **user ↔ user** | Tenancy (data isolation) | structural directory rooting + one `owned_campaign` ownership rule | 404 |
 | **loop ↔ everything** | OS privilege | systemd-hardened unit (kernel-enforced) | process denied (EACCES / cgroup) |
 
@@ -89,7 +89,7 @@ the bounded step verb** — owned by
 [ADR-0005](../adr/0005-delegated-principals-and-capability-scoping.md) §1 and §3–§6, with what is
 deferred in its §2 and §4; this page names only where each is enforced (the one-level rule at
 `grants.py::grant_principal`). The verb gate is
-`_require_capability_for` over `CAP_FOR_KIND` at the dispatcher's `_record_and_apply`
+`_require_capability_for` over `CommandKind.capability` at the dispatcher's `_record_and_apply`
 (`application/commands/dispatcher.py`), answering the same 404; attenuation is clamped at read by
 `infrastructure/identity/grants.py::resolve_effective_capabilities` under
 `middleware/oidc.py::_delegated_identity`, so a hand-edited over-grant in the sealed

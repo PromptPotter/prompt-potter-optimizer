@@ -62,7 +62,7 @@ A grant is keyed on **(sub-principal, channel)** rather than on the principal al
 
 ### 3. Capability → verb ladder (one enforcement seam) — SHIPPED
 
-Every control-plane verb requires a capability, checked in **one place**: the command dispatcher tests `has_capability(identity, CAP_FOR_KIND[kind])` at the single `_record_and_apply` chokepoint every dispatch method funnels through. An import-time exhaustiveness assert derives the closed kind set from the `*Kind` `Literal`s so the map cannot drift. Seven capabilities are enumerated once as `CAMPAIGN_CAP_BY_NAME` in `shared/identity.py`, and every first-class principal holds the full owner set, so the gate is a no-op for single-owner installs. Denial is **404**, not 403 — existence-hiding.
+Every control-plane verb requires a capability, checked in **one place**: the command dispatcher tests `require_capability(identity, kind.capability)` at the single `_record_and_apply` chokepoint every dispatch method funnels through. The capability is a column of the kind's own row (`domain/command_kinds.py::CommandKind`), so no kind exists without one. Seven capabilities are enumerated once as `CAMPAIGN_CAP_BY_NAME` in `shared/identity.py`, and every first-class principal holds the full owner set, so the gate is a no-op for single-owner installs. Denial is **404**, not 403 — existence-hiding.
 
 | Cap | Gates (real command kinds) | Kind |
 |---|---|---|
@@ -78,7 +78,7 @@ The ladder is the point: a delegate with `campaign.step` but **not** `campaign.r
 
 Three deltas from the original strawman, all deliberate. `fork-cycle` sits at **run**, not step, because an operator fork mints *and launches* an autonomous continuation. `register-backend` folds into `campaign.create` rather than earning its own cap — a delegate that may author campaigns may register the backend they run against. And `replace-dataset` sits at **lifecycle**, not create, because a dataset slug is part of the measurement cache key, so repointing one re-addresses every campaign that already measured against it.
 
-**A route is the only way to add a verb, so the route set is what the ladder is checked against.** `CAP_FOR_KIND`'s exhaustiveness raise can only see kinds that dispatch, so a route calling its handler directly would read as covered while gated by nothing and recorded nowhere. `routers/commands.py` therefore raises at import when a typed route names a kind outside `ALL_DISPATCHED_KINDS`, which makes the gap unwritable rather than merely known.
+**A route is the only way to add a verb, so the route set is what the ladder is checked against.** A capability column covers only kinds that dispatch, so a route calling its handler directly would read as covered while gated by nothing and recorded nowhere. `routers/commands.py` therefore paths every typed route by its `CommandKind` member, which makes the gap unwritable rather than merely known.
 
 ### 4. Babysat — a lineage-subtree tag, escapable by forking clean
 

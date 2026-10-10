@@ -24,8 +24,8 @@ tests. Add new ones the same way — never as a `test_structure` scan.
 | A resume / decision checkpoint | [§4](#4-a-resume--decision-checkpoint-kind) | Import-time: `decisions.py` + `replayers.py` asserts |
 | A connector (backend) | [§5](#5-a-connector-backend) | Init-time: the `registered()` registry guard |
 | An optimizer node | [§6](#6-an-optimizer-node) | `validate_template()` at prompt load |
-| A CLI verb | [§7](#7-a-cli-verb) | Import-time: the `COMMANDS` ↔ `parser_verbs` assert |
-| A control-plane command kind | [§8](#8-a-control-plane-command-kind) | Import-time: four asserts over `ALL_DISPATCHED_KINDS` — cap, handler, payload model, **and the CLI verb** |
+| A CLI verb | [§7](#7-a-cli-verb) | `gate.py --only handler-tables` over `commands/verbs.py::VERBS` |
+| A control-plane command kind | [§8](#8-a-control-plane-command-kind) | None to satisfy: cap, handler **and the CLI verb** are columns of the kind's one row, its payload model the class named for it |
 | A served READ (a GET) | [§9](#9-a-served-read) | `gate.py --only openapi` / `--only ts-types`, but **only once the route carries a `response_model`** — a read without one is invisible to both |
 | A measurement field | [developer README §4](README.md#4-cross-run-memory) | **Arm-time where a connector declares the key** (`Connector.required_observation_keys`), otherwise nothing — it is dropped at `sample_measurement.py::measure_sample` in silence. Declare it on `domain/scoring.py::QueryMeasurement` / `PipelineData`; a `pipeline_data` key also needs `_INFRA_KEYS` or a dataset `observation_mapping`, plus the compaction asserts beside those types |
 
@@ -39,7 +39,7 @@ site holds an explicit ledger handle.
 
 | If the fact originates… | Use | Why |
 |---|---|---|
-| in the **runner**, which owns the observers and threads per-cycle `ViewContext` state across events (phase enter/exit, round complete, the per-candidate / per-sample arm-walk records) | **`RunCallbacks`** method (`application/run_observers.py`) | The runner has the ledger as an explicit dependency and the phase path is **stateful** — the view builders read a `ViewContext` carried round-over-round. Owned state, explicit injection. |
+| in the **runner**, which owns the observers and threads per-cycle `ViewContext` state across events (phase enter/exit, round complete, the per-candidate / per-sample arm-walk records) | **`RunCallbacks`** method (`application/run_callbacks.py`) | The runner has the ledger as an explicit dependency and the phase path is **stateful** — the view builders read a `ViewContext` carried round-over-round. Owned state, explicit injection. |
 | **deep in the async LLM / dispatch chain**, with no ledger handle in scope (token usage, an LLM-call marker, a command ack, a crash, a self-healed round warning) | **`emit_*`** helper (`infrastructure/llm/telemetry.py`) | Stateless: kwargs in, append out. Reads the ledger from the `_CYCLE_LEDGER` ContextVar (set by `build_run_observers`, reset by `drain_all`) — the ContextVar exists *because* these sites can't be handed a handle. |
 
 Do **not** fold one into the other: routing the runner's `RunCallbacks` through
@@ -296,9 +296,9 @@ stands, and the [offline run](offline-run.md) runs it as the proof.
 A new `python -m promptpotter <verb>`. The CLI is a **thin shell**: parse, call into
 `application/`, format. Business logic that lands here is drift.
 
-One module under `presentation/cli/commands/`, one argparse subparser, one `COMMANDS` row —
-the wiring is owned by [`presentation/CLAUDE.md`](../../promptpotter/presentation/CLAUDE.md)
-§ Layout, and an import-time check pins the parser and the table together. Prefer a module over a
+One module under `presentation/cli/commands/` and one `Verb` in `commands/verbs.py::VERBS` — its
+name, help, arguments and handler together, the handler NAMED (`module:function`) so `--help`
+imports no verb. The parser and the `COMMANDS` dispatch are both derived from that roster. Prefer a module over a
 subpackage: `lifecycle.py` holds the thin `CommandDispatcher` shells in one file, because a
 directory per verb bought a reader a hop to learn there was nothing to choose. A shell that
 needs an import the others do not is its own module (`bench.py`), so the rest do not pay for it.
@@ -321,36 +321,37 @@ subject's `;in=`): every other cycle-scoped kind declares an `inner_refusal`
 (`application/commands/payloads.py`), so its verb takes no such flag. Raw-file ingest is
 `new <file.csv>`, not an `ingest` verb.
 
-**Guard:** the import-time check named above — `COMMANDS.keys()` must equal
-`parser_verbs(build_parser())`. If the verb answers a `/commands/{kind}`, §8 owns the other half.
+**Guard:** `gate.py --only handler-tables` resolves every named handler, and `--only help-imports`
+keeps the roster import-light. If the verb answers a `/commands/{kind}`, §8 owns the other half.
 
 ---
 
 ## 8. A control-plane command kind
 
-A new `POST /commands/{kind}`. **The vocabulary is `domain/command_kinds.py`** — five `Literal`
-aliases by scope, and `ALL_DISPATCHED_KINDS` derived from them. It sits in `domain/` and not
-beside the dispatcher because the parties that must agree on it cannot all afford to import the
-dispatcher: the CLI resolves command bodies lazily so `--help` does not pay for the application
-tree, and `scripts/build_ts_types.py` emits the `CommandKind` union from these names alone.
+A new `POST /commands/{kind}`. **A kind is ONE row of `domain/command_kinds.py::CommandKind`**,
+and every table a reader wants is derived from it. It sits in `domain/` and not beside the
+dispatcher because the parties that read it cannot all afford to import the dispatcher: the CLI
+resolves command bodies lazily so `--help` does not pay for the application tree, and a ledger
+fold reads which kinds a running loop takes.
 
-Join the right `Literal` and four import-time asserts start demanding the rest of the wiring:
-
-| Add | Where | The assert that demands it |
+| The row's column | What it is | What refuses a wrong one |
 |---|---|---|
-| a capability | `CAP_FOR_KIND` (`application/commands/dispatcher.py`) | `set(CAP_FOR_KIND) != ALL_DISPATCHED_KINDS` — a kind with no cap is a silent unguarded verb |
-| a handler | `HANDLER_FOR_KIND` (same file) — `module:handler`, in the `application/commands/` module named for what the kind does; the dispatcher imports it when the kind is dispatched, never at its own import | the same loop, beside the capability's |
-| a payload model | `PAYLOAD_MODEL_FOR_KIND` (`application/commands/payloads.py`) | the sibling raise beside it |
-| **the terminal's half** | `CLI_VERB_FOR_KIND` (`cli/campaign_runner.py`) | totality over `ALL_DISPATCHED_KINDS`, plus every named verb being a real `COMMANDS` key |
+| the kind | the wire name; its payload model is the class NAMED for it (`CommandKind.payload_name`), in `application/commands/payloads.py` — or beside the row, under `LoopPayload`, where only a running loop takes it | `payloads.py` fails at import on a kind with no model |
+| `handler` | `module:handler`, in the `application/commands/` module named for what the kind does; the dispatcher imports it when the kind is dispatched, never at its own import | `gate.py --only handler-tables` |
+| `capability` | the rung `_require_capability_for` asks | the row cannot be written without one |
+| **`cli_verb`** | the terminal verb that reaches it | `cli/campaign_runner.py` fails at import on a verb that is no `COMMANDS` key |
 
-`CLI_VERB_FOR_KIND` is the `<entry-point-parity>` guard. Its value is either
+The payload's address base is its target ledger (`CyclePayload`, `CampaignPayload`, a check-in's,
+or a bare `CommandPayload` for the workspace), and `routers/commands.py` routes on it.
+
+`cli_verb` is the `<entry-point-parity>` guard. Its value is either
 a CLI verb or `None` — and `None` is a **declaration**, not an escape hatch. Exactly one exists
 (`set-sample-lookahead`, whose absence from the terminal is the contract; root `CLAUDE.md`
 § Conventions). Writing a second one is a design decision with a reason, not a wiring shortcut.
 
 Then declare it on the wire: `docs/specs/api-openapi.yaml`, *before* the handler lands
 (root `CLAUDE.md` § Pre-flight gate). The router needs nothing — `_WIRED_KINDS` is
-`ALL_DISPATCHED_KINDS` minus the typed routes, so a new kind is wired by default and staying
+every kind minus the typed routes, so a new kind is wired by default and staying
 *unwired* is what has to be written down.
 
 ---

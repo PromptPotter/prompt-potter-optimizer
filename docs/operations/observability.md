@@ -33,7 +33,7 @@ An optimizer's eliminator emits a per-sample standing for every candidate as a `
 
 | Channel | Path | Format |
 |---|---|---|
-| Live dashboard | `dashboard.json::current_round.racing` — `{member, current_id, n_samples, leader_prob, posterior_width, top}`, null before a reading | scalar floats + a top-5 list |
+| Live dashboard | `dashboard.json::current_round.racing` — `{member, current_id, n_samples, top}`, null before a reading | a top-5 list, leader first |
 | Run readout | `cycles/{cycle_id}/readout.log` at every entry point; the CLI and a notebook passing `readout_sink` also see it on stdout | one line per decision-grade reading as the race runs — `pobb: P(best)=44.0% @ q14  vs hardest=…`; a block race prints what each close decided instead — `block 1/4: 6 raced · cut C1.3 · 5 survive`. No cross-arm P(best) line at round close: each reading is one arm against its own priors |
 | Append-only stream | `cycles/{cycle_id}/.runtime/streams/round_NNNN_{member}.jsonl` | `{round, sample_idx, current_id, n_samples, p_best, p_best_delta}` |
 | Round digest | `log.md` § P(best) trajectory | per-candidate sparkline + final %, rows named by label |

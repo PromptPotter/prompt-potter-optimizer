@@ -156,7 +156,7 @@ nothing resolves to `site-packages/`: `pip` deletes there on upgrade.
 
 ## 5. CLI flags — `new` and `resume`
 
-`python -m promptpotter new <name>` and `python -m promptpotter resume` are the loop-mint verbs; lifecycle, run-control, diagnostic and maintenance verbs exist beside them. **The flag set is `presentation/cli/parsers.py`** and what each does to the tree is [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md)'s — a table here is one `--help` away from its source and has drifted from it before. What v1 promises is that the two verbs, and the flags that file declares for them, keep their meanings.
+`python -m promptpotter new <name>` and `python -m promptpotter resume` are the loop-mint verbs; lifecycle, run-control, diagnostic and maintenance verbs exist beside them. **The flag set is `presentation/cli/commands/verbs.py`** and what each does to the tree is [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md)'s — a table here is one `--help` away from its source and has drifted from it before. What v1 promises is that the two verbs, and the flags that file declares for them, keep their meanings.
 
 Two behaviours a fork may rely on, neither of them readable off `--help`:
 
@@ -181,7 +181,7 @@ result = await run_campaign(session, train_data, campaign_config, *, readout_sin
 ceiling=SpendCeilings(usd=…, tokens=…))`, the model the CLI flags and the `start-run` payload build; a
 ceiling it declares sets the run's over the campaign's own (no admission — the host program holds no
 slot), and `LaunchLimits()` declares none. `mode`
-is `runner/entry.py::RunMode`, and `RunMode()` is a plain run.
+is `domain/launch_limits.py::RunMode`, the shape the `start-run` payload carries, and `RunMode()` is a plain run.
 
 Two steps rather than one because every caller does its own work between them. It mints through
 the same `mint_framed_cycle` prologue `new` and the web mint run, and scores the origin inside

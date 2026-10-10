@@ -13,7 +13,7 @@ its own prompts, at bounded and visible cost.
 ## The measurand
 
 `mean_round_delta` — the MEAN, over the inner rounds, of the parent each round **adopted**, minus the
-origin, in logits on one ability ruler (`exploration.py::parent_level_trajectory`). `campaign.yaml::scoring.per_sample`
+origin, in logits on one ability ruler (`rasch.py::parent_level_trajectory`). `campaign.yaml::scoring.per_sample`
 re-anchors it `(x+1)/3`: linear, clipping nothing in the banked range, so the paired estimator's effect × 3
 IS the mean logit lift — a number to read, not merely to order by. `scoring.per_cell` then weighs each cell
 by its wall clock against a fixed anchor; the reason is the comment beside it in `campaign.yaml`.
