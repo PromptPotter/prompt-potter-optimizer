@@ -40,8 +40,7 @@ campaign_config:
     elimination_n_min: 4
     # The ceiling the browser walk runs under. It is a STOP, not a forecast: the fixture is
     # built to come in far below it, and the run halting here means the geometry drifted.
-    spend_budget_usd: 0.05
-    token_budget: null
+    ceiling: {usd: 0.05, tokens: null}
     # Potter's knobs — the overlay on its manifest's nodes (assets/optimizers/potter/).
     nodes:
       # = the panel size in inner_tasks.yaml. One cell.

@@ -15,7 +15,7 @@ campaign_config:
     max_rounds: 6
     degradation_threshold: 0.4
     # The ceiling the operator set for the six-round Qwen campaign on s10.
-    spend_budget_usd: 7.50
+    ceiling: {usd: 7.50}
     # Potter's knobs — the overlay on its manifest's nodes (assets/optimizers/potter/).
     nodes:
       adaptive_queue:

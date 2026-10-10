@@ -11,7 +11,7 @@ campaign_config:
   # pick where an axis is open, and what a human may steer to un-tainted where it is not. A
   # `param_allowed_values` entry REPLACES the node's own list rather than intersecting with it
   # (`PipelineSchema.narrow`), so this file may name a model the manifest predates. Identity is
-  # unaffected: `connectors/promptpotter.py::_identity_config` hashes `config` only, so an
+  # unaffected: `runner/inner/connector.py::_identity_config` hashes `config` only, so an
   # `optimizer:` edit voids no banked panel.
   optimizer_narrowing:
     l1_generate: &pp_self_models
@@ -65,7 +65,7 @@ campaign_config:
   exclude_nodes: []
   pipeline_overlay: {}
   optimization:
-    # Priced against `spend_budget_usd`, not intuition: C0 costs ~$0.47 for the 6-cell panel and a
+    # Priced against `ceiling.usd`, not intuition: C0 costs ~$0.47 for the 6-cell panel and a
     # 3-variant round runs ~2.3 arms to completion (PoBB refunds the rest), so an optimizing round
     # is ~$1.08. 4 lands at ~$3.7 of the $5.00 ceiling; 5 would halt mid-round on budget rather
     # than on the cap.
@@ -83,8 +83,7 @@ campaign_config:
     # rejects most real wins.
     degradation_threshold: 0.4
     elimination_n_min: 4
-    spend_budget_usd: 5.0
-    token_budget: null
+    ceiling: {usd: 5.0, tokens: null}
     # Potter's knobs — the overlay on its manifest's nodes (assets/optimizers/potter/).
     nodes:
       # = the panel size in inner_tasks.yaml, which run init refuses to differ. Above it the
@@ -117,7 +116,7 @@ campaign_config:
           epsilon: 0.30
       escalation:
         config:
-          # No `lives`, and its absence is deliberate rather than an omission. It read
+          # No `optimization.lives`, and its absence is deliberate rather than an omission. It read
           # `start: 2` against `max_rounds: 2`, so the bank could not reach zero before the
           # calendar did: hearts NEVER bound, they only relabelled the stop. `af6252` stopped
           # `lives_exhausted` on round 2, which is also exactly where `max_rounds` would have

@@ -25,16 +25,16 @@ campaign_config:
   exclude_nodes: []
   pipeline_overlay: {}
   # `justlogic-d234`'s split, value for value, so the search and demo pools are that dataset's
-  # rows. The bench is the 100 it ranks plus the bank's 900 bench-only rows (`dataset.md`).
+  # rows. The bench is the 30 it ranks plus the bank's 900 bench-only rows (`dataset.md`).
   dataset_split:
-    bench: 100
+    bench: 30
     demo: 50
   optimization:
     max_rounds: 5
     degradation_threshold: 0.4
     elimination_n_min: 6
     # The head-to-head budget: one peer round at its paper's own ranges fits under it.
-    spend_budget_usd: 0.3
+    ceiling: {usd: 0.3}
     # Potter's knobs — the overlay on its manifest's nodes (assets/optimizers/potter/).
     nodes:
       adaptive_queue:
