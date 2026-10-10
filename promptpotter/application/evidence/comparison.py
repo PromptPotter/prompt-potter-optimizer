@@ -122,7 +122,6 @@ class Comparability(StrictModel):
     verdict: bool | None
     reason: ComparabilityReason
     datasets: list[str]
-    n_rulers: int
     note: str
     roster_note: str | None
 
@@ -342,9 +341,6 @@ def comparability(rows: list[SubjectReading]) -> Comparability:
         verdict=verdict,
         reason=reason,
         datasets=sorted({r.dataset_name for r in rows if r.dataset_name}),
-        n_rulers=len(
-            {r.ability.ruler_id for r in rows if r.ability and r.ability.ruler_id is not None}
-        ),
         note=note,
         roster_note=(
             next(iter(notes))

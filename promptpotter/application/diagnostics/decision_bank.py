@@ -26,10 +26,10 @@ from promptpotter.application.optimizer_manifest import (
     set_optimizer_prompt_overrides,
 )
 from promptpotter.application.optimizers.nodes import Panel, Proposals, RoundContext
-from promptpotter.application.run_observers import RunCallbacks
+from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.runner.round import propose_population, round_plan
 from promptpotter.application.scoring.candidate_report import fatal_validation_failures
-from promptpotter.application.scoring.cells import closed_rounds
+from promptpotter.application.scoring.closed_rounds import closed_rounds
 from promptpotter.application.scoring.paired import (
     MemberRows,
     fresh_cells,

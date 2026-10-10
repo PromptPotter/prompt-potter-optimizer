@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.bench.difficulty import calibrate_delta_ruler
@@ -12,7 +12,6 @@ from promptpotter.application.datasets.authored import (
     dataset_campaign_path,
     dataset_scorer,
     load_dataset_campaign_config,
-    scorer_of,
 )
 from promptpotter.application.datasets.loaders import samples_from_dicts
 from promptpotter.application.intelligence.hard_sample_archive import build_archive_observations
@@ -24,8 +23,8 @@ from promptpotter.application.intelligence.hard_sample_sorter import (
 from promptpotter.application.pipeline_resolve import (
     dataset_pipeline_declaration,
     experiment_outside_run,
-    resolve_campaign_config,
 )
+from promptpotter.application.scoring.closed_rounds import campaign_scorer, walked_rows
 from promptpotter.application.scoring.sample_measurement import interpolate_prompt
 from promptpotter.domain.cells import (
     Cell,
@@ -40,34 +39,19 @@ from promptpotter.domain.cells import (
 )
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, CyclePath
 from promptpotter.domain.dashboard_rows import sample_status
-from promptpotter.domain.paired_reading import instrument_of
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
-from promptpotter.domain.results import (
-    HardSampleOrder,
-    RoundOutcome,
-    RoundResult,
-    individual_cells,
-)
+from promptpotter.domain.results import HardSampleOrder, individual_cells
 from promptpotter.domain.scoring import (
     CellSheet,
-    MeasuredCell,
     SampleStatus,
-    WalkedCell,
     ground_truth_text,
     is_hit,
     is_verifier_graded,
 )
 from promptpotter.domain.spend import TokenAccount
 from promptpotter.infrastructure.ledger import ledger_chain
-from promptpotter.infrastructure.projections.base import Projection
-from promptpotter.infrastructure.store.archive_queries import (
-    list_populations,
-    load_population,
-    read_answer,
-    walked_answers,
-)
+from promptpotter.infrastructure.store.archive_queries import list_populations, load_population
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
-    StandingRound,
     scan_ledger_walks,
     scan_standing_rounds,
 )
@@ -76,45 +60,22 @@ from promptpotter.infrastructure.store.dataset_access import (
     readable_dataset_dir,
     readable_dataset_rows,
 )
-from promptpotter.infrastructure.store.io import unlink_robust, write_json
-from promptpotter.infrastructure.store.layout import (
-    ROUND_GLOB,
-    CycleLayout,
-    cycle_dir_for,
-    round_number,
-)
-from promptpotter.infrastructure.store.read_model import LedgerSpan, Moment, derived
+from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
+from promptpotter.infrastructure.store.read_model import Moment, derived
 from promptpotter.infrastructure.store.stores import Stores, resolve_cycle_path
-from promptpotter.shared.errors import (
-    BadRequestError,
-    NotFoundError,
-    PayloadInvalidError,
-    graceful,
-)
+from promptpotter.shared.errors import BadRequestError, NotFoundError, PayloadInvalidError
 from promptpotter.shared.measurement_context import RoleScope
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
-    from promptpotter.application.initialization.session import Session
     from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.domain.run_records import (
-        OptimizerStateRecord,
-        RoundClosedRecord,
-        RoundEnteredRecord,
-    )
+    from promptpotter.domain.sample import ArchiveEntry, FiledAnswer
     from promptpotter.domain.scoring import GradedCell, PipelineData, Scorer
 
 __all__ = [
-    "RoundFileProjection",
     "campaign_scope_cycle",
-    "campaign_scorer",
-    "closed_round",
-    "closed_rounds",
-    "cycle_instrument",
     "measurement_log",
     "open_cell",
-    "served_round",
-    "walked_rows",
 ]
 
 _SPAN_KEYS = frozenset({"step_tokens", "step_timings", "terminal_node", "total_time"})
@@ -122,169 +83,6 @@ _SPAN_KEYS = frozenset({"step_tokens", "step_timings", "terminal_node", "total_t
 _PREDICTED_CHARS = 120
 
 ScopeCells = tuple[list[CellCandidate], list[CellRow]]
-
-
-def campaign_scorer(stores: Stores, campaign_id: str) -> Scorer | None:
-    campaign = stores.campaigns.load_campaign(campaign_id)
-    if campaign is None:
-        return None
-    return scorer_of(
-        resolve_campaign_config(stores, campaign, campaign.root_hop), verifier_graded=False
-    )
-
-
-def walked_rows(stores: Stores, cells: Sequence[WalkedCell], scorer: Scorer) -> CellSheet:
-    """Replicates kept (one row per sample is ``CellSheet.standing``); the sheet is shared, so read-only."""
-    replayed = {answer: was for _, _, answer, was in cells}
-
-    def read(row: Mapping[str, Any]) -> MeasuredCell:
-        # Stamped BEFORE the grade, as the walk does: a formula may read the clock.
-        facts = MeasuredCell.from_wire(row)
-        return facts.replayed() if replayed[row["answer"]] else replace(facts, cached=False)
-
-    def grade() -> CellSheet:
-        return scorer.sheet(read(row) for row in walked_answers(stores, cells))
-
-    held = derived(
-        ("walked_rows", stores.archive.base_dir, scorer.id, tuple(cells)),
-        sig=stores.archive.files_signature({answer.partition(".")[0] for answer in replayed}),
-        compute=grade,
-    )
-    return held or scorer.sheet(())
-
-
-def cycle_instrument(dataset_name: str, standing: Mapping[int, StandingRound]) -> str:
-    """The read-side spelling of ``Session.instrument_id``; before round 0 closes the dataset stands."""
-    origin = standing.get(0)
-    return instrument_of(dataset_name, None if origin is None else origin.close.pipeline_params)
-
-
-def closed_rounds(
-    stores: Stores,
-    hop: CycleHop,
-    scorer: Scorer,
-    *,
-    before_round: int | None = None,
-) -> list[RoundResult]:
-    """What a round IS to a resume, a fork and a served read; ``rounds/round_NNNN.json`` is a checkout of it."""
-    return [
-        _with_rows(stores, hop, held, scorer)
-        for n, held in stores.campaigns.standing_rounds(hop).rounds.items()
-        if before_round is None or n < before_round
-    ]
-
-
-def closed_round(
-    stores: Stores,
-    hop: CycleHop,
-    round_num: int,
-    scorer: Scorer,
-    *,
-    moment: Moment | None = None,
-) -> RoundResult | None:
-    held = stores.campaigns.standing_rounds(hop, moment).rounds.get(round_num)
-    return None if held is None else _with_rows(stores, hop, held, scorer)
-
-
-def _with_rows(stores: Stores, hop: CycleHop, held: StandingRound, scorer: Scorer) -> RoundResult:
-    def rows(cells: list[WalkedCell]) -> CellSheet:
-        walked = {sample_id for _, sample_id, _, _ in cells}
-        taken = walked_rows(stores, cells, scorer)
-        if len(taken) != len(walked):
-            kept = {cell.sample_id for cell in taken}
-            raise NotFoundError(
-                f"round {close.round} of cycle {hop.cycle_id} closed on answers the measurement "
-                f"archive no longer holds (samples {sorted(walked - kept)}). Its rows "
-                "cannot be read back; rewind before it (`resume --from`) to walk it again."
-            )
-        return taken
-
-    close = held.close
-    return RoundResult(
-        **{name: getattr(close, name) for name in RoundOutcome.model_fields},
-        at_offset=held.at_offset,
-        results=rows(close.cells.head),
-        all_candidate_results={k: rows(v) for k, v in close.cells.arms.items()},
-        reference_results={k: rows(v) for k, v in close.cells.references.items()},
-        overlap_results={k: rows(v) for k, v in close.cells.overlap.items()},
-    )
-
-
-@dataclass(frozen=True)
-class _MarkedSheet(CellSheet):
-    def wire(self) -> list[dict[str, object]]:
-        return [
-            {
-                **cell.wire(),
-                "status": sample_status(cell.facts, cell.grade),
-                "ground_truth_text": ground_truth_text(cell.facts.ground_truth),
-            }
-            for cell in self.cells
-        ]
-
-
-class RoundFileProjection(Projection):
-    """The ONE writer of ``rounds/round_NNNN.json``; a failed checkout is logged, the ledger holding the round."""
-
-    def __init__(self, session: Session, hop: CycleHop) -> None:
-        self._session, self._hop = session, hop
-        self._layout = CycleLayout(session.store.campaigns.cycle_dir(hop))
-        self._synced = False
-
-    def _handle_round_entered(self, record: RoundEnteredRecord) -> None:
-        if not self._layout.rounds.exists():
-            return
-        for path in sorted(self._layout.rounds.glob(ROUND_GLOB)):
-            if (n := round_number(path)) is not None and n >= record.round:
-                unlink_robust(path)
-
-    def _handle_round_closed(self, record: RoundClosedRecord) -> None:
-        self._check_out(record.round)
-
-    def _handle_optimizer_state(self, record: OptimizerStateRecord) -> None:
-        self._check_out(record.round)
-
-    def _check_out(self, round_num: int) -> None:
-        with graceful(f"Round {round_num} checkout failed"):
-            wanted = {round_num}
-            if not self._synced:
-                own = scan_standing_rounds([LedgerSpan(self._layout.ledger)]).rounds
-                wanted |= {n for n in own if not self._layout.round_file(n).exists()}
-                self._synced = True
-            scorer = self._session.scoring.require_scorer()
-            for n in sorted(wanted):
-                closed = closed_round(self._session.store, self._hop, n, scorer)
-                if closed is not None:
-                    write_json(self._layout.round_file(n), closed.model_dump(mode="json"))
-
-
-def served_round(
-    stores: Stores, hop: CycleHop, round_num: int, moment: Moment | None = None
-) -> RoundResult | None:
-    """A served projection: the round a resume, a fork and the round file read carries no ``status``."""
-    graded_under = campaign_scorer(stores, hop.campaign_id)
-    closed = (
-        None
-        if graded_under is None
-        else closed_round(stores, hop, round_num, graded_under, moment=moment)
-    )
-    if closed is None:
-        return None
-
-    def marked(sheet: CellSheet) -> CellSheet:
-        return _MarkedSheet(sheet.scorer_id, sheet.cells)
-
-    def each(arms: dict[str, CellSheet]) -> dict[str, CellSheet]:
-        return {k: marked(v) for k, v in arms.items()}
-
-    return closed.model_copy(
-        update={
-            "results": marked(closed.results),
-            "all_candidate_results": each(closed.all_candidate_results),
-            "reference_results": each(closed.reference_results),
-            "overlap_results": each(closed.overlap_results),
-        }
-    )
 
 
 def _trim(text: object) -> str:
@@ -309,19 +107,6 @@ def _row_cell(cell: GradedCell, *, key: str) -> CellRow:
         input_tokens=account.input if account else None,
         output_tokens=account.output if account else None,
     )
-
-
-def _restored(row: dict[str, Any], cold: list[dict[str, Any]] | None) -> dict[str, Any]:
-    """The cold entry only FILLS absent keys: the answer on disk is the truth for what it still holds."""
-    entry = next((e for e in cold or [] if e.get("k") == row["answer"]), None)
-    if entry is None:
-        return row
-    pd = row.get("pipeline_data")
-    return {
-        **(entry.get("row") or {}),
-        **row,
-        "pipeline_data": {**(entry.get("pd") or {}), **(pd if isinstance(pd, dict) else {})},
-    }
 
 
 def _span(
@@ -352,12 +137,10 @@ def _span(
 
 
 def _assemble(
-    described: dict[str, Any],
+    described: ArchiveEntry,
+    filed: FiledAnswer,
     cell: GradedCell,
     schema: PipelineSchema | None,
-    *,
-    answer: str,
-    dataset_name: str | None,
 ) -> Cell:
     """Spans are READ-TIME assembly: outputs attribute through the dataset's CURRENT schema."""
     facts = cell.facts
@@ -372,24 +155,17 @@ def _assemble(
     }
     outputs_of = {n.name: n.output_keys for n in schema.nodes} if schema is not None else {}
     spans = [
-        _span(
-            str(node),
-            cfg if isinstance(cfg, dict) else {},
-            pd,
-            recorded,
-            variables,
-            outputs_of.get(node, []),
-        )
-        for node, cfg in described.get("node_configs") or []
+        _span(node, cfg, pd, recorded, variables, outputs_of.get(node, []))
+        for node, cfg in described.node_configs
     ]
     attributed = {k for s in spans for k in s.outputs} | _SPAN_KEYS
     return Cell(
-        answer=answer,
+        answer=filed.answer,
         sample_id=sid,
-        dataset_name=dataset_name,
-        role=facts.role or "",
-        created_at=facts.created_at,
-        prompt_fields_id=described.get("prompt_fields_id"),
+        dataset_name=filed.dataset_name,
+        role=filed.role,
+        created_at=filed.created_at,
+        prompt_fields_id=described.prompt_fields_id,
         query=facts.query,
         ground_truth=None if is_verifier_graded(facts.ground_truth) else facts.ground_truth,
         ground_truth_text=ground_truth_text(facts.ground_truth),
@@ -407,19 +183,18 @@ def _assemble(
 def open_cell(stores: Stores, name: str, answer: str) -> Cell:
     """The answer need not have been measured UNDER *name*: a walk replays a cell by content."""
     dataset_dir = readable_dataset_dir(stores, name)
-    row = read_answer(stores, answer)
-    if row is None:
+    filed = stores.archive.answer(answer)
+    if filed is None:
         raise NotFoundError(f"Answer '{answer}' not found")
-    described = stores.archive.entry(str(row.get("config_key") or ""), row.get("dataset_name"))
-    row = _restored(row, stores.archive.read_cold(answer.partition(".")[0]))
+    described = stores.archive.entry(filed.config_key, filed.dataset_name)
+    if described is None:
+        raise NotFoundError(f"Answer '{answer}' is filed under a configuration no index describes")
+    filed = stores.archive.whole(filed)
     declared = dataset_pipeline_declaration(
         stores, dataset_dir, experiment_outside_run(dataset_dir)
     )
     schema = parse_pipeline_response(declared) if declared is not None else None
-    (cell,) = dataset_scorer(dataset_dir).read([row])
-    return _assemble(
-        described or {}, cell, schema, answer=row["answer"], dataset_name=row.get("dataset_name")
-    )
+    return _assemble(described, filed, dataset_scorer(dataset_dir).grade(filed.cell), schema)
 
 
 def campaign_scope_cycle(stores: Stores, campaign_id: str) -> CycleHop:
@@ -682,11 +457,10 @@ def _dataset_cells(stores: Stores, name: str, wanted: set[int]) -> ScopeCells:
     candidates: list[CellCandidate] = []
     cells: list[CellRow] = []
     for entry in list_populations(stores, dataset_name=name):
-        key = entry["config_key"]
+        key = entry.config_key
 
-        def grade(entry: dict[str, Any] = entry) -> CellSheet:
-            held = load_population(stores, entry)
-            return scorer.read(held["measurements"] if held is not None else ())
+        def grade(entry: ArchiveEntry = entry) -> CellSheet:
+            return scorer.sheet(answer.cell for answer in load_population(stores, entry))
 
         sheet = derived(
             ("graded_population", archive.base_dir, key, name, scorer.id),
@@ -698,8 +472,8 @@ def _dataset_cells(stores: Stores, name: str, wanted: set[int]) -> ScopeCells:
         candidates.append(
             CellCandidate(
                 key=key,
-                label=f"{entry.get('name') or 'measured'} {key[:8]}",
-                created_at=str(entry.get("created_at") or "") or None,
+                label=f"{entry.name} {key[:8]}",
+                created_at=entry.created_at,
             )
         )
         cells.extend(_row_cell(cell, key=key) for cell in sheet if cell.sample_id in wanted)
@@ -783,7 +557,6 @@ def measurement_log(
             p_hat=on_ruler.p_hat,
             pick_score=on_ruler.pick_score,
             n_measured=len(graded),
-            n_hits=sum(1 for f in graded if is_hit(f)),
             mean_fitness=sum(graded) / len(graded) if graded else None,
             hit_spread=hit_spread(graded),
         )
@@ -794,10 +567,8 @@ def measurement_log(
     return CellsResponse(
         name=page.raw["name"],
         scope=scope,
-        row_count=len(sample_lookup),
         order=page.order,
         ruler=page.view.ruler,
-        ruler_cycle_id=page.view.cycle_id,
         samples=samples,
         never_hit=spreads["never"],
         partly_hit=spreads["partly"],

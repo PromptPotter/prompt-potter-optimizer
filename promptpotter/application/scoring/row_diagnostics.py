@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.domain.pipeline_schema import NodeRole
 from promptpotter.domain.results_health import is_degraded
 from promptpotter.domain.scoring import PipelineData, extract_item_label, is_verifier_graded
-from promptpotter.shared import text_list_items, text_list_rank
+from promptpotter.shared.answer_text import text_list_items, text_list_rank
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 shapes_optimizer_prompt(__name__)

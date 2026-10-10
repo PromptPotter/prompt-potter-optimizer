@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
+from promptpotter.application.initialization.session import Session
 from promptpotter.application.scoring.cell_envelope import CellEnvelope
 from promptpotter.application.scoring.classification import terminal_ranking
 from promptpotter.application.scoring.evaluators import materialize_sample_values
@@ -49,7 +50,6 @@ from promptpotter.infrastructure.llm.telemetry import (
 from promptpotter.shared.errors import CellUnscoreableError, ErrorCategory, SendRefusedError
 
 if TYPE_CHECKING:
-    from promptpotter.application.initialization.session import Session
     from promptpotter.application.intelligence.indexes.sample import SampleIndex
     from promptpotter.domain.pipeline_schema import NodeSpendBound, PipelineNode, PipelineSchema
     from promptpotter.infrastructure.backend import CellBilling

@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Annotated, Any
 
-from promptpotter.shared import (
+from promptpotter.shared.answer_text import (
     extract_boxed_number,
     extract_gsm8k_number,
     extract_last_bold,

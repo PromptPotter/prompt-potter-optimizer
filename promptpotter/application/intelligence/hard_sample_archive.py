@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.intelligence.exploration import (
+from promptpotter.application.intelligence.rasch import (
     ORIGIN_ABILITY_ID,
     Observation,
     dedup_observations,
@@ -12,6 +12,7 @@ from promptpotter.infrastructure.store import archive_queries
 from promptpotter.infrastructure.store.read_model import derived
 
 if TYPE_CHECKING:
+    from promptpotter.domain.sample import ArchiveEntry
     from promptpotter.domain.scoring import Scorer
     from promptpotter.infrastructure.store.stores import Stores
 
@@ -23,7 +24,7 @@ _RULER_GRADE = "A"
 
 def _population_cells(
     stores: Stores,
-    entry: dict[str, Any],
+    entry: ArchiveEntry,
     sig: list[list[Any]],
     *,
     scorer: Scorer,
@@ -32,11 +33,9 @@ def _population_cells(
 
     def grade() -> tuple[tuple[int, float, str], ...]:
         held = archive_queries.load_population(stores, entry)
-        if held is None:
-            return ()
         return tuple(
-            (cell.sample_id, float(objective), cell.facts.provenance or "C")
-            for cell in scorer.read(held["measurements"])
+            (cell.sample_id, float(objective), answer.provenance)
+            for answer, cell in zip(held, scorer.sheet(a.cell for a in held), strict=True)
             if cell.scored and (objective := cell.grade.objective) is not None
         )
 
@@ -46,8 +45,8 @@ def _population_cells(
     key = (
         "population_cells",
         stores.archive.base_dir,
-        entry["config_key"],
-        entry.get("dataset_name"),
+        entry.config_key,
+        entry.dataset_name,
         scorer.id,
     )
     return derived(key, sig=tuple(map(tuple, sig)) or None, compute=grade) or ()
@@ -70,12 +69,12 @@ def build_archive_observations(
         if row.fk == scorer.id and sigs.get(row.config_key) == row.sig
     }
     for entry in archive_queries.list_populations(stores, dataset_name=dataset_name):
-        candidate_id = (entry.get("prompt_fields_id") or "").strip()
+        candidate_id = entry.prompt_fields_id
         if not candidate_id:
             continue
         if origin_sp_hash and candidate_id == origin_sp_hash:
             candidate_id = ORIGIN_ABILITY_ID
-        key = entry["config_key"]
+        key = entry.config_key
         cells = (
             folded[key]
             if key in folded

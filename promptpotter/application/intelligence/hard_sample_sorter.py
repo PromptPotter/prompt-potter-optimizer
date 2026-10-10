@@ -23,7 +23,7 @@ from promptpotter.shared.clock import utcnow_iso
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from promptpotter.application.intelligence.exploration import Observation
+    from promptpotter.application.intelligence.rasch import Observation
     from promptpotter.domain.results import HardSampleOrder, RoundResult
     from promptpotter.domain.ruler import DeltaRuler
 

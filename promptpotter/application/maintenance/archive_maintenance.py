@@ -1,27 +1,29 @@
 from __future__ import annotations
 
-import json
 import pathlib
-from collections.abc import Iterable, Iterator, Mapping
-from dataclasses import dataclass, field
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from pydantic import Field, computed_field
 
-from promptpotter.domain.scoring import (
-    ABANDONED_ROW_KEYS,
-    UNREAD_PIPELINE_KEYS,
-    measured_facts,
-)
+from promptpotter.domain.scoring import UNREAD_PIPELINE_KEYS, PipelineData
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.layout import inner_sandboxes_dir
+from promptpotter.infrastructure.store.measurement_archive import (
+    MovedFields,
+    answer_line,
+    answer_of,
+    rejoined,
+)
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import graceful
 from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
+    from promptpotter.domain.sample import FiledAnswer
     from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive
     from promptpotter.infrastructure.store.stores import Stores
 
@@ -65,40 +67,27 @@ def archive_writers(root: pathlib.Path) -> int:
     return n
 
 
-_MOVABLE_ROW_FIELDS: frozenset[str] = ABANDONED_ROW_KEYS
-
 _ELIGIBLE_ROLE = MeasurementRole.PANEL
 """Only an answer a candidate's own walk filed compacts: the origin's and the parent's are the
 ones every later campaign replays. An answer under any other role is SKIPPED and counted by role,
 never compacted on a guess."""
 
-_COMPACTED = "compaction"
-_PURGED = "purged"
 
-
-def _protected_pipeline_fields(row: Mapping[str, Any]) -> frozenset[str]:
+def _protected_pipeline_fields(pipeline: PipelineData) -> frozenset[str]:
     """``panels.py::_inner_narrated`` needs ``reasoning_trace`` beside ``mean_round_delta``."""
-    pd = row.get("pipeline_data")
-    if isinstance(pd, dict) and "mean_round_delta" in pd:
-        return frozenset({"reasoning_trace"})
-    return frozenset()
+    return frozenset() if pipeline.mean_round_delta is None else frozenset({"reasoning_trace"})
 
 
-def _parsed(lines: Iterable[str]) -> Iterator[tuple[str, dict[str, Any] | None]]:
-    for line in lines:
-        try:
-            row = json.loads(line)
-        except json.JSONDecodeError:
-            row = None
-        yield line, row if isinstance(row, dict) else None
+def _parsed(lines: Iterable[str]) -> list[tuple[str, FiledAnswer | None]]:
+    return [(line, answer_of(line)) for line in lines]
 
 
-def _in_scope(row: Mapping[str, Any], dataset: str | None) -> bool:
-    return dataset is None or row.get("dataset_name") == dataset
+def _in_scope(answer: FiledAnswer, dataset: str | None) -> bool:
+    return dataset is None or answer.dataset_name == dataset
 
 
-def _dumped(row: Mapping[str, Any]) -> str:
-    return json.dumps(row, separators=(",", ":"), default=str) + "\n"
+def _moved(answer: FiledAnswer) -> bool:
+    return answer.compaction is not None and answer.purged is None
 
 
 def _size(lines: Iterable[str]) -> int:
@@ -269,21 +258,21 @@ def inventory_measurement_archive(
     held: set[tuple[str, str]] = set()
 
     for file_key in archive.file_keys():
-        rows = [(line, row) for line, row in _parsed(archive.detail_lines(file_key)) if row]
-        moved = sum(1 for _, row in rows if _COMPACTED in row and _PURGED not in row)
+        answers = [(line, a) for line, a in _parsed(archive.detail_lines(file_key)) if a]
+        moved = sum(1 for _, answer in answers if _moved(answer))
         cold_each = archive.cold_bytes_on_disk(file_key) / moved if moved else 0.0
-        for line, row in rows:
-            if not _in_scope(row, dataset):
+        for line, answer in answers:
+            if not _in_scope(answer, dataset):
                 continue
-            configuration = str(row.get("config_key") or "")
-            dataset_name = str(row.get("dataset_name") or "")
+            configuration = answer.config_key
+            dataset_name = answer.dataset_name or ""
             held.add((configuration, dataset_name))
             hot = len(line.encode("utf-8"))
-            cold = cold_each if _COMPACTED in row and _PURGED not in row else 0.0
+            cold = cold_each if _moved(answer) else 0.0
             for table, key in (
                 (by_dataset, dataset_name or "<unstamped>"),
-                (by_role, _role_family(str(row.get("role") or "<unlabelled>"))),
-                (by_age, _age_band(str(row.get("created_at") or ""), now=now)),
+                (by_role, _role_family(answer.role)),
+                (by_age, _age_band(answer.created_at, now=now)),
             ):
                 table.setdefault(key, _Tally()).add(configuration=configuration, hot=hot, cold=cold)
             total.add(configuration=configuration, hot=hot, cold=cold)
@@ -291,7 +280,7 @@ def inventory_measurement_archive(
     orphans = sum(
         1
         for entry in archive.list_all(dataset_name=dataset)
-        if (entry["config_key"], str(entry.get("dataset_name") or "")) not in held
+        if (entry.config_key, entry.dataset_name or "") not in held
     )
     return ArchiveInventory(
         by_dataset=_by_bytes(by_dataset),
@@ -306,7 +295,7 @@ def inventory_measurement_archive(
 @dataclass(frozen=True, slots=True)
 class _FilePlan:
     lines: list[str]
-    cold: list[dict[str, Any]]
+    cold: list[MovedFields]
     before: int
     after: int
 
@@ -316,39 +305,31 @@ def _plan_compaction(
     lines: list[str], *, dataset: str | None, stamped_at: str, skipped: dict[str, int]
 ) -> _FilePlan | None:
     out: list[str] = []
-    cold: list[dict[str, Any]] = []
+    cold: list[MovedFields] = []
 
-    for line, row in _parsed(lines):
-        if row is None or not _in_scope(row, dataset) or _COMPACTED in row:
+    for line, answer in _parsed(lines):
+        if answer is None or not _in_scope(answer, dataset) or answer.compaction is not None:
             out.append(line)
             continue
-        role = str(row.get("role") or "")
-        if role != _ELIGIBLE_ROLE:
-            skipped[role or "<unlabelled>"] = skipped.get(role or "<unlabelled>", 0) + 1
-            out.append(line)
-            continue
-
-        protected = _protected_pipeline_fields(row)
-        moved_row = {f: row.pop(f) for f in sorted(_MOVABLE_ROW_FIELDS) if f in row}
-        moved_pd: dict[str, Any] = {}
-        pd = row.get("pipeline_data")
-        if isinstance(pd, dict):
-            for f in sorted(UNREAD_PIPELINE_KEYS - protected):
-                if f in pd:
-                    moved_pd[f] = pd.pop(f)
-
-        if not moved_row and not moved_pd:
+        if answer.role != _ELIGIBLE_ROLE:
+            skipped[answer.role] = skipped.get(answer.role, 0) + 1
             out.append(line)
             continue
 
-        entry: dict[str, Any] = {"k": row["answer"]}
-        if moved_row:
-            entry["row"] = moved_row
-        if moved_pd:
-            entry["pd"] = moved_pd
-        cold.append(entry)
-        row[_COMPACTED] = stamped_at
-        out.append(_dumped(row))
+        pipeline = answer.cell.pipeline
+        moved: dict[str, Any] = {
+            f: value
+            for f in sorted(UNREAD_PIPELINE_KEYS - _protected_pipeline_fields(pipeline))
+            if (value := getattr(pipeline, f)) is not None
+        }
+        if not moved:
+            out.append(line)
+            continue
+
+        cold.append(MovedFields(answer.answer, PipelineData(**moved)))
+        absent: dict[str, Any] = dict.fromkeys(moved)
+        kept = replace(answer.cell, pipeline=replace(pipeline, **absent))
+        out.append(answer_line(replace(answer, cell=kept, compaction=stamped_at)))
 
     if not cold:
         return None
@@ -405,42 +386,22 @@ def compact_measurement_archive(
 
 
 def _split_cold(
-    lines: list[str], cold: list[dict[str, Any]], dataset: str | None
-) -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]] | None:
-    scoped = {
-        row["answer"]: _in_scope(row, dataset)
-        for _, row in _parsed(lines)
-        if row and "answer" in row
-    }
-    mine: dict[str, dict[str, Any]] = {}
-    rest: list[dict[str, Any]] = []
-    for entry in cold:
-        answer = str(entry.get("k") or "")
-        if answer not in scoped:
+    answers: list[tuple[str, FiledAnswer | None]], cold: list[MovedFields], dataset: str | None
+) -> tuple[dict[str, MovedFields], list[MovedFields]] | None:
+    scoped = {a.answer: _in_scope(a, dataset) for _, a in answers if a is not None}
+    mine: dict[str, MovedFields] = {}
+    rest: list[MovedFields] = []
+    for moved in cold:
+        if moved.answer not in scoped:
             return None
-        if scoped[answer]:
-            mine[answer] = entry
+        if scoped[moved.answer]:
+            mine[moved.answer] = moved
         else:
-            rest.append(entry)
+            rest.append(moved)
     return mine, rest
 
 
-def _restored(row: dict[str, Any], entry: Mapping[str, Any]) -> dict[str, Any]:
-    moved_row = entry.get("row")
-    if isinstance(moved_row, dict):
-        row.update(measured_facts(moved_row))
-    moved_pd = entry.get("pd")
-    if isinstance(moved_pd, dict):
-        pd = row.get("pipeline_data")
-        if not isinstance(pd, dict):
-            pd = {}
-            row["pipeline_data"] = pd
-        pd.update(moved_pd)
-    row.pop(_COMPACTED, None)
-    return row
-
-
-def _swap_cold(archive: MeasurementArchive, file_key: str, rest: list[dict[str, Any]]) -> None:
+def _swap_cold(archive: MeasurementArchive, file_key: str, rest: list[MovedFields]) -> None:
     if rest:
         archive.write_cold(file_key, rest)
     else:
@@ -463,13 +424,14 @@ def restore_measurement_archive(
     for file_key in archive.file_keys():
         with graceful(f"restore {file_key}"):
             lines = archive.detail_lines(file_key)
+            answers = _parsed(lines)
             purged += sum(
-                1 for _, row in _parsed(lines) if row and _PURGED in row and _in_scope(row, dataset)
+                1 for _, a in answers if a and a.purged is not None and _in_scope(a, dataset)
             )
             cold = archive.read_cold(file_key)
             if cold is None:
                 continue
-            split = _split_cold(lines, cold, dataset)
+            split = _split_cold(answers, cold, dataset)
             if split is None:
                 conflicts += 1
                 continue
@@ -477,10 +439,10 @@ def restore_measurement_archive(
             if not mine:
                 continue
             new_lines = [
-                _dumped(_restored(row, mine[row["answer"]]))
-                if row is not None and row.get("answer") in mine
+                answer_line(replace(rejoined(a, mine[a.answer].pipeline), compaction=None))
+                if a is not None and a.answer in mine
                 else line
-                for line, row in _parsed(lines)
+                for line, a in answers
             ]
             before += _size(lines)
             after += _size(new_lines)
@@ -520,8 +482,8 @@ def purge_cold_store(
         if cold is None:
             continue
         with graceful(f"purge {file_key}"):
-            lines = archive.detail_lines(file_key)
-            split = _split_cold(lines, cold, dataset)
+            answers = _parsed(archive.detail_lines(file_key))
+            split = _split_cold(answers, cold, dataset)
             if split is None:
                 conflicts += 1
                 continue
@@ -536,10 +498,10 @@ def purge_cold_store(
                 archive.replace_detail(
                     file_key,
                     [
-                        _dumped({**row, _PURGED: stamped_at})
-                        if row is not None and row.get("answer") in mine
+                        answer_line(replace(a, purged=stamped_at))
+                        if a is not None and a.answer in mine
                         else line
-                        for line, row in _parsed(lines)
+                        for line, a in answers
                     ],
                 )
                 _swap_cold(archive, file_key, rest)

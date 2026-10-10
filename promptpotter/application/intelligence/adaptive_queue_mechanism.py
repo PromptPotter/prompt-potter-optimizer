@@ -7,7 +7,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from typing import TYPE_CHECKING
 
 from promptpotter.domain.scoring import ROW_GRADES, is_hit
-from promptpotter.shared import sigmoid
+from promptpotter.shared.statistics import sigmoid
 
 if TYPE_CHECKING:
     from promptpotter.domain.ruler import DeltaRuler

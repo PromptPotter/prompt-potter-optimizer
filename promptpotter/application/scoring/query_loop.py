@@ -9,13 +9,14 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Protocol
 
+from promptpotter.application.initialization.session import Session
+from promptpotter.application.run_phase_control import Flight
 from promptpotter.application.scoring.sample_measurement import (
     cell_bound,
     emit_replayed_step_tokens,
     execute_stale_data_protocol,
     measure_sample,
 )
-from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.phases import (
     REFUSAL_STOPS,
     STOP_REASON_INFO,
@@ -44,7 +45,6 @@ from promptpotter.shared.errors import ErrorCategory, SendRefusedError, graceful
 from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
-    from promptpotter.application.initialization.session import Session
     from promptpotter.application.intelligence.indexes.sample import SampleIndex
     from promptpotter.domain.results import ScoreSummary
     from promptpotter.domain.sample import Sample
@@ -57,8 +57,6 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "ArmSlot",
     "BlockRace",
-    "Flight",
-    "FlightGauge",
     "QueryLoopResult",
     "Walk",
     "run_walks",
@@ -108,54 +106,6 @@ class BlockRace(Protocol):
     def block_size(self) -> int: ...
 
     def close(self, rows: Mapping[int, Sequence[GradedCell]]) -> Mapping[int, StopSignal]: ...
-
-
-@dataclass(frozen=True)
-class Flight:
-    """``waiting`` is the ``(sample_id, launched_at)`` call a DECISION is held on under in-order absorption."""
-
-    out: int = 0
-    allowed: int = 0
-    most: int = 0
-    waiting: tuple[int, float] | None = None
-    backpressure: BackpressureReading | None = None
-    # ``None`` where no book bounds them; against a reserve it is the WORST case.
-    affordable: int | None = None
-    cell_usd: float | None = None
-
-
-class FlightGauge:
-    """Read at most once per ``every`` seconds: a full horizon is a bounds sweep, too dear per launch."""
-
-    def __init__(self, emit: Callable[[Flight], None], *, every: float = 0.5) -> None:
-        self._emit = emit
-        self._every = every
-        self._reader: Callable[[], Flight] | None = None
-        self._published = Flight()
-        self._due: asyncio.TimerHandle | None = None
-
-    def open(self, reader: Callable[[], Flight]) -> None:
-        if self._reader is not None:
-            raise RuntimeError("a scoring phase is already publishing on this gauge")
-        self._reader = reader
-        self.touch()
-
-    def close(self) -> None:
-        self._reader = None
-        self._publish()
-
-    def touch(self) -> None:
-        if self._due is None and self._reader is not None:
-            self._due = asyncio.get_running_loop().call_later(self._every, self._publish)
-
-    def _publish(self) -> None:
-        if self._due is not None:
-            self._due.cancel()
-            self._due = None
-        reading = self._reader() if self._reader is not None else Flight()
-        if reading != self._published:
-            self._published = reading
-            self._emit(reading)
 
 
 _ABORTS_AT_ONCE: dict[ErrorCategory, WalkEnd] = {
@@ -327,7 +277,7 @@ async def _acquire(sample: Sample, idx: int, ctx: QueryLoopState, claiming: set[
         if sample.id in ctx.deprecated_samples:
             result = replace(result, retry_of_deprecated_cache=True)
         if claim is not None:
-            claim.publish(result.wire(), grade=ctx.recorder.provenance(result))
+            claim.publish(result, grade=ctx.recorder.provenance(result))
         graded = ctx.scorer.grade(result)
     except BaseException:
         if claim is not None:

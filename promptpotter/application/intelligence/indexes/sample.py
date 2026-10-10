@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.application.scoring.metrics import fold_cells
 from promptpotter.domain.results import CellFold
 from promptpotter.domain.results_health import UNKNOWN_STEP, terminal_node
-from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import CellSheet, GradedCell, Scorer
+from promptpotter.domain.sample import ArchiveEntry, FiledAnswer, Sample
+from promptpotter.domain.scoring import CellSheet, Scorer
 from promptpotter.infrastructure.store import archive_queries
 from promptpotter.infrastructure.store.archive_queries import SampleFoldRow
 from promptpotter.shared.hashing import shapes_optimizer_prompt
@@ -20,11 +20,6 @@ if TYPE_CHECKING:
     from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
-
-
-def _learnable(cell: GradedCell) -> bool:
-    facts = cell.facts
-    return facts.provenance != "C" and facts.role != MeasurementRole.BENCH
 
 
 @dataclass
@@ -48,7 +43,7 @@ class SampleIndex:
         self._admitted = sample_ids
         self._rows: dict[str, SampleFoldRow] | None = None
         self._reset()
-        self.runs: list[tuple[dict[str, Any], CellFold]] = []
+        self.runs: list[tuple[ArchiveEntry, CellFold]] = []
         self.generation = 0
 
     def _reset(self) -> None:
@@ -239,28 +234,34 @@ class SampleIndex:
 
     def _fold_population(
         self,
-        population: dict[str, Any],
+        entry: ArchiveEntry,
+        population: list[FiledAnswer],
         scorer: Scorer,
         sig: list[list[Any]],
         prior: SampleFoldRow | None,
     ) -> tuple[SampleFoldRow, str | None]:
         """The WHOLE population goes on the first ungradable row: a per-row skip folds a part as if scored entire."""
-        sheet = scorer.read(population["measurements"])
+        sheet = scorer.sheet(answer.cell for answer in population)
         row = SampleFoldRow(
-            config_key=population["config_key"],
-            sp=population.get("prompt_fields_id") or population["config_key"],
+            config_key=entry.config_key,
+            sp=entry.individual,
             fk=scorer.id,
             sig=sig,
             graded=[
-                (cell.sample_id, float(objective), cell.facts.provenance or "C")
-                for cell in sheet
+                (cell.sample_id, float(objective), answer.provenance)
+                for answer, cell in zip(population, sheet, strict=True)
                 if cell.scored and (objective := cell.grade.objective) is not None
             ],
         )
         unscored = next((why for cell in sheet if (why := cell.grade.unscored)), None)
         if unscored is not None:
             return row.model_copy(update={"unscoreable": True}), unscored
-        learnable = sheet.where(_learnable)
+        taught = {
+            answer.answer
+            for answer in population
+            if answer.provenance != "C" and answer.role != MeasurementRole.BENCH
+        }
+        learnable = sheet.where(lambda cell: cell.facts.answer in taught)
         cells, new_samples = self._derive(sheet, prior)
         return row.model_copy(
             update={
@@ -304,14 +305,14 @@ class SampleIndex:
         moved = 0
         skipped: list[str] = []
         for entry in entries:
-            key = entry["config_key"]
+            key = entry.config_key
             sig = signatures.get(key) or []
             held = self._rows.get(key)
             if scoped or held is None or held.sig != sig:
                 population = archive_queries.load_population(stores, entry)
-                if population is None:
+                if not population:
                     continue
-                held, unscored = self._fold_population(population, scorer, sig, held)
+                held, unscored = self._fold_population(entry, population, scorer, sig, held)
                 moved += 1
                 if unscored is not None:
                     logger.warning(
@@ -346,7 +347,7 @@ class SampleIndex:
         self.runs = [
             (entry, row.reading)
             for entry in entries
-            if (row := rows.get(entry["config_key"])) is not None and row.reading is not None
+            if (row := rows.get(entry.config_key)) is not None and row.reading is not None
         ]
         self.generation += 1
         logger.debug("SampleIndex refreshed: %d of %d configurations folded", moved, len(rows))

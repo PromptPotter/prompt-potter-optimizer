@@ -7,7 +7,7 @@ import time
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from promptpotter.application.datasets.loaders import archive_entry
 from promptpotter.application.scoring.metrics import compute_composite_fitness
@@ -32,9 +32,9 @@ if TYPE_CHECKING:
     from promptpotter.application.intelligence.indexes.sample import SampleIndex
     from promptpotter.application.scoring.query_loop import QueryLoopResult
     from promptpotter.domain.measurement_provenance import RunSource
-    from promptpotter.domain.sample import Sample
+    from promptpotter.domain.sample import ArchiveEntry, FiledAnswer, Sample
     from promptpotter.domain.search_point import JobSearchPoint
-    from promptpotter.infrastructure.store.measurement_archive import CellClaim, ReplayableRow
+    from promptpotter.infrastructure.store.measurement_archive import CellClaim
 
 logger = logging.getLogger(__name__)
 
@@ -94,16 +94,15 @@ def _split_off_deprecated_samples(
 
 def _replayable_on(
     dataset: list[Sample],
-    reusable: dict[str, ReplayableRow],
+    reusable: dict[str, FiledAnswer],
     dataset_name: str | None,
 ) -> dict[int, MeasuredCell]:
     """Readers key by ``(dataset_name, sample_id)``: a slot holding another sample means rows re-cut under a used name."""
     here = {s.id: s for s in dataset}
-    banked = {key: MeasuredCell.from_wire(prior.row) for key, prior in reusable.items()}
-    for key, prior in reusable.items():
+    for prior in reusable.values():
         if not dataset_name or prior.dataset_name != dataset_name:
             continue
-        stored = banked[key]
+        stored = prior.cell
         sample = here.get(stored.sample_id)
         if sample is not None and sample.key != stored.sample_key:
             raise DatasetIdentityError(
@@ -113,9 +112,9 @@ def _replayable_on(
                 current=(sample.query, sample.ground_truth or ""),
             )
     return {
-        s.id: replace(facts, sample_id=s.id)
+        s.id: replace(held.cell, sample_id=s.id)
         for s in dataset
-        if (facts := banked.get(s.key)) is not None
+        if (held := reusable.get(s.key)) is not None
     }
 
 
@@ -176,8 +175,8 @@ async def _claim_cell(
                     return None, claim
                 claim.release()
                 return row, None
-            if (measured := feed.claimed_row(sample.key)) is not None:
-                return MeasuredCell.from_wire({**measured, "sample_id": sample.id}), None
+            if (measured := feed.claimed_cell(sample.key)) is not None:
+                return replace(measured, sample_id=sample.id), None
             if waiting is None:
                 waiting = asyncio.create_task(
                     heartbeat(
@@ -211,7 +210,7 @@ class _ArchiveRecorder:
     source: RunSource
     search_point: JobSearchPoint
     role: str
-    entry: dict[str, Any]
+    entry: ArchiveEntry
 
     def sheet(self, results: Sequence[GradedCell]) -> CellSheet:
         return CellSheet(self.session.scoring.require_scorer().id, tuple(results))
@@ -243,18 +242,13 @@ class _ArchiveRecorder:
     def _file(self, cells: Sequence[GradedCell]) -> list[GradedCell]:
         if not cells or not self.session.backend_id:
             return list(cells)
-        at = utcnow_iso()
-        stamped = [
-            replace(
-                cell.facts,
-                role=self.role,
-                source=self.source,
-                provenance=self.provenance(cell.facts),
-                created_at=at,
-            ).wire()
-            for cell in cells
-        ]
-        answers = self.session.store.archive.file_answers(self.entry, stamped)
+        answers = self.session.store.archive.file_answers(
+            self.entry,
+            ((cell.facts, self.provenance(cell.facts)) for cell in cells),
+            role=self.role,
+            source=self.source.value,
+            created_at=utcnow_iso(),
+        )
         return [
             cell.filed(replace(cell.facts, answer=answer))
             for cell, answer in zip(cells, answers, strict=True)
@@ -320,7 +314,7 @@ def open_walk(
         search_point, dataset_name=session.dataset_name, pipeline_schema=pipeline_schema
     )
     replaying = bool(backend_id) and not force_fresh
-    node_configs = entry.get("node_configs", []) if replaying else []
+    node_configs = entry.node_configs if replaying else []
     # No node configs, no cell identity: every such searchpoint would share one claim per sample.
     feed = ReplayFeed(store.archive, node_configs) if node_configs else None
     cached_sample_results, deprecated_samples = _resolve_prior_cache(

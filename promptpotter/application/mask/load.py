@@ -12,7 +12,7 @@ from promptpotter.application.mask.record import (
     SpineCycle,
 )
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
-from promptpotter.application.scoring.cells import closed_rounds
+from promptpotter.application.scoring.closed_rounds import closed_rounds
 from promptpotter.application.scoring.formula import (
     origin_anchors,
     parse_dials,

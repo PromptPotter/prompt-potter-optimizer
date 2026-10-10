@@ -14,10 +14,10 @@ from promptpotter.application.initialization.loop_start import (
 )
 from promptpotter.application.initialization.wiring import bind_cycle_session
 from promptpotter.application.optimizer_manifest import select_optimizer
-from promptpotter.application.run_observers import RunCallbacks
+from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.bench import own_level
-from promptpotter.application.scoring.cells import cycle_instrument, walked_rows
+from promptpotter.application.scoring.closed_rounds import cycle_instrument, walked_rows
 from promptpotter.application.scoring.paired import MemberRows, grade_measurands, read_pair
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.bench import BandedValue
@@ -285,7 +285,7 @@ async def verify_candidate(
     predicate: dict[str, dict[str, Any]] = dict(schema.node_configs(jsp.pipeline_params))
 
     prior = stores.archive.measurements_for_config(predicate, dataset_name=campaign.dataset_name)
-    measured_ids = {m.sample_id for m in prior}
+    measured_ids = {m.cell.sample_id for m in prior}
     # Search pool only: `verify_on_saturation` runs inside the loop, which must decide on no bench row.
     search = session.scoring.require_partition().search
     unmeasured = [s for s in search if s.id not in measured_ids]

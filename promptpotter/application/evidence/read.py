@@ -56,7 +56,11 @@ from promptpotter.application.evidence.subjects import (
 )
 from promptpotter.application.mask.load import load_mask_record
 from promptpotter.application.mask.scenario import scenario_spine
-from promptpotter.application.scoring.cells import campaign_scorer, cycle_instrument, walked_rows
+from promptpotter.application.scoring.closed_rounds import (
+    campaign_scorer,
+    cycle_instrument,
+    walked_rows,
+)
 from promptpotter.application.scoring.formula.compiler import ScoringFormulaError
 from promptpotter.application.scoring.paired import MemberRows, as_family
 from promptpotter.domain.candidate_diff import build_candidate_flat, flatten_sp_summary

@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.candidate_diff import candidate_delta
 from promptpotter.domain.cycle_paths import CycleDir
-from promptpotter.domain.scoring import ANSWER_SPACE_CAP, MeasuredCell
+from promptpotter.domain.scoring import ANSWER_SPACE_CAP
 from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.store.archive_queries import walked_answers
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_standing_rounds
@@ -50,10 +50,7 @@ def answer_space_signature(labels: Iterable[Any], *, dataset: str) -> str:
 def _answer_space_signature(stores: Stores, closed: RoundClosedRecord, dataset: str) -> str:
     walked = {cell[0]: cell for cells in closed.cells.arms.values() for cell in cells}
     return answer_space_signature(
-        (
-            MeasuredCell.from_wire(row).ground_truth
-            for row in walked_answers(stores, walked.values())
-        ),
+        (cell.ground_truth for cell in walked_answers(stores, walked.values())),
         dataset=dataset,
     )
 

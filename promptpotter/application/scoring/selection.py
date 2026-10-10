@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Collection, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-from promptpotter.application.intelligence.exploration import (
+from promptpotter.application.intelligence.rasch import (
     candidate_abilities,
     fit_theta,
     graded_response,
@@ -21,7 +21,7 @@ from promptpotter.shared.statistics import (
 )
 
 if TYPE_CHECKING:
-    from promptpotter.application.intelligence.exploration import RoundAbilities
+    from promptpotter.application.intelligence.rasch import RoundAbilities
     from promptpotter.domain.results import RoundResult
     from promptpotter.domain.ruler import DeltaRuler
     from promptpotter.domain.scoring import GradeColumn

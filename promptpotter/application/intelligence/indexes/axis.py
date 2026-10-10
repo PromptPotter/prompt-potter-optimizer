@@ -26,6 +26,7 @@ if TYPE_CHECKING:
         SampleRecord,
     )
     from promptpotter.domain.results import RoundResult
+    from promptpotter.domain.sample import ArchiveEntry
 
 logger = logging.getLogger(__name__)
 
@@ -320,9 +321,7 @@ class AxisIndex:
         self._refresh_top_runs(self.sample_index.runs)
         self._folded = self.sample_index.generation
 
-    def _refresh_top_runs(
-        self, entries: list[tuple[dict[str, Any], CellFold]], k: int = 10
-    ) -> None:
+    def _refresh_top_runs(self, entries: list[tuple[ArchiveEntry, CellFold]], k: int = 10) -> None:
         """Only the modal ``total`` is kept: an 8/20 composite is not comparable with a 20/20 one."""
         all_totals = [scores.total for _, scores in entries if scores.total > 1]
         if not all_totals:
@@ -341,7 +340,7 @@ class AxisIndex:
                 continue
             scored.append(
                 RunRecord(
-                    individual=str(entry.get("prompt_fields_id") or entry["config_key"]),
+                    individual=entry.individual,
                     accuracy=accuracy,
                     composite=composite,
                     total=total,
@@ -387,7 +386,7 @@ class AxisIndex:
     @staticmethod
     def _fold_entry(
         axis_values: dict[str, dict[str, list[float]]],
-        entry: dict[str, Any],
+        entry: ArchiveEntry,
         scores: CellFold,
     ) -> None:
         """An entry with no accuracy is skipped: folded as 0.0 it manufactures ``effect_size``."""
@@ -395,7 +394,7 @@ class AxisIndex:
         if recorded is None:
             return
         accuracy = float(recorded)
-        for node_name, node_config in (entry.get("pipeline_params") or {}).items():
+        for node_name, node_config in entry.pipeline_params.items():
             if isinstance(node_config, dict):
                 for param, value in node_config.items():
                     axis = f"{node_name}.{param}" if node_name else param
