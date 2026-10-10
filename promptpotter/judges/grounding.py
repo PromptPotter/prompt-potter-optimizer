@@ -1,9 +1,3 @@
-"""The two graders that read a cell's EVIDENCE rather than its answer.
-
-**These rubrics are OURS**, unlike ``simpleqa.py``'s quoted upstream text — so a judge nobody
-validated is a measurement, not an authority. Screen them before funding a campaign on them.
-"""
-
 from __future__ import annotations
 
 import re
@@ -15,23 +9,18 @@ from promptpotter.judges.protocol import Judge, JudgeSpec, JudgeVerdict
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
-    from promptpotter.domain.scoring import QueryMeasurement
+    from promptpotter.domain.scoring import MeasuredCell
 
 __all__ = ["ANSWER_GROUNDING", "EVIDENCE_RETRIEVAL"]
 
 
-# The TAIL, matching `connectors/harbor.py::_tail`'s argument — a trace opens with setup identical
-# across candidates and closes with what this one actually found. `<simplify-the-problem>`: length
-# is a quality tax on the grader, so a grading whose input is a 40-turn wall is a worse grading.
+# The TAIL is kept: a trace opens with setup identical across candidates.
 _TRACE_CAP = 6000
 
 _LETTER_RE = re.compile(r"\b([ABC])\b")
 
 
 def _render_turns(turns: Sequence[Mapping[str, Any]]) -> str:
-    """A turn-structured cell's conversation, as a grader should read it. ``thought`` and ``say``
-    are the system's own assertions; ``saw`` is what the environment answered, and only that is
-    evidence — a distinction both rubrics turn on and a flat prose blob cannot carry."""
     out: list[str] = []
     for turn in turns:
         head = f"[{turn.get('index', '?')}] {turn.get('source') or 'agent'}"
@@ -46,30 +35,15 @@ def _render_turns(turns: Sequence[Mapping[str, Any]]) -> str:
     return "\n".join(out)
 
 
-def _trace(result: QueryMeasurement) -> str:
-    """What this cell DID, tail-capped — the structured conversation where the backend emits one,
-    else the prose digest. A preference order over two channels, never a shim: a backend with no
-    turn concept has one channel and always will."""
-    pd = result.get("pipeline_data") or {}
-    turns = pd.get("turns")
-    text = (
-        _render_turns(turns)
-        if isinstance(turns, list) and turns
-        else str(pd.get("reasoning_trace") or "")
-    ).strip()
+def _trace(result: MeasuredCell) -> str:
+    pd = result.pipeline
+    text = (_render_turns(pd.turns) if pd.turns else pd.reasoning_trace or "").strip()
     return text[-_TRACE_CAP:] if len(text) > _TRACE_CAP else text
 
 
 def _parser(letters: dict[str, str]) -> Callable[[str], str | None]:
-    """A reply → label reader for a three-way A/B/C taxonomy; ``None`` for anything else, which
-    ``call.py::graded`` turns into an ABSENT term.
-
-    The LAST standalone letter, never the first. A compliant reply is a bare letter and the two
-    agree; a chatty one ends on its verdict, where first-match grades "not A, so C" as A.
-    ``simpleqa.py`` keeps first-match because that parse is upstream's, and its numbers are meant
-    to sit beside published ones."""
-
     def parse(reply: str) -> str | None:
+        # The LAST letter: a reply ends on its verdict, and first-match grades "not A, so C" as A.
         found = _LETTER_RE.findall(reply.strip().upper())
         return letters[found[-1]] if found else None
 
@@ -84,13 +58,10 @@ def _build_grade_fn(
     to_score: dict[str, float],
     reads_answer: bool,
 ) -> object:
-    async def grade(spec: JudgeSpec, result: QueryMeasurement) -> JudgeVerdict:
+    async def grade(spec: JudgeSpec, result: MeasuredCell) -> JudgeVerdict:
 
         trace = _trace(result)
         if not trace:
-            # ABSENT, never a zero, and never a model call: a backend that emits nothing to read
-            # has not produced a badly-grounded answer, and scoring it UNGROUNDED would report
-            # "the system never uses evidence" for a run that merely lacks a trace channel.
             return absent(
                 judge_name,
                 "no `turns` and no `reasoning_trace` on this cell — this judge grades the evidence "
@@ -98,9 +69,6 @@ def _build_grade_fn(
             )
         answer = judge_answer(result)
         if reads_answer and answer is None:
-            # Load-bearing rather than defensive: `predicted` is the `NO_RESULT` sentinel on every
-            # cell of a backend that emits no ranking, so without this the rubric is handed the
-            # literal string `NO_RESULT` as the answer and grades it.
             return absent(
                 judge_name,
                 "this cell carries no answer text — grading the absence as ungrounded would "
@@ -171,9 +139,6 @@ Just return the letter "A", "B", or "C", with no text around it.
 """.strip()
 
 
-# The middle score is a PRIOR we invented, in the sense `verdict-resolution.md` § Phase 3 warns
-# about. Recoverable only because `_compute` banks the LABEL beside it, so a later fit re-derives
-# its own thresholds off archived rows instead of re-measuring under new ones.
 _RETRIEVAL_SCORES = {"SETTLED": 1.0, "PARTIAL": 0.5, "MISSING": 0.0}
 _GROUNDING_SCORES = {"GROUNDED": 1.0, "PARTIAL": 0.5, "UNGROUNDED": 0.0}
 
@@ -194,14 +159,11 @@ EVIDENCE_RETRIEVAL = Judge(
         "evidence_retrieval",
         letters=_RETRIEVAL_LETTERS,
         to_score=_RETRIEVAL_SCORES,
-        # Grades the EVIDENCE, deliberately not the answer — so it still reads on a cell whose
-        # answer never arrived, which is the case the retrieve step most wants measured.
         reads_answer=False,
     ),
     labels=tuple(_RETRIEVAL_SCORES),
     to_score=_RETRIEVAL_SCORES,
-    # Handing a grader the gold invites it to accept any trace that merely CONTAINS the gold
-    # string; asking whether the evidence SETTLES the question cannot be passed that way.
+    # A grader handed the gold accepts any trace that merely CONTAINS the gold string.
     needs_gold=False,
 )
 
@@ -222,6 +184,5 @@ ANSWER_GROUNDING = Judge(
     ),
     labels=tuple(_GROUNDING_SCORES),
     to_score=_GROUNDING_SCORES,
-    # Compares an answer to the system's OWN trace, so it is defined wherever a trace exists.
     needs_gold=False,
 )

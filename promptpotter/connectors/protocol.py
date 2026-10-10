@@ -1,6 +1,3 @@
-"""Connector protocol — adding one is intentionally LOCAL to ``connectors/<name>.py``, and the loop dispatches on a
-connector's DECLARED capability rather than on its name."""
-
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
@@ -17,6 +14,7 @@ from promptpotter.domain.connector import (
 from promptpotter.domain.pipeline_schema import NodeRole, NodeSpendBound
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.value_tree import Delivery
+from promptpotter.infrastructure.llm.send_pacing import CELL_WAIT_S, SEND_ATTEMPTS
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -32,13 +30,10 @@ class InProcessWorkload:
     program: object | None
 
 
-# What a client built only to probe a backend holds: it runs no query.
 PROBE_WORKLOAD = InProcessWorkload(experiment=None, program=None)
 
 
 class NoopSession:
-    """The session of a backend with no remote service: no handshake to make or recover."""
-
     __slots__ = ()
 
     async def set_terms(
@@ -53,37 +48,24 @@ class NoopSession:
         return None
 
 
-# The in-process execution arm: ``(workload, sample, payload) -> resp`` where ``payload`` is
-# the connector's ``wire_adapter`` output and ``resp`` is the same ``{"data": {…}}``
-# shape ``measure_sample`` parses from an HTTP ``/matches`` body (so the scorer
-# reads an in-process result identically to a remote one). Required on (and only
-# on) an ``in_process`` connector — the registry guard enforces the pairing.
+# `(workload, sample, wire_adapter payload) -> {"data": {…}}`, the shape of a `/matches` body.
 InProcessRun = Callable[[InProcessWorkload, Sample, dict[str, Any]], Awaitable[dict[str, Any]]]
 
-# Parsed ``experiment_file`` → the document every reader sees, with anything it only NAMES (a
-# published roster) resolved to what it names.
 ExperimentResolver = Callable[[Mapping[str, Any]], dict[str, Any]]
 
-# Run init calls a connector's version_check once, with the
-# BackendClient's live httpx client + base_url; the return is the backend's
-# self-reported revision string, or None when the backend is silent.
+# `(http, base_url) -> the backend's self-reported revision`, `None` where it is silent.
 VersionCheck = Callable[["httpx.AsyncClient", str], Awaitable[str | None]]
 
-# R2: reachability probe — called from the launcher's three command paths
-# (mint-campaign, start-checkin, start-run) before the applier touches the
-# backend. ``backend_url → why the backend is down``, ``None`` where it is up.
+# `backend_url -> why the backend is down`, `None` where it is up.
 PreflightFn = Callable[[str], Awaitable[str | None]]
 
-# The connector's wire credential, read at client-construction time (not at import,
-# so an env change lands without a reimport). ``None`` return = send no auth header.
+# Read at client construction, never at import; `None` sends no auth header.
 AuthTokenFn = Callable[[], str | None]
 
-# ``(node name, node config) → bound``: what one run of that node can bill, derived from the
-# config this process sends it.
+# `(node name, node config) -> what one run of that node can bill`.
 SentSpendBound = Callable[[str, Mapping[str, Any]], NodeSpendBound | None]
 
-# ``pipeline_params → Delivery``: where a backend offers more than one channel, which one carries
-# the prompt is the campaign's instrument choice, so it is resolved from the params a run hashes.
+# `pipeline_params -> Delivery`, resolved from the params a run hashes.
 PromptDelivery = Callable[[dict[str, Any] | None], Delivery]
 
 
@@ -91,139 +73,79 @@ def _in_the_request(pipeline_params: dict[str, Any] | None) -> Delivery:
     return "request"
 
 
+# The experiment-file key; its value is a scope out of `Connector.package_cache_scopes`.
+PACKAGE_CACHE_KEY = "package_cache"
+
+
 @dataclass(frozen=True)
 class Connector:
     name: str
-    """Lowercase id matching ``pipeline.yaml::backend_type`` and
-    ``pipeline_schema.name.lower()``."""
+    """Lowercase; matches ``pipeline.yaml::backend_type``."""
 
     wire_adapter: WireAdapter
-    """Outbound payload shaper for ``BackendClient.run_query``."""
 
-    session_factory: Callable[[], SessionProtocol]
-    """Fresh session instance per ``BackendClient`` — sessions hold per-client state."""
+    session_factory: Callable[[], SessionProtocol] = NoopSession
+    """Called per ``BackendClient``: a session holds per-client state."""
 
     experiment_file: str = ""
-    """Filename of an on-disk experiment doc in the dataset's config dir, read +
-    passed to :attr:`extract_experiment` when the dataset ships no CSV/loader
-    samples. The in-process ``promptpotter`` connector sets ``inner_tasks.yaml`` —
-    its outer "samples" ARE the inner tasks declared there, not a sample table.
-    Empty (default) = samples come from the loader registry / tenant upload only."""
+    """A panel file in the dataset's config dir that OWNS its rows; empty: the loader registry's."""
 
     extract_experiment: Callable[[dict[str, Any]], list[dict[str, Any]]] | None = None
-    """The resolved :attr:`experiment_file` → its rows in panel order, each a
-    ``{"query", "ground_truth"}``, plus ``source_pin`` where the query text does not say everything
-    the cell was measured on (a task's resolved commit) — it is part of the sample's content
-    address, ``Sample.key``. Set exactly where :attr:`experiment_file` is; the registry guard
-    enforces the pairing.
-
-    **The answer shape — owned by** ``connectors/CLAUDE.md`` § The answer shape: a query yielding
-    ``ground_truth: None`` declares it here, and never a second time anywhere else."""
+    """Rows in panel order: ``source_pin`` enters ``Sample.key``; a ``None`` ground truth IS the shape."""
 
     resolve_experiment: ExperimentResolver | None = None
     """Applied by ``dataset_access.py::dataset_experiment`` to every read of the file."""
 
     execution: ConnectorExecution = "remote_http"
-    """How this connector's backend runs — the dispatch capability the loop
-    reads instead of branching on ``name``. ``remote_http`` (default) posts to
-    a live ``/matches`` endpoint; ``in_process`` runs in this process via
-    ``in_process_run`` (no HTTP). ``BackendClient.run_query`` dispatches on this."""
+    """``BackendClient.run_query`` dispatches on this, never on ``name``."""
 
     max_cells_in_flight: int = 2
-    """Most calls a scoring round may hold in flight once armed — every candidate's cells and the
-    catch-up calls that pair them, together. Declared here rather than read off ``execution``, a
-    transport fact: ``dspy`` and ``promptpotter`` are both ``in_process`` and want opposite
-    answers. ``1`` opts out.
-
-    **This is the whole of what a connector may say about concurrency — never how long an operator
-    arming lasts.** A connector cannot see whether the walk in front of it sits inside a round;
-    ``_arm_run_controls`` binds an arming only under ``run_optimization``, so the round spends
-    every press, and a screen declares its depth at launch instead
-    (``application/diagnostics/seed_screen.py``)."""
+    """Cells and their catch-up calls together; ``1`` opts out. Never how long an arming lasts."""
 
     cells_hold_the_machine: bool = False
-    """Whether one cell holds a resource of THIS machine for its life — a container. Then
-    :attr:`max_cells_in_flight` bounds the machine, not one run: every run on it takes from one pool
-    of that many slots (``infrastructure/backend.py::MachineSlots``), so two runs each at their own
-    depth cannot together outrun the box. ``False`` (default): a cell's cost is the provider's or
-    the backend's, and each run answers for its own depth."""
+    """A cell holds a container, so ``max_cells_in_flight`` bounds the MACHINE: one pool across runs."""
 
     compose_overlay: Path | None = None
-    """The compose file this backend's containers are built from, where its harness starts them
-    through compose: taking a machine slot sweeps what a killed run left under it
-    (``infrastructure/docker_host.py::claim_machine``). ``None``: every container is started
-    labelled, by ``docker_host.run_cell_container``."""
+    """Taking a machine slot sweeps what a killed run left under it; ``None``: labelled containers."""
+
+    package_cache_scopes: frozenset[str] = frozenset()
+    """Run init refuses a dataset declaring any other scope, so the empty default refuses the key."""
 
     holds_own_sends: bool = False
-    """Whether every paid send a cell makes is admitted and billed on its own, where it is made —
-    by this process's LLM clients, by the litellm meter (``infrastructure/llm/litellm_sends.py``),
-    or by the connector around a send it cannot see into (``infrastructure/llm/spend_book.py``) —
-    so the cell is no send of its own. Where :attr:`sent_spend_bound` bounds the cell, it RESERVES
-    that bound: it starts only where its worst case fits, and its sends draw on the reservation.
-    ``False`` (default): the cell is held whole as ONE send, at the bound the backend serves per
-    node (``PipelineNode.spend_bound``) or the one :attr:`sent_spend_bound` derives, and billed off
-    its reply; a backend with neither cannot run under a spend ceiling. ``True`` for the recursion
-    and ``harbor``; ``dspy`` pays through litellm outside the meter, so it is billed per cell."""
+    """Each paid send is admitted and billed where it is made; ``False``: the cell is ONE send."""
 
     sent_spend_bound: SentSpendBound | None = None
-    """For a backend whose limits are the ones THIS process sends it, the bound one run of a node
-    can bill, derived from the node config the wire adapter sends — so the hold and what the
-    backend enforces are one set of numbers. ``None`` (default): the backend serves its own
-    (``PipelineNode.spend_bound``). The function answering ``None``: that config sends no limit,
-    and the cell cannot run under a spend ceiling."""
+    """The bound THIS process sends the backend; answering ``None`` leaves no spend ceiling to hold."""
+
+    model_names_provider: bool = False
+    """Model strings are litellm's ``provider/model``, priced as ``pricing.py::inline_route`` splits."""
 
     cancel_stops_billing: bool = False
-    """Whether cancelling a cell that is already sent stops what it bills. ``False`` (default): a
-    sent cell is left to land, because the backend finishes it and the provider bills it whether or
-    not anyone waits — cancelling would lose the result and learn nothing of the cost. Declared,
-    never read off ``execution``: an in-process call that is one provider request bills all the
-    same."""
+    """``False``: a sent cell is left to land, since the provider bills it whether or not anyone waits."""
 
     cell_envelope_s: CellEnvelopeSeconds | None = None
-    """Seconds ONE cell of this backend may SPEND, resolved per cell. ``None`` (default) = this
-    backend's cells carry no wall-clock bound.
+    """Bounds the SUM of one cell's awaits; reaching it is ``ErrorCategory.HALTED``, never a zero."""
 
-    **It bounds the SUM.** Every await inside a cell is bounded on its own and nothing bounds them
-    together, so a throttle storm stretches one cell across tens of minutes with no surface saying
-    so. Time the cell was not ALLOWED to spend is handed back at the seam that enforces this
-    (``application/scoring/cell_envelope.py``), leaving the cell's OWN work.
+    cell_attempts: int = SEND_ATTEMPTS
+    """Sends in all, the first included: only the backend knows what a resend costs."""
 
-    **Reaching it is HALTED, never a zero** — a cut we made is not an answer, so the row carries
-    :attr:`~promptpotter.shared.errors.ErrorCategory.HALTED`, no verdict, and no claim on a repair:
-    this declaration cuts the next attempt at the same place."""
+    cell_wait_s: float = CELL_WAIT_S
+    """One request's wait on its far end; running out is no cut of ours, so the cell ends unreported."""
 
     measured_unit: MeasuredUnit = "sample"
-    """What one measured row of this backend is CALLED: ``cell`` where it is a whole inner campaign
-    or agent episode, else ``sample``. Declared, never sniffed off a row."""
+    """Declared, never sniffed off a row."""
 
     prompt_delivery: PromptDelivery = _in_the_request
-    """The CHANNEL the candidate's rendered prompt reaches the model by, resolved per run from the
-    params it hashes and read by ``PipelineSchema.value_tree``.
+    """Per run, off the params it hashes; ``artifact_body`` may never ARRIVE and owes an observation."""
 
-    ``request`` — in the message that carries the task, so it always arrives. Three of the four
-    connectors, and the reason this is the default.
-
-    ``artifact_body`` — written into the environment as an Agent Skill, where the harness shows the
-    model only the frontmatter and the BODY arrives only if the model opens the file. A value on
-    this channel **may never arrive**, which no param name says and no roster of keys could; the
-    connector owes an arrival observation beside it (``harbor.py::SKILL_KEY``). Declared here and
-    not inferred from ``execution`` or ``measured_unit``: an in-process agent backend could just as
-    well put the prompt in the request, and ``harbor`` does exactly that under
-    ``skill_delivery: system_prompt``."""
+    prompt_fields_as_node_params: bool = False
+    """``True`` on the recursion alone; elsewhere a prompt node with no ``prompt_info`` is refused."""
 
     required_observation_keys: tuple[str, ...] = ()
-    """Observation keys this backend ALWAYS emits; ``wiring.py::_verify_required_observation_keys``
-    raises at init unless the schema maps each. Empty = the backend guarantees none.
-
-    **Why an undeclared key is a wrong number rather than drift — owned by**
-    ``connectors/CLAUDE.md`` § Conventions."""
+    """Keys the backend ALWAYS emits: run init raises unless the schema maps each."""
 
     answer_key: str | None = None
-    """The ``data`` key carrying this cell's ANSWER TEXT. ``None`` (default) = ``predicted`` comes
-    from the terminal ranker, as on every ranked-label backend.
-
-    **Why this is not the answer-shape flag, and the four things that follow from the split —
-    owned by** ``connectors/CLAUDE.md`` § The answer shape."""
+    """The ``data`` key holding the answer TEXT; ``None``: ``predicted`` is the terminal ranker's."""
 
     in_process_run: InProcessRun | None = None
 
@@ -232,102 +154,39 @@ class Connector:
     version_check: VersionCheck | None = None
 
     preflight: PreflightFn | None = None
-    """Async ``(backend_url) -> str | None`` — reachability probe, answering why the backend is
-    down; ``launcher/admission.py::probe_backend`` raises that as the connector's
-    :class:`BackendUnreachableError`. ``None`` opts the connector out (in-process backends like
-    ``promptpotter`` have nothing to probe)."""
+    """``None`` opts out: an in-process backend has nothing to probe."""
 
     auth_token: AuthTokenFn | None = None
 
     completion_check: Callable[[], None] | None = None
-    """Run where the table completes (``wiring.py::complete_registries``), so what it raises stops
-    the server at boot and a run at init; ``None`` checks nothing."""
+    """Run where the table completes, so a raise stops the server at boot and a run at init."""
 
     pipeline_declaration: Callable[[Stores, Mapping[str, Any] | None], dict[str, Any]] | None = None
-    """What an ``in_process`` backend answers in place of ``GET /pipeline``: the graph it runs, off
-    the dataset's resolved experiment. The dataset's ``pipeline.yaml`` overlays it exactly as it
-    overlays a remote backend's answer. ``None`` = that file is the whole declaration."""
+    """An ``in_process`` backend's answer in place of ``GET /pipeline``; ``pipeline.yaml`` overlays it."""
 
     identity_config: (
         Callable[[Stores, Path, Mapping[str, Any] | None], dict[str, dict[str, Any]]] | None
     ) = None
-    """Per-node config entries that are part of MEASUREMENT IDENTITY but not
-    wire tunables — folded into ``resolve_pipeline_config_params`` so the
-    origin cycle id and the archive's node-config reuse key change whenever
-    the backend's effective revision does. Receives the stores the dataset resolved
-    through, the resolved dataset config dir and the resolved experiment, so a connector can
-    fold dataset-scoped inner behavior into the fingerprint. The canonical user is the
-    in-process ``promptpotter`` connector: its backend IS the inner optimizer (optimizer
-    prompt origin + the code shaping its prompts + engine + the inner benchmark's config), so
-    without this an origin edit silently reuses stale measurements recorded
-    under the old behavior. These keys never reach ``wire_adapter``
-    (``sample_measurement.py::measure_sample`` sends the params without their identity layer).
-    ``None`` = the backend's revision is not part of identity (remote backends use the
-    advisory ``version_check`` instead).
-
-    **What the whole panel is measured WITH, never which cells it holds.** A cell's own identity
-    rides its row from :attr:`extract_experiment` as ``source_pin`` (``Sample.source_pin``);
-    folding the task list in here re-keys every cell a panel already had the moment it grows."""
+    """Identity-only, never on the wire: what a panel is measured WITH, never which cells it holds."""
 
     default_pipeline: tuple[str, ...] = ()
-    """First-tenant default pipeline step list — the launcher's chat-first
-    ingest seeds ``pipeline.yaml::pipelines.default`` from this when a draft
-    has no explicit override. Empty tuple means "no override; use the
-    backend's ``GET /pipeline`` default." TermNorm sets this to
-    ``("llm_only",)`` so a fresh CSV upload skips the heavy nodes
-    (``web_search``, ``fuzzy_matching``, ``entity_profiling``,
-    ``token_matching``, ``llm_ranking``) — those are the right default
-    for the production benchmark but wrong for a tenant's first run."""
+    """Seeds a fresh upload's ``pipelines.default``; empty: the backend's own default."""
 
     default_optimization: tuple[tuple[str, Any], ...] = ()
-    """Frozen ``(key, value)`` overrides slotted into the seed
-    ``campaign.json::optimization`` block. Lets a connector ship
-    domain-specific defaults (e.g. TermNorm pins ``n_variants=3``) without
-    the launcher hard-coding the values. Empty mapping means "use
-    :class:`OptimizationConfig` schema defaults verbatim." The required
-    field (``degradation_threshold``) MUST be present here when the connector
-    intends to seed it — there is no silent schema default."""
+    """Seeds ``campaign.json::optimization``; ``degradation_threshold`` has no schema default."""
 
     node_roles: Mapping[str, NodeRole] = field(default_factory=dict)
-    """Static node→:class:`NodeRole` classification, mirroring what the live
-    backend's ``GET /pipeline`` reports — declared here so the ingest UI can
-    detect a pipeline's required inputs *before* the backend is reached
-    (``launcher.draft_pipeline_dependencies`` reads it for the active steps). A
-    ``CANDIDATE_SOURCE`` node raises a ``candidate_library`` dependency the
-    operator drops in place. Only nodes that carry a dependency-bearing role need
-    an entry; unlisted nodes have none (no dependency)."""
+    """Lets ingest detect a pipeline's required inputs BEFORE the backend is reached."""
 
     default_node_config: Mapping[str, Any] = field(default_factory=dict)
-    """Per-node ``pipeline.yaml::nodes.{name}`` overlay the chat-first ingest
-    seeds into a fresh dataset's committed ``pipeline.yaml``. Keyed by node
-    name; each value is a node overlay (``config`` floor + ``optimizer``
-    constraints) merged onto the backend's live ``GET /pipeline`` schema (the
-    overlay's ``config``/``optimizer`` sub-blocks shallow-merge, so a partial
-    clamp narrows the backend schema rather than clobbering it). A seeded
-    ``param_allowed_values`` is a DEFAULT, so ``PipelineSchema.param_options``
-    replaces it wherever the model has answered — a cost rail has to be a check-in
-    narrowing, which intersects. Empty mapping means "no seed; the backend schema stands."
-    Draft ``pipeline_overlay`` (operator edits) layers on top of this."""
+    """Seeds a fresh ``pipeline.yaml``; its ``param_allowed_values`` is a DEFAULT, never a cost rail."""
 
     available_models: tuple[str, ...] = ()
-    """The model catalogue the chat-first ingest writes into a fresh dataset's
-    ``pipeline.yaml::available_models`` — the MENU an origin's permitted set is
-    picked from. Admin-owned, the target-side twin of
-    ``assets/optimizers/potter/pipeline.yaml::available_models``: extend it as this install
-    gains access to more models. Three DISTINCT layers, and collapsing any two is
-    the confusion this field exists to prevent — this is what is AVAILABLE, a node's
-    ``optimizer.param_allowed_values["model"]`` is which of them that node PERMITS
-    (both what the optimizer may pick and what a human may steer to un-tainted), and
-    ``default_node_config``'s ``config.model`` is where the origin STARTS. Whether
-    ``model`` is a search AXIS is a fourth question, answered by that node's
-    ``optimizer.param_keys`` alone. Empty tuple means "no menu" — the node's declared
-    model stands alone and the ingest UI has nothing to offer. A model listed here
-    that needs a ``max_tokens`` floor also needs a ``_MODEL_PROFILES`` entry
-    (``infrastructure/llm/registry.py``); preflight cannot floor what it cannot
-    profile, and neither list fails loudly when it lags the other."""
+    """The MENU, never what a node permits; a model needing a ``max_tokens`` floor needs a registry profile."""
 
 
 __all__ = [
+    "PACKAGE_CACHE_KEY",
     "PROBE_WORKLOAD",
     "AuthTokenFn",
     "Connector",
