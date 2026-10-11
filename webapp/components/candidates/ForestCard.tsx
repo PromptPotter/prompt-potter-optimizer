@@ -10,28 +10,35 @@ import {
   ToolbarSpacer,
 } from "@/components/ui";
 import { RotatePrompt } from "@/components/shell/RotatePrompt";
-import { useCycleStream } from "@/lib/poll";
+import { useCycleStream, type DashboardSnapshot } from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";
 import { useSelection } from "@/lib/SelectionContext";
 import { isSelectedCandidate } from "@/lib/types";
 import { selectedNodeOf } from "@/lib/derivations";
 import { encodeCyclePath, pathLeaf, shortFamilyTail } from "@/lib/ids";
-import { fmtPct0 } from "@/lib/format";
 import { CleanupConfirmModal } from "./CleanupConfirmModal";
 import { Forest, type CladogramCtx } from "./Forest";
 import { ROOMY } from "./forest-layout";
 import { useLineage } from "@/lib/hooks/useLineage";
 
-// The lineage forest card: a cladogram of cycles, sharing no axis with the candidates card's bars.
-// The toggle opening it lives beside the dendrogram and writes `showForest`.
 export function ForestCard() {
   const { dash } = useCycleStream();
+  if (!dash) {
+    return (
+      <CardFrame className="forest-card" title={<span className="cand-title">Lineage</span>}>
+        <div className="lineage-empty">Waiting for this run&rsquo;s dashboard…</div>
+      </CardFrame>
+    );
+  }
+  return <ReadForestCard dash={dash} />;
+}
+
+function ReadForestCard({ dash }: { dash: DashboardSnapshot }) {
   const {
     campaignId,
     cycleId,
     viewedPath,
-    selectCycle: onSelectCycle,
-    selectCyclePath,
+    navigate,
   } = useWorkspace();
   const { candidate, setSelectionForCandidate } = useSelection();
   const {
@@ -51,11 +58,9 @@ export function ForestCard() {
     campaignId,
     cycleId,
     path: viewedPath,
-    electedMetric: dash?.display_metric ?? "accuracy",
+    electedMetric: dash.display_metric,
   });
 
-  // Navigate on the node's OWN `coursePath`: `(campaignId, n.cycleId)` names the wrong run inside an
-  // `.inner/` sandbox, where cycle ids repeat.
   const ctx = useMemo<CladogramCtx>(
     () => ({
       viewedKey: viewedPath ? encodeCyclePath(viewedPath) : null,
@@ -66,7 +71,7 @@ export function ForestCard() {
       onPickCandidate: (n) => {
         const nodeCycleId = pathLeaf(n.coursePath).cycleId;
         if (n.coursePathKey !== (viewedPath ? encodeCyclePath(viewedPath) : null)) {
-          selectCyclePath(n.coursePath, null);
+          navigate(n.coursePath);
         }
         setSelectionForCandidate(
           isSelectedCandidate(candidate, nodeCycleId, n.round, n.candidateId)
@@ -75,7 +80,7 @@ export function ForestCard() {
         );
       },
     }),
-    [viewedPath, candidate, selectCyclePath, setSelectionForCandidate],
+    [viewedPath, candidate, navigate, setSelectionForCandidate],
   );
 
   return (
@@ -138,7 +143,7 @@ export function ForestCard() {
                     <button
                       type="button"
                       className="lineage-inherit-link"
-                      onClick={() => onSelectCycle(campaignId, parentId)}
+                      onClick={() => navigate([{ campaignId, cycleId: parentId }])}
                       title={`Switch to ${parentId}`}
                     >
                       {shortFamilyTail(parentId) || parentId}
@@ -146,7 +151,9 @@ export function ForestCard() {
                   ) : (
                     <span>{shortFamilyTail(parentId) || parentId}</span>
                   )}
-                  {dash?.best != null ? ` · best ${fmtPct0(dash.best)}` : ""}
+                  {dash.run_standing?.selection
+                    ? ` · selection ${dash.run_standing.selection.label}`
+                    : ""}
                   {" · no new rounds yet"}
                 </>
               ) : (

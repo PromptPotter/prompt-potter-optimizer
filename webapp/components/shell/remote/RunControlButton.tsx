@@ -14,28 +14,9 @@ const PAUSE_ICON = (
   </svg>
 );
 
-// The icon-button form of `useRunControl`, shared with the chat composer. No fork here: forking
-// needs a selected searchpoint (the Scoring inspector's Steer & fork).
-export function RunControlButton({ disabledReason }: { disabledReason?: string }) {
+export function RunControlButton() {
   const run = useRunControl();
   if (!run) return null;
-
-  // Checked before the phase branches: an inner run's gate copy would name the wrong hop's
-  // surfaces (I3).
-  if (disabledReason) {
-    return (
-      <div className="run-ctl" role="group" aria-label="Run control" title={disabledReason}>
-        <button
-          type="button"
-          className={`run-ctl-primary ${run.running ? "is-pause" : "is-play"}`}
-          disabled
-          aria-label={`Run control unavailable — ${disabledReason}`}
-        >
-          {run.running ? PAUSE_ICON : PLAY_ICON}
-        </button>
-      </div>
-    );
-  }
 
   if (run.noneReason) {
     return (
@@ -58,9 +39,8 @@ export function RunControlButton({ disabledReason }: { disabledReason?: string }
         title={
           run.action === "pause"
             ? "Pause at the next round boundary"
-            : run.action === "resume"
-              ? "Resume the paused run"
-              : "Start / resume the run"
+            : (run.pauseNote ??
+              (run.action === "resume" ? "Resume the paused run" : "Start / resume the run"))
         }
       >
         {run.running ? PAUSE_ICON : PLAY_ICON}

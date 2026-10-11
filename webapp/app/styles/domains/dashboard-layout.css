@@ -1,0 +1,16 @@
+.topstrip{display:flex;align-items:center;gap:var(--space-12);flex-wrap:wrap;padding:2px 0;font-family:var(--font-mono)}
+.topstrip-label{font-size:var(--text-xs);letter-spacing:.08em;color:var(--color-text-secondary);text-transform:uppercase;font-weight:600}
+.topstrip-sep{width:1px;height:13px;background:var(--color-border);flex:0 0 auto}
+.topstrip-last{display:inline-flex;align-items:center;gap:var(--space-6);font-size:var(--text-xs);color:var(--color-text-secondary)}
+.topstrip-hearts{display:inline-flex;align-items:center;gap:1px;color:var(--color-danger);line-height:0}
+.topstrip-counter-val{font-size:var(--text-base);color:var(--color-text-primary);font-family:var(--font-mono);font-weight:500}
+.topstrip-trace{font-size:var(--text-xs);color:var(--color-accent);text-decoration:none;font-weight:600}
+.topstrip-trace:hover{text-decoration:underline}
+
+/* ONE sizing rule for every box: a box never states a width, height or margin of its own. */
+.box-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--box-gap);align-items:start}
+.box-grid > *{min-width:0;margin:0}
+@media (min-width:880px){
+  .box-grid{grid-template-columns:repeat(auto-fit,minmax(min(var(--box-min),100%),1fr))}
+  .box-grid > .card-full,.box-grid > .box-full,.box-grid > .dash-lane{grid-column:1 / -1}
+}

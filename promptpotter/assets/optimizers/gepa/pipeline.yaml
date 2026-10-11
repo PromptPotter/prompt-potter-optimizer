@@ -45,6 +45,8 @@ nodes:
       max_tokens: 16384
       provider: openrouter
       model: qwen/qwen3-8b
+      # The paper's prompt is one text: the reply replaces the whole prompt.
+      rewrites: prompt
   # A child joins the pool only if it improves on its parent on the minibatch (Alg. 1 line 14).
   minibatch_gate:
     type: eliminator

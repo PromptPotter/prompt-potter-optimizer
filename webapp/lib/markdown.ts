@@ -8,8 +8,7 @@ function escapeHtml(raw: string): string {
     .replace(/"/g, "&quot;");
 }
 
-// Artifacts quote tenant-uploaded rows, so raw HTML (block and inline) renders as literal text.
-// A private `Marked` — `marked.use` mutates the global; escape at the renderer, never the source.
+// Artifacts quote tenant rows, so raw HTML is escaped; a private `Marked`, since `marked.use` mutates the global.
 const safeMarked = new Marked({
   renderer: {
     html(token) {

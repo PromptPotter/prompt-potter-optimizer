@@ -1,6 +1,3 @@
-"""One canonical reader for an authored dataset's on-disk config — dir in, dataclass out. Rows are
-deliberately absent: their 3-tier sourcing policy would force this reader to take ``Stores``."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -16,10 +13,10 @@ from promptpotter.application.campaign_config import (
 )
 from promptpotter.application.datasets.csv_ingest import read_candidate_library_file
 from promptpotter.application.scoring.formula import compile_scorer, split_scoring_block
-from promptpotter.domain.scoring import CellScorer
+from promptpotter.domain.scoring import Scorer
 from promptpotter.infrastructure.store.dataset_access import dataset_pipeline_path
 from promptpotter.infrastructure.store.io import read_yaml_optional
-from promptpotter.judges import judge_instrument
+from promptpotter.judges.registry import judge_instrument
 from promptpotter.shared.errors import StoredConfigInvalidError
 
 
@@ -59,14 +56,11 @@ class AuthoredDataset:
 
 
 def dataset_campaign_path(dataset_dir: Path) -> Path:
-    """The dataset's campaign TEMPLATE, and the one place this filename is spelled. NOT the minted
-    manifest ``campaigns/{id}/campaign.json`` — incompatible schemas, one stem, extension is the tell."""
+    """The dataset's TEMPLATE; the minted ``campaigns/{id}/campaign.json`` is another schema."""
     return dataset_dir / "campaign.yaml"
 
 
 def read_campaign_config_file(path: Path) -> dict[str, Any]:
-    """The sole reader of that template, always wrapped in ``campaign_config``; a hand-rolled
-    ``.get("campaign_config", data)`` accepts an unwrapped shape no writer emits. Raises naming *path*."""
     if not path.is_file():
         return {}
     raw = path.read_text(encoding="utf-8").strip()
@@ -81,8 +75,6 @@ def read_campaign_config_file(path: Path) -> dict[str, Any]:
 
 
 def load_dataset_campaign_config(path: Path) -> CampaignConfig:
-    """The read-and-validate pair, owned once. ``CampaignConfig`` is ``extra="forbid"``, so a dropped knob
-    makes every file naming it unloadable — a property of OUR deploy, remedied by ``restamp --apply``."""
     try:
         return validate_campaign_config(read_campaign_config_file(path))
     except ValidationError as exc:
@@ -90,19 +82,21 @@ def load_dataset_campaign_config(path: Path) -> CampaignConfig:
         raise StoredConfigInvalidError(path=str(path), reason=reason) from exc
 
 
-def config_cell_scorer(config: CampaignConfig) -> tuple[CellScorer, str]:
-    """The scorer *config* declares, and its id, for a reader grading archive rows with no session.
-    A campaign that HAS a session scorer uses it; this is not a fallback for one that forgot."""
-    spec = split_scoring_block(config.scoring, judge_instrument=judge_instrument(config.judges))
-    # No bank here to read the shape off, and none is needed: this compiles a formula a campaign's
-    # own init already refused-or-accepted against its samples.
-    return compile_scorer(spec.per_sample, spec.per_cell, verifier_graded=False), spec.scorer_id
+def scorer_of(config: CampaignConfig, *, verifier_graded: bool) -> Scorer:
+    """``verifier_graded`` is the bank's fact; a reader holding no bank passes ``False``."""
+    spec = split_scoring_block(config.scoring, judge_instrument=None)
+    return compile_scorer(
+        spec.per_sample,
+        spec.per_cell,
+        verifier_graded=verifier_graded,
+        judge_instrument=judge_instrument(config.judges),
+    )
 
 
-def dataset_cell_scorer(dataset_dir: Path) -> tuple[CellScorer, str]:
-    """The scorer a DATASET declares, for a reader with no campaign to ask — the shared inner δ
-    scale (the outer scorer names a measurand inner rows lack) and the dataset-scope cell reads."""
-    return config_cell_scorer(load_dataset_campaign_config(dataset_campaign_path(dataset_dir)))
+def dataset_scorer(dataset_dir: Path) -> Scorer:
+    return scorer_of(
+        load_dataset_campaign_config(dataset_campaign_path(dataset_dir)), verifier_graded=False
+    )
 
 
 def read_authored_dataset(dataset_dir: Path) -> AuthoredDataset:
@@ -128,9 +122,9 @@ def read_authored_dataset(dataset_dir: Path) -> AuthoredDataset:
 
 
 __all__ = [
-    "config_cell_scorer",
-    "dataset_cell_scorer",
+    "dataset_scorer",
     "load_dataset_campaign_config",
     "read_authored_dataset",
     "read_campaign_config_file",
+    "scorer_of",
 ]

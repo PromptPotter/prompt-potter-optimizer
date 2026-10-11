@@ -1,5 +1,4 @@
-"""OIDC provider configuration from ``oidc.json``. ``redirect_uri`` must match what was registered on the provider's app
-page — the provider checks that, we only verify the inbound ``state``. Omitting a provider hides its button."""
+"""The PROVIDER checks ``redirect_uri`` against its app page; we verify only the inbound ``state``."""
 
 from __future__ import annotations
 
@@ -13,9 +12,6 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class OIDCProviderConfig:
-    """Per-provider OAuth/OIDC client config. The four discovery overrides point at any OIDC-conformant IdP; ``None`` on all
-    four means production Google. GitHub is OAuth 2.0 and ignores them."""
-
     client_id: str
     client_secret: str
     redirect_uri: str
@@ -27,8 +23,6 @@ class OIDCProviderConfig:
 
 @dataclass(frozen=True)
 class ProviderConfigBundle:
-    """Loaded provider set — at most one of `google` / `github`."""
-
     google: OIDCProviderConfig | None
     github: OIDCProviderConfig | None
 
@@ -37,10 +31,6 @@ class ProviderConfigBundle:
         return tuple(name for name in SUPPORTED_PROVIDERS if getattr(self, name) is not None)
 
 
-# Every field of the bundle IS a provider, so the bundle is the single declaration and the
-# login route, `oidc.json`'s unknown-key warning and `configured` all read it. Hand-authored,
-# the same two names stood in four places across two layers, and a third provider would have
-# reached none of them.
 SUPPORTED_PROVIDERS: tuple[str, ...] = tuple(f.name for f in fields(ProviderConfigBundle))
 
 
@@ -49,7 +39,6 @@ class OIDCConfigError(ValueError):
 
 
 def load_provider_config(path: Path) -> ProviderConfigBundle:
-    """Parse `oidc.json`. Empty file or missing path → both providers None."""
     if not path.is_file():
         return ProviderConfigBundle(google=None, github=None)
     raw = path.read_text(encoding="utf-8").strip()

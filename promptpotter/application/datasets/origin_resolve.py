@@ -1,45 +1,38 @@
-"""One resolver turn against a ``DraftCampaign`` — the proposer half of the proposer/gate split,
-running the same ``checkin`` node CLI ``new`` does. ``origin_readiness`` decides completeness."""
-
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 from dataclasses import dataclass
 from typing import Any
+
+from pydantic import ValidationError
 
 from promptpotter.application.bench.task_context import (
     CheckinOutput,
     checkin_campaign_call_context,
     run_checkin,
 )
-from promptpotter.application.datasets.draft_campaign import DraftCampaign
+from promptpotter.application.commands.payloads import EditDraftCampaignPayload
+from promptpotter.application.datasets.draft_campaign import DraftCampaign, EditDraftPatch
 from promptpotter.application.datasets.origin_readiness import (
+    OriginLastResolution,
+    OriginResolution,
+    RaisedCommand,
     field_values,
     origin_readiness,
     resolution_block,
+    save_checkin_draft,
 )
-from promptpotter.application.jobs.launcher.checkin import save_checkin_draft
-from promptpotter.application.jobs.quota import admit_spend
+from promptpotter.application.jobs.quota import paid_verb
 from promptpotter.application.scoring.formula.matchers import extraction_note_for_scoring
-from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.origin_provenance import Provenance
-from promptpotter.infrastructure.llm.spend_book import spending_under
+from promptpotter.domain.search_point import PROMPT_STRING_FIELDS
 from promptpotter.infrastructure.llm.telemetry import reset_cycle_ledger, set_cycle_ledger
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.infrastructure.tracing.bridge import observed_node
 
 logger = logging.getLogger(__name__)
 
-# Checklist field id → the ``edit-draft-campaign`` patch key that sets it, which is
-# also the ``DraftCampaign`` attribute name. ONLY the genuinely-variable fields: the
-# two column picks and the task framing. Config (connector / scoring / optimizer LLM
-# / max_rounds) is NOT proposed — those are defaults the operator edits in the
-# optional Advanced block, not facts the LLM infers from the data.
-#
-# Every finding is therefore expressible as a command, which is why the resolver
-# never has to name one: it proposes a field, code derives the button.
+# Each value is both the ``EditDraftPatch`` key and the ``DraftCampaign`` attribute name.
 FINDING_PATCH_KEYS: dict[str, str] = {
     "column.query": "column_query",
     "column.ground_truth": "column_ground_truth",
@@ -50,36 +43,29 @@ _PREVIEW_ROWS = 10
 
 
 @dataclass(frozen=True, slots=True)
-class RaisedCommand:
-    """One proposal, already shaped as the command that would apply it. The operator clicks it; the
-    assistant never fires it. ``confidence`` is the CALLER's apply-inline policy, not the model's."""
-
+class OriginProposal:
     field: str
     patch_key: str
     value: Any
     confidence: str
     evidence: str
 
-    def to_wire(self, draft_id: str) -> dict[str, Any]:
-        # No `confidence`: a high-confidence proposal is applied CONFIRMED inside the turn
-        # and filtered out of `raised`, so every proposal that reaches the wire is a
-        # low-confidence one — the field would be a constant.
-        return {
-            "kind": "edit-draft-campaign",
-            "payload": {"draft_id": draft_id, "patch": {self.patch_key: self.value}},
-            "evidence": self.evidence,
-        }
+    def command(self, draft_id: str) -> RaisedCommand:
+        patch = EditDraftPatch.model_validate({self.patch_key: self.value})
+        return RaisedCommand(
+            payload=EditDraftCampaignPayload(draft_id=draft_id, patch=patch),
+            evidence=self.evidence,
+        )
 
 
 @dataclass(frozen=True, slots=True)
 class OriginResolutionResult:
-    resolution: dict[str, Any]
+    resolution: OriginResolution
     draft: DraftCampaign
 
 
 def build_origin_consultation(draft: DraftCampaign, message: str | None = None) -> tuple[str, str]:
-    """Deterministic origin-context message + the origin-mode instruction; no LLM call. ``message`` is
-    the operator's turn, kept apart from the ``raw_task_description`` the resolver proposes."""
+    """Deterministic (no timestamp, no id), so an unchanged turn replays free; adding either re-bills every turn."""
     readiness = origin_readiness(draft)
     values = field_values(draft)
     provenance = {key: prov.value for key, prov in draft.field_provenance.items()}
@@ -91,24 +77,14 @@ def build_origin_consultation(draft: DraftCampaign, message: str | None = None) 
         "sample_rows": preview,
         "current_values": values,
         "provenance": provenance,
-        "open_gaps": [gap.to_wire() for gap in readiness.gaps],
+        "open_gaps": [gap.model_dump() for gap in readiness.gaps],
     }
-    # When the target column reads as a closed label set, hand the proposer the
-    # FULL enumerated answer space (computed over the whole upload at ingest, not
-    # the truncated preview) so it stops inferring a partial taxonomy from the
-    # few visible rows and collapsing it to "(e.g., X)".
     answer_space = draft.answer_space()
     if answer_space is not None:
         state["answer_space"] = {
             "target_column": draft.column_ground_truth,
             "labels": list(answer_space),
         }
-    # The answer-extraction contract is decided by the SCORING MATCHER (it's the
-    # matcher that reads a label out of the raw output), so it rides the resolver's
-    # raw context keyed off the draft's scorer — not the backend, which passes the
-    # raw answer through. The resolver folds it into `answer_format`, fixing the root
-    # (the resolver never knew the requirement) instead of overwriting downstream.
-    # Empty for a compare-raw scorer → the resolver authors a plain format.
     extraction_note = extraction_note_for_scoring(draft.scoring_matcher)
     if extraction_note:
         state["answer_extraction_requirement"] = extraction_note
@@ -146,72 +122,48 @@ async def resolve_origin_turn(
     draft: DraftCampaign,
     message: str | None = None,
 ) -> OriginResolutionResult:
-    """Persists the mutated draft + resolution block under the draft's ``draft_id``."""
-    # The one optimizer call reachable before a campaign exists, so no launch admission has run
-    # and no run's book is watching — the account's headroom is this turn's book. Offloaded:
-    # admission globs every cycle ledger.
-    book = await asyncio.to_thread(admit_spend, stores=stores, bucket="turn")
     user_content, consultation_instruction = build_origin_consultation(draft, message)
 
-    # Bound here as well as in `CommandDispatcher` so the CLI path (`new <file>`,
-    # no dispatcher) files its spend on the same cycle the web path does.
-    # The consultation is deterministic (no timestamps, no ids), so an unchanged turn
-    # replays free off `optimizer_reuse/`; a schema or optimizer prompt edit changes
-    # `hash_call` and correctly misses.
+    # Bound here as well as in `CommandDispatcher`: the CLI path (`new <file>`) has no dispatcher.
     context = checkin_campaign_call_context(stores, draft.draft_id)
     token = set_cycle_ledger(context.ledger)
     try:
-        with spending_under(book):
-            async with observed_node(
-                "origin_checkin",
-                "llm",
-                obs=None,
-                campaign_id=draft.draft_id,
-                round_num=0,
-            ):
-                raw, repair_attempts = await run_checkin(
-                    consultation_instruction=consultation_instruction,
-                    user_content=user_content,
-                    context=context,
-                )
+        # No launch admitted this call and no run's book watches it; a check-in has no producer.
+        async with paid_verb(stores=stores, bucket="turn", hop=None):
+            raw, repair_attempts = await run_checkin(
+                consultation_instruction=consultation_instruction,
+                user_content=user_content,
+                context=context,
+            )
     finally:
         reset_cycle_ledger(token)
 
     raised = raised_commands(draft, raw)
     updated = _apply_findings(draft, raw, raised)
 
-    # Degradation gate. The resolver LLM can return a structurally-valid but content-empty
-    # CheckinOutput (the origin block defaults ``""``), which ``_apply_findings`` silently no-ops
-    # on (``updated is draft``) — a thin origin the draft must carry a cause for.
     degraded_cause = _degraded_cause(
         output=raw, applied=updated is not draft, repair_attempts=repair_attempts
     )
 
-    block = resolution_block(updated)
-    block["last_resolution"] = _resolution_wire(raw)
-    # Proposals the operator may still click. High-confidence ones already landed
-    # CONFIRMED inside this operator-invoked turn, so only the unsettled remain
-    # actionable — the assistant offers, it never fires.
-    block["raised"] = [
-        proposal.to_wire(updated.draft_id)
-        for proposal in raised
-        if updated.field_provenance.get(proposal.field) is not Provenance.CONFIRMED
-    ]
-    if degraded_cause is not None:
-        block["degraded_cause"] = degraded_cause
+    block = resolution_block(updated).model_copy(
+        update={
+            "last_resolution": OriginLastResolution(
+                assessment=raw.assessment, next_action=raw.next_action, recap=raw.recap
+            ),
+            "raised": [
+                proposal.command(updated.draft_id)
+                for proposal in raised
+                if updated.field_provenance.get(proposal.field) is not Provenance.CONFIRMED
+            ],
+            "degraded_cause": degraded_cause,
+        }
+    )
     save_checkin_draft(stores, updated, resolution=block)
 
     return OriginResolutionResult(resolution=block, draft=updated)
 
 
 def _degraded_cause(*, output: CheckinOutput, applied: bool, repair_attempts: int) -> str | None:
-    """Why this turn came back thin, or ``None`` where it did not — the check-in panel's warning
-    text.
-
-    A turn that produced nothing usable RAISES rather than returning one; the route's catch turns
-    that into the 502 the webapp shows. So no unusable turn ever reaches a client, which is why the
-    served fact is a cause and not a grade — every value a client can see means the same thing.
-    ``DegradationHealth`` grades SAMPLES and shares nothing with this but the word."""
     asking = output.next_action.kind == "ask" and bool(output.next_action.questions)
     if not applied and not asking and not output.recap.strip():
         reasons = ["it produced no usable setup, recap, or question"]
@@ -230,25 +182,25 @@ def _degraded_cause(*, output: CheckinOutput, applied: bool, repair_attempts: in
     return None
 
 
-def raised_commands(draft: DraftCampaign, output: CheckinOutput) -> list[RaisedCommand]:
-    """The turn's proposals as clickable commands, and the single admission gate: patchable field, cited
-    evidence, coercible type, no downgrade. Button surface and inline apply read this one list."""
-    raised: list[RaisedCommand] = []
+def raised_commands(draft: DraftCampaign, output: CheckinOutput) -> list[OriginProposal]:
+    raised: list[OriginProposal] = []
     for finding in output.findings:
         patch_key = FINDING_PATCH_KEYS.get(finding.field)
         if patch_key is None or not finding.evidence.strip():
             continue
-        # Provenance ratchets: a settled field is not reopened by a low-confidence
-        # re-proposal. Drop the finding whole — skipping only its tag would strand a
-        # CONFIRMED marker on a value nobody vouched for.
+        # Drop the finding whole: skipping only its tag strands CONFIRMED on an unvouched value.
         settled = draft.field_provenance.get(finding.field) is Provenance.CONFIRMED
         if settled and finding.confidence != "high":
             continue
         coerced = _coerce(finding.field, finding.proposed_value, draft)
         if coerced is None:
             continue
+        try:
+            EditDraftPatch.model_validate({patch_key: coerced})
+        except ValidationError:
+            continue
         raised.append(
-            RaisedCommand(
+            OriginProposal(
                 field=finding.field,
                 patch_key=patch_key,
                 value=coerced,
@@ -260,7 +212,7 @@ def raised_commands(draft: DraftCampaign, output: CheckinOutput) -> list[RaisedC
 
 
 def _apply_findings(
-    draft: DraftCampaign, output: CheckinOutput, raised: list[RaisedCommand]
+    draft: DraftCampaign, output: CheckinOutput, raised: list[OriginProposal]
 ) -> DraftCampaign:
     values: dict[str, Any] = {}
     provenance: dict[str, Provenance] = {}
@@ -269,11 +221,6 @@ def _apply_findings(
         provenance[proposal.field] = (
             Provenance.CONFIRMED if proposal.confidence == "high" else Provenance.PROPOSED
         )
-    # The same check-in node returns the decomposition half (the six Layer-1
-    # prompt strings) alongside the origin findings — see the CheckinOutput
-    # two-mode contract. Capture it as the draft's starting prompt; the operator
-    # edits it in the review step and it's written to prompts/default.yaml at
-    # mint. A turn that only authored the prompt (no findings) still applies.
     prompt_fields = {
         name: getattr(output, name)
         for name in PROMPT_STRING_FIELDS
@@ -282,20 +229,11 @@ def _apply_findings(
     if prompt_fields:
         values["origin_prompt_fields"] = {**draft.origin_prompt_fields, **prompt_fields}
         provenance["origin_prompt_fields"] = Provenance.CONFIRMED
-    # The check-in also decomposes the task into a 7-field ``task_context`` domain
-    # framing. Capture it onto the draft (it rides commit → ``task_context.yaml``)
-    # so the run reads it instead of recomputing via a second LLM call at run-start.
     decomposed = output.task_context.model_dump()
     if any(str(value).strip() for value in decomposed.values()):
         values["decomposed_task_context"] = decomposed
     if not values:
         return draft
-    # The resolver authors the answer_format PROSE (the scorer's extraction
-    # instruction — the bold/box it was handed in context); the closed answer-space
-    # ENUMERATION is appended deterministically downstream (`committed_prompt_fields`
-    # → `closed_answer_format`) because the LLM reliably drops labels from a many-way
-    # set. Leaving the prose empty blocks nothing — the optimizer evolves it, and the
-    # round-0 health grade is the empirical backstop.
     return draft.apply_resolution(values=values, provenance=provenance)
 
 
@@ -306,22 +244,6 @@ def _coerce(field_key: str, proposed: str, draft: DraftCampaign) -> Any | None:
     if field_key in ("column.query", "column.ground_truth"):
         return proposed if proposed in draft.headers else None
     return proposed
-
-
-def _resolution_wire(output: CheckinOutput) -> dict[str, Any]:
-    """The turn's output for ``cache.json``. Findings ride ``block["raised"]`` as clickable proposals,
-    so mirroring them here would serve the same fact twice."""
-    return {
-        "assessment": output.assessment,
-        "next_action": {
-            "kind": output.next_action.kind,
-            "questions": [
-                {"field": q.field, "prompt": q.prompt, "options": list(q.options)}
-                for q in output.next_action.questions
-            ],
-        },
-        "recap": output.recap,
-    }
 
 
 __all__ = ["resolve_origin_turn"]

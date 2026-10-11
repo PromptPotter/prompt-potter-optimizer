@@ -1,11 +1,9 @@
 "use client";
-// One cell of an L4 panel, rendered as the inner campaign it is: an outer round records
-// `is_hit: null` for a cell, which was optimized by a whole campaign rather than scored.
 
-import { fmtPct0 } from "@/lib/format";
-import { runPhaseLabel } from "@/lib/run-phase";
+import { phaseIs, phaseWalks } from "@/lib/run-phase";
 import { panelCellLabel, pathOf } from "@/lib/derivations";
-import type { LineageNode } from "@/lib/api";
+import type { CourseNode } from "@/lib/api";
+import { PairedLift } from "@/components/shell/PairedLift";
 
 export function PanelCellRow({
   cell,
@@ -14,14 +12,13 @@ export function PanelCellRow({
   onOpen,
 }: {
   cell: string;
-  run: LineageNode | null;
+  run: CourseNode | null;
   cached: boolean;
-  onOpen: (run: LineageNode) => void;
+  onOpen: (run: CourseNode) => void;
 }) {
   const name = panelCellLabel(cell);
 
-  // A live round's rows carry an empty `query` until the round file lands: an unnamed cell is
-  // pending, while a named one with no run is genuinely unrecorded.
+  // A live round's rows carry an empty `query` until the round file lands: unnamed = pending.
   if (!cell) {
     return (
       <div className="rsv-row pcr-row pcr-absent">
@@ -50,9 +47,7 @@ export function PanelCellRow({
     );
   }
 
-  const live = run.run_phase === "running";
-  const lifted =
-    run.origin_accuracy != null && run.best_accuracy != null && run.best_accuracy !== run.origin_accuracy;
+  const live = phaseWalks(run.run_phase);
   const at = pathOf(run).at(-1);
 
   return (
@@ -79,19 +74,11 @@ export function PanelCellRow({
         )}
       </span>
       <span className="pcr-meta">
-        {run.run_phase === "terminal" && (
-          <span className="pcr-status">{runPhaseLabel(run.run_phase, run.stop_reason)}</span>
+        {phaseIs(run.run_phase, "settled") && (
+          <span className="pcr-status">{run.status.label}</span>
         )}
         <span className="pcr-score">
-          {fmtPct0(run.origin_accuracy ?? run.best_accuracy ?? null)}
-          {lifted && (
-            <>
-              <span className="unit-library-arrow" aria-label="improved to">
-                →
-              </span>
-              {fmtPct0(run.best_accuracy)}
-            </>
-          )}
+          {run.run_standing ? <PairedLift reading={run.run_standing.vs_origin} /> : "—"}
         </span>
       </span>
     </button>

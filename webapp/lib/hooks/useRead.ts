@@ -1,20 +1,17 @@
 "use client";
-// The one keyed read: a `null` spec parks it, and a result renders only for the key generation
-// that issued it. `kept` is the last good read a caller may hold on screen
-// (`webapp/CLAUDE.md` § Failure handling).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { failureKind, operatorMessage, type Conditional, type FailureKind } from "@/lib/api";
+import { failureKind, operatorMessage, type FailureKind } from "@/lib/api";
 import { useAuthGate } from "@/lib/auth-context";
 import { reportIncident } from "@/lib/diagnostics";
-import { cachedRead, dropCachedRead, readThrough, type ReadLoad } from "@/lib/read-cache";
-import { usePoll } from "./usePoll";
-
-export type ReadSpec<T> = { key: string } & (
-  | { fetch: (signal: AbortSignal) => Promise<T> }
-  // Sent the held body's validator; a 304 keeps that body.
-  | { conditional: ReadLoad<T> }
-);
+import {
+  cachedRead,
+  dropCachedRead,
+  readName,
+  readThrough,
+  watchRead,
+  type ReadDescriptor,
+} from "@/lib/read-cache";
 
 export interface ReadFailure {
   kind: FailureKind;
@@ -28,16 +25,17 @@ export type ReadResult<T> =
   | { status: "failed"; failure: ReadFailure; kept: T | null };
 
 export interface ReadOptions {
-  surface: string;
-  // Idle until the session is confirmed (`frontend-surface-contract.md::I5`); a 401 re-probes it.
+  // Idle until the session is confirmed; a 401 re-probes it.
   auth?: boolean;
-  // A rejected query is the operator's own input, so `kept` then carries the prior key's read.
+  // `kept` then carries the PRIOR id's read under an `invalid`.
   survive?: "invalid";
-  // A 404 is this read's ordinary empty answer, so it is no incident.
+  // A 404 is this read's ordinary empty answer: no incident, and the poll goes on.
   expects?: "gone";
   intervalMs?: number;
-  revalidateOn?: number;
+  onGone?: () => void;
 }
+
+export const GONE_CONFIRM_LIMIT = 3;
 
 type Settled<T> = { stamp: number } & ({ ok: true; data: T } | { ok: false; failure: ReadFailure });
 
@@ -52,82 +50,104 @@ export function readyData<T>(read: ReadResult<T>): T | null {
   return read.status === "ready" ? read.data : null;
 }
 
-function loadOf<T>(spec: ReadSpec<T>): ReadLoad<T> {
-  if ("conditional" in spec) return spec.conditional;
-  const { fetch } = spec;
-  return async (signal): Promise<Conditional<T>> => ({
-    kind: "ok",
-    data: await fetch(signal),
-    validator: null,
-  });
+export function shownData<T>(read: ReadResult<T>): T | null {
+  if (read.status === "ready") return read.data;
+  return read.status === "idle" ? null : read.kept;
 }
 
 function landed<T>(stamp: number, data: T): Held<T> {
   return { outcome: { stamp, ok: true, data }, last: { stamp, data } };
 }
 
-export function useRead<T>(spec: ReadSpec<T> | null, opts: ReadOptions): ReadResult<T> {
-  const { surface, auth = false, survive, expects, intervalMs, revalidateOn = 0 } = opts;
+export function useRead<T>(read: ReadDescriptor<T> | null, opts: ReadOptions = {}): ReadResult<T> {
+  const { auth = false, survive, expects, intervalMs, onGone } = opts;
   const { authed, onAuthError } = useAuthGate();
-  const activeKey = spec !== null && (!auth || authed) ? spec.key : null;
-  const readId = activeKey === null ? null : `${surface}\x1f${activeKey}`;
+  const readId = read !== null && (!auth || authed) ? read.id : null;
 
-  const [generation, setGeneration] = useState({ key: activeKey, n: 0 });
+  const [generation, setGeneration] = useState({ id: readId, n: 0 });
   const [held, setHeld] = useState<Held<T>>(() => {
     const hit = readId === null ? null : cachedRead<T>(readId);
     return hit ? landed(0, hit.data) : { outcome: null, last: null };
   });
-  if (generation.key !== activeKey) {
+  const [goneAt, setGoneAt] = useState<number | null>(null);
+  if (generation.id !== readId) {
     const n = generation.n + 1;
-    setGeneration({ key: activeKey, n });
+    setGeneration({ id: readId, n });
     const hit = readId === null ? null : cachedRead<T>(readId);
     if (hit) setHeld(landed(n, hit.data));
   }
   const gen = generation.n;
 
-  const issueRef = useRef<{ id: string; load: ReadLoad<T> } | null>(null);
+  const issueRef = useRef<ReadDescriptor<T> | null>(null);
   const genRef = useRef(gen);
+  const onGoneRef = useRef(onGone);
+  const missesRef = useRef({ stamp: gen, n: 0 });
   useEffect(() => {
-    issueRef.current = spec !== null && readId !== null ? { id: readId, load: loadOf(spec) } : null;
+    issueRef.current = readId !== null ? read : null;
     genRef.current = gen;
+    onGoneRef.current = onGone;
   });
 
   const run = useCallback(
     async (stamp: number, signal: AbortSignal): Promise<void> => {
       const issue = issueRef.current;
       if (!issue) return;
+      const misses = missesRef.current.stamp === stamp ? missesRef.current.n : 0;
       try {
         const data = await readThrough(issue.id, issue.load, signal);
         if (signal.aborted || genRef.current !== stamp) return;
-        setHeld(landed(stamp, data));
+        missesRef.current = { stamp, n: 0 };
+        // A 304 hands back the body already held, and must re-render no one.
+        setHeld((prev) =>
+          prev.outcome?.ok && prev.outcome.stamp === stamp && prev.outcome.data === data
+            ? prev
+            : landed(stamp, data),
+        );
       } catch (e) {
         if (signal.aborted || genRef.current !== stamp) return;
         if (auth) onAuthError(e);
         const kind = failureKind(e);
-        if (kind !== expects) reportIncident(e, { surface });
-        // A body for an address that no longer exists must not paint the next mount.
-        if (kind === "gone") dropCachedRead(issue.id);
+        if (kind !== expects) reportIncident(e, { surface: readName(issue.id), address: issue.id });
+        if (kind === "gone" && expects !== "gone") {
+          // A body for an address that no longer exists must not paint the next mount.
+          dropCachedRead(issue.id);
+          missesRef.current = { stamp, n: misses + 1 };
+          if (misses + 1 === GONE_CONFIRM_LIMIT) {
+            setGoneAt(stamp);
+            onGoneRef.current?.();
+          }
+        } else {
+          missesRef.current = { stamp, n: 0 };
+        }
         const failure = { kind, message: operatorMessage(e, kind) };
         setHeld((prev) => ({ ...prev, outcome: { stamp, ok: false, failure } }));
       }
     },
-    [auth, onAuthError, surface, expects],
+    [auth, onAuthError, expects],
   );
 
-  const active = activeKey !== null;
-  const polled = intervalMs !== undefined;
+  const active = readId !== null;
   useEffect(() => {
-    if (!active || polled) return;
+    if (!active) return;
     const ac = new AbortController();
     void run(gen, ac.signal);
     return () => ac.abort();
-  }, [active, polled, gen, run]);
+  }, [active, gen, run]);
 
-  usePoll((signal) => run(genRef.current, signal), {
-    intervalMs: intervalMs ?? 0,
-    enabled: active && polled,
-    revalidateOn: revalidateOn + gen,
-  });
+  const stopped = goneAt === gen;
+  useEffect(() => {
+    if (readId === null || stopped) return;
+    const ac = new AbortController();
+    const unwatch = watchRead({
+      id: readId,
+      intervalMs: intervalMs ?? null,
+      fire: () => void run(genRef.current, ac.signal),
+    });
+    return () => {
+      unwatch();
+      ac.abort();
+    };
+  }, [readId, stopped, intervalMs, run]);
 
   return useMemo((): ReadResult<T> => {
     if (!active) return IDLE;

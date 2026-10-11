@@ -56,7 +56,7 @@ jobs:
 
       # `scripts/gate.py::_PINNED_EXTRAS`, as in ci.yml: the gate below is taken in this env.
       - name: Install dependencies
-        run: uv sync --extra dev --extra api --extra harbor --frozen
+        run: uv sync --extra dev --extra api --extra harbor --extra dspy --frozen
 
       # CI gates `main`; a release is cut from a COMMIT, and the two are the same thing
       # only by habit. Running the one check list here is what makes the gate a property
@@ -65,7 +65,7 @@ jobs:
         run: uv run python scripts/gate.py --py
 
       - name: Build the dashboard
-        run: npm ci && npm run build:deploy
+        run: npm ci && npm run build
         working-directory: webapp
 
       # No `--no-webapp`, and that is the whole difference from ci.yml's wheel job. The
@@ -80,7 +80,7 @@ jobs:
         env:
           PROMPTPOTTER_SMOKE_EXPECT_WEBAPP: "1"
         run: |
-          uv venv --python 3.13 --seed "$RUNNER_TEMP/venv"
+          uv venv --seed "$RUNNER_TEMP/venv"
           wheel=(dist/*.whl)
           "$RUNNER_TEMP/venv/bin/pip" install --quiet "${wheel[0]}[api]"
           mkdir -p "$RUNNER_TEMP/elsewhere" "$RUNNER_TEMP/home"

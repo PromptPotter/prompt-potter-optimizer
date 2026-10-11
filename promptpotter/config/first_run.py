@@ -1,6 +1,3 @@
-"""First-run helper: prompt for a provider API key when none is set. It lives in ``config/`` so the write target
-(``.env`` in CWD) is owned by the config layer — the entry-point invariant test forbids a write from the CLI shell."""
-
 from __future__ import annotations
 
 import os
@@ -13,8 +10,6 @@ _PROVIDER_KEYS = ("GROQ_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENRO
 
 
 def ensure_api_key() -> None:
-    """Prompt for an OpenRouter key when no provider key is set anywhere. Cancellation is GRACEFUL — the caller proceeds and
-    the provider call errors later with the provider's own message."""
     if any(os.environ.get(k) for k in _PROVIDER_KEYS):
         return
 

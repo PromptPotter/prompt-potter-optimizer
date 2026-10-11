@@ -1,9 +1,5 @@
-"""Round-summary renderers (``ReadoutProjection.on_round_complete``). Pure: no campaign
-I/O, no mutation (errors log, never abort the live readout)."""
-
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING
 
 from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
@@ -14,23 +10,26 @@ from promptpotter.application.views.render.primitives import (
     RESET,
     YELLOW,
     _node_line,
+    fmt_coverage,
     fmt_fitness,
+    overlap_series,
 )
 from promptpotter.domain.connector import MeasuredUnit, unit_count
 from promptpotter.domain.results import (
+    ROUND_ADVANCE_INFO,
     ArmOutcome,
-    overlap_series,
+    RoundAdvance,
+    StallEffect,
     scoreboard_rank_key,
 )
-from promptpotter.shared.errors import is_error_result
+from promptpotter.domain.ruler import PLATEAU_ROUNDS, series_levels, theta_plateau
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.domain.results import RoundResult
-
-logger = logging.getLogger(__name__)
+    from promptpotter.domain.results import RoundOutcome
+    from promptpotter.domain.run_records import RoundClosedRecord
 
 
 def fmt_elapsed(seconds: float) -> str:
@@ -42,94 +41,68 @@ def fmt_elapsed(seconds: float) -> str:
     return f"{s // 3600}h {(s % 3600) // 60:02d}m"
 
 
-# A θ band narrow enough that three readings inside it cannot be three different results: one
-# round's own θ SE on a realistic panel is several times this, so the banner fires on a series
-# that is genuinely flat and stays quiet on one that is merely noisy. It advises stopping, and a
-# false stop costs more than a missed one.
-_PLATEAU_THETA_BAND = 0.05
-
-
-def render_progress_table(rounds: Sequence[RoundResult], *, stamps_theta: bool) -> str:
-    """``stamps_theta`` is the selector's own declaration: one that elects on no θ gets no θ
-    column, trend or plateau advice, since its rounds were never decided on one."""
+def render_progress_table(rounds: Sequence[RoundOutcome]) -> str:
     if not rounds:
         return ""
 
-    header = f"{'Round':<7s} {'Accuracy':>9s} {'n':>5s} {'Composite':>10s}"
-    if stamps_theta:
-        header += f" {'Ability θ':>10s} {'Trend':>9s}"
+    header = (
+        f"{'Round':<7s} {'Accuracy':>9s} {'n':>5s} {'Composite':>10s}"
+        f" {'Ability θ':>10s} {'Trend':>9s}"
+    )
     lines: list[str] = [_node_line(header)]
 
-    # Trend and the plateau banner read ABILITY, never accuracy. Under `per_round_resubset` each
-    # round scores a fresh hard-first draw, so consecutive accuracies belong to different exams
-    # and their difference is mostly which cells were drawn. The frontier θ is the cycle's
-    # one subset-invariant series. Accuracy stays on the table — it is a true fact about the
-    # round — but it is badged with the `n` it was measured over rather than differenced, and
-    # nothing here may average it across rounds: that mean names a number no configuration scored.
-    thetas: list[float] = []
+    # Trend reads ABILITY, never accuracy: under `per_round_resubset` consecutive accuracies sit different exams.
+    abilities = [rr.ability for rr in rounds]
     prev: float | None = None
-    for rr in rounds:
-        theta = rr.ability.theta if rr.ability is not None else None
-        if theta is None:
-            th_str, trend = "---", "-"
-        else:
-            thetas.append(theta)
-            th_str = f"{theta:+.3f}"
-            trend = "-" if prev is None else f"{theta - prev:+.3f}"
-            prev = theta
-        # A round that read no cell prints no rate and no composite — never the 0.0% of one that
-        # failed every cell.
+    for rr, level in zip(rounds, series_levels(abilities), strict=True):
+        th_str = "---" if rr.ability is None else f"{rr.ability.theta:+.3f}"
+        trend = "-" if level is None or prev is None else f"{level - prev:+.3f}"
+        if level is not None:
+            prev = level
         row = (
             f"  {rr.round!s:<5s} {fmt_pct(rr.accuracy):>8s} {rr.total:>5d} "
-            f"{fmt_fitness(rr.composite_fitness):>9s}"
+            f"{fmt_fitness(rr.composite_fitness):>9s} {th_str:>10s} {trend:>9s}"
         )
-        if stamps_theta:
-            row += f" {th_str:>10s} {trend:>9s}"
         lines.append(_node_line(row))
 
-    if stamps_theta and len(thetas) >= 3:
-        recent = thetas[-3:]
-        mean = sum(recent) / 3
-        if all(abs(t - mean) < _PLATEAU_THETA_BAND for t in recent):
-            lines.append(
-                _node_line(f"{YELLOW}-- Plateau: ability flat at {mean:+.3f} for 3 rounds{RESET}")
+    # Plateau advice is for a run whose rounds are won on θ; a peer's θ series decides nothing.
+    if rounds[-1].elects_on == "ability" and (flat_at := theta_plateau(abilities)) is not None:
+        lines.append(
+            _node_line(
+                f"{YELLOW}-- Plateau: ability flat at {flat_at:+.3f} "
+                f"for {PLATEAU_ROUNDS} rounds{RESET}"
             )
+        )
 
     lines.append(_node_line(""))
     return "\n".join(lines)
 
 
-def round_verdict_basis(round_result: RoundResult) -> list[str]:
-    """The two readings a verdict is checked against, known only once the round has closed."""
+def round_verdict_basis(round_result: RoundOutcome) -> list[str]:
     lines: list[str] = []
-    # The selected arm's blocked lift over its reference WITH its interval — the served
-    # `RoundResult` pair, not a recomputation. The verdict line prints a point estimate and reads
-    # the same on a round that resolved nothing as on one that resolved something; this is the
-    # line that separates them. Silent when the round selected nobody or the panel held under two
-    # shared cells, where the absence is the honest answer.
+    # The verdict line's point estimate reads the same on a round that resolved nothing; the interval separates them.
     selected = next(iter(round_result.selected_scores), None)
-    lift = selected.reference_lift if selected else None
-    lo = selected.reference_lift_ci_lo if selected else None
-    hi = selected.reference_lift_ci_hi if selected else None
-    if lift is not None and lo is not None and hi is not None:
-        spans_zero = lo <= 0.0 <= hi
+    reading = selected.vs_reference if selected else None
+    if reading is not None and reading.headline is not None and reading.coverage is not None:
+        lift = reading.headline.estimate
         verdict = (
-            f"{YELLOW}spans 0 — not separable from its reference{RESET}"
-            if spans_zero
+            f"{YELLOW}spans 0 — not separated from its reference{RESET}"
+            if lift.side == "spans"
             else "clears 0"
         )
-        lines.append(f"lift vs reference: {lift:+.3f} [{lo:+.3f}, {hi:+.3f}]  |  {verdict}")
+        lines.append(
+            f"lift vs reference: {lift.value:+.3f} [{lift.ci_lo:+.3f}, {lift.ci_hi:+.3f}]"
+            f" on {fmt_coverage(reading.coverage)}  |  {verdict}"
+        )
 
-    # The 1-to-1 series: the best-so-far line read on the cells all of it has answered. It is the
-    # ONLY line two rounds can be differenced on — every other number in the verdict is read on
-    # the subset this round happened to buy. Silent until the line has a second member.
+    # The ONLY line two rounds can be differenced on: every other number is read on the subset this round bought.
     if series := overlap_series(round_result.overlap):
         lines.append(f"overlap ({series})")
     return lines
 
 
 def render_round_stats(
-    round_result: RoundResult,
+    round_result: RoundClosedRecord,
     pipeline_schema: PipelineSchema | None,
     unit: MeasuredUnit = "sample",
 ) -> str:
@@ -138,21 +111,15 @@ def render_round_stats(
     total = round_result.total
     deprecated = round_result.deprecated
     if total == 0 and round_result.candidate_scores:
-        # Stand-in when the round-level rollup is empty: the ELECTED winner's row
-        # (the label the round adopted), falling back to the shared composite-first
-        # display ordering — never a private accuracy-argmax that can star a
-        # candidate the engine didn't elect.
-        best = next(
-            iter(round_result.selected_scores),
-            max(
-                round_result.candidate_scores,
-                key=lambda s: scoreboard_rank_key(
-                    s.composite_fitness,
-                    s.accuracy,
-                    s.theta,
-                    is_selected=s.label in round_result.selected_labels,
-                    is_partial=s.outcome is ArmOutcome.SKIPPED,
-                ),
+        # The scoreboard's first row, never a private accuracy-argmax that can star an arm nobody elected.
+        best = max(
+            round_result.candidate_scores,
+            key=lambda s: scoreboard_rank_key(
+                s.composite_fitness,
+                s.accuracy,
+                s.theta,
+                is_leading=s.label == round_result.leading_label,
+                is_partial=s.outcome is ArmOutcome.SKIPPED,
             ),
         )
         accuracy = best.accuracy
@@ -161,70 +128,35 @@ def render_round_stats(
     suffix = f"  ({deprecated} deprecated)" if deprecated else ""
     lines.append(
         _node_line(
-            # Was `hits: 12/20`. The integer pair is the small readability cost of
-            # dropping a scalar that meant nothing on a graded scorer; the percentage
-            # is the same number the round reports everywhere else.
             f"accuracy: {fmt_pct(accuracy)} of {unit_count(total, unit)}{suffix}  |  evaluated: "
             f"{round_result.candidates_scored} candidates"
         )
     )
 
-    # Degradation verdict — the served ``round_result.health`` (rendered, not
-    # recomputed). Loudness scales with grade; ``healthy`` stays silent.
     h = round_result.health
     if h is not None and h.grade == "critical":
         lines.append(_node_line(f"{BOLD}{RED}⛔ CRITICAL — {h.suggested_action}{RESET}"))
     elif h is not None and h.grade == "degraded":
         lines.append(_node_line(f"{YELLOW}⚠ DEGRADED — {h.suggested_action}{RESET}"))
 
-    if not round_result.results:
-        return "\n".join(lines)
-
-    try:
-        results = round_result.results
-        n_results = len(results)
-        degraded = 0
-        for r in results:
-            pd = r.get("pipeline_data") or {}
-            if (pd.get("diagnostics") or {}).get("warnings"):
-                degraded += 1
-
-        # No "Pipeline: <node>:<n>" tally here. It counted `terminal_node`, the deepest node each
-        # sample REACHED, so a healthy round printed every sample under the last node — a constant
-        # dressed as a finding. Degradation below is the line that varies.
-        if degraded > 0:
-            lines.append(_node_line(f"Degradation: {degraded / n_results:.0%}"))
-
-        # Skip recall@k for llm_only-style pipelines — no ranked_items to match against ground_truth.
-        valid = [r for r in results if not is_error_result(r)]
-        if valid:
-            ranks = [r.get("ground_truth_rank") for r in valid]
-            if any(rk is not None for rk in ranks):
-
-                def recall_at_k(k: int) -> float:
-                    return sum(1 for rk in ranks if rk is not None and rk <= k) / len(valid)
-
-                lines.append(
-                    _node_line(f"Recall: top-1={recall_at_k(1):.0%} top-5={recall_at_k(5):.0%}")
-                )
-    except Exception:
-        # Resilient by design — a render glitch must not abort the live readout —
-        # but surface it (fail-loud), never swallow silently.
-        logger.warning("round-stats render block failed; lines dropped", exc_info=True)
-
+    # No per-node tally: `terminal_node` is the deepest node each sample REACHED, constant on a healthy round.
+    if round_result.degraded_samples and (n_results := len(round_result.cells.head)):
+        lines.append(_node_line(f"Degradation: {round_result.degraded_samples / n_results:.0%}"))
+    # Absent on an llm_only-style pipeline, which ranks nothing.
+    if recall := round_result.recall_at:
+        lines.append(
+            _node_line("Recall: " + " ".join(f"top-{k}={share:.0%}" for k, share in recall.items()))
+        )
     return "\n".join(lines)
 
 
-def render_patience_status(improved: bool, stall: int, patience: int) -> str:
-    # `stall` is the depth since the last advance, which a fire does not reset, so it can pass the
-    # patience that paces the next ask — the two are shown apart, never as a fraction.
-    if stall == 0:
+def render_patience_status(advance: RoundAdvance, stall: int, patience: int | None) -> str:
+    info = ROUND_ADVANCE_INFO[advance]
+    if info.stall is StallEffect.RESETS:
         return _node_line(f"{GREEN}✓ Improvement detected, auto-continuing...{RESET}")
-    cause = "Improved, not separable" if improved else "No improvement"
     rounds = "round" if stall == 1 else "rounds"
-    return _node_line(
-        f"{YELLOW}⚠ {cause} — {stall} {rounds} without an advance (patience {patience}){RESET}"
-    )
+    bound = "" if patience is None else f" (converges at {patience})"
+    return _node_line(f"{YELLOW}⚠ {info.label} — {stall} {rounds} without an advance{bound}{RESET}")
 
 
 __all__ = [

@@ -102,12 +102,12 @@ numbers and the argument, which are not restated here.
 
 **Only `label_match` decides the round today**, with `answer_correct` banked beside it. Naming a
 judge term in the formula is safe — a grading that fails past its retry resolves the row UNSCORED
-and keeps its measurement (`application/scoring/formula/rescore.py`) — so this is a choice about
+and keeps its measurement (`domain/scoring.py::Grade.unscored`) — so this is a choice about
 which grader the round is won on, not a constraint.
 
 **The step terms may never become separate items.** They compose into one cell score that θ reads;
 k steps per cell would claim kN observations where there are N, shrinking every SE by ~√k and
 letting PoBB eliminate on confidence it never earned. Held by
-`exploration.py::dedup_observations`; fitting δ and `a` per step needs a testlet model and a new
+`rasch.py::dedup_observations`; fitting δ and `a` per step needs a testlet model and a new
 `ruler_id` ([`../../docs/methods/verdict-resolution.md`](../../docs/methods/verdict-resolution.md)
 § Phase 3).

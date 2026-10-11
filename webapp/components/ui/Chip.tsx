@@ -2,8 +2,6 @@ import type { CSSProperties, ReactNode } from "react";
 import { cx } from "@/lib/cx";
 import s from "./Chip.module.css";
 
-// An independent on/off toggle (a `SegmentedControl` is the exclusive set). A lit chip wears the ink
-// of what it put ON SCREEN (webapp/components/CLAUDE.md § Component conventions).
 export function Chip({
   on,
   onClick,
@@ -21,7 +19,6 @@ export function Chip({
   // REQUIRED when `icon` is set — the only accessible name an icon-only chip gets.
   ariaLabel?: string;
   icon?: boolean;
-  // Only the `joined` underline reads it; state is still `aria-pressed`, never colour.
   ink?: string;
   children: ReactNode;
 }) {
@@ -41,8 +38,6 @@ export function Chip({
   );
 }
 
-// `label` is the ACCESSIBLE name, drawn only with `showLabel`. `joined` is for facets of ONE concept
-// (% / ∑ / θ), never unrelated switches.
 export function ChipGroup({
   label,
   joined,

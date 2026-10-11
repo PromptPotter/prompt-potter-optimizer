@@ -1,42 +1,32 @@
-"""``cmd_verify`` — re-score one campaign candidate on MORE search cells. Not a cycle or a fork: no round id, and the pass
-is banked on the candidate's own cycle ledger."""
-
 from __future__ import annotations
 
 import argparse
-import logging
+import uuid
 
-from promptpotter.application.diagnostics.verify import VerifyError, verify_candidate
+from pydantic import ValidationError
+
+from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
+from promptpotter.application.commands.payloads import VerifyCandidatePayload
+from promptpotter.application.diagnostics.verify import VerifyError, VerifyOutcome
 from promptpotter.application.evidence.subjects import parse_subject
+from promptpotter.application.views.render.primitives import fmt_ci
 from promptpotter.config.logging import setup_logging
-from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.domain.bench import BandedValue
-from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.paired_reading import READING_STATE_INFO
 from promptpotter.domain.results import BankedSearchPointError
-from promptpotter.infrastructure.store.stores import build_stores, descend_store
-from promptpotter.presentation.cli.commands._shared import (
-    CommandResult,
-    get_verbose,
-    identity_from_args,
-    resolve_campaign_hint,
-)
-
-logger = logging.getLogger("promptpotter.presentation.cli")
+from promptpotter.infrastructure.store.stores import descend_store
+from promptpotter.presentation.cli.commands.result import CommandResult
+from promptpotter.presentation.cli.commands.workspace import open_stores, resolve_campaign_hint
 
 
 def _level(level: BandedValue | None) -> str:
     if level is None:
         return "—"
-    if level.ci_lo is None or level.ci_hi is None:
-        return f"{level.value:.3f}"
-    return f"{level.value:.3f} [{level.ci_lo:.3f}, {level.ci_hi:.3f}]"
+    return f"{level.value:.3f} {fmt_ci(level.ci_lo, level.ci_hi, spec='{:.3f}')}"
 
 
 async def cmd_verify(args: argparse.Namespace) -> CommandResult:
-    """Re-score a campaign candidate on N unseen cells; bank the pass and print its reading."""
-
-    setup_logging(style="full" if get_verbose() else "cli")
-    identity = identity_from_args(args)
+    setup_logging(style="full" if args.verbose else "cli")
     try:
         spec = parse_subject(args.subject)
     except ValueError as exc:
@@ -46,24 +36,28 @@ async def cmd_verify(args: argparse.Namespace) -> CommandResult:
             "ERROR: verify takes one searchpoint and no mask: "
             "`candidate:<campaign>/<cycle>/<candidate_id>[;in=<c::y~…>]`."
         )
-    stores = descend_store(build_stores(identity, projects_root=DEFAULT_PROJECTS_ROOT), spec.inside)
-    hop = CycleHop(
-        campaign_id=resolve_campaign_hint(stores, spec.campaign_id), cycle_id=spec.cycle_id
-    )
+    stores = descend_store(open_stores(args), spec.inside)
 
     try:
-        outcome = await verify_candidate(
-            stores=stores,
-            hop=hop,
-            candidate_id=spec.candidate_id,
-            samples=args.samples,
-            strategy=args.strategy,
-            seed=args.seed,
-            log=logger.info if get_verbose() else None,
+        dispatched = await CommandDispatcher(stores).dispatch_cycle_command(
+            CommandCall(
+                VerifyCandidatePayload(
+                    campaign_id=resolve_campaign_hint(stores, spec.campaign_id),
+                    cycle_id=spec.cycle_id,
+                    candidate_id=spec.candidate_id,
+                    samples=args.samples,
+                    strategy=args.strategy,
+                    seed=args.seed,
+                ),
+                uuid.uuid4().hex,
+            ),
+            expected_version=None,
         )
-    except (VerifyError, BankedSearchPointError) as exc:
+    except (VerifyError, BankedSearchPointError, ValidationError) as exc:
         raise SystemExit(f"ERROR: {exc}") from exc
 
+    outcome = dispatched.result
+    assert isinstance(outcome, VerifyOutcome), "a fresh key applies, and the applier answers one"
     reading = outcome.reading
     if reading is None:
         return CommandResult(
@@ -77,15 +71,20 @@ async def cmd_verify(args: argparse.Namespace) -> CommandResult:
     verdict = {True: " — held", False: " — DROPPED", None: ""}[reading.held]
     lines = [
         f"{reading.label}: accuracy {_level(reading.recorded.accuracy)} on its round's "
-        f"{reading.n_recorded} cells → {_level(reading.fresh.accuracy)} on {reading.n_fresh} "
+        f"{reading.recorded.n} cells → {_level(reading.fresh.accuracy)} on {reading.fresh.n} "
         f"unseen ({reading.strategy}){verdict}",
         f"  composite {_level(reading.recorded.composite)} → {_level(reading.fresh.composite)}",
     ]
-    if reading.lift.accuracy is not None:
-        lines.append(
-            f"  lift over C0, paired on {reading.n_shared} shared cells: "
-            f"accuracy {_level(reading.lift.accuracy)}, composite {_level(reading.lift.composite)}"
+    pair = reading.vs_origin
+    if pair.headline is None or pair.coverage is None:
+        lines.append(f"  lift over C0: {READING_STATE_INFO[pair.state].sentence}")
+    else:
+        lifts = ", ".join(
+            f"{lift.measurand.key} {lift.estimate.value:+.3f} "
+            f"[{lift.estimate.ci_lo:+.3f}, {lift.estimate.ci_hi:+.3f}]"
+            for lift in (pair.headline, *pair.beside)
         )
+        lines.append(f"  lift over C0, paired on {pair.coverage.scored} shared cells: {lifts}")
     return CommandResult(data=reading.model_dump(mode="json"), human="\n".join(lines))
 
 

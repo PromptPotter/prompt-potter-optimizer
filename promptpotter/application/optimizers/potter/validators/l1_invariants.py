@@ -1,12 +1,3 @@
-"""The round-local + cross-round COLLAPSE gates: a proposal that mutates nothing, duplicates a
-sibling, or re-proposes an idea a prior round already measured and lost. Each rejection is a
-synthetic-0 candidate that never burned an LLM call.
-
-Distinct from ``l1_strict.py``, which checks a proposal against the pipeline SCHEMA. These three
-compare proposals against each other and against history, so they need no schema at all — and the
-cross-round one is the loop's most destructive rejection, which is why every bound on it
-(measured losses only, a stricter threshold, the never-empty-a-round valve) lives here beside it."""
-
 from __future__ import annotations
 
 import logging
@@ -36,8 +27,7 @@ __all__ = ["detect_invariants", "lost_ideas"]
 
 
 def lost_ideas(prior_rounds: Sequence[RoundResult]) -> list[tuple[int, frozenset[str]]]:
-    """Measured losses only, each on a paired reading: an ε cut, PoBB's posterior, or a walked arm
-    whose ``reference_lift`` interval sits wholly below zero. Each reads against the round BEFORE its own."""
+    """Measured losses only, each read against the round BEFORE its own."""
     out: list[tuple[int, frozenset[str]]] = []
     for parent_round, rr in pairwise(prior_rounds):
         parent, parent_pp = parent_round.prompt_fields, parent_round.pipeline_params
@@ -48,7 +38,11 @@ def lost_ideas(prior_rounds: Sequence[RoundResult]) -> list[tuple[int, frozenset
                 # ε alone measured this arm against its priors; COLLAPSED is no measurement.
                 if cand.elimination_context.get("gate") != EliminationGate.EPSILON:
                     continue
-            elif cand.reference_lift_ci_hi is None or cand.reference_lift_ci_hi >= 0.0:
+            elif (
+                cand.vs_reference is None
+                or (lift := cand.vs_reference.headline) is None
+                or lift.estimate.side != "below"
+            ):
                 continue
             if fp := candidate_idea(cand.prompt_fields, parent, cand.pipeline_overlay, parent_pp):
                 out.append((rr.round, fp))
@@ -61,8 +55,6 @@ def detect_invariants(
     parent_pipeline_params: dict[str, Any] | None,
     prior_rounds: Sequence[RoundResult] = (),
 ) -> None:
-    """Stamps each collapse on its proposal. A repeat is never allowed to EMPTY the round — if
-    rejection would leave no live proposal, none is rejected."""
     parent_pp = parent_pipeline_params or {}
     for cp in proposals:
         cp.validation_failures = [
@@ -70,12 +62,10 @@ def detect_invariants(
         ]
     seen: dict[tuple[Any, ...], int] = {}
     tried = lost_ideas(prior_rounds)
-    # Repeats are collected, not applied inline: whether they may be rejected at all depends on
-    # how many proposals SURVIVE the other two gates, which is only known after the loop.
+    # Collected, not applied inline: rejecting depends on how many SURVIVE the other two gates.
     repeats: list[tuple[CandidateProposal, int]] = []
     n_live = 0
-    # Both whole lists, so a variant that only moved its shots is an edit and one that dropped
-    # every shot is too.
+    # Whole lists, so a variant that only moved its shots, or dropped every one, is an edit.
     parent_fields = {**parent_opt_sp.prompt_fields(), "shot_ids": parent_opt_sp.shot_ids}
     for i, cp in enumerate(proposals):
         child_fields = {**cp.opt_sp.prompt_fields(), "shot_ids": cp.opt_sp.shot_ids}
@@ -106,9 +96,7 @@ def detect_invariants(
             continue
         seen[sig] = i
         n_live += 1
-        # The idea is the words the candidate ADDED to its parent — never the field names, and
-        # never the changed field's whole value: both collapse the test into "touched the same
-        # field" (see `candidate_idea`).
+        # The words ADDED to the parent, never field names or whole values (see `candidate_idea`).
         fp = candidate_idea(child_fields, parent_fields, cp.pipeline_overlay, parent_pp)
         echo = next(
             (rnd for rnd, prev in tried if same_idea(fp, prev, threshold=IDEA_MATCH_REJECT)),
@@ -117,11 +105,7 @@ def detect_invariants(
         if echo is not None:
             repeats.append((cp, echo))
 
-    # Safety valve — a repeat may cost the round a candidate, never the whole round. `n_live`
-    # counts proposals that cleared no-op + duplicate; if every one of them is also a repeat,
-    # none is rejected. The loop then re-tests a known-dead idea for one round, which the
-    # ALREADY TRIED panel still marks — strictly better than handing PoBB an empty population
-    # and burning the turn on nothing.
+    # A repeat may cost the round a candidate, never the whole round.
     if len(repeats) < n_live:
         for cp, echo in repeats:
             cp.validation_failures = [

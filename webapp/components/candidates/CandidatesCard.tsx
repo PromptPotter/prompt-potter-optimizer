@@ -1,342 +1,22 @@
 "use client";
-import { useCallback, useMemo, useState, type CSSProperties } from "react";
-import { activeSeries, metricInkToken, type SeriesCtx } from "./series";
-import { FitnessChart, type PlotGeometry, geomEqual } from "./FitnessChart";
+import type { CSSProperties } from "react";
+import { FitnessChart } from "./FitnessChart";
 import { DendrogramStrip } from "./DendrogramStrip";
-import { AbilityHelp, ThetaCaveatNotice } from "./AbilityInfo";
-import { setCandidatesState, toggleMetric, useCandidatesState } from "@/lib/candidates-store";
-import {
-  Badge,
-  CardFrame,
-  Chip,
-  ChipGroup,
-  CopyButton,
-  HoverCard,
-  IconMore,
-  IconTree,
-  Menu,
-  MenuCheck,
-  MenuRadioGroup,
-  MenuSep,
-  Toolbar,
-  ToolbarSep,
-  ToolbarSpacer,
-} from "@/components/ui";
-import { isMeasuring, liveCandidates, useCycleStream } from "@/lib/poll";
-import { ABORT_LENS_LABELS } from "@/lib/api/types.generated";
-import type { DashboardCandidate, RoundSummary } from "@/lib/api/types";
-import { subjectKey, withMask } from "@/lib/api/reads";
-import { useCompareSelection } from "@/lib/compare-selection";
-import { useSelection } from "@/lib/SelectionContext";
+import { ThetaCaveatNotice } from "./AbilityInfo";
+import { CandidatesToolbar } from "./CandidatesToolbar";
+import { useCandidatesModel, type CandidatesModel } from "./useCandidatesModel";
+import { CardFrame, Chip, IconTree } from "@/components/ui";
 import { Criterion } from "@/components/shell/scoring/Criterion";
 import { ApplyScenarioPanel } from "@/components/candidates/ApplyScenarioPanel";
-import {
-  lensOf,
-  setScoringMask,
-  useScoringMask,
-} from "@/lib/scoring-mask";
+import { setScoringMask } from "@/lib/scoring-mask";
 import { FitnessRankSummary } from "./FitnessRankSummary";
-import type { LineageNode } from "@/lib/api";
-import {
-  barsAreCourses,
-  benchByLabel,
-  candidateViews,
-  forkKeysOf,
-  DISPLAY_METRICS,
-  displayMetricLabel,
-  nodeKeyOf,
-  pathOf,
-  verifyByLabel,
-  type DisplayMetric,
-} from "@/lib/derivations";
-import { isSelectedCandidate, selectedCandidateOf } from "@/lib/types";
-import { encodeCyclePath } from "@/lib/ids";
-import { useWorkspace } from "@/lib/workspace";
-import { useLineage } from "@/lib/hooks/useLineage";
-import { useServedCriterion } from "@/lib/hooks/useServedCriterion";
 import { SampleSetControl } from "./SampleSetControl";
-import { measuredUniverse } from "@/lib/sample-set";
-import { useViewedLineage, divergenceRoundsFor } from "@/lib/lineage";
 import { cx } from "@/lib/cx";
-import { TERMS } from "@/lib/terms";
-import type { CandidateView } from "@/lib/types";
+import { useCycleStream, type DashboardSnapshot } from "@/lib/poll";
 
-// The candidates card: this cycle's population as bars, with the dendrogram on the same x spine.
-
-// The abort rows are derived from the served `ABORT_LENS_LABELS`, never hand-listed.
-const LENS_OPTIONS: readonly { value?: string; label?: string; heading?: string }[] = [
-  { value: "", label: "Realized" },
-  { heading: "Scoring" },
-  { value: "score:accuracy", label: "Accuracy" },
-  { heading: "Abort off" },
-  ...Object.entries(ABORT_LENS_LABELS).map(([variant, label]) => ({
-    value: `abort:${variant}`,
-    label,
-  })),
-];
-
-export function CandidatesCard() {
-  const { dash, isLive } = useCycleStream();
-  const unit = dash?.measured_unit ?? "sample";
-  const {
-    campaignId,
-    cycleId,
-    leafCampaignId,
-    leafCycleId,
-    viewedPath,
-    viewedCandidateId,
-    selectCyclePath,
-  } = useWorkspace();
-  const {
-    candidate: selectedCandidate,
-    setSelectionForCandidate,
-    sampleSet,
-    setSelectionForSampleSet,
-  } = useSelection();
-  const comparing = useCompareSelection();
-
-  const {
-    showForest,
-    metrics,
-    metricsSeededForCycle,
-    showOverlap,
-    overlapSeededForCycle,
-    showCache,
-  } = useCandidatesState();
-  const electedMetric: DisplayMetric = dash?.display_metric ?? "accuracy";
-
-  const inflightCandidates: DashboardCandidate[] = useMemo(() => liveCandidates(dash), [dash]);
-
-  // Served in round order; memoed so an absent `rounds` is one stable empty list.
-  const history: RoundSummary[] = useMemo(() => dash?.rounds ?? [], [dash?.rounds]);
-
-  const verifyReadings = useMemo(() => verifyByLabel(history), [history]);
-
-  const benchReadings = useMemo(
-    () => benchByLabel(history, dash?.bench_pass),
-    [history, dash?.bench_pass],
-  );
-
-  const { open: maskOpen, mask } = useScoringMask();
-  const served = useServedCriterion();
-  const activeLens = maskOpen ? lensOf(mask) : null;
-
-  // Carries the on-screen mask, so a scenario built here opens in Compare reading the same thing.
-  const compareKey =
-    selectedCandidate && leafCampaignId && viewedPath
-      ? withMask(
-          subjectKey(
-            "candidate",
-            [leafCampaignId, selectedCandidate.cycle_id, selectedCandidate.candidate_id],
-            viewedPath.slice(0, -1),
-          ),
-          { lens: activeLens, samples: sampleSet?.length ? sampleSet.join(",") : null },
-        )
-      : null;
-
-  // Gated on `dash`, or the seed runs before `display_metric` arrives.
-  if (cycleId && dash && metricsSeededForCycle !== cycleId) {
-    setCandidatesState({
-      metrics: new Set<DisplayMetric>(["accuracy", electedMetric]),
-      metricsSeededForCycle: cycleId,
-    });
-  }
-
-  // The newest round's reading names the basis; the round in flight carries one from its election,
-  // the adapters' whole pass before `rounds[]` does.
-  const overlap = useMemo(
-    () =>
-      dash?.current_round.overlap ??
-      history.reduce<RoundSummary["overlap"]>((best, r) => r.overlap ?? best, null),
-    [dash?.current_round.overlap, history],
-  );
-  const overlapByCandidate = useMemo(
-    () => new Map((overlap?.members ?? []).map((m) => [m.candidate_id, m])),
-    [overlap],
-  );
-
-  const sampleUniverse = useMemo(() => measuredUniverse(history), [history]);
-
-  const overlay = useViewedLineage();
-  const { lens, setLens, maskActive, maskLabel, scoringMaskActive } = overlay;
-
-  // The bars are the children of the VIEWED node (navigation), never of `selectedCandidate`
-  // (inspection): one slot for both makes the chart its own input.
-  const viewedNode = useMemo(() => {
-    if (!viewedPath) return undefined;
-    const entry = overlay.index.get(encodeCyclePath(viewedPath));
-    if (!entry) return undefined;
-    return viewedCandidateId
-      ? entry.candidates.find((c) => c.id === viewedCandidateId)
-      : (entry.course ?? undefined);
-  }, [overlay.index, viewedPath, viewedCandidateId]);
-
-  // The ledger snapshots a score only at completion, so a mid-scoring bar lives in
-  // `dash.current_round`. Keyed by label: a live candidate has no lineage id yet.
-  const inflightByLabel = useMemo(
-    () => new Map(inflightCandidates.map((c) => [c.label, c])),
-    [inflightCandidates],
-  );
-
-  const areCourses = useMemo(() => barsAreCourses(viewedNode), [viewedNode]);
-
-  const views = useMemo<CandidateView[]>(
-    () =>
-      candidateViews({
-        viewedNode,
-        inflightByLabel,
-        sampleSet,
-        verifyByLabel: verifyReadings,
-        benchByLabel: benchReadings,
-        overlapByCandidate,
-        overlapSize: overlap?.sample_ids.length ?? null,
-        stampsTheta: dash?.stamps_theta ?? false,
-      }),
-    [
-      viewedNode,
-      inflightByLabel,
-      sampleSet,
-      verifyReadings,
-      benchReadings,
-      overlapByCandidate,
-      overlap,
-      dash?.stamps_theta,
-    ],
-  );
-
-  const floorPinned = useMemo(
-    () => views.filter((v) => v.thetaCaveat === "floor_pinned").map((v) => v.label),
-    [views],
-  );
-
-  const forkKeys = useMemo(() => forkKeysOf(viewedNode), [viewedNode]);
-
-  const { metric, forkedFrom, revealLane, setShowForest, totalDescendants } = useLineage({
-    campaignId,
-    cycleId,
-    path: viewedPath,
-    electedMetric,
-  });
-
-  const [showTheta, setShowTheta] = useState(false);
-  const [plot, setPlot] = useState<PlotGeometry | null>(null);
-  const onGeometry = useCallback((g: PlotGeometry) => {
-    setPlot((prev) => (geomEqual(prev, g) ? prev : g));
-  }, []);
-
-  const onSelect = useCallback(
-    (v: CandidateView | null) => {
-      if (!v || !leafCycleId) {
-        setSelectionForCandidate(null);
-        return;
-      }
-      // A bar click INSPECTS, never navigates — a course bar included.
-      setSelectionForCandidate(selectedCandidateOf(leafCycleId, v.round, v.candidate_id, v.label));
-    },
-    [setSelectionForCandidate, leafCycleId],
-  );
-
-  // Navigation rides the node's own path, never a bare cycle id.
-  const onFreeHierarchy = useCallback(
-    (course: LineageNode) => {
-      revealLane(nodeKeyOf(course));
-      selectCyclePath(pathOf(course), null);
-    },
-    [revealLane, selectCyclePath],
-  );
-
-  const selectedKey = useMemo(
-    () =>
-      views.find((v) =>
-        isSelectedCandidate(selectedCandidate, leafCycleId, v.round, v.candidate_id),
-      )?.key ?? null,
-    [views, selectedCandidate, leafCycleId],
-  );
-
-  // Served (`divergence` on the tree overlay), never derived; the apply panel mints its fork here.
-  const divergentRound = useMemo(() => {
-    if (!overlay.maskActive || viewedCandidateId) return null;
-    const { points, subtree } = divergenceRoundsFor(overlay.index, viewedPath);
-    let first = Infinity;
-    for (const r of points) first = Math.min(first, r);
-    for (const r of subtree) first = Math.min(first, r);
-    return Number.isFinite(first) ? first : null;
-  }, [overlay.maskActive, overlay.index, viewedPath, viewedCandidateId]);
-
-  // The realized `per_cell` the tree was read under — what a fork applying the mask carries.
-  const lensCriterion =
-    (viewedPath && overlay.index.get(encodeCyclePath(viewedPath))?.course?.lens_criterion) || null;
-
-  const divergenceBoundary = useMemo(() => {
-    if (divergentRound == null) return null;
-    const idx = views.findIndex((v) => v.round >= divergentRound);
-    return idx >= 0 ? idx : null;
-  }, [divergentRound, views]);
-
-  // `dash.candidate` goes stale between rounds, so gate on the measurement being the active node.
-  const measuring = isMeasuring(dash);
-  const inFlightIndex = useMemo(() => {
-    if (!isLive || !measuring) return null;
-    const lbl = String(dash?.candidate || "").split("/")[0];
-    if (!lbl) return null;
-    const idx = views.findIndex((v) => v.label === lbl);
-    return idx >= 0 ? idx : null;
-  }, [isLive, measuring, dash?.candidate, views]);
-
-  const lensActive = lens !== "" && !scoringMaskActive;
-
-  // Off the served reading, not the views: those null `overlapAccuracy` for everyone off the set.
-  const hasOverlap = overlap != null && !areCourses;
-
-  if (cycleId && overlap != null && overlapSeededForCycle !== cycleId) {
-    setCandidatesState({ showOverlap: true, overlapSeededForCycle: cycleId });
-  }
-
-  const pickedSet = sampleSet != null && !areCourses;
-  const rung = pickedSet ? 2 : showOverlap && hasOverlap ? 1 : 0;
-  const overlapDisabled = areCourses || (!hasOverlap && sampleUniverse.length === 0);
-  const stepOverlap = () => {
-    if (rung === 2) {
-      setSelectionForSampleSet(null);
-      setCandidatesState({ showOverlap: false });
-    } else if (rung === 1 || !hasOverlap) {
-      setSelectionForSampleSet(overlap?.sample_ids ?? sampleUniverse);
-      setCandidatesState({ showOverlap: true });
-    } else {
-      setCandidatesState({ showOverlap: true });
-    }
-  };
-  const overlapNext = [
-    hasOverlap
-      ? "Read C0 and each new best since on the one set of cells all of them answered. The bars beside it stay on each candidate's own cells."
-      : "Pick a set of cells and read every candidate that answered all of it on that one basis. There is no reading to show yet: the best-so-far line is still C0 alone, and a second member arrives with the first round whose result beats it.",
-    "Choose which cells the overlap bars are read on — any round's set, or your own pick.",
-    "Hide the overlap bars and drop the picked set.",
-  ];
-
-  const seriesCtx = useMemo<SeriesCtx>(
-    () => ({
-      metrics,
-      showMask: maskOpen,
-      showCache,
-      showOverlap: rung > 0,
-      views,
-      unit,
-      electedMetric,
-    }),
-    [metrics, maskOpen, showCache, rung, views, unit, electedMetric],
-  );
-  const legend = useMemo(
-    () => activeSeries(seriesCtx).filter((s) => s.metric == null),
-    [seriesCtx],
-  );
-
-  const cacheHitCount = useMemo(
-    () => views.filter((v) => (v.cached_samples ?? 0) > 0).length,
-    [views],
-  );
-
-  const forestToggle = (
+function ForestToggle({ model: m }: { model: CandidatesModel }) {
+  const { showForest, totalDescendants } = m;
+  return (
     <Chip
       icon={totalDescendants === 0}
       on={showForest}
@@ -346,7 +26,7 @@ export function CandidatesCard() {
           : `Show the lineage forest — the full campaign tree, ${totalDescendants} descendant${totalDescendants === 1 ? "" : "s"}`
       }
       title={`${showForest ? "Hide" : "Show"} the campaign tree — every cycle and fork side by side (${totalDescendants} descendant${totalDescendants === 1 ? "" : "s"})`}
-      onClick={() => setShowForest(!showForest)}
+      onClick={() => m.setShowForest(!showForest)}
     >
       <span className="cand-forest-toggle">
         <IconTree />
@@ -354,6 +34,41 @@ export function CandidatesCard() {
       </span>
     </Chip>
   );
+}
+
+function FitnessLegend({ model: m }: { model: CandidatesModel }) {
+  const { legend, seriesCtx } = m;
+  if (legend.length === 0) return null;
+  return (
+    <div className="fitness-legend">
+      {legend.map((s) => (
+        <span key={s.key} title={s.hint?.(seriesCtx)}>
+          <span
+            className={cx("swatch", s.kind === "line" && "line", s.hollow && "hollow")}
+            style={{ "--ink": `var(${s.ink(seriesCtx)})` } as CSSProperties}
+          />
+          {s.legend?.(seriesCtx)}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+export function CandidatesCard() {
+  const { dash } = useCycleStream();
+  if (!dash) {
+    return (
+      <CardFrame className="cand-card" title={<span className="cand-title">Candidates</span>}>
+        <div className="lineage-empty">Waiting for this run&rsquo;s dashboard…</div>
+      </CardFrame>
+    );
+  }
+  return <ReadCandidatesCard dash={dash} />;
+}
+
+function ReadCandidatesCard({ dash }: { dash: DashboardSnapshot }) {
+  const m = useCandidatesModel(dash);
+  const { views, maskOpen, viewedCandidateId, areCourses, wonOnTheta } = m;
 
   return (
     <CardFrame
@@ -361,241 +76,71 @@ export function CandidatesCard() {
         "cand-card",
         maskOpen && "mask-open",
       )}
-      title={
-        <Toolbar className="cand-toolbar">
-          {viewedCandidateId && viewedPath ? (
-            <button
-              type="button"
-              className="cand-title cand-crumb"
-              onClick={() => selectCyclePath(viewedPath, null)}
-              title="Back to this course's candidates"
-            >
-              ‹ {viewedNode?.label ?? "runs"} · runs
-            </button>
-          ) : (
-            <span className="cand-title">Candidates</span>
-          )}
-          {maskActive && (
-            <Badge
-              tone="danger"
-              title={`Showing the ${maskLabel} mask — divergence vs the realized record`}
-            >
-              {maskLabel}
-            </Badge>
-          )}
-          <ToolbarSep />
-          {/* Display only — the selector elects on its own objective whatever is lit here. */}
-          <ChipGroup label="Bars" joined>
-            {DISPLAY_METRICS.map((m) => {
-              // Rows carry θ only where the selector fits it; a lit chip would draw no bar.
-              const unfit = m.id === "ability" && !dash?.stamps_theta;
-              return (
-                <Chip
-                  key={m.id}
-                  icon
-                  on={metrics.has(m.id) && !unfit}
-                  disabled={unfit}
-                  ink={`var(${metricInkToken(m.id, electedMetric)})`}
-                  ariaLabel={displayMetricLabel(m.id)}
-                  title={unfit ? "This optimizer does not elect on θ, so no candidate carries one" : m.title}
-                  onClick={() => toggleMetric(m.id)}
-                >
-                  {m.glyph}
-                </Chip>
-              );
-            })}
-            <Chip
-              icon
-              on={rung > 0}
-              ink={rung === 2 ? "var(--color-new)" : "var(--color-overlap)"}
-              disabled={overlapDisabled}
-              ariaLabel={
-                rung === 2
-                  ? "Choosing which cells the overlap bars are read on; press to turn them off"
-                  : rung === 1
-                    ? "Overlap shown — press to choose its cells"
-                    : hasOverlap
-                      ? "Show the overlap reading — the adopted line on one shared set of cells"
-                      : "Pick a set of cells to read the candidates on"
-              }
-              title={
-                areCourses
-                  ? "These bars are runs, not scored cells — open a run to compare its candidates."
-                  : overlapNext[rung]
-              }
-              onClick={stepOverlap}
-            >
-              ∩
-            </Chip>
-          </ChipGroup>
-          <ToolbarSpacer />
-          <Menu
-            renderTrigger={({ open, toggle }) => (
-              <Chip
-                icon
-                on={open || lensActive || maskOpen || showCache}
-                ariaLabel="More candidate options"
-                title="Lens, scoring mask, cache overlay, and the θ explainer"
-                onClick={toggle}
-              >
-                <IconMore />
-              </Chip>
-            )}
-          >
-            {({ close }) => (
-              <>
-                <MenuRadioGroup
-                  label={scoringMaskActive ? "Lens — driven by the scoring mask" : "Lens"}
-                  value={scoringMaskActive ? "" : lens}
-                  options={LENS_OPTIONS}
-                  onChange={(v) => {
-                    if (scoringMaskActive) return;
-                    setLens(v);
-                    close();
-                  }}
-                />
-                <MenuSep />
-                <HoverCard content="Pick per-cell terms and reweight them to re-read every score under a criterion you choose.">
-                  <MenuCheck on={maskOpen} onClick={() => setScoringMask({ open: !maskOpen })}>
-                    Scoring mask
-                  </MenuCheck>
-                </HoverCard>
-                {/* Never disabled: the origin is normally the replayed one. */}
-                <HoverCard content={TERMS.cache_replayed}>
-                  <MenuCheck
-                    on={showCache}
-                    onClick={() => setCandidatesState({ showCache: !showCache })}
-                  >
-                    {/* "Replayed", never "cache": `cache` names the provider's prefix discount elsewhere. */}
-                    Replayed{cacheHitCount > 0 ? ` · ${cacheHitCount} of ${views.length}` : ""}
-                  </MenuCheck>
-                </HoverCard>
-                <MenuSep />
-                <MenuCheck
-                  on={!!compareKey && comparing.hasSubject(compareKey)}
-                  disabled={!compareKey || !campaignId}
-                  onClick={() => {
-                    if (!compareKey || !campaignId) return;
-                    if (comparing.hasSubject(compareKey)) comparing.remove(compareKey);
-                    else comparing.addSubject({ rootCampaignId: campaignId, subject: compareKey });
-                    close();
-                  }}
-                  title={
-                    compareKey
-                      ? "Read this searchpoint beside other campaigns, branches and searchpoints on the Compare tab."
-                      : "Pick a candidate first — a bar, a dendrogram node or a forest stub."
-                  }
-                >
-                  Compare this searchpoint
-                </MenuCheck>
-                {dash?.stamps_theta && (
-                  <>
-                    <MenuSep />
-                    <MenuCheck
-                      on={showTheta}
-                      onClick={() => setShowTheta((v) => !v)}
-                      title="Why a lower-accuracy candidate can win"
-                    >
-                      How candidates are ranked
-                    </MenuCheck>
-                  </>
-                )}
-                {dash?.stamps_theta && showTheta && (
-                  <AbilityHelp
-                    model={history.at(-1)?.ability?.calibration_model ?? null}
-                    caveat={history.at(-1)?.ability?.caveat ?? null}
-                  />
-                )}
-              </>
-            )}
-          </Menu>
-          <CopyButton data={views} title="Copy all candidates as JSON" />
-        </Toolbar>
-      }
+      title={<CandidatesToolbar model={m} />}
     >
       <div className="fitness-body">
-        {/* A θ caveat qualifies an election on θ, which a peer optimizer never holds. */}
-        {!areCourses && dash?.stamps_theta && (
-          <ThetaCaveatNotice
-            caveat={history.at(-1)?.ability?.caveat ?? null}
-            ability={history.at(-1)?.ability ?? null}
-          />
+        {!areCourses && wonOnTheta && (
+          <ThetaCaveatNotice caveat={m.ability?.caveat ?? null} ability={m.ability} />
         )}
-        {!areCourses && dash?.stamps_theta && floorPinned.length > 0 && (
+        {!areCourses && wonOnTheta && m.floorPinned.length > 0 && (
           <>
             <ThetaCaveatNotice caveat="floor_pinned" />
-            <div className="theta-caveat-arms">Affected: {floorPinned.join(", ")}.</div>
+            <div className="theta-caveat-arms">Affected: {m.floorPinned.join(", ")}.</div>
           </>
         )}
-        {sampleSet && !areCourses && (
-          <SampleSetControl rounds={history} overlap={overlap} unit={unit} />
-        )}
+        {m.pickedSet && <SampleSetControl rounds={m.history} overlap={m.overlap} unit={m.unit} />}
         {/* The dendrogram's x-alignment depends on sharing this box with the canvas. */}
         <div className="fitness-chart-wrap">
-          {legend.length > 0 && (
-            <div className="fitness-legend">
-              {legend.map((s) => (
-                <span key={s.key} title={s.hint?.(seriesCtx)}>
-                  <span
-                    className={cx("swatch", s.kind === "line" && "line", s.hollow && "hollow")}
-                    style={{ "--ink": `var(${s.ink(seriesCtx)})` } as CSSProperties}
-                  />
-                  {s.legend?.(seriesCtx)}
-                </span>
-              ))}
-            </div>
-          )}
+          <FitnessLegend model={m} />
           <FitnessChart
-            views={views}
-            metrics={metrics}
-            showMask={maskOpen}
-            showOverlap={rung > 0}
-            showCache={showCache}
-            divergenceBoundary={divergenceBoundary}
-            inFlightIndex={inFlightIndex}
-            selectedKey={selectedKey}
-            onSelect={onSelect}
-            onGeometry={onGeometry}
-            unit={unit}
-            electedMetric={electedMetric}
+            ctx={m.seriesCtx}
+            divergenceBoundary={m.divergenceBoundary}
+            inFlightIndex={m.inFlightIndex}
+            selectedKey={m.selectedKey}
+            onSelect={m.onSelect}
+            onGeometry={m.onGeometry}
           />
           <div className="cand-tree-row">
             {!viewedCandidateId && (
               <DendrogramStrip
                 views={views}
-                plot={plot}
-                metric={metric}
-                selectedKey={selectedKey}
-                onSelect={onSelect}
-                forkedFrom={forkedFrom}
-                forkKeys={forkKeys}
-                onFreeHierarchy={onFreeHierarchy}
+                plot={m.plot}
+                metric={m.metric}
+                selectedKey={m.selectedKey}
+                onSelect={m.onSelect}
+                forkedFrom={m.forkedFrom}
+                onFreeHierarchy={m.onFreeHierarchy}
               />
             )}
-            {forestToggle}
+            <ForestToggle model={m} />
           </div>
         </div>
         {maskOpen && !viewedCandidateId && (
           <Criterion
             className="fitness-mask"
             startRung={1}
-            mask={mask}
+            mask={m.mask}
             onMask={(next) => setScoringMask({ mask: next })}
-            anchors={served.anchors}
-            formula={lensCriterion}
+            anchors={m.anchors}
+            formula={m.lensCriterion}
             note="Read this branch under a criterion it was not scored on. Every cell the run recorded is re-graded and folded, as a run under it would — the elections are re-decided, never re-run."
-            // No samples field: the chip strip owns that axis.
-            summary={<FitnessRankSummary views={views} criterion={activeLens != null} />}
+            summary={
+              <FitnessRankSummary
+                views={views}
+                shift={m.lensShift}
+                criterion={m.criterionActive}
+              />
+            }
           />
         )}
         {maskOpen && !viewedCandidateId && (
           <ApplyScenarioPanel
-            campaignId={campaignId}
-            cycleId={cycleId}
-            isLive={isLive}
-            criterion={lensCriterion}
-            divergentRound={divergentRound}
-            nextRound={history.length}
+            campaignId={m.campaignId}
+            cycleId={m.cycleId}
+            isLive={m.isLive}
+            criterion={m.lensCriterion}
+            divergentRound={m.divergentRound}
+            nextRound={m.history.length}
           />
         )}
       </div>

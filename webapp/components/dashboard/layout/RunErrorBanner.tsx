@@ -1,6 +1,3 @@
-// Both run alerts from `dashboard.json` — fatal `error` and non-fatal `recent_loop_warnings`.
-
-import { STOP_REASON_LABELS } from "@/lib/api/types.generated";
 import { useCycleStream } from "@/lib/poll";
 
 export function RunErrorBanner() {
@@ -18,7 +15,7 @@ export function RunErrorBanner() {
         <div className="run-error-banner" role="alert">
           <div className="run-error-banner-head">
             <span className="run-error-banner-kind">{err.kind}</span>
-            <span className="run-error-banner-stop">{STOP_REASON_LABELS[err.stop_reason]}</span>
+            <span className="run-error-banner-stop">{err.label}</span>
           </div>
           <p className="run-error-banner-msg">{lines[0] ?? err.message}</p>
           {lines.length > 1 ? (

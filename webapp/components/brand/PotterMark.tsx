@@ -1,5 +1,4 @@
-// The PromptPotter mark, drawn as a CSS mask over `currentColor`, never an <img>: an <img> bakes
-// the ink in, and a whitelabel accent must flow through (promptpotter-web/BRAND.md principle 4).
+// A CSS mask over `currentColor`, never an <img>: a whitelabel accent must flow through (BRAND.md principle 4).
 
 interface Props {
   size?: number;

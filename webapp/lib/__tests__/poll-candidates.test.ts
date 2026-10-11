@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { currentRound, dash, liveRow } from "@/lib/test-fixtures";
+import { armReading, currentRound, dash, liveRow } from "@/lib/test-fixtures";
 import { liveCandidate, liveCandidates } from "../poll";
 
-// The no-candidate path returns a STABLE reference, or the candidates card loops setState.
 describe("liveCandidates", () => {
   it("returns the same reference on the no-candidate path", () => {
     expect(liveCandidates(null)).toBe(liveCandidates(null));
@@ -14,16 +13,18 @@ describe("liveCandidates", () => {
   });
 });
 
-// The live half joins on LABEL; an empty label must not answer for one.
 describe("liveCandidate label join", () => {
   const d = dash({
     current_round: currentRound({
-      candidates: [liveRow({ label: "C2.1" }), liveRow({ label: "C2.2", run_id: "run-2" })],
+      candidates: [
+        liveRow({ reading: armReading({ arm: { round: 2, label: "C2.1" } }) }),
+        liveRow({ reading: armReading({ arm: { round: 2, label: "C2.2" }, panel: { scored: 3 } }) }),
+      ],
     }),
   });
 
   it("resolves the in-flight candidate by its label", () => {
-    expect(liveCandidate(d, "C2.2")?.run_id).toBe("run-2");
+    expect(liveCandidate(d, "C2.2")?.reading.panel.scored).toBe(3);
   });
 
   it("matches no row on an absent label", () => {

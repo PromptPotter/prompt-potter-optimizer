@@ -1,147 +1,73 @@
-"""Provenance grade (``A`` > ``B`` > ``C``) from ``source`` + per-sample ``terminal_node``, stamped once at
-``build_dataset_run_data``. Consumers read the grade instead of being fooled by row count."""
-
 from __future__ import annotations
 
 import enum
-from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.domain.scoring import MeasuredCell
 
 MEASUREMENT_GRADES = ("A", "B", "C")
-"""Ordinal quality grades, best first."""
 
 
 class RunSource(enum.StrEnum):
-    """What bought a run's rows. The origin and the loop's candidates explore the search space on
-    purpose, whichever optimizer proposed them; a diagnostic verb re-measures outside the loop."""
-
     ORIGIN = "origin"
     OPTIMIZATION_LOOP = "optimization_loop"
     VERIFY = "verify"
     AB = "ab"
     NOISE_FLOOR = "noise_floor"
     SEED_SCREEN = "seed_screen"
+    DECISION_BANK = "decision_bank"
 
     @property
     def deliberate(self) -> bool:
         match self:
             case RunSource.ORIGIN | RunSource.OPTIMIZATION_LOOP:
                 return True
-            case RunSource.VERIFY | RunSource.AB | RunSource.NOISE_FLOOR | RunSource.SEED_SCREEN:
+            case (
+                RunSource.VERIFY
+                | RunSource.AB
+                | RunSource.NOISE_FLOOR
+                | RunSource.SEED_SCREEN
+                | RunSource.DECISION_BANK
+            ):
                 return False
 
 
-# Fraction of a run's samples that must have run the deliberate LLM path for the
-# run to count as a real evaluation rather than a connector-retrieval batch.
-LLM_PATH_FLOOR = 0.5
-
 REUSABLE_MIN_GRADE = "B"
-"""Floor for serving a banked row back as a cache hit (ADR-0005: every consumer excludes ``C``).
-
-A ``C`` run is operator-intervened or off the deliberate LLM path, and replaying one launders it:
-the replayed copies are re-archived under the READING run, which `build_dataset_run_data` grades
-from its own ``source``/``human_intervened`` — so ``C`` cells re-enter as ``A`` and reach the δ
-ruler that `hard_sample_archive` keeps them out of."""
+"""Floor for serving a banked answer back as a cache hit: every consumer excludes ``C`` (ADR-0005)."""
 
 _GRADE_RANK = {grade: rank for rank, grade in enumerate(reversed(MEASUREMENT_GRADES), start=1)}
 
 
-@dataclass(frozen=True, slots=True)
-class RunProvenance:
-    grade: str
-    deliberate_source: bool
-    llm_path_fraction: float
-    human_intervened: bool = False
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "grade": self.grade,
-            "deliberate_source": self.deliberate_source,
-            "llm_path_fraction": round(self.llm_path_fraction, 4),
-            "human_intervened": self.human_intervened,
-        }
-
-
-def llm_terminal_nodes(schema: PipelineSchema | None) -> frozenset[str]:
-    """Names of the schema's LLM nodes — the nodes a deliberate evaluation ends at."""
-    if schema is None:
-        return frozenset()
-    return frozenset(node.name for node in schema.nodes if node.is_llm)
-
-
-def _ran_llm_path(measurement: Mapping[str, Any], llm_nodes: frozenset[str]) -> bool:
-    """Whether one sample reached the deliberate LLM evaluation. ``terminal_node`` names the deepest node that RAN, so a
-    value outside *llm_nodes* short-circuited before any LLM call; an unstamped row is credited, never penalised."""
-    pd = measurement.get("pipeline_data") or {}
-    terminal_node = pd.get("terminal_node") or ""
-    if not terminal_node:
+def _ran_llm_path(measurement: MeasuredCell, schema: PipelineSchema | None) -> bool:
+    """``terminal_node`` names the deepest node that RAN; an unstamped row is credited, never penalised."""
+    terminal_node = measurement.pipeline.terminal_node
+    if terminal_node is None:
         return True
-    return terminal_node in llm_nodes
+    return schema is not None and any(n.is_llm and n.name == terminal_node for n in schema.nodes)
 
 
-def llm_path_fraction(
-    measurements: Iterable[Mapping[str, Any]],
-    llm_nodes: frozenset[str],
-) -> float:
-    """Fraction of *measurements* that ran the deliberate LLM path (0.0 when empty)."""
-    rows = list(measurements)
-    if not rows:
-        return 0.0
-    ran = sum(1 for m in rows if _ran_llm_path(m, llm_nodes))
-    return ran / len(rows)
-
-
-def grade_run(
+def grade_answer(
     source: RunSource,
-    measurements: Iterable[Mapping[str, Any]],
+    measurement: MeasuredCell,
     schema: PipelineSchema | None,
     *,
-    human_intervened: bool = False,
-) -> RunProvenance:
-    """``A`` deliberate source AND LLM path, ``B`` one of the two, ``C`` neither. A ``human_intervened`` run is forced to
-    ``C`` regardless: deliberate, but no longer a clean autonomous datapoint."""
-    deliberate = source.deliberate
-    frac = llm_path_fraction(measurements, llm_terminal_nodes(schema))
-    full_path = frac >= LLM_PATH_FLOOR
+    human_intervened: bool,
+) -> str:
     if human_intervened:
-        grade = "C"
-    elif deliberate and full_path:
-        grade = "A"
-    elif deliberate or full_path:
-        grade = "B"
-    else:
-        grade = "C"
-    return RunProvenance(
-        grade=grade,
-        deliberate_source=deliberate,
-        llm_path_fraction=frac,
-        human_intervened=human_intervened,
-    )
-
-
-def entry_grade(entry: Mapping[str, Any]) -> str:
-    """Read a run summary's grade; unstamped rows grade ``C`` (treated as incidental)."""
-    prov = entry.get("provenance")
-    if isinstance(prov, Mapping):
-        grade = prov.get("grade")
-        if grade in _GRADE_RANK:
-            return str(grade)
-    return "C"
+        return "C"
+    met = int(source.deliberate) + int(_ran_llm_path(measurement, schema))
+    return "CBA"[met]
 
 
 def meets_grade(grade: str, min_grade: str) -> bool:
-    """True iff *grade* is at least as good as *min_grade* (``A`` ≥ ``B`` ≥ ``C``)."""
     return _GRADE_RANK.get(grade, 0) >= _GRADE_RANK.get(min_grade, 0)
 
 
 __all__ = [
     "REUSABLE_MIN_GRADE",
     "RunSource",
-    "entry_grade",
-    "grade_run",
+    "grade_answer",
     "meets_grade",
 ]

@@ -2,13 +2,10 @@
 import { Fragment, useState, type ReactNode } from "react";
 import { CopyButton, HoverCard } from "@/components/ui";
 import { readyData, useRead } from "@/lib/hooks/useRead";
-import { fetchCampaignStorage, fetchConfigMap } from "@/lib/api";
+import { campaignStorageRead, configMapRead } from "@/lib/api";
 import { declaredKnobs, type RowCardFacts } from "@/lib/derivations";
 import { SummaryBlock } from "@/components/shell/SummaryBlock";
 import { fmtBytes, fmtValue } from "@/lib/format";
-
-// The ONE hover surface for every sidebar row. The copy button reads the SAME lists the card
-// shows, so the payload cannot claim anything the card does not.
 
 const snake = (label: string) => label.toLowerCase().replace(/[^a-z0-9]+/g, "_");
 
@@ -22,30 +19,16 @@ export function RowHoverCard({ card, children }: { card: RowCardFacts; children:
 
 function RowCardBody({ card }: { card: RowCardFacts }) {
   const { campaignId, settings } = card;
-  const read = useRead(
-    campaignId != null
-      ? {
-          key: campaignId,
-          conditional: (signal, etag) => fetchCampaignStorage(campaignId, signal, etag),
-        }
-      : null,
-    { surface: "campaign-storage" },
-  );
+  const read = useRead(campaignId != null ? campaignStorageRead(campaignId) : null);
   const data = readyData(read);
   const error = read.status === "failed";
   // Waits for the fold; latches true so closing it again keeps the answer.
   const [configAsked, setConfigAsked] = useState(false);
-  const configRead = useRead(
-    campaignId != null && configAsked
-      ? { key: campaignId, fetch: (signal) => fetchConfigMap(campaignId, signal) }
-      : null,
-    { surface: "config-map" },
+  const configMap = readyData(
+    useRead(campaignId != null && configAsked ? configMapRead(campaignId) : null),
   );
-  const configMap = readyData(configRead);
   const knobs = configMap ? declaredKnobs(configMap) : null;
 
-  // "On disk" is the whole; the operator axis is Dataset / Connector / Loop, and Loop =
-  // State + Trace + History + Reports. The flag indents a Loop leaf.
   const loop = data && data.state_bytes + data.trace_bytes + data.history_bytes + data.reports_bytes;
   const sizes: [string, number | undefined, boolean?][] = [
     ["Dataset", data?.dataset_bytes],

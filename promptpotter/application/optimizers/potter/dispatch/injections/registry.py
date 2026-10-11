@@ -1,6 +1,4 @@
-"""``char_cap`` is a runaway backstop, carried only by the panels the composition places WHOLE.
-A divisible panel needs none — `compose.select` thins it to whatever the node ceiling affords.
-"""
+"""``char_cap`` is a runaway backstop, carried only by the panels the composition places WHOLE."""
 
 from __future__ import annotations
 
@@ -23,26 +21,14 @@ from promptpotter.application.optimizers.potter.records import L1Layout
 from promptpotter.domain.opt_search_point import TEMPLATE_TOKEN_RE, PromptTemplate
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
-# The one name in an `evidence_grounding` citation that is NOT a panel: the escape hatch a
-# measured stall licenses ("no panel points anywhere — explore"). Offered only when the
-# escalation panel's budget has widened past `tight`.
+# The one citable name that is NOT a panel: the escape hatch a measured stall licenses.
 STALL_EXPLORATION: Annotated[str, shapes_optimizer_prompt] = "stall_exploration"
-
-# Caller-supplied `compile_prompt` extras (not signals). Anything outside
-# `injection_table() ∪ extras` in a template body is a typo — `validate_template` raises.
-_TEMPLATE_EXTRAS: Annotated[dict[str, set[str]], shapes_optimizer_prompt] = {
-    "l1_generate": {"n_variants"},
-    "l1_critique": set(),
-    "l2_context": set(),
-    "l3_plan": set(),
-}
 
 
 @shapes_optimizer_prompt
 @functools.cache
 def renderer_modules() -> tuple[ModuleType, ...]:
-    """Walked, never listed: a hand-kept tuple drops a module from registration, the orphan check
-    and the digest at once, in silence. Name order is digest order."""
+    """Walked, never listed: a hand-kept tuple silently drops a module from registration and the digest. Name order is digest order."""
     return tuple(
         importlib.import_module(f"{_injections_pkg.__name__}.{m.name}")
         for m in sorted(pkgutil.iter_modules(_injections_pkg.__path__), key=lambda m: m.name)
@@ -58,8 +44,7 @@ def injection_table() -> Mapping[str, _Injection]:
     for key, inj in table.items():
         if inj.name != key:
             raise RuntimeError(f"injection {key!r} has mismatched name {inj.name!r}.")
-    # A `_r_*` renderer defined in a walked module but never wired (forgot the `@signal`
-    # decorator) renders nothing yet looks live.
+    # A `_r_*` renderer missing its `@signal` renders nothing yet looks live.
     wired = {inj.render for inj in table.values()}
     orphans = [
         f"{mod.__name__}.{name}"
@@ -72,20 +57,13 @@ def injection_table() -> Mapping[str, _Injection]:
             "Orphaned injection renderers — defined but never registered "
             f"(missing an @signal decorator?): {sorted(orphans)}"
         )
-    # Every name any node's layout may pick (the union of every `NODE_LAYOUTS[node].possible`)
-    # must resolve to a registered injection — else `DispatchHub.fill` would KeyError at fill
-    # time. Checked here, the one place both the registry and the picklists are visible (the
-    # domain layer that owns NODE_LAYOUTS must not import the application-side registry).
     possible = frozenset().union(*(spec.possible for spec in NODE_LAYOUTS.values()))
     if not set(table) >= possible:
         raise RuntimeError(
             f"NODE_LAYOUTS possible names with no registered injection: "
             f"{sorted(possible - set(table))}"
         )
-    # The citation contract must be satisfiable from the GUARD RAIL alone. `l1_generate` is
-    # required to cite an evidence panel, and L2/L4 may excise anything outside `mandatory` —
-    # so if no mandatory placeholder were citable, a legal layout edit could leave every variant
-    # with nothing to cite and fail the whole round's `evidence_grounding_present`.
+    # L2/L4 may excise anything outside `mandatory`, so the citation contract must hold on the rail ALONE.
     if not any(table[n].citable for n in NODE_LAYOUTS["l1_generate"].mandatory):
         raise RuntimeError(
             "l1_generate's mandatory placeholders render no citable panel — the "
@@ -96,8 +74,9 @@ def injection_table() -> Mapping[str, _Injection]:
 
 @shapes_optimizer_prompt
 def validate_template(name: str, template: PromptTemplate) -> None:
-    """Raise KeyError if any ``{{slot}}`` isn't a signal or known extra (typo → silent empty render)."""
-    extras = _TEMPLATE_EXTRAS.get(name, set())
+    """A typo'd ``{{slot}}`` is otherwise a silent empty render."""
+    spec = NODE_LAYOUTS.get(name)
+    extras = spec.caller_extras if spec is not None else frozenset()
     text = template.render()
     referenced = set(TEMPLATE_TOKEN_RE.findall(text))
     unknown = referenced - injection_table().keys() - extras
@@ -105,7 +84,7 @@ def validate_template(name: str, template: PromptTemplate) -> None:
         raise KeyError(
             f"Template {name!r} references unknown slot(s): {sorted(unknown)}. "
             f"Register a renderer (dispatch/injections/) or add it to "
-            f"_TEMPLATE_EXTRAS[{name!r}] if the slot is a caller-supplied extra."
+            f"NODE_LAYOUTS[{name!r}].caller_extras if the slot is a caller-supplied extra."
         )
 
 
@@ -116,18 +95,7 @@ def citable_fields(
     exploration_budget: str | None,
     rendered: Mapping[str, str],
 ) -> tuple[str, ...]:
-    """Narrowed to what actually RENDERED — offering a panel that said nothing is the phantom
-    citation one level down. Never empty: an empty ``evidence_grounding.field`` enum is unsatisfiable.
-
-    **Citability is DERIVED — never re-introduce a citable-panel list.** ``EVIDENCE_GROUNDING_FIELDS``
-    was a hand-maintained frozenset the validator checked *set membership* against, so a variant
-    could cite a panel the prompt never rendered and pass clean. It drifted twice: the phantom
-    ``parent_panel``/``sibling_yield`` names were excised, and by the time it was deleted four of its
-    nine names rendered nothing on ``l1_generate``'s floor while two rendered panels were uncitable.
-    ``@signal(citable=…)`` declares evidence-vs-menu at each renderer and this function intersects
-    it with the node's LIVE layout — one derivation feeding the wire-schema enum and
-    ``evidence_grounding_present``. A citable panel that never renders
-    invites a fabricated citation; deriving one from the other is the only defence that holds."""
+    """Narrowed to what RENDERED; never empty, since an empty ``evidence_grounding.field`` enum is unsatisfiable."""
     table = injection_table()
     names = [n for n in layout.all_placeholders() if table[n].citable and rendered.get(n)]
     if not names or exploration_budget != ExplorationBudget.TIGHT:

@@ -6,31 +6,11 @@ import {
   toggleInSet,
 } from "@/lib/sample-set";
 import { orderAtStep, seedFromOrder } from "@/lib/derivations";
-import type { RoundSummary } from "@/lib/api/types";
+import type { ServedRound } from "@/lib/api/types";
+import { summaryRound } from "@/lib/test-fixtures";
 
-const round = (r: number, selection: number[]): RoundSummary =>
-  ({
-    round: r,
-    accuracy: 0,
-    composite_fitness: 0,
-    total: 0,
-    ability: null,
-    ability_on_series_ruler: false,
-    best_so_far: null,
-    bench: null,
-    improved: null,
-    electable_count: null,
-    verdict_reason: null,
-    separable: null,
-    stamps_theta: true,
-    overlap: null,
-    panel_precision: null,
-    panel_precision_verdict: null,
-    optimizer_facts: [],
-    candidates: [],
-    selection,
-    health: null,
-  }) as RoundSummary;
+const round = (r: number, selection: number[]): ServedRound =>
+  summaryRound({ round: r, selection });
 
 describe("sample-set primitives", () => {
   it("sameSampleSet is order-insensitive and null-safe", () => {
@@ -62,7 +42,6 @@ describe("orderAtStep / seedFromOrder", () => {
     expect(orderAtStep([9, 4, 7], 7, 3)).toEqual({ computed: [9, 4], current: 7, planned: [] });
   });
 
-  // Position 1 derives from the MEASURED order like every other, never the intended one.
   it("treats the first cell like every other cell", () => {
     expect(orderAtStep([9, 4, 7], 9, 1)).toEqual({ computed: [], current: 9, planned: [4, 7] });
     const first = orderAtStep([9, 4, 7], 9, 1);

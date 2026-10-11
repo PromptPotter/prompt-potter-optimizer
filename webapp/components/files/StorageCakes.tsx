@@ -1,10 +1,8 @@
 "use client";
 import { readyData, useRead } from "@/lib/hooks/useRead";
-import { fetchStorageByDataset, type DatasetStorageEntry } from "@/lib/api";
+import { storageByDatasetRead, type DatasetStorageEntry } from "@/lib/api";
 import { fmtBytes } from "@/lib/format";
 import { seriesVar } from "@/lib/theme";
-
-// One donut per storage category, sliced by dataset; the shared measurement cache is excluded.
 
 // "On disk" is the whole; the six leaves partition it.
 const CATEGORIES = [
@@ -79,12 +77,7 @@ function Cake({
 }
 
 export function StorageCakes() {
-  const data = readyData(
-    useRead(
-      { key: "storage-by-dataset", conditional: fetchStorageByDataset },
-      { surface: "storage-by-dataset" },
-    ),
-  );
+  const data = readyData(useRead(storageByDatasetRead()));
   if (!data || data.datasets.length === 0) return null;
 
   // Served fattest-first; colour is `seriesVar(rank)`, so a dataset keeps its colour in every cake.

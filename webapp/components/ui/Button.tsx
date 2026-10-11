@@ -10,7 +10,6 @@ interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
 }
 
-// The one button; `type` defaults to "button" so it never submits a form by accident.
 export function Button({ variant = "default", className, type = "button", ...rest }: Props) {
   return (
     <button

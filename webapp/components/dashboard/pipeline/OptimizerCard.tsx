@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { cx } from "@/lib/cx";
-import { runPhaseLabel } from "@/lib/run-phase";
+import { phaseWalks } from "@/lib/run-phase";
 import { useCycleStream } from "@/lib/poll";
 import { useRoundNodes } from "@/lib/hooks/useRoundNodes";
 import {
@@ -17,16 +17,12 @@ import { NodeKnobsPanel } from "@/components/dashboard/pipeline/NodeKnobsPanel";
 import { RoundAxis } from "./RoundAxis";
 import type { PipelineDoc } from "@/lib/types";
 
-// The Optimizer card: the loop's frame, round axis and liveness around the shared `PipelineFlow`;
-// it draws no graph of its own. The optimizer's knobs are read-only here and sit behind the header's last icon.
-
 interface Props {
   pipeline: PipelineDoc | null;
 }
 
 export function OptimizerCard({ pipeline }: Props) {
   const [knobsOpen, setKnobsOpen] = useState(false);
-  // Liveness off the cycle stream's poll age: a frozen campaign still has a `dash`.
   const { dash, isLive } = useCycleStream();
   const view = pipeline?.view ?? null;
   const activeId = dash?.current_round.active_node ?? null;
@@ -41,9 +37,8 @@ export function OptimizerCard({ pipeline }: Props) {
     (view?.nodes ?? []).map((n) => [n.id, n.label]),
   );
   const activeLabel = isLive && viewingLive && activeId ? nodeLabel[activeId] : null;
-  // The RUN's state, not the connection's; `isLive` still gates the pulse on stale data.
-  const runIsRunning = viewingLive && dash?.run_phase === "running";
-  // The SERVER's phase, never a local "idle" — that word would cover paused, held and dead alike.
+  const runIsRunning = viewingLive && phaseWalks(dash?.run_phase);
+  // The SERVER's phase, never a local "idle": that word covers paused, held and dead alike.
   const status = !dash
     ? "pending"
     : !viewingLive
@@ -52,7 +47,7 @@ export function OptimizerCard({ pipeline }: Props) {
         ? activeLabel
           ? `live · ${activeLabel}`
           : "live"
-        : runPhaseLabel(dash.run_phase, dash.stop_reason);
+        : dash.status.label;
 
   // Off the audit twin: a node can be configured for a model and not have fired at all.
   const models = {
@@ -75,7 +70,6 @@ export function OptimizerCard({ pipeline }: Props) {
           ● {status}
         </span>
         <ToolbarSpacer />
-        {/* Off until a node has run — an empty `{}` copy reads as broken. */}
         <CopyButton
           data={roundNodes}
           disabled={Object.keys(roundNodes).length === 0}
@@ -105,7 +99,6 @@ export function OptimizerCard({ pipeline }: Props) {
           connector={null}
           reach={pipeline?.reach ?? null}
           scope="optimizer"
-          // One level drawn, yet the measurement node still runs the whole campaign pipeline.
           nestsNode={pipeline?.measurement_node ?? null}
           activeNode={isLive && viewingLive ? activeId : null}
           isLive={isLive}

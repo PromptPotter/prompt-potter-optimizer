@@ -1,15 +1,4 @@
-"""The SimpleQA auto-rater, and SealQA's variant of it.
-
-Provenance is the reason this is the first built-in: OpenAI published the grader with SimpleQA
-(Wei et al. 2024, arXiv:2411.04368, MIT, ``openai/simple-evals/simpleqa_eval.py``), and SealQA
-(arXiv:2506.01062, ICLR 2026) adopted it with four edits and validated the result at 98% agreement
-with two human annotators over 100 answers. So the rubric below is not ours, and neither is the
-taxonomy — which is exactly what a first built-in should be.
-
-**One deliberate divergence, and it goes the other way.** Upstream returns ``"C"`` when nothing
-matches, so an unparseable reply silently becomes ``NOT_ATTEMPTED`` — a category that does not
-count against accuracy-given-attempted. Here that is an error and the term is omitted.
-"""
+"""Upstream's rubrics: OpenAI SimpleQA (arXiv:2411.04368, MIT) and SealQA's variant (2506.01062)."""
 
 from __future__ import annotations
 
@@ -20,16 +9,12 @@ from promptpotter.judges.call import absent, graded, judge_answer, judge_questio
 from promptpotter.judges.protocol import Judge, JudgeSpec, JudgeVerdict
 
 if TYPE_CHECKING:
-    from promptpotter.domain.scoring import QueryMeasurement
+    from promptpotter.domain.scoring import MeasuredCell
 
 __all__ = ["SEALQA", "SIMPLEQA"]
 
 
-# Verbatim from `openai/simple-evals/simpleqa_eval.py::GRADER_TEMPLATE` (MIT). Two upstream quirks
-# are preserved on purpose — the INCORRECT block numbers two entries `Predicted answer 4`, and the
-# closing instruction says `NOT ATTEMPTED` without the underscore the key below uses. They are in
-# the text the published numbers were produced with; "fixing" them would make this a different
-# grader wearing the same name.
+# Verbatim `openai/simple-evals/simpleqa_eval.py::GRADER_TEMPLATE`, quirks included: never fix it.
 _SIMPLEQA_RUBRIC = """
 Your job is to look at a question, a gold target, and a predicted answer, and then assign a grade of either ["CORRECT", "INCORRECT", "NOT_ATTEMPTED"].
 First, I will give examples of each grade, and then you will grade a new example.
@@ -114,10 +99,6 @@ _SIMPLEQA_RULES = """
     - For example, if the gold target is "Hyung Won Chung", you can consider the following predicted answers as correct: "Hyoong Won Choong", "Hyungwon Chung", or "Hyun Won Chung".
 """.strip()
 
-# SealQA's rubric is SimpleQA's minus three leniency rules (significant figures, two of the
-# "clearly inferred" examples, and the typo rule), plus one self-consistency rule that promotes an
-# internally contradictory answer from NOT_ATTEMPTED to INCORRECT. Expressed as its own rule block
-# rather than a second copy of the whole template, so the shared 90% cannot drift between them.
 _SEALQA_RULES = """
 - The gold target may contain more information than the question. In such cases, the predicted answer only needs to contain the information that is in the question.
     - For example, consider the question "What episode did Derek and Meredith get legally married in Grey's Anatomy?" with gold target "Season 7, Episode 20: White Wedding". Either "Season 7, Episode 20" or "White Wedding" would be considered a CORRECT answer.
@@ -131,35 +112,27 @@ _SEALQA_RULES = """
 
 _LETTER_TO_LABEL = {"A": "CORRECT", "B": "INCORRECT", "C": "NOT_ATTEMPTED"}
 
-# CORRECT is the only credited outcome. NOT_ATTEMPTED scores 0 here rather than being excluded:
-# this maps a label to a per-cell fitness, and a campaign wanting SimpleQA's
-# `accuracy_given_attempted` (which drops abstentions from the denominator) declares that in its
-# scoring formula, where a denominator choice belongs. Folding it in here would hide the choice.
+# NOT_ATTEMPTED scores 0, not excluded: `accuracy_given_attempted` is a scoring formula's choice.
 _LABEL_TO_SCORE = {"CORRECT": 1.0, "INCORRECT": 0.0, "NOT_ATTEMPTED": 0.0}
 
 _LETTER_RE = re.compile(r"\b([ABC])\b")
 
 
 def _parse(reply: str) -> str | None:
-    """The graded LABEL, or ``None`` when the reply carries no letter. First-match, unlike
-    ``grounding.py``'s: this parse is upstream's, and its numbers sit beside published ones."""
+    # First-match is upstream's parse; an unparseable reply is `None`, not upstream's "C".
     match = _LETTER_RE.search(reply.strip().upper())
     return _LETTER_TO_LABEL[match.group(1)] if match else None
 
 
 def _build_grade_fn(rubric: str, judge_name: str) -> object:
-    async def grade(spec: JudgeSpec, result: QueryMeasurement) -> JudgeVerdict:
+    async def grade(spec: JudgeSpec, result: MeasuredCell) -> JudgeVerdict:
 
         answer = judge_answer(result)
         if answer is None:
-            # A cell with no answer text is UNMEASURED here, not NOT_ATTEMPTED — that label is a
-            # reading of what the model said, and there is nothing to read. Banking it would put
-            # a real category on a cell whose pipeline emitted the `NO_RESULT` sentinel, in the
-            # one direction `_parse` below already refuses to default.
             return absent(judge_name, "this cell carries no answer text to grade against the gold.")
         prompt = rubric.format(
             question=judge_question(result),
-            target=result.get("ground_truth", ""),
+            target=result.ground_truth,
             predicted_answer=answer,
         )
         return await graded(

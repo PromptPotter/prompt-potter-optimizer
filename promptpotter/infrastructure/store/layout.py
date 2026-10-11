@@ -1,10 +1,5 @@
-"""Campaign / cycle directory builders + cycle-id parsing. Pure — no I/O, no parent walk.
-Every cycle is flat under one ``cycles/``, and its sibling kind is read off the id, never stored."""
-
 from __future__ import annotations
 
-import hashlib
-import json
 import logging
 import re
 from collections.abc import Sequence
@@ -19,6 +14,7 @@ from promptpotter.infrastructure.store.io import (
     read_json_optional,
     validate_path_component,
 )
+from promptpotter.shared.hashing import stable_hash
 
 logger = logging.getLogger(__name__)
 
@@ -28,8 +24,7 @@ _DATASET_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 
 
 def validate_dataset_name(name: str) -> str:
-    """Lowercase-only because a dataset name IS a directory name and both shipped filesystems are
-    case-insensitive. A leading digit is legal — ingest mints ``2024-sales`` slugs of its own."""
+    """Lowercase-only: the name IS a directory name, and both shipped filesystems fold case."""
     if not name or not _DATASET_NAME_RE.match(name):
         raise ValueError(
             f"Invalid dataset name: {name!r}. Lowercase alphanumerics, hyphens and "
@@ -39,14 +34,11 @@ def validate_dataset_name(name: str) -> str:
 
 
 def root_cycle_id(cycle_id: str) -> str:
-    """Prefix before the FIRST sibling separator: ``cycle_X_fork_Y_diag_001`` roots at
-    ``cycle_X``."""
     m = _SIBLING_SEP_RE.search(cycle_id)
     return cycle_id[: m.start()] if m else cycle_id
 
 
 def sibling_kind(cycle_id: str) -> Literal["root", "fork", "diag"]:
-    """Kind of THIS cycle (LAST separator); ``cycle_X_fork_Y_diag_001`` ⇒ ``diag``."""
     m = _SIBLING_LAST_SEP_RE.search(cycle_id)
     if m is None:
         return "root"
@@ -54,113 +46,74 @@ def sibling_kind(cycle_id: str) -> Literal["root", "fork", "diag"]:
 
 
 def tenant_workspace(projects_root: Path, tenant_id: str) -> WorkspaceDir:
-    """The ONE place ``projects_root/{tenant_id}`` is written down. It returns a ``WorkspaceDir`` so
-    the type system separates it from ``projects_root``, one segment up and also a ``Path``."""
     return WorkspaceDir(projects_root / validate_path_component(tenant_id))
 
 
 def campaigns_root_dir_for(tenant_root: WorkspaceDir) -> Path:
-    """The tenant's ONE campaign parent. An archived campaign stays here and is hidden by
-    ``campaign.json::lifecycle_status``, never by living somewhere else."""
     return tenant_root / "campaigns"
 
 
 def campaign_root_dir_for(tenant_root: WorkspaceDir, campaign_id: str) -> Path:
-    """Campaign dir — the files ``CampaignLayout`` declares + ``cycles/``. Per-session telemetry binds one level down."""
     return campaigns_root_dir_for(tenant_root) / validate_path_component(campaign_id)
 
 
 def head_to_head_path(tenant_root: WorkspaceDir, head_to_head_id: str) -> Path:
-    """A declared head-to-head — workspace-scoped, because its arms are campaigns."""
     return tenant_root / "head_to_heads" / f"{validate_path_component(head_to_head_id)}.json"
 
 
 def campaign_cycles_dir(campaign_root: Path) -> Path:
-    """The ``cycles/`` dir under an ALREADY-RESOLVED campaign root — the sole owner
-    of the literal, for every enumerator that walks a campaign's cycles."""
     return campaign_root / "cycles"
 
 
 def cycle_dir_for(tenant_root: WorkspaceDir, hop: CycleHop) -> Path:
-    """Per-cycle dir ``campaigns/{campaign_id}/cycles/{cycle_id}``; flat — sibling kind in ``index.json``, not the path."""
     campaign_root = campaign_root_dir_for(tenant_root, hop.campaign_id)
     return campaign_cycles_dir(campaign_root) / validate_path_component(hop.cycle_id)
 
 
-def session_dir_for(tenant_root: WorkspaceDir, session_id: str) -> Path:
-    validate_path_component(session_id)
-    return tenant_root / "sessions" / session_id
-
-
-# -- the PAID content-addressed caches ----------------------------------------
-#
-# Keyed by CONTENT, so they outlive the campaigns that filled them and an L4 inner sandbox shares
-# them rather than isolating them (``stores.py::build_stores`` roots all three on ``shared_root``).
-# The names live here for the same reason every other workspace directory literal does — but the
-# TUPLE is what earns its place: three surfaces have to agree on this set and each authored its
-# own copy of it, so a cache added to one and not the others is destroyed by ``reset`` or misfiled
-# as ``other`` in the storage report. Both failures are silent, and one of them costs money.
 MEASUREMENTS_DIR = "measurements"
 OPTIMIZER_REUSE_DIR = "optimizer_reuse"
 JUDGE_REUSE_DIR = "judge_reuse"
 
 SHARED_CACHE_DIRS: tuple[str, ...] = (MEASUREMENTS_DIR, OPTIMIZER_REUSE_DIR, JUDGE_REUSE_DIR)
-"""Every cache holding real LLM spend, in one place. Consumers: ``application/maintenance/reset.py``
-(preserves them), ``application/maintenance/storage_report.py`` (counts them as shared, and skips
-them when summing the residual)."""
 
 
-# -- L4 inner sandboxes -------------------------------------------------------
-#
-# The natural home for a cycle's inner campaigns is inside that cycle's own directory,
-# where ownership would be structural and deletion would cascade for free. They live in a
-# flat off-registry registry instead for ONE reason: physical nesting blows Windows'
-# 260-char MAX_PATH at depth 1 and is hopeless at L5+. That constraint is also why the key
-# below is a fixed-width hash rather than the owner's three names joined — this tree already
-# runs within ~30 chars of the limit, so the key has to stay the width it always was.
+# Flat, off-registry and hash-keyed: nested in its owning cycle, a sandbox exceeds Windows' MAX_PATH.
+INNER_SANDBOXES_DIR = ".inner"
 
 
 def inner_sandboxes_dir(workspace_projects_root: Path) -> Path:
-    """Pass the REAL workspace projects root, invariant across recursion depth: a sandboxed store's
-    own ``projects_root`` already IS ``.inner/<key>``, so anchoring there nests it again at L5."""
-    return workspace_projects_root.parent / ".inner"
+    """Takes the REAL workspace root: a sandboxed store's own ``projects_root`` IS ``.inner/<key>``."""
+    return workspace_projects_root.parent / INNER_SANDBOXES_DIR
+
+
+def in_inner_sandbox(path: Path) -> bool:
+    return INNER_SANDBOXES_DIR in path.parts
 
 
 def inner_sandbox_key(tenant_id: str, hop: CycleHop) -> str:
-    """Keyed on the FULL owner triple. ``cycle_id`` is content-addressed on the origin and so is
-    shared by every campaign minted from it; keyed on the cycle alone, two campaigns share a sandbox."""
+    """The FULL owner triple: ``cycle_id`` is content-addressed on the origin, so campaigns share it."""
     for part in (tenant_id, hop.campaign_id, hop.cycle_id):
         validate_path_component(part)
-    # The three names go in as they always did — this hash IS the sandbox directory name,
-    # so serializing the carrier instead of its components would rename every sandbox on
-    # disk and orphan what they hold, silently.
-    blob = json.dumps([tenant_id, hop.campaign_id, hop.cycle_id], sort_keys=True)
-    return "inner_" + hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
+    # This hash IS the directory name: any change to the blob orphans every sandbox on disk.
+    return "inner_" + stable_hash([tenant_id, hop.campaign_id, hop.cycle_id])
 
 
 def inner_sandbox_dir(workspace_projects_root: Path, tenant_id: str, hop: CycleHop) -> Path:
-    """The one sandbox owned by ``(tenant, campaign, cycle)`` — THE path, built once here."""
     return inner_sandboxes_dir(workspace_projects_root) / inner_sandbox_key(tenant_id, hop)
 
 
 def sandbox_owner_path(sandbox_dir: Path) -> Path:
-    """A material fact, so it lands on disk in readable form rather than only in the directory
-    name. It is what makes the orphan reaper's ownership test exact."""
     return sandbox_dir / "owner.json"
 
 
 class SandboxOwner(NamedTuple):
-    """The ``(tenant, campaign, cycle)`` a sandbox belongs to, as its ``owner.json`` records it."""
-
     tenant_id: str
     campaign_id: str
     cycle_id: str
 
 
 def read_sandbox_owner(sandbox_dir: Path) -> SandboxOwner | None:
-    """``None`` where the record is absent or names a segment no path can hold. The directory
-    name is a hash, so nothing else says who owns a sandbox: a caller KEEPS what this cannot name.
-    """
+    """``None`` = nothing names the owner of this hash-named dir: a caller KEEPS such a sandbox."""
     record = read_json_optional(sandbox_owner_path(sandbox_dir))
     if not isinstance(record, dict):
         return None
@@ -174,23 +127,13 @@ def read_sandbox_owner(sandbox_dir: Path) -> SandboxOwner | None:
 
 
 def round_basename(round_num: int) -> str:
-    """The 4-digit zero-padded round-file basename — shared by the public round
-    tree, the candidate cache, and the audit cache. Owned once so all three agree."""
     return f"round_{round_num:04d}.json"
 
 
-# The glob that finds what ``round_basename`` writes. Spelled beside it so the pair moves together.
 ROUND_GLOB = "round_*.json"
 
 
 def round_number(path: Path) -> int | None:
-    """The reader-side INVERSE of :func:`round_basename`; ``None`` when the name is not a round file.
-
-    It is owned here because there was no inverse for years, so four readers each invented one —
-    and every one of them answers a plausible ZERO rather than raising on a name it cannot parse
-    (a resume seeding a fresh trajectory, a rewind that deletes nothing and reports success). That
-    is what made the naming claim above false: without this, a move on disk is silent, not one line.
-    """
     stem = path.stem
     if path.suffix != ".json" or not stem.startswith("round_"):
         return None
@@ -200,12 +143,8 @@ def round_number(path: Path) -> int | None:
 
 @dataclass(frozen=True, slots=True)
 class CycleLayout:
-    """Sole owner of the on-disk shape below ``campaigns/{c}/cycles/{cy}/`` — the ledger path, the
-    ``round_{n:04d}`` naming and the flag names all derive here, so a move on disk is one line."""
-
     cycle_dir: Path
 
-    # --- top-level per-cycle surfaces (human-readable; survive keep-results) ---
     @property
     def manifest(self) -> Path:
         return self.cycle_dir / "index.json"
@@ -228,73 +167,45 @@ class CycleLayout:
 
     @property
     def export(self) -> Path:
-        """The artifact a program that is not us reads — ``domain/export.py::PromptExport``."""
         return self.cycle_dir / "export.json"
 
     @property
     def resolved_pipeline(self) -> Path:
-        """The pipeline declaration this cycle actually RAN — the backend's under the dataset's
-        overlay, as ``wiring::_resolve_pipeline_schema`` merged it at init. The committed dataset
-        file deliberately snapshots no backend declaration (``merge_pipeline_overlay``), so without
-        this a served read knows every node's VALUES and none of its AXES."""
         return self.cycle_dir / "pipeline.resolved.yaml"
 
     @property
     def resolved_experiment(self) -> Path:
-        """The panel this cycle actually MEASURED — the connector's ``experiment_file`` with
-        everything it only NAMES resolved to what it named. Beside the declaration because they
-        answer the same question about different halves: that file is the search SPACE, this is the
-        set of CELLS. Landed because a named roster can move under its own name — a Harbor version
-        is an editable registry entry — and a campaign whose cells changed mid-flight is measuring
-        two things under one id."""
         return self.cycle_dir / "experiment.resolved.yaml"
 
     @property
     def bank_partition(self) -> Path:
-        """Which bank rows this cycle's search may draw and which the bench holds out
-        (``domain/bench.py::BankPartition``)."""
         return self.cycle_dir / "bank_partition.json"
 
     @property
     def optimized_surface(self) -> Path:
-        """What this cycle OPTIMIZES, and the channel each value reaches the model by — the reading
-        of the declaration beside it that the declaration itself cannot give, since it names a key
-        and never whether the model will ever see the value. Markdown: its only reader is a person.
-        """
         return self.cycle_dir / "optimized.md"
 
     @property
     def readout(self) -> Path:
-        """The run readout ANSI-stripped, every launch appended — ``ReadoutProjection``'s file."""
         return self.cycle_dir / "readout.log"
 
-    # --- resume state (heavy: dropped by ``delete --keep-results``) ---
     @property
     def rounds(self) -> Path:
-        """Public resume-state round tree — hand-editable, the resume SoT."""
         return self.cycle_dir / "rounds"
 
     def round_file(self, round_num: int) -> Path:
         return self.rounds / round_basename(round_num)
 
-    def round_files(self) -> list[Path]:
-        """Every public round file, ascending — the zero-padding makes lexical order round order.
-        Empty (never raising) on a cycle whose resume state was stripped by ``--keep-results``."""
-        return sorted(self.rounds.glob(ROUND_GLOB)) if self.rounds.is_dir() else []
-
-    # --- .runtime/ durability classes (spine / cache / control / rewind) ---
     @property
     def runtime(self) -> Path:
         return self.cycle_dir / ".runtime"
 
     @property
     def ledger(self) -> Path:
-        """The append-only per-cycle event spine — the persistence SoT."""
         return self.runtime / "ledger.jsonl"
 
     @classmethod
     def of_ledger(cls, ledger: Path) -> CycleLayout:
-        """The cycle a :attr:`ledger` path belongs to — its inverse, so the shape has one owner."""
         return cls(ledger.parent.parent)
 
     @property
@@ -303,53 +214,19 @@ class CycleLayout:
 
     @property
     def audit_rounds(self) -> Path:
-        """Deep per-round audit cache (rebuildable from the ledger)."""
         return self.runtime / "cache" / "rounds"
 
     def audit_round_file(self, round_num: int) -> Path:
         return self.audit_rounds / round_basename(round_num)
 
     @property
-    def candidates_cache(self) -> Path:
-        return self.runtime / "cache" / "candidates"
-
-    def candidate_file(self, round_num: int) -> Path:
-        return self.candidates_cache / round_basename(round_num)
-
-    # --- control-local flags (polled per checkpoint; transient) ---
-    @property
-    def pause_flag(self) -> Path:
-        return self.runtime / "pause.flag"
-
-    @property
-    def skip_flag(self) -> Path:
-        return self.runtime / "skip.flag"
-
-    @property
-    def checkin_flag(self) -> Path:
-        return self.runtime / "checkin.flag"
-
-    @property
-    def sample_lookahead(self) -> Path:
-        # Not a `.flag`: it carries the COUNT the operator armed, so presence alone no longer
-        # answers what the walk should do. Peer of `run_limits` — same write / poll / consume
-        # shape, same JSON body.
-        return self.runtime / "sample_lookahead.json"
-
-    @property
-    def gate_decision(self) -> Path:
-        return self.runtime / "gate_decision.json"
-
-    @property
-    def run_limits(self) -> Path:
-        return self.runtime / "run_limits.json"
+    def producer_lock(self) -> Path:
+        """Never unlinked: every launch reuses the path."""
+        return self.runtime / "producer.lock"
 
 
 @dataclass(frozen=True, slots=True)
 class CampaignLayout:
-    """Sole owner of the files directly in ``campaigns/{c}/``, one level ABOVE any cycle — the
-    Files tree and the ``reports`` keepsake both read :meth:`files`, so neither authors the set."""
-
     campaign_dir: Path
 
     @property
@@ -358,24 +235,18 @@ class CampaignLayout:
 
     @property
     def result(self) -> Path:
-        """The campaign's result — ``domain/campaign.py::CampaignResult``."""
         return self.campaign_dir / "result.json"
 
     @property
     def log_md(self) -> Path:
         return self.campaign_dir / "log.md"
 
-    @property
-    def hard_samples(self) -> Path:
-        return self.campaign_dir / "hard_samples.json"
-
     def files(self) -> list[Path]:
         return _declared_files(self, self.campaign_dir)
 
 
 def _declared_files(layout: CycleLayout | CampaignLayout, root: Path) -> list[Path]:
-    """Every file *layout* declares DIRECTLY in *root*, in declaration order. Derived: a hand-copy
-    skips the next file declared, and ``delete --keep-results`` then deletes it."""
+    """Derived: a hand-copied list skips the next file declared, and ``delete --keep-results`` deletes it."""
     return [
         p
         for name, attr in vars(type(layout)).items()
@@ -388,7 +259,6 @@ def _declared_files(layout: CycleLayout | CampaignLayout, root: Path) -> list[Pa
 
 _PROBE = Path(".")
 
-# Readable-output files (anywhere in a campaign tree) → the ``reports`` keepsake.
 _REPORT_NAMES = frozenset(
     p.name
     for layout in (CycleLayout(_PROBE), CampaignLayout(_PROBE))
@@ -397,25 +267,20 @@ _REPORT_NAMES = frozenset(
 
 
 class FileKind(Enum):
-    """``leaf`` names the MECE size bucket; ``keepsake`` is whether ``delete --keep-results`` spares
-    the file. ``trace`` straddles, which is why a bare 6-way leaf enum cannot answer both."""
-
     leaf: str
     keepsake: bool
 
-    # Heavy tiers — dropped by ``delete --keep-results``.
-    DATASET_MIRROR = ("dataset", False)  # langfuse/datasets/** — the ground-truth input copy
-    CONNECTOR_CACHE = ("connector", False)  # .runtime/cache/** — backend node-I/O + audit rounds
+    DATASET_MIRROR = ("dataset", False)
+    CONNECTOR_CACHE = ("connector", False)
     ROUND_PUBLIC = (
         "state",
         False,
-    )  # rounds/round_*.json — bytes split connector/state by the rollup
-    LEDGER = ("history", False)  # .runtime/ledger.jsonl — the event spine (carries the cycle seed)
-    LOOP_TELEMETRY = ("trace", False)  # .runtime/streams, prompts/, residual
+    )
+    LEDGER = ("history", False)
+    LOOP_TELEMETRY = ("trace", False)
 
-    # Keepsake — spared by ``delete --keep-results``.
-    LANGFUSE_TRACE = ("trace", True)  # langfuse/{traces,observations,scores} — the loop trace
-    REPORT = ("reports", True)  # manifest + dashboard/index/log/review + hard_samples
+    LANGFUSE_TRACE = ("trace", True)
+    REPORT = ("reports", True)
 
     def __init__(self, leaf: str, keepsake: bool) -> None:
         self.leaf = leaf
@@ -423,8 +288,7 @@ class FileKind(Enum):
 
 
 def classify(parts: Sequence[str]) -> FileKind:
-    """*parts* is the path below the campaign root. ``ROUND_PUBLIC`` is the lone file whose bytes
-    straddle two leaves, so the rollup splits it rather than reading ``.leaf``."""
+    """``ROUND_PUBLIC``'s bytes straddle two leaves: the rollup splits it rather than reading ``.leaf``."""
     name = parts[-1]
     if "langfuse" in parts:
         i = parts.index("langfuse")
@@ -437,19 +301,16 @@ def classify(parts: Sequence[str]) -> FileKind:
             return FileKind.CONNECTOR_CACHE
         if name == "ledger.jsonl":
             return FileKind.LEDGER
-        return FileKind.LOOP_TELEMETRY  # streams/ + anything else under .runtime
+        return FileKind.LOOP_TELEMETRY
     if name in _REPORT_NAMES:
         return FileKind.REPORT
     if "rounds" in parts and name.startswith("round_") and name.endswith(".json"):
         return FileKind.ROUND_PUBLIC
-    return FileKind.LOOP_TELEMETRY  # prompts/, residual → loop telemetry
+    return FileKind.LOOP_TELEMETRY
 
 
 def course_validator_ns(cycle_dir: Path) -> int | None:
-    """When a course last moved, for `/tree` and `/ray` alike — a file added to one copy of this
-    and not the other 304s a client into a body that has since changed."""
-    layout = CycleLayout(cycle_dir)
-    return newest_mtime_ns(layout.ledger, layout.manifest)
+    return newest_mtime_ns(CycleLayout(cycle_dir).ledger)
 
 
 __all__ = [
@@ -466,6 +327,7 @@ __all__ = [
     "classify",
     "course_validator_ns",
     "cycle_dir_for",
+    "in_inner_sandbox",
     "inner_sandbox_dir",
     "inner_sandbox_key",
     "inner_sandboxes_dir",
@@ -473,7 +335,6 @@ __all__ = [
     "root_cycle_id",
     "round_basename",
     "sandbox_owner_path",
-    "session_dir_for",
     "sibling_kind",
     "tenant_workspace",
     "validate_dataset_name",

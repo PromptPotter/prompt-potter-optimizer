@@ -3,9 +3,6 @@ import { cx } from "@/lib/cx";
 import { Popover, Switch } from "@/components/ui";
 import { useRunControl } from "@/lib/hooks/useRunControl";
 
-// The composer's "Tools" drawer — the only home for these switches. The optimize switch
-// IS the run's pause/start verb, the same one the dashboard's play/pause fires.
-
 const THINK_ICON = (
   <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
     <circle cx="8" cy="8" r="6" opacity=".3" />

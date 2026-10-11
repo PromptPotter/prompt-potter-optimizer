@@ -13,12 +13,12 @@ Three layers, repeating every round. L1 fires every round. L2 fires only when L1
 │  L1 CRITIQUE — analyze fitness; direct next generation                 │
 │                                                                        │
 │  ── ESCALATION (rules over EscalationInputs) ───────────────────────── │
-│  L2 REFINE CONTEXT — re-shape L1's attention (l1_layout, l1_overrides) │
+│  L2 REFINE CONTEXT — re-shape L1's attention (memory.steer)            │
 │  L3 MODIFY PLAN — rewrite the strategic plan L1 works within           │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-L1 picks specific values. L2 reframes *how* L1 searches by writing L1's attention surface onto the cycle's memory — `PotterState.memory.l1_layout` (which panels L1 sees) and `PotterState.memory.l1_overrides` (how hard it explores). It does **not** write `task_context`: that framing is operator-authored at check-in (`CheckinOutput.task_context`) and frozen for the run, structurally so (no L1/L2/L3 wire schema has a field for it). L3 writes a strategic framework to `PotterState.memory.plan`. Higher layers don't replace lower ones — they constrain them. Every loop-layer (L1/L2/L3) LLM call shares one path: per-call `InjectionBundle` → `NODE_LAYOUTS[node]` → `DispatchHub.fill`.
+L1 picks specific values. L2 reframes *how* L1 searches by writing L1's attention surface onto the cycle's memory as one node overlay — `PotterState.memory.steer["l1_generate"]`, carrying `layout` (which panels L1 sees) and the call settings (how hard it explores). It does **not** write `task_context`: that framing is operator-authored at check-in (`CheckinOutput.task_context`) and frozen for the run, structurally so (no L1/L2/L3 wire schema has a field for it). L3 writes a strategic framework to `PotterState.memory.plan`. Higher layers don't replace lower ones — they constrain them. Every loop-layer (L1/L2/L3) LLM call shares one path: per-call `InjectionBundle` → `NODE_LAYOUTS[node]` → `DispatchHub.fill`.
 
 The critique step is the only place in the loop that reads raw per-sample results; it feeds forward to next-round L1 (primary) and to L2 (operating context on escalation). **`l1_critique → l1_generate` is performance-driven feedback, not failure-driven healing** — different mechanism from self-healing.
 
@@ -34,7 +34,7 @@ Two parameter namespaces co-exist on it: **prompt fields** (the decomposition th
 
 It is the optimizer's working memory for two independent reasons:
 
-- **Persistence.** Every round's record is serialized to `<cycle_dir>/rounds/round_NNNN.json`, and resume reads from the latest trial. State that is not on the record does not survive interruption. The serialized record IS the loop's live config, not a log of it — CONTEXT and PLAN are inspectable and editable on disk, so "add this to the plan" means exactly that.
+- **Persistence.** Every round closes onto the cycle's ledger, and resume reads the rounds that stand there. State that is not on that record does not survive interruption. `<cycle_dir>/rounds/round_NNNN.json` is a checkout of it — CONTEXT and PLAN are inspectable on disk, and steering them is a fork with a seed, never an edit to the file.
 - **Steering.** Every layer reads from it to know what to do: L1 reads prompt fields + brief + surface overrides, L2 reads operational memory + surface state, L3 reads plan + runtime failures.
 
 **What it is NOT** — not the trace archive (per-sample results live in `measurements/`, referenced by ID: [`scoring-and-memory.md`](scoring-and-memory.md)); not the frozen target shape (that is `JobSearchPoint`); not the campaign config (operator knobs — max rounds, patience, `n_variants`, which L2's `l1_overrides` may raise to 3× — live on `CampaignConfig.optimization` and never mutate).

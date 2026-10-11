@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -37,11 +37,7 @@ class PreflightWarning:
 def _check_sp_budget_vs_dataset(
     config: CampaignConfig, dataset: list[Sample]
 ) -> PreflightWarning | None:
-    # Only the PER-ROUND draw is checked against the bank. An origin budget above the bank is
-    # not a misconfiguration: `sample_dataset` is a prefix slice, and "score the origin on
-    # everything there is" is exactly what a wide-origin default wants on a small bank.
-    # A round asking more cells than the bank holds IS a finding: its sampler has nothing to
-    # select from and every round re-scores the same full set.
+    # Only the PER-ROUND draw: an origin budget above the bank is fine (`sample_dataset` slices).
     m = len(dataset)
     n = select_optimizer(config.optimization).round_cells(m)
     if m > 0 and n > m:
@@ -69,9 +65,6 @@ def _model_params_b(model_id: str) -> float | None:
 def _check_optimizer_below_target(
     opt_model: str, target_models: tuple[str, ...]
 ) -> PreflightWarning | None:
-    """An optimizer smaller than the target it optimizes is almost always an accidental inversion.
-    Its model is the selected manifest's proposing node's."""
-
     opt_b = _model_params_b(opt_model)
     if opt_b is None:
         return None
@@ -94,9 +87,6 @@ def _check_optimizer_below_target(
 
 
 def _check_config_couplings(config: CampaignConfig) -> list[PreflightWarning]:
-    """The declared map lives in ``knobs``, which the webapp config-map endpoint also reads; this is
-    its pre-run CLI leg."""
-
     return [
         PreflightWarning(
             code=f"config_coupling.{c.name}",
@@ -110,10 +100,6 @@ def _check_config_couplings(config: CampaignConfig) -> list[PreflightWarning]:
 def _check_task_context_present(
     config: CampaignConfig, framing: TaskDecomposition
 ) -> PreflightWarning | None:
-    """The operator's frozen framing is the SOLE source of l1_generate's ``task_intent`` slot, and
-    an empty one renders as nothing at all — no header, no placeholder — so the slot falls back to
-    the static template. Decidable before a cell is bought, and afterwards visible only as
-    ``review.md``'s ``_(empty)_``."""
     if config.task_framing == "off":
         return PreflightWarning(
             code="task_framing_off",
@@ -145,10 +131,8 @@ def _check_cap_funds_round(
     cell_usd: float | None,
     measured_cell_usd: float | None,
 ) -> PreflightWarning | None:
-    """A warning, a block only for an arm. A round is priced at what a cell of this dataset BILLED
-    where the archive says, and only an unmeasured one at ``cell_usd`` — every retry at its token
-    ceiling on the dearest host, a bound a cell bills far under, so priced there alone it warns on every run."""
-    cap = config.optimization.spend_budget_usd
+    """Priced at what a cell BILLED where the archive says; the ``cell_usd`` bound alone warns on every run."""
+    cap = config.optimization.ceiling.usd
     price = cell_usd if measured_cell_usd is None else measured_cell_usd
     if cap is None or price is None:
         return None
@@ -183,9 +167,43 @@ def _check_cap_funds_round(
     )
 
 
+def _check_origin_already_run(origin_campaigns: Sequence[str]) -> PreflightWarning | None:
+    """A cycle id is content-addressed: another campaign holding it ran the identical origin."""
+    if not origin_campaigns:
+        return None
+    return PreflightWarning(
+        code="origin_already_run",
+        title=f"identical origin already run in {', '.join(origin_campaigns)}",
+        detail=(
+            "A fresh `new` re-measures the identical seed. `resume` continues one of those "
+            "instead; `new` is for an origin you have CHANGED (optimizer prompt, config, or "
+            "dataset)."
+        ),
+    )
+
+
+def _check_instrument_replays(
+    instrument: str | None, banked_instruments: Sequence[str]
+) -> PreflightWarning | None:
+    if instrument is None or not banked_instruments or instrument in banked_instruments:
+        return None
+    return PreflightWarning(
+        code="instrument_novel",
+        title=(
+            f"instrument {instrument} is new — none of {len(banked_instruments)} prior "
+            "campaigns replay"
+        ),
+        detail=(
+            f"Those campaigns carry {len(set(banked_instruments))} other fingerprint(s), so no "
+            "banked cell replays: this run re-measures its origin and can be compared to none of "
+            "them. Expected while the engine is being rewritten; it is also the reason a panel "
+            "does not accumulate across runs."
+        ),
+    )
+
+
 def check_search_pool_holds_round(config: CampaignConfig, search_pool: int) -> str | None:
-    """A HARD block, decidable before a mint: the sampler raises on such a pool at round 1, after
-    the origin's cells are paid."""
+    """Asked before a mint: the sampler raises on such a pool at round 1, after the origin is paid."""
     selected = select_optimizer(config.optimization)
     if selected.round_cells_ceiling(search_pool) > 0:
         return None
@@ -204,11 +222,10 @@ def run_preflight_checks(
     framing: TaskDecomposition,
     cell_usd: float | None,
     measured_cell_usd: float | None,
+    origin_campaigns: Sequence[str],
+    instrument: str | None,
+    banked_instruments: Sequence[str],
 ) -> list[PreflightWarning]:
-    """``target_models`` are the resolved per-node target/scoring model ids, empty when the backend
-    owns the model; ``dataset`` is the search pool, ``cell_usd`` the most one of its cells can
-    bill and ``measured_cell_usd`` what one has billed, each ``None`` where nothing prices it.
-    Pure — no mutation, no I/O."""
     warnings: list[PreflightWarning] = []
     if (w := _check_sp_budget_vs_dataset(config, dataset)) is not None:
         warnings.append(w)
@@ -219,6 +236,10 @@ def run_preflight_checks(
         warnings.append(w)
     if (w := _check_task_context_present(config, framing)) is not None:
         warnings.append(w)
+    if (w := _check_origin_already_run(origin_campaigns)) is not None:
+        warnings.append(w)
+    if (w := _check_instrument_replays(instrument, banked_instruments)) is not None:
+        warnings.append(w)
     warnings.extend(_check_config_couplings(config))
     return warnings
 
@@ -226,8 +247,7 @@ def run_preflight_checks(
 def refuse_arm_below_round(
     arm: Arm | None, warnings: Iterable[PreflightWarning], *, measured_cell_usd: float | None
 ) -> None:
-    """A HARD block for an arm alone: stopped on `spend_budget` inside round 1 it is still graded
-    beside the arms that searched. Never on the unmeasured bound, which a cell bills far under."""
+    """An arm alone: stopped inside round 1 it is still graded beside the arms that searched."""
     if arm is None or measured_cell_usd is None:
         return
     for w in warnings:
@@ -243,13 +263,11 @@ def refuse_arm_below_round(
 def refuse_below_reasoning_floor(
     config: CampaignConfig, pipeline_params: Mapping[str, Any] | None
 ) -> None:
-    """Below ``ModelProfile.min_max_tokens`` a reasoning model can spend its whole budget thinking
-    and emit nothing. An ABSENT ``max_tokens`` is the sanctioned default, never a violation."""
+    """An ABSENT ``max_tokens`` is the sanctioned default, never a violation."""
     selected = select_optimizer(config.optimization)
     node_configs: Iterable[tuple[str, Mapping[str, Any]]] = [
         *node_config_items(dict(pipeline_params or {})),
-        # Every llm node the optimizer DECLARES, off its `default` chain too, or an escalation
-        # node escapes.
+        # Every llm node DECLARED, off the `default` chain too, or an escalation node escapes.
         *((n, selected.node_config(n)) for n in selected.llm_nodes),
         *((n.name, n.current_config) for n in checkin_manifest().schema.declared_nodes),
     ]

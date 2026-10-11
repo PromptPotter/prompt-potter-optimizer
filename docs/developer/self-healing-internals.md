@@ -17,16 +17,16 @@ Three detection points but **four** typed `WoundChannels` lists: post-parse spli
 
 ## The wounds, mapped to the two axes
 
-Storage stays four typed lists (+ `l3_note`); **rendering collapses to two owner-grouped signals** — `l1_wounds` = validation + runtime, `guard_breaches` = L2 + L3 post-parse. This table is the roster; each § below adds only what it cannot hold.
+Storage is the arm's own rejects plus three typed lists on potter's memory (+ `l3_note`); **rendering collapses to two owner-grouped signals** — `l1_wounds` = validation + runtime, `guard_breaches` = L2 + L3 post-parse. This table is the roster; each § below adds only what it cannot hold.
 
 |  | Wound 1 | Wound 2 | Wound 3 | Wound 4 |
 |---|---|---|---|---|
 | **Producer → Nurse** (owner-keyed, not producer-keyed) | L1 → **L1** | L1 → **L1 / OPERATOR** | L2 → L3 | L2 → L3 |
 | **Owner source** | structural (L1's own output) | `RuntimeFailure.owner`: `L1` (rate) · `OPERATOR` (fatal) | (patience event) | structural (layout refusal → L3) |
-| **Detector** | `L1_SCHEMA_COMPLIANCE` (`validators/l1_strict.py`), at `parse_population()` | `DegradationCheck` (`scoring/classification.py`), mid-eval | `escalate_l2` patience (`escalation/firing.py`) | `validate_l1_layout` (post-parse) |
+| **Detector** | the bench's `overlay_failures` (`bench/children.py`) and L1's own registry (`validators/l1_strict.py`), at `parse_population()` | `DegradationCheck` (`scoring/classification.py`), mid-eval | `escalate_l2` patience (`escalation/firing.py`) | `validate_l1_layout` (post-parse) |
 | **Failure record class** | `ValidationFailure` | `RuntimeFailure` | (patience event, no record) | `ValidatorOutcome` |
-| **OSP storage** | `validation_failures` | `runtime_failures` | `state.escalation.l2_stall_count` (on the cycle, not the OSP) | `l2_guard_breaches` |
-| **Outer-memory mirror** | none (L2 reads `candidate_scores`) | cumulative on `state.memory.wounds.runtime_failures` | none | per-round on the `CandidateProposal` |
+| **Storage** | the arm's `ScoredCandidate.validation_failures` on its round; a round with no arm, `PotterRoundState.l1_parse_failure` | `runtime_failures` | `state.escalation.l2_stall_count` (on the cycle, not the OSP) | `l2_guard_breaches` |
+| **Outer-memory mirror** | none — `_r_l1_wounds` reads the last measured round's arms | cumulative on `state.memory.wounds.runtime_failures` | none | per-round on the `CandidateProposal` |
 | **Nurse prompt slot** | `{{l1_wounds}}` | `{{l1_wounds}}` | (whole `l3_plan` template) | `{{guard_breaches}}` |
 | **Renderer** | `_r_l1_wounds` | `_r_l1_wounds` | `_r_l1_wounds` | `_r_guard_breaches` |
 | **Nurse's writeback** | L1 re-proposes a valid override | L1 retunes the node config · or operator trims schema/model | `cycle.opt_sp.plan` | `cycle.opt_sp.plan` |
@@ -34,7 +34,7 @@ Storage stays four typed lists (+ `l3_note`); **rendering collapses to two owner
 
 ## Wound 1 — what trips the validator
 
-`L1_SCHEMA_COMPLIANCE` wraps `validate_overrides()` and fires when L1's `pipeline_overlay` proposes a value outside the axis's resolved space (`PipelineSchema.param_options`, which answers for every axis including `model` — so a rung the node declared but the chosen model refuses is caught here too), mismatched against the declared `param_types`, or touching a cost lever (`PARAM_FORBIDDEN_KEYS` — `provider`/`route_order`, always locked; `model` is an ordinary axis and validates against the node's permitted set). `evidence["failures"]` is `list[ValidationFailure(axis, value, allowed, reason)]`, and `reason` is this validator's subset of the vocabulary `ValidationFailure.reason` declares: `not_in_available_models`, `not_in_param_allowed_values`, `not_accepted_by_model`, `type_mismatch`, `unknown_param`, `forbidden_axis`, `hallucinated_node`.
+The bench's `overlay_failures()` (`application/bench/children.py`) runs on every optimizer's child and fires when its `pipeline_overlay` proposes a value outside the axis's resolved space (`PipelineSchema.param_options`, which answers for every axis including `model` — so a rung the node declared but the chosen model refuses is caught here too), mismatched against the declared `param_types`, or touching a cost lever (`PARAM_FORBIDDEN_KEYS` — `provider`/`route_order`, always locked; `model` is an ordinary axis and validates against the node's permitted set). `evidence["failures"]` is `list[ValidationFailure(axis, value, allowed, reason)]`, and `reason` is this validator's subset of the vocabulary `ValidationFailure.reason` declares: `not_in_available_models`, `not_in_param_allowed_values`, `not_accepted_by_model`, `type_mismatch`, `unknown_param`, `forbidden_axis`, `hallucinated_node`.
 
 **Exception — `hallucinated_node` is non-fatal.** The override named a node absent from the active schema, the node-name twin of `validate_l1_layout`'s unknown-placeholder wound (`build_l1_response_schema`'s node-name enum is advisory under `strict=False`). The phantom edit is stripped from the wire — `merge_pipeline_params` drops nodes outside `active_steps` — so the candidate's real edits still score; the reason-aware Path-1 gate skips synthetic-0 and the wound rides along only as routed signal, feeding `l1_wounds` self-correction and the `validation_failure_rate` evaluator, which makes hallucination-rate an L4-visible quality axis.
 
@@ -45,7 +45,7 @@ Storage stays four typed lists (+ `l3_note`); **rendering collapses to two owner
 1. **Fatal-code fast path.** `classify_result()` derives a fatal code from raw response shape. One sighting ends the candidate; bypasses `min_samples`/`threshold`.
 2. **Rate-based.** After `min_samples=3`, if `degraded_rate >= 0.4`, eliminate.
 
-The measurement (`scoring/candidate_report.py::read_breakage`) synthesises `RuntimeFailure(source, dominant_warning, warning_types, degraded_rate, …)` from the check plus the observed pipeline_params, then continues with the next candidate. End-of-round, `Cycle.absorb_round` mirrors new records onto the cycle's list, deduplicated by `(source, dominant_warning, observed_config)`, and never clears them — they represent discovered runtime constraints.
+The measurement (`scoring/candidate_report.py::read_breakage`) synthesises `RuntimeFailure(source, dominant_warning, warning_types, degraded_rate, …)` from the check plus the observed pipeline_params, then continues with the next candidate. End-of-round, `PotterState.absorb` returns potter's memory with the new records added, deduplicated by `(source, dominant_warning, observed_config)`, and never clears them — they represent discovered runtime constraints.
 
 `_r_l1_wounds()` partitions the runtime block into NEW (this round) vs ACCUMULATED (`first_seen_round != current_round`) and tags each entry `[owner=l1|operator]`. **ACCUMULATED is the real signal** — a surviving item means L2's prior angle didn't take. If it keeps growing, Wound 3 takes over.
 
@@ -65,7 +65,7 @@ A REFUSED L2 layout edit makes `escalate_l2` run `_run_transition(L3, …)` *imm
 
 ## Optimizer-memory state
 
-The fields that travel cross-round are the cycle's `optimizers/potter/records.py::L2L3Memory`, banked on every round document as its `optimizer_state` — read the roster and each field's lifecycle off the model, which cannot drift from itself.
+The fields that travel cross-round are the cycle's `optimizers/potter/records.py::L2L3Memory`, banked on every round's close as its `optimizer_state` — read the roster and each field's lifecycle off the model, which cannot drift from itself.
 
 Two that the model cannot tell you. **`wounds.l3_note` is sticky free-text and not a failure record** — L3 sets it to steer L2, and it survives every parent swap (an L1 win as well as an L2/L3 transition) and is cleared only when L3 fires again, the only field there with that lifetime. And **the L1 critique is not on `L2L3Memory` at all**: it lives on `RoundResult.critique`, which the dispatch hub's `critique` injection reads through `bundle.digest.critique` (`build_bundle`, off the latest round), the same way per-round trajectory lives on `Cycle.rounds` rather than the memory.
 
@@ -73,7 +73,7 @@ Two that the model cannot tell you. **`wounds.l3_note` is sticky free-text and n
 
 Not a wound: it guards the size of a composed optimizer prompt, has no producer→nurse pair, and rides the `injection_table()` registry, `DispatchHub` and the existing `StopLoop` / round-loop teardown rather than a sidecar. Two healing modes:
 
-1. **Select** — the composition (`dispatch/compose.py::select`) places whole items under the node's `OPTIMIZER_DISCRETIONARY_CHARS` allowance and drops the rest; the rules are owned by [`dispatch-hub.md`](dispatch-hub.md) § Every item that reaches an LLM carries an upper limit. `char_cap` is only the runaway backstop on indivisible panels (`facade.py::_cap_runaway`), which emits an `injection_budget_overrun` warning.
+1. **Select** — the composition (`dispatch/compose.py::select`) places whole items under the node's `discretionary_chars` allowance (`dispatch/layout.py::NODE_LAYOUTS`) and drops the rest; the rules are owned by [`dispatch-hub.md`](dispatch-hub.md) § Every item that reaches an LLM carries an upper limit. `char_cap` is only the runaway backstop on indivisible panels (`facade.py::_cap_runaway`), which emits an `injection_budget_overrun` warning.
 2. **Halt** — `RENDER_ERROR`: an injection renderer *raised* (usually code drift), or `MandatoryPanelStarvedError`: a mandatory panel rendered but was not placed; operator-recoverable stop.
 
 ## Mid-eval termination — what is and isn't healing
@@ -86,7 +86,7 @@ Two mid-eval checks stop a candidate and only one is healing. `DegradationCheck`
 
 Two rules a new row must keep. Every `content_empty` row is gated on **the result not having answered** — the advisory describes one ATTEMPT, and the backend's retry beside it can succeed. And a fatal code is deterministic for the whole config — one sighting proves the candidate is broken for every remaining query, which is why a rule allowed to fire on a row that answered *correctly* eliminates a good candidate. Grow the rule table (don't expose it as a tunable) when a new pattern proves equally conclusive.
 
-Two load-boundary effects, consumed via `is_deprecated()`: `DegradationCheck` eliminates the candidate on first sighting; and `open_walk` splits deprecated entries off `archive_queries.replay_feed` (`_split_off_deprecated_samples`) so fatal entries are evicted from cache and re-measured with `retry_of_deprecated_cache=True`. `_compute_accuracy` counts them apart as `deprecated`, a count WITHIN `total`: a deprecated row stays in every denominator as the miss the formula grades — which rows a reading counts is [`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md#which-rows-a-reading-counts)'s.
+Two load-boundary effects, consumed via `is_deprecated()`: `DegradationCheck` eliminates the candidate on first sighting; and `open_walk` splits deprecated entries off its `ReplayFeed` (`_split_off_deprecated_samples`) so fatal entries are evicted from cache and re-measured with `retry_of_deprecated_cache=True`. `_compute_accuracy` counts them apart as `deprecated`, a count WITHIN `total`: a deprecated row stays in every denominator as the miss the formula grades — which rows a reading counts is [`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md#which-rows-a-reading-counts)'s.
 
 This is a load-boundary filter, not a score-time fallback: trace records are still archived for forensic value, and only cache reuse is blocked. Sanctioned alongside the measurement's validation-failure synthetic-0 — see [`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md#deprecated-samples).
 
@@ -94,7 +94,7 @@ This is a load-boundary filter, not a score-time fallback: trace records are sti
 
 Pick the storage stream by detector + score-effect; the owner falls out of the record type, so you never wire a nurse by hand.
 
-- New gen-time check on L1's output → **Wound 1**. Add a validator next to `L1_SCHEMA_COMPLIANCE`.
+- New gen-time check on L1's output → **Wound 1**. Add a validator to `validators/l1_strict.py` — or to `bench/children.py` when every optimizer's child owes it.
 - New runtime measurement pointing at a candidate config region → **Wound 2**. Add a check that emits `RuntimeFailure` from `scoring/candidate_report.py::read_breakage`; stamp `owner=NurseOwner.L1` when L1 can retune it, `owner=NurseOwner.OPERATOR` when only the operator can.
 - New strategic-stall trigger → **Wound 3** isn't a registry; it's the patience timer.
 - New post-parse check on L2/L3's output → **Wound 4**. L3's side has a registry (`L3_OUTPUT_VALIDATORS`, `validators/l3_output.py`); L2's is the layout check itself (`dispatch/layout.py::validate_l1_layout`) — there is no `L2_OUTPUT_VALIDATORS` to append to, so a new L2 check means extending that validator or standing a registry up.

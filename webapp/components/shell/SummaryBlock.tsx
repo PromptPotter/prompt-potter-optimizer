@@ -1,6 +1,4 @@
 "use client";
-// A campaign's standing in one block for every host that summarises one — the sidebar hover card, a
-// Compare column, the chat's finished-run item. `dense` is the host's density, never other facts.
 
 import type { ReactNode } from "react";
 import { cx } from "@/lib/cx";

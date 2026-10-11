@@ -1,16 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useMemo } from "react";
 import {
-  fetchDatasetIndex,
-  fetchOrigins,
+  datasetIndexRead,
+  originsRead,
   type DatasetIndexEntry,
   type OriginEntry,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { useRead } from "./useRead";
 
-// What a campaign can be started FROM. Every ingest surface reads this one fetch: two
-// fetchers are two answers to "what is in my collection".
 export type CollectionState =
   | { kind: "loading" }
   | { kind: "needsAuth" }
@@ -19,32 +18,12 @@ export type CollectionState =
 
 export function useCollection(): CollectionState {
   const { status } = useAuth();
-  // An anon visitor fires nothing, so the protected read never 401s into the UI (I1/I5).
-  const resting = (): CollectionState =>
-    status === "authed" || status === "loading" ? { kind: "loading" } : { kind: "needsAuth" };
-  const [state, setState] = useState<CollectionState>(resting);
-
-  const [prevStatus, setPrevStatus] = useState(status);
-  if (status !== prevStatus) {
-    setPrevStatus(status);
-    setState(resting());
-  }
-
-  useEffect(() => {
-    if (status !== "authed") return;
-    let cancelled = false;
-    Promise.all([fetchDatasetIndex(), fetchOrigins()])
-      .then(([datasets, origins]) => {
-        if (!cancelled)
-          setState({ kind: "ready", origins: origins.origins, entries: datasets.datasets });
-      })
-      .catch(() => {
-        if (!cancelled) setState({ kind: "error" });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [status]);
-
-  return state;
+  const datasets = useRead(datasetIndexRead(), { auth: true });
+  const origins = useRead(originsRead(), { auth: true });
+  return useMemo((): CollectionState => {
+    if (status === "unauthed") return { kind: "needsAuth" };
+    if (datasets.status === "failed" || origins.status === "failed") return { kind: "error" };
+    if (datasets.status !== "ready" || origins.status !== "ready") return { kind: "loading" };
+    return { kind: "ready", origins: origins.data.origins, entries: datasets.data.datasets };
+  }, [status, datasets, origins]);
 }

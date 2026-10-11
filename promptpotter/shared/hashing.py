@@ -1,44 +1,45 @@
-"""Content-addressed hashing for measurement deduplication. In ``shared/`` to avoid a circular import between the two
-searchpoint modules."""
-
 from __future__ import annotations
 
 import ast
 import hashlib
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NewType, TypedDict
 
 if TYPE_CHECKING:
-    from collections.abc import Collection, Iterable
+    from collections.abc import Iterable
     from types import ModuleType
 
-# SHA256 truncated to 24 hex chars (96 bits) — sufficient for content-addressed
-# deduplication across campaigns.  Birthday-bound collision probability stays
-# negligible up to ~280 billion items.
-HASH_TRUNCATE = 24
+ID_HEX = 16
+# 16 hex collides at archive scale (cells = configurations x samples); 64 strains Windows paths.
+ADDRESS_HEX = 32
 
-_PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+_PACKAGE_NAME = __name__.split(".")[0]
 
 __all__ = [
-    "HASH_TRUNCATE",
+    "ADDRESS_HEX",
+    "ID_HEX",
+    "NormalizedSource",
+    "SourceFacts",
+    "SourceReads",
+    "UnitFacts",
     "content_hash",
     "dataset_hash",
     "module_source_digest",
-    "optimizer_prompt_shapers",
     "shapes_optimizer_prompt",
+    "source_facts",
     "stable_hash",
 ]
 
 
 def shapes_optimizer_prompt[T](obj: T) -> T:
-    """Marks a definition as its decorator, a constant as ``Annotated`` metadata, or — called on
-    ``__name__`` — a whole module, whose source decides an optimizer prompt's bytes."""
     return obj
 
 
+NormalizedSource = NewType("NormalizedSource", str)
+
+
 def _import_bindings(stmt: ast.stmt) -> list[tuple[str, str]] | None:
-    """``(bound, source)`` per name an import binds, or ``None`` for a statement that is not one."""
     if isinstance(stmt, ast.If):
         nested = [_import_bindings(s) for s in (*stmt.body, *stmt.orelse)]
         if not nested or any(n is None for n in nested):
@@ -54,9 +55,16 @@ def _import_bindings(stmt: ast.stmt) -> list[tuple[str, str]] | None:
     return None
 
 
+def _is_prose(stmt: ast.stmt) -> bool:
+    return (
+        isinstance(stmt, ast.Expr)
+        and isinstance(stmt.value, ast.Constant)
+        and isinstance(stmt.value.value, str)
+    )
+
+
 def _normalized_source(tree: ast.AST) -> str:
-    """Docstrings dropped and every import reduced to the names it binds, sorted — so documenting,
-    reformatting or relocating a name costs nothing, while rebinding one moves the digest."""
+    """Documenting, reformatting or relocating a name is free; rebinding one moves the digest."""
     bindings: set[tuple[str, str]] = set()
     for node in ast.walk(tree):
         for field in ("body", "orelse", "finalbody"):
@@ -64,21 +72,13 @@ def _normalized_source(tree: ast.AST) -> str:
             if isinstance(stmts, list):
                 kept = []
                 for s in stmts:
+                    if _is_prose(s):
+                        continue
                     if (pairs := _import_bindings(s)) is None:
                         kept.append(s)
                     else:
                         bindings.update(pairs)
                 stmts[:] = kept
-        if isinstance(
-            node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef
-        ) and (body := getattr(node, "body", None)):
-            head = body[0]
-            if (
-                isinstance(head, ast.Expr)
-                and isinstance(head.value, ast.Constant)
-                and isinstance(head.value.value, str)
-            ):
-                del body[0]
         body = getattr(node, "body", None)
         if isinstance(body, list) and not body:
             body.append(ast.Pass())
@@ -105,54 +105,18 @@ def _marked(tree: ast.Module) -> list[ast.AST]:
     return found
 
 
-# Plumbing hashed code calls without its source deciding a prompt's bytes. A CLASS is exempt by
-# kind instead: its identity renders nothing, and a method or schema that renders is marked.
-PLUMBING_MODULES = frozenset(
-    {
-        "promptpotter.infrastructure.llm.telemetry",  # records what a fill did
-        "promptpotter.application.bench.llm_call",  # sends the messages it is handed
-        "promptpotter.application.bench.resume_and_fork.decisions",  # records what a node decided
-        "promptpotter.application.optimizers.nodes",  # the contract a manifest is walked through
-        "promptpotter.application.runner.measurement",  # measures cells; their rows are data
-        "promptpotter.shared.hashing",  # the digest itself
-        "promptpotter.infrastructure.store.io",  # reads files the identity hashes as data
-        "promptpotter.config.paths",  # says where those files live
-    }
-)
+def _package_imports(nodes: Iterable[ast.AST]) -> list[list[str]]:
+    return [
+        [alias.asname or alias.name, node.module, alias.name]
+        for node in nodes
+        if isinstance(node, ast.ImportFrom)
+        and node.module
+        and node.module.split(".")[0] == _PACKAGE_NAME
+        for alias in node.names
+    ]
 
 
-class _Scope(NamedTuple):
-    names: frozenset[str]
-    classes: frozenset[str]
-    # Bound name -> (module, name) per package import; name None where it binds a module.
-    imports: dict[str, tuple[str, str | None]]
-
-
-def _module_name(path: Path) -> str:
-    parts = path.relative_to(_PACKAGE_ROOT.parent).with_suffix("").parts
-    return ".".join(parts[:-1] if parts[-1] == "__init__" else parts)
-
-
-def _module_path(module: str) -> Path | None:
-    base = _PACKAGE_ROOT.parent.joinpath(*module.split("."))
-    return next((p for p in (base.with_suffix(".py"), base / "__init__.py") if p.is_file()), None)
-
-
-def _package_imports(nodes: Iterable[ast.AST]) -> dict[str, tuple[str, str | None]]:
-    table: dict[str, tuple[str, str | None]] = {}
-    for node in nodes:
-        if isinstance(node, ast.ImportFrom) and node.module:
-            if node.module.split(".")[0] != _PACKAGE_ROOT.name:
-                continue
-            for alias in node.names:
-                full = f"{node.module}.{alias.name}"
-                table[alias.asname or alias.name] = (
-                    (full, None) if _module_path(full) else (node.module, alias.name)
-                )
-    return table
-
-
-def _scope(tree: ast.Module) -> _Scope:
+def _top_level_names(tree: ast.Module) -> set[str]:
     names: set[str] = set()
     for stmt in tree.body:
         if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
@@ -160,8 +124,7 @@ def _scope(tree: ast.Module) -> _Scope:
         elif isinstance(stmt, ast.Assign | ast.AnnAssign):
             targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target]
             names.update(t.id for t in targets if isinstance(t, ast.Name))
-    classes = frozenset(s.name for s in tree.body if isinstance(s, ast.ClassDef))
-    return _Scope(frozenset(names), classes, _package_imports(ast.walk(tree)))
+    return names
 
 
 def _unit_name(unit: ast.AST) -> str | None:
@@ -203,148 +166,108 @@ def _annotation_ids(unit: ast.AST) -> set[int]:
     return {id(n) for root in roots for n in ast.walk(root)}
 
 
-class _Package:
-    """The package's modules, parsed on demand, for resolving a name to where it is DEFINED —
-    beside the *hashed* trees handed in, which may live outside it, as a plugin's do."""
+class SourceReads(TypedDict):
+    """A whole module's own names are left out: they are hashed with it."""
 
-    def __init__(self, hashed: Iterable[tuple[str, ast.Module]]) -> None:
-        self._scopes: dict[str, _Scope | None] = {m: _scope(tree) for m, tree in hashed}
-
-    def scope(self, module: str) -> _Scope | None:
-        if module not in self._scopes:
-            path = _module_path(module)
-            self._scopes[module] = (
-                _scope(ast.parse(path.read_text(encoding="utf-8"))) if path else None
-            )
-        return self._scopes[module]
-
-    def is_class(self, module: str, name: str) -> bool:
-        scope = self.scope(module)
-        return scope is not None and name in scope.classes
-
-    def resolve(self, module: str, name: str) -> tuple[str, str] | None:
-        """Follows re-exports to the definition; ``None`` for a module, or outside the package."""
-        seen: set[tuple[str, str]] = set()
-        while (module, name) not in seen and (scope := self.scope(module)) is not None:
-            seen.add((module, name))
-            if name in scope.names:
-                return module, name
-            source = scope.imports.get(name)
-            if source is None or source[1] is None:
-                return None
-            module, name = source[0], source[1]
-        return None
-
-    def reached(self, module: str, unit: ast.AST) -> set[tuple[str, str]]:
-        """The package names *unit* reads outside its annotations — a whole module's own names
-        excepted, since they are hashed with it."""
-        scope = self.scope(module)
-        assert scope is not None
-        whole = isinstance(unit, ast.Module)
-        imports = scope.imports
-        if not whole:
-            imports = {**imports, **_package_imports(n for n in ast.walk(unit) if n is not unit)}
-        local = set() if whole else _bound_within(unit) - imports.keys()
-        skip = _annotation_ids(unit)
-        out: set[tuple[str, str] | None] = set()
-        for node in ast.walk(unit):
-            if id(node) in skip:
-                continue
-            if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
-                source = imports.get(node.value.id)
-                if source and source[1] is None and node.value.id not in local:
-                    out.add(self.resolve(source[0], node.attr))
-            elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
-                if node.id in local or (whole and node.id in scope.names):
-                    continue
-                source = imports.get(node.id)
-                if source is None:
-                    out.add(self.resolve(module, node.id))
-                elif source[1] is not None:
-                    out.add(self.resolve(source[0], source[1]))
-        return {hit for hit in out if hit is not None}
+    names: list[str]
+    attrs: list[list[str]]
+    imports: list[list[str]]
 
 
-def optimizer_prompt_shapers(
-    hashed: Iterable[ModuleType],
-    *,
-    covered: Iterable[ModuleType] = (),
-    foreign: Collection[str] = (),
-) -> tuple[ast.AST, ...]:
-    """Every marked definition in the package outside the *foreign* packages, in path then source
-    order — read off the source, so the set cannot depend on which modules a process happened to
-    import. RAISES where *hashed* or marked code reads a package name that is not hashed, *covered*,
-    marked, a class or plumbing: a helper it calls would shape the prompt for free."""
-    units: list[tuple[str, ast.AST]] = [
-        (module, node)
-        for path in sorted(_PACKAGE_ROOT.rglob("*.py"))
-        if not (module := _module_name(path)).startswith(tuple(f"{f}." for f in foreign))
-        and shapes_optimizer_prompt.__name__ in (text := path.read_text(encoding="utf-8"))
-        for node in _marked(ast.parse(text))
-    ]
-    whole = {m for m, unit in units if isinstance(unit, ast.Module)}
-    scanned = [m for m in hashed if m.__name__ not in whole]
-    covered_names = whole | {m.__name__ for m in (*scanned, *covered)} | PLUMBING_MODULES
-    marked = {(m, name) for m, unit in units if (name := _unit_name(unit))}
-    trees = [(m.__name__, ast.parse(Path(str(m.__file__)).read_text("utf-8"))) for m in scanned]
-    package = _Package(trees)
-    checked = [*units, *trees]
-    breaches = sorted(
+class UnitFacts(TypedDict):
+    name: str | None
+    whole: bool
+    source: str
+    reads: SourceReads
+
+
+class SourceFacts(TypedDict):
+    """A function of ONE source text: ``source_scan.py`` resolves another module's imports."""
+
+    names: list[str]
+    classes: list[str]
+    imports: list[list[str]]
+    reads: SourceReads
+    units: list[UnitFacts]
+
+
+def _reads(unit: ast.AST, names: set[str], imported: set[str]) -> SourceReads:
+    whole = isinstance(unit, ast.Module)
+    own = [] if whole else _package_imports(n for n in ast.walk(unit) if n is not unit)
+    bound = imported | {row[0] for row in own}
+    local = set() if whole else _bound_within(unit) - bound
+    skip = _annotation_ids(unit)
+    read_names: set[str] = set()
+    read_attrs: set[tuple[str, str]] = set()
+    for node in ast.walk(unit):
+        if id(node) in skip:
+            continue
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+            if node.value.id in bound:
+                read_attrs.add((node.value.id, node.attr))
+        elif (
+            isinstance(node, ast.Name)
+            and isinstance(node.ctx, ast.Load)
+            and node.id not in local
+            and not (whole and node.id in names)
+        ):
+            read_names.add(node.id)
+    return {
+        "names": sorted(read_names),
+        "attrs": [list(pair) for pair in sorted(read_attrs)],
+        "imports": own,
+    }
+
+
+def source_facts(text: str) -> SourceFacts:
+    tree = ast.parse(text)
+    names = _top_level_names(tree)
+    imports = _package_imports(ast.walk(tree))
+    imported = {row[0] for row in imports}
+    marked = _marked(tree)
+    module_reads = _reads(tree, names, imported)
+    unit_reads = [module_reads if u is tree else _reads(u, names, imported) for u in marked]
+    # Last, and in marked order: normalizing rewrites the tree, an outer unit's pass included.
+    units: list[UnitFacts] = [
         {
-            f"{target[0]}.{target[1]} (read by {module})"
-            for module, unit in checked
-            for target in package.reached(module, unit)
-            if target[0] not in covered_names
-            and target not in marked
-            and not package.is_class(*target)
+            "name": _unit_name(unit),
+            "whole": unit is tree,
+            "source": _normalized_source(unit),
+            "reads": reads,
         }
-    )
-    if breaches:
-        raise RuntimeError(
-            "hashed code reads package names nothing hashes — mark each one whose value reaches "
-            f"prompt text `shapes_optimizer_prompt`: {breaches}"
-        )
-    return tuple(unit for _, unit in units)
+        for unit, reads in zip(marked, unit_reads, strict=True)
+    ]
+    return {
+        "names": sorted(names),
+        "classes": sorted(s.name for s in tree.body if isinstance(s, ast.ClassDef)),
+        "imports": imports,
+        "reads": module_reads,
+        "units": units,
+    }
 
 
-def module_source_digest(*sources: ModuleType | ast.AST) -> str:
-    """Hash what a set of modules and definitions DOES, for the identity of a measurement they
-    decide: a docstring or an import path is free, a changed expression voids what it measured."""
+def module_source_digest(*sources: ModuleType | NormalizedSource) -> str:
     parts = [
-        _normalized_source(
-            s if isinstance(s, ast.AST) else ast.parse(Path(str(s.__file__)).read_text("utf-8"))
-        )
+        s
+        if isinstance(s, str)
+        else _normalized_source(ast.parse(Path(str(s.__file__)).read_text("utf-8")))
         for s in sources
     ]
-    return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()[:12]
+    return stable_hash(parts)
 
 
-def stable_hash(value: Any) -> str:
-    """The identity of any JSON-shaped value, key order aside."""
-    blob = json.dumps(value, sort_keys=True, default=str).encode()
-    return hashlib.sha256(blob).hexdigest()[:16]
+def stable_hash(value: Any, *, length: int = ID_HEX) -> str:
+    # Every stored key is cut from this canonical form: a change here re-keys the archive.
+    blob = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(blob).hexdigest()[:length]
 
 
 def _sorted_pairs(dataset: list[Any]) -> list[tuple[str, str]]:
-    """What the rows ARE, order-independent — the one definition both hashes below stand on.
-
-    A verifier-graded row carries no label (``Sample.ground_truth is None``) and reads as ``""``:
-    the sort has to be total, and a label that does not exist cannot be part of what was measured.
-    """
     return sorted((d.query, d.ground_truth or "") for d in dataset)
 
 
 def dataset_hash(dataset: list[Any]) -> str:
-    """The rows alone, so two measurements can be asked whether they stand on the same ones.
-
-    Deliberately NOT a slice of :func:`content_hash`, which mixes the rendered prompt and the
-    pipeline config into the same digest: two campaigns over one dataset hash differently there,
-    which is right for a measurement cache key and useless as an identity a consumer can compare.
-    Exported beside a fitness number for exactly that comparison — the number means nothing
-    without the identity of the rows it was measured on.
-    """
-    blob = json.dumps({"pairs": _sorted_pairs(dataset)}, sort_keys=True)
-    return hashlib.sha256(blob.encode()).hexdigest()[:HASH_TRUNCATE]
+    return stable_hash({"pairs": _sorted_pairs(dataset)}, length=ADDRESS_HEX)
 
 
 def content_hash(
@@ -352,13 +275,10 @@ def content_hash(
     dataset: list[Any],
     pipeline_params: dict[str, Any] | None = None,
 ) -> str:
-    """``sha256`` over rendered prompt + sorted query/ground-truth pairs + ``pipeline_params``. Sample ORDER does not affect
-    it; ``pipeline_params`` is included when non-empty, so different pipeline configs hash distinctly."""
     blob_dict: dict[str, Any] = {
         "prompt": rendered_prompt,
         "pairs": _sorted_pairs(dataset),
     }
     if pipeline_params:
         blob_dict["pipeline_params"] = pipeline_params
-    blob = json.dumps(blob_dict, sort_keys=True)
-    return hashlib.sha256(blob.encode()).hexdigest()[:HASH_TRUNCATE]
+    return stable_hash(blob_dict, length=ADDRESS_HEX)

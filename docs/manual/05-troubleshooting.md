@@ -80,7 +80,7 @@ Symptom-first reference. Each entry: what you see → why it happens → what to
 
 **What to try:**
 - Increase `n_variants` to widen the search per round.
-- Let L2 fire — it can raise `n_variants` and `creativity` via `l1_overrides`.
+- Let L2 fire — it can raise `n_variants` and `temperature` via `l1_overrides`.
 - If prompt fields are the only axis: confirm the pipeline's LLM node has a prompt template exposed. If it doesn't, the optimizer has no prompt space to explore.
 
 ---

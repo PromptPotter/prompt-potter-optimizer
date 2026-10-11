@@ -1,18 +1,4 @@
-"""Regenerate ``webapp/components/ui/vendor-marks.generated.ts``.
-
-Author-time, and the OUTPUT IS COMMITTED. An icon set is a brand asset, so a mark changing shape
-belongs in a diff someone reads rather than in a deploy nobody saw — which is also why the gate's
-``vendor-marks`` check re-runs this and fails when the committed file has drifted.
-
-Two sources, because neither covers the set alone. ``simple-icons`` is a devDependency, so its
-version is pinned in the lock and its geometry is reviewed on upgrade like any other; it ships
-plain ``icons/<slug>.svg``, read here directly. But as of v16 it carries no OpenAI, xAI, Zhipu or
-Upstage mark, and those four live as files under ``webapp/assets/vendor-marks/`` — see that
-directory's README for provenance, licence and why they are files rather than a second package.
-
-Nothing is fetched at runtime and nothing is fetched here: OpenRouter's API serves no logo, and its
-undocumented static icon path answers a miss with HTTP 200 ``text/html``.
-"""
+"""Fetches nothing: OpenRouter serves no logo, and its static icon path answers a miss with 200 HTML."""
 
 from __future__ import annotations
 
@@ -25,16 +11,7 @@ _ASSETS = _REPO / "webapp" / "assets" / "vendor-marks"
 _SIMPLE_ICONS = _REPO / "webapp" / "node_modules" / "simple-icons" / "icons"
 _DEST = _REPO / "webapp" / "components" / "ui" / "vendor-marks.generated.ts"
 
-# The served vendor (`application/pipeline_resolve.py::VendorModels.vendor`) → how it reads, how it
-# is inked, and where its geometry comes from.
-#
-# `si` names a simple-icons slug; otherwise the mark is `webapp/assets/vendor-marks/<vendor>.svg`
-# when that file exists, and the vendor wears its INITIAL when neither does. The initial is a
-# resting state, not a gap: the set of vendors is open and always will be.
-#
-# `tint` is declared here rather than taken from the upstream's own hex, and every value is one
-# decision: a brand whose ink is black disappears into the dark surface, and two brands landing on
-# the same blue stop being countable. A column of marks is read on ink first and shape second.
+# `tint` is chosen here, never the brand's own hex: black vanishes on dark, and two share a blue.
 VENDORS: list[dict[str, str]] = [
     {"vendor": "openai", "label": "OpenAI", "tint": "#10a37f"},
     {"vendor": "anthropic", "label": "Anthropic", "tint": "#d97757", "si": "anthropic"},
@@ -48,8 +25,7 @@ VENDORS: list[dict[str, str]] = [
     {"vendor": "z-ai", "label": "Z.ai", "tint": "#0ea5e9"},
     {"vendor": "nvidia", "label": "NVIDIA", "tint": "#76b900", "si": "nvidia"},
     {"vendor": "upstage", "label": "Upstage", "tint": "#e11d48"},
-    # No mark in either source. `inception` and `inclusionai` share an initial, so their inks are
-    # deliberately far apart — an initial still has to be countable.
+    # Initials only — `inception` and `inclusionai` share one, so their inks sit far apart.
     {"vendor": "microsoft", "label": "Microsoft", "tint": "#00a4ef"},
     {"vendor": "inception", "label": "Inception", "tint": "#00b3a4"},
     {"vendor": "inclusionai", "label": "InclusionAI", "tint": "#c2410c"},
@@ -61,11 +37,6 @@ _PATH_D = re.compile(r'<path[^>]*\sd="([^"]+)"')
 
 
 def _paths(svg_path: Path) -> list[str]:
-    """The 24x24 geometry in one file, refusing anything the component cannot ink from one place.
-
-    A multi-path mark is fine — that is a drawing detail. A mark carrying its OWN fills is not: it
-    would render as the silhouette of a logo rather than the logo.
-    """
     svg = svg_path.read_text(encoding="utf-8")
     box = _VIEWBOX.search(svg)
     if not box or box.group(1) != "0 0 24 24":

@@ -1,5 +1,4 @@
-// A node's contracted output, one row per parameter of its served JSON Schema. Read `json_schema`,
-// never `fields`/`field_descriptions` — top-level keys only, and empty on every optimizer node.
+// Reads `json_schema`, never `fields`/`field_descriptions`: top-level keys only, empty on every optimizer node.
 
 import type { NodeOutputSchema } from "@/lib/api";
 
@@ -14,7 +13,7 @@ export interface ContractField {
   enums: string[];
 }
 
-// Reaches every optimizer contract's leaves; a deeper schema should be flattened server-side.
+// Reaches every optimizer contract's leaves; a deeper schema is flattened server-side.
 const MAX_DEPTH = 3;
 
 function isRec(v: unknown): v is Record<string, unknown> {
@@ -111,8 +110,7 @@ function walk(
       depth,
       type: r.type,
       required: required.has(name) && !r.optional,
-      // The declaration site wins over the `$defs` target: a `$ref`'d field describes its ROLE
-      // here and its shape there, and the role is what the reader wants beside the name.
+      // The declaration site wins over the `$defs` target: it describes the field's ROLE.
       description: str(isRec(raw) ? raw.description : "") || str(r.schema.description),
       limit: limitOf(raw, r.schema),
       enums: enumsOf(raw, r.schema),
@@ -126,8 +124,7 @@ function walk(
 // `[]` is a real answer: a measurement node returns no structured output.
 export function outputContract(schema: NodeOutputSchema | null | undefined): ContractField[] {
   if (!schema) return [];
-  // A response-format envelope (`{name, strict, schema}`) and a bare JSON Schema both arrive
-  // here — the optimizer manifest serves the first, a backend's `/pipeline` the second.
+  // Both arrive: an envelope `{name, strict, schema}` (optimizer manifest) and a bare JSON Schema (a backend's `/pipeline`).
   const js = schema.json_schema;
   const root = isRec(js) ? (isRec(js.schema) ? js.schema : js) : null;
   const out: ContractField[] = [];
@@ -136,7 +133,6 @@ export function outputContract(schema: NodeOutputSchema | null | undefined): Con
     walk(root, 0, "", defs, new Set(), out);
   }
   if (out.length > 0) return out;
-  // Only the flat key list — what a backend's `/pipeline` reports for a target node.
   return schema.fields.map((f) => ({
     key: f,
     name: f,

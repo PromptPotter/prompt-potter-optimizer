@@ -1,31 +1,70 @@
 import { describe, expect, it } from "vitest";
-import { loadCycleFixture } from "@/lib/test-utils/fixtures";
-import { currentRound, dash as dashboard, liveRow } from "@/lib/test-fixtures";
 import {
-  measuredRoundNumbers,
-  groupByRound,
-  roundCandidates,
-} from "../round-candidates";
-import { availableRounds } from "../round-axis";
-import { runSummary } from "../run-summary";
-import { liveCandidateId } from "@/lib/candidate-label";
+  armReading,
+  currentRound,
+  dash as dashboard,
+  liveRow,
+  ownLevel,
+  servedLabel,
+  summaryCandidate,
+  summaryRound,
+} from "@/lib/test-fixtures";
+import { groupByRound, roundCandidates } from "../round-candidates";
+import { roundReading } from "../round-reading";
 
-describe("roundCandidates — l2_terminal fixture", () => {
-  // Fixture: origin + 3 scored rounds of three + an empty round-4 stub (closed mid-L2).
-  const dash = loadCycleFixture("l2_terminal");
+function l2Terminal() {
+  const scoredRound = (round: number, crowned: string | null) =>
+    summaryRound({
+      round,
+      improved: round === 0 ? null : crowned !== null,
+      candidates: Array.from({ length: round === 0 ? 1 : 3 }, (_, idx) => {
+        const label = servedLabel(round, idx);
+        return summaryCandidate({
+          reading: armReading({
+            arm: { round, label, candidate_id: `sp_${round}_${idx}` },
+            election: { held: true, selected: label === crowned },
+            ability: { theta: 0.1 * (idx - 1), se: 0.3, ci_lo: null, ci_hi: null, caveat: null },
+            panel: { scored: 20, expected: 20 },
+          }),
+        });
+      }),
+      optimizer_facts: [
+        { key: "critique", label: "Critique", text: `critique ${round}`, value: null, kind: "note" },
+      ],
+    });
+  return dashboard({
+    state: "stopped",
+    run_phase: "terminal",
+    round: 4,
+    current_round: currentRound({ round: 4 }),
+    rounds: [
+      scoredRound(0, "C0"),
+      scoredRound(1, "C1.2"),
+      scoredRound(2, null),
+      scoredRound(3, null),
+      summaryRound({ round: 4 }),
+    ],
+    // As served: the round that closed before measuring is not on the axis.
+    round_axis: { completed: [0, 1, 2, 3], live: null, position: 3 },
+  });
+}
+
+describe("roundCandidates — a run that stopped mid-L2", () => {
+  const dash = l2Terminal();
   const rows = roundCandidates(dash);
+  const roundOf = (r: (typeof rows)[number]) => r.reading.arm.round;
 
   it("emits origin as round 0 (C0)", () => {
-    const origin = rows.find((r) => r.round === 0);
+    const origin = rows.find((r) => roundOf(r) === 0);
     expect(origin).toBeDefined();
-    expect(origin?.label).toBe("C0");
+    expect(origin?.reading.arm.label).toBe("C0");
     expect(origin?.key).toBe("R0.0");
   });
 
   it("emits every non-empty post-origin round's candidates", () => {
-    const historical = rows.filter((r) => r.round > 0);
+    const historical = rows.filter((r) => roundOf(r) > 0);
     expect(historical).toHaveLength(9);
-    expect(new Set(historical.map((r) => r.round))).toEqual(new Set([1, 2, 3]));
+    expect(new Set(historical.map(roundOf))).toEqual(new Set([1, 2, 3]));
   });
 
   it("does not emit any inflight row for the L2-terminal round 4", () => {
@@ -50,19 +89,8 @@ describe("roundCandidates — l2_terminal fixture", () => {
   });
 
   it("empty round 4 does not suppress the in-flight branch for round 4", () => {
-    const round4 = rows.filter((r) => r.round === 4);
+    const round4 = rows.filter((r) => roundOf(r) === 4);
     expect(round4).toHaveLength(0);
-  });
-
-  it("availableRounds excludes the empty L2-terminal round 4 from completed", () => {
-    const axis = availableRounds(dash, false);
-    expect(axis.completed).toEqual([0, 1, 2, 3]);
-    expect(axis.live).toBeNull();
-  });
-
-  it("measuredRoundNumbers is the rounds that closed WITH measurements — excludes the empty round 4", () => {
-    // Excludes the empty round, unlike `useRoundSource::isRoundUnfiled`, which asks for a file.
-    expect(measuredRoundNumbers(dash)).toEqual(new Set([0, 1, 2, 3]));
   });
 
   it("groupByRound buckets the same spine rows without recomputing the merge", () => {
@@ -75,97 +103,43 @@ describe("roundCandidates — l2_terminal fixture", () => {
     expect(grouped).toBe(rows.length);
   });
 
-  // Rounds 2 and 3 HELD: the crown is only what each served `is_selected` says.
   it("crowns exactly the rows the rounds served as selected", () => {
-    expect(rows.filter((r) => r.is_selected).map((r) => r.label)).toEqual(["C0", "C1.2"]);
-  });
-
-  it("carries θ on every row of a campaign whose optimizer stamps it", () => {
-    expect(rows.every((r) => r.theta !== null)).toBe(true);
+    const crowned = rows.filter((r) => r.reading.election.selected);
+    expect(crowned.map((r) => r.reading.arm.label)).toEqual(["C0", "C1.2"]);
   });
 
   it("reads the last closed round's optimizer facts, never the empty stub's", () => {
-    const last = runSummary(dash)?.lastRound;
+    expect(roundReading(dash, 4)).toBeNull();
+    const last = roundReading(dash, 3);
     expect(last?.round).toBe(3);
     expect(last?.facts).toEqual(dash.rounds[3]?.optimizer_facts);
     expect(last?.facts.length).toBeGreaterThan(0);
   });
 });
 
-// A live row is the same served shape as a closed one, so every field carries through.
 describe("roundCandidates — the in-flight round", () => {
-  const live = dashboard({
-    current_round: currentRound({
-      round: 2,
-      candidates: [
-        liveRow({
-          label: "C2.1",
-          // A FINISHED live row: the score report's lineage id has landed on it.
-          candidate_id: "9f2c1b7e-4a80-4d55-9c31-0b6ad2f11e03",
-          accuracy: 0.6,
-          composite_fitness: 0.55,
-          mean_fitness_ci_lo: 0.41,
-          mean_fitness_ci_hi: 0.69,
-          scored_samples: 8,
-          expected_samples: 20,
-        }),
-      ],
+  const served = liveRow({
+    reading: armReading({
+      // A FINISHED live row: the score report's lineage id has landed on it.
+      arm: { round: 2, label: "C2.1", candidate_id: "9f2c1b7e-4a80-4d55-9c31-0b6ad2f11e03" },
+      own: { ...ownLevel(0.6, 8), accuracy: { value: 0.6, ci_lo: 0.41, ci_hi: 0.69 } },
+      panel: { scored: 8, expected: 20 },
     }),
   });
+  const live = dashboard({ current_round: currentRound({ round: 2, candidates: [served] }) });
   const row = roundCandidates(live).find((r) => r.source === "inflight");
 
-  it("carries the whisker off the same row as the bar", () => {
-    expect(row?.accuracy).toBe(0.6);
-    expect(row?.meanFitnessCiLo).toBe(0.41);
-    expect(row?.meanFitnessCiHi).toBe(0.69);
+  it("hands the served reading over whole, keyed by its position", () => {
+    expect(row?.reading).toBe(served.reading);
+    expect(row?.key).toBe("R2.0");
   });
 
-  // An in-flight `candidate_id` is POSITIONAL, a row key only; a live reader joins on the LABEL.
-  it("keys an in-flight row on the positional id and carries its label", () => {
-    expect(row?.candidate_id).toBe(liveCandidateId(2, 0));
-    expect(row?.label).toBeTruthy();
-  });
-
-  it("holds no crown — the election is a round-scoped fit that has not run", () => {
-    expect(row?.is_selected).toBe(false);
-    expect(row?.theta).toBeNull();
-  });
-
-  it("reports the partial panel it has measured so far", () => {
-    expect(row?.n_samples).toBe(8);
-    expect(row?.n_expected).toBe(20);
-  });
-});
-
-// A rejected candidate never ran; `INVALID_SCORES` gives it a synthetic 0.0, so the flag saying
-// which it is must carry through.
-describe("roundCandidates — a rejected candidate", () => {
-  const live = dashboard({
-    current_round: currentRound({
-      round: 4,
-      candidates: [
-        liveRow({ label: "C4.1", accuracy: 0.65, composite_fitness: 0.65, scored_samples: 20 }),
-        liveRow({
-          label: "C4.3",
-          outcome: "invalid",
-          // What the producer actually serves for one: the synthetic score, over no rows at all.
-          accuracy: 0,
-          composite_fitness: 0,
-          scored_samples: 0,
-        }),
-      ],
-    }),
-  });
-  const rows = roundCandidates(live).filter((r) => r.source === "inflight");
-
-  it("carries the outcome through, so a renderer can tell the two apart", () => {
-    expect(rows.find((r) => r.label === "C4.1")?.outcome).toBeNull();
-    expect(rows.find((r) => r.label === "C4.3")?.outcome).toBe("invalid");
-  });
-
-  it("leaves the served synthetic score untouched — it feeds selection, and only the RENDER changes", () => {
-    const rejected = rows.find((r) => r.label === "C4.3");
-    expect(rejected?.accuracy).toBe(0);
-    expect(rejected?.n_samples).toBe(0);
+  it("is absent once the round has closed with measurements", () => {
+    const closed = dashboard({
+      current_round: currentRound({ round: 2, candidates: [served] }),
+      rounds: [summaryRound({ round: 2, candidates: [summaryCandidate()] })],
+      round_axis: { completed: [2], live: null, position: 2 },
+    });
+    expect(roundCandidates(closed).map((r) => r.source)).toEqual(["history"]);
   });
 });

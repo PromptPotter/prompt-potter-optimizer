@@ -2,43 +2,35 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test as base, expect, type Page, type APIRequestContext } from "@playwright/test";
-import { STOP_REASON_OUTCOMES, type RoundSummary } from "@/lib/api/types.generated";
+import { STOP_REASON_OUTCOMES, type ServedRound } from "@/lib/api/types.generated";
 import { isStopReason } from "@/lib/run-phase";
-
-// What every spec shares. A spec asks the API which campaigns exist and never names one; the
-// suite has no fixture campaign, and a world that cannot answer a spec makes it SKIP.
 
 const API = "/api/v1";
 
-// Harness-only console noise. Never add anything the app emits: a suppressed app error is the
-// breakage the walk exists to catch.
+// Never add anything the app emits: a suppressed app error is the breakage the walk exists to catch.
 const BENIGN: RegExp[] = [];
 
-// The 4xx answers the app legitimately ASKS FOR; any other 4xx is reported.
 const EXPECTED_4XX: [RegExp, number][] = [
   [/\/active\b/, 404],
   // A selection with no scored rows — ticking a campaign whose origin never ran.
   [/\/evidence\b/, 400],
-  // `useRoundFile` asks by number, so a campaign with no completed round 404s `round_0000.json`.
-  [/\/file\?.*round_\d+\.json/, 404],
+  // A campaign with no completed round 404s round 0; its audit twin answers `200 null`, so a 4xx on `/audit` is reported.
+  [/\/rounds\/\d+(\?|$)/, 404],
 ];
 
 export type Problem = { kind: string; text: string };
 
-/** Where `serve.mjs` tees this server's faults, keyed by the port the project's `baseURL` carries. */
 function faultLog(baseURL: string | undefined): string | null {
   if (!baseURL) return null;
   const port = new URL(baseURL).port;
   return port ? path.join(os.tmpdir(), `pp-e2e-server-${port}.log`) : null;
 }
 
-// The PROMISE is memoized so concurrent tests share one scan; safe only because the walk tier
-// never writes.
+// Memoized so concurrent tests share one scan; safe only because the walk tier never writes.
 let richest: Promise<Campaign | null> | null = null;
 
 // `provide`, not `use`: `react-hooks/rules-of-hooks` reads `use` as React's hook and fails the lint.
 export const test = base.extend<{ problems: Problem[]; rich: Campaign }>({
-  // The richest campaign, or SKIP. Only a test that asks for it pays the scan or can skip.
   rich: async ({ request }, provide, testInfo) => {
     richest ??= richestCampaign(request);
     const found = await richest;
@@ -46,7 +38,6 @@ export const test = base.extend<{ problems: Problem[]; rich: Campaign }>({
     await provide(found!);
   },
 
-  // `auto` so no spec can forget it — the guard is the point of the suite, not an opt-in.
   problems: [
     async ({ page, baseURL }, use, testInfo) => {
       const problems: Problem[] = [];
@@ -60,8 +51,7 @@ export const test = base.extend<{ problems: Problem[]; rich: Campaign }>({
 
       page.on("console", (m) => {
         if (m.type() !== "error") return;
-        // Chrome's failed-subresource error carries no status, so it is read off the response
-        // channel below.
+        // Chrome's failed-subresource error carries no status; it is read off the response channel below.
         const url = m.location()?.url ?? "";
         if (/Failed to load resource/.test(m.text()) && expected(url, seen4xx.get(url) ?? 0)) return;
         note("console.error", m.text() + (url ? ` (${url})` : ""));
@@ -92,7 +82,7 @@ export const test = base.extend<{ problems: Problem[]; rich: Campaign }>({
       if (faults && existsSync(faults)) {
         const fresh = readFileSync(faults).subarray(from).toString("utf8").trim();
         if (fresh) {
-          // A detached run's later fault lands on whichever test is next: mis-attributed, never hidden.
+          // A detached run's later server fault lands on whichever test is next: mis-attributed, never hidden.
           const lines = fresh.split("\n");
           const head = lines.slice(0, 14).join("\n");
           const rest = lines.length > 14 ? `\n… +${lines.length - 14} more line(s)` : "";
@@ -114,7 +104,7 @@ export const test = base.extend<{ problems: Problem[]; rich: Campaign }>({
 
 export { expect };
 
-/** The shell mounted, not its crash fallback. Both headings are read off `ui/ErrorBoundary`. */
+/** Both headings are read off `ui/ErrorBoundary`. */
 export async function ready(page: Page) {
   await expect(page.locator("#main-content")).toBeVisible();
   await expect(
@@ -122,10 +112,7 @@ export async function ready(page: Page) {
   ).toHaveCount(0);
 }
 
-/**
- * The reload is required: a fragment-only `goto` does not remount, so the top-level
- * ErrorBoundary would carry one view's crash into every address visited after it.
- */
+/** The reload is required: a fragment-only `goto` does not remount, so one view's crash would follow every later address. */
 export async function open(page: Page, hash = "") {
   await page.goto(`/${hash}`);
   await page.reload();
@@ -142,7 +129,6 @@ export async function campaigns(request: APIRequestContext): Promise<Campaign[]>
   const res = await request.get(`${API}/campaigns`);
   expect(res.ok(), `GET ${API}/campaigns → ${res.status()}`).toBeTruthy();
   const rows: Record<string, string>[] = (await res.json()).campaigns ?? [];
-  // A campaign with no root cycle has no address, so it is skipped, never given a fabricated one.
   return rows.flatMap((c) => {
     const id = c.campaign_id;
     const cycleId = c.root_cycle_id;
@@ -152,10 +138,7 @@ export async function campaigns(request: APIRequestContext): Promise<Campaign[]>
   });
 }
 
-/**
- * Anything reading a run takes this, never the newest campaign — the newest is often an empty
- * check-in cycle, whose empty panes pass whatever the chart code does.
- */
+/** Never the newest campaign: it is often an empty check-in cycle, whose empty panes pass whatever the chart code does. */
 export async function richestCampaign(request: APIRequestContext): Promise<Campaign | null> {
   const all = await campaigns(request);
   let best: Campaign | null = null;
@@ -174,13 +157,9 @@ export async function richestCampaign(request: APIRequestContext): Promise<Campa
   return best;
 }
 
-/** The datasets the spend tier may have created; anything else means a world it must not write. */
 export const E2E_DATASETS = ["email-tagging", "promptpotter-self-e2e"];
 
-/**
- * Not "the world is empty": the spend specs share one workspace, so the second finds the
- * first's campaign. Every campaign present must belong to a dataset this suite owns.
- */
+/** Not "the world is empty": the spend specs share one workspace, so the second finds the first's campaign. */
 export async function assertThrowawayWorld(request: APIRequestContext) {
   const res = await request.get(`${API}/campaigns`);
   expect(res.ok()).toBeTruthy();
@@ -207,7 +186,6 @@ export function consentGate(page: Page) {
   });
 }
 
-/** Idempotent: the accept is persisted to `user.json`. */
 export async function passConsent(page: Page) {
   const gate = consentGate(page);
   if ((await gate.count()) === 0) return;
@@ -216,10 +194,7 @@ export async function passConsent(page: Page) {
   await expect(gate).toBeHidden();
 }
 
-/**
- * The body is the ENVELOPE `{kind, payload}` (`lib/api/commands.ts`); a flat one 422s on every
- * kind. Never retry a 4xx — a refusal is permanent.
- */
+/** The body is the ENVELOPE `{kind, payload}` (`lib/api/commands.ts`). Never retry a 4xx — a refusal is permanent. */
 export async function command(
   request: APIRequestContext,
   kind: string,
@@ -244,19 +219,16 @@ export async function dashboard(
   return r.ok() ? await r.json() : null;
 }
 
-export function roundsOf(dash: Record<string, unknown> | null): RoundSummary[] {
+export function roundsOf(dash: Record<string, unknown> | null): ServedRound[] {
   const rows = dash?.rounds;
-  return Array.isArray(rows) ? (rows as RoundSummary[]) : [];
+  return Array.isArray(rows) ? (rows as ServedRound[]) : [];
 }
 
-/**
- * A round that CLOSED need not have MEASURED: a round whose every cell errored still closes, with
- * `null` accuracy on every candidate. Counting rounds cannot tell them apart.
- */
-export function assertRoundMeasured(label: string, round: RoundSummary | undefined) {
+/** A round that CLOSED need not have MEASURED: one whose every cell errored still closes, with `null` accuracy throughout. */
+export function assertRoundMeasured(label: string, round: ServedRound | undefined) {
   expect(round, `${label}: no round to read`).toBeDefined();
   const graded = (round?.candidates ?? []).filter(
-    (c) => typeof c.accuracy === "number" && c.outcome !== "invalid",
+    (c) => c.reading.own?.accuracy != null && c.reading.outcome !== "invalid",
   );
   expect(
     graded.length,
@@ -265,10 +237,7 @@ export function assertRoundMeasured(label: string, round: RoundSummary | undefin
   ).toBeGreaterThan(0);
 }
 
-/**
- * Checked before any spend: the engine classifies `backend_unreachable` as a bounded `halted`,
- * which `assertBoundedStop` would pass, but for a test it means a mis-set harness.
- */
+/** Checked before any spend: `backend_unreachable` is a bounded `halted`, which `assertBoundedStop` would pass. */
 export const BACKEND_URL = process.env.PP_E2E_BACKEND_URL || "http://127.0.0.1:8000";
 
 export async function assertBackendUp(request: APIRequestContext) {
@@ -295,10 +264,7 @@ export function assertBoundedStop(label: string, stopped: string) {
   ).not.toBe("failed");
 }
 
-/**
- * `null` where the rollup is ABSENT, never `$0` — read as zero, a cache that silently went
- * missing reports itself as a perfect hit.
- */
+/** `replayed` is `null` where there is no share, never 0: read as zero, a cache that went missing reports a perfect hit. */
 export type Tape = { used: number; incurred: number; replayed: number | null };
 
 export function tapeOf(dash: Record<string, unknown> | null): Tape | null {
@@ -311,15 +277,11 @@ export function tapeOf(dash: Record<string, unknown> | null): Tape | null {
   return {
     used,
     incurred,
-    // Nothing incurred has no replay share; 0% would read as a cache that answered nothing.
     replayed: incurred > 0 ? 1 - used / incurred : null,
   };
 }
 
-/**
- * Pass `minReplayed` only where the path can honestly guarantee one (`README.md` § The second
- * pass is free): a floor on a stochastic path is a flaky failure in the paid tier.
- */
+/** Pass `minReplayed` only where the path guarantees one: a floor on a stochastic path is a flaky failure in the paid tier. */
 export function reportTape(label: string, tape: Tape | null, minReplayed?: number) {
   if (!tape) {
     console.log(`[e2e] ${label}: no spend rollup served — cannot say what was replayed`);
@@ -347,7 +309,6 @@ export function reportTape(label: string, tape: Tape | null, minReplayed?: numbe
   ).toBeGreaterThanOrEqual(minReplayed);
 }
 
-/** The document scrolls vertically; it must never scroll HORIZONTALLY (webapp/CLAUDE.md). */
 export async function noSidewaysScroll(page: Page) {
   const over = await page.evaluate(() => {
     const el = document.documentElement;

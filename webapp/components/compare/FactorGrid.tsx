@@ -1,8 +1,6 @@
 "use client";
-// The factorial read, two factors crossed at a time. Cells and margins are served and pooled server-side
-// (`webapp/CLAUDE.md` § Scoring authority); fixing a third factor belongs in the selection, never a client filter.
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { CardFrame } from "@/components/ui";
 import type { Evidence, FactorReading } from "@/lib/api/types";
 import { cx } from "@/lib/cx";
@@ -53,13 +51,9 @@ export function FactorGrid({
   onGrid: (grid: string) => void;
 }) {
   const factors = evidence.factors;
-  // Separable first: an aliased factor on an axis draws another factor's grid under the wrong heading.
-  const ordered = useMemo(
-    () => [...factors].sort((a, b) => a.confounded_with.length - b.confounded_with.length),
-    [factors],
-  );
-  const [rowKey, setRowKey] = useState<string>(() => ordered[0]?.key ?? "");
-  const [colKey, setColKey] = useState<string>(() => ordered[1]?.key ?? "");
+  // Served separable first (`application/evidence/grid.py::factors`), so the first two open the grid.
+  const [rowKey, setRowKey] = useState<string>(() => factors[0]?.key ?? "");
+  const [colKey, setColKey] = useState<string>(() => factors[1]?.key ?? "");
 
   const served = evidence.grid;
   const unit = evidence.metric.spec.unit;
@@ -72,7 +66,7 @@ export function FactorGrid({
   if (factors.length === 0) {
     return (
       <CardFrame title="Factor grid">
-        <p className="l4-empty">
+        <p className="note-empty">
           Nothing varies across these subjects — they ran the same way on the same dataset, which
           makes them replicates rather than a grid. The spread between them is the noise reading.
         </p>
@@ -87,7 +81,7 @@ export function FactorGrid({
 
   return (
     <CardFrame title="Factor grid">
-      <p className="l4-lede">
+      <p className="note-lede">
         {factors.length} factor(s) vary across {evidence.subjects.length} subject(s), read on{" "}
         {evidence.metric.spec.axis_label}. Cross two to see which COMBINATION leads; the marginals
         above answer which level leads on average.
@@ -97,13 +91,13 @@ export function FactorGrid({
         <FactorPicker
           label="rows"
           value={rowKey}
-          options={ordered}
+          options={factors}
           onChange={(k) => cross(k, colKey)}
         />
         <FactorPicker
           label="columns"
           value={colKey}
-          options={ordered}
+          options={factors}
           onChange={(k) => cross(rowKey, k)}
         />
         <button
@@ -117,14 +111,14 @@ export function FactorGrid({
       </div>
 
       {sameAxis && (
-        <p className="l4-warn">
+        <p className="note-warn">
           The same factor is on both axes, so only the diagonal could hold a subject. Pick a second
           one.
         </p>
       )}
 
       {(row?.confounded_with.length ?? 0) > 0 || (col?.confounded_with.length ?? 0) > 0 ? (
-        <p className="l4-warn">
+        <p className="note-warn">
           {[row, col]
             .filter((f) => f && f.confounded_with.length > 0)
             .map((f) => `${f?.key} is aliased by ${f?.confounded_with.join(", ")}`)
@@ -135,13 +129,13 @@ export function FactorGrid({
       ) : null}
 
       {!served ? (
-        <p className="l4-note">
+        <p className="note-info">
           No pair crossed yet. The cells are pooled on the server, so this is a read of its own
           rather than a regrouping of what is already on screen.
         </p>
       ) : (
         <>
-          {served.note && <p className="l4-warn">{served.note}</p>}
+          {served.note && <p className="note-warn">{served.note}</p>}
           <div className="l4-table-wrap">
             <table className="l4-table l4-factor-grid">
               <thead>
@@ -208,7 +202,7 @@ export function FactorGrid({
           </div>
 
           {served.marginalised.length > 0 && (
-            <p className="l4-note">
+            <p className="note-info">
               Marginalised into every cell above: {served.marginalised.join(", ")}. To read one held
               fixed, narrow the SELECTION to the subjects at that level — the server then pools over
               what you are actually looking at, which a filter here could not.

@@ -14,52 +14,58 @@ assistant" endpoint is a deferred Arc 2 —
 
 ## Keep — the reusable core
 
-- **Chat shell + one ordered thread** — `components/chat/ChatPane.tsx` hosts the
-  single thread in `components/ingest/IngestConversation.tsx`: the ingest /
-  check-in segment, then the appended `LiveSegment` (curated activity feed +
-  inline decision buttons), over the durable `ChatMsg` model
-  (`lib/hooks/useIngestFlow.ts`).
-- **The activity translator** — `lib/chat/activity.ts`
-  (`ProjectionEnvelope → ActivityItem`, 1:1 with the run readout's `ReadoutProjection`; curated,
-  with the per-sample firehose mapped to `null` / a single progress chip).
+The core imports nothing from an optimizer module; each file's import list is the proof.
+
+- **The thread model** — `lib/chat/thread.ts`: one ordered item list behind `ThreadProvider` /
+  `useThread`. `message` and `file` are what the operator and the assistant write, `run` is the
+  frozen values of a task that ended (generic in its payload), and a `block` is an
+  always-current region a host mounts into the list and the store never keeps.
+- **The renderer** — `components/chat/Thread.tsx` draws that list and follows its tail;
+  `components/chat/Composer.tsx` is attach + one field + send. Neither knows what a `block` or
+  a `run` holds: the host hands `Thread` a `renderRun` and `Composer` its `tools`.
+- **The served current state** — `promptpotter/domain/activity.py::ActivityFeed`, on the
+  server. The thread shows what the task is doing NOW, never its log: a record reads as at most
+  one `ActivityItem`, every `ActivityKind` declares a lifetime in `LIFETIME`
+  ([`event-stream.md`](../../../docs/developer/event-stream.md) § Current state), and every SSE frame
+  carries the fold whole as `activity: {status, notices}`. A new kind is one row in that table,
+  and any client — this one, an MCP tool, another agent's UI — renders the newest frame.
 - **The SSE client** — `lib/chat/useCycleEvents.ts` (snapshot → tail →
-  heartbeat → reconnect), the webapp's first EventSource consumer. It carries one
-  piece of STATE beside the item feed — `sampleOrder`, the scorer's declared order
-  (`sampleOrderFrom`) — because that frame is a non-item the stream alone reports.
-- **The decision surface** — `lib/chat/decision.ts` + `components/chat/LiveSegment.tsx`
-  (button-gated agency over the existing `/commands/{kind}` set; the origin gate
-  was folded in here from the removed global modal).
-- **The live-then-frozen shape** — an always-current pane at the thread tail
-  while the task runs, snapshotted into the durable message list when it ends (the
-  `run` `ChatMsg` kind). The *shape* is reusable for any long task; what fills it here
-  is not (see the delete-list).
+  heartbeat → reconnect), transport only: it keeps the newest `activity` and reads nothing
+  else off a frame.
+- **The decision surface** — `components/chat/LiveSegment.tsx`: the live status line, its
+  notices and the button-gated agency over the existing `/commands/{kind}` set, mounted as one
+  `block` at the thread's tail.
+- **The live-then-frozen shape** — an always-current `block` at the tail while the task runs,
+  snapshotted into the list as a `run` item when it ends (`useThread().appendRun`, idempotent
+  per key). The *shape* is reusable for any long task; what fills it here is not.
 
 ## Delete to de-PromptPotter
 
 To strip this down to a generic chat + tool-activity app, remove:
 
-- **The optimizer panes:** `components/dashboard/`,
-  `components/tree/` (Files), and the ingest setup flow
-  (`components/ingest/`, `lib/hooks/useIngestFlow.ts`'s `IngestPhase` machine).
-- **The optimizer-specific activity mappings** in `lib/chat/activity.ts` — the
-  `snapshot` candidate / round / PoBB branches and the `phase` round-summary
-  (`candidate`, `round` `ActivityKind`s). Keep the generic
-  `running`/`done`/`progress`/`warning`/`error`/`merge` mappings; rewire them to
-  your own tool's event records.
-- **The optimizer-specific decision** in `lib/chat/decision.ts` (the origin-gate
-  group); keep the `DecisionItem` shape + `LiveSegment`'s button rendering and
-  point them at your own gated commands.
-- **The run card** — `components/chat/RunCard.tsx` plus the three derivations it reads,
-  `lib/derivations/{run-summary,flipped-samples,sample-walk}.ts`, its `<TrendChart compact />`
-  (`components/eval/`, the card's running indicator and its link to the dashboard), and the
-  `runCard` slot in `IngestConversation`. Keep the `run` item kind and re-point it at your own
-  task summary.
-- The job-bar + pipeline hero inside `ChatPane.tsx` (the campaign telemetry chrome) —
-  leave the `.chat-panel` thread + `LiveSegment`.
-- **The optimize row** of `ingest/ComposerTools.tsx` and the `useRunControl` behind it —
-  keep the Tools popover and its coming-soon rows, which are the generic composer, and
-  re-point that one row at your own long-running task's pause/start.
+- **The optimizer panes:** `components/dashboard/`, `components/files/`, and the ingest setup
+  flow — `components/ingest/` whole, `lib/hooks/useIngestFlow.ts` and `lib/ingest-flow.tsx`.
+  Ingest is a contributor: it appends messages and mounts two blocks
+  (`IngestConversation.tsx::useIngestItems`), so removing it leaves the thread intact:
+  `ThreadProvider` is mounted by the shell (`shell/AppShell.tsx`), above `IngestFlowProvider`.
+- **The host** — `components/chat/ChatPane.tsx` is PromptPotter's composition: the pipeline
+  hero, ingest's items, the live tail and the run card. Replace it with a host that hands
+  `Thread` your own items.
+- **The optimizer-specific readings** in `domain/activity.py` — the `candidate_scored` /
+  `sample_scored` cases, the `phase` round headline and the held-out pass (`candidate`, `round`
+  `ActivityKind`s). Keep the generic `running`/`done`/`progress`/`warning`/`error`/`merge`
+  readings; rewire them to your own tool's event records.
+- **The optimizer-specific decision** — the served `ActivityDecision` (the origin-gate group) and the
+  origin-gate verb `LiveSegment` fires; keep `LiveSegment`'s button rendering and point it at
+  your own gated commands.
+- **The run card** — `components/chat/RunCard.tsx` (the Round row's
+  `<TrendChart density="glyph" />` and the dashboard link live there) plus the derivation it
+  reads, `lib/derivations/run-summary.ts`. Keep the `run` item kind and hand
+  `Thread` a `renderRun` for your own task summary.
+- **The optimize row** of `ingest/ComposerTools.tsx` and the `useRunControl` behind it — move
+  the Tools popover and its coming-soon rows, which are the generic composer's, beside
+  `Composer.tsx`, and re-point that one row at your own long-running task's pause/start.
 
-What remains is the chat shell, the one-thread model, the SSE transport +
-translator seam, and the button-gated control surface — a generic copilot you
+What remains is the thread model and its renderer, the composer, the SSE transport and its
+served state, and the button-gated control surface — a generic copilot you
 point at your own activity stream and commands.

@@ -1,9 +1,6 @@
-// @vitest-environment jsdom
-import { cleanup, fireEvent, render } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { SidePanel } from "../SidePanel";
-
-afterEach(cleanup);
 
 describe("SidePanel", () => {
   it("steps with j/k only where a row exists that way, and closes on Escape", () => {

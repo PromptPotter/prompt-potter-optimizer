@@ -1,5 +1,4 @@
-"""Dataset access gateway — the single seam that resolves a dataset directory, tenant content
-first. Install content carries NO capability check: gating bytes that ship protects nothing."""
+"""Install content carries NO capability check: gating bytes that ship protects nothing."""
 
 from __future__ import annotations
 
@@ -18,8 +17,7 @@ from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
 
 
 class DatasetAccessError(NotFoundError):
-    """No dataset *name* this identity can resolve — invalid slug, or absent. A
-    :class:`NotFoundError`: 404 rather than 403 is the existence-leak posture."""
+    """A 404, never a 403: the existence-leak posture."""
 
     def __init__(self, name: str) -> None:
         super().__init__(f"Dataset '{name}' not found")
@@ -35,42 +33,33 @@ class DatasetRef:
 
 
 def dataset_pipeline_path(dataset_dir: Path) -> Path:
-    """The dataset's node overlay. **The one place this filename is spelled** — a rename cannot
-    desync a reader from an existence probe, which is how a dataset stops being one silently."""
     return dataset_dir / "pipeline.yaml"
 
 
 def dataset_task_context_path(dataset_dir: Path) -> Path:
-    """The dataset's run-start framing, spelled once for every READER across all three tiers.
-    The commit writer keeps its own literal: it sits below this module in the import order."""
     return dataset_dir / "task_context.yaml"
 
 
 def is_dataset_dir(dataset_dir: Path) -> bool:
-    """A directory is a dataset iff it carries a pipeline overlay — public so no call site
-    re-derives it. A materialized ``cache.json`` does NOT count; rows live outside the dir."""
     return dataset_pipeline_path(dataset_dir).is_file()
 
 
 def readable_dataset_dir(stores: Stores, name: str) -> Path:
-    """Resolve *name*'s directory — tenant content first, then install content. The one resolver
-    every read AND every mint goes through; raises :class:`DatasetAccessError` on neither tier."""
     try:
-        tenant_dir = stores.tenant_datasets.dataset_dir(name)  # validates the slug
+        tenant_dir = stores.tenant_datasets.dataset_dir(name)
     except ValueError as exc:
         raise DatasetAccessError(name) from exc
     if is_dataset_dir(tenant_dir):
         return tenant_dir
 
-    install_dir = stores.benchmarks_root / name  # name validated above
+    install_dir = stores.benchmarks_root / name
     if is_dataset_dir(install_dir):
         return install_dir
     raise DatasetAccessError(name)
 
 
 def declared_backend_type(dataset_dir: Path) -> str:
-    """The connector *dataset_dir*'s ``pipeline.yaml`` declares, for a caller about to RUN on it.
-    Raises typed: a bare ``ValueError`` becomes a 500 the webapp retries forever."""
+    """Raises typed: a bare ``ValueError`` becomes a 500 the webapp retries forever."""
     path = dataset_pipeline_path(dataset_dir)
     try:
         raw = read_yaml_optional(path)
@@ -91,9 +80,7 @@ def declared_backend_type(dataset_dir: Path) -> str:
 
 
 def backend_type_of_dataset(stores: Stores, dataset_name: str) -> str:
-    """THE predicate for "which connector does this dataset use?", so no reader hand-maintains a
-    list of dataset NAMES. Tolerant, unlike :func:`declared_backend_type`: a campaign outlives its
-    dataset dir."""
+    """Tolerant, unlike :func:`declared_backend_type`: a campaign outlives its dataset dir."""
     try:
         raw = read_yaml_optional(dataset_pipeline_path(readable_dataset_dir(stores, dataset_name)))
     except (OSError, ValueError, DatasetAccessError):
@@ -103,8 +90,7 @@ def backend_type_of_dataset(stores: Stores, dataset_name: str) -> str:
 
 
 def dataset_experiment(config_dir: Path, connector: Connector) -> dict[str, Any] | None:
-    """*connector*'s ``experiment_file`` in *config_dir*, parsed and resolved, or ``None`` where
-    this box has none — a gitignored panel absent on a fresh clone is not an error; a malformed one is."""
+    """A gitignored panel absent on a fresh clone is ``None``, not an error; a malformed one is."""
     if not connector.experiment_file:
         return None
     panel_path = config_dir / connector.experiment_file
@@ -122,15 +108,12 @@ def dataset_experiment(config_dir: Path, connector: Connector) -> dict[str, Any]
 def extract_panel_rows(
     connector: Connector, dataset_name: str, experiment: dict[str, Any]
 ) -> list[dict[str, Any]]:
-    """The rows of a document :func:`dataset_experiment` read, in panel ORDER — the ``sample_id``,
-    so a second ordering would misfile every row against ``measurements/``."""
+    """Panel ORDER is the ``sample_id``: a second ordering misfiles every archived row."""
     assert connector.extract_experiment is not None, "paired with experiment_file at registration"
     try:
         return connector.extract_experiment(experiment)
     except (KeyError, TypeError, AttributeError, IndexError) as exc:
-        # A shape the connector did not expect. Re-raised as `ValueError` for the same reason
-        # `read_yaml` is: every guard above this seam is `except (ValueError, OSError, ImportError)`,
-        # and a raw `KeyError` from a connector walks through all of them into a 500.
+        # Every guard above this seam catches `ValueError`; a raw `KeyError` walks through to a 500.
         raise ValueError(
             f"Connector {connector.name!r} could not read {dataset_name!r}'s "
             f"{connector.experiment_file!r}: {type(exc).__name__}: {exc}"
@@ -140,19 +123,12 @@ def extract_panel_rows(
 def dataset_panel_rows(
     stores: Stores, dataset_name: str, *, experiment: dict[str, Any] | None = None
 ) -> list[dict[str, Any]] | None:
-    """The rows of the panel a CONNECTOR owns, or ``None`` where this box has no
-    connector-owned panel to read. It sits beside :func:`readable_dataset_rows` because the two ARE
-    the one ladder this module promises: a resolver that knows only materialized banks answers
-    EMPTY for a connector-owned one, which is not a fact about the dataset.
-
-    *experiment* is the panel a cycle already pinned (``resolved_experiment``): a campaign is read
-    off what it measured, and the dataset's own file answers only where nothing is pinned yet."""
+    """*experiment* is the panel a cycle pinned: a campaign is read off what it measured."""
     backend_type = backend_type_of_dataset(stores, dataset_name)
     connector = connectors.registered().get(backend_type)
     if connector is None:
         if backend_type:
-            # A declared connector this PROCESS does not hold — a server older than the connector.
-            # Its panel cannot be ruled out, so the roster is unreadable, never empty.
+            # A connector this PROCESS lacks: its panel is unreadable, never empty.
             raise ValueError(
                 f"Dataset {dataset_name!r} declares backend_type {backend_type!r}, which this "
                 f"process has no connector for. Restart the server."
@@ -164,10 +140,7 @@ def dataset_panel_rows(
 
 
 def readable_dataset_rows(stores: Stores, name: str) -> dict[str, Any] | None:
-    """The materialized rows for *name*, or ``None`` — the row half of the resolver, on the same
-    tenant-first ladder: the committed dataset's own ``cache.json``, this tenant's fetch, ours.
-    A connector-owned panel materializes nothing and answers here as ``None``; ask
-    :func:`dataset_panel_rows` first wherever the question is "what is this dataset's bank"."""
+    """A connector-owned panel answers ``None`` here: ask :func:`dataset_panel_rows` first."""
     try:
         tenant = stores.tenant_datasets.load_dataset(name)
     except ValueError as exc:
@@ -182,10 +155,9 @@ def readable_dataset_rows(stores: Stores, name: str) -> dict[str, Any] | None:
 
 
 def readable_task_context(stores: Stores, name: str) -> TaskDecomposition:
-    """The task framing for *name*, empty where no tier says anything, resolved like the rows. A
-    record blank in every field is skipped: at a higher tier it would shadow the shipped file."""
+    """A record blank in every field is skipped: higher up it would shadow the shipped file."""
     try:
-        tenant_dir = stores.tenant_datasets.dataset_dir(name)  # validates the slug
+        tenant_dir = stores.tenant_datasets.dataset_dir(name)
     except ValueError as exc:
         raise DatasetAccessError(name) from exc
     tiers = (
@@ -199,8 +171,6 @@ def readable_task_context(stores: Stores, name: str) -> TaskDecomposition:
 
 
 def list_readable_datasets(stores: Stores) -> list[DatasetRef]:
-    """Every dataset this identity may pick, tenant slugs shadowing install ones. No name filter
-    is needed — whatever sits in this tree is a dataset, and the optimizer's own is not here."""
     refs: list[DatasetRef] = []
     own: set[str] = set()
     for slug in stores.tenant_datasets.list_slugs():
@@ -213,7 +183,7 @@ def list_readable_datasets(stores: Stores) -> list[DatasetRef]:
     if stores.benchmarks_root.is_dir():
         for entry in sorted(stores.benchmarks_root.iterdir()):
             if entry.name in own:
-                continue  # tenant copy already won
+                continue
             if not entry.is_dir() or not dataset_pipeline_path(entry).is_file():
                 continue
             try:
@@ -240,10 +210,7 @@ def _read_title(dataset_dir: Path) -> str | None:
 
 
 def _read_n_samples(stores: Stores, name: str) -> int | None:
-    """``row_count`` off the resolved rows (falls back to ``items`` length); ``None`` when
-    unmaterialized — a benchmark nobody has fetched yet. NOT ``0``, which is the one state that
-    should stop an operator from minting an origin on it. Connector-owned panels answer off their
-    own declaration, so a harbor dataset counts here rather than reading as unmaterialized."""
+    """``None`` when unmaterialized, NOT ``0``: zero is the state that stops a mint."""
     try:
         if (panel := dataset_panel_rows(stores, name)) is not None:
             return len(panel)

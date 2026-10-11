@@ -1,16 +1,15 @@
-"""``Campaign`` — one declared effort, holding a root cycle plus fork/diag descendants FLAT under ``cycles/``. Two
-``new`` calls on an unchanged declaration share the root cycle id and origin score, then diverge from round 1."""
+"""Two ``new`` calls on an unchanged declaration share the root cycle id and origin score, then diverge."""
 
 from __future__ import annotations
 
-import hashlib
 from collections.abc import Iterable, Mapping
-from typing import Any, Literal
+from typing import Any, Literal, TypedDict, Unpack
 
 from pydantic import ConfigDict, Field
 
-from promptpotter.domain.bench import BenchPasses, DatasetSplit
+from promptpotter.domain.bench import DatasetSplit
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.paired_reading import instrument_of
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.run_records import WallClock
 from promptpotter.domain.spend import CeilingMeter
@@ -19,18 +18,16 @@ from promptpotter.shared.hashing import stable_hash
 
 
 class Treatment(StrictModel):
-    """Which optimizer ran, as it decides its behaviour: two runs are one treatment only where
-    ``digest`` agrees. No measurement key reads it, so an arm two treatments propose replays free."""
+    """Two runs are one treatment only where ``digest`` agrees; no measurement key reads it."""
 
     model_config = ConfigDict(frozen=True)
 
     optimizer: str
     version: str
-    # Per llm node, what shapes its call — the values each round stamps and a resume diverges on.
+    # Per llm node; a resume diverges on these.
     prompt_hashes: dict[str, str]
-    # Per member node, its validated knobs: an edit is a new treatment, and a policy diff to resume.
+    # Per member node: an edit is a new treatment, and a policy diff to resume.
     knobs: dict[str, dict[str, Any]]
-    # The code deciding what its prompts say (`OptimizerRuntime.source_digest`).
     source: str
 
     @property
@@ -38,42 +35,37 @@ class Treatment(StrictModel):
         return stable_hash(self.model_dump(mode="json"))
 
 
-class Instrument(StrictModel):
-    """What graded a bench headline: two are one quantity only where every field agrees."""
+class BenchSet(StrictModel):
+    """The bench set and grader behind a headline; two compare only where every field agrees."""
 
     model_config = ConfigDict(frozen=True)
 
-    dataset_name: str
-    # The bank's rows, order-independent: two banks re-cut under one name share ids, not content.
-    dataset_hash: str | None
+    # `instrument_of`: the id a pair refuses two members across.
+    instrument_id: str
+    # Order-independent content: two banks re-cut under one name share ids, not this.
+    dataset_hash: str
     split: DatasetSplit | None
-    # A digest of the held-out ids `bank_partition.json` names — what the split and its seed drew.
     bench_rows: str
-    # The run's grader, as `ScorerSetup.scorer_id` names it.
     scorer_id: str
-    # node -> model at the origin: the target every selection's bench pass ran through.
     models: dict[str, str]
-    # The origin's content hash (`Campaign.root_content_hash`): its prompt, framing, node params
-    # and the search rows, as `build_origin_cycle_id` folds them.
     origin: str
 
 
-def bench_instrument(
+def bench_set_of(
     *,
     dataset_name: str,
-    dataset_hash: str | None,
+    dataset_hash: str,
     split: DatasetSplit | None,
     bench_ids: Iterable[int],
     scorer_id: str,
     origin_params: Mapping[str, Any] | None,
     origin: str,
-) -> Instrument:
-    held_out = ",".join(str(i) for i in sorted(bench_ids))
-    return Instrument(
-        dataset_name=dataset_name,
+) -> BenchSet:
+    return BenchSet(
+        instrument_id=instrument_of(dataset_name, origin_params),
         dataset_hash=dataset_hash,
         split=split,
-        bench_rows=hashlib.sha256(held_out.encode()).hexdigest()[:12],
+        bench_rows=stable_hash([str(i) for i in sorted(bench_ids)]),
         scorer_id=scorer_id,
         models={
             node: str(cfg["model"])
@@ -93,25 +85,23 @@ class ArmBudget(StrictModel):
     usd: float | None
     max_rounds: int | None
     determinism: dict[str, Any] | None
+    # The stopping rule, so no arm outlasts another on a stall the other was stopped for.
+    lives: dict[str, int] | None
+    convergence_patience: int | None
 
 
 class HeadToHeadRecord(StrictModel):
-    """``head_to_heads/{id}.json``: one declared comparison — the instrument every arm is graded
-    under and the budget each may spend. Its arms are the campaigns whose ``arm`` names it, and
-    this is the one copy of the split and budget they run under: their snapshots carry neither."""
+    """``head_to_heads/{id}.json``: the ONE copy of the split and budget its arms run under."""
 
     model_config = ConfigDict(frozen=True)
 
     head_to_head_id: str
     created_at: str
-    instrument: Instrument
+    bench_set: BenchSet
     budget: ArmBudget
 
 
 class ArmRequest(StrictModel):
-    """A mint's ask to run as an arm: the head-to-head to join — declared by its first arm — and
-    this arm's key in it."""
-
     model_config = ConfigDict(frozen=True)
 
     head_to_head_id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
@@ -119,8 +109,7 @@ class ArmRequest(StrictModel):
 
 
 class Arm(StrictModel):
-    """Which declared head-to-head a campaign runs as an arm of, frozen at mint. Its presence is
-    what makes the campaign CONTROLLED."""
+    """The head-to-head a campaign is an arm of, frozen at mint; its presence makes it controlled."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -133,9 +122,13 @@ def ceiling_meter(arm: Arm | None) -> CeilingMeter:
     return "bill" if arm is None else "search_incurred"
 
 
-class Launch(StrictModel):
-    """One launch of the campaign's line, and where its wall clock went across every cycle it ran."""
+def comparison_line(arm: Arm | None) -> str:
+    if arm is None:
+        return "not controlled — optimizes with every measurement and steer"
+    return f"controlled — arm {arm.arm_key} of head-to-head {arm.head_to_head_id}"
 
+
+class Launch(StrictModel):
     model_config = ConfigDict(frozen=True)
 
     started_at: str
@@ -144,8 +137,6 @@ class Launch(StrictModel):
 
 
 class ArmCost(StrictModel):
-    """What the campaign's line spent reaching its result: every cycle on it, every launch."""
-
     model_config = ConfigDict(frozen=True)
 
     # Calls that reached a provider; a replay reached no wire.
@@ -154,8 +145,7 @@ class ArmCost(StrictModel):
 
     @property
     def worked_s(self) -> float | None:
-        """Each launch's clock less its origin gate, a human's, and the time its cells were not
-        allowed to spend; ``None`` where no launch has both endpoints."""
+        """Less each launch's origin gate, a human's, and the time its cells were not allowed to spend."""
         worked = [
             max(0.0, run.clock.elapsed_s - run.clock.gate_s - (run.clock.unworked_s or 0.0))
             for run in self.launches
@@ -165,27 +155,41 @@ class ArmCost(StrictModel):
 
 
 class CampaignResult(StrictModel):
-    """``campaigns/{id}/result.json``: the campaign's result as FACTS, rewritten by the cycle
-    answering for its line at every launch end. The bench score is read off them, never stored."""
+    """``campaigns/{id}/result.json``, rewritten at every launch end by the cycle holding the line."""
 
     model_config = ConfigDict(frozen=True)
 
     # The cycle answering for the line when this was written — the root, or where rebases led.
     cycle_id: str
-    # `None` where nothing is held out, or before the origin's pass.
-    bench: BenchPasses | None
     cost: ArmCost
 
 
 type LifecycleStatus = Literal["active", "archived", "deleted"]
-# What a campaign LIST may be asked for: a status, the `checkin` phase (a narrowing of `active`,
-# asked of the root cycle's flag), or `all`.
+LIFECYCLE_STATUS_LABELS: dict[LifecycleStatus, str] = {
+    "active": "Active",
+    "archived": "Archived",
+    "deleted": "Deleted",
+}
+# `checkin` narrows `active`, asked of the root cycle's flag.
 type LifecycleFilter = Literal["active", "archived", "deleted", "checkin", "all"]
 
 
+class CampaignEdit(TypedDict, total=False):
+    label: str
+    dataset_name: str
+    lifecycle_status: LifecycleStatus
+    lifecycle_changed_at: str
+    lifecycle_reason: str
+    root_content_hash: str
+    treatment: dict[str, Any]
+    backend_id: str
+    backend_url: str
+    backend_type: str
+    config: dict[str, Any]
+
+
 class Campaign(StrictModel):
-    """Frozen manifest — identity, config and operator VISIBILITY INTENT only, never run state: that
-    is per-cycle, or the line's :class:`CampaignResult`."""
+    """Identity, config and visibility INTENT only, never run state; no measurement rewrites ``config``."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -199,12 +203,12 @@ class Campaign(StrictModel):
     treatment: Treatment | None = None
     arm: Arm | None = None
     backend_id: str = ""
-    # Connector KIND, FROZEN at mint: a campaign OUTLIVES its dataset dir, so re-pointing a slug
-    # must not re-kind a campaign that already measured under the old one.
+    # Every later launch of any of its cycles runs here. Empty on an unstarted check-in.
+    backend_url: str = ""
+    # FROZEN at mint: a campaign outlives its dataset dir, so re-pointing a slug must not re-kind it.
     backend_type: str = ""
     owner_user_id: str = "default"
-    # VISIBILITY only — the authoring phase is NOT here. `.runtime/checkin.flag` on the root cycle
-    # owns it (`runtime_flags.py::is_checkin`), which is also what `derive_run_phase` serves.
+    # VISIBILITY only: the authoring phase is the root cycle's ledger's (`runtime_flags.py::is_checkin`).
     lifecycle_status: LifecycleStatus = "active"
     lifecycle_changed_at: str = ""
     lifecycle_reason: str = ""
@@ -212,14 +216,15 @@ class Campaign(StrictModel):
 
     @property
     def root_hop(self) -> CycleHop:
-        """This campaign's root cycle as the pair that addresses it. Re-pairing at a call site risks one campaign's id with
-        another's root cycle — easy, because a content-addressed ``root_cycle_id`` is shared by siblings."""
+        """Re-pairing at a call site risks another campaign's root: siblings share a ``root_cycle_id``."""
         return CycleHop(campaign_id=self.campaign_id, cycle_id=self.root_cycle_id)
+
+    def edited(self, **changes: Unpack[CampaignEdit]) -> Campaign:
+        return Campaign.model_validate({**self.model_dump(mode="json"), **changes})
 
     @property
     def origin_id(self) -> str:
-        """The origin this campaign is a run of — its content hash. A campaign still authoring its
-        origin stands as an origin of its own, never grouped with every other unstamped one."""
+        """A campaign still authoring its origin is an origin of its own, never grouped with the unstamped."""
         return self.root_content_hash or self.campaign_id
 
 
@@ -228,14 +233,16 @@ __all__ = [
     "ArmBudget",
     "ArmCost",
     "ArmRequest",
+    "BenchSet",
     "Campaign",
+    "CampaignEdit",
     "CampaignResult",
     "HeadToHeadRecord",
-    "Instrument",
     "Launch",
     "LifecycleFilter",
     "LifecycleStatus",
     "Treatment",
-    "bench_instrument",
+    "bench_set_of",
     "ceiling_meter",
+    "comparison_line",
 ]

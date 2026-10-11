@@ -8,8 +8,7 @@ import type {
 } from "@/lib/api";
 import { QuestionAnswer } from "./QuestionAnswer";
 
-// The check-in's assessment, proposals and follow-up questions. A proposal is offered, never
-// applied; it arrives already shaped as the `edit-draft-campaign` a click fires — never rebuild one.
+// A proposal arrives already shaped as the `edit-draft-campaign` a click fires — never rebuild one.
 export function OriginCheckinPanel({
   draft,
   lastResolution,

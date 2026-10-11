@@ -4,9 +4,6 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { cx } from "@/lib/cx";
 import s from "./DataTable.module.css";
 
-// THE table for every list of served rows. It never ORDERS anything: an ordering is a score
-// (`webapp/CLAUDE.md` § Scoring authority).
-
 export interface Column<T> {
   id: string;
   label: ReactNode;

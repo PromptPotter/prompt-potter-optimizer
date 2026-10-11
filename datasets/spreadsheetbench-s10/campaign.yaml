@@ -43,7 +43,7 @@ campaign_config:
     # A RAIL, not an estimate. One measured cell of this panel cost $0.0101 on a different model;
     # ten cells of a screen should land far under this, and the ceiling exists so that being
     # wrong about it costs less than the operator agreed to.
-    spend_budget_usd: 2.00
+    ceiling: {usd: 2.00}
     # Potter's knobs — the overlay on its manifest's nodes (assets/optimizers/potter/).
     nodes:
       l1_generate:

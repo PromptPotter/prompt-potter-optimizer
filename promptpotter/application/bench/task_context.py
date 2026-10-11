@@ -1,5 +1,4 @@
-"""Task check-in: raw context → L1 prompt fields + task_context, cached as ``task_context.yaml``. Read and
-write do NOT share a tier — read resolves tenant-then-install, a decomposition always lands in tenant."""
+"""Read resolves tenant-then-install; a decomposition always lands in tenant."""
 
 from __future__ import annotations
 
@@ -12,18 +11,15 @@ from promptpotter.application.bench.llm_call import (
 )
 from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.optimizer_manifest import llm_node_document, running_prompt
-from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.opt_search_point import TEMPLATE_TOKEN_RE, OptimizerPromptTemplate
-from promptpotter.domain.search_point import TaskDecomposition
+from promptpotter.domain.search_point import PROMPT_STRING_FIELDS, TaskDecomposition
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.llm.spend_book import SpendBook, spending_under
 from promptpotter.infrastructure.llm.telemetry import reset_cycle_ledger, set_cycle_ledger
 from promptpotter.infrastructure.store.dataset_access import (
     readable_task_context,
 )
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.infrastructure.tracing.bridge import observed_node
 
 __all__ = [
     "CheckinOutput",
@@ -37,18 +33,11 @@ __all__ = [
 ]
 
 
-# Per-field ceiling on a check-in-authored starting prompt, sized so every hand-authored origin
-# field in `datasets/*/prompts/` fits under it bar one templated `instruction`.
 ORIGIN_FIELD_MAX = 600
-
-# ---------------------------------------------------------------------------
-# checkin — one-time decomposition of user context into Layer-1 fields.
-# ---------------------------------------------------------------------------
 
 
 class CheckinTaskContext(OptimizerResponseModel):
-    """Domain context inside the checkin output. Every field renders VERBATIM into every optimizer prompt and is frozen for
-    the run, so an over-budget one is REFUSED at mint rather than clipped by a renderer. Overflow belongs elsewhere."""
+    """Every field renders VERBATIM into every optimizer prompt, frozen for the run: over budget is REFUSED at mint."""
 
     domain: str = Field(
         "", description="One noun phrase — the task family, e.g. 'competition mathematics'."
@@ -79,8 +68,7 @@ class CheckinTaskContext(OptimizerResponseModel):
 
 
 class OriginFinding(OptimizerResponseModel):
-    """One origin-readiness field the resolver proposes a value for. An UNCITED finding is rejected by the apply loop, and
-    only ``confidence == "high"`` auto-confirms."""
+    """An UNCITED finding is rejected by the apply loop, and only ``confidence == "high"`` auto-confirms."""
 
     field: str = Field(
         default="", description="Checklist field id, e.g. 'task_description', 'column.query'."
@@ -96,9 +84,6 @@ class OriginFinding(OptimizerResponseModel):
 
 
 class OriginQuestion(OptimizerResponseModel):
-    """One operator-facing question on an ``ask`` turn. ``field`` names the checklist field the answer resolves, so the
-    panel applies it as a confirmed patch rather than the operator hunting for the control."""
-
     field: str = Field(
         default="", description="Checklist field id the answer resolves, e.g. 'column.query'."
     )
@@ -110,8 +95,7 @@ class OriginQuestion(OptimizerResponseModel):
 
 
 class OriginNextAction(OptimizerResponseModel):
-    """What the resolver wants next. The deterministic checklist — not this field — decides
-    completeness, so a false ``ready`` is re-checked and rejected."""
+    """The deterministic checklist, not this field, decides completeness: a false ``ready`` is re-checked and rejected."""
 
     kind: str = Field(
         default="propose",
@@ -124,11 +108,9 @@ class OriginNextAction(OptimizerResponseModel):
 
 
 class CheckinOutput(OptimizerResponseModel):
-    """Output of the checkin prompt. Two modes share one shape: task decomposition leaves the origin block empty, origin
-    resolution fills it AND the Layer-1 fields — which seed the campaign's starting prompt either way."""
+    """Task decomposition leaves the origin block empty; origin resolution fills it AND the Layer-1 fields."""
 
-    # FIELD ORDER IS GENERATION ORDER, and the two the starting prompt cannot lack are REQUIRED
-    # on the wire: optional and trailing, a constrained decoder closes the object without them.
+    # Field order is GENERATION order; optional and trailing, a constrained decoder skips a field.
     persona: str = ""
     task_intent: str
     answer_format: str = Field(
@@ -141,7 +123,6 @@ class CheckinOutput(OptimizerResponseModel):
         description="How to reason. Never the output shape or the scoring rule — those are answer_format's.",
     )
     task_context: CheckinTaskContext = Field(default_factory=CheckinTaskContext)
-    # Origin-resolution block — populated only on the web ingest check-in path.
     assessment: str = Field(default="", description="One-line read of the current origin state.")
     findings: list[OriginFinding] = Field(default_factory=list)
     next_action: OriginNextAction = Field(default_factory=OriginNextAction)
@@ -152,9 +133,7 @@ class CheckinOutput(OptimizerResponseModel):
 
     @model_validator(mode="after")
     def _check_the_starting_prompt(self) -> CheckinOutput:
-        # Parse-side only, never a wire `maxLength`: a constrained decoder honours that by
-        # cutting the string mid-sentence, which is a broken origin rather than a short one.
-        # Raised here, the message rides the schema-repair retry back to the model.
+        # Never a wire `maxLength`: a constrained decoder honours that by cutting mid-sentence.
         problems = [
             f"{name} must not be empty"
             for name in ("task_intent", "answer_format")
@@ -175,29 +154,23 @@ class CheckinOutput(OptimizerResponseModel):
 def campaign_framing(
     stores: Stores, campaign_config: CampaignConfig, dataset_name: str | None
 ) -> TaskDecomposition:
-    """The framing a campaign's target renders splice in — its dataset's committed one, or none
-    at all under ``task_framing: off``. Every render and identity of a campaign reads this."""
     if campaign_config.task_framing == "off":
         return TaskDecomposition()
     return committed_task_context(stores, dataset_name)
 
 
 def committed_task_context(stores: Stores, dataset_name: str | None) -> TaskDecomposition:
-    """The framing check-in committed, read PURELY — the half IDENTITY may use, since a
-    decomposition needs a cycle to bill to and a mint is computing that cycle."""
+    """A PURE read, so identity may use it: a decomposition needs the cycle a mint is still computing."""
     if dataset_name is None:
         return TaskDecomposition()
     task_context = readable_task_context(stores, dataset_name)
-    # The budget is enforced HERE too, not only on the async path: whichever seam reads the
-    # framing first is the one that must refuse an over-budget field, or the clip lands on
-    # every render for the run's whole life.
+    # Refused here too: whichever seam reads the framing first must reject an over-budget field.
     task_context.check_budget(source=f"{dataset_name}/task_context.yaml")
     return task_context
 
 
 def _checkin_template() -> OptimizerPromptTemplate:
-    """No panel is filled into the check-in, so its one caller-supplied token is all it may name —
-    any other ``{{slot}}`` would reach the model literally."""
+    """No panel is filled into the check-in, so any other ``{{slot}}`` reaches the model literally."""
     _node, config, document = llm_node_document("checkin")
     template = running_prompt("checkin", config, document)
     if unknown := set(TEMPLATE_TOKEN_RE.findall(template.render())) - {"consultation_instruction"}:
@@ -208,7 +181,6 @@ def _checkin_template() -> OptimizerPromptTemplate:
 async def run_checkin(
     *, consultation_instruction: str, user_content: str, context: LLMCallContext
 ) -> tuple[CheckinOutput, int]:
-    """The ``checkin`` node's one call for both modes, and its repair attempts."""
     raw, _prompt, repair_attempts = await run_optimizer_node(
         template_name="checkin",
         template=_checkin_template(),
@@ -224,8 +196,6 @@ async def run_checkin(
 
 
 def checkin_campaign_call_context(stores: Stores, campaign_id: str) -> LLMCallContext:
-    """The web turn's audit home — the check-in campaign's own cycle ledger. ``draft_id`` IS the
-    ``campaign_id`` (re-keyed at ``create_checkin_campaign``); both modes bill through the one call."""
     campaign = stores.campaigns.load_campaign(campaign_id)
     if campaign is None:
         raise ValueError(f"check-in campaign {campaign_id!r} not found — cannot resolve its origin")
@@ -235,8 +205,6 @@ def checkin_campaign_call_context(stores: Stores, campaign_id: str) -> LLMCallCo
 
 
 def checkin_call_context(stores: Stores, ledger: CycleEventLog) -> LLMCallContext:
-    """The check-in call's audit home. The cache is what makes an unchanged decomposition free on
-    replay; omitting it silently re-spends."""
     return LLMCallContext(ledger=ledger, round_num=0, cache=stores.optimizer_reuse)
 
 
@@ -247,32 +215,21 @@ async def commit_task_framing(
     *,
     campaign_id: str,
     ledger: CycleEventLog,
-    book: SpendBook,
 ) -> None:
-    """Decompose ``description`` through the ``checkin`` node and COMMIT it as the dataset's
-    framing, billed on ``ledger`` and admitted against ``book``."""
     context = checkin_call_context(stores, ledger)
     token = set_cycle_ledger(ledger)
     try:
-        with spending_under(book):
-            async with observed_node(
-                "checkin",
-                "llm",
-                obs=None,
-                campaign_id=campaign_id,
-                round_num=0,
-            ):
-                result, _ = await run_checkin(
-                    consultation_instruction=(
-                        "Return a JSON object with exactly these keys. Be concise and actionable."
-                    ),
-                    user_content=(
-                        "The user has provided a raw context description. Parse it into "
-                        "structured Layer 1 prompt fields.\n\n"
-                        f"Context:\n{description}"
-                    ),
-                    context=context,
-                )
+        result, _ = await run_checkin(
+            consultation_instruction=(
+                "Return a JSON object with exactly these keys. Be concise and actionable."
+            ),
+            user_content=(
+                "The user has provided a raw context description. Parse it into "
+                "structured Layer 1 prompt fields.\n\n"
+                f"Context:\n{description}"
+            ),
+            context=context,
+        )
     finally:
         reset_cycle_ledger(token)
     stores.tenant_datasets.save_task_context(

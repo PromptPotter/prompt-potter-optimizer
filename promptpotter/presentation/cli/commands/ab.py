@@ -1,34 +1,26 @@
-"""Deterministic A/B replay of a campaign under the CURRENT engine + scorer; zero LLM calls. The honest
-engine/scorer A/B, since running a campaign twice cannot be one — candidate generation is non-deterministic."""
+"""A replay, never a second run: candidate generation is non-deterministic, so two runs are no A/B."""
 
 from __future__ import annotations
 
 import argparse
-import logging
 
 from promptpotter.application.bench.resume_and_fork.ab_replay import AbReplayError
+from promptpotter.application.cycle_listing import active_pointer
 from promptpotter.application.diagnostics.ab import ab_replay_campaign
 from promptpotter.config.logging import setup_logging
-from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.results import BankedSearchPointError
-from promptpotter.infrastructure.store.session_pointer import read_active_pointer
-from promptpotter.infrastructure.store.stores import Stores, build_stores
-from promptpotter.presentation.cli.commands._shared import (
-    CommandResult,
-    get_verbose,
-    identity_from_args,
+from promptpotter.infrastructure.store.stores import Stores
+from promptpotter.presentation.cli.commands.result import CommandResult
+from promptpotter.presentation.cli.commands.workspace import (
+    open_stores,
     resolve_campaign,
     resolve_cycle,
 )
 from promptpotter.presentation.cli.session import no_dataset_hint
 
-logger = logging.getLogger("promptpotter.presentation.cli")
-
 
 def _target(args: argparse.Namespace, stores: Stores) -> CycleHop:
-    """A named campaign replays from its ROOT cycle unless ``--cycle`` says otherwise; no ``--campaign`` is the active
-    pointer's pair, never half of it — the pointer's cycle belongs to the pointer's campaign."""
     if args.campaign:
         campaign_id = resolve_campaign(stores, args.campaign)
         if args.cycle:
@@ -39,27 +31,26 @@ def _target(args: argparse.Namespace, stores: Stores) -> CycleHop:
         if campaign is None:
             raise SystemExit(f"ERROR: campaign {campaign_id!r} has no manifest on disk.")
         return campaign.root_hop
-    _sid, campaign_id, cycle_id = read_active_pointer(stores.base_dir)
-    if not campaign_id:
+    pointer = active_pointer(stores)
+    if pointer.campaign_id is None or pointer.cycle_id is None:
         raise SystemExit(
             "ERROR: no active campaign — pass --campaign, or start one:\n\n" + no_dataset_hint()
         )
     return CycleHop(
-        campaign_id=campaign_id,
-        cycle_id=resolve_cycle(stores, campaign_id, args.cycle) if args.cycle else cycle_id,
+        campaign_id=pointer.campaign_id,
+        cycle_id=(
+            resolve_cycle(stores, pointer.campaign_id, args.cycle)
+            if args.cycle
+            else pointer.cycle_id
+        ),
     )
 
 
 async def cmd_ab(args: argparse.Namespace) -> CommandResult:
-    setup_logging(style="full" if get_verbose() else "cli")
-    identity = identity_from_args(args)
-    stores = build_stores(identity, projects_root=DEFAULT_PROJECTS_ROOT)
+    setup_logging(style="full" if args.verbose else "cli")
+    stores = open_stores(args)
     try:
-        report = await ab_replay_campaign(
-            stores=stores,
-            hop=_target(args, stores),
-            log=logger.info if get_verbose() else None,
-        )
+        report = await ab_replay_campaign(stores=stores, hop=_target(args, stores))
     except (AbReplayError, BankedSearchPointError) as exc:
         raise SystemExit(f"ERROR: {exc}") from exc
 

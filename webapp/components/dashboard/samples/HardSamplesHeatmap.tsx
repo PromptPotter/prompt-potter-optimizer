@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { fmtPct0 } from "@/lib/format";
+import { phaseIs } from "@/lib/run-phase";
 import { fitnessStyle } from "@/lib/derivations";
 import { useHardSamples } from "@/lib/hard-samples";
 import { useCycleStream } from "@/lib/poll";
@@ -8,13 +9,10 @@ import { MeasurementsPane } from "@/components/shell/measurements/MeasurementsPa
 import { SampleTrajectory, SampleTrajectoryMiniButton } from "./SampleTrajectory";
 import { RotatePrompt } from "@/components/shell/RotatePrompt";
 
-// Hard-samples heat-map: one tile per sample in the served ranking, shaded by served mean fitness;
-// clicking unfolds the one measurement log, preset to group by sample.
 export function HardSamplesHeatmap() {
   const {
     datasetName,
     items: datasetItems,
-    // Served roster-wide totals for the scope in view - never folded down from the tiles.
     totals: datasetTotals,
     stale: datasetStale,
     error: datasetError,
@@ -23,21 +21,17 @@ export function HardSamplesHeatmap() {
   const [heatExpanded, setHeatExpanded] = useState(false);
   const [bankExpanded, setBankExpanded] = useState(false);
 
-  // Tile order IS the order `/cells` served — never sort it; an ordering is a score.
-
-  // Failed, loading, empty and check-in are four sentences. A check-in 404s `/cells` by
-  // construction (`datasets/{slug}/` is written at Start), so it must not read as a broken dataset.
+  // A check-in 404s `/cells` by construction (`datasets/{slug}/` is written at Start): not a broken dataset.
   const rosterNote = datasetError
     ? `Couldn’t read this campaign’s samples${datasetName ? ` (${datasetName})` : ""}.`
     : datasetItems.length > 0
       ? null
-      : dash?.run_phase === "checkin"
+      : phaseIs(dash?.run_phase, "authoring")
         ? "Not committed yet — the sample bank is written when this campaign starts."
         : datasetStale
           ? "Loading this campaign’s samples…"
           : "No samples on this campaign’s dataset yet.";
 
-  // Mean fitness, not a hit rate: on a graded scorer the hit ceiling is unreachable.
   const outcome =
     datasetTotals && datasetTotals.mean_fitness != null
       ? ` · ${datasetTotals.total_measurements} measurements · ${fmtPct0(datasetTotals.mean_fitness)} mean fitness`
@@ -46,7 +40,7 @@ export function HardSamplesHeatmap() {
 
   return (
     <div className="hs-heat-wrap">
-      {/* ONE control row always: `SampleTrajectoryMiniButton` reads `dash.rounds`, not the roster. */}
+      {/* The row renders without a roster: `SampleTrajectoryMiniButton` reads `dash.rounds`. */}
       <div className="hs-controls-row">
         {rosterNote ? (
           <p className="hs-heat-empty" role="status">
@@ -64,7 +58,6 @@ export function HardSamplesHeatmap() {
             title={`${summary} - click to ${heatExpanded ? "collapse" : "expand"}`}
           >
             <span className="hs-mini-tiles" aria-hidden="true">
-              {/* The one `fitnessStyle`, as in Measurements — a gradient, never a threshold. */}
               {datasetItems.map((it) => {
                 const mean = it.mean_fitness ?? null;
                 return (

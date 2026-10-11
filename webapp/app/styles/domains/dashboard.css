@@ -1,12 +1,9 @@
 
-/* `both-edges` so the spine sits at the unit header's x: a one-edge gutter biases the centre,
-   and none shifts content sideways when a pane passes the fold. */
+/* `both-edges` keeps the spine at the unit header's x: a one-edge gutter biases the centre. */
 .content{flex:1;overflow-y:auto;scrollbar-gutter:stable both-edges;padding:var(--space-18);container-type:inline-size;container-name:content}
 
 @media (max-width:880px){
   .content{padding:var(--space-12)}
-  /* Ceiling the BOX, never the list: four server-authored warnings fill half a
-     phone pane, and clamping the text would hide a state with nothing to report it. */
   .run-error-banner{max-height:26vh;overflow-y:auto;overscroll-behavior:contain}
 }
 
@@ -68,21 +65,16 @@
 
 .lsc-charts{display:flex;flex-direction:column;gap:var(--space-14);margin-top:14px}
 .lsc-charts > *{margin-bottom:0;min-width:0}
-/* A SECTION of the host card, never a card: a second frame draws a double border. */
 .lsc-charts > .card{background:none;border:0;border-top:0.5px solid var(--color-border);border-radius:0;padding:var(--space-12) 0 0}
 
-/* Quiet: the critical grade owns the cross-tab banner. */
 .trend-degraded{list-style:none;margin:var(--space-8) 0 0;padding:0;display:flex;flex-direction:column;gap:3px}
 .trend-degraded-row{display:flex;align-items:baseline;gap:var(--space-6);font-size:var(--text-xs);line-height:1.4;min-width:0}
 .trend-degraded-dot{color:var(--color-warn);flex:none;font-size:var(--text-xs)}
 .trend-degraded-label{color:var(--color-warn);font-weight:600;flex:none}
 .trend-degraded-detail{color:var(--color-text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
-/* A REGION inside its node panel, never a card. The `.rsv-row*` half is the L4 panel row's
-   (`PanelCellRow`). */
 .rsv-filters{display:flex;align-items:center;gap:var(--space-12);flex-wrap:wrap;padding:var(--space-4) var(--space-4) var(--space-8)}
 .rsv-cand-strip{min-width:0;max-width:100%;overflow-x:auto;padding-bottom:2px}
-/* Bounded so a long prompt scrolls inside the fold instead of pushing sample rows off the panel. */
 .rsv-spec-row{display:flex;align-items:flex-start;gap:var(--space-6);margin:var(--space-6) var(--space-8) var(--space-8)}
 .rsv-spec-row > :not(.rsv-spec){flex:0 0 auto}
 .rsv-spec{flex:1;min-width:0;border-left:2px solid var(--color-border);padding-left:var(--space-10)}
@@ -98,9 +90,7 @@
 .rsv-cand-label{color:var(--color-text-primary);font-weight:600}
 .rsv-tally{display:inline-flex;gap:var(--space-8);font-weight:500}
 .rsv-tally-score{color:var(--color-text-secondary)}
-/* Colour plus the word: "not a measurement" must survive a monochrome reading. */
 .rsv-rejected{color:var(--color-danger)}
-/* One line each, ellipsised; the whole text rides `title`. */
 .rsv-why{padding:var(--space-4) var(--space-8) 0;display:flex;flex-direction:column;gap:2px}
 .rsv-why > p{margin:0;font-size:var(--text-xs);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .rsv-changes{color:var(--color-text-secondary)}
@@ -109,7 +99,6 @@
 .rsv-rows{display:flex;flex-direction:column}
 .rsv-row{padding:2px var(--space-8);display:block;border-bottom:0.5px dotted transparent}
 
-/* Borrows `.rsv-row`'s rhythm, then drops what only a scored line has. */
 .pcr-row{display:flex;align-items:baseline;gap:var(--space-8);width:100%;text-align:left;
   background:none;border:0;border-bottom:0.5px dotted transparent;font:inherit;cursor:pointer}
 .pcr-row:hover{background:var(--color-background-hover)}
@@ -162,8 +151,6 @@
 .cmap-knob-value{font-family:var(--font-mono);font-weight:600;color:var(--color-text-primary)}
 .cmap-knob-source-default{font-size:var(--text-xs);color:var(--color-text-secondary)}
 
-/* Steps are EVEN:
-   sequence is the x-axis, not time — gaps are stated in words. */
 .dash-time-ray{display:flex;align-items:stretch;gap:0;
   border:0.5px solid var(--color-border);border-radius:10px;
   background:var(--color-background-secondary);overflow:hidden}
@@ -178,16 +165,13 @@
 .dash-time-ray-step:hover{color:var(--color-accent);border-color:var(--color-accent)}
 .dash-time-ray-step:focus-visible{outline:2px solid var(--color-accent);outline-offset:1px}
 .dash-time-ray-step-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-/* Dashed, so "elsewhere in the family" is a SHAPE and not only a hue. */
 .dash-time-ray-step.is-elsewhere{border-style:dashed}
-/* Persists while every panel below reports what was true at this step. */
 .dash-time-ray-step.is-viewing{color:var(--color-accent);border-color:var(--color-accent);
   box-shadow:inset 0 -2px 0 var(--color-accent)}
 .dash-time-ray-step.tone-good{color:var(--color-text-primary)}
 .dash-time-ray-step.tone-warn{color:var(--color-warn);border-color:var(--color-warn-border)}
 .dash-time-ray-step.tone-bad{color:var(--color-danger-border);border-color:var(--color-danger-border)}
 .dash-time-ray-x{font-variant-numeric:tabular-nums;color:var(--color-text-secondary)}
-/* Non-interactive: a silence is not an event, so it takes no tab stop. */
 .dash-time-ray-gap{flex-shrink:0;padding:0 2px;color:var(--color-text-secondary);
   font-size:var(--text-xs);letter-spacing:0.04em;white-space:nowrap;font-variant-numeric:tabular-nums}
 .dash-time-ray-more{flex-shrink:0;padding:var(--space-4) var(--space-8);border-radius:12px;cursor:pointer;
@@ -198,9 +182,7 @@
   color:var(--color-accent);background:var(--color-background-primary);
   border:0.5px solid var(--color-accent);font-size:var(--text-xs)}
 .dash-time-ray-empty{padding:var(--space-4) var(--space-6);color:var(--color-text-secondary);font-size:var(--text-xs)}
-/* Sticky at the right edge: the newest event is the one you came to read. */
-/* max-width + min-width:0 are load-bearing: the detail is free text, and uncapped the ray's
-   `overflow:hidden` swallows it with no ellipsis. */
+/* max-width + min-width:0 are load-bearing: uncapped, the ray's `overflow:hidden` swallows the detail with no ellipsis. */
 .dash-time-ray-head{position:sticky;right:0;flex-shrink:0;max-width:60%;min-width:0;display:inline-flex;align-items:baseline;
   gap:var(--space-6);padding:var(--space-8) var(--space-14);border-left:0.5px solid var(--color-border);
   background:var(--color-background-tertiary);color:var(--color-text-primary);
@@ -209,15 +191,13 @@
 button.dash-time-ray-head{cursor:pointer}
 .dash-time-ray-head-label{font-weight:700;letter-spacing:0.03em;text-transform:uppercase}
 .dash-time-ray-head-detail{color:var(--color-text-secondary);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.dash-time-ray-head.phase-running{box-shadow:inset 3px 0 0 var(--color-success)}
-.dash-time-ray-head.phase-gate{box-shadow:inset 3px 0 0 var(--color-accent)}
-.dash-time-ray-head.phase-paused{box-shadow:inset 3px 0 0 var(--color-warn)}
-.dash-time-ray-head.phase-waiting{box-shadow:inset 3px 0 0 var(--color-text-secondary)}
-.dash-time-ray-head.phase-finished,
-.dash-time-ray-head.phase-detached,
-.dash-time-ray-head.phase-idle{box-shadow:inset 3px 0 0 var(--color-border)}
-/* `wedged` has no `phase-*` peer and must never become a RunPhase member (I6); its own hatch
-   keeps it from reading as a phase the server can produce. */
+/* Tone of the served status mark: `run-phase.ts::STATUS_MARK`. */
+.dash-time-ray-head.tone-live,
+.dash-time-ray-head.tone-success{box-shadow:inset 3px 0 0 var(--color-success)}
+.dash-time-ray-head.tone-attention{box-shadow:inset 3px 0 0 var(--color-accent)}
+.dash-time-ray-head.tone-warn{box-shadow:inset 3px 0 0 var(--color-warn)}
+.dash-time-ray-head.tone-danger{box-shadow:inset 3px 0 0 var(--color-danger)}
+.dash-time-ray-head.tone-quiet{box-shadow:inset 3px 0 0 var(--color-border)}
 .ray-head-wedged{color:var(--color-warn);box-shadow:inset 3px 0 0 var(--color-warn);
   background-image:repeating-linear-gradient(135deg,transparent 0 6px,
     rgba(var(--color-warn-rgb),0.10) 6px 12px)}

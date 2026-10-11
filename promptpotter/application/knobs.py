@@ -1,7 +1,3 @@
-"""The knob layer. ``KNOBS`` is WALKED off each field's own ``Knob`` metadata, never re-listed, so it
-cannot go stale; an optimizer node's knobs are walked the same way off its member's ``knobs`` model.
-Couplings + the one-way ``knobs`` → ``config`` import: ``application/CLAUDE.md``."""
-
 from __future__ import annotations
 
 import functools
@@ -73,8 +69,6 @@ def _default_of(field: FieldInfo) -> Any:
 
 
 def _walk(model_cls: type[BaseModel], prefix: tuple[str, ...] = ()) -> list[KnobDecl]:
-    """Every knob under *model_cls*, in declaration order. A field with no ``Knob`` that is not a nested
-    model is an UNDECLARED knob and fails here — else it ships invisible and DATA_AFFECTING forever."""
     out: list[KnobDecl] = []
     for name, field in model_cls.model_fields.items():
         path = (*prefix, name)
@@ -102,11 +96,8 @@ def _walk(model_cls: type[BaseModel], prefix: tuple[str, ...] = ()) -> list[Knob
     return out
 
 
-# The registry. Derived, so it cannot list a knob the model doesn't have, nor miss one
-# it does — the two failure modes of the name-keyed tables this replaces.
 KNOBS: dict[tuple[str, ...], KnobDecl] = {d.path: d for d in _walk(CampaignConfig)}
 
-# The overlay's own entry stands for its leaves, which each node's member declares.
 _NODES_PATH = ("optimization", "nodes")
 
 
@@ -167,11 +158,8 @@ def _diff_paths(
 def classify_config_diff(
     config: CampaignConfig, frozen: dict[str, Any], *, arm: bool
 ) -> tuple[DiffScope, list[str]]:
-    """Classify *config* vs the frozen snapshot, both frozen as the mint freezes them, leaf by leaf
-    — a leaf the table does not know classifies DATA_AFFECTING."""
     if not frozen:
-        # A check-in skeleton (`mint_checkin_skeleton`) carries `config: {}` — the campaign has
-        # no snapshot yet. That is "nothing to diff against", not "every leaf changed".
+        # A check-in skeleton carries `config: {}`: nothing to diff against, not every leaf changed.
         return DiffScope.NONE, []
     active = config.frozen(arm=arm)
     table = _table(config)
@@ -183,8 +171,6 @@ def classify_config_diff(
     for path in diffs:
         decl = table.get(path)
         if decl is None and path[: len(_NODES_PATH)] == _NODES_PATH:
-            # A node leaf no member declares is an llm node's call config
-            # (`optimizer_manifest.py::_refuse_unknown_llm_keys`), or another optimizer's knob.
             has_treatment = True
         elif decl is None:
             logger.warning(
@@ -206,15 +192,13 @@ def classify_config_diff(
     return DiffScope.POLICY_ONLY, diff_strs
 
 
-# Gravest first — the order a reader meets the couplings in: an ill-defined statistic, a silent
-# waste, knobs that co-move.
+# Gravest first: an ill-defined statistic, a silent waste, knobs that co-move.
 CouplingSeverity = Literal["collision", "inert", "info"]
 
 
 @dataclass(frozen=True)
 class Coupling:
-    """A declared relationship between knobs sharing an estimand; ``predicate`` is True in the violating
-    combination."""
+    """``predicate`` is True in the VIOLATING combination."""
 
     name: str
     knobs: tuple[str, ...]
@@ -225,7 +209,6 @@ class Coupling:
     predicate: Callable[[CampaignConfig], bool]
 
 
-# The bench's own couplings. An optimizer's live on its members (`MemberCoupling`).
 COUPLINGS: tuple[Coupling, ...] = (
     Coupling(
         name="fatal_fastpath_needs_degradation",
@@ -266,6 +249,26 @@ COUPLINGS: tuple[Coupling, ...] = (
         severity="info",
         predicate=lambda c: False,
     ),
+    Coupling(
+        name="lives_no_headroom",
+        knobs=("optimization.lives.start", "optimization.max_rounds"),
+        estimand=Estimand.STOPPING,
+        relation=(
+            "lives stops a stalling run early, but only when the bank can empty before the "
+            "calendar cap does."
+        ),
+        consequence=(
+            "lives.start ≥ max_rounds, so hearts can never run out first: the run stops on "
+            "the calendar. Lower lives.start to brake a stalling run early, or raise "
+            "max_rounds to give it room."
+        ),
+        severity="inert",
+        predicate=lambda c: (
+            c.optimization.lives is not None
+            and c.optimization.max_rounds is not None
+            and c.optimization.lives.start >= c.optimization.max_rounds
+        ),
+    ),
 )
 
 
@@ -273,7 +276,9 @@ def _member_couplings(config: CampaignConfig) -> Iterator[Coupling]:
     selected = select_optimizer(config.optimization)
     for node in selected.member_nodes:
         knobs, declared = selected.knobs(node), selected.declared_knobs(node)
-        for mc in optimizers.member(node).couplings:
+        for mc in selected.runtime.couplings.get(node, ()):
+            if ghosts := sorted(set(mc.knobs) - set(type(knobs).model_fields)):
+                raise RuntimeError(f"{node}: coupling {mc.name!r} names unknown knobs {ghosts}.")
             yield Coupling(
                 name=mc.name,
                 knobs=(
@@ -295,7 +300,6 @@ def _member_predicate(
 
 
 def declared_couplings(config: CampaignConfig) -> list[Coupling]:
-    """The bench's couplings and the selected optimizer's, active or not."""
     return [*COUPLINGS, *_member_couplings(config)]
 
 
@@ -307,7 +311,7 @@ def check_couplings(config: CampaignConfig) -> list[Coupling]:
 class KnobState:
     path: str
     value: Any
-    source: str  # default | campaign | required | manifest
+    source: str
     estimands: tuple[Estimand, ...]
 
 
@@ -324,9 +328,7 @@ def _at(data: Any, path: tuple[str, ...]) -> Any:
 
 
 def resolve_knob_states(config: CampaignConfig) -> list[KnobState]:
-    """Every knob's effective value + source layer + estimands. ``source`` is required / campaign /
-    default for a bench knob and campaign / manifest for a node's; ``value`` is ``None`` where an
-    opt-in submodel is off, not merely unset."""
+    """``value`` is ``None`` where an opt-in submodel is off, not merely unset."""
     selected = select_optimizer(config.optimization)
     dumped = config.model_dump(mode="json")
     authored = config.model_dump(mode="json", exclude_defaults=True)
@@ -351,8 +353,7 @@ def resolve_knob_states(config: CampaignConfig) -> list[KnobState]:
     return states
 
 
-# A coupling naming a knob that no longer exists points the operator at a knob they
-# cannot set. Cheap to check, beside the table it guards.
+# A coupling naming a knob that does not exist points the operator at one they cannot set.
 _declared = {d.dotted for d in KNOBS.values()}
 _ghosts = sorted({k for c in COUPLINGS for k in c.knobs} - _declared)
 if _ghosts:

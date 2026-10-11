@@ -1,60 +1,46 @@
 "use client";
 import { useState } from "react";
 import { Badge, CardFrame, Term } from "@/components/ui";
-import type { RoundResult } from "@/lib/api/types";
+import type { PairedReading, RoundResult } from "@/lib/api/types";
 import { fmtNum, fmtPct1, fmtSigned } from "@/lib/format";
-import { isHit } from "@/lib/fitness";
+import { PairedLift } from "@/components/shell/PairedLift";
 
-// The round file IS `RoundResult.model_dump()`. `Partial` because a file on disk promises only a
-// SUBSET of the current model.
-export type RoundDoc = Partial<RoundResult>;
-
-// Hand-written: `results` is `list[dict[str, Any]]` on the model, so there is nothing to generate from.
-interface ResultRow {
-  sample_id?: string | number;
-  query?: string;
-  predicted?: string;
-  ground_truth?: string;
-  fitness?: number;
-}
-
-function fmtLift(lift: number | null | undefined, lo: number | null | undefined, hi: number | null | undefined): string {
-  if (typeof lift !== "number" || typeof lo !== "number" || typeof hi !== "number") return "—";
-  return `${fmtSigned(lift, 3)} [${fmtSigned(lo, 3)}, ${fmtSigned(hi, 3)}]`;
+function ArmLift({ reading }: { reading: PairedReading | null }) {
+  if (reading === null) return <>—</>;
+  return (
+    <PairedLift reading={reading}>
+      {({ estimate }) =>
+        `${fmtSigned(estimate.value, 3)} [${fmtSigned(estimate.ci_lo, 3)}, ${fmtSigned(estimate.ci_hi, 3)}]`
+      }
+    </PairedLift>
+  );
 }
 
 interface Props {
-  doc: RoundDoc;
+  doc: RoundResult;
   raw: string;
 }
 
 export function RoundFileView({ doc, raw }: Props) {
   const [showRaw, setShowRaw] = useState(false);
-  const results = (doc.results ?? []) as ResultRow[];
-  const scoreboard = doc.scoreboard ?? [];
-  // A selector that fits no θ gets no column, not a blank one that reads as a cold ruler.
-  const stampsTheta = doc.stamps_theta ?? false;
-  // The selected arm's own matched floor: a round that held selected nobody and shows none.
-  const selectedLabels = doc.selected_labels ?? [];
-  const selected = (doc.candidate_scores ?? []).find((c) => selectedLabels.includes(c.label));
-  const matched = typeof selected?.reference_accuracy === "number" ? selected.reference_accuracy : null;
+  const { results, scoreboard } = doc;
+  const wonOnTheta = doc.elects_on === "ability";
 
   return (
     <div className="round-file-view">
       <div className="round-file-summary">
         <div className="round-file-summary-row">
-          <Badge className="round-file-badge">round {doc.round ?? "—"}</Badge>
-          <span>accuracy {fmtPct1(doc.accuracy)} {matched != null && (<span className="round-file-dim"><Term content="The parent — the origin at round 0, the prior round's winner after — re-scored on the samples this round's winner measured. The floor the promotion gate used.">(matched parent {fmtPct1(matched)})</Term></span>)}</span>
+          <Badge className="round-file-badge">round {doc.round}</Badge>
+          <span>accuracy {fmtPct1(doc.accuracy)}</span>
           <span>composite {fmtNum(doc.composite_fitness)}</span>
-          <span>n {doc.total ?? "—"}</span>
-          {stampsTheta && typeof doc.ability?.theta === "number" && (
+          <span>n {doc.total}</span>
+          {typeof doc.ability?.theta === "number" && (
             <Term
-              content="Ability of the adopted lineage on the cycle's fixed δ ruler — the subset-invariant series the round was won on. The cell count is how much of that ruler was real when this round was read."
+              content={`Ability of the adopted lineage on the cycle's fixed δ ruler — the subset-invariant series${wonOnTheta ? " the round was won on" : ""}. The cell count is how much of that ruler was real when this round was read.`}
             >
               θ {fmtSigned(doc.ability.theta, 3)}{doc.ability.ruler_n > 0 ? ` (${doc.ability.ruler_n} cells)` : ""}
             </Term>
           )}
-          {typeof doc.p_value === "number" && <span>p {fmtNum(doc.p_value, 3)}</span>}
           {doc.improved ? <span className="pass">improved</span> : <span className="round-file-dim">no improvement</span>}
         </div>
         {doc.verdict_reason && (
@@ -72,25 +58,25 @@ export function RoundFileView({ doc, raw }: Props) {
                   <th>Candidate</th>
                   <th>Accuracy</th>
                   <th>Composite</th>
-                  {stampsTheta && (
-                    <th><Term content="Difficulty-adjusted Rasch ability on the cycle's fixed δ ruler — the metric the round winner is elected on, which is what explains a lower-accuracy winner. Empty outside the election fit, and for every row while the ruler is cold.">θ</Term></th>
-                  )}
+                  <th><Term content={`Difficulty-adjusted Rasch ability on the cycle's fixed δ ruler${wonOnTheta ? " — the metric the round winner is elected on, which is what explains a lower-accuracy winner" : ""}. Empty outside the election fit, and for every row while the ruler is cold.`}>θ</Term></th>
                   <th><Term content="The candidate's blocked lift over the parent on the cells both measured, with its 95% interval. An interval spanning 0 means the round could not separate them.">Lift vs parent</Term></th>
                   <th>Win</th>
                 </tr>
               </thead>
               <tbody>
-                {scoreboard.map((s, i) => (
-                  <tr key={s.candidate_id ?? i}>
-                    <td>{s.rank ?? i + 1}</td>
+                {scoreboard.map(({ rank, reading: s }, i) => (
+                  <tr key={s.arm.candidate_id || i}>
+                    <td>{rank ?? i + 1}</td>
                     <td className="round-file-clip wide" title={s.changes_description}>
-                      {s.changes_description || s.candidate_id || "—"}
+                      {s.changes_description || s.arm.candidate_id || "—"}
                     </td>
-                    <td>{fmtPct1(s.accuracy)}</td>
-                    <td>{fmtNum(s.composite_fitness)}</td>
-                    {stampsTheta && <td>{fmtSigned(s.theta, 3)}</td>}
-                    <td>{fmtLift(s.reference_lift, s.reference_lift_ci_lo, s.reference_lift_ci_hi)}</td>
-                    <td>{s.is_selected ? <span className="pass">win</span> : ""}</td>
+                    <td>{fmtPct1(s.own?.accuracy?.value)}</td>
+                    <td>{fmtNum(s.own?.composite?.value)}</td>
+                    <td>{fmtSigned(s.ability?.theta, 3)}</td>
+                    <td>
+                      <ArmLift reading={s.vs_reference} />
+                    </td>
+                    <td>{s.election.selected ? <span className="pass">win</span> : ""}</td>
                   </tr>
                 ))}
               </tbody>
@@ -106,32 +92,29 @@ export function RoundFileView({ doc, raw }: Props) {
               <thead>
                 <tr>
                   <th><Term content="Sample ID — stable identifier from the project.">ID</Term></th>
-                  <th><Term content="Hit / miss for this sample.">Status</Term></th>
+                  <th><Term content="The graded score this file carries for the sample. The file holds no mark: an errored row reads 0 here, and the round's own view says which rows those are.">Fitness</Term></th>
                   <th><Term content="Input given to the pipeline for this sample.">Query</Term></th>
                   <th><Term content="Top-1 prediction returned by the pipeline.">Predicted</Term></th>
                   <th><Term content="Ground-truth answer from the project.">Ground</Term></th>
                 </tr>
               </thead>
               <tbody>
-                {results.map((r, i) => {
-                  const hit = isHit(r.fitness);
-                  const id = r.sample_id ?? i;
-                  return (
-                    <tr key={String(id)}>
-                      <td>{String(id)}</td>
-                      <td>{hit ? <span className="pass">HIT</span> : <span className="fail">MISS</span>}</td>
-                      <td className="round-file-clip" title={r.query}>
-                        {r.query || "—"}
-                      </td>
-                      <td className="round-file-clip" title={r.predicted}>
-                        {r.predicted || "—"}
-                      </td>
-                      <td className="round-file-clip" title={r.ground_truth}>
-                        {r.ground_truth || "—"}
-                      </td>
-                    </tr>
-                  );
-                })}
+                {results.map((r, i) => (
+                  // A cell measured twice is two rows of one sample.
+                  <tr key={`${r.sample_id}:${i}`}>
+                    <td>{r.sample_id}</td>
+                    <td>{fmtNum(r.fitness)}</td>
+                    <td className="round-file-clip" title={r.query}>
+                      {r.query || "—"}
+                    </td>
+                    <td className="round-file-clip" title={r.predicted}>
+                      {r.predicted || "—"}
+                    </td>
+                    <td className="round-file-clip" title={r.ground_truth}>
+                      {r.ground_truth || "—"}
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>

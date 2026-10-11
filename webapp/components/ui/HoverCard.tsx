@@ -5,8 +5,7 @@ import { createPortal } from "react-dom";
 import { cx } from "@/lib/cx";
 import s from "./HoverCard.module.css";
 
-// Teaching prose for a control, portaled to <body> so no ancestor's `overflow` clips it. REACHABLE,
-// hence `role="note"` rather than tooltip, and WCAG 1.4.13 applies.
+// REACHABLE, hence `role="note"` rather than tooltip; WCAG 1.4.13 applies.
 const CLOSE_GRACE_MS = 160;
 const GAP = 8;
 
@@ -36,7 +35,6 @@ export function HoverCard({
   }, []);
   const cardRef = useRef<HTMLDivElement>(null);
   const timer = useRef(0);
-  // `null` IS closed.
   const [at, setAt] = useState<CSSProperties | null>(null);
   const open = at !== null;
 

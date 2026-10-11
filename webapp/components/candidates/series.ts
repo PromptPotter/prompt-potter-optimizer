@@ -1,10 +1,10 @@
 "use client";
-// The bar-chart channels, each declared once (`webapp/CLAUDE.md` § Display-data sources).
 
 import type { MeasuredUnit } from "@/lib/api/types";
-import type { DisplayMetric } from "@/lib/derivations";
+import { VERIFY_STRATEGY_LABELS } from "@/lib/api/types.generated";
+import { barLevel, type DisplayMetric } from "@/lib/derivations";
 import { fmtNum, unitCount } from "@/lib/format";
-import type { CandidateView } from "@/lib/types";
+import type { CandidateBar } from "@/lib/types";
 
 export type SeriesKey =
   | "accuracy"
@@ -21,7 +21,8 @@ export interface SeriesCtx {
   showMask: boolean;
   showCache: boolean;
   showOverlap: boolean;
-  views: readonly CandidateView[];
+  views: readonly CandidateBar[];
+  overlapBasis: number | null;
   unit: MeasuredUnit;
   electedMetric: DisplayMetric;
 }
@@ -29,20 +30,17 @@ export interface SeriesCtx {
 export interface SeriesSpec {
   key: SeriesKey;
   metric?: DisplayMetric;
-  // The JOIN to `DISPLAY_METRICS`; its presence also means "this channel has a chip".
-  // Chipless channels only.
   legend?: (ctx: SeriesCtx) => string;
   hint?: (ctx: SeriesCtx) => string;
   ink: (ctx: SeriesCtx) => string;
   kind: "bar" | "line";
   axis: "y" | "y1";
   gap: "floor-when-started" | "sparse";
-  // Separate from `gap`: a signed series must get no `minBarLength`.
   signed?: true;
   hollow?: true;
-  valueOf: (v: CandidateView) => number | null;
+  valueOf: (v: CandidateBar) => number | null;
   applies: (ctx: SeriesCtx) => boolean;
-  tip: (v: CandidateView, ctx: SeriesCtx) => string;
+  tip: (v: CandidateBar, ctx: SeriesCtx) => string;
 }
 
 export function metricInkToken(m: DisplayMetric, elected: DisplayMetric): string {
@@ -54,11 +52,10 @@ const metricInk =
   (ctx: SeriesCtx): string =>
     metricInkToken(m, ctx.electedMetric);
 
-function basisN(ctx: SeriesCtx): number {
-  let n = 0;
-  for (const v of ctx.views) if (v.overlapN != null && v.overlapN > n) n = v.overlapN;
-  return n;
-}
+const benchLevel = (v: CandidateBar): number | null =>
+  v.benchPass ? v.benchPass.accuracy : (v.reading?.bench?.level?.value ?? null);
+
+const hasBench = (v: CandidateBar): boolean => v.benchPass != null || v.reading?.bench != null;
 
 // Array order is draw order.
 export const CANDIDATE_SERIES: readonly SeriesSpec[] = [
@@ -69,9 +66,9 @@ export const CANDIDATE_SERIES: readonly SeriesSpec[] = [
     kind: "bar",
     axis: "y",
     gap: "floor-when-started",
-    valueOf: (v) => v.accuracy,
+    valueOf: (v) => barLevel("accuracy", v),
     applies: (c) => c.metrics.has("accuracy"),
-    tip: (v) => `accuracy: ${fmtNum(v.accuracy)}`,
+    tip: (v) => `accuracy: ${fmtNum(barLevel("accuracy", v))}`,
   },
   {
     key: "ability",
@@ -82,9 +79,9 @@ export const CANDIDATE_SERIES: readonly SeriesSpec[] = [
     // θ is a logit: a floored 0 would be a fabricated middling ability.
     gap: "sparse",
     signed: true,
-    valueOf: (v) => v.theta,
+    valueOf: (v) => barLevel("ability", v),
     applies: (c) => c.metrics.has("ability"),
-    tip: (v) => `ability θ: ${fmtNum(v.theta, 2)}`,
+    tip: (v) => `ability θ: ${fmtNum(barLevel("ability", v), 2)}`,
   },
   {
     key: "composite",
@@ -93,9 +90,9 @@ export const CANDIDATE_SERIES: readonly SeriesSpec[] = [
     kind: "bar",
     axis: "y",
     gap: "floor-when-started",
-    valueOf: (v) => v.composite,
+    valueOf: (v) => barLevel("composite", v),
     applies: (c) => c.metrics.has("composite"),
-    tip: (v) => `composite: ${fmtNum(v.composite)}`,
+    tip: (v) => `composite: ${fmtNum(barLevel("composite", v))}`,
   },
   {
     key: "mask",
@@ -106,44 +103,42 @@ export const CANDIDATE_SERIES: readonly SeriesSpec[] = [
     kind: "bar",
     axis: "y",
     gap: "floor-when-started",
-    valueOf: (v) => v.lensValue,
+    valueOf: (v) => v.arm?.lens_value ?? null,
     applies: (c) => c.showMask,
-    tip: (v) => `masked: ${fmtNum(v.lensValue)}`,
+    tip: (v) => `masked: ${fmtNum(v.arm?.lens_value)}`,
   },
   {
     key: "overlap",
-    legend: (c) => `overlap · ${basisN(c)}`,
+    legend: (c) => (c.overlapBasis == null ? "overlap" : `overlap · ${c.overlapBasis}`),
     hint: (c) =>
-      `Read on the same ${unitCount(basisN(c), c.unit)} — the only bars here that can be differenced against each other, and a candidate that did not answer all of it is blank rather than short. By default the cells C0 and each new best since all answered; pin your own with the set below.`,
+      `Read on the same ${c.overlapBasis == null ? "cells" : unitCount(c.overlapBasis, c.unit)} — the only bars here that can be differenced against each other, and a candidate that did not answer all of it is blank rather than short. By default the cells C0 and each new best since all answered; pin your own with the set below.`,
     ink: () => "--color-overlap",
     kind: "bar",
     axis: "y",
     gap: "sparse",
-    valueOf: (v) => v.overlapAccuracy,
-    applies: (c) => c.showOverlap && c.views.some((v) => v.overlapAccuracy != null),
+    valueOf: (v) => v.overlap?.rate ?? null,
+    applies: (c) => c.showOverlap && c.views.some((v) => v.overlap?.rate != null),
     tip: (v, c) =>
-      v.overlapAccuracy == null
+      v.overlap?.rate == null
         ? "overlap: not read on the whole set"
-        : `overlap: ${fmtNum(v.overlapAccuracy)}${v.overlapN ? ` on ${unitCount(v.overlapN, c.unit)} shared` : ""}`,
+        : `overlap: ${fmtNum(v.overlap.rate)}${v.overlap.n ? ` on ${unitCount(v.overlap.n, c.unit)} shared` : ""}`,
   },
   {
     key: "verify",
     legend: () => "verify",
     hint: () =>
       "This candidate on search cells its rounds never bought, read on those fresh cells alone — the check on the level its bar claims. Picked hardest-first, they sit below that level by construction.",
-    // The ink that says WHICH cells: these are the new ones.
     ink: () => "--color-new",
     hollow: true,
     kind: "bar",
     axis: "y",
     gap: "sparse",
-    valueOf: (v) => v.verify?.fresh.accuracy?.value ?? null,
-    applies: (c) => c.views.some((v) => v.verify != null),
+    valueOf: (v) => v.reading?.verify?.fresh.accuracy?.value ?? null,
+    applies: (c) => c.views.some((v) => v.reading?.verify != null),
     tip: (v, c) => {
-      const r = v.verify;
+      const r = v.reading?.verify;
       if (r == null) return "verify: —";
-      const picked = r.strategy === "hard" ? "hardest first" : "picked at random";
-      return `verify: ${fmtNum(r.fresh.accuracy?.value)} on ${unitCount(r.n_fresh, c.unit)} fresh, ${picked}`;
+      return `verify: ${fmtNum(r.fresh.accuracy?.value)} on ${unitCount(r.fresh.n, c.unit)} fresh, ${VERIFY_STRATEGY_LABELS[r.strategy]}`;
     },
   },
   {
@@ -151,20 +146,20 @@ export const CANDIDATE_SERIES: readonly SeriesSpec[] = [
     legend: () => "bench · held out",
     hint: () =>
       "This candidate on the held-out bench set — questions no round of the search ever read. Graded for the origin as the run starts and for the selection as it ends, so most bars carry none.",
-    // The trend chart's bench series wears the accent; the same reading keeps the same ink here.
     ink: () => "--color-accent",
     hollow: true,
     kind: "bar",
     axis: "y",
     gap: "sparse",
-    valueOf: (v) => v.bench?.accuracy ?? null,
-    applies: (c) => c.views.some((v) => v.bench != null),
+    valueOf: benchLevel,
+    applies: (c) => c.views.some(hasBench),
     tip: (v, c) => {
-      const b = v.bench;
-      if (b == null) return "bench: —";
-      if (b.rows != null)
-        return `bench: ${b.accuracy == null ? "—" : fmtNum(b.accuracy)} so far · ${b.scored} of ${unitCount(b.rows, c.unit)} held out`;
-      return `bench: ${b.accuracy == null ? "—" : fmtNum(b.accuracy)} on ${unitCount(b.scored, c.unit)} held out`;
+      const level = benchLevel(v);
+      const at = level == null ? "—" : fmtNum(level);
+      if (v.benchPass)
+        return `bench: ${at} so far · ${v.benchPass.scored} of ${unitCount(v.benchPass.rows, c.unit)} held out`;
+      const b = v.reading?.bench;
+      return b == null ? "bench: —" : `bench: ${at} on ${unitCount(b.n, c.unit)} held out`;
     },
   },
   {
@@ -176,16 +171,14 @@ export const CANDIDATE_SERIES: readonly SeriesSpec[] = [
     kind: "line",
     axis: "y",
     gap: "sparse",
-    valueOf: (v) => {
-      const n = v.n_samples;
-      return v.cached_samples == null || n == null || n <= 0 ? null : v.cached_samples / n;
-    },
+    valueOf: (v) => v.reading?.panel.cached_share ?? null,
     applies: (c) => c.showCache,
-    // The served integers, never the share: the operator must not READ a number this layer made.
-    tip: (v, c) =>
-      v.cached_samples == null || v.n_samples == null
+    tip: (v, c) => {
+      const panel = v.reading?.panel;
+      return panel?.cached == null || panel.scored == null
         ? "cached: —"
-        : `cached: ${v.cached_samples} of ${unitCount(v.n_samples, c.unit)}`,
+        : `cached: ${panel.cached} of ${unitCount(panel.scored, c.unit)}`;
+    },
   },
 ];
 
@@ -199,15 +192,14 @@ export function activeSeries(ctx: SeriesCtx): SeriesSpec[] {
   return CANDIDATE_SERIES.filter((s) => s.applies(ctx));
 }
 
-// The floor is a rendering decision and never leaves this array; tooltips read the raw value.
 export function seriesColumn(
   spec: SeriesSpec,
-  views: readonly CandidateView[],
+  views: readonly CandidateBar[],
 ): (number | null)[] {
   return views.map((v) => {
     const raw = spec.valueOf(v);
     if (raw != null) return raw;
-    return spec.gap === "floor-when-started" && v.started ? 0 : null;
+    return spec.gap === "floor-when-started" && v.level != null ? 0 : null;
   });
 }
 
@@ -217,38 +209,38 @@ export interface WhiskerBand {
   hi: (number | null)[];
 }
 
-// Widens θ's SE to match the served 95% `mean_fitness_ci`. z (not t) holds only because θ's SE
-// is the Rasch posterior SE, not a mean over cells (`shared/statistics.py::mean_ci`).
-const Z95 = 1.96;
-
 export function whiskerBands(ctx: SeriesCtx): WhiskerBand[] {
   const bands: WhiskerBand[] = [];
-  // `mean_fitness_ci` is accuracy's band; the composite bar gets none rather than a borrowed one.
   if (ctx.metrics.has("accuracy")) {
     bands.push({
       anchor: "accuracy",
-      lo: ctx.views.map((v) => v.meanFitnessCiLo),
-      hi: ctx.views.map((v) => v.meanFitnessCiHi),
+      lo: ctx.views.map((v) => v.reading?.own?.accuracy?.ci_lo ?? null),
+      hi: ctx.views.map((v) => v.reading?.own?.accuracy?.ci_hi ?? null),
     });
   }
-  if (ctx.views.some((v) => v.verify != null)) {
+  if (ctx.views.some((v) => v.reading?.verify != null)) {
     bands.push({
       anchor: "verify",
-      lo: ctx.views.map((v) => v.verify?.fresh.accuracy?.ci_lo ?? null),
-      hi: ctx.views.map((v) => v.verify?.fresh.accuracy?.ci_hi ?? null),
+      lo: ctx.views.map((v) => v.reading?.verify?.fresh.accuracy?.ci_lo ?? null),
+      hi: ctx.views.map((v) => v.reading?.verify?.fresh.accuracy?.ci_hi ?? null),
     });
   }
-  if (ctx.views.some((v) => v.bench != null)) {
+  if (ctx.views.some(hasBench)) {
+    const edge = (side: "ci_lo" | "ci_hi") => (v: CandidateBar) =>
+      v.benchPass ? null : (v.reading?.bench?.level?.[side] ?? null);
     bands.push({
       anchor: "bench",
-      lo: ctx.views.map((v) => v.bench?.ciLo ?? null),
-      hi: ctx.views.map((v) => v.bench?.ciHi ?? null),
+      lo: ctx.views.map(edge("ci_lo")),
+      hi: ctx.views.map(edge("ci_hi")),
     });
   }
   if (ctx.metrics.has("ability")) {
-    const edge = (sign: number) => (v: CandidateView) =>
-      v.theta == null || v.theta_se == null ? null : v.theta + sign * Z95 * v.theta_se;
-    bands.push({ anchor: "ability", lo: ctx.views.map(edge(-1)), hi: ctx.views.map(edge(1)) });
+    // served: domain/ruler.py::theta_band
+    bands.push({
+      anchor: "ability",
+      lo: ctx.views.map((v) => v.reading?.ability?.ci_lo ?? null),
+      hi: ctx.views.map((v) => v.reading?.ability?.ci_hi ?? null),
+    });
   }
   return bands;
 }

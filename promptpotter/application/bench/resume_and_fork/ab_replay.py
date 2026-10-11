@@ -1,5 +1,4 @@
-"""Deterministic A/B replay. Scoring, election and elimination are a pure function of a round's recorded
-measurements, so re-deriving them under another engine is exact and costs zero LLM calls."""
+"""Decisions are a pure function of a round's recorded measurements, so replay costs no LLM call."""
 
 from __future__ import annotations
 
@@ -21,13 +20,14 @@ from promptpotter.application.mask.divergence import (
 )
 from promptpotter.application.mask.load import load_mask_record
 from promptpotter.application.mask.record import MaskRound
-from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.domain.cycle_paths import CycleHop
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
+    from promptpotter.domain.results import RoundResult
     from promptpotter.domain.ruler import DeltaRuler
+    from promptpotter.domain.scoring import CellSheet, Scorer
 
 logger = logging.getLogger(__name__)
 
@@ -35,14 +35,11 @@ __all__ = ["AbReplayError", "AbReport", "ab_replay_cycle"]
 
 
 class AbReplayError(Exception):
-    """The addressed campaign cannot be replayed off disk. The CLI shell maps it to a clean ``SystemExit``."""
+    """The addressed campaign cannot be replayed off disk."""
 
 
 @dataclass(frozen=True)
 class AbReport:
-    """``mismatches`` is the EVIDENCE (decisions that re-derive differently); ``divergences`` is the CONSEQUENCE — the
-    first round per branch where the change departs, below which every round is counterfactual."""
-
     campaign_id: str
     cycle_id: str
     scorer_id: str
@@ -81,9 +78,6 @@ class AbReport:
                 }
                 for d in self.mismatches
             ],
-            # `node` is a LABEL for a human reading the report, composed here at the render
-            # site. It was a field on the record and got parsed back into this same pair by the
-            # tree's overlay — the two spellings of one coordinate that the pair now replaces.
             "divergences": [
                 {
                     "node": f"{d.cycle_id}::r{d.round}",
@@ -97,31 +91,42 @@ class AbReport:
         }
 
 
+def _regraded(rd: RoundResult, scorer: Scorer) -> RoundResult:
+    """All four row sets: a replayer reads an individual across them, and a sheet holds one scorer."""
+
+    def under(sheets: dict[str, CellSheet]) -> dict[str, CellSheet]:
+        return {cid: regraded(sheet) for cid, sheet in sheets.items()}
+
+    def regraded(sheet: CellSheet) -> CellSheet:
+        return scorer.sheet(cell.facts for cell in sheet)
+
+    return rd.model_copy(
+        update={
+            "results": regraded(rd.results),
+            "all_candidate_results": under(rd.all_candidate_results),
+            "reference_results": under(rd.reference_results),
+            "overlap_results": under(rd.overlap_results),
+        }
+    )
+
+
 def _make_replay_verdict(
     session: Session,
     ruler: DeltaRuler | None,
     sink: list[ReplayMismatch],
 ) -> Verdict:
-    """The replay as a verdict on the shared fold. Rescoring happens HERE, not in a prior pass, because the fold only
-    asks about rounds still on the carried-over side of the departure."""
-    sc = session.scoring
-    scorer = sc.require_scorer()
+    """Rescored HERE: the fold only asks about rounds still on the carried-over side of the departure."""
+    scorer = session.scoring.require_scorer()
 
     def verdict(rnd: MaskRound) -> VerdictOutcome:
-        rd = rnd.round_data
-        if rd is None:
+        if rnd.round_data is None:
             return VerdictOutcome(diverged=False)
-        rescore_results(rd.results, scorer)
-        for items in rd.all_candidate_results.values():
-            rescore_results(items, scorer)
-        # No anchor passed: `known_outcomes` pools rows from DIFFERENT configurations and its own
-        # docstring forbids scoring it. Each decision carries the anchor its election used.
+        rd = _regraded(rnd.round_data, scorer)
+        # No anchor passed: each decision carries the anchor its election used.
         found = replay_all_mismatches(rd, rnd.decisions, ruler=ruler)
         if not found:
             return VerdictOutcome(diverged=False)
         sink.extend(found)
-        # A decision re-deriving to a measured arm is a flipped election: unlike the abort verdict,
-        # it names the one-step alternative. Any other kind moved without naming a leader.
         alternative = next(
             (
                 m.current_outcome
@@ -141,8 +146,7 @@ def ab_replay_cycle(
     session: Session,
     campaign_config: CampaignConfig,
 ) -> AbReport:
-    """Re-derive a campaign under the active engine + scorer; no LLM calls. The walk is the CAMPAIGN's — a fork shares its
-    parent's measurements, so an invalidating change reaches every branch below and a per-cycle answer cannot say that."""
+    """The walk is the CAMPAIGN's: a fork shares its parent's measurements."""
     sc = session.scoring
     scorer = sc.require_scorer()
 
@@ -162,11 +166,8 @@ def ab_replay_cycle(
             f"{hop.campaign_id}/{hop.cycle_id} has no scored round 0, so there is no origin to "
             "calibrate the δ ruler on and every replayed decision would be read against nothing."
         )
-    # Round 0 = the origin scored; its results calibrate the ruler, exactly as Cycle.start did —
-    # including its searchpoint identity, which folds the archive's copies of the origin into the
-    # one ``ORIGIN_ABILITY_ID`` candidate the live ruler saw. Rescored first: the ruler is fitted
-    # on the grades the CURRENT scorer gives, or arm B is measured against arm A's δ.
-    rescore_results(round_0.results, scorer)
+    # Rescored first: a ruler fit on another scorer's grades measures arm B against arm A's δ.
+    origin_sheet = scorer.sheet(cell.facts for cell in round_0.results)
     origin_sp_hash = round_0.origin.searchpoint(
         schema=session.pipeline_schema,
         framing=campaign_framing(session.store, campaign_config, session.dataset_name),
@@ -179,7 +180,7 @@ def ab_replay_cycle(
         origin_sp_hash=origin_sp_hash,
     )
     ruler, _ = calibrate_delta_ruler(
-        round_0.results, view.n_min, enable_2pl=view.enable_2pl, archive_obs=view.archive()
+        origin_sheet, view.n_min, enable_2pl=view.enable_2pl, archive_obs=view.archive()
     )
 
     mismatches: list[ReplayMismatch] = []
@@ -196,7 +197,7 @@ def ab_replay_cycle(
     return AbReport(
         campaign_id=hop.campaign_id,
         cycle_id=hop.cycle_id,
-        scorer_id=sc.scorer_id or "",
+        scorer_id=scorer.id,
         n_cycles=len(record.cycles),
         n_rounds=n_rounds,
         mismatches=mismatches,

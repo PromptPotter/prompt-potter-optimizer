@@ -1,5 +1,4 @@
-"""The config map: every knob under the estimand it moves, every coupling flagged against one config.
-A READING of ``knobs.py``, kept out of it: that source is hashed into the optimizer prompt's identity."""
+"""Kept OUT of ``knobs.py``: that source is hashed into the optimizer prompt's identity."""
 
 from __future__ import annotations
 
@@ -77,7 +76,6 @@ class ConfigMapResponse(StrictModel):
 
 
 def config_map(config: CampaignConfig) -> ConfigMapResponse:
-    """What moves which estimand, what overwrites what, and which knobs collide under *config*."""
     states = resolve_knob_states(config)
     groups = [
         ConfigEstimandGroup(
@@ -106,6 +104,5 @@ def config_map(config: CampaignConfig) -> ConfigMapResponse:
     ]
     return ConfigMapResponse(
         groups=[g for g in groups if g.knobs],
-        # Stable, so declaration order survives within one severity.
         couplings=sorted(couplings, key=lambda c: (not c.active, _SEVERITIES.index(c.severity))),
     )

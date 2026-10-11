@@ -1,9 +1,6 @@
-// The transport seam. Internal to `lib/api`, except the vocabulary `index.ts` re-exports.
-
 export const API = "/api/v1";
 
-// Never render `message` to an operator (frontend-surface-contract.md § I2). `errorId` greps the
-// server log line (`main.py::_error_response`).
+// `errorId` greps the server log line (`main.py::_error_response`).
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -17,17 +14,15 @@ export class ApiError extends Error {
   }
 }
 
-// `transient` is the SAFE default: an unrecognised failure retries rather than destroying client
-// state. Only an explicit 404 is `gone`.
 export type FailureKind = "transient" | "auth" | "gone" | "denied" | "invalid";
 
 export function failureKind(e: unknown): FailureKind {
-  if (!(e instanceof ApiError)) return "transient"; // network, parse, abort
+  if (!(e instanceof ApiError)) return "transient";
   if (e.status === 401) return "auth";
   if (e.status === 403) return "denied";
   if (e.status === 404) return "gone";
   if (e.status === 400 || e.status === 422) return "invalid";
-  return "transient"; // 5xx and anything unmapped
+  return "transient";
 }
 
 // Tolerant: a proxy 502 or a static-export 404 answers HTML, not an envelope.
@@ -78,12 +73,9 @@ export async function jpost<T>(
   return (await r.json()) as T;
 }
 
-// An ETag where the body depends on the query (tree/ray masks, windows), since a date cannot say
-// so; `Last-Modified` where the body is one file (the dashboard).
 export type Conditional<T> =
   | { kind: "ok"; data: T; validator: string | null }
-  // No validator here on purpose: a caller storing a proxy-stripped `null` would go unconditional
-  // forever. A 304 means keep the one you sent.
+  // No validator on purpose: a caller storing a proxy-stripped `null` would go unconditional forever.
   | { kind: "not_modified" };
 
 async function jgetWithValidator<T>(

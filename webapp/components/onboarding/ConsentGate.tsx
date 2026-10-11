@@ -1,6 +1,5 @@
 "use client";
-// Provable-consent gate: `/auth/accept-terms` writes the record server-side. Consent attaches only
-// to someone about to submit data, so anon visitors and non-active accounts are never gated.
+// Consent attaches only to someone about to submit data: anon visitors and non-active accounts are never gated.
 
 import { useState } from "react";
 import { BRAND } from "@/lib/brand";
@@ -12,7 +11,6 @@ import { Dialog } from "@/components/ui";
 export function ConsentGate() {
   const { status, me, refresh } = useAuth();
   const [checked, setChecked] = useState(false);
-  // One sentence for every refusal: the re-probe below reloads the live terms either way.
   const cmd = useCommand<"accept-terms">("consent-gate", {
     revalidate: false,
     describe: () => "Couldn't record that — reloading the current terms. Try again.",

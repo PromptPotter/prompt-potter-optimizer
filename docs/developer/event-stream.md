@@ -2,7 +2,7 @@
 
 The outbound half of the M12 Control-remote highway: how a client subscribes to a cycle's live ledger over Server-Sent Events, what frames it gets and in what order, and the guarantees the runtime makes about ordering, gap detection, and idle-keepalive.
 
-Permanent contract: [`docs/adr/0001-m12-control-plane.md`](../adr/0001-m12-control-plane.md). Wire schema: [`docs/specs/events-asyncapi.yaml`](../specs/events-asyncapi.yaml). Codepath: [`promptpotter/infrastructure/projections/event_stream.py`](../../promptpotter/infrastructure/projections/event_stream.py) (`CycleLedgerTail`, tails the on-disk ledger) → [`promptpotter/presentation/api/routers/campaigns/events.py`](../../promptpotter/presentation/api/routers/campaigns/events.py) (`stream_cycle_events`).
+Permanent contract: [`docs/adr/0001-m12-control-plane.md`](../adr/0001-m12-control-plane.md). Wire schema: [`docs/specs/events-asyncapi.yaml`](../specs/events-asyncapi.yaml). Codepath: [`promptpotter/infrastructure/projections/event_stream.py`](../../promptpotter/infrastructure/projections/event_stream.py) (`CycleLedgerTail`, tails the on-disk ledger) → `application/cycle_reads.py::cycle_event_frames` (the snapshot, then the tail) → [`promptpotter/presentation/api/routers/campaigns/events.py`](../../promptpotter/presentation/api/routers/campaigns/events.py) (`stream_cycle_events`).
 
 ## URL
 
@@ -31,8 +31,9 @@ data: {"kind": "phase", "cycle_id": "cycle_abc123",
 | `cycle_id` | string | Target cycle. Redundant with the URL path, stamped per-frame so multi-cycle clients can demultiplex a fan-in subscription. |
 | `sequence` | integer | Ledger offset. Snapshot frame carries the high-water mark the snapshot reflects; live tail strictly greater. Gap = missed frames. |
 | `payload` | object | Per-kind body. For record-derived kinds, the record's `model_dump` content; for `stream_snapshot`, the cycle's served dashboard. |
+| `activity` | object | The run's current state as of this frame: `status`, the one line saying what it is doing, `notices`, what was said that still holds, and `decision`, the choice it is held on — worded, with each answer as the command to send. Whole on every frame — see § Current state. |
 
-Adding a new kind requires updating [`events-asyncapi.yaml`](../specs/events-asyncapi.yaml) **first** (closed-set policy — security box 1), then `ProjectionKind` in [`promptpotter/domain/projection_envelope.py`](../../promptpotter/domain/projection_envelope.py), then the record class on `CycleRecord` (or `_PROJECTION_ONLY`, for a kind the tail synthesizes rather than reads), then its `RENDERS_AS_ACTIVITY` answer beside it — can a feed item ever be made of this? — which is what `/ray` drops on. The last two raise at import if skipped; the YAML enum is synced by hand (§ Testing).
+Adding a new kind requires updating [`events-asyncapi.yaml`](../specs/events-asyncapi.yaml) **first** (closed-set policy — security box 1), then `ProjectionKind` in [`promptpotter/domain/projection_envelope.py`](../../promptpotter/domain/projection_envelope.py), then the record class on `CycleRecord` (or `_PROJECTION_ONLY`, for a kind the tail synthesizes rather than reads), then its answer in `domain/activity.py` — a case in `ActivityFeed._item` for the line it reads as, or a place in `SILENT_RECORDS` if no line is ever made of it, which is what `/ray` drops on. The record class raises at import if skipped and the answer fails the type check; the YAML enum is synced by hand (§ Testing).
 
 ## Subscription contract — snapshot-then-tail
 
@@ -40,13 +41,17 @@ The runtime guarantees, in order:
 
 1. **Snapshot frame first.** The first message is a `stream_snapshot` envelope whose `payload` is the subscribed cycle's served dashboard — the body the dashboard route returns (`application/served_dashboard.py`). The envelope's `sequence` is the ledger offset the tail picks up at, and nothing in the payload repeats it.
 
-   When `dashboard.json` doesn't exist yet (fresh campaign before origin's first flush), the payload is the warming shape (`"warming_up": true`) and the client renders a "campaign initialising" placeholder.
+   For a cycle still at check-in — no launch has declared what it runs with — the payload is the warming shape (`"warming_up": true`) and the client renders a "campaign initialising" placeholder.
 
 2. **Live tail.** Every subsequent `CycleRecord` appended to the ledger is broadcast as one envelope. `sequence` matches the record's ledger offset; envelopes from the snapshot's `sequence` onward arrive in append order.
 
 3. **Heartbeat.** Every 15 s the server emits an SSE **comment** line (`EventSourceResponse`'s ping — currently `: ping - <timestamp>`). The exact text is not consumed: browsers' `EventSource` and proxies key on its *arrival*, not its content, so they can tell "no events" from "stream broken." Heartbeats do not advance `sequence`.
 
 4. **Idle after teardown.** The stream tails a file, so when the runner finalizes the cycle there's nothing to close — the tail simply stops seeing new lines and the connection idles on heartbeats. The client stays subscribed (and disconnects when the operator navigates away).
+
+## Current state — served, never folded by a client
+
+A subscriber wants to know what the run is doing now, not to replay its log. So the tail reads each record once (`domain/activity.py::ActivityFeed`), folds it, and stamps the result on the frame: every `ActivityKind` declares how long it stays (`LIFETIME` — `status` is replaced by the next status and ends when the runner declares a run phase, `round` lasts until the runner enters another round, `run` until it declares another launch). The snapshot frame's `activity` is that same fold over the ledger up to where the tail picks up — one fold of one file, never a second reading off the dashboard. So any client — the webapp, an MCP tool, another agent's UI — that keeps only the newest frame's `activity` is always current.
 
 ## Sequence semantics + gap detection
 
@@ -60,9 +65,9 @@ The `Last-Event-ID` header is reserved for a future profile's resume-from-sequen
 
 This stream has **no replay**, by construction: `snapshot_frame` parks the tail one past the offset its dashboard is a fold of (`at_offset`) — at end-of-file only for a warming shape, which carries none — so a subscriber starts where its snapshot ends and never receives what came before.
 
-That is correct, and it is correct because history has its own home — `GET /campaigns/{c}/cycles/{cy}/ray`, the **time-ray**: one merged chronology across a course, its forks, and its inner runs, windowed and paged backwards. Its items carry a `ProjectionEnvelope`'s `kind` and a subset of the same `payload`, so one client translator serves both, plus a `path` the envelope cannot carry (an inner `cycle_id` repeats across sibling sandboxes, so it does not identify a cycle in a family).
+That is correct, and it is correct because history has its own home — `GET /campaigns/{c}/cycles/{cy}/ray`, the **time-ray**: one merged chronology across a course, its forks, and its inner runs, windowed and paged backwards. Its items carry the same reader's line for that record (`activity`) and a `path` the envelope cannot carry (an inner `cycle_id` repeats across sibling sandboxes, so it does not identify a cycle in a family).
 
-**The subset is the difference in SHAPE between the two, and it follows from the difference in scope.** This stream hands over one record at a time as it lands, so it hands over the whole thing; a ray window is up to `MAX_RAY_LIMIT` records at once, so it serves what a chronology reads — identity, address and the one-line reading — and leaves each record's bulk (an LLM's prompt and response, a sample's query and prediction, a phase's whole view) to the surface built for it, every one of which is fetched one round at a time. The declaration is `projection_envelope.py::RAY_PAYLOAD_FIELDS`, beside the by-kind one, and it is a validator input on the ray's ETag for the same reason the drop set is: it decides the body and it moves on deploy rather than on a write. **Adding a field to the ray means declaring it there** — a field the client reads and the projection omits is not an error anywhere; the step simply renders without it.
+**The difference in SHAPE between the two follows from the difference in scope.** This stream hands over one record at a time as it lands, so it hands over the whole thing; a ray window is up to `MAX_RAY_LIMIT` records at once, so it serves the reading and never the record — each record's bulk (an LLM's prompt and response, a sample's query and prediction, a phase's whole view) stays with the surface built for it, every one of which is fetched one round at a time. The reader is a validator input on the ray's ETag for the same reason the drop set is: it decides the body and it moves on deploy rather than on a write.
 
 **Do not add a `since=` parameter to this stream.** A second replay mechanism is exactly what the ray exists to avoid. The two objects have different scopes and that is deliberate: the tail is per-cycle and live, the ray is family-wide and historical. A client joins them on `(path, offset)` — a live frame's `sequence` IS a ray item's `offset`, because both are the physical line index of that cycle's own ledger file.
 
@@ -84,7 +89,7 @@ A client applies the leading `stream_snapshot`, then requires each subsequent `s
 one past the last; any other value is a gap and the recovery is to close and re-subscribe for a fresh
 snapshot. Clients **MUST NOT** assume a mutation succeeded before the corresponding `command_ack` frame
 arrives — a Profile B contract enforced from this stream. The webapp's implementation is
-`webapp/lib/chat/activity.ts` + `useCycleEvents`; smoke-test with
+`webapp/lib/chat/useCycleEvents.ts`; smoke-test with
 `curl -N http://localhost:8001/api/v1/campaigns/{cid}/cycles/{cyid}/events:subscribe`.
 
 ## Testing

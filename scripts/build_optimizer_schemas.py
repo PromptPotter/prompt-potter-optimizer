@@ -1,13 +1,3 @@
-"""Regenerate every ``resolved_schemas.json`` beside a manifest — one per registered optimizer
-runtime, from the ``response_models`` it declares, and the bench's check-in (``checkin/``).
-Idempotent.
-
-Each file holds the schemas of the nodes its own manifest DECLARES, so a node's schema ships
-beside the manifest that runs it. It reads the manifests' node names and writes nothing else:
-the authored half is YAML, and re-emitting it would reformat the operator's blocks and comments
-on every run, which CI would read as schema drift.
-"""
-
 from __future__ import annotations
 
 import json
@@ -24,18 +14,25 @@ from promptpotter.infrastructure.store.io import read_yaml
 
 
 def _manifests() -> dict[Path, Mapping[str, type[BaseModel]]]:
-    return {
-        checkin_assets_root(): {"checkin": CheckinOutput},
-        **{rt.manifest_dir: rt.response_models for rt in optimizers.runtimes().values()},
+    stated = optimizers.llm_nodes()
+    out: dict[Path, Mapping[str, type[BaseModel]]] = {
+        checkin_assets_root(): {"checkin": CheckinOutput}
     }
+    for runtime in optimizers.runtimes().values():
+        declared = read_yaml(runtime.manifest_dir / "pipeline.yaml").get("nodes") or {}
+        # Manifest order: the file's key order is the committed artifact's.
+        out[runtime.manifest_dir] = {
+            node: model
+            for node in declared
+            if node in stated and (model := stated[node].response_model) is not None
+        }
+    return out
 
 
 def _entry(node: str, model: type[BaseModel]) -> dict[str, Any]:
     schema = model.model_json_schema()
     return {
-        # DECLARATION order, never sorted. `fields` IS the order declaration
-        # (`NodeOutputSchema`), and field order is generation order — alphabetizing
-        # it makes the manifest disagree with the schema the wire actually carries.
+        # DECLARATION order, never sorted: field order is generation order (`NodeOutputSchema`).
         "fields": list(schema.get("properties", {})),
         "json_schema": {
             "name": node,
@@ -55,9 +52,7 @@ def main() -> int:
             )
         resolved = {f"{node}/1": _entry(node, model) for node, model in models.items()}
         out_path = directory / "resolved_schemas.json"
-        # `ensure_ascii=False`: the schemas carry hand-written prose in their `description`
-        # strings. Escaping them to \uXXXX makes the generator unable to reproduce its own
-        # committed output, so the contract check fails on punctuation instead of schema drift.
+        # `ensure_ascii=False`: escaped prose cannot reproduce the committed output byte for byte.
         out_path.write_text(
             json.dumps(resolved, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
         )

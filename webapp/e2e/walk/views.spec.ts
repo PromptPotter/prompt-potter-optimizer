@@ -1,7 +1,5 @@
 import { test, expect, open, ready } from "../harness";
 
-// Each campaign view, the strip that owns it, and the segment that lights there (a Records
-// member lights its own strip besides). The workspace view has no strip; its test is below.
 const VIEWS = [
   { tab: "chat", strip: "Campaign view", label: "Chat" },
   { tab: "dashboard", strip: "Campaign view", label: "Dashboard" },

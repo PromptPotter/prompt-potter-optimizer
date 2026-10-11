@@ -17,7 +17,6 @@ interface Props {
   onClose: () => void;
 }
 
-// The canonical confirm dialog. Actions render in order — rightmost is the primary.
 export function Modal({ open, title, message, actions, onClose }: Props) {
   return (
     <Dialog

@@ -1,27 +1,18 @@
 "use client";
 import { Button } from "@/components/ui";
 import { WORKSPACE_LABEL, tabLabel, type WorkspaceTab } from "@/lib/view-tab";
+import { useWorkspace } from "@/lib/workspace";
 
-// The header of a WORKSPACE view — one that reads across campaigns. It stands where the run
-// masthead stands on a campaign view, and says nothing about any one run.
-export function WorkspaceHeader({
-  tab,
-  onBack,
-  backLabel,
-}: {
-  tab: WorkspaceTab;
-  // Absent when no campaign is in view to go back to.
-  onBack?: () => void;
-  backLabel: string;
-}) {
+export function WorkspaceHeader({ tab }: { tab: WorkspaceTab }) {
+  const { campaignId, backToCampaign } = useWorkspace();
   return (
     <header className="workspace-header">
       <span className="workspace-title">
         {WORKSPACE_LABEL} · {tabLabel(tab)}
       </span>
-      {onBack && (
-        <Button className="workspace-back" onClick={onBack}>
-          ← {backLabel}
+      {campaignId && (
+        <Button className="workspace-back" onClick={backToCampaign}>
+          ← Back to campaign
         </Button>
       )}
     </header>

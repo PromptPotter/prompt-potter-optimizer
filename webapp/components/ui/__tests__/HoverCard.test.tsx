@@ -1,15 +1,9 @@
-// @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { HoverCard } from "../HoverCard";
 
 beforeEach(() => {
   vi.useFakeTimers();
-});
-afterEach(() => {
-  cleanup();
-  vi.restoreAllMocks();
-  vi.useRealTimers();
 });
 
 // jsdom measures everything as zero, so placement needs a stubbed trigger rect.

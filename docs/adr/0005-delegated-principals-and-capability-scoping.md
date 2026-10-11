@@ -62,12 +62,12 @@ A grant is keyed on **(sub-principal, channel)** rather than on the principal al
 
 ### 3. Capability → verb ladder (one enforcement seam) — SHIPPED
 
-Every control-plane verb requires a capability, checked in **one place**: the command dispatcher tests `has_capability(identity, CAP_FOR_KIND[kind])` at the single `_record_and_apply` chokepoint every dispatch method funnels through. An import-time exhaustiveness assert derives the closed kind set from the `*Kind` `Literal`s so the map cannot drift. Seven capabilities are enumerated once as `CAMPAIGN_CAP_BY_NAME` in `shared/identity.py`, and every first-class principal holds the full owner set, so the gate is a no-op for single-owner installs. Denial is **404**, not 403 — existence-hiding.
+Every control-plane verb requires a capability, checked in **one place**: the command dispatcher tests `require_capability(identity, kind.capability)` at the single `_record_and_apply` chokepoint every dispatch method funnels through. The capability is a column of the kind's own row (`domain/command_kinds.py::CommandKind`), so no kind exists without one. Seven capabilities are enumerated once as `CAMPAIGN_CAP_BY_NAME` in `shared/identity.py`, and every first-class principal holds the full owner set, so the gate is a no-op for single-owner installs. Denial is **404**, not 403 — existence-hiding.
 
 | Cap | Gates (real command kinds) | Kind |
 |---|---|---|
 | `campaign.step` | `skip-searchpoint`, `pause-cycle`, `origin-gate-decision`, `step-cycle` | stepwise / bounded |
-| `campaign.run` | `start-run`, `fork-cycle`, `start-checkin`, `verify-candidate`, `cancel-queued-run` | autonomous |
+| `campaign.run` | `start-run`, `fork-cycle`, `start-checkin`, `verify-candidate`, `grade-bench`, `cancel-queued-run` | autonomous |
 | `campaign.create` | `mint-campaign`, `register-backend`, `edit-draft-campaign`, `resolve-origin` | create |
 | `campaign.budget` | `change-run-limits` (raise a ceiling), `set-concurrent-cycles` | budget |
 | `campaign.lifecycle` | `archive-/delete-/unarchive-campaign`, `delete-cycle`, `cleanup-empty-cycles`, `set-campaign-label`, `replace-dataset`, `compact-archive` | destructive |
@@ -78,7 +78,7 @@ The ladder is the point: a delegate with `campaign.step` but **not** `campaign.r
 
 Three deltas from the original strawman, all deliberate. `fork-cycle` sits at **run**, not step, because an operator fork mints *and launches* an autonomous continuation. `register-backend` folds into `campaign.create` rather than earning its own cap — a delegate that may author campaigns may register the backend they run against. And `replace-dataset` sits at **lifecycle**, not create, because a dataset slug is part of the measurement cache key, so repointing one re-addresses every campaign that already measured against it.
 
-**A route is the only way to add a verb, so the route set is what the ladder is checked against.** `CAP_FOR_KIND`'s exhaustiveness raise can only see kinds that dispatch, so a route calling its handler directly would read as covered while gated by nothing and recorded nowhere. `routers/commands.py` therefore raises at import when a typed route names a kind outside `ALL_DISPATCHED_KINDS`, which makes the gap unwritable rather than merely known.
+**A route is the only way to add a verb, so the route set is what the ladder is checked against.** A capability column covers only kinds that dispatch, so a route calling its handler directly would read as covered while gated by nothing and recorded nowhere. `routers/commands.py` therefore paths every typed route by its `CommandKind` member, which makes the gap unwritable rather than merely known.
 
 ### 4. Babysat — a lineage-subtree tag, escapable by forking clean
 
@@ -88,9 +88,9 @@ There is **no per-value unlock control.** A value the optimizer normally owns, o
 
 **Escaping babysat is a fork decision.** Fork and steer from the last *clean* ancestor — the node just before the edit — and choose whether to carry the edited information forward. Exclude it and the fork grows a fresh un-babysat branch whose runs grade clean again; include it and the new branch honestly inherits the tag. This *subsumes* the old "a comparability-breaking change MUST fork a clean sibling" rule rather than contradicting it.
 
-Babysat rides the existing provenance grade, **not** a new sidecar: `grade_run` demotes a run in a babysat subtree, and the three existing consumers — the `AxisIndex` digest, `MeasurementArchive` reuse, L4's graded-clean ingestion — exclude it exactly as they exclude an incidental `C` run today. Warning copy is literal: "editing this marks this branch babysat — its runs won't count as clean measurements; fork from before the edit to keep a clean branch."
+Babysat rides the existing provenance grade, **not** a new sidecar: `grade_answer` demotes every answer filed in a babysat subtree, and the three existing consumers — the `AxisIndex` digest, `MeasurementArchive` reuse, L4's graded-clean ingestion — exclude it exactly as they exclude an incidental `C` answer today. Warning copy is literal: "editing this marks this branch babysat — its runs won't count as clean measurements; fork from before the edit to keep a clean branch."
 
-**The minimal first slice is SHIPPED, and it is a cycle-level flag rather than the subtree.** A fork seed whose `pipeline_overlay` steers the inner-optimizer model OUTSIDE what that NODE permits (`optimizer_narrowing[node].param_allowed_values["model"]`; nothing declared = nothing sanctioned = restrictive default, via `overlay_sets_model_outside_allowed`) requires `campaign.babysit`, checked in the `fork-cycle` builder above the `campaign.run` fork itself. It stamps the cycle index babysat via `mark_human_intervened` and forces every run that cycle scores to grade **C**, through an explicit `human_intervened: bool` argument on `grade_run` fed from `Session.human_intervened` — read from the index at init, set at the runner seed seam, passed through the one write path `build_dataset_run_data`. No consumer changed, because the grade *is* the exclusion.
+**The minimal first slice is SHIPPED, and it is a cycle-level flag rather than the subtree.** A fork seed whose `pipeline_overlay` steers the inner-optimizer model OUTSIDE what that NODE permits (`optimizer_narrowing[node].param_allowed_values["model"]`; nothing declared = nothing sanctioned = restrictive default, via `overlay_sets_model_outside_allowed`) requires `campaign.babysit`, checked in the `fork-cycle` builder above the `campaign.run` fork itself. It stamps the cycle index babysat via `mark_human_intervened` and forces every answer that cycle files to grade **C**, through an explicit `human_intervened: bool` argument on `grade_answer` fed from `Session.human_intervened` — read from the index at init, set at the runner seed seam, passed through the one write path `build_dataset_run_data`. No consumer changed, because the grade *is* the exclusion.
 
 A steer to a PERMITTED model is a clean human fork: no cap, no taint. The done C0 is INHERITED either way (`try_inherit_fork_origin` accepts an overlay touching only `WHO_ANSWERS_KEYS`), never re-measured. The trigger is the direct overlay edit against what the node permits, not a policy flag.
 
@@ -104,7 +104,7 @@ Each grant carries a spend ceiling enforced by the existing spend-cap probe (ADR
 
 ### 6. The bounded step verb — SHIPPED as `step-cycle`
 
-`start-run` is all-or-nothing and `fork-cycle` mints a *sibling*, so there was no discrete "advance N rounds in place" action. Rather than a new verb, this wired the already-declared-not-wired `step-cycle`: resume the cycle in place, run `rounds` clean rounds (default 1), then auto-pause on the existing `StopReason.PAUSED`, resumable so the operator steps again. It reuses the resume launcher wholesale plus one run-scoped field, `RunMode.stop_after_rounds`; no new runner path. On the `campaign.step` rung, so a delegate holding step-but-not-run can advance bounded work without firing an autonomous loop.
+`start-run` is all-or-nothing and `fork-cycle` mints a *sibling*, so there was no discrete "advance N rounds in place" action. Rather than a new verb, this wired the already-declared-not-wired `step-cycle`: resume the cycle in place, run `rounds` clean rounds (default 1), then auto-pause on the existing `StopReason.PAUSED` (cause `step`), resumable so the operator steps again. It reuses the resume launcher wholesale plus one launch limit, `step_rounds`, held on the ledger as `RunLimitsRecord.pause_at_round` beside the ceiling; no new runner path. On the `campaign.step` rung, so a delegate holding step-but-not-run can advance bounded work without firing an autonomous loop.
 
 One full clean L1 round is the unit — the same generate/score/escalation/PoBB machinery as an autonomous round, just bounded. Not sub-round: the round is the atomic scored and selected unit, so a partial round has no clean stop.
 

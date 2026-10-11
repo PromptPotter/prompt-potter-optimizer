@@ -1,11 +1,7 @@
-// Shared display formatters — import from here, never re-inline a copy.
-
 import type { MeasuredUnit, MetricSpec } from "@/lib/api/types";
 import { RECENT_STEP_S } from "@/lib/api/types.generated";
 import type { LiftSide } from "@/lib/fitness";
 
-// The browser's half of the engine's one noun for a measured row
-// (`dashboard.json::measured_unit`): never pick it off a local flag, never pluralise inline.
 export function unitPlural(unit: MeasuredUnit): string {
   return `${unit}s`;
 }
@@ -39,8 +35,7 @@ export function fmtDuration(sec: number): string {
   return rm === 0 ? `${h}h` : `${h}h ${rm}m`;
 }
 
-// A silence on the time-ray; empty inside the served recent-step window, which is counted in
-// `llm_call_progress` heartbeats — without them on the ray, every backend query sprouts a gap.
+// `RECENT_STEP_S` is counted in `llm_call_progress` heartbeats: the ray must carry them or every backend query shows a gap.
 export function fmtGap(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < RECENT_STEP_S) return "";
   if (seconds < 90 * 60) return `${Math.round(seconds / 60)}m`;
@@ -74,11 +69,11 @@ export function fmtBytes(n: number | null | undefined): string {
 export function fmtTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M tok`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(0)}k tok`;
-  return `${n} tok`;
+  // Rounded: a mean over cells is fractional, and a fraction of a token is noise.
+  return `${Math.round(n)} tok`;
 }
 
-// Mirrors `views/render/primitives.py::fmt_pvalue`. `null` means nothing was tested — never render
-// it as a test that found nothing.
+// Mirrors `views/render/primitives.py::fmt_pvalue`; `null` means nothing was tested.
 export function fmtPValue(p: number | null): string {
   if (p == null) return "—";
   if (p < 0.001) return "p<0.001 ***";
@@ -121,20 +116,18 @@ export function fmtSigned(v: number | null | undefined, digits = 3): string {
   return `${v >= 0 ? "+" : ""}${v.toFixed(digits)}`;
 }
 
-// θ is in logits, so it never renders as a percent. Bare: the "θ" beside it is the caller's label.
+// θ is in logits, so it never renders as a percent.
 export function fmtTheta(v: number | null | undefined): string {
   return typeof v === "number" && Number.isFinite(v) ? v.toFixed(2) : "—";
 }
 
-// θ with its standard error, where the fit reported one.
 export function fmtThetaSe(v: number | null | undefined, se: number | null | undefined): string {
   const theta = fmtTheta(v);
   return theta !== "—" && typeof se === "number" ? `${theta} ± ${se.toFixed(2)}` : theta;
 }
 
-// The ink of a SERVED interval side (`lift_side`). `null` is flat: nothing was tested.
-export function sideTone(side: LiftSide | null): string {
-  return side === null ? "l4-eff-flat" : SIDE_TONE[side];
+export function sideTone(side: LiftSide | null | undefined): string {
+  return side == null ? "l4-eff-flat" : SIDE_TONE[side];
 }
 
 const SIDE_TONE: Record<LiftSide, string> = {
@@ -143,9 +136,9 @@ const SIDE_TONE: Record<LiftSide, string> = {
   spans: "l4-eff-flat",
 };
 
-// A comparability verdict's tone; the sentence beside it is served, and `null` is UNKNOWN.
+// `null` is UNKNOWN, and warns.
 export function verdictTone(verdict: boolean | null): string {
-  return verdict === true ? "l4-note" : "l4-warn";
+  return verdict === true ? "note-info" : "note-warn";
 }
 
 export function fmtNum(v: unknown, digits = 3): string {
@@ -197,7 +190,6 @@ export function fmtText(v: unknown): string {
   return String(v);
 }
 
-// The one formatter for a config/param value of any shape; panels never re-inline the switch.
 export function fmtValue(v: unknown, opts?: { pretty?: boolean }): string {
   if (typeof v === "boolean") return v ? "ON" : "OFF";
   if (v != null && typeof v === "object") {

@@ -1,69 +1,80 @@
-"""The lineage tree — the served genealogy, read at any depth. A fork is not a node; its
-candidates mount onto the parent's ONE timeline. The law: `infrastructure/CLAUDE.md`."""
-
 from __future__ import annotations
 
-from collections.abc import Mapping
+import itertools
+from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any, Literal, NamedTuple, TypedDict
+from typing import Annotated, Literal, NamedTuple, TypedDict
 
 from pydantic import ConfigDict, Field
 
+from promptpotter.domain.bench import BenchReading
 from promptpotter.domain.campaign import Campaign
-from promptpotter.domain.cycle_listing import CycleListEntry
+from promptpotter.domain.cycle_listing import CycleIndex, CycleListEntry, RunStatus
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath
-from promptpotter.domain.dashboard_rows import LiftSide, RunStanding, lift_side, panel_cuts
-from promptpotter.domain.phases import RunPhase, StopReason
-from promptpotter.domain.ruler import ThetaCaveat
+from promptpotter.domain.opt_search_point import Variation
+from promptpotter.domain.paired_reading import ArmPointer, PairedReading
+from promptpotter.domain.phases import RunPhase
+from promptpotter.domain.results import (
+    ArmAbility,
+    ArmElection,
+    ArmReading,
+    ArmVerdict,
+    DisplayMetric,
+    LineRate,
+    RunStanding,
+    VerifyReading,
+    arm_verdict,
+    line_by_individual,
+    overlap_line,
+    panel_cuts,
+)
 from promptpotter.domain.run_records import (
-    FORK_DIRECTION,
-    CandidateState,
     ElectionRecord,
     ForkDirection,
-    ForkTrigger,
-    LedgerAbility,
     LedgerCandidate,
     LedgerFit,
 )
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.runtime_flags import derive_run_phase
+from promptpotter.infrastructure.projections.cycle_index import read_cycle_index
+from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
-    scan_ledger_candidates,
-    scan_ledger_electable_counts,
-    scan_ledger_elections,
-    scan_ledger_round_closes,
-    scan_ledger_run_standing,
+    StandingRounds,
+    scan_bench_readings,
+    scan_ledger_verify,
+    scan_standing_rounds,
 )
-from promptpotter.infrastructure.store.campaign_store.store import (
-    cycle_ending,
-    origin_accuracy_of,
+from promptpotter.infrastructure.store.layout import (
+    CycleLayout,
+    cycle_dir_for,
+    in_inner_sandbox,
+    sibling_kind,
 )
-from promptpotter.infrastructure.store.io import read_json_tolerant
-from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for, sibling_kind
+from promptpotter.infrastructure.store.read_model import LedgerSpan, Moment
 from promptpotter.infrastructure.store.stores import Stores, inner_sandbox_store, resolve_cycle_path
 
 __all__ = [
+    "ArmNode",
+    "CourseNode",
     "FamilyCourse",
+    "ForkStamp",
+    "LensShift",
     "LineageDivergence",
     "LineageNode",
+    "MainLineStep",
     "build_lineage_tree",
     "iter_family_courses",
-    "rank_siblings",
+    "rank_moves",
 ]
 
 
-NodeKind = Literal["course", "candidate"]
 CourseKind = Literal["root", "fork", "diag", "inner"]
-Crown = Literal["elected", "uncontested"]
 
-# A COST BOUND on `.inner/` NESTING, never a caller's dial: one served tree per campaign, and
-# sandboxes nest re-entrantly, so an unbounded walk is unbounded on disk. 3 covers L4.
+# A cost bound, never a caller's dial: sandboxes nest re-entrantly, so an unbounded walk is unbounded on disk.
 _MAX_COURSE_DEPTH = 3
 
 
 class LineageDivergence(StrictModel):
-    """Where an alternative criterion would have elected someone else. Rides the node it
-    describes (``LineageNode.divergence``) — there is no parallel list to re-join."""
+    """Where an alternative criterion would have elected someone else, on the node it describes."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -74,12 +85,65 @@ class LineageDivergence(StrictModel):
     )
 
 
-class LineageNode(StrictModel):
-    """One node of the served tree. The same shape at every depth — that is the point."""
+class ForkStamp(StrictModel):
+    """What marks an attempt the operator cut: a fork is NOT a node, so its identity rides them."""
 
     model_config = ConfigDict(frozen=True)
 
-    kind: NodeKind = Field(description="course | candidate — they strictly alternate")
+    kind: CourseKind
+    trigger: str
+    direction: ForkDirection | None = Field(
+        description="Which side of the cut the run CONTINUES on (`FORK_DIRECTION`): `offshoot` "
+        "hangs off a line that keeps running, `supersede` IS the line."
+    )
+    steered_by: str | None = Field(
+        description="Who cut the fork, as its fork record names them: an account or delegate id, "
+        "`system`, or the layer and round that proposed it. An id, never a display name."
+    )
+    status: RunStatus = Field(
+        description="How the fork's own run reads — what the stand-in row of a branch that "
+        "minted nothing shows in place of a level."
+    )
+    cut_from: str | None = Field(
+        description="The timeline label of the attempt this fork was cut from — its first parent, "
+        "as the course it sits on numbers it. Null where that parent is not on this timeline."
+    )
+
+
+RankMove = Literal["up", "down", "unchanged"]
+
+
+class LensShift(StrictModel):
+    """What the request's lens did to one course's sibling ordering, over the arms on its timeline."""
+
+    model_config = ConfigDict(frozen=True)
+
+    top_composite: str | None = Field(
+        description="The timeline label of the arm ranked first by composite; null where that "
+        "arm is on the retired side of a supersede cut."
+    )
+    top_lens: str | None = Field(description="The same, ranked by `lens_value`.")
+    top_changed: bool = Field(description="The lens ranks another arm first.")
+    moved_up: int
+    moved_down: int
+    unchanged: int
+
+
+class MainLineStep(StrictModel):
+    """One round on the main line to an arm."""
+
+    model_config = ConfigDict(frozen=True)
+
+    round: int
+    rows: list[int] = Field(
+        description="The arms the round's election crowned, each by its `row`; at the head's "
+        "round, the head. Empty: the election crowned nobody."
+    )
+
+
+class _Node(StrictModel):
+    model_config = ConfigDict(frozen=True)
+
     id: str = Field(
         description="Course: the cycle_id. Candidate: the searchpoint id minted at L1/origin."
     )
@@ -95,182 +159,56 @@ class LineageNode(StrictModel):
         "free index of its round, by mint time — UNLESS the cut superseded, where it keeps "
         "its own label because it replaced that position rather than joining it, and the "
         "candidate it replaced carries `superseded_by`. So one label can appear twice in a "
-        "round: at most once LIVE, the other retired.",
-    )
-    course_label: str = Field(
-        description="This candidate's label in the course that MINTED it. Equal to `label` "
-        "for a candidate this course minted itself; a fork-contributed attempt keeps the "
-        "fork's private `C{round}.{n}` here while `label` carries its renumbered position "
-        "on this course's timeline. JOIN ON THIS, never on `candidate_id`, when matching a "
-        "node against a per-cycle projection: `dashboard.json` is per-cycle and speaks the "
-        "minting course's private counter, while `candidate_id` is re-minted per run (see "
-        "`_round_facts`), so an id join silently misses.",
+        "round: at most once LIVE, the other retired. A course's is its cycle_id.",
     )
     path: list[CycleHop] = Field(
         default_factory=list,
         description="THE address, root → leaf: the course this node belongs to. A candidate "
         "a fork contributed carries the FORK's path, so selecting it re-roots onto that fork.",
     )
-    children: list[LineageNode] = Field(default_factory=list)
-    origin_id: str = Field(
-        default="",
-        description="The `id` of the origin candidate — C0 — of the timeline this node is on. A "
+    origin_row: int | None = Field(
+        default=None,
+        description="The `row` of the origin arm — C0 — of the timeline this node is on. A "
         "course names its own; a candidate names its course's, and an attempt a fork contributed "
         "names the origin of the timeline it was folded onto, never the fork's replayed C0. An "
-        "inner course starts its own timeline, so its candidates name ITS C0. Empty on a course "
+        "inner course starts its own timeline, so its candidates name ITS C0. Where a repair "
+        "left the origin's individual on two rows, the one still on a line. Null on a course "
         "that has minted nothing.",
     )
+    elects_on: DisplayMetric | None = Field(
+        default=None,
+        description="The column the selector elects on. Candidate: the declaration its round's "
+        "election carried (`RoundResult.elects_on`), null on a round that never elected. Course: "
+        "the declaration its own elections carried. `ability`: the rounds are won on theta, not "
+        "on accuracy.",
+    )
 
-    # -- candidate scalars ----------------------------------------------------
-    round: int | None = Field(default=None, description="Column hint. Candidates only.")
-    sp_hash: str = Field(
-        default="",
-        description="THE address of this candidate's measurements — the searchpoint id the "
-        "archive stores on every row it wrote, under its own spelling `prompt_fields_id`. "
-        "Neither `id` (the individual's lineage id) nor `label` joins to a row; this does. Served "
-        "rather than derived: it hashes the node configs INCLUDING the rendered prompt, which "
-        "no served field carries, so a client recomputing it would match nothing and see no "
-        "error. Empty on a course and on a candidate that measured nothing. NOT unique — one "
-        "searchpoint scored on two subsets is one `sp_hash` over two runs, and a re-proposed "
-        "configuration shares it across rounds.",
+
+class ArmNode(_Node):
+    """One arm on a course's timeline; everything measured or decided about it is its `reading`."""
+
+    kind: Literal["candidate"] = "candidate"
+    row: int = Field(
+        description="THE key of this row in this response: unique tree-wide, where `id` is not — "
+        "a supersede cut leaves one individual on two rows, and a later round can read it again. "
+        "Every pointer the tree serves at an arm (`origin_row`, `main_line`) names one. Minted "
+        "per build, so it addresses nothing across two responses."
     )
-    accuracy: float | None = None
-    composite_fitness: float | None = None
-    changes_description: str = Field(
-        default="",
-        description="What the optimizer says this candidate changed against its parent, as it "
-        "worded it at mint. Empty on a course.",
+    variations: list[Variation] = Field(
+        default_factory=list,
+        description="The variation nodes that wrote this arm's individual, in the order they "
+        "ran: each `{manifest}:{node}`, whether it computed its result or asked a model, and the "
+        "loci it left different. Empty on an origin, and on the stand-in row of a branch.",
     )
-    status: CandidateState | None = Field(
-        default=None,
-        description="Candidate: minted | measured | invalid — never 'winner' (that rides "
-        "`is_selected`). `invalid` was rejected before it cost a sample, so it carries no "
-        "accuracy: its stored 0.0 is synthetic and reads as getting every answer wrong. "
-        "Null on a course, whose ending is `stop_reason`.",
+    children: list[CourseNode] = Field(
+        default_factory=list, description="The runs that measured this arm's individual."
     )
-    election_held: bool = Field(
-        default=False,
-        description="This candidate's ROUND has held its election. The complement `is_selected` "
-        "cannot supply: a round that HELD crowned nobody, so every bar in it reads "
-        "`is_selected: false` exactly as a round still scoring does — and only this says whether "
-        "an uncrowned bar lost or has not been judged yet. False on a course, which is not a "
-        "round, and on a round halted before it stood (a holed panel).",
-    )
-    is_selected: bool = Field(
-        default=False,
-        description="Elected this round. Stamped at the ELECTION, which is the last thing "
-        "scoring does — so it lands before the round's adapters run and the round closes, and a "
-        "round still running its optimizer calls already reports its winner. False where no "
-        "election has been held (still scoring, or halted on a holed panel) and on a round that "
-        "held: those two are told apart by the election record, not by this flag.",
-    )
-    crown: Crown | None = Field(
-        default=None,
-        description="How a selected candidate came to advance: `elected` over at least one other "
-        "electable arm, or `uncontested` as the only one its round could choose — the origin's "
-        "round always, and a round whose other arms were all eliminated or invalid. Read off the "
-        "electable count the round's CLOSE banks, so it lands one step after `is_selected`: null "
-        "on a selected candidate whose round has not closed yet, and on every candidate that is "
-        "not selected.",
-    )
-    theta: float | None = Field(
-        default=None,
-        description="Difficulty-adjusted Rasch ability the election ranked on — what explains "
-        "a lower-accuracy winner. Null outside the round's election fit.",
-    )
-    theta_se: float | None = None
-    theta_caveat: ThetaCaveat | None = Field(
-        default=None,
-        description="Why the theta above is not this arm's ability: a `ThetaCaveat` of the ARM's "
-        "own scope. The round's scale states ride the round's own reading.",
-    )
-    stamps_theta: bool = Field(
-        default=False,
-        description="Whether the optimizer fits theta per arm at all. Candidate: the declaration "
-        "its round's election carried (`RoundResult.stamps_theta`), false on a round that never "
-        "elected. Course: the declaration its own elections carried, so a course says whether "
-        "its rounds are won on theta. False: theta is not a column here, so a surface hides it "
-        "rather than drawing a cold ruler's blank.",
-    )
-    mean_fitness_ci_lo: float | None = None
-    mean_fitness_ci_hi: float | None = None
-    reference_lift: float | None = Field(
-        default=None,
-        description="The candidate's blocked lift over the floor it was JUDGED against — the "
-        "origin restricted to the cells this candidate actually measured — with its 95% "
-        "interval. The election's own verdict, and the only comparable answer to 'by how "
-        "much': under `per_round_resubset` a bare difference of two accuracies is the "
-        "luckiest draw minus the fullest one. An interval spanning 0 means the round could "
-        "not separate this candidate from its parent. `None` below two shared cells, outside "
-        "the election fit, and on any round that has not elected yet.",
-    )
-    reference_lift_ci_lo: float | None = None
-    reference_lift_ci_hi: float | None = None
-    reference_lift_side: LiftSide | None = Field(
-        default=None,
-        description="Which side of 0 that interval sits on: `above`, `below`, or `spans` where "
-        "the round could not separate this candidate from its parent. Null where it carries no "
-        "interval. Served so no surface reads the sign of the bounds for itself.",
-    )
-    scored_samples: int | None = None
-    expected_samples: int | None = None
-    panel_cut: bool = Field(
-        default=False,
-        description="This candidate stopped short of its round's panel: under its own "
-        "`expected_samples`, or under the fullest panel a candidate of its round reached on this "
-        "timeline — an eliminator's cut. The retired side of a supersede cut is judged among "
-        "itself. False on a course and on a candidate that measured nothing.",
-    )
-    cached_samples: int | None = Field(
-        default=None,
-        description="Of `scored_samples`, how many were replayed from the MeasurementArchive "
-        "rather than measured. `None` on a course and on any candidate never measured.",
-    )
-    lens_value: float | None = Field(
-        default=None,
-        description="This candidate's composite fitness under the request's `score:` lens — its "
-        "rows re-graded per cell under that `per_cell` formula and folded, the number a fresh "
-        "run under it reports. Null without a lens, or where no row carries a verdict under it.",
-    )
-    lens_criterion: str | None = Field(
-        default=None,
-        description="On a course: the `per_cell` formula its record was read under for the "
-        "request's lens — a `dials:` lens realized against this campaign's anchors, a `score:` "
-        "one as given. What a fork applying the lens carries as `scoring.per_cell`. Null without "
-        "one.",
-    )
-    composite_rank: int | None = Field(
-        default=None,
-        description="1-based position by `composite_fitness` descending among THIS node's "
-        "siblings — the bars one chart draws. Null where the value is. An ordering is a "
-        "score, so it is served rather than sorted client-side; the rank-shift read-out "
-        "against `lens_rank` is then a comparison of two served numbers.",
-    )
-    lens_rank: int | None = Field(
-        default=None,
-        description="The same sibling ordering under `lens_value`. Null without a lens. Read "
-        "against `composite_rank` to see which candidates the alternative formula moves.",
-    )
-    sample_set_accuracy: float | None = Field(
-        default=None,
-        description="Scorer-faithful accuracy over the request's `samples=` subset. Null "
-        "without a `samples=` mask, or when this candidate never ran any selected sample.",
-    )
-    sample_set_n: int | None = Field(
-        default=None,
-        description="How many of the `samples=` subset this candidate carries a SCOREABLE verdict "
-        "for — the denominator `sample_set_accuracy` is the mean over. Below the subset size, the "
-        "candidate sat a different exam from one that answered all of it.",
-    )
-    divergence: LineageDivergence | None = Field(
-        default=None,
-        description="Set when the request's lens would have FORKED the record at this node. "
-        "Only ever set on a closed round's node.",
-    )
-    divergent: bool = Field(
-        default=False,
-        description="This node is inside the counterfactual subtree below a divergence — the "
-        "client dims it.",
+    reading: ArmReading = Field(
+        description="`reading.arm` is the arm in the course that MINTED it — the key every "
+        "per-cycle document of that course speaks — while `label` above is its position on this "
+        "timeline; the two differ only on an attempt a fork contributed and the fold renumbered. "
+        "`reading.sp_hash` joins to the archive rows. On the retired side of a supersede cut the "
+        "election wears no crown: the branch re-asks it."
     )
     superseded_by: str | None = Field(
         default=None,
@@ -282,95 +220,166 @@ class LineageNode(StrictModel):
         "retired attempt and a live one as peers of one round, which is the whole reason a "
         "cut records its direction.",
     )
+    fork: ForkStamp | None = Field(
+        default=None,
+        description="Set on an attempt a fork contributed here; null on a course's own "
+        "candidates and on a branch the run moved to, whose attempts ARE the line.",
+    )
+    verdict: ArmVerdict = Field(
+        default="awaiting",
+        description="Where this arm stands on its timeline, as one closed value "
+        "(`domain/results.py::arm_verdict`); its words are `ARM_VERDICT_LABELS`. Stamped over the "
+        "finished tree, like the heads below.",
+    )
+    stands: bool = Field(
+        default=False,
+        description="The newest crowned arm still on this timeline — the parent the next round "
+        "mutates from. At most one child of a course.",
+    )
+    course_winner: bool = Field(
+        default=False,
+        description="The last arm an election crowned among those sharing this node's `path` — "
+        "a course's, or a fork's, which has no node of its own to say it.",
+    )
+    course_latest: bool = Field(
+        default=False,
+        description="The newest arm minted at this node's `path`, crowned or not.",
+    )
+    answers_for_id: bool = Field(
+        default=False,
+        description="The ONE row tree-wide that answers for its `id` — what a remembered "
+        "candidate id (a selection, a deep link) resolves to: the row still on a line where a "
+        "supersede cut left the individual on two, the first where several stand.",
+    )
+    main_line: list[MainLineStep] = Field(
+        default_factory=list,
+        description="The main line to THIS arm at its own address, origin first: each elected "
+        "round before it with the arms it crowned, then this arm at its own round, then any "
+        "later round that crowned nobody up to the next crown. Read off crowns, never "
+        "`parent_ids`: a parent edge names an individual, not the arm that was crowned.",
+    )
+    lens_value: float | None = Field(
+        default=None,
+        description="This candidate's composite fitness under the request's `score:` lens — its "
+        "rows re-graded per cell under that `per_cell` formula and folded, the number a fresh "
+        "run under it reports. Null without a lens, or where no row carries a verdict under it.",
+    )
+    lens_rank_move: RankMove | None = Field(
+        default=None,
+        description="Which way the lens moved this arm among its siblings — the bars one chart "
+        "draws: its 1-based position by `lens_value` descending against its position by the "
+        "reading's composite. An ordering is a score, so the move is served rather than sorted "
+        "client-side. Null without a lens, or where either value is.",
+    )
+    sample_set_accuracy: float | None = Field(
+        default=None,
+        description="Scorer-faithful accuracy over the request's `samples=` subset, served only "
+        "where this candidate carries a scoreable verdict for ALL of it — a rate over part of the "
+        "subset sat a different exam, and these are read side by side. Null without a `samples=` "
+        "mask, and short of the subset.",
+    )
+    sample_set_n: int | None = Field(
+        default=None,
+        description="How many of the `samples=` subset this candidate carries a SCOREABLE verdict "
+        "for. The denominator of `sample_set_accuracy` where that is served; below the subset "
+        "size, how far short of it the candidate is.",
+    )
+    divergence: LineageDivergence | None = Field(
+        default=None,
+        description="Set when the request's lens would have FORKED the record at this node. "
+        "Only ever set on a closed round's node.",
+    )
+    divergent: bool = Field(
+        default=False,
+        description="This node is inside the counterfactual subtree below a divergence — the "
+        "client dims it.",
+    )
 
-    # -- course scalars -------------------------------------------------------
-    # Also set on a FORK-candidate: a fork is served as a candidate (it IS the attempt), and
-    # these carry the provenance a surface marks it by — ⑂, who steered it, what stopped it.
-    course_kind: CourseKind | None = Field(
-        default=None,
-        description="Courses, and the candidates a fork contributed here — on those it is "
-        "the ⑂ stamp marking an attempt the operator cut.",
+    @property
+    def round(self) -> int:
+        return self.reading.arm.round
+
+
+class CourseNode(_Node):
+    """One run, whose children are the arms on its ONE timeline, forks folded in."""
+
+    kind: Literal["course"] = "course"
+    children: list[ArmNode] = Field(default_factory=list)
+    course_kind: CourseKind
+    run_phase: RunPhase = Field(
+        description="The ONE server-owned run-state (`derive_run_state`), the same value "
+        "`/cycles` serves."
     )
-    run_phase: RunPhase | None = Field(
-        default=None,
-        description="Courses only — the ONE server-owned run-state (`derive_run_phase`), the "
-        "same value `/cycles` serves. Null on a candidate, which has no run of its own.",
+    status: RunStatus = Field(
+        description="How the course reads on a row — its phase and why it ended as one word and "
+        "one mark, as `/cycles` serves it."
     )
-    stop_reason: StopReason | None = Field(
-        default=None,
-        description="Courses only — why the cycle ended (`index.json::stop_reason`), the same "
-        "value `/cycles` serves. Null while it has not ended, and on a candidate.",
-    )
-    dataset_name: str = ""
-    trigger: str = Field(default="", description="Fork trigger; empty for roots and inner runs.")
+    dataset_name: str
+    trigger: str = Field(description="Fork trigger; empty for roots and inner runs.")
     fork_direction: ForkDirection | None = Field(
-        default=None,
         description="Which side of this cut the run CONTINUES on, derived from `trigger` "
         "(`FORK_DIRECTION`). `offshoot` = this branch hangs off a line that keeps running; "
         "`supersede` = this branch IS the line and the PARENT is what was left behind. Null "
         "for roots and inner runs, which were not cut from anything. Served, never derived "
         "in the client — the two read identically on disk and only this says them apart.",
     )
-    steered_by: str | None = Field(
-        default=None,
-        description="Who cut this fork, as its fork record names them: an account or delegate "
-        "id, `system`, or the layer and round that proposed it. An id, never a display name.",
-    )
+    steered_by: str | None = Field(description="As `ForkStamp.steered_by`.")
     task: str | None = Field(
-        default=None,
         description="An inner run's benchmark task. Load-bearing: every task runs for every "
         "candidate, so the candidate edge alone does not identify an inner run.",
     )
-    best_accuracy: float | None = None
-    origin_accuracy: float | None = Field(
-        default=None,
-        description="This course's round-0 score. A course that has only run its origin has "
-        "this and no `best_accuracy`, so reading only `best` blanks its bar.",
-    )
-    headline_accuracy: float | None = Field(
-        default=None,
-        description="Courses only — the one accuracy a course is drawn at: its `best_accuracy`, "
-        "or its `origin_accuracy` while it has only run its origin. Null on a course that "
-        "measured nothing, and on a candidate.",
-    )
     run_standing: RunStanding | None = Field(
-        default=None,
-        description="Courses only — the optimizer's standing as the course's last closed round "
-        "left it, read off the course's own ledger. Null before round 0 closes.",
+        description="Where the run stands as the course's newest standing round left it, over "
+        "its whole history: its selection, that selection against the origin on the origin "
+        "panel, and what it has cost. A course whose line moved to a branch serves the "
+        "branch's. Null before round 0 closes.",
     )
+    lens_criterion: str | None = Field(
+        default=None,
+        description="The `per_cell` formula this course's record was read under for the "
+        "request's lens — a `dials:` lens realized against this campaign's anchors, a `score:` "
+        "one as given. What a fork applying the lens carries as `scoring.per_cell`. Null without "
+        "one.",
+    )
+    lens_shift: LensShift | None = Field(
+        default=None,
+        description="How the request's lens reorders this course's arms. Null without a lens, "
+        "and where it ranked none of them.",
+    )
+
+
+LineageNode = Annotated[CourseNode | ArmNode, Field(discriminator="kind")]
+
+ArmNode.model_rebuild()
+CourseNode.model_rebuild()
 
 
 class FamilyCourse(NamedTuple):
-    """A course in the family and how to reach it — the recursion's unit of work. Public because
-    ``family_ray_queries.py`` walks the same family, and a second walk is a second answer."""
-
     store: Stores
     path: CyclePath
-    # NOT `index` — a NamedTuple field by that name shadows `tuple.index`.
-    manifest: dict[str, object]
-    # A sandbox root vs a fork/diag: only a fork contributes attempts to this timeline.
+    # Not `index`: a NamedTuple field by that name shadows `tuple.index`.
+    manifest: CycleIndex | None
     inner: bool
-    # Hops off the family root, stamped by `iter_family_courses`; a fork costs no depth.
     depth: int = 0
 
     @property
     def created_at(self) -> str:
-        """When the course was minted — the campaign timeline's ordering key."""
-        value = self.manifest.get("created_at")
-        return value if isinstance(value, str) else ""
+        return "" if self.manifest is None else self.manifest.created_at
 
 
 class _Reads:
-    """Every store this tree touches, read ONCE (``enumerate_cycles`` answers a WHOLE store).
-    Per-build and thrown away: a memo outliving the request serves a round that has closed."""
+    """Per-build and thrown away: a memo outliving the request serves a round that has closed."""
 
-    def __init__(self) -> None:
+    def __init__(self, moment: Moment | None = None) -> None:
+        self.moment = moment
         self._cycles: dict[Path, list[CycleListEntry]] = {}
         self._campaigns: dict[tuple[Path, str], Campaign | None] = {}
-        # Dirs visited this build, keyed on the FULL identity — a cycle_id alone is not one
-        # (it is a content hash, so campaigns and inner cells repeat it). Terminates both
-        # walkers against a `parent_cycle_id` that points back up the chain.
+        # Keyed on the full identity: a cycle_id is a content hash, so campaigns and inner cells repeat it.
         self.seen: set[tuple[Path, str, str]] = set()
+        self._rows = itertools.count(1)
+
+    def row(self) -> int:
+        return next(self._rows)
 
     def cycles(self, stores: Stores) -> list[CycleListEntry]:
         if (key := stores.base_dir) not in self._cycles:
@@ -384,184 +393,118 @@ class _Reads:
 
 
 def _layout(stores: Stores, hop: CycleHop) -> CycleLayout:
-    """This hop's cycle paths — ``CycleLayout`` owns every filename in the dir."""
     return CycleLayout(cycle_dir_for(stores.base_dir, hop))
 
 
-def _read_index(stores: Stores, hop: CycleHop) -> dict[str, object]:
-    index = read_json_tolerant(_layout(stores, hop).manifest)
-    return index if isinstance(index, dict) else {}
+def _read_index(stores: Stores, hop: CycleHop, moment: Moment | None = None) -> CycleIndex | None:
+    return read_cycle_index(_layout(stores, hop).cycle_dir, moment)
 
 
-def _block(index: dict[str, object], key: str) -> dict[str, object]:
-    block = index.get(key)
-    return block if isinstance(block, dict) else {}
-
-
-def _float_or_none(value: object) -> float | None:
-    return float(value) if isinstance(value, int | float) else None
-
-
-def _str_or_none(value: object) -> str | None:
-    return value if isinstance(value, str) and value else None
-
-
-def _course_edge(index: dict[str, object]) -> tuple[str | None, str | None]:
-    """``(candidate_id, candidate_label)`` this course hangs off — the ONE resolver. The label is a
-    full-strength fallback; both null = a campaign root or a rebase fork, attached to the origin."""
-    fork = _block(index, "fork")
-    if cid := _str_or_none(fork.get("from_candidate_id")):
-        return cid, None
-    spawned = _block(index, "spawned_by")
-    if spawned:
-        return _str_or_none(spawned.get("candidate_id")), _str_or_none(
-            spawned.get("candidate_label")
-        )
+def _course_edge(index: CycleIndex | None) -> tuple[str | None, str | None]:
+    """Both null = a campaign root or a rebase fork, attached to the origin."""
+    if index is None:
+        return None, None
+    if index.fork is not None and index.fork.from_candidate_id:
+        return index.fork.from_candidate_id, None
+    if (spawned := index.spawned_by) is not None:
+        return spawned.candidate_id or None, spawned.candidate_label or None
     return None, None
 
 
-def _fork_direction(fork: Mapping[str, Any]) -> ForkDirection | None:
-    """A cut's direction: the MEASURED one it recorded, else the one its trigger implies. An
-    unrecognised trigger returns ``None`` — drawing a supersession as an offshoot is the lie."""
-    measured = fork.get("direction")
-    if isinstance(measured, str):
-        try:
-            return ForkDirection(measured)
-        except ValueError:
-            return None
-    trigger = fork.get("trigger")
-    if not isinstance(trigger, str) or not trigger:
-        return None
-    try:
-        return FORK_DIRECTION[ForkTrigger(trigger)]
-    except (ValueError, KeyError):
-        return None
+_NO_ELECTION = ArmElection(held=False, selected=False, leading=False, crown=None)
 
 
 class _RoundFacts(NamedTuple):
-    """What a candidate learns from its ROUND, folded from the two records that hold it.
-
-    The ELECTION carries everything it stamps at the end of scoring — the crown, θ, and the
-    matched-parent floor the arm was judged against. The CLOSE carries the frontier, and RE-READS
-    θ, which is how a warm ruler's restamp reaches round 0; where it answers, it wins. Neither
-    implies the other — a round elects before its adapters run and it closes.
-
-    The whisker is in neither: it is the candidate's own, and a round-scoped copy would draw two
-    quantities as one band."""
-
-    election_held: bool = False
-    is_selected: bool = False
-    crown: Crown | None = None
-    stamps_theta: bool = False
-    theta: float | None = None
-    theta_se: float | None = None
-    theta_caveat: ThetaCaveat | None = None
-    reference_lift: float | None = None
-    reference_lift_ci_lo: float | None = None
-    reference_lift_ci_hi: float | None = None
+    election: ArmElection = _NO_ELECTION
+    elects_on: DisplayMetric | None = None
+    ability: ArmAbility | None = None
+    vs_reference: PairedReading | None = None
 
 
 def _round_facts(
-    ledger_path: Path, candidates: list[LedgerCandidate], elections: Mapping[int, ElectionRecord]
+    standing: StandingRounds, candidates: list[LedgerCandidate]
 ) -> dict[str, _RoundFacts]:
-    """``candidate_id -> _RoundFacts``, folded from the cycle's OWN ledger — the whole fold, so the
-    tree is never a projection of another projection. **The join stays on ``label``**:
-    ``candidate_id`` is a fresh uuid per construction, and a resume re-mints it. The lift rides
-    ``ElectionRecord``, at the moment it is stamped."""
-    closes = scan_ledger_round_closes(ledger_path)
-    electable = scan_ledger_electable_counts(ledger_path)
+    """The join stays on `label`: `candidate_id` names an individual a later round can read again."""
     out: dict[str, _RoundFacts] = {}
     for cand in candidates:
-        election = elections.get(cand.round)
-        close = closes.get(cand.round)
+        election = standing.elections.get(cand.round)
+        held = standing.rounds.get(cand.round)
+        close = None if held is None else held.close
         if election is None and close is None:
             continue
-        # A HELD round adopted the parent, which is not among these — so nobody is crowned.
-        won = election is not None and cand.label in election.selected_labels
         fit = (election.fit.get(cand.label) if election is not None else None) or LedgerFit()
-        # The close WINS where it answers: it re-reads θ on every close, which is the channel
-        # round 0's warm-ruler restamp arrives on. Everywhere else the two agree — same
-        # `candidate_scores`, read twice — so the election's copy is simply the earlier one.
-        ability = (close.abilities.get(cand.label) if close is not None else None) or LedgerAbility(
-            theta=fit.theta, theta_se=fit.theta_se, theta_caveat=fit.theta_caveat
+        row = (
+            None
+            if close is None
+            else next((cs for cs in close.candidate_scores if cs.label == cand.label), None)
         )
-        # The count is the round's, banked at its close: one arm to choose is no contest.
-        arms = electable.get(cand.round)
-        crown: Crown | None = None
-        if won and arms is not None:
-            crown = "elected" if arms > 1 else "uncontested"
+        ability = (
+            fit
+            if row is None or (row.theta, row.theta_se, row.theta_caveat) == (None, None, None)
+            else row
+        )
         out[cand.candidate_id] = _RoundFacts(
-            election_held=election is not None,
-            is_selected=won,
-            crown=crown,
-            stamps_theta=election is not None and election.stamps_theta,
-            theta=ability.theta,
-            theta_se=ability.theta_se,
-            theta_caveat=ability.theta_caveat,
-            reference_lift=fit.reference_lift,
-            reference_lift_ci_lo=fit.reference_lift_ci_lo,
-            reference_lift_ci_hi=fit.reference_lift_ci_hi,
+            election=ArmElection.of(
+                cand.label,
+                held=election is not None,
+                selected=() if election is None else election.selected_labels,
+                leading=None if close is None else close.leading_label,
+                electable=None if close is None else close.electable_count,
+            ),
+            elects_on=None if election is None else election.elects_on,
+            ability=ArmAbility.of(ability.theta, ability.theta_se, ability.theta_caveat),
+            vs_reference=fit.vs_reference,
         )
     return out
 
 
 class _CourseScalars(TypedDict):
     course_kind: CourseKind
-    stop_reason: StopReason | None
-    run_phase: RunPhase | None
+    run_phase: RunPhase
+    status: RunStatus
     trigger: str
     fork_direction: ForkDirection | None
     steered_by: str | None
     task: str | None
     dataset_name: str
-    best_accuracy: float | None
-    origin_accuracy: float | None
     run_standing: RunStanding | None
-    stamps_theta: bool
+    elects_on: DisplayMetric | None
 
 
 def _course_scalars(
     stores: Stores,
     hop: CycleHop,
-    index: dict[str, object],
+    index: CycleIndex | None,
     reads: _Reads,
     elections: Mapping[int, ElectionRecord],
 ) -> _CourseScalars:
-    """The course's own facts: topology from ``index.json``, its standing and its declaration off
-    its own ledger — which a finished course keeps as a live one does."""
     layout = _layout(stores, hop)
 
-    fork, spawned = _block(index, "fork"), _block(index, "spawned_by")
-    best = index.get("best_accuracy")
+    fork = None if index is None else index.fork
+    spawned = None if index is None else index.spawned_by
     campaign = reads.campaign(stores, hop.campaign_id)
 
-    # INNER by where it LIVES, not by saying so: a rebase pair in the sandbox has no
-    # `spawned_by`, and calling it "root" puts two roots in one tree.
+    # Inner by where it lives: a rebase pair in the sandbox has no `spawned_by`, and "root" puts two roots in one tree.
     kind: CourseKind = sibling_kind(hop.cycle_id)
-    if kind == "root" and (spawned or ".inner" in stores.projects_root.parts):
+    if kind == "root" and (spawned or in_inner_sandbox(stores.projects_root)):
         kind = "inner"
 
+    run = derive_run_state(layout.cycle_dir)
     return {
         "course_kind": kind,
-        "stop_reason": cycle_ending(index),
-        # The ONE run-phase derivation, the same call `/cycles` makes.
-        "run_phase": derive_run_phase(layout.cycle_dir, is_terminal=bool(index.get("finished_at"))),
-        "trigger": str(fork.get("trigger") or ""),
-        "fork_direction": _fork_direction(fork),
-        "steered_by": _str_or_none(fork.get("issued_by")),
-        "task": _str_or_none(spawned.get("task")),
+        "run_phase": run.run_phase,
+        "status": RunStatus.of(run.run_phase, None if index is None else index.stop_reason),
+        "trigger": "" if fork is None else fork.trigger.value,
+        "fork_direction": None if fork is None else fork.resolved_direction,
+        "steered_by": None if fork is None else fork.issued_by or None,
+        "task": None if spawned is None else spawned.task or None,
         "dataset_name": campaign.dataset_name if campaign else "",
-        "best_accuracy": float(best) if isinstance(best, int | float) else None,
-        # The SAME derivation `/cycles` uses — no stored copy to drift from.
-        "origin_accuracy": origin_accuracy_of(index),
-        "run_standing": scan_ledger_run_standing(layout.ledger),
-        "stamps_theta": any(e.stamps_theta for e in elections.values()),
+        "run_standing": None if index is None else index.standing,
+        "elects_on": next((e.elects_on for e in elections.values()), None),
     }
 
 
 def _child_courses(stores: Stores, path: CyclePath, reads: _Reads) -> list[FamilyCourse]:
-    """Every course hanging off *path* — forks AND inner runs in one list, so callers never branch.
-    Sandbox ROOTS only, matched on the full ``(campaign_id, cycle_id)``: a bare id reaches out."""
     leaf = path[-1]
     reads.seen.add((stores.base_dir, leaf.campaign_id, leaf.cycle_id))
     out: list[FamilyCourse] = []
@@ -578,7 +521,7 @@ def _child_courses(stores: Stores, path: CyclePath, reads: _Reads) -> list[Famil
             FamilyCourse(
                 store=stores,
                 path=(*path[:-1], hop),
-                manifest=_read_index(stores, hop),
+                manifest=_read_index(stores, hop, reads.moment),
                 inner=False,
             )
         )
@@ -596,16 +539,14 @@ def _child_courses(stores: Stores, path: CyclePath, reads: _Reads) -> list[Famil
                 FamilyCourse(
                     store=sandbox,
                     path=(*path, hop),
-                    manifest=_read_index(sandbox, hop),
+                    manifest=_read_index(sandbox, hop, reads.moment),
                     inner=True,
                 )
             )
-    return out
+    return out if reads.moment is None else [c for c in out if c.manifest is not None]
 
 
 def iter_family_courses(stores: Stores, path: CyclePath) -> list[FamilyCourse]:
-    """The whole family rooted at *path* — the FLAT view of what :func:`_build` walks recursively,
-    same helpers. Order is stable so the time-ray's ETag holds across identical requests."""
     reads = _Reads()
     root_store, _ = resolve_cycle_path(stores, path)
     root = FamilyCourse(
@@ -624,6 +565,7 @@ def iter_family_courses(stores: Stores, path: CyclePath) -> list[FamilyCourse]:
                 if depth > _MAX_COURSE_DEPTH:
                     continue
                 level.append(child._replace(depth=depth))
+        # Stable order: the time-ray's ETag must hold across identical requests.
         level.sort(key=lambda c: (c.created_at, c.path[-1].campaign_id, c.path[-1].cycle_id))
         out.extend(level)
         frontier = level
@@ -631,8 +573,6 @@ def iter_family_courses(stores: Stores, path: CyclePath) -> list[FamilyCourse]:
 
 
 def _parent_candidate_of(course: FamilyCourse, candidates: list[LedgerCandidate]) -> str:
-    """The candidate this course descends from: id, then label, then the origin. The label join is
-    scoped to THIS course's candidates, so it is a minted key rather than a guess."""
     by_label = {c.label: c.candidate_id for c in candidates}
     known = {c.candidate_id for c in candidates}
     origin = candidates[0].candidate_id if candidates else ""
@@ -653,87 +593,91 @@ def _bucket_by_parent(
 def _retired_by(
     fork: FamilyCourse, candidates: list[LedgerCandidate], reach: int | None
 ) -> dict[str, str]:
-    """``candidate_id -> the branch that replaced it``, for the tail a SUPERSEDE cut retired.
-    Bounded by BOTH the cut and *reach* — retirement is a replacement, not a position."""
-    spec = _block(fork.manifest, "fork")
-    if _fork_direction(spec) is not ForkDirection.SUPERSEDE or reach is None:
+    spec = None if fork.manifest is None else fork.manifest.fork
+    if spec is None or spec.resolved_direction is not ForkDirection.SUPERSEDE or reach is None:
         return {}
-    edge = _str_or_none(spec.get("from_candidate_id"))
+    edge = spec.from_candidate_id
     cut = next((i + 1 for i, c in enumerate(candidates) if c.candidate_id == edge), None)
     if cut is None:
-        cut_round = spec.get("from_round")
-        if not isinstance(cut_round, int) or isinstance(cut_round, bool):
+        cut_round = spec.from_round
+        if cut_round is None:
             return {}
         cut = next((i for i, c in enumerate(candidates) if c.round >= cut_round), len(candidates))
     branch = fork.path[-1].cycle_id
     return {c.candidate_id: branch for c in candidates[cut:] if c.round <= reach}
 
 
-def _is_replay(node: LineageNode) -> bool:
-    """A ``C0`` that descends from a candidate IS that candidate re-run, so it merges into what it
-    replays. Structural, not a convention: only a fork's origin has a parent, because it borrows."""
+def _is_replay(node: ArmNode) -> bool:
     return node.label == "C0" and bool(node.parent_ids)
 
 
-def _empty_attempt(course: LineageNode, *, cut_from: str, round_: int) -> LineageNode:
-    """A fork that put no candidate on the timeline still holds its row. ``accuracy`` is None
-    on purpose: its ``best_accuracy`` is seeded from the PARENT."""
-    return course.model_copy(
-        update={
-            "kind": "candidate",
-            "parent_ids": [cut_from],
-            "round": round_,
-            "accuracy": None,
-            "headline_accuracy": None,
-            "stamps_theta": False,
-            "children": [],
-        }
+def _stamp(course: CourseNode) -> ForkStamp:
+    return ForkStamp(
+        kind=course.course_kind,
+        trigger=course.trigger,
+        direction=course.fork_direction,
+        steered_by=course.steered_by,
+        status=course.status,
+        cut_from=None,
+    )
+
+
+def _empty_attempt(course: CourseNode, *, cut_from: str, round_: int, row: int) -> ArmNode:
+    return ArmNode(
+        id=course.id,
+        row=row,
+        parent_ids=[cut_from],
+        label=course.label,
+        path=course.path,
+        reading=ArmReading.walking(
+            ArmPointer(round=round_, label=course.label, candidate_id=""),
+            fold=None,
+            scored=None,
+            expected=None,
+            cached=None,
+            cut=False,
+            election=_NO_ELECTION,
+        ),
+        fork=_stamp(course),
     )
 
 
 class _Contribution(NamedTuple):
-    """What a fork puts on its parent's timeline, and what it hands back to the candidate it
-    was cut from."""
-
-    attempts: list[LineageNode]  # never empty — a fork with none gets `_empty_attempt`
-    replayed_runs: list[LineageNode]  # they measured the candidate the fork's C0 replays
-    supersedes: bool  # retired what it replaced → `superseded_by` + the label rule
-    takes_the_line: bool  # the RUN moved here (all but offshoot) → delegation + the ⑂ strip
-    reach: int | None  # last round this fork minted for; bounds the retirement
-    course: LineageNode  # held, not re-derived — `_build` reads the campaign's liveness off it
+    attempts: list[ArmNode]
+    replayed_runs: list[CourseNode]
+    supersedes: bool
+    takes_the_line: bool
+    reach: int | None
+    course: CourseNode
 
 
 def _contributions(
     fork: FamilyCourse, *, cut_from: str, cut_round: int, depth: int, reads: _Reads
 ) -> _Contribution:
-    """A fork, resolved onto the timeline of the course it was cut in. ``depth`` passes straight
-    through — a fork is not a course node, so its candidates sit at this course's depth."""
+    # `depth` passes unchanged: a fork is not a course node, so its candidates sit at this course's depth.
     course = _build(fork.store, fork.path, depth=depth, reads=reads)
     replays = [c for c in course.children if _is_replay(c)]
     replay_ids = {c.id for c in replays}
 
-    attempts: list[LineageNode] = []
+    attempts: list[ArmNode] = []
     for cand in course.children:
         if _is_replay(cand):
             continue
         attempts.append(
             cand.model_copy(
                 update={
-                    # The replay is gone, so an attempt off it would dangle.
                     "parent_ids": [cut_from if p in replay_ids else p for p in cand.parent_ids],
-                    # The ⑂ stamp — a fork is not a node, so its identity lives here.
-                    "course_kind": course.course_kind,
-                    "trigger": course.trigger,
-                    "fork_direction": course.fork_direction,
-                    "steered_by": course.steered_by,
+                    "fork": _stamp(course),
                 }
             )
         )
 
-    # BEFORE `_empty_attempt` fabricates a row: a stand-in is no evidence of reach.
-    reach = max((c.round or 0 for c in course.children), default=None)
+    # Before `_empty_attempt` fabricates a row: a stand-in is no evidence of reach.
+    reach = max((c.round for c in course.children), default=None)
     if not attempts:
-        attempts = [_empty_attempt(course, cut_from=cut_from, round_=cut_round + 1)]
+        attempts = [
+            _empty_attempt(course, cut_from=cut_from, round_=cut_round + 1, row=reads.row())
+        ]
     return _Contribution(
         attempts,
         [k for c in replays for k in c.children],
@@ -744,33 +688,24 @@ def _contributions(
     )
 
 
-def _fold_contributions(
-    kids: list[LineageNode], contributions: list[_Contribution]
-) -> list[LineageNode]:
-    """Mount every fork's attempts onto this course's ONE timeline, three cases in the order asked.
-    ``course_label`` survives untouched — it is the fork's private position."""
+def _fold_contributions(kids: list[ArmNode], contributions: list[_Contribution]) -> list[ArmNode]:
     by_round: dict[int, int] = {}
     for k in kids:
-        by_round[k.round or 0] = by_round.get(k.round or 0, 0) + 1
+        by_round[k.round] = by_round.get(k.round, 0) + 1
     at_id = {k.id: i for i, k in enumerate(kids)}
     positions = {k.label for k in kids}
     for contribution in contributions:
         for attempt in contribution.attempts:
             if contribution.takes_the_line and contribution.reach is not None:
-                attempt = attempt.model_copy(
-                    update={
-                        "course_kind": None,
-                        "trigger": "",
-                        "fork_direction": None,
-                        "steered_by": None,
-                    }
-                )
+                attempt = attempt.model_copy(update={"fork": None})
             twin = at_id.get(attempt.id)
             if twin is not None and not contribution.supersedes:
                 kids[twin] = attempt.model_copy(
                     update={
                         "label": kids[twin].label,
-                        "course_label": kids[twin].course_label,
+                        "reading": attempt.reading.model_copy(
+                            update={"arm": kids[twin].reading.arm}
+                        ),
                         "children": [*kids[twin].children, *attempt.children],
                     }
                 )
@@ -780,129 +715,284 @@ def _fold_contributions(
                     update={"children": [*kids[twin].children, *attempt.children]}
                 )
                 kids[twin] = kids[twin].model_copy(update={"children": []})
-            round_ = attempt.round or 0
-            # Keeping a label claims a position this timeline HAS — `_empty_attempt` carries
-            # a cycle_id and replaced nothing, so it renumbers like any other attempt.
+            round_ = attempt.round
             if not (contribution.supersedes and (twin is not None or attempt.label in positions)):
                 by_round[round_] = by_round.get(round_, 0) + 1
                 attempt = attempt.model_copy(update={"label": f"C{round_}.{by_round[round_]}"})
             positions.add(attempt.label)
             at_id[attempt.id] = len(kids)
             kids.append(attempt)
-    # Stable: arrival order within a round, which is the order the labels were assigned in.
-    kids.sort(key=lambda k: k.round or 0)
+    # The sort's stability keeps arrival order within a round, the order labels were assigned in.
+    kids.sort(key=lambda k: k.round)
     return kids
 
 
 _NO_ROUND_FACTS = _RoundFacts()
 
 
-def _candidate_node(
+class _Readings(NamedTuple):
+    verify: Mapping[str, VerifyReading]
+    bench: Mapping[tuple[int, str], BenchReading]
+    line: Mapping[str, LineRate]
+
+
+def _arm_node(
     cand: LedgerCandidate,
     *,
-    close: _RoundFacts,
-    children: list[LineageNode],
+    row: int,
+    facts: _RoundFacts,
+    readings: _Readings,
+    children: list[CourseNode],
     retired_by: str | None,
     hops: list[CycleHop],
-) -> LineageNode:
-    """One candidate as the tree serves it — ledger identity plus what its round decided about
-    it, appends to one ledger that identity joins (:func:`_round_facts`)."""
-    return LineageNode(
-        kind="candidate",
+) -> ArmNode:
+    election = (
+        facts.election
+        if retired_by is None
+        else facts.election.model_copy(update={"selected": False, "crown": None})
+    )
+    arm = ArmPointer(round=cand.round, label=cand.label, candidate_id=cand.candidate_id)
+    if cand.report is None:
+        reading = ArmReading.walking(
+            arm,
+            fold=None,
+            scored=None,
+            expected=cand.walk_length,
+            cached=None,
+            cut=False,
+            election=election,
+            changes_description=cand.lineage.changes_description,
+        )
+    else:
+        reading = ArmReading.of(
+            arm,
+            cand.report,
+            cut=False,
+            election=election,
+            changes_description=cand.lineage.changes_description,
+            ability=facts.ability,
+            vs_reference=facts.vs_reference,
+        )
+    return ArmNode(
         id=cand.candidate_id,
-        parent_ids=list(cand.parent_ids),
+        row=row,
+        parent_ids=list(cand.lineage.parent_ids),
+        variations=list(cand.lineage.variations),
         label=cand.label,
-        # Equal here; they diverge only where the fold renumbers a contribution.
-        course_label=cand.label,
         path=hops,
-        round=cand.round,
-        sp_hash=cand.sp_hash,
-        accuracy=cand.accuracy,
-        composite_fitness=cand.composite_fitness,
-        changes_description=cand.changes_description,
-        status=cand.state,
-        # The candidate's own band, and only ever that.
-        mean_fitness_ci_lo=cand.mean_fitness_ci_lo,
-        mean_fitness_ci_hi=cand.mean_fitness_ci_hi,
-        reference_lift=close.reference_lift,
-        reference_lift_ci_lo=close.reference_lift_ci_lo,
-        reference_lift_ci_hi=close.reference_lift_ci_hi,
-        reference_lift_side=lift_side(close.reference_lift_ci_lo, close.reference_lift_ci_hi),
-        scored_samples=cand.scored_samples,
-        expected_samples=cand.expected_samples,
-        cached_samples=cand.cached_samples,
-        election_held=close.election_held,
-        # A RETIRED candidate wears no crown — the branch re-asks that election.
-        is_selected=close.is_selected and retired_by is None,
-        crown=close.crown if retired_by is None else None,
-        stamps_theta=close.stamps_theta,
-        theta=close.theta,
-        theta_se=close.theta_se,
-        theta_caveat=close.theta_caveat,
+        reading=reading.on_line(readings.line).model_copy(
+            update={
+                "verify": readings.verify.get(cand.label),
+                "bench": readings.bench.get((cand.round, cand.label)),
+            }
+        ),
+        elects_on=facts.elects_on,
         superseded_by=retired_by,
         children=children,
     )
 
 
-_RANK_OF = {"composite_fitness": "composite_rank", "lens_value": "lens_rank"}
+def _composite(node: ArmNode) -> float | None:
+    own = node.reading.own
+    return None if own is None or own.composite is None else own.composite.value
 
 
-def rank_siblings(
-    kids: list[LineageNode], by: Literal["composite_fitness", "lens_value"]
-) -> list[LineageNode]:
-    """Stamp *by*'s rank across one course's candidate children. Served because an ordering IS a
-    score; courses take none. Ties break on id so N bars read 1..N."""
-    scored = {
-        k.id: value for k in kids if k.kind == "candidate" and (value := getattr(k, by)) is not None
-    }
-    if not scored:
-        return kids
-    position = {
+def _sibling_ranks(
+    kids: list[ArmNode], value_of: Callable[[ArmNode], float | None]
+) -> dict[str, int]:
+    scored = {k.id: value for k in kids if (value := value_of(k)) is not None}
+    return {
         cid: i + 1
         for i, (cid, _) in enumerate(sorted(scored.items(), key=lambda kv: (-kv[1], kv[0])))
     }
-    return [
-        k.model_copy(update={_RANK_OF[by]: position.get(k.id)}) if k.kind == "candidate" else k
-        for k in kids
-    ]
 
 
-def _panel_cuts(kids: list[LineageNode]) -> list[bool]:
-    """``panel_cuts`` across one timeline, a cohort per round — and per side of a supersede cut,
-    so a retired tail is never the fuller panel a live arm is found short of."""
-    cohorts: dict[tuple[int | None, str | None], list[int]] = {}
+def rank_moves(kids: list[ArmNode]) -> tuple[list[ArmNode], LensShift | None]:
+    by_composite = _sibling_ranks(kids, _composite)
+    by_lens = _sibling_ranks(kids, lambda k: k.lens_value)
+    moved: list[ArmNode] = []
+    for k in kids:
+        before, after = by_composite.get(k.id), by_lens.get(k.id)
+        move: RankMove | None = None
+        if before is not None and after is not None:
+            move = "up" if after < before else "down" if after > before else "unchanged"
+        moved.append(k.model_copy(update={"lens_rank_move": move}))
+    if not by_lens:
+        return moved, None
+    live = [k for k in moved if k.superseded_by is None]
+    first_composite = next((cid for cid, rank in by_composite.items() if rank == 1), None)
+    first_lens = next((cid for cid, rank in by_lens.items() if rank == 1), None)
+
+    def label(first: str | None) -> str | None:
+        return next((k.label for k in live if k.id == first), None)
+
+    return moved, LensShift(
+        top_composite=label(first_composite),
+        top_lens=label(first_lens),
+        top_changed=first_composite is not None
+        and first_lens is not None
+        and first_composite != first_lens,
+        moved_up=sum(k.lens_rank_move == "up" for k in live),
+        moved_down=sum(k.lens_rank_move == "down" for k in live),
+        unchanged=sum(k.lens_rank_move == "unchanged" for k in live),
+    )
+
+
+def _panel_cuts(kids: list[ArmNode]) -> list[bool]:
+    """A cohort per side of a supersede cut: a retired tail is never the fuller panel a live arm is short of."""
+    cohorts: dict[tuple[int, str | None], list[int]] = {}
     for i, kid in enumerate(kids):
         cohorts.setdefault((kid.round, kid.superseded_by), []).append(i)
     out = [False] * len(kids)
     for members in cohorts.values():
-        cuts = panel_cuts([(kids[i].scored_samples, kids[i].expected_samples) for i in members])
+        cuts = panel_cuts(
+            [(kids[i].reading.panel.scored, kids[i].reading.panel.expected) for i in members]
+        )
         for i, cut in zip(members, cuts, strict=True):
             out[i] = cut
     return out
 
 
-def _build(stores: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> LineageNode:
+def _origin_row(kids: list[ArmNode], origin_id: str) -> int | None:
+    on_origin = [k for k in kids if k.id == origin_id]
+    live = next((k for k in on_origin if k.superseded_by is None), None)
+    answering = live or (on_origin[-1] if on_origin else None)
+    return None if answering is None else answering.row
+
+
+def _main_line(arms: list[ArmNode], head: ArmNode) -> list[MainLineStep]:
+    crowned: dict[int, list[int]] = {}
+    elected: set[int] = set()
+    for arm in arms:
+        if not arm.reading.election.held:
+            continue
+        elected.add(arm.round)
+        if arm.reading.election.selected:
+            crowned.setdefault(arm.round, []).append(arm.row)
+    steps: list[MainLineStep] = []
+    for round_ in sorted(elected | {head.round}):
+        picks = crowned.get(round_)
+        if round_ == head.round:
+            steps.append(MainLineStep(round=round_, rows=[head.row]))
+        elif round_ < head.round and picks:
+            steps.append(MainLineStep(round=round_, rows=picks))
+        elif round_ > head.round and picks:
+            break
+        else:
+            steps.append(MainLineStep(round=round_, rows=[]))
+    return steps
+
+
+def _with_heads(root: CourseNode) -> CourseNode:
+    at_path: dict[tuple[CycleHop, ...], list[ArmNode]] = {}
+    at_id: dict[str, ArmNode] = {}
+    stands: set[int] = set()
+
+    def collect(course: CourseNode) -> None:
+        standing: int | None = None
+        for arm in course.children:
+            at_path.setdefault(tuple(arm.path), []).append(arm)
+            held = at_id.get(arm.id)
+            if held is None or (held.superseded_by is not None and arm.superseded_by is None):
+                at_id[arm.id] = arm
+            if arm.reading.election.selected and arm.superseded_by is None:
+                standing = arm.row
+            for run in arm.children:
+                collect(run)
+        if standing is not None:
+            stands.add(standing)
+
+    collect(root)
+    winners: set[int] = set()
+    latest: set[int] = set()
+    lines: dict[int, list[MainLineStep]] = {}
+    for arms in at_path.values():
+        newest: ArmNode | None = None
+        crowned: ArmNode | None = None
+        for arm in arms:
+            if newest is None or arm.round >= newest.round:
+                newest = arm
+            if arm.reading.election.selected and (crowned is None or arm.round >= crowned.round):
+                crowned = arm
+            lines[arm.row] = _main_line(arms, arm)
+        if newest is not None:
+            latest.add(newest.row)
+        if crowned is not None:
+            winners.add(crowned.row)
+
+    def stamp(course: CourseNode) -> CourseNode:
+        kids: list[ArmNode] = []
+        labels: dict[str, str] = {}
+        for arm in course.children:
+            labels.setdefault(arm.id, arm.label)
+        for arm in course.children:
+            at = arm.row
+            kids.append(
+                arm.model_copy(
+                    update={
+                        "children": [stamp(run) for run in arm.children],
+                        "fork": None
+                        if arm.fork is None
+                        else arm.fork.model_copy(
+                            update={"cut_from": labels.get(next(iter(arm.parent_ids), ""))}
+                        ),
+                        "verdict": arm_verdict(arm.reading, retired=arm.superseded_by is not None),
+                        "stands": at in stands,
+                        "course_winner": at in winners,
+                        "course_latest": at in latest,
+                        "main_line": lines[at],
+                        "answers_for_id": at_id[arm.id].row == at,
+                    }
+                )
+            )
+        return course.model_copy(update={"children": kids})
+
+    return stamp(root)
+
+
+def _readings(
+    layout: CycleLayout, span: LedgerSpan, standing: StandingRounds, *, replay: bool
+) -> _Readings:
+    closes = [standing.rounds[r].close for r in sorted(standing.rounds, reverse=True)]
+    return _Readings(
+        verify={}
+        if replay
+        else {label: read for label, (_, read) in scan_ledger_verify(layout.ledger).graded.items()},
+        bench=scan_bench_readings(span),
+        line=line_by_individual(
+            next(
+                (c.overlap for c in closes if c.overlap is not None and overlap_line(c.overlap)),
+                None,
+            )
+        ),
+    )
+
+
+def _build(stores: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> CourseNode:
     leaf = path[-1]
-    index = _read_index(stores, leaf)
+    index = _read_index(stores, leaf, reads.moment)
     layout = _layout(stores, leaf)
-    ledger_path = layout.ledger
-    candidates = scan_ledger_candidates(ledger_path)
-    elections = scan_ledger_elections(ledger_path)
+    # The course's own ledger, never its chain: a fork's lifted rounds are its parent's nodes.
+    own = LedgerSpan(layout.ledger)
+    span = own if reads.moment is None else reads.moment.span(own.path)
+    standing = scan_standing_rounds([span])
+    candidates = standing.candidates()
+    elections = standing.elections
     children = _child_courses(stores, path, reads)
     inner = [c for c in children if c.inner]
-    # Mint order IS the campaign's timeline, so it is what positions a fork on it.
     forks = sorted(
         (c for c in children if not c.inner), key=lambda c: (c.created_at, c.path[-1].cycle_id)
     )
     buckets = _bucket_by_parent(inner, candidates)
     hops = list(path)
 
-    decided = _round_facts(ledger_path, candidates, elections)
+    decided = _round_facts(standing, candidates)
+    readings = _readings(layout, span, standing, replay=reads.moment is not None)
 
-    # Forks resolve FIRST: a replayed origin grafts its runs onto the candidate it replays.
+    # Forks resolve first: a replayed origin grafts its runs onto the candidate it replays.
     by_id = {c.candidate_id: c for c in candidates}
     contributions: list[_Contribution] = []
-    grafts: dict[str, list[LineageNode]] = {}
+    grafts: dict[str, list[CourseNode]] = {}
     retired: dict[str, str] = {}
     for fork in forks:
         cut_from = _parent_candidate_of(fork, candidates)
@@ -914,68 +1004,65 @@ def _build(stores: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Lin
         grafts.setdefault(cut_from, []).extend(contribution.replayed_runs)
         retired |= _retired_by(fork, candidates, contribution.reach)
 
-    kids = rank_siblings(
-        _fold_contributions(
-            [
-                _candidate_node(
-                    cand,
-                    close=decided.get(cand.candidate_id, _NO_ROUND_FACTS),
-                    children=[
-                        _build(c.store, c.path, depth=depth - 1, reads=reads)
-                        for c in buckets.get(cand.candidate_id, [])
-                        if depth > 0
-                    ]
-                    + grafts.get(cand.candidate_id, []),
-                    retired_by=retired.get(cand.candidate_id),
-                    hops=hops,
-                )
-                for cand in candidates
-            ],
-            contributions,
-        ),
-        "composite_fitness",
+    kids = _fold_contributions(
+        [
+            _arm_node(
+                cand,
+                row=reads.row(),
+                facts=decided.get(cand.candidate_id, _NO_ROUND_FACTS),
+                readings=readings,
+                children=[
+                    _build(c.store, c.path, depth=depth - 1, reads=reads)
+                    for c in buckets.get(cand.candidate_id, [])
+                    if depth > 0
+                ]
+                + grafts.get(cand.candidate_id, []),
+                retired_by=retired.get(cand.candidate_id),
+                hops=hops,
+            )
+            for cand in candidates
+        ],
+        contributions,
     )
 
     scalars = _course_scalars(stores, leaf, index, reads, elections)
-    # A course whose line MOVED does not answer for run-state; the LAST such cut speaks, and
-    # each branch delegates onward, so a chain resolves to its tip. `origin_accuracy` stays
-    # OURS — round 0 is the shared prefix, not the cut.
     branch = next((c.course for c in reversed(contributions) if c.takes_the_line), None)
     if branch is not None:
         scalars |= {
             "run_phase": branch.run_phase,
-            "stop_reason": branch.stop_reason,
-            "best_accuracy": branch.best_accuracy,
+            "status": branch.status,
+            "run_standing": branch.run_standing,
         }
 
-    # AFTER the fold: a fork's attempts arrive naming the fork's replayed C0, which this timeline
-    # dropped, and judged short against the fork's own rounds; from here on they are on this one.
-    origin_id = candidates[0].candidate_id if candidates else ""
+    # After the fold: a fork's attempts arrive naming its replayed C0 and judged short against its own rounds.
+    origin_row = _origin_row(kids, candidates[0].candidate_id) if candidates else None
     kids = [
-        k.model_copy(update={"origin_id": origin_id, "panel_cut": cut})
+        k.model_copy(
+            update={
+                "origin_row": origin_row,
+                "reading": k.reading.model_copy(
+                    update={"panel": k.reading.panel.model_copy(update={"cut": cut})}
+                ),
+            }
+        )
         for k, cut in zip(kids, _panel_cuts(kids), strict=True)
     ]
 
-    best, origin = scalars["best_accuracy"], scalars["origin_accuracy"]
     edge_id, _ = _course_edge(index)
-    return LineageNode(
-        kind="course",
+    return CourseNode(
         id=leaf.cycle_id,
-        origin_id=origin_id,
-        parent_ids=[edge_id] if edge_id else (list(candidates[0].parent_ids) if candidates else []),
+        origin_row=origin_row,
+        parent_ids=[edge_id]
+        if edge_id
+        else (list(candidates[0].lineage.parent_ids) if candidates else []),
         label=leaf.cycle_id,
-        # Nothing folds a course onto another timeline, so its two labels are one fact.
-        course_label=leaf.cycle_id,
         path=hops,
         children=kids,
-        # AFTER the delegation above, so a course whose line moved is drawn at its branch's best.
-        headline_accuracy=best if best is not None else origin,
         **scalars,
     )
 
 
-def build_lineage_tree(stores: Stores, path: CyclePath) -> LineageNode:
-    """The course at *path* and its subtree, expanded to :data:`_MAX_COURSE_DEPTH`. Each course
-    costs scans of its own ledger plus one small JSON read."""
+def build_lineage_tree(stores: Stores, path: CyclePath, moment: Moment | None = None) -> CourseNode:
+    """*moment* replays the ledgers only: run-state stays the live one, as on a replayed dashboard."""
     store_at, _ = resolve_cycle_path(stores, path)
-    return _build(store_at, path, depth=_MAX_COURSE_DEPTH, reads=_Reads())
+    return _with_heads(_build(store_at, path, depth=_MAX_COURSE_DEPTH, reads=_Reads(moment)))

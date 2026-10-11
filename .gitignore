@@ -80,6 +80,7 @@ data/
 
 # Linting cache
 .ruff_cache/
+.gate_cache/
 
 # `latest-readout-path.txt`: where the newest terminal launch's `readout.log` is.
 # Sole writer: the CLI launch. Nothing else belongs in here.

@@ -36,7 +36,7 @@ one origin, no hand-written loader. A registered benchmark skips all of it and u
 python -m promptpotter new <file.csv> --set task_description='what the prompt does'
 ```
 
-Same chain, same seam: `ingest_draft` → `resolve_origin_turn` → `prepare_checkin_run`. Omit
+Same chain, same seam: `ingest_draft` → `resolve_origin_turn` → `hold_checkin_start`. Omit
 `--set` to let the resolver propose the framing and ask; `--set optimizer=capo` and
 `--set nodes.<node>.<knob>=V` are the picker's two answers.
 
@@ -85,6 +85,6 @@ OpenAI/Anthropic/OpenRouter only if named. `.env.example` is the full template.
 
 ## First-run smoke
 
-If `datasets/{name}/` has never produced a measurement (`measurements/runs/{run_id}.jsonl`),
+If `datasets/{name}/` has never produced a measurement (`measurements/cells/{config_key}.jsonl`),
 run `python scripts/smoke_campaign.py --dataset {name}` (~90 s; it mints a campaign, so it falls
 under the autonomy mode).

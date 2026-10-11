@@ -1,14 +1,12 @@
 "use client";
 import { memo, useMemo } from "react";
-// `Chart`, not `Bar`: the cache overlay is a line dataset on a bar chart, and the per-type
-// `Bar` wrapper types its data as bar-only. Both controllers register in `lib/theme.ts`.
 import { Chart } from "react-chartjs-2";
-import { ensureChartRegistered, getCss, useThemeVersion } from "@/lib/theme";
-import type { DisplayMetric } from "@/lib/derivations";
-import type { MeasuredUnit } from "@/lib/api/types";
+import { ensureChartRegistered, getCss, lineLook, lineMotion, useThemeVersion } from "@/lib/theme";
+import { useMediaQuery } from "@/lib/hooks/useMediaQuery";
+import { liftOf } from "@/lib/derivations";
 import { fmtSigned, fmtTheta, unitCount } from "@/lib/format";
 import { NOT_SEPARABLE } from "@/lib/fitness";
-import type { CandidateView } from "@/lib/types";
+import type { CandidateBar } from "@/lib/types";
 import {
   activeSeries,
   seriesByKey,
@@ -18,12 +16,11 @@ import {
   type SeriesSpec,
   type WhiskerBand,
 } from "./series";
-import type { ChartData, ChartOptions, ChartType, Plugin } from "chart.js";
+import type { Chart as ChartJS, ChartData, ChartOptions, ChartType, Plugin } from "chart.js";
 
 ensureChartRegistered();
 
-// Fractions, not pixels: a category centre's fraction is invariant under a width change, so a
-// resize costs no React work.
+// Fractions, not pixels: invariant under a width change, so a resize costs no React work.
 export interface PlotGeometry {
   left: number;
   rightGutter: number;
@@ -47,12 +44,11 @@ declare module "chart.js" {
     barCaps?: { counts: (number | null)[]; parent: number | null; crown: string };
     divergenceLine?: { index: number | null };
     inFlightPulse?: { index: number | null };
-    ciWhisker?: { bands: WhiskerBand[] };
+    ciWhisker?: { bands: WhiskerBand[]; shaded: boolean };
     xBridge?: { onGeometry: (g: PlotGeometry) => void };
   }
 }
 
-// One crown, on the parent only — the per-round crowns are the dendrogram's job.
 const CROWN = "♛";
 const barCapsPlugin: Plugin<
   "bar",
@@ -64,13 +60,12 @@ const barCapsPlugin: Plugin<
     const xScale = chart.scales.x;
     if (!counts || !xScale) return;
     const { ctx, chartArea } = chart;
-    // Bars only: letting the cache line into the minimum drags the caption onto the dash.
+    // Bar channels only: letting the cache line into the minimum drags the caption onto the dash.
     const topOf = (i: number): number => {
       let topY = Infinity;
-      chart.data.datasets.forEach((_ds, di) => {
-        const meta = chart.getDatasetMeta(di);
-        if (meta.type !== "bar") return;
-        const el = meta.data[i] as { y?: number } | undefined;
+      chart.data.datasets.forEach((ds, di) => {
+        if (seriesByKey(String(ds.label ?? ""))?.kind !== "bar") return;
+        const el = chart.getDatasetMeta(di).data[i] as { y?: number } | undefined;
         if (el && typeof el.y === "number" && el.y < topY) topY = el.y;
       });
       return topY;
@@ -105,13 +100,63 @@ const barCapsPlugin: Plugin<
   },
 };
 
-// Drawn at the anchor dataset's own rendered x, not the category centre, and on the axis that
-// channel declares in `CANDIDATE_SERIES` — never a per-bar scale.
-const ciWhiskerPlugin: Plugin<"bar", { bands: WhiskerBand[] }> = {
+const BAND_ALPHA = 0.16;
+type BandOpts = { bands: WhiskerBand[]; shaded: boolean };
+type Placed = { getProps?: (p: string[], final: boolean) => Record<string, number> } | undefined;
+
+function drawRibbons(chart: ChartJS, bands: WhiskerBand[]): void {
+  const { ctx, chartArea } = chart;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(chartArea.left, chartArea.top, chartArea.width, chartArea.height);
+  ctx.clip();
+  ctx.globalAlpha = BAND_ALPHA;
+  for (const band of bands) {
+    const yScale = chart.scales[seriesByKey(band.anchor)?.axis ?? "y"];
+    const di = chart.data.datasets.findIndex((ds) => ds.label === band.anchor);
+    const ink = chart.data.datasets[di]?.borderColor;
+    if (!yScale || di < 0 || typeof ink !== "string") continue;
+    const points = chart.getDatasetMeta(di).data as Placed[];
+    ctx.fillStyle = ink;
+    let run: { x: number; lo: number; hi: number }[] = [];
+    const close = () => {
+      const first = run[0];
+      if (first && run.length > 1) {
+        ctx.beginPath();
+        ctx.moveTo(first.x, first.hi);
+        for (const p of run) ctx.lineTo(p.x, p.hi);
+        for (let i = run.length - 1; i >= 0; i--) {
+          const p = run[i];
+          if (p) ctx.lineTo(p.x, p.lo);
+        }
+        ctx.closePath();
+        ctx.fill();
+      }
+      run = [];
+    };
+    for (let i = 0; i < band.lo.length; i++) {
+      const lo = band.lo[i];
+      const hi = band.hi[i];
+      const x = points[i]?.getProps?.(["x"], true)?.x;
+      if (lo == null || hi == null || typeof x !== "number") {
+        close();
+        continue;
+      }
+      run.push({ x, lo: yScale.getPixelForValue(lo), hi: yScale.getPixelForValue(hi) });
+    }
+    close();
+  }
+  ctx.restore();
+}
+
+const ciWhiskerPlugin: Plugin<"bar", BandOpts> = {
   id: "ciWhisker",
+  beforeDatasetsDraw(chart, _args, opts) {
+    if (opts?.shaded && opts.bands?.length) drawRibbons(chart, opts.bands);
+  },
   afterDatasetsDraw(chart, _args, opts) {
     const bands = opts?.bands;
-    if (!bands?.length) return;
+    if (!bands?.length || opts?.shaded) return;
     const { ctx } = chart;
     ctx.save();
     ctx.strokeStyle = getCss("--color-ci");
@@ -178,8 +223,8 @@ const divergenceLinePlugin: Plugin<"bar", { index: number | null }> = {
   },
 };
 
-// Canvas bars are out of CSS animation's reach, so this drives its own rAF redraw while `index` is set.
 const PULSE_PERIOD_MS = 1600;
+const POINT_PULSE_WIDTH = 10;
 const pulseRaf = new WeakMap<object, number>();
 const inFlightPulsePlugin: Plugin<"bar", { index: number | null }> = {
   id: "inFlightPulse",
@@ -209,16 +254,9 @@ const inFlightPulsePlugin: Plugin<"bar", { index: number | null }> = {
       const p = el?.getProps?.(["x", "y", "base", "width"], true);
       const x = p?.x;
       const y = p?.y;
-      const b = p?.base;
-      const width = p?.width;
-      if (
-        typeof x !== "number" ||
-        typeof y !== "number" ||
-        typeof b !== "number" ||
-        typeof width !== "number"
-      ) {
-        return;
-      }
+      if (typeof x !== "number" || typeof y !== "number") return;
+      const b = typeof p?.base === "number" ? p.base : chart.chartArea.bottom;
+      const width = typeof p?.width === "number" ? p.width : POINT_PULSE_WIDTH;
       left = Math.min(left, x - width / 2);
       right = Math.max(right, x + width / 2);
       top = Math.min(top, y);
@@ -278,44 +316,32 @@ const CHART_PLUGINS = [
 ];
 
 const ROTATE_THRESHOLD = 8;
+const LINES_ABOVE = 12;
 
 interface Props {
-  views: CandidateView[];
-  metrics: ReadonlySet<DisplayMetric>;
-  showMask: boolean;
-  showCache: boolean;
-  showOverlap: boolean;
+  // MUST be memoized; the legend reads the same value (`useCandidatesModel::seriesCtx`).
+  ctx: SeriesCtx;
   selectedKey: string | null;
-  onSelect: (view: CandidateView | null) => void;
+  onSelect: (view: CandidateBar | null) => void;
   divergenceBoundary: number | null;
   inFlightIndex: number | null;
-  // MUST be stable: it rides the `options` memo.
   onGeometry: (g: PlotGeometry) => void;
-  unit: MeasuredUnit;
-  electedMetric: DisplayMetric;
 }
 
 export const FitnessChart = memo(function FitnessChart({
-  views,
-  metrics,
-  showMask,
-  showCache,
-  showOverlap,
+  ctx,
   selectedKey,
   onSelect,
   divergenceBoundary,
   inFlightIndex,
   onGeometry,
-  unit,
-  electedMetric,
 }: Props) {
+  const { views, metrics, unit } = ctx;
   const themeVersion = useThemeVersion();
+  const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
   const labels = useMemo(() => views.map((v) => v.label), [views]);
+  const asLines = labels.length > LINES_ABOVE;
 
-  const ctx = useMemo<SeriesCtx>(
-    () => ({ metrics, showMask, showCache, showOverlap, views, unit, electedMetric }),
-    [metrics, showMask, showCache, showOverlap, views, unit, electedMetric],
-  );
   const active = useMemo(() => activeSeries(ctx), [ctx]);
   const bands = useMemo(() => whiskerBands(ctx), [ctx]);
   const showAbility = metrics.has("ability");
@@ -330,30 +356,26 @@ export const FitnessChart = memo(function FitnessChart({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [views, selectedKey, themeVersion]);
 
-  // The LAST crowned bar, not `findIndex`: every advancing round has a winner and the first is C0.
   const parentIdx = useMemo(() => {
-    for (let i = views.length - 1; i >= 0; i--) if (views[i]?.is_selected) return i;
-    return null;
+    const idx = views.findIndex((v) => v.arm?.stands);
+    return idx >= 0 ? idx : null;
   }, [views]);
 
-  // The served lift, claimed only where its 95% interval is served clear of 0.
   const crown = useMemo(() => {
-    const v = parentIdx == null ? undefined : views[parentIdx];
-    if (v?.referenceLift == null || v.referenceLiftSide == null || v.referenceLiftSide === "spans")
-      return "";
-    return ` ${fmtSigned(v.referenceLift, 2)}`;
+    const lift = parentIdx == null ? null : liftOf(views[parentIdx]?.reading?.vs_reference ?? null);
+    return lift == null || lift.side === "spans" ? "" : ` ${fmtSigned(lift.value, 2)}`;
   }, [views, parentIdx]);
 
-  // Painted only where it is NEWS — a served `panel_cut`; the tooltip footer is the denominator
-  // of record.
-  const cutCounts = useMemo(() => views.map((v) => (v.panelCut ? v.n_samples : null)), [views]);
+  const cutCounts = useMemo(
+    () => views.map((v) => (v.reading?.panel.cut ? v.reading.panel.scored : null)),
+    [views],
+  );
 
   const data = useMemo<ChartData<"bar" | "line">>(() => {
     const bars = active.filter((s) => s.kind === "bar").length;
     const cat = bars <= 1 ? 0.55 : bars === 2 ? 0.75 : bars === 3 ? 0.9 : 0.95;
     const barCount = Math.max(1, labels.length);
     const maxBar = Math.max(6, Math.min(28, Math.round(640 / (barCount * Math.max(1, bars)))));
-    // The parent gets no ring: on the elected series its fill already IS the accent.
     const outline = (spec: SeriesSpec, ink: string) => {
       const base = spec.hollow ? ink : "transparent";
       const baseW = spec.hollow ? 1.5 : 0;
@@ -386,6 +408,23 @@ export const FitnessChart = memo(function FitnessChart({
             order: -1,
           };
         }
+        if (asLines) {
+          const picked = selectionBorder?.idx;
+          return {
+            type: "line" as const,
+            label: spec.key,
+            data,
+            ...lineLook(ink, spec.hollow),
+            pointRadius: labels.map((_, i) => (i === picked ? 5 : 2)),
+            pointBorderColor: labels.map((_, i) =>
+              i === picked && selectionBorder ? selectionBorder.colour : ink,
+            ),
+            pointHitRadius: 10,
+            fill: false,
+            spanGaps: spec.gap === "sparse",
+            yAxisID: spec.axis,
+          };
+        }
         return {
           label: spec.key,
           data,
@@ -401,13 +440,13 @@ export const FitnessChart = memo(function FitnessChart({
       }),
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [labels, views, active, ctx, themeVersion, selectionBorder]);
+  }, [labels, views, active, ctx, themeVersion, selectionBorder, asLines]);
 
   const rotate = labels.length > ROTATE_THRESHOLD;
   const options = useMemo<ChartOptions<"bar">>(() => ({
     responsive: true,
     maintainAspectRatio: false,
-    animation: false,
+    animation: asLines ? lineMotion(reducedMotion) : false,
     onClick: (_evt, elements) => {
       const hit = elements?.[0];
       if (!hit) return;
@@ -455,42 +494,40 @@ export const FitnessChart = memo(function FitnessChart({
             const idx = items[0]?.dataIndex;
             if (idx == null) return "";
             const lines: string[] = [];
-            const n = views[idx]?.n_samples;
-            if (n != null) {
-              const exp = views[idx]?.n_expected;
+            const bar = views[idx];
+            const reading = bar?.reading;
+            const n = reading?.panel.scored;
+            if (reading && n != null) {
+              const { expected: exp, cached } = reading.panel;
               lines.push(
                 exp != null && exp !== n
                   ? `${n} of ${unitCount(exp, unit)} scored`
                   : `${unitCount(n, unit)} scored`,
               );
+              if (cached != null && cached > 0) {
+                lines.push(`${cached} of ${unitCount(n, unit)} from cache`);
+              }
             }
-            const cached = views[idx]?.cached_samples;
-            if (cached != null && cached > 0 && n != null) {
-              lines.push(`${cached} of ${unitCount(n, unit)} from cache`);
-            }
-            const theta = views[idx]?.theta;
+            const theta = reading?.ability?.theta;
             if (typeof theta === "number") {
-              const se = views[idx]?.theta_se;
+              const se = reading?.ability?.se;
               // Named "se", not ±: the drawn whisker is the wider 95% band.
               const tail = typeof se === "number" ? `, se ${se.toFixed(2)}` : "";
               lines.push(`ability θ ${fmtTheta(theta)}${tail} (elected on θ, not accuracy)`);
             }
-            const ciLo = views[idx]?.meanFitnessCiLo;
-            const ciHi = views[idx]?.meanFitnessCiHi;
+            const ciLo = reading?.own?.accuracy?.ci_lo;
+            const ciHi = reading?.own?.accuracy?.ci_hi;
             if (typeof ciLo === "number" && typeof ciHi === "number") {
               lines.push(`accuracy 95% CI [${ciLo.toFixed(3)}, ${ciHi.toFixed(3)}]`);
             }
-            const lift = views[idx]?.referenceLift;
-            const lLo = views[idx]?.referenceLiftCiLo;
-            const lHi = views[idx]?.referenceLiftCiHi;
-            if (lift != null && lLo != null && lHi != null) {
-              const flat = views[idx]?.referenceLiftSide === "spans" ? ` — ${NOT_SEPARABLE}` : "";
+            const lift = liftOf(reading?.vs_reference ?? null);
+            if (lift != null && lift.ci_lo != null && lift.ci_hi != null) {
+              const flat = lift.side === "spans" ? ` — ${NOT_SEPARABLE}` : "";
               lines.push(
-                `accuracy lift vs parent ${fmtSigned(lift)} [${fmtSigned(lLo)}, ${fmtSigned(lHi)}]${flat}`,
+                `accuracy lift vs parent ${fmtSigned(lift.value)} [${fmtSigned(lift.ci_lo)}, ${fmtSigned(lift.ci_hi)}]${flat}`,
               );
             }
-            // Keyed on the election, not the round close: after it, no crown does mean "lost".
-            if (views[idx]?.electionPending) {
+            if (bar?.arm && !bar.arm.reading.election.held) {
               lines.push("no election yet — nothing crowned in this round");
             }
             return lines.join("\n");
@@ -500,21 +537,20 @@ export const FitnessChart = memo(function FitnessChart({
       barCaps: { counts: cutCounts, parent: parentIdx, crown },
       divergenceLine: { index: divergenceBoundary },
       inFlightPulse: { index: inFlightIndex },
-      ciWhisker: { bands },
+      ciWhisker: { bands, shaded: asLines },
       xBridge: { onGeometry },
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [themeVersion, ctx, rotate, views, selectedKey, onSelect, divergenceBoundary, inFlightIndex, showAbility, parentIdx, crown, cutCounts, onGeometry, bands]);
+  }), [themeVersion, ctx, rotate, asLines, reducedMotion, views, selectedKey, onSelect, divergenceBoundary, inFlightIndex, showAbility, parentIdx, crown, cutCounts, onGeometry, bands]);
 
   return (
     <div className="fitness-chart-frame">
-      {/* Explicit type argument: `type="bar"` alone rejects the cache overlay's line dataset. */}
       <Chart<"bar" | "line">
         type="bar"
         data={data}
         options={options}
         plugins={CHART_PLUGINS}
-        aria-label={`Candidates this round — ${views.length} bar${
+        aria-label={`Candidates this round — ${views.length} ${asLines ? "point" : "bar"}${
           views.length === 1 ? "" : "s"
         } per series (${active.map((s) => s.key).join(", ")}); intervals on ${
           bands.map((b) => b.anchor).join(" and ") || "none"

@@ -1,7 +1,6 @@
 import type { KeyboardEvent } from "react";
 
-// The native button activation for an element that cannot BE a `<button>` — an SVG `<g>`,
-// a row hosting a focusable descendant. Spread it onto the element beside its `aria-label`.
+// For an element that cannot BE a `<button>`: an SVG `<g>`, a row hosting a focusable descendant.
 export function pressable(onActivate: () => void) {
   return {
     role: "button" as const,

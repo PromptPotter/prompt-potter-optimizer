@@ -1,42 +1,50 @@
-"""``Projection`` — typed-record dispatch for ledger subscribers, owning the routing in ONE place so a
-new record subtype touches one file. Default hooks are no-ops.
-
-``on_record`` dispatches off a ``_ROUTES`` table checked against the ``CycleRecord`` union at
-import, so an arm naming no hook is a DECLARED silence carrying its reason rather than one that
-fell off the end of a chain. Subclasses override hooks; there is no second dispatch path because
-this base class is the only one.
-
-``drain()`` is the runner's teardown seam — ``_finalize_run`` calls ``RunObservers.drain_all()``
-on every stop reason, so buffered state flushes without faking a ``round:complete``.
-``AuditTrailProjection`` is the only projection that buffers: its ``drain()`` writes the partial
-``round_NNNN.json`` with ``"interrupted": true`` when the cycle was torn down on Ctrl+C. The
-public ``rounds/`` tree stays empty for an interrupted round by design — a partial round is not a
-complete round — while the audit cache carries the partial so a post-mortem reader sees what the
-ledger has.
-"""
-
 from __future__ import annotations
 
 from typing import get_args
 
 from promptpotter.domain.run_records import (
+    BackendWarningRecord,
     CandidateMintedRecord,
+    CandidateScoredRecord,
+    CandidateStartedRecord,
+    CheckinClosedRecord,
     CommandAckRecord,
     CommandRecord,
+    CycleFinalRecord,
+    CycleMintedRecord,
     CycleRecord,
     CycleSeedRecord,
+    CycleSupersededRecord,
     ElectionRecord,
     ErrorRecord,
+    FlightRecord,
+    ForkGradedRecord,
+    InterventionRecord,
+    LaunchClaimRecord,
+    LaunchReleasedRecord,
     LLMCallProgressRecord,
     LLMCallRecord,
     LLMCallStartRecord,
+    OptimizerStateRecord,
     PhaseRecord,
     PricedKeyRecord,
+    RaceCatchUpRecord,
+    RaceStandingRecord,
     ResumeCheckpointRecord,
+    RoundClosedRecord,
+    RoundEnteredRecord,
+    RoundProposedRecord,
+    RoundStandingRecord,
     RoundWarningRecord,
     RulerRecord,
     RunLimitsRecord,
-    SnapshotRecord,
+    RunPhaseRecord,
+    RunWiringRecord,
+    SampleOrderRecord,
+    SampleScoredRecord,
+    SampleStartedRecord,
+    ScoringLockedRecord,
+    SpawnedRecord,
     SpendHoldRecord,
     SpendTombstoneRecord,
     TokenUsageRecord,
@@ -45,15 +53,22 @@ from promptpotter.domain.run_records import (
 __all__ = ["Projection"]
 
 
-# Record → the hook it routes to, or ``None`` for one no projection folds. It replaced an
-# ``isinstance`` chain, which could only express the first half: a record naming no arm fell off
-# the end and was dispatched NOWHERE, in silence. That is not hypothetical — ``ElectionRecord``
-# sat here unrouted while a second channel covered for it, so the origin folded uncrowned on its
-# only arm and no surface said so. The `None` arms are the same statement made deliberately, and
-# the raise below makes an unanswered record impossible rather than merely discouraged.
 _ROUTES: dict[type, str | None] = {
     PhaseRecord: "_handle_phase",
-    SnapshotRecord: "_handle_snapshot",
+    RunPhaseRecord: "_handle_run_phase",
+    RunWiringRecord: "_handle_run_wiring",
+    BackendWarningRecord: "_handle_backend_warning",
+    RoundEnteredRecord: "_handle_round_entered",
+    RoundClosedRecord: "_handle_round_closed",
+    RoundStandingRecord: "_handle_round_standing",
+    CandidateStartedRecord: "_handle_candidate_started",
+    SampleOrderRecord: "_handle_sample_order",
+    SampleStartedRecord: "_handle_sample_started",
+    SampleScoredRecord: "_handle_sample_scored",
+    CandidateScoredRecord: "_handle_candidate_scored",
+    FlightRecord: "_handle_flight",
+    RaceStandingRecord: "_handle_race_standing",
+    RaceCatchUpRecord: "_handle_race_catch_up",
     ResumeCheckpointRecord: "_handle_decision",
     TokenUsageRecord: "_handle_token_usage",
     LLMCallStartRecord: "_handle_llm_call_start",
@@ -63,26 +78,29 @@ _ROUTES: dict[type, str | None] = {
     RoundWarningRecord: "_handle_round_warning",
     CandidateMintedRecord: "_handle_candidate_minted",
     ElectionRecord: "_handle_election",
-    # Applied at the seam that wrote them (`application/commands/dispatcher.py`), which answers the
-    # caller inline; the ledger pair is the audit trail, not an input to any view.
+    # Applied where written (`application/commands/dispatcher.py`); the pair is audit trail only.
     CommandRecord: None,
     CommandAckRecord: None,
-    # Read once, by a scan, at the moment it is needed: the cycle seed at the runner seam
-    # (`scan_ledger_cycle_seed`) and the δ rulers on resume (`scan_ledger_rulers`). Folding either
-    # continuously would hold a second copy of a fact one reader wants once.
     CycleSeedRecord: None,
     RulerRecord: None,
-    # The standing operator ceiling, read by a scan at launch (`scan_ledger_run_limits`); the
-    # running book polls its mirror, `.runtime/run_limits.json`, written beside it.
     RunLimitsRecord: None,
-    # Banked by `store/account_spend.py` before a delete takes the rows it stands for — a fact
-    # about a cycle that no longer exists, so no live view of one can hold it.
+    ScoringLockedRecord: None,
+    CycleMintedRecord: None,
+    CheckinClosedRecord: None,
+    CycleFinalRecord: None,
+    CycleSupersededRecord: None,
+    ForkGradedRecord: None,
+    InterventionRecord: None,
+    SpawnedRecord: None,
+    LaunchClaimRecord: None,
+    LaunchReleasedRecord: None,
+    # Banked by `store/account_spend.py` for a cycle that no longer exists.
     SpendTombstoneRecord: None,
-    # Read by a scan at launch (`scan_ledger_priced_keys`), into the set the walks then grow.
     PricedKeyRecord: None,
-    # A send's admission, paired with the bill that closes it. Money moves on the bill alone; a
-    # hold no bill closed is unreported, read off the ledger where it is asked (`spend_book.py`).
+    # Read off the ledger by `spend_book.py`: money moves on the bill alone.
     SpendHoldRecord: None,
+    RoundProposedRecord: None,
+    OptimizerStateRecord: "_handle_optimizer_state",
 }
 
 _arms = frozenset(get_args(get_args(CycleRecord)[0]))
@@ -97,8 +115,7 @@ del _arms
 
 
 class Projection:
-    #: The ``Cut`` this projection is folded to. A fold that materializes itself STAMPS this, which is
-    #: the only way a state on disk can say which moment it is of. ``-1`` = nothing folded yet.
+    #: The ``Cut`` folded to, stamped by a fold that materializes itself. ``-1`` = nothing folded yet.
     at_offset: int = -1
 
     def on_record(self, record: CycleRecord, offset: int) -> None:
@@ -108,8 +125,21 @@ class Projection:
             getattr(self, hook)(record)
 
     def _handle_phase(self, record: PhaseRecord) -> None: ...
+    def _handle_run_phase(self, record: RunPhaseRecord) -> None: ...
+    def _handle_run_wiring(self, record: RunWiringRecord) -> None: ...
+    def _handle_backend_warning(self, record: BackendWarningRecord) -> None: ...
+    def _handle_round_entered(self, record: RoundEnteredRecord) -> None: ...
+    def _handle_round_closed(self, record: RoundClosedRecord) -> None: ...
+    def _handle_round_standing(self, record: RoundStandingRecord) -> None: ...
     def _handle_election(self, record: ElectionRecord) -> None: ...
-    def _handle_snapshot(self, record: SnapshotRecord) -> None: ...
+    def _handle_candidate_started(self, record: CandidateStartedRecord) -> None: ...
+    def _handle_sample_order(self, record: SampleOrderRecord) -> None: ...
+    def _handle_sample_started(self, record: SampleStartedRecord) -> None: ...
+    def _handle_sample_scored(self, record: SampleScoredRecord) -> None: ...
+    def _handle_candidate_scored(self, record: CandidateScoredRecord) -> None: ...
+    def _handle_flight(self, record: FlightRecord) -> None: ...
+    def _handle_race_standing(self, record: RaceStandingRecord) -> None: ...
+    def _handle_race_catch_up(self, record: RaceCatchUpRecord) -> None: ...
     def _handle_decision(self, record: ResumeCheckpointRecord) -> None: ...
     def _handle_token_usage(self, record: TokenUsageRecord) -> None: ...
     def _handle_llm_call_start(self, record: LLMCallStartRecord) -> None: ...
@@ -118,7 +148,7 @@ class Projection:
     def _handle_error(self, record: ErrorRecord) -> None: ...
     def _handle_round_warning(self, record: RoundWarningRecord) -> None: ...
     def _handle_candidate_minted(self, record: CandidateMintedRecord) -> None: ...
+    def _handle_optimizer_state(self, record: OptimizerStateRecord) -> None: ...
 
     def drain(self) -> None:
-        """Settle buffered state to disk on teardown, so the ledger's truth is mirrored even when no ``round:complete`` arrived.
-        A no-op for projections that already flush every event."""
+        """Settle buffered state on teardown; a no-op where every event already flushes."""

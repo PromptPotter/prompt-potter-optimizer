@@ -88,7 +88,7 @@ Captured so they are not re-investigated. All are projections, so read each thro
 **A containerized agent episode costs 14–48× an `llm_only` call, and that gap is the reason the
 harbor datasets need their own budget arithmetic rather than the LLM-only defaults.** Folded off
 the workspace archive over every non-error row, latency via
-[`domain/scoring.py::recorded_cost_s`](../../promptpotter/domain/scoring.py) (which sums
+[`domain/scoring.py::MeasuredCell.cost_s`](../../promptpotter/domain/scoring.py) (which sums
 `step_timings` and so survives a cache replay, unlike `total_time`), tokens as `input + output`
 summed across `step_tokens` nodes. Recompute it by folding those two fields over
 `measurements/runs/*.jsonl`; the `n` column is what the claim rests on.

@@ -1,16 +1,17 @@
-// @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CopyButton } from "../CopyButton";
-
-afterEach(cleanup);
 
 describe("CopyButton", () => {
   const writeText = vi.fn().mockResolvedValue(undefined);
 
+  // jsdom ships no clipboard; the one planted here is taken back, since the next file shares it.
   beforeEach(() => {
     writeText.mockClear();
     Object.assign(navigator, { clipboard: { writeText } });
+  });
+  afterEach(() => {
+    Reflect.deleteProperty(navigator, "clipboard");
   });
 
   it("stringifies object data as pretty JSON", async () => {

@@ -1,7 +1,4 @@
 "use client";
-// The ONE rendering of a scoring criterion — chrome, worn wherever scoring surfaces. Three rungs
-// of one frame: the LINE, the DIALS under it, then the formula, the expression and the samples.
-// A control commits on release, Enter or blur: on Compare the mask is part of the fetch key.
 
 import { useState, type ComponentType, type ReactNode } from "react";
 import {
@@ -47,7 +44,6 @@ const KINDS = [
 
 export type CriterionRung = 0 | 1 | 2;
 
-// What grades one answer. `onPick` is present exactly where the matcher is still the host's to set.
 export interface CriterionMatcher {
   value: string;
   options?: readonly string[];
@@ -57,7 +53,6 @@ export interface CriterionMatcher {
 const pct = (weight: number) => String(Math.round(weight * 1000) / 10);
 
 function lineParts(mask: ScoringMask, matcher: CriterionMatcher | undefined): string[] {
-  // An expression already says what it does with correctness, so it stands alone.
   if (mask.kind === "expression") return [mask.lens.trim() || "no expression yet"];
   return [
     matcher?.value || "accuracy",
@@ -68,7 +63,6 @@ function lineParts(mask: ScoringMask, matcher: CriterionMatcher | undefined): st
   ];
 }
 
-// Rung 0 on its own, for a host with one line of room (the masthead).
 export function CriterionLine({
   mask,
   matcher,
@@ -102,27 +96,22 @@ export function Criterion({
   className,
 }: {
   mask: ScoringMask;
-  // Omit where the criterion is a record: every control then renders as its value.
   onMask?: (mask: ScoringMask) => void;
-  // A host whose channel carries dials alone (a check-in draft has no `per_cell` to type into).
   dialsOnly?: boolean;
   matcher?: CriterionMatcher;
-  // The served level each anchored dial is locked at; a term absent from it is not yet measured.
+  // Served level per anchored dial; a term absent from it is not yet measured.
   anchors?: Readonly<Record<string, number>> | null;
-  // The served realized `per_cell`, shown verbatim at the last rung.
   formula?: string | null;
-  // Omit where the surface already owns a sample-subset editor (the dashboard's chip strip).
   samples?: string;
   onSamples?: (raw: string) => void;
   invalid?: string | null;
   summary?: ReactNode;
-  // The host's own sentence on what setting this does HERE; the fields never change with it.
   note?: ReactNode;
   startRung?: CriterionRung;
   className?: string;
 }) {
   const [rung, setRung] = useState<CriterionRung>(startRung);
-  // Terms picked off the `+` list this session; a dial at 0 has no other way to stay on screen.
+  // A dial at 0 has no other way to stay on screen.
   const [added, setAdded] = useState<readonly string[]>([]);
 
   const weights = mask.kind === "dials" ? mask.weights : NO_WEIGHTS;
@@ -239,7 +228,7 @@ export function Criterion({
             </Menu>
           )}
 
-          {invalid ? <p className="l4-warn">{invalid}</p> : null}
+          {invalid ? <p className="note-warn">{invalid}</p> : null}
           {summary ? <div className="criterion-summary">{summary}</div> : null}
 
           {rung === 2 && (
@@ -305,7 +294,7 @@ function DialRow({
   onWeight?: (weight: number) => void;
   onRemove?: () => void;
 }) {
-  // The thumb moves on a draft and commits on release, so a drag is one read, not one per step.
+  // Commits on release: on Compare the mask is in the fetch key, so a drag is one read.
   const [draft, setDraft] = useState(weight);
   const [seen, setSeen] = useState(weight);
   if (weight !== seen) {

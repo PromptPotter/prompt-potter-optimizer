@@ -3,34 +3,24 @@ through its entry points alone: a random panel, a rephrasing llm node, a keep-th
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any, ClassVar, cast
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar
 
 from pydantic import Field
 
-from example_optimizer import operators
-from promptpotter.application.bench.resume_and_fork.decisions import GatingMode, record_decision
+from example_optimizer import prompts
 from promptpotter.application.campaign_config import Estimand, Knob, Scope
-from promptpotter.application.optimizers import nodes
-from promptpotter.application.optimizers.paper_templates import (
-    PaperRuntime,
-    ask,
-    child,
-    walk_rng,
-)
-from promptpotter.domain.opt_search_point import node_source
+from promptpotter.application.optimizers import nodes, paper_templates
+from promptpotter.application.optimizers.paper_templates import RewriteKnobs, child, shown
 from promptpotter.domain.optimizer_state import RoundPayload
 from promptpotter.domain.pipeline_schema import NodeKind
-from promptpotter.domain.results import OptimizerFact
-from promptpotter.domain.run_records import CheckpointKind
 from promptpotter.domain.strict_model import StrictModel
 
 if TYPE_CHECKING:
     from types import ModuleType
 
-    from promptpotter.application.bench.resume_and_fork.replayers import Replayer
+    from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
@@ -38,19 +28,14 @@ if TYPE_CHECKING:
         BankedState,
         Measured,
         Panel,
-        Population,
-        RoundContext,
+        Proposals,
         Selection,
     )
-    from promptpotter.domain.results import RoundResult
+    from promptpotter.domain.results import DisplayMetric
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import QueryMeasurement
 
 MANIFEST = "example"
-
-
-class ExampleCheckpointKind(CheckpointKind):
-    KEPT = "example_kept"
 
 
 class ExampleRoundState(RoundPayload, manifest=MANIFEST):
@@ -67,19 +52,17 @@ class Draw:
     name: ClassVar[str] = "example_draw"
     kind: ClassVar[NodeKind] = NodeKind.SAMPLER
     knobs: ClassVar[type[StrictModel]] = DrawKnobs
-    couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = ()
     size_knob: ClassVar[str | None] = "size"
 
     def draws(self, selected: SelectedOptimizer, pool: int) -> int:
-        return min(cast("DrawKnobs", selected.knobs(self.name)).size, pool)
+        return min(selected.knobs_of(self.name, DrawKnobs).size, pool)
 
-    def draw(self, ctx: RoundContext, pool: list[Sample]) -> Panel:
-        size = cast("DrawKnobs", ctx.cycle.optimizer.knobs(self.name)).size
-        cells = walk_rng(ctx.cycle, ctx.round_num, self.name).sample(pool, min(size, len(pool)))
+    def draw(self, ctx: NodeContext[DrawKnobs], pool: list[Sample]) -> Panel:
+        cells = ctx.rng().sample(pool, min(ctx.knobs.size, len(pool)))
         return nodes.Panel(cells=cells, order=list(cells), block_size=len(cells))
 
 
-class ProposeKnobs(StrictModel):
+class ProposeKnobs(RewriteKnobs):
     variants: Annotated[int, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
         ge=1, description="Arms a round proposes."
     )
@@ -90,20 +73,15 @@ class Propose:
     kind: ClassVar[NodeKind] = NodeKind.LLM
     opens: ClassVar[bool] = True
     knobs: ClassVar[type[StrictModel]] = ProposeKnobs
-    couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = ()
 
-    async def propose(self, ctx: RoundContext, panel: Panel, population: Population) -> Population:
-        cycle = ctx.cycle
-        n = cast("ProposeKnobs", cycle.optimizer.knobs(self.name)).variants
-        parent = cycle.opt_sp
-        prompt = operators.rephrase_prompt(cycle, self.name, instruction=parent.instruction)
-        answers = await asyncio.gather(*(ask(ctx, self.name, i, prompt) for i in range(n)))
-        source = node_source(MANIFEST, self.name)
-        return nodes.Population.of(
-            [
-                child(source, self.name, [parent], raw, f"rephrase {i}")
-                for i, raw in enumerate(answers)
-            ]
+    async def propose(
+        self, ctx: NodeContext[ProposeKnobs], panel: Panel, proposals: Proposals
+    ) -> Proposals:
+        parent = ctx.parent
+        prompt = prompts.rephrase_prompt(ctx, instruction=shown(ctx, parent))
+        answers = await ctx.ask_each(dict.fromkeys(range(ctx.knobs.variants), prompt))
+        return nodes.Proposals(
+            [child(ctx, [parent], raw, f"rephrase {i}") for i, raw in enumerate(answers)]
         )
 
 
@@ -115,44 +93,37 @@ class Keep:
     name: ClassVar[str] = "example_keep"
     kind: ClassVar[NodeKind] = NodeKind.SELECTOR
     knobs: ClassVar[type[StrictModel]] = KeepKnobs
-    couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = ()
-    stamps_theta: ClassVar[bool] = False
+    elects_on: ClassVar[DisplayMetric] = "composite"
     elects_partial: ClassVar[bool] = False
 
     def parent_cells(
-        self, ctx: RoundContext, panel: Panel, rows: Mapping[str, Sequence[QueryMeasurement]]
+        self,
+        ctx: NodeContext[KeepKnobs],
+        panel: Panel,
+        rows: Mapping[str, Sequence[QueryMeasurement]],
     ) -> list[Sample]:
         return panel.cells
 
-    def select(self, ctx: RoundContext, measured: Measured, population: Population) -> Selection:
+    def select(
+        self, ctx: NodeContext[KeepKnobs], measured: Measured, proposals: Proposals
+    ) -> Selection:
         fitness = {cs.candidate_id: cs.composite_fitness or 0.0 for cs in measured.scores}
-        ranked = sorted((ind.lineage.id for ind in measured.electable), key=lambda c: -fitness[c])
+        ranked = sorted((ind.id for ind in measured.electable), key=lambda c: -fitness[c])
         bar = measured.parent.report.composite_fitness or 0.0
         selected_id = ranked[0] if ranked and fitness[ranked[0]] > bar else ""
-        record_decision(
-            ctx.cycle.pending_decisions,
-            ExampleCheckpointKind.KEPT,
-            {"round_num": ctx.round_num, "ranked": ranked},
-            selected_id,
-            node=self.name,
-            round=ctx.round_num,
-        )
+        ctx.decide("example_kept", {"round_num": ctx.round_num, "ranked": ranked}, selected_id)
         return nodes.Selection(
             selected_id=selected_id,
+            leading_id=ranked[0] if ranked else "",
             scores=list(measured.scores),
             verdict_reason=f"kept {selected_id[:8] or 'the parent'}",
-            payload=nodes.state_as(ctx, ExampleRoundState).payload,
         )
 
 
-class ExampleRuntime(PaperRuntime):
+class ExampleRuntime(nodes.OptimizerRuntime):
     name: ClassVar[str] = MANIFEST
     manifest_dir: ClassVar[Path] = Path(__file__).parent
-    operators: ClassVar[ModuleType] = operators
-    checkpoint_gating: ClassVar[Mapping[CheckpointKind, GatingMode]] = {
-        ExampleCheckpointKind.KEPT: GatingMode.ARCHIVAL
-    }
-    replayers: ClassVar[Mapping[str, Replayer]] = {}
+    prompt_sources: ClassVar[tuple[ModuleType, ...]] = (paper_templates, prompts)
 
     def start(
         self, session: Session, config: CampaignConfig, origin_results: list[dict[str, Any]]
@@ -160,15 +131,7 @@ class ExampleRuntime(PaperRuntime):
         return nodes.BankedState(ExampleRoundState())
 
     def arms(self, selected: SelectedOptimizer) -> int:
-        return cast("ProposeKnobs", selected.knobs(Propose.name)).variants
-
-    def round_cells_ceiling(self, selected: SelectedOptimizer, pool: int) -> int:
-        return (self.arms(selected) + 1) * selected.round_cells(pool)
-
-    def round_facts(
-        self, selected: SelectedOptimizer, round_result: RoundResult
-    ) -> list[OptimizerFact]:
-        return []
+        return selected.knobs_of(Propose.name, ProposeKnobs).variants
 
 
 DRAW, PROPOSE, KEEP = Draw(), Propose(), Keep()

@@ -3,53 +3,42 @@ import { useMemo, useRef } from "react";
 import { Bar } from "react-chartjs-2";
 import { barChartDefaults, ensureChartRegistered, getCss, useThemeVersion } from "@/lib/theme";
 import { TERMS } from "@/lib/terms";
-import { liveCandidates, useCycleStream, type DashboardSnapshot } from "@/lib/poll";
-import { useEffectiveRound } from "@/lib/hooks/useEffectiveRound";
-import { useRoundRows } from "@/lib/hooks/useRoundRows";
+import { liveCandidates, useCycleStream } from "@/lib/poll";
+import { useObserveSubject } from "@/lib/hooks/useObserveSubject";
+import { useRound } from "@/lib/hooks/useRound";
+import { useWorkspace } from "@/lib/workspace";
 import { Badge, CardFrame, Term } from "@/components/ui";
-import type { RawResultRow } from "@/lib/types";
+import type { DashboardSample, SheetRow } from "@/lib/api/types";
 
 ensureChartRegistered();
 
-// `rescore_results` floors error rows to 0.0, so `fitness` is always served.
-type ResultRow = Pick<RawResultRow, "fitness">;
+type ResultRow = Pick<DashboardSample | SheetRow, "status" | "fitness">;
 
 const LABELS = ["0", "", "", "", "", "", "", "", "", "1"];
 
+// Only graded marks bucket: `Scorer.grade` floors an errored row to 0.0, which is not a low score.
 function bucketScores(results: ResultRow[]): number[] {
   const buckets = new Array<number>(10).fill(0);
   results.forEach((r) => {
-    const score = typeof r.fitness === "number" ? r.fitness : 0;
-    const idx = Math.min(9, Math.max(0, Math.floor(score * 9.999)));
+    if ((r.status !== "HIT" && r.status !== "MISS") || typeof r.fitness !== "number") return;
+    const idx = Math.min(9, Math.max(0, Math.floor(r.fitness * 9.999)));
     buckets[idx] = (buckets[idx] ?? 0) + 1;
   });
   return buckets;
-}
-
-// The live row carries a verdict, not a fitness, so only the two graded marks bucket.
-function liveResultsFrom(dash: DashboardSnapshot | null): ResultRow[] {
-  const out: ResultRow[] = [];
-  for (const c of liveCandidates(dash)) {
-    for (const s of c.samples) {
-      if (s.status === "HIT") out.push({ fitness: 1 });
-      else if (s.status === "MISS") out.push({ fitness: 0 });
-    }
-  }
-  return out;
 }
 
 export function FreqChart() {
   useThemeVersion();
   const chartRef = useRef(null);
   const { dash } = useCycleStream();
-  const { round: effectiveRound, isLiveView } = useEffectiveRound();
+  const { round: effectiveRound, live: isLiveView } = useObserveSubject();
 
-  // No stitch: `useRoundRows` idles the round-file fetch on the live round.
-  const { unfiled, doc: roundDoc } = useRoundRows(effectiveRound);
+  const { viewedPath } = useWorkspace();
+  const { unfiled, doc: roundDoc } = useRound(viewedPath, effectiveRound);
 
   const results: ResultRow[] = useMemo(() => {
-    if (unfiled) return liveResultsFrom(dash);
-    return (roundDoc?.results as ResultRow[] | undefined) ?? [];
+    if (unfiled) return liveCandidates(dash).flatMap((c) => c.samples);
+    return roundDoc?.results ?? [];
   }, [unfiled, dash, roundDoc]);
 
   const data = bucketScores(results);
@@ -72,7 +61,6 @@ export function FreqChart() {
       actions={<Badge>{isLiveView ? "live" : `R${effectiveRound}`}</Badge>}
     >
       <div style={{ position: "relative", height: 140 }}>
-        {/* A canvas has no text, so the name IS the whole reading for anyone not looking at it. */}
         <Bar
           ref={chartRef}
           data={chartData}

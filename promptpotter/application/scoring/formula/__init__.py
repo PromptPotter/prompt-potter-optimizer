@@ -14,7 +14,6 @@ from promptpotter.application.scoring.formula.compiler import (
     split_scoring_block,
 )
 from promptpotter.application.scoring.formula.matchers import SCORING_FUNCTIONS
-from promptpotter.application.scoring.formula.rescore import rescore_results
 
 __all__ = [
     "DIALS_KEY",
@@ -27,7 +26,6 @@ __all__ = [
     "origin_anchors",
     "parse_dials",
     "realize_dials",
-    "rescore_results",
     "spell_dials",
     "split_scoring_block",
 ]

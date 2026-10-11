@@ -1,5 +1,3 @@
-"""``LLMResponse`` — the standardized shape every LLM client returns."""
-
 from __future__ import annotations
 
 from typing import Any
@@ -11,9 +9,6 @@ from promptpotter.domain.strict_model import StrictModel
 
 
 class LLMResponse(StrictModel):
-    """The standardized response every provider returns. ``reasoning`` is a CORE, permanent member: do not clean it up
-    because no gate reads it — that is the point of it."""
-
     content: str = Field(..., description="Response content")
     reasoning: str = Field(
         "",
@@ -42,9 +37,9 @@ class LLMResponse(StrictModel):
             "What the PROVIDER says the call cost, summed across a repair retry (both "
             "round-trips are billed). Its own field rather than a ``usage`` key because "
             "``usage`` counts tokens and this is money. ``None`` means the provider "
-            "reported nothing — the honest answer, which routes the reader back to the "
-            "rate table (``infrastructure/llm/pricing.py::compute_usd`` takes it as "
-            "``override_usd``) instead of quoting a zero nobody measured."
+            "reported nothing — the honest answer, never a zero nobody measured. The call is "
+            "then priced at our rate in its own field (``telemetry.py::rate_priced_usd``), "
+            "never in this one."
         ),
     )
     served_by: str | None = Field(

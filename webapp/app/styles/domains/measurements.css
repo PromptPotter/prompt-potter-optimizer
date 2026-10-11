@@ -1,6 +1,3 @@
-/* The one measurement log (`shell/measurements/MeasurementsPane`) and the cell it opens
-   (`shell/cell/CellPanel`). */
-
 .ms-pane {
   display: flex;
   flex-direction: column;

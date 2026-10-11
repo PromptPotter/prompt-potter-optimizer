@@ -18,8 +18,7 @@ import {
 import { STOP_REASON_CATEGORIES } from "@/lib/api/types.generated";
 import { isStopReason } from "@/lib/run-phase";
 
-// The recursion end to end, on the degenerate `promptpotter-self-e2e` panel. Minted through the
-// control plane: browser ingest materializes 0 items for an outer dataset, and the CLI blocks on a TTY.
+// Minted through the control plane: browser ingest materializes 0 items for an outer dataset, and the CLI blocks on a TTY.
 
 const BUDGET_USD = Number(process.env.PP_E2E_BUDGET_USD || "0.05");
 const DATASET = "promptpotter-self-e2e";
@@ -82,7 +81,7 @@ test.describe("the recursion, end to end", () => {
   test("minting carries the ceiling, so there is no unclamped window", async ({ request }) => {
     const res = await command(request, "mint-campaign", {
       dataset_name: DATASET,
-      spend_budget_usd: BUDGET_USD,
+      ceiling: { usd: BUDGET_USD },
     });
     expect(res.status, `mint-campaign: ${res.body}`).toBeLessThan(300);
 
@@ -111,7 +110,7 @@ test.describe("the recursion, end to end", () => {
     const started = await command(request, "start-run", {
       campaign_id: outer!.id,
       cycle_id: outer!.cycleId,
-      spend_budget_usd: BUDGET_USD,
+      ceiling: { usd: BUDGET_USD },
     });
     expect(started.status, `start-run: ${started.body}`).toBeLessThan(300);
 
@@ -179,9 +178,9 @@ test.describe("the recursion, end to end", () => {
 
   test("the run stayed inside the ceiling it was minted with", async ({ request }) => {
     const d = await dashboard(request, outer!);
-    const limits = d?.run_limits as { spend_budget_usd?: number | null } | undefined;
-    expect(limits?.spend_budget_usd, "the L4 run has no USD ceiling at all").not.toBeNull();
-    expect(limits?.spend_budget_usd).toBeLessThanOrEqual(BUDGET_USD);
+    const limits = d?.run_limits as { ceiling?: { usd?: number | null } } | undefined;
+    expect(limits?.ceiling?.usd, "the L4 run has no USD ceiling at all").not.toBeNull();
+    expect(limits?.ceiling?.usd).toBeLessThanOrEqual(BUDGET_USD);
 
     // INCURRED, not used: a replayed pass bills ~0, which would hide a re-keyed panel.
     const tape = tapeOf(d);
@@ -190,7 +189,6 @@ test.describe("the recursion, end to end", () => {
       tape!.incurred,
       "the fixture incurred its whole ceiling — the panel geometry has drifted",
     ).toBeLessThan(BUDGET_USD);
-    // A floor holds here: the outer origin is the dataset's own file, authored nothing at run time.
     reportTape(DATASET, tape, 0.5);
   });
 

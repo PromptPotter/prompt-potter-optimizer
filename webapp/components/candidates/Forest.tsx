@@ -1,19 +1,17 @@
 "use client";
 import { memo, useCallback, useMemo } from "react";
-import { fmtPct0, fmtTheta } from "@/lib/format";
+import { fmtTheta } from "@/lib/format";
 import {
   fmtDisplayValue,
-  displayMetricLabel,
   nodeKeyOf,
-  nodeMetric,
   type DisplayMetric,
 } from "@/lib/derivations";
 import { cx } from "@/lib/cx";
 import { pressable } from "@/components/ui";
 import { pathLeaf, shortFamilyTail } from "@/lib/ids";
-import { heartsText } from "@/lib/derivations";
-import type { LineageNode } from "@/lib/api";
-import { STOP_REASON_LABELS } from "@/lib/api/types.generated";
+import { fmtPaired } from "@/lib/derivations";
+import type { CourseNode } from "@/lib/api";
+import { DISPLAY_METRIC_LABELS } from "@/lib/api/types.generated";
 import {
   DIRECTION_GLYPH,
   HEADER_H,
@@ -41,13 +39,11 @@ export interface CladogramCtx {
   isPicked: (n: RoundNodePos) => boolean;
   onPickCandidate: (n: RoundNodePos) => void;
   channels: readonly CladogramChannel[];
-  // The family is cut to this channel's extent; `null` draws the whole family.
   clip: CladogramAnchor | null;
-  // Candidate ids (the space `parent_ids` speaks) whose config was edited, plus descendants.
   invalidated?: ReadonlySet<string>;
 }
 
-function courseName(course: LineageNode): string {
+function courseName(course: CourseNode): string {
   return course.course_kind === "root"
     ? course.dataset_name || course.id
     : shortFamilyTail(course.id);
@@ -55,7 +51,7 @@ function courseName(course: LineageNode): string {
 
 const CandidateNode = memo(function CandidateNode({
   n,
-  accuracy,
+  level,
   theta,
   metric,
   selected,
@@ -68,7 +64,7 @@ const CandidateNode = memo(function CandidateNode({
   d,
 }: {
   n: RoundNodePos;
-  accuracy: number | null;
+  level: number | null;
   theta: number | null;
   metric: DisplayMetric;
   selected: boolean;
@@ -81,8 +77,7 @@ const CandidateNode = memo(function CandidateNode({
   d: Density;
 }) {
   const retiredBy = n.retiredBy;
-  const stampsTheta = n.node.stamps_theta;
-  const shown = nodeMetric(metric, stampsTheta);
+  const wonOnTheta = n.node.elects_on === "ability";
   return (
     <g
       className={cx(
@@ -97,22 +92,25 @@ const CandidateNode = memo(function CandidateNode({
       )}
       {...pressable(() => onPick(n))}
       aria-pressed={selected}
-      aria-label={`Round ${n.round} candidate ${n.candidateLabel}, ${invalidated ? "unknown — a setting was changed at or above this point" : `${displayMetricLabel(shown)} ${fmtDisplayValue(shown, accuracy, theta)}`}${n.crown === "elected" ? ", round winner" : ""}${ink ? ", a channel of the comparison" : ""}${retiredBy ? ", retired — the run branched away and continued elsewhere" : ""}${divergence ? ", divergence point under the lens" : ""}${alt ? ", would be elected under the scoring lens" : ""}${dimmed ? ", counterfactual under the scoring lens" : ""}`}
+      aria-label={`Round ${n.round} candidate ${n.candidateLabel}, ${invalidated ? "unknown — a setting was changed at or above this point" : `${DISPLAY_METRIC_LABELS[metric]} ${fmtDisplayValue(metric, level)}`}${n.crown === "elected" ? ", round winner" : ""}${ink ? ", a channel of the comparison" : ""}${retiredBy ? ", retired — the run branched away and continued elsewhere" : ""}${divergence ? ", divergence point under the lens" : ""}${alt ? ", would be elected under the scoring lens" : ""}${dimmed ? ", counterfactual under the scoring lens" : ""}`}
       style={{ cursor: "pointer" }}
     >
       <title>
         {n.candidateLabel} ·{" "}
         {invalidated
           ? "unknown"
-          : fmtDisplayValue(shown, accuracy, theta)}
-        {!invalidated && shown !== "ability" && typeof theta === "number"
+          : fmtDisplayValue(metric, level)}
+        {!invalidated && metric !== "ability" && typeof theta === "number"
           ? ` · ability θ ${fmtTheta(theta)}`
           : ""}
+        {n.node.variations
+          .map((v) => `\n${v.node} (${v.mode}): ${v.loci.join(", ") || "nothing"}`)
+          .join("")}
         {invalidated
           ? "\na setting was changed here or above — nothing ran at that value, so this point's numbers describe a searchpoint it no longer is"
           : ""}
         {n.crown === "elected"
-          ? `\nround winner${stampsTheta ? " — elected on difficulty-adjusted ability θ, not raw accuracy" : ""}`
+          ? `\nround winner${wonOnTheta ?" — elected on difficulty-adjusted ability θ, not raw accuracy" : ""}`
           : n.crown === "uncontested"
             ? "\nthe round's only arm — it advances without an election"
             : n.isWinner
@@ -151,7 +149,7 @@ const CandidateNode = memo(function CandidateNode({
           className={cx("lineage-label", n.isWinner && "winner", selected && "selected")}
           style={ink ? { fill: ink } : undefined}
         >
-          {n.candidateLabel} {invalidated ? "?" : fmtDisplayValue(shown, accuracy, theta)}
+          {n.candidateLabel} {invalidated ? "?" : fmtDisplayValue(metric, level)}
         </text>
       )}
       <rect
@@ -165,7 +163,6 @@ const CandidateNode = memo(function CandidateNode({
   );
 });
 
-// The campaign's cladogram — the one served tree, rendered.
 export function Forest({
   tree,
   valueByKey,
@@ -176,12 +173,11 @@ export function Forest({
   ctx,
   d,
 }: {
-  tree: LineageNode;
+  tree: CourseNode;
   valueByKey: ReadonlyMap<string, number | null>;
   thetaByKey: ReadonlyMap<string, number | null>;
   metric: DisplayMetric;
   expanded: ReadonlySet<string>;
-  // Toggles the lane in place; never changes the dashboard's selected cycle.
   onLaneActivate: (courseKey: string) => void;
   ctx: CladogramCtx;
   d: Density;
@@ -196,7 +192,6 @@ export function Forest({
     [tree, expanded, clip],
   );
   const { nodes, segs } = useMemo(() => placeNodes(laneByKey, d), [laneByKey, d]);
-  // Narrowest first: a node wears the ink of the first extent holding it.
   const extents = useMemo(
     () =>
       channels
@@ -212,7 +207,6 @@ export function Forest({
       extents.find((e) => e.keys.has(n.candKey))?.ink ?? null,
     [extents],
   );
-  // The divergence marker rides the round's WINNER, so the alternative learns of itself here.
   const altIds = useMemo(
     () =>
       new Set(
@@ -293,11 +287,11 @@ export function Forest({
             );
           })}
 
-          {/* Painted before nodes so their clicks win; the row background falls through here. */}
+          {/* Painted before the nodes so their clicks win. */}
           {laneList.map((l) => {
             const course = l.course;
             const isEmpty = l.candidates.length === 0;
-            const roundCount = new Set(l.candidates.map((c) => c.round)).size;
+            const roundCount = new Set(l.candidates.map((c) => c.reading.arm.round)).size;
             const verb = l.expanded ? "Collapse" : "Expand";
             return (
               <rect
@@ -324,8 +318,10 @@ export function Forest({
                   {course.fork_direction === "equivalent"
                     ? "\n≡ the cut reached nothing — this branch and its parent continue identically"
                     : ""}
-                  {course.stop_reason ? ` · ${STOP_REASON_LABELS[course.stop_reason]}` : ""}
-                  {course.best_accuracy != null ? ` · best ${fmtPct0(course.best_accuracy)}` : ""}
+                  {` · ${course.status.label}`}
+                  {course.run_standing?.selection
+                    ? ` · selection ${course.run_standing.selection.label} ${fmtPaired(course.run_standing.vs_origin, "rates")}`
+                    : ""}
                   {isEmpty
                     ? "\nNo post-divergence rounds — use Clean up in the header to prune"
                     : `\n${roundCount} round(s) · click row to ${l.expanded ? "collapse" : "expand"}`}
@@ -342,17 +338,11 @@ export function Forest({
               const nodeCycleId = pathLeaf(n.coursePath).cycleId;
               const cycName = layoutEntry ? courseName(layoutEntry.course) : nodeCycleId;
               const rowLabelText = n.isLastInLane && layoutEntry ? cycName : null;
-              // Inside an <svg>, so `<Hearts>` can't mount; `heartsText` is the same derivation.
-              const laneHearts = layoutEntry
-                ? heartsText(
-                    layoutEntry.course.run_standing?.stalls_left,
-                    layoutEntry.course.run_standing?.stalls_left_cap,
-                  )
-                : "";
+              // Inside an <svg>, so `<Hearts>` can't mount; the served bar is the same pips as text.
+              const laneHearts = layoutEntry?.course.run_standing?.lives?.bar ?? "";
               const isDivergence = n.divergence !== null;
               const isDivergent = n.divergent;
               const ink = inkOf(n);
-              const shown = nodeMetric(metric, n.node.stamps_theta);
               return (
                 <g
                   key={`n-${n.courseKey}-${n.round}`}
@@ -389,7 +379,7 @@ export function Forest({
                       className="family-cladogram-roundlabel"
                       textAnchor="middle"
                     >
-                      R{n.round} {fmtDisplayValue(shown, valOf(n), thetaOf(n))}
+                      R{n.round} {fmtDisplayValue(metric, valOf(n))}
                     </text>
                   )}
                   {d.labels && rowLabelText && (
@@ -408,8 +398,8 @@ export function Forest({
                     </text>
                   )}
                   <title>
-                    {nodeCycleId} · R{n.round} · {fmtDisplayValue(shown, valOf(n), thetaOf(n))}
-                    {shown !== "ability" && typeof thetaOf(n) === "number"
+                    {nodeCycleId} · R{n.round} · {fmtDisplayValue(metric, valOf(n))}
+                    {metric !== "ability" && typeof thetaOf(n) === "number"
                       ? ` · ability θ ${fmtTheta(thetaOf(n))}`
                       : ""}
                     {n.candidateLabel ? `\n${n.candidateLabel}` : ""}
@@ -427,7 +417,7 @@ export function Forest({
               <CandidateNode
                 key={`c-${n.candKey}`}
                 n={n}
-                accuracy={valOf(n)}
+                level={valOf(n)}
                 theta={thetaOf(n)}
                 metric={metric}
                 selected={isPicked(n)}
@@ -454,7 +444,7 @@ export function Forest({
                   className="family-cladogram-cyclelabel"
                 >
                   <tspan className="family-cladogram-glyph">
-                    {KIND_GLYPH[course.course_kind ?? "root"]}
+                    {KIND_GLYPH[course.course_kind]}
                     {TRIGGER_GLYPH[course.trigger] ?? ""}
                     {course.fork_direction ? DIRECTION_GLYPH[course.fork_direction] : ""}
                   </tspan>

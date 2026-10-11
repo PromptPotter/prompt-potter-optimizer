@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Any, Literal
+from collections.abc import Iterable, Mapping
+from typing import Literal
 
 from pydantic import computed_field
 
@@ -11,19 +11,15 @@ from promptpotter.application.scoring.formula.compiler import (
     cell_channels_of,
     compile_expression,
 )
+from promptpotter.domain.scoring import GradedCell
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.statistics import mean_ci
 
-# What a number IS, which decides how it reads. `delta` is a signed difference and `level` an
-# absolute value, so only the first earns a leading `+`; `composed` is a hand-typed expression whose
-# units nothing can name — `higher_is_better` already has that unknown state and this is its twin.
 MetricUnit = Literal["level", "delta", "seconds", "usd", "tokens", "rank", "rounds", "composed"]
 
 CUSTOM_METRIC_PREFIX = "expr:"
+CUSTOM_METRIC_KEY = "custom"
 
-# The catalogue key whose expression the SELECTION picks: `lift` where the rows carry a per-seed
-# delta, `fitness` where a cell is a sample and there is none. One entry, because "Level" and
-# "Lift over origin" naming one number is the synonym the root CLAUDE.md forbids.
 MEASURAND = "measurand"
 
 
@@ -33,13 +29,9 @@ class MetricSpec(StrictModel):
 
     key: str
     label: str
-    # The channel expression the key stands for — one evaluation path for a catalogue entry and a
-    # hand-typed formula alike, so nothing can make the two disagree.
     expression: str
     unit: MetricUnit
-    # ``None`` on a composed expression: ``lift / latency`` is up and ``latency / lift`` is down,
-    # and nothing here can tell. The reader is told there is no direction rather than shown a
-    # winner picked by a guess.
+    # `None` on a composed expression: `lift / latency` is up, `latency / lift` down, and nothing can tell.
     higher_is_better: bool | None
     description: str
 
@@ -52,36 +44,22 @@ class MetricSpec(StrictModel):
         return self.label if self.unit in _UNNAMED_UNITS else f"{self.label} ({self.unit})"
 
 
-# A level and a delta are already in the measurand's own scale, and a composed expression has no
-# unit at all — naming any of the three tells the reader nothing they do not have.
 _UNNAMED_UNITS: frozenset[str] = frozenset({"level", "delta", "composed"})
 
 
-# --- Channels: what one row can be asked for -------------------------------------------------
-
-
-# What a row can be asked for is `formula/compiler.py::cell_channels_of` — the SAME builder the
-# per-sample formula namespace is cut from, so a channel here and a term in a `scoring:` formula
-# cannot come to mean different things. `CHANNELS` derives from that table rather than restating it.
+# The builder the per-sample formula namespace is cut from, so a channel here IS a `scoring:` term.
 CHANNELS: tuple[str, ...] = CELL_CHANNELS
 
 
-def cell_channels(rows: list[dict[str, Any]]) -> dict[str, dict[str, float]]:
-    """``{cell: {channel: value}}``, keyed by the row's ``query`` — the cell identity that survives
-    across campaigns where a per-campaign ``sample_id`` names a different cell.
-
-    Several rows on one cell average. A row that answered NOTHING leaves no key behind: a cell
-    present with an empty map would be counted as one the metric could not read, when nothing
-    measured it at all."""
+def cell_channels(rows: Iterable[GradedCell]) -> dict[str, dict[str, float]]:
+    """Keyed by the row's `query`: a per-campaign `sample_id` names a different cell across campaigns."""
     sums: dict[str, dict[str, list[float]]] = {}
     for row in rows:
-        cell = row.get("query")
-        if not isinstance(cell, str):
-            continue
-        answered = cell_channels_of(row)
+        answered = cell_channels_of(row.facts, row.grade.fitness)
+        # No key for a row that answered nothing: an empty map reads as unscorable, not unmeasured.
         if not answered:
             continue
-        per_cell = sums.setdefault(cell, {})
+        per_cell = sums.setdefault(row.facts.query, {})
         for channel, value in answered.items():
             per_cell.setdefault(channel, []).append(value)
     return {
@@ -93,9 +71,7 @@ def cell_channels(rows: list[dict[str, Any]]) -> dict[str, dict[str, float]]:
 def available_channels(
     channels_by_campaign: Mapping[str, dict[str, dict[str, float]]],
 ) -> frozenset[str]:
-    """The channels EVERY selected campaign can answer on at least one cell. Intersected, not
-    unioned: a metric one campaign carries and another cannot is a comparison with one side
-    missing, and offering it invites exactly that reading."""
+    """Intersected, not unioned: a channel only one campaign carries compares it against nothing."""
     per_campaign = [
         frozenset(channel for cell in cells.values() for channel in cell)
         for cells in channels_by_campaign.values()
@@ -104,16 +80,12 @@ def available_channels(
 
 
 def merge_cells(values: dict[str, float]) -> tuple[float | None, float | None, float | None, int]:
-    """``(value, ci_lo, ci_hi, n_cells)`` for one set of per-cell readings. Below two cells there is
-    no spread, and a bracket drawn from one reading would claim certainty nothing measured."""
+    """``(value, ci_lo, ci_hi, n_cells)``; no bracket below two cells."""
     ordered = [values[c] for c in sorted(values)]
     bracketed = mean_ci(ordered)
     if bracketed is not None:
         return (*bracketed, len(ordered))
     return (ordered[0] if ordered else None, None, None, len(ordered))
-
-
-# --- The catalogue, resolved against what the SELECTION carries -------------------------------
 
 
 _ENTRIES: tuple[MetricSpec, ...] = (
@@ -235,13 +207,6 @@ _COMPOSITE_FITNESS = MetricSpec(
 
 
 def catalogue_for(available: frozenset[str]) -> tuple[MetricSpec, ...]:
-    """The metrics THIS selection can actually answer, in picker order.
-
-    A metric no selected campaign carries is not offered at all: a picker listing one is how an
-    operator ends up reading a wall of "unavailable" and concluding the number is broken. The
-    measurand comes first and resolves against the same set — the seed's own lift where the cells
-    carry one, the cell's own fitness where a cell is a sample and there is no origin to lift
-    over."""
     seed_lift = "lift" in available
     out: list[MetricSpec] = []
     if seed_lift or "fitness" in available:
@@ -262,27 +227,15 @@ def catalogue_for(available: frozenset[str]) -> tuple[MetricSpec, ...]:
                 ),
             )
         )
-    # Offered only BESIDE the lift: on the recursion `fitness` is the composed score a campaign's
-    # own formula made of that lift, a different number. Where the measurand already IS fitness, a
-    # second entry would be one number under two names.
+    # Only beside the lift: where the measurand IS fitness it is one number, one entry.
     if seed_lift and "fitness" in available:
         out.append(_COMPOSITE_FITNESS)
     out.extend(m for m in _ENTRIES if m.expression in available)
     return tuple(out)
 
 
-# --- Compiling ------------------------------------------------------------------------------
-
-
 def compile_metric(expression: str) -> CompiledExpression:
-    """Safe-AST compile over the channel namespace — the same primitive, allow-list and builtins
-    every other formula in the package rides, deliberately without ``clamp_unit_score``.
-
-    Checked against every channel a row can answer, and DELIBERATELY wider than the served
-    ``namespace``: the catalogue hides a metric this selection cannot answer, while naming one
-    anyway through the composed-expression door has to reach the honest reading — every cell
-    unscorable, counted rather than zeroed. Narrowing this to the intersection turns that
-    reading into a refusal and closes a door the design opened."""
+    """Checked against every channel, wider than the served namespace: an unanswerable one is unscorable, never refused."""
     compiled = compile_expression(expression, source="compare metric expression")
     unknown = compiled.names - set(CHANNELS)
     if unknown:
@@ -296,19 +249,13 @@ def compile_metric(expression: str) -> CompiledExpression:
 def resolve_metric(
     selector: str, available: frozenset[str]
 ) -> tuple[MetricSpec, CompiledExpression]:
-    """A catalogue key, or ``expr:<formula>``. One evaluation path for both — a named metric IS its
-    expression, so nothing can make the two disagree.
-
-    Raises ``ValueError`` / ``SyntaxError`` on anything unresolvable; the route turns those into a
-    clean 400, the contract ``mask/record.py::parse_lens`` holds for ``?lens=``. HTTP status is
-    not this layer's to know."""
     if selector.startswith(CUSTOM_METRIC_PREFIX):
         expression = selector[len(CUSTOM_METRIC_PREFIX) :].strip()
         if not expression:
             raise ValueError(f"{CUSTOM_METRIC_PREFIX!r} was given no expression.")
         return (
             MetricSpec(
-                key="custom",
+                key=CUSTOM_METRIC_KEY,
                 label=expression,
                 expression=expression,
                 unit="composed",
@@ -321,9 +268,6 @@ def resolve_metric(
     catalogue = catalogue_for(available)
     named = next((m for m in catalogue if m.key == selector), None)
     if named is None:
-        # An empty catalogue does NOT mean nothing was measured — `available` is the
-        # INTERSECTION, so campaigns each carrying a channel the others cannot answer offer
-        # nothing jointly. Say the shared set is empty, never that the rows are.
         offered = sorted(m.key for m in catalogue)
         raise ValueError(
             f"Metric {selector!r} is not one this selection can answer. It offers "
@@ -335,6 +279,7 @@ def resolve_metric(
 
 __all__ = [
     "CHANNELS",
+    "CUSTOM_METRIC_KEY",
     "CUSTOM_METRIC_PREFIX",
     "MEASURAND",
     "MetricSpec",

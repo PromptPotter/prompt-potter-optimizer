@@ -1,5 +1,4 @@
 "use client";
-// Edit buffer for an "edit then Apply" field; a server-applied `value` overwrites it.
 
 import { useState } from "react";
 

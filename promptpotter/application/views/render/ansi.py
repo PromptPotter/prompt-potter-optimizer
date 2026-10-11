@@ -1,8 +1,6 @@
-"""The readout's render target — typed View → ANSI-styled text, beside its markdown peer."""
-
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, assert_never
 
 from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
 from promptpotter.application.views.render.primitives import (
@@ -18,10 +16,11 @@ from promptpotter.application.views.render.primitives import (
     _node_top,
     _round_rule,
     _scoreboard,
-    fmt_pvalue,
+    fmt_coverage,
 )
-from promptpotter.application.views.view_models import (
-    AnyView,
+from promptpotter.domain.bench import BENCH_STATE_INFO
+from promptpotter.domain.candidate_diff import group_diff_keys
+from promptpotter.domain.phase_views import (
     BenchEnterView,
     BenchGradedView,
     BenchScoredView,
@@ -31,6 +30,7 @@ from promptpotter.application.views.view_models import (
     MeasureEnterView,
     OptimizerStepEnterView,
     OptimizerStepExitView,
+    PhaseView,
     RoundCompleteView,
     RoundStartView,
     RunSpendView,
@@ -38,9 +38,9 @@ from promptpotter.application.views.view_models import (
     VerifyEnterView,
     VerifyGradedView,
 )
-from promptpotter.domain.candidate_diff import group_diff_keys
-from promptpotter.domain.ruler import is_flat_ruler_id
-from promptpotter.domain.spend import CeilingMeter
+from promptpotter.domain.ruler import THETA_CAVEAT_INFO, ThetaCaveat, is_flat_ruler_id
+from promptpotter.domain.spend import CEILING_METER_LABELS, RATE_PRICED_LABEL
+from promptpotter.domain.wounds import COLLAPSE_WORDS
 from promptpotter.shared.composite import render_composite_fitness_block
 
 if TYPE_CHECKING:
@@ -81,24 +81,11 @@ def _render_init_exit(v: InitExitView) -> str:
     return "\n".join(out)
 
 
-def _heart_bar(stalls_left: int, cap: int | None) -> str:
-    """Banked stalls filled, the rest of the ceiling hollow. The EMPTY pips are the readout: three
-    alone cannot distinguish healthy-of-four from nearly-dead-of-seven, and a run banking stalls
-    has no ``ROUND n/max`` to carry the scale."""
-    if stalls_left <= 0:
-        return "💀"
-    if cap is None or cap < stalls_left:
-        return "♥" * stalls_left
-    return "♥" * stalls_left + "♡" * (cap - stalls_left)
-
-
 def _render_round_start(v: RoundStartView) -> str:
-    # A run banking stalls shows the ♥ bank instead of the fixed round ceiling (null/999 when the
-    # bank governs the budget); any other run keeps the "ROUND N/max" form.
     standing = v.run_standing
     round_label = (
-        f"ROUND {v.round}  {_heart_bar(standing.stalls_left, standing.stalls_left_cap)}"
-        if standing is not None and standing.stalls_left is not None
+        f"ROUND {v.round}  {standing.lives.bar}"
+        if standing is not None and standing.lives is not None
         else f"ROUND {v.round}/{v.max_rounds or 999}"
     )
     arms = "?" if v.arms is None else str(v.arms)
@@ -109,7 +96,7 @@ def _render_round_start(v: RoundStartView) -> str:
             "",
             _node_block(
                 "GENERATE",
-                f"Parent accuracy {fmt_pct(v.current_acc)}",
+                f"Parent accuracy {fmt_pct(v.parent_accuracy)}",
                 f"Parent prompt   {v.prompt_preview}",
                 f"Candidates      {arms}" + (f"   {v.note}" if v.note else ""),
                 f"Model           {v.model}",
@@ -138,34 +125,23 @@ def _render_measure_enter(v: MeasureEnterView) -> str:
 def render_round_verdict(
     v: RoundCompleteView, basis: Sequence[str], ability: AbilityReading | None
 ) -> str:
-    """The round's verdict as ONE block: the board, who was selected and why, then *basis* (the lift
-    interval and the overlap series) and *ability*, the frontier θ — all three only once it closed."""
     out: list[str] = [""]
-    if board := _scoreboard(v.scores, v.winner_label, theta=v.stamps_theta):
+    if board := _scoreboard(v.arms):
         out.append(board)
 
     formula = v.composite_fitness_formula_short or v.composite_fitness_formula
     show_inline = not formula
     comp_tag = (
-        f"  composite_fitness={v.winner_composite_fitness:.4f}"
-        if show_inline
-        and v.winner_composite_fitness is not None
-        and v.winner_composite_fitness != v.winner_accuracy
+        f"  composite_fitness={v.composite_fitness:.4f}"
+        if show_inline and v.composite_fitness is not None and v.composite_fitness != v.accuracy
         else ""
     )
 
-    # The campaign says WHICH number leads this line. `ability` is what a resubset campaign
-    # sets (`couplings.py::display_subset_relative_under_resubset`), because the panel is re-picked
-    # each round, so accuracy is subset-relative and a parent that did nothing still moves with it.
-    # Accuracy does not disappear; it moves into the parenthetical, so declaring the other loses
-    # no reading.
-    acc_txt = fmt_pct(v.winner_accuracy)
-    # A cold θ is logit-accuracy on the arm's own subset, so headlining it dresses a
-    # subset-relative number as the difficulty-adjusted one: the headline stays accuracy.
+    acc_txt = fmt_pct(v.accuracy)
+    # A cold θ is logit-accuracy on the arm's own subset, so the headline stays accuracy.
     theta = (
         ability.theta
-        if v.stamps_theta
-        and v.display_metric == "ability"
+        if v.display_metric == "ability"
         and ability is not None
         and not is_flat_ruler_id(ability.ruler_id or "")
         else None
@@ -173,35 +149,45 @@ def render_round_verdict(
     headline = acc_txt if theta is None else f"θ {theta:+.3f}"
     detail = [] if theta is None else [acc_txt]
 
+    selected = next((s.vs_reference for s in v.arms if s.election.selected), None)
     if v.improved:
-        # An arm that stopped short gets no reference rate rather than the full-set one:
-        # subtracting a full panel from a prefix accuracy publishes lift nobody measured.
+        # An arm that stopped short gets no reference rate: over a prefix it is a lift nobody measured.
+        lift = selected.on_whole_set if selected else None
         detail.append(
-            f"vs reference {v.reference_accuracy:.1%}, {_fmt_delta(v.delta)}"
-            if v.reference_accuracy is not None and v.delta is not None
+            f"vs reference {lift.rate_a:.1%}, {_fmt_delta(lift.estimate.value)}"
+            if lift is not None
             else "no matched reference — stopped before covering its reference's cells"
         )
-        sig_tag = f"  {fmt_pvalue(v.p_value)}" if v.p_value is not None else ""
         out.append(
-            f"  {GREEN}{BOLD}✓ SELECTED {v.winner_label}{RESET}  {headline}"
-            f" ({', '.join(detail)}){comp_tag}{sig_tag}"
+            f"  {GREEN}{BOLD}✓ SELECTED {v.ended_on}{RESET}  {headline}"
+            f" ({', '.join(detail)}){comp_tag}"
         )
     else:
-        detail += ["the best-so-far held", f"n={v.winner_total}"]
+        detail += ["the best-so-far held", f"n={v.total}"]
         out.append(f"  {YELLOW}{BOLD}· HELD{RESET}  {headline} ({', '.join(detail)}){comp_tag}")
-    # The selector's own reason, whichever way the round went: the rate on the line above is never
-    # what an optimizer's selection read.
     if v.verdict_reason:
         out.append(f"  {DIM}why: {v.verdict_reason}{RESET}")
+    # Every number above still renders under a SILENT caveat: this line is the terminal's only notice.
+    caveats: dict[ThetaCaveat, list[str]] = {}
+    if ability is not None and ability.caveat is not None:
+        caveats[ability.caveat] = []
+    for arm in v.arms:
+        if arm.ability is not None and arm.ability.caveat is not None:
+            caveats.setdefault(arm.ability.caveat, []).append(arm.arm.label)
+    for caveat, labels in caveats.items():
+        scope = f" ({', '.join(labels)})" if labels else ""
+        out.append(
+            f"  {YELLOW}⚠ θ caveat{scope}: {THETA_CAVEAT_INFO[caveat].head}{RESET}"
+            f" {DIM}[{caveat.value}]{RESET}"
+        )
     out.extend(f"  {line}" for line in basis)
 
-    if not show_inline and v.winner_composite_fitness is not None:
-        # No fallback to the cycle's origin composite — the substitution the verdict line refuses.
+    if not show_inline and v.composite_fitness is not None:
         for line in render_composite_fitness_block(
-            v.winner_composite_fitness,
-            v.winner_evaluators,
+            v.composite_fitness,
+            v.evaluators,
             formula,
-            reference=v.reference_composite,
+            reference=selected.reference_level("objective") if selected else None,
             use_short_names=bool(v.composite_fitness_formula_short),
         ):
             out.append(f"  {line}")
@@ -217,7 +203,6 @@ def _render_step_exit(v: OptimizerStepExitView) -> str:
         return ""
     out = [f"  {GREEN}✓{RESET} {v.headline}", *(f"    {line}" for line in v.details)]
     if v.audit is not None:
-        # Address the call's canonical home, never re-print it: the audit twin holds it uncapped.
         label, node = v.audit
         out.append(
             f"  {CYAN}{label}{RESET} {DIM}→ .runtime/cache/rounds/round_NNNN.json"
@@ -226,9 +211,8 @@ def _render_step_exit(v: OptimizerStepExitView) -> str:
     return "\n".join(out)
 
 
-def to_text(view: AnyView) -> str:
-    """Dispatch a typed view to its ANSI text renderer. Explicit match so each
-    ``grep _render_*`` lands on the call site and mypy narrows the view type per arm."""
+def to_text(view: PhaseView) -> str:
+    """``RoundCompleteView`` renders nothing here: the readout holds it for ``render_round_verdict``."""
     match view:
         case InitEnterView():
             return _render_init_enter(view)
@@ -254,21 +238,19 @@ def to_text(view: AnyView) -> str:
             return f"  {DIM}verify {view.label}: {view.rows} unseen cells, {view.strategy}{RESET}"
         case VerifyGradedView():
             return _render_verify_graded(view)
-        case RunSpendView():
-            return _render_run_spend(view)
-        case _:
+        case RoundCompleteView():
             return ""
+        case _:
+            assert_never(view)
 
 
-_METER_WORDS: dict[CeilingMeter, str] = {"bill": "billed", "search_incurred": "search incurred"}
-
-
-def _render_run_spend(v: RunSpendView) -> str:
+def render_run_spend(v: RunSpendView) -> str:
     bits = [
-        f"billed ${v.billed_usd:.4f} (what the provider charged)",
+        f"billed ${v.billed_usd:.4f} (what the provider reported it charged)",
+        f"{RATE_PRICED_LABEL} ${v.rate_priced_usd:.4f} (calls no provider reported a charge for)",
         f"incurred ${v.incurred_usd:.4f} (every cell priced, replays included)",
     ]
-    counted = _METER_WORDS[v.meter]
+    counted = CEILING_METER_LABELS[v.meter]
     if v.usd_cap is not None:
         bits.append(f"cap ${v.metered_usd:.4f} of ${v.usd_cap:.2f} {counted}")
     if v.token_cap is not None:
@@ -284,61 +266,60 @@ def _render_bench_enter(v: BenchEnterView) -> str:
 def _render_bench_graded(v: BenchGradedView) -> str:
     reading = v.reading
     if reading is None:
-        return f"  {YELLOW}bench: no reading — {v.missing}{RESET}"
-    column = reading["headline"]
-    level = reading[column]
-    value = "—" if level is None else f"{level['value']:.3f}"
+        cut = v.bench_pass.stop
+        stop = "" if cut is None else f": {cut.cause.value}"
+        return f"  {YELLOW}bench: no reading — {BENCH_STATE_INFO[v.state].label}{stop}{RESET}"
+    level = reading.level
+    value = "—" if level is None else f"{level.value:.3f}"
     return (
-        f"  {DIM}bench R{reading['round']}: {column} {value} on "
-        f"{reading['n_scored']} held-out rows{RESET}"
+        f"  {DIM}bench R{reading.round}: {reading.headline} {value} on "
+        f"{reading.n} held-out rows{RESET}"
     )
 
 
 def _render_verify_graded(v: VerifyGradedView) -> str:
     r = v.reading
     levels = " → ".join(
-        "—" if (level := r[side]["accuracy"]) is None else f"{level['value']:.3f}"
-        for side in ("recorded", "fresh")
+        "—" if (level := side.accuracy) is None else f"{level.value:.3f}"
+        for side in (r.recorded, r.fresh)
     )
-    verdict = {True: " — held", False: f" — {YELLOW}dropped{RESET}{DIM}", None: ""}[r["held"]]
+    verdict = {True: " — held", False: f" — {YELLOW}dropped{RESET}{DIM}", None: ""}[r.held]
     lift = ""
-    if (paired := r["lift"]["accuracy"]) is not None:
+    pair = r.vs_origin
+    if pair.headline is not None and pair.coverage is not None:
+        paired = pair.headline.estimate
         lift = (
-            f", lift over C0 {paired['value']:+.3f} "
-            f"[{paired['ci_lo']:+.3f}, {paired['ci_hi']:+.3f}] on {r['n_shared']} shared"
+            f", lift over C0 {paired.value:+.3f} "
+            f"[{paired.ci_lo:+.3f}, {paired.ci_hi:+.3f}] on {fmt_coverage(pair.coverage)}"
         )
     return (
-        f"  {DIM}verify {r['label']}: accuracy {levels} on {r['n_fresh']} unseen cells"
+        f"  {DIM}verify {r.label}: accuracy {levels} on {r.fresh.n} unseen cells"
         f"{lift}{verdict}{RESET}"
     )
 
 
 def _render_bench_scored(v: BenchScoredView) -> str:
     bench = v.bench
-    column = bench["headline"]
-    origin, selected = bench["origin"], bench["selected"]
-    if origin is None or selected is None:
-        return f"  {YELLOW}bench: no headline — {bench['missing_reason']}{RESET}"
+    column = bench.headline
+    graded = bench.graded
+    if graded is None:
+        # Loud only where a pass or the run broke; a bench still waiting is no fault.
+        ink = YELLOW if BENCH_STATE_INFO[bench.status.state].fault else DIM
+        return f"  {ink}bench: no headline — {bench.status.sentence}{RESET}"
+    selected = graded.selected
     levels = " → ".join(
-        "—" if (level := reading[column]) is None else f"{level['value']:.3f}"
-        for reading in (origin, selected)
+        "—" if (level := reading.of(column)) is None else f"{level.value:.3f}" for reading in graded
     )
     band = ""
-    if (lift := bench["lift"][column]) is not None:
-        band = f", lift {lift['value']:+.3f}"
-        if lift["ci_lo"] is not None and lift["ci_hi"] is not None:
-            band += f" [{lift['ci_lo']:+.3f}, {lift['ci_hi']:+.3f}]"
+    if (lift := bench.lift(column)) is not None:
+        est = lift.estimate
+        band = f", lift {est.value:+.3f} [{est.ci_lo:+.3f}, {est.ci_hi:+.3f}]"
     return (
-        f"  bench: {column} {levels} (origin → R{selected['round']} selection, "
-        f"{selected['n_scored']} held-out rows{band})"
+        f"  bench: {column} {levels} (origin → R{selected.round} selection, "
+        f"{selected.n} held-out rows{band})"
     )
 
 
-_COLLAPSE_WORDS = {
-    "no_op_variant": "no-op",
-    "duplicate_variant": "duplicate",
-    "repeat_variant": "repeat",
-}
 _SP_DIFF_ABSENT = "-"
 _SP_DIFF_UNCHANGED = "·"
 _SP_DIFF_VAL_INLINE_MAX = 12
@@ -361,7 +342,7 @@ def render_sp_diff(view: SpDiffView) -> str:
     round_num = view.round_num
 
     warning_lines: list[str] = []
-    bits = [f"{view.collapses[r]} {w}" for r, w in _COLLAPSE_WORDS.items() if view.collapses.get(r)]
+    bits = [f"{view.collapses[r]} {w}" for r, w in COLLAPSE_WORDS.items() if view.collapses.get(r)]
     if bits:
         n_total = sum(1 for label, _ in columns_in if label.startswith("C"))
         n_valid = max(0, n_total - sum(view.collapses.values()))
@@ -380,9 +361,7 @@ def render_sp_diff(view: SpDiffView) -> str:
         return "\n".join(warning_lines) if warning_lines else ""
 
     lookup: dict[str, str] = {}
-    # code → (byte length, the flat keys it appears under, the column labels carrying it). Keyed
-    # by VALUE like the codes are, so one origin prompt shared by Start/Parent/candidates stays a
-    # single row instead of one per column.
+    # Keyed by VALUE, so one prompt shared by Start/Parent/candidates stays a single legend row.
     legend: dict[str, tuple[int, set[str], list[str]]] = {}
     code_idx = 0
 
@@ -450,10 +429,6 @@ def render_sp_diff(view: SpDiffView) -> str:
     out.append(_node_line(hdr))
 
     for node_name, rows in rendered_groups:
-        # Prompt-field rows carry node_name "" (group_diff_keys' catch-all); label
-        # them "prompt" so a prompt mutation reads as one in the live diff instead
-        # of as unlabeled rows mixed with node.param tweaks. The Values: legend below
-        # sizes and addresses each elided value; the text itself is in the round file.
         if len(rendered_groups) > 1:
             sep_name = node_name or "prompt"
             sep = f"{'─── ' + sep_name + ' ':─<{max_key + 2}}"
@@ -463,10 +438,6 @@ def render_sp_diff(view: SpDiffView) -> str:
             out.append(_node_line(row))
 
     if legend:
-        # Address each value, never re-print it. `candidate_scores[].prompt_fields` already holds
-        # the full text in queryable form, and re-dumping it here cost the Start and Parent columns
-        # once per round for the life of the run — while the [a]/[b] indirection stripped the very
-        # key→value association the JSON keeps. So: what changed, how big, and on which columns.
         rf = f"round_{round_num:04d}.json" if round_num is not None else "the round file"
         out.append(_node_line(""))
         out.append(
@@ -487,4 +458,4 @@ def render_sp_diff(view: SpDiffView) -> str:
     return "\n".join(out)
 
 
-__all__ = ["render_round_verdict", "render_sp_diff", "to_text"]
+__all__ = ["render_round_verdict", "render_run_spend", "render_sp_diff", "to_text"]

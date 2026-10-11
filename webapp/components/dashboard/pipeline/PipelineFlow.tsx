@@ -12,8 +12,8 @@ import type { NodeScope } from "@/lib/SelectionContext";
 import type { PipelineStatus } from "@/lib/types";
 import { isMeasuring, useCycleStream } from "@/lib/poll";
 import { useSelection } from "@/lib/SelectionContext";
+import { MOVABLE_AGENT_LABELS } from "@/lib/api/types.generated";
 import {
-  agentLabel,
   cycleOf,
   interiorNodes,
   layoutGrid,
@@ -22,9 +22,6 @@ import {
 import { Icon, pressable } from "@/components/ui";
 import { cx } from "@/lib/cx";
 
-// One level of the pipeline stack; `PipelineStack` owns the chain of levels.
-
-// Each kind is styled in `chat.css`; one arrowhead marker per member of the served set.
 const EDGE_KINDS = Object.keys({
   forward: true,
   loop: true,
@@ -92,17 +89,14 @@ interface BoxProps {
   connector: string | null;
   activeNode: string | null;
   isLive: boolean;
-  // SERVED, never summed here. A node absent from the map is UNKNOWN — never draw it as shut.
+  // A node absent from the map is UNKNOWN — never draw it as shut.
   reach: Record<string, NodeReach> | null;
-  // Null makes every node inert: a level with no detail panel offers no click.
   scope: NodeScope | null;
-  // `onIsolate` is null where no level below is on screen; the node then selects like any other.
-  nest: { node: string; onIsolate: (() => void) | null } | null;
+  nestsNode: string | null;
   compact: boolean;
   models: { by: Record<string, string | null>; loading: boolean } | null;
 }
 
-// One box at every size, single-node included.
 function PipelineBox({
   view,
   connector,
@@ -110,7 +104,7 @@ function PipelineBox({
   isLive,
   reach: reachByNode,
   scope,
-  nest,
+  nestsNode,
   compact,
   models,
 }: BoxProps) {
@@ -129,21 +123,16 @@ function PipelineBox({
   // Per-dot band on a grid: a full-height rect each would leave only the last-drawn reachable.
   const HIT_BAND = compact ? 24 : 40;
   const isSel = (id: string) => scope != null && selected?.scope === scope && selected.id === id;
-  const nestAt = (id: string) => (nest != null && id === nest.node ? nest : null);
   const activate = (id: string) => {
-    const here = nestAt(id);
-    if (here?.onIsolate) return here.onIsolate();
     if (scope == null) return;
     setSelected(isSel(id) ? null : { id, scope });
   };
 
   const cycle = cycleOf(interior, view.edges);
 
-  // `derive_pipeline_view` puts every node of a loopless view on tier 0, so `rank` alone
-  // columns it.
+  // `derive_pipeline_view` serves a loopless view on tier 0, so `rank` alone columns it.
   const cols = Math.max(interior.length, 1);
 
-  // Siblings give exactly the open cell's bonus, so expanding never pushes the tail out.
   const others = Math.max(cols - 1, 0);
   const givable = others * (CELL_W - CELL_W_MIN);
   const selectedCol = interior.find((n) => isSel(n.id))?.rank ?? -1;
@@ -161,8 +150,6 @@ function PipelineBox({
   const railW = cols * CELL_W;
   const colX = (i: number) => (offsets[i] ?? 0) + (widths[i] ?? CELL_W) / 2;
 
-  // A looping graph folds onto a grid on EVERY surface, compact included — one graph, one
-  // picture. A chain keeps the rail.
   const ring = cycle.length
     ? layoutGrid(interior, cycle, {
         cell: CELL_W,
@@ -179,7 +166,6 @@ function PipelineBox({
     ring?.pos.get(n.id) ?? { x: colX(n.rank), y: cy, muted: false };
   const posOf = new Map(interior.map((n) => [n.id, at(n)] as const));
 
-  // One ribbon per SERVED edge only — never between array-adjacent nodes.
   const edgeD = (a: { x: number; y: number }, b: { x: number; y: number }) => {
     const dx = b.x - a.x;
     const dy = b.y - a.y;
@@ -188,7 +174,6 @@ function PipelineBox({
     const [x2, y2] = [b.x - (dx / len) * RADIUS, b.y - (dy / len) * RADIUS];
     const mx = (x1 + x2) / 2;
 
-    // Between rows the upper node joins below its label block, never through its text.
     if (Math.abs(dy) > 1) {
       const down = a.y < b.y;
       const [upper, lower] = down ? [a, b] : [b, a];
@@ -203,15 +188,13 @@ function PipelineBox({
     return `M ${x1} ${y1} C ${mx} ${y1 + bow} ${mx} ${y2 + bow} ${x2} ${y2}`;
   };
 
-  // An edge onto an `io` end (dropped by `interiorNodes`) still draws, as a terminal stub.
   const terminalD = (p: { x: number; y: number }) =>
     `M ${p.x + RADIUS} ${p.y} L ${p.x + CELL_W * 0.5} ${p.y}`;
 
   const labelLines = (label: string) =>
     label.includes("_") ? label.split("_") : [label];
 
-  // Green is the RUN's phase, held across every step; the pulse is the measurement node scoring.
-  // `active_node` lights a dot here only on a self-optimizing campaign, and then the chip holds.
+  // `active_node` names a node here only on a self-optimizing campaign; the chip then holds unpulsed.
   const namedHere = isLive && interior.some((n) => n.id === activeNode);
   const calling = isLive && isMeasuring(dash) && !namedHere;
 
@@ -225,7 +208,6 @@ function PipelineBox({
   const soleModel = typeof liveModel === "string" && liveModel ? liveModel : null;
   if (sole) {
     const isSelected = isSel(sole.id);
-    const soleNest = nestAt(sole.id);
     return (
       <div
         className={cx(
@@ -240,13 +222,9 @@ function PipelineBox({
         <button
           type="button"
           className="wf-hero-sole"
-          aria-pressed={soleNest?.onIsolate ? undefined : isSelected}
-          aria-label={
-            soleNest?.onIsolate
-              ? `${sole.label} — show what it runs, alone`
-              : `Node: ${sole.label}`
-          }
-          disabled={scope == null && soleNest?.onIsolate == null}
+          aria-pressed={isSelected}
+          aria-label={`Node: ${sole.label}`}
+          disabled={scope == null}
           onClick={() => activate(sole.id)}
         >
           {/* Spans, not divs: a `<button>` takes phrasing content only. */}
@@ -324,9 +302,7 @@ function PipelineBox({
             isSelected && "selected",
             isActive && "active",
           );
-          // Frame = runs a nested pipeline; ring = searched; padlock = openable via `param_keys`
-          // but shut (open shackle = partly). Ring and padlock compose; bare dot = never openable.
-          const nests = nestAt(n.id);
+          const nests = n.id === nestsNode;
           const reach = reachByNode?.[n.id] ?? null;
           const lock: "open" | "closed" | null = !reach
             ? null
@@ -341,7 +317,7 @@ function PipelineBox({
               ? null
               : reach.open === 0
                 ? `no axis open of ${reach.openable}${reach.held ? " — narrowed at mint" : ""}; open one by forking`
-                : `${reach.open} of ${reach.openable} axes open — ${reach.agents.map(agentLabel).join(", ")}`;
+                : `${reach.open} of ${reach.openable} axes open — ${reach.agents.map((a) => MOVABLE_AGENT_LABELS[a]).join(", ")}`;
           const parts = isSelected || ring ? [n.label] : labelLines(n.label);
           const cellW = ring ? CELL_W : (widths[n.rank] ?? CELL_W);
           const showLabel = !compact && cellW >= 44;
@@ -350,21 +326,15 @@ function PipelineBox({
             ? nodeSubLabel(n.kind, models.by[n.id] ?? null, models.loading)
             : "";
           const subDy = labelDy + parts.length * 11;
-          const inert = scope == null && nests?.onIsolate == null;
+          const inert = scope == null;
           return (
             <g
               key={n.id}
               className={cx("wf-hero-multi-node", inert && "inert", muted && "muted")}
               transform={`translate(${cxPos} 0)`}
               {...(inert ? {} : pressable(() => activate(n.id)))}
-              aria-pressed={inert || nests?.onIsolate ? undefined : isSelected}
-              aria-label={
-                nests?.onIsolate
-                  ? `${n.label} — show what it runs, alone`
-                  : reachNote
-                    ? `${n.label} — ${reachNote}`
-                    : n.label
-              }
+              aria-pressed={inert ? undefined : isSelected}
+              aria-label={reachNote ? `${n.label} — ${reachNote}` : n.label}
             >
               <rect
                 x={-cellW / 2}
@@ -376,17 +346,12 @@ function PipelineBox({
               <title>
                 {[
                   n.label,
-                  nests
-                    ? nests.onIsolate
-                      ? "runs the pipeline below; show it alone"
-                      : "runs a whole pipeline of its own"
-                    : n.description,
+                  nests ? "runs a whole pipeline of its own" : n.description,
                   reachNote,
                 ]
                   .filter(Boolean)
                   .join(" — ")}
               </title>
-              {/* The node's own glyph is never replaced — reach and lock only adorn it. */}
               {nests ? (
                 <g
                   className={cx("node-nest", isActive && "active")}
@@ -454,48 +419,23 @@ export interface PipelineFlowProps {
   nestsNode: string | null;
   activeNode: string | null;
   isLive: boolean;
-  leading?: ReactNode;
-  // Present on exactly one level of a stack — the only one a sample flows through.
-  queryPath?: {
-    pressed: boolean;
-    label: string;
-    onClick: () => void;
-    connector: ReactNode;
-  };
-  // Which levels draw is owned by the STACK, never a `useState` here: a zoom re-parents this
-  // flow, and React drops a re-parented component's state.
-  nest?: { level: ReactNode; onIsolate: () => void };
-  // From the stack: a level cannot know its own depth, and CSS cannot count inside-out.
+  inspector?: ReactNode;
+  // Owned by the STACK, never a `useState` here: a zoom re-parents this flow and React drops its state.
+  nested?: ReactNode;
   tone: "accent" | "neutral";
   models?: { by: Record<string, string | null>; loading: boolean } | null;
   bare?: boolean;
 }
 
-function FlowEnd({
-  icon,
-  lbl,
-  val,
-  path,
-}: {
-  icon: ReactNode;
-  lbl: string;
-  val: string;
-  path: NonNullable<PipelineFlowProps["queryPath"]>;
-}) {
+function FlowEnd({ icon, lbl, val }: { icon: ReactNode; lbl: string; val: string }) {
   return (
-    <button
-      type="button"
-      className="wf-hero-node wf-hero-node-toggle"
-      aria-pressed={path.pressed}
-      aria-label={path.label}
-      onClick={path.onClick}
-    >
+    <div className="wf-hero-node wf-hero-end" aria-label={`${lbl}: ${val}`}>
       <span className="ico">{icon}</span>
       <span className="text-col">
         <span className="lbl">{lbl}</span>
         <span className="val">{val}</span>
       </span>
-    </button>
+    </div>
   );
 }
 
@@ -508,9 +448,8 @@ export function PipelineFlow({
   nestsNode,
   activeNode,
   isLive,
-  leading,
-  queryPath,
-  nest,
+  inspector,
+  nested,
   tone,
   models = null,
   bare = false,
@@ -527,8 +466,8 @@ export function PipelineFlow({
         isLive={isLive}
         reach={reach}
         scope={scope}
-        nest={nestsNode ? { node: nestsNode, onIsolate: nest?.onIsolate ?? null } : null}
-        compact={nest != null}
+        nestsNode={nestsNode}
+        compact={nested != null}
         models={models}
       />
     );
@@ -537,23 +476,21 @@ export function PipelineFlow({
 
   return (
     <div className="wf-hero-flow">
-      {leading}
-      {queryPath && (
+      {inspector != null && (
         <>
-          <FlowEnd icon={ATTACH_ICON} lbl="Input" val="Query" path={queryPath} />
-          <div className="wf-hero-arrow">{queryPath.connector}</div>
+          <FlowEnd icon={ATTACH_ICON} lbl="Input" val="Query" />
+          <div className="wf-hero-arrow">{inspector}</div>
         </>
       )}
-      {/* Box and nested level are SIBLINGS: inside the box they would fall under every
-          `.wf-hero-node.llm <part>` rule in chat.css. */}
-      <div className={cx("wf-hero-unit", `tone-${tone}`, nest && "has-nested")}>
+      {/* Siblings: inside the box, the nested level matches every `.wf-hero-node.llm <part>` rule in chat.css. */}
+      <div className={cx("wf-hero-unit", `tone-${tone}`, nested != null && "has-nested")}>
         {box}
-        {nest && <div className="wf-hero-nested">{nest.level}</div>}
+        {nested != null && <div className="wf-hero-nested">{nested}</div>}
       </div>
-      {queryPath && (
+      {inspector != null && (
         <>
           <div className="wf-hero-arrow" />
-          <FlowEnd icon={ANSWER_ICON} lbl="Output" val="Answer" path={queryPath} />
+          <FlowEnd icon={ANSWER_ICON} lbl="Output" val="Answer" />
         </>
       )}
     </div>

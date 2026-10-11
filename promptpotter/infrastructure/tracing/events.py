@@ -1,15 +1,19 @@
-"""Two families: ``OptimizationEvent`` (one trace per campaign, emitted inline by the loop) and ``MeasurementEvent`` (one trace per query,
-emitted by the backfill replayer). Each event is self-contained; sinks own the id mappings."""
-
 from __future__ import annotations
 
-import hashlib
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Union
+from typing import TYPE_CHECKING, Any, Union
 
-from promptpotter.domain.phases import StopReason
+from promptpotter.shared.hashing import stable_hash
+
+if TYPE_CHECKING:
+    from promptpotter.domain.run_records import (
+        CandidateScoredRecord,
+        RoundClosedRecord,
+        RoundEnteredRecord,
+        RunPhaseRecord,
+    )
 
 
 def generate_observation_id() -> str:
@@ -19,147 +23,27 @@ def generate_observation_id() -> str:
 
 
 def dataset_item_id(dataset_name: str, query: str) -> str:
-    """Content-addressed Langfuse item id for a ``(dataset, query)`` pair. It MUST be byte-identical across the file sink
-    and the cloud bridge, or the two register mismatched ids for one pair — hence it lives here, not at each sink."""
-    return hashlib.sha256(f"{dataset_name}:{query}".encode()).hexdigest()[:16]
+    """MUST be byte-identical across the file sink and the cloud bridge, hence it lives here."""
+    return stable_hash([dataset_name, query])
 
 
 @dataclass(frozen=True, slots=True)
 class DatasetRegistered:
-    """Dataset items registered in the file store and, optionally, Langfuse. The cloud-side query → item id mapping is
-    shared between both topologies."""
-
     dataset_name: str
     items: tuple[tuple[str, str], ...]
-    """Frozen ``(query, ground_truth)`` pairs in registration order — each query non-empty and
-    distinct, which ``ObservabilityBridge.register_dataset`` settles so no sink repeats it."""
-
-
-# --- Optimization (Topology A) ---
+    """Queries non-empty and distinct: ``TracingProjection._register_dataset`` settles it once."""
 
 
 @dataclass(frozen=True, slots=True)
 class CampaignStart:
     campaign_id: str
     config: dict[str, Any]
-    origin_accuracy: float | None
     cycle_id: str
-    """The cycle whose directory the sinks write under."""
     session_id: str | None
-    """The Langfuse session the trace is grouped in, which an embedded host may name itself."""
-
-
-@dataclass(frozen=True, slots=True)
-class RoundStart:
-    campaign_id: str
-    round_num: int
-
-
-@dataclass(frozen=True, slots=True)
-class NodeStart:
-    """Open a node observation under the active round. Producers pass identity; sinks resolve trace + parent by id."""
-
-    campaign_id: str
-    round_num: int
-    node_id: str
-    node_type: str
-    as_type: str
-    input_data: dict[str, Any]
-    metadata: dict[str, Any] | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class NodeEnd:
-    campaign_id: str
-    round_num: int
-    node_id: str
-    output_data: dict[str, Any] | None = None
-    metrics: dict[str, float] | None = None
-    error: str | None = None
-
-
-# An event declared here must have a REMOTE sink. Five mid-round ones (candidate created /
-# scored, round winner, L1 critique, layer applied) reached only the file mirror, restating a
-# fact the ledger and ``rounds/round_NNNN.json`` already carried — so the writer paid the
-# tracing tax for a second copy nothing read. The ledger is where a mid-round fact lands.
-
-
-@dataclass(frozen=True, slots=True)
-class PromptVersion:
-    """``lineage_id`` is ``OptSearchPoint.lineage.id`` — the individual's id, and NOT the
-    ``prompt_fields_id`` the archive stores under that name (which is ``sp_hash``). Two events on
-    this page carry each; joining a trace to an archive row on the wrong one matches nothing and
-    raises nothing. The ladder is `docs/developer/README.md` § Cross-run memory."""
-
-    campaign_id: str
-    round_num: int
-    lineage_id: str
-    rendered_prompt: str
-    layer1_fields: dict[str, Any]
-    parent_ids: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
-class DatasetRun:
-    """Target-layer scoring report, nested under the optimizer round span — a layer-boundary event with target data and an
-    optimizer-layer parent, so the campaign trace shows which scoring run each round used."""
-
-    campaign_id: str
-    round_num: int | None
-    """``None`` for a run scored outside a round, which hangs off the campaign trace itself."""
-    run_id: str
-    content_hash: str
-    prompt_fields_id: str
-    """``sp_hash`` — the archive's own spelling, and the one id that joins a trace to a row."""
-    accuracy: float | None
-    total: int
-
-
-@dataclass(frozen=True, slots=True)
-class RoundEnd:
-    campaign_id: str
-    round_num: int
-    accuracy: float | None
-    total: int
-    improved: bool
-    winner_lineage_id: str
-    candidate_scores: list[dict[str, Any]]
-    next_action: str = ""
-    model: str = ""
-    n_candidates: int = 0
-    optimizer_templates: list[str] | None = None
-    evaluators: dict[str, float] = field(default_factory=dict)
-
-
-@dataclass(frozen=True, slots=True)
-class CampaignEnd:
-    campaign_id: str
-    result_accuracy: float | None
-    # Completed L1 rounds, origin-EXCLUSIVE (mirrors CycleResult.n_rounds_after_origin).
-    n_rounds_after_origin: int
-    stop_reason: StopReason
-    result_round: int
-
-
-OptimizationEvent = Union[
-    CampaignStart,
-    RoundStart,
-    NodeStart,
-    NodeEnd,
-    PromptVersion,
-    DatasetRun,
-    RoundEnd,
-    CampaignEnd,
-]
-
-
-# --- Measurement (Topology B, replayed from measurements/) ---
 
 
 @dataclass(frozen=True, slots=True)
 class QueryNodeSpan:
-    """One pipeline node's I/O during a measurement. ``as_type`` is the pipeline schema's declared type for that node."""
-
     run_id: str
     query: str
     node_name: str
@@ -194,7 +78,6 @@ class QueryScoreEnd:
     hit: bool
     total_time: float | None
     node_outputs: dict[str, Any]
-    """Flat map of pipeline node output keys → values (for the trace output blob)."""
 
 
 MeasurementEvent = Union[
@@ -204,24 +87,48 @@ MeasurementEvent = Union[
 ]
 
 
-Event = Union[DatasetRegistered, OptimizationEvent, MeasurementEvent]
-"""Per-cycle Langfuse shadow + events.jsonl + prompts under campaigns/{cycle_id}/langfuse/."""
+class TraceSink:
+    def on_dataset_registered(self, event: DatasetRegistered) -> None: ...
+    def on_campaign_start(self, event: CampaignStart) -> None: ...
+    def on_round_entered(self, campaign_id: str, record: RoundEnteredRecord) -> None: ...
+
+    def on_span_open(
+        self,
+        campaign_id: str,
+        round_num: int | None,
+        span_id: str,
+        *,
+        name: str,
+        node_type: str,
+        as_type: str,
+        metadata: dict[str, Any],
+    ) -> None: ...
+
+    def on_span_close(
+        self, campaign_id: str, round_num: int | None, span_id: str, *, error: str | None
+    ) -> None: ...
+
+    def on_candidate_scored(self, campaign_id: str, record: CandidateScoredRecord) -> None: ...
+    def on_round_closed(self, campaign_id: str, record: RoundClosedRecord) -> None: ...
+
+    def on_run_stopped(
+        self, campaign_id: str, record: RunPhaseRecord, *, rounds_closed: int
+    ) -> None: ...
+
+    def on_query_score_start(self, event: QueryScoreStart) -> None: ...
+    def on_query_node_span(self, event: QueryNodeSpan) -> None: ...
+    def on_query_score_end(self, event: QueryScoreEnd) -> None: ...
+    def flush(self) -> None: ...
 
 
 __all__ = [
-    "CampaignEnd",
     "CampaignStart",
     "DatasetRegistered",
-    "DatasetRun",
-    "Event",
-    "NodeEnd",
-    "NodeStart",
-    "PromptVersion",
+    "MeasurementEvent",
     "QueryNodeSpan",
     "QueryScoreEnd",
     "QueryScoreStart",
-    "RoundEnd",
-    "RoundStart",
+    "TraceSink",
     "dataset_item_id",
     "generate_observation_id",
 ]

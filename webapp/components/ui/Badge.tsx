@@ -4,7 +4,6 @@ import s from "./Badge.module.css";
 
 export type BadgeTone = "default" | "accent" | "success" | "danger";
 
-// Pair a tone with text that carries the meaning — never colour alone.
 export function Badge({
   tone = "default",
   title,

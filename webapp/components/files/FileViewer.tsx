@@ -1,8 +1,10 @@
 "use client";
+import { useMemo } from "react";
 import { renderMarkdownSafe } from "@/lib/markdown";
-import { fetchCycleFile } from "@/lib/api";
+import { cycleFileRead, type FileContentResponse } from "@/lib/api";
+import type { RoundResult } from "@/lib/api/types";
 import { readyData, useRead } from "@/lib/hooks/useRead";
-import { RoundFileView, type RoundDoc } from "./RoundFileView";
+import { RoundFileView } from "./RoundFileView";
 
 interface Props {
   campaignId: string | null;
@@ -15,7 +17,7 @@ interface ViewerState {
   body: string;
   contentType: string;
   isMarkdown: boolean;
-  roundDoc: RoundDoc | null;
+  roundDoc: RoundResult | null;
   rawJson: string;
 }
 
@@ -43,17 +45,10 @@ function isRoundFile(selected: { scope: string; path: string } | null): boolean 
   return !!selected && selected.scope === "cycle" && ROUND_FILE_RE.test(selected.path);
 }
 
-async function loadViewerState(
-  ready: { campaignId: string; cycleId: string; selected: { scope: string; path: string } },
-  signal: AbortSignal,
-): Promise<ViewerState> {
-  const r = await fetchCycleFile(
-    ready.campaignId,
-    ready.cycleId,
-    ready.selected.scope,
-    ready.selected.path,
-    signal,
-  );
+function viewerState(
+  r: FileContentResponse,
+  selected: { scope: string; path: string },
+): ViewerState {
   const ct = r.content_type;
   const meta = `${r.size} B • ${ct}`;
   if (r.content == null) {
@@ -79,14 +74,13 @@ async function loadViewerState(
       /* keep raw */
     }
     const roundDoc =
-      isRoundFile(ready.selected) && parsed && typeof parsed === "object"
-        ? (parsed as RoundDoc)
+      isRoundFile(selected) && parsed && typeof parsed === "object"
+        ? (parsed as RoundResult)
         : null;
     return { meta, body, contentType: ct, isMarkdown: false, roundDoc, rawJson: body };
   }
   if (ct === "markdown") {
-    // `renderMarkdownSafe`, never `marked.parse`: this reaches `dangerouslySetInnerHTML` with
-    // tenant-supplied text.
+    // `renderMarkdownSafe`, never `marked.parse`: tenant-supplied text reaches `dangerouslySetInnerHTML`.
     return {
       meta,
       body: renderMarkdownSafe(r.content),
@@ -104,21 +98,26 @@ export function FileViewer({ campaignId, cycleId, selected }: Props) {
 
   const read = useRead(
     ready
-      ? {
-          key: [ready.campaignId, ready.cycleId, ready.selected.scope, ready.selected.path].join(
-            "\x1f",
-          ),
-          fetch: (signal) => loadViewerState(ready, signal),
-        }
+      ? cycleFileRead(
+          [{ campaignId: ready.campaignId, cycleId: ready.cycleId }],
+          ready.selected.scope,
+          ready.selected.path,
+        )
       : null,
-    { surface: "file" },
+  );
+  const file = readyData(read);
+  const scope = selected?.scope ?? null;
+  const path = selected?.path ?? null;
+  const shown = useMemo(
+    () => (file && scope !== null && path !== null ? viewerState(file, { scope, path }) : null),
+    [file, scope, path],
   );
 
   const state: ViewerState = !ready
     ? EMPTY
     : read.status === "failed"
       ? { ...EMPTY, meta: "", body: "Could not load this file." }
-      : (readyData(read) ?? LOADING);
+      : (shown ?? LOADING);
 
   const headerPath = selected ? `${selected.scope}: ${selected.path}` : "(no file selected)";
   return (

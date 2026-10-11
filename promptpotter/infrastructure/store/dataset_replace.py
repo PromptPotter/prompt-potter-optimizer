@@ -1,8 +1,4 @@
-"""The data-critical *Replace* path. An in-place overwrite would falsify every prior result — a campaign reads its dataset LIVE
-by name — so the old data moves to ``{slug}-vN`` with its dependents, freeing the canonical name LAST, marker written first.
-
-A JOURNAL across three stores: a marker sits under ``.migrations/pending/`` while they are out of
-step, ``build_stores`` replays one a crash left, and one file lock orders both across processes."""
+"""Never overwrite in place — a campaign reads its dataset LIVE by name; the marker is written FIRST."""
 
 from __future__ import annotations
 
@@ -30,9 +26,6 @@ _LOCK = ".lock"
 
 @dataclass(frozen=True, slots=True)
 class ReplaceResult:
-    """Outcome of one version-and-repoint. ``versioned_to`` is the archival name
-    the old data now lives under; the counts are what moved with it."""
-
     slug: str
     versioned_to: str
     repointed_campaigns: int
@@ -40,17 +33,13 @@ class ReplaceResult:
 
 
 class NothingToReplaceError(Exception):
-    """Replace was asked for a slug with no committed dataset behind it — a race / stale-client guard, surfaced as a
-    clean 409 rather than a half-run migration."""
-
     def __init__(self, slug: str) -> None:
         self.slug = slug
         super().__init__(f"no committed dataset named {slug!r} to replace")
 
 
 def replace_dataset(*, stores: Stores, slug: str) -> ReplaceResult:
-    """Does **not** land the new data — the caller re-ingests under the now-free *slug* through
-    the normal draft/check-in flow."""
+    """Does not land the new data: the caller re-ingests under the freed *slug*."""
     mig_dir = stores.tenant_datasets.migrations_dir()
     mig_dir.mkdir(parents=True, exist_ok=True)
     with FileLock(str(mig_dir / _LOCK)):
@@ -72,8 +61,6 @@ def replace_dataset(*, stores: Stores, slug: str) -> ReplaceResult:
 
 
 def heal_pending_replacements(stores: Stores) -> None:
-    """Replay every replace a crash left half-applied. A held lock is a LIVE applier, which
-    finishes its own."""
     mig_dir = stores.tenant_datasets.migrations_dir()
     if not (mig_dir / _PENDING_DIR).is_dir():
         return
@@ -81,6 +68,7 @@ def heal_pending_replacements(stores: Stores) -> None:
     try:
         lock.acquire(timeout=0)
     except Timeout:
+        # A held lock is a LIVE applier, which finishes its own.
         return
     try:
         _replay_pending(stores, mig_dir)

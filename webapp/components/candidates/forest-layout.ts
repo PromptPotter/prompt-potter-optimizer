@@ -1,17 +1,13 @@
-// Cladogram geometry for the one tree `/tree` serves: lanes, node and branch coordinates. No React.
-
-import type { LineageDivergence, LineageNode } from "@/lib/api";
-import { candidatesOf, nodeKeyOf, pathOf } from "@/lib/derivations";
+import type { ArmElection, ArmNode, CourseNode, LineageDivergence } from "@/lib/api";
+import { nodeKeyOf, pathOf } from "@/lib/derivations";
 import { encodeCyclePath, type CyclePath } from "@/lib/ids";
 
-// Horizontal only: a surface that must fit narrower drops the text and closes the columns — never
-// a scaled `viewBox`. Rows stay click-target height either way.
 export interface Density {
-  colW: number;        // width per round-column
-  leftPad: number;     // left margin before column 0
-  rightPad: number;    // room past the rightmost node
-  stub: number;        // horizontal stub before a collapsed round node
-  candStub: number;    // horizontal stub before an expanded candidate node
+  colW: number;
+  leftPad: number;
+  rightPad: number;
+  stub: number;
+  candStub: number;
   labels: boolean;
 }
 
@@ -32,13 +28,12 @@ export const DENSE: Density = {
   labels: false,
 };
 
-export const LANE_H = 26;          // height per lane-row
-export const HEADER_H = 18;        // column-header row at the top
-export const TOP_PAD = HEADER_H + 8; // first lane sits below the header row
-export const NODE_R = 3.5;         // round-node circle radius
+export const LANE_H = 26;
+export const HEADER_H = 18;
+export const TOP_PAD = HEADER_H + 8;
+export const NODE_R = 3.5;
 
-// `inner` is an L4 seed run — a course filed under a candidate rather than cut beside one.
-export type CourseKind = NonNullable<LineageNode["course_kind"]>;
+export type CourseKind = CourseNode["course_kind"];
 
 export const KIND_GLYPH: Record<CourseKind, string> = {
   root: "●",
@@ -51,20 +46,20 @@ export const TRIGGER_GLYPH: Record<string, string> = {
   operator_steered: "✎",
 };
 
-// Served (`FORK_DIRECTION`, derived server-side from the trigger) — never re-derived here.
-export type ForkDirection = NonNullable<LineageNode["fork_direction"]>;
+export type ForkDirection = NonNullable<CourseNode["fork_direction"]>;
 
-// "↳" = this branch IS the line now; "≡" = the cut changed nothing measurable. Offshoot is unmarked.
 export const DIRECTION_GLYPH: Record<ForkDirection, string> = {
   offshoot: "",
   supersede: "↳",
   equivalent: "≡",
 };
 
-function groupRounds(cands: readonly LineageNode[]): Map<number, LineageNode[]> {
-  const byRound = new Map<number, LineageNode[]>();
+const roundOf = (c: ArmNode): number => c.reading.arm.round;
+
+function groupRounds(cands: readonly ArmNode[]): Map<number, ArmNode[]> {
+  const byRound = new Map<number, ArmNode[]>();
   for (const c of cands) {
-    const r = c.round ?? 0;
+    const r = roundOf(c);
     const arr = byRound.get(r) ?? [];
     arr.push(c);
     byRound.set(r, arr);
@@ -72,12 +67,11 @@ function groupRounds(cands: readonly LineageNode[]): Map<number, LineageNode[]> 
   return byRound;
 }
 
-// NO first-candidate fallback: a held or never-closed round crowned nobody.
-function pickWinner(cands: readonly LineageNode[]): LineageNode | null {
-  return cands.find((c) => c.is_selected) ?? null;
+function pickWinner(cands: readonly ArmNode[]): ArmNode | null {
+  return cands.find((c) => c.reading.election.selected) ?? null;
 }
 
-export function expandedLaneSpan(cands: readonly LineageNode[]): number {
+export function expandedLaneSpan(cands: readonly ArmNode[]): number {
   let max = 1;
   for (const n of groupRounds(cands).values()) {
     if (n.length > max) max = n.length;
@@ -86,61 +80,55 @@ export function expandedLaneSpan(cands: readonly LineageNode[]): number {
 }
 
 export interface LaneLayout {
-  course: LineageNode;
+  course: CourseNode;
   coursePathKey: string;
-  candidates: LineageNode[];
+  candidates: ArmNode[];
   expanded: boolean;
   // In LANE_H units.
   laneOffset: number;
   laneSpan: number;
   baseCol: number;
-  // Both null only at the tree's root.
   anchorCandidateId: string | null;
   parentKey: string | null;
 }
 
-// Both halves needed: a candidate id repeats across `.inner/` sandboxes, a course path holds many.
 export interface CladogramAnchor {
   coursePathKey: string;
   candidateId: string;
 }
 
-// A point's extent (`webapp/components/CLAUDE.md` § Component conventions) as `nodeKeyOf` addresses.
-// `null` where this tree does not hold the anchor.
 export function extentKeys(
-  root: LineageNode,
+  root: CourseNode,
   anchor: CladogramAnchor,
 ): ReadonlySet<string> | null {
   const keys = new Set<string>();
-  const addMeasurements = (cand: LineageNode): void => {
+  const addMeasurements = (cand: ArmNode): void => {
     for (const child of cand.children) {
-      if (child.kind !== "course" || child.course_kind !== "inner") continue;
-      for (const c of candidatesOf(child)) {
+      if (child.course_kind !== "inner") continue;
+      for (const c of child.children) {
         keys.add(nodeKeyOf(c));
         addMeasurements(c);
       }
     }
   };
-  const walk = (course: LineageNode): boolean => {
-    const cands = candidatesOf(course);
+  const walk = (course: CourseNode): boolean => {
+    const cands = course.children;
     const keepThrough = (round: number): void => {
-      for (const c of cands) if ((c.round ?? 0) <= round) keys.add(nodeKeyOf(c));
+      for (const c of cands) if (roundOf(c) <= round) keys.add(nodeKeyOf(c));
     };
     const own =
       encodeCyclePath(pathOf(course)) === anchor.coursePathKey
         ? cands.find((c) => c.id === anchor.candidateId)
         : undefined;
     if (own) {
-      keepThrough(own.round ?? 0);
+      keepThrough(roundOf(own));
       addMeasurements(own);
       return true;
     }
     for (const cand of cands) {
-      for (const child of cand.children) {
-        if (child.kind === "course" && walk(child)) {
-          keepThrough(cand.round ?? 0);
-          return true;
-        }
+      if (cand.children.some(walk)) {
+        keepThrough(roundOf(cand));
+        return true;
       }
     }
     return false;
@@ -149,9 +137,8 @@ export function extentKeys(
 }
 
 // Lanes key on `nodeKeyOf`, never `course.id`: inner cycle ids repeat across `.inner/` sandboxes.
-// `keep` (`extentKeys`) restricts the layout; `null` lays out the whole family.
 export function layout(
-  root: LineageNode,
+  root: CourseNode,
   expanded: ReadonlySet<string>,
   keep: ReadonlySet<string> | null = null,
 ): {
@@ -163,20 +150,20 @@ export function layout(
   let nextRow = 0;
   let maxCol = 0;
   const visit = (
-    course: LineageNode,
+    course: CourseNode,
     baseCol: number,
     anchorCandidateId: string | null,
     parentKey: string | null,
   ): void => {
     const key = nodeKeyOf(course);
-    const cands = candidatesOf(course).filter((c) => keep === null || keep.has(nodeKeyOf(c)));
+    const cands = course.children.filter((c) => keep === null || keep.has(nodeKeyOf(c)));
     if (keep !== null && cands.length === 0) return;
     const isExpanded = expanded.has(key);
     const laneSpan = isExpanded ? expandedLaneSpan(cands) : 1;
     const laneOffset = nextRow;
     nextRow += laneSpan;
     const rightmost =
-      cands.length > 0 ? baseCol + Math.max(...cands.map((c) => c.round ?? 0)) : baseCol;
+      cands.length > 0 ? baseCol + Math.max(...cands.map(roundOf)) : baseCol;
     if (rightmost > maxCol) maxCol = rightmost;
     laneByKey.set(key, {
       course,
@@ -190,11 +177,7 @@ export function layout(
       parentKey,
     });
     for (const cand of cands) {
-      for (const child of cand.children) {
-        if (child.kind === "course") {
-          visit(child, baseCol + (cand.round ?? 0) + 1, cand.id, key);
-        }
-      }
+      for (const child of cand.children) visit(child, baseCol + roundOf(cand) + 1, cand.id, key);
     }
   };
   visit(root, 0, null, null);
@@ -203,22 +186,18 @@ export function layout(
 
 export interface RoundNodePos {
   courseKey: string;
-  // Selection and navigation ride this, never a bare cycle id.
   coursePath: CyclePath;
   coursePathKey: string;
   round: number;
   col: number;
   x: number;
   y: number;
-  // "" for a collapsed round that elected nobody. Display only — a renumbered timeline position.
   candidateLabel: string;
-  // The served node this was placed from — ask it about the searchpoint, never the placed dot.
-  node: LineageNode;
+  node: ArmNode;
   candKey: string;
   candidateId: string;
   isWinner: boolean;
-  // Served: `uncontested` advanced as its round's only arm, with no election to win.
-  crown: LineageNode["crown"];
+  crown: ArmElection["crown"];
   isExpanded: boolean;
   isLastInLane: boolean;
   courseKind: CourseKind;
@@ -226,7 +205,6 @@ export interface RoundNodePos {
   forkDirection: ForkDirection | null;
   divergence: LineageDivergence | null;
   divergent: boolean;
-  // What the run actually did, unlike `divergent` (a counterfactual under an applied lens).
   retiredBy: string | null;
 }
 interface BranchSeg {
@@ -248,33 +226,33 @@ function bandLeftX(l: LaneLayout, d: Density): number {
 function placedNode(
   laneKey: string,
   l: LaneLayout,
-  cand: LineageNode,
+  cand: ArmNode,
   x: number,
   y: number,
   isExpanded: boolean,
   label: string,
 ): RoundNodePos {
+  const { round } = cand.reading.arm;
+  const { selected, crown } = cand.reading.election;
   return {
     courseKey: laneKey,
     coursePath: pathOf(l.course),
     coursePathKey: l.coursePathKey,
-    round: cand.round ?? 0,
-    col: l.baseCol + (cand.round ?? 0),
+    round,
+    col: l.baseCol + round,
     x,
     y,
     candidateLabel: label,
-    // A collapsed band passes the winner's label while standing on `stand`; this names the latter.
     node: cand,
-    // Not lane key + id: a fork-contributed candidate carries the fork's path.
     candKey: nodeKeyOf(cand),
     candidateId: cand.id,
-    isWinner: cand.is_selected,
-    crown: cand.crown,
+    isWinner: selected,
+    crown,
     isExpanded,
     isLastInLane: false,
-    courseKind: l.course.course_kind ?? "root",
+    courseKind: l.course.course_kind,
     trigger: l.course.trigger,
-    forkDirection: l.course.fork_direction ?? null,
+    forkDirection: l.course.fork_direction,
     divergence: cand.divergence,
     divergent: cand.divergent,
     retiredBy: cand.superseded_by,
@@ -289,7 +267,6 @@ export function placeNodes(layouts: Map<string, LaneLayout>, d: Density): {
   const nodes: RoundNodePos[] = [];
   const segs: BranchSeg[] = [];
   const spineByKeyRound = new Map<string, RoundNodePos>();
-  // A repair re-measures without re-minting, so one id names two nodes; the RETIRED one is skipped.
   const nodeByCandidate = new Map<string, RoundNodePos>();
 
   for (const [laneKey, l] of layouts) {
@@ -302,7 +279,6 @@ export function placeNodes(layouts: Map<string, LaneLayout>, d: Density): {
       let prev: RoundNodePos | null = null;
       for (const [round, cands] of rounds) {
         const winner = pickWinner(cands);
-        // A retired candidate is passed over, or the band plots the abandoned line.
         const stand = winner ?? cands.find((c) => !c.superseded_by) ?? cands[0];
         if (!stand) continue;
         const node = placedNode(laneKey, l, stand, colX(round), y, false, winner?.label ?? "");
@@ -319,7 +295,6 @@ export function placeNodes(layouts: Map<string, LaneLayout>, d: Density): {
       continue;
     }
 
-    // Each round fans from the last WINNING round's winner; a held round never becomes a parent.
     let parent: { x: number; y: number } | null = null;
     let lastWinnerNode: RoundNodePos | null = null;
 
@@ -366,7 +341,7 @@ export function placeNodes(layouts: Map<string, LaneLayout>, d: Density): {
     const childBandY = bandCenterY(l);
     const minChildX = anchorX + d.colW;
     const firstRound = l.candidates.length > 0
-      ? Math.min(...l.candidates.map((c) => c.round ?? 0))
+      ? Math.min(...l.candidates.map(roundOf))
       : null;
     let childX = minChildX;
     if (firstRound != null) {

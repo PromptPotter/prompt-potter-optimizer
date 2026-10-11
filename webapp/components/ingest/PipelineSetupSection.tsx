@@ -10,9 +10,6 @@ import { NodeDetail } from "@/components/shell/node-surface/NodeDetail";
 import { NodeSurface } from "@/components/shell/node-surface/NodeSurface";
 import { interiorNodes, searchPoint } from "@/lib/derivations";
 
-// The check-in's pipeline block, on the Chat tab's own renderers. The draft response carries
-// the resolver's check-in arm, so it is not fetched: every draft edit returns a fresh one.
-
 const LLM_ONLY: string[] = ["llm_only"];
 
 function arraysEqual(a: readonly string[], b: readonly string[]): boolean {
@@ -30,10 +27,13 @@ export function PipelineSetupSection({
     () => ({
       connector: draft.connector,
       view: draft.pipeline_view,
-      // Landed by construction; the context's default (`unbound`) would read as no campaign.
-      pipelineStatus: "ok" as const,
-      nodeConfigSchema: draft.node_config_schema,
-      nodeOutputSchema: draft.node_output_schema,
+      schema: {
+        // Landed by construction; the context's default (`unbound`) would read as no campaign.
+        status: "ok" as const,
+        config: draft.node_config_schema,
+        output: draft.node_output_schema,
+        isSingleNode: draft.is_single_node,
+      },
       reach: draft.reach,
     }),
     [
@@ -41,6 +41,7 @@ export function PipelineSetupSection({
       draft.pipeline_view,
       draft.node_config_schema,
       draft.node_output_schema,
+      draft.is_single_node,
       draft.reach,
     ],
   );
@@ -60,7 +61,6 @@ function PipelineSetupInner({
 }) {
   const cv = useConnector();
   const { node: selected, setSelectionForNode } = useSelection();
-  // Only the two documents the DRAFT owns; config rows come from the served resolution.
   const authoring = useMemo(
     () => ({ overlay: draft.pipeline_overlay, promptFields: draft.origin_prompt_fields }),
     [draft.pipeline_overlay, draft.origin_prompt_fields],
@@ -74,7 +74,6 @@ function PipelineSetupInner({
   const showDetail =
     selected?.scope === "target" && targetNodeIds(cv.view).includes(selected.id);
 
-  // One-shot per mount: once closed, it stays closed.
   const llmNode = nodes.find((n) => n.kind === "llm") ?? null;
   const llmNodeId = llmNode?.id ?? null;
   const autoOpened = useRef(false);
@@ -132,10 +131,7 @@ function PipelineSetupInner({
               node={llmNode}
               point={searchPoint(draft.origin_prompt_fields, draft.pipeline_overlay)}
               overlay={draft.pipeline_overlay}
-              isSingleNode={draft.is_single_node}
-              schema={cv.nodeConfigSchema}
-              schemaStatus={cv.pipelineStatus}
-              outputSchema={cv.nodeOutputSchema}
+              schema={cv.schema}
               mode="search-space"
               modelCapabilities={draft.model_capabilities}
               onApply={onApply}
@@ -148,7 +144,7 @@ function PipelineSetupInner({
         <>
           <PipelineFlow
             view={cv.view}
-            status={cv.pipelineStatus}
+            status={cv.schema.status}
             connector={cv.connector}
             reach={cv.reach}
             scope="target"

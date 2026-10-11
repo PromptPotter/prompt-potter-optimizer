@@ -8,10 +8,7 @@ from pydantic import BaseModel
 
 @dataclass(frozen=True)
 class ChatRequest:
-    """One chat request, as every provider client takes it. ``model`` is concrete: no model
-    fallback lives below this seam. ``response_schema`` overrides ``response_model``'s wire schema;
-    passed alone it means untyped JSON mode. A field left ``None`` is one the caller did not ask
-    for, and a client refuses a field it was asked for and cannot send (``LLMClientBase.SENDS``)."""
+    """``None`` = not asked for; a client refuses an asked field it cannot send (``LLMClientBase.SENDS``)."""
 
     messages: list[dict[str, str]]
     model: str

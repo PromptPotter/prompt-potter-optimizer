@@ -28,13 +28,13 @@ campaign_config:
   # inner cell ignores it — its drawn rows are its whole bank.
   # `demo` opens the shot surface, CAPO's `few_shot` and potter's `l1_generate.k_max` alike.
   dataset_split:
-    bench: 100
+    bench: 30
     demo: 50
   optimization:
     max_rounds: 5
     degradation_threshold: 0.4
     elimination_n_min: 6
-    spend_budget_usd: 0.15
+    ceiling: {usd: 0.15}
     # Potter's knobs — the overlay on its manifest's nodes (assets/optimizers/potter/).
     nodes:
       adaptive_queue:

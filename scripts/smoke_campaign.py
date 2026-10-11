@@ -1,5 +1,3 @@
-"""Smoke-test a dataset end-to-end: one L1 round, minimal budget. ~90s on gpt-oss-120b via Groq."""
-
 from __future__ import annotations
 
 import argparse
@@ -39,8 +37,7 @@ from promptpotter.application.embedded_run import open_session, run_campaign  # 
 from promptpotter.application.pipeline_resolve import (  # noqa: E402
     configure_and_apply_pipeline,
 )
-from promptpotter.application.runner.entry import RunMode  # noqa: E402
-from promptpotter.domain.launch_limits import LaunchLimits  # noqa: E402
+from promptpotter.domain.launch_limits import LaunchLimits, RunMode  # noqa: E402
 from promptpotter.presentation.terminal.completion import report_completion  # noqa: E402
 
 
@@ -72,9 +69,6 @@ def _build_config(
 
 
 def _infer_scoring(dataset: str) -> str:
-    """Prefer the dataset's own declared formula; fall back to ``label_match``. Through the one
-    reader — this parsed the YAML template with ``json.loads`` behind a bare ``except``, so it
-    never once read a formula and every smoke run scored on the fallback."""
     formula = read_campaign_config_file(
         dataset_campaign_path(_REPO_ROOT / "datasets" / dataset)
     ).get("scoring")
@@ -106,10 +100,7 @@ async def _run(args: argparse.Namespace) -> int:
     print(f"[smoke] dataset runs: {project_dir / 'dataset_runs'}", flush=True)
 
     session = await open_session(
-        args.dataset,
-        backend_url=args.backend_url,
-        backend_id=args.dataset,
-        on_status=print,
+        args.dataset, backend_url=args.backend_url, backend_id=args.dataset
     )
 
     schema = session.pipeline_schema
@@ -132,7 +123,7 @@ async def _run(args: argparse.Namespace) -> int:
             patience=args.patience,
         )
     )
-    configure_and_apply_pipeline(session, campaign_config, log=print)
+    configure_and_apply_pipeline(session, campaign_config)
 
     train_slice = (session.samples or [])[: args.samples]
     if not train_slice:
@@ -148,10 +139,10 @@ async def _run(args: argparse.Namespace) -> int:
         mode=RunMode(),
     )
     report_completion(result, session=session)
-    origin_acc = result.origin_accuracy
+    origin = None if result.origin is None else result.origin.accuracy
     print(
-        f"[smoke] origin: {origin_acc:.3f}"
-        if origin_acc is not None
+        f"[smoke] origin: {origin.value:.3f}"
+        if origin is not None
         else "[smoke] origin: not measured (no scoreable row)",
         flush=True,
     )

@@ -1,10 +1,8 @@
-// Origin check-in client helpers. The mint gate is `origin_readiness.py`'s, served as
-// `draft.readiness` — never re-derive it here.
+// The mint gate is `origin_readiness.py`'s, served as `draft.readiness` — never re-derive it here.
 
 import type { DraftCampaignWire, DraftPatch } from "./api";
 
-// Mirrors the field ids `origin_readiness.py` keys `draft.field_provenance` by. Config keys are
-// settable by a resolver question but not gated.
+// Mirrors the field ids `origin_readiness.py` keys `draft.field_provenance` by.
 export const ORIGIN_KEY = {
   columnQuery: "column.query",
   columnGroundTruth: "column.ground_truth",

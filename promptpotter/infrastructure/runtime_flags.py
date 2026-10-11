@@ -1,377 +1,208 @@
-"""Readers for the per-cycle Control-local flags (ADR-0001) and :func:`derive_run_phase`, the ONE
-place run-state is computed — for every reader, live surfaces included."""
-
 from __future__ import annotations
 
 import sys
 import time
 from pathlib import Path
-from typing import Any
 
-from pydantic import ValidationError
-
-from promptpotter.domain.launch_limits import RoundsCap
-from promptpotter.domain.phases import RunPhase
-from promptpotter.domain.run_records import RunLimitsRecord
-from promptpotter.domain.spend import BudgetChange
-from promptpotter.infrastructure.llm.heartbeat import HEARTBEAT_INTERVAL_S
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
-    scan_ledger_declared_phase,
+from promptpotter.domain.dashboard_rows import RunLimits
+from promptpotter.domain.phases import (
+    STOP_REASON_INFO,
+    LaunchStage,
+    PauseCause,
+    PauseReading,
+    ProducerReading,
+    ProducerState,
+    RunPhase,
+    RunState,
 )
-from promptpotter.infrastructure.store.io import read_json_tolerant, write_json
-from promptpotter.infrastructure.store.layout import CampaignLayout, CycleLayout
-from promptpotter.infrastructure.store.read_model import derived, file_sig
-
-
-def is_paused(cycle_dir: Path) -> bool:
-    """``.runtime/pause.flag`` present — the single operator-interrupt flag (there is no
-    ``stop.flag``). The loop exits at the next checkpoint and the cycle stays resumable."""
-    return CycleLayout(cycle_dir).pause_flag.is_file()
+from promptpotter.domain.run_records import RunLimitsRecord
+from promptpotter.domain.spend import declare_ceiling
+from promptpotter.infrastructure.llm.heartbeat import HEARTBEAT_INTERVAL_S
+from promptpotter.infrastructure.producer_lock import cycle_held, held
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
+    Controls,
+    Progress,
+    scan_cycle_facts,
+    scan_launch_claim,
+    scan_ledger_controls,
+    scan_ledger_declared_phase,
+    scan_ledger_progress,
+    scan_ledger_run_limits,
+)
+from promptpotter.infrastructure.store.layout import CampaignLayout, CycleLayout, in_inner_sandbox
 
 
 def is_checkin(cycle_dir: Path) -> bool:
-    """``.runtime/checkin.flag`` present — the campaign is still authoring its origin, not
-    running. Dropped at skeleton creation, cleared when Start flips ``checkin`` → ``active``."""
-    return CycleLayout(cycle_dir).checkin_flag.is_file()
+    return scan_cycle_facts(CycleLayout(cycle_dir).ledger).checkin
 
 
-def write_sample_lookahead(cycle_dir: Path, cells: int, *, auto: bool = False) -> None:
-    """How many calls the round holds in flight, until the round that scores under it ends — or,
-    with ``auto``, as many as its stop rules allow, every round until the operator says otherwise.
-    ``cells <= 1`` without ``auto`` removes the file, so "back to sequential" and "never set" are
-    one on-disk state rather than two that read alike."""
-    path = CycleLayout(cycle_dir).sample_lookahead
-    _POLLS.pop(path, None)
-    if cells <= 1 and not auto:
-        path.unlink(missing_ok=True)
-        return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    write_json(path, {"cells": int(cells), "auto": auto, "requested_at": time.time()})
-
-
-def sample_lookahead_auto(cycle_dir: Path) -> bool:
-    """Whether the arming outlives its round. A mode, where the plain press is a gesture."""
-    data = _polled(CycleLayout(cycle_dir).sample_lookahead)
-    return isinstance(data, dict) and data.get("auto") is True
-
-
-def spend_sample_lookahead(cycle_dir: Path) -> None:
-    """The round that scored under the arming spends it — a press, never an ``auto`` one. The walk
-    wastes at most one call per cut at any depth (``StopRule.earliest_stop``), which is what makes
-    an arming that never ends safe to leave on."""
-    path = CycleLayout(cycle_dir).sample_lookahead
-    # Read past the held answer: an `auto` press another process wrote inside the poll window
-    # would be unlinked as a plain one.
-    _POLLS.pop(path, None)
-    if not sample_lookahead_auto(cycle_dir):
-        _POLLS.pop(path, None)
-        path.unlink(missing_ok=True)
-
-
-_POLL_EVERY_S = 0.2
-_POLLS: dict[Path, tuple[float, Any]] = {}
-
-
-def _polled(path: Path) -> Any:
-    """A control file a walk asks at every cell and every paid call. A write from this process
-    drops the held answer, so only a write from ANOTHER process waits out ``_POLL_EVERY_S``."""
-    now = time.monotonic()
-    held = _POLLS.get(path)
-    if held is not None and now - held[0] < _POLL_EVERY_S:
-        return held[1]
-    value = derived(
-        ("control_file", path), sig=file_sig(path), compute=lambda: read_json_tolerant(path)
-    )
-    _POLLS[path] = (now, value)
-    return value
+def standing_controls(cycle_dir: Path) -> Controls:
+    return scan_ledger_controls(CycleLayout(cycle_dir).ledger)
 
 
 def effective_lookahead(requested: int, ceiling: int) -> int:
-    """What the round will ACTUALLY hold in flight — the request bounded by the connector's
-    declared ``max_cells_in_flight``.
-
-    **The one clamp**, and every reader meaning "the depth in force" ends here: the scoring phase
-    (`query_loop._armed_cells`), the served overlay (`overlay_armed_controls`), and the dashboard
-    file (`live_dashboard/projection.py::_persist`) — which was the one that did not, and wrote a depth
-    nothing was running beside the ceiling refusing it. The write side stores the request UNCLAMPED
-    on purpose: a ceiling is a property of the backend a cycle runs against, not of the press."""
+    """The one clamp: the command records the request UNCLAMPED, the ceiling being the backend's."""
     return max(1, min(requested, ceiling))
 
 
-def read_sample_lookahead(cycle_dir: Path) -> int:
-    """The depth REQUESTED, unclamped — read by the walk at every launch boundary and, through
-    :func:`effective_lookahead`, served as ``dashboard.json::sample_lookahead``. So a press applies
-    to a walk already running, waits harmlessly for the next one if none is, and is gone once the
-    round clears the file.
-
-    Not the depth in force on its own: `POST /commands/set-sample-lookahead` takes any int ≥ 1,
-    and the connector's ceiling is what decides how much of it the walk honours. ``auto`` asks for
-    no bound at all, so the ceiling alone decides and the stop rules limit the rest.
-
-    ``1`` when absent, unreadable or malformed: the failure direction is "run as normal", never
-    "stall"."""
-    data = _polled(CycleLayout(cycle_dir).sample_lookahead)
-    if not isinstance(data, dict):
+def requested_lookahead(controls: Controls) -> int:
+    ask = controls.lookahead
+    if ask is None:
         return 1
-    if data.get("auto") is True:
-        return sys.maxsize
-    cells = data.get("cells")
-    if not isinstance(cells, int) or isinstance(cells, bool):
-        return 1
-    return max(1, cells)
+    return sys.maxsize if ask.auto else ask.cells
 
 
-def clear_run_control_flags(cycle_dir: Path) -> None:
-    """Drop every POLLED run-control flag a fresh launch supersedes — a launch IS the operator's
-    intent to run at the engine's own cadence, and a flag surviving the gesture it answered
-    re-answers the next one. An ``auto`` look-ahead answered no gesture, so it stays until toggled
-    off.
-
-    ``run_limits.json`` goes too, and loses nothing: it only MIRRORS the ledger's standing ceiling,
-    which the launch has already declared and admitted, and re-lands the mirror at the value it
-    holds (`runner/entry.py::_prepare_run`)."""
-    layout = CycleLayout(cycle_dir)
-    layout.pause_flag.unlink(missing_ok=True)
-    layout.skip_flag.unlink(missing_ok=True)
-    _POLLS.pop(layout.run_limits, None)
-    layout.run_limits.unlink(missing_ok=True)
-    spend_sample_lookahead(cycle_dir)
+def standing_run_limits(cycle_dir: Path) -> RunLimitsRecord:
+    return scan_ledger_run_limits(CycleLayout(cycle_dir).ledger)
 
 
-def write_run_limits_mirror(
-    cycle_dir: Path, change: BudgetChange, *, rounds: RoundsCap | None, reserve: BudgetChange
-) -> None:
-    """Land the POLLED MIRROR of the cycle's standing operator ceiling, an unset arm omitted — so
-    ``max_rounds: null`` (a lifted round cap) and no ``max_rounds`` key are two answers.
-
-    The mirror has one job: carrying a ceiling moved in another process to a run already in
-    flight, read on every paid call (`runner/entry.py::_arm_spend_book`), every round boundary
-    (`runner/loop.py`) and every served dashboard (:func:`overlay_armed_controls`), where
-    rescanning the ledger each time costs the whole log. What the operator DECLARED is the ledger's
-    ``RunLimitsRecord`` alone — `CampaignStore.write_run_limits` writes both, and nothing
-    else declares one."""
-    path = CycleLayout(cycle_dir).run_limits
-    path.parent.mkdir(parents=True, exist_ok=True)
-    caps: dict[str, float | int | None] = {}
-    if change.usd is not None:
-        caps["max_usd"] = change.usd
-    if change.tokens is not None:
-        caps["max_tokens"] = change.tokens
-    if rounds is not None:
-        caps["max_rounds"] = rounds.max_rounds
-    if reserve.usd is not None:
-        caps["reserve_usd"] = reserve.usd
-    if reserve.tokens is not None:
-        caps["reserve_tokens"] = reserve.tokens
-    _POLLS.pop(path, None)
-    write_json(path, caps)
-
-
-def _usd(value: object) -> float | None:
-    return float(value) if isinstance(value, int | float) and not isinstance(value, bool) else None
-
-
-def _count(value: object) -> int | None:
-    return int(value) if isinstance(value, int) and not isinstance(value, bool) else None
-
-
-def read_run_limits_mirror(cycle_dir: Path) -> RunLimitsRecord:
-    """The mirrored ceilings, ``None`` per arm when absent, unreadable or the wrong type — for the
-    pollers only; a launch reads the ledger (`CampaignStore.read_run_limits`). The one place that
-    knows this file's shape."""
-    data = _polled(CycleLayout(cycle_dir).run_limits)
-    if not isinstance(data, dict):
-        return RunLimitsRecord()
-    rounds = None
-    if "max_rounds" in data:
-        try:
-            rounds = RoundsCap(max_rounds=data["max_rounds"])
-        except ValidationError:
-            rounds = None
-    return RunLimitsRecord(
-        usd=_usd(data.get("max_usd")), tokens=_count(data.get("max_tokens")), rounds=rounds
+def armed_run_limits(cycle_dir: Path, declared: RunLimits) -> RunLimits:
+    standing = standing_run_limits(cycle_dir)
+    return RunLimits(
+        max_rounds=declared.max_rounds if standing.rounds is None else standing.rounds.max_rounds,
+        ceiling=declare_ceiling(declared.ceiling, standing.ceiling),
+        optimizer=declared.optimizer,
     )
 
 
-def read_reserve_mirror(cycle_dir: Path) -> BudgetChange:
-    """The job's reservation as a ceiling moved since the launch left it; ``None`` on an arm none
-    moved, where the run holds the reserve it launched with."""
-    data = _polled(CycleLayout(cycle_dir).run_limits)
-    if not isinstance(data, dict):
-        return BudgetChange(None, None)
-    return BudgetChange(_usd(data.get("reserve_usd")), _count(data.get("reserve_tokens")))
-
-
-def armed_run_limits(cycle_dir: Path) -> dict[str, float | int | None]:
-    """The mirror as ``run_limits`` updates, an unmoved arm omitted — the ARMED ceilings, which
-    both writers of a dashboard body lay over the ones INIT declared."""
-    mirror = read_run_limits_mirror(cycle_dir)
-    armed: dict[str, float | int | None] = {}
-    if mirror.usd is not None:
-        armed["spend_budget_usd"] = mirror.usd
-    if mirror.tokens is not None:
-        armed["token_budget"] = mirror.tokens
-    if mirror.rounds is not None:
-        armed["max_rounds"] = mirror.rounds.max_rounds
-    return armed
-
-
-def overlay_armed_controls(body: dict[str, Any], cycle_dir: Path) -> None:
-    """Re-read every ARMED run-control value into a served ``dashboard.json`` body, so a surface
-    shows what the loop will read rather than what the runner last flushed. Mutates in place; a
-    body with no ``run_limits`` block simply has no ceilings to correct.
-
-    **The reason is the one ``run_phase`` is derived rather than served, and it is a property of
-    the WRITER, not of any one field**: the API process applies the command while
-    :class:`LiveDashboardProjection` projects it from the RUNNER's, so the file answers for the last
-    record rather than for the press — forever on a halted cycle. ``.runtime/`` is in the
-    conditional-GET validator, so a press expires the cached answer on its own.
-
-    **A REPLAY must not call this.** These are the values in force now, and restating one as a past
-    moment's is a fabrication. Call it after ``run_phase`` is set on the body."""
-    limits = body.get("run_limits")
-    if isinstance(limits, dict):
-        limits.update(armed_run_limits(cycle_dir))
-    # Clamped against the SERVED ceiling, so this is the depth the walk will hold rather than the
-    # depth someone asked for. `max_cells_in_flight` is a WIRING_FIELD stamped at INIT:exit, so it
-    # is already in the body being corrected. Unclamped, an out-of-range request rendered as fact —
-    # a served 8 against a ceiling of 2 claimed a depth nothing was running — and an `auto` arming,
-    # which asks for no bound at all, would serve a number no backend holds.
-    served = body.get("max_cells_in_flight")
-    ceiling = served if isinstance(served, int) and not isinstance(served, bool) else 1
-    depth = effective_lookahead(read_sample_lookahead(cycle_dir), ceiling)
-    body["sample_lookahead"] = depth
-    body["sample_lookahead_auto"] = sample_lookahead_auto(cycle_dir)
-    # The flight gauge is the one FOLDED value that goes stale the same way: a killed or crashed
-    # run never publishes its closing zero, so a dead producer would go on reporting calls out.
-    if body.get("run_phase") != RunPhase.RUNNING:
-        body.update(
-            in_flight=0, lookahead_allowed=0, waiting_on=None, waiting_since=None, backpressure=None
-        )
-    # Both verdicts read the depth and the gauge as just corrected, so they are decided here.
-    affordable, most = body["lookahead_affordable"], body["lookahead_most"]
-    body["lookahead_money_pinned"] = affordable is not None and (
-        body["in_flight"] + affordable < min(depth, body["lookahead_allowed"])
-    )
-    body["lookahead_pick_max"] = (
-        max(1, min(ceiling, most)) if most is not None and most > 0 else ceiling
-    )
-
-
-# dashboard.json untouched for longer than this ⇒ an active cycle's producer is
-# treated as vanished (detached). The loop bumps the file on every sample /
-# progress tick / round boundary, so a healthy run stays well inside the window
-# even across long backend calls. This is the sole remaining use of freshness —
-# it splits running from detached, it does not define "running".
+# `RUN_FRESH_S` bounds ANY ledger append (a heartbeat is one); the other two, the last NON-heartbeat one.
 RUN_FRESH_S = 30.0
-
-# Freshness proves ATTACHMENT, never progress, so these two windows are the time-ray head's other
-# half, over the gap since the last NON-heartbeat append. A held gate and an open cell are exempt.
 RECENT_STEP_S = 9 * HEARTBEAT_INTERVAL_S
 WEDGED_AFTER_S = 30 * HEARTBEAT_INTERVAL_S
 
 
 def _heartbeat_mtime(cycle_dir: Path) -> float | None:
-    """The producer's last sign of life. ``dashboard.json`` is canonical whenever it exists — never
-    averaged or maxed against ``index.json``, which is the fallback only until the first dashboard
-    write lands. ``None`` when the cycle has neither."""
-    layout = CycleLayout(cycle_dir)
-    for path in (layout.dashboard, layout.manifest):
-        try:
-            return path.stat().st_mtime
-        except OSError:
-            continue
-    return None
+    try:
+        return CycleLayout(cycle_dir).ledger.stat().st_mtime
+    except OSError:
+        return None
 
 
-def _detached_after(cycle_dir: Path, *, fresh_s: float) -> float | None:
-    """The clock instant the last heartbeat stops counting as fresh — **the one expression of the
-    ``running`` → ``detached`` edge.** Both readers of that edge (the phase itself, and the
-    conditional-GET validator that has to expire a cached answer when it passes) ask here, so the
-    304 path cannot come to disagree with the body it is short-circuiting."""
+def _beat_stale_after(cycle_dir: Path) -> float | None:
     beat = _heartbeat_mtime(cycle_dir)
-    return None if beat is None else beat + fresh_s
+    return None if beat is None else beat + RUN_FRESH_S
 
 
-# A verify runs in whichever process fired it, so its only sign of life is its own ledger
-# appends: the bills of the cells it scores. Wide enough to span one slow cell, and it bounds
-# nothing but how long a KILLED pass goes on reading as in flight — a pass that ends writes its exit.
+# Spans one slow cell; bounds only how long a KILLED verify pass reads as in flight.
 VERIFY_FRESH_S = 300.0
 
 
 def verify_stale_after(cycle_dir: Path) -> float | None:
-    """The clock instant an open verify pass stops reading as in flight — the overlay that serves
-    it and the conditional-GET validator that has to expire it both ask here."""
     try:
         return CycleLayout(cycle_dir).ledger.stat().st_mtime + VERIFY_FRESH_S
     except OSError:
         return None
 
 
-def _producer_fresh(cycle_dir: Path, *, fresh_s: float) -> bool:
-    edge = _detached_after(cycle_dir, fresh_s=fresh_s)
+def _beating(cycle_dir: Path) -> bool:
+    edge = _beat_stale_after(cycle_dir)
     return edge is not None and time.time() < edge
 
 
-def _is_terminal(cycle_dir: Path) -> bool:
-    """``index.json::finished_at`` — the lifecycle half, for a caller that does not already hold the
-    manifest it was reading anyway."""
-    manifest = read_json_tolerant(CycleLayout(cycle_dir).manifest)
-    return bool(manifest.get("finished_at")) if isinstance(manifest, dict) else False
-
-
-def derive_run_phase(
-    cycle_dir: Path,
+def read_run_state(
     *,
-    is_terminal: bool | None = None,
-    fresh_s: float = RUN_FRESH_S,
-) -> RunPhase:
-    """The single run-phase derivation, for EVERY reader — the cycle list, the lineage tree and the
-    live surfaces alike. ``paused`` is deliberately NOT freshness-gated (a paused producer has
-    exited) while ``gate`` is.
+    checkin: bool,
+    terminal: bool,
+    pause_requested: bool,
+    declared: str,
+    held: bool,
+    beating: bool,
+    silent_for_s: float | None,
+    open_for_s: float | None,
+    claimed: LaunchStage | None = None,
+) -> RunState:
+    """`held` alone decides attachment; the clocks only grade it, so a quiet producer reads WEDGED, still attached."""
+    absent = ProducerReading.of(ProducerState.ABSENT)
+    taken = ProducerReading.of(ProducerState.CLAIMED)
+    if checkin:
+        return RunState(RunPhase.CHECKIN, absent if claimed is None else taken)
+    if not held and claimed is not None:
+        return RunState(claimed, taken)
+    if not held:
+        owed = declared == RunPhase.RUNNING and not pause_requested and not terminal
+        producer = ProducerReading.of(ProducerState.SILENT) if owed else absent
+    elif declared == RunPhase.GATE:
+        producer = ProducerReading.of(ProducerState.HELD)
+    else:
+        if not beating or (
+            open_for_s is None and silent_for_s is not None and silent_for_s > WEDGED_AFTER_S
+        ):
+            state = ProducerState.WEDGED
+        elif silent_for_s is not None and silent_for_s <= RECENT_STEP_S:
+            state = ProducerState.LIVE
+        else:
+            state = ProducerState.IDLE
+        producer = ProducerReading.of(state, silent_for_s=silent_for_s, open_for_s=open_for_s)
+    if terminal:
+        return RunState(RunPhase.TERMINAL, producer)
+    if pause_requested or declared == RunPhase.PAUSED:
+        return RunState(RunPhase.PAUSED, producer)
+    if producer.state is ProducerState.HELD:
+        return RunState(RunPhase.GATE, producer)
+    return RunState(RunPhase.RUNNING if producer.attached else RunPhase.DETACHED, producer)
 
-    ``paused`` has TWO writers: the operator's flag, and the runner declaring it on the LEDGER (a
-    Ctrl+C out of a long phase writes no flag) — consulted for that and ``gate`` only."""
-    if is_checkin(cycle_dir):
-        return RunPhase.CHECKIN
-    if is_terminal is None:
-        is_terminal = _is_terminal(cycle_dir)
-    if is_terminal:
-        return RunPhase.TERMINAL
-    declared = scan_ledger_declared_phase(CycleLayout(cycle_dir).ledger)
-    if is_paused(cycle_dir) or declared == RunPhase.PAUSED:
-        return RunPhase.PAUSED
-    fresh = _producer_fresh(cycle_dir, fresh_s=fresh_s)
-    if fresh and declared == RunPhase.GATE:
-        return RunPhase.GATE
-    if fresh:
-        return RunPhase.RUNNING
-    return RunPhase.DETACHED
+
+def derive_run_state(cycle_dir: Path) -> RunState:
+    ledger = CycleLayout(cycle_dir).ledger
+    checkin = is_checkin(cycle_dir)
+    declared = scan_ledger_declared_phase(ledger)
+    terminal = declared == RunPhase.TERMINAL
+    settled = checkin or terminal
+    producer_held = cycle_held(cycle_dir)
+    progress = scan_ledger_progress(ledger) if producer_held else Progress()
+    asked = None if settled else standing_controls(cycle_dir).pause
+    claim = None if producer_held else scan_launch_claim(ledger)
+    now = time.time()
+    run = read_run_state(
+        checkin=checkin,
+        terminal=terminal,
+        pause_requested=asked is not None,
+        declared="" if settled else declared,
+        held=producer_held,
+        beating=_beating(cycle_dir),
+        silent_for_s=None
+        if progress.progressed_at is None
+        else max(0.0, now - progress.progressed_at),
+        open_for_s=None
+        if progress.waiting_since is None
+        else max(0.0, now - progress.waiting_since),
+        claimed=None if claim is None or not held(Path(claim.claimant_lock)) else claim.stage,
+    )._replace(inner=in_inner_sandbox(cycle_dir))
+    if run.run_phase is not RunPhase.PAUSED:
+        return run
+    stood = scan_cycle_facts(ledger).paused
+    if stood is not None and stood.stop_reason is not None and stood.cause is not None:
+        return run._replace(
+            pause=PauseReading(
+                stop_reason=stood.stop_reason,
+                cause=stood.cause,
+                detail=stood.detail,
+                next_step=STOP_REASON_INFO[stood.stop_reason].next_step,
+                at=stood.timestamp,
+            )
+        )
+    if asked is None:
+        return run
+    return run._replace(
+        pause=PauseReading(
+            stop_reason=None,
+            cause=PauseCause.COMMAND,
+            detail=f"pause-cycle by {asked.issued_by}" if asked.issued_by else "pause-cycle",
+            next_step="The run stops at its next checkpoint.",
+            at=asked.at,
+        )
+    )
 
 
-def run_phase_validator_epoch(cycle_dir: Path, *, fresh_s: float = RUN_FRESH_S) -> float | None:
-    """Every input to :func:`derive_run_phase` folded into ONE monotone epoch a conditional GET can
-    compare — stats only, no parse, so it stays cheap enough for the 2 s poll's 304 path.
-
-    Four paths carry a write: the cycle DIRECTORY (its mtime bumps when ``dashboard.json`` is first
-    created), ``dashboard.json`` (the declaration), ``index.json`` (the terminal stamp), and the
-    ``.runtime`` DIRECTORY (the flags — its mtime bumps on a child create *and* unlink, which a
-    per-flag stat cannot see). The fifth term carries no write at all: the ``running`` →
-    ``detached`` edge moves with the CLOCK, so without it a stale ``If-Modified-Since`` pins a dead
-    producer at ``running`` for as long as the browser keeps polling. It is read from
-    :func:`_detached_after`, the same expression the phase itself derives from — restating it here
-    is what would let the 304 outlive the answer it stands for. The campaign's ``campaign.json``
-    rides too: a halted cycle serves the ceilings its frozen config declares. So does the LEDGER,
-    which a verify writes from a process that moves no other path here, with its own clock edge
-    (:func:`verify_stale_after`)."""
+def run_phase_validator_epoch(cycle_dir: Path) -> float | None:
+    """Stats only, no parse: this is the 2 s poll's 304 path."""
     layout = CycleLayout(cycle_dir)
     campaign_manifest = CampaignLayout(cycle_dir.parent.parent).manifest
     stamps: list[float] = []
     for path in (
         layout.cycle_dir,
         layout.dashboard,
-        layout.manifest,
-        layout.runtime,
+        layout.runtime,  # the producer lock: a directory's mtime sees a child's create AND unlink
         layout.ledger,
         campaign_manifest,
     ):
@@ -379,9 +210,12 @@ def run_phase_validator_epoch(cycle_dir: Path, *, fresh_s: float = RUN_FRESH_S) 
             stamps.append(path.stat().st_mtime)
         except OSError:
             continue
-    for edge in (_detached_after(cycle_dir, fresh_s=fresh_s), verify_stale_after(cycle_dir)):
+    for edge in (_beat_stale_after(cycle_dir), verify_stale_after(cycle_dir)):
         if edge is not None and time.time() >= edge:
             stamps.append(edge)
+    # A claim lasts as long as its process, which no write marks: a claimed cycle is never a 304.
+    if scan_launch_claim(layout.ledger) is not None:
+        stamps.append(time.time())
     return max(stamps) if stamps else None
 
 
@@ -390,17 +224,13 @@ __all__ = [
     "RUN_FRESH_S",
     "WEDGED_AFTER_S",
     "armed_run_limits",
-    "clear_run_control_flags",
-    "derive_run_phase",
+    "derive_run_state",
+    "effective_lookahead",
     "is_checkin",
-    "is_paused",
-    "read_reserve_mirror",
-    "read_run_limits_mirror",
-    "read_sample_lookahead",
+    "read_run_state",
+    "requested_lookahead",
     "run_phase_validator_epoch",
-    "sample_lookahead_auto",
-    "spend_sample_lookahead",
+    "standing_controls",
+    "standing_run_limits",
     "verify_stale_after",
-    "write_run_limits_mirror",
-    "write_sample_lookahead",
 ]

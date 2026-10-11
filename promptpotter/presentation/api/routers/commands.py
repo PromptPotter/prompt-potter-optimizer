@@ -1,50 +1,43 @@
-"""``POST /commands/{kind}`` — the closed inbound surface; parse, enforce the trust-boundary headers, delegate. A kind is
-declared in the OpenAPI spec BEFORE its handler lands, and a response shape never buys its own write path."""
-
 from __future__ import annotations
 
 import logging
-from typing import Annotated, Any, cast, get_args
+from typing import Annotated, Any, cast
 
 from fastapi import APIRouter, Header, Path, Request
 from fastapi.routing import APIRoute
 from pydantic import Field, ValidationError
 
-from promptpotter.application.commands.checkin_dispatch import (
-    dispatch_draft_patch,
-    dispatch_origin_resolution,
-    dispatch_start_checkin,
-)
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
+from promptpotter.application.commands.draft_editing import dispatch_draft_patch
+from promptpotter.application.commands.launching import dispatch_start_checkin
+from promptpotter.application.commands.origin_resolving import (
+    ResolveOriginResponse,
+    dispatch_origin_resolution,
+)
 from promptpotter.application.commands.payloads import (
     PAYLOAD_MODEL_FOR_KIND,
-    CampaignPayload,
     CommandAcceptedBody,
-    CommandPayload,
     CompactArchivePayload,
-    CyclePayload,
     DatasetReplaced,
-    DescendableCyclePayload,
     EditDraftCampaignPayload,
     LifecyclePayload,
     ReplaceDatasetPayload,
     ResolveOriginPayload,
+    SetCampaignLabelPayload,
     StartCheckinPayload,
+    WorkspacePayload,
 )
-from promptpotter.application.jobs.launcher.checkin import start_checkin_campaign
+from promptpotter.application.datasets.draft_build import DraftCampaignWire
+from promptpotter.application.jobs.launcher.checkin import StartCheckinResponse
 from promptpotter.application.maintenance.archive_maintenance import ArchiveReport
 from promptpotter.domain.command_kinds import (
-    ALL_DISPATCHED_KINDS,
-    CampaignConfigKind,
-    CheckinScopedKind,
-    CycleScopedKind,
-    LifecycleKind,
-    WorkspaceScopedKind,
+    CampaignPayload,
+    CommandKind,
+    CommandPayload,
+    CyclePayload,
 )
-from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.store.stores import resolve_cycle_path
-from promptpotter.presentation.api.deps import JobRegistryDep, StoresDep, decode_descend
+from promptpotter.presentation.api.deps import JobRegistryDep, StoresDep
 from promptpotter.shared.errors import (
     BadRequestError,
     NotFoundError,
@@ -55,35 +48,15 @@ logger = logging.getLogger(__name__)
 
 commands_router = APIRouter(prefix="/commands", tags=["Commands"])
 
-# Derived from the `domain/command_kinds.py` Literals (the SoT), never re-authored here — so a
-# new kind reaches the router the moment it joins its Literal.
-_LIFECYCLE_KINDS: frozenset[str] = frozenset(get_args(LifecycleKind))
-_CYCLE_SCOPED_KINDS: frozenset[str] = frozenset(get_args(CycleScopedKind))
-_WORKSPACE_SCOPED_KINDS: frozenset[str] = frozenset(get_args(WorkspaceScopedKind))
-_CAMPAIGN_CONFIG_KINDS: frozenset[str] = frozenset(get_args(CampaignConfigKind))
-# A kind answering a domain object rather than a 202 keeps its own typed route and stays off
-# the generic one. Two such kinds sit outside `CheckinScopedKind`.
-_TYPED_ROUTE_KINDS: frozenset[str] = frozenset(get_args(CheckinScopedKind)) | {
-    "replace-dataset",
-    # Its whole point is the report: a preview the operator consents on cannot be delivered
-    # through a 202 envelope, and the apply must answer in the same shape the preview did.
-    "compact-archive",
-}
-# SUBTRACTED from the dispatched set rather than re-authored as a union of the four Literals,
-# because a union silently omits whatever it forgets to name — so a new kind is wired by
-# default and going unwired is the thing you have to write down.
-_WIRED_KINDS: frozenset[str] = ALL_DISPATCHED_KINDS - _TYPED_ROUTE_KINDS
-
 
 class CommandEnvelope(StrictModel):
-    """Inbound envelope per ``api-openapi.yaml#/components/schemas/CommandEnvelope``."""
+    """The inbound envelope every command is posted in."""
 
     kind: str = Field(min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9-]*$")
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
 def ensure_idempotency_key(header_value: str | None) -> str:
-    """Trust-boundary check — 400 ``idempotency_key_missing`` when absent or empty."""
     if not header_value or not header_value.strip():
         raise BadRequestError(
             "Idempotency-Key header is required on every command.",
@@ -93,109 +66,92 @@ def ensure_idempotency_key(header_value: str | None) -> str:
 
 
 def _validated_payload(kind: str, raw: dict[str, Any]) -> CommandPayload:
-    """The WHOLE of payload validation for every dispatched kind, at one call. The model's own
-    ``extra="forbid"`` is what refuses an undeclared key: dropping one instead is how a field
-    reaches the applier as an absent argument and fails as if it had never been sent."""
     try:
         return PAYLOAD_MODEL_FOR_KIND[kind].model_validate(raw)
     except ValidationError as exc:
-        raise PayloadInvalidError(f"payload invalid for {kind!r}: {exc}") from exc
+        raise PayloadInvalidError(f"payload invalid for '{kind}': {exc}") from exc
 
 
-def _require_kind(envelope: CommandEnvelope, expected: str) -> None:
-    """Pin a typed route's envelope to its declared ``kind`` const — the same check
-    ``post_command`` runs against the path segment."""
+def _require_kind(envelope: CommandEnvelope, expected: CommandKind) -> None:
     if envelope.kind != expected:
-        raise PayloadInvalidError(f"envelope.kind must be {expected!r}, got {envelope.kind!r}.")
+        raise PayloadInvalidError(f"envelope.kind must be '{expected}', got {envelope.kind!r}.")
 
 
-@commands_router.post("/edit-draft-campaign")
+@commands_router.post(f"/{CommandKind.EDIT_DRAFT_CAMPAIGN}", response_model=DraftCampaignWire)
 async def edit_draft_campaign(
     stores: StoresDep,
     envelope: CommandEnvelope,
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
-) -> dict[str, Any]:
-    """Sparse-patch a `DraftCampaign`. Returns the post-mutation full shape.
-
-    Per ``docs/specs/api-openapi.yaml::editDraftCampaign``. The mutation rides
-    `CommandDispatcher` (architecture.md § Control-remote: sole writer of `CommandRecord`);
-    only the response shape differs from the generic 202 verbs, never the ingress.
-    """
-    _require_kind(envelope, "edit-draft-campaign")
+) -> DraftCampaignWire:
+    """Sparse-patch a `DraftCampaign` and return its full post-mutation shape."""
+    _require_kind(envelope, CommandKind.EDIT_DRAFT_CAMPAIGN)
     idemp = ensure_idempotency_key(idempotency_key)
     payload = cast(
-        EditDraftCampaignPayload, _validated_payload("edit-draft-campaign", envelope.payload)
+        EditDraftCampaignPayload,
+        _validated_payload(CommandKind.EDIT_DRAFT_CAMPAIGN, envelope.payload),
     )
     return await dispatch_draft_patch(stores, CommandCall(payload, idemp))
 
 
-@commands_router.post("/resolve-origin")
+@commands_router.post(f"/{CommandKind.RESOLVE_ORIGIN}", response_model=ResolveOriginResponse)
 async def resolve_origin(
     stores: StoresDep,
     envelope: CommandEnvelope,
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
-) -> dict[str, Any]:
-    """Run one origin-resolver turn against a draft. Returns ``{resolution, draft}``.
-
-    Per ``docs/specs/api-openapi.yaml::resolveOrigin``. Synchronous, like
-    ``edit-draft-campaign`` — the resolver's findings apply in-line and the
-    deterministic checklist re-gates before the response.
-    """
-    _require_kind(envelope, "resolve-origin")
-    payload = cast(ResolveOriginPayload, _validated_payload("resolve-origin", envelope.payload))
+) -> ResolveOriginResponse:
+    """Run one origin-resolver turn against a draft, synchronously, and return ``{resolution, draft}``."""
+    _require_kind(envelope, CommandKind.RESOLVE_ORIGIN)
+    payload = cast(
+        ResolveOriginPayload, _validated_payload(CommandKind.RESOLVE_ORIGIN, envelope.payload)
+    )
     return await dispatch_origin_resolution(
         stores, CommandCall(payload, ensure_idempotency_key(idempotency_key))
     )
 
 
-@commands_router.post("/start-checkin")
+@commands_router.post(f"/{CommandKind.START_CHECKIN}", response_model=StartCheckinResponse)
 async def start_checkin(
     job_registry: JobRegistryDep,
     stores: StoresDep,
     envelope: CommandEnvelope,
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
-) -> dict[str, Any]:
-    """Flip a CHECKIN campaign to ``active`` + spawn the runner. Synchronous;
-    returns ``{campaign_id, cycle_id, job_id}``.
+) -> StartCheckinResponse:
+    """Flip a check-in campaign to ``active``, mint its run cycle and detach the loop.
 
-    Per ``docs/specs/api-openapi.yaml::startCheckin``. The campaign already
-    exists durably (minted on the first ingest action); this gate-checks the
-    origin (incomplete → 422, stays ``checkin``), materializes the dataset, mints
-    the run cycle, and detaches the loop.
+    An incomplete origin answers 422 and the campaign stays ``checkin``.
     """
-    _require_kind(envelope, "start-checkin")
+    _require_kind(envelope, CommandKind.START_CHECKIN)
     idemp = ensure_idempotency_key(idempotency_key)
-    payload = cast(StartCheckinPayload, _validated_payload("start-checkin", envelope.payload))
-    return await dispatch_start_checkin(
-        stores,
-        CommandCall(payload, idemp),
-        start=lambda hop, draft: start_checkin_campaign(
-            stores=stores, job_registry=job_registry, hop=hop, draft=draft, limits=payload
-        ),
+    payload = cast(
+        StartCheckinPayload, _validated_payload(CommandKind.START_CHECKIN, envelope.payload)
+    )
+    launched = await dispatch_start_checkin(
+        stores, CommandCall(payload, idemp), job_registry=job_registry
+    )
+    job = launched.job
+    return StartCheckinResponse(
+        campaign_id=job.campaign_id, cycle_id=job.cycle_id, job_id=job.job_id
     )
 
 
-@commands_router.post("/compact-archive")
+@commands_router.post(f"/{CommandKind.COMPACT_ARCHIVE}")
 async def compact_archive(
     request: Request,
     stores: StoresDep,
     envelope: CommandEnvelope,
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> ArchiveReport:
-    """Compact, restore, or purge the measurement archive's cold store.
-
-    Per ``docs/specs/api-openapi.yaml::compactArchive``. Typed rather than 202 because the
-    preview IS the product: an operator consents to a step that costs money to undo on the byte
-    counts this returns, and the apply answers in the same shape so the two are comparable.
-    """
-    _require_kind(envelope, "compact-archive")
+    """Compact, restore or purge the measurement archive's cold store; a preview and its apply answer in one shape."""
+    _require_kind(envelope, CommandKind.COMPACT_ARCHIVE)
     idemp = ensure_idempotency_key(idempotency_key)
-    payload = cast(CompactArchivePayload, _validated_payload("compact-archive", envelope.payload))
+    payload = cast(
+        CompactArchivePayload, _validated_payload(CommandKind.COMPACT_ARCHIVE, envelope.payload)
+    )
     outcome = await CommandDispatcher(stores).dispatch_compact_archive(CommandCall(payload, idemp))
     return outcome.result
 
 
-@commands_router.post("/replace-dataset")
+@commands_router.post(f"/{CommandKind.REPLACE_DATASET}")
 async def replace_dataset(
     request: Request,
     stores: StoresDep,
@@ -204,14 +160,14 @@ async def replace_dataset(
 ) -> DatasetReplaced:
     """Version-and-repoint a colliding dataset so its name frees for new data.
 
-    Per ``docs/specs/api-openapi.yaml::replaceDataset``. Data-safe: never overwrites — the
-    old data + every prior campaign's results are preserved under ``{slug}-vN``.
-    Synchronous (the migration is a bounded set of renames + JSON rewrites); the
-    freed name is re-ingested in a separate ``/datasets/ingest`` call.
+    Nothing is overwritten: the old data and every prior campaign's results stay under ``{slug}-vN``.
+    The freed name is re-ingested by a separate ``/datasets/ingest`` call.
     """
-    _require_kind(envelope, "replace-dataset")
+    _require_kind(envelope, CommandKind.REPLACE_DATASET)
     idemp = ensure_idempotency_key(idempotency_key)
-    payload = cast(ReplaceDatasetPayload, _validated_payload("replace-dataset", envelope.payload))
+    payload = cast(
+        ReplaceDatasetPayload, _validated_payload(CommandKind.REPLACE_DATASET, envelope.payload)
+    )
     outcome = await CommandDispatcher(stores).dispatch_replace_dataset(CommandCall(payload, idemp))
     return outcome.result
 
@@ -225,9 +181,7 @@ async def post_command(
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
     expected_version: Annotated[int | None, Header(alias="Expected-Version")] = None,
 ) -> CommandAcceptedBody:
-    """Closed-set command surface — every wired kind validates against the
-    declared schema in ``api-openapi.yaml`` and dispatches through
-    ``CommandDispatcher``."""
+    """The closed-set command surface: every wired kind validates against its declared schema, then dispatches."""
     idemp = ensure_idempotency_key(idempotency_key)
     if kind != envelope.kind:
         raise PayloadInvalidError(
@@ -240,62 +194,31 @@ async def post_command(
             code="command_kind_unknown",
         )
 
-    payload = _validated_payload(kind, envelope.payload)
     dispatcher = CommandDispatcher(stores, job_registry=job_registry)
-
-    if kind in _WORKSPACE_SCOPED_KINDS:
-        workspace_outcome = await dispatcher.dispatch_workspace_command(CommandCall(payload, idemp))
-        return workspace_outcome.accepted
-
-    if kind in _CAMPAIGN_CONFIG_KINDS:
-        # In-place manifest edit — campaign-scoped, no cycle.
-        config_outcome = await dispatcher.dispatch_campaign_config(
-            CommandCall(cast(CampaignPayload, payload), idemp)
-        )
-        return config_outcome.accepted
-
-    if kind in _LIFECYCLE_KINDS:
-        lifecycle_outcome = await dispatcher.dispatch_lifecycle(
-            CommandCall(cast(LifecyclePayload, payload), idemp)
-        )
-        return lifecycle_outcome.accepted
-
-    # Cycle-scoped. The address may descend into an inner sandbox where the payload TYPE declares
-    # one — same grammar as the read side's `?descend=`, and the leaf is a cycle in its own tree.
-    cycle_payload = cast(CyclePayload, payload)
-    hops: tuple[CycleHop, ...] = (
-        CycleHop(campaign_id=cycle_payload.campaign_id, cycle_id=cycle_payload.cycle_id),
-    )
-    if isinstance(cycle_payload, DescendableCyclePayload):
-        hops = (*hops, *decode_descend(cycle_payload.descend))
-    stores, leaf = resolve_cycle_path(stores, hops)
-    # Re-pointed at the LEAF so the applier and the ledger record name the one cycle addressed.
-    cycle_payload = cycle_payload.model_copy(
-        update={"campaign_id": leaf.campaign_id, "cycle_id": leaf.cycle_id}
-    )
-    # Rebuilt on the RESOLVED store: a descent hands back a different workspace root, and the
-    # one above was bound to the caller's own.
-    dispatcher = CommandDispatcher(stores, job_registry=job_registry)
-    cycle_outcome = await dispatcher.dispatch_cycle_command(
-        CommandCall(cycle_payload, idemp), expected_version=expected_version
-    )
-    return cycle_outcome.accepted
+    # The payload's address base IS its target ledger; `_WIRED_KINDS` turned the typed routes away.
+    match _validated_payload(kind, envelope.payload):
+        case CyclePayload() as payload:
+            outcome = await dispatcher.dispatch_cycle_command(
+                CommandCall(payload, idemp), expected_version=expected_version
+            )
+        case CampaignPayload() as payload:
+            outcome = await dispatcher.dispatch_campaign_command(
+                CommandCall(cast(LifecyclePayload | SetCampaignLabelPayload, payload), idemp)
+            )
+        case payload:
+            outcome = await dispatcher.dispatch_workspace_command(
+                CommandCall(cast(WorkspacePayload, payload), idemp)
+            )
+    return outcome.accepted
 
 
-# Import-time closure of the command surface: every typed route must name a DISPATCHED kind, so
-# it inherits `_require_capability_for` and its `CommandRecord`. A route is the only way to add a
-# verb here, and a verb that dispatches nothing is authorized by nothing and recorded nowhere —
-# which `replace-dataset` was, invisibly, because the cap ladder can only check what dispatches.
-_ROUTED_KINDS: frozenset[str] = frozenset(
+# A kind answering a domain object, not a 202, keeps its own typed route and stays off the generic.
+# Each is PATHED by its `CommandKind`, so no route names a kind no capability gates and no ledger records.
+_WIRED_KINDS: frozenset[str] = frozenset[str](CommandKind) - {
     route.path.removeprefix("/commands/")
     for route in commands_router.routes
-    if isinstance(route, APIRoute) and route.path != "/commands/{kind}"
-)
-if _ROUTED_KINDS - ALL_DISPATCHED_KINDS:
-    raise RuntimeError(
-        "command route with no dispatched kind — it is gated by no capability and lands on no "
-        f"ledger: {sorted(_ROUTED_KINDS - ALL_DISPATCHED_KINDS)}"
-    )
+    if isinstance(route, APIRoute)
+}
 
 
 __all__ = ["CommandEnvelope", "commands_router"]

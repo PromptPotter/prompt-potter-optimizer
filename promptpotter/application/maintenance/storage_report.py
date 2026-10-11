@@ -1,5 +1,4 @@
-"""On-disk size, read-only. ONE taxonomy, MECE: every byte lands in exactly one of six leaves. The ``--keep-results`` keepsake
-is a cross-cutting SUBSET — surface it as a note, never a summed figure, or the partition stops being MECE."""
+"""Every byte lands in exactly one leaf; a cross-cutting subset is a note, never a summed figure."""
 
 from __future__ import annotations
 
@@ -14,11 +13,10 @@ from promptpotter.domain.results import RoundResult
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.io import iter_files, read_json_tolerant
 from promptpotter.infrastructure.store.layout import SHARED_CACHE_DIRS, FileKind, classify
-from promptpotter.shared.errors import NotFoundError
+from promptpotter.infrastructure.store.stores import Stores, owned_campaign
 
 if TYPE_CHECKING:
     from promptpotter.domain.campaign import Campaign
-    from promptpotter.infrastructure.store.stores import Stores
 
 __all__ = [
     "CampaignStorageResponse",
@@ -33,8 +31,7 @@ __all__ = [
 
 _SAMPLE_ROWS = list[dict[str, Any]]
 
-# The per-sample arrays inside a public round file — what the backend produced → ``connector``.
-# Read off the round document's own model, so a row field declared there is counted here.
+# Read off the round file's own model, so a row field declared there is counted here.
 _CONNECTOR_ROUND_KEYS = tuple(
     name
     for name, field in RoundResult.model_fields.items()
@@ -46,8 +43,7 @@ _LEAVES = tuple(dict.fromkeys(kind.leaf for kind in FileKind))
 
 @functools.lru_cache(maxsize=2048)
 def _connector_bytes_of(_path: str, _mtime_ns: int, _size: int) -> int:
-    """The backend's share of one round file, memoized on ``(path, mtime, size)``: a round a repair
-    rewrote or a rewind swapped is re-read, since a disk-usage figure must never lag the disk."""
+    """Keyed on ``(path, mtime, size)`` so a rewritten round is re-read, never served stale."""
     doc = read_json_tolerant(Path(_path))
     if not isinstance(doc, dict):
         return 0
@@ -55,13 +51,10 @@ def _connector_bytes_of(_path: str, _mtime_ns: int, _size: int) -> int:
 
 
 def _campaign_split(root: Path) -> dict[str, int]:
-    """One walk of a campaign tree → ``{leaf: bytes}`` over the six MECE leaves, which sum exactly to the on-disk total.
-    ``ROUND_PUBLIC`` is the lone straddler — backend arrays to ``connector``, the searchpoint remainder to ``state``."""
     acc = dict.fromkeys(_LEAVES, 0)
     if not root.is_dir():
         return acc
-    # Walked per read: only the whole listing covers these bytes (a directory's mtime stands
-    # still while a file below it grows), and taking that listing IS this walk.
+    # Walked per read, uncached: a directory's mtime stands still while a file below it grows.
     below = len(root.parts)
     for path, st in iter_files(root):
         kind = classify(path.parts[below:])
@@ -75,13 +68,10 @@ def _campaign_split(root: Path) -> dict[str, int]:
 
 
 def _dir_size(root: Path, *, skip: frozenset[str] = frozenset()) -> int:
-    """Bytes under *root*, skipping the top-level names in *skip*."""
     return sum(st.st_size for _, st in iter_files(root, skip=skip))
 
 
 def _owned_campaign_splits(stores: Stores) -> list[tuple[Campaign, dict[str, int]]]:
-    """Every campaign the caller owns, archived included, each with its six-leaf split — the ONE
-    scan both workspace reports pool from, so they cannot disagree about the same bytes."""
     owner = str(stores.identity.user_id)
     return [
         (campaign, _campaign_split(stores.campaigns.campaign_root_dir(campaign.campaign_id)))
@@ -98,7 +88,7 @@ class CampaignStorageResponse(StrictModel):
     on_disk_bytes: int = Field(description="Whole campaign-dir footprint — sum of the six leaves")
     dataset_bytes: int = Field(description="langfuse ground-truth mirror (the input-data copy)")
     connector_bytes: int = Field(description="Backend-produced: node-I/O cache + per-sample arrays")
-    state_bytes: int = Field(description="Loop resume point: round searchpoint state + overrides")
+    state_bytes: int = Field(description="Round checkouts less their per-sample rows")
     trace_bytes: int = Field(description="Loop telemetry: streams, prompts, langfuse loop trace")
     history_bytes: int = Field(description="Loop event spine: ledger.jsonl")
     reports_bytes: int = Field(description="Readable output: manifest + reports + hard_samples")
@@ -106,8 +96,7 @@ class CampaignStorageResponse(StrictModel):
 
 def campaign_storage(stores: Stores, campaign_id: str) -> CampaignStorageResponse:
     """Raises ``NotFoundError`` on a campaign the caller does not own, as on a missing one."""
-    if stores.campaigns.load_owned(campaign_id, str(stores.identity.user_id)) is None:
-        raise NotFoundError(f"Campaign not found: {campaign_id}")
+    owned_campaign(stores, campaign_id)
     acc = _campaign_split(stores.campaigns.campaign_root_dir(campaign_id))
     return CampaignStorageResponse(
         campaign_id=campaign_id, on_disk_bytes=sum(acc.values()), **_leaf_fields(acc)
@@ -193,8 +182,7 @@ def workspace_storage(stores: Stores) -> WorkspaceStorageResponse:
     entries.sort(key=lambda e: e.on_disk_bytes, reverse=True)
     base = stores.base_dir
     shared = sum(_dir_size(base / name) for name in SHARED_CACHE_DIRS)
-    # Each byte is counted ONCE and the three parts ARE the total. Both halves read the ONE
-    # declaration: named in the sum but not the skip set, a cache is counted twice.
+    # Both halves read the ONE declaration: a cache in the sum but not the skip set counts twice.
     other = _dir_size(base, skip=frozenset({"campaigns", *SHARED_CACHE_DIRS}))
     return WorkspaceStorageResponse(
         total_bytes=campaigns_total + shared + other,

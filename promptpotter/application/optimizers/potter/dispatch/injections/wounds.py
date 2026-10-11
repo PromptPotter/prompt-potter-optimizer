@@ -1,6 +1,3 @@
-"""Wound-channel renderers — self-healing evidence into optimizer prompts, uniform ``(InjectionBundle) -> str``.
-Fenced wherever untrusted content (LLM-proposed values, pipeline warnings) is echoed."""
-
 from __future__ import annotations
 
 from collections import defaultdict
@@ -18,21 +15,19 @@ from promptpotter.application.optimizers.potter.dispatch.layout import (
     L1_LAYOUT_SLOTS,
     L1_POSSIBLE,
 )
-from promptpotter.config.settings import PROMPT_STRING_FIELDS
-from promptpotter.domain.search_point import WHO_ANSWERS_KEYS
+from promptpotter.application.optimizers.potter.records import PotterRoundState
+from promptpotter.domain.search_point import PROMPT_STRING_FIELDS, WHO_ANSWERS_KEYS
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.domain.wounds import RuntimeFailure
 
-# Evidence values safe to render into an UNFENCED panel: a signal, slot or target-prompt-field
-# name, all closed vocabularies. Any other LLM-authored value reports its size instead.
+# Closed vocabularies, safe in an UNFENCED panel; any other LLM-authored value reports its size.
 _PLAIN_EVIDENCE_VALUES = L1_POSSIBLE | frozenset(L1_LAYOUT_SLOTS) | frozenset(PROMPT_STRING_FIELDS)
 
 
 def _rf_matches_current_config(
     rf: RuntimeFailure, pipeline_params: dict[str, dict[str, Any]]
 ) -> bool:
-    """Filter ACCUMULATED failures by current backend config: one observed under a superseded provider/model is stale
-    evidence that mis-steers L2's axis routing."""
+    """A failure observed under a superseded provider/model is stale evidence that mis-steers L2."""
     node = rf.dominant_warning.split(":", 1)[0]
     if not node:
         return True
@@ -44,29 +39,30 @@ def _rf_matches_current_config(
 
 
 def _validation_block(b: InjectionBundle) -> str:
-    """Parse-time validation failures (all owner=L1 — L1's own invalid variants). Bounded to the
-    most RECENT ``VALIDATION_RENDER_CAP``, which is where the fixable ones are: the list
-    accumulates on the searchpoint, so an unbounded render grew with the cycle until the cap
-    downstream cut it — and cut the newest, the round L1 is being asked to heal."""
-    failures = b.memory.wounds.validation_failures
-    if not failures:
+    """One round deep, because a wound heals in the round after it was made."""
+    if not b.measured_rounds:
         return ""
-    shown = failures[-VALIDATION_RENDER_CAP:]
-    sec = ["L1 VALIDATION FAILURES (last round produced invalid variants):"]
-    for vf in shown:
+    last = b.measured_rounds[-1]
+    lines: dict[str, None] = {}
+    for vf in (vf for sc in last.candidate_scores for vf in sc.validation_failures):
         allowed_str = ", ".join(vf.allowed[:5])
-        sec.append(
+        lines[
             f"  axis={vf.axis} value={vf.value!r} reason={vf.reason}"
             + (f" allowed=[{allowed_str}]" if allowed_str else "")
-        )
-    if len(failures) > len(shown):
-        sec.append(f"  … {len(failures) - len(shown)} older failures suppressed.")
+        ] = None
+    if (parse := last.optimizer_state.payload_as(PotterRoundState).l1_parse_failure) is not None:
+        lines[f"  axis=l1_generate.output reason={parse}"] = None
+    if not lines:
+        return ""
+    shown = list(lines)[:VALIDATION_RENDER_CAP]
+    sec = ["L1 VALIDATION FAILURES (last round produced invalid variants):", *shown]
+    if len(lines) > len(shown):
+        sec.append(f"  … {len(lines) - len(shown)} more suppressed.")
     return "\n".join(sec)
 
 
 def _runtime_block(b: InjectionBundle) -> str:
-    """Mid-eval runtime failures, owner-tagged. ACCUMULATED entries filter through the config match; NEW ones always pass —
-    they describe the failure being heard right now."""
+    """NEW entries skip the config match: they describe the failure being heard right now."""
     runtime_failures = b.memory.wounds.runtime_failures
     if not runtime_failures:
         return ""
@@ -98,23 +94,17 @@ def _runtime_block(b: InjectionBundle) -> str:
 @signal(
     "l1_wounds",
     kind=InjectionKind.MEASUREMENT,
-    # Fenced (echoes LLM-proposed values + pipeline warnings). Cap fits one
-    # RUNTIME_FAILURE_RECENCY_WINDOW of runtime + the validation list; runtime is
-    # already window-bounded ("… N older suppressed"). Truncating runtime mid-list
-    # would invite L1 to re-propose a dropped config (the validator still blocks it).
+    # Uncapped: truncating mid-list would invite L1 to re-propose a dropped config.
     char_cap=None,
     citable=True,
 )
 def _r_l1_wounds(b: InjectionBundle) -> list[Item]:
-    # One item per block: the composition fences the contiguous run, so no selection can split
-    # the pair across a tag.
+    # One item per block: the composition fences the run, so no selection splits the pair across a tag.
     return [Item(blk, trusted=False) for blk in (_validation_block(b), _runtime_block(b)) if blk]
 
 
 def _guard_evidence(evidence: dict[str, Any]) -> str:
-    """WHICH signals breached, not merely that something did. The id alone left L2 unable to see that
-    the slot it OMITTED was holding the duplicates it was being told to remove — every layout edit
-    that moves a signal trips the same guard, and it re-sent the same edit for three rounds."""
+    """WHICH signals breached: on the id alone L2 cannot see what its edit tripped, and re-sends it."""
     parts: list[str] = []
     for key, value in evidence.items():
         items = list(value) if isinstance(value, list | tuple) else [value]
@@ -131,9 +121,6 @@ def _guard_evidence(evidence: dict[str, Any]) -> str:
 
 
 def _render_guard_breaches(outcomes: list[ValidatorOutcome], layer: str) -> str:
-    """Post-parse guard-breach list — programmatic guards on a layer's LLM output, distinct from
-    `validation_failures` / `runtime_failures` (pipeline evidence). No untrusted content.
-    """
     if not outcomes:
         return ""
     lines = [f"{layer} GUARD BREACHES (post-parse guards on {layer}'s output caught thrashing):"]
@@ -150,8 +137,7 @@ def _render_guard_breaches(outcomes: list[ValidatorOutcome], layer: str) -> str:
     citable=True,
 )
 def _r_guard_breaches(b: InjectionBundle) -> list[Item]:
-    """L2 + L3 post-parse guard outcomes in one block, read by both layers so neither repeats a past breach. Prompt
-    evidence only: no escalation rule reads the stream (``escalation/firing.py``)."""
+    """Prompt evidence only: no escalation rule reads the stream (``escalation/firing.py``)."""
     wounds = b.memory.wounds
     blocks = [
         blk
@@ -179,8 +165,7 @@ def _format_runtime_failure_lines(rf: RuntimeFailure) -> list[str]:
 
 
 def _format_runtime_failure_group(rfs: list[RuntimeFailure]) -> list[str]:
-    """Cluster by (warning, provider, model). N failures with the same backend on a varying param axis are ONE discovery,
-    not N — collapsed to a single line with the varying params enumerated."""
+    """N failures on one backend across a varying param axis are ONE discovery, collapsed to one line."""
     clusters: dict[tuple[str, str, str], list[RuntimeFailure]] = defaultdict(list)
     for rf in rfs:
         cfg = rf.observed_config

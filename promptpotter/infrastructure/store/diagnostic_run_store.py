@@ -1,6 +1,3 @@
-"""Verdict sidecars for ``verify`` runs. The per-sample measurements land in the cross-cycle ``measurements/``
-through the ordinary scoring gateway; this store owns only the workspace-scope record."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -24,8 +21,6 @@ class DiagnosticRunStore:
         return self._root() / "runs"
 
     def sidecar_path(self, filename: str) -> Path:
-        """A diagnostic that is not a :class:`DiagnosticRunRecord` still belongs in the same
-        directory, so this store owns ``diagnostics/`` rather than only its own subtree."""
         return self._root() / filename
 
     def _path(self, ts: str, config_hash: str) -> Path:
@@ -38,7 +33,6 @@ class DiagnosticRunStore:
         return path
 
     def list(self, dataset: str | None = None) -> list[DiagnosticRunRecord]:
-        """All records, newest first; optionally filtered by ``dataset``."""
         out: list[DiagnosticRunRecord] = []
         dir_ = self._dir()
         if not dir_.exists():

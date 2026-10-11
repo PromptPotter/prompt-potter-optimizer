@@ -1,13 +1,10 @@
 "use client";
-// Forest state: value overlays, fork map, empty-stub cleanup. The tree itself is `LineageProvider`'s;
-// the ledger mints a candidate the moment it exists, so the in-flight round needs no stitching.
 
 import { useCallback, useMemo, useState } from "react";
 import { postCleanupEmpty } from "@/lib/api";
-import type { LineageNode } from "@/lib/api";
+import type { CourseNode } from "@/lib/api";
 import {
   primaryMetric,
-  candidatesOf,
   countDescendants,
   nodeKeyOf,
   nodeOverlays,
@@ -31,12 +28,12 @@ interface LineageCleanup {
 }
 
 export interface Lineage {
-  tree: LineageNode | null;
+  tree: CourseNode | null;
   valueByKey: ReadonlyMap<string, number | null>;
   thetaByKey: ReadonlyMap<string, number | null>;
   metric: DisplayMetric;
   // The node, not its id: a bare cycle id cannot supply `pathOf` or `nodeKeyOf`.
-  forkedFrom: ReadonlyMap<string, LineageNode>;
+  forkedFrom: ReadonlyMap<string, CourseNode>;
   expanded: ReadonlySet<string>;
   onLaneActivate: (courseKey: string) => void;
   // The only write path for `showForest`: store and view memory move together.
@@ -57,7 +54,6 @@ export function useLineage({
 }: {
   campaignId: string | null;
   cycleId: string | null;
-  // Passed in: this hook touches no `dashboard.json`.
   electedMetric: DisplayMetric;
   path: CyclePath | null;
 }): Lineage {
@@ -88,7 +84,6 @@ export function useLineage({
     });
   }
 
-  // Recorded from the handler, never from render.
   const onLaneActivate = useCallback(
     (key: string) => {
       const next = new Set(expanded);
@@ -123,19 +118,17 @@ export function useLineage({
     [index],
   );
 
-  const forkedFrom = useMemo<ReadonlyMap<string, LineageNode>>(() => {
-    const m = new Map<string, LineageNode>();
+  const forkedFrom = useMemo<ReadonlyMap<string, CourseNode>>(() => {
+    const m = new Map<string, CourseNode>();
     // Own-path `candidates`, never `course`: the server dissolves a FORK onto its parent's timeline.
     for (const cand of index.get(viewedKey)?.candidates ?? []) {
-      for (const child of cand.children) {
-        if (child.kind === "course") m.set(cand.id, child);
-      }
+      for (const child of cand.children) m.set(cand.id, child);
     }
     return m;
   }, [index, viewedKey]);
 
   const { valueByKey, thetaByKey } = useMemo(
-    () => nodeOverlays(courses, metric === "composite"),
+    () => nodeOverlays(courses, metric),
     [courses, metric],
   );
 
@@ -145,7 +138,7 @@ export function useLineage({
 
   const stubCount = useMemo(
     () =>
-      courses.filter((c) => c.course_kind !== "root" && candidatesOf(c).length === 0).length,
+      courses.filter((c) => c.course_kind !== "root" && c.children.length === 0).length,
     [courses],
   );
 
@@ -170,7 +163,7 @@ export function useLineage({
     confirm: async () => {
       const rootId = tree?.id;
       if (!campaignId || !rootId) return;
-      await cmd.run("cleanup-empty-cycles", () => postCleanupEmpty(campaignId, rootId), () => {
+      await cmd.run("cleanup-empty-cycles", () => postCleanupEmpty([{ campaignId, cycleId: rootId }]), () => {
         setCleanupAcked(true);
         setCleanupOpen(false);
       });

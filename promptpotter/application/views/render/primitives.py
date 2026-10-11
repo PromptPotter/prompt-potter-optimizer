@@ -1,5 +1,3 @@
-"""Live display primitives — pure formatting, zero business logic."""
-
 from __future__ import annotations
 
 import re
@@ -8,37 +6,58 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import NodeKind
-from promptpotter.domain.results import ArmOutcome, scoreboard_rank_key
+from promptpotter.domain.results import ArmOutcome, overlap_line, scoreboard_rank_key
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from promptpotter.application.views.view_models import ScoreEntry
+    from promptpotter.domain.bench import BenchColumn
+    from promptpotter.domain.paired_reading import Coverage
     from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.domain.results import ArmReading, OverlapReading
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 
 
-def fmt_ci(lower: float | None, upper: float | None, *, spec: str) -> str:
-    """Format a 95% CI bracket, or ``—`` where no interval exists. *spec* formats each bound — a share
-    reads as ``{:.1%}``, while seconds, dollars and a signed lift are none of those and read raw.
+def fmt_coverage(coverage: Coverage) -> str:
+    """Dropped cells by cause: an ungraded one is the formula's to fix, an errored one the backend's."""
+    dropped = ", ".join(
+        f"{n} {cause}"
+        for n, cause in (
+            (coverage.excluded_unscored, "ungraded"),
+            (coverage.excluded_faulted, "errored"),
+        )
+        if n
+    )
+    return f"{coverage.scored} shared" + (f" ({dropped} dropped)" if dropped else "")
 
-    An absent interval must READ as absent: ``[0.0%, 0.0%]`` is a fabricated bracket claiming
-    certainty about a measurement that never happened."""
+
+def overlap_series(overlap: OverlapReading) -> str:
+    line = overlap_line(overlap)
+    if not line:
+        return ""
+    arms = "  →  ".join(f"{m.arm.label} {m.rate:.1%} (n={m.n})" for m in line)
+    lead = overlap.lead
+    bought = sum(
+        member.bought
+        for member in (lead.a, *(pick.b for pick in (*overlap.earlier, lead)))
+        if member is not None
+    )
+    paid = f", +{bought} measured" if bought else ""
+    return f"origin panel of {len(overlap.sample_ids)}{paid}: {arms}"
+
+
+def fmt_ci(lower: float | None, upper: float | None, *, spec: str) -> str:
     if lower is None or upper is None:
         return "—"
     return f"[{spec.format(lower)}, {spec.format(upper)}]"
 
 
 def fmt_fitness(score: float | None) -> str:
-    """A composite, or ``—`` where no cell was read: an unmeasured arm has no score, and ``0.0000``
-    would print it as a measured one that failed everything."""
     return "—" if score is None else f"{score:.4f}"
 
 
 def fmt_pvalue(p: float | None) -> str:
-    """``None`` is a test that never ran — below two pairs nothing was tested, and a ``p=1.00 (ns)``
-    there would misreport that as a test which found nothing."""
     if p is None:
         return "—"
     if p < 0.001:
@@ -78,7 +97,6 @@ def _truncate_visible(text: str, max_visible: int) -> str:
     return "".join(out)
 
 
-# ANSI foreground colors
 RESET = "\033[0m"
 BOLD = "\033[1m"
 DIM = "\033[2m"
@@ -87,10 +105,9 @@ GREEN = "\033[32m"
 YELLOW = "\033[33m"
 CYAN = "\033[36m"
 
-# Display geometry — single source of truth for terminal widths
-BOX_WIDTH = 70  # standard box width
-NODE_FRAME_WIDTH = 74  # node frame width (phase display)
-_W = BOX_WIDTH  # internal alias
+BOX_WIDTH = 70
+NODE_FRAME_WIDTH = 74
+_W = BOX_WIDTH
 _NW = NODE_FRAME_WIDTH
 
 
@@ -186,68 +203,62 @@ def _round_rule(label: str, label_right: str = "", width: int = _NW) -> str:
     return f"{rule}\n{inner}\n{rule}"
 
 
-def _scoreboard(
-    candidate_scores: Sequence[ScoreEntry],
-    winner_label: str,
-    *,
-    theta: bool,
-) -> str:
-    """Δ is blank where a row has no matched floor — the full-set rate is a different basis,
-    not a fallback. ``theta`` is the selector's own declaration that it fits one per arm."""
-    # A collapsed proposal burned no LLM call, and ranking it at 0.0% distorts the verdict.
-    scored = [s for s in candidate_scores if s.collapsed_by is None]
-    if not scored:
+def _scoreboard(arms: Sequence[ArmReading]) -> str:
+    """Δ is blank where a row has no matched floor: the full-set rate is a different basis."""
+    if not arms:
         return ""
 
+    def level(arm: ArmReading, column: BenchColumn) -> float | None:
+        banded = None if arm.own is None else arm.own.of(column)
+        return None if banded is None else banded.value
+
     ranked = sorted(
-        scored,
+        arms,
         key=lambda s: scoreboard_rank_key(
-            s.composite_fitness,
-            s.accuracy,
-            s.theta,
-            is_selected=s.label == winner_label,
+            level(s, "composite"),
+            level(s, "accuracy"),
+            None if s.ability is None else s.ability.theta,
+            is_leading=s.election.leading,
             is_partial=s.outcome is ArmOutcome.SKIPPED,
         ),
         reverse=True,
     )
     w = 108
 
-    # Column ORDER is the row's, and the two disagreed: the header named Composite before 95% CI
-    # while the row printed them the other way round, so every CI was read against the wrong
-    # column. The interval brackets mean per-cell fitness — accuracy's own fold — so it sits
-    # beside Accuracy, and `Ability θ` closes the table with what a θ selector decides on.
-    # `Cells` leads the numbers because it is their basis: every rate to its right is read over it.
-    theta_hdr = f"   {'Ability θ':>9s}" if theta else ""
     hdr = (
         f"{'#':<4s}{'Label':<8s}{'Cells':>7s}   {'Accuracy':>8s}   {'95% CI':>16s}   "
-        f"{'Composite':>9s}{theta_hdr}   {'Delta':>7s}"
+        f"{'Composite':>9s}   {'Ability θ':>9s}   {'Delta':>7s}"
     )
     lines = [f"  {_box_top('SCOREBOARD', width=w)}", f"  {_box_line(hdr, width=w)}"]
 
     for i, s in enumerate(ranked, 1):
-        label = (s.label or "")[:8]
-        acc = s.accuracy
-        ci_str = fmt_ci(s.mean_fitness_ci_lo, s.mean_fitness_ci_hi, spec="{:.1%}")
-        # A row whose matched floor genuinely scored 0.0 keeps its 0.0 — `or` cannot tell
-        # that from absence.
-        row_parent = s.reference_accuracy
-        delta = acc - row_parent if row_parent is not None and acc is not None else None
+        label = s.arm.label[:8]
+        accuracy = None if s.own is None else s.own.accuracy
+        ci_str = fmt_ci(
+            None if accuracy is None else accuracy.ci_lo,
+            None if accuracy is None else accuracy.ci_hi,
+            spec="{:.1%}",
+        )
+        lift = s.vs_reference.on_whole_set if s.vs_reference else None
+        delta = None if lift is None else lift.estimate.value
         delta_str = f"{delta:+.1%}" if delta is not None and abs(delta) >= 0.001 else "---"
-        if s.outcome.cut_short:
+        if s.outcome is not None and s.outcome.cut_short:
             winner_mark = f"  {YELLOW}({s.outcome}){RESET}"
-        elif label == winner_label:
+        elif s.election.selected:
             winner_mark = f"  {GREEN}{BOLD}*{RESET}"
         else:
             winner_mark = ""
-        # "---", never "0.000": a candidate outside the election fit has no ability, and while the
-        # ruler is cold NO row has one — a zero there would read as a measured mid-scale ability.
-        theta_str = "---" if s.theta is None else f"{s.theta:+.3f}"
-        theta_cell = f"   {theta_str:>9s}" if theta else ""
-        cells = f"{s.scored}/{s.expected}" if s.expected else str(s.total)
-        acc_str = "—" if acc is None else f"{acc:.1%}"
+        theta = None if s.ability is None else s.ability.theta
+        theta_str = "---" if theta is None else f"{theta:+.3f}"
+        cells = (
+            f"{s.panel.scored}/{s.panel.expected}"
+            if s.panel.expected and s.panel.scored is not None
+            else str(0 if s.own is None else s.own.n)
+        )
+        acc_str = "—" if accuracy is None else f"{accuracy.value:.1%}"
         row = (
             f"{i:<4d}{label:<8s}{cells:>7s}   {acc_str:>8s}   {ci_str:>16s}   "
-            f"{fmt_fitness(s.composite_fitness):>9s}{theta_cell}   {delta_str:>7s}{winner_mark}"
+            f"{fmt_fitness(level(s, 'composite')):>9s}   {theta_str:>9s}   {delta_str:>7s}{winner_mark}"
         )
         lines.append(f"  {_box_line(row, width=w)}")
 
@@ -255,8 +266,7 @@ def _scoreboard(
     return "\n".join(lines)
 
 
-# `ai` marks a node that OWNS a model (`is_llm`, as `llm_only` does); an optimizer node, which
-# owns none, reads better as `l1_g`/`l1_c` than as `ai_1`/`ai_2`.
+# `ai` marks a node that OWNS a model (`is_llm`); an optimizer node owns none.
 _KIND_TAGS: dict[NodeKind, str] = {
     NodeKind.RETRIEVER: "retr",
     NodeKind.TOOL: "tool",
@@ -265,12 +275,10 @@ _KIND_TAGS: dict[NodeKind, str] = {
 
 
 def display_tags(schema: PipelineSchema | None) -> dict[str, str]:
-    """Node name → the short tag a sample line prints it under; a run with no schema has none."""
     if not schema:
         return {}
     base_tags: list[tuple[str, str]] = [
-        # An UNDECLARED node has no kind to read a tag off, so it falls to its own initials —
-        # the same place a declared kind this map does not carry lands.
+        # An UNDECLARED node has no kind to read a tag off, so it falls to its own initials.
         (
             n.name,
             "ai" if n.is_llm else (_KIND_TAGS.get(n.kind) if n.kind else None) or n.name[:4],
@@ -295,13 +303,6 @@ def _step_tag(step_name: str | None, tags: dict[str, str]) -> str:
     return f"[{tags.get(step_name, step_name[:4])}]"
 
 
-# ===========================================================================
-# Live-display formatting helpers shared across views.
-# Markdown/box helpers consumed by the readout and the notebook ↔ Claude exchange
-# channel; plus the ``fmt_*`` numeric formatters
-# (``fmt_ci`` / ``fmt_pvalue``) — single import surface.
-# ===========================================================================
-
 __all__ = [
     "fmt_ci",
     "fmt_pvalue",
@@ -313,8 +314,7 @@ def render_pipeline_overlay(
     pipeline_params: dict[str, Any] | None,
     pipeline_schema: PipelineSchema | None = None,
 ) -> str:
-    """Render ``pipeline_params`` as a copy-paste-ready ``pipeline_overlay`` block. With a schema, only
-    each node's ``param_keys`` are shown; a node absent from the schema falls back to every pair."""
+    """A node absent from the schema shows every pair, not only its ``param_keys``."""
     if not pipeline_params:
         return ""
 

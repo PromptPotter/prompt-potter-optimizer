@@ -12,12 +12,8 @@ import { useWorkspace } from "@/lib/workspace";
 import { Modal, type ModalAction } from "@/components/shell/Modal";
 import { Button, Dialog, Menu, MenuItem } from "@/components/ui";
 
-// Per-campaign ⋯ menu: archive / unarchive, rename, and delete (destructive; the measurement
-// cache survives per ADR-0002).
-
 interface Props {
   campaign: CampaignSummary;
-  // `row`: the row is the tab stop, so the ⋯ takes no focus and swallows the row's click.
   variant?: "row" | "standalone";
 }
 
@@ -37,7 +33,6 @@ export function CampaignMenu({ campaign, variant = "row" }: Props) {
   const runUnarchive = () =>
     void cmd.run("unarchive", () => postUnarchiveCampaign(campaign.campaign_id));
 
-  // Display only — nothing addresses a campaign by its label, so no view to reconcile.
   const runRename = () => {
     setRenaming(false);
     void cmd.run("rename", () => postSetCampaignLabel(campaign.campaign_id, draft.trim()));
@@ -48,8 +43,7 @@ export function CampaignMenu({ campaign, variant = "row" }: Props) {
     void cmd.run(
       "delete",
       () => postDeleteCampaign(campaign.campaign_id),
-      // Let go of the view BEFORE the re-poll rather than discover it by 404; `workspace.tsx`
-      // reconciles every other way an address dies.
+      // Lets go of the view BEFORE the re-poll rather than discovering it by 404.
       () => {
         if (viewedCampaignId === campaign.campaign_id) followActive();
       },
@@ -80,6 +74,7 @@ export function CampaignMenu({ campaign, variant = "row" }: Props) {
             aria-label="Campaign actions"
             title="Campaign actions"
             disabled={pending}
+            // In a row the ROW is the tab stop: focus here would nest one tab stop in another.
             tabIndex={inRow ? -1 : undefined}
           >
             ⋯
@@ -154,7 +149,6 @@ export function CampaignMenu({ campaign, variant = "row" }: Props) {
             />
           </label>
         </form>
-        {/* The id nothing renames — it addresses the directory, the cache and every bookmark. */}
         <p className="campaign-rename-id">{campaign.campaign_id}</p>
       </Dialog>
       <Modal

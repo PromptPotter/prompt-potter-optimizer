@@ -4,9 +4,6 @@ import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
 import { Button } from "./Button";
 import s from "./SidePanel.module.css";
 
-// THE detail panel for one table row. The host passes only whether a neighbour exists and how to
-// step (`onStep(±1)`), never the rows.
-
 const MIN_PX = 360;
 const DEFAULT_PX = 560;
 const KEY_STEP_PX = 32;

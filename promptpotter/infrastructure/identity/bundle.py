@@ -1,6 +1,3 @@
-"""``IdentityBundle`` — the startup singleton holding provider config, session store, JWKS cache, clients, and the
-short-lived OAuth-state map. Stashed on ``app.state``; the middleware and auth router both read it from there."""
-
 from __future__ import annotations
 
 import threading
@@ -17,7 +14,7 @@ from promptpotter.infrastructure.identity.provider_config import (
 )
 from promptpotter.infrastructure.identity.session import OIDCSessionStore
 
-OAUTH_STATE_TTL_S = 600  # 10 min — covers slow consent screens but bounds replay
+OAUTH_STATE_TTL_S = 600
 _MAX_PENDING_STATES = 1024
 
 

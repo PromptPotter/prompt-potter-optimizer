@@ -1,17 +1,14 @@
-/* The shell's two-screen layout is in domains/shell.css at ≤bp-md; the other tabs carry no
-   phone fork — the fluid --space-* / --text-* scales contract them. */
 @media (max-width:640px){
   .auth-chip{height:32px;padding:0 var(--space-12);font-size:var(--text-sm)}
 
-  /* The Input/Output flanks drop to icons; `FlowEnd` still names the button from `path.label`. */
   .wf-hero-flow{justify-content:center;gap:0;padding:var(--space-4) 0;flex-wrap:nowrap;overflow:visible;max-width:100%;min-width:0}
-  .wf-hero-node-toggle{
-    flex:0 0 auto;min-width:var(--touch-target-min);min-height:var(--touch-target-min);
-    padding:0;gap:0;flex-direction:column;justify-content:center;
-    align-items:center;text-align:center;background:none;border:0;box-shadow:none
+  .wf-hero-end{
+    flex:0 0 auto;min-width:0;
+    padding:0 var(--space-4);gap:0;justify-content:center;
+    background:none;border:0;box-shadow:none
   }
-  .wf-hero-node-toggle .ico svg{width:22px;height:22px}
-  .wf-hero-node-toggle .text-col{display:none}
+  .wf-hero-end .ico svg{width:22px;height:22px}
+  .wf-hero-end .text-col{display:none}
   .wf-hero-node.llm{
     flex:1 1 auto;min-width:0;max-width:min(238px,100%);
     padding:var(--space-4) var(--space-10);gap:var(--space-8);
@@ -26,32 +23,24 @@
   .round-axis-label{display:none}
   .round-tab{min-width:30px;height:30px;min-height:30px;font-size:var(--text-xs)}
   .hs-mini-btn{height:26px}
-  /* `--touch-floor` INHERITS, so a container retunes the floor for its subtree without
-     out-specifying the rule that sets it. */
+  /* `--touch-floor` INHERITS: a container retunes the floor for its subtree without out-specifying the rule that sets it. */
   .run-card,.round-axis{--touch-floor:0px}
   .run-card{font-size:var(--text-sm)}
-  /* The headline already reads the before/after; the counts would restate it in a second unit. */
-  .run-flips{display:none}
-  .run-box-head{gap:var(--space-6)}
-  .run-headline{font-size:var(--text-xs);gap:var(--space-4)}
-  .run-headline-acc,.run-headline-was{font-size:var(--text-xs)}
-  .run-diff{margin-top:var(--space-4);font-size:var(--text-xs)}
+  .run-card .subject-flips{display:none}
+  .run-card .subject-head{gap:var(--space-6)}
+  .run-card .subject-diff{margin-top:var(--space-4);font-size:var(--text-xs)}
   .hsp-row{font-size:var(--text-xs);line-height:1.5}
   .hsp-spread{flex-direction:row;align-items:baseline;gap:var(--space-8);width:100%;justify-content:space-between;border-left:0;border-top:1px solid var(--color-border);padding:var(--space-4) 0 0}
   .wf-hero-arrow{flex:0 1 auto;min-width:14px;max-width:32px}
-  /* Anchored to the dot's left edge: centred on a dot ~30px from the edge, the card starts off-screen.
-     Not position:fixed — `.connector` itself carries a transform. */
+  /* Not position:fixed — `.connector` itself carries a transform. */
   .connector-pop{left:0;transform:none;min-width:0;max-width:calc(100vw - 48px)}
 
-  /* `1fr` hands the thread the slack; the minmax floor keeps an unmet one from overflowing
-     through the bars below. */
   .chat-grid{padding:0 var(--space-12);gap:var(--space-14);grid-template-rows:minmax(240px,1fr)}
   .chat-messages{padding:var(--space-14);gap:var(--space-10)}
   .chat-msg{max-width:88%;font-size:var(--text-base);padding:var(--space-8) var(--space-12)}
   .chat-input-row{padding:var(--space-10) var(--space-8);gap:var(--space-6)}
   .chat-attach{width:44px;height:44px;flex-shrink:0}
-  /* 16px literal suppresses iOS focus-zoom; a token merely equal to 16 would take the
-     suppressor with it. */
+  /* 16px literal suppresses iOS focus-zoom; a token merely equal to 16 would take the suppressor with it. */
   .chat-input{font-size:16px;min-height:44px;padding-left:var(--space-8);padding-right:var(--space-8)}
   .chat-send{padding:var(--space-10) var(--space-18);font-size:var(--text-md);min-height:44px}
   .toggle-row{padding:var(--space-6) 0;gap:var(--space-10)}
@@ -65,13 +54,11 @@
   .login-button{padding:var(--space-14) var(--space-16);min-height:44px;font-size:var(--text-md)}
 }
 
-/* Hover-revealed controls would be permanently invisible on touch. */
 @media (pointer:coarse){
   .hs-mini-btn.resizable::after{opacity:1}
 }
 
-/* Gated on (pointer:coarse), not width, so a touchscreen laptop gets the 44px floor too; the
-   chat's miniature readouts opt out by container (`--touch-floor`), not a `:not()` chain. */
+/* Gated on (pointer:coarse), not width: a touchscreen laptop gets the 44px floor too. */
 @media (pointer:coarse){
   button:not(.btn-tight):not(.account-nav-item),
   a[role="button"],
@@ -92,8 +79,6 @@
   }
 }
 
-/* Exactly two surfaces wrap in <RotatePrompt> (Forest, HardSamplesHeatmap): portrait would
-   misstate a 2D measurement. Pure CSS — no JS reflow on rotation. */
 .rotate-prompt-card{display:none}
 @media (orientation:portrait) and (max-width:767px){
   .rotate-prompt-host > .rotate-prompt-children{display:none}

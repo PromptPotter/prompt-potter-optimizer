@@ -1,21 +1,18 @@
 "use client";
-// The end of the free allowance — a NOTICE, never a gate: what the spend bought stays readable.
-// Otherwise the user sees only `quota.py`'s refusal, which is worded for the box's operator.
+// A NOTICE, never a gate: what the spend bought stays readable.
 
 import { useState } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { Dialog } from "@/components/ui";
-import { fetchQuotaStatus } from "@/lib/api";
+import { quotaRead } from "@/lib/api";
 import { fmtUsd } from "@/lib/format";
 import { readyData, useRead } from "@/lib/hooks/useRead";
 
-const DISMISSED = "pp.allowance-spent.dismissed";
+const DISMISSED = "promptpotter.allowance-spent.dismissed";
 
 export function AllowanceSpent() {
   const { status, me } = useAuth();
-  const quota = readyData(
-    useRead({ key: "quota", fetch: fetchQuotaStatus }, { surface: "allowance", auth: true }),
-  );
+  const quota = readyData(useRead(quotaRead(), { auth: true }));
   const [dismissed, setDismissed] = useState(() => {
     try {
       return window.localStorage.getItem(DISMISSED) === "1";

@@ -1,6 +1,4 @@
 "use client";
-// The single `/auth/me` probe, re-run on window focus so an OIDC login in another tab lands.
-// It also owns the ONE sign-in modal's state (`<WelcomeLockoutModal>`), whatever triggers it.
 
 import {
   createContext,
@@ -11,8 +9,9 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { ApiError, fetchMe, type MeResponse } from "@/lib/api";
-import { clearReadCache } from "@/lib/read-cache";
+import { ApiError, failureKind, meRead, type MeResponse } from "@/lib/api";
+import { reportIncident } from "@/lib/diagnostics";
+import { clearReadCache, readThrough } from "@/lib/read-cache";
 
 export type AuthStatus = "loading" | "authed" | "unauthed";
 
@@ -58,15 +57,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       identityRef.current = identity;
       clearReadCache();
     };
-    fetchMe()
+    // The probe `useRead`'s own gate stands on, so it cannot ride the hook; it shares the cache.
+    const probe = meRead();
+    readThrough(probe.id, probe.load, new AbortController().signal)
       .then((data) => {
         if (cancelled || probeIdRef.current !== probeId) return;
         adopt(`${data.tenant_id}\x1f${data.user_id}`);
         setMe(data);
         setStatus("authed");
       })
-      .catch(() => {
+      .catch((e: unknown) => {
         if (cancelled || probeIdRef.current !== probeId) return;
+        // A 401 is the probe's ordinary answer; anything else is an incident that reads as anon.
+        if (failureKind(e) !== "auth") reportIncident(e, { surface: "me" });
         adopt(null);
         setMe(null);
         setStatus("unauthed");
@@ -88,7 +91,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
   const closeAuthPrompt = useCallback(() => setAuthPrompt(PROMPT_CLOSED), []);
 
-  // `/auth/callback/{provider}` 303s to `/?auth_error=<code>(&email=)` on failure. Read
   // `window.location`, not `useSearchParams`, whose Suspense requirement breaks static export.
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
@@ -117,8 +119,7 @@ export function useAuth(): AuthCtx {
   return ctx;
 }
 
-// `authed` gates a poll's `enabled`; `onAuthError`, from a tick's catch, re-probes on a 401 so a
-// session that died mid-run halts the loop instead of 401-storming until the next focus.
+// `onAuthError` re-probes on a 401, so a session that died mid-run halts the polls.
 export function useAuthGate(): {
   authed: boolean;
   onAuthError: (err: unknown) => void;

@@ -4,9 +4,6 @@ import { Icon, Popover, SegmentedControl, type Segment } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import type { LifecycleFilter } from "@/lib/api";
 
-// The campaign-library filter. The trigger carries a dot whenever a non-default filter is set —
-// a narrowed list must never look like a complete one.
-
 interface Props {
   lifecycleFilter: LifecycleFilter;
   setLifecycleFilter: (f: LifecycleFilter) => void;

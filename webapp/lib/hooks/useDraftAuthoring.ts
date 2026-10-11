@@ -1,7 +1,4 @@
 "use client";
-// A campaign being set up previews the DRAFT's searchpoint, only for the campaign that draft is:
-// the ingest thread outlives a sidebar selection. Read by whichever surface opens a node, so a
-// check-in's node shows what is being authored rather than a resolution that has not run.
 
 import { useMemo } from "react";
 import { draftForCampaign } from "@/lib/derivations";
@@ -17,7 +14,6 @@ export function useDraftAuthoring() {
       : null,
     leafCampaignId,
   );
-  // The draft's documents, not the wire, so config is read only where the served resolution answered.
   return useMemo(
     () =>
       previewDraft

@@ -1,5 +1,3 @@
-/* Light = the buyer-facing editorial-cobalt register; no orange (that is the dark operator
-   register). Source of truth: promptpotter-web/BRAND.md. */
 [data-theme="light"]{
   color-scheme:light;
   --color-background-tertiary:#F5F1EA;
@@ -18,18 +16,18 @@
   --color-accent-glow:rgba(var(--color-accent-rgb),0.28);
   --color-selection:#55251D;
   --color-ci:#454545;
-  --color-cache:#6D28D9;                     /* the one hue that is neither cobalt, oxblood nor olive */
+  --color-cache:#6D28D9;
   --color-overlap:#0F766E;
   --color-background-tint:rgba(0,0,0,0.04);
   --color-background-tint-strong:rgba(0,0,0,0.12);
-  --status-tint:0.18; --status-edge:0.45;    /* paper needs a heavier fill than lava */
+  --status-tint:0.18; --status-edge:0.45;
   --color-success:#1a8265;
   --color-success-rgb:26,130,101;
-  --color-warn:#55251D;                      /* no orange in light */
+  --color-warn:#55251D;
   --color-warn-rgb:85,37,29;
-  --color-new:#1D4ED8;                       /* azure, deepened for paper — clear of cobalt by lightness */
+  --color-new:#1D4ED8;
   --color-new-rgb:29,78,216;
-  --color-link:var(--color-accent);          /* cobalt already reads as a link on paper */
+  --color-link:var(--color-accent);
   --color-link-hover:var(--color-accent-strong);
   --scrollbar-thumb:rgba(85,37,29,0.30);
   --scrollbar-thumb-hover:rgba(85,37,29,0.55);

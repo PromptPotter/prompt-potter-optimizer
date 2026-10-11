@@ -1,5 +1,3 @@
-"""JWKS cache keyed by URL, refreshed on an unknown ``kid`` — which covers Google rotating keys with no fixed schedule."""
-
 from __future__ import annotations
 
 import base64
@@ -15,9 +13,11 @@ from cryptography.hazmat.primitives.asymmetric.rsa import (
     RSAPublicNumbers,
 )
 
+from promptpotter.infrastructure.tls import tls_context
+
 logger = logging.getLogger(__name__)
 
-_DEFAULT_CACHE_TTL_S = 60 * 60  # 1 h
+_DEFAULT_CACHE_TTL_S = 60 * 60
 
 
 def _b64url_decode_int(value: str) -> int:
@@ -41,8 +41,6 @@ class _JWKSEntry:
 
 
 class JWKSCache:
-    """Process-wide JWKS cache. Thread-safe; refresh on unknown kid + TTL expiry."""
-
     def __init__(self, ttl_s: float = _DEFAULT_CACHE_TTL_S) -> None:
         self._ttl_s = ttl_s
         self._entries: dict[str, _JWKSEntry] = {}
@@ -67,7 +65,7 @@ class JWKSCache:
             return entry.keys.get(kid)
 
     async def _refresh(self, jwks_uri: str) -> None:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=10.0, verify=tls_context()) as client:
             response = await client.get(jwks_uri)
             response.raise_for_status()
             body = response.json()

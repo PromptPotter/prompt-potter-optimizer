@@ -24,9 +24,14 @@ nodes:
     config:
       block_size: 30
       max_blocks: 10
-  # c = 4 crossovers per round (App. C.4), parents drawn at random (§4). The paper runs one model
-  # as optimizer and target (§5); set `config.model` to the target's to match it. The paper
-  # states no decoding temperature; 1.0 is the vLLM sampling default it ran under (App. C.1).
+  # c = 4 crossovers per round (App. C.4), each one's two parents drawn at random (§4).
+  mating:
+    type: algorithm
+    config:
+      offspring: 4
+  # The paper runs one model as optimizer and target (§5); set `config.model` to the target's to
+  # match it. The paper states no decoding temperature; 1.0 is the vLLM sampling default it ran
+  # under (App. C.1).
   capo_crossover:
     type: llm
     config:
@@ -37,7 +42,12 @@ nodes:
       max_tokens: 8000
       provider: openrouter
       model: openai/gpt-6-luna
-      crossovers: 4
+      # The paper's prompt is one text: the reply replaces the whole prompt.
+      rewrites: prompt
+  # A child's shots are a sample of its parents' union, as many as their mean count (§4).
+  shot_crossover:
+    type: algorithm
+    config: {}
   capo_mutate:
     type: llm
     config:
@@ -48,6 +58,7 @@ nodes:
       max_tokens: 8000
       provider: openrouter
       model: openai/gpt-6-luna
+      rewrites: prompt
   # k_max = 5 (App. C.4); the shot mutation adds, drops or keeps one shot, then shuffles (§4).
   few_shot:
     type: algorithm
@@ -72,7 +83,8 @@ nodes:
     type: selector
     config:
       size: 10
-  # The initial instructions (App. D.2, Table 7), generated once from the task description.
+  # The initial instructions (App. D.2, Table 7), generated once from the task description: μ of
+  # them, each given 0..k_max shots (Alg. 1 lines 3-8).
   capo_init:
     type: llm
     config:
@@ -83,10 +95,15 @@ nodes:
       max_tokens: 8000
       provider: openrouter
       model: openai/gpt-6-luna
+      size: 10
+      k_max: 5
+      rewrites: prompt
 pipelines:
   default:
     - blocks
+    - mating
     - capo_crossover
+    - shot_crossover
     - capo_mutate
     - few_shot
     - population_rejoin

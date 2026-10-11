@@ -12,36 +12,31 @@ from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 
 class NurseOwner(enum.StrEnum):
-    """Who heals a wound. Stamped only on ``RuntimeFailure`` — the one wound whose owner genuinely varies; the other two are structural.
-    A member earns its place once a producer stamps it, which is why ``L3`` is absent."""
+    """Who heals a runtime failure."""
 
+    # A member earns its place once a producer stamps it, which is why ``L3`` is absent.
     L1 = "l1"
     OPERATOR = "operator"
 
 
-# The reasons that mark a candidate COLLAPSED — generated, then rejected before it could cost
-# a backend call. Two are round-local (`no_op_variant`: the delta is empty; `duplicate_variant`:
-# two identical signatures in one population) and one is cross-round (`repeat_variant`: an idea
-# a prior round already measured and lost).
-#
-# The vocabulary lives in `domain/` beside `ValidationFailure` because it is domain language,
-# not a detail of the validator that happens to emit it. Two layers must agree on it: the
-# validator that WRITES these reasons (`validators/l1_strict.py`) and `RoundResult`, which
-# DERIVES its collapse counts by reading them back off `candidate_scores`. Left in the
-# application layer, the domain side could not name the set it counts without an upward import.
+# In `domain/`: `RoundResult` counts collapses off these and may not import their validator.
 INVARIANT_REASONS: Annotated[frozenset[str], shapes_optimizer_prompt] = frozenset(
     {"no_op_variant", "duplicate_variant", "repeat_variant"}
 )
 
+# The OPERATOR's word for each; a prompt renderer spells its own inside its hashed prose.
+COLLAPSE_WORDS: dict[str, str] = {
+    "no_op_variant": "no-op",
+    "duplicate_variant": "duplicate",
+    "repeat_variant": "repeat",
+}
+assert COLLAPSE_WORDS.keys() == INVARIANT_REASONS
+
 
 class ValidationFailure(StrictModel):
-    """L1-output parse-time invariant violation; drives synthetic-0 in ``score_search_point``.
+    """An L1 output that broke a parse-time invariant, scoring its candidate a synthetic zero."""
 
-    Surfaced to L2's prompt as JSON (via ``model_dump``) so the field
-    semantics here are part of the L2 contract — not just a Python
-    schema.
-    """
-
+    # Rendered into L2's prompt as JSON (``model_dump``): a field renamed here rewrites that prompt.
     model_config = ConfigDict(frozen=True)
 
     axis: str = Field(
@@ -96,15 +91,12 @@ class ValidationFailure(StrictModel):
 
 @shapes_optimizer_prompt
 def collapse_reason(failures: Iterable[ValidationFailure]) -> str | None:
-    """The ``INVARIANT_REASONS`` member that collapsed a proposal, ``None`` where none did. One
-    per proposal, or the collapse counts would sum past the population."""
+    """One per proposal, or the collapse counts would sum past the population."""
     return next((vf.reason for vf in failures if vf.reason in INVARIANT_REASONS), None)
 
 
 @shapes_optimizer_prompt
 def collapse_counts(populations: Iterable[Iterable[ValidationFailure]]) -> dict[str, int]:
-    """How many proposals each ``INVARIANT_REASONS`` member collapsed, over one failure list per
-    proposal — the ONE tally, whichever carrier holds the lists."""
     counts: dict[str, int] = {}
     for failures in populations:
         if reason := collapse_reason(failures):
@@ -113,14 +105,9 @@ def collapse_counts(populations: Iterable[Iterable[ValidationFailure]]) -> dict[
 
 
 class RuntimeFailure(StrictModel):
-    """Post-eval degradation evidence, per-candidate.
+    """One candidate's degradation evidence from its evaluation, beside a score that stands."""
 
-    On ``OptSearchPoint.wounds.runtime_failures``; surfaced in the score
-    report + ingested by L2 next round. Does NOT drive synthetic-0 —
-    real score stands. Field semantics are part of the L2 contract
-    (rendered as JSON via ``model_dump``).
-    """
-
+    # Rendered into L2's prompt as JSON (``model_dump``): a field renamed here rewrites that prompt.
     model_config = ConfigDict(frozen=True)
 
     source: str = Field(
@@ -172,8 +159,7 @@ class RuntimeFailure(StrictModel):
 
 
 def rf_dedup_key(rf_dict: dict[str, Any]) -> tuple[str, str, str]:
-    """Dedup key for a serialized runtime failure. Pure and canonical, so intra-cycle dedup and cross-cycle sibling-wound
-    inheritance match without a hand-synced mirror."""
+    """Canonical, so intra-cycle dedup and cross-cycle sibling-wound inheritance match."""
     return (
         rf_dict["source"],
         rf_dict["dominant_warning"],
@@ -182,6 +168,7 @@ def rf_dedup_key(rf_dict: dict[str, Any]) -> tuple[str, str, str]:
 
 
 __all__ = [
+    "COLLAPSE_WORDS",
     "INVARIANT_REASONS",
     "NurseOwner",
     "RuntimeFailure",

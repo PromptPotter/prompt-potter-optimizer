@@ -1,9 +1,7 @@
 "use client";
-// What the selected searchpoints ARE, side by side. Configuration is SERVED resolved (`SubjectReading.config`);
-// ancestry walks `parent_ids[0]` on the one served tree (`webapp/CLAUDE.md`), never a second read.
 
 import { useMemo, useState } from "react";
-import type { Evidence, LineageNode, SubjectReading } from "@/lib/api";
+import type { ArmNode, Evidence, SubjectReading } from "@/lib/api";
 import { CardFrame } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { indexLineage, pathOf } from "@/lib/derivations";
@@ -11,41 +9,28 @@ import { shortId } from "@/lib/format";
 import type { CyclePath } from "@/lib/ids";
 import { useLineageTree } from "@/lib/lineage";
 import { seriesVar } from "@/lib/theme";
-import { ChannelRestore, ConfigCell, pointKeyOf, type ScenarioEdits } from "./config-edit";
+import { ChannelRestore, ConfigCell, pointKeyOf } from "./config-edit";
 
 function configured(evidence: Evidence): SubjectReading[] {
   return evidence.subjects.filter((s) => s.config !== null);
 }
 
-export function ConfigPanels({
-  evidence,
-  loading,
-  edits,
-  onEdits,
-}: {
-  evidence: Evidence;
-  loading: boolean;
-  edits: ScenarioEdits;
-  onEdits: (next: ScenarioEdits) => void;
-}) {
+function ConfigPanels({ evidence, loading }: { evidence: Evidence; loading: boolean }) {
   const rows = configured(evidence);
   const [showSame, setShowSame] = useState(false);
 
-  // THREE served bands: a key only one side carries is a different finding from a key set
-  // differently — two pipelines sharing no key would otherwise read as "17 keys differ".
   const differs = evidence.config_keys?.differs ?? [];
   const oneSided = evidence.config_keys?.one_sided ?? [];
   const same = evidence.config_keys?.same ?? [];
 
-  // Named rather than silently absent, so "records no config" is not read as "the panel dropped it".
   const withoutConfig = evidence.subjects.filter((s) => s.config === null);
 
   if (rows.length === 0) {
     return (
-      <p className={loading ? "l4-lede" : "l4-empty"}>
+      <p className={loading ? "note-lede" : "note-empty"}>
         {loading
           ? "Reading the searchpoints…"
-          : "None of these searchpoints recorded a configuration. A round document written before `resolved_pipeline_params` carries none, and nothing here reconstructs one."}
+          : "None of these searchpoints recorded a configuration. A round file written before `resolved_pipeline_params` carries none, and nothing here reconstructs one."}
       </p>
     );
   }
@@ -53,15 +38,15 @@ export function ConfigPanels({
   return (
     <div className="cmp-cfg-wrap">
       {rows.length === 1 && (
-        <p className="l4-note">
+        <p className="note-info">
           One searchpoint, so there is nothing to line it up against — this is what it IS. Add a
           second channel to see which keys differ.
         </p>
       )}
       {withoutConfig.length > 0 && (
-        <p className="l4-note">
+        <p className="note-info">
           Not in this table: {withoutConfig.map((s) => s.label).join(", ")} — read, but the round
-          document at that point records no configuration, so there is nothing to line up.
+          file at that point records no configuration, so there is nothing to line up.
         </p>
       )}
       <p className="l4-subtle">
@@ -83,8 +68,7 @@ export function ConfigPanels({
                   aria-hidden="true"
                 />
                 {r.kind === "campaign" ? shortId(r.label) : r.label}
-                {/* Keyed on the resolved POINT (`pointKeyOf`), the same key the card's editor writes. */}
-                <ChannelRestore edits={edits} subjectKey={pointKeyOf(r)} onEdits={onEdits} />
+                <ChannelRestore subjectKey={pointKeyOf(r)} />
               </th>
             ))}
           </tr>
@@ -94,14 +78,14 @@ export function ConfigPanels({
             {differs.length} key{differs.length === 1 ? "" : "s"} set differently
           </Band>
           {differs.map((key) => (
-            <Row key={key} name={key} rows={rows} edits={edits} onEdits={onEdits} differing />
+            <Row key={key} name={key} rows={rows} differing />
           ))}
           <Band n={oneSided.length} colSpan={rows.length + 1}>
             {oneSided.length} only one of these configures — not a disagreement, a different
             pipeline
           </Band>
           {oneSided.map((key) => (
-            <Row key={key} name={key} rows={rows} edits={edits} onEdits={onEdits} />
+            <Row key={key} name={key} rows={rows} />
           ))}
           <tr className="cmp-cfg-band">
             <th scope="row" colSpan={rows.length + 1}>
@@ -117,9 +101,7 @@ export function ConfigPanels({
             </th>
           </tr>
           {showSame &&
-            same.map((key) => (
-              <Row key={key} name={key} rows={rows} edits={edits} onEdits={onEdits} />
-            ))}
+            same.map((key) => <Row key={key} name={key} rows={rows} />)}
         </tbody>
       </table>
     </div>
@@ -145,18 +127,13 @@ function Band({
   );
 }
 
-// The CELL is shared with the channel card's editor (`config-edit.tsx`), so one value has one editor.
 function Row({
   name,
   rows,
-  edits,
-  onEdits,
   differing,
 }: {
   name: string;
   rows: readonly SubjectReading[];
-  edits: ScenarioEdits;
-  onEdits: (next: ScenarioEdits) => void;
   differing?: boolean;
 }) {
   return (
@@ -171,8 +148,6 @@ function Row({
             subjectKey={pointKeyOf(r)}
             label={r.label}
             served={r.config?.[name]}
-            edits={edits}
-            onEdits={onEdits}
           />
         </td>
       ))}
@@ -180,17 +155,14 @@ function Row({
   );
 }
 
-// One spine per CAMPAIGN, not per subject: a shared prefix shows one point extends the other.
-
 interface Spine {
   campaignId: string;
   cycleId: string;
-  chain: LineageNode[];
-  marked: Map<string, string[]>; // candidate id -> the channel labels sitting on it
+  chain: ArmNode[];
+  marked: Map<string, string[]>;
 }
 
-export function AncestryPanels({ evidence }: { evidence: Evidence }) {
-  // Grouped first so a campaign contributing two channels fetches its tree once.
+function AncestryPanels({ evidence }: { evidence: Evidence }) {
   const byCampaign = useMemo(() => {
     const out = new Map<string, SubjectReading[]>();
     for (const s of evidence.subjects) {
@@ -234,12 +206,12 @@ function CampaignSpines({
   const spines = useMemo(() => buildSpines(index, subjects), [index, subjects]);
 
   if (failed) {
-    return <p className="l4-warn">Could not read {shortId(campaignId)}&rsquo;s lineage.</p>;
+    return <p className="note-warn">Could not read {shortId(campaignId)}&rsquo;s lineage.</p>;
   }
-  if (!loaded) return <p className="l4-empty">Reading {shortId(campaignId)}&rsquo;s lineage…</p>;
+  if (!loaded) return <p className="note-empty">Reading {shortId(campaignId)}&rsquo;s lineage…</p>;
   if (spines.length === 0) {
     return (
-      <p className="l4-note">
+      <p className="note-info">
         {shortId(campaignId)}: no ancestry to draw — its channels read at points the tree does not
         place, which is the case for an L4 inner run in its own sandbox.
       </p>
@@ -290,7 +262,7 @@ function buildSpines(
   index: ReturnType<typeof indexLineage>,
   subjects: readonly SubjectReading[],
 ): Spine[] {
-  const nodes = new Map<string, LineageNode>();
+  const nodes = new Map<string, ArmNode>();
   const courseOf = new Map<string, string>();
   for (const [addr, entry] of index) {
     for (const cand of entry.candidates) {
@@ -299,19 +271,18 @@ function buildSpines(
     }
   }
 
-  const chains = new Map<string, { chain: LineageNode[]; marked: Map<string, string[]> }>();
+  const chains = new Map<string, { chain: ArmNode[]; marked: Map<string, string[]> }>();
   for (const s of subjects) {
     const head = nodes.get(s.candidate_id);
     if (!head) continue;
-    const chain: LineageNode[] = [];
+    const chain: ArmNode[] = [];
     const seen = new Set<string>();
-    let cursor: LineageNode | undefined = head;
+    let cursor: ArmNode | undefined = head;
     while (cursor && !seen.has(cursor.id)) {
       seen.add(cursor.id);
       chain.unshift(cursor);
       cursor = cursor.parent_ids[0] ? nodes.get(cursor.parent_ids[0]) : undefined;
     }
-    // Keyed on the chain's ROOT, so the longer chain of a shared origin wins.
     const rootId = chain[0]?.id ?? s.candidate_id;
     const prior = chains.get(rootId);
     const merged = !prior || chain.length > prior.chain.length ? chain : prior.chain;
@@ -337,22 +308,17 @@ function buildSpines(
 export function SearchpointCards({
   evidence,
   loading,
-  edits,
-  onEdits,
 }: {
   evidence: Evidence;
   loading: boolean;
-  edits: ScenarioEdits;
-  onEdits: (next: ScenarioEdits) => void;
 }) {
-  // Rendered even when empty — a vanished card is indistinguishable from one that dropped channels.
   return (
     <>
       <CardFrame title="How these searchpoints are configured" headingTag="h2">
-        <ConfigPanels evidence={evidence} loading={loading} edits={edits} onEdits={onEdits} />
+        <ConfigPanels evidence={evidence} loading={loading} />
       </CardFrame>
       <CardFrame title="How we got here" headingTag="h2">
-        <p className="l4-lede">
+        <p className="note-lede">
           The parent chain to each point. Two points on one chain share a spine — the shorter one
           is a prefix of the longer, so both are marked on the same line rather than drawn twice.
         </p>

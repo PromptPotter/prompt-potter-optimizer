@@ -2,9 +2,6 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { ApiError, failureKind, IngestApiError, operatorMessage } from "@/lib/api";
 import { clearIncidents, formatDiagnostics, getIncidents, reportIncident } from "@/lib/diagnostics";
 
-// Every unmapped case lands on `transient`: mistaking transient for gone destroys the
-// operator's view, while the reverse costs one retry.
-
 describe("failureKind", () => {
   it("maps the statuses whose reactions differ", () => {
     expect(failureKind(new ApiError(401, "/api/v1/x"))).toBe("auth");
@@ -21,7 +18,6 @@ describe("failureKind", () => {
   });
 
   it("treats a non-ApiError (network, parse, abort) as transient", () => {
-    // A fetch that never reached the server proves nothing about the address.
     expect(failureKind(new TypeError("Failed to fetch"))).toBe("transient");
     expect(failureKind(new Error("Unexpected token < in JSON"))).toBe("transient");
     expect(failureKind(null)).toBe("transient");
@@ -29,7 +25,6 @@ describe("failureKind", () => {
   });
 
   it("classifies a WRITE failure by its status, like any other", () => {
-    // Command and ingest writes throw `IngestApiError`; it must classify inside this family.
     const write = (status: number) =>
       failureKind(new IngestApiError(status, "/api/v1/commands/compact-archive", "no"));
     expect(write(403)).toBe("denied");
@@ -40,8 +35,7 @@ describe("failureKind", () => {
   it("words a write failure as the server's sentence, else one per kind — never the raw failure", () => {
     const said = new IngestApiError(409, "/api/v1/commands/fork-cycle", "Already forked.");
     expect(operatorMessage(said, failureKind(said))).toBe("Already forked.");
-    // No envelope (a proxy 502) and no response at all: neither the status line nor the
-    // browser's network text reaches the operator, and neither claims the write did not land.
+    // No envelope (a proxy 502) and no response at all: neither may claim the write did not land.
     const bare = new IngestApiError(502, "/api/v1/commands/fork-cycle", null);
     const offline = new TypeError("Failed to fetch");
     for (const e of [bare, offline]) {

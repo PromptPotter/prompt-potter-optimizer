@@ -1,9 +1,6 @@
-// The field set is generated from `config/settings.py::PROMPT_STRING_FIELDS`; only the on-screen
-// labels live here.
-
+// Generated from `domain/search_point.py::PROMPT_STRING_FIELDS`.
 export { PROMPT_STRING_FIELDS } from "@/lib/api/types.generated";
 
-// One label per field for every surface; the editor keeps only its authoring hints and heights.
 export const PROMPT_FIELD_LABEL: Record<string, string> = {
   persona: "Persona",
   task_intent: "Task intent",

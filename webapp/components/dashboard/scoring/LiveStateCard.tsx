@@ -1,6 +1,6 @@
 import { useCycleStream, type DashboardSnapshot } from "@/lib/poll";
-import { headlineStats } from "@/lib/derivations";
 import { fmtNum, fmtClock } from "@/lib/format";
+import { useOrigin } from "@/lib/hooks/useOrigin";
 import { cx } from "@/lib/cx";
 import { CardFrame } from "@/components/ui";
 import { Criterion } from "@/components/shell/scoring/Criterion";
@@ -9,7 +9,6 @@ import { FreqChart } from "@/components/dashboard/scoring/FreqChart";
 import { TrendChart } from "@/components/dashboard/scoring/TrendChart";
 import { CostStrip } from "@/components/dashboard/scoring/CostStrip";
 
-// Fields surfaced elsewhere, or withheld from the UI.
 const SHOWN_ELSEWHERE = new Set([
   "cycle_id", "wallclock_serialized_at",
   "best", "total_queries_scored", "last_query_elapsed_s",
@@ -24,7 +23,7 @@ const SHOWN_ELSEWHERE = new Set([
 ]);
 
 const KNOWN_ORDER = [
-  "origin_acc", "current_acc", "arms_per_round", "sp_budget_round",
+  "origin_acc", "arms_per_round", "sp_budget_round",
   "total_backend_calls", "error_count", "degraded_count", "backend_retry_count",
   "state_since", "stop_reason",
 ];
@@ -33,27 +32,24 @@ const WARN_IF_POSITIVE = new Set(["error_count", "degraded_count", "backend_retr
 
 const FORMATTERS: Record<string, (v: unknown) => string> = {
   origin_acc: (v) => fmtNum(v),
-  current_acc: (v) => fmtNum(v),
   state_since: fmtClock,
 };
 
 export function LiveStateCard() {
   const { dash } = useCycleStream();
   const served = useServedCriterion();
+  const origin = useOrigin()?.row?.reading;
 
   const items: [string, unknown][] = [];
   const seen = new Set(SHOWN_ELSEWHERE);
   if (dash) {
-    const { origin } = headlineStats(dash);
-    if (origin != null) {
-      items.push(["origin_acc", origin]);
+    const originAcc = origin?.own?.accuracy?.value;
+    if (originAcc != null) {
+      items.push(["origin_acc", originAcc]);
       seen.add("origin_acc");
     }
-    // Located off the round's incumbency stamp, never by position.
-    const round0 = dash.rounds.find((r) => r.round === 0);
-    const originSamples = round0?.candidates.find((c) => c.is_selected)?.scored_samples;
-    if (typeof originSamples === "number") {
-      items.push(["origin_samples", originSamples]);
+    if (origin?.panel.scored != null) {
+      items.push(["origin_samples", origin.panel.scored]);
       seen.add("origin_samples");
     }
     for (const k of KNOWN_ORDER) {
@@ -68,13 +64,7 @@ export function LiveStateCard() {
     }
   }
 
-  const payload = dash?.current_query_payload ?? "";
-  const payloadEmpty = payload === "";
-  const payloadText = payloadEmpty
-    ? Array.isArray(dash?.open_sample_ids) && dash.open_sample_ids.length > 0
-      ? "in flight, payload not exposed"
-      : "no query in flight"
-    : payload;
+  const payload = dash?.current_query_payload || null;
 
   return (
     <CardFrame
@@ -107,8 +97,17 @@ export function LiveStateCard() {
           </div>
         )}
       </div>
-      <div className="var-label">In-flight query payload</div>
-      <div className={cx("payload-block", payloadEmpty && "empty")}>{payloadText}</div>
+      {dash && (
+        <>
+          <div className="var-label">In-flight query payload</div>
+          <div className={cx("payload-block", payload === null && "empty")}>
+            {payload ??
+              (dash.open_sample_ids.length > 0
+                ? "in flight, payload not exposed"
+                : "no query in flight")}
+          </div>
+        </>
+      )}
       <BackendWarnings dash={dash} />
       <RaceCatchUpLog dash={dash} />
       <div className="lsc-charts">
@@ -121,7 +120,6 @@ export function LiveStateCard() {
 }
 
 function RaceCatchUpLog({ dash }: { dash: DashboardSnapshot | null }) {
-  // One entry per sample where a prior in the eliminator's race gained a fresh measurement.
   const log = dash?.catch_up_log;
   if (!log || log.length === 0) return null;
   return (

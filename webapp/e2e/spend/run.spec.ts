@@ -17,9 +17,6 @@ import {
   type Campaign,
 } from "../harness";
 
-// A campaign taken from nothing to a measuring run through the browser, at real spend. Kept cheap
-// enough to run often: the draft cap, a poll that stops when satisfied, a pause in `afterAll`.
-
 const DATASET = process.env.PP_E2E_DATASET || "email-tagging";
 const BUDGET_USD = Number(process.env.PP_E2E_BUDGET_USD || "0.05");
 // Origin plus TWO search rounds: only the second runs against an ELECTED parent.
@@ -34,8 +31,7 @@ test.afterAll(async ({ request }) => {
   // Re-resolved: a timeout in the Start test leaves `made` naming the pre-Start cycle.
   made = (await campaigns(request).catch(() => []))[0] ?? made;
   if (!made) return;
-  // Unconditional and resumable. A refusal is reported, never swallowed: it may mean the safety
-  // net did not catch.
+  // A refusal is reported, never swallowed: it may mean the safety net did not catch.
   const { status, body } = await command(request, "pause-cycle", {
     campaign_id: made.id,
     cycle_id: made.cycleId,
@@ -111,8 +107,7 @@ test.describe("a campaign, end to end", () => {
     const start = page.getByRole("button", { name: /Start campaign/ });
     await expect(start).toBeEnabled({ timeout: 120_000 });
 
-    // The cap rides the Start verb, so the run is born under it. After the enabled wait, so a
-    // missing field is a failure, not a race; `summary` because `getByText` also hits `<details>`.
+    // After the enabled wait, so a missing field is a failure, not a race; `summary` because `getByText` also hits `<details>`.
     await page.locator("summary", { hasText: "Run bounds" }).click();
     await page.getByRole("spinbutton", { name: "Spend cap in USD" }).fill(String(BUDGET_USD));
 
@@ -139,10 +134,8 @@ test.describe("a campaign, end to end", () => {
     page,
     request,
   }) => {
-    // Pass: the rounds land, or the run stops on a bounded reason. Round 0 alone searches nothing.
     test.setTimeout(1_500_000);
 
-    // Parked BEFORE polling, so a human watching the headed run sees the rounds land.
     await open(page, `${made!.addr}/dashboard`);
     await passConsent(page);
     await ready(page);
@@ -199,13 +192,12 @@ test.describe("a campaign, end to end", () => {
   });
 
   test("it is running under a cap, and the browser renders one", async ({ page, request }) => {
-    // Some finite cap no higher than ours, never exactly ours: the launch composes against the
-    // account allowance first, which may be tighter.
+    // `<=`, never `==`: the launch composes against the account allowance first, which may be tighter.
     const limits = (await dashboard(request, made!))?.run_limits as
-      | { spend_budget_usd?: number | null }
+      | { ceiling?: { usd?: number | null } }
       | undefined;
-    expect(limits?.spend_budget_usd, "the run has no USD cap at all").not.toBeNull();
-    expect(limits?.spend_budget_usd).toBeLessThanOrEqual(BUDGET_USD);
+    expect(limits?.ceiling?.usd, "the run has no USD cap at all").not.toBeNull();
+    expect(limits?.ceiling?.usd).toBeLessThanOrEqual(BUDGET_USD);
 
     await open(page, `${made!.addr}/dashboard`);
     await passConsent(page);
@@ -213,7 +205,6 @@ test.describe("a campaign, end to end", () => {
   });
 
   test("what it PAID and what it COST are both on the wire", async ({ request }) => {
-    // No floor: the check-in agent authors the origin prompt, so replay share is stochastic.
     reportTape(DATASET, tapeOf(await dashboard(request, made!)));
   });
 

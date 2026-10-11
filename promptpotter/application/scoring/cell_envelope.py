@@ -1,14 +1,16 @@
-"""The per-cell wall-clock envelope — the ONE bound on the SUM of a measured cell's awaits, and
-the give-back that keeps it measuring the cell rather than the box."""
-
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from functools import partial
 from typing import TYPE_CHECKING
 
-from promptpotter.infrastructure.llm.rate_limit import set_throttle_stall_sink
+from promptpotter.infrastructure.llm.send_pacing import (
+    SendBudget,
+    set_throttle_stall_sink,
+    under_budget,
+)
 from promptpotter.shared.errors import CellHaltedError
 
 if TYPE_CHECKING:
@@ -25,38 +27,32 @@ def _noop(_seconds: float) -> None:
 
 
 class CellEnvelope:
-    """Async context manager bounding one cell's total wall clock. ``budget_s=None`` enters and
-    exits doing nothing, so an undeclared backend costs the seam a branch rather than a code path.
+    """Expiry raises ``CellHaltedError``: the cell was CUT, so no repair may re-buy a truncated trajectory."""
 
-    Expiry raises :class:`CellHaltedError` — the measurement was CUT, so there is no trajectory to
-    grade, a truncated one must never reach the formula, and no repair may re-buy the cell."""
-
-    def __init__(self, budget_s: float | None, *, label: str) -> None:
+    def __init__(self, budget_s: float | None, *, attempts: int, label: str) -> None:
         self.budget_s = budget_s
         self.label = label
-        self.unworked = 0.0
+        self._budget = SendBudget(budget_s, attempts=attempts)
         self._announced = False
-        self._deadline = None if budget_s is None else asyncio.timeout(budget_s)
+        self._deadline = self._budget.clock
+        self._bound = contextlib.ExitStack()
+
+    @property
+    def unworked(self) -> float:
+        return self._budget.given_back
 
     @property
     def on_suspend(self) -> Callable[[float], None]:
-        """The give-back the caller hands its heartbeat — the only channel that sees a machine
-        sleep. Read BEFORE ``__aenter__`` so the heartbeat task outlives the timeout scope."""
+        """Read BEFORE ``__aenter__`` so the heartbeat task outlives the timeout scope."""
         if self._deadline is None:
             return _noop
         return partial(self._give_back, cause="the machine suspended")
 
     def _give_back(self, seconds: float, *, cause: str) -> None:
-        deadline = self._deadline
-        when = None if deadline is None else deadline.when()
-        if deadline is None or when is None:
+        before = self.unworked
+        self._budget.give_back(seconds)
+        if self.unworked == before:
             return
-        try:
-            deadline.reschedule(when + seconds)
-        except RuntimeError:
-            # The scope has not started or already exited; nothing to extend.
-            return
-        self.unworked += seconds
         budget = self.budget_s or 0.0
         logger.debug(
             "cell %s: +%.1fs envelope (%s); %.0fs given back of a %.0fs budget",
@@ -66,8 +62,6 @@ class CellEnvelope:
             self.unworked,
             budget,
         )
-        # Past its whole budget in waiting, the envelope is no longer measuring this cell. Said
-        # once: the give-back is working as intended, the volume is not.
         if not self._announced and self.unworked > budget:
             self._announced = True
             logger.warning(
@@ -79,10 +73,10 @@ class CellEnvelope:
             )
 
     async def __aenter__(self) -> CellEnvelope:
+        # Bound in the cell's own task, so its resends and stall never touch a sibling's.
+        self._bound.enter_context(under_budget(self._budget))
         if self._deadline is None:
             return self
-        # Bound in the task the cell is measured in, so one cell's stall never credits a sibling's
-        # envelope; the backend's own work inherits this context copy.
         set_throttle_stall_sink(
             partial(self._give_back, cause="queued behind the shared rate limiter")
         )
@@ -95,6 +89,7 @@ class CellEnvelope:
         exc: BaseException | None,
         tb: TracebackType | None,
     ) -> bool:
+        self._bound.close()
         if self._deadline is None:
             return False
         timed_out = False
@@ -104,19 +99,16 @@ class CellEnvelope:
             timed_out = True
         finally:
             set_throttle_stall_sink(None)
-        # A cancel the timeout did not convert is someone else's — a pause, a Ctrl+C — and keeps
-        # travelling even when the deadline had fired too.
+        # A cancel the timeout did not convert is someone else's (a pause, a Ctrl+C) and keeps travelling.
         if not timed_out and exc_type is not None and issubclass(exc_type, asyncio.CancelledError):
             return False
+        # `expired()` too: `asyncio.timeout` raises only when a CancelledError comes back up.
         if timed_out or self._deadline.expired():
-            # `asyncio.timeout` raises only when a CancelledError comes back up, so a chain that
-            # answers cancellation with a normal return would make the guard vanish silently.
             raise CellHaltedError(
                 f"cell {self.label} ran past its {self.budget_s:.0f}s wall-clock envelope and was "
                 f"cancelled ({self.unworked:.0f}s of it already given back as time the cell was "
                 "not allowed to spend)",
-                # A cancelled call hands back no bill: our own LLM calls are on the ledger already,
-                # but an agent that spends outside our client is lost with it.
+                # A cancelled call hands back no bill: an agent spending outside our client is lost.
                 spent={},
             )
         return False

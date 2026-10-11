@@ -1,6 +1,4 @@
 "use client";
-// Headless modal a11y: focus in, Tab trap, Escape, focus restore. Backdrop and close button
-// stay the caller's.
 
 import { useEffect, useRef } from "react";
 
@@ -11,8 +9,7 @@ const FOCUSABLE =
 export function useDialogA11y(open: boolean, onClose: (() => void) | undefined) {
   const cardRef = useRef<HTMLDivElement>(null);
   const restoreRef = useRef<HTMLElement | null>(null);
-  // A ref, not a dep: under a polling subtree an inline `onClose` would re-run the trap every
-  // poll, yanking the caret out of whatever the operator is typing in.
+  // A ref, not a dep: an inline `onClose` would re-run the trap every poll and yank the caret.
   const onCloseRef = useRef(onClose);
   useEffect(() => {
     onCloseRef.current = onClose;

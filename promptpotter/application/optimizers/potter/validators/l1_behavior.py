@@ -1,6 +1,3 @@
-"""Each check is a pure ``(round_dict, ctx) -> CheckResult`` over one round's L1 output.
-``CHECK_REGISTRY`` is the single source, so every surface that enumerates them agrees."""
-
 from __future__ import annotations
 
 import re
@@ -18,9 +15,9 @@ from promptpotter.application.optimizers.potter.validators.behavior_base import 
     CheckFn,
     ValidatorContext,
 )
-from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.pipeline_overlay import node_config_items
-from promptpotter.domain.search_point import PARAM_SCOPE_KEYS
+from promptpotter.domain.round_audit import NodeBlock, RoundAudit
+from promptpotter.domain.search_point import PARAM_SCOPE_KEYS, PROMPT_STRING_FIELDS
 
 __all__ = [
     "CHECK_REGISTRY",
@@ -29,30 +26,30 @@ __all__ = [
 ]
 
 
-def extract_l1_variants(container: dict[str, Any] | None) -> list[dict[str, Any]]:
-    """The same shape rides both the round-summary dict and the per-round audit dict, and both
-    reach this codepath. Empty list when L1 did not fire or the response is malformed."""
-    if not container:
-        return []
-    nodes = container.get("nodes") or {}
-    node = nodes.get("l1_generate") or {}
-    response = ((node.get("output") or {}).get("response")) or {}
+def _l1_block(audit: RoundAudit | None) -> NodeBlock | None:
+    return None if audit is None else audit.nodes.get("l1_generate")
+
+
+def extract_l1_variants(audit: RoundAudit | None) -> list[dict[str, Any]]:
+    block = _l1_block(audit)
+    response = None if block is None else block.output.response
     if isinstance(response, dict):
         return [v for v in (response.get("variants") or []) if isinstance(v, dict)]
     return []
 
 
-# --- helpers ---------------------------------------------------------------
+def _shown_l1_prompt(audit: RoundAudit) -> str:
+    block = _l1_block(audit)
+    fields = {} if block is None else block.input.template_fields
+    return " ".join(str(v) for v in fields.values() if isinstance(v, str))
 
-# Phrase-seed tokens: alphabetic-start, 3+ chars. Excludes digits and
-# underscore-first tokens because it seeds noun-phrase substring matches, not set
-# overlap.
+
+# Alphabetic-start, 3+ chars: it seeds substring matches, not set overlap.
 _PHRASE_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z_\-]{2,}")
 
 
 def _variant_prose_written(variant: dict[str, Any]) -> dict[str, str]:
-    """A prose mutation rides two different carriers depending on whether the campaign evolves a
-    target prompt or a node's own template — reading one answers inverted on the other kind."""
+    """Prose rides two carriers by campaign kind: reading one answers inverted on the other."""
     written = {
         f: str(v)
         for f, v in (variant.get("prompt_fields_updates") or {}).items()
@@ -66,8 +63,6 @@ def _variant_prose_written(variant: dict[str, Any]) -> dict[str, str]:
 
 
 def _variant_text_blob(variant: dict[str, Any]) -> str:
-    """Both carriers count — on an L4 cycle the prose rides ``changes_description`` and no
-    override slot, so scanning the overrides alone leaves a one-sentence blob to match against."""
     parts = [str(variant.get("changes_description") or "")]
     parts.extend(_variant_prose_written(variant).values())
     return "\n".join(parts).lower()
@@ -85,13 +80,9 @@ def _key_phrases(text: str, *, min_len: int = 4, max_phrases: int = 6) -> list[s
     return seen
 
 
-# --- checks ----------------------------------------------------------------
-
-
-def _check_context_object_honored(round_dict: dict[str, Any], ctx: ValidatorContext) -> CheckResult:
-    """Each variant must reference at least one ``context_object`` item."""
+def _check_context_object_honored(audit: RoundAudit, ctx: ValidatorContext) -> CheckResult:
     items = [c for c in ctx.context_object if isinstance(c, str) and c.strip()]
-    variants = extract_l1_variants(round_dict)
+    variants = extract_l1_variants(audit)
     if not items:
         return CheckResult("context_object_honored", True, "no context_object items to honour")
     if not variants:
@@ -116,13 +107,12 @@ def _check_context_object_honored(round_dict: dict[str, Any], ctx: ValidatorCont
     )
 
 
-def _check_param_scope_discipline(round_dict: dict[str, Any], ctx: ValidatorContext) -> CheckResult:
-    """No param-scope mutations while prompt-field exploration hasn't settled."""
-    variants = extract_l1_variants(round_dict)
+def _check_param_scope_discipline(audit: RoundAudit, ctx: ValidatorContext) -> CheckResult:
+    variants = extract_l1_variants(audit)
     if not variants:
         return CheckResult("param_scope_discipline", True, "no variants emitted")
 
-    stale_field = _stale_prompt_field(ctx, _held_prompt_fields(round_dict))
+    stale_field = _stale_prompt_field(ctx, _held_prompt_fields(audit))
     if stale_field is None:
         return CheckResult("param_scope_discipline", True, "unlocked: no stale prompt field")
 
@@ -145,17 +135,14 @@ def _check_param_scope_discipline(round_dict: dict[str, Any], ctx: ValidatorCont
     )
 
 
-def _check_evidence_grounding_present(
-    round_dict: dict[str, Any], ctx: ValidatorContext
-) -> CheckResult:
-    """The cited panel must be on the menu the round's call offered, and the citation must also
-    QUOTE the shown prompt. A round that banked no menu is judged on the quote alone."""
-    variants = extract_l1_variants(round_dict)
+def _check_evidence_grounding_present(audit: RoundAudit, ctx: ValidatorContext) -> CheckResult:
+    """A round that banked no menu is judged on the quote alone."""
+    variants = extract_l1_variants(audit)
     if not variants:
         return CheckResult("evidence_grounding_present", True, "no variants emitted")
 
     citable = ctx.citable
-    shown = _rendered_l1_prompt(round_dict)
+    shown = _rendered_l1_prompt(audit)
     offenders: list[tuple[str, str]] = []
     for i, v in enumerate(variants):
         label = f"C{i + 1}"
@@ -193,15 +180,11 @@ def _check_evidence_grounding_present(
     )
 
 
-def _check_not_only_param_variants(
-    round_dict: dict[str, Any], ctx: ValidatorContext
-) -> CheckResult:
-    """≥1 variant per round must mutate a prompt-field axis WHEREVER it rides — asking for
-    ``prompt_fields_updates`` reads the carrier, which an L4 cycle structurally lacks."""
-    variants = extract_l1_variants(round_dict)
+def _check_not_only_param_variants(audit: RoundAudit, ctx: ValidatorContext) -> CheckResult:
+    variants = extract_l1_variants(audit)
     if not variants:
         return CheckResult("not_only_param_variants", True, "no variants emitted")
-    if _held_prompt_fields(round_dict) >= set(PROMPT_STRING_FIELDS):
+    if _held_prompt_fields(audit) >= set(PROMPT_STRING_FIELDS):
         return CheckResult("not_only_param_variants", True, "every prompt field is held")
 
     for v in variants:
@@ -218,12 +201,8 @@ def _check_not_only_param_variants(
     )
 
 
-def _check_changes_description_english(
-    round_dict: dict[str, Any], ctx: ValidatorContext
-) -> CheckResult:
-    """The loop's ONLY record of what a candidate intended, so every downstream reader reads this
-    string. A behaviour check, not a rejection — an unreadable note is a bad record, not a bad edit."""
-    variants = extract_l1_variants(round_dict)
+def _check_changes_description_english(audit: RoundAudit, ctx: ValidatorContext) -> CheckResult:
+    variants = extract_l1_variants(audit)
     if not variants:
         return CheckResult("changes_description_english", True, "no variants emitted")
 
@@ -246,21 +225,14 @@ def _check_changes_description_english(
     )
 
 
-def _check_distinct_clusters(round_dict: dict[str, Any], ctx: ValidatorContext) -> CheckResult:
-    """Two variants on ONE failure cluster are one hypothesis wearing two edits, and the round pays a
-    full measurement per copy — at L4 a copy is a whole panel arm. Reads `targets_cluster`, which the
-    schema requires, rather than the citation: a shared citation was the wrong proxy, passing 2/2 on a
-    round that re-proposed both of the previous round's measured losses. SCORED, never rejected —
-    rejecting the duplicate would leave the round measuring one arm, which is the worse failure.
-
-    The method rewrite — variant 1 where it replaces several prompt fields as one hypothesis —
-    stays out of the tally, as `l1_generate`'s answer_format lets it share a cluster with one
-    single-mechanism variant; two of THOSE on one cluster are still counted."""
-    variants = extract_l1_variants(round_dict)
+def _check_distinct_clusters(audit: RoundAudit, ctx: ValidatorContext) -> CheckResult:
+    """SCORED, never rejected: rejecting the duplicate would leave the round measuring one arm."""
+    variants = extract_l1_variants(audit)
     if not variants:
         return CheckResult("distinct_clusters", True, "no variants emitted")
     seen: dict[str, int] = {}
     for i, v in enumerate(variants):
+        # The method rewrite may share a cluster with one single-mechanism variant.
         if i == 0 and len(v.get("prompt_fields_updates") or {}) > 1:
             continue
         cluster = str(v.get("targets_cluster") or "").strip().lower()
@@ -278,8 +250,6 @@ def _check_distinct_clusters(round_dict: dict[str, Any], ctx: ValidatorContext) 
     )
 
 
-# --- registry --------------------------------------------------------------
-
 CHECK_REGISTRY: dict[str, CheckFn] = {
     "context_object_honored": _check_context_object_honored,
     "param_scope_discipline": _check_param_scope_discipline,
@@ -290,41 +260,30 @@ CHECK_REGISTRY: dict[str, CheckFn] = {
 }
 
 
-def run_all_checks(round_dict: dict[str, Any], ctx: ValidatorContext) -> list[CheckResult]:
-    """**Empty list when L1 emitted NO variants.** Every check short-circuits to ``passed=True``
-    on an empty list, so running them anyway scores 4/4: "nothing to check" is not "nothing wrong"."""
-    if not extract_l1_variants(round_dict):
+def run_all_checks(audit: RoundAudit, ctx: ValidatorContext) -> list[CheckResult]:
+    """Empty on no variants: every check passes on none, and "nothing to check" is not a pass."""
+    if not extract_l1_variants(audit):
         return []
-    return [fn(round_dict, ctx) for fn in CHECK_REGISTRY.values()]
-
-
-# --- support helpers used by checks ---------------------------------------
+    return [fn(audit, ctx) for fn in CHECK_REGISTRY.values()]
 
 
 _NORMALIZE_RE = re.compile(r"[^a-z0-9]+")
 
-# A quoted run shorter than this cannot adjudicate fabrication either way: it matches
-# something in a 16k-char prompt by coincidence, and flagging its absence would be noise.
-# The check abstains rather than guessing — a false accusation here downgrades a round's
-# verdict, and the round-1 verdict is what authorises another round of real spend.
+# A shorter quoted run matches a long prompt by coincidence, so the check abstains.
 _CITATION_MIN_RUN = 12
 
 
 def _normalize_quote(text: str) -> str:
-    """A citation re-types a panel line, so it drifts on what carries no meaning — wrapping, smart
-    quotes, an em-dash rendered as a hyphen. Normalizing both sides matches only the WORDS."""
+    """A citation re-types a panel line, so only the WORDS are matched."""
     return _NORMALIZE_RE.sub(" ", text.lower()).strip()
 
 
-def _rendered_l1_prompt(round_dict: dict[str, Any]) -> str:
-    node = ((round_dict.get("nodes") or {}).get("l1_generate")) or {}
-    fields = ((node.get("input") or {}).get("template_fields")) or {}
-    return _normalize_quote(" ".join(str(v) for v in fields.values() if isinstance(v, str)))
+def _rendered_l1_prompt(audit: RoundAudit) -> str:
+    return _normalize_quote(_shown_l1_prompt(audit))
 
 
 def _citation_in_prompt(citation: str, shown: str) -> bool:
-    """An honest citation may ELIDE, so the test is the longest ellipsis-free run. Abstains (True)
-    when the prompt is unavailable, rather than failing every variant the round holds."""
+    """An honest citation may ELIDE: the longest ellipsis-free run is tested. No prompt abstains."""
     if not shown:
         return True
     longest = max((_normalize_quote(part) for part in re.split(r"[.]{3}|…", citation)), key=len)
@@ -343,8 +302,7 @@ def _uncitable_reason(field_name: str) -> str:
         return f"bad_field={field_name!r}"
     if not injection.citable:
         return f"not_evidence={field_name!r}"
-    # A real evidence panel — just not one L1 was shown this round. A set-membership check
-    # waves this fabricated citation through.
+    # A real evidence panel, just not one L1 was shown this round.
     return f"panel_not_in_prompt={field_name!r}"
 
 
@@ -361,8 +319,6 @@ _REBUT_SIGNALS: tuple[str, ...] = (
 def _cited_peaked_axis(
     variant: dict[str, Any], citation: str, field_name: str, ctx: ValidatorContext
 ) -> str | None:
-    """Permissive on purpose — the axis name as a substring of the citation, or a key inside
-    ``pipeline_overlay``. Fires only when ``field_name == "axis_memory"``."""
     if not ctx.peaked_axes or field_name != "axis_memory":
         return None
     pp = variant.get("pipeline_overlay") or {}
@@ -383,8 +339,6 @@ def _cited_peaked_axis(
 
 
 def _has_peaked_rebut(variant: dict[str, Any], citation: str, ctx: ValidatorContext) -> bool:
-    """The critique naming the axis, or an explicit wide budget. Permissive substring match —
-    the prompt instructs L1 to name the rebut verbatim."""
     if ctx.exploration_budget == "wide":
         return True
     blob = " ".join(
@@ -407,17 +361,13 @@ def _touches_param_scope(pipeline_overlay: dict[str, Any]) -> bool:
     return False
 
 
-def _held_prompt_fields(round_dict: dict[str, Any]) -> frozenset[str]:
-    """The prompt fields THIS round showed L1 as held, read off the prompt it rendered — a score
-    judges the generator against what it was shown, and a held field is not stale."""
-    node = ((round_dict.get("nodes") or {}).get("l1_generate")) or {}
-    fields = ((node.get("input") or {}).get("template_fields")) or {}
-    shown = " ".join(str(v) for v in fields.values() if isinstance(v, str))
+def _held_prompt_fields(audit: RoundAudit) -> frozenset[str]:
+    """Read off the prompt the round rendered: a held field is not stale."""
+    shown = _shown_l1_prompt(audit)
     return frozenset(f for f in PROMPT_STRING_FIELDS if f"[{f}{HELD_PROMPT_FIELD_MARK}]" in shown)
 
 
 def _stale_prompt_field(ctx: ValidatorContext, held: frozenset[str]) -> str | None:
-    """A field appearing in zero variants for two rounds is stale and triggers the param-scope lock."""
     if len(ctx.prior_rounds) < 2:
         return None
     recent_two = ctx.prior_rounds[-2:]

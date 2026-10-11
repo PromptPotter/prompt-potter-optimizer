@@ -19,7 +19,6 @@ interface Props {
   renderTrigger: (args: { open: boolean; toggle: () => void }) => ReactNode;
   children: (args: { close: () => void }) => ReactNode;
   align?: Align;
-  /** `top` for a trigger at the bottom of its scrollport; `over` covers the trigger (dropdown list). */
   side?: Side;
   className?: string;
 }
@@ -33,8 +32,6 @@ const place = (r: DOMRect, align: Align, side: Side): CSSProperties => {
   return { ...x, top: r.bottom + GAP };
 };
 
-// The one popover: owns open state, click-outside and Escape. Portaled to <body> so no ancestor's
-// `overflow` clips it.
 export function Popover({
   renderTrigger,
   children,
@@ -44,7 +41,6 @@ export function Popover({
 }: Props) {
   const [anchor, setAnchor] = useState<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  // `null` IS closed.
   const [at, setAt] = useState<CSSProperties | null>(null);
   const open = at !== null;
   const close = useCallback(() => setAt(null), []);

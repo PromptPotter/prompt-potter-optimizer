@@ -1,15 +1,12 @@
-"""Per-node prompt layout — potter's information-flow axis, and the SINGLE source for which
-signals reach each of its optimizer prompts. There is no second ``{{token}}`` source in the
-templates."""
-
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, Literal
+from typing import Any, ClassVar
 
 from pydantic import ConfigDict
 
 from promptpotter.application.optimizer_manifest import declared_node_override
+from promptpotter.application.optimizers.nodes import LlmNode
 from promptpotter.application.optimizers.potter.records import L1Layout
 from promptpotter.domain.opt_search_point import OptimizerPromptTemplate
 from promptpotter.domain.strict_model import StrictModel
@@ -18,11 +15,7 @@ from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 shapes_optimizer_prompt(__name__)
 
-# What every L1 layout must carry: a field L1 cannot OPERATE without, or the sole carrier of a state
-# L1 must not enter blind — `answer_distribution` is the second kind, and it self-suppresses where
-# there is no label to be constant about, so it costs nothing on the runs it cannot speak about.
-# An edit only MOVES panels (`coerce_l1_layout`), so a layout lacking one can only be authored, and
-# `l1_layout_missing_mandatory` rolls it back rather than starving L1.
+# A field L1 cannot operate without, or the SOLE carrier of a state L1 must not enter blind.
 L1_MANDATORY: frozenset[str] = frozenset(
     {
         "plan",
@@ -31,19 +24,14 @@ L1_MANDATORY: frozenset[str] = frozenset(
         "pipeline_param_catalogue",
         "critique",
         "answer_distribution",
-        # Also the second kind: `measurand` names the number every variant is judged on — without
-        # it an edit optimizes a column rather than an objective — and `confounds` is the sole
-        # carrier of the states where that number is not ability.
         "measurand",
         "confounds",
-        # The one carrier of the parent's shots, which the rendered prompt leaves out; silent
-        # without a demo pool, so it costs nothing where there are none to edit.
+        # The one carrier of the parent's shots, which the rendered prompt leaves out.
         "demo_pool",
     }
 )
 
-# Names L2 may pick from. Subset of the global registry; L2-internal signals are excluded so
-# L1 can't see L2's own state.
+# L2-internal signals are excluded, so L1 cannot see L2's own state.
 L1_POSSIBLE: frozenset[str] = frozenset(
     {
         "measurand",
@@ -74,39 +62,15 @@ L1_POSSIBLE: frozenset[str] = frozenset(
     }
 )
 
-# PromptTemplate slots a layout addresses, IN RENDER ORDER: `L1Layout`'s fields, asserted below to
-# be a subsequence of `OptimizerPromptTemplate.RENDER_ORDER`. ``answer_format`` is omitted — it
-# carries the output JSON schema and is owned by the template, not L2.
-#
-# The order is what makes `VOLATILE_SLOT` readable below: the slots ahead of it are the ones a
-# panel voids the provider's prefix cache from.
+# IN RENDER ORDER; ``answer_format`` is omitted, carrying the output JSON schema the template owns.
 L1_LAYOUT_SLOTS: tuple[str, ...] = tuple(L1Layout.model_fields)
 
 VOLATILE_SLOT: str = L1_LAYOUT_SLOTS[-1]
-"""The slot behind the provider's prefix-cache boundary — the LAST thing an optimizer prompt
-renders (`OptimizerPromptTemplate.RENDER_ORDER`), which is why every floor below puts its evidence there.
-
-An implicit prefix cache hits on an identical LEADING byte range, so a panel whose text CHANGES
-between rounds voids the discount on every byte after it. Ahead of this slot that means the static
-template itself — instruction, thinking_style, answer_format — is re-billed at full rate every
-round, for a panel that had to be re-sent anyway."""
+"""The provider's prefix-cache boundary: a changing panel ahead of it voids the discount on every byte behind (`dispatch-hub.md` § L1 layout)."""
 
 PREFIX_STABLE_PANELS: frozenset[str] = frozenset({"task_context"})
-"""Panels that may sit ahead of :data:`VOLATILE_SLOT` for free, because their text does not change
-from round to round — so the shared prefix survives them.
+"""Membership is a claim about a WRITER, never a renderer: re-read both before adding a name (`dispatch-hub.md` § L1 layout)."""
 
-**Membership is a claim about a WRITER, not about a renderer**, and there is exactly one today:
-`_r_task_context` renders the operator's framing, which no layer writes, so it never moves within
-a run. Every other panel is derived from measurement and moves whenever the measurement does.
-
-This list is what keeps :func:`validate_l1_layout`'s prefix check silent on the floors while still
-catching an EDIT that walks a live panel forward — L2 addresses any of the four slots
-(`layout_json_schema`), so without it the placement axis can spend the discount with nothing
-reporting that it did. Adding a name here means re-reading its renderer and its writer; a panel
-that is merely stable TODAY is not stable, it is untested."""
-
-# Both load-bearing: without the second, `L1_LAYOUT_SLOTS[:-1]` is not "the slots ahead of the
-# boundary" and `validate_l1_layout`'s prefix check reads the wrong ones.
 _OPTIMIZER_ORDER = OptimizerPromptTemplate.RENDER_ORDER
 assert _OPTIMIZER_ORDER[-1] == VOLATILE_SLOT, (
     f"the optimizer prompt must render {VOLATILE_SLOT!r} last — it is where every NODE_LAYOUTS "
@@ -119,53 +83,31 @@ assert [f for f in _OPTIMIZER_ORDER if f in L1_LAYOUT_SLOTS] == list(L1_LAYOUT_S
 
 
 class NodeLayoutSpec(StrictModel):
-    """One optimizer node's searchable injection axis. ``mandatory`` is the guard rail.
-
-    ``editor`` is READ, not decoration — ``l2`` is ``l1_generate`` alone, and NO path applies an L4
-    layout override to it. A node's live layout comes from ``prompts.py::node_layout``; a caller
-    branching on ``editor`` for that re-derives the function badly."""
-
     model_config = ConfigDict(frozen=True)
 
-    editor: Literal["l2", "l4"]
     possible: frozenset[str]
     mandatory: frozenset[str]
     floor: L1Layout
+    # Only the DISCRETIONARY panels: the mandatory floor is the dataset's, so no whole-prompt ceiling.
+    discretionary_chars: int
+    # `compile_prompt` extras that are not signals; any other unknown token in a template body raises.
+    caller_extras: frozenset[str] = frozenset()
 
 
-# The per-node layout registry — L4's information-flow surface. The dispatch hub fills every
-# node from here, so the set of signals reaching each optimizer prompt is ONE searched axis
-# rather than two hand-tuned sources. `checkin` is excluded: it runs around the loop.
-#
-# `mandatory` = the GUARD RAIL every layout of the node carries, deliberately minimal. `floor` = the
-# good default a normal campaign runs on UNCHANGED — these govern every campaign's inner prompts,
-# and a normal campaign has no outer loop to reconverge, so the floor must be good rather than
-# merely not-terrible. `possible − mandatory` = L4's search space, scored by the same proxy as
-# any other mutation.
+# `checkin` is excluded: it runs around the loop. `floor` is what a normal campaign runs UNCHANGED.
 NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
-    # Order is load-bearing. `answer_distribution` leads because it frames everything after
-    # it: a pipeline collapsed onto one label needs that break, not a better-argued
-    # instruction, and no other panel can say so. Then the DISTILLED failure signal, then the
-    # misses themselves ordered by difficulty — the evidence beside its own compression, so
-    # the generator can check one against the other — then what it has ALREADY tried, without
-    # which round 4 re-proposes round 1's measured failure and nothing objects.
-    # `sample_transcripts` closes the floor, so it takes the allowance the rest left: a generator
-    # shown only ids and one quoted span cannot write the method a failing problem needs, and on
-    # justlogic-d234 it wrote single-sentence nudges for five rounds. Raw `diagnostics` and the
-    # cross-run panels stay off the floor: the same evidence at several times the bytes.
+    # Floor order is load-bearing: the composition places in order and `sample_transcripts` takes the rest.
     "l1_generate": NodeLayoutSpec(
-        editor="l2",
+        # Room for two whole transcripts behind the frame.
+        discretionary_chars=11_000,
+        caller_extras=frozenset({"n_variants"}),
         possible=L1_POSSIBLE,
         mandatory=L1_MANDATORY,
         floor=L1Layout(
-            # The one floor placement ahead of `VOLATILE_SLOT`, and it is free: `task_context` is
-            # in `PREFIX_STABLE_PANELS`, whose docstring names the one way it moves. Anything NOT
-            # on that list belongs behind the boundary.
+            # The one floor placement ahead of `VOLATILE_SLOT`, free because it is prefix-stable.
             task_intent=["task_context"],
             problem_description=[
                 "rendered_prompt",
-                # Directly under the prompt: its schema-description block is text the solver
-                # reads with it, and an edit to one is checked against the other only side by side.
                 "pipeline_param_catalogue",
                 "measurand",
                 "precision",
@@ -188,19 +130,10 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
             ],
         ),
     ),
-    # The distiller — the one node where a raw dump is justified, since everything downstream
-    # reads its compression. `diagnostics` alone shows truncated stems, which starves the
-    # critique into unverifiable steers.
-    # WHICH raw source depends on the level, so both sit on the floor and each renders only
-    # where it means something: a miss selects `sample_transcripts`, while one level up a miss
-    # is a placeholder-label artifact and the raw source is `inner_narratives`. A critique
-    # shown neither prescribes steers the inner loops have already measured and lost.
-    # `failing_samples` carries the BREADTH both lack — the deep panels reach ~5 misses of ~20,
-    # and clusters ranked "largest first, share of the misses" cannot be read off a sample.
-    # `mutation_memory` because the round under critique IS a set of edits: which cells the
-    # parent's run hit that they keep missing is a failure no miss panel can carry.
+    # Both raw sources sit on the floor: each renders only at the recursion level it means something.
     "l1_critique": NodeLayoutSpec(
-        editor="l4",
+        # A transcript is indivisible, so this alone decides how many fit; two, beside the frame.
+        discretionary_chars=7_500,
         possible=frozenset(
             {
                 "measurand",
@@ -237,14 +170,9 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
             ],
         ),
     ),
-    # Framing layer — must see the distilled failure signal, its own edit vocabulary and the
-    # raw round evidence. `task_context` is off the floor: L2 cannot write the framing, so a
-    # mandatory rail here would guard a capability that does not exist while admitting static
-    # text identical on every fire. It stays in `possible`, an axis L4 can search back in.
-    # The two layer-control directives are mandatory, so no L4 edit can sever the channel —
-    # the sanctioned off-switch stays the config bit, which renders them empty.
+    # `task_context` is off the floor (L2 cannot write the framing); the directives are mandatory so no L4 edit severs the channel.
     "l2_context": NodeLayoutSpec(
-        editor="l4",
+        discretionary_chars=5_500,
         possible=frozenset(
             {
                 "plan",
@@ -281,8 +209,6 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
         ),
         floor=L1Layout(
             problem_description=[
-                # The frame leads: L2 holds terminate authority, and a layer deciding whether a
-                # fault is recoverable must read the objective and its caveats before the evidence.
                 "measurand",
                 "confounds",
                 "budget_state",
@@ -296,7 +222,6 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
                 "archive_top_runs",
                 "rare_hit_samples",
                 "critique",
-                # Both levers' CURRENT state, side by side — an edit needs to read what it lands on.
                 "l1_overrides",
                 "l1_layout",
                 "l1_signal_catalogue",
@@ -306,11 +231,8 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
             ],
         ),
     ),
-    # Strategic replan — must see the `plan` it rewrites and the raw evidence. `task_context`
-    # is off the floor for the same reason as `l2_context` above. `evidence_health` earns its
-    # place: the per-node failure rates L3 needs to judge a fault unrecoverable.
     "l3_plan": NodeLayoutSpec(
-        editor="l4",
+        discretionary_chars=6_400,
         possible=frozenset(
             {
                 "plan",
@@ -341,8 +263,6 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
         ),
         floor=L1Layout(
             problem_description=[
-                # Same reason as L2: a replan that may terminate the cycle reads the objective and
-                # its caveats first, or it argues about a number it was never shown the shape of.
                 "measurand",
                 "confounds",
                 "budget_state",
@@ -362,20 +282,9 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
 }
 
 
-def default_l1_layout() -> L1Layout:
-    """Origin layout for ``l1_generate``, deep-copied so the OSP's mutable per-slot lists never alias the
-    shared floor."""
-    return NODE_LAYOUTS["l1_generate"].floor.model_copy(deep=True)
-
-
-# Import-time exhaustiveness — the same structural contract `validate_l1_layout` enforces per
-# edit, asserted at module load so a drift in any node's spec fails at the source. The
-# registry-membership half lives in `injection_table()`; this half is pure set algebra.
 for _node, _spec in NODE_LAYOUTS.items():
     _floor_ph = set(_spec.floor.all_placeholders())
     assert _spec.mandatory <= _spec.possible, f"{_node}: mandatory ⊄ possible"
-    # An EDIT cannot name a panel twice — a panel addresses one slot — so the floor is the only
-    # producer left that could, and `DispatchHub.fill` renders one copy per occurrence.
     assert len(_floor_ph) == len(_spec.floor.all_placeholders()), (
         f"{_node}: floor names a placeholder in two places"
     )
@@ -385,9 +294,6 @@ for _node, _spec in NODE_LAYOUTS.items():
     assert _floor_ph >= _spec.mandatory, (
         f"{_node}: floor must reference every mandatory placeholder"
     )
-    # No floor may cost the prefix. `PREFIX_STABLE_PANELS` is the exemption and it is short on
-    # purpose, so this is what stops the list growing to fit a floor rather than the other way
-    # round — and it is why `validate_l1_layout`'s prefix check is silent on an unedited run.
     _early = {n for s in L1_LAYOUT_SLOTS[:-1] for n in _spec.floor.slot(s)} - PREFIX_STABLE_PANELS
     assert not _early, (
         f"{_node}: floor places {sorted(_early)} ahead of {VOLATILE_SLOT!r}, voiding the prefix "
@@ -400,15 +306,7 @@ del _node, _spec, _floor_ph, _early
 def layout_json_schema(
     spec: NodeLayoutSpec, *, description: str, withheld: frozenset[str] = frozenset()
 ) -> dict[str, Any]:
-    """The wire shape of a layout edit against ``spec``: a panel name addresses the ONE slot it fills.
-    ONE builder for BOTH seams that offer the edit — L4's per-node ``layout`` param and L2's
-    ``l1_layout`` — because a vocabulary the emitter is never shown is not a vocabulary.
-
-    ``propertyNames`` + ``additionalProperties`` state each enum once. Per-slot arrays restate the
-    signal enum for every slot of every node, and this schema is prompt text on each call.
-
-    ``description`` is passed rather than written here: the wire schema's prose lives in ``bundle``
-    (`LAYOUT_SCHEMA_INSTRUCTION`), beside every other description it sends."""
+    """``propertyNames`` + ``additionalProperties`` state each enum once: this schema is prompt text."""
     return {
         "type": "object",
         "description": description,
@@ -418,13 +316,7 @@ def layout_json_schema(
 
 
 def unplaceable_edit(raw_layout: object) -> ValidatorOutcome | None:
-    """``l1_layout_unparseable`` for an edit asking for a slot no layout has, else ``None``. ONE
-    stray move refuses the whole edit: applied without it, the rest would land as a layout nobody
-    asked for, with nothing reporting the move that was dropped.
-
-    The evidence names the stray slot values first, then the panels they were asked for, then the
-    legal slots. A stray is LLM-authored, so ``_guard_evidence`` renders one only where it is a
-    name from a closed vocabulary."""
+    """ONE stray move refuses the whole edit: the rest would land as a layout nobody asked for."""
     if not raw_layout:
         return None
     asked = raw_layout if isinstance(raw_layout, dict) else {}
@@ -446,15 +338,7 @@ def unplaceable_edit(raw_layout: object) -> ValidatorOutcome | None:
 
 
 def coerce_l1_layout(raw_layout: Any, *, base: L1Layout) -> L1Layout | None:
-    """Apply a ``{panel: slot}`` EDIT onto ``base``, or ``None`` for "no edit asked" (``{}``, the
-    sanctioned omit-sentinel). An edit :func:`unplaceable_edit` convicts never reaches here; this
-    returns no outcome of its own, because a coercer that judged would be a second validator.
-
-    A panel is MOVED, so it reaches at most one slot and a duplicate has no shape to arrive in. One
-    the edit does not name keeps its slot AND its position — the floor's order is authored and
-    load-bearing, so only a moved panel is repositioned, to the end of the slot it moves to. An
-    unknown PANEL is placed rather than dropped, so ``l1_layout_unknown_placeholder`` rolls the edit
-    back instead of the floor surviving in silence."""
+    """``None`` is "no edit asked". An unknown PANEL is placed, not dropped, so ``l1_layout_unknown_placeholder`` rolls the edit back."""
     if not raw_layout:
         return None
     moves: dict[str, str] = dict(raw_layout)
@@ -463,20 +347,13 @@ def coerce_l1_layout(raw_layout: Any, *, base: L1Layout) -> L1Layout | None:
         kept = [n for n in base.slot(slot) if moves.get(n, slot) == slot]
         update[slot] = kept + [n for n, s in moves.items() if s == slot and n not in kept]
     out = base.model_copy(update=update, deep=True)
-    # "A panel is MOVED" is the whole contract above, and a panel placed twice is rendered twice
-    # into one prompt with no validator between here and the wire. Asserted over every real edit
-    # rather than over a test's enumeration of them.
     placed = out.all_placeholders()
     assert len(placed) == len(set(placed)), f"a layout edit placed one panel twice: {placed}"
     return out
 
 
 class LayoutValidationResult:
-    """L1-layout validation result. What `is_valid=False` COSTS is the caller's, and the two differ:
-    L2's edit of `l1_generate` keeps the prior layout, so the fire is spent but the cycle runs on;
-    an L4 override is rejected at proposal (`l1_inner_layout_applies`), because substituting the
-    floor there would spend a whole inner campaign measuring the parent's information flow and
-    report it as the edit's own reading. Outcomes surface as self-healing evidence either way."""
+    """What ``is_valid=False`` costs is the caller's: L2 keeps the prior layout, an L4 override is rejected at proposal."""
 
     __slots__ = ("is_valid", "outcomes")
 
@@ -491,14 +368,11 @@ def validate_l1_layout(
     spec: NodeLayoutSpec,
     prior_layout: L1Layout | None = None,
 ) -> LayoutValidationResult:
-    """Deterministic layout checks against a node's ``spec``; what a HARD failure costs is the
-    caller's, and ``LayoutValidationResult`` states the two."""
     outcomes: list[ValidatorOutcome] = []
     is_valid = True
 
     used = set(layout.all_placeholders())
 
-    # HARD: every mandatory placeholder must be referenced somewhere.
     missing = spec.mandatory - used
     if missing:
         outcomes.append(
@@ -509,7 +383,6 @@ def validate_l1_layout(
         )
         is_valid = False
 
-    # HARD: every placeholder must be in the node's `possible` set.
     unknown = used - spec.possible
     if unknown:
         outcomes.append(
@@ -520,10 +393,7 @@ def validate_l1_layout(
         )
         is_valid = False
 
-    # SOFT: a panel whose text moves between rounds, placed ahead of the prefix boundary. Costs
-    # money, not correctness — placement is a real axis and an edit may be worth its discount — so
-    # this reports rather than rolls back, and the report is the whole point: the discount is
-    # otherwise spent with nothing able to say it was.
+    # SOFT: costs money, not correctness, and placement is a real axis, so it reports and never rolls back.
     early = [
         name
         for slot in L1_LAYOUT_SLOTS[:-1]
@@ -538,7 +408,7 @@ def validate_l1_layout(
             )
         )
 
-    # SOFT: unchanged from prior — L2 spent a fire on nothing. Flag, don't block.
+    # SOFT: L2 spent a fire on nothing.
     if prior_layout is not None and layout == prior_layout:
         outcomes.append(
             ValidatorOutcome(
@@ -553,25 +423,8 @@ def validate_l1_layout(
 def resolve_layout_override(
     node: str, raw_layout: object
 ) -> tuple[L1Layout, list[ValidatorOutcome]]:
-    """One node's floor with an L4 ``{panel: slot}`` edit applied, and the outcomes that edit
-    breaks — empty on a clean apply, where the returned layout is what the inner cycle renders.
-
-    ONE derivation asked at two boundaries. `validators/l1_strict.py` convicts the PROPOSAL, where
-    the arm can be told and costs a synthetic 0; this module re-asks at render time, one recursion
-    level down, where nothing can be told and the arm has already paid for a whole inner campaign.
-    Two derivations would let the boundary that rejects and the boundary that applies disagree
-    about which edits are legal."""
+    """ONE derivation for both boundaries (`validators/l1_strict.py` at proposal, this module at render), so they cannot disagree."""
     spec = NODE_LAYOUTS[node]
-    # The `editor` field is a contract, so it is asked rather than assumed. `l1_generate`'s
-    # layout is L2's in-campaign surface (`PotterState.memory.l1_layout`) and nothing here applies
-    # to it — reaching this with that node means a caller believes in an L4 lever that has no
-    # code path, and silence would let the belief survive.
-    if spec.editor != "l4":
-        raise ValueError(
-            f"resolve_layout_override({node!r}): this node's layout is edited by {spec.editor!r}, "
-            "not L4. Only `editor='l4'` nodes resolve a layout through the per-node override "
-            "channel; l1_generate's rides PotterState.memory.l1_layout instead."
-        )
     if breach := unplaceable_edit(raw_layout):
         return spec.floor, [breach]
     merged = coerce_l1_layout(raw_layout, base=spec.floor)
@@ -584,9 +437,7 @@ def resolve_layout_override(
 
 
 def resolve_node_layout(node: str) -> L1Layout:
-    """The layout this node renders under. A declaration that does not apply RAISES: an L1 proposal
-    is convicted upstream by `l1_inner_layout_applies`, so what reaches here is operator-authored,
-    and rendering the floor for it would attribute the measurement to a layout nobody ran."""
+    """Raises rather than render the floor: that attributes the measurement to a layout nobody ran."""
     layout, breaches = resolve_layout_override(node, declared_node_override(node).get("layout"))
     if breaches:
         raise ValueError(
@@ -596,12 +447,17 @@ def resolve_node_layout(node: str) -> L1Layout:
     return layout
 
 
+class LayoutNode(LlmNode):
+    name: ClassVar[str]
+    outer_levers: ClassVar[Mapping[str, str]] = {"layout": "object"}
+
+    def resolved_levers(self, declared: Mapping[str, Any]) -> dict[str, Any]:
+        return layout_levers(self.name, declared)
+
+
 def layout_levers(node: str, declared: Mapping[str, Any]) -> dict[str, Any]:
-    """``PotterRuntime.override_levers``: the layout an L4 declaration RESOLVES to, dropped where it
-    lands back on the node's floor — so two declarations rendering one prompt hash alike."""
-    spec = NODE_LAYOUTS.get(node)
-    if spec is None or spec.editor != "l4":
-        return {}
+    """Dropped where it resolves to the node's floor, so two declarations rendering one prompt hash alike."""
+    spec = NODE_LAYOUTS[node]
     layout, _breaches = resolve_layout_override(node, declared.get("layout"))
     return {} if layout == spec.floor else {"layout": layout.model_dump(mode="json")}
 
@@ -613,9 +469,9 @@ __all__ = [
     "NODE_LAYOUTS",
     "PREFIX_STABLE_PANELS",
     "VOLATILE_SLOT",
+    "LayoutNode",
     "NodeLayoutSpec",
     "coerce_l1_layout",
-    "default_l1_layout",
     "layout_json_schema",
     "layout_levers",
     "resolve_layout_override",

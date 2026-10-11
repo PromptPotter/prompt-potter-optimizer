@@ -1,11 +1,4 @@
-"""What a task will spawn inner cells UNDER — the contextvar, and the four verbs that move it.
-
-Split from ``spawn.py`` because the two have opposite dependency directions. Publishing a context
-is something the ordinary campaign runner does on its way past (``runner/entry``, ``noise_floor``,
-``initialization/loop_start``); running an inner campaign is something that reaches back DOWN into
-that runner. Together in one module those made ``entry <-> spawn`` mutual, which is what forced
-twenty-four function-local imports across this package and ``seed_screen``.
-"""
+"""Apart from ``spawn.py``: the runner publishes this on its way past, while a spawn reaches back DOWN into it."""
 
 from __future__ import annotations
 
@@ -45,9 +38,7 @@ __all__ = [
 
 @dataclass(frozen=True)
 class InnerSpawnContext:
-    """``shared_root`` stays the REAL workspace root so every ``layout.py::SHARED_CACHE_DIRS`` tree
-    remains tenant-global: sandboxing them re-scored every inner origin, injecting more noise than
-    the lift."""
+    """``shared_root`` stays the REAL workspace root: sandboxing the shared caches re-scores every inner origin."""
 
     inner_sandbox_root: Path
     dataset_config_dir: Path
@@ -56,11 +47,11 @@ class InnerSpawnContext:
     spawn_campaign_id: str
     spawn_cycle_id: str
     asking_cycle_id: str
-    # Resolved ONCE at publish, `None` where the dataset owns no `inner_tasks.yaml`. Carried, never
-    # re-read: both files are editable, so a per-cell read lets an edit split one run's cells.
+    # Outermost first, ending at the asker's: a pause on any of their ledgers stops the cell.
+    enclosing: tuple[Path, ...]
+    # Resolved ONCE at publish: a per-cell read lets an edit split one run's cells.
     cells: InnerCells | None = None
-    # The δ scale each inner dataset's cells read on, refreshed at every outer round boundary by
-    # `ruler.py`. Empty until one can be identified, which is the cold path a cell self-fits.
+    # Empty until a scale can be identified, the cold path where a cell self-fits.
     rulers: Mapping[str, DeltaRuler] = field(default_factory=dict)
 
 
@@ -72,19 +63,13 @@ _INNER_SPAWN: contextvars.ContextVar[InnerSpawnContext | None] = contextvars.Con
 def _resolve_outer_panel(
     session: Session, campaign_config: CampaignConfig, dataset_dir: Path
 ) -> InnerTasks | None:
-    """The panel run init resolved into the workload, census-checked — never a second read of the
-    file, which the samples and the identity fingerprint were taken from.
-
-    ``None`` where the dataset owns no panel: owning one IS what makes a dataset outer, and no
-    name test recognises one. The observation-key half of the contract is
-    ``Connector.required_observation_keys``, verified for every connector at ``init_services``."""
+    """``None`` where the dataset owns no panel: owning one IS what makes a dataset outer."""
     panel_path = inner_tasks_path(dataset_dir)
     if not panel_path.is_file():
         return None
+    # The workload's panel, never a second read of the file the samples and fingerprint came from.
     panel = InnerTasks.model_validate(session.backend_client.workload.experiment)
-    # The panel (`inner_tasks.yaml`) and the outer sampler's draw are ONE declaration in two
-    # files. A draw BELOW the panel narrows it silently, and a resubsetting sampler then draws
-    # different cells per round — candidates compared on bases that never matched.
+    # A draw BELOW the panel narrows it silently, and a resubsetting sampler moves the cells per round.
     selected = select_optimizer(campaign_config.optimization)
     if (drawn := selected.round_cells(len(panel.tasks))) != len(panel.tasks):
         raise ValueError(
@@ -102,8 +87,7 @@ def publish_inner_spawn_context(session: Session, campaign_config: CampaignConfi
     dataset_dir = session.dataset_config_dir
     if not cycle_id or dataset_dir is None or not session.campaign_id:
         return
-    # Anchored on ``shared_root`` (the REAL workspace root, invariant across depth), never this
-    # store's ``projects_root``, which inside a sandbox already IS the sandbox.
+    # Never this store's ``projects_root``, which inside a sandbox already IS the sandbox.
     shared_root = session.store.shared_root
     inner_root = inner_sandbox_dir(
         shared_root,
@@ -122,18 +106,17 @@ def publish_inner_spawn_context(session: Session, campaign_config: CampaignConfi
             spawn_campaign_id=session.campaign_id,
             spawn_cycle_id=cycle_id,
             asking_cycle_id=cycle_id,
+            enclosing=(*session.control.enclosing, session.store.campaigns.cycle_dir(session.hop)),
             cells=cells,
         )
     )
 
 
 def inner_spawn_context() -> InnerSpawnContext | None:
-    """What this task will spawn inner cells under, or ``None`` outside a campaign that spawns."""
     return _INNER_SPAWN.get()
 
 
 def set_inner_rulers(ctx: InnerSpawnContext) -> None:
-    """Publish a context carrying refreshed δ scales — ``ruler.py``'s half of the round boundary."""
     _INNER_SPAWN.set(ctx)
 
 
@@ -143,7 +126,13 @@ def retarget_inner_spawn(session: Session) -> None:
     cycle_id = session.state.cycle_id
     if ctx is None or not cycle_id or ctx.asking_cycle_id == cycle_id:
         return
-    _INNER_SPAWN.set(replace(ctx, asking_cycle_id=cycle_id))
+    _INNER_SPAWN.set(
+        replace(
+            ctx,
+            asking_cycle_id=cycle_id,
+            enclosing=(*ctx.enclosing[:-1], session.store.campaigns.cycle_dir(session.hop)),
+        )
+    )
     logger.info(
         "inner spawn provenance now names %s; sandbox stays owned by %s",
         cycle_id,

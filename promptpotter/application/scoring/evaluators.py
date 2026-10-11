@@ -1,37 +1,28 @@
-"""Evaluator registry + materializers — the round-level REPORTING surface; no formula reads a
-round's map, a mask included. A compute fn returns a float in [0, 1], or ``None`` when the
-round/sample carried nothing to measure: a zero is a verdict, an absence is not.
-
-**Nothing here decides a round.** The election reads the per-cell ``objective``
-(``domain/scoring.py::CellScorer``), so an evaluator says what a round LOOKED like, never what it
-was worth. Two shapes are therefore inadmissible: a per-cell quantity the channel map already names
-(``latency`` / ``cost`` / ``tokens``, meaned in by ``metrics.py``), and a CANDIDATE CONSTANT, which
-cannot be a term at cell scope at all — under a logistic link a constant on y moves θ by an amount
-that depends on δ."""
+"""A REPORTING surface: nothing here decides a round, the election reads the per-cell ``objective``."""
 
 from __future__ import annotations
 
 import inspect
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal, NamedTuple
 
 from promptpotter.application.scoring.classification import scoreable_rows
 from promptpotter.application.scoring.formula.compiler import CELL_INTRINSIC_NAMES, CELL_TERMS
 from promptpotter.domain.pipeline_schema import NodeRole
 from promptpotter.domain.results_health import is_degraded
 from promptpotter.domain.scoring import (
+    ROW_GRADES,
+    JudgeReading,
     all_verifier_graded,
     extract_item_label,
-    is_verifier_graded,
 )
 from promptpotter.shared.composite import to_short_formula
-from promptpotter.shared.errors import is_error_result
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
-    from promptpotter.domain.scoring import QueryMeasurement
+    from promptpotter.domain.scoring import GradedCell, MeasuredCell
 
 
 Scope = Literal["per_sample", "per_round"]
@@ -40,6 +31,8 @@ Scope = Literal["per_sample", "per_round"]
 __all__ = [
     "DEFAULT_CELL_FORMULA",
     "Evaluator",
+    "JudgedTerm",
+    "SampleTerms",
     "all_evaluators",
     "cell_terms_meta",
     "materialize_round_values",
@@ -50,66 +43,57 @@ __all__ = [
 
 
 @shapes_optimizer_prompt
-def compute_accuracy(*, results: list[QueryMeasurement], **_: Any) -> float | None:
-    """Mean fitness over SCOREABLE rows — a refusal and a charged error count as the misses they
-    are, and a row carrying no verdict surfaces via ``compute_error_rate`` instead.
-
-    **With no scoreable row left there is no rate at all.** Scoring it 0.0 invents the worst
-    possible measurement out of no measurement, and at L4, where a cell is a whole inner campaign,
-    that reads as "drove the inner loop maximally DOWN". The composite beside it is absent on the
-    same rows (``metrics.py::CellFold``)."""
+def compute_accuracy(*, results: Sequence[GradedCell], **_: Any) -> float | None:
+    """``None``, never 0.0, with no scoreable row: a zero invents the worst measurement out of none."""
     scoreable = scoreable_rows(results)
     if not scoreable:
         return None
-    return sum(r["fitness"] for r in scoreable) / len(scoreable)
+    fitness = ROW_GRADES["fitness"]
+    return sum(fitness.read(cell) for cell in scoreable) / len(scoreable)
 
 
-def compute_error_rate(*, results: list[QueryMeasurement], **_: Any) -> float | None:
+def compute_error_rate(*, results: Sequence[GradedCell], **_: Any) -> float | None:
     if not results:
         return None
-    return sum(1 for r in results if is_error_result(r)) / len(results)
+    return sum(1 for r in results if r.facts.errored) / len(results)
 
 
-def compute_degraded_rate(*, results: list[QueryMeasurement], **_: Any) -> float | None:
+def compute_degraded_rate(*, results: Sequence[GradedCell], **_: Any) -> float | None:
     if not results:
         return None
-    return sum(1 for r in results if is_degraded(r)) / len(results)
+    return sum(1 for r in results if is_degraded(r.facts)) / len(results)
 
 
 def _compute_recall(
     *,
-    results: list[QueryMeasurement],
+    results: Sequence[GradedCell],
     node: PipelineNode,
     **_: Any,
 ) -> float | None:
-    def _step_ran(r: QueryMeasurement) -> bool:
-        pd = r.get("pipeline_data") or {}
-        if pd.get("terminal_node") == node.name:
-            return True
-        return (pd.get("step_timings") or {}).get(node.name) is not None
+    def _step_ran(facts: MeasuredCell) -> bool:
+        pd = facts.pipeline
+        return pd.terminal_node == node.name or node.name in pd.step_timings
 
-    scoped = [r for r in results if _step_ran(r) and not is_error_result(r)]
+    scoped = [r.facts for r in results if _step_ran(r.facts) and not r.facts.errored]
     if not scoped:
         return None
     found = 0
-    for r in scoped:
-        candidates = node.ranking_in(r.get("pipeline_data") or {}) or []
-        gt = r.get("ground_truth", "")
-        if any(extract_item_label(c) == gt for c in candidates):
+    for facts in scoped:
+        candidates = node.ranking_in(facts.pipeline.observations) or []
+        if any(extract_item_label(c) == facts.ground_truth for c in candidates):
             found += 1
     return found / len(scoped)
 
 
 def compute_cache_hit_rate(
-    *, results: list[QueryMeasurement], node: PipelineNode, **_: Any
+    *, results: Sequence[GradedCell], node: PipelineNode, **_: Any
 ) -> float | None:
     cache_hits = non_error = 0
     for r in results:
-        if is_error_result(r):
+        if r.facts.errored:
             continue
         non_error += 1
-        pd = r.get("pipeline_data") or {}
-        if (pd.get("step_timings") or {}).get(node.name) is not None:
+        if node.name in r.facts.pipeline.step_timings:
             cache_hits += 1
     return cache_hits / non_error if non_error else None
 
@@ -137,13 +121,13 @@ def has_limit_node(schema: PipelineSchema) -> bool:
 
 
 def compute_retrieval_shortfall_per_sample(
-    *, result: QueryMeasurement, schema: PipelineSchema, **_: Any
+    *, result: MeasuredCell, schema: PipelineSchema, **_: Any
 ) -> float | None:
-    pd = result.get("pipeline_data") or {}
+    observed = result.pipeline.observations
     ratios: list[float] = []
     for node, _key, target in _limit_nodes(schema):
         for mapping in node.observation_mappings:
-            val = pd.get(mapping.pipeline_key)
+            val = observed.get(mapping.pipeline_key)
             if isinstance(val, list):
                 ratios.append(min(len(val) / target, 1.0))
                 break
@@ -152,15 +136,27 @@ def compute_retrieval_shortfall_per_sample(
     return sum(ratios) / len(ratios)
 
 
-def compute_mean_retrieval_shortfall(*, results: list[QueryMeasurement], **_: Any) -> float | None:
-    """The mean of what each cell BANKED (``retrieval_shortfall``, written at measure time against
-    the limits that cell ran under), never re-derived against this round's schema."""
+def compute_mean_retrieval_shortfall(*, results: Sequence[GradedCell], **_: Any) -> float | None:
+    """What each cell BANKED under its own limits, never re-derived against this round's schema."""
     values = [
         float(banked)
         for r in results
-        if isinstance(banked := (r.get("pipeline_data") or {}).get("retrieval_shortfall"), float)
+        if isinstance(banked := r.facts.pipeline.observations.get("retrieval_shortfall"), float)
     ]
     return sum(values) / len(values) if values else None
+
+
+class JudgedTerm(NamedTuple):
+    score: float | None
+    reading: JudgeReading
+
+
+class SampleTerms(NamedTuple):
+    values: dict[str, float]
+    judged: dict[str, JudgeReading]
+
+
+Computed = float | JudgedTerm | None
 
 
 @dataclass(frozen=True)
@@ -168,31 +164,19 @@ class Evaluator:
     name: str
     description: str
     scope: Scope
-    # ``None`` = this round/sample carried nothing to measure. The materializers below OMIT
-    # the key rather than substituting a default, so a reader shows the absence instead of a
-    # number nobody computed. An empty-collection default reads as PERFECT here — inverted for
-    # every health term.
-    compute: Callable[..., float | None | Awaitable[float | None]]
-    # The awaitable arm is `per_sample` ONLY, refused elsewhere by `_validate_evaluator` —
-    # `judges/CLAUDE.md` § The seam says why a round materializer may never await.
-    # `high` = larger is better; `low` = larger is worse (the webapp's mask editor direction-corrects).
+    # ``None`` = nothing to measure, and the key is OMITTED: a zero is a verdict, an absence is not.
+    # The awaitable arm is `per_sample` ONLY (`_validate_evaluator`).
+    compute: Callable[..., Computed | Awaitable[Computed]]
     direction: Literal["high", "low"] = "high"
     node_role: NodeRole | None = None
-    # An extra structural requirement no node role can express (``has_limit_node``). The declared
-    # ``node_role`` is NOT restated here — ``applies`` asks it.
     requires: Callable[[PipelineSchema], bool] = field(default=lambda _schema: True)
 
     def applies(self, schema: PipelineSchema) -> bool:
-        """Has this evaluator anything to measure on ``schema``. The declared ``node_role`` IS half
-        the test, asked here rather than re-spelled per entry as a lambda — a typo in such a copy
-        is an evaluator that silently never renders."""
         if self.node_role is not None and not any(n.role == self.node_role for n in schema.nodes):
             return False
         return self.requires(schema)
 
-    # True ⇒ this number is a comparison AGAINST A LABEL, so it is undefined on a verifier-graded
-    # backend rather than 0.0. Declared rather than derived because ``applies`` sees the schema
-    # alone and the fact lives in the ROWS (`connectors/CLAUDE.md` § The answer shape).
+    # True ⇒ a comparison AGAINST A LABEL: undefined, not 0.0, on a verifier-graded backend.
     needs_labels: bool = False
 
 
@@ -260,12 +244,8 @@ _REGISTRY: list[Evaluator] = [
 ]
 
 
+# Unenforced: no per-candidate constant (on the logistic link its θ shift varies with δ), no channel-map quantity.
 def _validate_evaluator(ev: Evaluator, origin: str) -> None:
-    """Every invariant an ``Evaluator`` must satisfy, built-in and campaign-declared alike.
-
-    The load-bearing clause is the ``per_round`` × awaitable refusal — the sync read paths
-    (``metrics.py``, ``mask/load.py``, ``l1/population.py``) re-derive over archived rows, so an
-    awaiting compute there re-bills the whole measurement history on every index warm."""
     where = f"evaluator {ev.name!r} ({origin})"
     if not ev.name:
         raise ValueError(f"{where}: name must be non-empty.")
@@ -288,12 +268,6 @@ def _validate_evaluator(ev: Evaluator, origin: str) -> None:
 
 
 def validate_campaign_evaluator(ev: Evaluator, origin: str) -> None:
-    """Every invariant an evaluator a CAMPAIGN declares must satisfy — a judge's, today.
-
-    The extra clause over :func:`_validate_evaluator` is the roster collision, and it belongs here
-    because it is a property of the PAIR: ``materialize_sample_values`` iterates
-    ``(*_REGISTRY, *extra)`` writing ``values[ev.name]``, so a campaign term repeating a package
-    evaluator's name overwrites it — silently, with a number measuring something else."""
     _validate_evaluator(ev, origin)
     if ev.name in {e.name for e in _REGISTRY}:
         raise ValueError(
@@ -320,9 +294,6 @@ def all_evaluators() -> list[Evaluator]:
 
 
 def cell_terms_meta() -> list[dict[str, Any]]:
-    """What a ``per_cell`` formula — and so a ``score:`` lens — can name, for the webapp's
-    scoring form: the per-cell terms, then the per-sample evaluators banked beside them. ``dial``
-    and ``primary`` say which of them the form offers a dial for, and which it shows unasked."""
     terms: list[dict[str, Any]] = [
         {
             "name": name,
@@ -347,14 +318,12 @@ def cell_terms_meta() -> list[dict[str, Any]]:
     return terms + banked
 
 
-def _round_value(ev: Evaluator, value: float | None | Awaitable[float | None]) -> float | None:
-    """Narrow a ``per_round`` compute's result to the sync arm. Unreachable in a loaded registry,
-    and a raise rather than a cast so an evaluator that somehow got there stops instead of
-    re-billing the archive."""
-    if isinstance(value, Awaitable):
+def _round_value(ev: Evaluator, value: Computed | Awaitable[Computed]) -> float | None:
+    if isinstance(value, Awaitable | JudgedTerm):
         raise TypeError(
-            f"evaluator {ev.name!r}: per_round compute returned an awaitable. Only per_sample "
-            f"evaluators may reach a model; a round materializer re-derives over archived rows."
+            f"evaluator {ev.name!r}: per_round compute returned {type(value).__name__}. Only "
+            f"per_sample evaluators may reach a model; a round materializer re-derives over "
+            f"archived rows."
         )
     return value
 
@@ -381,12 +350,10 @@ def _concrete_round_entries(
 
 def materialize_round_values(
     schema: PipelineSchema,
-    results: list[QueryMeasurement],
+    results: Sequence[GradedCell],
 ) -> dict[str, float]:
-    """No ``opt_sp``: every evaluator that read one was a candidate constant, and those are gone.
-    What a round REPORTS is now a pure function of its rows and the schema they ran on."""
     values: dict[str, float] = {}
-    labelless = all_verifier_graded(r.get("ground_truth") for r in results)
+    labelless = all_verifier_graded(r.facts.ground_truth for r in results)
     for display_name, ev, node in _concrete_round_entries(schema):
         if ev.needs_labels and labelless:
             continue
@@ -401,48 +368,30 @@ def materialize_round_values(
 
 async def materialize_sample_values(
     schema: PipelineSchema,
-    result: QueryMeasurement,
+    result: MeasuredCell,
     extra: Sequence[Evaluator] = (),
-) -> dict[str, float]:
-    """The per-sample evaluators' values, keyed by name, for the ONE caller that measures a cell
-    (``sample_measurement.py::measure_sample``).
-
-    **Async, and only at this scope.** A ``per_sample`` evaluator may reach an LLM — that is what
-    an LLM-as-judge IS — so its ``compute`` may return an awaitable, which is awaited here. The
-    ``per_round`` materializers below stay strictly synchronous because their callers are sync
-    READ paths (``metrics.py``, ``mask/load.py``, ``l1/population.py``) that re-derive over
-    already-archived rows; an awaitable reaching one of those would re-bill the whole measurement
-    history on every index refresh. :func:`_validate_evaluator` refuses the combination outright,
-    so the asymmetry is a declared invariant rather than a convention.
-
-    ``extra`` carries the evaluators a CAMPAIGN declares rather than the package — today, its
-    judges, one per term. They are not appended to ``_REGISTRY``: that dict is process-global and a
-    campaign's graders are not, so registering them would leak into every other run in the process,
-    inner L4 cells included. It is also why the roster collision is checked once at init
-    (:func:`validate_campaign_evaluator`) rather than here — ``extra`` is written last and would
-    otherwise overwrite a package name silently, per cell.
-
-    The caller writes these TOP-LEVEL into ``pipeline_data``, which is what makes them addressable
-    from a scoring formula."""
-    values: dict[str, float] = {}
+) -> SampleTerms:
+    """``extra`` is never appended to ``_REGISTRY``: that list is process-global, a campaign's judges are not."""
+    terms = SampleTerms({}, {})
     for ev in (*_REGISTRY, *extra):
         if ev.scope != "per_sample":
             continue
-        if ev.needs_labels and is_verifier_graded(result.get("ground_truth")):
+        if ev.needs_labels and result.verifier_graded:
             continue
         if not ev.applies(schema):
             continue
         value = ev.compute(result=result, schema=schema)
         if inspect.isawaitable(value):
             value = await value
+        if isinstance(value, JudgedTerm):
+            if value.reading != JudgeReading():
+                terms.judged[ev.name] = value.reading
+            value = value.score
         if value is not None:
-            values[ev.name] = float(value)
-    return values
+            terms.values[ev.name] = float(value)
+    return terms
 
 
-# The composite a campaign declaring none is scored on: the cell's own score, so the decision
-# metric and the headline agree and adopting the machinery costs nothing. Degradation is gated by
-# the round ``health`` block, never folded into fitness.
 DEFAULT_CELL_FORMULA: Annotated[str, shapes_optimizer_prompt] = "fitness"
 
 
@@ -451,11 +400,9 @@ def resolve_cell_formula(
     explicit: str | None,
     schema: PipelineSchema | None,
 ) -> tuple[str | None, str | None]:
-    """``(full, short)`` for a cycle — campaign override, else the default, else nothing. THE one
-    resolution for all three surfaces; a short form exists only for the default, never for an override."""
+    """``(full, short)``; a short form exists only for the default, never for an override."""
     if explicit:
         return explicit, None
     if schema is None:
         return None, None
-    # Short form derived through the shared code table, never a synced literal.
     return DEFAULT_CELL_FORMULA, to_short_formula(DEFAULT_CELL_FORMULA)

@@ -12,32 +12,27 @@ if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
 
 
+# The decomposition field SET; the render ORDER is per class (`PromptTemplate.RENDER_ORDER`).
+PROMPT_STRING_FIELDS: Annotated[list[str], shapes_optimizer_prompt] = [
+    "persona",
+    "task_intent",
+    "problem_description",
+    "instruction",
+    "thinking_style",
+    "answer_format",
+]
+
+
+# WHO ANSWERS the call: a steer touching only these inherits its done C0.
 WHO_ANSWERS_KEYS: Annotated[frozenset[str], shapes_optimizer_prompt] = frozenset(
     {"model", "provider", "route_order"}
 )
-"""The keys naming WHO ANSWERS the call, rather than what is asked of them. A steer that touches
-only these leaves the origin unchanged in every other respect, which is what three readers need:
-the fork inherits its done C0 (``pipeline_overlay.overlay_is_locked_axis_only``), a stale runtime
-failure is matched by responder identity (``dispatch/injections/wounds.py``), and a node is
-recognised as an LLM call at all (``datasets/origin_readiness.py``)."""
 
 
+# Never a search axis: hosts of one model disagree, so an arm moving either measures the plumbing.
 PARAM_FORBIDDEN_KEYS: Annotated[frozenset[str], shapes_optimizer_prompt] = frozenset(
     {"provider", "route_order"}
 )
-"""Optimizer-forbidden ``pipeline_params[node]`` keys — the subset of :data:`WHO_ANSWERS_KEYS`
-that is never a search axis, whatever a dataset's ``optimizer.param_keys`` says.
-
-Both are COST levers the operator sets against a measured capture: ``provider`` picks the gateway,
-``route_order`` pins WHICH HOST of a model answers, and hosts of one model disagree systematically
-— an arm that moved either would be measuring the plumbing while reporting a prompt.
-
-``model`` is deliberately NOT here. It is a legitimate axis, and whether it is open is the answer
-of that node's ``optimizer.param_keys`` plus its ``param_allowed_values["model"]`` — a dataset's
-decision, per dataset, not one this constant makes for all of them. Two sets rather than one
-because two questions are asked here: :data:`WHO_ANSWERS_KEYS` names who answers the call, and a
-steer touching nothing else inherits its done C0 instead of re-paying for that origin; this set
-names what nothing may search."""
 
 assert PARAM_FORBIDDEN_KEYS <= WHO_ANSWERS_KEYS
 
@@ -45,16 +40,10 @@ assert PARAM_FORBIDDEN_KEYS <= WHO_ANSWERS_KEYS
 PARAM_SCOPE_KEYS: Annotated[frozenset[str], shapes_optimizer_prompt] = frozenset(
     {"temperature", "max_tokens", "reasoning_effort", "top_p"}
 )
-"""Per-node LLM-call tunable axes (non-prompt). Drives param-scope discipline + continuous_envelope."""
 
 
 def strip_rendered_prompt(pipeline_params: dict[str, Any] | None) -> dict[str, Any]:
-    """SOLE writer of the strip, so no surface invents a second rule for what counts as config.
-
-    A node's ``prompt`` is the RENDER of ``prompt_fields``, never configuration — persist it and it
-    is stale the moment the fields move, while every reader rebuilds it. `promptpotter-self` is not
-    an exception: an optimizer node's evolved content rides the six ``PROMPT_STRING_FIELDS`` beside
-    this key, which survive."""
+    """A node's ``prompt`` is the RENDER of ``prompt_fields``, never configuration: persisted, it goes stale."""
     return {
         node: ({k: v for k, v in cfg.items() if k != "prompt"} if isinstance(cfg, dict) else cfg)
         for node, cfg in (pipeline_params or {}).items()
@@ -64,9 +53,7 @@ def strip_rendered_prompt(pipeline_params: dict[str, Any] | None) -> dict[str, A
 class JobSearchPoint(StrictModel):
     model_config = ConfigDict(frozen=True)
 
-    # Empty is the ONE spelling for "carries none" on both. No reader distinguishes absent from
-    # empty, and `content_hash` omits a falsy `pipeline_params` either way — so the archive key is
-    # unmoved — while the nullable twin reaches `CycleResult` / `export.py` as a crash.
+    # Empty is the ONE spelling of "carries none": `content_hash` omits a falsy `pipeline_params`.
     pipeline_params: dict[str, Any] = Field(default_factory=dict)
     prompt_fields: dict[str, Any] = Field(default_factory=dict)
 
@@ -89,22 +76,14 @@ class JobSearchPoint(StrictModel):
 
     @property
     def config_params(self) -> dict[str, Any]:
-        """``pipeline_params`` minus the per-node rendered prompt, which rides ``prompt_fields``
-        and :meth:`render`. The observe view reads it verbatim."""
         return strip_rendered_prompt(self.pipeline_params)
 
     def sp_hash(self, pipeline_schema: PipelineSchema) -> str:
-        """The SEARCHPOINT id — over the SCHEMA-RESOLVED node configs alone, so it is the same
-        across subsets while :meth:`content_hash` is not. It is stored on every archive row as
-        ``prompt_fields_id``, and is what the δ ruler keys its arms on
-        (``intelligence/hard_sample_archive.py``); it is not the archive's RUN key.
-        A ``None`` schema would hash the raw params under this same name — so it is required."""
+        """Over the SCHEMA-RESOLVED node configs alone: the same across subsets, as :meth:`content_hash` is not."""
         return pipeline_schema.sp_hash(self.pipeline_params)
 
     def content_hash(self, dataset: list[Any]) -> str:
-        """The measurement-archive RUN key — rendered prompt + dataset + the overlay-MERGED
-        ``pipeline_params``, so two points differing only by model share no measurements, and one
-        prompt scored on N subsets is N runs."""
+        """Names a campaign's root (``runner/campaign_ids.py``); no measurement is filed under it."""
         return content_hash(
             self.render(),
             dataset,
@@ -112,13 +91,7 @@ class JobSearchPoint(StrictModel):
         )
 
 
-# ---------------------------------------------------------------------------
-# TaskDecomposition — structured domain context for optimizer LLM calls
-# ---------------------------------------------------------------------------
-
-# The FRAMING half: operator-authored, never measured, budgeted at mint. The whole
-# `TaskDecomposition` is frozen for the run — no layer's wire schema has a field of it. Why:
-# `application/optimizers/potter/CLAUDE.md` § L2.
+# Operator-authored, never measured, frozen for the run: `application/optimizers/potter/CLAUDE.md` § L2.
 FRAMING_FIELDS: Annotated[frozenset[str], shapes_optimizer_prompt] = frozenset(
     {
         "domain",
@@ -129,18 +102,10 @@ FRAMING_FIELDS: Annotated[frozenset[str], shapes_optimizer_prompt] = frozenset(
     }
 )
 
-# Per-field authoring budget, enforced ONCE at mint (`TaskDecomposition.check_budget`) and
-# never at render. That is the whole point: a budget a renderer enforces is a budget the
-# author never sees until their words are already gone, and the author here is a human who
-# can simply edit the file. Sized off what real framing needs — the widest field authored
-# across the shipped datasets is ~420 chars, and 600 leaves room to say something without
-# inviting a page.
+# Enforced ONCE at mint, never at render: a render-time clip loses words the author never sees go.
 FRAMING_VALUE_BUDGET: Annotated[int, shapes_optimizer_prompt] = 600
 
-# ...and a TOTAL, because five legal fields are not a legal framing: the per-field budget
-# alone permits 3000 chars, which renders VERBATIM into every optimizer prompt. It has held
-# only because a human wrote the shipped ones (640 / 1003 / 1186); the check-in decomposition
-# writes these five with an LLM, which is where a page arrives.
+# The per-field budget alone permits five full fields, rendered VERBATIM into every optimizer prompt.
 FRAMING_TOTAL_BUDGET: Annotated[int, shapes_optimizer_prompt] = 1500
 
 
@@ -177,8 +142,6 @@ class TaskDecomposition:
         return cls(**coerced)
 
     def check_budget(self, *, source: str) -> None:
-        """Both bounds, because the per-field one cannot see the sum. Called once at the run-start
-        seam, so an over-budget field stops the campaign instead of clipping every render."""
         sizes = {k: len(v) for k, v in self.to_dict().items() if k in FRAMING_FIELDS}
         over = [(k, n) for k, n in sizes.items() if n > FRAMING_VALUE_BUDGET]
         total = sum(sizes.values())

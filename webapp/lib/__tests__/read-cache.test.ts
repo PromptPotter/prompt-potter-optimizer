@@ -1,9 +1,13 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  READ_BEAT_MS,
   READ_CACHE_MAX_KEYS,
   cachedRead,
   clearReadCache,
+  invalidateReads,
+  readName,
   readThrough,
+  watchRead,
   type ReadLoad,
 } from "@/lib/read-cache";
 
@@ -63,7 +67,6 @@ describe("read cache", () => {
     void readThrough("gone", load, only.signal).catch(() => {});
     only.abort();
     expect(flown[1]!.aborted).toBe(true);
-    // The abandoned flight is not joined: the next reader starts its own.
     void readThrough("gone", load, live());
     expect(calls).toBe(3);
   });
@@ -92,5 +95,96 @@ describe("read cache", () => {
     land();
     expect(await pending).toBe("theirs");
     expect(cachedRead("k")).toBeNull();
+  });
+});
+
+describe("read clock", () => {
+  const mounted: (() => void)[] = [];
+  const watch = (id: string, intervalMs: number | null): { fired: number } => {
+    const seen = { fired: 0 };
+    mounted.push(watchRead({ id, intervalMs, fire: () => (seen.fired += 1) }));
+    return seen;
+  };
+
+  beforeEach(() => {
+    clearReadCache();
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+  });
+  afterEach(() => {
+    for (const unwatch of mounted.splice(0)) unwatch();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it("names a read by its id's first segment", () => {
+    expect(readName("quota\x1f/api/v1/auth/quota-status")).toBe("quota");
+  });
+
+  it("fires a watch on wall-clock multiples of its interval, whenever it mounted", () => {
+    const early = watch("a\x1fu", 2 * READ_BEAT_MS);
+    vi.advanceTimersByTime(500);
+    const late = watch("b\x1fu", 2 * READ_BEAT_MS);
+    vi.advanceTimersByTime(1000);
+    expect([early.fired, late.fired]).toEqual([0, 0]);
+    // 12 000 is the next multiple for both, so they land on one beat.
+    vi.advanceTimersByTime(500);
+    expect([early.fired, late.fired]).toEqual([1, 1]);
+    vi.advanceTimersByTime(2 * READ_BEAT_MS);
+    expect([early.fired, late.fired]).toEqual([2, 2]);
+  });
+
+  it("never fires a one-shot on the beat, and stops beating once no polled watch is mounted", () => {
+    const once = watch("a\x1fu", null);
+    const polled = watch("b\x1fu", READ_BEAT_MS);
+    vi.advanceTimersByTime(3 * READ_BEAT_MS);
+    expect([once.fired, polled.fired]).toEqual([0, 3]);
+    for (const unwatch of mounted.splice(0)) unwatch();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("unnamed, re-asks polled reads and only the one-shots a validator makes free", async () => {
+    await readThrough("held\x1fu", body(1, 'W/"a"'), live());
+    await readThrough("bare\x1fu", body(1), live());
+    const polled = watch("polled\x1fu", 5 * READ_BEAT_MS);
+    const held = watch("held\x1fu", null);
+    const bare = watch("bare\x1fu", null);
+    invalidateReads();
+    expect([polled.fired, held.fired, bare.fired]).toEqual([1, 1, 0]);
+  });
+
+  it("named, re-asks every read of that endpoint and no other", () => {
+    const bare = watch("quota\x1fu", null);
+    const sibling = watch("quota\x1fv", 5 * READ_BEAT_MS);
+    const other = watch("cycles\x1fu", 5 * READ_BEAT_MS);
+    invalidateReads("quota");
+    expect([bare.fired, sibling.fired, other.fired]).toEqual([1, 1, 0]);
+  });
+
+  it("stops the beat under a hidden tab, ignores invalidation there, and re-asks on return", () => {
+    const page = { hidden: false, onVisibility: () => {} };
+    vi.stubGlobal("document", {
+      get hidden() {
+        return page.hidden;
+      },
+      addEventListener: (_: string, handler: () => void) => (page.onVisibility = handler),
+    });
+    vi.stubGlobal("window", { addEventListener: () => {} });
+    const polled = watch("a\x1fu", READ_BEAT_MS);
+    vi.advanceTimersByTime(READ_BEAT_MS);
+    expect(polled.fired).toBe(1);
+
+    page.hidden = true;
+    page.onVisibility();
+    expect(vi.getTimerCount()).toBe(0);
+    invalidateReads();
+    vi.advanceTimersByTime(5 * READ_BEAT_MS);
+    expect(polled.fired).toBe(1);
+
+    page.hidden = false;
+    page.onVisibility();
+    expect(polled.fired).toBe(2);
+    vi.advanceTimersByTime(READ_BEAT_MS);
+    expect(polled.fired).toBe(3);
   });
 });

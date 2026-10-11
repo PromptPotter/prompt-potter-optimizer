@@ -1,6 +1,3 @@
-"""Pre-flight check-in lines for ``cmd_new``. Display-only — every fact echoed here is already on disk, so this is
-a progress echo and never a source of truth."""
-
 from __future__ import annotations
 
 import logging

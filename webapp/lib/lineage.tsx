@@ -1,37 +1,21 @@
 "use client";
-// The served genealogy: one keyed store over `/tree`, `course -> candidate -> course` at any depth.
-// Reach a node through `lineage-candidates.ts::indexLineage`, never a bare cycle_id (inner ids
-// collide across sandboxes) nor a label. RUNS are served on the live node only, so an id-keyed
-// lookup must skip `superseded_by` rather than rely on iteration order.
+// RUNS are served on the live node only: an id-keyed lookup skips `superseded_by`.
 
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
-import { failureKind, fetchLineageTree } from "@/lib/api";
+import { createContext, useContext, useMemo, useState } from "react";
+import { treeRead, type TreeMask, type TreeMoment } from "@/lib/api";
 import { ABORT_LENS_LABELS } from "@/lib/api/types.generated";
-import type { LineageNode } from "@/lib/api/types";
-import { reportIncident } from "@/lib/diagnostics";
+import type { CourseNode } from "@/lib/api/types";
+import { phaseIs } from "@/lib/run-phase";
 import { indexLineage, type LineageIndex } from "@/lib/derivations";
-import { createRegistry, type TreeFetchOpts } from "@/lib/lineage-registry";
 import { lensOf, useScoringMask } from "@/lib/scoring-mask";
 import { useScoringMaskSeed } from "@/lib/hooks/useServedCriterion";
-import { useAuthGate } from "@/lib/auth-context";
 import { useDebounced } from "@/lib/hooks/useDebounced";
-import { usePoll } from "@/lib/hooks/usePoll";
+import { shownData, useRead } from "@/lib/hooks/useRead";
 import { encodeCyclePath, rootCycleId, type CyclePath } from "@/lib/ids";
-import { useRevalidation } from "@/lib/revalidate";
+import { useRegistry } from "@/lib/registry";
 import { useSelection } from "@/lib/SelectionContext";
 import { useWorkspace } from "@/lib/workspace";
 
-// The server validator is the subtree's ledger mtime, which bumps the moment a candidate is
-// minted, so no proxy for "the dashboard moved" is needed.
 const POLL_MS = 5000;
 
 const LENS_LABELS: Record<string, string> = {
@@ -42,16 +26,15 @@ const LENS_LABELS: Record<string, string> = {
 };
 
 export interface CampaignTree {
-  root: LineageNode | null;
+  root: CourseNode | null;
   loaded: boolean;
-  // A course whose tree could not be read is not a course that never ran.
   failed: boolean;
 }
 
 const EMPTY: CampaignTree = { root: null, loaded: false, failed: false };
 
 export interface ViewedLineage {
-  tree: LineageNode | null;
+  tree: CourseNode | null;
   index: LineageIndex;
   // "" (off), "score:<formula>", or "abort:<variant>"; the open scoring-mask panel overrides it.
   lens: string;
@@ -61,23 +44,36 @@ export interface ViewedLineage {
   scoringMaskActive: boolean;
 }
 
-interface LineageData {
-  entries: Map<string, CampaignTree>;
-  // A key with no subscribers is not polled, so a dead campaign's loop cannot outlive its row.
-  subscribe: (key: string, path: CyclePath, opts?: TreeFetchOpts) => () => void;
-  viewedAddr: string | null;
-  viewedKey: string | null;
+interface TreeAddressing {
+  viewedAddress: string | null;
+  viewedMask: TreeMask | null;
+  viewedMoment: TreeMoment | null;
+  // Campaigns whose every `/cycles` row is terminal: read once, re-asked only by an invalidation.
+  resting: ReadonlySet<string>;
 }
 
-// Two contexts: `entries` changes identity whenever ANY subscribed tree lands, and the viewed-only
-// surfaces must not re-render for a sidebar row's refetch.
-const LineageDataContext = createContext<LineageData | null>(null);
+// Two contexts: a sidebar row naming another campaign's read must not re-render per viewed-tree landing.
+const TreeAddressingContext = createContext<TreeAddressing | null>(null);
 const ViewedLineageContext = createContext<ViewedLineage | null>(null);
 
-// One function, so a subscriber and the fetcher can never disagree about what they named.
-function treeKey(path: CyclePath, lens: string | null, samples: string): string {
-  const addr = encodeCyclePath(path);
-  return lens || samples ? `${addr}|${lens ?? ""}|${samples}` : addr;
+function useTree(
+  path: CyclePath | null,
+  mask: TreeMask | null,
+  moment: TreeMoment | null,
+  resting: ReadonlySet<string>,
+): CampaignTree {
+  const rests = path !== null && resting.has(path[0]?.campaignId ?? "");
+  // No `onGone`: the dashboard read owns that verdict, and this reader may be another campaign's row.
+  const read = useRead(path ? treeRead(path, mask, moment) : null, {
+    auth: true,
+    intervalMs: rests ? undefined : POLL_MS,
+  });
+  const root = shownData(read);
+  const failed = read.status === "failed" && root === null;
+  return useMemo(
+    () => (root === null && !failed ? EMPTY : { root, loaded: root !== null, failed }),
+    [root, failed],
+  );
 }
 
 export function LineageProvider({
@@ -89,9 +85,6 @@ export function LineageProvider({
   cycleId: string | null;
   children: React.ReactNode;
 }) {
-  const { authed, onAuthError } = useAuthGate();
-  const reval = useRevalidation();
-
   const [lens, setLens] = useState<string>("");
   // This provider lives at the shell root, so a lens would otherwise leak across campaigns.
   const [prevCampaign, setPrevCampaign] = useState(campaignId);
@@ -100,140 +93,52 @@ export function LineageProvider({
     setLens("");
   }
 
-  // Seeded here, where the mask becomes a fetch key: seeded later, a cycle's first tree goes out
-  // unmasked.
+  // Seeded here: any later, and a cycle's first tree goes out unmasked.
   useScoringMaskSeed();
   const { open: maskOpen, mask } = useScoringMask();
   const { sampleSet } = useSelection();
-  const samplesParam = useMemo(
+  const samples = useMemo(
     () => (sampleSet && sampleSet.length > 0 ? sampleSet : null),
     [sampleSet],
   );
-  const samplesKey = samplesParam ? samplesParam.join(",") : "";
   const liveMaskLens = useMemo(() => (maskOpen ? lensOf(mask) : null), [maskOpen, mask]);
   const maskLens = useDebounced(liveMaskLens, 250);
-  const lensParam = useMemo(() => {
-    if (maskOpen) return maskLens;
-    return lens || null;
-  }, [maskOpen, maskLens, lens]);
-  const maskLabel = maskOpen
-    ? "Scoring mask"
-    : samplesParam
-      ? "Sample set"
-      : (LENS_LABELS[lens] ?? "");
+  const lensParam = maskOpen ? maskLens : lens || null;
+  const maskLabel = maskOpen ? "Scoring mask" : samples ? "Sample set" : (LENS_LABELS[lens] ?? "");
 
-  // Keyed on the derived root id, not `cycleId`: a same-campaign cycle switch must keep this
-  // array's identity, or the self-subscribe below re-subscribes and re-asks for a tree it holds.
+  // Keyed on the derived root id, not `cycleId`: a same-campaign cycle switch keeps one read.
   const rootId = cycleId ? rootCycleId(cycleId) : null;
   const viewedPath = useMemo<CyclePath | null>(() => {
     if (!campaignId || !rootId) return null;
     return [{ campaignId, cycleId: rootId }];
   }, [campaignId, rootId]);
-  const viewedAddr = viewedPath ? encodeCyclePath(viewedPath) : null;
-  const viewedKey = viewedPath ? treeKey(viewedPath, lensParam, samplesKey) : null;
-
-  const [entries, setEntries] = useState<Map<string, CampaignTree>>(() => new Map());
-
-  // External state because its writers are mount/unmount effects (`lib/lineage-registry.ts`).
-  // The registry bounds what it retains; a key it evicts, or a gone one, drops its body here.
-  const [registry] = useState(() =>
-    createRegistry((key) => {
-      setEntries((prev) => {
-        if (!prev.has(key)) return prev;
-        const next = new Map(prev);
-        next.delete(key);
-        return next;
-      });
-    }),
-  );
-  const subsVersion = useSyncExternalStore(
-    registry.onVersionChange,
-    registry.version,
-    registry.version,
-  );
-  const subscribe = registry.subscribe;
-
-  // Self-subscribed: this provider owns the masks, so no consumer can name the viewed key.
-  useEffect(() => {
-    if (!viewedKey || !viewedPath) return;
-    return subscribe(viewedKey, viewedPath, { lens: lensParam, samples: samplesParam });
-  }, [viewedKey, viewedPath, subscribe, lensParam, samplesParam]);
-
-  // What to fetch is the key's own latched spec — the tick never infers it from whose key it is.
-  const tick = useCallback(
-    async (signal: AbortSignal, key: string) => {
-      const spec = registry.spec(key);
-      if (!spec) return;
-      const prior = registry.etag(key);
-      try {
-        const res = await fetchLineageTree(spec.path, spec.opts, prior, signal);
-        if (signal.aborted) return;
-        // A key unsubscribed mid-flight must not be resurrected by its own response.
-        if (!registry.spec(key)) return;
-        if (res.kind !== "ok") return;
-        registry.setEtag(key, res.validator);
-        setEntries((prev) => {
-          const next = new Map(prev);
-          next.set(key, { root: res.data, loaded: true, failed: false });
-          return next;
-        });
-      } catch (e) {
-        if (signal.aborted) return;
-        onAuthError(e);
-        reportIncident(e, { surface: "lineage", address: key });
-        // Retire the key, but never move the VIEW: the dashboard read owns that verdict, and a
-        // subscriber here may be another campaign's sidebar row.
-        if (failureKind(e) === "gone") registry.markGone(key);
-        // Or the next attempt would 304 into a tree it never received.
-        registry.setEtag(key, null);
-        setEntries((prev) => {
-          if (!registry.spec(key)) return prev;
-          // Keep a last-good body; report FAILED only when there is nothing to keep.
-          if (prev.get(key)?.loaded) return prev;
-          const next = new Map(prev);
-          next.set(key, { ...EMPTY, failed: true });
-          return next;
-        });
-      }
-    },
-    // Mask changes reach the poll as a re-keyed subscription, never through this identity.
-    [registry, onAuthError],
+  const viewedAddress = viewedPath ? encodeCyclePath(viewedPath) : null;
+  const viewedMask = useMemo<TreeMask | null>(
+    () => (lensParam || samples ? { lens: lensParam, samples } : null),
+    [lensParam, samples],
   );
 
-  // A campaign whose every `/cycles` row is terminal has no writer left, so its tree is read once
-  // and not polled. A command can still change one, so a revalidation bump asks for every key.
-  const { cycles } = useWorkspace();
+  const { cycles } = useRegistry();
   const resting = useMemo(() => {
     const all = new Set<string>();
     const live = new Set<string>();
     for (const c of cycles) {
       all.add(c.campaign_id);
-      if (c.run_phase !== "terminal") live.add(c.campaign_id);
+      if (!phaseIs(c.run_phase, "settled")) live.add(c.campaign_id);
     }
     return new Set([...all].filter((id) => !live.has(id)));
   }, [cycles]);
-  const wakeRef = useRef(false);
-  useEffect(() => {
-    wakeRef.current = true;
-  }, [reval]);
-  const pollKeys = (): string[] => {
-    const wake = wakeRef.current;
-    wakeRef.current = false;
-    return registry.liveKeys(wake ? undefined : (path) => resting.has(path[0]?.campaignId ?? ""));
-  };
 
-  usePoll(tick, {
-    intervalMs: POLL_MS,
-    keys: pollKeys,
-    tickOnFocus: true,
-    enabled: authed,
-    revalidateOn: subsVersion + reval,
-  });
+  // The offset is the viewed LEAF's, which the root-keyed tree is not addressed by.
+  const { at, viewedPath: leafPath } = useWorkspace();
+  const viewedMoment = useMemo<TreeMoment | null>(
+    () => (at !== null && leafPath !== null ? { at, cycle: leafPath } : null),
+    [at, leafPath],
+  );
 
-  const viewedTree = viewedKey ? (entries.get(viewedKey)?.root ?? null) : null;
+  const viewedTree = useTree(viewedPath, viewedMask, viewedMoment, resting).root;
   const index = useMemo(() => indexLineage(viewedTree), [viewedTree]);
 
-  // Only when the served tree carries a divergence — not merely because a lens is requested.
   const maskActive = useMemo(() => {
     for (const { candidates } of index.values()) {
       if (candidates.some((c) => c.divergence !== null || c.divergent)) return true;
@@ -254,22 +159,16 @@ export function LineageProvider({
     [viewedTree, index, lens, maskActive, maskLabel, maskOpen],
   );
 
-  const data = useMemo<LineageData>(
-    () => ({ entries, subscribe, viewedAddr, viewedKey }),
-    [entries, subscribe, viewedAddr, viewedKey],
+  const addressing = useMemo<TreeAddressing>(
+    () => ({ viewedAddress, viewedMask, viewedMoment, resting }),
+    [viewedAddress, viewedMask, viewedMoment, resting],
   );
 
   return (
-    <LineageDataContext.Provider value={data}>
+    <TreeAddressingContext.Provider value={addressing}>
       <ViewedLineageContext.Provider value={viewed}>{children}</ViewedLineageContext.Provider>
-    </LineageDataContext.Provider>
+    </TreeAddressingContext.Provider>
   );
-}
-
-function useLineageData(): LineageData {
-  const ctx = useContext(LineageDataContext);
-  if (ctx === null) throw new Error("useLineage* must be used within a LineageProvider");
-  return ctx;
 }
 
 export function useViewedLineage(): ViewedLineage {
@@ -279,26 +178,18 @@ export function useViewedLineage(): ViewedLineage {
 }
 
 export function useLineageTree(path: CyclePath, enabled: boolean): CampaignTree {
-  const { entries, subscribe, viewedAddr, viewedKey } = useLineageData();
-  const addr = encodeCyclePath(path);
-  // The VIEWED campaign rides its mask-carrying entry: a masked body is a strict superset.
-  const key = enabled ? (addr === viewedAddr && viewedKey ? viewedKey : addr) : null;
-
-  useEffect(() => {
-    if (key === null) return;
-    // Keyed off `key`, not the caller's `path`, which is rebuilt every render.
-    return subscribe(key, path);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, subscribe]);
-
-  if (key === null) return EMPTY;
-  const entry = entries.get(key);
-  if (!entry) return EMPTY;
-  return { root: entry.root, loaded: entry.loaded, failed: entry.failed };
+  const ctx = useContext(TreeAddressingContext);
+  if (ctx === null) throw new Error("useLineage* must be used within a LineageProvider");
+  const viewed = encodeCyclePath(path) === ctx.viewedAddress;
+  return useTree(
+    enabled ? path : null,
+    viewed ? ctx.viewedMask : null,
+    viewed ? ctx.viewedMoment : null,
+    ctx.resting,
+  );
 }
 
-// The marker rides the round's WINNER (the candidate the lens would have replaced); every
-// candidate of a counterfactual round carries `divergent`.
+// served: `divergence` rides the round's WINNER; `divergent` every candidate of a counterfactual round.
 export function divergenceRoundsFor(
   index: LineageIndex,
   path: CyclePath | null,
@@ -309,9 +200,9 @@ export function divergenceRoundsFor(
   // Addressed, not scanned: inner cycle ids repeat across sandboxes.
   const course = index.get(encodeCyclePath(path))?.course;
   for (const cand of course?.children ?? []) {
-    if (cand.round == null) continue;
-    if (cand.divergence) points.add(cand.round);
-    if (cand.divergent) subtree.add(cand.round);
+    const { round } = cand.reading.arm;
+    if (cand.divergence) points.add(round);
+    if (cand.divergent) subtree.add(round);
   }
   return { points, subtree };
 }

@@ -1,13 +1,10 @@
-/* Shares the `l4-*` table/lede vocabulary (imported just above) rather than restating it. */
-
 .cmp-main {
   display: flex;
   flex-direction: column;
   gap: var(--space-16);
-  min-width: 0; /* a chart must be allowed to shrink, or it forces the page wide */
+  min-width: 0;
 }
 
-/* Per card: one channel is usually the one walked, and a board-wide switch grows every card to serve it. */
 .cmp-channel-lineage {
   margin: var(--space-8) 0 0;
 }
@@ -40,10 +37,6 @@
   font-size: var(--text-sm);
   color: var(--color-text-secondary);
 }
-/* One item per line, full width: the lead numbers line up down the list, and an opened item's
-   drill-in gets the whole row. */
-/* Side by side wherever two fit, so two searchpoints read against each other line for line; one
-   column on a narrow screen. Tops align, since one card can be open while its neighbour is not. */
 .cmp-channels {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 30rem), 1fr));
@@ -63,7 +56,6 @@
   border-radius: 8px;
   background: var(--color-background-secondary);
 }
-/* Every item shares this template, so its columns align down the list without a table. */
 .cmp-channel-row {
   display: grid;
   grid-template-columns: minmax(0, 16rem) minmax(0, 12rem) minmax(0, 12rem) minmax(0, 1fr) auto;
@@ -105,7 +97,6 @@
   grid-row: 1;
   color: var(--color-text-secondary);
 }
-/* Level with the metrics' labels: the cost is read against the headline beside it. */
 .cmp-channel-cost {
   grid-column: 4;
   grid-row: 1;
@@ -149,8 +140,6 @@
   padding-top: var(--space-8);
   border-top: 1px solid var(--color-border);
 }
-/* A transposed table: each campaign fills one grid column top to bottom (`display: contents`), so a
-   row's cells line up across campaigns and the label column names them once. */
 .cmp-cols {
   display: grid;
   grid-auto-flow: column;
@@ -179,7 +168,6 @@
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
-/* Sticky, so the names stay beside the values while the columns scroll. */
 .cmp-row-label {
   position: sticky;
   left: 0;
@@ -255,7 +243,6 @@
 .cmp-line-step.is-held .cmp-line-change {
   color: var(--color-text-secondary);
 }
-/* The main line's key, taught on hover. */
 .cmp-line-key {
   max-width: min(32rem, 90vw);
   margin: 0;
@@ -316,8 +303,6 @@
 .cmp-channel-means dd {
   color: var(--color-text-primary);
 }
-/* Drawn at `DENSE`, yet it can outgrow the card, so the box scrolls both axes — `overflow:hidden`
-   would delete the part of the tree the operator opened it to reach. */
 .cmp-channel-map {
   max-height: 26rem;
   overflow: auto;
@@ -332,7 +317,6 @@
   margin: var(--space-8) 0 0;
   font-size: var(--text-xs);
 }
-/* Sticky: the node reached by scrolling right is never the one beside the buttons. */
 .cmp-armed {
   position: sticky;
   bottom: 0;
@@ -355,7 +339,6 @@
   cursor: default;
 }
 
-/* Wide by construction: it scrolls inside its own box rather than forcing the page wide. */
 .cmp-cfg-wrap {
   overflow-x: auto;
 }
@@ -392,8 +375,7 @@
 .cmp-cfg-val {
   font-family: var(--font-mono);
   color: var(--color-text-secondary);
-  /* ONE line, the whole value on `title`. No line-clamp: a `-webkit-box` would take the restore
-     button with it. */
+  /* No line-clamp: a `-webkit-box` would take the restore button with it. */
   max-width: 22rem;
 }
 .cmp-cfg-differs .cmp-cfg-key,
@@ -409,8 +391,7 @@
   color: var(--color-text-secondary);
   font-family: var(--font-mono);
 }
-/* Controls OUTSIDE `<summary>`, a label that may hold neither a menu's markup nor its words in its
-   name. A flex row, never an overlay: an absolute control sits on the open drill-in. */
+/* A flex row, never an overlay: an absolute control sits on the open drill-in. */
 .cmp-channel-setup-row {
   display: flex;
   align-items: flex-start;
@@ -423,7 +404,6 @@
 .cmp-channel-setup-row > :not(.cmp-channel-setup) {
   flex: 0 0 auto;
 }
-/* No chrome until it holds a value the record does not — the one state worth ink. */
 .cmp-cfg-cell {
   display: flex;
   align-items: baseline;
@@ -457,7 +437,6 @@
   margin-left: var(--space-4);
   color: var(--color-new);
 }
-/* Nothing ran at the edited value, so the level is not a small number — it is no number. */
 .cmp-channel-unknown .cmp-metric-num {
   color: var(--color-text-secondary);
 }
@@ -556,7 +535,6 @@
   border-radius: 2px;
   flex: 0 0 auto;
 }
-/* Struck rather than hidden: its cells still pair where they overlap. */
 .cmp-tag {
   border: 1px solid var(--color-border);
   border-radius: 4px;
@@ -578,7 +556,6 @@
   color: var(--color-text-secondary);
 }
 
-/* Wide by construction: it scrolls inside its own box rather than forcing the page wide. */
 .cmp-coverage {
   overflow-x: auto;
   margin: var(--space-12) 0;
@@ -609,8 +586,7 @@
   background: var(--color-background-secondary);
 }
 
-/* The `ov-*` row from `l4.css`, borrowed whole minus its last-row emphasis: rows here are
-   campaigns in run order, and bolding the newest asserts a winner nothing measured. */
+/* Undoes `compare-evidence.css`'s last-row emphasis: rows here are campaigns in run order, not a winner. */
 .cmp-forest .ov-row:last-child .ov-cell-label,
 .cmp-forest .ov-row:last-child .ov-cell-val {
   font-weight: inherit;
@@ -637,14 +613,13 @@
   background: var(--color-background-secondary);
   color: var(--color-text-primary);
   font-family: var(--font-mono);
-  /* iOS focus-zoom is a constraint, not a rhythm value — the sanctioned raw-px exception. */
+  /* 16px literal: iOS focus-zoom, the sanctioned raw-px exception. */
   font-size: 16px;
 }
 .cmp-expr-bad {
   border-color: var(--color-danger);
 }
 
-/* Borrows `.l4-table` for the frame; only what a GRID needs beyond a list lives here. */
 .l4-factor-controls {
   display: flex;
   flex-wrap: wrap;
@@ -667,8 +642,6 @@
   font-family: var(--font-mono);
   font-size: var(--text-sm);
 }
-/* Intrinsic width plus the wrapper's scroll, never a percentage: that compresses the columns
-   until the level labels collide, and nothing overflows to say so. */
 .l4-factor-grid {
   min-width: max-content;
 }
@@ -677,8 +650,6 @@
   font-weight: 400;
   color: var(--color-text-secondary);
 }
-/* Set apart from the cells: the served marginal pools every subject at that level, and read as
-   a cell it passes for a measurement. */
 .l4-margin {
   background: var(--color-background-secondary);
   font-variant-numeric: tabular-nums;

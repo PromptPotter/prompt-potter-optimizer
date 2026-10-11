@@ -2,9 +2,6 @@
 import { Button, Chip, CommitInput, ValueList } from "@/components/ui";
 import { LockButton } from "./NodeConfigEditor";
 
-// A node's output schema as an editable tree, one row per field. Emits JSON Schema only — the
-// server's parser is the one validator.
-
 type Schema = Record<string, unknown>;
 type Fields = (readonly [string, Schema])[];
 // Keyed by dotted field path; a list's `items` adds no segment.
@@ -75,7 +72,6 @@ export function SchemaTreeEditor({
   ...lock
 }: Locks & {
   schema: Schema;
-  // The top-level field graded as the answer (`answer_field`).
   answer?: string;
   onChange: (schema: Schema, answer?: string) => void;
 }) {
@@ -114,7 +110,6 @@ function FieldList({
   obj: Schema;
   prefix: string;
   answer?: string;
-  // Top level only: `answer_field` names a top-level field.
   onAnswer?: (field: string) => void;
   onChange: (obj: Schema, answer?: string) => void;
 }) {

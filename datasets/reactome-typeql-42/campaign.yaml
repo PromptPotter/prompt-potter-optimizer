@@ -21,4 +21,4 @@ campaign_config:
   optimization:
     max_rounds: null
     degradation_threshold: 0.4
-    spend_budget_usd: 0.13
+    ceiling: {usd: 0.13}

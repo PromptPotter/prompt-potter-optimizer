@@ -1,43 +1,40 @@
 "use client";
+import { postPauseCycle } from "@/lib/api/commands";
 import { cx } from "@/lib/cx";
+import { useCommand } from "@/lib/hooks/useCommand";
+import { pathRoot } from "@/lib/ids";
 import { connectorReachability, criticalAlert } from "@/lib/derivations";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { useMachineStatus } from "@/lib/hooks/useMachineStatus";
 import { readyData } from "@/lib/hooks/useRead";
 import { useCycleStream, type StatusKind } from "@/lib/poll";
+import { useActivePointer, useRegistry } from "@/lib/registry";
 import { useWorkspace } from "@/lib/workspace";
 
-// The sticky failure bar on every tab, presenting the pure `criticalAlert` verdict. It reads the
-// dashboard itself, so a tick re-renders the bar and not the shell around it.
-
-interface Props {
-  onOpenFiles: () => void;
-  // The run never auto-pauses — this is the operator pulling the trigger.
-  onPauseCampaign?: () => void;
-}
-
-export function CriticalAlertBanner({ onOpenFiles, onPauseCampaign }: Props) {
+export function CriticalAlertBanner() {
   const { dash, status, statusText, statusHint } = useCycleStream();
-  const { cycleId, cycles, cyclesLoaded, activeError, cyclesError, goneAddress } = useWorkspace();
+  const { viewedPath, cycleId, goneAddress, openView } = useWorkspace();
+  const { cycles, cyclesLoaded, failure: registryFailure } = useRegistry();
+  const { failure: pointerFailure } = useActivePointer();
+  const pause = useCommand<"pause-cycle">("critical-alert");
 
   const noUnit = !cycleId;
-  const netDown = Boolean(activeError || cyclesError);
-  // Its own fact, not a status, and it silences the bar: the poll rests at `offline`, which would
-  // paint a fresh account as an outage. A down server also reports zero cycles, hence `!netDown`.
+  const netFailure = pointerFailure ?? registryFailure;
+  const netDown = netFailure !== null;
+  // `!netDown`: a down server also reports zero cycles; a fresh account must not read as an outage.
   const emptyWorkspace = noUnit && cyclesLoaded && !netDown && cycles.length === 0;
   let bannerStatus: StatusKind = status;
   let bannerText = statusText;
   let bannerHint = statusHint;
   if (goneAddress) {
-    // The WORKSPACE's verdict wins outright: the dashboard has already reset onto another
-    // address and would replace this notice within a frame.
+    // The workspace's verdict wins: the dashboard has already reset onto another address.
     bannerStatus = "gone";
     bannerText = "This campaign no longer exists";
     bannerHint = "It was deleted, or its store was reset — returning to the active run.";
   } else if (noUnit && netDown) {
     bannerStatus = "offline";
     bannerText = "Server unreachable — retrying";
-    bannerHint = activeError ?? cyclesError ?? "";
+    bannerHint = netFailure?.message ?? "";
   }
 
   const { health, connector } = useConnector();
@@ -52,12 +49,7 @@ export function CriticalAlertBanner({ onOpenFiles, onPauseCampaign }: Props) {
     connectorDown,
     connectorName: connector,
     connectorDetail: health?.detail ?? null,
-    // No tick landed yet: say nothing about the machine rather than call it free or full.
-    machineBusy: machine !== null && machine.busy,
-    machineBusyHolder: machine?.holder?.user ?? null,
-    machineBusySince: machine?.holder?.started_at ?? null,
-    // The served queue is ordered and scoped to this caller: the first entry IS their place.
-    queuePosition: machine?.queue[0]?.position ?? null,
+    machineNotice: machine?.notice ?? null,
   });
   if (!alert) return null;
 
@@ -77,22 +69,25 @@ export function CriticalAlertBanner({ onOpenFiles, onPauseCampaign }: Props) {
         <strong className="critical-alert-title">{alert.title}</strong>
         {alert.detail ? <span className="critical-alert-detail">{alert.detail}</span> : null}
       </span>
-      {alert.action === "pause" && onPauseCampaign ? (
+      {alert.action === "pause" && viewedPath ? (
         <button
           type="button"
           className="critical-alert-jump critical-alert-stop"
-          onClick={onPauseCampaign}
+          // The CAMPAIGN is the root hop: an inner run stops with the outer run that spawned it.
+          onClick={() =>
+            void pause.run("pause-cycle", () => postPauseCycle([pathRoot(viewedPath)]))
+          }
           aria-label="Pause the campaign"
         >
           Pause campaign
         </button>
       ) : null}
-      {/* No jump on `info`: the address stopped existing, so there are no files to open (I3). */}
+      {/* No jump on `info`: the address is gone, so there are no files to open. */}
       {info ? null : (
         <button
           type="button"
           className="critical-alert-jump"
-          onClick={onOpenFiles}
+          onClick={() => openView("files")}
           aria-label="Open files pane"
         >
           Files →

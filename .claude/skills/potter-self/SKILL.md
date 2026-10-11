@@ -38,13 +38,13 @@ Cycle root: `.promptpotter/projects/{tenant}/campaigns/{campaign_id}/cycles/{cyc
 | Step | File | What you extract |
 |---|---|---|
 | 1 | `promptpotter/assets/optimizers/potter/pipeline.yaml` → `resolved_prompts["l1_generate/1"]` (outer: the `*_self_optimizing/1` families beside it, picked by `promptpotter-self`'s `optimization.nodes`) | The current L1 optimizer prompt template — the thing you will edit |
-| 2 | `{cycle_dir}/rounds/round_NNNN.json` | Per-round audit: parsed candidates, per-candidate scores, `overlap`, `separable`, critique text. **No rendered prompt** — see row 4 |
+| 2 | `{cycle_dir}/rounds/round_NNNN.json` | Per-round audit: parsed candidates, per-candidate scores, `overlap` (its `advance`), critique text. **No rendered prompt** — see row 4 |
 | 3 | `{cycle_dir}/.runtime/streams/round_NNNN_pobb.jsonl` | PoBB elimination stream — did variants stratify or collapse? Which got eliminated first? |
 | 4 | `{cycle_dir}/.runtime/ledger.jsonl` | The cycle event log — escalation firings, decisions, spend. There is no `signals.jsonl`. **The ONLY place the rendered optimizer prompt survives**: each `payload_kind: "llm_call"` record carries `template_fields` + `variables` (render one against the other), and the `llm_call_start` beside it carries `prompt_chars`, `injection_chars`, `injection_dropped` and `injection_silent` — the panel-by-panel breakdown of what the node was actually handed. |
 | 5 | `{cycle_dir}/dashboard.json` | Round-by-round composite trajectory + recent rules |
 | 6 | `{cycle_dir}/prompts/{node}.yaml` | Current `PromptTemplate` for each pipeline node — the *target* of L1's mutations (read-only here) |
 
-Reads happen by opening files; `evidence` is the one read VERB, because a comparison ACROSS subjects is in no single file. The file tree is the dashboard.
+Reads happen by opening files; the read VERBS are the three whose reading is in no file — `evidence` (a comparison ACROSS subjects), `cycles` (run state) and `machine-status` (occupancy and the queue). The file tree is the dashboard.
 
 ## Live-run supervision
 
@@ -66,7 +66,7 @@ Reads happen by opening files; `evidence` is the one read VERB, because a compar
 4. **`l2_context` / `l3_plan` when fired** — their behaviour checks (`validators/l2_behavior.py`, `l3_output.py` — read the registry there), whether the `l1_layout` / `l1_overrides` move is evidence-anchored, plan text sane and within its render cap.
 5. **Spot-check ≥1 inner campaign per outer sample batch** — the same four reads one level down, under `.inner/<key>/…/campaigns/`.
 
-**STOP-AND-DIAGNOSE, not keep-watching:** `raw_chars: 0` / an empty candidate list · an outer sample returning in ~0.0s (stale-cache reuse) · off-enum grounding fields · any optimizer call > 2 min · a headline Δ that disagrees with `reference_*` / `improved`.
+**STOP-AND-DIAGNOSE, not keep-watching:** `raw_chars: 0` / an empty candidate list · an outer sample returning in ~0.0s (stale-cache reuse) · off-enum grounding fields · any optimizer call > 2 min · a headline Δ that disagrees with `vs_reference` / `improved`.
 
 A quiet outer round is normal — it is awaiting a multi-minute inner campaign, and the cycle heartbeats its own ledger ("inner rX/Y · best Z%") while it waits. General hang triage: [`docs/operations/persistence-and-state.md`](../../../docs/operations/persistence-and-state.md) § Diagnosing a live or stuck run.
 
@@ -74,9 +74,9 @@ A quiet outer round is normal — it is awaiting a multi-minute inner campaign, 
 
 Read this before proposing any new run: an edit inside the inner-origin fingerprint voids every banked outer cell.
 
-- **`connectors/promptpotter.py::_identity_config` is the fingerprint's membership — read it, never recall it.** Inside it: an inner optimizer node's prompt body, resolved schema or config, `NODE_LAYOUTS`, dispatch and panel prose, the estimator's source, the inner benchmark's `pipeline.yaml` + `campaign.yaml`. An edit there is a corpus reset, so batch those and re-measure once, deliberately. An edited `inner_tasks.yaml` seat voids only itself (each seat is its own sample's `source_pin`).
+- **`application/runner/inner/connector.py::_identity_config` is the fingerprint's membership — read it, never recall it.** Inside it: an inner optimizer node's prompt body, resolved schema or config, `NODE_LAYOUTS`, dispatch and panel prose, the estimator's source, the inner benchmark's `pipeline.yaml` + `campaign.yaml`. An edit there is a corpus reset, so batch those and re-measure once, deliberately. An edited `inner_tasks.yaml` seat voids only itself (each seat is its own sample's `source_pin`).
 - **Outside it, the `*_self_optimizing` prompt families in potter's manifest (`promptpotter/assets/optimizers/potter/pipeline.yaml`) are the whole L4 edit surface and cost nothing banked**, so refine them as often as you like. An edit there still trips the RESUME divergence gate, a different mechanism: it costs the cycle (`new`, never `resume`) and keeps the archive.
-- **Count the fingerprints before trusting any cross-campaign number.** Campaigns carrying different `inner_origin` values have never replayed each other's cells, so a spread between them is the instrument moving and not a noise measurement — the same reading applies to the run-order confound `evidence` reports. The mint says how many prior campaigns a novel instrument matches before the spend (`jobs/mint.py::_warn_on_novel_instrument`); read that line.
+- **Count the fingerprints before trusting any cross-campaign number.** Campaigns carrying different `inner_origin` values have never replayed each other's cells, so a spread between them is the instrument moving and not a noise measurement — the same reading applies to the run-order confound `evidence` reports. Run init's preflight says how many prior campaigns a novel instrument matches (`application/preflight.py::_check_instrument_replays`, an INIT warning in the cycle's `readout.log`); read that line.
 
 ## What the outer panel can and cannot tell you
 
@@ -174,7 +174,7 @@ Symptom: identical `pipeline_overlay`; only prompt text varies cosmetically; com
 
 #### Pipeline-params overreach — touching locked axes
 
-Symptom: `param_scope_discipline` (`validators/l1_behavior.py`) scores a param-scope mutation made while a prompt field sat unmutated for two rounds. Edit: require `changes_description` to name the prompt-field evidence exhausted first. `validate_overrides`' rejections are mechanical — do not restate them in the prompt.
+Symptom: `param_scope_discipline` (`validators/l1_behavior.py`) scores a param-scope mutation made while a prompt field sat unmutated for two rounds. Edit: require `changes_description` to name the prompt-field evidence exhausted first. `overlay_failures`' rejections are mechanical — do not restate them in the prompt.
 
 #### Critique-score divergence (out of scope from L1)
 
@@ -188,14 +188,14 @@ Parse failures, no-ops and verbatim duplicates were measured absent (the spec ca
 
 Skipping these has historically let evidence-free or rule-violating proposals through unflagged. None
 is blanket-rejected by code; **for the unenforced ones your analysis IS the gate.** The enforced set is
-the registry itself (`optimizers/potter/validators/l1_strict.py`) plus `validate_overrides()`, which rejects
+the registry itself (`optimizers/potter/validators/l1_strict.py`) plus the bench's `overlay_failures()` (`application/bench/children.py`), which rejects
 `PARAM_FORBIDDEN_KEYS` unconditionally — read the registry before assuming a check is unenforced.
 
 - **Evidence availability.** For round 1 (especially a fresh fork), does the rendered input actually
   carry the signals a candidate claims to consult? `axis_memory` is present iff `SampleIndex.ensure_for`
   found ≥1 prior archive measurement (empty on a backend's first cycle). `runtime_failures` is present
   iff this cycle produced one OR `Cycle.start` inherited from sibling forks — **empty in round 1 while
-  siblings DID produce failures means the inheritance path is broken** (`sibling_wounds.py`,
+  siblings DID produce failures means the inheritance path is broken** (`optimizers/potter/state.py::_sibling_runtime_failures`,
   `_rf_matches_current_config`). `critique` / `escalation_panel` are empty in round 1 by design.
 - **Re-proposal of known-failing configs.** `L1_CONFIG_NOT_IN_RUNTIME_FAILURES` catches EXACT
   `(param, value)` matches only — a *near* value is legitimate exploration, so flag one proposed near a
@@ -216,7 +216,7 @@ the registry itself (`optimizers/potter/validators/l1_strict.py`) plus `validate
   either, and `idea_fingerprint` is blind to both (see § semantic restatement).
 - **Format integrity.** LaTeX escapes survive (`\boxed{N}`, not `oxed{N}`); no template placeholders
   (`{x}`, `[insert]`, `<query>`) in prompt-field values; `pipeline_overlay` keys are real node
-  `param_keys` (`L1_SCHEMA_COMPLIANCE` catches invalid ones).
+  `param_keys` (`overlay_failures` catches invalid ones).
 
 **Report violations as a checklist at the TOP of the reply, before any narrative** — the glyph makes it
 scannable and the parenthetical lets the operator verify in the trace:

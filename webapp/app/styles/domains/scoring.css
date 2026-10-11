@@ -1,5 +1,3 @@
-/* The CRITERION — one frame wherever scoring surfaces (components/shell/scoring/). Its identity is
-   the accent rule down the left edge plus the target glyph; the rungs only add rows inside it. */
 .criterion{border-left:2px solid var(--color-accent);padding-left:var(--space-10);min-width:0}
 .criterion-head{display:flex;align-items:center;gap:var(--space-6);width:100%;min-width:0;padding:var(--space-4) 0;background:transparent;border:0;color:inherit;font:inherit;text-align:left;cursor:pointer}
 .criterion-line{display:inline-flex;align-items:center;gap:var(--space-6);min-width:0;font-family:var(--font-mono);font-size:var(--text-sm);color:var(--color-text-primary);overflow-wrap:anywhere}
@@ -7,18 +5,16 @@
 .criterion-glyph svg{width:100%;height:100%}
 .criterion-caret{flex:0 0 auto;margin-left:auto;color:var(--color-text-secondary);font-size:var(--text-xs)}
 .criterion-body{display:flex;flex-direction:column;align-items:flex-start;gap:var(--space-8);padding:var(--space-4) 0 var(--space-8)}
-/* One thermometer per ROW: glyph, name, slider, number, unit, anchor, remove. */
 .criterion-rows{display:flex;flex-direction:column;gap:var(--space-6);width:min(40rem,100%)}
 /* Fixed tracks, not `auto`: each row is its own grid, and the sliders must line up down the list. */
 .criterion-row{display:grid;grid-template-columns:14px 10.5rem minmax(4rem,1fr) 3.5rem 0.75rem 10.5rem 16px;align-items:center;gap:var(--space-8);min-width:0}
-/* The accuracy row has no slider: its matcher takes the rest of the line. */
 .criterion-row > :nth-child(3):not(.criterion-range){grid-column:3 / -1;justify-self:start}
 .criterion-row.off .criterion-name,.criterion-row.off .criterion-pct{color:var(--color-text-secondary)}
 .criterion-row.off .criterion-glyph{color:var(--color-text-secondary)}
 .criterion-name{font-family:var(--font-mono);font-size:var(--text-sm)}
 .criterion-range{width:100%;min-width:0;accent-color:var(--color-accent);cursor:pointer}
 .criterion-range:disabled{cursor:default}
-/* iOS focus-zoom is a constraint, not a rhythm value — the sanctioned raw-px exception. */
+/* 16px literal: iOS focus-zoom, the sanctioned raw-px exception. */
 .criterion-pct{width:100%;min-width:0;padding:2px var(--space-4);border:1px solid var(--color-border);border-radius:var(--border-radius-md);background:var(--color-background-secondary);color:var(--color-text-primary);font-family:var(--font-mono);font-size:16px;text-align:right}
 span.criterion-pct{border-color:transparent;background:transparent;font-size:var(--text-sm)}
 .criterion-unit,.criterion-anchor{font-size:var(--text-xs);color:var(--color-text-secondary);white-space:nowrap}
@@ -31,10 +27,8 @@ span.criterion-pct{border-color:transparent;background:transparent;font-size:var
 .criterion-full{gap:var(--space-10)}
 .criterion-formula{font-family:var(--font-mono);font-size:var(--text-sm);color:var(--color-text-secondary);overflow-wrap:anywhere}
 .criterion-summary{width:100%}
-/* On the masthead the line is one more run of its text, so it gives up its own size and ink. */
 .run-setup .criterion-line{display:inline;margin-inline-start:var(--space-8);font-size:inherit;color:inherit}
 .run-setup .criterion-glyph{width:11px;height:11px;margin-inline-end:var(--space-4);vertical-align:-1px}
-/* Phone: the anchor drops under its row instead of squeezing the slider. */
 @media (max-width:640px){
   .criterion-row{grid-template-columns:14px 6.5rem minmax(3rem,1fr) 3.5rem 0.75rem 16px}
   .criterion-name{overflow-wrap:anywhere}

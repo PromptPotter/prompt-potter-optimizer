@@ -5,8 +5,6 @@ import { CommitInput } from "./CommitInput";
 import { Popover } from "./Popover";
 import s from "./ValueList.module.css";
 
-// The one widget for an enumerable axis: position 1 is the start value, the ticks are the
-// permitted set, each drawn only when its callback/prop is passed (webapp/components/CLAUDE.md § an AXIS).
 export function ValueList({
   name,
   values,
@@ -21,31 +19,25 @@ export function ValueList({
   onAdd,
 }: {
   name: string;
-  /** ALREADY ordered current-first by the caller; this component never sorts. */
+  // ALREADY ordered current-first by the caller; this component never sorts.
   values: readonly string[];
-  /** `undefined` = no tick column, never a column of empty boxes reading "nothing permitted". */
+  // `undefined` = no tick column, never a column of empty boxes reading "nothing permitted".
   checked?: readonly string[];
-  /** Values something downstream refuses; disabled rather than hidden, since the axis still declares them. */
   inert?: readonly string[];
-  /** Values the operator typed that the catalogue does not offer — tagged, as the likeliest typos. */
   userAdded?: readonly string[];
   note?: string;
   readOnly?: boolean;
-  /** Omit to drop the free-text row — an axis whose values a caller cannot widen. */
   addPlaceholder?: string;
-  /** Omit where the start value is not this list's to set; the rows then render as text. */
   onPick?: (value: string) => void;
   onToggle?: (value: string) => void;
   onAdd?: (value: string) => void;
 }) {
-  // The free-text input clears by REMOUNT: `CommitInput` latches what it sent, so a constant ""
-  // prop never re-clears it.
+  // The free-text input clears by REMOUNT: `CommitInput` latches what it sent, so a constant "" never re-clears it.
   const [added, setAdded] = useState(0);
 
   const start = values[0] ?? "";
   const permitted = checked === undefined ? null : values.filter((v) => checked.includes(v));
   const count = permitted === null ? null : `${permitted.length}/${values.length}`;
-  // A permissions-only host (ticks, no pick) shows the permitted set: its value belongs to a sibling surface.
   const summary =
     permitted !== null && !onPick ? permitted.join(", ") || "(none)" : start || "(unset)";
 
@@ -79,7 +71,6 @@ export function ValueList({
           setAdded((n) => n + 1);
         };
         return (
-          // A listbox only where a value can be CHOSEN; permissions-only, nothing is selectable.
           <div className={s.panel} role={onPick ? "listbox" : "group"} aria-label={name}>
             {values.map((value, i) => {
               const isStart = i === 0 && onPick !== undefined;
@@ -110,7 +101,6 @@ export function ValueList({
                             ? `${name} starts here`
                             : `Start ${name} on ${value}`
                       }
-                      // Picking closes the panel; ticking does not, since narrowing is several clicks.
                       onClick={() => {
                         onPick(value);
                         close();
@@ -128,8 +118,7 @@ export function ValueList({
                       type="checkbox"
                       className={s.tick}
                       checked={isOn}
-                      // An inert value can be UNticked but not ticked: unticking is the repair for a
-                      // permitted value something downstream now refuses.
+                      // An inert value can be UNticked but not ticked: unticking is the repair.
                       disabled={readOnly || (isInert && !isOn) || lastTick}
                       aria-label={`Permit ${value} for ${name}`}
                       title={

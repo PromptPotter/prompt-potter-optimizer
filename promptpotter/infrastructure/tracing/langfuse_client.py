@@ -1,47 +1,41 @@
-"""Langfuse SDK wrapper with project isolation via API keys. A per-call failure logs at DEBUG (a lost span is expected
-during a blip); setup and post-retry failures log at WARNING."""
-
 from __future__ import annotations
 
 import logging
 import threading
 import time
 import uuid
-from typing import Any
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 import httpx
 
 from promptpotter.config.settings import settings
-from promptpotter.infrastructure.llm.rate_limit import decide_429_wait, parse_retry_after
-from promptpotter.shared.errors import graceful
+from promptpotter.infrastructure.llm.send_failure import failed_send
+from promptpotter.infrastructure.llm.send_pacing import SendBudget, parse_retry_after
+from promptpotter.infrastructure.tls import tls_context
+from promptpotter.shared.errors import ErrorCategory, graceful
 
 logger = logging.getLogger(__name__)
 
-# Ceiling on concurrently-open observations one logger holds (see ``_evict_orphans``).
+_T = TypeVar("_T")
+
 _MAX_OPEN_OBSERVATIONS = 256
 
-# SDK flush blocks on an internal queue.join() that's uninterruptible until
-# a second SIGINT. Bounded daemon flush — drop spans before deadlocking Ctrl+C.
+_WRITE_ATTEMPTS = 3
+_LONGEST_HELD_S = 5.0
+
 FLUSH_TIMEOUT_SEC: float = 5.0
 
 
 def langfuse_trace_url(trace_id: str | None) -> str | None:
-    """The operator-facing deep link for a trace id. Single source of the URL shape, so the notebook box and the dashboard
-    never drift."""
     if not trace_id:
         return None
     return f"{settings.LANGFUSE_HOST.rstrip('/')}/trace/{trace_id}"
 
 
 class LangfuseLogger:
-    """Langfuse SDK wrapper. Disabled if credentials are missing."""
-
     def __init__(self, *, enabled: bool = True) -> None:
-        # ``enabled=False`` force-disables regardless of credentials. Used for
-        # ephemeral L4 inner campaigns: their cloud traces have no operator value
-        # (the self-potter-hop reads the LOCAL FileSink traces, not the cloud),
-        # they burn Langfuse quota (429s), and unfiltered they pile payload-bearing
-        # span objects in ``_trace_metadata`` until the process OOM-kills.
+        # ``enabled=False`` is an ephemeral L4 inner campaign's: its traces are read locally.
         self.enabled = bool(
             enabled
             and settings.LANGFUSE_ENABLED
@@ -49,9 +43,9 @@ class LangfuseLogger:
             and settings.LANGFUSE_PUBLIC_KEY
         )
         self.client = None
-        self._trace_metadata: dict[str, Any] = {}  # trace_id → root SDK observation
-        self._open_observations: dict[str, Any] = {}  # observation_id → open SDK observation
-        self._rate_limit_until: float = 0.0  # unix ts when quota resets
+        self._trace_metadata: dict[str, Any] = {}
+        self._open_observations: dict[str, Any] = {}
+        self._rate_limit_until: float = 0.0
 
         if self.enabled:
             try:
@@ -81,7 +75,6 @@ class LangfuseLogger:
         session_id: str | None = None,
         tags: list[str] | None = None,
     ) -> str | None:
-        """Create trace with a root span; ``update_trace`` pushes metadata so the cloud UI isn't an auto-stub."""
         if not self.enabled or not self.client:
             return None
 
@@ -109,8 +102,7 @@ class LangfuseLogger:
             return None
 
     def _evict_orphans(self) -> None:
-        """Close the oldest still-open observations past the bound. An error mid-node skips the ``end_observation`` pairing and the
-        span lingers with its payload — a slow leak that OOM-killed a 9-hour outer run."""
+        # An error mid-node skips `end_observation`; its span would hold its payload for the process's life.
         while len(self._open_observations) >= _MAX_OPEN_OBSERVATIONS:
             orphan_id, orphan = next(iter(self._open_observations.items()))
             del self._open_observations[orphan_id]
@@ -135,7 +127,6 @@ class LangfuseLogger:
         parent_observation_id: str | None = None,
         as_type: str = "span",
     ) -> str | None:
-        """Start a long-running observation; pair with ``end_observation``."""
         if not self.enabled or not self.client or not trace_id:
             return None
 
@@ -270,22 +261,16 @@ class LangfuseLogger:
         if not self.enabled or not self.client or not trace_id:
             return
 
-        # POP (not get): the root span carries the trace's full I/O payload; leaving
-        # it in ``_trace_metadata`` after the trace ends made the dict append-only —
-        # a memory leak that a long-lived process (L4: dozens of campaigns) grows
-        # until OOM. Popping releases the span object the moment the trace closes.
+        # POP, not get: the root span carries the trace's full I/O payload.
         with graceful("Failed to end Langfuse trace"):
             root = self._trace_metadata.pop(trace_id, None)
             if root:
                 root.end()
 
     def reset(self) -> None:
-        """Drop this logger's retained span references without touching the SDK, whose client is a process-wide singleton and must
-        NOT be shut down per campaign. Called at a campaign boundary; idempotent."""
+        # Never shut the SDK client down here: it is a process-wide singleton.
         self._trace_metadata.clear()
         self._open_observations.clear()
-
-    # -- Dataset API ---------------------------------------------------------
 
     def create_dataset(
         self,
@@ -293,7 +278,6 @@ class LangfuseLogger:
         description: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> bool:
-        """Idempotent — no error if the dataset exists."""
         if not self.enabled or not self.client:
             return False
         try:
@@ -313,32 +297,46 @@ class LangfuseLogger:
         input: Any,
         expected_output: Any = None,
         metadata: dict[str, Any] | None = None,
-        _max_retries: int = 3,
     ) -> str | None:
-        """Retries with exponential backoff on 429."""
-        if not self.enabled or not self.client:
+        client = self.client
+        if not self.enabled or client is None:
             return None
-        for attempt in range(_max_retries):
+        item = self._resent(
+            "create dataset item",
+            lambda: client.create_dataset_item(
+                dataset_name=dataset_name,
+                input=input,
+                expected_output=expected_output,
+                metadata=metadata or {},
+            ),
+        )
+        return getattr(item, "id", None)
+
+    def _resent(self, what: str, send: Callable[[], _T]) -> _T | None:
+        if self.rate_limited:
+            return None
+        budget = SendBudget(None, attempts=_WRITE_ATTEMPTS)
+        while True:
             try:
-                item = self.client.create_dataset_item(
-                    dataset_name=dataset_name,
-                    input=input,
-                    expected_output=expected_output,
-                    metadata=metadata or {},
-                )
-                return getattr(item, "id", None)
+                return send()
             except Exception as exc:
-                if "429" in str(exc) and attempt < _max_retries - 1:
-                    # SDK exception carries no headers reliably; honor Retry-After
-                    # when the wrapped response exposes it, else bounded backoff.
-                    headers = getattr(getattr(exc, "response", None), "headers", None)
-                    delay = parse_retry_after(headers) or float(2**attempt)
-                    logger.debug("Langfuse 429 rate limit, retry in %.0fs", delay)
-                    time.sleep(delay)
-                    continue
-                logger.warning("Failed to create Langfuse dataset item", exc_info=True)
-                return None
-        return None
+                outcome = failed_send(exc)
+                throttled = outcome.failure is ErrorCategory.PROVIDER_THROTTLED
+                asked = parse_retry_after(outcome.headers) if throttled else None
+                # A long throttle pauses every later write (`rate_limited`) instead of holding the run.
+                if asked is not None and asked > _LONGEST_HELD_S:
+                    self._rate_limit_until = time.time() + asked
+                    logger.warning(
+                        "Langfuse is throttling (resets in %.0fs); its writes are skipped until "
+                        "then.",
+                        asked,
+                    )
+                    return None
+                wait = budget.resend_wait() if throttled or outcome.resendable else None
+                if wait is None:
+                    logger.warning("Langfuse %s failed: %s", what, outcome.detail[:300])
+                    return None
+                time.sleep(asked or wait)
 
     def get_dataset(self, name: str) -> object | None:
         if not self.enabled or not self.client:
@@ -381,85 +379,33 @@ class LangfuseLogger:
         observation_id: str | None = None,
         run_name: str = "",
         run_metadata: dict[str, Any] | None = None,
-        *,
-        max_retries: int = 3,
     ) -> bool:
-        """Link trace/observation to a dataset item via REST, since the SDK only exposes a context manager. A 429 with a long
-        ``Retry-After`` sets ``rate_limited`` and returns False, so callers stop early instead of retrying for hours."""
         if not self.enabled or not self.client:
             return False
-        if self.rate_limited:
-            return False
-        try:
-            body: dict[str, Any] = {
-                "datasetItemId": dataset_item_id,
-                "traceId": trace_id,
-                "runName": run_name,
-                "metadata": run_metadata or {},
-            }
-            if observation_id:
-                body["observationId"] = observation_id
+        body: dict[str, Any] = {
+            "datasetItemId": dataset_item_id,
+            "traceId": trace_id,
+            "runName": run_name,
+            "metadata": run_metadata or {},
+        }
+        if observation_id:
+            body["observationId"] = observation_id
+        url = f"{settings.LANGFUSE_HOST}/api/public/dataset-run-items"
+        auth = (settings.LANGFUSE_PUBLIC_KEY, settings.LANGFUSE_SECRET_KEY)
 
-            url = f"{settings.LANGFUSE_HOST}/api/public/dataset-run-items"
-            auth = (settings.LANGFUSE_PUBLIC_KEY, settings.LANGFUSE_SECRET_KEY)
+        def post() -> bool:
+            resp = httpx.post(url, auth=auth, json=body, timeout=30, verify=tls_context())
+            resp.raise_for_status()
+            return True
 
-            for attempt in range(max_retries):
-                resp = httpx.post(url, auth=auth, json=body, timeout=30)
-
-                if resp.status_code in (200, 201):
-                    return True
-
-                if resp.status_code == 429:
-                    retry_after = parse_retry_after(resp.headers) or 0.0
-
-                    # Daily quota exhausted (Retry-After > 5 min) — stop trying.
-                    # Langfuse-specific escape hatch: a daily reset is hours away,
-                    # so skip every remaining link instead of retrying for hours.
-                    if retry_after > 300 or resp.headers.get("X-RateLimit-Remaining") == "0":
-                        self._rate_limit_until = time.time() + retry_after
-                        logger.warning(
-                            "Langfuse daily rate limit hit (resets in %.0fs). "
-                            "Skipping remaining link_item_to_run calls.",
-                            retry_after,
-                        )
-                        return False
-
-                    # Short-term rate limit — defer to the canonical 429 decision.
-                    decision = decide_429_wait(
-                        resp.headers, resp.text, attempt, max_attempts=max_retries
-                    )
-                    if decision is None:
-                        return False
-                    logger.debug(
-                        "Rate limited (%s), waiting %.0fs (attempt %d)",
-                        decision.scope,
-                        decision.seconds,
-                        attempt + 1,
-                    )
-                    time.sleep(decision.seconds)
-                    continue
-
-                # Other HTTP error
-                logger.warning(
-                    "Link item to run HTTP %s: %s",
-                    resp.status_code,
-                    resp.text[:200],
-                )
-                return False
-
-            logger.warning("link_item_to_run exhausted %d retries", max_retries)
-            return False
-        except Exception:
-            logger.warning("Failed to link dataset item to run", exc_info=True)
-            return False
+        return self._resent("link item to run", post) or False
 
     def flush(self) -> None:
         if not (self.enabled and self.client):
             return
-        # Daemon thread so flush can't keep the interpreter alive past Ctrl+C
-        # nor be re-blocked by an implicit ``ThreadPoolExecutor.__exit__`` wait.
+        # SDK flush blocks on an uninterruptible queue.join(): a daemon thread drops spans, not Ctrl+C.
         done = threading.Event()
-        client = self.client  # narrow Any|None for the closure capture
+        client = self.client
 
         def _flush() -> None:
             try:

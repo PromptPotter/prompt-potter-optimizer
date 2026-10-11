@@ -13,8 +13,7 @@ class BackendConnection(StrictModel):
 
 
 class BackpressureReading(StrictModel):
-    """A provider holding a sender's sends (`infrastructure/llm/rate_limit.py::Backpressure`).
-    Exists only while something is held, so its presence is the whole signal."""
+    """Exists only while a provider holds a sender's sends, so its presence is the whole signal."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -30,4 +29,21 @@ class BackpressureReading(StrictModel):
     detail: str = Field(description="The provider's own words, from the throttle that opened it.")
 
 
-__all__ = ["BackendConnection", "BackpressureReading"]
+class ServedBackpressure(BackpressureReading):
+    """A provider hold as served: the banked reading with both clocks read at the response."""
+
+    held_for_s: float | None = Field(description="Seconds the provider has been throttling.")
+    resumes_in_s: float | None = Field(
+        description="Seconds until the cooldown ends; 0 once it has, where one send probes."
+    )
+
+    @classmethod
+    def at(cls, held: BackpressureReading, now: float) -> "ServedBackpressure":
+        return cls(
+            **{name: getattr(held, name) for name in BackpressureReading.model_fields},
+            held_for_s=None if held.since is None else max(0.0, now - held.since),
+            resumes_in_s=None if held.resumes_at is None else max(0.0, held.resumes_at - now),
+        )
+
+
+__all__ = ["BackendConnection", "BackpressureReading", "ServedBackpressure"]

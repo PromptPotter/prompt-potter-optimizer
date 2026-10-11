@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { criticalAlert } from "../critical-alert";
-import { STOP_REASON_LABELS, STOP_REASON_NEXT_STEPS } from "@/lib/api/types.generated";
+import type { DegradationHealth, ProducerReading } from "@/lib/api/types";
 import type { DashboardSnapshot } from "@/lib/poll";
+import { dash as dashboard, health, producerReading, summaryRound } from "@/lib/test-fixtures";
+
+type ProducerState = ProducerReading["state"];
 
 const base = {
-  bannerStatus: "live" as const,
-  bannerText: "Live · last write 2s ago",
+  bannerStatus: "connected" as const,
+  bannerText: "",
   bannerHint: undefined,
   dash: null as DashboardSnapshot | null,
 };
@@ -16,46 +19,38 @@ describe("criticalAlert", () => {
   });
 
   it("flags a crashed run as critical, regardless of connection", () => {
-    const dash = {
+    const dash = dashboard({
       run_phase: "terminal",
-      error: { kind: "CRASHED", message: "boom\nretry", stop_reason: "crashed" },
-    } as DashboardSnapshot;
+      error: {
+        kind: "CRASHED",
+        message: "boom\nretry",
+        stop_reason: "crashed",
+        label: "Crashed",
+        next_step: "Read the traceback, then resume.",
+      },
+    });
     expect(criticalAlert({ ...base, dash })).toEqual({
       severity: "critical",
-      title: `${STOP_REASON_LABELS.crashed} — CRASHED`,
-      detail: STOP_REASON_NEXT_STEPS.crashed,
+      title: "Crashed — CRASHED",
+      detail: "Read the traceback, then resume.",
     });
   });
 
-  // A DESIGNED halt names a recovery and must not read as a crash; its label comes from the
-  // generated STOP_REASON_LABELS, never from here.
   it("names a designed halt by its own stop reason rather than calling it a crash", () => {
-    const dash = {
+    const dash = dashboard({
       run_phase: "terminal",
       error: {
         kind: "ResumeDivergenceError",
         message: "optimizer_identity:l1_generate",
         stop_reason: "diverged",
+        label: "Diverged",
+        next_step: "Fork on the divergence.",
       },
-    } as DashboardSnapshot;
-    expect(criticalAlert({ ...base, dash })).toEqual({
-      severity: "critical",
-      title: `${STOP_REASON_LABELS.diverged} — ResumeDivergenceError`,
-      detail: STOP_REASON_NEXT_STEPS.diverged,
     });
-  });
-
-  // `dashboard.json` is served verbatim, so a file an older build wrote can carry a spelling
-  // the table lacks. The bar names the error kind and invents no label for it.
-  it("names only the error kind for a stop reason the label table does not carry", () => {
-    const dash = {
-      run_phase: "terminal",
-      error: { kind: "SomethingNew", message: "x", stop_reason: "CRASHED" },
-    } as unknown as DashboardSnapshot;
     expect(criticalAlert({ ...base, dash })).toEqual({
       severity: "critical",
-      title: "SomethingNew",
-      detail: undefined,
+      title: "Diverged — ResumeDivergenceError",
+      detail: "Fork on the divergence.",
     });
   });
 
@@ -75,8 +70,7 @@ describe("criticalAlert", () => {
   });
 
   it("stays silent for an empty workspace, despite the poll's resting offline", () => {
-    // A first-run account: no cycle, so the poll never left INITIAL_STATE. Without
-    // its own signal this is indistinguishable from an outage and paints red.
+    // A first-run account never leaves INITIAL_STATE: without its own signal it paints as an outage.
     expect(
       criticalAlert({
         ...base,
@@ -88,8 +82,7 @@ describe("criticalAlert", () => {
   });
 
   it("a genuinely unreachable server still wins over an empty workspace", () => {
-    // The caller subtracts netDown before setting emptyWorkspace; this pins that
-    // the derivation does not silence a real outage if that ever slips.
+    // The caller subtracts netDown first; this pins that a slip there cannot silence a real outage.
     const out = criticalAlert({
       ...base,
       bannerStatus: "offline",
@@ -99,43 +92,52 @@ describe("criticalAlert", () => {
     expect(out?.title).toBe("Server unreachable — retrying");
   });
 
-  it("flags a gone-silent run (server says running, this poll has gone stale) as a warning", () => {
-    const dash = { run_phase: "running" } as DashboardSnapshot;
-    expect(
-      criticalAlert({
-        ...base,
-        dash,
-        bannerStatus: "stale",
-        bannerText: "Stale · last write 90s ago",
-      }),
-    ).toEqual({
-      severity: "warn",
-      title: "Run went silent",
-      detail: "Stale · last write 90s ago",
-    });
+  const PRODUCER_ALERT: Record<ProducerState, string | null> = {
+    live: null,
+    idle: null,
+    held: null,
+    absent: null,
+    claimed: null,
+    silent: "Run went silent",
+    wedged: "Run wedged",
+  };
+
+  it.each(Object.entries(PRODUCER_ALERT) as [ProducerState, string | null][])(
+    "reads a %s producer off the served state alone",
+    (state, title) => {
+      const dash = dashboard({ producer: producerReading(state, { silent_for_s: 600 }) });
+      expect(criticalAlert({ ...base, dash })?.title ?? null).toBe(title);
+    },
+  );
+
+  it("raises the served producer alert verbatim", () => {
+    const alert = { title: "Run wedged", detail: "heartbeats only for 10m" };
+    const dash = dashboard({ producer: producerReading("wedged", { alert }) });
+    expect(criticalAlert({ ...base, dash })).toEqual({ severity: "warn", ...alert });
   });
 
   it("does not flag a clean terminal (no error record)", () => {
-    const dash = { run_phase: "terminal", stop_reason: "target_hit" } as DashboardSnapshot;
+    const dash = dashboard({ run_phase: "terminal", stop_reason: "target_hit" });
     expect(criticalAlert({ ...base, dash })).toBeNull();
   });
 
   it("stays silent for warming_up (reachable, no snapshot yet)", () => {
-    const out = criticalAlert({
-      ...base,
-      bannerStatus: "stale",
-      bannerText: "Origin running",
-    });
-    expect(out).toBeNull();
+    expect(criticalAlert({ ...base, dash: null })).toBeNull();
   });
 
   it("a terminal error takes precedence over offline", () => {
-    const dash = {
+    const dash = dashboard({
       run_phase: "terminal",
-      error: { kind: "DIVERGED", message: "x", stop_reason: "diverged" },
-    } as DashboardSnapshot;
+      error: {
+        kind: "DIVERGED",
+        message: "x",
+        stop_reason: "diverged",
+        label: "Diverged",
+        next_step: "",
+      },
+    });
     const out = criticalAlert({ ...base, bannerStatus: "offline", dash });
-    expect(out?.title).toBe(`${STOP_REASON_LABELS.diverged} — DIVERGED`);
+    expect(out?.title).toBe("Diverged — DIVERGED");
   });
 
   it("flags an unreachable backend as critical (the LED's twin)", () => {
@@ -164,73 +166,45 @@ describe("criticalAlert", () => {
     expect(out?.title).toBe("Server unreachable — retrying");
   });
 
-  it("flags a full machine (no free slot) as a wait, not a refusal", () => {
-    expect(
-      criticalAlert({
-        ...base,
-        machineBusy: true,
-        machineBusyHolder: "u_bob",
-        machineBusySince: "2026-06-08T10:00:00+00:00",
-      }),
-    ).toEqual({
-      severity: "warn",
-      title: "Machine full — u_bob is running",
-      detail: "a launch will queue · oldest run since 2026-06-08T10:00:00+00:00",
-    });
+  const machineNotice = { title: "Machine full — u_bob is running", detail: "a launch will queue" };
+
+  it("raises the served machine notice verbatim, as a wait and not a refusal", () => {
+    expect(criticalAlert({ ...base, machineNotice })).toEqual({ severity: "warn", ...machineNotice });
   });
 
-  it("a launch of the caller's own in the queue outranks the full machine", () => {
-    expect(
-      criticalAlert({
-        ...base,
-        machineBusy: true,
-        machineBusyHolder: "u_bob",
-        queuePosition: 2,
-      }),
-    ).toEqual({
-      severity: "warn",
-      title: "Queued — position 2",
-      detail: "it starts by itself when a slot frees",
-    });
-  });
-
-  it("a down backend takes precedence over machine-busy", () => {
+  it("a down backend takes precedence over the machine notice", () => {
     const out = criticalAlert({
       ...base,
       connectorDown: true,
       connectorName: "termnorm",
-      machineBusy: true,
-      machineBusyHolder: "u_bob",
+      machineNotice,
     });
     expect(out?.title).toBe("Backend unreachable — termnorm");
   });
 
-  const roundWithGrade = (round: number, grade: string, suggested: string | null) => ({
-    round,
-    accuracy: 0.16,
-    composite_fitness: 0.5,
-    candidates: [],
-    selection: [],
-    health: {
-      grade,
-      reasons: [],
-      samples: 20,
-      structural_count: grade === "critical" ? 12 : 0,
-      transient_count: 5,
-      degraded_rate: 0.3,
-      consecutive_degraded_rounds: 1,
-      prior_clean_rounds: 0,
-      dominant_node: "entity_profiling",
-      ci_lo: 0.03,
-      ci_hi: 0.3,
-      suggested_action: suggested,
-    },
-  });
+  const roundWithGrade = (
+    round: number,
+    grade: DegradationHealth["grade"],
+    suggested: string | null,
+    alert: string | null = null,
+  ) =>
+    summaryRound({
+      round,
+      health: health(grade, { suggested_action: suggested }),
+      health_alert: alert,
+    });
 
-  it("flags a structurally-critical latest round as critical with a pause action", () => {
-    const dash = {
-      rounds: [roundWithGrade(0, "critical", "entity_profiling failing on 60% — abort")],
-    } as unknown as DashboardSnapshot;
+  it("raises the latest round's served health alert as critical with a pause action", () => {
+    const dash = dashboard({
+      rounds: [
+        roundWithGrade(
+          0,
+          "critical",
+          "entity_profiling failing on 60% — abort",
+          "Degraded origin — pipeline may be structurally broken",
+        ),
+      ],
+    });
     expect(criticalAlert({ ...base, dash })).toEqual({
       severity: "critical",
       title: "Degraded origin — pipeline may be structurally broken",
@@ -240,9 +214,7 @@ describe("criticalAlert", () => {
   });
 
   it("stays quiet when the latest round is merely degraded (noise — keep going)", () => {
-    const dash = {
-      rounds: [roundWithGrade(3, "degraded", null)],
-    } as unknown as DashboardSnapshot;
+    const dash = dashboard({ rounds: [roundWithGrade(3, "degraded", null)] });
     expect(criticalAlert({ ...base, dash })).toBeNull();
   });
 });

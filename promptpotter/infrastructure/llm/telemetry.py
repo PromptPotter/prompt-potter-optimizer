@@ -1,6 +1,3 @@
-"""The ``emit_*`` seam — per-call telemetry from deep async chains straight to the active cycle
-ledger, read from a ContextVar. No process global, no wrapper: call site to ledger in one hop."""
-
 from __future__ import annotations
 
 import logging
@@ -10,21 +7,26 @@ from contextvars import ContextVar, Token
 from typing import TYPE_CHECKING, Any, Literal
 
 from promptpotter.domain.phases import StopReason
+from promptpotter.domain.results import ScoreSummary
 from promptpotter.domain.run_records import (
+    BackendWarningRecord,
     CommandAckRecord,
+    CommandAckStatus,
     CommandRecord,
     CycleRecord,
     ErrorRecord,
-    PhaseRecord,
     PricedKeyRecord,
     RoundWarningKind,
     RoundWarningRecord,
+    SampleScoredRecord,
+    SampleStartedRecord,
     SpendHoldRecord,
     TokenUsageRecord,
 )
+from promptpotter.domain.scoring import GradedCell
 from promptpotter.domain.spend import TokenAccount, TokenUsageKind
 from promptpotter.infrastructure.llm.pricing import compute_usd
-from promptpotter.shared.instrument import measured_candidate
+from promptpotter.shared.measurement_context import MeasurementRole, measured_candidate
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.ledger import CycleEventLog
@@ -37,7 +39,6 @@ _CURRENT_ROUND: ContextVar[int | None] = ContextVar("current_round", default=Non
 
 
 def set_cycle_ledger(ledger: CycleEventLog | None) -> Token[CycleEventLog | None]:
-    """Bind the ledger ``emit_token_usage`` appends to; returns the ``Token`` ``drain_all`` resets."""
     return _CYCLE_LEDGER.set(ledger)
 
 
@@ -46,8 +47,7 @@ def reset_cycle_ledger(token: Token[CycleEventLog | None]) -> None:
 
 
 def active_cycle_ledger() -> CycleEventLog | None:
-    """The ledger already bound, if any. Asked by a caller that would otherwise OPEN one — a second
-    handle on the same file is a second appender, and ``append`` is not crash-atomic."""
+    """Ask before OPENING one: a second handle is a second appender, and ``append`` is not atomic."""
     return _CYCLE_LEDGER.get()
 
 
@@ -56,10 +56,6 @@ _FILED_AS: ContextVar[TokenUsageKind | None] = ContextVar("filed_as", default=No
 
 @contextmanager
 def filed_as(kind: TokenUsageKind | None) -> Iterator[None]:
-    """Every call emitted inside this block banks as *kind* whatever it would otherwise have been;
-    ``None`` leaves the enclosing block's filing. Bound around a pass rather than passed to each
-    emit site, because the call sites are the ordinary scoring path — a `verify` re-scores through
-    exactly the code a round does, and what files the spend is the QUESTION asked, not the call."""
     if kind is None:
         yield
         return
@@ -83,8 +79,6 @@ def reset_current_round(token: Token[int | None]) -> None:
 
 
 def _append_record(record: CycleRecord, ledger: CycleEventLog | None = None) -> int | None:
-    """Append *record* to ``ledger``, else the active cycle ledger, or ``None``. A missing ledger keeps pure/test
-    paths side-effect-free; a raising append is logged and swallowed — telemetry must not break its call site."""
     if ledger is None:
         ledger = _CYCLE_LEDGER.get()
     if ledger is None:
@@ -92,19 +86,27 @@ def _append_record(record: CycleRecord, ledger: CycleEventLog | None = None) -> 
     try:
         return ledger.append(record)
     except Exception:
+        # Telemetry must not break its call site.
         logger.exception("ledger append failed for %s", type(record).__name__)
         return None
 
 
-def bill_usd(
-    usage: TokenAccount, *, model: str | None, provider: str | None, cost_usd: float | None
+def rate_priced_usd(
+    usage: TokenAccount,
+    *,
+    model: str | None,
+    provider: str | None,
+    cost_usd: float | None,
+    recorded: float | None = None,
 ) -> float | None:
-    """What one bill cost: the provider's own figure, else the rate table's price now."""
+    if cost_usd is not None:
+        return None
+    if recorded is not None:
+        return recorded
     return compute_usd(
         model,
         usage.input,
         usage.output,
-        override_usd=cost_usd,
         provider=provider,
         cache_read_tokens=usage.cache_read or 0,
         cache_write_tokens=usage.cache_write,
@@ -121,34 +123,29 @@ def emit_token_usage(
     provider: str | None = None,
     served_by: str | None = None,
     cost_usd: float | None = None,
+    recorded_rate_usd: float | None = None,
     cached: bool = False,
     hold_id: str | None = None,
     mirrored: bool = False,
 ) -> TokenUsageRecord | None:
-    """Build ``TokenUsageRecord`` and append it; the record once it is on the ledger, else ``None``.
-    ``cached`` marks a call served from the content-addressed cache: it consumed the recorded tokens
-    but spent no money, and the rollup keeps the two apart.
-
-    **Priced here, once.** ``cost_usd`` is what the provider billed, else the rate table's price at
-    the moment of the call, and every reader sums the stamp rather than re-pricing — so a rate
-    refresh cannot rewrite what a call cost. ``None`` stays unpriced.
-
-    **The one place the account is flattened**, and it stays flat: the record is the persisted
-    chronology every lifetime-spend read sums off raw JSON, so nesting the counts under a key
-    would zero every account's history. ``cache_read=None`` lands as ``0`` here."""
     record = TokenUsageRecord(
         kind=filed_kind(kind),
         node=node,
         model=model,
         provider=provider,
         served_by=served_by,
+        # Flat on purpose: every lifetime-spend read sums these counts off raw JSON.
         input_tokens=usage.input,
         output_tokens=usage.output,
         reasoning_tokens=usage.reasoning,
         cache_read_tokens=usage.cache_read or 0,
         cache_write_tokens=usage.cache_write,
         duration_s=float(duration_s),
-        cost_usd=bill_usd(usage, model=model, provider=provider, cost_usd=cost_usd),
+        cost_usd=cost_usd,
+        # Priced once, here: readers sum the stamp, so a rate refresh rewrites nothing.
+        rate_priced_usd=rate_priced_usd(
+            usage, model=model, provider=provider, cost_usd=cost_usd, recorded=recorded_rate_usd
+        ),
         hold_id=hold_id,
         mirrored=mirrored,
         cached=cached,
@@ -170,36 +167,22 @@ def emit_backend_warning(
     status_code: int | None = None,
     final: bool = False,
 ) -> None:
-    """A backend attempt that failed and will be tried again — the ONE producer of the channel
-    ``dashboard.json::recent_backend_warnings`` serves.
-
-    ``detail`` is load-bearing: the category alone says a cell could not be measured, and only the
-    backend's own words say WHY (a corrupt package index, a stopped daemon, a lost session). It
-    rode Python ``logging`` alone, so a run hosted by the API server left it in a console nobody
-    but the operator at that terminal could read, and every surface downstream — the dashboard, a
-    headless reader, the next session picking the run up — saw an unexplained
-    ``backend_unreachable``."""
     _append_record(
-        PhaseRecord(
-            phase="backend",
-            event="warning",
-            payload={
-                "kind": kind,
-                "attempt": attempt,
-                "max_attempts": max_attempts,
-                "wait_s": float(wait_s),
-                "error_class": error_class,
-                "status_code": status_code,
-                "final": final,
-                "detail": detail[:400],
-                "query": query[:80],
-            },
+        BackendWarningRecord(
+            kind=kind,
+            attempt=attempt,
+            max_attempts=max_attempts,
+            wait_s=float(wait_s),
+            error_class=error_class,
+            status_code=status_code,
+            final=final,
+            detail=detail[:400],
+            query=query[:80],
         )
     )
 
 
 def emit_priced_key(priced_key: str) -> None:
-    """Say on the active ledger that this campaign's search priced ``priced_key``."""
     _append_record(PricedKeyRecord(priced_key=priced_key))
 
 
@@ -207,13 +190,10 @@ _PRICED: ContextVar[set[str] | None] = ContextVar("priced", default=None)
 
 
 def bind_priced(priced: set[str]) -> None:
-    """Bind the campaign's priced set — its cells and its calls — for :func:`call_priced`."""
     _PRICED.set(priced)
 
 
 def call_priced(key: str) -> bool:
-    """Whether this campaign already priced the reuse call ``key``. The first asking says so on the
-    active ledger, as a walk does for a cell, so no replay of it is metered again."""
     priced = _PRICED.get()
     if priced is None:
         return False
@@ -231,14 +211,13 @@ def emit_spend_hold(
     node: str,
     kind: TokenUsageKind,
     input_tokens: int,
-    output_tokens: int,
+    output_tokens: int | None,
     cost_usd: float | None,
     model: str | None,
     provider: str | None,
     ledger: CycleEventLog | None,
 ) -> None:
-    """Write a paid call's admission ahead of the call — onto ``ledger`` where the admitting book
-    keeps one, else the active ledger. ``kind`` arrives filed (``spend_book.py::filed``)."""
+    """``kind`` arrives already filed (``spend_book.py::filed``)."""
     _append_record(
         SpendHoldRecord(
             hold_id=hold_id,
@@ -263,7 +242,6 @@ def emit_command(
     idempotency_key: str,
     issued_by_user_id: str = "",
 ) -> int | None:
-    """Append a ``CommandRecord``; the dispatcher binds the target cycle's ledger around its work."""
     return _append_record(
         CommandRecord(
             command_id=command_id,
@@ -278,7 +256,7 @@ def emit_command(
 def emit_command_ack(
     *,
     command_id: str,
-    status: Literal["applied", "rejected"],
+    status: CommandAckStatus,
     detail: str = "",
     effect: dict[str, Any] | None = None,
 ) -> None:
@@ -294,8 +272,6 @@ def emit_error_record(
     stop_reason: StopReason,
     traceback: str | None = None,
 ) -> ErrorRecord:
-    """Append an ``ErrorRecord`` and RETURN it — ``end_run_on`` carries the same object onto
-    ``CycleResult.error``, so there is one build and no twin. Pre-loop errors carry ``round=None``."""
     record = ErrorRecord(
         kind=kind,
         message=message,
@@ -314,8 +290,6 @@ def emit_round_warning(
     severity: Literal["warning", "error"] = "warning",
     detail: dict[str, Any] | None = None,
 ) -> None:
-    """Append a ``RoundWarningRecord``, putting a non-fatal self-healed degradation on every channel
-    instead of only the server log."""
     _append_record(
         RoundWarningRecord(
             kind=kind,
@@ -327,9 +301,64 @@ def emit_round_warning(
     )
 
 
+# Capped at the writer, never sliced off a full query by a reader.
+QUERY_PREVIEW_CHARS = 120
+
+
+def emit_sample_started(
+    *,
+    candidate_idx: int,
+    candidate_total: int,
+    sample_idx: int,
+    sample_total: int,
+    sample_id: int,
+    query: str,
+    sample_lookahead: int,
+    stop_horizon: int | None,
+) -> None:
+    _append_record(
+        SampleStartedRecord(
+            round=_CURRENT_ROUND.get() or 0,
+            candidate_idx=candidate_idx,
+            candidate_total=candidate_total,
+            sample_idx=sample_idx,
+            sample_total=sample_total,
+            sample_id=int(sample_id),
+            query_preview=query[:QUERY_PREVIEW_CHARS],
+            sample_lookahead=int(sample_lookahead),
+            stop_horizon=stop_horizon,
+        )
+    )
+
+
+def emit_sample_scored(
+    *,
+    candidate_idx: int,
+    candidate_total: int,
+    individual_id: str,
+    role: MeasurementRole,
+    sample_idx: int,
+    sample_total: int,
+    cell: GradedCell,
+    running: ScoreSummary | None,
+) -> None:
+    _append_record(
+        SampleScoredRecord(
+            round=_CURRENT_ROUND.get() or 0,
+            candidate_idx=candidate_idx,
+            candidate_total=candidate_total,
+            individual_id=individual_id,
+            role=role,
+            sample_idx=sample_idx,
+            sample_total=sample_total,
+            result=cell.ledger_wire(),
+            running=running,
+        )
+    )
+
+
 __all__ = [
     "active_cycle_ledger",
-    "bill_usd",
     "bind_priced",
     "call_priced",
     "emit_command",
@@ -337,9 +366,12 @@ __all__ = [
     "emit_error_record",
     "emit_priced_key",
     "emit_round_warning",
+    "emit_sample_scored",
+    "emit_sample_started",
     "emit_token_usage",
     "filed_as",
     "filed_kind",
+    "rate_priced_usd",
     "reset_current_round",
     "reset_cycle_ledger",
     "set_current_round",

@@ -1,5 +1,4 @@
-/* ORDER IS LOAD-BEARING: Lightning CSS inlines these in barrel order, so this list IS the
-   cascade, and the responsive/a11y tail imports last so its overrides win. */
+/* ORDER IS LOAD-BEARING: Lightning CSS inlines these in barrel order, so this list IS the cascade. */
 
 @import "./foundation/tokens.css";
 @import "./foundation/themes.css";
@@ -8,23 +7,29 @@
 @import "./domains/shell.css";
 @import "./domains/dashboard.css";
 @import "./domains/masthead.css";
-@import "./domains/lineage.css";
-@import "./domains/panels.css";
+@import "./domains/searchpoint-fork.css";
+@import "./domains/dashboard-layout.css";
+@import "./domains/ui.css";
+@import "./domains/dashboard-scoring.css";
 @import "./domains/candidates.css";
-@import "./domains/workflow.css";
+@import "./domains/dashboard-pipeline.css";
+@import "./domains/node-surface.css";
 @import "./domains/files.css";
 @import "./domains/chat.css";
-@import "./domains/family-tree.css";
+@import "./domains/searchpoint.css";
+@import "./domains/candidates-forest.css";
 @import "./domains/hard-samples.css";
 @import "./domains/measurements.css";
 @import "./domains/remote.css";
 @import "./domains/verify.css";
 @import "./domains/login.css";
 @import "./domains/onboarding.css";
-@import "./domains/backend-node.css";
+@import "./domains/node-surface-frame.css";
+@import "./domains/dashboard-pipeline-nodes.css";
 @import "./domains/account.css";
-@import "./domains/auth.css";
-@import "./domains/l4.css";
+@import "./domains/login-auth.css";
+@import "./domains/onboarding-consent.css";
+@import "./domains/compare-evidence.css";
 @import "./domains/compare.css";
 @import "./domains/scoring.css";
 

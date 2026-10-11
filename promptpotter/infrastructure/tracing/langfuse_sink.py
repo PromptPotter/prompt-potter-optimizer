@@ -1,36 +1,35 @@
-"""Langfuse cloud sink — owns the trace/observation id maps and persists them, so a CLI-interrupted resume still
-produces one continuous trace."""
-
 from __future__ import annotations
 
 import logging
 import threading
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
 from promptpotter.infrastructure.store.io import read_json_optional, write_json
 from promptpotter.infrastructure.store.layout import cycle_dir_for
 from promptpotter.infrastructure.tracing.events import (
-    CampaignEnd,
     CampaignStart,
     DatasetRegistered,
-    DatasetRun,
-    NodeEnd,
-    NodeStart,
-    PromptVersion,
     QueryNodeSpan,
     QueryScoreEnd,
     QueryScoreStart,
-    RoundEnd,
-    RoundStart,
+    TraceSink,
 )
 from promptpotter.infrastructure.tracing.langfuse_client import LangfuseLogger
+
+if TYPE_CHECKING:
+    from promptpotter.domain.run_records import (
+        CandidateScoredRecord,
+        RoundClosedRecord,
+        RoundEnteredRecord,
+        RunPhaseRecord,
+    )
 
 logger = logging.getLogger(__name__)
 
 
-class LangfuseSink:
+class LangfuseSink(TraceSink):
     def __init__(
         self,
         store_base_dir: str | Path,
@@ -43,13 +42,11 @@ class LangfuseSink:
 
         self._trace_ids: dict[str, str] = {}
         self._round_observation_ids: dict[tuple[str, int], str] = {}
-        self._node_observation_ids: dict[tuple[str, int, str], str] = {}
+        self._node_observation_ids: dict[tuple[str, int | None, str], str] = {}
         self._dataset_item_ids: dict[tuple[str, str], str] = {}
         self._session_ids: dict[str, str] = {}
-        # (run_id, query) → (trace_id, dataset_name, origin) — Topology B in-flight.
         self._query_trace_ids: dict[tuple[str, str], tuple[str, str, str]] = {}
 
-        # Resolved on the first event naming a cycle; the id state lives in that cycle's dir.
         self._state_cycle_id: str | None = None
         self._state_path: Path | None = None
 
@@ -68,7 +65,7 @@ class LangfuseSink:
                 self._round_observation_ids[(cid, int(rn))] = value
             for key, value in (existing.get("node_observation_ids") or {}).items():
                 cid, rn, nid = key.split("|", 2)
-                self._node_observation_ids[(cid, int(rn), nid)] = value
+                self._node_observation_ids[(cid, int(rn) if rn else None, nid)] = value
             for key, value in (existing.get("dataset_item_ids") or {}).items():
                 dsname, query = key.split("|", 1)
                 self._dataset_item_ids[(dsname, query)] = value
@@ -83,7 +80,8 @@ class LangfuseSink:
                 f"{cid}|{rn}": v for (cid, rn), v in self._round_observation_ids.items()
             },
             "node_observation_ids": {
-                f"{cid}|{rn}|{nid}": v for (cid, rn, nid), v in self._node_observation_ids.items()
+                f"{cid}|{'' if rn is None else rn}|{nid}": v
+                for (cid, rn, nid), v in self._node_observation_ids.items()
             },
             "dataset_item_ids": {
                 f"{dsname}|{query}": v for (dsname, query), v in self._dataset_item_ids.items()
@@ -98,11 +96,7 @@ class LangfuseSink:
         self._bind_cycle(event.cycle_id)
         cloud_id = self._lf.create_trace(
             name="optimization_loop",
-            input={
-                "campaign_id": event.campaign_id,
-                "origin_accuracy": event.origin_accuracy,
-                "config": event.config,
-            },
+            input={"campaign_id": event.campaign_id, "config": event.config},
             session_id=event.session_id,
             tags=["campaign", "optimization_loop"],
         )
@@ -110,12 +104,6 @@ class LangfuseSink:
             self._trace_ids[event.campaign_id] = cloud_id
             if event.session_id:
                 self._session_ids[event.campaign_id] = event.session_id
-            if event.origin_accuracy is not None:
-                self._lf.create_score(
-                    trace_id=cloud_id,
-                    name="origin_accuracy",
-                    value=event.origin_accuracy,
-                )
             self._persist()
 
     def on_dataset_registered(self, event: DatasetRegistered) -> None:
@@ -127,12 +115,7 @@ class LangfuseSink:
             )
             return
 
-        # Off the run path: this is up to a hundred sequential POSTs, each retried behind a
-        # blocking sleep, fired from run start — so the operator waited on a price of pure
-        # observability before the campaign made its first call. Nothing the loop does depends
-        # on the result (tracing is fan-out only), and a query whose item has not landed yet
-        # simply skips its link-back in `on_query_score_end`. The mint lands in one `update`
-        # rather than key-by-key so a concurrent `_persist` cannot observe the dict mid-growth.
+        # One `update`, never key-by-key: a concurrent `_persist` must not see the dict mid-growth.
         def _register() -> None:
             self._lf.create_dataset(
                 name=event.dataset_name,
@@ -154,165 +137,128 @@ class LangfuseSink:
 
         threading.Thread(target=_register, name="langfuse-dataset", daemon=True).start()
 
-    def on_dataset_run(self, event: DatasetRun) -> None:
-        trace_id = self._trace_ids.get(event.campaign_id)
+    def on_candidate_scored(self, campaign_id: str, record: CandidateScoredRecord) -> None:
+        trace_id = self._trace_ids.get(campaign_id)
         if not trace_id:
             return
-        round_observation_id = (
-            None
-            if event.round_num is None
-            else self._round_observation_ids.get((event.campaign_id, event.round_num))
-        )
+        scores = record.scores
         self._lf.create_span(
             trace_id=trace_id,
-            name=f"run_{event.run_id[:8]}",
-            input={
-                "run_id": event.run_id,
-                "content_hash": event.content_hash,
-                "prompt_fields_id": event.prompt_fields_id,
-            },
-            output={
-                "accuracy": event.accuracy,
-                "total": event.total,
-            },
-            parent_observation_id=round_observation_id,
+            name=f"walk_{scores.label}",
+            input={"candidate_id": scores.candidate_id, "prompt_fields_id": scores.sp_hash},
+            output={"accuracy": scores.accuracy, "total": scores.total},
+            parent_observation_id=self._round_observation_ids.get((campaign_id, record.round)),
             as_type="span",
         )
 
-    def on_round_start(self, event: RoundStart) -> None:
-        trace_id = self._trace_ids.get(event.campaign_id)
+    def on_round_entered(self, campaign_id: str, record: RoundEnteredRecord) -> None:
+        trace_id = self._trace_ids.get(campaign_id)
         if not trace_id:
             return
         observation_id = self._lf.start_span(
             trace_id=trace_id,
-            name=f"round_{event.round_num}",
-            input={"round": event.round_num},
-            metadata={"round": event.round_num},
+            name=f"round_{record.round}",
+            input={"round": record.round},
+            metadata={"round": record.round},
             as_type="span",
         )
         if observation_id:
-            self._round_observation_ids[(event.campaign_id, event.round_num)] = observation_id
+            self._round_observation_ids[(campaign_id, record.round)] = observation_id
 
-    def on_node_start(self, event: NodeStart) -> None:
-        trace_id = self._trace_ids.get(event.campaign_id)
+    def on_span_open(
+        self,
+        campaign_id: str,
+        round_num: int | None,
+        span_id: str,
+        *,
+        name: str,
+        node_type: str,
+        as_type: str,
+        metadata: dict[str, Any],
+    ) -> None:
+        trace_id = self._trace_ids.get(campaign_id)
         if not trace_id:
             return
-        round_observation_id = self._round_observation_ids.get((event.campaign_id, event.round_num))
-        as_type = event.as_type if event.as_type in ("generation", "span") else "span"
         observation_id = self._lf.start_span(
             trace_id=trace_id,
-            name=event.node_id,
-            input=event.input_data,
-            metadata={"node_type": event.node_type, **(event.metadata or {})},
-            parent_observation_id=round_observation_id,
+            name=name,
+            input={},
+            metadata={"node_type": node_type, **metadata},
+            parent_observation_id=(
+                None
+                if round_num is None
+                else self._round_observation_ids.get((campaign_id, round_num))
+            ),
             as_type=as_type,
         )
         if observation_id:
-            self._node_observation_ids[(event.campaign_id, event.round_num, event.node_id)] = (
-                observation_id
-            )
+            self._node_observation_ids[(campaign_id, round_num, span_id)] = observation_id
 
-    def on_node_end(self, event: NodeEnd) -> None:
-        key = (event.campaign_id, event.round_num, event.node_id)
-        observation_id = self._node_observation_ids.pop(key, None)
+    def on_span_close(
+        self, campaign_id: str, round_num: int | None, span_id: str, *, error: str | None
+    ) -> None:
+        observation_id = self._node_observation_ids.pop((campaign_id, round_num, span_id), None)
         if not observation_id:
             return
-        meta: dict[str, Any] = {}
-        if event.metrics:
-            meta["metrics"] = event.metrics
-        if event.error:
-            meta["error"] = event.error
         self._lf.end_observation(
-            observation_id,
-            output=event.output_data,
-            metadata=meta or None,
+            observation_id, output=None, metadata={"error": error} if error else None
         )
 
-    def on_round_end(self, event: RoundEnd) -> None:
-        trace_id = self._trace_ids.get(event.campaign_id)
+    def on_round_closed(self, campaign_id: str, record: RoundClosedRecord) -> None:
+        trace_id = self._trace_ids.get(campaign_id)
         if not trace_id:
             return
-        round_observation_id = self._round_observation_ids.pop(
-            (event.campaign_id, event.round_num), None
-        )
+        round_observation_id = self._round_observation_ids.pop((campaign_id, record.round), None)
+        winner = record.opt_sp
+        if winner is not None:
+            self._lf.create_span(
+                trace_id=trace_id,
+                name="prompt_version",
+                input={"lineage_id": winner.id, "parent_ids": list(winner.lineage.parent_ids)},
+                output={
+                    "family": "target_prompt",
+                    "version": winner.id[:8] if winner.id else "unknown",
+                },
+                metadata={"layer1_fields": record.prompt_fields},
+                parent_observation_id=round_observation_id,
+                as_type="span",
+            )
         if round_observation_id:
-            round_meta: dict[str, Any] = {
-                "round": event.round_num,
-                "candidates_scored": len(event.candidate_scores),
-            }
-            if event.optimizer_templates:
-                round_meta["optimizer_templates"] = event.optimizer_templates
             self._lf.end_observation(
                 round_observation_id,
                 output={
-                    "winner_accuracy": event.accuracy,
-                    "improved": event.improved,
-                    "next_action": event.next_action,
-                    "candidates_scored": len(event.candidate_scores),
+                    "winner_accuracy": record.accuracy,
+                    "improved": record.improved,
+                    "candidates_scored": record.candidates_scored,
                 },
-                metadata=round_meta,
+                metadata={"round": record.round, "candidates_scored": record.candidates_scored},
             )
-        if event.accuracy is not None:
+        if record.accuracy is not None:
             self._lf.create_score(
                 trace_id=trace_id,
-                name=f"accuracy_round_{event.round_num}",
-                value=event.accuracy,
-                comment=f"Round {event.round_num}: {'improved' if event.improved else 'no change'}",
+                name=f"accuracy_round_{record.round}",
+                value=record.accuracy,
+                comment=f"Round {record.round}: {'improved' if record.improved else 'no change'}",
             )
-        # Emit one Langfuse score per evaluator value. Each evaluator's name
-        # is suffixed with the round number so the cloud UI shows them as a
-        # per-round time series.
-        for ev_name, ev_value in event.evaluators.items():
-            try:
-                numeric = float(ev_value)
-            except (TypeError, ValueError):
-                continue
+        for ev_name, ev_value in record.evaluators.items():
             self._lf.create_score(
-                trace_id=trace_id,
-                name=f"{ev_name}_round_{event.round_num}",
-                value=numeric,
+                trace_id=trace_id, name=f"{ev_name}_round_{record.round}", value=float(ev_value)
             )
 
-    def on_prompt_version(self, event: PromptVersion) -> None:
-        trace_id = self._trace_ids.get(event.campaign_id)
+    def on_run_stopped(
+        self, campaign_id: str, record: RunPhaseRecord, *, rounds_closed: int
+    ) -> None:
+        trace_id = self._trace_ids.get(campaign_id)
         if not trace_id:
             return
-        round_observation_id = self._round_observation_ids.get((event.campaign_id, event.round_num))
-        self._lf.create_span(
-            trace_id=trace_id,
-            name="prompt_version",
-            input={
-                "lineage_id": event.lineage_id,
-                "parent_ids": list(event.parent_ids),
-            },
-            output={
-                "family": "target_prompt",
-                "version": event.lineage_id[:8] if event.lineage_id else "unknown",
-            },
-            metadata={"layer1_fields": event.layer1_fields},
-            parent_observation_id=round_observation_id,
-            as_type="span",
-        )
-
-    def on_campaign_end(self, event: CampaignEnd) -> None:
-        trace_id = self._trace_ids.get(event.campaign_id)
-        if not trace_id:
-            return
-        if event.result_accuracy is not None:
-            self._lf.create_score(
-                trace_id=trace_id,
-                name="result_accuracy",
-                value=event.result_accuracy,
-                comment=f"Selected at round {event.result_round}, stop: {event.stop_reason}",
-            )
         self._lf.update_trace(
             trace_id=trace_id,
             output={
-                "result_accuracy": event.result_accuracy,
-                "n_rounds_after_origin": event.n_rounds_after_origin,
-                "stop_reason": event.stop_reason,
+                "run_phase": record.run_phase.value,
+                "stop_reason": record.stop_reason,
+                "rounds_closed": rounds_closed,
             },
-            metadata={"stop_reason": event.stop_reason, "result_round": event.result_round},
+            metadata={"stop_reason": record.stop_reason},
         )
         self._lf.end_trace(trace_id)
         self._persist()
@@ -392,8 +338,6 @@ class LangfuseSink:
         gt_map: dict[str, str],
         seed_items: dict[str, str] | None = None,
     ) -> dict[str, str]:
-        """Create/update Langfuse dataset, returning ``{query: item_id}`` and
-        populating ``_dataset_item_ids`` for query-score link-back."""
         query_to_item_id: dict[str, str] = dict(seed_items or {})
 
         ok = self._lf.create_dataset(

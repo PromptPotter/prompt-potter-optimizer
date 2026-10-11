@@ -1,35 +1,22 @@
-"""Re-score a cached origin *k* times to read the backend's run-to-run noise. A fenced debug diagnostic — no config field, no
-L1 injection, nothing on the ledger but its bills; the loop never learns this verb exists."""
-
 from __future__ import annotations
 
 import argparse
-import logging
 
 from promptpotter.application.diagnostics.noise_floor import NoiseFloorError, measure_noise_floor
 from promptpotter.config.logging import setup_logging
-from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.results import BankedSearchPointError
-from promptpotter.infrastructure.store.stores import build_stores
-from promptpotter.presentation.cli.commands._shared import (
-    CommandResult,
-    get_verbose,
-    identity_from_args,
+from promptpotter.presentation.cli.commands.result import CommandResult
+from promptpotter.presentation.cli.commands.workspace import (
+    open_stores,
     resolve_campaign,
     resolve_cycle,
 )
 
-logger = logging.getLogger("promptpotter.presentation.cli")
-
 
 async def cmd_noise_floor(args: argparse.Namespace) -> CommandResult:
-    """Re-score the active/named cycle's cached C0 origin ``--k`` times (force_fresh)
-    and report the spread as a workspace diagnostic-run record."""
-
-    setup_logging(style="full" if get_verbose() else "cli")
-    identity = identity_from_args(args)
-    stores = build_stores(identity, projects_root=DEFAULT_PROJECTS_ROOT)
+    setup_logging(style="full" if args.verbose else "cli")
+    stores = open_stores(args)
     campaign_id = resolve_campaign(stores, args.campaign)
     cycle_id = resolve_cycle(stores, campaign_id, args.cycle)
 
@@ -38,7 +25,6 @@ async def cmd_noise_floor(args: argparse.Namespace) -> CommandResult:
             stores=stores,
             hop=CycleHop(campaign_id=campaign_id, cycle_id=cycle_id),
             k=args.k,
-            log=logger.info if get_verbose() else None,
         )
     except (NoiseFloorError, BankedSearchPointError) as exc:
         raise SystemExit(f"ERROR: {exc}") from exc

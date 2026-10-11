@@ -1,12 +1,10 @@
 "use client";
-// "About this unit" — a reader of the identity the app already publishes (brand, the <head>
-// JSON-LD, the server's version), never a parallel manifest.
 
 import { useState } from "react";
 import { PotterMark } from "@/components/brand/PotterMark";
 import { CopyButton } from "@/components/ui";
 import { BRAND, softwareApplicationLd } from "@/lib/brand";
-import { fetchHealth } from "@/lib/api";
+import { healthRead } from "@/lib/api";
 import { readyData, useRead } from "@/lib/hooks/useRead";
 import { formatDiagnostics, useIncidents } from "@/lib/diagnostics";
 import { cx } from "@/lib/cx";
@@ -15,7 +13,7 @@ export function AboutUnit() {
   const [showHow, setShowHow] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
 
-  const health = readyData(useRead({ key: "health", fetch: fetchHealth }, { surface: "health" }));
+  const health = readyData(useRead(healthRead()));
   const version = health?.version ?? null;
   const incidents = useIncidents();
 
@@ -214,7 +212,6 @@ function ResourceLink({ href, label }: { href: string; label: string }) {
   );
 }
 
-// `self-declared` is a neutral state, NOT a success state.
 function ProvenancePill({ verified }: { verified: boolean }) {
   return (
     <span className={cx("about-unit-pill", verified ? "verified" : "declared")}>

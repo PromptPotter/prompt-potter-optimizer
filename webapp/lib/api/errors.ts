@@ -1,20 +1,16 @@
-// The write surface's failure vocabulary. `IngestApiError` is raised by EVERY write path, and must
-// stay an `ApiError`, or `failureKind` classifies each write failure as `transient`.
-
 import { ApiError, type FailureKind } from "./client";
-import type { OriginGap } from "./draft-types";
+import type { FieldGap } from "./types";
 
 export function mintIdempotencyKey(): string {
   return crypto.randomUUID();
 }
-// A type alias rather than an interface, so it satisfies `ApiError.details`'
-// `Record<string, unknown>`: an interface carries no implicit index signature.
+// A type alias, not an interface: an interface has no implicit index signature for `ApiError.details`.
 export type IngestErrorDetail = {
   reason?: string;
   slug?: string;
   suggested_slug?: string;
   draft_id?: string;
-  gaps?: OriginGap[];
+  gaps?: FieldGap[];
 };
 export class IngestApiError extends ApiError {
   readonly serverMessage: string | null;
@@ -22,7 +18,7 @@ export class IngestApiError extends ApiError {
   readonly existingSlug?: string;
   readonly suggestedSlug?: string;
   readonly draftId?: string;
-  readonly gaps?: OriginGap[];
+  readonly gaps?: FieldGap[];
   constructor(
     status: number,
     url: string,
@@ -43,8 +39,7 @@ export class IngestApiError extends ApiError {
   }
 }
 
-// A transient write may have landed before the connection dropped, so its sentence never claims
-// nothing changed.
+// A transient write may have landed before the connection dropped: never claim nothing changed.
 const KIND_SENTENCE: Record<FailureKind, string> = {
   transient: "Could not reach the server — the change may not have been applied.",
   auth: "Your session has ended — sign in again.",
@@ -53,8 +48,7 @@ const KIND_SENTENCE: Record<FailureKind, string> = {
   invalid: "The server refused the request as malformed.",
 };
 
-// Never rebuild a sentence from the envelope's details: a refusal's remedy is known only where the
-// server decided it.
+// Never rebuild a sentence from the envelope's details: only the server knows a refusal's remedy.
 export function operatorMessage(e: unknown, kind: FailureKind): string {
   if (!(e instanceof IngestApiError) || e.serverMessage === null) return KIND_SENTENCE[kind];
   if (e.suggestedSlug) return `${e.serverMessage} Suggested slug: ${e.suggestedSlug}.`;

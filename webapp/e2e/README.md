@@ -29,6 +29,11 @@ both stay desk tiers run by hand.
 Two servers rather than one, because `PROMPTPOTTER_HOME` is bound at import and one process
 cannot hold both. **Neither binds 8001** — that port is the operator's.
 
+**A run boots only the servers its projects need** (`playwright.config.ts::runs`, read off
+`--project`): `walk` starts the walk server, `cold` and `spend` the throwaway one, and no
+`--project` at all — `npm run e2e` — starts both. So the gate's `--project=cold` never opens the
+operator's workspace.
+
 **One spec inside `cold` brings a THIRD**, and it is not a fourth world: `onboarding-signed-in`
 needs an identity that is signed in and is not the host, which neither server above can produce
 because both pass `PROMPTPOTTER_AUTH=off`. So `fake_issuer.ts` runs the same `serve.mjs` with
@@ -38,7 +43,7 @@ declared by each caller rather than inside the script.
 
 | Variable | Default | For |
 |---|---|---|
-| `PP_E2E_PORT` | `8123` | the walk server |
+| `PP_E2E_PORT` | `8123` | the walk server, started only when `walk` is among the projects run |
 | `PP_E2E_COLD_PORT` | `8124` | the throwaway server |
 | `PP_E2E_FAKEAUTH_PORT` | `8125` | the auth-CLOSED server `onboarding-signed-in.spec.ts` raises for itself |
 | `PP_E2E_COLD_HOME` | `<tmp>/promptpotter-e2e` | where the throwaway world lives; it must sit under the system temp dir or `reset_world.py` refuses to wipe it |

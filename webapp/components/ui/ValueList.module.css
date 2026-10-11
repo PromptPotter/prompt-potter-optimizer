@@ -1,6 +1,5 @@
 @layer ui {
-/* Doubled: `Popover` composes its own `.wrap` with this one, and a tie in one layer would be
-   decided by bundle order. */
+/* Doubled: `Popover` composes its own `.wrap` with this one, and a one-layer tie is decided by bundle order. */
 .wrap.wrap {
   display: block;
   flex: 1 1 auto;
@@ -75,8 +74,7 @@
   margin: 0 var(--space-4) 0 0;
 }
 
-/* Cursor affordances are scoped to the button: on a permissions-only host the same class is a
-   `<span>`, and lighting it would advertise a click that goes nowhere. */
+/* Scoped to the button: on a permissions-only host the same class is a `<span>` with no click behind it. */
 .name {
   flex: 1 1 auto;
   min-width: 0;
@@ -130,7 +128,6 @@ button.name:focus-visible {
   text-decoration: line-through;
 }
 
-/* Refused by the selection, distinct from ruled out by the operator — never the same mark. */
 .inert {
   opacity: 0.45;
 }

@@ -1,6 +1,3 @@
-// Per-user identity writes to the auth router, not `/commands` verbs: no campaign, no cycle, no
-// idempotency key.
-
 import { API } from "./client";
 import { throwApiError } from "./errors";
 import type { UserSettings } from "./types";

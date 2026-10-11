@@ -1,12 +1,8 @@
-"""Re-score a cached origin *k* times to measure the backend's own run-to-run noise. A fenced debug diagnostic,
-not a loop mechanism — the loop never learns it exists, and persistence is a ``diagnostics/`` sidecar only."""
-
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, NewType
+from typing import TYPE_CHECKING
 
 from promptpotter.application.bench.task_context import campaign_framing
 from promptpotter.application.initialization.loop_start import (
@@ -15,12 +11,14 @@ from promptpotter.application.initialization.loop_start import (
     diagnostic_trace,
 )
 from promptpotter.application.initialization.wiring import bind_cycle_session
+from promptpotter.application.jobs.quota import paid_verb
 from promptpotter.application.runner.inner.spawn_context import publish_inner_spawn_context
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.results import (
     DiagnosticRunRecord,
+    RescoreCount,
     candidate_label,
     diagnostic_held,
 )
@@ -32,21 +30,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["NoiseFloorError", "RescoreCount", "measure_noise_floor", "rescore_count"]
-
-# How many times the origin is re-scored: two or more, since one rescore has no spread.
-RescoreCount = NewType("RescoreCount", int)
-
-
-def rescore_count(k: int) -> RescoreCount:
-    if k < 2:
-        raise ValueError(f"k={k}: one rescore has no spread to report — ask for two or more.")
-    return RescoreCount(k)
+__all__ = ["NoiseFloorError", "measure_noise_floor"]
 
 
 class NoiseFloorError(Exception):
-    """A resolved-state failure: campaign/cycle/round-0 missing on disk, or the
-    pipeline schema is unavailable. The CLI shell maps this to a clean ``SystemExit``."""
+    """A resolved-state failure the CLI shell maps to a clean ``SystemExit``."""
 
 
 @dataclass(frozen=True)
@@ -60,41 +48,36 @@ async def measure_noise_floor(
     stores: Stores,
     hop: CycleHop,
     k: RescoreCount,
-    log: Callable[[str], None] | None = None,
 ) -> NoiseFloorOutcome:
-    """Re-score the cached round-0 origin *k* times with ``force_fresh`` and report the spread. On a pp-self cycle the
-    origin's backend IS the recursion, so this reads the inner noise floor. ``k``× real spend, never loop-triggered."""
+    async with paid_verb(stores=stores, bucket="noise-floor", hop=hop):
+        return await _rescore_origin(stores, hop, k)
 
+
+async def _rescore_origin(stores: Stores, hop: CycleHop, k: RescoreCount) -> NoiseFloorOutcome:
     campaign = stores.campaigns.load_campaign(hop.campaign_id)
     if campaign is None:
         raise NoiseFloorError(f"campaign {hop.campaign_id!r} has no manifest on disk.")
 
-    round_file = stores.campaigns.load_round_file(hop, 0)
-    if round_file is None:
+    standing = stores.campaigns.standing_rounds(hop).rounds.get(0)
+    if standing is None:
         raise NoiseFloorError(
-            f"round_0000.json missing in {hop.campaign_id}/{hop.cycle_id} — the origin was never scored."
+            f"round 0 never closed in {hop.campaign_id}/{hop.cycle_id} — the origin was never scored."
         )
+    round_file = standing.close
     if not round_file.candidate_scores:
-        raise NoiseFloorError(
-            f"round_0000.json in {hop.campaign_id}/{hop.cycle_id} carries no origin arm."
-        )
+        raise NoiseFloorError(f"round 0 of {hop.campaign_id}/{hop.cycle_id} carries no origin arm.")
     origin = round_file.origin
-    origin_rows = round_file.all_candidate_results[origin.candidate_id]
-    sample_ids = {int(r["sample_id"]) for r in origin_rows if r.get("sample_id") is not None}
+    sample_ids = {sample_id for _, sample_id, _, _ in round_file.cells.arms[origin.candidate_id]}
     if not sample_ids:
         raise NoiseFloorError(
             f"origin arm in {hop.campaign_id}/{hop.cycle_id} round 0 carries no scored samples."
         )
 
     session, campaign_config = await bind_cycle_session(stores, campaign, hop)
-    # A pp-self origin's backend IS the inner recursion — the `promptpotter` connector
-    # needs this cycle published as the spawn context before it can dispatch an inner
-    # campaign per sample. Normally done once by `run_optimization`; this use-case
-    # bypasses that runner, so it publishes for itself (no-op on a non-recursive cycle).
+    # Normally `run_optimization`'s: a pp-self origin's connector dispatches no inner run without it.
     publish_inner_spawn_context(session, campaign_config)
 
-    log_fn = log or (lambda *_a, **_k: None)
-    arm_diagnostic_scoring(session, campaign_config, source=RunSource.NOISE_FLOOR, log=log_fn)
+    arm_diagnostic_scoring(session, campaign_config, source=RunSource.NOISE_FLOOR)
 
     schema = session.pipeline_schema
     jsp = origin.searchpoint(
@@ -134,12 +117,10 @@ async def measure_noise_floor(
                     session,
                     label=f"noise_floor_{i}",
                     measured=None,
-                    on_sample_scored=lambda *_a, **_k: None,
-                    on_sample_starting=lambda *_a, **_k: None,
                     force_fresh=True,
                 ),
             )
-        accuracy, composite = scored.scores["accuracy"], scored.scores["composite_fitness"]
+        accuracy, composite = scored.scores.accuracy, scored.scores.composite_fitness
         if accuracy is None or composite is None:
             raise NoiseFloorError(
                 f"noise-floor rescore {i + 1}/{k} of {hop.campaign_id}/{hop.cycle_id} measured no "
@@ -147,7 +128,7 @@ async def measure_noise_floor(
             )
         composites.append(composite)
         accuracies.append(accuracy)
-        log_fn(f"noise-floor rescore {i + 1}/{k}: composite={composites[-1]:.4f}")
+        logger.info("noise-floor rescore %d/%d: composite=%.4f", i + 1, k, composite)
 
     band = mean_ci(composites)
     assert band is not None  # a RescoreCount is two or more

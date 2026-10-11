@@ -1,5 +1,4 @@
-/* Beneath the `ui` primitives: an unlayered `*` reset would out-rank every layered rule and
-   strip a primitive's padding and focus ring. A nested layer loses to its parent's own rules. */
+/* Layered beneath the `ui` primitives: an unlayered `*` reset out-ranks every layered rule and strips their padding and focus ring. */
 @layer ui.reset {
 *{box-sizing:border-box;margin:0;padding:0}
 *:focus{outline:none}

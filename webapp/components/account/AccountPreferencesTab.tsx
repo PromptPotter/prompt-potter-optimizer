@@ -1,43 +1,31 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { AccountSection } from "./AccountSection";
 import { Switch } from "@/components/ui";
-import { fetchUserSettings, patchUserSettings } from "@/lib/api";
+import { patchUserSettings, userSettingsRead } from "@/lib/api";
 import { useCommand } from "@/lib/hooks/useCommand";
+import { shownData, useRead } from "@/lib/hooks/useRead";
+import { invalidateReads } from "@/lib/read-cache";
 import { applyTheme, readStoredTheme, useThemeVersion } from "@/lib/theme";
 import { useShowCandidates } from "@/lib/tree-prefs";
 
 export function AccountPreferencesTab() {
-  const [demo, setDemo] = useState<boolean | null>(null);
-  // Nothing polls user settings, so the write re-ticks nothing; the answer IS the read-back.
+  const read = useRead(userSettingsRead());
+  // No blanket revalidate: the write re-asks the one read carrying the setting.
   const cmd = useCommand<"user-settings">("preferences", { revalidate: false });
-  const [readError, setReadError] = useState<string | null>(null);
-
-  // Hand-rolled, not `useRead`: the load only seeds `demo`, which each PATCH then writes.
-  useEffect(() => {
-    let cancelled = false;
-    fetchUserSettings()
-      .then((s) => {
-        if (!cancelled) setDemo(s.demo_mode_enabled);
-      })
-      .catch(() => {
-        if (!cancelled) setReadError("Could not read this setting. Reopen the pane to retry.");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const demo = shownData(read)?.demo_mode_enabled ?? null;
 
   const toggle = (next: boolean) =>
     void cmd.run(
       "user-settings",
       () => patchUserSettings({ demo_mode_enabled: next }),
-      (s) => setDemo(s.demo_mode_enabled),
+      () => invalidateReads("user-settings"),
     );
 
   const busy = cmd.pending !== null;
-  const error = cmd.failure?.message ?? readError;
+  const error =
+    cmd.failure?.message ??
+    (read.status === "failed" ? "Could not read this setting. Reopen the pane to retry." : null);
 
   return (
     <>
@@ -68,7 +56,6 @@ export function AccountPreferencesTab() {
   );
 }
 
-// Client-only, like the theme: nothing on the server reads it.
 function CampaignTreeSection() {
   const [show, setShow] = useShowCandidates();
   return (

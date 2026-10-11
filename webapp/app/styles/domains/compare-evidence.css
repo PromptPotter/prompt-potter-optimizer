@@ -1,0 +1,125 @@
+.l4-readings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-16);
+  margin: var(--space-12) 0;
+}
+.l4-readings dt {
+  color: var(--color-text-secondary);
+  font-size:var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.l4-readings dd {
+  margin: 0;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.l4-subtle {
+  color: var(--color-text-secondary);
+  font-size:var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.l4-table-wrap {
+  overflow-x: auto;
+}
+.l4-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size:var(--text-base);
+  font-variant-numeric: tabular-nums;
+}
+.l4-table th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  font-size:var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: var(--space-4) var(--space-10);
+  border-bottom: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+.l4-table td {
+  padding: var(--space-6) var(--space-10);
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: baseline;
+}
+.l4-rank {
+  color: var(--color-text-secondary);
+  width: 2ch;
+}
+
+.l4-effect {
+  white-space: nowrap;
+}
+.l4-effect-mean {
+  font-weight: 600;
+}
+.l4-effect-ci {
+  color: var(--color-text-secondary);
+  margin-left: 8px;
+  font-size:var(--text-sm);
+}
+.l4-eff-pos .l4-effect-mean {
+  color: var(--color-success);
+}
+.l4-eff-neg .l4-effect-mean {
+  color: var(--color-danger);
+}
+.l4-eff-flat .l4-effect-mean {
+  color: var(--color-text-secondary);
+}
+
+.l4-num {
+  white-space: nowrap;
+  color: var(--color-text-secondary);
+}
+.l4-dim {
+  color: var(--color-text-secondary);
+}
+
+.l4-label {
+  color: var(--color-text-secondary);
+  max-width: 40ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ov-forest {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 6px;
+}
+.ov-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  font-size:var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+.ov-cell-label {
+  flex: 0 0 12ch;
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+  font-size:var(--text-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-axis {
+  flex: 0 0 auto;
+}
+.ov-cell-val {
+  flex: 0 0 auto;
+  color: var(--color-text-primary);
+}
+.ov-row:last-child .ov-cell-label,
+.ov-row:last-child .ov-cell-val {
+  font-weight: 700;
+  color: var(--color-text-primary);
+}

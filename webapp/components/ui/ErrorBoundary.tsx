@@ -1,6 +1,4 @@
 "use client";
-// Root render-error boundary; render-path errors only — async failures land in component state
-// through `useRead` / `useCommand`.
 
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import s from "./ErrorBoundary.module.css";
@@ -16,12 +14,10 @@ interface State {
   reload: ReloadOutcome | null;
 }
 
-// A chunk 404 is this tab holding the previous build's manifest: `out/` is served off disk, so a
-// rebuild swaps every chunk hash under every open tab.
 const STALE_BUILD = /ChunkLoadError|Failed to load chunk|Loading chunk \S+ failed|dynamically imported module|Importing a module script failed/i;
 
 // Reload ONCE. A time, not a flag, so a later rebuild heals too without anyone clearing it.
-const RELOAD_STAMP = "pp:chunk-reload-at";
+const RELOAD_STAMP = "promptpotter.chunk-reload-at";
 const RELOAD_GUARD_MS = 20_000;
 
 function reloadOnceForStaleBuild(): ReloadOutcome {

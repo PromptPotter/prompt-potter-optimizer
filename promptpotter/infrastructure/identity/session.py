@@ -1,5 +1,4 @@
-"""Server-side opaque session store, one JSON file per session. The cookie carries the session id ONLY — no JWT, no signed envelope
-(ADR-0002 gate #2). TTL is 7 days; an expired session is deleted on read miss."""
+"""The cookie carries the session id only — no JWT, no signed envelope (ADR-0002 gate #2)."""
 
 from __future__ import annotations
 
@@ -14,7 +13,7 @@ from promptpotter.infrastructure.store.io import read_json, write_json
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_SESSION_TTL_S = 60 * 60 * 24 * 7  # 7 days
+DEFAULT_SESSION_TTL_S = 60 * 60 * 24 * 7
 
 
 @dataclass(frozen=True)
@@ -33,9 +32,6 @@ class SessionData:
 
 
 class OIDCSessionStore:
-    """File-backed opaque store for BROWSER LOGIN sessions. NOT the campaign-run ``SessionStore`` — same word, two
-    referents, and the ``OIDC`` prefix is what stops a reader grabbing the wrong one."""
-
     def __init__(self, sessions_dir: Path, ttl_s: int = DEFAULT_SESSION_TTL_S) -> None:
         self._dir = sessions_dir
         self._ttl_s = ttl_s
@@ -78,7 +74,6 @@ class OIDCSessionStore:
         return session_id, data
 
     def read(self, session_id: str) -> SessionData | None:
-        """Return the session or `None`. Expired sessions are deleted on miss."""
         if not session_id or "/" in session_id or "\\" in session_id:
             return None
         path = self._path(session_id)

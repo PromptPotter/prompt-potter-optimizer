@@ -1,6 +1,3 @@
-// The Series view's step→order kernel. Positional: every candidate walks one shared round order,
-// so a sample's place in `selection` is the whole answer.
-
 export type SelectMode = "measured" | "all";
 
 export interface StepOrder {

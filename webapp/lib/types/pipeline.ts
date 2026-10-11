@@ -1,5 +1,3 @@
-// The Optimizer card's own types; graph shapes are re-exported from the generated wire types.
-
 import type { PipelineViewNode } from "@/lib/api";
 
 export type {
@@ -9,8 +7,7 @@ export type {
   PipelineViewNode,
 } from "@/lib/api";
 
-// ONE record per node kind, TOTAL over the served set (`pipeline_schema.py::ViewKind`): a kind the
-// server adds fails to compile here instead of drawing an uncaptioned node.
+// served: `pipeline_schema.py::ViewKind`
 export type ViewKind = PipelineViewNode["kind"];
 
 const NODE_KINDS: Record<ViewKind, { label: string; role: string }> = {

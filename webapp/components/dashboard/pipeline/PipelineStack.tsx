@@ -12,9 +12,6 @@ import type { PipelineStatus } from "@/lib/types";
 import { ConnectorInspector } from "./ConnectorInspector";
 import { PipelineFlow } from "./PipelineFlow";
 
-// The campaign as its nesting chain, outermost first: optimization loop, this pipeline, one level
-// per served `nests`. `outermost` is the only zoom state — a zoom re-parents every flow.
-
 interface Layer {
   key: string;
   // Not the connector name — pp-self's target and the optimizer both report "PromptPotter".
@@ -43,18 +40,16 @@ function ZoomGlyph({ depth }: { depth: number }) {
 
 interface Props {
   datasetName: string | null;
-  samplesOpen: boolean;
-  onToggleSamples: () => void;
 }
 
 const CAMPAIGN_LEVEL = 1;
 
-export function PipelineStack({ datasetName, samplesOpen, onToggleSamples }: Props) {
+export function PipelineStack({ datasetName }: Props) {
   const cv = useConnector();
-  const { dash } = useCycleStream();
+  const { dash, isLive } = useCycleStream();
   const [outermost, setOutermost] = useState(CAMPAIGN_LEVEL);
   // Gated on the campaign pipeline resolving, so an anon preview fires nothing.
-  const nested = useNestedPipelines(cv.nests, cv.pipelineStatus === "ok");
+  const nested = useNestedPipelines(cv.nests, cv.schema.status === "ok");
   const { doc: optimizer, loading: optimizerLoading } = useOptimizerPipeline(
     outermost === 0 ? cv.optimizer : null,
   );
@@ -66,29 +61,28 @@ export function PipelineStack({ datasetName, samplesOpen, onToggleSamples }: Pro
       label: cv.optimizer ? `the ${cv.optimizer} optimization loop` : "the optimization loop",
       view: optimizer?.view ?? null,
       status: pipelineReadStatus({
-        bound: cv.pipelineStatus !== "unbound",
-        loading: optimizerLoading || cv.pipelineStatus === "loading",
+        bound: cv.schema.status !== "unbound",
+        loading: optimizerLoading || cv.schema.status === "loading",
         failed: !optimizer,
       }),
       connector: "PromptPotter",
       reach: optimizer?.reach ?? null,
       scope: "optimizer",
       nestsNode: optimizer?.measurement_node ?? null,
-      // The one level `active_node` speaks for.
       activeNode,
-      isLive: cv.isLive,
+      isLive,
     },
     {
       key: "campaign",
       label: datasetName ?? "this campaign's pipeline",
       view: cv.view,
-      status: cv.pipelineStatus,
+      status: cv.schema.status,
       connector: cv.connector,
       reach: cv.reach,
       scope: "target",
       nestsNode: cv.nests?.node ?? null,
       activeNode,
-      isLive: cv.isLive,
+      isLive,
     },
     ...nested.layers.map((l) => ({
       key: l.dataset,
@@ -108,24 +102,27 @@ export function PipelineStack({ datasetName, samplesOpen, onToggleSamples }: Pro
   // Indices count from the OUTSIDE in, so a choice survives deeper levels resolving.
   const start = Math.min(outermost, anchor);
 
-  const zoomStrip =
-    start > 0 ? (
-      <div className="pipeline-zoom">
-        {layers.slice(0, start).map((l, i) => (
+  const zoomStrip = (
+    <div className="pipeline-zoom">
+      {layers.slice(0, anchor).map((l, i) => {
+        const shown = i >= start;
+        return (
           <button
             key={l.key}
             type="button"
             className="pipeline-zoom-btn"
             aria-controls="pipeline-stack"
+            aria-pressed={shown}
             aria-label={`Show ${l.label}`}
-            title={`Show ${l.label}`}
-            onClick={() => setOutermost(i)}
+            title={`${shown ? "Hide" : "Show"} ${l.label}`}
+            onClick={() => setOutermost(shown ? i + 1 : i)}
           >
             <ZoomGlyph depth={anchor - i + 1} />
           </button>
-        ))}
-      </div>
-    ) : null;
+        );
+      })}
+    </div>
+  );
 
   const draw = (i: number): ReactNode => {
     const l = layers[i];
@@ -141,22 +138,8 @@ export function PipelineStack({ datasetName, samplesOpen, onToggleSamples }: Pro
         nestsNode={l.nestsNode}
         activeNode={l.activeNode}
         isLive={l.isLive}
-        leading={i === anchor ? zoomStrip : undefined}
-        queryPath={
-          i === anchor
-            ? {
-                pressed: samplesOpen,
-                label: samplesOpen ? "Hide project preview" : "Show project preview",
-                onClick: onToggleSamples,
-                connector: <ConnectorInspector view={cv} />,
-              }
-            : undefined
-        }
-        nest={
-          i < anchor
-            ? { level: draw(i + 1), onIsolate: () => setOutermost(i + 1) }
-            : undefined
-        }
+        inspector={i === anchor ? <ConnectorInspector view={cv} /> : undefined}
+        nested={i < anchor ? draw(i + 1) : undefined}
         tone={(anchor - i) % 2 === 0 ? "accent" : "neutral"}
       />
     );
@@ -164,8 +147,8 @@ export function PipelineStack({ datasetName, samplesOpen, onToggleSamples }: Pro
 
   return (
     <div className="pipeline-stack" id="pipeline-stack">
+      {zoomStrip}
       {draw(start)}
-      {/* A truncated recursion that looks finished is worse than a short one. */}
       {nested.truncated && (
         <p className="pipeline-stack-note">Stack incomplete — {nested.truncated}.</p>
       )}

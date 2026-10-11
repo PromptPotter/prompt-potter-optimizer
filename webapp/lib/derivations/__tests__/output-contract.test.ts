@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import type { NodeOutputSchema } from "@/lib/api";
 import { outputContract } from "../output-contract";
 
-// `l1_generate`'s served schema, trimmed to the shapes that decide the walk.
 const L1_GENERATE: NodeOutputSchema = {
   fields: ["variants"],
   field_descriptions: {},
@@ -46,7 +45,6 @@ const L1_GENERATE: NodeOutputSchema = {
 
 describe("outputContract", () => {
   it("is empty for a node that declares no structured output", () => {
-    // A measurement node returns none — a real answer, not a missing one.
     expect(outputContract(null)).toEqual([]);
     expect(outputContract(undefined)).toEqual([]);
     expect(outputContract({ fields: [], field_descriptions: {}, json_schema: {} })).toEqual([]);
@@ -61,7 +59,6 @@ describe("outputContract", () => {
   });
 
   it("steps THROUGH the array into the element's own parameters", () => {
-    // The whole point: `fields` says `variants` and stops. Six parameters live one hop in.
     const rows = outputContract(L1_GENERATE);
     expect(rows.map((r) => r.key)).toEqual([
       "variants",
@@ -78,7 +75,6 @@ describe("outputContract", () => {
     const eg = rows.find((r) => r.key === "variants.evidence_grounding");
     expect(eg?.type).toBe("VariantEvidenceGrounding");
     expect(eg?.required).toBe(false);
-    // Resolved through the `$ref`, so its own two fields are rows of their own.
     expect(rows.find((r) => r.key === "variants.evidence_grounding.field")?.required).toBe(true);
   });
 
@@ -93,7 +89,6 @@ describe("outputContract", () => {
   });
 
   it("falls back to the flat field list when no schema is on the wire", () => {
-    // What a backend's `/pipeline` reports for a target node: keys and prose, no JSON Schema.
     const rows = outputContract({
       fields: ["answer", "reasoning"],
       field_descriptions: { answer: "The normalized term." },

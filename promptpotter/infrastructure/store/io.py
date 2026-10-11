@@ -16,12 +16,7 @@ from promptpotter.domain.cycle_paths import ALL_DOTS_RE, ID_COMPONENT_RE
 
 
 def validate_path_component(name: str) -> str:
-    # The charset is `domain/cycle_paths.py`'s, not a second copy: a path component and a
-    # cycle-address component are ONE grammar, and it was written out three times — here, in
-    # the codec's prose, and by hand in `webapp/lib/ids.ts`.
-    # An all-dots component (``.``/``..``/``...``) matches the dot-allowing regex
-    # but is a traversal segment — reject it so a user-supplied id/slug/filename
-    # can never climb out of the dir the caller rooted it under.
+    # An all-dots component (`.`/`..`) matches the dot-allowing regex but is a traversal segment.
     if not name or ALL_DOTS_RE.match(name) or not ID_COMPONENT_RE.match(name):
         raise ValueError(
             f"Invalid path component: {name!r}. "
@@ -32,8 +27,7 @@ def validate_path_component(name: str) -> str:
 
 
 def _long_path(p: str | Path) -> str:
-    """The Windows long-path prefix bypasses ``MAX_PATH=260`` without the registry's
-    ``LongPathsEnabled`` — fork audit dirs nest past it. No-op on POSIX."""
+    """The Windows long-path prefix bypasses `MAX_PATH=260`, which nested sandbox dirs exceed."""
     s = str(p)
     if os.name != "nt":
         return s
@@ -47,8 +41,6 @@ def ensure_parent_dir(path: Path) -> None:
 
 
 def unlink_robust(path: Path) -> None:
-    """Delete one FILE — the same read-only chmod dance and retry :func:`rmtree_robust` does, split
-    from it only by arity (Windows refuses while a reader holds it). Missing is success."""
     for attempt in range(4):
         try:
             path.unlink()
@@ -64,8 +56,7 @@ def unlink_robust(path: Path) -> None:
 
 
 def open_text_robust(path: Path) -> IO[str]:
-    """Open one FILE to read — retried, since Windows refuses for the instant another process swaps
-    it (:func:`_atomic_replace`). Missing raises as ``open`` does."""
+    """Retried: Windows refuses for the instant another process swaps the file (`_atomic_replace`)."""
     for attempt in range(3):
         try:
             return open(_long_path(path), encoding="utf-8")
@@ -75,9 +66,6 @@ def open_text_robust(path: Path) -> IO[str]:
 
 
 def rmtree_robust(path: Path) -> None:
-    """Delete a tree — long-path safe, read-only tolerant, retried. **The one deleter.**
-    Raises on genuine failure: a sandbox that could not be reclaimed is a fact its caller needs."""
-
     def _onexc(func: Callable[[str], object], target: str, exc: BaseException) -> None:
         if isinstance(exc, PermissionError):
             try:
@@ -102,10 +90,6 @@ def rmtree_robust(path: Path) -> None:
 def iter_files(
     root: Path, *, skip: frozenset[str] = frozenset()
 ) -> Iterator[tuple[Path, os.stat_result]]:
-    """Every FILE under *root*, paired with the ``os.stat_result`` its directory scan already
-    produced — ``os.scandir`` rather than ``rglob`` + ``.stat()``, one syscall per file where the
-    glob spends three. *skip* names top-level directory names to exclude, so a caller does not
-    walk a directory once for its own figure and again inside a parent total."""
     stack = [root]
     first = True
     while stack:
@@ -127,8 +111,7 @@ def iter_files(
 
 
 def _atomic_replace(tmp: str, path: Path) -> None:
-    """Atomically swap *tmp* onto *path*, long-path safe. Windows can fail with WinError 5 while a
-    reader holds the destination, so it retries; POSIX never reaches that branch."""
+    """Retried: Windows fails with WinError 5 while a reader holds the destination."""
     last_exc: OSError | None = None
     for attempt in range(3):
         try:
@@ -142,9 +125,17 @@ def _atomic_replace(tmp: str, path: Path) -> None:
         raise last_exc
 
 
+def _tmp_beside(path: Path) -> tuple[int, str]:
+    parent = _long_path(path.parent)
+    try:
+        return tempfile.mkstemp(dir=parent, suffix=".tmp")
+    except FileNotFoundError:
+        ensure_parent_dir(path)
+        return tempfile.mkstemp(dir=parent, suffix=".tmp")
+
+
 def _atomic_write(path: Path, write_fn: Callable[[IO[str]], object]) -> None:
-    ensure_parent_dir(path)
-    fd, tmp = tempfile.mkstemp(dir=_long_path(path.parent), suffix=".tmp")
+    fd, tmp = _tmp_beside(path)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             write_fn(f)
@@ -156,11 +147,7 @@ def _atomic_write(path: Path, write_fn: Callable[[IO[str]], object]) -> None:
 
 
 def write_bytes(path: Path, data: bytes) -> None:
-    """The binary twin of :func:`_atomic_write`, not a second mechanism: the text path streams into
-    an encoding wrapper, so a caller holding compressed bytes cannot use it. Only the measurement
-    archive's gzip cold store needs this."""
-    ensure_parent_dir(path)
-    fd, tmp = tempfile.mkstemp(dir=_long_path(path.parent), suffix=".tmp")
+    fd, tmp = _tmp_beside(path)
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(data)
@@ -177,7 +164,8 @@ def write_json(
     *,
     default: Callable[[Any], Any] | None = None,
 ) -> None:
-    _atomic_write(path, lambda f: json.dump(data, f, indent=2, ensure_ascii=False, default=default))
+    text = json.dumps(data, indent=2, ensure_ascii=False, default=default)
+    _atomic_write(path, lambda f: f.write(text))
 
 
 def write_text(path: Path, content: str) -> None:
@@ -185,7 +173,6 @@ def write_text(path: Path, content: str) -> None:
 
 
 def read_bytes_optional(path: Path) -> bytes | None:
-    """``None`` for an absent file — the caller distinguishes "never compacted" from "empty"."""
     try:
         with open(_long_path(path), "rb") as f:
             return f.read()
@@ -224,18 +211,12 @@ _YAML_FOLD_OVER = 90
 
 
 class _YamlDumper(yaml.SafeDumper):
-    """``SafeDumper``, so an enum / datetime / arbitrary object raises instead of serialising to
-    something no editor can read back."""
-
     def increase_indent(self, flow: bool = False, indentless: bool = False) -> None:
-        # Indent sequence items under their key. PyYAML hangs them at the parent's
-        # column by default, which puts a list outside the block an editor folds.
         super().increase_indent(flow, False)
 
 
 def _represent_str(dumper: yaml.SafeDumper, data: str) -> yaml.ScalarNode:
-    """Picks literal / folded / plain so prose wraps instead of running off the edge. It NEVER
-    rewrites the value — these strings hash into measurement identity, so ugly output stays."""
+    """Picks the scalar STYLE only and never rewrites the value: these strings hash into measurement identity."""
     lines = data.split("\n")
     if len([ln for ln in lines if ln.strip()]) <= 1:
         style = ">" if len(data) > _YAML_FOLD_OVER else None
@@ -252,14 +233,13 @@ _YamlDumper.add_representer(str, _represent_str)
 
 
 def write_yaml(path: Path, data: Any) -> None:
-    """Write *data* as block-scalar YAML atomically. ``sort_keys=False`` because declaration order
-    is meaning here — a pipeline's node order, a schema's field order."""
     _atomic_write(
         path,
         lambda f: yaml.dump(
             data,
             f,
             Dumper=_YamlDumper,
+            # Load-bearing: declaration order is meaning (node order, schema field order).
             sort_keys=False,
             allow_unicode=True,
             default_flow_style=False,
@@ -269,20 +249,11 @@ def write_yaml(path: Path, data: Any) -> None:
     )
 
 
-# libyaml's loader where the wheel carries it: the same safe schema, parsed in C.
 _YAML_LOADER: type = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
 
 
 def read_yaml(path: Path) -> Any:
-    """A parse failure surfaces as ``ValueError`` NAMING THE FILE, which is what `json.loads`
-    already does (`JSONDecodeError` is a `ValueError`) and what every guard in this tree was
-    written against — `except (ValueError, OSError)`, over and over. A bare `yaml.YAMLError`
-    inherits from `Exception` alone, so it walked straight through all of them: one corrupt
-    `pipeline.yaml` under `datasets/` took down the whole readable-dataset listing, where the
-    guard it passed through was written to degrade that dataset to "unknown size" and move on.
-
-    Wrapped HERE rather than at the guards, because there are eleven call sites and this is the
-    one place that knows which path failed."""
+    """`yaml.YAMLError` is no `ValueError`, which every guard in this tree catches, so it is wrapped here."""
     try:
         with open(_long_path(path), encoding="utf-8") as f:
             return yaml.load(f, Loader=_YAML_LOADER)
@@ -291,8 +262,6 @@ def read_yaml(path: Path) -> Any:
 
 
 def read_yaml_optional(path: Path) -> Any | None:
-    """``None`` for a file that is not THERE. A file that is there and unreadable still raises —
-    absence is a state a caller can act on, corruption is one it must not paper over."""
     try:
         return read_yaml(path)
     except FileNotFoundError:
@@ -317,8 +286,6 @@ def append_jsonl(path: Path, item: dict[str, Any]) -> Path:
 
 
 def write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> None:
-    """The whole-file peer of :func:`append_jsonl` — compaction / reindex replace a log with its
-    live rows through the temp-file + atomic-replace path."""
     _atomic_write(
         path,
         lambda f: f.writelines(json.dumps(r, ensure_ascii=False) + "\n" for r in rows),
@@ -326,8 +293,7 @@ def write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> None:
 
 
 def newest_mtime_ns(*paths: Path) -> int | None:
-    """Newest ``st_mtime_ns`` across *paths*; missing skipped, all missing → ``None``. Nanoseconds,
-    not float seconds: the float collides on a same-tick append and serves a spurious 304."""
+    """Nanoseconds, not float seconds: the float collides on a same-tick append and serves a spurious 304."""
     newest: int | None = None
     for p in paths:
         try:

@@ -1,36 +1,28 @@
 "use client";
-// The "New campaign" modal — only the DOOR: a pick or drop advances the shared thread and the
-// shell moves to the chat tab. It must hold no flow of its own, or it carries a second draft.
+// Only the DOOR to the shared thread: a flow of its own here is a second draft.
 
-import { useState } from "react";
-import { IngestConversation } from "./IngestConversation";
+import { IngestComposer, useIngestItems } from "./IngestConversation";
 import { useIngest } from "@/lib/ingest-flow";
+import { useThread } from "@/lib/chat/thread";
+import type { RunSummary } from "@/lib/derivations";
+import { Thread } from "@/components/chat/Thread";
+import { RunSummaryItem } from "@/components/chat/RunCard";
 import { Button, Dialog, IconClose, SignInPrompt } from "@/components/ui";
 
-interface Props {
-  open: boolean;
-  onClose: () => void;
-}
-
-export function IngestPane({ open, onClose }: Props) {
-  const { flow, collection, startNew } = useIngest();
-  const [prevOpen, setPrevOpen] = useState(open);
-
-  // A fresh open starts a fresh thread.
-  if (open !== prevOpen) {
-    setPrevOpen(open);
-    if (open) startNew();
-  }
-
-  if (!open) return null;
+export function IngestPane() {
+  const { flow, collection, closeComposer: onClose } = useIngest();
+  const thread = useThread<RunSummary>();
+  const ingestItems = useIngestItems(thread.items.length === 0);
 
   const body =
     collection.kind === "ready" ? (
-      <IngestConversation
-        flow={flow}
-        origins={collection.origins}
-        datasets={collection.entries}
-      />
+      <div className="ingest-conversation">
+        <Thread
+          items={[...ingestItems.head, ...thread.items, ...ingestItems.tail]}
+          renderRun={(summary) => <RunSummaryItem summary={summary} />}
+        />
+        <IngestComposer />
+      </div>
     ) : collection.kind === "needsAuth" ? (
       <div className="new-campaign-body">
         <SignInPrompt message="Sign in to start a campaign." />

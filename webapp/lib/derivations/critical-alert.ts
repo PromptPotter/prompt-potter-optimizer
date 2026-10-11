@@ -1,16 +1,10 @@
-// The one verdict for the loud cross-tab alert bar, over signals AppShell already reconciled.
-// Branch order IS the precedence.
-
-import { STOP_REASON_LABELS, STOP_REASON_NEXT_STEPS } from "@/lib/api/types.generated";
-import type { RoundSummary } from "@/lib/api/types";
+import type { MachineNotice } from "@/lib/api/types";
 import type { DashboardSnapshot, StatusKind } from "@/lib/poll";
 
 export interface CriticalAlert {
-  // `info` = nothing is wrong: the app already recovered and says why.
   severity: "critical" | "warn" | "info";
   title: string;
   detail?: string;
-  // The run never auto-pauses on a broken measurement; the operator decides.
   action?: "pause";
 }
 
@@ -18,20 +12,13 @@ interface Args {
   bannerStatus: StatusKind;
   bannerText: string;
   bannerHint?: string;
-  // Not a `StatusKind`: the poll's resting `INITIAL_STATE.status` is already `offline`, so only
-  // the caller knows the cycle list loaded AND came back empty.
+  // Not a `StatusKind`: the poll rests at `offline`, so only the caller knows the list loaded empty.
   emptyWorkspace?: boolean;
   dash: DashboardSnapshot | null;
-  // The same reachability as the ConnectorInspector LED; this bar is its cross-tab twin.
   connectorDown?: boolean;
   connectorName?: string | null;
   connectorDetail?: string | null;
-  // No slot free — the caller's own runs count too.
-  machineBusy?: boolean;
-  machineBusyHolder?: string | null;
-  machineBusySince?: string | null;
-  // `/machine-status::queue[].position` of the caller's earliest waiting launch, null when none.
-  queuePosition?: number | null;
+  machineNotice?: MachineNotice | null;
 }
 
 export function criticalAlert({
@@ -43,29 +30,22 @@ export function criticalAlert({
   connectorDown,
   connectorName,
   connectorDetail,
-  machineBusy,
-  machineBusyHolder,
-  machineBusySince,
-  queuePosition,
+  machineNotice,
 }: Args): CriticalAlert | null {
-  // GONE outranks a crash: any `dash` in hand describes a campaign no longer on disk.
+  // Branch order IS the precedence. GONE first: any `dash` in hand describes a campaign no longer on disk.
   if (bannerStatus === "gone") {
     return { severity: "info", title: bannerText, detail: bannerHint };
   }
-  // Arrives wearing the poll's resting `offline`; the sidebar's empty state is the message.
+  // Arrives wearing the poll's resting `offline`, so it must precede that branch.
   if (emptyWorkspace) return null;
   const err = dash?.error;
   if (err) {
-    // Label and next step are the served `STOP_REASON_INFO` row's; a reason an older build
-    // wrote under a retired spelling carries neither, so the bar names the error kind alone.
-    const label = STOP_REASON_LABELS[err.stop_reason];
     return {
       severity: "critical",
-      title: label === undefined ? err.kind : `${label} — ${err.kind}`,
-      detail: STOP_REASON_NEXT_STEPS[err.stop_reason],
+      title: `${err.label} — ${err.kind}`,
+      detail: err.next_step,
     };
   }
-  // The poll and AppShell already collapse every offline-class condition into this one.
   if (bannerStatus === "offline") {
     return { severity: "critical", title: bannerText, detail: bannerHint };
   }
@@ -76,46 +56,18 @@ export function criticalAlert({
       detail: connectorDetail ?? undefined,
     };
   }
-  if (queuePosition != null) {
-    return {
-      severity: "warn",
-      title:
-        queuePosition === 1
-          ? "Queued — next in line"
-          : `Queued — position ${queuePosition}`,
-      detail: "it starts by itself when a slot frees",
-    };
-  }
-  // A notice, not a refusal: pressing Start joins the queue.
-  if (machineBusy) {
-    return {
-      severity: "warn",
-      title: `Machine full — ${machineBusyHolder ?? "another run"} is running`,
-      detail: machineBusySince
-        ? `a launch will queue · oldest run since ${machineBusySince}`
-        : "a launch will queue",
-    };
-  }
-  // Two orthogonal signals (server phase × this connection's freshness), never one "detached" phase.
-  if (dash?.run_phase === "running" && bannerStatus === "stale") {
-    return { severity: "warn", title: "Run went silent", detail: bannerText };
-  }
-  // Only `critical` health raises the bar; `degraded` is surfaced per round by `round-health.ts`.
-  const latest = (dash?.rounds ?? []).reduce<RoundSummary | null>(
-    (acc, r) => (acc === null || r.round >= acc.round ? r : acc),
-    null,
-  );
-  if (latest?.health?.grade === "critical") {
+  if (machineNotice) return { severity: "warn", ...machineNotice };
+  const stuck = dash?.producer.alert;
+  if (stuck) return { severity: "warn", title: stuck.title, detail: stuck.detail };
+  // Only a `critical` round carries an alert; `degraded` is `round-health.ts`'s.
+  const latest = dash?.rounds.at(-1);
+  if (latest?.health_alert) {
     return {
       severity: "critical",
-      title:
-        latest.round === 0
-          ? "Degraded origin — pipeline may be structurally broken"
-          : `Round ${latest.round} degraded — pipeline may be structurally broken`,
-      detail: latest.health.suggested_action ?? undefined,
+      title: latest.health_alert,
+      detail: latest.health?.suggested_action ?? undefined,
       action: "pause",
     };
   }
-  // `warming_up` is not a lost connection; the masthead's STATE chip carries it.
   return null;
 }

@@ -1,22 +1,15 @@
-"""Application settings + global constants. The module-level constants are the single source for prompt field lists,
-persistence versioning and service-level defaults."""
-
 import codecs
 import locale
-import math
 import tomllib
 from importlib.metadata import version
-from typing import Annotated
 
 from pydantic_settings import BaseSettings
 
 from promptpotter.config.paths import env_file_path, source_checkout_root
-from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 
 def _app_version() -> str:
-    """One version owner: ``pyproject.toml``. The dev tree reads the file (editable-install metadata goes stale on a bump);
-    an installed wheel reads its own. Whether a checkout sits beside the package is ``source_checkout_root``'s question."""
+    """A checkout reads `pyproject.toml` itself: editable-install metadata goes stale on a bump."""
     checkout = source_checkout_root()
     if checkout is not None:
         with (checkout / "pyproject.toml").open("rb") as f:
@@ -26,220 +19,92 @@ def _app_version() -> str:
 
 APP_VERSION: str = _app_version()
 
-# The version the consent gate requires. Bumping it re-prompts every user, since the version
-# recorded in ``user.json`` no longer matches. Keep in sync with the marketing site's
-# /terms + /privacy.
+# Bumping it re-prompts every user for consent; keep in sync with the site's /terms + /privacy.
 TERMS_VERSION: str = "2026-09-08"
 
-# Defaults for backend connection (not env-driven — override via CLI args)
 DEFAULT_BACKEND_URL = "http://127.0.0.1:8000"
 DEFAULT_BACKEND_ID = "local"
 
-DATASET_NAME: str = "ground_truth"
-NO_RESULT: Annotated[str, shapes_optimizer_prompt] = "NO_RESULT"
-
-# stores/measurement_archive — file lock parameters
 LOCK_TIMEOUT: float = 5.0  # seconds before treating lock as stale
 
 
-# The decomposition field SET; the render ORDER is per class (`PromptTemplate.RENDER_ORDER`).
-PROMPT_STRING_FIELDS: Annotated[list[str], shapes_optimizer_prompt] = [
-    "persona",
-    "task_intent",
-    "problem_description",
-    "instruction",
-    "thinking_style",
-    "answer_format",
-]
-
-# Above this many distinct ground truths a task's answer space is "open" (free-text /
-# ranking) — no enumerable label identity. Shared by the answer_distribution collapse
-# detector and the earned-block library's task-fit signature, so both draw the same line.
-ANSWER_SPACE_CAP: Annotated[int, shapes_optimizer_prompt] = 10
-
-# Populates ``PipelineNode.param_types`` so a dataset overlay need not spell these out. An
-# overlay may add backend-specific types via the node's ``optimizer.param_types`` block, which
-# overrides these; inference from ``node.config`` Python types is the last-resort fallback.
-WELL_KNOWN_PARAM_TYPES: Annotated[dict[str, str], shapes_optimizer_prompt] = {
-    # Universal LLM-call params — same shape across every provider.
-    "temperature": "number",
-    "top_p": "number",
-    "max_tokens": "integer",
-    "max_completion_tokens": "integer",
-    "thinking_budget": "integer",
-    "seed": "integer",
-    "model": "string",
-    "provider": "string",
-    "reasoning_effort": "string",
-    # PromptTemplate scheme — six string fields render() assembles.
-    "persona": "string",
-    "task_intent": "string",
-    "problem_description": "string",
-    "instruction": "string",
-    "thinking_style": "string",
-    "answer_format": "string",
-    # The structured-output contract (`pipeline_schema.OUTPUT_CONTRACT_KEYS`), typed rather than
-    # inferred because it must resolve on a node declaring NO schema. `object` is also what bounds
-    # the overlay merge to one level, so a fork replacing `properties` keeps its siblings.
-    "output_schema": "object",
-    "answer_field": "string",
-}
-
-
-# Wall-clock ceiling on one optimizer round-trip. The provider SDK's own timeout is a
-# per-read-gap timeout, not a total one, so a reasoning model streaming slowly never trips it
-# and the call hangs indefinitely. Per round trip: the logical call's wall multiplies it by the
-# round trips its parse ladder may take (`bench/llm_call.py::_MAX_ROUND_TRIPS_PER_CALL`). A call past
-# that wall halts the loop with ``StopReason.OPTIMIZER_TIMEOUT`` — it is never sent again.
-OPTIMIZER_CALL_DEADLINE_S: float = 180.0
-
-DEFAULT_ORIGIN_BUDGET: int = 40
-
-# UCB1 exploration weight for the lineage rewind pick. sqrt(2) is UCB1's regret-optimal constant
-# for rewards in [0, 1], which the θ values are min-max normalized into, so it means what the
-# literature says. Deliberately NOT a campaign knob: one rewind costs a whole cycle, so this is
-# a property of the search rather than a per-run dial.
-UCB_EXPLORATION_C: float = math.sqrt(2)
-
-
 class Settings(BaseSettings):
-    # Environment
     ENVIRONMENT: str = "development"
 
-    # Display identity. `deploy-linux/deploy.config`'s brand block is the ONE declaration a
-    # fork edits; `brand-env.sh` mirrors it here and into the webapp's `NEXT_PUBLIC_*` twins.
-    # The package, the CLI verb and the state dir are NOT brand — that is a different tier.
+    # A fork edits `deploy-linux/deploy.config`'s brand block; `brand-env.sh` mirrors it here.
     BRAND_SHORT_NAME: str = "PromptPotter"
     BRAND_SERVICE_NAME: str = "PromptPotter Optimizer"
     BRAND_DOCS_URL: str = "https://github.com/PromptPotter/prompt-potter-optimizer"
 
-    # Comma-separated CORS allowlist. Empty by default because the webapp is same-origin, so
-    # cross-origin access is opt-in — and never `*`, since the app serves credentialed requests.
+    # Comma-separated; never `*`, since the app serves credentialed requests.
     ALLOWED_ORIGINS: str = ""
 
     @property
     def allowed_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",") if origin.strip()]
 
-    # Keys only. The optimizer's provider + model are per node in
-    # ``promptpotter/assets/optimizers/potter/pipeline.yaml``; there is no env-var default for either.
     OPENAI_API_KEY: str = ""
     ANTHROPIC_API_KEY: str = ""
     GROQ_API_KEY: str = ""
     OPENROUTER_API_KEY: str = ""
 
-    # Per-provider tier caps (rolling 60s window), keyed by provider → [rpm, tpm].
-    # Omit a provider, or use null for a slot → no client-side throttle (the limiter
-    # then self-tunes from response headers). Example (Groq free tier, 5 req/min +
-    # 8000 tokens/min for gpt-oss-120b): RATE_LIMITS='{"groq": [5, 8000]}'
+    # provider -> [rpm, tpm] per rolling 60s; a missing provider or a null slot is unthrottled.
     RATE_LIMITS: dict[str, list[int | None]] = {}
 
-    # TermNorm's credential, nobody else's: read ONLY by the termnorm connector's
-    # ``auth_token`` hook, so a second remote backend declares its own or gets no auth header.
-    # TermNorm gates it behind its own flag, so unset is the normal local posture.
+    # Read ONLY by the termnorm connector's `auth_token` hook: a second backend declares its own.
     TERMNORM_TOKEN: str = ""
 
-    # Where the dbllmbench connector's database is — the deployment's, never the dataset's. Empty
-    # is upstream's local compose stack; a TypeDB Cloud cluster is its gRPC `host:port`, the admin
-    # credentials and TLS on. Read ONLY by `connectors/dbllmbench.py::harness_config`.
+    # Empty is upstream's local compose stack; read only by `connectors/dbllmbench.py::harness_config`.
     DBLLMBENCH_DB_URL: str = ""
     DBLLMBENCH_DB_USERNAME: str = ""
     DBLLMBENCH_DB_PASSWORD: str = ""
     DBLLMBENCH_DB_TLS: bool = False
 
-    # Langfuse Observability (cloud.langfuse.com)
     LANGFUSE_PUBLIC_KEY: str = ""
     LANGFUSE_SECRET_KEY: str = ""
     LANGFUSE_HOST: str = "https://cloud.langfuse.com"
     LANGFUSE_ENABLED: bool = True
 
-    # When True, binary/Office uploads are rejected at ingest rather than parsed — xlsx is a
-    # macro / zip-bomb / XXE vector. The hook for upload-surface hardening generally.
+    # Rejects binary/Office uploads at ingest: xlsx is a macro / zip-bomb / XXE vector.
     HARDENED_MODE: bool = False
 
-    # WHO may claim this box from the browser. Signing up entitles, so entitlement can no longer
-    # stand in for this: unset means no browser sign-in writes the claim marker, and the box has
-    # no admin identity until it is set. A hosted deployment must declare it.
+    # Unset: no browser sign-in can claim the box, and it has no admin identity.
     HOST_ADMIN_EMAIL: str = ""
 
-    # ...and WHICH ISSUER must have vouched for that address. An email is a claim a provider makes,
-    # so the box's most privileged decision should not rest on one provider's word alone: with two
-    # providers wired, matching on the address by itself lets whichever of them has the weakest
-    # email handling grant the box. Pinning the issuer means a provider added later cannot
-    # re-open that by default.
-    #
-    # Empty accepts any issuer, which is the behaviour every existing box already has — so this
-    # never locks an operator out on deploy. Set it to the `iss` of the provider you actually sign
-    # in with (Google: "https://accounts.google.com").
+    # Empty accepts any issuer: with two providers wired, the weakest one's email handling then grants the box.
     HOST_ADMIN_ISSUER: str = ""
 
-    # The ADR-0004 operator-admin channel: the bot's own Telegram credentials, plus the n8n door a
-    # new account is announced to. Declared here rather than read from `os.environ` so there is ONE
-    # answer to "where does a key live" — pydantic consults the process environment AND
-    # `env_file_path()`, while a bare environ read sees only what systemd's `EnvironmentFile`
-    # exported, and silently ignores the same key written to the install's own file.
+    # Declared here, never read from `os.environ`: a bare environ read ignores `env_file_path()`.
     ADMIN_BOT_TELEGRAM_TOKEN: str = ""
     ADMIN_BOT_CHAT_ID: str = ""
     ADMIN_BOT_PASSPHRASE: str = ""
     N8N_SIGNUP_WEBHOOK_URL: str = ""
 
-    # The lifetime USD ceiling a free-tier account spends against — TOTAL, not per day, and summed
-    # over the account's whole ledger. It is the only thing bounding a stranger who signs up, since
-    # signing up is now the grant. A per-user override lives on `user.json::spend_budget_usd_total`;
-    # the operator of the box is exempt (`quota.py::spends_the_hosts_own_key`).
+    # LIFETIME total over the account's whole ledger, not per day; the box's operator is exempt.
     FREE_TIER_SPEND_CAP_USD: float = 0.30
 
-    # What ONE metered launch may declare. The offer is denominated in runs, so the ceiling above
-    # divides into this many of them and no single run can declare the whole grant.
+    # What ONE metered launch may declare, so no single run takes the whole grant.
     FREE_TIER_LAUNCH_STEP_USD: float = 0.03
 
-    # The same ceiling in the unit a missing rate cannot blind (ADR-0003 D1). Sized ABOVE what the
-    # USD one buys on the cheapest configured model, so it binds only once that one has; re-derive
-    # it whenever the USD ceiling moves. Per-user override: `user.json::token_budget_total`.
+    # Sized ABOVE what the USD cap buys on the cheapest model: re-derive it whenever that cap moves.
     FREE_TIER_TOKEN_CAP: int = 5_000_000
 
-    # What a metered account may still spend once its USD total is known to be understated. A
-    # CEILING on the remainder, never a bonus added to it: an exhausted account gets nothing.
+    # A ceiling on the remainder once the USD total is understated, never a bonus added to it.
     UNPRICED_GRACE_USD: float = 0.10
 
-    # The per-user token bucket every metered gesture draws on — a campaign launch and a check-in
-    # resolver turn keep separate buckets of this shape. Abuse-bound, not audit-bound: process
-    # state, reset by a restart. The burst is what a CONVERSATION spends in one sitting, so it is
-    # the arm to move if the check-in chat starts refusing a real operator.
+    # Per-user token bucket; process state, reset by a restart.
     USER_RATE_BURST: int = 5
     USER_RATE_PER_MIN: float = 1.0
 
-    # The CEILING on campaigns admitted at once — `jobs/capacity.py::resolve_run_capacity` reads it
-    # per admission and may only ever LOWER it (provider back-pressure), never raise it. 1 = strictly
-    # sequential.
-    #
-    # **This is the MACHINE's ceiling, not anyone's allowance**, and it is deliberately not the
-    # binding limit: `user.max_concurrent_cycles` is what the host turns down to bound one person,
-    # and each account answers to its own lifetime wallet besides. So the default is sized to leave
-    # both of those the actual gate — one user at their own default allowance of 2, and room for a
-    # second person beside them, which is the case that has to work on a shared box.
-    #
-    # Raising it further is safe where concurrent runs cannot take from each other. They no longer
-    # can: the shared provider window admits tenants least-served-first
-    # (`infrastructure/llm/rate_limit.py`) rather than in lock-arrival order, so one account's burst
-    # cannot starve another inside the 60 s window. What more concurrency cannot manufacture is
-    # provider QUOTA — two busy tenants on one key each get about half the throughput however the
-    # window is divided, and only a higher tier or per-user keys change that.
+    # The machine's ceiling, not an allowance: `jobs/capacity.py::resolve_run_capacity` may only lower it.
     MACHINE_RUN_CAPACITY: int = 3
 
-    # How long a launch may wait in line before it is withdrawn. A full box QUEUES rather than
-    # refuses, and an unbounded queue is a promise the machine may never keep — a run that waited
-    # overnight starts against a world the operator has moved on from. Six hours is "still the same
-    # working day"; past it the honest answer is to say so and let them press again.
     QUEUE_MAX_WAIT_S: float = 6 * 3600.0
 
-    # File-based observability (traces, events.jsonl)
     OBS_ENABLED: bool = True
 
-    # Opt-in: MLflowSink writes per-round MLflow runs to ``traces/mlruns/``.
     MLFLOW_ENABLED: bool = False
 
-    # Resolved, never CWD-relative — see ``config/paths.py::env_file_path``.
     model_config = {"env_file": env_file_path(), "case_sensitive": True, "extra": "ignore"}
 
 
@@ -247,28 +112,16 @@ settings = Settings()
 
 
 def non_utf8_encoding() -> str | None:
-    """This interpreter's text encoding when it is NOT UTF-8, else ``None`` — one reading of a
-    posture two surfaces act on. A container-backed connector REFUSES a launch under it, because
-    the agent reads its task files without naming an encoding and any byte outside the locale's
-    raises before a container is built; the API server's boot banner warns that it can therefore
-    run none. Written twice, the two could disagree about what counts as UTF-8."""
     name = codecs.lookup(locale.getpreferredencoding(False)).name
     return None if "utf-8" in name else name
 
 
 __all__ = [
-    "ANSWER_SPACE_CAP",
     "APP_VERSION",
-    "DATASET_NAME",
     "DEFAULT_BACKEND_ID",
     "DEFAULT_BACKEND_URL",
-    "DEFAULT_ORIGIN_BUDGET",
     "LOCK_TIMEOUT",
-    "NO_RESULT",
-    "OPTIMIZER_CALL_DEADLINE_S",
-    "PROMPT_STRING_FIELDS",
     "TERMS_VERSION",
-    "WELL_KNOWN_PARAM_TYPES",
     "Settings",
     "non_utf8_encoding",
     "settings",

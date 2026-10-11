@@ -36,8 +36,7 @@ const STAGES: { label: string; left: number; width: number; tone?: "success" }[]
   { label: "converged", left: 71, width: 27, tone: "success" },
 ];
 
-// The login pane's advertising composition — NOT operator chrome, so its palette ignores the theme.
-// A whitelabel host drops it by clearing NEXT_PUBLIC_MARKETING_URL.
+// NOT operator chrome, so its palette ignores the theme.
 export function BrandShowcase() {
   const { url, title, tagline } = BRAND.marketing;
 

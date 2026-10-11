@@ -1,6 +1,3 @@
-"""Per-dataset starting-point prompts. ``dataset_dir`` is the RESOLVED dir off the session (tenant-first), so these loaders never
-recompute a repo-relative path and a tenant upload loads through the same code as a repo benchmark."""
-
 from __future__ import annotations
 
 import functools
@@ -13,8 +10,6 @@ from promptpotter.infrastructure.store.io import read_yaml, read_yaml_optional
 
 
 def load_dataset_node_overlay(dataset_dir: Path) -> dict[str, dict[str, Any]]:
-    """Sparse per-node overlay from the dataset's ``pipeline.yaml``, layered onto the wire payload at init. The backend's
-    ``GET /pipeline`` stays SoT for runtime defaults; this encodes per-dataset operator preferences."""
     raw = read_yaml_optional(dataset_pipeline_path(dataset_dir))
     if not raw:
         return {}
@@ -27,16 +22,7 @@ def load_dataset_node_overlay(dataset_dir: Path) -> dict[str, dict[str, Any]]:
 
 
 def dataset_declared_nodes(dataset_dir: Path) -> frozenset[str]:
-    """The node names the dataset's ``pipeline.yaml`` DECLARES — what this campaign can configure.
-
-    A discovered backend answers ``GET /pipeline`` with its WHOLE inventory, so without this the
-    schema carries every node that backend can serve and the optimizer prompt advertises levers the
-    campaign cannot pull.
-
-    Its sibling above keeps only nodes carrying a non-empty ``config``, which is the wrong question
-    here: a node declared ``config: {}`` is still the campaign's (every ``promptpotter-self``
-    optimizer node is one). Empty where the dataset ships no ``pipeline.yaml`` — "no opinion",
-    never "no nodes"."""
+    """Empty where the dataset ships no ``pipeline.yaml``: "no opinion", never "no nodes"."""
     raw = read_yaml_optional(dataset_pipeline_path(dataset_dir))
     if not raw:
         return frozenset()

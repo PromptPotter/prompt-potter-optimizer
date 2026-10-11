@@ -1,6 +1,4 @@
 "use client";
-// Four views of one served comparison; every value comes off `Evidence.subjects`, nothing recomputes a level,
-// bound or verdict (`webapp/CLAUDE.md` § Scoring authority). The axis is `covered_cells`, not the intersection.
 
 import { memo } from "react";
 import { Bar, Line } from "react-chartjs-2";
@@ -15,8 +13,6 @@ ensureChartRegistered();
 
 export type CompareView = "grouped" | "overlaid" | "lines" | "merged";
 
-// The y axis carries the metric's NAME, or a composed expression plots as bare numbers. Shape matches
-// `candidates/FitnessChart.tsx`, the only other titled axis.
 function axisScales(title: string, stacked: boolean) {
   const tick = { color: getCss("--color-text-secondary") };
   return {
@@ -46,8 +42,6 @@ export const EvidenceCharts = memo(function EvidenceCharts({
   evidence: Evidence;
   view: CompareView;
 }) {
-  // Theme subscription re-resolves the `getCss` palette. Not memoized: the data changes only with the
-  // selection, not the poll.
   useThemeVersion();
   const cells = evidence.metric.covered_cells;
   const series = evidence.subjects;
@@ -60,7 +54,7 @@ export const EvidenceCharts = memo(function EvidenceCharts({
 
   if (cells.length === 0) {
     return (
-      <p className="l4-empty">
+      <p className="note-empty">
         No selected subject reached a cell under this metric, so there is nothing to plot.
       </p>
     );
@@ -68,7 +62,6 @@ export const EvidenceCharts = memo(function EvidenceCharts({
 
   const datasets = series.map((s, i) => ({
     label: seriesLabel(s),
-    // `null`, never 0 — a 0 reads as a measured floor; `Coverage` says which absence.
     data: cells.map((cell) => {
       const value = s.values[cell];
       return value === undefined ? null : value;
@@ -111,7 +104,6 @@ export const EvidenceCharts = memo(function EvidenceCharts({
   );
 });
 
-// Two served absences: `?` never measured (`values`), `x` measured but unscorable (`unscorable_cells`).
 export function Coverage({ evidence }: { evidence: Evidence }) {
   const cells = evidence.metric.covered_cells;
   const gaps = evidence.subjects.some(
@@ -157,12 +149,9 @@ export function Coverage({ evidence }: { evidence: Evidence }) {
   );
 }
 
-// One row per subject with its served 95% interval, in the `ov-axis` idiom the outer-signal forest uses.
-// No interval draws a dot alone (a zero-width whisker reads as perfect); no value keeps its row with `—`.
 const AXIS_W = 220;
 const ROW_H = 18;
 
-// One scale over heads AND chain points, or a chain point outside the heads' range clips to the edge.
 function scaleOver(rows: readonly { value: number | null; ci_lo: number | null; ci_hi: number | null }[]) {
   const bounds = rows.flatMap((r) =>
     r.value === null ? [] : [r.ci_lo ?? r.value, r.value, r.ci_hi ?? r.value],
@@ -180,11 +169,11 @@ function Merged({ evidence }: { evidence: Evidence }) {
   const x = scaleOver([...rows, ...rows.flatMap((r) => r.winner_chain ?? [])]);
   if (x === null) {
     return (
-      <p className="l4-empty">No subject in this selection could be read under this metric.</p>
+      <p className="note-empty">No subject in this selection could be read under this metric.</p>
     );
   }
   return (
-    // `cmp-forest` turns OFF the shared row's newest-row emphasis: here rows are subjects, not rounds.
+    // `cmp-forest` turns off `ov-forest`'s newest-row emphasis: these rows are subjects, not rounds.
     <div className="ov-forest cmp-forest">
       {rows.map((r, i) => (
         <div key={r.key}>
@@ -236,7 +225,6 @@ function MergedRow({
 }) {
   const value = fmtMetricValue(unit, row.value);
   const interval = fmtMetricInterval(unit, row.ci_lo, row.ci_hi);
-  // Merged over THIS subject's own cells, so the count belongs on the row.
   const cells = `${row.n_cells} cell${row.n_cells === 1 ? "" : "s"}`;
   return (
     <div className={cx("ov-row", nested && "cmp-row-nested", muted && "cmp-row-muted")}>
@@ -276,14 +264,12 @@ function MergedRow({
   );
 }
 
-// The comparable tag is the served verdict, never a client guess at the odd one out.
 export function SeriesLegend({
   evidence,
   masking,
   onMask,
 }: {
   evidence: Evidence;
-  // The BARE address, not the key, so applying a mask does not close the form that applied it.
   masking: string | null;
   onMask: (address: string) => void;
 }) {
@@ -306,7 +292,6 @@ export function SeriesLegend({
             )}
             {s.comparable === false && <span className="cmp-tag">not comparable</span>}
             {s.comparable === null && <span className="cmp-tag">ruler unknown</span>}
-            {/* Only a course has elections to re-decide — the server's rule. */}
             {s.kind === "course" && (
               <button
                 type="button"

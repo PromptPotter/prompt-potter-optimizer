@@ -1,8 +1,4 @@
-// The view axis, rendered only by `components/shell/ViewTabs`. A client-side closed set on
-// purpose: no route names it, so the server-owns-closed-sets rule does not reach it.
-//
-// Two LEVELS, never mixed on one strip: a CAMPAIGN view reads the viewed campaign, a WORKSPACE
-// view reads across campaigns and is reached from the campaign list, not from one campaign's nav.
+// A client-side closed set on purpose: no route names it.
 
 export type PrimaryTab = "chat" | "dashboard";
 export type RecordsTab = "measurements" | "files";

@@ -1,34 +1,76 @@
 "use client";
+import { useEffect, useMemo, useState } from "react";
 import { SignInPrompt } from "@/components/ui";
-import type { AuthStatus } from "@/lib/auth-context";
-import type { LifecycleFilter } from "@/lib/api";
-import type { OriginGroup } from "@/lib/derivations";
+import { useAuth } from "@/lib/auth-context";
+import { filterForest, nodeKey } from "@/lib/derivations";
+import { encodeCyclePath, rootCycleId } from "@/lib/ids";
+import { useActivePointer, useRegistry } from "@/lib/registry";
+import { useShowCandidates } from "@/lib/tree-prefs";
+import { useNodeToggle } from "@/lib/view-memory";
+import { useWorkspace } from "@/lib/workspace";
 import { ForestRows, type TreeCtx } from "./ForestRows";
 import { SidebarFilterPopover } from "./SidebarFilterPopover";
 
-interface Props {
-  status: AuthStatus;
-  loaded: boolean;
-  lifecycleFilter: LifecycleFilter;
-  setLifecycleFilter: (f: LifecycleFilter) => void;
-  datasetNames: string[];
-  datasetFilter: string | null;
-  setDatasetFilter: (d: string | null) => void;
-  origins: OriginGroup[];
-  ctx: TreeCtx;
-}
+export function SidebarContent() {
+  const { status } = useAuth();
+  const { viewedPath, viewedCandidateId } = useWorkspace();
+  const {
+    campaigns,
+    forest,
+    cyclesLoaded,
+    campaignsLoaded,
+    failure,
+    lifecycleFilter,
+    setLifecycleFilter,
+  } = useRegistry();
+  const { campaignId: activeCampaignId, cycleId: activeCycleId } = useActivePointer();
+  const nodes = useNodeToggle();
+  const [showCandidates] = useShowCandidates();
+  const [datasetFilter, setDatasetFilter] = useState<string | null>(null);
 
-export function SidebarContent({
-  status,
-  loaded,
-  lifecycleFilter,
-  setLifecycleFilter,
-  datasetNames,
-  datasetFilter,
-  setDatasetFilter,
-  origins,
-  ctx,
-}: Props) {
+  const origins = useMemo(
+    () =>
+      datasetFilter == null
+        ? forest
+        : filterForest(forest, (c) => (c.dataset_name || "(unknown)") === datasetFilter),
+    [forest, datasetFilter],
+  );
+
+  const datasetNames = useMemo(() => {
+    const s = new Set<string>();
+    for (const c of campaigns) s.add(c.dataset_name || "(unknown)");
+    return [...s].sort();
+  }, [campaigns]);
+
+  // The ACTIVE cycle, never the viewed one: a manual selection must not pop a course open.
+  const focusKey = useMemo(() => {
+    if (!activeCampaignId || !activeCycleId) return null;
+    const path = encodeCyclePath([
+      { campaignId: activeCampaignId, cycleId: rootCycleId(activeCycleId) },
+    ]);
+    return nodeKey("course", path);
+  }, [activeCampaignId, activeCycleId]);
+
+  // Latched per (campaign, active cycle): unlatched, a remount re-opens a row just collapsed.
+  useEffect(() => {
+    if (!focusKey || !activeCampaignId || !activeCycleId) return;
+    if (nodes.autoExpandedFor(activeCampaignId) === activeCycleId) return;
+    nodes.markAutoExpanded(activeCampaignId, activeCycleId, focusKey);
+  }, [focusKey, activeCampaignId, activeCycleId, nodes]);
+
+  const ctx: TreeCtx = useMemo(
+    () => ({
+      isNodeOpen: nodes.isOpen,
+      toggleNode: nodes.toggle,
+      viewedPath,
+      viewedCandidateId,
+      showCandidates,
+    }),
+    [nodes, viewedPath, viewedCandidateId, showCandidates],
+  );
+
+  const loaded = cyclesLoaded && campaignsLoaded;
+  const error = failure?.message ?? null;
   const filtered = lifecycleFilter === "archived" || datasetFilter != null;
   const clearFilters = () => {
     setLifecycleFilter("active");
@@ -74,7 +116,9 @@ export function SidebarContent({
           />
         )
       ) : (
-        !loaded && <div className="unit-library-note">loading…</div>
+        !loaded && (
+          <div className="unit-library-note">{error ?? "loading…"}</div>
+        )
       )}
       {loaded && origins.length === 0 && lifecycleFilter === "archived" && (
         <div className="unit-library-empty">

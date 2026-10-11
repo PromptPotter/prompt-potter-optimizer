@@ -28,7 +28,6 @@ describe("pruneStore", () => {
 
   it("evicts least-recently-viewed first once over the cap", () => {
     const store: Record<string, CampaignView> = {};
-    // 30 campaigns, oldest first — `c0` is the least recent.
     for (let i = 0; i < 30; i++) store[`c${i}`] = view({ at: NOW - (30 - i) * 1000 });
     const kept = Object.keys(pruneStore(store, NOW));
     expect(kept).toHaveLength(24);
@@ -51,15 +50,12 @@ describe("viewMemoryCodec", () => {
   });
 
   it("returns an empty store for a non-object blob rather than crashing the app", () => {
-    // Storage is operator-writable: a hand-edited value degrades to defaults, never an error.
     expect(viewMemoryCodec.deserialize("[]")).toEqual({});
     expect(viewMemoryCodec.deserialize("null")).toEqual({});
     expect(viewMemoryCodec.deserialize('"nope"')).toEqual({});
   });
 
   it("stores no measurement — every persisted field is an id, a flag, or a UI key", () => {
-    // A restored view never renders a number read as current: `ScoringInspector` renders
-    // `is_selected`, so only the navigation axis is remembered.
     const keys = Object.keys(emptyView()).sort();
     expect(keys).toEqual(
       [

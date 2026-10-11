@@ -7,14 +7,15 @@ from promptpotter.config.settings import settings
 from promptpotter.domain.spend import TokenAccount
 from promptpotter.infrastructure.llm.base import LLMClientBase
 from promptpotter.infrastructure.llm.json_parse import parse_response_content
-from promptpotter.infrastructure.llm.rate_limit import (
+from promptpotter.infrastructure.llm.request import ChatRequest
+from promptpotter.infrastructure.llm.response import LLMResponse
+from promptpotter.infrastructure.llm.send_pacing import (
     ANTHROPIC_RPM_HEADER,
     ANTHROPIC_TPM_HEADER,
     RateLimiter,
 )
-from promptpotter.infrastructure.llm.request import ChatRequest
-from promptpotter.infrastructure.llm.response import LLMResponse
 from promptpotter.infrastructure.llm.spend_book import Billed, CallLabel
+from promptpotter.infrastructure.tls import tls_context
 
 if TYPE_CHECKING:
     from anthropic import AsyncAnthropic
@@ -22,8 +23,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Anthropic's `stop_reason` in the OpenAI spelling `LLMResponse.finish_reason` declares; a reason
-# with no counterpart rides through under its own name.
 _FINISH_REASONS: dict[str, str] = {
     "end_turn": "stop",
     "stop_sequence": "stop",
@@ -31,12 +30,12 @@ _FINISH_REASONS: dict[str, str] = {
     "tool_use": "tool_calls",
     "refusal": "content_filter",
 }
+# What a request declaring no `max_tokens` asks for: the Messages API refuses one without it.
+_UNSET_MAX_TOKENS = 8192
 
 
 def _usage(response: Message) -> TokenAccount:
-    """Anthropic reports its cache counts BESIDE its input count; the OpenAI-compat wire reports
-    its own INSIDE it. Normalized to the latter — the convention `TokenAccount` declares — so no
-    reader downstream has to know which provider answered."""
+    """Anthropic reports cache counts BESIDE its input count; `TokenAccount` holds them INSIDE."""
     cache_read = int(getattr(response.usage, "cache_read_input_tokens", 0) or 0)
     cache_write = int(getattr(response.usage, "cache_creation_input_tokens", 0) or 0)
     return TokenAccount(
@@ -76,25 +75,23 @@ class AnthropicClient(LLMClientBase):
     def _ensure_client(self) -> AsyncAnthropic:
         if self._client is None:
             try:
-                from anthropic import AsyncAnthropic
+                from anthropic import AsyncAnthropic, DefaultAsyncHttpxClient
             except ImportError as err:
                 raise ImportError(
                     "anthropic package not installed. "
                     'Install the anthropic extras: pip install -e ".[anthropic]"'
                 ) from err
             # No SDK retries — see `OpenAICompatibleClient._ensure_client`.
-            self._client = AsyncAnthropic(api_key=self._api_key, max_retries=0)
+            self._client = AsyncAnthropic(
+                api_key=self._api_key,
+                max_retries=0,
+                http_client=DefaultAsyncHttpxClient(verify=tls_context()),
+            )
         return self._client
 
     async def _chat(self, request: ChatRequest, label: CallLabel) -> LLMResponse:
         messages, model, max_tokens = request.messages, request.model, request.max_tokens
         response_model, response_schema = request.response_model, request.response_schema
-        # Anthropic has no wire ``response_format``: JSON is contractual via the prompt;
-        # ``response_model``/``response_schema`` parse + validate client-side, never sent.
-        # So the schema's two free levers — field ORDER and per-field ``description``
-        # (`docs/concepts/structured-output.md`) — reach no model here. A campaign that
-        # optimizes them on this provider measures noise. Warned once per process rather
-        # than raised: parsing still works, only the second prompt is missing.
         if (response_schema or response_model) and not AnthropicClient._schema_warned:
             AnthropicClient._schema_warned = True
             logger.warning(
@@ -104,7 +101,6 @@ class AnthropicClient(LLMClientBase):
             )
         client = self._ensure_client()
 
-        # Anthropic convention: system message lifts out of the messages array.
         system_message = None
         anthropic_messages = []
         for msg in messages:
@@ -113,8 +109,7 @@ class AnthropicClient(LLMClientBase):
             else:
                 anthropic_messages.append({"role": msg["role"], "content": msg["content"]})
 
-        # Anthropic requires max_tokens; 8192 is the per-request ceiling on most Claude models (boundary-local fallback, not a project default).
-        anthropic_max_tokens = max_tokens if max_tokens is not None else 8192
+        anthropic_max_tokens = max_tokens if max_tokens is not None else _UNSET_MAX_TOKENS
 
         request_params: dict[str, Any] = {
             "model": model,
@@ -132,8 +127,7 @@ class AnthropicClient(LLMClientBase):
             reply = raw.parse()
             return raw.headers, (reply, _usage(reply))
 
-        # Held and throttled against the number we are ABOUT TO SEND, not the caller's raw one:
-        # with `max_tokens=None` the request still asks for 8192.
+        # Held and throttled against the number we are ABOUT TO SEND, not the caller's raw one.
         response, usage = await self._admitted_send(
             label,
             model=model,

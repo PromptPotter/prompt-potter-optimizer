@@ -1,24 +1,20 @@
 "use client";
-// Configuration edits on Compare. Nothing ever ran at an edited value, so an edit INVALIDATES (a "?")
-// rather than re-projects; one map owned by `ComparePane` feeds both the card and the table editor.
 
+import { createContext, useContext } from "react";
 import type { SubjectReading } from "@/lib/api";
 import { candidateSubject, readingPath } from "@/lib/api/reads";
 import { overlayEdits } from "@/lib/derivations";
 import { CommitInput } from "@/components/ui";
 import { cx } from "@/lib/cx";
 
-/** Keyed by the edited POINT's subject address, not the channel: a channel can walk its branch, and
- *  descendants for invalidation are taken from edited points. */
+// Keyed by the edited point's subject address (`pointKeyOf`), not the channel's, then by config key.
 export type ScenarioEdits = ReadonlyMap<string, ReadonlyMap<string, string>>;
 
-/** The point the server RESOLVED a channel to — a `campaign:`/`course:` channel's address names a branch. */
 export function pointKeyOf(reading: SubjectReading): string {
   return candidateSubject(readingPath(reading), reading.candidate_id);
 }
 
-/** The emission is the point's WHOLE running config, diffed against its seed (`overlayEdits`); it
- *  replaces rather than merges, so a cleared value is not stranded. */
+// Replaces the point's edits rather than merging, so a cleared value is not stranded.
 export function withOverlay(
   edits: ScenarioEdits,
   pointKey: string,
@@ -34,6 +30,21 @@ export function withOverlay(
 }
 
 export const NO_EDITS: ScenarioEdits = new Map();
+
+interface ScenarioEditing {
+  edits: ScenarioEdits;
+  setEdits: (next: ScenarioEdits) => void;
+}
+
+const ScenarioEditsContext = createContext<ScenarioEditing | null>(null);
+
+export const ScenarioEditsProvider = ScenarioEditsContext.Provider;
+
+export function useScenarioEdits(): ScenarioEditing {
+  const ctx = useContext(ScenarioEditsContext);
+  if (!ctx) throw new Error("useScenarioEdits outside ScenarioEditsProvider");
+  return ctx;
+}
 
 export function editsFor(edits: ScenarioEdits, subjectKey: string): ReadonlyMap<string, string> {
   return edits.get(subjectKey) ?? new Map();
@@ -72,22 +83,18 @@ export function restored(
   return next;
 }
 
-// A key this channel does not carry is NOT editable: no fork could express the edit.
 export function ConfigCell({
   name,
   subjectKey,
   label,
   served,
-  edits,
-  onEdits,
 }: {
   name: string;
   subjectKey: string;
   label: string;
   served: string | undefined;
-  edits: ScenarioEdits;
-  onEdits: (next: ScenarioEdits) => void;
 }) {
+  const { edits, setEdits: onEdits } = useScenarioEdits();
   if (served === undefined) return <span className="l4-dim">—</span>;
   const edited = editsFor(edits, subjectKey).get(name);
   return (
@@ -115,15 +122,8 @@ export function ConfigCell({
   );
 }
 
-export function ChannelRestore({
-  edits,
-  subjectKey,
-  onEdits,
-}: {
-  edits: ScenarioEdits;
-  subjectKey: string;
-  onEdits: (next: ScenarioEdits) => void;
-}) {
+export function ChannelRestore({ subjectKey }: { subjectKey: string }) {
+  const { edits, setEdits: onEdits } = useScenarioEdits();
   const n = editsFor(edits, subjectKey).size;
   if (n === 0) return null;
   return (

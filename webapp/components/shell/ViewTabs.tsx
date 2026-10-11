@@ -1,7 +1,8 @@
 "use client";
 import type { ReactNode } from "react";
-import { cx } from "@/lib/cx";
 import { SegmentedControl, type Segment } from "@/components/ui";
+import { useWorkspace } from "@/lib/workspace";
+import { preloadLazyPanes } from "./lazy-panes";
 import {
   PRIMARY_TABS,
   RECORDS_ENTRY,
@@ -16,11 +17,6 @@ import {
   type ViewGroup,
 } from "@/lib/view-tab";
 
-// The view axis, one strip per LEVEL. `ViewTabs` is the frame's campaign nav (below --bp-md the
-// phone's bottom bar); `RecordsTabs` belongs to the Records view. A workspace view has no strip:
-// it is entered from the campaign list.
-
-// `Record<Tab, …>` on purpose: a new view is a compile error here until it has a glyph.
 const ICONS: Record<Tab, ReactNode> = {
   chat: (
     <path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h9A1.5 1.5 0 0 1 14 4.5v5A1.5 1.5 0 0 1 12.5 11H6l-3 2.5V11H3.5A1.5 1.5 0 0 1 2 9.5z" />
@@ -77,20 +73,10 @@ const RECORDS_SEGMENTS: readonly Segment<RecordsTab>[] = RECORDS_TABS.map((t) =>
   label: tabLabel(t),
 }));
 
-export function ViewTabs({
-  tab,
-  onSelect,
-  onIntent,
-  className,
-}: {
-  tab: CampaignTab;
-  onSelect: (tab: Tab) => void;
-  // The pointer or the focus reached the strip: the moment to warm what a click will ask for.
-  onIntent?: () => void;
-  className?: string;
-}) {
-  // The group segment fires even when already on; re-clicking it while reading Files must
-  // not bounce back to the entry member.
+export function ViewTabs({ tab }: { tab: CampaignTab }) {
+  const { openView: onSelect } = useWorkspace();
+  const onIntent = preloadLazyPanes;
+  // The group segment fires even when already on: a re-click on Files must not bounce to the entry.
   const pickGroup = (group: ViewGroup) => {
     if (group !== "records") onSelect(group);
     else if (!isRecordsTab(tab)) onSelect(RECORDS_ENTRY);
@@ -98,7 +84,7 @@ export function ViewTabs({
 
   return (
     <nav
-      className={cx("view-tabs", className)}
+      className="view-tabs"
       aria-label="Campaign view"
       onPointerEnter={onIntent}
       onFocus={onIntent}
@@ -114,7 +100,8 @@ export function ViewTabs({
   );
 }
 
-export function RecordsTabs({ tab, onSelect }: { tab: RecordsTab; onSelect: (tab: Tab) => void }) {
+export function RecordsTabs({ tab }: { tab: RecordsTab }) {
+  const { openView: onSelect } = useWorkspace();
   return (
     <div className="view-subnav">
       <SegmentedControl

@@ -19,7 +19,7 @@ Cost here is dominated by the inner **optimizer** call, which is roughly fixed p
 (~40% of a four-round cell, so ~$0.0135) and does not shrink with the sample count. Cutting
 samples to two removes nearly all of the worker share and none of that, so one cell has a floor
 near 1.5¢ and **sub-1¢ per arm is not reachable while an inner optimization actually runs**. The
-campaign's `spend_budget_usd` is a stop at $0.05, not a forecast: a run that halts there means the
+campaign's `ceiling.usd` is a stop at $0.05, not a forecast: a run that halts there means the
 geometry has drifted and this file is wrong.
 
 The inner benchmark stays `justlogic-d234` for the same reason. A shallower cut would save worker

@@ -47,17 +47,19 @@ broke", "bug-hunting", an operator already mid-investigation.
 There is no fresh-start ceremony and no audit to replay. Whatever the conversation already
 covered, re-read state from disk — that is what makes turn 0 and turn 100 the same entry:
 
-1. `.promptpotter/projects/{tenant}/.workspace/active_session.json` → `{session_id, campaign_id, cycle_id}` —
-   the LATEST launch only; parallel runs each say so by their own `run_phase` (`GET /cycles`)
-2. that cycle's `dashboard.json` (`round`, `best`, `run_standing`, `error_count`; on disk it holds
-   only `declared_phase`, the runner's claim; the phase to trust is `GET /cycles`' `run_phase`) + the
-   newest `rounds/round_NNNN.json`
+1. `.promptpotter/projects/{tenant}/.workspace/active_session.json` → `{campaign_id, cycle_id}` —
+   the LATEST launch only; parallel runs each say so by their own `run_phase`
+   (`python -m promptpotter cycles --attached`)
+2. that cycle's `dashboard.json` (`round`, `run_standing`, `error_count`; its `declared_phase` is
+   only the runner's claim — the phase to trust is `run_phase`, derived at each read and in no
+   file: `python -m promptpotter cycles`, which also prints why a paused cycle is and which verb
+   it admits next) + the newest `rounds/round_NNNN.json`
 3. that cycle's `readout.log` tail — its terminal readout, ANSI-stripped, every launch appended.
    With several runs live, each has its own; `logs/latest-readout-path.txt` names only the newest launch's
 
 Then **one line**: `mode · what's live · next action`. Nothing else before it.
 
-Reads happen by opening files; `evidence` is the one read VERB, because a comparison ACROSS subjects is in no single file. Campaign detail lives in
+Reads happen by opening files; the read VERBS are the three whose reading is in no file — `evidence` (a comparison ACROSS subjects), `cycles` (run state, derived against the clock; `--inside <campaign>::<cycle>` lists an L4 inner run's) and `machine-status` (occupancy and the queue `cancel-queued` names a job from). Campaign detail lives in
 `campaigns/<campaign_id>/{campaign.json,log.md}`, per-cycle detail in
 `cycles/<cycle_id>/{index.json,dashboard.json,log.md,readout.log,rounds/}`, per-round node I/O in
 `.runtime/cache/rounds/round_NNNN.json`. **Open JSON as UTF-8 explicitly** — a default read on
@@ -84,25 +86,26 @@ owned by `/potter-self`.
 | `new <name>` | Registered benchmark. Mint a fresh Campaign + root cycle from `datasets/<name>/`, run from round 0 on the committed `task_context.yaml` — none committed, the mint decomposes `task_description.md` and commits it first (one `checkin` call on the run's spend); `task_framing: off` in the campaign config runs unframed on purpose. Distinct `campaign_id` per invocation; the prior campaign is preserved. |
 | `new <file>` | Raw ingest — parse → `--set` → resolve origin → commit tenant dataset → mint + run. See [onboarding.md](reference/onboarding.md). |
 | `new … --set optimizer=<name>` | Pick the optimizer, either form: any `GET /optimizers` roster name (potter, capo, gepa, levi), plus `--set nodes.<node>.<knob>=V` for its knobs (`GET /optimizers/{name}/knobs`). The CLI spelling of `campaign.yaml::optimization.optimizer` + `optimization.nodes.<node>.config.<knob>`; the web check-in's optimizer picker writes the same two. A knob the manifest does not take is refused before anything mints. |
-| `new … --arm <h2h>:<key>` | Mint a CONTROLLED arm of a head-to-head, for an optimizer comparison rather than a best result: the first arm declares its instrument and budget, a later one adopts its split and budget and is refused on any other instrument, and each arm reads no other campaign's measurements, refuses steer/skip, and spends its declared search budget; `set-limits` moves one arm's cap alone, and the read then serves that arm NOT CONTROLLED. `evidence` then reads the arms under the declared scorer. |
-| `resume` | Continue the active cycle from the tenant pointer. `--from N` rewinds in place. |
+| `new … --arm <h2h>:<key>` | Mint a CONTROLLED arm of a head-to-head, for an optimizer comparison rather than a best result: the first arm declares its instrument and budget, a later one adopts its split and budget and is refused on any other instrument, and each arm reads no other campaign's measurements, refuses steer/skip, and spends its declared search budget; `set-limits` moves one arm's cap alone, and the read then serves that arm's guard as `differs` on `budget`. `evidence` then reads the arms under the declared scorer. |
+| `resume` | Continue the active cycle from the tenant pointer. `--from N` rewinds in place. The run's shape — `--from`, `--no-check`, `--fork-on-divergence`, `--diag` — is the `start-run` command's `from_round` / `no_divergence_check` / `fork_on_divergence` / `diag`, so REST takes it too and an embedded host passes the same `RunMode` to `run_campaign`. |
 | `set-limits` | Raise (or lower) an existing cycle's ceiling: `--max-usd` / `--max-tokens` / `--max-rounds N\|none`. |
-| `pause` | Ask a RUNNING cycle to stop at its next checkpoint — resumable, and the same dispatcher verb the webapp control fires. This is the HALT this skill keeps asking for. |
+| `pause` | Ask a RUNNING cycle to stop at its next checkpoint — resumable, and the same dispatcher verb the webapp control fires. This is the HALT this skill keeps asking for. A launch still `queued` / `starting` refuses it: withdraw that one with `cancel-queued <job_id>` (`machine-status` lists it). |
+| `bench` | Grade the campaign's result on its held-out bench set: `bench [--campaign ID] [--cycle ID]`; admitted exactly where the served dashboard's `bench_score.status.can_grade` is true, and refused in its `refusal` otherwise (a run in flight, a selection already graded, a cycle beside the line). When a launch sends the pass itself is `bench_trigger` (`docs/architecture.md` § The bench score is not an optimizer's selection). Head-to-head arms grade at their own end. |
 | `verify` | Re-score one candidate (`candidate:<campaign>/<cycle>/<candidate_id>`) on search cells it has never met; moves no round and no election. The sanctioned way to settle a candidate — never re-ask a cell it already answered. |
 | `evidence` | Read any set of campaigns together: roster, comparability, replicates, the variance split, resolving power, and (behind `--ranking`) which edits beat their own origin. Zero spend, writes nothing. |
-| `compact-archive <mode>` | Reclaim the measurement archive: `inventory` COUNTS it first — runs, cells, bytes and replay rate by dataset, label and age, and the read that sizes every other mode. Then `compact` moves the fields nothing reads out of candidate runs into a gzip store beside them, `restore` puts them back, `purge-cold` deletes that store. Dry-run by default; `--dataset` scopes it. `origin` / `parent` runs are never touched. **`purge-cold --apply` is the one irreversible verb in this table** — the rows it drops are paid LLM spend. Refuses outright while any cycle can still append. |
+| `compact-archive <mode>` | Reclaim the measurement archive: `inventory` COUNTS it first — configurations, answers and bytes by dataset, role and age, and the read that sizes every other mode. Then `compact` moves the fields nothing reads out of candidates' own answers into a gzip store beside them, `restore` puts them back, `purge-cold` deletes that store. Dry-run by default; `--dataset` scopes it. `origin` / `parent` answers are never touched. **`purge-cold --apply` is the one irreversible verb in this table** — the rows it drops are paid LLM spend. Refuses outright while any cycle can still append. |
 
 **Every ending states its own next verb** (`STOP_REASON_INFO::next_step`), so read the run's
 readout rather than a ladder here. What it cannot tell you is the two ways a raise silently fails:
 the ceiling is clamped against the account allowance, so read the ARMED value back off
-`dashboard.json::run_limits` rather than trusting the number you sent; and the counter is
+the served dashboard's `run_limits` (the file banks only what INIT declared) rather than trusting the number you sent; and the counter is
 CUMULATIVE across resume, so the new ceiling must exceed the total already spent, not the work
-remaining. Only `spend_budget_usd` is armed by default — `token_budget` is `None` until set.
+remaining. Only `ceiling.usd` is armed by default — `ceiling.tokens` is `null` until set.
 
 Flags are the verbs' own (`--help`); a dataset's defaults live in its `campaign.yaml` — never
 guessed. `new` overwrites the tenant pointer; `resume` is the happy path and needs no flags. Stop with Ctrl+C:
 first pauses (resumable, exit 130), second force-quits. Every query lands in
-`measurements/runs/{run_id}.jsonl` immediately, so a hard kill loses zero work and `resume`
+`measurements/cells/{config_key}.jsonl` immediately, so a hard kill loses zero work and `resume`
 cache-hits prior results.
 
 **Launch discipline for `promptpotter-self`** — owned by the `potter-self` skill
@@ -161,7 +164,7 @@ Where a loader assigns `sample_id` each display line carries `#NNN` right after 
 `0.0s #042 MISS [ai]📖 -> 'unknown' gt:'disproved' q:'…'` — use it to refer to samples across runs.
 
 Finished cycle: `campaigns/<id>/log.md` (campaign digest, heatmap, final winner) and
-`cycles/<id>/index.json` (`best_accuracy`, `best_round`, `origin_accuracy`, `final.result_*`,
+`cycles/<id>/index.json` (`standing` — the selection, its reading against the origin and the cost at the last close; `final.result_*`,
 `final.stop_reason` — its label, outcome class and the operator's NEXT STEP all come from the one
 `STOP_REASON_INFO` table, `promptpotter/domain/phases.py`, so the terminal, `log.md`, `review.md`
 and the browser all say the same thing; don't compose a different one here).
@@ -169,7 +172,7 @@ and the browser all say the same thing; don't compose a different one here).
 ### A held potter round is not proof the candidate failed — check the other estimator
 
 This section reads potter's own instruments — its sampler, PoBB and the θ gate, all present only
-where the selector stamps θ (`stamps_theta`). A peer's round is ordered, cut and elected by its
+where the selector elects on θ (`elects_on == "ability"`). A peer's round is ordered, cut and elected by its
 own manifest's nodes, so read those instead; none of what follows carries over.
 
 **The hit sequence is difficulty-ordered, so a tail of 1s is the ORDER, never a surge.**
@@ -187,12 +190,12 @@ against a parent that also wins those rows it carries no information.
 ruler — `display_metric` is DISPLAY config, never what the gate compares. They can legitimately
 disagree without either being broken. Read both, name both.
 
-**A number can be set by where you STOPPED — ask what CHOSE the rows.** `reference_*` strata
+**A number can be set by where you STOPPED — ask what CHOSE the rows.** `vs_reference` strata
 are defined by the *parent's own* grades, so on a truncated prefix the score is fixed by
 construction rather than by the data (one HIT-stratum slot every 4th position ⇒ a cut arm reports
-`⌊n/4⌋/n`). `scoring/metrics.py::matched_parent_stats` returns `None` unless the candidate
-measured every cell its parent did, so a cut arm reports where it stopped plus its θ, never a standing.
-**A `reference_accuracy` on a row whose `scored_samples < expected_samples` is not a standing —
+`⌊n/4⌋/n`). `PairedReading.reference_level` answers `None` unless both sides scored every cell
+of the set, so a cut arm reports where it stopped plus its θ, never a standing.
+**A `vs_reference` rate on a row whose `scored_samples < expected_samples` is not a standing —
 do not quote it, and do not compare it across arms.**
 
 **The ordering does not starve the posterior.** `p_best` moves across most of the budget, so arms
@@ -229,7 +232,7 @@ leaderboard picks.
 - **Warn only from this allowlist** — backend `/status` non-200 or refused (`{backend_url}` is the
   backend, default `:8000`; the PromptPotter API on `:8001` has no `/status` and 404s there); the
   active pointer naming a different dataset than requested; recent
-  `measurements/runs/{run_id}.jsonl` showing empty `predicted` strings. Documented config is
+  `measurements/cells/{config_key}.jsonl` showing empty `predicted` strings. Documented config is
   expected state, not a warning.
 - **Bounded retries are already handled.** `BackendClient.run_query()` retries a 5xx and a
   connection never made, 5 attempts, and a 429 whenever the run's backpressure lets it (the

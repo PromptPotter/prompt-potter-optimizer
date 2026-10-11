@@ -1,14 +1,9 @@
 "use client";
-// The Compare metric picker. The catalogue, labels, units and prose are all SERVED. `Menu` +
-// `MenuRadioGroup`: `SegmentedControl` caps at 4 options and `Chip` is a non-exclusive toggle.
-
 
 import { CommitInput, Menu, MenuRadioGroup } from "@/components/ui";
 import type { MetricReading } from "@/lib/api/types";
 import { cx } from "@/lib/cx";
 
-// The one spelling of the composed-metric prefix. No `MEASURAND` constant: the default is the
-// server's, and the picker reads it back off `reading.spec`.
 const EXPR_PREFIX = "expr:";
 
 export const isCustomMetric = (metric: string) => metric.startsWith(EXPR_PREFIX);
@@ -26,7 +21,6 @@ export function MetricPicker({
 }) {
   const custom = isCustomMetric(metric);
   const label = custom ? "Custom" : reading.spec.label;
-  // "Custom" SEEDS from what is on screen, so the input opens on a formula that already works.
   const customValue = custom ? metric : customMetric(reading.spec.expression);
   return (
     <Menu
@@ -45,7 +39,7 @@ export function MetricPicker({
       {({ close }) => (
         <MenuRadioGroup
           label="Metric"
-          // The RESOLVED key: the local string is empty until the operator picks.
+          // The resolved key, not `metric`, which is "" until the operator picks.
           value={custom ? customValue : reading.spec.key}
           options={[
             ...reading.catalogue.map((m) => ({ value: m.key, label: m.label })),
@@ -61,8 +55,6 @@ export function MetricPicker({
   );
 }
 
-// COMMITS on Enter or blur, never per keystroke: the metric is a fetch key, so each keystroke would
-// fire a request, 400 on a half-typed formula, and blank the card.
 export function MetricExpression({
   reading,
   metric,
@@ -95,7 +87,7 @@ export function MetricExpression({
         Enter to apply. Available: {reading.namespace.join(", ")}. Units and direction are yours to
         know — a composed metric has none the server can name.
       </p>
-      {invalid ? <p className="l4-warn">{invalid}</p> : null}
+      {invalid ? <p className="note-warn">{invalid}</p> : null}
     </div>
   );
 }

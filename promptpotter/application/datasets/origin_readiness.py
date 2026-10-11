@@ -1,58 +1,79 @@
-"""The deterministic gate between ingest and mint. An LLM resolver PROPOSES and this checklist
-GATES; only what the operator must genuinely state is gated, since a default is not a gap."""
-
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any, Literal
+
+from pydantic import Field
 
 from promptpotter import connectors
+from promptpotter.application.bench.task_context import OriginNextAction
+from promptpotter.application.commands.payloads import EditDraftCampaignPayload
 from promptpotter.application.datasets.draft_campaign import (
     DraftCampaign,
     merge_pipeline_overlay,
 )
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.search_point import PARAM_SCOPE_KEYS, WHO_ANSWERS_KEYS
+from promptpotter.domain.strict_model import StrictModel
 
-# A node's resolved ``config`` block is an LLM call iff it carries any of these
-# axes — who answers + the per-call tunables. Such a node must own a model
-# (see :func:`_check_node_models`).
+if TYPE_CHECKING:
+    from promptpotter.infrastructure.store.stores import Stores
+
 _LLM_CALL_KEYS: frozenset[str] = WHO_ANSWERS_KEYS | PARAM_SCOPE_KEYS
 
 
-@dataclass(frozen=True, slots=True)
-class FieldGap:
-    """One origin field that still blocks mint. ``reason`` is ``"unset"`` or
-    ``"proposed_unconfirmed"``; ``hint`` is one operator-facing line on how to close it."""
+class FieldGap(StrictModel):
+    """One origin field that still blocks mint — also the ``422 origin_incomplete`` body's ``details.gaps``."""
 
-    field: str
-    reason: str
-    hint: str
-
-    def to_wire(self) -> dict[str, str]:
-        return {"field": self.field, "reason": self.reason, "hint": self.hint}
+    field: str = Field(description="Checklist field id, e.g. `column.query`.")
+    reason: Literal["unset", "proposed_unconfirmed"]
+    hint: str = Field(description="One operator-facing line on how to close it.")
 
 
-@dataclass(frozen=True, slots=True)
-class OriginReadiness:
-    complete: bool
+class OriginReadiness(StrictModel):
+    """The mint gate's verdict; a surface gates Start on it and never re-derives it."""
+
+    complete: bool = Field(description="True iff no field still blocks mint.")
     gaps: tuple[FieldGap, ...]
 
 
-def origin_readiness(draft: DraftCampaign) -> OriginReadiness:
-    """Gate ``draft`` for mint. Pure; the checklist — not the operator — decides.
+class OriginLastResolution(StrictModel):
+    """One resolver turn's own output. Its findings ride ``OriginResolution.raised`` as commands."""
 
-    **"Ready" is deliberately not "mintable", and the gap is not a bug to close here.** This gates
-    columns / framing / node-models but NOT whether the committed prompt carries each node's
-    required ``{{template vars}}`` — that check lives only at mint
-    (``pipeline_resolve.py::configure_and_apply_pipeline``, ``pipeline_config_invalid`` 422).
-    Surfacing it at the resolve turn would need the live ``GET /pipeline`` schema threaded into a
-    path that is I/O-free on purpose (this function is pure over the draft; ``resolve_origin_turn``
-    carries no backend client and the draft no base_url). **Operator decided: keep the 422 backstop,
-    add no pre-mint backend I/O.** It is non-destructive — draft preserved, retry, and it names the
-    exact missing vars — so a bad origin never runs. Revisit only if check-in timing becomes a felt
-    pain."""
+    assessment: str
+    next_action: OriginNextAction
+    recap: str = Field(description="Set only on a `ready` turn.")
+
+
+class RaisedCommand(StrictModel):
+    """One proposal, already the command a click fires. The assistant offers it and never fires it."""
+
+    kind: Literal["edit-draft-campaign"] = "edit-draft-campaign"
+    payload: EditDraftCampaignPayload
+    evidence: str = Field(description="The citation backing the proposal.")
+
+
+class OriginResolution(StrictModel):
+    """The checklist state ``cache.json::resolution`` holds, and the last resolver turn beside it."""
+
+    complete: bool
+    provenance: dict[str, Provenance]
+    values: dict[str, Any] = Field(description="Each gated field's current value, by field id.")
+    gaps: tuple[FieldGap, ...]
+    last_resolution: OriginLastResolution | None = Field(
+        default=None, description="Null until a resolver turn ran, and again after a later edit."
+    )
+    raised: list[RaisedCommand] = Field(
+        default_factory=list, description="Proposals the last turn left unclicked."
+    )
+    degraded_cause: str | None = Field(
+        default=None,
+        description="Why the last turn came back thin (a paid repair retry); null where it did not.",
+    )
+
+
+def origin_readiness(draft: DraftCampaign) -> OriginReadiness:
+    """Ready is not mintable: a node's required ``{{template vars}}`` are checked only at mint."""
     gaps: list[FieldGap] = []
 
     _check_column(
@@ -122,19 +143,21 @@ def _check_confirmed(
     hint: str,
     gaps: list[FieldGap],
 ) -> None:
-    """Satisfied by CONFIRMED provenance over a NON-EMPTY value: provenance records who settled a
-    field, never that it holds anything, so a CONFIRMED blank is ``unset``, not a passing gate."""
     provenance = draft.field_provenance.get(field_key, Provenance.UNSET)
     if provenance is Provenance.CONFIRMED and value.strip():
         return
-    reason = "proposed_unconfirmed" if provenance is Provenance.PROPOSED else "unset"
-    extra = " (proposed — confirm or correct)." if provenance is Provenance.PROPOSED else ""
-    gaps.append(FieldGap(field=field_key, reason=reason, hint=f"{hint} [{label}]{extra}"))
+    proposed = provenance is Provenance.PROPOSED
+    extra = " (proposed — confirm or correct)." if proposed else ""
+    gaps.append(
+        FieldGap(
+            field=field_key,
+            reason="proposed_unconfirmed" if proposed else "unset",
+            hint=f"{hint} [{label}]{extra}",
+        )
+    )
 
 
 def _check_node_models(draft: DraftCampaign, *, gaps: list[FieldGap]) -> None:
-    """Every active LLM node must own a ``model`` before mint. Pre-mint the backend schema is not
-    available, so this reads the connector-merged config for the exact pre-crash state."""
     try:
         connector = connectors.get(draft.connector)
     except KeyError:
@@ -160,8 +183,6 @@ def _check_node_models(draft: DraftCampaign, *, gaps: list[FieldGap]) -> None:
 
 
 def field_values(draft: DraftCampaign) -> dict[str, Any]:
-    """Current value of every closed-set field, surfaced into ``cache.json`` so the operator reads
-    what each field is set to beside its provenance, without re-deriving from the draft."""
     getters: dict[str, Callable[[DraftCampaign], Any]] = {
         "column.query": lambda d: d.column_query,
         "column.ground_truth": lambda d: d.column_ground_truth,
@@ -172,8 +193,7 @@ def field_values(draft: DraftCampaign) -> dict[str, Any]:
 
 
 def origin_projection(draft: DraftCampaign) -> dict[str, Any]:
-    """What the draft WOULD commit — the gate above decides whether it may. **Not hash-equivalent to
-    the committed origin**, so any content_hash assertion must run through the real commit path."""
+    """Not hash-equivalent to the committed origin: a content_hash check runs the real commit."""
     projection: dict[str, Any] = {
         "slug": draft.slug,
         "connector": draft.connector,
@@ -197,8 +217,6 @@ def origin_projection(draft: DraftCampaign) -> dict[str, Any]:
 
 
 def origin_delta(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
-    """Projected fields that moved, as ``{field: {"from": x, "to": y}}``. A field absent on one side
-    reads ``None`` there, so confirming a column is a change from ``None``."""
     return {
         key: {"from": before.get(key), "to": after.get(key)}
         for key in before.keys() | after.keys()
@@ -206,25 +224,41 @@ def origin_delta(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any
     }
 
 
-def resolution_block(draft: DraftCampaign) -> dict[str, Any]:
-    """Serialize the checklist state for the on-disk ``cache.json`` — the AI-readable record of what
-    blocks mint, each gated field's value and provenance, and why each one blocks."""
+def resolution_block(draft: DraftCampaign) -> OriginResolution:
     readiness = origin_readiness(draft)
-    return {
-        "complete": readiness.complete,
-        "provenance": {
-            field_name: prov.value for field_name, prov in draft.field_provenance.items()
-        },
-        "values": field_values(draft),
-        "gaps": [gap.to_wire() for gap in readiness.gaps],
-    }
+    return OriginResolution(
+        complete=readiness.complete,
+        provenance=dict(draft.field_provenance),
+        values=field_values(draft),
+        gaps=readiness.gaps,
+    )
+
+
+def save_checkin_draft(
+    stores: Stores, draft: DraftCampaign, *, resolution: OriginResolution | None = None
+) -> DraftCampaign:
+    stores.checkin.write_draft(draft.draft_id, draft.to_disk())
+    block = resolution or resolution_block(draft)
+    stores.checkin.write_resolution(draft.draft_id, block.model_dump(mode="json"))
+    return draft
+
+
+def load_resolution(stores: Stores, draft: DraftCampaign) -> OriginResolution:
+    block = (stores.checkin.load_bank(draft.draft_id) or {}).get("resolution")
+    return OriginResolution.model_validate(block) if block else resolution_block(draft)
 
 
 __all__ = [
     "FieldGap",
+    "OriginLastResolution",
+    "OriginReadiness",
+    "OriginResolution",
+    "RaisedCommand",
     "field_values",
+    "load_resolution",
     "origin_delta",
     "origin_projection",
     "origin_readiness",
     "resolution_block",
+    "save_checkin_draft",
 ]

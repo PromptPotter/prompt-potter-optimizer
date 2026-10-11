@@ -3,8 +3,6 @@
 import type { DatasetIndexEntry, OriginEntry } from "@/lib/api";
 import { fmtPct0 } from "@/lib/format";
 
-// New Campaign entry list. An origin reuses a runnable starting point and skips the check-in
-// (it is already runnable); a dataset is raw material the check-in turns into one.
 export function DatasetPickList({
   origins,
   datasets,

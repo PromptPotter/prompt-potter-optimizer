@@ -1,11 +1,8 @@
-// The one connector reachability verdict — the ConnectorInspector LED and CriticalAlertBanner
-// must agree. A null `health` probe means not probed yet ("probing"), never down.
+// A null `health` probe means not probed yet ("probing"), never down.
 
 import type { BackendHealthResponse } from "@/lib/api";
 import type { PipelineStatus } from "@/lib/types";
 
-/** Unbound outranks in flight, which outranks failed — for every surface resolving a schema
- *  outside `ConnectorProvider` (`frontend-surface-contract.md::I1`). */
 export function pipelineReadStatus(read: {
   bound: boolean;
   loading: boolean;

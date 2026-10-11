@@ -1,19 +1,17 @@
 "use client";
-// The single resolver for which round's node blocks the optimizer card shows. Plain equality
-// against `current_round.round`, never "has it closed": the adapters' calls land after the flush.
 
 import { useMemo } from "react";
+import { roundAuditRead } from "@/lib/api";
 import { useCycleStream } from "@/lib/poll";
-import { useEffectiveRound } from "./useEffectiveRound";
-import { useRoundAudit } from "./useRoundFile";
+import { useObserveSubject } from "./useObserveSubject";
+import { readyData, useRead } from "./useRead";
 import { useWorkspace } from "@/lib/workspace";
-import type { NodeBlock } from "@/lib/types";
+import type { NodeBlock } from "@/lib/api/types";
 
 const EMPTY: Record<string, NodeBlock> = {};
 
 export interface RoundNodes {
   round: number | null;
-  // Not `isLiveView`: this asks whether the live block holds this round's nodes.
   showsCurrent: boolean;
   nodes: Record<string, NodeBlock>;
   // An empty map and an unfinished fetch otherwise both read "this node never fired".
@@ -23,12 +21,16 @@ export interface RoundNodes {
 export function useRoundNodes(): RoundNodes {
   const { dash } = useCycleStream();
   const { viewedPath } = useWorkspace();
-  const { round } = useEffectiveRound();
+  const { round } = useObserveSubject();
   const showsCurrent = round != null && round === (dash?.current_round.round ?? null);
-  const { doc, loading } = useRoundAudit(showsCurrent ? null : viewedPath, round);
+  const audit = useRead(
+    viewedPath && round != null && !showsCurrent ? roundAuditRead(viewedPath, round) : null,
+  );
+  const doc = readyData(audit);
+  const loading = audit.status === "loading";
   const nodes = useMemo(() => {
     if (round == null) return EMPTY;
-    if (showsCurrent) return (dash?.current_round.nodes ?? EMPTY) as Record<string, NodeBlock>;
+    if (showsCurrent) return dash?.current_round.nodes ?? EMPTY;
     return doc?.nodes ?? EMPTY;
   }, [round, showsCurrent, dash, doc]);
   return { round, showsCurrent, nodes, loading };

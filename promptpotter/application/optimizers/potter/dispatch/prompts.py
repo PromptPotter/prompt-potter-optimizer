@@ -14,14 +14,11 @@ from promptpotter.application.optimizer_manifest import (
 from promptpotter.application.optimizers.potter.dispatch.injections.registry import (
     validate_template,
 )
-from promptpotter.application.optimizers.potter.dispatch.layout import (
-    NODE_LAYOUTS,
-    resolve_node_layout,
-)
+from promptpotter.application.optimizers.potter.dispatch.layout import resolve_node_layout
 from promptpotter.application.optimizers.potter.records import L1Layout, L2L3Memory
-from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.opt_search_point import OptimizerPromptTemplate
 from promptpotter.domain.pipeline_schema import PipelineSchema
+from promptpotter.domain.search_point import PROMPT_STRING_FIELDS
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 shapes_optimizer_prompt(__name__)
@@ -37,9 +34,7 @@ __all__ = [
 
 
 def base_optimizer_template(inner: SelectedOptimizer, name: str) -> OptimizerPromptTemplate:
-    """Override-free and off the family the MANIFEST FILE names — *inner*'s, the manifest the L4
-    inner campaign selects, unless the bench's check-in declares *name*: the base an L4 prose
-    mutation merges onto, and the declaration of the inline ``{{tokens}}`` it must preserve."""
+    """Override-free, off *inner*'s manifest file unless the bench's check-in declares *name*."""
     checkin = checkin_manifest()
     document = checkin.document if checkin.schema.get_node(name) is not None else inner.document
     return optimizer_prompt(name, (document["nodes"][name] or {}).get("config") or {}, document)
@@ -58,8 +53,6 @@ def effective_optimizer_prompts(
     pipeline_params: dict[str, Any] | None,
     inner: SelectedOptimizer | None,
 ) -> dict[str, dict[str, str]]:
-    """``{}`` off the recursion (*inner* is ``None``) — a node qualifies if it advertises
-    ``PromptTemplate`` fields, and the L4 identity refuses an outer one *inner* does not declare."""
     if schema is None or inner is None:
         return {}
     keys_by_node = schema.node_param_keys()
@@ -79,20 +72,11 @@ def effective_optimizer_prompts(
 
 
 def load_optimizer_prompt(name: str) -> OptimizerPromptTemplate:
-    """Every load runs ``validate_template``, so a template naming a slot outside ``injection_table()``
-    and the per-template extras raises at load time rather than silently rendering empty."""
     _node, config, document = llm_node_document(name)
     return _running_template(name, config, document)
 
 
 def node_layout(node: str, memory: L2L3Memory) -> L1Layout:
-    """**The layout ``node`` renders under, this cycle — the one question every fill asks.**
-
-    Two storage channels, because the two edits have different lifetimes and neither can hold the
-    other: L2's edit of `l1_generate` is per-cycle optimizer state that must survive a resume, so
-    it lives on `PotterState.memory.l1_layout`; an L4 edit binds a whole inner cycle from OUTSIDE its
-    state, so it rides the override ContextVar. `NodeLayoutSpec.editor` is what says which —
-    asked HERE and nowhere else."""
-    if NODE_LAYOUTS[node].editor == "l2":
-        return memory.l1_layout
-    return resolve_node_layout(node)
+    """A layer's steer this cycle, else what an outer declared for the inner cycle, else the floor."""
+    steered = memory.steered_layout(node)
+    return resolve_node_layout(node) if steered is None else steered

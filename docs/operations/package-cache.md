@@ -25,7 +25,7 @@ Three mechanisms close this, and none of them changes measurement identity:
    `StopReason.PROVIDER_CREDIT`. Either cell stays a hole that `resume` re-measures. There is no
    fallback to direct downloads: in an outage it fails the same way, one path later. An episode a
    model provider's throttle ended — or that ran out of clock after one — measured the provider,
-   not the machine, and is the run's backpressure's to re-send (`infrastructure/llm/rate_limit.py::
+   not the machine, and is the run's backpressure's to re-send (`infrastructure/llm/send_pacing.py::
    Backpressure`); a throttle the episode outlived is only latency, and its grade stands.
 3. **No registry call once a task image exists.** A kept `hb__<hash>` tag starts as a prebuilt
    image, so a cell no longer resolves the task's `FROM` against its registry.
@@ -63,8 +63,11 @@ Three mechanisms close this, and none of them changes measurement identity:
 
 ## Scope — the identity trade
 
-A dataset opts in with `package_cache: <scope>` in its experiment file. Only harbor honours one, in
-`harbor_tasks.yaml`, and `harbor.py::PACKAGE_CACHE_SCOPES` is the set it accepts.
+A dataset opts in with `package_cache: <scope>` in its experiment file. A connector declares the
+scopes it routes on `Connector.package_cache_scopes`, and run init refuses a dataset naming any
+other (`wiring.py::_verify_package_cache_scope`) — so on a backend declaring none, the key itself
+is refused rather than ignored. `dbllmbench` is one: its runner image is prebuilt and a cell
+installs nothing. Harbor declares `harbor.py::PACKAGE_CACHE_SCOPES`:
 
 - **`verifier`** — the proxy rides `VerifierConfig.env`, which Harbor passes to the verifier's
   exec alone. The agent cannot observe it and the packages are the same signature-checked files, so

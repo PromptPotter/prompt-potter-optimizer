@@ -13,8 +13,7 @@
   color: var(--vendor-tint);
 }
 
-/* `currentColor` inside the `<symbol>` resolves against THIS element, so one shared path
-   definition still paints in each vendor's own ink. */
+/* `currentColor` inside the `<symbol>` resolves against THIS element: one shared path, each vendor's ink. */
 .glyph {
   inline-size: 100%;
   block-size: 100%;

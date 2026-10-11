@@ -1,14 +1,8 @@
 #!/usr/bin/env python
 """Materialize a `sealqa-longseal-*` dataset's Harbor task directories and its panel file.
 
-A build step rather than a loader: a harbor dataset's samples ARE its `harbor_tasks.yaml` tasks,
-and a loader registered under the same name would win over the connector's panel.
-
-Both outputs are the drawn cut and stay out of git — `.gitignore` makes the same split for
-`datasets/*/cache.json`. SealQA ships a per-row `canary` GUID and this repo is public, so the
-questions and golds must not be committed; this file plus its pinned revision regenerates them.
-
-Usage (from the repo root):
+A build step, not a loader: one registered under the same name would win over the connector's panel.
+Both outputs stay out of git: SealQA ships a per-row `canary` GUID and this repo is public.
 
     python scripts/build_sealqa_tasks.py                     # every sealqa-longseal-* dir
     python scripts/build_sealqa_tasks.py sealqa-longseal-12  # just this one
@@ -27,26 +21,21 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DATASETS_DIR = REPO_ROOT / "datasets"
 
-# Pinned, not a branch: per-sample history is kept by `sample_id` within a dataset name, so a
-# moving roster would hand new rows the history of the ones they displaced.
+# Pinned: history is keyed by `sample_id`, so a moving roster hands new rows displaced ones'.
 HF_DATASET = "vtllms/sealqa"
 HF_CONFIG = "longseal"
 HF_SPLIT = "test"
 HF_REVISION = "b2ecadf036972d8471a5c4cdf92aa3b3c6ba96e7"
 
-# The size is the experimental variable, so it lives in the dataset NAME: `sealqa-longseal-20` is a
-# different instrument, not this one reconfigured.
 _SIZES = (12, 20, 30)
 _NAME_RE = re.compile(r"^sealqa-longseal-(\d+)(-2step)?$")
 
-# Harbor's convention artifacts dir, which `connectors/harbor.py::_answer` reads back as
-# `predicted`. One spelling, shared by the instruction and the verifier.
+# Harbor's artifacts dir, which `connectors/harbor.py::_answer` reads back as `predicted`.
 ANSWER_PATH = "/logs/artifacts/answer.txt"
 RETRIEVED_PATH = "/logs/artifacts/retrieved.txt"
 
 
 def _sizes_from_name(name: str) -> tuple[int, bool]:
-    """`(haystack size, is two-step)` for a dataset directory name."""
     m = _NAME_RE.match(name)
     if m is None:
         raise SystemExit(f"{name!r} is not a sealqa-longseal-* dataset name.")
@@ -57,11 +46,6 @@ def _sizes_from_name(name: str) -> tuple[int, bool]:
 
 
 def _render_docs(docs: list[dict[str, Any]]) -> str:
-    """The haystack as prompt text, NUMBERED so a model can cite one and a grounding judge can read
-    the citation back.
-
-    Title and text only: a URL is a retrieval artifact rather than evidence and `date` is usually
-    null. The one place that choice is made, for both layouts."""
     out: list[str] = []
     for i, d in enumerate(docs, start=1):
         title = str(d.get("title") or "").strip()
@@ -71,10 +55,7 @@ def _render_docs(docs: list[dict[str, Any]]) -> str:
     return "\n\n".join(out)
 
 
-# One image for the whole panel, so the layer cache builds it once. `tmux`/`asciinema` are Harbor's
-# agent tooling, baked in so no cell pays an apt-get and the runtime needs no egress. Nothing that
-# FETCHES is added: on a host that cannot enforce a network policy, that is the only thing between
-# the agent and the live web.
+# Nothing that FETCHES: where no network policy holds, the toolless image is the only seal.
 _DOCKERFILE = """FROM ubuntu:24.04
 
 # Harbor's agent tooling only. A fetch tool here would hand the agent a way around the haystack.
@@ -85,21 +66,13 @@ RUN apt-get update \\
 WORKDIR /app
 """
 
-# Inert stub. Harbor's OracleAgent would run this; the gold stays out of the task directory the
-# agent's image is built from.
 _SOLVE_SH = (
     "#!/bin/bash\n"
     "# No oracle. The gold answer is held outside the container (`harbor_tasks.yaml`) and\n"
     "# graded there, so that the agent's environment never contains what it is asked for.\n"
 )
 
-# No `network_mode`: Harbor enforces every non-public policy through an egress sidecar needing
-# `CONFIG_NFT_FIB_INET` in the daemon's kernel, which Docker Desktop lacks, so declaring one ERRs
-# every cell instead of sealing it. The toolless image is what holds here — see `_DOCKERFILE`.
-#
-# On a Linux host whose kernel has it, add `network_mode = "no-network"` under `[agent]` and
-# `[verifier]`. Phase-scoped, so `[environment]` stays public and the image still builds; the agent
-# itself is a host process, so sealing the container costs it no model access.
+# No `network_mode`: its egress sidecar needs `CONFIG_NFT_FIB_INET`, which Docker Desktop lacks.
 _TASK_TOML = """schema_version = "1.4"
 
 [metadata]
@@ -114,10 +87,7 @@ timeout_sec = 900.0
 build_timeout_sec = 600.0
 """
 
-# `env_reward` is instrument health — "did this episode answer at all" — never the score. A
-# container verifier may decide nothing more: `trial/multi_step.py` empties `/tests` at the NEXT
-# step's verification rather than before its agent, so a gold in `tests/` is readable by a later
-# step. Correctness is graded outside, by `campaign.yaml`.
+# `env_reward` is instrument health, never the score: a gold in `tests/` is readable by a step.
 _TEST_SH = f"""#!/bin/bash
 # Non-empty answer artifact => 1; correctness is the campaign's call, not this container's.
 # Echoes because `_digest` tails this into the optimizer's view and warns when the tail is empty —
@@ -131,8 +101,6 @@ else
 fi
 """
 
-# The offline line is INSTRUMENT, identical across arms — a property of the machine, like the
-# answer path. Without it an agent spends turns discovering the shape of its own sandbox.
 _INSTRUCTION_SINGLE = """{question}
 
 Documents:
@@ -237,8 +205,7 @@ def _write_two_step(task_dir: Path, question: str, docs: list[dict[str, Any]]) -
     _write(task_dir / "task.toml", _TASK_TOML_2STEP)
     _write(task_dir / "environment" / "Dockerfile", _DOCKERFILE)
     _write(task_dir / "solution" / "solve.sh", _SOLVE_SH)
-    # `steps/<name>/workdir/` is Harbor's upload convention: one upload into the agent's cwd,
-    # surviving into the answer step, rather than an image layer per task.
+    # `steps/<name>/workdir/` is Harbor's upload convention: it lands in the agent's cwd.
     for i, d in enumerate(docs, start=1):
         title = str(d.get("title") or "").strip()
         text = str(d.get("text") or "").strip()
@@ -262,14 +229,8 @@ def _write_two_step(task_dir: Path, question: str, docs: list[dict[str, Any]]) -
 
 
 def _panel_yaml(tasks: list[dict[str, str]]) -> str:
-    """`harbor_tasks.yaml` — the panel, inline, one absolute path per task.
-
-    Absolute because Harbor resolves `TaskConfig.path` against the process CWD and this file is
-    generated per machine. `question` and `answer` ride each task: `query` is the task ID, so a
-    judge falling back to it would grade against an identifier, and the declared answer is what
-    makes this a labelled bank."""
-    # json.dumps every scalar — a question or gold may hold a colon, quote or newline, and a
-    # hand-rolled quoting rule would be a second YAML writer with one user.
+    """Paths are absolute: Harbor resolves `TaskConfig.path` against the process CWD."""
+    # json.dumps every scalar: a question or gold may hold a colon, quote or newline.
     lines = [
         "# GENERATED by scripts/build_sealqa_tasks.py — do not hand-edit, and do not commit.",
         f"# {HF_DATASET} config={HF_CONFIG} split={HF_SPLIT} revision={HF_REVISION}",
@@ -279,12 +240,7 @@ def _panel_yaml(tasks: list[dict[str, str]]) -> str:
         "agent:",
         "  name: terminus-2",
         "  environment: docker",
-        # NO `kwargs:`, and the absence is the declaration. `harbor.py` resolves the two sources as
-        # `dict(agent_cfg["kwargs"]).update(payload["agent_kwargs"])`, so the overlay in
-        # `pipeline.yaml::nodes.agent.config` ALWAYS wins and anything written here is dead the
-        # moment it is read — while reading as authoritative, and regenerating itself under every
-        # dataset, this file being gitignored. Name and environment are its to declare; tunables
-        # are not.
+        # NO `kwargs:` — `harbor.py` lays `pipeline.yaml::nodes.agent.config` over it, always.
         "",
         "tasks:",
     ]
@@ -308,8 +264,7 @@ def build(name: str) -> None:
     column = f"{size}_docs"
 
     tasks_root = dataset_dir / "tasks"
-    # Rebuilt whole rather than merged into: a stale directory from an earlier revision would be
-    # a task Harbor still runs and nothing compares against the pin.
+    # Rebuilt whole rather than merged into: a stale directory is a task Harbor still runs.
     if tasks_root.exists():
         shutil.rmtree(tasks_root)
 

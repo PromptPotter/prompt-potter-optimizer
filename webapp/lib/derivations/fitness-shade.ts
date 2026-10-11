@@ -1,6 +1,3 @@
-// The one shade for a SERVED fitness, so one fitness reads one colour everywhere — never a grade
-// of its own.
-
 import type { CSSProperties } from "react";
 
 export function fitnessStyle(fitness: number): CSSProperties {

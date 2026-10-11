@@ -1,15 +1,13 @@
 "use client";
 import { useState } from "react";
-import { fetchCell, type Cell, type CellSpan } from "@/lib/api";
+import { cellRead, type Cell, type CellSpan } from "@/lib/api";
+import { RATE_PRICED_LABEL } from "@/lib/api/types.generated";
 import type { CellAddress } from "@/lib/address";
 import { fmtPct0 } from "@/lib/format";
 import { fitnessStyle } from "@/lib/derivations";
 import { useRead } from "@/lib/hooks/useRead";
 import { cx } from "@/lib/cx";
 import { CopyButton, ErrorNote, Loading, SegmentedControl, SidePanel } from "@/components/ui";
-
-// One measured cell opened. Chrome, so IDENTITY props only, never where to read from (I9);
-// nothing is computed — the input is the server's re-render of what was sent.
 
 type SpanTab = "input" | "output" | "details" | "tokens";
 
@@ -61,8 +59,14 @@ function SpanBody({ span, tab }: { span: CellSpan; tab: SpanTab }) {
       <dd>{span.output_tokens ?? "—"}</dd>
       <dt>Provider cache</dt>
       <dd>{span.cache_read_tokens ?? "—"}</dd>
-      <dt>Cost</dt>
+      <dt>Billed</dt>
       <dd>{span.cost_usd == null ? "—" : `$${span.cost_usd.toFixed(5)}`}</dd>
+      {span.rate_priced_usd != null && (
+        <>
+          <dt>{RATE_PRICED_LABEL}</dt>
+          <dd>${span.rate_priced_usd.toFixed(5)}</dd>
+        </>
+      )}
       {span.estimated && (
         <>
           <dt>Counted</dt>
@@ -86,9 +90,8 @@ function CellBody({ cell }: { cell: Cell }) {
             {fmtPct0(cell.fitness)}
           </span>
         )}
-        {cell.cached && <span className="cell-tag">replayed</span>}
         <span className="cell-dim">{secs(cell.seconds)}</span>
-        <span className="cell-dim">{cell.run_name}</span>
+        <span className="cell-dim">{cell.role}</span>
         <CopyButton data={cell} title="Copy this cell as JSON" />
       </div>
       <div className="cell-answer">
@@ -98,7 +101,7 @@ function CellBody({ cell }: { cell: Cell }) {
         </div>
         <div>
           <div className="cell-label">Ground truth</div>
-          <pre className="cell-pre">{cell.ground_truth || "verifier-graded — no label"}</pre>
+          <pre className="cell-pre">{cell.ground_truth_text}</pre>
         </div>
       </div>
       {cell.error && <ErrorNote>{cell.error}</ErrorNote>}
@@ -156,17 +159,11 @@ export function CellPanel({
   hasNext: boolean;
   onStep: (shift: -1 | 1) => void;
 }) {
-  const read = useRead(
-    {
-      key: `${datasetName}/${cell.runId}/${cell.sampleId}`,
-      fetch: (signal) => fetchCell(datasetName, cell.runId, cell.sampleId, signal),
-    },
-    { surface: "cell-panel" },
-  );
+  const read = useRead(cellRead(datasetName, cell.answer));
   return (
     <SidePanel
       panelId="cell"
-      title={`Sample ${cell.sampleId}`}
+      title={read.status === "ready" ? `Sample ${read.data.sample_id}` : "Sample"}
       onClose={onClose}
       hasPrev={hasPrev}
       hasNext={hasNext}
@@ -174,7 +171,7 @@ export function CellPanel({
     >
       {read.status === "ready" ? (
         // Keyed by the address, so a J/K step starts on the first span again.
-        <CellBody key={`${cell.runId}/${cell.sampleId}`} cell={read.data} />
+        <CellBody key={cell.answer} cell={read.data} />
       ) : read.status === "failed" ? (
         <ErrorNote>{read.failure.message}</ErrorNote>
       ) : (

@@ -12,9 +12,6 @@ from promptpotter.infrastructure.store.io import (
 
 
 class BackendStore:
-    """Backend registration + synced API responses. It also held a named-dataset row cache OUTSIDE the tenant tree, which is
-    what made the install tier need to be writable; rows are the operator's and live with the rest of their data."""
-
     def __init__(self, base_dir: Path):
         self._base_dir = base_dir
 
@@ -24,8 +21,6 @@ class BackendStore:
     def _backend_dir(self, backend_id: str) -> Path:
         validate_path_component(backend_id)
         return self._backends_root() / backend_id
-
-    # -- backend CRUD ---------------------------------------------------------
 
     def register(self, backend: BackendConnection) -> Path:
         path = self._backend_dir(backend.id) / "backend.json"

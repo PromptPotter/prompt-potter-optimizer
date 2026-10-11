@@ -1,73 +1,48 @@
-"""CycleEventLog — the append-only spine of facts about one cycle, at ``.runtime/ledger.jsonl``.
-
-Forks are first-class: ``inherit_from(parent, offset)``, cut recorded as a ``FORK_CUT`` and
-STAMPED at ``index.json::forked_at_offset``, read back by ``ledger_chain``. Nothing wrote that
-until it existed, so where a fork's history began was known only inside the forking process —
-``forked_from_round`` is a round and ``forked_at`` a clock, and neither addresses a ledger.
-
-A fork's own FILE holds only its own appends; the parent's prefix is WALKED, not copied. So
-anything a fork must answer for ITSELF is appended to it: a repair's corrected rounds reach the
-branch via ``repair.py::_rebank_on_branch``, because a round file written with no ingress behind
-it is invisible to every scan and readers silently fall back to the parent.
-
-``append`` is not crash-atomic. Any rewrite of an existing ledger goes tmp + ``os.replace`` and
-must preserve the line count, because the line index IS ``sequence``.
-"""
-
 from __future__ import annotations
 
 import logging
 from collections.abc import Iterator
+from contextlib import suppress
 from pathlib import Path
 
-from pydantic import TypeAdapter, ValidationError
+from pydantic import ValidationError
 
 from promptpotter.domain.cycle_paths import CycleDir, WorkspaceDir
-from promptpotter.domain.run_records import CycleRecord
+from promptpotter.domain.run_records import (
+    FORK_DIRECTION,
+    RECORD_ADAPTER,
+    CycleMintedRecord,
+    CycleRecord,
+    ForkDirection,
+)
 from promptpotter.infrastructure.projections.base import Projection
-from promptpotter.infrastructure.store.io import read_json_optional
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_cycle_facts
 from promptpotter.infrastructure.store.layout import CycleLayout
-from promptpotter.infrastructure.store.read_model import LedgerSpan
+from promptpotter.infrastructure.store.read_model import LedgerSpan, Moment
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["CycleEventLog", "ledger_chain", "open_with_history"]
+__all__ = ["CycleEventLog", "continued_chain", "ledger_chain", "open_with_history"]
 
 
-def _fork_link(cycle_dir: Path) -> tuple[str, int] | None:
-    """``(parent_cycle_id, index.json::forked_at_offset)``, or ``None`` for a root. An unstamped
-    fork raises: a default ``0`` reads as a real, much shorter history."""
-    index = CycleLayout(cycle_dir).manifest
-    # Optional, not tolerant: an absent manifest is a root, a corrupt one is a history we cannot
-    # vouch for and must not shorten to a root's.
-    data = read_json_optional(index)
-    if not isinstance(data, dict):
-        return None
-    parent = data.get("parent_cycle_id")
-    if not isinstance(parent, str) or not parent:
-        return None
-    offset = data.get("forked_at_offset")
-    if not isinstance(offset, int) or isinstance(offset, bool):
-        raise ValueError(
-            f"{index}: a fork carries no `forked_at_offset`, so where its history begins on "
-            "its parent's ledger is unknown and cannot be guessed. Re-mint the fork, or drop "
-            "the cycle — campaign state is disposable and the caches it reads are not."
-        )
-    return parent, offset
+def _fork_link(cycle_dir: Path) -> CycleMintedRecord | None:
+    minted = scan_cycle_facts(CycleLayout(cycle_dir).ledger).minted
+    return None if minted is None or minted.parent_cycle_id is None else minted
 
 
-def _fork_prefix(cycle_dir: CycleDir) -> list[tuple[Path, int]]:
-    """Each ancestor's ledger and its child's cut, oldest first; a parent resolves as a sibling dir
-    (``store/layout.py``). A parent already on the chain is refused: walking it would hang."""
+def _fork_prefix(cycle_dir: CycleDir, *, continued: bool = False) -> list[tuple[Path, int]]:
     prefix: list[tuple[Path, int]] = []
     child_dir = Path(cycle_dir)
     seen = {child_dir.name}
     while (link := _fork_link(child_dir)) is not None:
-        parent_id, cut = link
+        parent_id, cut, spec = link.parent_cycle_id, link.forked_at_offset, link.fork
+        assert parent_id is not None and cut is not None and spec is not None
+        if continued and FORK_DIRECTION[spec.trigger] is ForkDirection.OFFSHOOT:
+            break
         if parent_id in seen:
             raise ValueError(
                 f"{child_dir}: parent_cycle_id {parent_id!r} is already on this fork chain — "
-                "the manifests describe a cycle, which no walk can resolve."
+                "the mints describe a cycle, which no walk can resolve."
             )
         seen.add(parent_id)
         child_dir = child_dir.parent / parent_id
@@ -75,18 +50,23 @@ def _fork_prefix(cycle_dir: CycleDir) -> list[tuple[Path, int]]:
     return prefix[::-1]
 
 
-def ledger_chain(cycle_dir: CycleDir) -> list[LedgerSpan]:
-    """Each ancestor's ledger up to its child's cut, oldest first, then this cycle's whole: the one
-    walk of a fork's history, so no reader adds an inherited prefix by hand."""
-    return [
+def ledger_chain(cycle_dir: CycleDir, moment: Moment | None = None) -> list[LedgerSpan]:
+    chain = [
         *(LedgerSpan(path, cut) for path, cut in _fork_prefix(cycle_dir)),
+        LedgerSpan(CycleLayout(Path(cycle_dir)).ledger),
+    ]
+    return chain if moment is None else moment.spans(chain)
+
+
+def continued_chain(cycle_dir: CycleDir) -> list[LedgerSpan]:
+    """Stops at an OFFSHOOT cut: what only a continuation inherits (the δ scale) is read over it."""
+    return [
+        *(LedgerSpan(path, cut) for path, cut in _fork_prefix(cycle_dir, continued=True)),
         LedgerSpan(CycleLayout(Path(cycle_dir)).ledger),
     ]
 
 
 def open_with_history(cycle_dir: CycleDir) -> CycleEventLog:
-    """This cycle's ledger with its :func:`ledger_chain` bound, so ``iter()`` walks the same
-    history in the run that appends to it and in any reader off disk."""
     log = child = CycleEventLog.open(cycle_dir)
     for path, cut in reversed(_fork_prefix(cycle_dir)):
         parent = CycleEventLog(path)
@@ -95,22 +75,17 @@ def open_with_history(cycle_dir: CycleDir) -> CycleEventLog:
     return log
 
 
-_RECORD_ADAPTER: TypeAdapter[CycleRecord] = TypeAdapter(CycleRecord)
-
-
 class CycleEventLog:
-    """Append-only ``.runtime/ledger.jsonl`` plus an in-memory subscriber list; the FILE is the truth.
-    One per cycle, plus one workspace-scoped variant for commands with no cycle to address."""
-
     def __init__(self, path: Path) -> None:
         self._path = path
         self._subscribers: list[Projection] = []
-        # Next append's offset = count of existing lines (0 if the file is absent).
+        self._next_offset = 0
+        self._end = 0
         if path.exists():
             with path.open("rb") as fh:
-                self._next_offset = sum(1 for _ in fh)
-        else:
-            self._next_offset = 0
+                for line in fh:
+                    self._next_offset += 1
+                    self._end += len(line)
         self._inherit_parent: CycleEventLog | None = None
         self._inherit_offset: int = 0
 
@@ -122,15 +97,11 @@ class CycleEventLog:
 
     @staticmethod
     def workspace_path(workspace_dir: WorkspaceDir) -> Path:
-        """Where the workspace ledger lives, resolved WITHOUT creating it — so a read (the account
-        spend walk, the cross-tenant install report) never mints a ``.workspace/`` in a tenant that
-        has yet to write one."""
+        """Never creates it: a read must not mint a `.workspace/` in a tenant that wrote none."""
         return Path(workspace_dir) / ".workspace" / "events.jsonl"
 
     @classmethod
     def open_workspace(cls, workspace_dir: WorkspaceDir) -> CycleEventLog:
-        """Open the workspace ledger at ``{workspace_dir}/.workspace/events.jsonl`` — same single-writer
-        discipline, no ``inherit_from`` (the workspace has no fork tree)."""
         path = cls.workspace_path(workspace_dir)
         path.parent.mkdir(parents=True, exist_ok=True)
         return cls(path)
@@ -140,14 +111,38 @@ class CycleEventLog:
         return self._path
 
     def append(self, record: CycleRecord) -> int:
-        """Write one record, fan out to subscribers, return its offset. ``fallback=str`` lets a payload carry
-        submodels / dataclasses / enums: they stringify on disk, subscribers still see the original."""
+        line = RECORD_ADAPTER.dump_json(record, fallback=str) + b"\n"
+        try:
+            fh = self._path.open("ab")
+        except FileNotFoundError:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            fh = self._path.open("ab")
+        with fh:
+            fh.write(line)
+            fh.flush()
+            end = fh.tell()
+        # The offset is the record's LINE, so what another writer appended since is fanned out first.
+        self._catch_up(end - len(line))
         offset = self._next_offset
-        line = _RECORD_ADAPTER.dump_json(record, fallback=str).decode("utf-8")
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        with self._path.open("a", encoding="utf-8") as fh:
-            fh.write(line + "\n")
-        self._next_offset += 1
+        self._next_offset, self._end = offset + 1, end
+        self._fan_out(record, offset)
+        return offset
+
+    def _catch_up(self, upto: int) -> None:
+        if upto <= self._end:
+            return
+        with self._path.open("rb") as fh:
+            fh.seek(self._end)
+            theirs = fh.read(upto - self._end)
+        for raw in theirs.splitlines():
+            offset = self._next_offset
+            self._next_offset += 1
+            # A line no arm reads still CONSUMES its offset, as ``iter`` counts it.
+            with suppress(ValidationError, ValueError):
+                self._fan_out(RECORD_ADAPTER.validate_json(raw), offset)
+        self._end = upto
+
+    def _fan_out(self, record: CycleRecord, offset: int) -> None:
         for sub in self._subscribers:
             try:
                 sub.on_record(record, offset)
@@ -157,15 +152,9 @@ class CycleEventLog:
                     type(sub).__name__,
                     offset,
                 )
-        return offset
 
     def iter(self, own_limit: int | None = None) -> Iterator[tuple[int, CycleRecord]]:
-        """The whole chain — a fork's parent prefix, then this ledger's own records — as
-        ``(offset, record)``, cut after ``own_limit`` of THIS ledger's own records; ``offset`` is a
-        ``Cut``'s. ``own_limit`` counts OWN records, never the chain: that is what
-        ``forked_at_offset`` counts (``campaign_store/store.py::_branch_offset`` reads the parent's
-        ``next_offset``) and what a caller holds, and bounding the chain instead truncates a fork
-        of a fork inside its GRANDPARENT."""
+        """`own_limit` counts OWN records, as `forked_at_offset` does, never a position over the chain."""
         if self._inherit_parent is not None:
             yield from self._inherit_parent.iter(self._inherit_offset)
         if not self._path.exists():
@@ -178,14 +167,8 @@ class CycleEventLog:
                 if not stripped:
                     continue
                 try:
-                    yield offset, _RECORD_ADAPTER.validate_json(stripped)
+                    yield offset, RECORD_ADAPTER.validate_json(stripped)
                 except (ValidationError, ValueError):
-                    # A torn final line (append is not crash-atomic) or a version-skewed
-                    # record. Skip-and-continue the way the sibling readers do
-                    # (ledger_scan.py, event_stream.py) — the ledger is the SoT, so one bad
-                    # line must not abort the whole read and blind every projection rebuild
-                    # / fork lookup. The offset is still CONSUMED, exactly as `append`
-                    # assigned it, so a skipped line never shifts its successors' addresses.
                     logger.warning(
                         "skipping unparseable ledger line at offset %d in %s",
                         offset,
@@ -193,8 +176,6 @@ class CycleEventLog:
                     )
 
     def inherit_from(self, parent: CycleEventLog, offset: int) -> None:
-        """Mark as a fork of *parent*; idempotent with the same args. Subscribers see only own appends —
-        the parent already broadcast its own when they happened."""
         if self._inherit_parent is parent and self._inherit_offset == offset:
             return
         if self._inherit_parent is not None:

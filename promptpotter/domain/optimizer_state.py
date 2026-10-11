@@ -1,15 +1,11 @@
-"""An optimizer's own working state, which rides the round document and never the individual.
-
-The bench persists it as ``RoundResult.optimizer_state``, restores it from there on resume and
-fork, and reads nothing inside ``payload`` beyond what :class:`RoundPayload` asks of it. Each
-optimizer declares its payload in its own package, registered under its manifest's name."""
-
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Annotated, ClassVar, Self, TypedDict, Unpack
 
-from pydantic import ConfigDict, SerializeAsAny, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SerializeAsAny, model_validator
 
+from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
@@ -21,30 +17,22 @@ __all__ = [
     "CritiqueReadout",
     "OptimizerState",
     "RoundPayload",
+    "UnregisteredPayloadError",
     "round_payload_type",
 ]
 
-# The reasons a proposer's output can be unreadable. Opposite kinds of evidence, so no reader may
-# treat one as a bool:
-#   MALFORMED  — schema-noncompliant output. The optimizer prompt's fault; charge it.
-#   WRONG_TYPE — decoded cleanly but as another model, so the fault is the schema it asked
-#                for, not the transport. Charged like MALFORMED.
-#   TOOLING    — empty/truncated content. Missing data, not a verdict: charging it scores
-#                provider flakiness as a bad mutation, so the round must be EXCLUDED.
 PARSE_FAILURE_MALFORMED: Annotated[str, shapes_optimizer_prompt] = "optimizer_prompt_parse_failure"
 PARSE_FAILURE_WRONG_TYPE = "optimizer_prompt_unexpected_type"
+# Empty or truncated content is missing data, not a verdict: the round is EXCLUDED, never charged.
 PARSE_FAILURE_TOOLING: Annotated[str, shapes_optimizer_prompt] = "l1_provider_empty_response"
-# The reasons a CHARGING reader may hold against the optimizer prompt. Asked as this predicate,
-# never as `is not None` — that is the bool the block above forbids, and it reads TOOLING as a
-# verdict the round never reached. A ROUTING reader is a different question and may ask either.
+# Ask this predicate, never `is not None`, which reads TOOLING as a verdict.
 PARSE_FAILURE_CHARGED: frozenset[str] = frozenset(
     {PARSE_FAILURE_MALFORMED, PARSE_FAILURE_WRONG_TYPE}
 )
 
 
 class CritiqueReadout(TypedDict, total=False):
-    """A domain-local mirror, so a round file round-trips without the optimization layer's
-    schema in scope; the optimizer node's full Pydantic shape stays in ``dispatch/schemas.py``."""
+    """A domain-local mirror, so a round file round-trips without the optimizer's schema in scope."""
 
     priority_fix: str
     suggested_axes: list[str]
@@ -52,9 +40,9 @@ class CritiqueReadout(TypedDict, total=False):
 
 
 class RoundPayload(StrictModel):
-    """An optimizer's payload: ``class P(RoundPayload, manifest="name")`` registers it, and the
-    envelope reads a banked one back as that type. It answers the two questions a harness reader
-    asks of any optimizer's payload; one that keeps no such readout answers with absence."""
+    """An optimizer's own payload, banked with every round and read back as its registered type."""
+
+    model_config = ConfigDict(frozen=True)
 
     _registered: ClassVar[dict[str, type[RoundPayload]]] = {}
 
@@ -67,31 +55,38 @@ class RoundPayload(StrictModel):
         return None
 
     def lost_to_empty_response(self) -> bool:
-        """A round that proposed no arm at all: whether its generation came back empty. A round
-        with arms answers off them instead (``domain/l4/proxies.py::_is_evidential``)."""
+        """Asked only of a round with no arm; one with arms answers off them (``l4/proxies.py::_is_evidential``)."""
         return False
+
+
+class UnregisteredPayloadError(RuntimeError):
+    """Not a ``ValueError`` on purpose: a ledger reader skips a line that fails validation."""
 
 
 def round_payload_type(manifest: str) -> type[RoundPayload]:
     if (held := RoundPayload._registered.get(manifest)) is None:
-        raise ValueError(
+        raise UnregisteredPayloadError(
             f"no payload is registered for optimizer {manifest!r} (known: "
-            f"{sorted(RoundPayload._registered)}) — complete the registries before reading a round"
+            f"{sorted(RoundPayload._registered)}) — the package declaring it is not installed"
         )
     return held
 
 
 class OptimizerState(StrictModel):
-    """``{manifest, prompt_hashes, payload}`` — the one envelope every optimizer's state rides."""
+    """The one envelope every optimizer's state rides: its own payload beside the bench's population."""
+
+    model_config = ConfigDict(frozen=True)
 
     manifest: str
-    # Which prompts of the manifest produced this round, per llm node — the only thing that can
-    # answer "was this round produced by the optimizer I am holding now?" once the process exited.
-    # Resume diverges at the FIRST round that disagrees.
-    # IDENTITY, NOT A FIRE RECORD — every node is named on every round, including ones that never
-    # run. Which node RAN, and what each panel cost it, is the ledger's `llm_call`.
+    # Empty where the manifest keeps only the bench's one parent.
+    population: list[OptSearchPoint] = Field(default_factory=list)
+    # IDENTITY, not a fire record: every llm node is named every round, and a resume diverges on these.
     prompt_hashes: dict[str, str]
     payload: SerializeAsAny[RoundPayload]
+
+    @classmethod
+    def stored_field_model(cls, key: str, raw: Mapping[str, object]) -> type[BaseModel] | None:
+        return round_payload_type(str(raw["manifest"])) if key == "payload" else None
 
     @model_validator(mode="before")
     @classmethod
@@ -111,8 +106,7 @@ class OptimizerState(StrictModel):
         return self
 
     def payload_as[P: RoundPayload](self, kind: type[P]) -> P:
-        """The payload as *kind*, raising on any other optimizer's — a reader handed a peer's round
-        is a wiring fault, never a round to read as empty."""
+        """A reader handed a peer's round is a wiring fault, never a round to read as empty."""
         if not isinstance(self.payload, kind):
             raise TypeError(f"a {kind.__name__} reader was handed {self.manifest!r}'s state")
         return self.payload

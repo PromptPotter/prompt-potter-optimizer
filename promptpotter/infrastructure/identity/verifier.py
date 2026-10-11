@@ -1,6 +1,3 @@
-"""ID Token verifier — RS256 only, the dialect Google emits. GitHub issues no ID token, so its identity extraction never
-reaches this module."""
-
 from __future__ import annotations
 
 import base64
@@ -22,8 +19,6 @@ class IDTokenInvalidError(ValueError):
 
 @dataclass(frozen=True)
 class VerifiedIDToken:
-    """Verified claims — only flows downstream until the middleware exits."""
-
     issuer: str
     subject: str
     email: str | None
@@ -44,8 +39,6 @@ async def verify_id_token(
     jwks_cache: JWKSCache,
     leeway_s: int = 30,
 ) -> VerifiedIDToken:
-    """Verify signature + claims and return the envelope. Raises :class:`IDTokenInvalidError` on ANY failure — the caller
-    treats it as a hard 401 at the trust boundary."""
     try:
         header_b64, payload_b64, signature_b64 = id_token.split(".")
     except ValueError as exc:
@@ -96,16 +89,7 @@ async def verify_id_token(
     if not isinstance(sub, str) or not sub:
         raise IDTokenInvalidError("sub claim missing or empty")
 
-    # The email is only returned when the issuer VOUCHES for it. Downstream it is an identity key
-    # — the sign-in blocklist matches on it, and so does the host-admin claim — so an address the
-    # issuer will not stand behind must not travel as one. Absent counts as unverified, not as
-    # verified: this client is generic over any OIDC-conformant IdP (Dex, Keycloak, Auth0), and an
-    # IdP that never sends the claim is exactly the one whose addresses cannot be trusted. Google
-    # always sends it, so a Google deployment sees no change.
-    #
-    # Dropped to ``None`` rather than raising: the subject is the real account key, so an
-    # unverified address costs the user nothing but the email-keyed features, and refusing the
-    # whole sign-in would turn an IdP misconfiguration into a lockout.
+    # An absent `email_verified` counts as UNVERIFIED; ``None`` rather than a raise, so no IdP lockout.
     email_verified = payload.get("email_verified")
     email_raw = payload.get("email")
     email = str(email_raw) if isinstance(email_raw, str) and email_verified is True else None

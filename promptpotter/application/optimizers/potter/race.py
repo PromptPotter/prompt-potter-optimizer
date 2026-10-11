@@ -1,16 +1,11 @@
-"""PoBB as the measurement drives it — potter's eliminator: the round's prior pool seeded with the
-parent, the catch-up calls pairing each prior with the arm on turn, the stop rule, the ledger decision."""
-
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from functools import partial
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.bench.resume_and_fork.decisions import record_decision
 from promptpotter.application.optimizers.nodes import EliminationReading
-from promptpotter.application.optimizers.potter.knobs import PoBBKnobs
 from promptpotter.application.optimizers.potter.pobb.checks import (
     EliminationContext,
     EliminationGate,
@@ -22,16 +17,13 @@ from promptpotter.application.optimizers.potter.records import PotterCheckpointK
 if TYPE_CHECKING:
     import asyncio
 
-    from promptpotter.application.optimizers.nodes import (
-        CatchUp,
-        CatchUpFn,
-        Panel,
-        RoundContext,
-    )
+    from promptpotter.application.bench.node_context import NodeContext
+    from promptpotter.application.optimizers.nodes import CatchUp, CatchUpFn, Panel
+    from promptpotter.application.optimizers.potter.knobs import PoBBKnobs
     from promptpotter.application.scoring.query_loop import Walk
     from promptpotter.domain.connector import MeasuredUnit
     from promptpotter.domain.sample import Sample
-    from promptpotter.domain.scoring import QueryMeasurement
+    from promptpotter.domain.scoring import GradedCell
     from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.domain.validators import StopSignal
 
@@ -56,9 +48,7 @@ def _reason(ctx: EliminationContext, unit: MeasuredUnit) -> str:
 
 @dataclass
 class _PriorsAhead:
-    """The round's PoBB check as one candidate's walk reads it: the candidates before it that are
-    still being walked may yet become priors, so its horizon allows for them, as far as their
-    returned cells say."""
+    """Candidates ahead that are still being walked may yet become priors, so the horizon allows for them."""
 
     pobb: PoBBCheck
     ahead: Sequence[tuple[str, Walk | None]]
@@ -67,13 +57,13 @@ class _PriorsAhead:
     def __post_init__(self) -> None:
         self.name = self.pobb.name
 
-    def check(self, results: list[QueryMeasurement]) -> StopSignal | None:
+    def check(self, results: Sequence[GradedCell]) -> StopSignal | None:
         return self.pobb.check(results)
 
     def earliest_stop(
         self,
-        results: list[QueryMeasurement],
-        upcoming: Sequence[tuple[Sample, QueryMeasurement | None]],
+        results: Sequence[GradedCell],
+        upcoming: Sequence[tuple[Sample, GradedCell | None]],
     ) -> int | None:
         unresolved = {
             pid: walk.rows()
@@ -84,8 +74,7 @@ class _PriorsAhead:
 
 
 class CatchUpPool:
-    """The priors of one round and the calls that catch each up on a cell it lacks, so every
-    comparison the stop rule makes is on identical cells. One measurement per (prior, cell)."""
+    """Every comparison the stop rule makes is on identical cells; one measurement per (prior, cell)."""
 
     def __init__(self, check: PoBBCheck, measure: CatchUpFn) -> None:
         self._check = check
@@ -94,7 +83,7 @@ class CatchUpPool:
         self._pending: dict[tuple[str, int], CatchUp] = {}
         self._on_catch_up: Callable[[int, list[str]], None] | None = None
 
-    def admit(self, candidate_id: str, results: list[QueryMeasurement], sp: JobSearchPoint) -> None:
+    def admit(self, candidate_id: str, results: Sequence[GradedCell], sp: JobSearchPoint) -> None:
         self._check.register_completed(results, candidate_id=candidate_id)
         self._sps[candidate_id] = sp
 
@@ -102,12 +91,11 @@ class CatchUpPool:
         return [
             cid
             for cid, held in self._check.priors_by_sample.items()
-            if str(sample.id) not in held and (cid, sample.id) not in self._pending
+            if sample.id not in held and (cid, sample.id) not in self._pending
         ]
 
     def start_backfill(self, sample: Sample, room: int) -> list[asyncio.Future[Any]]:
-        """Start measuring up to ``room`` of the priors that lack ``sample``, so the calls overlap
-        the cell's own. Nothing is written or graded until :meth:`commit_backfills` takes them."""
+        """Nothing is written or graded until :meth:`commit_backfills` takes them."""
         started: list[asyncio.Future[Any]] = []
         for cid in self._unstarted(sample)[: max(room, 0)]:
             backfill = self._measure(self._sps[cid], sample, cid)
@@ -122,26 +110,23 @@ class CatchUpPool:
         return [call for call, *_ in self._pending.values() if not call.done()]
 
     def backfills_for(self, sample: Sample) -> list[asyncio.Future[Any]]:
-        """The catch-up calls started for ``sample`` and not yet committed."""
         return [call for (_, sid), (call, *_) in self._pending.items() if sid == sample.id]
 
     def commit_backfills(self, sample: Sample) -> None:
-        """Take every started catch-up on ``sample``, in prior order — the moment a serial round
-        would have measured them, so what reaches disk, and in what order, is the serial round's."""
+        """In prior order, when a serial round would have measured them, so what reaches disk is the serial round's."""
         fresh: list[str] = []
         for cid, held in self._check.priors_by_sample.items():
             backfill = self._pending.pop((cid, sample.id), None)
             if backfill is None:
                 continue
             self._check.extend_prior(cid, backfill[1]())
-            if str(sample.id) in held:
+            if sample.id in held:
                 fresh.append(cid)
         if fresh and self._on_catch_up is not None:
             self._on_catch_up(sample.id, fresh)
 
     def bank_backfills(self, samples: Sequence[Sample]) -> None:
-        """Write, ungraded, the catch-ups back for *samples* — cells a stopped round's walks were
-        sure to take, so the resumed round replays these rather than paying for them again."""
+        """Written UNGRADED: cells a stopped round's walks were sure to take, so the resume replays them unpaid."""
         wanted = {s.id for s in samples}
         for key, (call, commit, _) in list(self._pending.items()):
             landed = call.done() and not call.cancelled() and call.exception() is None
@@ -150,42 +135,45 @@ class CatchUpPool:
                 commit()
 
     def discard_backfills(self) -> None:
-        """Drop every measurement no walk took — paid, and never written, as a serial round would
-        never have made it — save what :meth:`bank_backfills` kept."""
+        """Paid and never written: a serial round would never have made these."""
         for _call, _commit, discard in self._pending.values():
             discard()
         self._pending.clear()
 
 
 class PoBBRace(CatchUpPool):
-    """One round's PoBB. The parent is its first prior, so candidate #1 has a comparator —
-    without one PoBB short-circuits on an empty pool and the round's first arm is uneliminable."""
+    """The parent is the first prior: on an empty pool PoBB short-circuits and the round's first arm is uneliminable."""
 
-    def __init__(self, ctx: RoundContext, panel: Panel, catch_up: CatchUpFn, *, node: str) -> None:
-        cycle = ctx.cycle
+    def __init__(
+        self,
+        ctx: NodeContext[PoBBKnobs],
+        panel: Panel,
+        catch_up: CatchUpFn,
+        *,
+        measured_unit: MeasuredUnit,
+    ) -> None:
         super().__init__(
             PoBBCheck(
-                cast("PoBBKnobs", cycle.optimizer.knobs("pobb")),
-                n_min=cycle.config.optimization.elimination_n_min,
+                ctx.knobs,
+                n_min=ctx.config.optimization.elimination_n_min,
                 n_samples=len(panel.cells),
-                ruler=cycle.difficulty.ruler,
+                ruler=ctx.difficulty.ruler,
             ),
             catch_up,
         )
         self._ctx = ctx
-        self._node = node
-        # The one prior no arm of this round labels, so its label is the race's to hold.
+        self._measured_unit = measured_unit
+        # The one prior no arm of this round labels.
         self._parent_label: dict[str, str] = {}
-        # `current_results` = best-so-far per-sample history; `current_sp` is the leader,
-        # backfill-able on the candidate's hard samples.
-        parent_results = cycle.tracking.current_results
-        parent_sp = cycle.tracking.current_sp
+        parent_results = ctx.parent_rows
+        parent_sp = ctx.parent_point
         if parent_results and parent_sp is not None:
             # Named for the round that ELECTED it: a held round keeps the parent it had.
-            elected_in = next((rr.round for rr in reversed(cycle.rounds) if rr.improved), 0)
+            elected_in = next((rr.round for rr in reversed(ctx.rounds) if rr.improved), 0)
             parent = f"R{elected_in}_winner"
             self._parent_label[parent] = parent
-            self.admit(parent, cast("list[QueryMeasurement]", parent_results), parent_sp)
+            self._check.register_completed(parent_results, candidate_id=parent)
+            self._sps[parent] = parent_sp
 
     @property
     def n_priors(self) -> int:
@@ -199,24 +187,22 @@ class PoBBRace(CatchUpPool):
         return _PriorsAhead(self._check, ahead)
 
     def open_turn(self, candidate_id: str, idx: int, n: int) -> None:
-        # Binds the per-sample snapshot so it rides the telemetry stream tagged with this arm.
-        callbacks, round_num = self._ctx.callbacks, self._ctx.round_num
+        callbacks, node, round_num = self._ctx.callbacks, self._ctx.node, self._ctx.round_num
         self._check.set_current(
             candidate_id,
-            on_snapshot=partial(callbacks.on_race_standing, self._node, round_num, idx, n),
+            on_snapshot=partial(callbacks.on_race_standing, node, round_num, idx, n),
         )
-        self._on_catch_up = partial(callbacks.on_race_catch_up, self._node, round_num, idx, n)
+        self._on_catch_up = partial(callbacks.on_race_catch_up, node, round_num, idx, n)
 
     def judge(
         self,
         signal: StopSignal | None,
         *,
         candidate_id: str,
-        results: list[QueryMeasurement],
+        results: Sequence[GradedCell],
         labels: dict[str, str],
     ) -> EliminationReading | None:
-        """This arm's elimination context, and the decision its cut or lock-in leaves — read off
-        the priors BEFORE the arm joins them, which is the pool the stop rule tested against."""
+        """Read off the priors BEFORE the arm joins them: the pool the stop rule tested against."""
         if not isinstance(signal, PoBBStop):
             return None
         context, fit = signal.check_result, signal.fit
@@ -235,16 +221,15 @@ class PoBBRace(CatchUpPool):
                 "leader_label": {**self._parent_label, **labels}[context["leader_id"]],
             }
             inputs["recorded_p_best"] = context["p_best"]
-            # The cells the posterior was fit on and each paired prior's grade on exactly those:
-            # a replay re-fits from these, with no cross-round crawl and no catch-up of its own.
+            # A cell is spelled as its ruler key, a string: a replay re-fits from this JSON record.
+            cells = [str(cell) for cell in fit.cells]
             data = {
                 "p_best": context["p_best"],
                 "leader_id": context["leader_id"],
                 "paired_breakdown": signal.paired_breakdown,
-                "candidate_sample_ids": fit.cells,
+                "candidate_sample_ids": cells,
                 "prior_histories": {
-                    pid: dict(zip(fit.cells, grades, strict=True))
-                    for pid, grades in fit.priors.items()
+                    pid: dict(zip(cells, grades, strict=True)) for pid, grades in fit.priors.items()
                 },
             }
         check = self._check
@@ -257,14 +242,5 @@ class PoBBRace(CatchUpPool):
             inputs |= {"gate": gate, "n_min": int(check.n_min)}
             if gate is EliminationGate.EPSILON:
                 inputs["epsilon"] = context["epsilon"]
-        record_decision(
-            self._ctx.cycle.pending_decisions,
-            kind,
-            inputs,
-            True,
-            node=self._node,
-            data=data,
-            round=round_num,
-        )
-        unit = self._ctx.cycle.session.backend_client.measured_unit
-        return EliminationReading(reason=_reason(context, unit), context=context)
+        self._ctx.decide(kind, inputs, True, data=data)
+        return EliminationReading(reason=_reason(context, self._measured_unit), context=context)

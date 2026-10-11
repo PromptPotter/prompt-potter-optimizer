@@ -1,54 +1,38 @@
-/* A mirror of promptpotter-web/BRAND.md, never a second spec. */
-
 :root{
   color-scheme:dark;
-  /* Three steps: tertiary is the ground, primary a raised surface, secondary a well cut into either. */
+  /* Tertiary is the ground, primary a raised surface, secondary a well cut into either. */
   --color-background-primary:#1f1f1f; --color-background-secondary:#141414; --color-background-tertiary:#181818;
   --color-background-hover:#2a2a2a;
   --color-background-tint-active:#2a1f10;
   --color-background-tint-icon:#3a2a10;
-  /* Two tiers, both clearing 4.5:1 on every background above, hover included. */
+  /* Both clear 4.5:1 on every background above, hover included. */
   --color-text-primary:#ede9e1; --color-text-secondary:#b5afa5;
   --color-text-on-accent:#0d0d0d;
   --color-border:#333333;
   --color-accent:#f59e0b; --color-accent-strong:#ea580c;
   --color-accent-rgb:245,158,11;
   --color-accent-glow:rgba(var(--color-accent-rgb),0.30);
-  /* Cross-panel selection stroke; every panel highlight reads this one var. */
   --color-selection:#dc2626;
-  /* A neutral mark, not a status colour: it reads as statistical range, not good/bad. */
   --color-ci:#b5afa5;
-  /* Violet sits outside the lava register on purpose: it rides the accuracy axis and must not
-     read as a metric. */
   --color-cache:#a78bfa;
-  /* Teal, outside the accent and status registers: it rides the accuracy axis beside bars measured
-     on a DIFFERENT basis, so it must read as its own reading. */
   --color-overlap:#2dd4bf;
-  /* Ink by ROLE: `components/candidates/series.ts` resolves it off the served `display_metric`, and
-     legend and canvas read one name. Three steps is the ceiling — a fourth alpha is lost on ~6px bars. */
+  /* Resolved by `components/candidates/series.ts` off the served `display_metric`; a fourth alpha is lost on ~6px bars. */
   --series-elected:var(--color-accent);
   --series-reading:rgba(var(--color-accent-rgb),0.45);
   --series-counterfactual:rgba(var(--color-accent-rgb),0.70);
-  /* Read through `theme.ts::seriesColor`, never inline: a canvas cannot resolve var(), so a
-     hardcoded copy never flips theme. */
   --chart-series-1:#4f8ef7; --chart-series-2:#e8833a;
   --chart-series-3:#3fb27f; --chart-series-4:#c9639e;
   --chart-series-5:#d4b02c; --chart-series-6:#6f6bd8;
   --chart-series-7:#4bb3c4; --chart-series-8:#b5603f;
-  /* BOX SIZING — the whole vocabulary. A box states no width or height of its own: a view's
-     `.box-grid` lays boxes in columns no narrower than `--box-min` (one column on a phone, as
-     many as fit on a desktop), a box whose content is unbounded scrolls under `--box-scroll-max`,
-     and a chart is `--chart-h` tall. `--reading-measure` caps PROSE (the chat thread), never a box. */
   --box-min:26rem;
   --box-gap:var(--space-14);
   --box-scroll-max:60dvh;
   --chart-h:clamp(140px,22dvh,220px);
   --reading-measure:980px;
 
-  /* @media cannot read custom properties, so the numbers are literal in @media rules; these name
-     the only allowed breakpoints. */
+  /* @media cannot read custom properties: these name the only allowed breakpoints, repeated as literals. */
   --bp-sm:640px;
-  --bp-rotate:768px;      /* below this, portrait dense surfaces show rotate prompt */
+  --bp-rotate:768px;
   --bp-md:880px;
 
   --touch-target-min:44px;
@@ -58,8 +42,7 @@
   --safe-bottom:env(safe-area-inset-bottom,0px);
   --safe-left:env(safe-area-inset-left,0px);
 
-  /* Dense tiers are static (`xs` is the floor); only the two display tiers are fluid. Text inputs
-     do NOT read this scale — iOS focus-zoom sets their 16px floor in responsive.css. */
+  /* Text inputs do NOT read this scale — iOS focus-zoom sets their 16px floor in responsive.css. */
   --text-xs:11px;
   --text-sm:12px;
   --text-base:13px;
@@ -70,8 +53,7 @@
   --text-3xl:clamp(18px,calc(16.5px + 0.4vw),22px);
   --text-4xl:clamp(22px,calc(20.5px + 0.4vw),26px);
 
-  /* Named by DESKTOP value (exact at >=1400px); steps from 10 up are fluid, ~2/3 by 375px. Nothing
-     below 4px: hairlines and tile-grid gutters are geometry, not rhythm. */
+  /* Named by DESKTOP value (exact at >=1400px); steps from 10 up are fluid. */
   --space-4:4px;
   --space-6:6px;
   --space-8:8px;
@@ -89,13 +71,11 @@
   --vh-full:100dvh;
   --color-background-tint:rgba(255,255,255,0.04);
   --color-background-tint-strong:rgba(255,255,255,0.12);
-  /* The -bg / -border fills derive here and re-resolve per theme: var() substitutes against the
-     element a property lands on, and :root and [data-theme] are both <html>. Danger is theme-invariant. */
+  /* The -bg / -border fills derive here and re-resolve per theme: :root and [data-theme] are both <html>. */
   --status-tint:0.12; --status-edge:0.35;
   --color-success:#10b981; --color-success-rgb:16,185,129;
   --color-danger:#C53030;  --color-danger-rgb:197,48,48;
   --color-warn:#f59e0b;    --color-warn-rgb:245,158,11;
-  /* The fourth member says WHICH cell (new, current, selected), never how good it is. */
   --color-new:#3b82f6;     --color-new-rgb:59,130,246;
   /* Browser-blue: the dark accent is orange, and an orange link reads as a button. */
   --color-link:#3b82f6; --color-link-hover:#60a5fa;

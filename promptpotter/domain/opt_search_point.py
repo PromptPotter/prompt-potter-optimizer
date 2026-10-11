@@ -1,24 +1,18 @@
-"""The individual and the prompt scheme under it — models only. An optimizer's own state is not
-here: it rides ``optimizer_state.py``.
-
-The ``pipeline_params`` SHAPE lives in ``pipeline_overlay.py`` and the delta / idea views in
-``candidate_diff.py``; neither references a model here, and their consumers are disjoint from
-this file's (connectors and the dispatcher take the overlay, validators and renderers take the
-diff). One edge crosses back: ``to_job_search_point`` folds schema descriptions."""
-
 from __future__ import annotations
 
-import copy
 import re
-import uuid
-from collections.abc import Callable, Sequence
-from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Self
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, Self
 
 from pydantic import ConfigDict, Field
 
-from promptpotter.config.settings import PROMPT_STRING_FIELDS
-from promptpotter.domain.pipeline_overlay import fold_output_contract
-from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
+from promptpotter.domain.pipeline_overlay import fold_output_contract, node_config_items
+from promptpotter.domain.search_point import (
+    PROMPT_STRING_FIELDS,
+    JobSearchPoint,
+    TaskDecomposition,
+    strip_rendered_prompt,
+)
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
 
@@ -30,19 +24,21 @@ if TYPE_CHECKING:
 __all__ = [
     "FEW_SHOT_BLOCK",
     "ORIGIN_SOURCE",
+    "SHOTS_LOCUS",
     "TEMPLATE_TOKEN_RE",
     "EvidenceGrounding",
     "IndividualLineage",
+    "Locus",
     "OptSearchPoint",
     "OptimizerPromptTemplate",
     "PromptTemplate",
+    "Variation",
+    "VariationMode",
+    "locus_name",
     "node_source",
 ]
 
 
-# The `{{token}}` shape `compile_prompt` substitutes — the ONE definition every
-# reader of a template's token set shares (dispatch-hub fill/validate, the
-# optimizer prompt port guard in `validators/l1_strict.py`).
 TEMPLATE_TOKEN_RE: Annotated[re.Pattern[str], shapes_optimizer_prompt] = re.compile(
     r"\{\{(\w+)\}\}"
 )
@@ -53,12 +49,7 @@ FEW_SHOT_BLOCK: Annotated[str, shapes_optimizer_prompt] = "few_shot_block"
 
 
 def _check_render_order(cls: type[PromptTemplate]) -> None:
-    """A field the order omits renders nowhere — silently, in a prompt.
-
-    Fired from ``__init_subclass__`` rather than against a hand-listed pair of classes at import:
-    the pair only ever named the classes in THIS module, so a fourth rendering class defined
-    anywhere else would have shipped its own order unchecked. Class creation is the one event every
-    subclass has, wherever it lives."""
+    """A field the order omits renders nowhere, silently; ``__init_subclass__`` runs this for every subclass."""
     if sorted(cls.RENDER_ORDER) != sorted(PROMPT_STRING_FIELDS):
         raise RuntimeError(
             f"{cls.__name__}.RENDER_ORDER must be a permutation of "
@@ -67,9 +58,6 @@ def _check_render_order(cls: type[PromptTemplate]) -> None:
 
 
 class PromptTemplate(StrictModel):
-    """The scheme shared by job + optimizer prompts: the six ``render()`` decomposition fields
-    (``PROMPT_STRING_FIELDS``)."""
-
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
         _check_render_order(cls)
@@ -77,9 +65,7 @@ class PromptTemplate(StrictModel):
     RENDER_ORDER: ClassVar[Annotated[tuple[str, ...], shapes_optimizer_prompt]] = tuple(
         PROMPT_STRING_FIELDS
     )
-    """Order ``render()`` concatenates the decomposition fields in — the TARGET prompt's, so it sits
-    inside the measurement archive's ``node_configs`` key and moving it re-cuts every banked cell.
-    ``OptimizerPromptTemplate`` is the one class that orders otherwise."""
+    """The TARGET prompt's order sits inside the archive key: moving it re-cuts every banked cell."""
 
     persona: str = ""
     task_intent: str = ""
@@ -103,15 +89,13 @@ class PromptTemplate(StrictModel):
 
     @shapes_optimizer_prompt
     def compile_prompt(self, **kwargs: str | int) -> str:
-        """Any ``{{…}}`` left after substitution stays LITERAL: an evolved node prompt echoed into an
-        optimizer template carries the backend's own placeholders, which the backend fills, not us."""
+        """Any ``{{…}}`` left after substitution stays LITERAL: it is the backend's placeholder to fill."""
         text = self.render()
         for key, value in kwargs.items():
             text = text.replace("{{" + key + "}}", str(value))
         return text
 
     def prompt_fields(self) -> dict[str, str]:
-        """String-only projection (no shots) for L1 summaries + validator diffs."""
         return {f: v for f in PROMPT_STRING_FIELDS if (v := getattr(self, f))}
 
     @classmethod
@@ -130,27 +114,11 @@ class OptimizerPromptTemplate(PromptTemplate):
         "answer_format",
         "problem_description",
     )
-    """Ordered for the provider's prefix cache, apart from the target's order so shaping a cache
-    prefix here cannot re-cut a banked measurement.
-
-    ``problem_description`` renders LAST because it is where the evidence goes — the slot potter's
-    layout floors fill (`optimizers/potter/dispatch/layout.py::VOLATILE_SLOT`, asserted there) —
-    so anything rendered after it would sit behind panels that change every round and could never
-    be served off a provider's prefix cache.
-
-    **The corollary binds the prompts, not just this tuple: a value that CHANGES between rounds
-    belongs in ``problem_description``, never in a field ahead of it** — a moving menu substituted
-    one slot early voids the stable prefix from inside a static template. Ordering the fields is
-    half the contract; keeping the moving values behind the boundary is the other half, and the
-    half nothing can assert."""
+    """Prefix-cache order: a value that CHANGES between rounds goes in ``problem_description``, last."""
 
 
 class EvidenceGrounding(StrictModel):
-    """Panel field + citation L1 declares to justify a mutation.
-
-    The set of citable panels is not declared anywhere: it is DERIVED per round from the
-    node's live layout (``dispatch.injections.registry.citable_fields``), so L1 can only
-    cite a panel it was actually shown."""
+    """The panel field and citation L1 declares to justify a mutation."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -160,15 +128,43 @@ class EvidenceGrounding(StrictModel):
 
 ORIGIN_SOURCE = "origin"
 
+SHOTS_LOCUS = "shot_ids"
+"""The shots' locus: one ordered list, so its order is part of its value."""
+
+Locus = str | tuple[str, str]
+"""A prompt field by name, ``SHOTS_LOCUS``, or a ``(node, param)`` of the configuration."""
+
+VariationMode = Literal["deterministic", "llm"]
+
 
 def node_source(manifest: str, node: str) -> str:
     return f"{manifest}:{node}"
 
 
-class IndividualLineage(StrictModel):
-    """Identity + provenance — set once at creation, never mutated."""
+def locus_name(locus: Locus) -> str:
+    return locus if isinstance(locus, str) else ".".join(locus)
 
-    id: str = Field(default_factory=lambda: uuid.uuid4().hex)
+
+class Variation(StrictModel):
+    """One variation node's act: which node ran, whether it asked a model, and the loci it wrote."""
+
+    model_config = ConfigDict(frozen=True)
+
+    node: str = Field(description="`{manifest}:{node}` of the variation node that ran.")
+    mode: VariationMode = Field(
+        description="`deterministic`: a function of its inputs and the run's seed. `llm`: a "
+        "model's reply."
+    )
+    loci: list[str] = Field(
+        default_factory=list,
+        description="The loci it left different from what it was handed, by `locus_name`: the "
+        "first one's against the first parent, a later one's against the variation before it.",
+    )
+
+
+class IndividualLineage(StrictModel):
+    """The provenance of one mint: its edges, variations and words; it names no individual."""
+
     parent_ids: list[str] = Field(
         default_factory=list,
         description=(
@@ -177,21 +173,35 @@ class IndividualLineage(StrictModel):
         ),
     )
     changes_description: str = ""
-    source: str = Field(
-        default="",
-        description=(
-            "`{manifest}:{node}` of the node that proposed it (`potter:l1_generate`); "
-            "`origin` for an individual the bench minted."
-        ),
+    variations: list[Variation] = Field(
+        default_factory=list,
+        description="Every variation node that wrote it, in the order they ran; empty for an "
+        "individual the bench minted as an origin. A later node appends its own and rewrites none.",
     )
     evidence_grounding: EvidenceGrounding | None = None
 
+    @property
+    def source(self) -> str:
+        """Its FIRST variation, which no later one replaces; ``origin`` where the bench minted it."""
+        return self.variations[0].node if self.variations else ORIGIN_SOURCE
+
+
+def _resolved_config(pipeline_params: dict[str, Any], schema: PipelineSchema) -> dict[str, Any]:
+    """Idempotent."""
+    pp = strip_rendered_prompt(pipeline_params)
+    if schema.active_steps:
+        pp["steps"] = list(schema.active_steps)
+    return fold_output_contract(pp, schema)
+
+
+def _refuse_unwritable(names: Iterable[str]) -> None:
+    """A configuration locus is written through a whole resolved configuration alone, never by name."""
+    if unknown := [name for name in names if name not in (*PROMPT_STRING_FIELDS, SHOTS_LOCUS)]:
+        raise ValueError(f"an individual is written by prompt field and shots, not {unknown}")
+
 
 class OptSearchPoint(PromptTemplate):
-    """The individual: prompt structure + lineage.
-
-    The campaign's framing and every optimizer's working state ride elsewhere, so a derive can
-    carry neither."""
+    """The individual: a configuration of prompt fields, shots and node config, plus its lineage."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -202,7 +212,23 @@ class OptSearchPoint(PromptTemplate):
             "to each row's query and ground truth only when the target prompt renders."
         ),
     )
+    pipeline_params: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Its node configuration, resolved: the active steps named, the output contract "
+            "folded, no rendered prompt. `configured` is the one writer."
+        ),
+    )
     lineage: IndividualLineage = Field(default_factory=IndividualLineage)
+
+    @property
+    def id(self) -> str:
+        """The individual IS its content, never stored: one configuration reached twice is one id."""
+        return stable_hash([self.prompt_field_dict(), self.pipeline_params])
+
+    def configured(self, pipeline_params: dict[str, Any] | None, schema: PipelineSchema) -> Self:
+        resolved = _resolved_config(pipeline_params or {}, schema)
+        return self.model_copy(update={"pipeline_params": resolved})
 
     def prompt_field_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = dict(self.prompt_fields())
@@ -223,9 +249,7 @@ class OptSearchPoint(PromptTemplate):
     def target_fields(
         self, framing: TaskDecomposition, *, demo: Sequence[Sample]
     ) -> list[tuple[str, str]]:
-        """The campaign's framing spliced up/downstream of ``problem_description`` — which may be
-        EMPTY, and the context still renders — and the shots last. This render, not ``render()``,
-        is what is scored."""
+        """What is SCORED, not ``render()``; an EMPTY ``problem_description`` still renders the framing."""
 
         def value_of(name: str) -> str:
             v: str = getattr(self, name)
@@ -247,31 +271,18 @@ class OptSearchPoint(PromptTemplate):
 
     def to_job_search_point(
         self,
-        base_pipeline_params: dict[str, Any] | None = None,
         *,
         schema: PipelineSchema,
         framing: TaskDecomposition,
         demo: Sequence[Sample],
     ) -> JobSearchPoint:
-        """*schema* is REQUIRED: without one this produced a valid-looking point carrying neither the
-        rendered prompt nor ``steps``, and that point is scored and archived like any other."""
-
-        pp = copy.deepcopy(base_pipeline_params or {})
-        active_steps = schema.active_steps
+        pp = _resolved_config(self.pipeline_params, schema)
         prompt_nodes = schema.prompt_node_names()
         prompt_node = prompt_nodes[0] if prompt_nodes else ""
-        if active_steps:
-            pp["steps"] = list(active_steps)
         pairs = self.target_fields(framing, demo=demo)
         rendered = "\n\n".join(v for _, v in pairs)
         if rendered and prompt_node:
             pp.setdefault(prompt_node, {})["prompt"] = rendered
-
-        # Resolve the structured-output contract onto the wire: fold the accumulated description
-        # keys into each node's real `output_schema` prose and drop the virtual keys, and strip the
-        # contract entirely where this point chose to answer in text.
-        # `schema` resolves the registry-declared case (`schema_family`, no inline schema).
-        fold_output_contract(pp, schema)
 
         pf: dict[str, Any] = {}
         if rendered and prompt_node:
@@ -285,40 +296,76 @@ class OptSearchPoint(PromptTemplate):
         )
 
     def as_origin(self, *, changes_description: str) -> OptSearchPoint:
-        """This point as a cycle's C0, its id derived from its own fields: every launch re-resolves
-        the origin, and must name the individual its round documents and ledger already carry."""
-        lineage = IndividualLineage(
-            id=stable_hash([ORIGIN_SOURCE, self.prompt_field_dict()]),
-            changes_description=changes_description,
-            source=ORIGIN_SOURCE,
-        )
+        lineage = IndividualLineage(changes_description=changes_description)
         return self.model_copy(update={"lineage": lineage})
+
+    def loci(self) -> dict[Locus, Any]:
+        loci: dict[Locus, Any] = {f: getattr(self, f) for f in PROMPT_STRING_FIELDS}
+        loci[SHOTS_LOCUS] = tuple(self.shot_ids)
+        for node, config in node_config_items(self.pipeline_params):
+            for param, value in config.items():
+                loci[(node, param)] = value
+        return loci
+
+    def loci_moved_from(self, before: OptSearchPoint) -> list[str]:
+        mine, theirs = self.loci(), before.loci()
+        return [
+            locus_name(locus)
+            for locus in dict.fromkeys((*theirs, *mine))
+            if (locus in mine, mine.get(locus)) != (locus in theirs, theirs.get(locus))
+        ]
 
     @classmethod
     def derive(
         cls,
         parents: Sequence[OptSearchPoint],
         *,
-        source: str,
+        variation: Variation,
+        take: Mapping[str, int] | None = None,
+        config: tuple[dict[str, Any], PipelineSchema] | None = None,
         changes_description: str = "",
         evidence_grounding: EvidenceGrounding | None = None,
         **changes: Any,
     ) -> OptSearchPoint:
-        """``parents[0]`` supplies every field *changes* leaves unset — a crossover names its
-        recombined fields explicitly."""
+        """*take* maps a locus to its donor's position in *parents*; a configuration locus comes from *config* alone."""
         base = parents[0]
-        data: dict[str, Any] = {}
-        for f in PROMPT_STRING_FIELDS:
-            data[f] = changes.pop(f, getattr(base, f))
-        data["shot_ids"] = list(changes.pop("shot_ids", base.shot_ids))
-        data["lineage"] = IndividualLineage(
-            parent_ids=[p.lineage.id for p in parents],
+        values = base.loci()
+        _refuse_unwritable((*(take or {}), *changes))
+        for locus, donor in (take or {}).items():
+            values[locus] = parents[donor].loci()[locus]
+        values.update(changes)
+        child = cls(
+            **{f: values[f] for f in PROMPT_STRING_FIELDS},
+            shot_ids=list(values[SHOTS_LOCUS]),
+            pipeline_params=base.pipeline_params,
+        )
+        if config is not None:
+            child = child.configured(*config)
+        lineage = IndividualLineage(
+            parent_ids=[p.id for p in parents],
             changes_description=changes_description,
-            source=source,
+            variations=[variation.model_copy(update={"loci": child.loci_moved_from(base)})],
             evidence_grounding=evidence_grounding,
         )
-        data.update(changes)
-        return cls(**data)
+        return child.model_copy(update={"lineage": lineage})
+
+    def edited(
+        self,
+        variation: Variation,
+        *,
+        changes_description: str | None = None,
+        **changes: Any,
+    ) -> OptSearchPoint:
+        _refuse_unwritable(changes)
+        after = self.model_copy(update=changes)
+        written = after.loci_moved_from(self)
+        update: dict[str, Any] = {}
+        if written:
+            step = variation.model_copy(update={"loci": written})
+            update["variations"] = [*self.lineage.variations, step]
+        if changes_description is not None:
+            update["changes_description"] = changes_description
+        return after.model_copy(update={"lineage": self.lineage.model_copy(update=update)})
 
 
 _check_render_order(PromptTemplate)

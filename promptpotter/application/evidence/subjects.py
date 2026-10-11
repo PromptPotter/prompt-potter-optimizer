@@ -12,47 +12,33 @@ from promptpotter.domain.cycle_paths import (
     encode_cycle_path,
 )
 from promptpotter.domain.ruler import AbilityReading
-from promptpotter.domain.run_records import OPERATOR_ORIGIN_SOURCES
+from promptpotter.domain.run_records import OPERATOR_ORIGIN_SOURCES, CandidateState
 from promptpotter.domain.strict_model import StrictModel
 
 SubjectKind = Literal["campaign", "course", "candidate"]
 
-# How many path segments each kind addresses. The parse is arity-checked off this, so a kind added
-# here without a resolver fails at the door rather than resolving to the wrong depth.
 _SUBJECT_ARITY: dict[SubjectKind, int] = {"campaign": 1, "course": 2, "candidate": 3}
+SUBJECT_KIND_LABELS: dict[SubjectKind, str] = {
+    "campaign": "origin",
+    "course": "branch head",
+    "candidate": "searchpoint",
+}
+assert SUBJECT_KIND_LABELS.keys() == _SUBJECT_ARITY.keys()
 
 
 class SubjectSpec(NamedTuple):
-    """One addressed subject, plus the MASK it is read under. INTERNAL — what crosses the
-    wire is the ``key`` spelling and, coming back, a :class:`SubjectReading`.
-
-    The mask is part of the ADDRESS, not a second query parameter, which is what lets one read
-    carry a course beside the same course under a different formula: two channels, two keys, one
-    selection. Without it the mask would be selection-wide and the comparison the operator wants —
-    the record against the counterfactual — would need two page loads to see.
-    """
-
     kind: SubjectKind
     campaign_id: str
     cycle_id: str = ""
     candidate_id: str = ""
-    # The sandbox chain the address lives INSIDE — empty for a top-level campaign, one hop per L4
-    # recursion below it. An inner cycle is a cycle in a tree of its own, so every resolver here
-    # works on it unchanged once the store has descended; without it the whole of a
-    # `promptpotter-self` tree is unaddressable.
     inside: CyclePath = ()
-    # Course-only: a campaign is an origin no election reaches, and a candidate one point rather
-    # than a chain; neither has an election to re-decide.
     lens: Lens | None = None
     samples: frozenset[int] | None = None
 
     @property
     def key(self) -> str:
-        """The canonical spelling — what was asked for, what the reading is stamped with, and what
-        the pairwise table refers to. One string, so nothing joins on a tuple it re-derived."""
         addressed = [p for p in (self.campaign_id, self.cycle_id, self.candidate_id) if p]
         parts = [f"{self.kind}:{'/'.join(addressed)}"]
-        # WHERE first, then how to read it: the address half of the segments before the mask half.
         if self.inside:
             parts.append(f"in={encode_cycle_path(self.inside)}")
         if self.lens:
@@ -63,18 +49,8 @@ class SubjectSpec(NamedTuple):
 
 
 def parse_subject(spec: str) -> SubjectSpec:
-    """``kind:<campaign>[/<cycle>[/<candidate>]][;in=<c::y~…>][;lens=score:…|dials:…][;samples=1,2,3]``.
-
-    ``in=`` names the sandbox chain the address lives inside — the same ``campaign::cycle`` codec
-    the read side's ``?descend=`` uses, because it is the same question. Without it every L4 inner
-    run is unaddressable, which on a ``promptpotter-self`` campaign is almost the whole tree.
-
-    Raises ``ValueError`` on anything unresolvable, for each entry point to turn into its own kind
-    of refusal — a 400 on the route, a printed line on the terminal.
-
-    ``;`` separates the segments because it cannot appear in a safe-AST formula, so a lens needs
-    no escaping and the address stays one readable URL parameter.
-    """
+    """``kind:<campaign>[/<cycle>[/<candidate>]][;in=<c::y~…>][;lens=score:…|dials:…][;samples=1,2,3]``."""
+    # `;` cannot appear in a safe-AST formula, so a lens needs no escaping.
     address, *segments = spec.split(";")
     kind, sep, rest = address.partition(":")
     if not sep or kind not in _SUBJECT_ARITY:
@@ -114,8 +90,6 @@ def parse_subject(spec: str) -> SubjectSpec:
 
 
 def authorship_of(source: str, issued_by: str) -> str:
-    """``SubjectReading.arm_id`` cannot answer this: it hashes round 0's optimizer prompts, so two
-    forks of one campaign share an arm. A non-human source names its LAYER and passes through verbatim."""
     if source not in OPERATOR_ORIGIN_SOURCES:
         return source
     return f"operator:{issued_by}"
@@ -141,19 +115,12 @@ class ScenarioReading(StrictModel):
     honest limit of a lens is not something a surface can be trusted to remember.
     """
 
-    # Both read at the round the chain ends on, and equal where the two readings never part.
     recorded_winner_id: str | None
     scenario_winner_id: str | None
     winner_changed: bool
-    # Where the two part — and the round a fork applying this formula is minted at, which is the
-    # same fact. `None` = they never part within this branch.
     first_divergent_round: int | None
-    # Rounds before that point — the prefix both readings agree on, and the honest measure of how
-    # much of this branch a formula change leaves standing.
     invariant_rounds: int
     total_rounds: int
-    # How many cells the head was actually read over once the sample mask was applied. Served
-    # beside the subject's own `n_cells` because "17 of 28" is the question the mask was asked.
     n_samples_scored: int
     note: str
 
@@ -161,7 +128,7 @@ class ScenarioReading(StrictModel):
 class WinnerChainPoint(StrictModel):
     """One step of the branch standing behind a subject — the winner chain from the origin up to
     its head, each point read on ITS OWN cells under the selected metric. Opt-in
-    (``include_winner_chain``), because every point past the origin opens a round document.
+    (``include_winner_chain``), because every point past the origin opens a round file.
 
     **Named for the chain, never "trajectory".** The subsets move between rounds, so this reads
     each point on the evidence that point actually had; the round's own `overlap` line is the
@@ -192,115 +159,60 @@ class SubjectReading(StrictModel):
     bracket drawn from it is a fiction.
     """
 
-    # The canonical subject spelling (``SubjectSpec.key``) — what was asked for, what the pairwise
-    # table refers to and what a series keys on. The three ids below are the same address parsed
-    # out, carried so no consumer re-splits the string.
     key: str
     kind: SubjectKind
-    # The sandbox chain this subject lives INSIDE, root-first — empty at the top level, one hop
-    # per L4 recursion below it. The three ids below name the LEAF only, so this is what completes
-    # the address: prepended to ``(campaign_id, cycle_id)`` it is the node's full path in the
-    # served tree, and it is what a re-addressing surface appends a mask to.
     inside: list[CycleHop]
     campaign_id: str
-    # RESOLVED, not echoed: the cycle these rows were read in, and the ONE searchpoint they came
-    # off. A campaign resolves to its root cycle's origin arm and a course to the winner its last
-    # election crowned, so "which point am I looking at" is answerable without asking for the
-    # whole winner chain.
     cycle_id: str
     candidate_id: str
-    # What to CALL this channel — the campaign, the branch, or the searchpoint. Deliberately not
-    # the resolved point's label for a course: two branches of one campaign are what a course
-    # comparison is about, and naming both by their current winner hides which is which.
     label: str
     dataset_name: str
     created_at: str
-    # Whether THIS subject's absolute level sits on the same scale as the rest of the selection —
-    # served rather than derived per surface, so the strike-through and the note cannot disagree.
-    # ``None`` is UNKNOWN (an unstamped ruler), which is not ``True`` and must never render as it.
+    # `None` is UNKNOWN (an unstamped ruler): never render it as `True`.
     comparable: bool | None
-    # WHY, as the sentence to show — empty unless ``comparable`` is False. Served for the same
-    # reason `Comparability.note` is: the two ways of failing are not one fact worded twice. A
-    # different RULER still pairs cell by cell and only its level moves; a different DATASET
-    # shares no cell at all, and a surface that guessed one sentence for both told the operator
-    # their two subjects overlapped when nothing did.
     comparable_note: str
-    # The mask this channel is read under, and what it did to the branch. Both ``None`` on an
-    # unmasked channel — the record read as it stands.
     mask: SubjectMask | None
     scenario: ScenarioReading | None
-    # The winner chain behind this subject, origin-first. ``None`` unless asked for.
     winner_chain: list[WinnerChainPoint] | None
-    # WHAT this searchpoint IS, as against what it scored: one flat ``key -> rendered value`` map
-    # over the RESOLVED config (`node.param`) plus the prompt fields. ``None`` unless asked for —
-    # a prompt field is the largest thing this read can put on the wire, and a comparison of four
-    # channels carries four of them. Resolved rather than the sparse override, because two
-    # searchpoints from different campaigns share no delta to line up.
     config: dict[str, str] | None
-    # The configuration the subject's own CYCLE ran under, hashed off round 0's
-    # `optimizer_state.prompt_hashes`. Two campaigns sharing it are replicates of one arm however much
-    # else differs, which is the fact a roster listing campaigns cannot show. `None` where round 0
-    # carries no hashes: the arm is UNKNOWN, which groups with nothing — least of all with every
-    # other unstamped campaign.
+    # `None` where round 0 carries no hashes: an unknown arm groups with nothing.
     arm_id: str | None
-    # WHO proposed the configuration this subject reads at — `l1_generate` / `l2_context` /
-    # `l3_plan` for a layer, `operator:<id>` where a human wrote it, `origin` for the dataset's own.
-    # The arm above groups by optimizer CONFIG, which two forks of one campaign share whoever
-    # authored the edit, so this is the key a human-against-loop comparison groups on. `""` = the
-    # ledger names no source for this point, which groups with nothing.
+    # `""` where the ledger names no source for the point, which groups with nothing.
     authorship: str
-    # Whether an operator intervened in this subject's CYCLE mid-flight. A fact about the RUN, so a
-    # loop-authored arm carries it too — and such a cycle is no longer purely reproducible, which
-    # is what stops it pairing against one nobody touched.
     human_intervened: bool
-    # Of the cells this point scored, how many REPLAYED from the archive. `None` where the round
-    # document carries no report for the point at all — never 0, which is the measurement "it
-    # earned every cell". A rewind fork inherits its parent's rows, so collapsing the two reads
-    # that evidence as independently bought and the pairing is not matched on effort at all.
+    status: CandidateState = Field(
+        description="Where the resolved searchpoint stands, in the lineage tree's own words. "
+        "`minted` = it has no score report yet: its walk is still open (or ended with its "
+        "producer), so `n_cells`, `values` and `cell_means` cover only the cells it has scored SO "
+        "FAR and every reading here is a prefix, of `expected_samples`. `measured` = its walk "
+        "ended and these are all its cells.",
+    )
+    expected_samples: int | None = Field(
+        description="How many cells the point's walk was sized for — the denominator `n_cells` is "
+        "read against. The score report's own once it lands; before that, what the walk last "
+        "announced, which a racing arm raises block by block. Null until its first cell lands.",
+    )
+    # `None` where the point carries no score report — never 0, which means "it earned every cell".
     cached_samples: int | None
-    # The connector's measurement-identity fingerprint — the RULER the arm was read against, moved
-    # by any inner prompt, panel prose, layout or estimator edit. Two campaigns sharing an arm but
-    # not this are NOT replicates: their spread is code drift wearing a noise label.
-    instrument_id: str | None
-    # The cycle origin's own reading, carried for the scale on it: subjects whose rulers differ
-    # measured on different scales, so their ABSOLUTE levels are not one quantity however well
-    # paired the cells are. `None` where round 0 carries no reading at all.
+    instrument_id: str
     ability: AbilityReading | None
-    # The round the resolved point sits at. Every kind resolves to exactly ONE searchpoint, so
-    # this is always answerable — and it is the only round number here that describes the SUBJECT
-    # rather than the cycle it was found in.
     round: int
-    # The CYCLE's figures, and named for it because neither narrows to the point above: the spend
-    # is `dashboard.json`'s roll-up, cumulative-from-seed (so a fork carries what it inherited),
-    # and the count is a glob of the cycle's whole `rounds/` dir. A candidate addressed at round 2
-    # of a six-round branch is one point of six, and reading either as its own cost or its own
-    # depth is the misreading these names exist to refuse.
     cycle_spend_usd: float | None
     cycle_rounds_scored: int
-    # `round -> USD spent by the end of it`, cumulative, over the cycle's history. What lets a
-    # surface answer "what had it cost to get to the point I am looking at" as the operator walks
-    # the branch, which no single scalar can: the pick moves in the browser and the read does not.
     spend_to_round: dict[str, float]
-    # Mean per measured cell of `SIDE_CHANNELS`: what a cell of THIS point cost, how long it took
-    # and how long its prompt is, whatever metric the read selected. A channel none of its cells
-    # carries is absent, never 0.
+    # A channel none of its cells carries is absent, never 0.
     cell_means: dict[str, float]
     values: dict[str, float]
     value: float | None
     ci_lo: float | None
     ci_hi: float | None
     n_cells: int
-    # The cells this subject MEASURED and this metric cannot read. Named, not counted: a cell
-    # blank on the chart is either this or a cell the subject never measured, and only naming
-    # them lets a surface render the two as the different facts they are.
     unscorable_cells: list[str]
-    # Where this subject sits on each factor the selection varies on — its address in the grid,
-    # over the keys `Evidence.factors` discovered. Empty where nothing varies. It carries only the
-    # VARYING keys, which is what makes it a coordinate rather than a second copy of `config`.
     levels: dict[str, str] = Field(default_factory=dict)
 
 
 __all__ = [
+    "SUBJECT_KIND_LABELS",
     "ScenarioReading",
     "SubjectKind",
     "SubjectMask",

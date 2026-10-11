@@ -1,69 +1,50 @@
 "use client";
 import { useMemo } from "react";
 import { Badge, CopyButton, Term, VendorLogo } from "@/components/ui";
+import { BenchAction } from "@/components/shell/masthead/BenchAction";
 import { CampaignSwitcher } from "@/components/shell/masthead/CampaignSwitcher";
+import { PairedLift } from "@/components/shell/PairedLift";
 import { CriterionLine } from "@/components/shell/scoring/Criterion";
 import { SpendBuckets } from "@/components/shell/SpendBuckets";
 import {
-  METER_WORD,
   benchReading,
-  buildForest,
   campaignLineParts,
   campaignModels,
-  campaignTitle,
   campaignVendors,
-  fitnessTrend,
-  headlineStats,
+  fmtLift,
+  ratePricedText,
   readSpend,
   spendHeadline,
 } from "@/lib/derivations";
-import { fmtPct0, fmtUsd, shortModel } from "@/lib/format";
+import { CEILING_METER_LABELS } from "@/lib/api/types.generated";
+import { cx } from "@/lib/cx";
+import { fmtUsd, shortModel } from "@/lib/format";
 import { useServedCriterion } from "@/lib/hooks/useServedCriterion";
 import { pathLeaf } from "@/lib/ids";
-import { isMeasuring, roundOf, useCycleStream } from "@/lib/poll";
-import { cx } from "@/lib/cx";
-import { runPhaseLabel } from "@/lib/run-phase";
+import { measuringLabel, useCycleStream } from "@/lib/poll";
+import { useRegistry } from "@/lib/registry";
+import { statusTone } from "@/lib/run-phase";
 import { TERMS } from "@/lib/terms";
 import { useWorkspace } from "@/lib/workspace";
 
-// ONE header over every campaign view, owning "where is this run": no pane below repeats a fact
-// it shows (webapp/components/CLAUDE.md § Component conventions).
-export function RunMasthead({ onFollowed }: { onFollowed: () => void }) {
-  const { campaignId, leafCycleId, viewedPath, campaigns, cycles, following, followActive } =
-    useWorkspace();
+export function RunMasthead() {
+  const { campaignId, leafCycleId, viewedPath, following, followActive } = useWorkspace();
+  const { forest } = useRegistry();
   const { dash } = useCycleStream();
-  const dashRound = roundOf(dash);
   const served = useServedCriterion();
 
-  const origins = useMemo(() => buildForest(campaigns, cycles), [campaigns, cycles]);
   const run = useMemo(
     () =>
-      origins
-        .flatMap((o) => o.runs)
-        .find((r) => r.campaign.campaign_id === campaignId) ?? null,
-    [origins, campaignId],
+      forest.flatMap((o) => o.runs).find((r) => r.campaign.campaign_id === campaignId) ?? null,
+    [forest, campaignId],
   );
 
-  const spark = useMemo(() => {
-    const ys = fitnessTrend(dash?.rounds).best.filter((y): y is number => y != null);
-    if (ys.length < 2) return null;
-    const W = 120;
-    const H = 26;
-    const maxY = Math.max(...ys, 0.01);
-    const toX = (i: number) => (i / (ys.length - 1)) * W;
-    const toY = (v: number) => H - 2 - (v / maxY) * (H - 4);
-    const path = ys
-      .map((y, i) => `${i === 0 ? "M" : "L"}${toX(i).toFixed(1)},${toY(y).toFixed(1)}`)
-      .join("");
-    return { path, area: `${path} L${W},${H} L0,${H} Z`, W, H };
-  }, [dash?.rounds]);
-
-  const title = run ? campaignTitle(run.campaign) : null;
-  // Backing out is the remote's drill button; this only says where the view is.
+  const campaign = run?.campaign ?? null;
   const innerLeaf = viewedPath && viewedPath.length > 1 ? pathLeaf(viewedPath) : null;
 
-  const runPhase = dash?.run_phase ?? null;
-  const phaseLabel = runPhaseLabel(runPhase, dash?.stop_reason);
+  const status = dash?.status ?? null;
+  const phaseLabel = status ? status.label : "—";
+  const phaseTone = status && statusTone(status);
   const phaseBody = (
     <>
       <span className="phase-dot" aria-hidden="true" />
@@ -71,23 +52,25 @@ export function RunMasthead({ onFollowed }: { onFollowed: () => void }) {
     </>
   );
 
-  const { best } = headlineStats(dash);
-  const bench = benchReading(dash?.bench_score, dash?.bench_missing_reason);
-  // `dash.candidate` goes stale between rounds, so it stands in only while the measurement works.
-  const scoringCand = dash && isMeasuring(dash) ? String(dash.candidate || "").split("/")[0] : "";
-  const roundsCap = dash?.run_limits?.max_rounds ?? null;
-  const position = scoringCand || (dashRound != null ? `R${dashRound}` : "—");
+  const best = dash?.run_standing ?? null;
+  const bench = benchReading(dash?.bench_score);
+  const round = dash?.round_axis.position ?? null;
+  const roundsCap = dash?.run_limits.max_rounds ?? null;
+  const position = measuringLabel(dash) ?? (round != null ? `R${round}` : "—");
 
   const { metered, budgetUsd } = readSpend(dash);
+  const priced = metered
+    ? ratePricedText(metered.rate_priced_usd, metered.calls_rate_priced)
+    : null;
 
   return (
     <header className="run-header">
       <div className="run-header-inner">
         <div className="run-title">
-          {title && <Badge>{title.dataset}</Badge>}
-          {title?.label && <span className="run-name">{title.label}</span>}
-          {title?.suffix && <span className="run-suffix">__{title.suffix}</span>}
-          <CampaignSwitcher origins={origins} />
+          {campaign && <Badge>{campaign.dataset_name}</Badge>}
+          {campaign?.label && <span className="run-name">{campaign.label}</span>}
+          {campaign?.id_suffix && <span className="run-suffix">__{campaign.id_suffix}</span>}
+          <CampaignSwitcher />
           {innerLeaf && (
             <span className="inner-breadcrumb">
               <span className="inner-breadcrumb-sep" aria-hidden="true">
@@ -120,21 +103,17 @@ export function RunMasthead({ onFollowed }: { onFollowed: () => void }) {
             {served.formula ? <CriterionLine mask={served.mask} /> : null}
           </div>
         )}
-        {/* Every chip reads `dash` for the VIEWED LEAF, the one per-cycle source. */}
         <div className="run-chips">
           {following ? (
-            <span className={cx("chip", `phase-${runPhase}`)}>
+            <span className={cx("chip", phaseTone)}>
               <span className="chip-lbl">State</span>
               {phaseBody}
             </span>
           ) : (
             <button
               type="button"
-              className={cx("chip", "chip-btn", `phase-${runPhase}`)}
-              onClick={() => {
-                followActive();
-                onFollowed();
-              }}
+              className={cx("chip", "chip-btn", phaseTone)}
+              onClick={() => followActive("dashboard")}
               aria-label={`${phaseLabel} — pinned to this campaign. Follow the latest launch instead.`}
               title="Pinned to this campaign; other launches leave it on screen. Click to follow the latest launch."
             >
@@ -144,19 +123,21 @@ export function RunMasthead({ onFollowed }: { onFollowed: () => void }) {
           )}
           <Term className="chip" content={TERMS.masthead_best}>
             <span className="chip-lbl">Best</span>
-            {fmtPct0(best)}
-            {spark && (
-              <svg
-                className="run-spark"
-                viewBox={`0 0 ${spark.W} ${spark.H}`}
-                aria-hidden="true"
-              >
-                <path className="area" d={spark.area} />
-                <path className="line" d={spark.path} />
-              </svg>
+            {best ? (
+              <PairedLift reading={best.vs_origin} unread="label">
+                {(lift, cells) => (
+                  <>
+                    {fmtLift(lift, "rates")}
+                    <span className="chip-of"> on {cells}</span>
+                  </>
+                )}
+              </PairedLift>
+            ) : (
+              "—"
             )}
           </Term>
-          {/* The headline: the selection graded on held-out rows; BEST beside it is the optimizer's own. */}
+          {/* Ahead of the chip it fills: an ungraded bench's reason runs the row past the viewport. */}
+          {viewedPath && !innerLeaf && <BenchAction path={viewedPath} />}
           <span className="chip">
             <span className="chip-lbl">{bench.label}</span>
             {bench.value}
@@ -176,13 +157,13 @@ export function RunMasthead({ onFollowed }: { onFollowed: () => void }) {
             ) : (
               "—"
             )}
-            {/* Where the cap counts something other than the headline, its own figure sits beside it. */}
+            {priced && <span className="chip-of"> + {priced}</span>}
             {budgetUsd != null &&
               (metered && !metered.metered_is_bill ? (
                 <span className="chip-of">
                   {" "}
                   · {fmtUsd(metered.metered_usd)} / {fmtUsd(budgetUsd)} cap{" "}
-                  {METER_WORD[metered.meter]}
+                  {CEILING_METER_LABELS[metered.meter]}
                 </span>
               ) : (
                 <span className="chip-of"> / {fmtUsd(budgetUsd)} cap</span>

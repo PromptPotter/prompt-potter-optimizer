@@ -1,6 +1,5 @@
 "use client";
-// The account modal. Update profile, remove account and connect account are INTENTIONAL
-// placeholders — out of scope for any "hide non-functional controls" sweep.
+// Update profile, remove account and connect account are INTENTIONAL placeholders: never hide them.
 
 import { useEffect, useRef } from "react";
 import { AboutUnit } from "./AboutUnit";
@@ -12,15 +11,10 @@ import { AccountPreferencesTab } from "./AccountPreferencesTab";
 import { WorkspaceStoragePanel } from "./WorkspaceStoragePanel";
 import { Button, Dialog, IconClose } from "@/components/ui";
 import { cx } from "@/lib/cx";
+import { meRead } from "@/lib/api";
 import { readyData, useRead } from "@/lib/hooks/useRead";
-import { fetchMe } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace";
 import { DEFAULT_ACCOUNT_PANE, type AccountPane } from "@/lib/view-tab";
-
-interface Props {
-  open: boolean;
-  onClose: () => void;
-}
 
 const TAB_TITLES: Record<AccountPane, string> = {
   profile: "Profile",
@@ -37,11 +31,11 @@ const NAV_GROUPS: readonly { label: string; panes: readonly AccountPane[] }[] = 
   { label: "This unit", panes: ["about"] },
 ];
 
-export function AccountModal({ open, onClose }: Props) {
-  const { accountPane, openAccount } = useWorkspace();
+export function AccountModal() {
+  const { accountPane, openAccount, closeAccount: onClose } = useWorkspace();
+  const open = accountPane != null;
   const tab: AccountPane = accountPane ?? DEFAULT_ACCOUNT_PANE;
-  // Parked while closed, so a prior session's profile never flashes in.
-  const profile = useRead(open ? { key: "me", fetch: fetchMe } : null, { surface: "profile" });
+  const profile = useRead(open ? meRead() : null);
   const me = readyData(profile);
   const cardRef = useRef<HTMLDivElement>(null);
   // Runs after Dialog's own first-focusable focus, which would ring "Profile" whatever pane shows.

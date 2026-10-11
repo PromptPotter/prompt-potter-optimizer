@@ -1,4 +1,3 @@
-// The browser address codec: `#/c/<campaign>/<cycle>…/<tab>/k/<candidate>/x/<run>/<sample>`.
 // The `cycle_` prefix is stripped HERE, never in `ids.ts`, whose encoding is the `?descend=` wire.
 
 import {
@@ -14,10 +13,9 @@ import {
   type Tab,
 } from "./view-tab";
 
-// An archive row (`domain/cells.py`), not a place in any cycle — it opens from every scope.
+// An archive answer (`domain/cells.py`), not a place in any cycle — it opens from every scope.
 export interface CellAddress {
-  runId: string;
-  sampleId: number;
+  answer: string;
 }
 interface FollowAddress {
   kind: "follow";
@@ -29,6 +27,8 @@ interface CycleAddress {
   path: CyclePath;
   tab: Tab;
   candidateId: string | null;
+  // An offset into the LEAF's ledger; a followed view has none.
+  at: number | null;
   cell: CellAddress | null;
 }
 // Carries no cycle: the pin stays in workspace state while the modal is up.
@@ -40,6 +40,7 @@ export type Address = FollowAddress | CycleAddress | AccountAddress;
 
 const CYCLE_PREFIX = "cycle_";
 const CAND_SEG = "k";
+const AT_SEG = "t";
 const CELL_SEG = "x";
 const CYCLE_SEG = "c";
 const ACCOUNT_SEG = "account";
@@ -62,10 +63,12 @@ export function formatAddress(a: Address): string {
     segs.push(CYCLE_SEG);
     for (const hop of a.path) segs.push(hop.campaignId, shortCycle(hop.cycleId));
   }
-  // The default view is omitted, except before a cell, so `x` never follows a bare hop.
-  if (a.tab !== DEFAULT_TAB || a.cell) segs.push(a.tab);
+  const at = a.kind === "cycle" ? a.at : null;
+  // The default view is omitted, except before a moment or a cell, so neither follows a bare hop.
+  if (a.tab !== DEFAULT_TAB || a.cell || at !== null) segs.push(a.tab);
   if (a.kind === "cycle" && a.candidateId) segs.push(CAND_SEG, a.candidateId);
-  if (a.cell) segs.push(CELL_SEG, a.cell.runId, String(a.cell.sampleId));
+  if (at !== null) segs.push(AT_SEG, String(at));
+  if (a.cell) segs.push(CELL_SEG, a.cell.answer);
   return `#/${segs.join("/")}`;
 }
 
@@ -88,8 +91,7 @@ export function parseAddress(hash: string): Address | null {
     return { kind: "follow", tab, cell: cell?.cell ?? null };
   }
 
-  // Hop pairs end at the first view name or `k`; a campaign id always contains `__`
-  // (`campaign_ids.py::mint_campaign_id`), so it can never equal one.
+  // A campaign id always contains `__` (`campaign_ids.py::mint_campaign_id`), so it never equals a view name or `k`.
   const path: CyclePath = [];
   let i = 1;
   while (i < segs.length) {
@@ -97,8 +99,7 @@ export function parseAddress(hash: string): Address | null {
     if (isTab(head) || head === CAND_SEG) break;
     const cycle = segs[i + 1];
     if (cycle === undefined) return null;
-    // Validate what was WRITTEN, before restoring the prefix: `cycle_..` passes the all-dots
-    // rejection that `..` fails.
+    // Validate BEFORE restoring the prefix: `cycle_..` passes the all-dots rejection that `..` fails.
     if (!validIdComponent(head) || !validIdComponent(cycle)) return null;
     path.push({ campaignId: head, cycleId: longCycle(cycle) });
     i += 2;
@@ -119,18 +120,24 @@ export function parseAddress(hash: string): Address | null {
     candidateId = id;
     i += 2;
   }
+  let at: number | null = null;
+  if (segs[i] === AT_SEG) {
+    const offset = segs[i + 1];
+    if (offset === undefined || !/^\d+$/.test(offset)) return null;
+    at = Number(offset);
+    i += 2;
+  }
   const cell = parseCell(segs, i);
   if (cell === undefined) return null;
 
-  return { kind: "cycle", path, tab, candidateId, cell: cell?.cell ?? null };
+  return { kind: "cycle", path, tab, candidateId, at, cell: cell?.cell ?? null };
 }
 
 // null = no cell; undefined = malformed, since trailing junk is not ignorable.
 function parseCell(segs: string[], i: number): { cell: CellAddress } | null | undefined {
   if (i === segs.length) return null;
-  if (segs[i] !== CELL_SEG || i + 3 !== segs.length) return undefined;
-  const runId = segs[i + 1]!;
-  const sample = segs[i + 2]!;
-  if (!validIdComponent(runId) || !/^\d+$/.test(sample)) return undefined;
-  return { cell: { runId, sampleId: Number(sample) } };
+  if (segs[i] !== CELL_SEG || i + 2 !== segs.length) return undefined;
+  const answer = segs[i + 1]!;
+  if (!validIdComponent(answer)) return undefined;
+  return { cell: { answer } };
 }

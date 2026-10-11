@@ -1,21 +1,15 @@
+import type { ServedRound } from "@/lib/api/types";
 
-import type { RoundSummary } from "@/lib/api/types";
+export type SampleMovement = ServedRound["selection_movement"][number];
 
+// Position is 1-based; a sample absent from a round's map was not in that round.
 export interface SortedRounds {
-  rounds: RoundSummary[];
+  rounds: ServedRound[];
   positions: Map<number, number>[];
+  movements: Map<number, SampleMovement>[];
 }
 
-export type CellKind = "new" | "gained" | "lost" | "kept" | "absent";
-
-function positionMap(bank: number[] | undefined): Map<number, number> {
-  const m = new Map<number, number>();
-  if (!bank) return m;
-  bank.forEach((sid, i) => m.set(sid, i + 1));
-  return m;
-}
-
-export function unionFirstAppearance(rounds: RoundSummary[]): number[] {
+export function unionFirstAppearance(rounds: ServedRound[]): number[] {
   const out: number[] = [];
   const seen = new Set<number>();
   for (const r of rounds) {
@@ -28,37 +22,18 @@ export function unionFirstAppearance(rounds: RoundSummary[]): number[] {
   return out;
 }
 
-export function buildSorted(rounds: RoundSummary[]): SortedRounds {
-  const sorted = rounds.filter((r) => Array.isArray(r.selection) && r.selection.length > 0);
+export function buildSorted(rounds: ServedRound[]): SortedRounds {
+  const sorted = rounds.filter((r) => r.selection.length > 0);
   return {
     rounds: sorted,
-    positions: sorted.map((r) => positionMap(r.selection)),
+    positions: sorted.map((r) => new Map(r.selection.map((sid, i) => [sid, i + 1]))),
+    movements: sorted.map((r) => {
+      const byId = new Map<number, SampleMovement>();
+      r.selection.forEach((sid, i) => {
+        const movement = r.selection_movement[i];
+        if (movement !== undefined) byId.set(sid, movement);
+      });
+      return byId;
+    }),
   };
-}
-
-export function cumulativeEverSeen(rounds: RoundSummary[]): Set<number>[] {
-  const out: Set<number>[] = [];
-  let seen = new Set<number>();
-  for (const r of rounds) {
-    seen = new Set(seen);
-    r.selection.forEach((s) => seen.add(s));
-    out.push(seen);
-  }
-  return out;
-}
-
-export function classifyCell(
-  sid: number,
-  pos: Map<number, number>,
-  prev: Map<number, number> | null,
-  everPrev: Set<number>,
-): CellKind {
-  const p = pos.get(sid);
-  if (p === undefined) return "absent";
-  if (!everPrev.has(sid)) return "new";
-  const pp = prev?.get(sid);
-  if (pp === undefined) return "new"; // re-added after a drop
-  if (p < pp) return "gained";
-  if (p > pp) return "lost";
-  return "kept";
 }

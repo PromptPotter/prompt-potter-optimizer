@@ -1,9 +1,7 @@
 "use client";
-// Picks `SelectionContext.sampleSet`, the cells the OVERLAP bars are read on. It moves that one
-// series only: the metric bars stay on each candidate's own cells.
 
 import { useState } from "react";
-import type { MeasuredUnit, OverlapReading, RoundSummary } from "@/lib/api/types";
+import type { MeasuredUnit, OverlapReading, ServedRound } from "@/lib/api/types";
 import { unitCount } from "@/lib/format";
 import { cx } from "@/lib/cx";
 import { useSelection } from "@/lib/SelectionContext";
@@ -29,7 +27,7 @@ export function SampleSetControl({
   overlap,
   unit,
 }: {
-  rounds: RoundSummary[];
+  rounds: ServedRound[];
   overlap: OverlapReading | null;
   unit: MeasuredUnit;
 }) {
@@ -37,14 +35,13 @@ export function SampleSetControl({
   const [detailOpen, setDetailOpen] = useState(false);
   const [load, setLoad] = useState<LoadMode>("measured");
 
-  if (sampleSet == null) return null; // mode off — nothing to control
+  if (sampleSet == null) return null;
 
   const universe = measuredUniverse(rounds);
   const roundSets = roundMeasuredSets(rounds);
   const inSet = new Set(sampleSet);
   const coverage = roundsCoveringSample(rounds);
   const fullyCovered = roundSets.length;
-  // Served: the cells every member of the adopted line answered — stronger than round coverage.
   const shared = new Set(overlap?.sample_ids ?? []);
 
   return (

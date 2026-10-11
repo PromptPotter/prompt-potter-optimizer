@@ -1,25 +1,33 @@
 "use client";
 import { useMemo, useState, type CSSProperties } from "react";
-import type { RoundSummary } from "@/lib/api/types";
+import type { ServedRound } from "@/lib/api/types";
 import { CardFrame, SegmentedControl } from "@/components/ui";
+import { cx } from "@/lib/cx";
 import {
+  type SampleMovement,
   type SelectMode,
   buildSorted,
-  classifyCell,
-  cumulativeEverSeen,
   unionFirstAppearance,
   type SortedRounds,
 } from "@/lib/derivations";
 import { SeriesView } from "./TrajectorySeriesView";
 
 interface Props {
-  rounds: RoundSummary[];
+  rounds: ServedRound[];
 }
 
 type ViewKind = "delta" | "series";
 
-// `adaptive_queue_mechanism.py` has a single objective; a variant needs a RoundSummary field.
+// `adaptive_queue_mechanism.py` has a single objective; a variant needs a ServedRound field.
 const OBJECTIVE_LABEL = "by decision_information_gain";
+
+const MINI_CELL_CLASS: Record<SampleMovement, string> = {
+  new: "new",
+  readded: "new",
+  gained: "gained",
+  lost: "lost",
+  kept: "kept",
+};
 
 // 57x22px `.hs-mini-btn` minus its 3px padding.
 const MINI_BOX_W = 51;
@@ -38,19 +46,17 @@ function miniTileSize(n: number): number {
   return 1;
 }
 
-// Fixed to `.hs-mini-btn` (57 × 22 px); its texture previews the Series grid.
 export function SampleTrajectoryMiniButton({
   expanded,
   rounds,
   onToggle,
 }: {
   expanded: boolean;
-  rounds: RoundSummary[];
+  rounds: ServedRound[];
   onToggle: () => void;
 }) {
   const sorted = useMemo(() => buildSorted(rounds), [rounds]);
   const columns = useMemo(() => unionFirstAppearance(sorted.rounds), [sorted.rounds]);
-  const everSeen = useMemo(() => cumulativeEverSeen(sorted.rounds), [sorted.rounds]);
 
   const nRounds = sorted.rounds.length;
   const summary = `Sample trajectory · ${nRounds} round${nRounds === 1 ? "" : "s"}`;
@@ -71,12 +77,15 @@ export function SampleTrajectoryMiniButton({
         style={{ "--hs-mini-tile": `${tile}px` } as CSSProperties}
       >
         {sorted.rounds.map((r, i) => {
-          const pos = sorted.positions[i]!;
-          const prev = i > 0 ? sorted.positions[i - 1]! : null;
-          const everPrev = i > 0 ? everSeen[i - 1]! : new Set<number>();
+          const movements = sorted.movements[i]!;
           return columns.map((sid) => {
-            const kind = classifyCell(sid, pos, prev, everPrev);
-            return <span key={`${r.round}-${sid}`} className={`hs-mini-cell ${kind}`} />;
+            const kind = movements.get(sid);
+            return (
+              <span
+                key={`${r.round}-${sid}`}
+                className={cx("hs-mini-cell", kind === undefined ? "absent" : MINI_CELL_CLASS[kind])}
+              />
+            );
           });
         })}
       </span>
@@ -118,13 +127,12 @@ export function SampleTrajectory({ rounds }: Props) {
   );
 }
 
-// Also embedded by the per-candidate fitness "Sample set" detail.
 export function SampleTrajectorySeries({
   rounds,
   selectMode = "measured",
   maxHeight = 200,
 }: {
-  rounds: RoundSummary[];
+  rounds: ServedRound[];
   selectMode?: SelectMode;
   maxHeight?: number;
 }) {

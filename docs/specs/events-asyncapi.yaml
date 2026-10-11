@@ -160,9 +160,11 @@ components:
       description: |
         Closed envelope shape. Every SSE frame outside of heartbeats has
         this exact shape - no raw payload variants, no envelope variation.
-      required: [kind, cycle_id, sequence, payload]
+      required: [kind, cycle_id, sequence, payload, activity]
       additionalProperties: false
       properties:
+        activity:
+          $ref: '#/components/schemas/ActivityState'
         kind:
           type: string
           description: |
@@ -180,8 +182,26 @@ components:
             - llm_call
             - llm_call_start
             - phase
-            - snapshot
             - token_usage
+            # Where the run stands, a fact per record.
+            - run_phase
+            - round_entered
+            - round_proposed
+            - round_closed
+            - optimizer_state
+            - round_standing
+            # A backend attempt that failed and will be tried again
+            # (`BackendWarningRecord`).
+            - backend_warning
+            # One arm's walk, a fact per record; `flight` alone names no arm.
+            - candidate_started
+            - sample_order
+            - sample_started
+            - sample_scored
+            - candidate_scored
+            - flight
+            - race_standing
+            - race_catch_up
             # A candidate's IDENTITY at mint time — the only witness that a
             # candidate exists BEFORE it is scored, and so the earliest point a
             # chronology can name it. `CandidateMintedRecord`.
@@ -222,6 +242,35 @@ components:
             # ``set-limits`` and by a launch flag that moves it
             # (``RunLimitsRecord``); the last one wins.
             - run_limits
+            # What a launch runs under — the optimizer's pacing, the connector's
+            # declarations and the admitted ceilings (``RunWiringRecord``); the
+            # last one wins.
+            - run_wiring
+            # The criterion the origin's measurement locked, where the campaign
+            # declared scoring dials (``ScoringLockedRecord``).
+            - scoring_locked
+            # The cycle's own facts, each appended as it becomes true and folded into
+            # `CycleIndex` (`index.json` is that fold, written): that it exists and
+            # what it was cut from (``CycleMintedRecord``), what its runner banked
+            # at its stop (``CycleFinalRecord``), that the line moved off it
+            # (``CycleSupersededRecord``), a cut's measured direction
+            # (``ForkGradedRecord``), an operator's intervention
+            # (``InterventionRecord``), and the outer work-item an L4 inner cycle
+            # opened for (``SpawnedRecord``). None is a progress event.
+            - cycle_minted
+            - cycle_final
+            - cycle_superseded
+            - fork_graded
+            - intervention
+            - spawned
+            # A launch's claim on the cycle before any process runs it — queued or
+            # starting (``LaunchClaimRecord``) — and the act that lets it go
+            # without a run (``LaunchReleasedRecord``). Neither is a progress event.
+            - launch_claim
+            - launch_released
+            # The check-in the cycle was minted in is over (``CheckinClosedRecord``):
+            # Start froze the campaign's config. Not a progress event.
+            - checkin_closed
             # An account's banked spend, written before a delete takes the rows
             # carrying it (``SpendTombstoneRecord``). Rides the WORKSPACE ledger,
             # so it reaches no cycle subscriber — listed because the enum's rule
@@ -256,7 +305,21 @@ components:
             - $ref: '#/components/schemas/StreamSnapshotPayload'
             - $ref: '#/components/schemas/DecisionPayload'
             - $ref: '#/components/schemas/PhasePayload'
-            - $ref: '#/components/schemas/SnapshotPayload'
+            - $ref: '#/components/schemas/RunPhasePayload'
+            - $ref: '#/components/schemas/RoundEnteredPayload'
+            - $ref: '#/components/schemas/RoundProposedPayload'
+            - $ref: '#/components/schemas/RoundClosedPayload'
+            - $ref: '#/components/schemas/OptimizerStatePayload'
+            - $ref: '#/components/schemas/RoundStandingPayload'
+            - $ref: '#/components/schemas/BackendWarningPayload'
+            - $ref: '#/components/schemas/CandidateStartedPayload'
+            - $ref: '#/components/schemas/SampleOrderPayload'
+            - $ref: '#/components/schemas/SampleStartedPayload'
+            - $ref: '#/components/schemas/SampleScoredPayload'
+            - $ref: '#/components/schemas/CandidateScoredPayload'
+            - $ref: '#/components/schemas/FlightPayload'
+            - $ref: '#/components/schemas/RaceStandingPayload'
+            - $ref: '#/components/schemas/RaceCatchUpPayload'
             - $ref: '#/components/schemas/TokenUsagePayload'
             - $ref: '#/components/schemas/LlmCallStartPayload'
             - $ref: '#/components/schemas/LlmCallProgressPayload'
@@ -270,7 +333,112 @@ components:
             - $ref: '#/components/schemas/ElectionPayload'
             - $ref: '#/components/schemas/RulerPayload'
             - $ref: '#/components/schemas/RunLimitsPayload'
+            - $ref: '#/components/schemas/RunWiringPayload'
+            - $ref: '#/components/schemas/ScoringLockedPayload'
+            - $ref: '#/components/schemas/CycleMintedPayload'
+            - $ref: '#/components/schemas/CycleFinalPayload'
+            - $ref: '#/components/schemas/CycleSupersededPayload'
+            - $ref: '#/components/schemas/ForkGradedPayload'
+            - $ref: '#/components/schemas/InterventionPayload'
+            - $ref: '#/components/schemas/SpawnedPayload'
+            - $ref: '#/components/schemas/LaunchClaimPayload'
+            - $ref: '#/components/schemas/LaunchReleasedPayload'
+            - $ref: '#/components/schemas/CheckinClosedPayload'
             - $ref: '#/components/schemas/SpendTombstonePayload'
+
+    # ---- The run's current state, stamped on every frame ----
+    # Mirrors `promptpotter/domain/activity.py`. The tail folds the ledger up to each frame —
+    # the snapshot's included — so a subscriber keeps the newest frame's `activity` and
+    # translates nothing.
+
+    ActivityState:
+      type: object
+      description: What the run is doing now, and what was said that still holds.
+      required: [status, notices, decision]
+      additionalProperties: false
+      properties:
+        status:
+          description: The one line saying what the run is doing; each new one replaces it.
+          oneOf:
+            - $ref: '#/components/schemas/ActivityItem'
+            - type: 'null'
+        notices:
+          type: array
+          description: |
+            Warnings and controls of the round the run is in, and any error of this launch.
+            The round is the one whose phase the runner last entered; a notice from a round
+            it has left is no longer served.
+          items:
+            $ref: '#/components/schemas/ActivityItem'
+        decision:
+          description: |
+            What the run is holding for the operator to decide, or null while it holds for
+            nothing. Served from the run-phase declaration that opened the hold until the next
+            one, so a subscriber renders it and tests no phase.
+          oneOf:
+            - $ref: '#/components/schemas/ActivityDecision'
+            - type: 'null'
+
+    ActivityDecision:
+      type: object
+      description: |
+        A choice the run is holding for: what to say about it, and the commands that answer it.
+        A subscriber renders every field verbatim and computes nothing.
+      required: [title, lead, facts, reasons, actions]
+      additionalProperties: false
+      properties:
+        title: { type: string }
+        lead: { type: string, description: The paragraph under the title. }
+        facts:
+          type: array
+          description: The evidence behind the hold, one labelled line each, in reading order.
+          items:
+            type: object
+            required: [label, value, tone]
+            additionalProperties: false
+            properties:
+              label: { type: string }
+              value: { type: string }
+              tone: { type: string, enum: [good, warn, bad, muted] }
+        reasons:
+          type: array
+          description: Why the run is holding, one sentence fragment each.
+          items: { type: string }
+        actions:
+          type: array
+          description: |
+            One button each. A press POSTs `payload` to `/commands/{kind}` unchanged — the
+            payload already addresses the cycle, its `descend` tail included.
+          items:
+            type: object
+            required: [label, variant, kind, payload]
+            additionalProperties: false
+            properties:
+              label: { type: string }
+              variant: { type: string, enum: [primary, ghost, danger] }
+              kind:
+                type: string
+                description: A `/commands/{kind}` kind, as `api-openapi.yaml` declares the set.
+              payload: { type: object }
+
+    ActivityItem:
+      type: object
+      description: One record's reading — a line to show, and the round and candidate it is about.
+      required: [id, kind, icon, label, detail, tone, round, candidate]
+      additionalProperties: false
+      properties:
+        id: { type: string, description: The record's kind and ledger offset. }
+        kind:
+          type: string
+          enum: [running, done, candidate, round, warning, error, merge, progress]
+        icon: { type: string }
+        label: { type: string }
+        detail: { type: [string, 'null'] }
+        tone: { type: string, enum: [good, warn, bad, muted] }
+        round: { type: [integer, 'null'] }
+        candidate:
+          type: [string, 'null']
+          description: The candidate the record is about, by the label its course minted.
 
     # ---- Profile A: projection-synthesized payload ----
 
@@ -287,8 +455,9 @@ components:
           type: boolean
           description: |
             Set to `true` when `dashboard.json` does not yet exist (fresh
-            campaign before origin's first flush). Other fields are then
-            absent; clients should render a "campaign initialising"
+            campaign before origin's first flush). The body is then a
+            `WarmingDashboard` — the cycle's ids, `run_phase` and `producer`
+            — and clients should render a "campaign initialising"
             placeholder.
 
     # ---- Profile A: record-derived payloads ----
@@ -333,8 +502,12 @@ components:
 
     PhasePayload:
       type: object
-      description: PhaseRecord — a campaign-phase boundary event.
-      required: [phase, event, payload, timestamp]
+      description: |
+        PhaseRecord — a phase BRACKET, the bench's or an optimizer's own,
+        opening, closing, or stating a result inside itself. `view` is the whole
+        of what the boundary says: one typed view of the `PhaseView` union
+        (`promptpotter/domain/phase_views.py`), discriminated by its `kind`.
+      required: [phase, event, timestamp]
       additionalProperties: false
       properties:
         phase: { type: string, minLength: 1 }
@@ -342,18 +515,227 @@ components:
         round:
           type: [integer, 'null']
           minimum: 0
-        payload:
-          type: object
+        view:
+          type: [object, 'null']
+          required: [kind]
           additionalProperties: true
-          description: '`{view, data}` — typed View envelope + raw event data.'
+          properties:
+            kind:
+              type: string
+              enum:
+                - init_enter
+                - init_exit
+                - round_start
+                - candidates_generated
+                - measure_enter
+                - bench_enter
+                - bench_scored
+                - bench_graded
+                - verify_enter
+                - verify_graded
+                - round_complete
+                - optimizer_step_enter
+                - optimizer_step_exit
         timestamp:
           type: string
           format: date-time
 
+    RunPhasePayload:
+      type: object
+      description: |
+        RunPhaseRecord — the runner DECLARING where its run stands; the last
+        one is what every surface's run phase is derived from. `stop_reason` is
+        set where a run STOPS — `terminal` and `paused` alike — and a `paused`
+        declaration also names its `cause`; `spend` rides where a run ends.
+        This record is a cycle's ending on every exit path: the runner's own
+        stop, a launch that never bound a run, and the reaper all write it.
+      required: [run_phase, timestamp]
+      additionalProperties: false
+      properties:
+        run_phase: { type: string, minLength: 1 }
+        stop_reason: { type: [string, 'null'] }
+        cause:
+          type: [string, 'null']
+          enum: [command, enclosing, interrupt, cancelled, step, bound, null]
+          description: |
+            What paused the run: a `pause-cycle` command the loop took, the
+            pause of the run it measures for, an interrupt signal, its host
+            cancelling it, the round allowance of a `step-cycle`, or a declared
+            bound cutting the round's panel. Required on `paused`.
+        detail:
+          type: string
+          description: The cause in words — who issued the command, which enclosing cycle.
+        spend:
+          type: [object, 'null']
+          additionalProperties: false
+          required: [billed_usd, rate_priced_usd, incurred_usd, meter, metered_usd, metered_tokens, usd_cap, token_cap]
+          properties:
+            billed_usd: { type: number }
+            rate_priced_usd: { type: number }
+            incurred_usd: { type: number }
+            meter: { type: string }
+            metered_usd: { type: number }
+            metered_tokens: { type: integer }
+            usd_cap: { type: [number, 'null'] }
+            token_cap: { type: [integer, 'null'] }
+        timestamp: { type: string, format: date-time }
+
+    RoundEnteredPayload:
+      type: object
+      description: |
+        RoundEnteredRecord — the run moves into `round`. Entering round N
+        displaces N and every round after it: its closes stop standing and
+        its arms are walked again. `rewound` is the run moved BACK (a rewind,
+        a branch minted to continue at N), which discards what was generated
+        for N and after as well.
+      required: [round, timestamp]
+      additionalProperties: false
+      properties:
+        round: { type: integer, minimum: 0 }
+        rewound: { type: boolean }
+        timestamp: { type: string, format: date-time }
+
+    RoundProposedPayload:
+      type: object
+      description: |
+        RoundProposedRecord — what a round's proposer generated. `consumed` is
+        the digest of the round it read to do so; `proposals` is a list of
+        `CandidateProposal`. A resume walking back into the round replays them.
+      required: [round, consumed, proposals, timestamp]
+      additionalProperties: false
+      properties:
+        round: { type: integer, minimum: 0 }
+        consumed: { type: string }
+        proposals:
+          type: array
+          items: { type: object, additionalProperties: true }
+        timestamp: { type: string, format: date-time }
+
+    RoundClosedPayload:
+      type: object
+      description: |
+        RoundClosedRecord — a round closed, WHOLE: every outcome field of the
+        round (`RoundOutcome`, which the OpenAPI file declares as
+        `RoundResult` less its rows), and `cells`, the archive address of every
+        row the round read. The last close per round stands and IS the round;
+        `rounds/round_NNNN.json` is a checkout of it.
+      required: [round, label, accuracy, composite_fitness, improved, electable_count, overlap, ability, cells, timestamp]
+      additionalProperties: true
+      properties:
+        round: { type: integer, minimum: 0 }
+        label: { type: string }
+        accuracy: { type: [number, 'null'] }
+        composite_fitness: { type: [number, 'null'] }
+        improved: { type: boolean }
+        electable_count: { type: integer, minimum: 0 }
+        # The `OverlapReading` the OpenAPI file declares: the best-so-far line on
+        # the origin panel, and `advance`, what the round did to it.
+        overlap: { type: object, additionalProperties: true }
+        ability: { type: [object, 'null'], additionalProperties: true }
+        generation_only: { type: boolean }
+        cells:
+          $ref: '#/components/schemas/RoundCells'
+        timestamp: { type: string, format: date-time }
+
+    RoundCells:
+      type: object
+      description: |
+        Where a round's rows are in the archive, by row set. Each address is
+        `[sample_id, answer, replayed]`, in walk order: the answer the cell
+        store files, and whether this walk took it as a replay.
+      required: [head, arms, references, overlap]
+      additionalProperties: false
+      properties:
+        head: { $ref: '#/components/schemas/WalkedCells' }
+        arms:
+          type: object
+          additionalProperties: { $ref: '#/components/schemas/WalkedCells' }
+        references:
+          type: object
+          additionalProperties: { $ref: '#/components/schemas/WalkedCells' }
+        overlap:
+          type: object
+          additionalProperties: { $ref: '#/components/schemas/WalkedCells' }
+
+    WalkedCells:
+      type: array
+      items:
+        type: array
+        prefixItems:
+          - { type: integer }
+          - { type: string }
+          - { type: boolean }
+        minItems: 3
+        maxItems: 3
+
+    OptimizerStatePayload:
+      type: object
+      description: |
+        OptimizerStateRecord — a CLOSED round's optimizer state, restated: the
+        `OptimizerState` envelope (`{manifest, population, prompt_hashes, payload}`) as the
+        optimizer now holds it for `round`. The last one after the round's
+        standing close is that round's state.
+      required: [round, optimizer_state, timestamp]
+      additionalProperties: false
+      properties:
+        round: { type: integer, minimum: 0 }
+        optimizer_state: { type: object, additionalProperties: true }
+        timestamp: { type: string, format: date-time }
+
+    RoundStandingPayload:
+      type: object
+      description: |
+        RoundStandingRecord — where the run stands once `round` is closed: what
+        it has selected, how that reads against the origin and what the cycle
+        has cost. Once per round, where a close can repeat, and displaced with
+        its round; a subscriber that renders the round reads its last
+        `RoundClosedRecord`, which this record follows.
+        `run_standing` is the `RunStanding` and `panel_precision` the
+        `PanelPrecision` the OpenAPI file declares — the latter pairs the
+        round's leading arm against the origin's rows, so it is read once the
+        round stands.
+      required: [round, run_standing, anchors, timestamp]
+      additionalProperties: false
+      properties:
+        round: { type: integer, minimum: 0 }
+        run_standing: { type: object, additionalProperties: true }
+        panel_precision: { type: [object, 'null'], additionalProperties: true }
+        anchors: { $ref: '#/components/schemas/ViewAnchors' }
+        timestamp: { type: string, format: date-time }
+
+    BackendWarningPayload:
+      type: object
+      description: |
+        BackendWarningRecord — a backend attempt that failed and will be tried
+        again: a transport fault or a 5xx, never a 429. `detail` is the
+        backend's own words about why.
+      required: [kind, attempt, max_attempts, wait_s, timestamp]
+      additionalProperties: false
+      properties:
+        kind: { type: string }
+        attempt: { type: integer, minimum: 0 }
+        max_attempts: { type: integer, minimum: 0 }
+        wait_s: { type: number, minimum: 0 }
+        error_class: { type: [string, 'null'] }
+        status_code: { type: [integer, 'null'] }
+        final: { type: boolean }
+        query: { type: string }
+        detail: { type: string }
+        timestamp: { type: string, format: date-time }
+
+    ViewAnchors:
+      type: object
+      description: The formula and display metric a score beside them is read under.
+      additionalProperties: true
+      properties:
+        composite_fitness_formula: { type: [string, 'null'] }
+        composite_fitness_formula_short: { type: [string, 'null'] }
+        display_metric: { type: string }
+
     BenchEnterPayload:
       type: object
       description: |
-        `PhaseRecord.payload.view` of `phase: bench`, `event: enter` — one
+        `PhaseRecord.view` of `phase: bench`, `event: enter` — one
         individual's pass over the bench set begins, and every `sample_scored`
         up to the matching `exit` is one of its rows. `subject` says whose pass
         it is, `label` the candidate it grades as its row is labelled, `sp_hash`
@@ -372,8 +754,10 @@ components:
     BenchScoredPayload:
       type: object
       description: |
-        `PhaseRecord.payload.view` of `phase: bench`, `event: scored` — the
-        bench pass graded the selection. `bench` is the `BenchScore` the
+        `PhaseRecord.view` of `phase: bench`, `event: scored` — the bench as
+        the cycle stands to it, declared when a launch starts and again when it
+        ends, for every trigger and for a cycle beside the line, and once more
+        by a `grade-bench` pass. `bench` is the `BenchScore` the
         OpenAPI file declares, the run's reading of its passes stamped with its
         `scorer_id`; the dashboard serves it as `bench_score`.
       required: [bench]
@@ -383,22 +767,33 @@ components:
     BenchGradedPayload:
       type: object
       description: |
-        `PhaseRecord.payload.view` of `phase: bench`, `event: graded` — one
-        pass read: the origin's as every launch begins, and under
-        `bench_each_round` each round's declared selection. `reading` is the
-        `BenchReading` the OpenAPI file declares, null with `missing` saying
-        why; the dashboard serves it as `rounds[].bench` on the round it names
-        and as `bench` on the candidate `label` names.
-      required: [reading, missing, label]
+        `PhaseRecord.view` of `phase: bench`, `event: graded` — one
+        pass BANKED and read: the origin's as a launch begins or a
+        `grade-bench` command runs, the selection's as either ends, and under
+        `bench_trigger: each_round` each round's declared selection.
+        `bench_pass` is the `BenchPass` itself — the line's passes are the
+        fold of these records over every ledger on it, so a pass stands from
+        the moment it is graded. `reserve_*` is what an origin's pass
+        incurred, null on a selection's. `reading` is the
+        `BenchReading` the OpenAPI file declares, null exactly where `state`
+        is not `read` (`pass_stopped`, with `bench_pass.stop`, or
+        `past_tolerance`); the dashboard serves it as `rounds[].bench` on the
+        round it names and as `bench` on the candidate `label` names.
+      required: [subject, bench_pass, tolerance, reserve_usd, reserve_tokens, reading, state, label]
       properties:
+        subject: { type: string, enum: [origin, selected] }
+        bench_pass: { type: object, additionalProperties: true }
+        tolerance: { type: integer, minimum: 0 }
+        reserve_usd: { type: [number, 'null'] }
+        reserve_tokens: { type: [integer, 'null'] }
         label: { type: string }
         reading: { type: [object, 'null'], additionalProperties: true }
-        missing: { type: [string, 'null'] }
+        state: { type: string, enum: [read, pass_stopped, past_tolerance] }
 
     VerifyEnterPayload:
       type: object
       description: |
-        `PhaseRecord.payload.view` of `phase: verify`, `event: enter` — one
+        `PhaseRecord.view` of `phase: verify`, `event: enter` — one
         candidate's pass over search cells it has never met begins, on the
         ledger of the cycle that scored it and from whichever process runs it.
         The matching `exit` always follows; the dashboard read serves an open
@@ -413,7 +808,7 @@ components:
     VerifyGradedPayload:
       type: object
       description: |
-        `PhaseRecord.payload.view` of `phase: verify`, `event: graded` — the
+        `PhaseRecord.view` of `phase: verify`, `event: graded` — the
         pass banked. `verify_pass` is the `VerifyPass` the OpenAPI file declares
         (the facts: which candidate, the archive run, the cells sent, the
         scorer); `reading` is the `VerifyReading` of it under that scorer, which
@@ -423,61 +818,158 @@ components:
         verify_pass: { type: object, additionalProperties: true }
         reading: { type: object, additionalProperties: true }
 
-    RaceStandingPayload:
+    # ---- One arm's walk ----
+    # Every record below but `flight` is addressed by `ArmAddress`: the round and the arm's
+    # slot there.
+
+    ArmAddress:
+      type: object
+      required: [round, candidate_idx, candidate_total, timestamp]
+      properties:
+        round: { type: integer, minimum: 0 }
+        candidate_idx:
+          type: integer
+          minimum: -1
+          description: "`-1` (`NO_ROUND_SLOT`) is a pass that is no arm of the round: the parent's re-measure, a bench pass."
+        candidate_total: { type: integer, minimum: 0 }
+        timestamp: { type: string, format: date-time }
+
+    CandidateStartedPayload:
+      description: |
+        CandidateStartedRecord — an arm is about to walk: what it is, announced
+        before its first cell. `block` is its turn in a block race.
+      allOf:
+        - $ref: '#/components/schemas/ArmAddress'
+        - type: object
+          properties:
+            changes_description: { type: string }
+            pipeline_overlay: { type: [object, 'null'], additionalProperties: true }
+            prompt_fields: { type: object, additionalProperties: true }
+            resolved_pipeline_params: { type: [object, 'null'], additionalProperties: true }
+            block:
+              type: [object, 'null']
+              additionalProperties: { type: integer }
+
+    SampleOrderPayload:
+      description: |
+        SampleOrderRecord — the cells the arm will walk, in the round's shared
+        order. A declared order: a stop rule can end the walk before its tail.
+      allOf:
+        - $ref: '#/components/schemas/ArmAddress'
+        - type: object
+          required: [sample_order]
+          properties:
+            n_priors: { type: integer, minimum: 0 }
+            sample_order: { type: array, items: { type: integer } }
+
+    SampleStartedPayload:
+      description: SampleStartedRecord — a cell left for the backend.
+      allOf:
+        - $ref: '#/components/schemas/ArmAddress'
+        - type: object
+          required: [sample_idx, sample_total, sample_id]
+          properties:
+            sample_idx: { type: integer, minimum: 0 }
+            sample_total: { type: integer, minimum: 0 }
+            sample_id: { type: integer }
+            query_preview: { type: string }
+            sample_lookahead:
+              type: integer
+              minimum: 1
+              description: What the walk held in flight as it launched this cell.
+            stop_horizon:
+              type: [integer, 'null']
+              description: The fewest rows at which a stop rule could still cut.
+
+    SampleScoredPayload:
+      description: |
+        SampleScoredRecord — a cell the walk took. `result` is the measured row
+        as the ledger keeps it, naming the archive `answer` the walk read.
+        `sample_idx` is null on a row re-banked onto a branch. `individual_id`
+        and `role` say whose cell it is and why the walk ran — the only
+        address a pass at `NO_ROUND_SLOT` has before its round closes.
+      allOf:
+        - $ref: '#/components/schemas/ArmAddress'
+        - type: object
+          required: [individual_id, role, result]
+          properties:
+            individual_id: { type: string }
+            role:
+              type: string
+              enum: [origin, panel, backfill, parent, repair, overlap, verify, bench]
+            sample_idx: { type: [integer, 'null'], minimum: 0 }
+            sample_total: { type: [integer, 'null'], minimum: 0 }
+            result: { type: object, additionalProperties: true }
+
+    CandidateScoredPayload:
+      description: |
+        CandidateScoredRecord — an arm's score report, landing when its walk is
+        decided. `scores` is the `ScoredCandidate` the OpenAPI file declares.
+      allOf:
+        - $ref: '#/components/schemas/ArmAddress'
+        - type: object
+          required: [scores]
+          properties:
+            scores: { type: object, additionalProperties: true }
+            anchors: { $ref: '#/components/schemas/ViewAnchors' }
+
+    FlightPayload:
       type: object
       description: |
-        `SnapshotRecord.payload` of `event: race_standing` — one candidate's
-        standing in its eliminator's race, per sample. `member` names the
-        manifest node racing it.
-      required: [member, current_id, n_samples, p_best, paired_breakdown]
-      properties:
-        member: { type: string, minLength: 1 }
-        current_id: { type: string }
-        n_samples: { type: integer, minimum: 0 }
-        p_best: { type: number }
-        paired_breakdown: { type: object, additionalProperties: true }
-
-    RaceCatchUpPayload:
-      type: object
-      description: |
-        `SnapshotRecord.payload` of `event: race_catch_up` — the priors the
-        race caught up on the sample just measured; absent where the archive
-        already held them.
-      required: [member, sample_id, prior_ids]
-      properties:
-        member: { type: string, minLength: 1 }
-        sample_id: { type: integer }
-        prior_ids: { type: array, items: { type: string } }
-
-    SnapshotPayload:
-      type: object
-      description: SnapshotRecord — in-flight live-state snapshot.
-      required: [event, round, payload, timestamp]
+        FlightRecord — the scoring phase's calls in flight (`out`), what its
+        stop rules allow, what the spend ceiling affords and the most it could
+        hold. The whole round's, so it names no arm.
+      required: [round, out, allowed, most, timestamp]
       additionalProperties: false
       properties:
-        event: { type: string, minLength: 1 }
-        round:
-          type: integer
-          minimum: 0
-        candidate_idx:
-          type: [integer, 'null']
-          minimum: -1
-          description: "`-1` (`NO_ROUND_SLOT`) names no candidate: the parent's re-measure, and the round-wide `flight` gauge."
-        candidate_total:
-          type: [integer, 'null']
-          minimum: 0
-        sample_idx:
-          type: [integer, 'null']
-          minimum: 0
-        sample_total:
-          type: [integer, 'null']
-          minimum: 0
-        payload:
-          type: object
+        round: { type: integer, minimum: 0 }
+        out: { type: integer, minimum: 0 }
+        allowed: { type: integer, minimum: 0 }
+        most: { type: integer, minimum: 0 }
+        affordable: { type: [integer, 'null'] }
+        cell_usd: { type: [number, 'null'] }
+        waiting:
+          type: [object, 'null']
+          description: The call a decision waits on, and since when.
+          required: [sample_id, since]
+          properties:
+            sample_id: { type: integer }
+            since: { type: number }
+        backpressure:
+          type: [object, 'null']
           additionalProperties: true
-        timestamp:
-          type: string
-          format: date-time
+          description: The `BackpressureReading` the OpenAPI file declares.
+        timestamp: { type: string, format: date-time }
+
+    RaceStandingPayload:
+      description: |
+        RaceStandingRecord — one candidate's standing in its eliminator's race,
+        per sample. `member` names the manifest node racing it; `p_best` is
+        about `current_id` alone.
+      allOf:
+        - $ref: '#/components/schemas/ArmAddress'
+        - type: object
+          required: [member, current_id, n_samples, p_best, decision_grade]
+          properties:
+            member: { type: string, minLength: 1 }
+            current_id: { type: string }
+            n_samples: { type: integer, minimum: 0 }
+            p_best: { type: number }
+            paired_breakdown: { type: object, additionalProperties: true }
+            decision_grade: { type: boolean }
+
+    RaceCatchUpPayload:
+      description: |
+        RaceCatchUpRecord — the priors the race caught up on the sample just
+        measured; absent where the archive already held them.
+      allOf:
+        - $ref: '#/components/schemas/ArmAddress'
+        - type: object
+          required: [member, sample_id, prior_ids]
+          properties:
+            member: { type: string, minLength: 1 }
+            sample_id: { type: integer }
+            prior_ids: { type: array, items: { type: string } }
 
     ErrorPayload:
       type: object
@@ -495,10 +987,6 @@ components:
             `dashboard.json::error`. The presentation layer reads this
             block; nothing else writes it.
           * `CycleLedgerTail` — tails this record to SSE subscribers.
-          * `JobRegistry.mark_finished` — reads `CycleResult.error.message`
-            (the in-process companion of this record) to populate
-            `status` + `stop_reason` (replaces the prior
-            `session.state.crash_*` side-channel).
       required: [kind, message, stop_reason, timestamp]
       additionalProperties: false
       properties:
@@ -526,7 +1014,7 @@ components:
           type: string
           description: |
             The `StopReason` VALUE the run ended on (lowercase, e.g.
-            `crashed`) — the same spelling the control `PhaseRecord`,
+            `crashed`) — the same spelling the `RunPhaseRecord`,
             `index.json` and `dashboard.json` carry. Its label, outcome
             and next step are that member's `STOP_REASON_INFO` row.
         round:
@@ -571,15 +1059,15 @@ components:
             # `message` is the refusal's own sentence — which ceiling, and the sums
             # behind it, or that no rate prices the route. `severity: error`.
             - send_refused
-            # The round selected an arm whose lead over C0 on the origin
-            # panel still spans 0 (`OverlapReading.lead_interval`). The round's
+            # The round selected an arm and closed `not_separated` or `unread`
+            # (`OverlapReading.advance`): its lead over C0 on the origin panel
+            # still spans 0, or the reading owed on it failed. The round's
             # numbers are real and its winner is the best of what it saw —
             # but the point estimate must not be read as a result. Emitted
             # at round close, after the overlap pass. Distinct from every kind
-            # above: nothing failed, nothing was recovered from, and the round
-            # looks identical on every other channel. That silence is the
-            # defect this kind exists to break.
-            - round_not_separable
+            # above: the round looks identical on every other channel. That
+            # silence is the defect this kind exists to break.
+            - round_not_advanced
           description: Which degradation class this record reports.
         severity:
           type: string
@@ -620,13 +1108,14 @@ components:
         through this record alone.
 
         Subscribers:
-          * `scan_ledger_candidates` — folds it onto the `candidate_scored`
-            snapshot by `(round, idx)` to build `LedgerCandidate`, which is the
-            identity half of the served lineage tree.
+          * `scan_standing_rounds` — a mint REPLACES its `(round, idx)` slot,
+            and `StandingRounds.candidates` joins it to the `candidate_scored`
+            record that lands after it to build `LedgerCandidate`, which is
+            the identity half of the served lineage tree.
           * `CycleLedgerTail` — tails this record to SSE subscribers.
           * `FamilyRay` — the earliest step a chronology can show for a
             candidate; the ray's `candidate_minted` item upserts to the same
-            `cand-{label}` row the later `candidate_started` snapshot writes.
+            `cand-{label}` row the later `candidate_started` record writes.
       required: [round, idx, candidate_id, label, timestamp]
       additionalProperties: false
       properties:
@@ -640,9 +1129,9 @@ components:
           type: string
           minLength: 1
           description: |
-            The searchpoint id (`IndividualLineage.id`) minted with this
-            candidate. **Re-minted per run**, so a resume/rewind re-mints the
-            same `(round, idx)` under a NEW id — join on `label`, not on this.
+            The individual's id (`OptSearchPoint.id`): its content, so the same
+            configuration reached again carries the same id. A REJECTED proposal
+            is named by its slot (`candidate_report.py::arm_id`).
         parent_ids:
           type: array
           items: { type: string, minLength: 1 }
@@ -671,20 +1160,21 @@ components:
       type: object
       description: |
         ElectionRecord — what the round's selection produced, appended by the
-        optimizer's selector before the round closes, keyed by LABEL because a
-        resume re-mints candidate ids. θ stays on `round:complete`, which every
-        close re-reads; only the selection never moves.
-      required: [round, fit, stamps_theta, timestamp]
+        optimizer's selector before the round closes, keyed by LABEL. θ is re-read on every `round_closed`
+        (its `candidate_scores`); only the selection never moves. `verdict_reason` is
+        the round's own reading as the election held it.
+      required: [round, fit, elects_on, timestamp]
       additionalProperties: false
       properties:
         round:
           type: integer
           minimum: 0
-        stamps_theta:
-          type: boolean
+        elects_on:
+          type: string
+          enum: [accuracy, composite, ability]
           description: |
-            `RoundResult.stamps_theta` — whether the selector fits θ per arm at all.
-            False: θ is not a column of this round, never a cold ruler.
+            `RoundResult.elects_on` — the column the selector elects on. `ability`: the
+            round is won on θ, not on accuracy.
         selected_labels:
           type: array
           items: { type: string, minLength: 1 }
@@ -699,11 +1189,12 @@ components:
             type: object
             additionalProperties: true
             properties:
-              reference_id:
-                type: string
+              vs_reference:
+                type: [object, 'null']
                 description: |
-                  The individual this arm's lift is read against, over the cells
-                  it touched.
+                  This arm's lift over its reference as one `PairedReading`, over
+                  the cells the reference was read on. Null on the origin.
+        verdict_reason: { type: [string, 'null'] }
         timestamp:
           type: string
           format: date-time
@@ -713,7 +1204,7 @@ components:
       description: |
         RulerRecord — a δ ruler as it stands, written WHOLE at lock and after
         every extension; the last record for a `dataset_name` wins. Not a
-        progress event: the tail skips it, so it is declared for the union.
+        progress event: the tail frames it, the activity line stays silent, so it is declared for the union.
       required: [ruler, dataset_name, round, timestamp]
       additionalProperties: false
       properties:
@@ -731,21 +1222,40 @@ components:
           type: string
           format: date-time
 
+    ScoringLockedPayload:
+      type: object
+      description: |
+        ScoringLockedRecord — the criterion a cycle's origin measurement locked:
+        the scoring block as `declared` with `dials`, and the same block
+        `locked` to the `per_cell` formula those dials spell on the origin's
+        measured anchors. Appended once per cycle that measures an origin under
+        dials; `campaign.json::config.scoring` keeps the declaration, and every
+        config read lays the root cycle's lock over it. Not a progress event:
+        the tail frames it, the activity line stays silent.
+      required: [declared, locked, timestamp]
+      additionalProperties: false
+      properties:
+        declared:
+          type: object
+          additionalProperties: { type: string }
+        locked:
+          type: object
+          additionalProperties: { type: string }
+        timestamp:
+          type: string
+          format: date-time
+
     RunLimitsPayload:
       type: object
       description: |
         RunLimitsRecord — the cycle's standing operator ceiling, whole; the last
         record wins. Appended by `set-limits` and by a launch flag that moves
-        it. Not a progress event: the tail skips it.
+        it. Not a progress event: the tail frames it, the activity line stays silent.
       required: [timestamp]
       additionalProperties: false
       properties:
-        usd:
-          type: [number, 'null']
-          minimum: 0
-        tokens:
-          type: [integer, 'null']
-          minimum: 0
+        ceiling:
+          $ref: '#/components/schemas/SpendCeilings'
         rounds:
           oneOf:
             - type: 'null'
@@ -758,6 +1268,259 @@ components:
                   minimum: 0
                   description: '`null` lifts the round cap, so the spend ceiling governs.'
           description: The `RoundsCap`; `null` never moved it.
+        pause_at_round:
+          type: [integer, 'null']
+          minimum: 0
+          description: |
+            The count of closed rounds at which the launch in flight pauses —
+            `step-cycle`'s allowance. Every launch declares its own or clears
+            the last one's; the loop reads this and the round cap off the one
+            record.
+        reserve:
+          $ref: '#/components/schemas/SpendCeilings'
+          description: The job's reservation as this change moved it; a `null` arm left it alone.
+        timestamp:
+          type: string
+          format: date-time
+
+    SpendCeilings:
+      type: object
+      description: What a run may spend, in both units (`domain/spend.py::SpendCeilings`); a `null` arm is unbounded.
+      additionalProperties: false
+      properties:
+        usd:
+          type: [number, 'null']
+          minimum: 0
+        tokens:
+          type: [integer, 'null']
+          minimum: 0
+
+    CycleMintedPayload:
+      type: object
+      description: |
+        CycleMintedRecord — the cycle exists; the first line of its own ledger.
+        A fork carries `parent_cycle_id`, `forked_at_offset` (the line of the
+        parent's ledger its history begins at) and `fork` (the `ForkSpec`, less
+        its seed) together; a root carries none. A ledger chain is walked off
+        this record alone. `checkin` marks a cycle minted while its campaign is
+        still authoring its origin: it reads `run_phase: checkin` until a
+        `checkin_closed` record follows.
+      required: [timestamp]
+      additionalProperties: false
+      properties:
+        checkin:
+          type: boolean
+          default: false
+        parent_cycle_id:
+          type: [string, 'null']
+        forked_at_offset:
+          type: [integer, 'null']
+          minimum: 0
+        fork:
+          type: [object, 'null']
+          description: The `ForkSpec` (`promptpotter/domain/run_records.py`).
+        timestamp:
+          type: string
+          format: date-time
+
+    CycleFinalPayload:
+      type: object
+      description: |
+        CycleFinalRecord — what a cycle banks once, as its own runner stops it,
+        just before that runner's `terminal` declaration. A later `running`
+        declaration retires it with the ending it belonged to.
+      required: [final, timestamp]
+      additionalProperties: false
+      properties:
+        final:
+          type: object
+          description: The `CycleFinal` (`promptpotter/domain/run_records.py`).
+        interrupted_round:
+          type: [integer, 'null']
+          minimum: 0
+          description: The round the stop left unclosed; `null` for a stop at a boundary.
+        timestamp:
+          type: string
+          format: date-time
+
+    CycleSupersededPayload:
+      type: object
+      description: |
+        CycleSupersededRecord — the line moved to `successor_cycle_id`, on the
+        left-behind side of a supersede cut.
+      required: [successor_cycle_id, timestamp]
+      additionalProperties: false
+      properties:
+        successor_cycle_id:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    ForkGradedPayload:
+      type: object
+      description: |
+        ForkGradedRecord — a cut's MEASURED direction, on the branch; it
+        overrides the direction the mint's trigger implies.
+      required: [direction, timestamp]
+      additionalProperties: false
+      properties:
+        direction:
+          type: string
+          enum: [offshoot, supersede, equivalent]
+        timestamp:
+          type: string
+          format: date-time
+
+    InterventionPayload:
+      type: object
+      description: |
+        InterventionRecord — an operator manually intervened; one is enough to
+        make the cycle babysat for good.
+      required: [kind, timestamp]
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    SpawnedPayload:
+      type: object
+      description: |
+        SpawnedRecord — an L4 inner cycle opened for `spawned_by`; the last one
+        names the outer work-item the cycle last measured for.
+      required: [spawned_by, timestamp]
+      additionalProperties: false
+      properties:
+        spawned_by:
+          type: object
+          description: The `SpawnedBy` (`promptpotter/domain/run_records.py`).
+        timestamp:
+          type: string
+          format: date-time
+
+    LaunchClaimPayload:
+      type: object
+      description: |
+        LaunchClaimRecord — a launch CLAIMED the cycle before any process runs
+        it. The last one stands while neither a `run_phase` record nor its own
+        `launch_released` follows it and the process that made it is alive.
+        `stage` IS the `run_phase` the cycle then reads, the value the launch's
+        job carries, so every guard a running cycle refuses also refuses a
+        claimed one. Not a progress event: the tail frames it, the activity line stays silent.
+      required: [stage, job_id, claimant_lock, timestamp]
+      additionalProperties: false
+      properties:
+        stage:
+          type: string
+          enum: [queued, starting]
+        job_id: { type: string, minLength: 1 }
+        claimant_lock:
+          type: string
+          minLength: 1
+          description: The OS lock file the claiming process holds for its life; a dead claimant claims nothing.
+        timestamp:
+          type: string
+          format: date-time
+
+    LaunchReleasedPayload:
+      type: object
+      description: |
+        LaunchReleasedRecord — the launch `job_id` let its claim go without a
+        run: refused at admission, withdrawn from the queue, or failed before
+        its process took the cycle. It ends that job's claim and no other's.
+        Not a progress event: the tail frames it, the activity line stays silent.
+      required: [job_id, detail, timestamp]
+      additionalProperties: false
+      properties:
+        job_id: { type: string, minLength: 1 }
+        detail:
+          type: string
+          description: What refused or withdrew the launch.
+        timestamp:
+          type: string
+          format: date-time
+
+    CheckinClosedPayload:
+      type: object
+      description: |
+        CheckinClosedRecord — the check-in this cycle was minted in is over:
+        Start froze the campaign's config and the cycle is a launch's to run.
+        One per cycle. Not a progress event: the tail frames it, the activity line stays silent.
+      required: [timestamp]
+      additionalProperties: false
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+
+    RunWiringPayload:
+      type: object
+      description: |
+        RunWiringRecord — what a cycle runs under that no other record states;
+        the last record wins. Appended first as the cycle's config is frozen (a
+        root's mint, the Start closing a check-in), then by every launch once
+        its admitted config is settled, before the origin scores, and again for
+        a cycle the launch forks onto. Not a progress event: the tail frames it, the activity line stays silent.
+      required:
+        - arms_per_round
+        - sp_budget_round
+        - display_metric
+        - elects_on
+        - max_cells_in_flight
+        - measured_unit
+        - langfuse_trace_url
+        - run_limits
+        - timestamp
+      additionalProperties: false
+      properties:
+        arms_per_round:
+          type: [integer, 'null']
+          description: The most arms one round races; `null` where the optimizer declares none.
+        sp_budget_round:
+          type: integer
+          description: The cells one arm walks in a round.
+        display_metric:
+          type: string
+          enum: [accuracy, composite, ability]
+        elects_on:
+          type: string
+          enum: [accuracy, composite, ability]
+          description: The column the selected optimizer's selector elects on.
+        max_cells_in_flight:
+          type: integer
+          minimum: 1
+          description: How many cells the connector's backend holds in flight.
+        measured_unit:
+          type: string
+          enum: [sample, cell]
+        langfuse_trace_url:
+          type: [string, 'null']
+        run_limits:
+          type: object
+          description: The ceilings of the config the launch was admitted under (`RunLimits`).
+          required: [max_rounds, ceiling, optimizer]
+          additionalProperties: false
+          properties:
+            max_rounds:
+              type: [integer, 'null']
+            ceiling:
+              $ref: '#/components/schemas/SpendCeilings'
+            optimizer:
+              type: array
+              description: The optimizer's own run-bounding knobs (`OptimizerLimit`).
+              items:
+                type: object
+                required: [node, knob, label, value, integer]
+                additionalProperties: false
+                properties:
+                  node: { type: string }
+                  knob: { type: string }
+                  label: { type: string }
+                  value: { type: [number, 'null'] }
+                  integer: { type: boolean }
         timestamp:
           type: string
           format: date-time
@@ -768,7 +1531,7 @@ components:
         SpendTombstoneRecord — a deleted campaign's or cycle's spend, banked on
         the WORKSPACE ledger before the delete so the money outlives the data.
         Reaches no cycle subscriber.
-      required: [campaign_id, used_usd, used_tokens, unpriced_tokens, timestamp]
+      required: [campaign_id, used_usd, rate_priced_usd, used_tokens, unpriced_tokens, timestamp]
       additionalProperties: false
       properties:
         campaign_id:
@@ -778,6 +1541,10 @@ components:
           description: Empty for a whole-campaign bank.
         used_usd:
           type: number
+          description: What providers reported they billed.
+        rate_priced_usd:
+          type: number
+          description: What our rate table prices the calls no provider billed. Never spent.
         used_tokens:
           type: integer
         unpriced_tokens:
@@ -841,6 +1608,16 @@ components:
         cost_usd:
           type: [number, 'null']
           minimum: 0
+          description: >-
+            What the provider REPORTED the call cost — the only figure a surface
+            calls spent. Null where it reported none.
+        rate_priced_usd:
+          type: [number, 'null']
+          minimum: 0
+          description: >-
+            What our rate table prices a call whose provider reported no cost. An
+            estimate a ceiling counts and no surface calls spent. Null beside a
+            reported `cost_usd`, and where no rate is on file.
         key_source:
           type: [string, 'null']
           enum: [host, user, null]
@@ -965,8 +1742,17 @@ components:
       type: object
       description: |
         Projection of `CommandAckRecord` (Profile B Phase 2a). Echoes the
-        originating `command_id` + status (`applied` | `rejected`) +
-        optional human-readable detail (never load-bearing for clients).
+        originating `command_id` + status + optional human-readable detail
+        (never load-bearing for clients).
+
+        `applied` means the thing was DONE. A command the running loop carries
+        out (`pause-cycle`, `skip-searchpoint`, `set-sample-lookahead`,
+        `origin-gate-decision`) is delivered by this ledger: the dispatcher acks
+        it `accepted`, the run reads the accepted commands standing since its
+        launch, and the run itself acks `applied` when it takes one — so a
+        command may carry two acks, and an `accepted` one no run took stays
+        `accepted`. Every other command is applied by the dispatcher and acked
+        `applied` once.
 
         `effect` is what the applier ACTUALLY changed, as opposed to what the
         `CommandRecord.payload` asked for. The two diverge whenever the applier
@@ -980,7 +1766,7 @@ components:
         command_id: { type: string, minLength: 1 }
         status:
           type: string
-          enum: [applied, rejected]
+          enum: [accepted, applied, rejected]
         detail: { type: string }
         effect:
           type: object

@@ -1,59 +1,64 @@
-"""DSPy-as-connector — the loop optimizing a program someone else wrote. A THIN adapter: it
-declares ``execution="in_process"`` and calls the student once, because a program is not a wire."""
-
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.connectors.protocol import Connector, InProcessWorkload, NoopSession
+from promptpotter.connectors.protocol import Connector, InProcessWorkload
 from promptpotter.domain.pipeline_overlay import node_config_items
-from promptpotter.domain.spend import StepTokenUsage
-from promptpotter.shared.errors import CellUnscoreableError
+from promptpotter.domain.pipeline_schema import LLMSpendBound
+from promptpotter.domain.spend import StepUsage, TokenAccount
+from promptpotter.infrastructure.llm.base import hold_ceiling, send_bound
+from promptpotter.infrastructure.llm.pricing import inline_route
+from promptpotter.infrastructure.llm.send_failure import failed_send
+from promptpotter.infrastructure.llm.send_pacing import drawn_budget, held_wait
+from promptpotter.infrastructure.llm.spend_book import (
+    Admission,
+    Billed,
+    CallLabel,
+    Reported,
+    admitted,
+    answered,
+)
+from promptpotter.shared.errors import (
+    CellHaltedError,
+    CellUnscoreableError,
+    ErrorCategory,
+    SendRefusedError,
+    cell_failure,
+)
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Awaitable, Callable, Coroutine, Mapping
 
     from promptpotter.domain.sample import Sample
 
 logger = logging.getLogger(__name__)
 
 
-# The one node a dspy dataset declares. ONE, because a DSPy program is a single call from here —
-# its predictors are its own composition, not a chain we route a query through node by node.
 PROGRAM_NODE = "program"
 
-# What the campaign formula scores. It reaches `pipeline_data` only because the node names it in
-# `observation_mappings`; an undeclared key never arrives and the formula then grades a
-# measurement it never got — the same contract the L4 connector's proxies ride.
 SCORE_KEY = "dspy_score"
 
-# The terminal ranking `measure_sample` reads. The metric already graded the sample, so this
-# carries the prediction for a HUMAN reading the round file and decides nothing.
+# Decides nothing: the metric already graded the sample, and this shows a human the prediction.
 RESULT_KEY = "final_ranking"
 
 
 @dataclass(frozen=True)
 class DspyProgram:
-    """The student and its metric, bound for the length of one compile."""
-
     student: Any
-    """The caller's ``dspy.Module``. Never mutated — each candidate scores a ``deepcopy``."""
+    """Never mutated: each candidate scores a ``deepcopy``."""
 
     metric: Callable[[Any, Any], Any]
-    """The caller's ``(example, prediction) -> float``. It IS the scorer: its number rides
-    :data:`SCORE_KEY` and the campaign formula reads that key, so PromptPotter never has to
-    reproduce a grading rule the DSPy program already owns."""
+    """``(example, prediction) -> float``, and it IS the scorer: its number rides ``SCORE_KEY``."""
 
     examples: list[Any]
-    """The trainset's ``dspy.Example`` rows, in the order its samples were numbered — a sample's
-    ``id`` is its example's position."""
+    """In the order its samples were numbered: a sample's ``id`` is its example's position."""
 
 
 def dspy_wire_adapter(query: str, pipeline_params: dict[str, Any] | None) -> dict[str, Any]:
-    """Outbound payload for one example. The candidate's rendered prompt rides ``prompt`` (the node
-    declares ``prompt_info``, so the searchpoint's render lands there); the rest are its tunables."""
     payload: dict[str, Any] = {"query": query}
     for node, cfg in node_config_items(pipeline_params):
         if node != PROGRAM_NODE:
@@ -65,56 +70,268 @@ def dspy_wire_adapter(query: str, pipeline_params: dict[str, Any] | None) -> dic
     return payload
 
 
-def _configured(student: Any, prompt: str | None, params: dict[str, Any]) -> Any:
-    """The candidate applied to a COPY of the student — prompt onto every predictor's signature,
-    model settings onto its ``lm``. Jointly, which is the half ``with_instructions()`` alone cannot
-    reach and the reason this optimizer is worth swapping in.
-
-    Never ``save``/``load_state``: :meth:`Signature.dump_state` writes fields positionally with no
-    names, and ``load_state`` zips them back with ``strict=False``, so a signature that gained a
-    field reloads a scrambled prompt and raises nothing."""
+def _configured(
+    student: Any, prompt: str | None, lm_kwargs: dict[str, Any], sends: _CellSends
+) -> Any:
     import dspy
 
+    # Never `save`/`load_state`: it zips fields back positionally, `strict=False`, silently.
     copy = student.deepcopy()
-    lm_kwargs = {k: v for k, v in params.items() if k in _LM_KEYS}
     for predictor in copy.predictors():
         if prompt:
             predictor.signature = predictor.signature.with_instructions(prompt)
-        if lm_kwargs:
-            # `base.copy(**kwargs)` and NOT `dspy.LM(**settings_read_off_base)`: reconstructing
-            # swaps the caller's LM CLASS for a generic one, so an Azure wrapper, a local-model
-            # handle or a cached client silently becomes a plain client — the measurement then
-            # belongs to a model nobody chose. `copy` keeps the subclass and its provider
-            # session, and sets `model` as an attribute the same way it sets a request param.
-            base = predictor.lm or dspy.settings.lm
-            predictor.lm = base.copy(**lm_kwargs) if base is not None else dspy.LM(**lm_kwargs)
+        base = predictor.lm or dspy.settings.lm
+        if base is None and lm_kwargs:
+            base = dspy.LM(**lm_kwargs)
+        if base is not None:
+            predictor.lm = _metered(base, sends, lm_kwargs)
     return copy
 
 
-# What a `Node.tune` entry may move on the predictor's LM. Anything else in `params` is the
-# caller's own field and reaches the program untouched through the prompt.
 _LM_KEYS = frozenset({"model", "temperature", "max_tokens"})
+
+_NOT_THE_PROMPT = frozenset(
+    {
+        ErrorCategory.PROVIDER_THROTTLED,
+        ErrorCategory.PROVIDER_CREDIT,
+        ErrorCategory.CONNECTION,
+    }
+)
+
+_SEND = CallLabel(PROGRAM_NODE, "backend")
+
+
+class _CellSends:
+    """A forward-only student calls from a worker thread; the spend book is the event loop's."""
+
+    def __init__(
+        self, sample_id: int, max_calls: int | None, priced_as: tuple[str | None, str | None]
+    ) -> None:
+        self.what = f"dspy example {sample_id}"
+        self.calls_left = max_calls
+        self.model, self.provider = priced_as
+        self.loop = asyncio.get_running_loop()
+        self.budget = drawn_budget()
+        self.used = TokenAccount()
+        # Raised again on every later call: the program may catch a failure or answer around it.
+        self.ended: Exception | None = None
+
+    def __deepcopy__(self, _memo: object) -> _CellSends:
+        # DSPy deep-copies an LM to vary a call; the copy's sends are still this cell's.
+        return self
+
+    def end(self, failure: Exception) -> Exception:
+        self.ended = self.ended or failure
+        return self.ended
+
+    def step_tokens(self) -> dict[str, dict[str, object]]:
+        if not self.used.total:
+            return {}
+        return {
+            PROGRAM_NODE: StepUsage(
+                input=self.used.input,
+                output=self.used.output,
+                model=self.model,
+                provider=self.provider,
+            ).wire()
+        }
+
+    async def _admit(
+        self, lm: _Metered, args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> tuple[contextlib.ExitStack, Admission]:
+        model, provider = self.model, self.provider
+        if self.ended is not None:
+            raise self.ended
+        if self.calls_left is not None:
+            if self.calls_left <= 0:
+                raise self.end(
+                    CellHaltedError(
+                        f"{self.what} was stopped: its program made more LM calls than the "
+                        f"`max_calls` nodes.{PROGRAM_NODE}.config declares, which is what its "
+                        "spend bound was sized on.",
+                        spent=self.step_tokens(),
+                    )
+                )
+            self.calls_left -= 1
+        sent = kwargs.get("messages") or (args[0] if args else kwargs.get("prompt"))
+        max_tokens = kwargs.get("max_tokens", lm.kwargs.get("max_tokens"))
+        hold = contextlib.ExitStack()
+        try:
+            bound = send_bound(
+                await hold_ceiling(model, provider) if model and provider else None,
+                sent=sent,
+                max_tokens=max_tokens,
+            )
+            admission = hold.enter_context(admitted(_SEND, bound, model=model, provider=provider))
+        except SendRefusedError as refused:
+            raise self.end(refused) from None
+        return hold, admission
+
+    async def _settle(
+        self,
+        hold: contextlib.ExitStack,
+        admission: Admission,
+        totals: dict[str, dict[str, Any]],
+        failure: Exception | None,
+    ) -> bool:
+        """``True`` where the send goes again."""
+        bill = None
+        if totals:
+            usage = TokenAccount(
+                input=sum(int(u.get("prompt_tokens") or 0) for u in totals.values()),
+                output=sum(int(u.get("completion_tokens") or 0) for u in totals.values()),
+            )
+            self.used += usage
+            bill = Billed(usage, None)
+        with hold:
+            if failure is None:
+                admission.close(answered(bill))
+                return False
+            outcome = failed_send(failure)
+            if bill is not None:
+                outcome = outcome._replace(reported=Reported((bill,)))
+            admission.close(outcome)
+        wait = self.budget.resend_wait() if outcome.resendable else None
+        if wait is not None:
+            logger.warning(
+                "%s: %s (attempt %d/%d); waiting %.1fs",
+                self.what,
+                type(failure).__name__,
+                self.budget.resent,
+                self.budget.attempts,
+                wait,
+            )
+            await held_wait(wait, self.what)
+            return True
+        if outcome.failure in _NOT_THE_PROMPT:
+            raise self.end(
+                cell_failure(
+                    f"{self.what}: {outcome.detail[:300]}",
+                    outcome.failure,
+                    spent=self.step_tokens(),
+                )
+            ) from failure
+        return False
+
+    def _on_loop(self, step: Coroutine[Any, Any, Any]) -> Any:
+        return asyncio.run_coroutine_threadsafe(step, self.loop).result()
+
+    async def asend(
+        self,
+        lm: _Metered,
+        call: Callable[[], Awaitable[Any]],
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+    ) -> Any:
+        from dspy.utils.usage_tracker import track_usage
+
+        while True:
+            hold, admission = await self._admit(lm, args, kwargs)
+            try:
+                with track_usage() as used:
+                    reply = await call()
+            except Exception as failure:
+                if not await self._settle(hold, admission, used.get_total_tokens(), failure):
+                    raise
+            except BaseException:
+                # Cancelled with the send out: nothing reported what it cost.
+                hold.close()
+                raise
+            else:
+                await self._settle(hold, admission, used.get_total_tokens(), None)
+                return reply
+
+    def send(
+        self, lm: _Metered, call: Callable[[], Any], args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> Any:
+        from dspy.utils.usage_tracker import track_usage
+
+        with contextlib.suppress(RuntimeError):
+            asyncio.get_running_loop()
+            raise self.end(
+                TypeError(
+                    f"{self.what}: the student called its LM synchronously on the event loop, "
+                    "which blocks every other task of the run — await `lm.acall(...)` in "
+                    "`aforward`."
+                )
+            )
+        while True:
+            hold, admission = self._on_loop(self._admit(lm, args, kwargs))
+            try:
+                with track_usage() as used:
+                    reply = call()
+            except Exception as failure:
+                closing = self._settle(hold, admission, used.get_total_tokens(), failure)
+                if not self._on_loop(closing):
+                    raise
+            except BaseException:
+                self.loop.call_soon_threadsafe(hold.close)
+                raise
+            else:
+                self._on_loop(self._settle(hold, admission, used.get_total_tokens(), None))
+                return reply
+
+
+class _Metered:
+    cell_sends: _CellSends
+    model: str
+    kwargs: dict[str, Any]
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        call = super().__call__  # type: ignore[misc]  # the LM class this is mixed ahead of
+        return self.cell_sends.send(self, lambda: call(*args, **kwargs), args, kwargs)
+
+    async def acall(self, *args: Any, **kwargs: Any) -> Any:
+        acall = super().acall  # type: ignore[misc]
+        return await self.cell_sends.asend(self, lambda: acall(*args, **kwargs), args, kwargs)
+
+
+_METERED: dict[type[Any], type[Any]] = {}
+
+
+def _metered(lm: Any, sends: _CellSends, changed: dict[str, Any]) -> Any:
+    # `copy`, not `dspy.LM(...)`: reconstructing swaps the caller's LM subclass for a generic one.
+    own = lm.copy(**changed)
+    lm_class = type(own)
+    if lm_class not in _METERED:
+        _METERED[lm_class] = type(lm_class.__name__, (_Metered, lm_class), {})
+    own.__class__ = _METERED[lm_class]
+    own.cell_sends = sends
+    # Off: a resend is admitted anew from the cell's budget, and a cached reply reports no usage.
+    if hasattr(own, "num_retries"):
+        own.num_retries = 0
+    if hasattr(own, "cache"):
+        own.cache = False
+    return own
+
+
+def _sent_spend_bound(node: str, cfg: Mapping[str, Any]) -> LLMSpendBound | None:
+    if node != PROGRAM_NODE:
+        return None
+    calls, context, reply = cfg.get("max_calls"), cfg.get("max_input_tokens"), cfg.get("max_tokens")
+    if calls is None or context is None or reply is None:
+        return None
+    return LLMSpendBound(
+        kind="llm",
+        attempts=int(calls),
+        input_tokens=int(context),
+        max_tokens=int(reply),
+    )
 
 
 async def _acall(student: Any, example: Any) -> Any:
-    """Await the student. A module declaring ``aforward`` goes straight through ``acall``; one
-    declaring only ``forward`` goes through **``dspy.asyncify``**, never ``asyncio.to_thread`` —
-    ``dspy.settings`` is thread-local, so a plain worker thread would run under a default
-    configuration and attribute the measurement to a model the caller never chose."""
     import dspy
 
     inputs = example.inputs().toDict()
     if hasattr(type(student), "aforward"):
         return await student.acall(**inputs)
+    # Never `asyncio.to_thread`: `dspy.settings` is thread-local, so it would run a default LM.
     return await dspy.asyncify(student)(**inputs)
 
 
 async def _in_process_run(
     workload: InProcessWorkload, sample: Sample, payload: dict[str, Any]
 ) -> dict[str, Any]:
-    """Score one example under one candidate, projected onto the ``{"data": {…}}`` shape
-    ``measure_sample`` parses from an HTTP body — so the scorer reads a DSPy result identically
-    to a remote one."""
     program = workload.program
     if not isinstance(program, DspyProgram) or sample.id >= len(program.examples):
         raise CellUnscoreableError(
@@ -126,19 +343,38 @@ async def _in_process_run(
 
     import dspy
 
-    student = _configured(program.student, payload.get("prompt"), payload.get("params") or {})
-    # `track_usage` is what makes the STUDENT's spend visible at all: its calls go through
-    # litellm, not our client, so `emit_token_usage` never fires for them and without this the
-    # campaign's spend ceiling would bound the optimizer half of a compile and nothing else.
-    with dspy.context(track_usage=True):
-        prediction = await _acall(student, example)
+    params: dict[str, Any] = payload.get("params") or {}
+    calls = params.get("max_calls")
+    lm_kwargs = {k: v for k, v in params.items() if k in _LM_KEYS}
+    model = lm_kwargs.get("model")
+    sends = _CellSends(
+        sample.id,
+        None if calls is None else int(calls),
+        inline_route(model) if isinstance(model, str) else (None, None),
+    )
+    student = _configured(program.student, payload.get("prompt"), lm_kwargs, sends)
+    # Metered too, so a call naming no LM runs the model the cell is priced as.
+    default = dspy.settings.lm
+    try:
+        with dspy.context(lm=None if default is None else _metered(default, sends, lm_kwargs)):
+            prediction = await _acall(student, example)
+    except Exception as exc:
+        if sends.ended is not None and sends.ended is not exc:
+            raise sends.ended from exc
+        raise
+    finally:
+        # The student's worker thread outlives a cancelled cell: nothing it calls from here is sent.
+        ended = sends.ended
+        sends.end(CellHaltedError(f"{sends.what} is over; no further call is sent.", spent={}))
+    if ended is not None:
+        raise ended
 
     return {
         "data": {
             RESULT_KEY: [str(prediction)],
             SCORE_KEY: float(program.metric(example, prediction)),
             "terminal_node": PROGRAM_NODE,
-            "step_tokens": _step_tokens(prediction),
+            "step_tokens": sends.step_tokens(),
         }
     }
 
@@ -151,8 +387,6 @@ def dataset_pipeline(
     tune: tuple[str, ...],
     allowed: dict[str, list[str]],
 ) -> dict[str, Any]:
-    """The ``pipeline.yaml`` a dspy dataset declares: the caller's program as the ONE node, and the
-    two observations :func:`_in_process_run` emits mapped where the scorer reads them."""
     node = {
         "type": "llm",
         "runtime": "in_process",
@@ -164,8 +398,7 @@ def dataset_pipeline(
             "param_keys": list(tune),
             "param_allowed_values": dict(allowed),
             "observation_name": PROGRAM_NODE,
-            # `is_llm` on the prediction mapping makes a per-node `model` REQUIRED, so no
-            # measurement is attributed to whichever LM happens to be configured.
+            # `is_llm` makes a per-node `model` REQUIRED.
             "observation_mappings": [
                 {"pipeline_key": RESULT_KEY, "is_llm": True},
                 {"pipeline_key": SCORE_KEY},
@@ -182,41 +415,17 @@ def dataset_pipeline(
     }
 
 
-def _step_tokens(prediction: Any) -> dict[str, StepTokenUsage]:
-    """The student's usage on the SAME channel a remote backend's rides — one ``step_tokens``
-    entry, metered where the cell is admitted and, on a replay, by ``emit_replayed_step_tokens``. No
-    ``cost_usd``: pricing is our rate table's job, and an unpriced model is already a named
-    signal rather than a silent zero.
-
-    **DSPy SKIPS recording on its own cache hit** (`base_lm.py` guards `add_usage` on
-    ``cache_hit``), so such a call is absent from the sum rather than zeroed. Our measurement
-    cache sits above DSPy's and replays archived tokens correctly, so the only under-count is a
-    sample OUR cache missed and DSPy's served —
-    `dspy.configure_cache(enable_disk_cache=False, enable_memory_cache=False)` makes it exact."""
-    usage = (prediction.get_lm_usage() or {}) if hasattr(prediction, "get_lm_usage") else {}
-    if not usage:
-        return {}
-    return {
-        PROGRAM_NODE: {
-            "input": sum(int(u.get("prompt_tokens") or 0) for u in usage.values()),
-            "output": sum(int(u.get("completion_tokens") or 0) for u in usage.values()),
-            "estimated": False,
-            "model": ", ".join(sorted(usage)),
-        }
-    }
-
-
 CONNECTOR = Connector(
     name="dspy",
     execution="in_process",
     wire_adapter=dspy_wire_adapter,
-    session_factory=NoopSession,
     in_process_run=_in_process_run,
-    # One call into the caller's module — no latency to hide behind, so overlapping two
-    # buys nothing and only doubles peak memory in the host's own process.
+    holds_own_sends=True,
+    sent_spend_bound=_sent_spend_bound,
+    # A DSPy model string is litellm's: the provider is its prefix.
+    model_names_provider=True,
+    # Overlapping two buys nothing and doubles peak memory in the host's own process.
     max_cells_in_flight=1,
-    # Both keys `_in_process_run` always emits and `dataset_pipeline` declares: drop a mapping
-    # there and init raises, instead of the formula grading a score that was silently dropped.
     required_observation_keys=(RESULT_KEY, SCORE_KEY),
     default_pipeline=(PROGRAM_NODE,),
 )
