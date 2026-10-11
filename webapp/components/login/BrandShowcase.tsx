@@ -9,40 +9,14 @@ function siteHost(url: string): string {
   }
 }
 
-function Check({ done }: { done: boolean }) {
-  return done ? (
-    <svg className="ls-check ls-check-done" viewBox="0 0 16 16" aria-hidden="true">
-      <rect x="0.5" y="0.5" width="15" height="15" rx="3.5" />
-      <path d="M4 8.2 6.8 11 12 5" fill="none" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  ) : (
-    <svg className="ls-check ls-check-todo" viewBox="0 0 16 16" aria-hidden="true">
-      <rect x="0.75" y="0.75" width="14.5" height="14.5" rx="3.5" fill="none" strokeWidth="1.3" />
-    </svg>
-  );
-}
-
-const BEHAVIORS: { label: string; done: boolean }[] = [
-  { label: "Normalize units before lookup", done: true },
-  { label: "Return the exact catalog ID", done: true },
-  { label: "Resolve ambiguous abbreviations", done: false },
-  { label: "Cite the matched source row", done: false },
-];
-
-const STAGES: { label: string; left: number; width: number; tone?: "success" }[] = [
-  { label: "L1 · generate", left: 1, width: 32 },
-  { label: "L2 · refine", left: 22, width: 34 },
-  { label: "L3 · escalate", left: 48, width: 30 },
-  { label: "converged", left: 71, width: 27, tone: "success" },
-];
-
 // NOT operator chrome, so its palette ignores the theme.
 export function BrandShowcase() {
   const { url, title, tagline } = BRAND.marketing;
 
   return (
     <aside className="login-showcase" aria-label={`About ${title}`}>
-      <div className="ls-aurora" aria-hidden="true" />
+      {/* The mark itself is the picture: the 512 cut, masked so a whitelabel accent flows through. */}
+      <span className="ls-vessel" aria-hidden="true" />
 
       <div className="ls-content">
         <div className="ls-eyebrow">
@@ -54,77 +28,6 @@ export function BrandShowcase() {
           Fix a broken LLM pipeline <em>in one hour of waiting.</em> Then it just works.
         </h2>
         <p className="ls-lead">{tagline}</p>
-
-        <div className="ls-art" role="img" aria-label="Live optimization run preview">
-          <div className="ls-panel ls-panel-chart">
-            <div className="ls-panel-head">
-              <span className="ls-score">0.94</span>
-              <span className="ls-delta">+0.31 vs origin</span>
-              <span className="ls-panel-label">composite fitness · round 4 / 5</span>
-            </div>
-            <svg className="ls-curve" viewBox="0 0 400 140" preserveAspectRatio="none" aria-hidden="true">
-              <line x1="0" y1="38" x2="400" y2="38" className="ls-grid" />
-              <line x1="0" y1="78" x2="400" y2="78" className="ls-grid" />
-              <path
-                d="M 0 100 L 80 88 L 160 64 L 240 38 L 320 24 L 400 18 L 400 140 L 0 140 Z"
-                className="ls-area"
-              />
-              <path d="M 0 100 L 80 88 L 160 64 L 240 38 L 320 24 L 400 18" className="ls-line" />
-              <circle cx="240" cy="38" r="3" className="ls-dot" />
-              <circle cx="320" cy="24" r="3" className="ls-dot" />
-              <circle cx="400" cy="18" r="4" className="ls-dot ls-dot-head" />
-            </svg>
-            <div className="ls-meta">
-              <span>
-                <b>8</b> candidates
-              </span>
-              <span>
-                <b>320</b> scored
-              </span>
-              <span>
-                <b>5</b> rounds
-              </span>
-            </div>
-          </div>
-
-          <div className="ls-panel ls-panel-checks" aria-hidden="true">
-            <div className="ls-checks-head">
-              <span className="ls-checks-title">Behavior checks</span>
-              <span className="ls-checks-count">18 / 20</span>
-            </div>
-            <ul className="ls-checks-list">
-              {BEHAVIORS.map((b) => (
-                <li key={b.label} className={b.done ? "done" : undefined}>
-                  <Check done={b.done} />
-                  <span>{b.label}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          <div className="ls-panel ls-panel-timeline" aria-hidden="true">
-            <div className="ls-tl-head">
-              <span className="ls-tl-title">Run timeline</span>
-              <span className="ls-tl-chip">termnorm</span>
-            </div>
-            <div className="ls-tl-ticks">
-              {["R0", "R1", "R2", "R3", "R4", "R5"].map((r) => (
-                <span key={r}>{r}</span>
-              ))}
-            </div>
-            <div className="ls-tl-gantt">
-              {STAGES.map((s) => (
-                <div
-                  key={s.label}
-                  className={s.tone === "success" ? "ls-tl-bar success" : "ls-tl-bar"}
-                  style={{ marginLeft: `${s.left}%`, width: `${s.width}%` }}
-                >
-                  {s.label}
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
 
         {url ? (
           <a className="ls-cta" href={url} target="_blank" rel="noopener noreferrer">

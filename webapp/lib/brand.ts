@@ -22,7 +22,7 @@ export const BRAND = {
     title: process.env.NEXT_PUBLIC_MARKETING_TITLE || "PromptPotter",
     tagline:
       process.env.NEXT_PUBLIC_MARKETING_TAGLINE ||
-      "Give PromptPotter the prompt you're already using; it returns critiqued, improved versions with rich evaluation metadata — a significant, measured gain in about five minutes.",
+      "Give PromptPotter the prompt you're already using; it returns critiqued, improved versions with rich evaluation metadata.",
   },
   supportUrl:
     process.env.NEXT_PUBLIC_SUPPORT_URL ||
