@@ -67,7 +67,6 @@ def _card(entry: dict[str, Any], fetched_at: str) -> dict[str, Any]:
         "context_length": _as_int(entry.get("context_length")),
         "max_output_tokens": _as_int(top.get("max_completion_tokens")),
         "modality": str(arch.get("modality") or ""),
-        "moderated": top.get("is_moderated"),
         "fetched_at": fetched_at,
     }
 

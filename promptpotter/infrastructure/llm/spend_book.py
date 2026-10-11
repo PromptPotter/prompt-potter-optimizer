@@ -8,9 +8,9 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, ClassVar, NamedTuple
 
-from promptpotter.domain.run_records import TokenUsageRecord
+from promptpotter.domain.run_records import SpendHoldRecord, TokenUsageRecord
 from promptpotter.domain.spend import (
     CEILING_METER_LABELS,
     METER_KINDS,
@@ -25,6 +25,7 @@ from promptpotter.domain.spend import (
 )
 from promptpotter.infrastructure.llm.telemetry import (
     active_cycle_ledger,
+    billing_ledger,
     emit_spend_hold,
     emit_token_usage,
     filed_kind,
@@ -35,9 +36,10 @@ from promptpotter.infrastructure.runtime_flags import standing_run_limits
 from promptpotter.infrastructure.store.read_model import (
     HOLD_TRAIL,
     HeldSends,
+    HoldTrailRecord,
+    LedgerIndex,
+    RecordClasses,
     held_tokens,
-    iter_jsonl,
-    usage_row_usd,
 )
 from promptpotter.shared.errors import (
     ErrorCategory,
@@ -473,6 +475,7 @@ def _bound_book(what: str) -> SpendBook:
         raise RuntimeError(
             f"{what}: no spend book is bound, and a paid call is never sent unadmitted"
         )
+    billing_ledger(what)
     return book
 
 
@@ -745,29 +748,54 @@ class Unreported(NamedTuple):
     dearest: tuple[tuple[CallLabel, float, int], ...] = ()
 
 
+class _Trail(NamedTuple):
+    open: dict[str, SpendHoldRecord]
+    unpriced: tuple[float | None, ...]
+    dearest: tuple[tuple[CallLabel, float, int], ...]
+
+
+class _HoldTrail:
+    records: ClassVar[RecordClasses] = HOLD_TRAIL
+
+    def __init__(self) -> None:
+        self._held = HeldSends()
+        self._labels: dict[str, CallLabel] = {}
+        self._bills: dict[str, tuple[float, int]] = {}
+
+    def feed(self, offset: int, record: HoldTrailRecord) -> None:
+        self._held.track(record)
+        if isinstance(record, SpendHoldRecord):
+            self._labels[record.hold_id] = CallLabel(record.node, record.kind)
+            return
+        hold_id, usd = record.hold_id, record.bill_or_rate_usd
+        if hold_id is not None and hold_id in self._labels and usd is not None:
+            usd_was, tokens_was = self._bills.get(hold_id, (0.0, 0))
+            billed = record.input_tokens + record.output_tokens
+            self._bills[hold_id] = (usd_was + usd, tokens_was + billed)
+
+    def value(self) -> _Trail:
+        unpriced = self._held.unpriced
+        return _Trail(
+            dict(self._held.open),
+            tuple(unpriced.values()),
+            tuple(
+                (self._labels[hold_id], usd, tokens)
+                for hold_id, (usd, tokens) in self._bills.items()
+                if hold_id not in unpriced
+            ),
+        )
+
+
+_TRAIL_FOLDS = (_HoldTrail,)
+
+
 def unreported_on(ledger: CycleEventLog) -> Unreported:
     """``store/account_spend.py`` cannot see ``_OUT``; it asks the run's phase for liveness."""
-    held = HeldSends()
-    labels: dict[str, CallLabel] = {}
-    bills: dict[str, tuple[float, int]] = {}
     # The ledger's OWN lines only: walking a fork chain holds the parent's open sends twice.
-    for rec in iter_jsonl(ledger.path, record_types=HOLD_TRAIL):
-        held.track(rec)
-        hold_id = rec.get("hold_id")
-        if rec.get("record_type") == "spend_hold":
-            labels[str(hold_id)] = CallLabel(rec["node"], rec["kind"])
-        elif hold_id in labels and (usd := usage_row_usd(rec)) is not None:
-            usd_was, tokens_was = bills.get(hold_id, (0.0, 0))
-            billed = int(rec.get("input_tokens", 0)) + int(rec.get("output_tokens", 0))
-            bills[hold_id] = (usd_was + usd, tokens_was + billed)
-    left = [rec for hold_id, rec in held.open.items() if hold_id not in _OUT]
-    tokens = sum(held_tokens(h) for h in left)
+    trail = LedgerIndex.of(ledger.path, _TRAIL_FOLDS).view(_HoldTrail)
+    left = [hold for hold_id, hold in trail.open.items() if hold_id not in _OUT]
+    tokens = sum(held_tokens(hold) for hold in left)
     # A hold with no bound was admitted where no ceiling stood, and names no money to keep.
-    bounds = (*(h.get("cost_usd") for h in left), *held.unpriced.values())
-    usd = sum(float(bound) for bound in bounds if bound is not None)
-    dearest = tuple(
-        (labels[hold_id], billed_usd, billed_tokens)
-        for hold_id, (billed_usd, billed_tokens) in bills.items()
-        if hold_id not in held.unpriced
-    )
-    return Unreported(usd, tokens, len(left) + len(held.unpriced), dearest)
+    bounds = (*(hold.cost_usd for hold in left), *trail.unpriced)
+    usd = sum(bound for bound in bounds if bound is not None)
+    return Unreported(usd, tokens, len(left) + len(trail.unpriced), trail.dearest)

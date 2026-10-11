@@ -10,7 +10,6 @@ from promptpotter.domain.scoring import Grade, MeasuredCell
 
 
 class WalkedSample(NamedTuple):
-    qi: int
     facts: MeasuredCell
     grade: Grade
 
@@ -25,6 +24,7 @@ class ArmSlot:
     changes_description: str = ""
     pipeline_overlay: dict[str, Any] | None = None
     prompt_fields: dict[str, Any] | None = None
+    node_prompt_fields: dict[str, dict[str, Any]] = field(default_factory=dict)
     resolved_pipeline_params: dict[str, Any] | None = None
     samples: list[WalkedSample] = field(default_factory=list)
     expected_samples: int | None = None
@@ -61,13 +61,13 @@ class RoundBuffer:
         entry.changes_description = record.changes_description
         entry.pipeline_overlay = record.pipeline_overlay
         entry.prompt_fields = record.prompt_fields
+        entry.node_prompt_fields = record.node_prompt_fields
         entry.resolved_pipeline_params = record.resolved_pipeline_params
 
     def append_sample(
         self,
         ci: int,
         ct: int,
-        qi: int,
         qt: int,
         facts: MeasuredCell,
         grade: Grade,
@@ -78,7 +78,7 @@ class RoundBuffer:
             entry.running = running
         entry.expected_samples = qt
         # Held with its grade: without it `blocks.py::sample_row` renders an ungraded cell MISS.
-        entry.samples.append(WalkedSample(qi, facts, grade))
+        entry.samples.append(WalkedSample(facts, grade))
 
     def set_candidate_scores(self, idx: int, total: int, scores: ScoredCandidate) -> None:
         self.slot(idx, total).scores = scores

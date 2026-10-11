@@ -42,7 +42,6 @@ def sample_row(s: WalkedSample) -> DashboardSample:
     graded_by_verifier = is_verifier_graded(ground_truth)
     account = TokenAccount.from_step_tokens(facts.pipeline.step_tokens)
     return DashboardSample(
-        qi=s.qi,
         sample_id=facts.sample_id,
         status=status,
         fitness=grade.fitness,
@@ -113,6 +112,7 @@ def build_candidate_rows(
             LiveCandidate(
                 reading=reading,
                 prompt_fields=slot.prompt_fields,
+                node_prompt_fields=slot.node_prompt_fields,
                 resolved_pipeline_params=slot.resolved_pipeline_params,
                 pipeline_overlay=slot.pipeline_overlay,
                 samples=[sample_row(s) for s in slot.samples],

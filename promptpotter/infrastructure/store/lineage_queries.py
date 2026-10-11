@@ -334,6 +334,12 @@ class CourseNode(_Node):
         "panel, and what it has cost. A course whose line moved to a branch serves the "
         "branch's. Null before round 0 closes.",
     )
+    deletable_stubs: int = Field(
+        description="How many cycles `cleanup-empty-cycles` addressed at this course deletes "
+        "now: its forks that closed no round of their own, hold no producer and no descendant, "
+        "and are not the active cycle (`CampaignStore.deletable_stubs`, the command's own list). "
+        "A fork is no node of this tree, so no count over its nodes can stand in for it.",
+    )
     lens_criterion: str | None = Field(
         default=None,
         description="The `per_cell` formula this course's record was read under for the "
@@ -468,6 +474,7 @@ class _CourseScalars(TypedDict):
     task: str | None
     dataset_name: str
     run_standing: RunStanding | None
+    deletable_stubs: int
     elects_on: DisplayMetric | None
 
 
@@ -486,6 +493,8 @@ def _course_scalars(
 
     # Inner by where it lives: a rebase pair in the sandbox has no `spawned_by`, and "root" puts two roots in one tree.
     kind: CourseKind = sibling_kind(hop.cycle_id)
+    # A fork's course is folded into its parent's and never served: only a family root is asked.
+    stubs = len(stores.campaigns.deletable_stubs(hop)) if kind == "root" else 0
     if kind == "root" and (spawned or in_inner_sandbox(stores.projects_root)):
         kind = "inner"
 
@@ -500,6 +509,7 @@ def _course_scalars(
         "task": None if spawned is None else spawned.task or None,
         "dataset_name": campaign.dataset_name if campaign else "",
         "run_standing": None if index is None else index.standing,
+        "deletable_stubs": stubs,
         "elects_on": next((e.elects_on for e in elections.values()), None),
     }
 

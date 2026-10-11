@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from promptpotter.domain.results import DiagnosticRunRecord
-from promptpotter.infrastructure.store.io import read_json_optional, write_json
+from promptpotter.infrastructure.store.io import write_json
 
 
 def _ts_filename_part(ts: str) -> str:
@@ -31,20 +31,6 @@ class DiagnosticRunStore:
         path = self._path(record.ts, record.config_hash)
         write_json(path, record.model_dump())
         return path
-
-    def list(self, dataset: str | None = None) -> list[DiagnosticRunRecord]:
-        out: list[DiagnosticRunRecord] = []
-        dir_ = self._dir()
-        if not dir_.exists():
-            return out
-        for p in sorted(dir_.glob("*.json"), reverse=True):
-            raw = read_json_optional(p)
-            if not isinstance(raw, dict):
-                continue
-            if dataset is not None and raw.get("dataset") != dataset:
-                continue
-            out.append(DiagnosticRunRecord.model_validate(raw))
-        return out
 
 
 __all__ = ["DiagnosticRunStore"]

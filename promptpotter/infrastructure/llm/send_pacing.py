@@ -111,13 +111,22 @@ def throttle_stall_given_to(sink: Callable[[float], None]) -> Iterator[None]:
         _THROTTLE_STALL_SINK.reset(token)
 
 
-# Unbound is the default share, which the check-in resolver's turns draw on (`jobs/quota.py`).
-_RATE_TENANT: ContextVar[str] = ContextVar("rate_tenant", default="")
+_RATE_TENANT: ContextVar[str] = ContextVar("rate_tenant")
 
 
 def set_rate_tenant(tenant: str) -> None:
     """The ACCOUNT, never the campaign: N campaigns must not take one user N shares."""
     _RATE_TENANT.set(tenant)
+
+
+def _rate_tenant() -> str:
+    try:
+        return _RATE_TENANT.get()
+    except LookupError:
+        raise RuntimeError(
+            "no rate tenant is bound, so this send would wait on no account's share. Every entry "
+            "that sends calls `set_rate_tenant` where it binds its account's spend book."
+        ) from None
 
 
 # Locked: the reader runs in FastAPI's threadpool, every writer on the event loop.
@@ -524,7 +533,7 @@ class RateLimiter:
 
     async def _acquire(self, estimated_tokens: int) -> _TokenReservation:
         started = time.monotonic()
-        waiter = _Waiter(tenant=_RATE_TENANT.get(), tokens=estimated_tokens)
+        waiter = _Waiter(tenant=_rate_tenant(), tokens=estimated_tokens)
         self._waiting.append(waiter)
         try:
             while True:

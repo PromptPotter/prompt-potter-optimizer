@@ -9,7 +9,7 @@ from collections import deque
 from functools import partial
 from itertools import pairwise
 from pathlib import Path
-from typing import Any, ClassVar, NamedTuple
+from typing import Any, NamedTuple
 
 from pydantic import ConfigDict, Field
 
@@ -25,7 +25,7 @@ from promptpotter.infrastructure.store.layout import (
     cycle_dir_for,
 )
 from promptpotter.infrastructure.store.lineage_queries import FamilyCourse
-from promptpotter.infrastructure.store.read_model import LedgerIndex, RecordClasses
+from promptpotter.infrastructure.store.read_model import LineIndex
 from promptpotter.shared.clock import epoch_seconds
 
 __all__ = [
@@ -118,8 +118,6 @@ class _Tail(NamedTuple):
 
 
 class _RayTail:
-    records: ClassVar[RecordClasses] = ()
-
     def __init__(
         self, limit: int = MAX_RAY_LIMIT, path_and_bound: tuple[str, RayCursor] | None = None
     ) -> None:
@@ -133,19 +131,19 @@ class _RayTail:
         self._last_epoch: float | None = None
         self._last_ts = ""
 
-    def feed(self, offset: int, rec: dict[str, Any]) -> None:
-        kind = rec.get("record_type")
+    def feed(self, offset: int, line: dict[str, Any]) -> None:
+        kind = line.get("record_type")
         if not isinstance(kind, str) or kind not in RECORD_KINDS:
             return
-        record = bearing_record(kind, rec)
+        record = bearing_record(kind, line)
         item = None if record is None else self._feed.read(offset, record)
-        own = epoch_seconds(rec.get("timestamp"))
+        own = epoch_seconds(line.get("timestamp"))
         if own is None or (self._last_epoch is not None and own < self._last_epoch):
             if self._last_epoch is None:
                 # A fabricated epoch would sort below every outstanding cursor and mutate served windows.
                 return
         else:
-            self._last_epoch, self._last_ts = own, str(rec.get("timestamp"))
+            self._last_epoch, self._last_ts = own, str(line.get("timestamp"))
         # A bare heartbeat rides unread: it is what ends a silence on the ray.
         if item is None and not isinstance(record, LLMCallProgressRecord):
             return
@@ -172,12 +170,12 @@ _RAY_FOLDS = (_RayTail,)
 def _read_curated(
     ledger: Path, *, encoded_path: str, depth: int, keep: int, bound: RayCursor | None
 ) -> tuple[list[_Raw], bool]:
-    tail = LedgerIndex.of(ledger, _RAY_FOLDS).view(_RayTail)[min(depth, 1)]
+    tail = LineIndex.of(ledger, _RAY_FOLDS).view(_RayTail)[min(depth, 1)]
     if bound is not None:
         below = [r for r in tail.rows if (r.epoch, encoded_path, r.offset) < bound]
         if len(below) < keep and tail.total > len(tail.rows):
             window = partial(_RayTail, keep, (encoded_path, bound))
-            older_tail = LedgerIndex(ledger, (window,)).view(_RayTail)[min(depth, 1)]
+            older_tail = LineIndex(ledger, (window,)).view(_RayTail)[min(depth, 1)]
             return older_tail.rows, older_tail.total > keep
         older = tail.total - len(tail.rows) + len(below)
         return below[-keep:], older > keep
