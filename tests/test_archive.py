@@ -44,6 +44,7 @@ from promptpotter.domain.sample import ArchiveEntry, Sample, sample_key
 from promptpotter.domain.scoring import MeasuredCell
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 from promptpotter.infrastructure.ledger import CycleEventLog
+from promptpotter.infrastructure.llm.telemetry import reset_cycle_ledger, set_cycle_ledger
 from promptpotter.infrastructure.store import measurement_archive
 from promptpotter.infrastructure.store.measurement_archive import (
     MeasurementArchive,
@@ -53,7 +54,7 @@ from promptpotter.infrastructure.store.measurement_archive import (
 )
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import DatasetIdentityError
-from tests.factories import optimizer_state, scored_candidate, sheet
+from tests.factories import measurement, optimizer_state, scored_candidate, sheet
 
 # 1. Replay eligibility
 
@@ -280,16 +281,20 @@ def _walk_panel(root: Path, panel: list[Sample], per_sample: str, per_cell: str 
     async def _measure(sample: Sample, _session: Any, *, pipeline_params: Any) -> MeasuredCell:
         return _drawn_row(sample, "b" if sample.id % 2 else "a")
 
-    with mock.patch.object(query_loop, "measure_sample", _measure):
-        walked = asyncio.run(
-            search_point_scorer.score_search_point(
-                sp,
-                panel,
-                session,
-                label="panel",
-                measured=None,
+    bound = set_cycle_ledger(CycleEventLog(root / "walk.jsonl"))
+    try:
+        with mock.patch.object(query_loop, "measure_sample", _measure):
+            walked = asyncio.run(
+                search_point_scorer.score_search_point(
+                    sp,
+                    panel,
+                    session,
+                    label="panel",
+                    measured=None,
+                )
             )
-        )
+    finally:
+        reset_cycle_ledger(bound)
     return session, walked
 
 
@@ -502,17 +507,6 @@ def test_compaction_round_trips_every_field_it_moved(built_stores: Stores) -> No
 # 3. Replayed decisions, and forks
 
 
-def _r(score: float) -> dict:
-    # `objective` equals `fitness` here deliberately; `factories.measurement` diverges the two.
-    return {
-        "query": "q",
-        "predicted": "p",
-        "ground_truth": "g",
-        "fitness": score,
-        "objective": score,
-    }
-
-
 def _decisions(*recs: dict[str, Any]) -> list[ResumeCheckpointRecord]:
     return [ResumeCheckpointRecord.model_validate(rec) for rec in recs]
 
@@ -540,7 +534,11 @@ def _round(**kw: Any) -> RoundResult:
 def test_a_replayer_that_cannot_re_derive_is_not_reported_as_a_match() -> None:
     round_data = _round(
         round=0,
-        all_candidate_results={"c1": sheet([{**_r(1.0), "sample_id": 0}])},
+        all_candidate_results={
+            "c1": sheet(
+                [measurement(0, 1.0, objective=1.0, query="q", predicted="p", ground_truth="g")]
+            )
+        },
     )
     div = replay_decisions(
         round_data,
@@ -549,7 +547,6 @@ def test_a_replayer_that_cannot_re_derive_is_not_reported_as_a_match() -> None:
                 "kind": "round_winner",
                 "inputs_ref": {"candidate_ids": ["c1"], "round_num": 0, "coverage_floor": 1},
                 "outcome": "c1",
-                "data": {"parent_cells": [{**_r(0.0), "sample_id": 0}]},
             }
         ),
     )
@@ -567,7 +564,7 @@ def test_a_cut_made_past_an_errored_cell_replays_on_the_cells_it_was_fit_on() ->
     from promptpotter.application.optimizers.potter.pobb.checks import EliminationGate
     from promptpotter.application.optimizers.potter.race import PoBBRace
     from promptpotter.domain.search_point import JobSearchPoint
-    from tests.factories import measurement, measurements, pobb_knobs
+    from tests.factories import measurements, pobb_knobs
 
     cycle = SimpleNamespace(
         optimizer=SimpleNamespace(knobs=lambda node: pobb_knobs(epsilon=0.30)),
@@ -610,6 +607,109 @@ def test_a_cut_made_past_an_errored_cell_replays_on_the_cells_it_was_fit_on() ->
         ),
     )
     assert replayed is None, "the cut the live rule made is the cut its own record replays"
+
+
+def test_a_charged_parent_error_replays_at_the_grade_the_election_read(
+    built_stores: Stores,
+) -> None:
+    from types import SimpleNamespace
+
+    from promptpotter.application.bench.node_context import NodeContext
+    from promptpotter.application.optimizers.nodes import Measured, Proposals, RoundContext
+    from promptpotter.application.optimizers.potter.election import elect_on_theta
+    from promptpotter.application.scoring.closed_rounds import closed_rounds
+    from promptpotter.application.scoring.formula import compile_scorer
+    from promptpotter.domain.results import ReferenceReading
+
+    stores = built_stores
+    scorer = compile_scorer("label_match(predicted, ground_truth)", None, verifier_graded=False)
+
+    def walked(model: str, answers: dict[int, str | None]) -> Any:
+        refs = _file(
+            stores.archive,
+            [
+                {"sample_id": sid, "query": f"q{sid}", "ground_truth": "g", "predicted": said}
+                if said is not None
+                else {
+                    "sample_id": sid,
+                    "query": f"q{sid}",
+                    "ground_truth": "g",
+                    "error": "boom",
+                    "error_category": "PIPELINE",
+                }
+                for sid, said in answers.items()
+            ],
+            dataset_name="replayds",
+            node_configs=[("llm_only", {"model": model})],
+        )
+        return scorer.sheet(
+            filed.cell for ref in refs if (filed := stores.archive.answer(ref)) is not None
+        )
+
+    shared = {sid: "g" if sid < 5 else "x" for sid in range(9)}
+    parent, child = OptSearchPoint(instruction="parent"), OptSearchPoint(instruction="child")
+    # Level with the parent on the nine cells both answered: only the charged error separates them.
+    bar, arm = walked("P", {**shared, 9: None}), walked("C", shared)
+    assert bar.cells[9].scored and bar.cells[9].grade.fitness == 0.0, "guard"
+
+    cycle = SimpleNamespace(
+        difficulty=SimpleNamespace(ruler=None),
+        rounds=[],
+        pending_decisions=[],
+        opt_sp=parent,
+        population=[parent],
+    )
+    scores = [scored_candidate(child.id, label="C1.1")]
+    selection = elect_on_theta(
+        NodeContext(RoundContext(cycle, 1, callbacks=None), "election"),  # type: ignore[arg-type]
+        Measured(
+            rows={child.id: arm},
+            scores=scores,
+            scored=[child],
+            parent=ReferenceReading(opt_sp=parent, report=scored_candidate(parent.id)),
+            parent_rows=bar,
+            references={parent.id: bar},
+            electable=[child],
+            coverage_floor=1,
+            cut=None,
+        ),
+        Proposals([]),
+    )
+    assert selection.selected_id == child.id, "guard: the live election charges the error"
+
+    hop = CycleHop(campaign_id=_CAMPAIGN, cycle_id="cycle_charged_parent")
+    stores.campaigns.mint_cycle(hop)
+    ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(hop)))
+    ledger.append(RoundEnteredRecord(round=1))
+    ledger.append(
+        RoundClosedRecord.of(
+            _round(
+                round=1,
+                label="C1.1",
+                improved=True,
+                opt_sp=child,
+                candidate_scores=scores,
+                selected_labels=["C1.1"],
+                results=arm,
+                all_candidate_results={child.id: arm},
+                reference_results={parent.id: bar},
+            )
+        )
+    )
+    [closed] = closed_rounds(stores, hop, scorer)
+    [decision] = cycle.pending_decisions
+    replayed = replay_decisions(
+        closed,
+        _decisions(
+            {
+                "kind": decision.kind,
+                "round": decision.round,
+                "inputs_ref": decision.inputs_ref,
+                "outcome": decision.outcome,
+            }
+        ),
+    )
+    assert replayed is None, "the replay read the parent's charged error as a cell nobody scored"
 
 
 _CAMPAIGN = "testds__20260101-000000"

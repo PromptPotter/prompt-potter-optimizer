@@ -9,11 +9,12 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import dataclasses
 import json
 import pickle
 import random
 import types
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -86,7 +87,6 @@ from promptpotter.domain.paired_reading import (
     CellSetName,
     CoverageState,
     EstimatorSpec,
-    IntervalMethod,
     Measurand,
     MeasurandKind,
     MeasurandUnit,
@@ -126,6 +126,7 @@ from promptpotter.domain.sample import ArchiveEntry, Sample
 from promptpotter.domain.scoring import (
     ROW_GRADES,
     CellSheet,
+    GradedCell,
     MeasuredCell,
     PipelineData,
     Scorer,
@@ -134,6 +135,13 @@ from promptpotter.domain.scoring import (
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.spend import SpendCeilings
 from promptpotter.infrastructure.ledger import CycleEventLog
+from promptpotter.infrastructure.llm.telemetry import (
+    active_cycle_ledger,
+    reset_current_round,
+    reset_cycle_ledger,
+    set_current_round,
+    set_cycle_ledger,
+)
 from promptpotter.infrastructure.store.measurement_archive import config_key
 from promptpotter.shared.answer_text import extract_gsm8k_number
 from promptpotter.shared.measurement_context import NO_ROUND_SLOT, MeasurementRole, RoleScope
@@ -203,7 +211,7 @@ def test_a_dial_reads_its_term_against_the_origin_and_never_sums_a_raw_unit() ->
     from promptpotter.application.scoring.formula import origin_anchors, parse_dials, realize_dials
     from promptpotter.domain.scoring import anchored_criterion_dials
 
-    def cell(said: str, tokens: int) -> dict[str, Any]:
+    def cell(said: str, tokens: int) -> GradedCell:
         return measurement(
             0,
             None,
@@ -221,7 +229,7 @@ def test_a_dial_reads_its_term_against_the_origin_and_never_sums_a_raw_unit() ->
     scorer = compile_scorer("label_match(predicted, ground_truth)", formula, verifier_graded=False)
 
     def scored(said: str, tokens: int) -> float:
-        graded = scorer.read([cell(said, tokens)])
+        graded = scorer.sheet([cell(said, tokens).facts])
         return compute_composite_fitness(graded, _single_node_schema()).composite_fitness
 
     assert scored("a", 692) == pytest.approx(1.0)
@@ -247,20 +255,21 @@ def test_a_miss_is_charged_its_cost_and_a_solved_cell_scores_its_composite(monke
     per_sample = "label_match(predicted, ground_truth)"
     per_cell = "fitness * (0.92 + 0.08 * 692.0 / max(692.0, tokens))"
 
-    def cell(sid: int, predicted: str, tokens: int, **extra: Any) -> dict[str, Any]:
-        steps = {"solve": {"input": tokens, "output": 0}}
-        return {
-            "sample_id": sid,
-            "query": "q",
-            "predicted": predicted,
-            "ground_truth": "a",
-            "error": None,
-            "pipeline_data": {"step_tokens": steps},
+    def cell(sid: int, predicted: str, tokens: int, **extra: Any) -> MeasuredCell:
+        steps = {"solve": {"input": tokens, "output": 0, **extra.pop("usd", {})}}
+        return measurement(
+            sid,
+            None,
+            query="q",
+            predicted=predicted,
+            ground_truth="a",
+            error=None,
+            pipeline_data={"step_tokens": steps},
             **extra,
-        }
+        ).facts
 
     scorer = compile_scorer(per_sample, per_cell, verifier_graded=False)
-    graded = scorer.read(
+    graded = scorer.sheet(
         [
             cell(0, "a", 692),
             cell(1, "a", 2076),
@@ -280,8 +289,8 @@ def test_a_miss_is_charged_its_cost_and_a_solved_cell_scores_its_composite(monke
     # The 0% floor is a fact about correctness, which a charged miss no longer reads as zero.
     assert is_floor_pinned(rows[2:4]) and not is_floor_pinned(rows[1:4])
 
-    def objectives(*cells: dict[str, Any]) -> list[float]:
-        return [r.grade.objective for r in scorer.read(cells)]
+    def objectives(*cells: MeasuredCell) -> list[float]:
+        return [r.grade.objective for r in scorer.sheet(cells)]
 
     solved = objectives(*(cell(i, "a", t) for i, t in enumerate((100, 692, 1000, 2076, 10**7))))
     assert solved[0] == solved[1] and solved[1:] == sorted(set(solved[1:]), reverse=True)
@@ -292,15 +301,13 @@ def test_a_miss_is_charged_its_cost_and_a_solved_cell_scores_its_composite(monke
     assert sum(long_perfect) > sum(short_half), "length outranked a 2x accuracy gap"
 
     # A cost term reads the provider's bill, else our rate's price: most report no dollars.
-    def costing(**usd: float) -> dict[str, Any]:
-        row = cell(0, "a", 692)
-        row["pipeline_data"]["step_tokens"]["solve"].update(usd)
-        return row
+    def costing(**usd: float) -> MeasuredCell:
+        return cell(0, "a", 692, usd=usd)
 
     by_cost = compile_scorer(per_sample, "fitness / (1.0 + cost)", verifier_graded=False)
-    at_rate, billed = by_cost.read([costing(rate_priced_usd=1.0), costing(cost_usd=3.0)])
+    at_rate, billed = by_cost.sheet([costing(rate_priced_usd=1.0), costing(cost_usd=3.0)])
     assert (at_rate.grade.objective, billed.grade.objective) == (0.5, 0.25)
-    assert "cost" not in compiler.cell_channels_of(MeasuredCell.from_wire(costing()), None)
+    assert "cost" not in compiler.cell_channels_of(costing(), None)
 
     # The share is half the grading function: a ruler must never pool grades across two of them.
     before = auto_scorer_id(per_sample, per_cell, judge_instrument=None)
@@ -309,7 +316,7 @@ def test_a_miss_is_charged_its_cost_and_a_solved_cell_scores_its_composite(monke
     monkeypatch.setattr(compiler, "MISS_COST_SHARE", 0.3)
     assert auto_scorer_id(per_sample, per_cell, judge_instrument=None) != before
     # Only a DECLARED cell formula charges a miss: the id, never the text, names the grader.
-    [defaulted] = compile_scorer(per_sample, None, verifier_graded=False).read([cell(2, "b", 692)])
+    defaulted = compile_scorer(per_sample, None, verifier_graded=False).grade(cell(2, "b", 692))
     assert defaulted.grade.objective == 0.0
     assert auto_scorer_id(per_sample, None, judge_instrument=None) != auto_scorer_id(
         per_sample, DEFAULT_CELL_FORMULA, judge_instrument=None
@@ -358,7 +365,7 @@ def test_a_conversation_reaches_the_formula_only_as_projected_scalars() -> None:
         None,
         verifier_graded=True,
     )
-    assert scorer.grade(MeasuredCell.from_wire(row)).grade.fitness == 1.0
+    assert scorer.grade(row.facts).grade.fitness == 1.0
 
     # Refused at COMPILE: a bare Call reaches eval as a NameError, which reads as a missing TERM.
     for formula in ("turns[0]", "turns.index"):
@@ -374,13 +381,18 @@ def test_a_grade_is_a_new_record_and_keeps_nothing_of_the_formula_before_it() ->
     composed = compile_scorer("skill_opened", "fitness * 0.5", verifier_graded=True)
     plain = compile_scorer("env_reward", None, verifier_graded=True)
 
-    def record(**channels: float) -> dict[str, Any]:
+    def facts(error: str | None = None, **channels: float) -> MeasuredCell:
+        fault = {"error_category": "SERVER"} if error else {}
         return measurement(
-            0, None, query="q", ground_truth="", predicted="p", error=None, pipeline_data=channels
-        )
-
-    def facts(**channels: float) -> MeasuredCell:
-        return MeasuredCell.from_wire(record(**channels))
+            0,
+            None,
+            query="q",
+            ground_truth="",
+            predicted="p",
+            error=error,
+            pipeline_data=channels,
+            **fault,
+        ).facts
 
     both = facts(skill_opened=1.0, env_reward=0.25)
     as_banked = json.dumps(both.wire(), sort_keys=True)
@@ -402,9 +414,7 @@ def test_a_grade_is_a_new_record_and_keeps_nothing_of_the_formula_before_it() ->
 
     # An errored row is graded 0.0 without evaluating a formula that would raise on it.
     raising = compile_scorer("1.0 / tokens", None, verifier_graded=True)
-    unanswered = MeasuredCell.from_wire(
-        {**record(tokens=0.0), "error": "HTTP 502", "error_category": "SERVER"}
-    )
+    unanswered = facts("HTTP 502", tokens=0.0)
     with pytest.raises(ScoringFormulaError):
         raising.grade(facts(tokens=0.0))
     errored = raising.grade(unanswered)
@@ -532,14 +542,15 @@ def test_an_unmeasured_term_is_never_scored_as_zero() -> None:
     assert _timed(0.0, {}).cost_s is None
 
     deprecated = _result_min("q", "a") | {"error": "SCHEMA_VALIDATION_FAILED", "fitness": 0.0}
-    assert compute_accuracy(results=sheet([deprecated]).cells) == 0.0
+    assert compute_accuracy(results=[GradedCell.from_wire(deprecated)]) == 0.0
 
     # A provider's fault is the ABSENCE of a verdict: out of the mean, still on the error channel.
     scored = _result_min("q", "a") | {"hit": True, "fitness": 1.0}
     errored = _result_min("ERROR", "a") | {"error": "boom", "error_category": "SERVER"}
     del errored["fitness"], errored["hit"]  # real error rows carry neither
-    assert compute_accuracy(results=sheet([scored, errored]).cells) == 1.0
-    assert compute_error_rate(results=sheet([scored, errored]).cells) == 0.5
+    pair = [GradedCell.from_wire(scored), GradedCell.from_wire(errored)]
+    assert compute_accuracy(results=pair) == 1.0
+    assert compute_error_rate(results=pair) == 0.5
 
     # An EMPTY round has NO score, never a 0.0 that reads as an arm that failed every cell.
     empty = compute_composite_fitness(sheet([]), _single_node_schema())
@@ -551,7 +562,9 @@ def test_an_unmeasured_term_is_never_scored_as_zero() -> None:
     # Every row ERRORED with no label to miss: no rate either (an L4 cell cut throughout is not 0%).
     errored = _result_min("ERROR", "") | {"error": "boom", "error_category": "HALTED"}
     del errored["fitness"], errored["hit"]
-    all_errored = compute_composite_fitness(sheet([errored]), _single_node_schema())
+    all_errored = compute_composite_fitness(
+        sheet([GradedCell.from_wire(errored)]), _single_node_schema()
+    )
     assert all_errored.accuracy is None
     assert all_errored.composite_fitness is None
     assert all_errored.total == 0
@@ -561,23 +574,24 @@ def test_a_cell_the_prompt_failed_stays_in_the_denominator_as_a_miss() -> None:
     """Only a provider fault leaves the count: a refusal and a cut cell are the prompt's own."""
     scorer = compile_scorer("label_match(predicted, ground_truth)", verifier_graded=False)
 
-    def row(sid: int, predicted: str, **extra: Any) -> dict[str, Any]:
-        cell = {"sample_id": sid, "query": f"q{sid}", "ground_truth": "a", "predicted": predicted}
-        return {**cell, "error": None, "pipeline_data": {}, **extra}
+    def row(sid: int, predicted: str, **extra: Any) -> MeasuredCell:
+        cell = {"query": f"q{sid}", "ground_truth": "a", "predicted": predicted, "error": None}
+        return measurement(sid, None, **{**cell, **extra}).facts
 
     rows = [row(i, "a") for i in range(5)]
     rows += [row(5 + i, "I cannot help with that request.") for i in range(5)]
+    cut = {"error": "ran past its envelope", "error_category": "HALTED"}
     rows += [
-        row(10, "ERROR", error="ran past its envelope", error_category="HALTED"),
+        row(10, "ERROR", **cut),
         row(11, "ERROR", error="HTTP 502", error_category="SERVER"),
     ]
-    scores = compute_composite_fitness(scorer.read(rows), _single_node_schema())
+    scores = compute_composite_fitness(scorer.sheet(rows), _single_node_schema())
     assert (scores.total, len(rows) - scores.total) == (11, 1)
     assert scores.accuracy == pytest.approx(5 / 11), "the prompt's own failures left the count"
     # The default formula is plain accuracy, so the decision metric and the headline agree.
     assert scores.composite_fitness == pytest.approx(scores.accuracy)
     # With no label a cut cell has no miss to be, so it carries no verdict either.
-    [unlabelled] = scorer.read([{**rows[10], "ground_truth": ""}])
+    unlabelled = scorer.grade(row(10, "ERROR", ground_truth="", **cut))
     assert not unlabelled.scored
 
 
@@ -598,11 +612,9 @@ def test_a_measured_cell_the_formula_cannot_grade_is_kept_not_failed() -> None:
     scorer = compile_scorer("skill_opened", None, verifier_graded=True)
 
     # The second was banked under another formula: its verdict is one this formula cannot derive.
-    carries, lacks = scorer.read(
-        [
-            {**_r(1.0), "pipeline_data": {"skill_opened": 1.0}},
-            {**_r(1.0), "pipeline_data": {"env_reward": 1.0}},
-        ]
+    carries, lacks = scorer.sheet(
+        MeasuredCell.from_wire({**_r(1.0), "pipeline_data": channels})
+        for channels in ({"skill_opened": 1.0}, {"env_reward": 1.0})
     )
 
     assert carries.grade.fitness == 1.0 and carries.grade.objective == 1.0
@@ -625,8 +637,8 @@ def test_a_measured_cell_the_formula_cannot_grade_is_kept_not_failed() -> None:
 
     # A formula that RAISES is a different fact and must still halt loud.
     with pytest.raises(ScoringFormulaError):
-        compile_scorer("1.0 / tokens", None, verifier_graded=True).read(
-            [{**_r(1.0), "pipeline_data": {"tokens": 0.0}}]
+        compile_scorer("1.0 / tokens", None, verifier_graded=True).grade(
+            MeasuredCell.from_wire({**_r(1.0), "pipeline_data": {"tokens": 0.0}})
         )
 
 
@@ -712,7 +724,7 @@ def test_round_winner_elects_by_ability_not_subset_accuracy() -> None:
     able_on_hard = [measurement(i, float(i < 34)) for i in range(20, 40)]
     results_by_id = {"weak_on_easy": sheet(weak_on_easy), "able_on_hard": sheet(able_on_hard)}
 
-    assert sum(r["hit"] for r in weak_on_easy) / 20 > sum(r["hit"] for r in able_on_hard) / 20
+    assert sum(r.hit for r in weak_on_easy) / 20 > sum(r.hit for r in able_on_hard) / 20
     winner_id, abilities = elect_round_winner(
         ["weak_on_easy", "able_on_hard"], results_by_id, sheet(origin), 4, ruler, parent_bias=0.0
     )
@@ -875,7 +887,8 @@ def _peer_cycle(
         }
     )
     session = loop_session(built_stores, schema, bank)
-    session.state.ledger = CycleEventLog.open(CycleDir(tmp_path / "cycle"))
+    # A second handle on one file is a second appender, so the one `in_round` bound is the cycle's.
+    session.state.ledger = active_cycle_ledger() or CycleEventLog.open(CycleDir(tmp_path / "cycle"))
     # The campaign's composite REWARDS length, the opposite of CAPO's objective.
     session.scoring.scorer = compile_scorer(
         "label_match(predicted, ground_truth)",
@@ -1006,6 +1019,16 @@ _C0_PANEL: list[float | None] = [0.0] * 8 + [1.0]
 _CLEAN_PANEL: list[float | None] = [1.0] * 9
 
 
+@pytest.fixture
+def in_round(tmp_path: Path) -> Iterator[None]:
+    """What a run seam binds: the cycle's ledger, which `_peer_cycle` takes up, and the round."""
+    ledger = set_cycle_ledger(CycleEventLog.open(CycleDir(tmp_path / "cycle")))
+    token = set_current_round(1)
+    yield
+    reset_current_round(token)
+    reset_cycle_ledger(ledger)
+
+
 _QUIET_CALLBACKS = types.SimpleNamespace(
     view_context=ViewContext(),
     on_phase=_noop,
@@ -1024,6 +1047,7 @@ def test_a_round_the_budget_cuts_elects_on_the_cells_it_paid_for(
     built_stores,
     tmp_path,
     monkeypatch,
+    in_round,
     cut_round: int,
     budget: int,
     replayed: int,
@@ -1107,7 +1131,7 @@ class _ComposedPayload(RoundPayload, manifest="ga-composition"):
 
 
 def test_one_round_composes_a_peers_crossover_with_potters_racing_selector(
-    built_stores, tmp_path, monkeypatch
+    built_stores, tmp_path, monkeypatch, in_round
 ) -> None:
     import yaml
 
@@ -1199,7 +1223,7 @@ def test_one_round_composes_a_peers_crossover_with_potters_racing_selector(
 
 
 def test_capos_split_nodes_make_the_children_its_one_crossover_made_for_the_same_draws(
-    built_stores, tmp_path, monkeypatch
+    built_stores, tmp_path, monkeypatch, in_round
 ) -> None:
     """Handed ONE stream in walk order, the three nodes make the offspring one node would."""
     from promptpotter.application.optimizers.capo.members import cross_shots, mutate_shots
@@ -1273,7 +1297,7 @@ def test_capos_split_nodes_make_the_children_its_one_crossover_made_for_the_same
 
 
 def test_the_bench_grades_the_pick_the_optimizer_declared_over_a_higher_composite_round(
-    built_stores, tmp_path, monkeypatch
+    built_stores, tmp_path, monkeypatch, in_round
 ) -> None:
 
     async def _llm(messages: list[dict], **_kw: Any) -> Any:
@@ -1606,14 +1630,16 @@ def test_the_collapse_gate_reads_the_answer_not_the_labels() -> None:
     """A verifier proves an answer wrong by an unsolved cell; alike and all-solved is NOT collapsed."""
     from promptpotter.shared.errors import ErrorCategory
 
-    def rows(fitness: list[float], **over: Any) -> list[Any]:
+    def rows(fitness: list[float], **over: Any) -> list[GradedCell]:
         return [
-            {"sample_id": i, "ground_truth": "", "predicted": "done", "fitness": f, **over}
+            GradedCell.from_wire(
+                {"sample_id": i, "ground_truth": "", "predicted": "done", "fitness": f, **over}
+            )
             for i, f in enumerate(fitness)
         ]
 
-    def cut(rs: list[Any]) -> Any:
-        return PoBBCheck(pobb_knobs(), n_min=6, n_samples=28, ruler=None).check(sheet(rs).cells)
+    def cut(rs: list[GradedCell]) -> Any:
+        return PoBBCheck(pobb_knobs(), n_min=6, n_samples=28, ruler=None).check(rs)
 
     signal = cut(rows([1.0, 0.0, 0.0, 1.0, 0.0, 0.0]))
     assert signal is not None, "a constant answerer must be cut at n_min with no labels to read"
@@ -1629,12 +1655,14 @@ def test_the_collapse_gate_reads_the_answer_not_the_labels() -> None:
 
     # A collapse cut returns before the posterior, so it carries no ε field.
     labelled = [
-        {
-            "sample_id": i,
-            "fitness": 1.0 if i % 2 == 0 else 0.0,
-            "predicted": "Uncertain",
-            "ground_truth": "TRUE" if i % 2 == 0 else "FALSE",
-        }
+        GradedCell.from_wire(
+            {
+                "sample_id": i,
+                "fitness": 1.0 if i % 2 == 0 else 0.0,
+                "predicted": "Uncertain",
+                "ground_truth": "TRUE" if i % 2 == 0 else "FALSE",
+            }
+        )
         for i in range(6)
     ]
     signal = cut(labelled)
@@ -1695,25 +1723,23 @@ def test_a_fatal_row_ends_a_candidate_on_one_sighting_and_an_advisory_never_does
 
     check = DegradationCheck(threshold=0.4, min_samples=3)
 
-    sig = check.check(
-        sheet([measurement(0, 1.0), {**measurement(1, 1.0), **warn("structural")}]).cells
-    )
+    sig = check.check([measurement(0, 1.0), measurement(1, 1.0, **warn("structural"))])
     assert sig is not None
     assert sig.check_result["fatal"] is True
 
     # An unstamped warning is advisory: the source stamp is the only structural signal.
     for kind in ("transient", None):
-        advisory = sheet({**measurement(i, 1.0), **warn(kind)} for i in range(6))
-        assert check.check(advisory.cells) is None
+        advisory = [measurement(i, 1.0, **warn(kind)) for i in range(6)]
+        assert check.check(advisory) is None
 
     assert check.check(sheet([measurement(0, 1.0), measurement(1, 0.0)]).cells) is None
 
     # The rate arm, with the fast path off so the threshold is what is under test.
     rated = DegradationCheck(threshold=0.4, min_samples=3, fatal_fastpath=False)
-    fatal_row = {**measurement(0, 0.0), **warn("structural")}
+    fatal = [measurement(sid, 0.0, **warn("structural")) for sid in (0, 9)]
     clean = [measurement(i, 1.0) for i in range(1, 6)]
-    assert rated.check(sheet([fatal_row, *clean[:4]]).cells) is None  # 1/5 = 0.2, under the bar
-    cut = rated.check(sheet([fatal_row, {**fatal_row, "sample_id": 9}, *clean[:2]]).cells)
+    assert rated.check([fatal[0], *clean[:4]]) is None  # 1/5 = 0.2, under the bar
+    cut = rated.check([*fatal, *clean[:2]])
     assert cut is not None and cut.check_result["degraded_rate"] == pytest.approx(0.5)
 
 
@@ -1725,8 +1751,8 @@ def test_unscoreable_cells_counts_holes_but_not_stops_or_deprecated_rows() -> No
     from promptpotter.domain.scoring import NO_RESULT
     from promptpotter.shared.errors import ErrorCategory
 
-    def row(sample_id: int, **extra: Any) -> dict[str, Any]:
-        return {"sample_id": sample_id, "predicted": "TRUE", **extra}
+    def row(sample_id: int, predicted: str = "TRUE", **extra: Any) -> GradedCell:
+        return measurement(sample_id, None, predicted=predicted, **extra)
 
     holed = [row(i) for i in range(4)] + [
         row(4, predicted="ERROR", error_category="UNKNOWN", error="ran past its deadline"),
@@ -1755,16 +1781,14 @@ def test_unscoreable_cells_counts_holes_but_not_stops_or_deprecated_rows() -> No
             },
         },
     )
-    assert is_deprecated(MeasuredCell.from_wire(deprecated)), (
-        "fixture drift — this row must classify as deprecated"
-    )
+    assert is_deprecated(deprecated.facts), "fixture drift — this row must classify as deprecated"
     assert unscoreable_cells(sheet([row(0), row(1), row(2), deprecated])) == 0, (
         "a classifier-deprecated sample was counted as a hole — the gate would halt a "
         "healthy cycle on a transient retry the loop already handles"
     )
 
     # A cell a declared bound CUT is settled, not a hole: the same bound cuts the next attempt.
-    def _rows(category: ErrorCategory) -> list[dict[str, Any]]:
+    def _rows(category: ErrorCategory) -> list[GradedCell]:
         return [
             measurement(0, 1.0),
             measurement(1, None, error="no verdict", error_category=category),
@@ -2276,8 +2300,8 @@ def test_a_verify_reads_its_fresh_cells_alone_and_pairs_its_lift_over_the_origin
             scorer_id="s",
         )
 
-    def keyed(rows: list[dict[str, Any]]) -> CellSheet:
-        return sheet(({**row, "sample_key": f"k{row['sample_id']}"} for row in rows), "s")
+    def keyed(rows: list[GradedCell]) -> CellSheet:
+        return sheet((_keyed(row, f"k{row.sample_id}") for row in rows), "s")
 
     recorded = keyed(measurements([1.0] * 20))
     fresh = keyed(measurements([1.0, 0.0] * 5, range(100, 110)))
@@ -2450,9 +2474,13 @@ def test_paired_mean_t_matches_ttest_rel_and_brackets_the_same_evidence_it_tests
     assert paired_mean_t([0.5], [0.1])[1:4] == (None, None, None)
 
 
+def _keyed(cell: GradedCell, sample_key: str) -> GradedCell:
+    return cell.filed(dataclasses.replace(cell.facts, sample_key=sample_key))
+
+
 def _pair_member(
     individual: str,
-    rows: list[dict[str, Any]],
+    rows: list[GradedCell],
     bank: list[Sample],
     *,
     scorer_id: str = "s",
@@ -2465,9 +2493,7 @@ def _pair_member(
             "address": MemberAddress(
                 path=(hop,), individual_id=individual, arm=None, pass_role=None
             ),
-            "sheet": sheet(
-                ({**row, "sample_key": key_of[row["sample_id"]]} for row in rows), scorer_id
-            ),
+            "sheet": sheet((_keyed(row, key_of[row.sample_id]) for row in rows), scorer_id),
             "bought": 0,
             "cut": False,
             "scope": RoleScope.DECISION,
@@ -2492,9 +2518,7 @@ def _read_pair(a: MemberRows, b: MemberRows, panel: list[Sample], **asked: Any) 
             "masked": False,
             "dataset_hash": "d",
             "measurands": [hit],
-            "spec": EstimatorSpec(
-                interval_method=IntervalMethod.STUDENT_T, alpha=0.05, null_value=0.0
-            ),
+            "spec": EstimatorSpec(alpha=0.05, null_value=0.0),
             "scope": RoleScope.DECISION,
             "instrument_id": "i",
         }
@@ -2518,7 +2542,7 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored() -> None:
     )
     b = _pair_member(
         "b",
-        [*measurements([1.0, 1.0, 1.0, 0.0, 1.0, 1.0]), measurement(6, None, unscored=True)],
+        [*measurements([1.0, 1.0, 1.0, 0.0, 1.0, 1.0]), measurement(6, None, unscored="no term")],
         bank,
     )
     composite = Measurand(
@@ -2589,7 +2613,7 @@ def test_a_cell_measured_twice_is_one_standing_row_to_every_reader() -> None:
 
     bank = [Sample(id=i, query=f"q{i}", ground_truth="t") for i in range(4)]
 
-    def unanswered(sid: int) -> dict[str, Any]:
+    def unanswered(sid: int) -> GradedCell:
         return measurement(sid, None, error="HTTP 502", error_category="SERVER")
 
     walked = [
@@ -2599,7 +2623,7 @@ def test_a_cell_measured_twice_is_one_standing_row_to_every_reader() -> None:
         measurement(3, 1.0),
     ]
     standing = {0: 1.0, 1: 1.0, 2: 0.0, 3: 1.0}
-    worth = {sid: measurement(sid, grade)["objective"] for sid, grade in standing.items()}
+    worth = {sid: measurement(sid, grade).grade.objective for sid, grade in standing.items()}
     twice = _pair_member("twice", walked, bank)
     cells = twice.sheet
 
@@ -3097,7 +3121,6 @@ def test_a_head_to_head_pairs_two_optimizers_only_on_one_bench_under_one_grader(
     )
     # The lift is priced on the SEARCH alone: the bench's own pass is the instrument grading it.
     assert row.bench.cost.lift_per_usd == pytest.approx(0.3 / 0.25)
-    assert [r.concurrent_with for r in h2h.rows] == [[], []]
     assert [r.bench.status.reads_before for r in h2h.rows] == [1, 2]
     # A campaign ticked in the webapp arrives as a COURSE and stands for the campaign ONCE.
     course = SubjectSpec("course", "potter_a", "cycle_potter_a_fork_r1")
@@ -3135,7 +3158,6 @@ def test_a_head_to_head_pairs_two_optimizers_only_on_one_bench_under_one_grader(
     overlapping = campaign("capo_f", 6, seed=0, selected=0.7, at=1)
     h2h = subject_evidence(stores, [potter, capo, overlapping]).head_to_head
     assert h2h is not None and h2h.verdict is True and len(h2h.pairs) == 3
-    assert [r.concurrent_with for r in h2h.rows] == [["capo_f"], [], ["potter_a"]]
 
     # One optimizer on another model: a gap to it is the model's as much as the method's.
     swapped = campaign("potter_g", 7, seed=0, selected=0.7, proposer_model="other/model")
@@ -3322,7 +3344,7 @@ def test_an_arm_still_scoring_reads_only_its_own_cells_and_says_it_is_partial(
 
 
 def _filed(
-    stores: Any, individual: str, rows: list[Any], *, role: str = "panel", sp_hash: str = ""
+    stores: Any, individual: str, rows: list[GradedCell], *, role: str = "panel", sp_hash: str = ""
 ) -> list[WalkedCell]:
     """A cell is keyed by the query it asks unless the row names its own key."""
     entry = ArchiveEntry(
@@ -3333,17 +3355,22 @@ def _filed(
         pipeline_params={},
         dataset_name="ds",
     )
-    keyed = [{"sample_key": f"key:{row['query']}", **row} for row in rows]
+    keyed = [
+        row.facts
+        if row.facts.sample_key
+        else dataclasses.replace(row.facts, sample_key=f"key:{row.facts.query}")
+        for row in rows
+    ]
     answers = stores.archive.file_answers(
         entry,
-        [(MeasuredCell.from_wire(row), "A") for row in keyed],
+        [(facts, "A") for facts in keyed],
         role=role,
         source="optimization_loop",
         created_at="",
     )
     return [
-        (row["sample_key"], row["sample_id"], answer, False)
-        for row, answer in zip(keyed, answers, strict=True)
+        (facts.sample_key, facts.sample_id, answer, False)
+        for facts, answer in zip(keyed, answers, strict=True)
     ]
 
 

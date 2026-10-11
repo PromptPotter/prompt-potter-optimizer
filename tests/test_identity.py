@@ -478,7 +478,9 @@ def test_a_row_reads_as_the_search_space_its_ticks_and_padlock_drew() -> None:
     from promptpotter.domain.pipeline_schema import NodeConfigParam, ParamIntent, narrowing_of
 
     rows = [
-        NodeConfigParam(key="model", kind="model", options=["a", "b"], permitted=["a"]),
+        NodeConfigParam(
+            key="model", kind="model", options=["a", "b"], permitted=["a"], permitted_stated=True
+        ),
         NodeConfigParam(key="effort", kind="enum", options=["low", "mid", "high"]),
         NodeConfigParam(key="temperature", kind="number"),
     ]
