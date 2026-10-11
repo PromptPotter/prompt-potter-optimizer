@@ -82,7 +82,8 @@ The word `legacy` is **never** sanctioned.
   write-target newtypes (passed through, never reconstructed from `str`);
   `dashboard.json` is per-cycle, so projections bind to `CycleDir`.
 - `pipeline_overlay.py` — the SHAPE of a `pipeline_params` dict: `RESERVED_PIPELINE_PARAM_KEYS` +
-  `node_config_items` (the canonical walk), the two overlay predicates and `fold_output_contract`.
+  `node_config_items` (the canonical walk), `apply_node_overlay` / `merge_pipeline_params` (the one
+  merge), the two overlay predicates and `fold_output_contract`.
   A re-derived `k == "steps" and isinstance(…)` is a second definition of a node config.
 - `wire_record.py` — a slots dataclass as its own wire record: `null` reads as absent, a
   wrong-typed value raises `TypeError`, and what the reader builds is immutable one level down.

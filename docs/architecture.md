@@ -171,7 +171,7 @@ Each is one value from one function, and none folds into another.
   digests every round stamps: `classify_config_diff` reads a knob edit as policy and a swapped
   `optimizer` or llm-node call config as `TREATMENT` (`Scope.IDENTITY`), never policy.
 - **Bench set** — what graded the headline: `domain/campaign.py::bench_set_of` — what measured
-  the cells (`instrument_id`, `instrument_of`), the bank's rows (`dataset_hash`), the held-out ids, the `scorer_id` the passes were read under (never
+  the cells (`instrument_id`, `instrument_of`), the bank's rows (`dataset_hash`), the held-out rows by content (`bench_rows`, the `CellSet` of `domain/bench.py::bench_split` that every bench pair is read on), the `scorer_id` the passes were read under (never
   re-hashed here), the target's node models and the origin (`root_content_hash`: its prompt,
   framing, params and search rows). Two headlines are one quantity only where it agrees; the
   evidence head-to-head reads every arm's passes under ONE scorer — the declared one where the

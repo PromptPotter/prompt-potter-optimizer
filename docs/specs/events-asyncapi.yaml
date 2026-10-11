@@ -877,9 +877,6 @@ components:
               type: integer
               minimum: 1
               description: What the walk held in flight as it launched this cell.
-            stop_horizon:
-              type: [integer, 'null']
-              description: The fewest rows at which a stop rule could still cut.
 
     SampleScoredPayload:
       description: |

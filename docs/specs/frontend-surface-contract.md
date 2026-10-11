@@ -161,9 +161,9 @@ invariants:
                       owned_campaign and nothing else; a future demo-mode or shared-origin read is
                       its OWN decision and does not inherit this one.
                       PERMISSION IS SERVED TWICE on every enumerable axis, because one list
-                      cannot say both: `options` is the MENU, `permitted` the narrower set the
-                      gate allows, `null` that they do not differ (never `[]`, which says
-                      nothing may be picked). `narrow` REPLACES `param_allowed_values`, so a
+                      cannot say both: `options` is the MENU, `permitted` the set the gate
+                      allows — the menu itself where the campaign stated no narrowing, which
+                      `permitted_stated` says. `narrow` REPLACES `param_allowed_values`, so a
                       menu that is its own selection can never offer back an unticked value.'
 ```
 

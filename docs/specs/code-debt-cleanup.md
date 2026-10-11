@@ -133,6 +133,45 @@ and delete the entry if the answer is no.
   cells (`finish_reason=error` then a schema repair) and whether their rate differs by arm; and
   potter's round-5 L2 layout refusal.
 
+## Open — left by the structure pass
+
+Filed at the operator's ask as the hand-off of that pass, not under the multi-arc bar. Each was
+found, sized and deliberately not taken; none is the root of a patch that shipped.
+
+**The browser still derives**
+
+Each needs a served field declared in `api-openapi.yaml` first, then the browser code deleted.
+**Rides with:** any change to the served model named, or to the component. **Re-test:** the
+`file::symbol` still holding the arithmetic.
+
+- **The "waiting" line has two predicates** — `components/shell/remote/useRemoteModel.ts` and
+  `lib/derivations/time-ray.ts`. Serve `dash.wait_line` once. **Blocker:** which predicate is
+  right is the operator's call. **Re-test:** ask; both still present means it stands.
+
+**Unbound context that still does not raise**
+
+`judges/call.py::ask` returns the unbound-ledger raise as an absent grade, by its never-raises
+contract. **Rides with:** any change to the judge call's failure contract. **Re-test:**
+`grep -n "except" promptpotter/judges/call.py` — a catch wide enough to take a `RuntimeError`
+means it stands.
+
+**Structure**
+
+- `application/optimizer_manifest.py` holds a manifest as a dict until its members read it — no
+  `StrictModel` at load, no typed node override. Behavioural. **Rides with:** the next
+  digest-moving edit to that module. **Re-test:**
+  `grep -n "dict\[str, Any\] = read_yaml" promptpotter/application/optimizer_manifest.py`.
+- `judges/` and `application/` import each other, and the connector, judge and optimizer
+  registries are three hand-written loaders over `shared/plugin_registry.py`. **Rides with:** any
+  change to plugin loading. **Re-test:** `gate.py --only layering` names the pair it exempts.
+- `domain/phases.py` holds the stop-reason table and the producer reading for about two fifths of
+  its length; `phases` no longer names them. A split adds modules and removes no cycle — measured,
+  declined; a rename re-points some forty-six files. **Rides with:** a pass that already moves the
+  stop-reason table. **Re-test:** none needed; it is a name.
+- Every CLI verb completes the registries at entry (`cli/campaign_runner.py::main`), about a second
+  a verb, and that call is the package's one deferred import of `application`. **Rides with:** any
+  change to `wiring.py::complete_registries`. **Re-test:** time `python -m promptpotter cycles`.
+
 ## Bypasses — one defect class, held for ONE holistic pass
 
 **A path that goes around the mechanism the rest of the code rides, and re-derives the answer
@@ -182,7 +221,9 @@ an untyped dict.
 
 - **The stored-shape batch — every item below changes what a round file, ledger record or cache
   holds, and lands as ONE pass with the workspace wipe.** **Blocker:** the workspace must stay
-  loadable for the demo. **Re-test:** `ls .promptpotter/projects/*/campaigns` is empty.
+  loadable for the demo. **Re-test:** `ls .promptpotter/projects/*/campaigns` is empty — it was on
+  2026-10-11, so this is UNBLOCKED until a campaign is minted; re-run it, and re-check each item
+  below against the code, since the structure pass took several.
   - *Authorship.* The author's display name is stored beside `issued_by`, so "Steered by" stops
     serving the issuer id; the authoring act and issuer ride the candidate's ledger record
     (`authorship_of` reads every C0 as `origin`).

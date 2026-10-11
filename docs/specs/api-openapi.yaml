@@ -1652,6 +1652,8 @@ paths:
         whole: the closed-row numbers, the searchpoint as a round file's
         `candidate_scores[]` (`ScoredCandidate`) carries it historically, the sample
         tape (`samples[]`) and `validation_failures[]`;
+        `current_round.fitness_bands` counts their scored rows per tenth of [0, 1], as a
+        closed round's own `fitness_bands` counts its `results`;
         `current_round.nodes` holds optimizer LLM calls alone.
         `current_round.measurement_node` names the node the ledger recorded at
         `measure:enter`, and `active_node` names it while it measures.
@@ -3333,23 +3335,12 @@ components:
                 IS the origin, so declaring a second one is contradictory.
             seed:
               $ref: '#/components/schemas/CycleSeed'
-            from_round:
-              type: integer
-              minimum: 0
-            no_divergence_check:
-              type: boolean
-              default: false
-            fork_on_divergence:
-              type: boolean
-              default: false
-            diag:
-              type: boolean
-              default: false
+            mode:
+              $ref: '#/components/schemas/RunMode'
               description: |
-                With the three above, the shape of the fork's FIRST run — the
-                fields `start-run` carries, read the same way, applied to the
-                cycle this command mints. Omitted, the fork runs as a plain
-                `start-run` of it would.
+                The shape of the fork's FIRST run — what `start-run` carries, read
+                the same way, applied to the cycle this command mints. Omitted, the
+                fork runs as a plain `start-run` of it would.
 
     CycleSeed:
       type: object
@@ -3513,11 +3504,6 @@ components:
             resolves it to its root and sweeps every empty stub under that
             root (matching `cleanup_empty_stubs` semantics).
 
-    # The three operator-set launch ceilings. Written out on EACH declaring payload rather than
-    # $ref'd as one branch: `additionalProperties: false` only sees `properties` in its own schema
-    # object, so folding these in via `allOf` would close the payload against the very fields it
-    # declares. One model serves all three (`domain/launch_limits.py::LaunchLimits`, which each
-    # payload inherits) — keep the copies identical. The set is mint-campaign, start-run and
     SpendCeilings:
       type: object
       additionalProperties: false
@@ -3542,14 +3528,17 @@ components:
             model-portable twin of `usd` and the one that still binds when a model
             has no rate on file.
 
-    # start-checkin: every verb that BEGINS spending, which is what makes it the whole set.
-    MintCampaignPayload:
+    LaunchLimits:
       type: object
-      required: [dataset_name]
       additionalProperties: false
+      description: |
+        What ONE launch asks to be bounded by (`domain/launch_limits.py::LaunchLimits`),
+        carried whole as `limits` by every verb that BEGINS spending: `mint-campaign`,
+        `start-run` and `start-checkin`. Omitted, the launch declares no limit of
+        its own.
       properties:
         halt_at_accuracy:
-          type: number
+          type: [number, "null"]
           minimum: 0
           maximum: 1
           description: |
@@ -3560,17 +3549,67 @@ components:
         ceiling:
           $ref: '#/components/schemas/SpendCeilings'
           description: |
-            This run's ceiling. One the account cannot cover is refused whole
-            (ADR-0003 § D1); one it can may lower the campaign's ceiling, never
-            raise it.
+            This run's ceiling — the CLI's `--spend-budget` / `--token-budget`.
+            One the account cannot cover is refused whole (ADR-0003 § D1); one it
+            can may lower the campaign's ceiling, never raise it.
         step_rounds:
-          type: integer
+          type: [integer, "null"]
           minimum: 1
           maximum: 100
           description: |
             A round allowance: the launch pauses (resumable, `run.pause.cause: step`)
             once it has closed this many rounds. `step-cycle` is a launch that
             declares only this. Unset, the round cap and the controller end the run.
+
+    RunMode:
+      type: object
+      additionalProperties: false
+      description: |
+        The SHAPE a run of an existing cycle takes (`domain/launch_limits.py::RunMode`),
+        carried whole as `mode` by `start-run` and by `fork-cycle`, where it
+        shapes the fork's first run. Omitted, the run continues where the ledger
+        stands.
+      properties:
+        from_round:
+          type: [integer, "null"]
+          minimum: 0
+          description: |
+            Rewind IN PLACE before running: rounds after this one are dropped
+            from the cycle and the run continues from the round after it.
+            Omitted, the run continues where the ledger stands. The CLI's
+            `resume --from N`. Refused on a round the ledger never closed.
+        no_divergence_check:
+          type: boolean
+          default: false
+          description: |
+            Replay the cycle's recorded decisions without checking that the
+            current config still reproduces them — accept a divergence instead
+            of refusing on it. The CLI's `resume --no-check`.
+        fork_on_divergence:
+          type: boolean
+          default: false
+          description: |
+            Where the replay diverges from the record, branch a sibling cycle
+            at that point and run it, leaving this cycle untouched. Without it
+            a divergence ends the run `diverged`. The CLI's
+            `resume --fork-on-divergence`.
+        diag:
+          type: boolean
+          default: false
+          description: |
+            Run the diagnostic shape — origin, one scored round, a forced
+            task-framing refinement, a generation-only round, halt. Against a
+            cycle that already finished a diagnostic run (and no `from_round`),
+            the run is a counted sibling cycle `{root}_diag_NNN`, so each probe
+            is its own cycle. The CLI's `resume --diag`.
+
+    MintCampaignPayload:
+      type: object
+      required: [dataset_name]
+      additionalProperties: false
+      properties:
+        limits:
+          $ref: '#/components/schemas/LaunchLimits'
         dataset_name:
           type: string
           minLength: 1
@@ -3667,60 +3706,10 @@ components:
         - type: object
           additionalProperties: false
           properties:
-            halt_at_accuracy:
-              type: number
-              minimum: 0
-              maximum: 1
-              description: |
-                Stop once the optimizer's declared pick reaches this accuracy. Omitted, the run
-                never halts on accuracy. Must be FINITE — `NaN` satisfies a
-                `minimum`/`maximum` pair and then never compares true.
-            ceiling:
-              $ref: '#/components/schemas/SpendCeilings'
-              description: |
-                This run's ceiling — the CLI's `--spend-budget` / `--token-budget`.
-                One the account cannot cover is refused whole (ADR-0003 § D1); one it
-                can may lower the campaign's ceiling, never raise it.
-            step_rounds:
-              type: integer
-              minimum: 1
-              maximum: 100
-              description: |
-                A round allowance: the launch pauses (resumable, `run.pause.cause: step`)
-                once it has closed this many rounds. `step-cycle` is a launch that
-                declares only this. Unset, the round cap and the controller end the run.
-            from_round:
-              type: integer
-              minimum: 0
-              description: |
-                Rewind IN PLACE before running: rounds after this one are dropped
-                from the cycle and the run continues from the round after it.
-                Omitted, the run continues where the ledger stands. The CLI's
-                `resume --from N`. Refused on a round the ledger never closed.
-            no_divergence_check:
-              type: boolean
-              default: false
-              description: |
-                Replay the cycle's recorded decisions without checking that the
-                current config still reproduces them — accept a divergence instead
-                of refusing on it. The CLI's `resume --no-check`.
-            fork_on_divergence:
-              type: boolean
-              default: false
-              description: |
-                Where the replay diverges from the record, branch a sibling cycle
-                at that point and run it, leaving this cycle untouched. Without it
-                a divergence ends the run `diverged`. The CLI's
-                `resume --fork-on-divergence`.
-            diag:
-              type: boolean
-              default: false
-              description: |
-                Run the diagnostic shape — origin, one scored round, a forced
-                task-framing refinement, a generation-only round, halt. Against a
-                cycle that already finished a diagnostic run (and no `from_round`),
-                the run is a counted sibling cycle `{root}_diag_NNN`, so each probe
-                is its own cycle. The CLI's `resume --diag`.
+            limits:
+              $ref: '#/components/schemas/LaunchLimits'
+            mode:
+              $ref: '#/components/schemas/RunMode'
 
     ChangeRunLimitsPayload:
       allOf:
@@ -4235,35 +4224,13 @@ components:
       additionalProperties: false
       description: |
         Start-verb payload. The durable check-in draft stays the canonical source
-        for everything the campaign IS — no field of it is overridable here. The
-        three launch ceilings are not draft fields: they bound what THIS launch
-        may spend, exactly as on `start-run` and `mint-campaign`, and omitting
-        them from this payload is what left the web Start unable to declare a
-        budget that CLI `new <file>` takes on the same three seams. Tenant-scoped;
+        for everything the campaign IS — no field of it is overridable here.
+        `limits` is not a draft field: it bounds what THIS launch may spend,
+        exactly as on `start-run` and `mint-campaign`. Tenant-scoped;
         404 on a cross-tenant `campaign_id` (or one with no check-in working state).
       properties:
-        halt_at_accuracy:
-          type: number
-          minimum: 0
-          maximum: 1
-          description: |
-            Stop once the optimizer's declared pick reaches this accuracy. Omitted, the run
-            never halts on accuracy. Must be FINITE — `NaN` satisfies a
-            `minimum`/`maximum` pair and then never compares true.
-        ceiling:
-          $ref: '#/components/schemas/SpendCeilings'
-          description: |
-            This run's ceiling. One the account cannot cover is refused whole
-            (ADR-0003 § D1); one it can may lower the campaign's ceiling, never
-            raise it.
-        step_rounds:
-          type: integer
-          minimum: 1
-          maximum: 100
-          description: |
-            A round allowance: the launch pauses (resumable, `run.pause.cause: step`)
-            once it has closed this many rounds. `step-cycle` is a launch that
-            declares only this. Unset, the round cap and the controller end the run.
+        limits:
+          $ref: '#/components/schemas/LaunchLimits'
         campaign_id:
           type: string
           minLength: 8

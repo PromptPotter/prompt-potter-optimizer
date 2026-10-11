@@ -95,7 +95,7 @@ and moves every round.
   - **Sandboxes are a FLAT per-cycle registry** `<workspace>/.inner/<key>/`, never physically
     nested (`infrastructure/store/layout.py`) — no active-pointer collision, no machine slot held,
     and the recursion stays **re-entrant** at L5+.
-  - **Sandbox owner and asker are two fields, and a fork moves only the asker**
+  - **The sandbox owner is `spawn_cycle_id`, the asker is the last of `enclosing`, and a fork moves only the asker**
     (`spawn_context.py::retarget_inner_spawn`).
   - One process, no networking; a localhost-endpoint worker mode would be a new `execution` value
     with no core-loop edit.

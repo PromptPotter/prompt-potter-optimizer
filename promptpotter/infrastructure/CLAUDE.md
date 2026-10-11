@@ -141,7 +141,7 @@ writes, and why — [`docs/operations/persistence-and-state.md`](../../docs/oper
 
 Shared I/O in `store/io.py`, and **format follows authorship**: `write_json`/`read_json*` for what code writes and only code reads, `write_yaml`/`read_yaml*` for the operator-authored config tier under `datasets/`. There is deliberately no `read_yaml_tolerant` — a corrupt config degrading to "not there" attributes a measurement to the wrong fingerprint.
 
-Path helpers live in `store/layout.py`, the per-tenant active-session pointer in `store/session_pointer.py`, and derived reads are free functions in query modules (`store/archive_queries.py` is the template). **`store/read_model.py::append_row` / `fold_jsonl*` / `LedgerIndex` are the only derived-index persistence primitives**; a second mechanism is the bug. `measurements/` is cross-cycle and cross-campaign **within one tenant** — `build_stores` roots it and every `SHARED_CACHE_DIRS` peer at `shared_root / identity.tenant_id`, so content-addressing makes a row shareable across campaigns and into an L4 sandbox, never across accounts. `MeasurementArchive` is the DB core — ONE instance per `base_dir` per process (`MeasurementArchive.at`), so readers share its index tail — and `store/archive_queries.py` the facade a run files through and where a controlled line's memory scope is applied — a MEMORY read past it is the bug; `application/maintenance/` rewrites the archive itself.
+Path helpers live in `store/layout.py`, the per-tenant active-session pointer in `store/session_pointer.py`, and derived reads are free functions in query modules (`store/archive_queries.py` is the template). **`store/read_model.py::append_row` / `fold_jsonl*` / `LedgerIndex` (typed records) / `LineIndex` (raw lines) are the only derived-index persistence primitives**; a second mechanism is the bug. `measurements/` is cross-cycle and cross-campaign **within one tenant** — `build_stores` roots it and every `SHARED_CACHE_DIRS` peer at `shared_root / identity.tenant_id`, so content-addressing makes a row shareable across campaigns and into an L4 sandbox, never across accounts. `MeasurementArchive` is the DB core — ONE instance per `base_dir` per process (`MeasurementArchive.at`), so readers share its index tail — and `store/archive_queries.py` the facade a run files through and where a controlled line's memory scope is applied — a MEMORY read past it is the bug; `application/maintenance/` rewrites the archive itself.
 
 The `CycleDir` / `WorkspaceDir` write-target newtypes live in `domain/cycle_paths.py` — projections and stores accept these, not raw `str`/`Path` — as does `CycleHop`, which every per-cycle `CampaignStore` method takes in place of a `(campaign_id, cycle_id)` pair (both `str`, so a swapped call read as "no data" rather than raising). Build it from the carrier that owns both, never by re-pairing.
 
@@ -214,7 +214,8 @@ retries are off — each resend is admitted anew, and drawn from the ONE `llm/se
 its unit of work's OWNER sized and opened (a cell, an optimizer call, a grading, a probe): a loop
 counting its own attempts multiplies under every loop around it, so a send under no budget raises
 (`drawn_budget`). A caller meters
-only a cache replay; a diagnostic verb binds its ledger through `loop_start.py::diagnostic_trace`.
+only a cache replay; a diagnostic verb binds its ledger through `loop_start.py::diagnostic_trace`
+and its rate share through `jobs/quota.py::paid_verb`, and a send missing either raises.
 
 **Provider selection is always EXPLICIT** — the caller passes it to
 `registry.get_llm_client`, sourced from the optimizer node's `config.provider`. No

@@ -45,7 +45,7 @@ The bench's `overlay_failures()` (`application/bench/children.py`) runs on every
 1. **Fatal-code fast path.** `classify_result()` derives a fatal code from raw response shape. One sighting ends the candidate; bypasses `min_samples`/`threshold`.
 2. **Rate-based.** After `min_samples=3`, if `degraded_rate >= 0.4`, eliminate.
 
-The measurement (`scoring/candidate_report.py::read_breakage`) synthesises `RuntimeFailure(source, dominant_warning, warning_types, degraded_rate, …)` from the check plus the observed pipeline_params, then continues with the next candidate. End-of-round, `PotterState.absorb` returns potter's memory with the new records added, deduplicated by `(source, dominant_warning, observed_config)`, and never clears them — they represent discovered runtime constraints.
+The measurement (`scoring/candidate_report.py::read_breakage`) synthesises `RuntimeFailure(source, dominant_warning, degraded_rate, …)` from the check plus the observed pipeline_params, then continues with the next candidate. End-of-round, `PotterState.absorb` returns potter's memory with the new records added, deduplicated by `(source, dominant_warning, observed_config)`, and never clears them — they represent discovered runtime constraints.
 
 `_r_l1_wounds()` partitions the runtime block into NEW (this round) vs ACCUMULATED (`first_seen_round != current_round`) and tags each entry `[owner=l1|operator]`. **ACCUMULATED is the real signal** — a surviving item means L2's prior angle didn't take. If it keeps growing, Wound 3 takes over.
 

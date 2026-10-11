@@ -110,7 +110,7 @@ never by a fixed count of reads.
 `factories.py` is not a test file (no `test_` prefix, collects nothing). It holds builders that
 return REAL models — `round_result`, `cycle_result`, `scored_candidate`, plus `measurement` /
 `measurements`, the one
-MEASURED-CELL wire record (`sheet()` reads each through `MeasuredCell.from_wire`). Domain models
+graded cell (`GradedCell`; `.facts` is the `MeasuredCell` a scorer takes, and `sheet()` holds them as given). Domain models
 and the few application models the dispatch seam needs, plus the real objects more than one
 file builds: `spend_book`, `inner_sandbox`, `workspace` and `loop_session`.
 
