@@ -75,6 +75,8 @@ async def _grade(stores: Stores, campaign: Campaign, hop: CycleHop) -> BenchScor
         readout.open_readout(cycle_dir)
         ledger.bind(readout)
         cb = RunCallbacks(ledger)
+        # The round an `at_end` launch grades under: its last.
+        cb.set_round(rounds[-1].round)
         try:
             banked = await bench_origin(
                 session,

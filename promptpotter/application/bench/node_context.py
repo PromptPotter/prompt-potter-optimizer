@@ -13,10 +13,10 @@ from promptpotter.application.bench.children import (
 from promptpotter.application.bench.llm_call import LLMCallContext, llm_call
 from promptpotter.application.bench.resume_and_fork.decisions import record_decision
 from promptpotter.application.optimizer_manifest import running_prompt
-from promptpotter.application.pipeline_resolve import merge_pipeline_params
 from promptpotter.application.scoring.query_loop import ArmSlot
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.opt_search_point import OptSearchPoint, Variation, node_source
+from promptpotter.domain.pipeline_overlay import merge_pipeline_params
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.results import CandidateProposal, round_document_digest
 from promptpotter.domain.run_records import RoundProposedRecord

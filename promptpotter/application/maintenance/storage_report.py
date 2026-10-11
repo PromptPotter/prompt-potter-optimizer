@@ -92,6 +92,13 @@ class CampaignStorageResponse(StrictModel):
     trace_bytes: int = Field(description="Loop telemetry: streams, prompts, langfuse loop trace")
     history_bytes: int = Field(description="Loop event spine: ledger.jsonl")
     reports_bytes: int = Field(description="Readable output: manifest + reports + hard_samples")
+    loop_bytes: int = Field(
+        description="What the loop wrote: the state, trace, history and reports leaves together"
+    )
+
+
+_LOOP_LEAVES = ("state", "trace", "history", "reports")
+assert set(_LOOP_LEAVES) <= set(_LEAVES)
 
 
 def campaign_storage(stores: Stores, campaign_id: str) -> CampaignStorageResponse:
@@ -99,7 +106,10 @@ def campaign_storage(stores: Stores, campaign_id: str) -> CampaignStorageRespons
     owned_campaign(stores, campaign_id)
     acc = _campaign_split(stores.campaigns.campaign_root_dir(campaign_id))
     return CampaignStorageResponse(
-        campaign_id=campaign_id, on_disk_bytes=sum(acc.values()), **_leaf_fields(acc)
+        campaign_id=campaign_id,
+        on_disk_bytes=sum(acc.values()),
+        loop_bytes=sum(acc[leaf] for leaf in _LOOP_LEAVES),
+        **_leaf_fields(acc),
     )
 
 
@@ -116,6 +126,12 @@ class DatasetStorageEntry(StrictModel):
 
 class DatasetStorageResponse(StrictModel):
     total_bytes: int = Field(description="Grand total across the caller's datasets")
+    dataset_bytes: int = Field(description="Each leaf below: that leaf summed over `datasets`")
+    connector_bytes: int
+    state_bytes: int
+    trace_bytes: int
+    history_bytes: int
+    reports_bytes: int
     datasets: list[DatasetStorageEntry] = Field(description="Fattest-first per-dataset leaf splits")
 
 
@@ -131,7 +147,10 @@ def storage_by_dataset(stores: Stores) -> DatasetStorageResponse:
         for name, acc in by_dataset.items()
     ]
     entries.sort(key=lambda e: e.total_bytes, reverse=True)
-    return DatasetStorageResponse(total_bytes=sum(e.total_bytes for e in entries), datasets=entries)
+    whole = {leaf: sum(acc[leaf] for acc in by_dataset.values()) for leaf in _LEAVES}
+    return DatasetStorageResponse(
+        total_bytes=sum(whole.values()), datasets=entries, **_leaf_fields(whole)
+    )
 
 
 class WorkspaceStorageEntry(StrictModel):

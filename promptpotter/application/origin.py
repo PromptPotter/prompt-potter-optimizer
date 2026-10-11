@@ -153,6 +153,7 @@ def try_inherit_fork_origin(
                 "label": candidate_label(0, 0),
                 "sp_hash": sp.sp_hash(session.pipeline_schema),
                 "resolved_pipeline_params": sp.config_params,
+                "node_prompt_fields": resolved_origin.node_prompt_fields(sp),
             }
         ),
         origin_results=inherited_results,
@@ -247,9 +248,9 @@ async def establish_campaign_origin(
                 [],
                 [],
                 label=candidate_label(0, 0),
+                sp=sp,
                 sp_hash=sp.sp_hash(pipeline_schema),
                 outcome=ArmOutcome.MEASURED,
-                resolved_pipeline_params=sp.config_params,
             ),
             origin_results=None,
             framing=framing,
@@ -280,7 +281,7 @@ async def establish_campaign_origin(
         0,
         1,
         opt_sp=resolved_origin,
-        resolved_pipeline_params=sp.config_params,
+        sp=sp,
         sample_order=[s.id for s in scoring_set],
     )
 
@@ -322,9 +323,9 @@ async def establish_campaign_origin(
             sheet.cells,
             scoring_set,
             label=candidate_label(0, 0),
+            sp=sp,
             sp_hash=sp.sp_hash(pipeline_schema),
             outcome=walk_outcome(scored),
-            resolved_pipeline_params=sp.config_params,
         )
         listener.on_candidate_scored(0, 1, report)
     finally:

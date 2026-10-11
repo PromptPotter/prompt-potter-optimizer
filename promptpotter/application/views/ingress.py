@@ -72,7 +72,6 @@ def init_enter(
         max_rounds=ctx.max_rounds,
         patience=ctx.patience,
         sp_budget_round=selected.round_cells(len(dataset)),
-        dataset_size=len(dataset),
         model=selected.model(),
         composite_fitness_formula=full,
         composite_fitness_formula_short=short,
@@ -154,7 +153,6 @@ def propose_exit(
     opening: RoundOpening,
     candidates: Sequence[dict[str, Any]],
     collapses: Mapping[str, int],
-    n_scoring_samples: int,
 ) -> CandidatesGeneratedView:
     parent = ctx.current_sp_flat
     columns: list[tuple[str, dict[str, str]]] = [
@@ -172,7 +170,6 @@ def propose_exit(
     return CandidatesGeneratedView(
         n_candidates=len(candidates),
         source="disk" if opening.replayed else "llm",
-        n_scoring_samples=n_scoring_samples,
         clone_labels=tuple(clone_labels),
         sp_diff=SpDiffView(
             columns=tuple(columns),

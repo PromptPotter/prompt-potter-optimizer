@@ -293,7 +293,7 @@ async def _acquire(sample: Sample, idx: int, ctx: QueryLoopState, claiming: set[
     )
 
 
-LaunchEvent = tuple["Sample", int, int, int | None]
+LaunchEvent = tuple["Sample", int, int]
 
 
 @dataclass
@@ -329,11 +329,11 @@ class Walk:
     def enter_block(self, end: int) -> None:
         self.boundary = min(self.n, end)
 
-    def launch(self, armed: int, horizon: int | None) -> tuple[Sample, asyncio.Task[_Acquired]]:
+    def launch(self, armed: int) -> tuple[Sample, asyncio.Task[_Acquired]]:
         idx = self.submitted
         sample = self.dataset[idx]
         # `armed` is the depth the round RUNS at, never the in-flight count, empty at each candidate's start.
-        event: LaunchEvent = (sample, idx, armed, horizon)
+        event: LaunchEvent = (sample, idx, armed)
         if self.held is not None:
             self.held.append(event)
         else:
@@ -355,7 +355,7 @@ class Walk:
 
     def _started(self, event: LaunchEvent) -> None:
         if (slot := self.ctx.slot) is not None:
-            sample, idx, armed, horizon = event
+            sample, idx, armed = event
             emit_sample_started(
                 candidate_idx=slot.idx,
                 candidate_total=slot.total,
@@ -364,7 +364,6 @@ class Walk:
                 sample_id=sample.id,
                 query=sample.query,
                 sample_lookahead=armed,
-                stop_horizon=horizon,
             )
 
     def collect(self) -> None:
@@ -825,7 +824,7 @@ class _ScoringPhase:
         while (
             room > 0 and walk.submitted <= last and (horizon is None or walk.submitted <= horizon)
         ):
-            sample, _cell = walk.launch(armed, horizon)
+            sample, _cell = walk.launch(armed)
             room -= 1
             if backfills is not None:
                 room -= len(backfills.start_backfill(sample, min(room, self.affordable())))

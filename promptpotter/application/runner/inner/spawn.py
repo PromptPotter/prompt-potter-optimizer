@@ -49,7 +49,7 @@ from promptpotter.domain.results import ArmOutcome, candidate_label
 from promptpotter.domain.run_records import SpawnedBy
 from promptpotter.domain.wounds import collapse_counts
 from promptpotter.infrastructure.llm.heartbeat import heartbeat
-from promptpotter.infrastructure.llm.telemetry import _CURRENT_ROUND, _CYCLE_LEDGER
+from promptpotter.infrastructure.llm.telemetry import active_cycle_ledger, current_round
 from promptpotter.infrastructure.runtime_flags import derive_run_state, standing_run_limits
 from promptpotter.infrastructure.store.archive_queries import scope_memory_to_own_answers
 from promptpotter.infrastructure.store.io import write_json
@@ -92,13 +92,9 @@ _REFUSALS: dict[StopReason | None, ErrorCategory] = {
 OUTER_SAMPLE_WALL_S_PER_ROUND = 600.0
 
 
-def _spawn_provenance(ctx: InnerSpawnContext, round_num: int | None, query: str) -> dict[str, Any]:
+def _spawn_provenance(round_num: int | None, query: str) -> dict[str, Any]:
     cand = measured_candidate()
     return {
-        # The ASKER, not the sandbox owner: a repair fork asks while the parent still owns the sandbox.
-        "outer_cycle_id": ctx.asking_cycle_id,
-        # A cycle_id is shared by every campaign minted from one origin: alone it is half an identity.
-        "outer_campaign_id": ctx.spawn_campaign_id,
         "round": round_num,
         "candidate_idx": cand.idx if cand else None,
         "candidate_id": cand.candidate_id if cand else None,
@@ -257,8 +253,7 @@ def _resolve_inner_cell(sample: Sample, payload: dict[str, Any]) -> _InnerCell:
     ctx = inner_spawn_context()
     if ctx is None:
         raise RuntimeError(
-            "promptpotter connector: no inner-spawn context published — "
-            "run_optimization must call publish_inner_spawn_context first."
+            "promptpotter connector: this run has no cycle to spawn an inner campaign under"
         )
     spec = resolve_inner_task(_cells(ctx), sample)
     overrides = payload.get("optimizer_prompt_overrides") or {}
@@ -446,9 +441,9 @@ async def run_inner_cycle(sample: Sample, payload: dict[str, Any]) -> dict[str, 
     minted: list[CycleHop] = []
 
     # Still the OUTER ledger: the inner campaign emits only to its sandbox's, and the outer reads silence.
-    outer_ledger = _CYCLE_LEDGER.get()
-    # Captured in the OUTER task: the inner task's context copy rebinds `_CURRENT_ROUND`.
-    spawned_by = _spawn_provenance(ctx, _CURRENT_ROUND.get(), query)
+    outer_ledger = active_cycle_ledger()
+    # Captured in the OUTER task: the inner task's context copy rebinds the round.
+    spawned_by = _spawn_provenance(current_round(), query)
 
     sandbox = _sandbox_stores(ctx)
 
@@ -479,7 +474,7 @@ async def run_inner_cycle(sample: Sample, payload: dict[str, Any]) -> dict[str, 
             outer_ledger,
             call_id=f"inner:{query}",
             node="inner_campaign",
-            round_num=_CURRENT_ROUND.get(),
+            round_num=current_round(),
             start_monotonic=start,
             detail_fn=_inner_detail,
         )
@@ -510,7 +505,7 @@ async def run_inner_cycle(sample: Sample, payload: dict[str, Any]) -> dict[str, 
         )
     # Raises `CellUnscoreableError` on every other no-evidence shape, which `measure_sample` resolves.
     proxies = compute_outer_proxies(result)
-    facts = inner_cell_facts(result, campaign_id)
+    facts = inner_cell_facts(result)
 
     data: dict[str, Any] = {
         # A summary line, not an answer to be matched: this cell carries no label, so add no hit/miss reader.

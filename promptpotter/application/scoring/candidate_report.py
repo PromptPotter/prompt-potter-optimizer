@@ -30,6 +30,7 @@ from promptpotter.shared.hashing import stable_hash
 
 if TYPE_CHECKING:
     from promptpotter.domain.scoring import GradedCell
+    from promptpotter.domain.search_point import JobSearchPoint
 
 __all__ = [
     "Breakage",
@@ -89,7 +90,6 @@ def read_breakage(
         RuntimeFailure(
             source="scoring_error_abort" if aborted else "degradation_check",
             dominant_warning=cr["dominant_warning"],
-            warning_types=dict(cr["warning_types"]),
             degraded_rate=cr["degraded_rate"],
             degraded_count=cr["degraded_count"],
             total_scored=cr["total_scored"],
@@ -120,9 +120,9 @@ def build_score_report(
     dataset: list[Any],
     *,
     label: str,
+    sp: JobSearchPoint,
     sp_hash: str,
     outcome: ArmOutcome,
-    resolved_pipeline_params: dict[str, Any] | None = None,
     elimination_context: dict[str, Any] | None = None,
     elimination_reason: str | None = None,
     breakage: Breakage | None = None,
@@ -135,9 +135,10 @@ def build_score_report(
         label=label,
         changes_description=opt_sp.lineage.changes_description or "",
         pipeline_overlay=pipeline_overlay,
-        resolved_pipeline_params=resolved_pipeline_params,
+        resolved_pipeline_params=sp.config_params,
         sp_hash=sp_hash,
         prompt_fields=opt_sp.prompt_field_dict(),
+        node_prompt_fields=opt_sp.node_prompt_fields(sp),
         outcome=outcome,
         scored_samples=len(query_results),
         expected_samples=len(dataset),

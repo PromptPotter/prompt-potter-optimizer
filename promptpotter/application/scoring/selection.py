@@ -1,9 +1,7 @@
-"""The live election and both replayers read the parent it RECORDED (``parent_cells``); none reconstructs one."""
-
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 from promptpotter.application.intelligence.rasch import (
     candidate_abilities,
@@ -12,7 +10,7 @@ from promptpotter.application.intelligence.rasch import (
     theta_bounds_given_delta,
     theta_lift_over_parent,
 )
-from promptpotter.domain.scoring import CellSheet, Grade, GradedCell, MeasuredCell
+from promptpotter.domain.scoring import CellSheet, GradedCell
 from promptpotter.shared.statistics import (
     discordant_counts,
     mean_ci,
@@ -36,11 +34,9 @@ __all__ = [
     "level_band",
     "lift_over_bar",
     "paired_p_best",
-    "parent_cells",
     "parent_selection_bias",
     "priors_covering",
     "readable_lifts",
-    "recorded_parent",
 ]
 
 
@@ -61,30 +57,6 @@ def level_band(
 
 def distinct_valid_cells(sheet: CellSheet) -> int:
     return len(sheet.scoreable)
-
-
-def parent_cells(parent_results: CellSheet) -> list[dict[str, Any]]:
-    """θ reads ``objective``, the paired lift ``fitness``; an absent ``objective`` stays absent, never a miss."""
-    return [
-        {
-            "sample_id": cell.sample_id,
-            "fitness": cell.grade.fitness,
-            "error_category": cell.facts.error_category,
-            **({"objective": cell.grade.objective} if cell.grade.objective is not None else {}),
-        }
-        for cell in parent_results
-    ]
-
-
-def recorded_parent(cells: Sequence[dict[str, Any]]) -> CellSheet:
-    """Each grade stands AS RECORDED: the sheet names no scorer and is never re-graded."""
-    return CellSheet("", tuple(_recorded_cell(row) for row in cells))
-
-
-def _recorded_cell(row: Mapping[str, Any]) -> GradedCell:
-    facts = MeasuredCell.from_wire(row)
-    grade = Grade(row.get("fitness"), row.get("objective"), None)
-    return GradedCell(facts, grade, not facts.errored)
 
 
 # E[max of k standard normals], k = 1..6; the last entry stands for any wider round.

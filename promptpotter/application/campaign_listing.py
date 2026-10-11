@@ -101,13 +101,6 @@ class CampaignSummary(StrictModel):
         default="active",
         description="Operator visibility intent: 'active' (default sidebar), 'archived' (hidden), 'deleted' (soft-marked, data retained)",
     )
-    lifecycle_changed_at: str = Field(
-        default="", description="ISO 8601 timestamp of last lifecycle transition"
-    )
-    lifecycle_reason: str = Field(
-        default="",
-        description="Optional operator-supplied reason for the last lifecycle transition",
-    )
     spend_lifetime: LifetimeSpend = Field(
         description=(
             "This campaign's share of `QuotaStatus.spend_lifetime`: every cycle's ledger, forks "
@@ -222,8 +215,6 @@ def _summary(campaign: Campaign, stores: Stores) -> CampaignSummary:
         self_optimization=is_self_optimization(campaign.backend_type),
         owner_user_id=campaign.owner_user_id,
         lifecycle_status=campaign.lifecycle_status,
-        lifecycle_changed_at=campaign.lifecycle_changed_at,
-        lifecycle_reason=campaign.lifecycle_reason,
         spend_lifetime=LifetimeSpend.of(campaign_spend(stores.campaigns, campaign.campaign_id)),
         spend_metered=MeteredSpend.of(
             read_line_spend(stores, campaign), ceiling_meter(campaign.arm)

@@ -27,6 +27,7 @@ from promptpotter.application.optimizer_manifest import (
 )
 from promptpotter.application.optimizers.nodes import Panel, Proposals, RoundContext
 from promptpotter.application.run_callbacks import RunCallbacks
+from promptpotter.application.runner.inner.spawn_context import publish_inner_spawn_context
 from promptpotter.application.runner.round import propose_population, round_plan
 from promptpotter.application.scoring.candidate_report import fatal_validation_failures
 from promptpotter.application.scoring.closed_rounds import closed_rounds
@@ -291,6 +292,7 @@ class _Frozen:
     hop: CycleHop
     round_num: int
     session: Session
+    config: CampaignConfig
     cells: list[Sample]
     parent_id: str
     parent: CellSheet
@@ -382,6 +384,8 @@ async def _freeze_cycle(
     campaign = campaigns.load_campaign(hop.campaign_id)
     assert campaign is not None, "the hop was enumerated off this campaign's manifest"
     session, config = await bind_cycle_session(stores, campaign, hop)
+    # Each arm's task copies it: an L4 outer round proposes under its inner cells' optimizer.
+    publish_inner_spawn_context(session, config)
     arm_diagnostic_scoring(session, config, source=RunSource.DECISION_BANK)
     params = session.pipeline_params
     session.control = replace(session.control, held_lookahead=parallel)
@@ -418,6 +422,7 @@ async def _freeze_cycle(
             hop=hop,
             round_num=round_num,
             session=session,
+            config=config,
             cells=panel_cells,
             parent_id=parent.id,
             parent=reference,
@@ -590,6 +595,8 @@ async def _grade(
             if dry is not None:
                 decisions.append(replace(decision, plans=(_plan(point, 0), _plan(point, 1))))
                 continue
+            # Every cycle froze before this one measures, so the context left bound is the last one's.
+            publish_inner_spawn_context(point.session, point.config)
             try:
                 readings = (await _measure(point, 0), await _measure(point, 1))
             except DecisionBankError as stop:

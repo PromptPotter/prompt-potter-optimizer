@@ -75,7 +75,6 @@ from promptpotter.domain.run_records import (
     SampleOrderRecord,
     SampleScoredRecord,
     SampleStartedRecord,
-    scored_cell,
 )
 from promptpotter.domain.spend import TokenAccount, prefix_reading
 from promptpotter.infrastructure.ledger import ledger_chain
@@ -316,7 +315,7 @@ class ReadoutProjection(Projection):
         self._write(f"  {DIM}⇉ sample look-ahead depth {depth}{tail}{RESET}")
 
     def _handle_sample_scored(self, record: SampleScoredRecord) -> None:
-        self.on_sample_scored(*scored_cell(record.result))
+        self.on_sample_scored(record.result.facts, record.result.grade)
 
     def _handle_candidate_minted(self, record: CandidateMintedRecord) -> None:
         if chain := " → ".join(

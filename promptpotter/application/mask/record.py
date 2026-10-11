@@ -12,6 +12,9 @@ from promptpotter.domain.strict_model import StrictModel
 LensKind = Literal["score", "dials", "abort"]
 _LENS_KINDS: dict[str, LensKind] = {kind: kind for kind in get_args(LensKind)}
 
+#: The `score:` formulas a picklist offers by name; any other is the operator's own expression.
+SCORE_LENS_LABELS: dict[str, str] = {"accuracy": "Accuracy"}
+
 
 class Lens(NamedTuple):
     kind: LensKind
@@ -116,6 +119,7 @@ class SpineCycle(StrictModel):
 
 
 __all__ = [
+    "SCORE_LENS_LABELS",
     "Lens",
     "MaskCandidate",
     "MaskCycle",

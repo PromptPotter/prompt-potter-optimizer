@@ -3,13 +3,15 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal, get_args
 
 from pydantic import Field, ValidationError
 
 from promptpotter import connectors
+from promptpotter.application import optimizers
 from promptpotter.application.campaign_config import (
     CampaignConfig,
+    OptimizationConfig,
     apply_cycle_seed,
     load_campaign_config,
     under_record,
@@ -34,7 +36,8 @@ from promptpotter.application.datasets.prompts import (
 from promptpotter.application.evidence.subjects import SubjectSpec, parse_subject
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizer_manifest import (
-    StartPrompt,
+    SelectedOptimizer,
+    prompt_body,
     resolve_optimizer,
     select_optimizer,
 )
@@ -44,7 +47,11 @@ from promptpotter.application.runner.inner.tasks import (
     load_inner_tasks,
 )
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.pipeline_overlay import fold_output_contract, node_config_items
+from promptpotter.domain.pipeline_overlay import (
+    apply_node_overlay,
+    fold_output_contract,
+    node_config_items,
+)
 from promptpotter.domain.pipeline_parsing import (
     merge_node_blocks,
     parse_pipeline_response,
@@ -64,7 +71,11 @@ from promptpotter.domain.pipeline_schema import (
     PipelineView,
     reach_map,
 )
-from promptpotter.domain.search_point import PROMPT_STRING_FIELDS, strip_rendered_prompt
+from promptpotter.domain.search_point import (
+    PROMPT_STRING_FIELDS,
+    missing_template_vars,
+    strip_rendered_prompt,
+)
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.llm.capabilities import resolve_menu, resolve_schema_menu
 from promptpotter.infrastructure.llm.registry import normalize_model_id
@@ -89,6 +100,7 @@ from promptpotter.shared.errors import (
     StoredConfigInvalidError,
 )
 from promptpotter.shared.hashing import stable_hash
+from promptpotter.shared.plugin_registry import BUILT_IN
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -113,11 +125,15 @@ __all__ = [
     "CampaignPipelineResponse",
     "CampaignRunsWith",
     "DatasetPipelineResponse",
+    "KnobRow",
+    "NodeKnobs",
+    "OptimizerEntry",
+    "OptimizerKnobsResponse",
     "OptimizerPipelineResponse",
+    "OptimizerRoster",
     "RunsWithParam",
     "VendorModels",
     "apply_identity_layer",
-    "apply_node_overlay",
     "campaign_runs_with",
     "configure_and_apply_pipeline",
     "dataset_pipeline_declaration",
@@ -125,8 +141,8 @@ __all__ = [
     "frozen_config",
     "measurement_node",
     "merge_declared_layers",
-    "merge_pipeline_params",
-    "missing_template_vars",
+    "optimizer_knobs",
+    "optimizer_roster",
     "overlay_dataset_pipeline",
     "resolve_campaign_config",
     "resolve_pipeline_at",
@@ -138,66 +154,6 @@ __all__ = [
     "resolve_root_config",
     "resolved_dataset_name",
 ]
-
-
-def apply_node_overlay(
-    base: dict[str, Any],
-    overlay: Mapping[str, Any],
-    schema: PipelineSchema | None,
-    *,
-    source: ParamSource | None = None,
-    provenance: MutableMapping[str, dict[str, ParamSource]] | None = None,
-) -> dict[str, Any]:
-    merged = dict(base)
-    for node, cfg in overlay.items():
-        existing = merged.get(node)
-        if not (isinstance(existing, dict) and isinstance(cfg, dict)):
-            merged[node] = cfg
-            _stamp(provenance, source, node, cfg)
-            continue
-        node_obj = schema.get_node(node) if schema else None
-        param_types = node_obj.param_types if node_obj else {}
-        node_cfg = {**existing, **cfg}
-        for param, incoming in cfg.items():
-            prior = existing.get(param)
-            if (
-                param_types.get(param) == "object"
-                and isinstance(prior, dict)
-                and isinstance(incoming, dict)
-            ):
-                node_cfg[param] = {**prior, **incoming}
-        merged[node] = node_cfg
-        _stamp(provenance, source, node, cfg)
-    return merged
-
-
-def merge_pipeline_params(
-    base: dict[str, Any] | None,
-    overrides: dict[str, Any] | None,
-    schema: PipelineSchema | None,
-) -> dict[str, Any] | None:
-    if not overrides:
-        return base
-    merged = apply_node_overlay(base or {}, overrides, schema)
-    if schema:
-        # DECLARED, not the running chain: a node reached only by escalating exists.
-        _declared = {n.name for n in schema.declared_nodes}
-        for k, _cfg in list(node_config_items(merged)):
-            if k not in _declared:
-                logger.warning("Dropping LLM override for undeclared node %r", k)
-                del merged[k]
-    return merged
-
-
-def _stamp(
-    provenance: MutableMapping[str, dict[str, ParamSource]] | None,
-    source: ParamSource | None,
-    node: str,
-    cfg: object,
-) -> None:
-    if provenance is None or source is None or not isinstance(cfg, dict):
-        return
-    provenance.setdefault(node, {}).update(dict.fromkeys(cfg, source))
 
 
 def resolve_pipeline_config_params(
@@ -438,13 +394,6 @@ def _identity_contributions(
         # The TERMINAL step: a judge grades the answer that node emits.
         out.setdefault(active[-1], {})[JUDGE_INSTRUMENT_KEY] = judge_instrument(judges)
     return out
-
-
-def missing_template_vars(rendered: str, declared: list[str]) -> list[str]:
-    """``PROMPT_STRING_FIELDS`` are excluded: ``render()`` assembles them, nothing substitutes them."""
-    return [
-        v for v in declared if v not in PROMPT_STRING_FIELDS and "{{" + v + "}}" not in rendered
-    ]
 
 
 def _resolve_active_schema(
@@ -1041,6 +990,31 @@ def resolve_pipeline_for_dataset(stores: Stores, dataset_name: str) -> DatasetPi
     )
 
 
+class StartPrompt(StrictModel):
+    fields: dict[str, Any] = Field(description="The prompt body, by decomposition field")
+    version: str = Field(description="The `prompt_version` the node's config names")
+    versions_declared: int = Field(
+        description="How many versions the manifest declares for the node's prompt family — a "
+        "surface showing this one says so where there are more"
+    )
+
+
+def _start_prompts(selected: SelectedOptimizer) -> dict[str, StartPrompt]:
+    out: dict[str, StartPrompt] = {}
+    declared = [str(key) for key in selected.document.get("resolved_prompts") or {}]
+    for node in selected.schema.declared_nodes:
+        config = node.current_config
+        body = prompt_body(selected.document, config)
+        if body is not None:
+            family = str(config.get("prompt_family"))
+            out[node.name] = StartPrompt(
+                fields=body,
+                version=str(config.get("prompt_version") or ""),
+                versions_declared=sum(k.partition("/")[0] == family for k in declared),
+            )
+    return out
+
+
 class OptimizerPipelineResponse(StrictModel):
     """What the OPTIMIZER runs — the manifest's peer of ``GET /campaigns/{id}/pipeline``. The raw
     manifest keys are not served: ``nodes`` was a second, untyped spelling of ``node_config_schema``."""
@@ -1086,8 +1060,131 @@ def resolve_pipeline_for_optimizer(stores: Stores, optimizer: str) -> OptimizerP
         reach=reach_map(rows),
         # Per tenant: a hand-authored catalogue override lives in their workspace.
         model_capabilities=resolve_schema_menu(schema, workspace=stores.base_dir),
-        start_prompts=selected.start_prompts(),
+        start_prompts=_start_prompts(selected),
     )
+
+
+KnobType = Literal["boolean", "integer", "number", "string", "array", "object"]
+
+_KNOB_TYPES: tuple[KnobType, ...] = get_args(KnobType)
+
+
+class KnobRow(StrictModel):
+    """One knob of one optimizer node, as a settings surface offers it."""
+
+    key: str = Field(description="The knob's name under `nodes.{node}.config`")
+    description: str = Field(description="What the knob does — its field description")
+    type: KnobType = Field(description="JSON Schema type the value takes")
+    options: list[str] | None = Field(
+        description="The closed set a string knob takes, in declared order; null when open"
+    )
+    nullable: bool = Field(description="Whether null is a legal value (an opt-in knob, off)")
+    minimum: float | None = Field(description="The least legal value, itself legal; null when none")
+    exclusive_minimum: float | None = Field(
+        description="A bound every legal value lies strictly above; null when none"
+    )
+    maximum: float | None = Field(
+        description="The greatest legal value, itself legal; null when none"
+    )
+    exclusive_maximum: float | None = Field(
+        description="A bound every legal value lies strictly below; null when none"
+    )
+    value: Any = Field(description="The value the manifest declares — a campaign's floor")
+
+
+class NodeKnobs(StrictModel):
+    node: str = Field(description="The manifest node that owns these knobs")
+    kind: str = Field(description="The node's type: sampler | eliminator | selector | …")
+    knobs: list[KnobRow] = Field(description="Its knobs, in declared order")
+
+
+class OptimizerKnobsResponse(StrictModel):
+    """Every knob an optimizer manifest's nodes take, each written to `optimization.nodes.{node}.config.{key}`."""
+
+    optimizer: str = Field(description="The manifest name, as `optimization.optimizer` names it")
+    version: str = Field(description="The manifest's own version")
+    nodes: list[NodeKnobs] = Field(description="Every node taking a knob, in declared order")
+
+
+def _knob_type(kind: Mapping[str, Any]) -> KnobType:
+    declared = kind.get("type") or ("object" if "properties" in kind else "string")
+    for known in _KNOB_TYPES:
+        if known == declared:
+            return known
+    raise ValueError(f"knob type {declared!r} is none of {', '.join(_KNOB_TYPES)}")
+
+
+def _knob_row(key: str, prop: Mapping[str, Any], defs: Mapping[str, Any], value: Any) -> KnobRow:
+    options = [
+        defs[ref["$ref"].rsplit("/", 1)[-1]] if "$ref" in ref else ref
+        for ref in prop.get("anyOf") or [prop]
+    ]
+    nullable = any(o.get("type") == "null" for o in options)
+    kind = next(o for o in options if o.get("type") != "null")
+    enum = kind.get("enum") or ([kind["const"]] if "const" in kind else None)
+    return KnobRow(
+        key=key,
+        description=str(prop.get("description") or ""),
+        type=_knob_type(kind),
+        options=[str(v) for v in enum] if enum else None,
+        nullable=nullable,
+        minimum=kind.get("minimum"),
+        exclusive_minimum=kind.get("exclusiveMinimum"),
+        maximum=kind.get("maximum"),
+        exclusive_maximum=kind.get("exclusiveMaximum"),
+        value=value,
+    )
+
+
+def optimizer_knobs(name: str) -> OptimizerKnobsResponse:
+    selected = resolve_optimizer(name, {})
+    nodes: list[NodeKnobs] = []
+    for node in selected.member_nodes:
+        schema = optimizers.member(node).knobs.model_json_schema()
+        declared = selected.declared_knobs(node).model_dump(mode="json")
+        rows = [
+            _knob_row(key, prop, schema.get("$defs") or {}, declared[key])
+            for key, prop in (schema.get("properties") or {}).items()
+        ]
+        if rows:
+            nodes.append(NodeKnobs(node=node, kind=str(selected.node(node).kind), knobs=rows))
+    return OptimizerKnobsResponse(optimizer=selected.name, version=selected.version, nodes=nodes)
+
+
+class OptimizerEntry(StrictModel):
+    """One optimizer this install can run, as a picker offers it."""
+
+    name: str = Field(description="The manifest name, as `optimization.optimizer` names it")
+    version: str = Field(description="The manifest's own version")
+    paper: str | None = Field(
+        description="The citation a paper preset reproduces; its declared knob values are that "
+        "paper's configuration. Null for an optimizer reproducing none"
+    )
+    origin: str | None = Field(
+        description="The installed package that registered it, as `<distribution>: <entry point>`; "
+        "null for one shipped with PromptPotter"
+    )
+
+
+class OptimizerRoster(StrictModel):
+    """The optimizers this install can run, the default first: one per runtime the registry holds."""
+
+    default: str = Field(description="What a campaign naming no `optimization.optimizer` runs")
+    optimizers: list[OptimizerEntry] = Field(description="The roster, the default first")
+
+
+def optimizer_roster() -> OptimizerRoster:
+    default = OptimizationConfig.model_fields["optimizer"].default
+    names = sorted(optimizers.runtimes(), key=lambda n: (n != default, n))
+    origins = optimizers.runtime_origins()
+    entries = []
+    for name in names:
+        selected = resolve_optimizer(name, {})
+        origin = None if origins[name] == BUILT_IN else origins[name]
+        entries.append(
+            OptimizerEntry(name=name, version=selected.version, paper=selected.paper, origin=origin)
+        )
+    return OptimizerRoster(default=default, optimizers=entries)
 
 
 class RunsWithParam(StrictModel):

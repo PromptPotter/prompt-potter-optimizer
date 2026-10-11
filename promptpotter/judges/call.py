@@ -16,9 +16,9 @@ from promptpotter.infrastructure.llm.response import LLMResponse
 from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS, SendBudget, under_budget
 from promptpotter.infrastructure.llm.spend_book import CallLabel
 from promptpotter.infrastructure.llm.telemetry import (
-    _CURRENT_ROUND,
-    _CYCLE_LEDGER,
+    active_cycle_ledger,
     call_priced,
+    current_round,
     emit_token_usage,
 )
 from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache, hash_call
@@ -146,10 +146,10 @@ async def _sample(stage: JudgeStage, prompt: str, *, judge: str, started: float)
     # Unconditional: `heartbeat` takes `ledger=None`, so a missing sink cannot disarm liveness.
     beat = asyncio.create_task(
         heartbeat(
-            _CYCLE_LEDGER.get(),
+            active_cycle_ledger(),
             call_id=uuid.uuid4().hex,
             node=label,
-            round_num=_CURRENT_ROUND.get(),
+            round_num=current_round(),
             start_monotonic=started,
             detail_fn=lambda: waiting_on(client, stage.model, role="grader"),
         )

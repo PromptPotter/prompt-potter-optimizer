@@ -34,6 +34,7 @@ if TYPE_CHECKING:
     from promptpotter.application.run_phase_control import Flight
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.phase_views import PhaseView
+    from promptpotter.domain.search_point import JobSearchPoint
 
 __all__ = ["RunCallbacks"]
 
@@ -120,6 +121,7 @@ class RunCallbacks:
         changes_description: str,
         pipeline_overlay: dict[str, Any] | None,
         prompt_fields: dict[str, Any],
+        node_prompt_fields: dict[str, dict[str, Any]],
         resolved_pipeline_params: dict[str, Any] | None,
         block: Mapping[str, int] | None = None,
     ) -> None:
@@ -131,6 +133,7 @@ class RunCallbacks:
                 changes_description=changes_description,
                 pipeline_overlay=pipeline_overlay,
                 prompt_fields=prompt_fields,
+                node_prompt_fields=node_prompt_fields,
                 resolved_pipeline_params=resolved_pipeline_params,
                 block=None if block is None else dict(block),
             )
@@ -143,7 +146,7 @@ class RunCallbacks:
         total: int,
         *,
         opt_sp: OptSearchPoint,
-        resolved_pipeline_params: dict[str, Any] | None,
+        sp: JobSearchPoint,
         sample_order: Sequence[int],
         n_priors: int = 0,
         pipeline_overlay: dict[str, Any] | None = None,
@@ -156,7 +159,8 @@ class RunCallbacks:
             opt_sp.lineage.changes_description or "",
             pipeline_overlay,
             opt_sp.prompt_field_dict(),
-            resolved_pipeline_params,
+            opt_sp.node_prompt_fields(sp),
+            sp.config_params,
             block,
         )
         self.on_sample_order(

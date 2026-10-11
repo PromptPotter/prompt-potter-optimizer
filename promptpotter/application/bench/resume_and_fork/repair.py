@@ -139,7 +139,7 @@ def _rebank_on_branch(
                         individual_id=scores.candidate_id,
                         role=MeasurementRole.PANEL,
                         sample_total=scores.expected_samples,
-                        result=walked.ledger_wire(),
+                        result=walked,
                     )
                 )
             ledger.append(
@@ -273,9 +273,9 @@ async def repair_incomplete_rounds(
                 results.cells,
                 attempted,
                 label=cs.label,
+                sp=sp,
                 sp_hash=sp.sp_hash(session.pipeline_schema),
                 outcome=cs.outcome,
-                resolved_pipeline_params=cs.resolved_pipeline_params,
                 elimination_context=cs.elimination_context,
                 elimination_reason=cs.elimination_reason,
             )

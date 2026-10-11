@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 
 from promptpotter.application.intelligence.adaptive_queue_mechanism import (
     build_round_order,
-    marginal_hit_probability,
     pick_value,
 )
 from promptpotter.domain.cells import (
@@ -70,16 +69,14 @@ def build_hard_samples(
 
     def difficulty(sid: int) -> SampleDifficulty:
         pick: float | None = None
-        p_hat: float | None = None
         if ruler is None or sid not in carried:
-            return SampleDifficulty.on(standing, None, pick_score=pick, p_hat=p_hat)
+            return SampleDifficulty.on(standing, None, pick_score=pick)
         delta, se = carried[sid], ruler.delta_se[sid]
         if frontier is not None:
             mu, mu_se = frontier
             var = ruler.sigma_theta * ruler.sigma_theta
             pick = pick_value(mu, var, mu, mu_se * mu_se, delta, se)
-            p_hat = marginal_hit_probability(mu_c=mu, var_c=var, delta_s=delta, se_delta_s=se)
-        return SampleDifficulty.on(standing, (delta, se), pick_score=pick, p_hat=p_hat)
+        return SampleDifficulty.on(standing, (delta, se), pick_score=pick)
 
     def sample_key(sid: int) -> tuple[int, float, int]:
         return (0, -carried[sid], sid) if sid in carried else (1, 0.0, sid)

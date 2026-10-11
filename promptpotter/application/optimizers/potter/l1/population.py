@@ -14,9 +14,9 @@ from promptpotter.application.optimizers.potter.validators.l1_strict import (
     L1_PROMPT_FIELDS_OPEN,
     L1_SHOTS_IN_DEMO_POOL,
 )
-from promptpotter.application.pipeline_resolve import merge_pipeline_params
 from promptpotter.domain.candidate_diff import candidate_delta
 from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.pipeline_overlay import merge_pipeline_params
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.results import CandidateProposal
 from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure

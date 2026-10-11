@@ -42,10 +42,10 @@ class FactorReading(StrictModel):
     shows. Discovery spans the dataset each subject ran on and the resolved config it ran under,
     which are two keyspaces and one question.
 
-    ``poolable`` is the verdict on the ``value`` column, and it is a property of the METRIC against
-    the roster rather than of this factor: see :data:`_POOLABLE_UNITS`. False leaves the levels and
-    their membership intact — grouping is always honest, only the aggregate is not — so a surface
-    can still lay the grid out and say why the cells are blank.
+    Whether the ``value`` column may be pooled is a property of the METRIC against the roster
+    rather than of this factor: see :data:`_POOLABLE_UNITS`. Where it may not, the levels and their
+    membership stay intact — grouping is always honest, only the aggregate is not — every
+    ``value`` is null and ``note`` says why, so a surface can still lay the grid out.
 
     ``confounded_with`` is the one that decides whether a marginal may be BELIEVED, and it is why
     this is a reading rather than a group-by. A roster assembled from campaigns that already ran is
@@ -59,7 +59,6 @@ class FactorReading(StrictModel):
     key: str
     kind: Literal["dataset", "config", "prompt_field"]
     levels: list[FactorLevel]
-    poolable: bool
     confounded_with: list[str]
     note: str
 
@@ -99,7 +98,6 @@ class FactorGridReading(StrictModel):
     # Occupied coordinates only: an empty cell is the absence of a run, never a row.
     cells: list[FactorCell]
     marginalised: list[str]
-    poolable: bool
     note: str
 
 
@@ -203,7 +201,6 @@ def factors(
                     else "prompt_field"
                 ),
                 levels=readings,
-                poolable=poolable,
                 confounded_with=sorted(
                     other for other in keys if other != key and partitions[other] == partitions[key]
                 ),
@@ -260,7 +257,6 @@ def grid_reading(
         col_key=col_key,
         cells=cells,
         marginalised=[k for k in keys if k not in axes],
-        poolable=poolable,
         note=_pool_note(spec, poolable),
     )
 
