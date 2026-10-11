@@ -5,9 +5,10 @@ import type {
   CommandKind,
   ConfigOverrides as WireConfigOverrides,
   CycleSeed,
+  LaunchLimits,
   ParamIntent,
+  RunMode,
   SpendCeilings,
-  StartRunPayload,
 } from "./types.generated";
 import type { ArchiveReport, CommandAcceptedBody, VerifyReading } from "./types";
 
@@ -150,31 +151,13 @@ export async function postChangeRunLimits(
 export async function postSetConcurrentCycles(limit: number): Promise<CommandAcceptedBody> {
   return postCommand("set-concurrent-cycles", { max_concurrent_cycles: limit });
 }
-export type StartRunOptions = Partial<
-  Omit<StartRunPayload, "campaign_id" | "cycle_id" | "descend">
->;
+export type StartRunOptions = { limits?: Partial<LaunchLimits>; mode?: Partial<RunMode> };
 
-const START_RUN_KEYS: { [K in keyof Required<StartRunOptions>]: true } = {
-  halt_at_accuracy: true,
-  ceiling: true,
-  from_round: true,
-  no_divergence_check: true,
-  fork_on_divergence: true,
-  diag: true,
-  step_rounds: true,
-};
-
-// Sent sparsely, so the `CommandRecord` shows what the operator declared and nothing else.
 export async function postStartRun(
   path: CyclePath,
   options: StartRunOptions = {},
 ): Promise<CommandAcceptedBody> {
-  const payload: Record<string, unknown> = cycleAddress(path);
-  for (const key of Object.keys(START_RUN_KEYS) as (keyof StartRunOptions)[]) {
-    const value = options[key];
-    if (value !== undefined && value !== null) payload[key] = value;
-  }
-  return postCommand("start-run", payload);
+  return postCommand("start-run", { ...cycleAddress(path), ...options });
 }
 
 // A dry run unless `apply`; `purge-cold` with `apply` destroys paid measurement.

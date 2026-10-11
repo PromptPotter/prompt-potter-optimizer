@@ -5,25 +5,13 @@ import { useConnector } from "@/lib/hooks/useConnector";
 import { useCycleStream } from "@/lib/poll";
 import { useNestedPipelines } from "@/lib/hooks/useNestedPipelines";
 import { useOptimizerPipeline } from "@/lib/hooks/useOptimizerPipeline";
-import type { NodeReach } from "@/lib/api";
-import type { NodeScope } from "@/lib/SelectionContext";
-import type { PipelineView } from "@/lib/types";
-import type { PipelineStatus } from "@/lib/types";
 import { ConnectorInspector } from "./ConnectorInspector";
-import { PipelineFlow } from "./PipelineFlow";
+import { PipelineFlow, type PipelineLayer } from "./PipelineFlow";
 
-interface Layer {
+interface Layer extends PipelineLayer {
   key: string;
   // Not the connector name — pp-self's target and the optimizer both report "PromptPotter".
   label: string;
-  view: PipelineView | null;
-  status: PipelineStatus;
-  connector: string | null;
-  reach: Record<string, NodeReach> | null;
-  scope: NodeScope | null;
-  nestsNode: string | null;
-  activeNode: string | null;
-  isLive: boolean;
 }
 
 function ZoomGlyph({ depth }: { depth: number }) {
@@ -130,14 +118,7 @@ export function PipelineStack({ datasetName }: Props) {
     return (
       <PipelineFlow
         key={l.key}
-        view={l.view}
-        status={l.status}
-        connector={l.connector}
-        reach={l.reach}
-        scope={l.scope}
-        nestsNode={l.nestsNode}
-        activeNode={l.activeNode}
-        isLive={l.isLive}
+        layer={l}
         inspector={i === anchor ? <ConnectorInspector view={cv} /> : undefined}
         nested={i < anchor ? draw(i + 1) : undefined}
         tone={(anchor - i) % 2 === 0 ? "accent" : "neutral"}

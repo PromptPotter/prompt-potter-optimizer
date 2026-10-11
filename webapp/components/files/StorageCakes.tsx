@@ -22,17 +22,22 @@ const C = 2 * Math.PI * R;
 function Cake({
   label,
   field,
+  total,
   datasets,
 }: {
   label: string;
-  field: keyof DatasetStorageEntry;
+  field: (typeof CATEGORIES)[number]["key"];
+  total: number;
   datasets: DatasetStorageEntry[];
 }) {
-  const total = datasets.reduce((a, d) => a + (Number(d[field]) || 0), 0);
-  const denom = total || 1;
   const arcs = datasets.map((d, i) => {
-    const value = Number(d[field]) || 0;
-    return { name: d.dataset_name, value, seg: (value / denom) * C, color: seriesVar(i) };
+    const value = d[field];
+    return {
+      name: d.dataset_name,
+      value,
+      seg: total > 0 ? (value / total) * C : 0,
+      color: seriesVar(i),
+    };
   });
   const slices = arcs.map((a, i) => ({
     ...a,
@@ -98,7 +103,13 @@ export function StorageCakes() {
       </div>
       <div className="cakes-row">
         {CATEGORIES.map((cat) => (
-          <Cake key={cat.key} label={cat.label} field={cat.key} datasets={datasets} />
+          <Cake
+            key={cat.key}
+            label={cat.label}
+            field={cat.key}
+            total={data[cat.key]}
+            datasets={datasets}
+          />
         ))}
       </div>
     </div>

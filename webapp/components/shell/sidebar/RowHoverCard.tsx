@@ -29,17 +29,16 @@ function RowCardBody({ card }: { card: RowCardFacts }) {
   );
   const knobs = configMap ? declaredKnobs(configMap) : null;
 
-  const loop = data && data.state_bytes + data.trace_bytes + data.history_bytes + data.reports_bytes;
   const sizes: [string, number | undefined, boolean?][] = [
     ["Dataset", data?.dataset_bytes],
     ["Connector", data?.connector_bytes],
-    ["Loop", loop ?? undefined],
+    ["Loop", data?.loop_bytes],
     ["State", data?.state_bytes, true],
     ["Trace", data?.trace_bytes, true],
     ["History", data?.history_bytes, true],
     ["Reports", data?.reports_bytes, true],
   ];
-  const size = (n: number | undefined) => (error ? "—" : data ? fmtBytes(n ?? 0) : "…");
+  const size = (n: number | undefined) => (error ? "—" : n === undefined ? "…" : fmtBytes(n));
 
   const payload = {
     name: card.title,

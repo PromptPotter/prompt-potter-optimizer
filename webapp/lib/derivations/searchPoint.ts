@@ -81,34 +81,20 @@ export function searchpointText(cfg: ObserveConfig): string {
   return lines.join("\n");
 }
 
-// promptpotter-self: prompt fields ride per node, and the round file carries only the mutated delta.
-function nodePromptFields(
-  resolved: Record<string, unknown> | undefined | null,
-  nodeId: string | null | undefined,
-): Record<string, unknown> {
-  if (!nodeId || !resolved) return {};
-  const slice = resolved[nodeId];
-  if (!slice || typeof slice !== "object") return {};
-  const rec = slice as Record<string, unknown>;
-  const out: Record<string, unknown> = {};
-  for (const k of PROMPT_STRING_FIELDS) {
-    if (k in rec) out[k] = rec[k];
-  }
-  return out;
-}
+type SearchpointRow = Pick<
+  LiveCandidate,
+  "prompt_fields" | "node_prompt_fields" | "resolved_pipeline_params"
+>;
 
-type SearchpointRow = Pick<LiveCandidate, "prompt_fields" | "resolved_pipeline_params">;
-
+// A node asks for the fields IT runs (absent = none); the whole searchpoint for the individual's own.
 function rowConfig(
   row: SearchpointRow | undefined | null,
   label: string,
   nodeId?: string | null,
 ): ObserveConfig | null {
   if (!row) return null;
-  const flat = row.prompt_fields ?? {};
-  const hasFlatPrompt = PROMPT_STRING_FIELDS.some((k) => k in flat);
   return {
-    promptFields: hasFlatPrompt ? flat : nodePromptFields(row.resolved_pipeline_params, nodeId),
+    promptFields: (nodeId ? row.node_prompt_fields[nodeId] : row.prompt_fields) ?? {},
     config: row.resolved_pipeline_params ?? {},
     label,
   };

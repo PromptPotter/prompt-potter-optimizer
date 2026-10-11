@@ -171,8 +171,10 @@ function launchLimits(c: CapDrafts): StartCheckinOptions {
   const usd = num(c.usd) ?? null;
   const tokens = num(c.tokens) ?? null;
   return {
-    halt_at_accuracy: num(c.halt),
-    ceiling: usd === null && tokens === null ? undefined : { usd, tokens },
+    limits: {
+      halt_at_accuracy: num(c.halt),
+      ceiling: usd === null && tokens === null ? undefined : { usd, tokens },
+    },
   };
 }
 

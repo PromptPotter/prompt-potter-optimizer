@@ -93,12 +93,12 @@ export function ComparePane() {
   }
 
   const comparability = evidence?.comparability ?? null;
-  const readable = !!evidence?.subjects.some((c) => c.n_cells > 0);
+  const readable = !!evidence && evidence.subjects_read > 0;
   const names = useMemo(() => channelNames(evidence?.subjects ?? []), [evidence?.subjects]);
   const maskTarget =
     evidence?.subjects.find((s) => maskedSubject(s, {}) === masking) ?? null;
   if (masking !== null && evidence && !loading && maskTarget === null) setMasking(null);
-  const hasBranch = !!evidence?.subjects.some((s) => s.kind !== "campaign");
+  const hasBranch = !!evidence && evidence.branch_subjects > 0;
 
   return (
     <div className="content" id="content-compare">
@@ -239,7 +239,7 @@ export function ComparePane() {
                   <FactorGrid evidence={evidence} grid={grid} onGrid={setGrid} />
                   <PairwisePanel
                     reading={evidence.metric}
-                    nRead={evidence.subjects.filter((c) => c.n_cells > 0).length}
+                    nRead={evidence.subjects_read}
                     names={names}
                   />
                   <Readings evidence={evidence} />
@@ -392,11 +392,10 @@ function WinnerChains({
       </p>
     );
   }
-  const points = evidence.subjects.reduce((n, s) => n + (s.winner_chain?.length ?? 0), 0);
   const parted = evidence.subjects.some((s) => s.scenario?.winner_changed);
   return (
     <p className="note-lede">
-      {points} point(s) across {evidence.subjects.filter((s) => s.winner_chain).length} branch(es),
+      {evidence.chain_points ?? "—"} point(s) across {evidence.branch_subjects} branch(es),
       shown under their heads in the <strong>Merged</strong> view. Each point is read on the cells
       that round actually scored — the subsets move between rounds, so a chain drawn on one shared
       axis would redraw earlier rounds on evidence they never had.

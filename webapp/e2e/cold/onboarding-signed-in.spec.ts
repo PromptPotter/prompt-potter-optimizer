@@ -1,7 +1,7 @@
 import { test, expect, ready } from "../harness";
 import { startFakeIssuer, type FakeIssuer } from "../fake_issuer";
 
-// `AccessGate` and `AllowanceSpent` need a signed-in NON-host identity, which the auth-off servers cannot produce.
+// `AccessGate` and `AllowanceExhausted` need a signed-in NON-host identity, which the auth-off servers cannot produce.
 
 let fake: FakeIssuer;
 
@@ -25,13 +25,13 @@ test("a blocked account sees AccessGate, not the app", async ({ page, context })
   await expect(page.getByRole("button", { name: "Sign out" })).toBeEnabled();
 });
 
-test("an account at its free-tier ceiling sees AllowanceSpent", async ({ page, context, request }) => {
+test("an account at its free-tier ceiling sees AllowanceExhausted", async ({ page, context, request }) => {
   const tenantId = "e2e-fake-allowance";
   fake.seedSpendCeiling(tenantId, 0);
   const sessionId = fake.mintSession({ tenantId, email: "allowance@example.com" });
   await context.addCookies([{ name: "promptpotter_session", value: sessionId, url: fake.baseURL }]);
 
-  // Pre-accept Terms, or ConsentGate paints over AllowanceSpent; `request` is bound to the cold project's baseURL, hence full URLs.
+  // Pre-accept Terms, or ConsentGate paints over AllowanceExhausted; `request` is bound to the cold project's baseURL, hence full URLs.
   const cookie = { Cookie: `promptpotter_session=${sessionId}` };
   const me = await (
     await request.get(`${fake.baseURL}/api/v1/auth/me`, { headers: cookie })

@@ -1,31 +1,17 @@
 "use client";
-import { useMemo, useRef } from "react";
+import { useRef } from "react";
 import { Bar } from "react-chartjs-2";
 import { barChartDefaults, ensureChartRegistered, getCss, useThemeVersion } from "@/lib/theme";
 import { TERMS } from "@/lib/terms";
-import { liveCandidates, useCycleStream } from "@/lib/poll";
+import { useCycleStream } from "@/lib/poll";
 import { useObserveSubject } from "@/lib/hooks/useObserveSubject";
 import { useRound } from "@/lib/hooks/useRound";
 import { useWorkspace } from "@/lib/workspace";
 import { Badge, CardFrame, Term } from "@/components/ui";
-import type { DashboardSample, SheetRow } from "@/lib/api/types";
 
 ensureChartRegistered();
 
-type ResultRow = Pick<DashboardSample | SheetRow, "status" | "fitness">;
-
-const LABELS = ["0", "", "", "", "", "", "", "", "", "1"];
-
-// Only graded marks bucket: `Scorer.grade` floors an errored row to 0.0, which is not a low score.
-function bucketScores(results: ResultRow[]): number[] {
-  const buckets = new Array<number>(10).fill(0);
-  results.forEach((r) => {
-    if ((r.status !== "HIT" && r.status !== "MISS") || typeof r.fitness !== "number") return;
-    const idx = Math.min(9, Math.max(0, Math.floor(r.fitness * 9.999)));
-    buckets[idx] = (buckets[idx] ?? 0) + 1;
-  });
-  return buckets;
-}
+const NO_BANDS: number[] = [];
 
 export function FreqChart() {
   useThemeVersion();
@@ -36,18 +22,13 @@ export function FreqChart() {
   const { viewedPath } = useWorkspace();
   const { unfiled, doc: roundDoc } = useRound(viewedPath, effectiveRound);
 
-  const results: ResultRow[] = useMemo(() => {
-    if (unfiled) return liveCandidates(dash).flatMap((c) => c.samples);
-    return roundDoc?.results ?? [];
-  }, [unfiled, dash, roundDoc]);
-
-  const data = bucketScores(results);
+  const data = (unfiled ? dash?.current_round.fitness_bands : roundDoc?.fitness_bands) ?? NO_BANDS;
   const accStrong = getCss("--color-accent-strong");
   const acc = getCss("--color-accent");
-  const colors = data.map((_, i) => (i < 5 ? accStrong : acc));
+  const colors = data.map((_, i) => (i < data.length / 2 ? accStrong : acc));
 
   const chartData = {
-    labels: LABELS,
+    labels: data.map((_, i) => (i === 0 ? "0" : i === data.length - 1 ? "1" : "")),
     datasets: [{ data, backgroundColor: colors, borderRadius: 2 }],
   };
   const options = barChartDefaults({

@@ -23,7 +23,6 @@ import {
   type RaisedCommand,
   type StartCheckinOptions,
 } from "@/lib/api";
-import { plainLanguageRecap } from "@/lib/origin-readiness";
 import { useThread, type MessageTone } from "@/lib/chat/thread";
 type OnMinted = (selection: { campaignId: string; cycleId: string }) => void;
 
@@ -110,9 +109,9 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
       resolution = r.resolution.last_resolution;
       raised = r.resolution.raised;
       degradedCause = r.resolution.degraded_cause;
-      recap = resolution?.recap || resolution?.assessment || plainLanguageRecap(resolved);
+      recap = resolution?.recap || resolution?.assessment || resolved.recap;
     } catch (e) {
-      recap = plainLanguageRecap(resolved);
+      recap = resolved.recap;
       sayError(e);
     }
     if (degradedCause) say(degradedCause, "warning");

@@ -54,13 +54,12 @@ const EMPTY: CellsState = {
 };
 
 function sliceFrom(r: CellsResponse): ScopeSlice {
-  const measured = r.samples.filter((it) => it.n_measured > 0).length;
   return {
     items: r.samples,
     candidates: r.candidates,
     cells: r.cells,
-    measuredCount: measured,
-    unmeasuredCount: r.samples.length - measured,
+    measuredCount: r.measured_samples,
+    unmeasuredCount: r.unmeasured_samples,
     totals: {
       total_measurements: r.total_measurements,
       total_hits: r.total_hits,

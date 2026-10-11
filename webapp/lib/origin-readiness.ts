@@ -1,6 +1,6 @@
 // The mint gate is `origin_readiness.py`'s, served as `draft.readiness` — never re-derive it here.
 
-import type { DraftCampaignWire, DraftPatch } from "./api";
+import type { DraftPatch } from "./api";
 
 // Mirrors the field ids `origin_readiness.py` keys `draft.field_provenance` by.
 export const ORIGIN_KEY = {
@@ -28,11 +28,9 @@ export function questionPatch(field: string, answer: string): DraftPatch | null 
     case ORIGIN_KEY.scoringMatcher:
       return { scoring_matcher: value };
     case ORIGIN_KEY.maxRounds: {
-      // 0 is legal — "measure the origin and stop" (server `ge=0`); never guard `>= 1`.
+      // The range is the server's (`OptimizationOverrides.max_rounds`); only a non-integer has no patch.
       const n = Number(value);
-      return Number.isInteger(n) && n >= 0 && n <= 100
-        ? { optimization_overrides: { max_rounds: n } }
-        : null;
+      return Number.isInteger(n) ? { optimization_overrides: { max_rounds: n } } : null;
     }
     default:
       return null;
@@ -43,35 +41,4 @@ export function questionOptions(field: string, options: string[], headers: strin
   if (options.length > 0) return options;
   if (field === ORIGIN_KEY.columnQuery || field === ORIGIN_KEY.columnGroundTruth) return headers;
   return [];
-}
-
-const CONNECTOR_LABELS: Record<string, string> = { termnorm: "the TermNorm pipeline" };
-const SCORER_LABELS: Record<string, string> = {
-  label_match: "an exact match against the target",
-};
-
-function shortTaskTitle(task: string): string | null {
-  const firstLine = task
-    .split("\n")
-    .map((l) => l.trim())
-    .find((l) => l.length > 0);
-  if (!firstLine) return null;
-  const cleaned = firstLine.replace(/^#+\s*/, "").replace(/[.\s]+$/, "").trim();
-  return cleaned.length > 0 && cleaned.length <= 72 ? cleaned : null;
-}
-
-export function plainLanguageRecap(draft: DraftCampaignWire): string {
-  const input = draft.column_query || "your input";
-  const target = draft.column_ground_truth || "the target";
-  const scorer = SCORER_LABELS[draft.scoring_matcher] ?? draft.scoring_matcher;
-  const connector = CONNECTOR_LABELS[draft.connector] ?? draft.connector;
-  const maxRounds = draft.optimization_overrides.max_rounds;
-  const rounds = maxRounds === 1 ? "1 round" : `up to ${maxRounds} rounds`;
-
-  const title = shortTaskTitle(draft.raw_task_description);
-  const lead = title
-    ? `evolve a prompt for “${title}”`
-    : `evolve a prompt that turns each “${input}” into the right “${target}”`;
-
-  return `PromptPotter will ${lead} — running ${connector}, scoring by ${scorer}, over ${rounds}.`;
 }

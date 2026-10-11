@@ -6,14 +6,12 @@ from pydantic import Field
 from promptpotter.application.campaign_config import OptimizationConfig
 from promptpotter.application.cycle_listing import CyclesResponse, active_pointer, list_cycles
 from promptpotter.application.jobs.capacity import MachineStatusResponse, machine_status
-from promptpotter.application.optimizer_manifest import (
+from promptpotter.application.pipeline_resolve import (
     OptimizerKnobsResponse,
+    OptimizerPipelineResponse,
     OptimizerRoster,
     optimizer_knobs,
     optimizer_roster,
-)
-from promptpotter.application.pipeline_resolve import (
-    OptimizerPipelineResponse,
     resolve_pipeline_for_optimizer,
 )
 from promptpotter.domain.strict_model import StrictModel

@@ -221,7 +221,7 @@ async def _hold_ingested_checkin(args: argparse.Namespace) -> HeldRun:
                 diag=args.diag,
                 backend_url=args.backend_url,
                 backend_id=args.backend_id,
-                **launch_limits_from_args(args).model_dump(),
+                limits=launch_limits_from_args(args),
             ),
             uuid.uuid4().hex,
         ),
@@ -283,7 +283,7 @@ def _named_mint(args: argparse.Namespace, stores: Stores) -> MintCampaignPayload
             task_text=task_text,
             backend_url=args.backend_url,
             backend_id=args.backend_id,
-            **launch_limits_from_args(args).model_dump(),
+            limits=launch_limits_from_args(args),
         )
     except ValidationError as exc:
         raise SystemExit(f"ERROR: {exc.errors()[0].get('msg', exc)}") from None

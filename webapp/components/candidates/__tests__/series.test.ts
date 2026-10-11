@@ -145,7 +145,7 @@ describe("the confidence band", () => {
         cell_set: null,
         instrument_id: null,
         scope: "report",
-        spec: { interval_method: "student_t", alpha: 0.05, null_value: 0 },
+        spec: { alpha: 0.05, null_value: 0 },
         coverage: null,
         headline: null,
         beside: [],

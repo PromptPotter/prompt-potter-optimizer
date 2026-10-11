@@ -66,7 +66,7 @@ export function NodeSurface({
   const authored = nodeId ? authoredOutputSchema(overlay, nodeId) : undefined;
   const rows = nodeId ? schema.config?.[nodeId] : undefined;
   const toggle = rows?.find((p) => p.key === "response_format");
-  const asksForSchema = (toggle?.permitted ?? toggle?.options)?.includes("json") === true;
+  const asksForSchema = toggle?.permitted.includes("json") === true;
   const onAuthor =
     author &&
     nodeId &&

@@ -3,7 +3,7 @@
 
 import { createContext, useContext, useMemo, useState } from "react";
 import { treeRead, type TreeMask, type TreeMoment } from "@/lib/api";
-import { ABORT_LENS_LABELS } from "@/lib/api/types.generated";
+import { ABORT_LENS_LABELS, SCORE_LENS_LABELS } from "@/lib/api/types.generated";
 import type { CourseNode } from "@/lib/api/types";
 import { phaseIs } from "@/lib/run-phase";
 import { indexLineage, type LineageIndex } from "@/lib/derivations";
@@ -18,12 +18,7 @@ import { useWorkspace } from "@/lib/workspace";
 
 const POLL_MS = 5000;
 
-const LENS_LABELS: Record<string, string> = {
-  "score:accuracy": "Accuracy",
-  ...Object.fromEntries(
-    Object.entries(ABORT_LENS_LABELS).map(([variant, label]) => [`abort:${variant}`, label]),
-  ),
-};
+const LENS_LABELS: Record<string, string> = { ...SCORE_LENS_LABELS, ...ABORT_LENS_LABELS };
 
 export interface CampaignTree {
   root: CourseNode | null;

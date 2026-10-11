@@ -21,7 +21,7 @@ const liveDash = dash({
     candidates: [
       liveRow({
         reading,
-        samples: [sampleRow({ qi: 0, sample_id: 2, status: "MISS", terminal_node: "token_matching" })],
+        samples: [sampleRow({ sample_id: 2, status: "MISS", terminal_node: "token_matching" })],
       }),
     ],
   }),

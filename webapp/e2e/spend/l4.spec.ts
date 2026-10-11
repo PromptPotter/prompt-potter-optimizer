@@ -81,7 +81,7 @@ test.describe("the recursion, end to end", () => {
   test("minting carries the ceiling, so there is no unclamped window", async ({ request }) => {
     const res = await command(request, "mint-campaign", {
       dataset_name: DATASET,
-      ceiling: { usd: BUDGET_USD },
+      limits: { ceiling: { usd: BUDGET_USD } },
     });
     expect(res.status, `mint-campaign: ${res.body}`).toBeLessThan(300);
 
@@ -110,7 +110,7 @@ test.describe("the recursion, end to end", () => {
     const started = await command(request, "start-run", {
       campaign_id: outer!.id,
       cycle_id: outer!.cycleId,
-      ceiling: { usd: BUDGET_USD },
+      limits: { ceiling: { usd: BUDGET_USD } },
     });
     expect(started.status, `start-run: ${started.body}`).toBeLessThan(300);
 

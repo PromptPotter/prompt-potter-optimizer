@@ -8,9 +8,9 @@ import { quotaRead } from "@/lib/api";
 import { fmtUsd } from "@/lib/format";
 import { readyData, useRead } from "@/lib/hooks/useRead";
 
-const DISMISSED = "promptpotter.allowance-spent.dismissed";
+const DISMISSED = "promptpotter.allowance-exhausted.dismissed";
 
-export function AllowanceSpent() {
+export function AllowanceExhausted() {
   const { status, me } = useAuth();
   const quota = readyData(useRead(quotaRead(), { auth: true }));
   const [dismissed, setDismissed] = useState(() => {
@@ -21,7 +21,7 @@ export function AllowanceSpent() {
     }
   });
 
-  const open = status === "authed" && !!me && quota?.allowance_spent === true && !dismissed;
+  const open = status === "authed" && !!me && quota?.allowance_exhausted === true && !dismissed;
 
   if (!open || quota == null) return null;
 
@@ -35,10 +35,10 @@ export function AllowanceSpent() {
   };
 
   return (
-    <Dialog open onClose={onDismiss} labelledBy="allowance-spent-title" bare>
+    <Dialog open onClose={onDismiss} labelledBy="allowance-exhausted-title" bare>
       <div className="account-modal consent-modal">
         <header className="account-pane-head">
-          <h3 id="allowance-spent-title">That&rsquo;s the last of your free runs</h3>
+          <h3 id="allowance-exhausted-title">That&rsquo;s the last of your free runs</h3>
         </header>
 
         <div className="account-pane-body">

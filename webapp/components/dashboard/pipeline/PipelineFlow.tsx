@@ -84,30 +84,27 @@ function PipelinePlaceholder({ status }: { status: PipelineStatus }) {
   );
 }
 
-interface BoxProps {
-  view: PipelineView;
+export interface PipelineLayer {
+  view: PipelineView | null;
+  status: PipelineStatus;
   connector: string | null;
-  activeNode: string | null;
-  isLive: boolean;
   // A node absent from the map is UNKNOWN — never draw it as shut.
   reach: Record<string, NodeReach> | null;
   scope: NodeScope | null;
   nestsNode: string | null;
+  activeNode: string | null;
+  isLive: boolean;
+}
+
+interface BoxProps {
+  view: PipelineView;
+  layer: PipelineLayer;
   compact: boolean;
   models: { by: Record<string, string | null>; loading: boolean } | null;
 }
 
-function PipelineBox({
-  view,
-  connector,
-  activeNode,
-  isLive,
-  reach: reachByNode,
-  scope,
-  nestsNode,
-  compact,
-  models,
-}: BoxProps) {
+function PipelineBox({ view, layer, compact, models }: BoxProps) {
+  const { connector, activeNode, isLive, reach: reachByNode, scope, nestsNode } = layer;
   const { node: selected, setSelectionForNode: setSelected } = useSelection();
   const { dash } = useCycleStream();
   const interior = interiorNodes(view);
@@ -411,14 +408,7 @@ function PipelineBox({
 }
 
 export interface PipelineFlowProps {
-  view: PipelineView | null;
-  status: PipelineStatus;
-  connector: string | null;
-  reach: Record<string, NodeReach> | null;
-  scope: NodeScope | null;
-  nestsNode: string | null;
-  activeNode: string | null;
-  isLive: boolean;
+  layer: PipelineLayer;
   inspector?: ReactNode;
   // Owned by the STACK, never a `useState` here: a zoom re-parents this flow and React drops its state.
   nested?: ReactNode;
@@ -440,36 +430,20 @@ function FlowEnd({ icon, lbl, val }: { icon: ReactNode; lbl: string; val: string
 }
 
 export function PipelineFlow({
-  view,
-  status,
-  connector,
-  reach,
-  scope,
-  nestsNode,
-  activeNode,
-  isLive,
+  layer,
   inspector,
   nested,
   tone,
   models = null,
   bare = false,
 }: PipelineFlowProps) {
+  const { view, status } = layer;
   const interior = interiorNodes(view);
   const box =
     view == null || interior.length === 0 ? (
       <PipelinePlaceholder status={status === "ok" ? "unbound" : status} />
     ) : (
-      <PipelineBox
-        view={view}
-        connector={connector}
-        activeNode={activeNode}
-        isLive={isLive}
-        reach={reach}
-        scope={scope}
-        nestsNode={nestsNode}
-        compact={nested != null}
-        models={models}
-      />
+      <PipelineBox view={view} layer={layer} compact={nested != null} models={models} />
     );
 
   if (bare) return box;

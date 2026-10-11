@@ -12,7 +12,7 @@ const WEBAPP = path.resolve(__dirname, "..");
 export type FakeIssuer = {
   baseURL: string;
   mintSession(opts: { tenantId: string; email: string | null }): string;
-  /** `0` puts the account at its cap with nothing spent, which is what `AllowanceSpent` reads. */
+  /** `0` puts the account at its cap with nothing spent, which is what `AllowanceExhausted` reads. */
   seedSpendCeiling(tenantId: string, usd: number): void;
   blockEmails(emails: string[]): void;
   stop(): Promise<void>;

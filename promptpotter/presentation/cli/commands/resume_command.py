@@ -69,8 +69,8 @@ def _start_run(
     return StartRunPayload(
         campaign_id=hop.campaign_id,
         cycle_id=hop.cycle_id,
-        **_run_mode(args, fork_on_divergence=fork_on_divergence).model_dump(),
-        **launch_limits_from_args(args).model_dump(),
+        limits=launch_limits_from_args(args),
+        mode=_run_mode(args, fork_on_divergence=fork_on_divergence),
     )
 
 
@@ -107,7 +107,7 @@ async def _dispatch_fork(
                 seed=seed,
                 keep_rounds=keep_rounds,
                 reason=reason,
-                **_run_mode(args, fork_on_divergence=args.fork_on_divergence).model_dump(),
+                mode=_run_mode(args, fork_on_divergence=args.fork_on_divergence),
             ),
         )
     except (ConfigDriftError, BackendUnreachableError):
@@ -256,7 +256,7 @@ async def _run_loop(args: argparse.Namespace, ctx: SessionCtx, held: HeldRun) ->
         # The refused run handed its slot back; the re-run is a launch — and a command — of its own.
         rerun = _start_run(args, ctx.hop, fork_on_divergence=True)
         held = await _dispatch_held(args, ctx, rerun)
-        cycle_result = await run_inline(held, mode=rerun)
+        cycle_result = await run_inline(held, mode=rerun.mode)
 
     return cycle_result_command(held.session, cycle_result)
 
@@ -280,7 +280,7 @@ async def _pivot_to_fresh(
             dataset_name=drift.dataset_name,
             backend_url=ctx.campaign.backend_url,
             backend_id=ctx.campaign.backend_id,
-            **launch_limits_from_args(args).model_dump(),
+            limits=launch_limits_from_args(args),
         ),
         inline_launch(args),
     )
