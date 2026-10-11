@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Literal, NamedTuple, Self, get_args
@@ -9,6 +9,9 @@ from pydantic import ConfigDict, Field, model_validator
 
 from promptpotter.domain.paired_reading import (
     ArmPointer,
+    CellSet,
+    CellSetBasis,
+    CellSetName,
     MeasuredLift,
     PairedReading,
     ReadingState,
@@ -44,6 +47,7 @@ __all__ = [
     "PartitionRecord",
     "PassOutcome",
     "PassStop",
+    "bench_split",
     "bench_status",
     "partition_bank",
 ]
@@ -75,6 +79,12 @@ class DatasetSplit(StrictModel):
     )
 
 
+def bench_split(sample_keys: Iterable[str]) -> CellSet:
+    return CellSet.of(
+        CellSetName.BENCH_SPLIT, CellSetBasis.DECLARED, list(sample_keys), dataset_hash=None
+    )
+
+
 @dataclass(frozen=True)
 class BankPartition:
     split: DatasetSplit | None
@@ -87,12 +97,17 @@ class BankPartition:
         """``None`` when nothing is held out, so an L4 cell drawn from a bank still reads every row."""
         return None if self.split is None else frozenset(s.id for s in self.search)
 
+    @property
+    def bench_rows(self) -> CellSet:
+        return bench_split(s.key for s in self.bench)
+
     def record(self, *, dataset_hash: str) -> PartitionRecord:
         return PartitionRecord(
             dataset_hash=dataset_hash,
             split=self.split,
             search_ids=[s.id for s in self.search],
             bench_ids=[s.id for s in self.bench],
+            bench_rows=self.bench_rows,
             demo_ids=[s.id for s in self.demo],
         )
 
@@ -106,6 +121,8 @@ class PartitionRecord(StrictModel):
     split: DatasetSplit | None
     search_ids: list[int]
     bench_ids: list[int]
+    # Row ids are slots; this is the held-out content two campaigns are compared on.
+    bench_rows: CellSet
     demo_ids: list[int]
 
     @property

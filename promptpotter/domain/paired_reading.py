@@ -26,7 +26,6 @@ __all__ = [
     "CoverageState",
     "EstimatorSpec",
     "FlipCounts",
-    "IntervalMethod",
     "LiftEstimate",
     "LiftReference",
     "LiftSide",
@@ -313,24 +312,17 @@ class Measurand(StrictModel):
     unit: MeasurandUnit
 
 
-class IntervalMethod(StrEnum):
-    STUDENT_T = "student_t"
-
-
 class EstimatorSpec(StrictModel):
     """How a lift's two-sided interval and test were taken; the estimate is the mean paired difference."""
 
     model_config = ConfigDict(frozen=True)
 
-    interval_method: IntervalMethod
     alpha: float
     null_value: float = Field(description="The difference the test and `side` are read against.")
 
 
 #: One spec for every lift a round banks, so each arm's and the pick's are read on one bar.
-ROUND_LIFT_SPEC = EstimatorSpec(
-    interval_method=IntervalMethod.STUDENT_T, alpha=0.05, null_value=0.0
-)
+ROUND_LIFT_SPEC = EstimatorSpec(alpha=0.05, null_value=0.0)
 
 
 class LiftEstimate(StrictModel):

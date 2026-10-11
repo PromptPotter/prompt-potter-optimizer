@@ -30,17 +30,16 @@ __all__ = [
 HeatmapScope = Literal["cycle", "campaign", "dataset"]
 
 # A reader takes a `hard_samples.json` of any other version as not written.
-HARD_SAMPLES_VERSION = 7
+HARD_SAMPLES_VERSION = 8
 
 
 class SampleDifficulty(StrictModel):
-    """Every number is null outside ``linked``; two also where the scope holds no frontier ability."""
+    """Every number is null outside ``linked``; ``pick_score`` also where the scope holds no frontier ability."""
 
     state: DeltaState
     delta: float | None
     delta_se: float | None
     pick_score: float | None
-    p_hat: float | None
 
     @classmethod
     def on(
@@ -49,7 +48,6 @@ class SampleDifficulty(StrictModel):
         held: tuple[float, float] | None,
         *,
         pick_score: float | None,
-        p_hat: float | None,
     ) -> SampleDifficulty:
         delta, delta_se = held if held is not None else (None, None)
         return cls(
@@ -57,7 +55,6 @@ class SampleDifficulty(StrictModel):
             delta=delta,
             delta_se=delta_se,
             pick_score=pick_score,
-            p_hat=p_hat,
         )
 
     @property
@@ -92,7 +89,7 @@ class HardSamples(StrictModel):
         held = self.samples.get(sample_id)
         if held is not None:
             return held
-        return SampleDifficulty.on(self.ruler, None, pick_score=None, p_hat=None)
+        return SampleDifficulty.on(self.ruler, None, pick_score=None)
 
 
 #: `partly` is both a sample some candidates hit and others missed, and one a graded scorer part-credited.
@@ -247,7 +244,7 @@ class DatasetItem(StrictModel):
     delta_label: str | None = Field(
         description="What to print in place of the δ where the scope's ruler "
         "(`CellsResponse.ruler`) holds none for this sample — the ruler is not fitted, or does "
-        "not carry it. The four numbers below are then null, never 0; null where `delta` stands."
+        "not carry it. The three numbers below are then null, never 0; null where `delta` stands."
     )
     pick_score: float | None = Field(
         description="The acquisition score (`adaptive_queue_mechanism.pick_value`) of this sample "
@@ -258,11 +255,6 @@ class DatasetItem(StrictModel):
         description="The ruler's difficulty δ for this sample (higher = harder)."
     )
     delta_se: float | None = Field(description="SE of that δ (large = barely measured).")
-    p_hat: float | None = Field(
-        description="Marginal hit probability of that same new candidate "
-        "(`adaptive_queue_mechanism.marginal_hit_probability`). Near 0.5 = contested at the "
-        "frontier; near 0/1 = predictable. Null wherever `pick_score` is."
-    )
     n_measured: int = Field(
         default=0,
         description="GRADED cells of this sample in scope (errored and unscored cells excluded) "
@@ -292,7 +284,7 @@ class CellsResponse(StrictModel):
         "holds no `pick_score` to rank on. Echoed so a client labels what it is showing.",
     )
     ruler: RulerStanding = Field(
-        description="The ONE δ ruler every `delta`, `pick_score` and `p_hat` below is read on: "
+        description="The ONE δ ruler every `delta` and `pick_score` below is read on: "
         "the ruler of the cycle the scope reads, whose walks `cells` are — the requested cycle in "
         "cycle scope, the one campaign scope names "
         "(`application/scoring/measurement_log.py::campaign_scope_cycle`); in dataset scope one "
@@ -312,3 +304,7 @@ class CellsResponse(StrictModel):
     never_hit: int = Field(description="`samples` whose `hit_spread` is `never`.")
     partly_hit: int = Field(description="`samples` whose `hit_spread` is `partly`.")
     always_hit: int = Field(description="`samples` whose `hit_spread` is `always`.")
+    measured_samples: int = Field(
+        description="`samples` holding a graded cell in scope — every `hit_spread` but `unmeasured`."
+    )
+    unmeasured_samples: int = Field(description="`samples` whose `hit_spread` is `unmeasured`.")

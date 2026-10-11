@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from typing import Any, Literal, TypedDict, Unpack
 
 from pydantic import ConfigDict, Field
 
 from promptpotter.domain.bench import DatasetSplit
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.paired_reading import instrument_of
+from promptpotter.domain.paired_reading import CellSet, instrument_of
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.run_records import WallClock
 from promptpotter.domain.spend import CeilingMeter
@@ -45,7 +45,7 @@ class BenchSet(StrictModel):
     # Order-independent content: two banks re-cut under one name share ids, not this.
     dataset_hash: str
     split: DatasetSplit | None
-    bench_rows: str
+    bench_rows: CellSet
     scorer_id: str
     models: dict[str, str]
     origin: str
@@ -56,7 +56,7 @@ def bench_set_of(
     dataset_name: str,
     dataset_hash: str,
     split: DatasetSplit | None,
-    bench_ids: Iterable[int],
+    bench_rows: CellSet,
     scorer_id: str,
     origin_params: Mapping[str, Any] | None,
     origin: str,
@@ -65,7 +65,7 @@ def bench_set_of(
         instrument_id=instrument_of(dataset_name, origin_params),
         dataset_hash=dataset_hash,
         split=split,
-        bench_rows=stable_hash([str(i) for i in sorted(bench_ids)]),
+        bench_rows=bench_rows,
         scorer_id=scorer_id,
         models={
             node: str(cfg["model"])

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import enum
-from collections.abc import Mapping
 from typing import Annotated, Any, Literal, get_args
 
 from pydantic import ConfigDict, Field, TypeAdapter, model_validator
@@ -36,7 +35,7 @@ from promptpotter.domain.results import (
     ScoreSummary,
 )
 from promptpotter.domain.ruler import DeltaRuler, ThetaCaveat
-from promptpotter.domain.scoring import Grade, MeasuredCell
+from promptpotter.domain.scoring import LedgerCell
 from promptpotter.domain.spend import (
     SpendCeilings,
     TokenUsageKind,
@@ -108,7 +107,6 @@ __all__ = [
     "SpendHoldRecord",
     "TokenUsageRecord",
     "WallClock",
-    "scored_cell",
 ]
 
 
@@ -290,6 +288,7 @@ class CandidateStartedRecord(_ArmFact):
     changes_description: str = ""
     pipeline_overlay: dict[str, Any] | None = None
     prompt_fields: dict[str, Any] = Field(default_factory=dict)
+    node_prompt_fields: dict[str, dict[str, Any]] = Field(default_factory=dict)
     resolved_pipeline_params: dict[str, Any] | None = None
     # The turn's place in a block race — ``n`` of ``of``, ``size`` cells, ``racing`` arms live.
     block: dict[str, int] | None = None
@@ -302,8 +301,6 @@ class SampleOrderRecord(_ArmFact):
 
 
 class SampleStartedRecord(_ArmFact):
-    """``stop_horizon`` is the fewest rows at which a stop rule could still cut."""
-
     record_type: Literal["sample_started"] = "sample_started"
     sample_idx: int
     sample_total: int
@@ -311,25 +308,18 @@ class SampleStartedRecord(_ArmFact):
     # Capped at the writer: the whole query is a dataset fact, in every measurement row.
     query_preview: str = ""
     sample_lookahead: int = 1
-    stop_horizon: int | None = None
 
 
 class SampleScoredRecord(_ArmFact):
-    """Read ``result`` through :func:`scored_cell`; a re-banked row has no ``sample_idx``."""
+    """A re-banked row has no ``sample_idx``."""
 
     record_type: Literal["sample_scored"] = "sample_scored"
     individual_id: str
     role: MeasurementRole
     sample_idx: int | None = None
     sample_total: int | None = None
-    result: dict[str, Any]
+    result: LedgerCell
     running: ScoreSummary | None = None
-
-
-def scored_cell(result: Mapping[str, Any]) -> tuple[MeasuredCell, Grade]:
-    return MeasuredCell.from_wire(result), Grade(
-        result.get("fitness"), result.get("objective"), result.get("unscored")
-    )
 
 
 class CandidateScoredRecord(_ArmFact):
@@ -960,10 +950,6 @@ class ForkSpec(StrictModel):
 class SpawnedBy(StrictModel):
     """The outer work-item an L4 inner cycle was spawned to measure."""
 
-    outer_cycle_id: str = Field(description="The outer cycle that owns this inner sandbox")
-    outer_campaign_id: str = Field(
-        description="The outer CAMPAIGN that owns this inner sandbox. Required alongside the cycle because a `cycle_id` is content-addressed on its origin and so is shared by every campaign minted from that origin — the pair is the identity, either half alone is not, and a null here is why two pooled sandboxes on disk could not be attributed after the fact.",
-    )
     round: int | None = Field(
         default=None,
         description="Outer round; 0 is the origin (C0). Null when the spawn came from outside any round (the noise-floor diagnostic).",

@@ -42,6 +42,13 @@ PARAM_SCOPE_KEYS: Annotated[frozenset[str], shapes_optimizer_prompt] = frozenset
 )
 
 
+def missing_template_vars(rendered: str, declared: list[str]) -> list[str]:
+    """``PROMPT_STRING_FIELDS`` are excluded: ``render()`` assembles them, nothing substitutes them."""
+    return [
+        v for v in declared if v not in PROMPT_STRING_FIELDS and "{{" + v + "}}" not in rendered
+    ]
+
+
 def strip_rendered_prompt(pipeline_params: dict[str, Any] | None) -> dict[str, Any]:
     """A node's ``prompt`` is the RENDER of ``prompt_fields``, never configuration: persisted, it goes stale."""
     return {
@@ -177,5 +184,6 @@ __all__ = [
     "WHO_ANSWERS_KEYS",
     "JobSearchPoint",
     "TaskDecomposition",
+    "missing_template_vars",
     "strip_rendered_prompt",
 ]
