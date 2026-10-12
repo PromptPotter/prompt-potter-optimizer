@@ -20,7 +20,7 @@ def _app_version() -> str:
 APP_VERSION: str = _app_version()
 
 # Bumping it re-prompts every user for consent; keep in sync with the site's /terms + /privacy.
-TERMS_VERSION: str = "2026-09-08"
+TERMS_VERSION: str = "2026-10-11"
 
 DEFAULT_BACKEND_URL = "http://127.0.0.1:8000"
 DEFAULT_BACKEND_ID = "local"
