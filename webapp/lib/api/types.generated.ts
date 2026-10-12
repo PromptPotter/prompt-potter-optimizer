@@ -2024,7 +2024,8 @@ export interface CampaignSummary {
   id_suffix: string | null;
   /** The campaign's line: the cycle answering for it now and how that cycle stands
    * — its run state, its standing, its rounds and the cap binding them. Null
-   * while the root cycle is not on disk yet. */
+   * while the root cycle is not on disk yet. Its `max_rounds` is null where
+   * the root config did not resolve. */
   line: LineStanding | null;
   /** ISO 8601 creation timestamp */
   created_at: string;
@@ -2066,8 +2067,10 @@ export interface CampaignSummary {
    * selection), read off the campaign's result (`result.json`) under the
    * formula its line runs — whichever cycle rebases handed the line to.
    * `status` says where it stands and whether its pass may be asked for;
-   * `selected` is null until the line grades its pick. */
-  bench: BenchScore;
+   * `selected` is null until the line grades its pick. Null where the root
+   * config did not resolve — a check-in whose dataset is gone, a manifest
+   * this build cannot read. */
+  bench: BenchScore | null;
   /** What the ROOT course runs with — a second transport of the answer `GET
    * /campaigns/{id}/pipeline` gives at the root, never a second source. Null
    * when the root pipeline did not resolve. `max_rounds` is the DECLARED

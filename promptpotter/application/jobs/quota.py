@@ -31,7 +31,7 @@ from promptpotter.infrastructure.llm.spend_book import (
     spending_under,
     unbounded_spend_book,
 )
-from promptpotter.infrastructure.runtime_flags import derive_run_state, is_checkin
+from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.account_spend import (
     ZERO_SPEND,
     LifetimeSpend,
@@ -87,7 +87,7 @@ def check_launch_quotas(
 ) -> None:
     """Runs BEFORE ``JobRegistry.request_slot``, same gate: it counts prior launches, not this one."""
     rate_limited = not spends_the_hosts_own_key(stores) and (
-        hop == UNRESOLVED_HOP or is_checkin(stores.campaigns.cycle_dir(hop))
+        hop == UNRESOLVED_HOP or stores.campaigns.in_checkin(hop)
     )
     if rate_limited and not _consume_rate_token(user.user_id):
         raise QuotaExceededError(

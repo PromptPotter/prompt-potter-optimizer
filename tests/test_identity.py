@@ -330,16 +330,20 @@ def test_prose_moves_no_source_digest_and_a_code_token_does() -> None:
 # 2. The config a campaign runs
 
 
-def test_the_drafts_CHAIN_reaches_the_mint_on_a_reused_dataset(tmp_path: Path) -> None:
-    from promptpotter.application.jobs.launcher.mint_and_start import build_cycle_config
+def test_the_drafts_CHAIN_reaches_the_mint_on_a_reused_dataset(built_stores: Any) -> None:
+    from promptpotter.application.datasets.draft_campaign import load_checkin_draft, new_draft
+    from promptpotter.application.jobs.launcher.checkin import create_checkin_campaign
+    from promptpotter.application.pipeline_resolve import checkin_campaign_config
     from promptpotter.connectors import DEFAULT_CONNECTOR, get
+    from promptpotter.infrastructure.store.dataset_replace import replace_dataset
     from promptpotter.infrastructure.store.io import write_yaml
 
-    root = tmp_path / "ds"
-    root.mkdir()
+    pinned = {"per_sample": "label_match(predicted, ground_truth)", "per_cell": "correct"}
+    root = built_stores.tenant_datasets.dataset_dir("ds")
+    optimization = dict(get(DEFAULT_CONNECTOR).default_optimization)
     write_yaml(
         root / "campaign.yaml",
-        {"campaign_config": {"optimization": dict(get(DEFAULT_CONNECTOR).default_optimization)}},
+        {"campaign_config": {"optimization": optimization, "scoring": pinned}},
     )
     schema = parse_pipeline_response(
         {
@@ -347,17 +351,38 @@ def test_the_drafts_CHAIN_reaches_the_mint_on_a_reused_dataset(tmp_path: Path) -
             "pipelines": {"default": ["web_search", "rerank", "llm_only"]},
         }
     )
-    session = types.SimpleNamespace(pipeline_schema=schema)
+    write_yaml(root / "pipeline.yaml", {"pipelines": dict(schema.pipelines)})
+    draft = new_draft(
+        tenant_id=built_stores.identity.tenant_id,
+        slug="ds",
+        n_samples=1,
+        sample_preview=[],
+        headers=[],
+        source_file="dataset:ds",
+    ).patch(optimization_overrides={"optimizer": "capo"})
+    live = [n.name for n in schema.nodes]
 
-    chosen = build_cycle_config(
-        cast(Any, session), root, optimization={"optimizer": "capo"}, pipeline_steps=["llm_only"]
-    )
+    picked = draft.patch(pipeline_steps=["llm_only"])
+    chosen = checkin_campaign_config(built_stores, picked, session_chain=live)
     assert sorted(chosen.exclude_nodes) == ["rerank", "web_search"]
     assert schema.active_steps_excluding(chosen.exclude_nodes) == ["llm_only"]
     assert chosen.optimization.optimizer == "capo"
+    # What a read serves before Start is what Start freezes, the pinned criterion included.
+    assert checkin_campaign_config(built_stores, picked) == chosen
+    assert chosen.scoring == pinned
+    dialled = checkin_campaign_config(built_stores, picked.patch(scoring_dials="cost=0.1"))
+    assert dialled.scoring == {"per_sample": pinned["per_sample"], "dials": "cost=0.1"}
     # `pipeline_steps=[]` is "untouched": excluding its complement would close the whole pipeline.
-    untouched = build_cycle_config(cast(Any, session), root, optimization={}, pipeline_steps=[])
+    untouched = checkin_campaign_config(built_stores, draft, session_chain=live)
     assert untouched.exclude_nodes == []
+    # A replace frees the slug for other rows: the check-in follows the ones it was cut from.
+    campaign_id, _, _ = create_checkin_campaign(built_stores, draft=picked, bank_items=[])
+    replace_dataset(stores=built_stores, slug="ds")
+    write_yaml(root / "campaign.yaml", {"campaign_config": {"optimization": optimization}})
+    write_yaml(root / "pipeline.yaml", {"pipelines": dict(schema.pipelines)})
+    carried = load_checkin_draft(built_stores, campaign_id)
+    assert carried is not None
+    assert checkin_campaign_config(built_stores, carried).scoring == pinned
 
 
 def _pipeline_schema(dataset: str) -> PipelineSchema:
@@ -509,13 +534,15 @@ def test_a_row_reads_as_the_search_space_its_ticks_and_padlock_drew() -> None:
 def test_a_draft_edit_sent_as_rows_freezes_the_search_space_the_overlay_spelled(
     built_stores: Any,
 ) -> None:
-    from promptpotter.application.datasets.draft_campaign import (
-        EditDraftPatch,
-        draft_campaign_config,
-        new_draft,
-    )
+    from promptpotter.application.datasets.draft_campaign import EditDraftPatch, new_draft
     from promptpotter.application.datasets.draft_patch import apply_draft_patch, plan_draft_patch
+    from promptpotter.application.pipeline_resolve import checkin_campaign_config
     from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
+
+    # A REUSED dataset: its file is not the check-in's to write, so the overlay rides the config.
+    reused = built_stores.tenant_datasets.dataset_dir("d")
+    write_yaml(reused / "campaign.yaml", {"campaign_config": _frozen_config()})
+    write_yaml(reused / "pipeline.yaml", {"backend_type": "termnorm"})
 
     declared = {
         "type": "llm",
@@ -531,11 +558,12 @@ def test_a_draft_edit_sent_as_rows_freezes_the_search_space_the_overlay_spelled(
         n_samples=1,
         sample_preview=[],
         headers=[],
+        source_file="dataset:d",
     ).patch(backend_nodes={"llm_only": declared})
 
     def frozen(**patch: Any) -> Any:
         plan = plan_draft_patch(built_stores, draft, EditDraftPatch.model_validate(patch))
-        return draft_campaign_config(apply_draft_patch(draft, plan))
+        return checkin_campaign_config(built_stores, apply_draft_patch(draft, plan))
 
     rows = [
         {"key": "reasoning_effort", "open": True, "allowed": ["low", "high"]},

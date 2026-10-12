@@ -17,6 +17,7 @@ from promptpotter.application.commands.dispatcher import (
     refused_on_an_arm,
 )
 from promptpotter.application.commands.draft_editing import reread_draft
+from promptpotter.application.datasets.authored import dataset_campaign_config
 from promptpotter.application.datasets.origin_readiness import save_checkin_draft
 from promptpotter.application.evidence.subjects import SubjectSpec
 from promptpotter.application.jobs.launcher import launch as launcher
@@ -26,7 +27,6 @@ from promptpotter.application.jobs.launcher.mint_and_start import (
     ExistingCycle,
     FreshMint,
     OriginIncompleteError,
-    dataset_campaign_config,
 )
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import (
@@ -169,6 +169,8 @@ def fork_cycle(
     if refused := refused_on_an_arm(campaign):
         return refused
     stores = dispatcher.stores
+    if stores.campaigns.in_checkin(campaign.root_hop):
+        return Applier.refusing("A check-in has no round to fork. Start it first.")
     seed = _parse_cycle_seed(
         payload.seed, resolve_campaign_config(stores, campaign, None), stores, campaign, hop
     )

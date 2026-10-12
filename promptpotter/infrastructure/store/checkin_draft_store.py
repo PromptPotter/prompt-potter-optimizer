@@ -17,9 +17,34 @@ if TYPE_CHECKING:
     from promptpotter.domain.sample import Sample
 
 
+_DATASET_SOURCE = "dataset:"
+
+
+def dataset_source(name: str) -> str:
+    """The ``source_file`` of a draft cut from a committed dataset, never from an upload."""
+    return f"{_DATASET_SOURCE}{name}"
+
+
+def dataset_source_of(source_file: str) -> str | None:
+    if source_file.startswith(_DATASET_SOURCE):
+        return source_file[len(_DATASET_SOURCE) :] or None
+    return None
+
+
 class CheckinDraftStore:
     def __init__(self, base_dir: WorkspaceDir):
         self._base_dir = base_dir
+
+    def repoint_dataset(self, campaign_id: str, old_name: str, new_name: str) -> None:
+        old = dataset_source(old_name)
+        for name in ("draft.json", "cache.json"):
+            path = self._checkin_dir(campaign_id) / name
+            data = read_json_optional(path)
+            if data is None or data.get("source_file") != old:
+                continue
+            # A draft cut from a dataset carries that dataset's name as its own slug.
+            renamed = {"slug": new_name} if "slug" in data else {}
+            write_json(path, {**data, **renamed, "source_file": dataset_source(new_name)})
 
     def _checkin_dir(self, campaign_id: str) -> Path:
         return campaign_root_dir_for(self._base_dir, campaign_id) / "checkin"
@@ -68,4 +93,4 @@ class CheckinDraftStore:
         write_json(path, data)
 
 
-__all__ = ["CheckinDraftStore"]
+__all__ = ["CheckinDraftStore", "dataset_source", "dataset_source_of"]

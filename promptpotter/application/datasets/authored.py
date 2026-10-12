@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -7,17 +8,18 @@ from typing import Any
 import yaml
 from pydantic import ValidationError
 
-from promptpotter.application.campaign_config import CampaignConfig
+from promptpotter.application.campaign_config import CampaignConfig, merge_config_layers
 from promptpotter.application.campaign_config import (
     load_campaign_config as validate_campaign_config,
 )
 from promptpotter.application.datasets.csv_ingest import read_candidate_library_file
+from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.scoring.formula import compile_scorer, split_scoring_block
 from promptpotter.domain.scoring import Scorer
 from promptpotter.infrastructure.store.dataset_access import dataset_pipeline_path
 from promptpotter.infrastructure.store.io import read_yaml_optional
 from promptpotter.judges.registry import judge_instrument
-from promptpotter.shared.errors import StoredConfigInvalidError
+from promptpotter.shared.errors import PayloadInvalidError, StoredConfigInvalidError
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +84,25 @@ def load_dataset_campaign_config(path: Path) -> CampaignConfig:
         raise StoredConfigInvalidError(path=str(path), reason=reason) from exc
 
 
+def with_optimization(config: CampaignConfig, overrides: Mapping[str, Any]) -> CampaignConfig:
+    merged = merge_config_layers(config.model_dump(mode="json"), {"optimization": dict(overrides)})
+    try:
+        out = validate_campaign_config(merged)
+    except ValidationError as exc:
+        first = exc.errors()[0]
+        where = ".".join(str(p) for p in first["loc"])
+        raise PayloadInvalidError(f"{where}: {first['msg']}", code="optimization_invalid") from exc
+    select_optimizer(out.optimization)
+    return out
+
+
+def dataset_campaign_config(
+    dataset_root: Path, *, optimization: Mapping[str, Any], declared: CampaignConfig | None = None
+) -> CampaignConfig:
+    config = declared or load_dataset_campaign_config(dataset_campaign_path(dataset_root))
+    return with_optimization(config, optimization) if optimization else config
+
+
 def scorer_of(config: CampaignConfig, *, verifier_graded: bool) -> Scorer:
     """``verifier_graded`` is the bank's fact; a reader holding no bank passes ``False``."""
     spec = split_scoring_block(config.scoring, judge_instrument=None)
@@ -122,9 +143,11 @@ def read_authored_dataset(dataset_dir: Path) -> AuthoredDataset:
 
 
 __all__ = [
+    "dataset_campaign_config",
     "dataset_scorer",
     "load_dataset_campaign_config",
     "read_authored_dataset",
     "read_campaign_config_file",
     "scorer_of",
+    "with_optimization",
 ]

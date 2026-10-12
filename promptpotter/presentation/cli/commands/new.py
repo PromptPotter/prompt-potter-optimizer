@@ -20,7 +20,10 @@ from promptpotter.application.commands.payloads import (
     ResolveOriginPayload,
     StartCheckinPayload,
 )
-from promptpotter.application.datasets.authored import read_campaign_config_file
+from promptpotter.application.datasets.authored import (
+    dataset_campaign_config,
+    read_campaign_config_file,
+)
 from promptpotter.application.datasets.csv_ingest import IngestError
 from promptpotter.application.datasets.draft_campaign import (
     SETTABLE_SCALARS,
@@ -31,7 +34,6 @@ from promptpotter.application.datasets.draft_campaign import (
 from promptpotter.application.datasets.ingest import SlugTakenError, ingest_draft
 from promptpotter.application.datasets.origin_readiness import origin_readiness
 from promptpotter.application.datasets.origin_resolve import FINDING_PATCH_KEYS
-from promptpotter.application.jobs.launcher.mint_and_start import dataset_campaign_config
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.campaign import ArmRequest
 from promptpotter.domain.connector import BackendUnreachableError

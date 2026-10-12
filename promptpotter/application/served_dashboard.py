@@ -293,7 +293,7 @@ def _binding(
     stores: Stores, hop: CycleHop, campaign: Campaign | None, run: RunState, declared: RunLimits
 ) -> RunLimits:
     limits = declared
-    if campaign is not None and campaign.config and not run.producer.appending:
+    if campaign is not None and not run.producer.appending:
         config = resolve_campaign_config(stores, campaign, hop)
         limits = limits.model_copy(
             update={

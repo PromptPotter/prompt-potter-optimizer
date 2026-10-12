@@ -4,12 +4,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from promptpotter.application.datasets.draft_campaign import (
-    DraftCampaign,
-    dataset_source_of,
-    default_campaign_config,
-    load_checkin_draft,
-)
+from promptpotter.application.datasets.draft_campaign import DraftCampaign, load_checkin_draft
 from promptpotter.application.datasets.origin_readiness import save_checkin_draft
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.launcher.admission import (
@@ -19,8 +14,6 @@ from promptpotter.application.jobs.launcher.admission import (
 from promptpotter.application.jobs.launcher.mint_and_start import (
     LaunchError,
     assert_origin_ready,
-    build_cycle_config,
-    dataset_campaign_config,
     materialize_and_write_origin,
     persist_origin_candidate_library,
 )
@@ -31,11 +24,11 @@ from promptpotter.application.jobs.mint import (
     resolve_cycle_plan,
     write_plan_seed,
 )
+from promptpotter.application.pipeline_resolve import checkin_campaign_config
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.launch_limits import LaunchLimits
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.runtime_flags import is_checkin
-from promptpotter.infrastructure.store.dataset_access import readable_dataset_dir
+from promptpotter.infrastructure.store.checkin_draft_store import dataset_source_of
 from promptpotter.infrastructure.store.stores import Stores, owned_campaign
 from promptpotter.shared.identity import CAMPAIGN_CREATE_CAP, require_capability
 
@@ -76,7 +69,7 @@ class StartCheckinResponse(StrictModel):
 
 def load_checkin_for_start(stores: Stores, campaign_id: str) -> tuple[CycleHop, DraftCampaign]:
     campaign = owned_campaign(stores, campaign_id)
-    if not is_checkin(stores.campaigns.cycle_dir(campaign.root_hop)):
+    if not stores.campaigns.in_checkin(campaign.root_hop):
         raise LaunchError(f"campaign {campaign_id} is not in check-in — its origin is committed")
     draft = load_checkin_draft(stores, campaign_id)
     if draft is None:
@@ -103,13 +96,7 @@ class CheckinStart:
         return self.draft.connector, self.backend_url
 
     def campaign_config(self, stores: Stores) -> CampaignConfig:
-        """Read BEFORE Start commits, so admission sees the ceiling the run will hold."""
-        canonical = dataset_source_of(self.draft.source_file)
-        if canonical is None:
-            return default_campaign_config(self.draft)
-        return dataset_campaign_config(
-            readable_dataset_dir(stores, canonical), optimization=self.draft.optimization_overrides
-        )
+        return checkin_campaign_config(stores, self.draft)
 
 
 async def _commit_checkin(stores: Stores, request: CheckinStart) -> Session:
@@ -125,16 +112,10 @@ async def _commit_checkin(stores: Stores, request: CheckinStart) -> Session:
             raise LaunchError(f"campaign {hop.campaign_id} has no sample bank to materialize")
         materialize_and_write_origin(stores, draft, bank_items=list(bank["items"]))
         dataset_name = draft.slug
-        pipeline_overlay: dict[str, Any] = {}
-        # A fresh upload commits its own `pipeline.yaml`, whose default already IS the draft's chain.
-        pipeline_steps: list[str] = []
         origin_override = None
     else:
         persist_origin_candidate_library(stores, canonical, draft)
         dataset_name = canonical
-        pipeline_overlay = draft.pipeline_overlay
-        # A REUSED dataset writes no file, so the draft's chain reaches the run only here.
-        pipeline_steps = list(draft.pipeline_steps)
         # An origin authored over an existing slug writes no dataset: only the override carries it.
         authored = any(str(value).strip() for value in draft.origin_prompt_fields.values())
         # `committed_prompt_fields` rather than the raw dict, or the label enumeration is lost.
@@ -148,14 +129,8 @@ async def _commit_checkin(stores: Stores, request: CheckinStart) -> Session:
         stores=stores,
     )
 
-    dataset_root = readable_dataset_dir(stores, dataset_name)
-    campaign_config = build_cycle_config(
-        session,
-        dataset_root,
-        # The optimizer the check-in chose — on a reused dataset the shared file names another.
-        optimization=draft.optimization_overrides,
-        pipeline_overlay=pipeline_overlay,
-        pipeline_steps=pipeline_steps,
+    campaign_config = checkin_campaign_config(
+        stores, draft, session_chain=[n.name for n in session.pipeline_schema.nodes]
     )
 
     plan = resolve_cycle_plan(

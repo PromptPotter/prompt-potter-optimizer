@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import Field
@@ -30,6 +29,7 @@ from promptpotter.domain.pipeline_schema import (
 )
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.infrastructure.store.stores import Stores
 
 SchemaSource = Literal["backend", "local", "unreachable"]
 
@@ -189,10 +189,8 @@ def _recap(draft: DraftCampaign) -> str:
     )
 
 
-def draft_wire(draft: DraftCampaign, workspace: Path | None = None) -> DraftCampaignWire:
-    resolution = resolve_pipeline_for_draft(
-        draft, campaign_id=draft.draft_id, cycle_id="", workspace=workspace
-    )
+def draft_wire(stores: Stores, draft: DraftCampaign) -> DraftCampaignWire:
+    resolution = resolve_pipeline_for_draft(stores, draft, campaign_id=draft.draft_id, cycle_id="")
     return DraftCampaignWire(
         draft_id=draft.draft_id,
         slug=draft.slug,

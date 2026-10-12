@@ -12,7 +12,12 @@ from promptpotter.application.campaign_config import (
     OptimizationConfig,
     load_campaign_config,
 )
-from promptpotter.application.scoring.formula import DIALS_KEY
+from promptpotter.application.scoring.formula import (
+    DIALS_KEY,
+    parse_dials,
+    spell_dials,
+    split_scoring_block,
+)
 from promptpotter.connectors import DEFAULT_CONNECTOR
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.pipeline_parsing import merge_node_blocks
@@ -21,6 +26,7 @@ from promptpotter.domain.pipeline_schema import (
     NodeSearchNarrowing,
     ParamIntent,
 )
+from promptpotter.domain.scoring import anchored_criterion_dials
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
@@ -310,6 +316,15 @@ def draft_scoring_block(draft: DraftCampaign) -> str | dict[str, str]:
     return {"per_sample": per_sample, DIALS_KEY: draft.scoring_dials}
 
 
+def scoring_choice(scoring: str | dict[str, str] | None) -> tuple[str, str]:
+    """The matcher and dials a draft holds of a scoring block; a pinned formula's anchors are lost."""
+    spec = split_scoring_block(scoring, judge_instrument=None)
+    matcher = (spec.per_sample or "").split("(", 1)[0].strip() or DEFAULT_SCORING_MATCHER
+    declared = parse_dials(scoring.get(DIALS_KEY, "")) if isinstance(scoring, dict) else {}
+    pinned = anchored_criterion_dials(spec.per_cell) if spec.per_cell else None
+    return matcher, spell_dials(declared or {name: d.weight for name, d in (pinned or {}).items()})
+
+
 def default_campaign_config(draft: DraftCampaign) -> CampaignConfig:
     connector = connectors.get(draft.connector)
     overrides = draft.optimization_overrides
@@ -322,17 +337,6 @@ def default_campaign_config(draft: DraftCampaign) -> CampaignConfig:
             "dataset_name": draft.slug,
             "scoring": draft_scoring_block(draft),
             "optimization": optimization,
-        }
-    )
-
-
-def draft_campaign_config(draft: DraftCampaign) -> CampaignConfig:
-    base = default_campaign_config(draft)
-    overrides, narrowing = split_overlay(draft.pipeline_overlay or {})
-    return base.model_copy(
-        update={
-            "pipeline_overlay": {**base.pipeline_overlay, **overrides},
-            "optimizer_narrowing": {**base.optimizer_narrowing, **narrowing},
         }
     )
 
@@ -415,15 +419,6 @@ def _mint_draft_id() -> str:
     return f"d_{uuid.uuid4().hex[:16]}"
 
 
-_DERIVED_PREFIX = "dataset:"
-
-
-def dataset_source_of(source_file: str) -> str | None:
-    if source_file.startswith(_DERIVED_PREFIX):
-        return source_file[len(_DERIVED_PREFIX) :] or None
-    return None
-
-
 def default_slug_from_filename(filename: str) -> str:
     stem = filename.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
     if "." in stem:
@@ -444,7 +439,6 @@ __all__ = [
     "EditDraftPatch",
     "NodeOutputEdit",
     "OptimizationOverrides",
-    "dataset_source_of",
     "default_slug_from_filename",
     "merge_pipeline_overlay",
     "new_draft",

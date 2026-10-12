@@ -35,7 +35,7 @@ def reread_draft(stores: Stores, draft_id: str) -> DraftCampaign:
 
 
 def reread_draft_wire(stores: Stores, draft_id: str) -> DraftCampaignWire:
-    return draft_wire(reread_draft(stores, draft_id), stores.base_dir)
+    return draft_wire(stores, reread_draft(stores, draft_id))
 
 
 def origin_effect(stores: Stores, draft_id: str, before: dict[str, Any]) -> dict[str, Any]:
@@ -54,7 +54,7 @@ def edit_draft_campaign(
     def _apply() -> DraftCampaignWire:
         updated = apply_draft_patch(draft, plan)
         save_checkin_draft(stores, updated)
-        return draft_wire(updated, stores.base_dir)
+        return draft_wire(stores, updated)
 
     before = origin_projection(draft)
     return Applier(

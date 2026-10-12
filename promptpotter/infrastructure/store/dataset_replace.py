@@ -87,6 +87,9 @@ def _apply(stores: Stores, mig_dir: Path, marker: Path) -> ReplaceResult:
     record = read_json_optional(marker) or {}
     slug, versioned = str(record["from"]), str(record["to"])
     stores.tenant_datasets.version_dataset(slug, versioned)
+    # A check-in cut from the slug follows its rows, as its campaign and its measurements do.
+    for campaign_id in stores.campaigns.list_campaign_ids():
+        stores.checkin.repoint_dataset(campaign_id, slug, versioned)
     result = ReplaceResult(
         slug=slug,
         versioned_to=versioned,

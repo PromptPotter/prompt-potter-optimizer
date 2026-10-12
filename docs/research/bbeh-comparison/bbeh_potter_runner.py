@@ -11,10 +11,12 @@ from typing import Any
 from shared_config import Record, export_results
 
 from promptpotter.application.campaign_config import CampaignConfig
-from promptpotter.application.datasets.authored import load_dataset_campaign_config
+from promptpotter.application.datasets.authored import (
+    load_dataset_campaign_config,
+    with_optimization,
+)
 from promptpotter.application.datasets.loaders import samples_from_dicts
 from promptpotter.application.embedded_run import open_session, run_campaign
-from promptpotter.application.jobs.launcher.mint_and_start import with_optimization
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
 from promptpotter.application.scoring.cell_envelope import CellEnvelope

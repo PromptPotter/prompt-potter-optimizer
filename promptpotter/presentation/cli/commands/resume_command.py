@@ -24,7 +24,6 @@ from promptpotter.domain.pipeline_overlay import (
     permitted_models_for_campaign,
     steers_disallowed_model,
 )
-from promptpotter.infrastructure.runtime_flags import is_checkin
 from promptpotter.presentation.cli.commands.launch import (
     backend_unreachable_result,
     confirm_tty,
@@ -302,7 +301,7 @@ async def _resume(args: argparse.Namespace) -> CommandResult:
         )
     ctx = load_session(stores, CycleHop(campaign_id=campaign_id, cycle_id=cycle_id))
     campaign = ctx.campaign
-    if is_checkin(stores.campaigns.cycle_dir(campaign.root_hop)):
+    if stores.campaigns.in_checkin(campaign.root_hop):
         raise SystemExit(
             f"ERROR: campaign '{ctx.campaign_id}' is still in check-in — its origin "
             "isn't authored yet, so there's nothing to resume.\n"

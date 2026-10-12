@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping, MutableMapping
+from collections.abc import Callable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, get_args
 
@@ -19,13 +19,18 @@ from promptpotter.application.campaign_config import (
 from promptpotter.application.datasets.authored import (
     dataset_campaign_path,
     load_dataset_campaign_config,
+    scorer_of,
+    with_optimization,
 )
 from promptpotter.application.datasets.draft_campaign import (
     DraftCampaign,
     declared_pipeline_json,
-    draft_campaign_config,
+    default_campaign_config,
+    draft_scoring_block,
     load_checkin_draft,
     rendered_pipeline_json,
+    scoring_choice,
+    split_overlay,
 )
 from promptpotter.application.datasets.prompts import (
     dataset_declared_nodes,
@@ -79,8 +84,8 @@ from promptpotter.domain.search_point import (
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.llm.capabilities import resolve_menu, resolve_schema_menu
 from promptpotter.infrastructure.llm.registry import normalize_model_id
-from promptpotter.infrastructure.runtime_flags import is_checkin
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_scoring_lock
+from promptpotter.infrastructure.store.checkin_draft_store import dataset_source_of
 from promptpotter.infrastructure.store.dataset_access import (
     DatasetAccessError,
     dataset_experiment,
@@ -135,6 +140,7 @@ __all__ = [
     "VendorModels",
     "apply_identity_layer",
     "campaign_runs_with",
+    "checkin_campaign_config",
     "configure_and_apply_pipeline",
     "dataset_pipeline_declaration",
     "draft_config_rows",
@@ -151,8 +157,8 @@ __all__ = [
     "resolve_pipeline_for_dataset",
     "resolve_pipeline_for_draft",
     "resolve_pipeline_for_optimizer",
-    "resolve_root_config",
     "resolved_dataset_name",
+    "root_config_resolves",
 ]
 
 
@@ -656,9 +662,42 @@ def frozen_config(stores: Stores, campaign: Campaign) -> dict[str, Any]:
     return campaign.config if locked == declared else {**campaign.config, "scoring": locked}
 
 
+def checkin_campaign_config(
+    stores: Stores, draft: DraftCampaign, *, session_chain: Sequence[str] | None = None
+) -> CampaignConfig:
+    """What Start freezes. ``session_chain`` is the live backend's, which only Start holds."""
+    canonical = dataset_source_of(draft.source_file)
+    if canonical is None:
+        # A fresh upload commits its overlay and chain into its own `pipeline.yaml`.
+        return with_optimization(default_campaign_config(draft), draft.optimization_overrides)
+    dataset_dir = readable_dataset_dir(stores, canonical)
+    declared = load_dataset_campaign_config(dataset_campaign_path(dataset_dir))
+    overrides, narrowing = split_overlay(draft.pipeline_overlay)
+    update: dict[str, Any] = {
+        "pipeline_overlay": {**declared.pipeline_overlay, **overrides},
+        "optimizer_narrowing": {**declared.optimizer_narrowing, **narrowing},
+    }
+    # The file's block carries anchors a draft's two fields cannot: it stands until they move.
+    if scoring_choice(declared.scoring) != (draft.scoring_matcher, draft.scoring_dials):
+        update["scoring"] = draft_scoring_block(draft)
+    if draft.pipeline_steps:
+        chain = _declared_chain(dataset_dir) if session_chain is None else session_chain
+        # Via `exclude_nodes`: a reused dataset's `pipelines.default` stays the first campaign's.
+        update["exclude_nodes"] = [n for n in chain if n not in draft.pipeline_steps]
+    return with_optimization(declared, draft.optimization_overrides).model_copy(update=update)
+
+
+def _declared_chain(dataset_dir: Path) -> list[str]:
+    local = read_yaml_optional(dataset_pipeline_path(dataset_dir)) or {}
+    return [str(step) for step in (local.get("pipelines") or {}).get("default") or []]
+
+
 def resolve_campaign_config(
     stores: Stores, campaign: Campaign, hop: CycleHop | None
 ) -> CampaignConfig:
+    draft = _authoring_draft(stores, campaign)
+    if draft is not None:
+        return checkin_campaign_config(stores, draft)
     try:
         frozen = load_campaign_config(frozen_config(stores, campaign))
     except ValidationError as exc:
@@ -683,16 +722,9 @@ def resolve_campaign_config(
 
 def _authoring_draft(stores: Stores, campaign: Campaign) -> DraftCampaign | None:
     """The FLAG decides, never a draft's presence: ``draft.json`` stays in place after Start."""
-    if not is_checkin(stores.campaigns.cycle_dir(campaign.root_hop)):
+    if not stores.campaigns.in_checkin(campaign.root_hop):
         return None
     return load_checkin_draft(stores, campaign.campaign_id)
-
-
-def resolve_root_config(stores: Stores, campaign: Campaign) -> CampaignConfig:
-    draft = _authoring_draft(stores, campaign)
-    if draft is not None:
-        return draft_campaign_config(draft)
-    return resolve_campaign_config(stores, campaign, campaign.root_hop)
 
 
 @dataclass(frozen=True)
@@ -724,22 +756,25 @@ class _CampaignMerge(_Merge):
         )
 
 
-def _draft_merge(draft: DraftCampaign, *, workspace: Path | None) -> _Merge:
+def _draft_merge(stores: Stores, draft: DraftCampaign) -> _Merge:
     schema = parse_pipeline_response(rendered_pipeline_json(draft))
-    cfg = draft_campaign_config(draft)
+    cfg = checkin_campaign_config(stores, draft)
+    # Still the operator's own layer here, where a fresh upload's Start files it in `pipeline.yaml`.
+    overrides, narrowing = split_overlay(draft.pipeline_overlay)
     active, filtered = _resolve_active_schema(
         schema,
-        exclude=list(cfg.exclude_nodes),
-        narrowing=cfg.optimizer_narrowing,
+        # The draft's schema already runs the chosen chain; excluding drops what it can still add.
+        exclude=[],
+        narrowing={**cfg.optimizer_narrowing, **narrowing},
         dataset_dir=None,
     )
     provenance: dict[str, dict[str, ParamSource]] = {}
     params = merge_declared_layers(
         active,
-        cfg.pipeline_overlay,
+        {**cfg.pipeline_overlay, **overrides},
         None,
         filtered,
-        workspace=workspace,
+        workspace=stores.base_dir,
         base_config={n.name: dict(n.current_config) for n in filtered.declared_nodes},
         provenance=provenance,
     )
@@ -803,14 +838,9 @@ def _optimizer_knobs(cfg: CampaignConfig) -> dict[str, dict[str, Any]]:
 
 
 def resolve_pipeline_for_draft(
-    draft: DraftCampaign,
-    *,
-    campaign_id: str,
-    cycle_id: str,
-    workspace: Path | None = None,
+    stores: Stores, draft: DraftCampaign, *, campaign_id: str, cycle_id: str
 ) -> CampaignPipelineResponse:
-    """Never reads the dataset file; a reused origin arrives via ``datasets/ingest.py::draft_from_origin``."""
-    m = _draft_merge(draft, workspace=workspace)
+    m = _draft_merge(stores, draft)
     params, rows = _draft_rows(m)
     return CampaignPipelineResponse(
         campaign_id=campaign_id,
@@ -825,7 +855,7 @@ def resolve_pipeline_for_draft(
         node_config_schema=rows,
         view=m.filtered.view,
         node_output_schema=resolved_output_schemas(m.filtered, params),
-        model_capabilities=_served_menu(m, params, workspace),
+        model_capabilities=_served_menu(m, params, stores.base_dir),
         reach=reach_map(rows),
         # A dataset dir is what declares an inner panel, and a check-in has none yet.
         nests=None,
@@ -833,10 +863,8 @@ def resolve_pipeline_for_draft(
     )
 
 
-def draft_config_rows(
-    draft: DraftCampaign, *, workspace: Path | None
-) -> dict[str, list[NodeConfigParam]]:
-    return _draft_rows(_draft_merge(draft, workspace=workspace))[1]
+def draft_config_rows(stores: Stores, draft: DraftCampaign) -> dict[str, list[NodeConfigParam]]:
+    return _draft_rows(_draft_merge(stores, draft))[1]
 
 
 def _draft_rows(m: _Merge) -> tuple[dict[str, Any], dict[str, list[NodeConfigParam]]]:
@@ -869,10 +897,7 @@ def resolve_pipeline_for_campaign(
     draft = _authoring_draft(stores, campaign)
     if draft is not None:
         return resolve_pipeline_for_draft(
-            draft,
-            campaign_id=campaign.campaign_id,
-            cycle_id=campaign.root_cycle_id,
-            workspace=stores.base_dir,
+            stores, draft, campaign_id=campaign.campaign_id, cycle_id=campaign.root_cycle_id
         )
 
     m = _campaign_merge(stores, campaign, at)
@@ -1226,11 +1251,12 @@ class CampaignRunsWith(StrictModel):
 
 # A prompt, a description and a nested value are no setting one line can print.
 _RUNS_WITH_KINDS = frozenset({"model", "enum", "number", "bool", "string"})
-_RUNS_WITH_UNRESOLVED = (
+_ROOT_UNRESOLVED = (
     OSError,
     ValueError,
     KeyError,
     TypeError,
+    NotFoundError,
     StoredConfigInvalidError,
     PayloadInvalidError,
 )
@@ -1238,25 +1264,45 @@ _RUNS_WITH_UNRESOLVED = (
 
 def campaign_runs_with(stores: Stores, campaign: Campaign) -> CampaignRunsWith | None:
     """``None`` is a root whose pipeline did not resolve: a broken dataset drops its own row only."""
+    return _root_read(
+        stores, campaign, "runs_with", lambda draft: _runs_with(stores, campaign, draft)
+    )
+
+
+def root_config_resolves(stores: Stores, campaign: Campaign) -> bool:
+    """False where the list serves a row's config-bound readings null, never a failed read."""
+
+    def scoreable(_draft: DraftCampaign | None) -> bool:
+        config = resolve_campaign_config(stores, campaign, campaign.root_hop)
+        # A config naming no formula resolves and still grades nothing.
+        scorer_of(config, verifier_graded=False)
+        return True
+
+    return bool(_root_read(stores, campaign, "root_config", scoreable))
+
+
+def _root_read[T](
+    stores: Stores, campaign: Campaign, what: str, read: Callable[[DraftCampaign | None], T]
+) -> T | None:
     root = stores.campaigns.cycle_dir(campaign.root_hop)
 
-    def resolve() -> CampaignRunsWith | None:
+    def resolve() -> T | None:
         try:
-            return _runs_with(stores, campaign, draft)
-        except _RUNS_WITH_UNRESOLVED:
-            logger.exception("runs_with: root pipeline of %s did not resolve", campaign.campaign_id)
+            return read(draft)
+        except _ROOT_UNRESOLVED:
+            logger.exception("%s: root of %s did not resolve", what, campaign.campaign_id)
             return None
 
     try:
         draft = _authoring_draft(stores, campaign)
-        key = _runs_with_key(stores, campaign, root, draft)
-    except _RUNS_WITH_UNRESOLVED:
-        logger.exception("runs_with: root pipeline of %s did not resolve", campaign.campaign_id)
+        key = _root_key(stores, campaign, root, draft)
+    except _ROOT_UNRESOLVED:
+        logger.exception("%s: root of %s did not resolve", what, campaign.campaign_id)
         return None
-    return derived(("runs_with", root), sig=key, compute=resolve)
+    return derived((what, root), sig=key, compute=resolve)
 
 
-def _runs_with_key(
+def _root_key(
     stores: Stores, campaign: Campaign, root: Path, draft: DraftCampaign | None
 ) -> tuple[Any, ...]:
     dataset_dir = _dataset_dir_of(stores, campaign)
@@ -1269,6 +1315,8 @@ def _runs_with_key(
         campaign.root_cycle_id,
         dataset_dir,
         file_sig(dataset_pipeline_path(dataset_dir)) if dataset_dir is not None else None,
+        # A check-in on a reused dataset reads that dataset's declaration live.
+        file_sig(dataset_campaign_path(dataset_dir)) if dataset_dir is not None else None,
         file_sig(CycleLayout(root).resolved_pipeline),
         None if seed is None else stable_hash(seed.model_dump(mode="json")),
         None if draft is None else stable_hash(draft.to_disk()),
@@ -1278,7 +1326,7 @@ def _runs_with_key(
 def _runs_with(stores: Stores, campaign: Campaign, draft: DraftCampaign | None) -> CampaignRunsWith:
     m: _Merge
     if draft is not None:
-        m = _draft_merge(draft, workspace=stores.base_dir)
+        m = _draft_merge(stores, draft)
         params = m.params
     else:
         read = _campaign_merge(stores, campaign, SubjectSpec("campaign", campaign.campaign_id))

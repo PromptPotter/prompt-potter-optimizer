@@ -208,7 +208,7 @@ class Campaign(StrictModel):
     # FROZEN at mint: a campaign outlives its dataset dir, so re-pointing a slug must not re-kind it.
     backend_type: str = ""
     owner_user_id: str = "default"
-    # VISIBILITY only: the authoring phase is the root cycle's ledger's (`runtime_flags.py::is_checkin`).
+    # VISIBILITY only: the authoring phase is the root cycle's ledger's (`CampaignStore.in_checkin`).
     lifecycle_status: LifecycleStatus = "active"
     lifecycle_changed_at: str = ""
     lifecycle_reason: str = ""

@@ -435,9 +435,11 @@ surface asking what a campaign runs and getting a dataset default back is the sc
 split exists to make unsayable.
 
 One dataset file is shared by every campaign built on it, so it is nobody's answer in
-particular — which is why a campaign still AUTHORING its origin consumes no dataset file at all:
-`is_checkin` selects which layers exist, and the draft is that campaign's own layer until Start
-freezes it.
+particular — which is why a campaign still AUTHORING its origin consumes no dataset pipeline file
+at all: `CampaignStore.in_checkin` selects which layers exist, and the draft is that campaign's own
+layer until Start freezes it. Its config is `pipeline_resolve.py::checkin_campaign_config`, the one
+answer every read before Start and Start itself take — over a reused dataset, that dataset's
+`campaign.yaml` under the draft's own choices.
 
 **`nodes.*.config` is therefore the SEED a new campaign starts from, never the answer for one
 that has already started** — the campaign layer above it is what makes an answer

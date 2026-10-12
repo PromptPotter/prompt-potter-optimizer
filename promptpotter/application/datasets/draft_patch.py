@@ -85,7 +85,7 @@ def plan_draft_patch(stores: Stores, draft: DraftCampaign, patch: EditDraftPatch
             draft.pipeline_overlay if overlay is None else overlay, patch.node_output
         )
     if patch.node_narrowing is not None:
-        rows = draft_config_rows(draft, workspace=stores.base_dir)
+        rows = draft_config_rows(stores, draft)
         overlay = dict(draft.pipeline_overlay if overlay is None else overlay)
         for node, intents in patch.node_narrowing.items():
             try:

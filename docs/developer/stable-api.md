@@ -202,7 +202,7 @@ promptpotter` is the engine, `[api]` is what a host adds if it also wants to ser
 the dashboard.
 
 `with_optimization(load_dataset_campaign_config(path), {…})`
-(`application/jobs/launcher/mint_and_start.py`, `application/datasets/authored.py`) is the
+(`application/datasets/authored.py`) is the
 supported way to shape a dataset's `campaign.yaml` for one launch without editing the shared file:
 a sparse `optimization` mapping merged depth-first **before** validation, so an unknown knob raises
 here instead of being silently dropped — the same call a web mint, a check-in and the terminal make.

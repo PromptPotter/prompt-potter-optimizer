@@ -89,7 +89,7 @@ async def ingest_dataset(
             code="slug_collision",
             details={"slug": exc.slug, "suggested_slug": exc.suggested},
         ) from None
-    return draft_wire(draft, stores.base_dir)
+    return draft_wire(stores, draft)
 
 
 @datasets_router.post("/draft/candidate-library", response_model=DraftCampaignWire)
@@ -148,4 +148,4 @@ async def draft_from_existing_dataset(name: str, stores: StoresDep) -> DraftCamp
     ``draft_id`` is the ``campaign_id``; nothing runs until ``/commands/start-checkin``.
     """
     draft = await draft_from_dataset_name(stores=stores, dataset_name=name)
-    return draft_wire(draft, stores.base_dir)
+    return draft_wire(stores, draft)

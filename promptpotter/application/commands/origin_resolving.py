@@ -50,7 +50,7 @@ def resolve_origin(
                 f"origin resolver turn failed: {exc}", code="resolver_failed"
             ) from exc
         return ResolveOriginResponse(
-            resolution=result.resolution, draft=draft_wire(result.draft, stores.base_dir)
+            resolution=result.resolution, draft=draft_wire(stores, result.draft)
         )
 
     def _on_replay() -> ResolveOriginResponse:
@@ -58,7 +58,7 @@ def resolve_origin(
         replayed = reread_draft(stores, draft_id)
         return ResolveOriginResponse(
             resolution=load_resolution(stores, replayed),
-            draft=draft_wire(replayed, stores.base_dir),
+            draft=draft_wire(stores, replayed),
         )
 
     before = origin_projection(draft)

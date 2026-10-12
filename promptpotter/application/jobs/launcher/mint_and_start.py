@@ -7,17 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar
 
-from pydantic import ValidationError
-
-from promptpotter.application.campaign_config import (
-    CampaignConfig,
-    load_campaign_config,
-    merge_config_layers,
-)
-from promptpotter.application.datasets.authored import (
-    dataset_campaign_path,
-    load_dataset_campaign_config,
-)
+from promptpotter.application.campaign_config import CampaignConfig
+from promptpotter.application.datasets.authored import dataset_campaign_config
 from promptpotter.application.datasets.csv_ingest import Table, materialize_samples
 from promptpotter.application.datasets.draft_build import (
     default_campaign_json,
@@ -26,10 +17,8 @@ from promptpotter.application.datasets.draft_build import (
 from promptpotter.application.datasets.draft_campaign import (
     DraftCampaign,
     committed_pipeline_json,
-    split_overlay,
 )
 from promptpotter.application.datasets.origin_readiness import FieldGap, origin_readiness
-from promptpotter.application.initialization.session import Session
 from promptpotter.application.initialization.wiring import bind_cycle_session, init_services
 from promptpotter.application.jobs.launcher.admission import (
     admit_and_hold,
@@ -45,7 +34,6 @@ from promptpotter.application.jobs.mint import (
 )
 from promptpotter.application.jobs.quota import QuotaExceededError
 from promptpotter.application.jobs.registry import UNRESOLVED_HOP, Job, JobRegistry
-from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import (
     resolve_campaign_config,
 )
@@ -83,58 +71,6 @@ def assert_origin_ready(draft: DraftCampaign) -> None:
     readiness = origin_readiness(draft)
     if not readiness.complete:
         raise OriginIncompleteError(readiness.gaps)
-
-
-def with_optimization(config: CampaignConfig, overrides: Mapping[str, Any]) -> CampaignConfig:
-    merged = merge_config_layers(config.model_dump(mode="json"), {"optimization": dict(overrides)})
-    try:
-        out = load_campaign_config(merged)
-    except ValidationError as exc:
-        first = exc.errors()[0]
-        where = ".".join(str(p) for p in first["loc"])
-        raise PayloadInvalidError(f"{where}: {first['msg']}", code="optimization_invalid") from exc
-    select_optimizer(out.optimization)
-    return out
-
-
-def dataset_campaign_config(
-    dataset_root: Path, *, optimization: Mapping[str, Any], declared: CampaignConfig | None = None
-) -> CampaignConfig:
-    config = declared or load_dataset_campaign_config(dataset_campaign_path(dataset_root))
-    return with_optimization(config, optimization) if optimization else config
-
-
-def build_cycle_config(
-    session: Session,
-    dataset_root: Path,
-    *,
-    optimization: Mapping[str, Any],
-    declared: CampaignConfig | None = None,
-    pipeline_overlay: dict[str, Any] | None = None,
-    pipeline_steps: list[str] | None = None,
-) -> CampaignConfig:
-    campaign_config = dataset_campaign_config(
-        dataset_root, optimization=optimization, declared=declared
-    )
-    if pipeline_overlay:
-        overrides, narrowing = split_overlay(pipeline_overlay)
-        campaign_config = campaign_config.model_copy(
-            update={
-                "pipeline_overlay": {**campaign_config.pipeline_overlay, **overrides},
-                "optimizer_narrowing": {**campaign_config.optimizer_narrowing, **narrowing},
-            }
-        )
-    # Via `exclude_nodes`: a reused dataset's `pipelines.default` stays the first campaign's.
-    if pipeline_steps:
-        chosen = set(pipeline_steps)
-        campaign_config = campaign_config.model_copy(
-            update={
-                "exclude_nodes": [
-                    n.name for n in session.pipeline_schema.nodes if n.name not in chosen
-                ]
-            }
-        )
-    return campaign_config
 
 
 def _declared_dataset(stores: Stores, dataset_name: str) -> tuple[Path, str]:
@@ -216,8 +152,8 @@ async def hold_fresh_mint(
         )
         logger.info("mint[%s]: init_services=%.2fs", dataset_name, time.perf_counter() - _t0)
 
-        campaign_config = build_cycle_config(
-            session, dataset_root, optimization=request.optimization, declared=request.declared
+        campaign_config = dataset_campaign_config(
+            dataset_root, optimization=request.optimization, declared=request.declared
         )
 
         minted = await mint_framed_cycle(
@@ -308,11 +244,8 @@ __all__ = [
     "OriginIncompleteError",
     "QuotaExceededError",
     "assert_origin_ready",
-    "build_cycle_config",
-    "dataset_campaign_config",
     "hold_existing_cycle",
     "hold_fresh_mint",
     "materialize_and_write_origin",
     "persist_origin_candidate_library",
-    "with_optimization",
 ]

@@ -6,7 +6,8 @@ from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.pipeline_resolve import (
     CampaignRunsWith,
     campaign_runs_with,
-    resolve_root_config,
+    resolve_campaign_config,
+    root_config_resolves,
 )
 from promptpotter.application.runner.campaign_result import read_campaign_bench, read_line_spend
 from promptpotter.application.runner.inner.tasks import is_self_optimization
@@ -60,7 +61,8 @@ class CampaignSummary(StrictModel):
         description=(
             "The campaign's line: the cycle answering for it now and how that cycle stands — its "
             "run state, its standing, its rounds and the cap binding them. Null while the root "
-            "cycle is not on disk yet."
+            "cycle is not on disk yet. Its `max_rounds` is null where the root config did not "
+            "resolve."
         )
     )
     created_at: str = Field(description="ISO 8601 creation timestamp")
@@ -115,12 +117,14 @@ class CampaignSummary(StrictModel):
             "controlled arm. The number a surface sets beside a cap, live."
         )
     )
-    bench: BenchScore = Field(
+    bench: BenchScore | None = Field(
         description=(
             "The headline (`architecture.md` § The bench score is not an optimizer's selection), "
             "read off the campaign's result (`result.json`) under the formula its line runs — "
             "whichever cycle rebases handed the line to. `status` says where it stands and "
-            "whether its pass may be asked for; `selected` is null until the line grades its pick."
+            "whether its pass may be asked for; `selected` is null until the line grades its pick. "
+            "Null where the root config did not resolve — a check-in whose dataset is gone, a "
+            "manifest this build cannot read."
         )
     )
     runs_with: CampaignRunsWith | None = Field(
@@ -160,14 +164,14 @@ class CampaignDetailResponse(CampaignSummary):
 
 
 def _line(
-    stores: Stores, campaign: Campaign, runs_with: CampaignRunsWith | None
+    stores: Stores, campaign: Campaign, runs_with: CampaignRunsWith | None, *, resolves: bool
 ) -> LineStanding | None:
     holder = stores.campaigns.line_holder(campaign.root_hop)
     index = stores.campaigns.load(holder)
     if index is None:
         return None
     run = derive_run_state(stores.campaigns.cycle_dir(holder))
-    limits = binding_run_limits(stores, holder, campaign, run)
+    limits = binding_run_limits(stores, holder, campaign, run) if resolves else None
     max_rounds = (
         (None if runs_with is None else runs_with.max_rounds)
         if limits is None
@@ -199,6 +203,7 @@ def _updated_at(stores: Stores, campaign: Campaign) -> str:
 
 def _summary(campaign: Campaign, stores: Stores) -> CampaignSummary:
     runs_with = campaign_runs_with(stores, campaign)
+    resolves = root_config_resolves(stores, campaign)
     tail = campaign.campaign_id.rpartition("__")[2] if "__" in campaign.campaign_id else ""
     return CampaignSummary(
         campaign_id=campaign.campaign_id,
@@ -206,7 +211,7 @@ def _summary(campaign: Campaign, stores: Stores) -> CampaignSummary:
         label=campaign.label,
         display_name=campaign.label or campaign.dataset_name or campaign.campaign_id,
         id_suffix=None if campaign.label or not tail else tail,
-        line=_line(stores, campaign, runs_with),
+        line=_line(stores, campaign, runs_with, resolves=resolves),
         created_at=campaign.created_at,
         updated_at=_updated_at(stores, campaign),
         root_cycle_id=campaign.root_cycle_id,
@@ -219,7 +224,7 @@ def _summary(campaign: Campaign, stores: Stores) -> CampaignSummary:
         spend_metered=MeteredSpend.of(
             read_line_spend(stores, campaign), ceiling_meter(campaign.arm)
         ),
-        bench=read_campaign_bench(stores, campaign),
+        bench=read_campaign_bench(stores, campaign) if resolves else None,
         runs_with=runs_with,
         comparison=comparison_line(campaign.arm),
     )
@@ -242,5 +247,5 @@ def campaign_detail(stores: Stores, campaign_id: str) -> CampaignDetailResponse:
     return CampaignDetailResponse(
         **_summary(campaign, stores).model_dump(),
         root_content_hash=campaign.root_content_hash,
-        config=resolve_root_config(stores, campaign),
+        config=resolve_campaign_config(stores, campaign, campaign.root_hop),
     )

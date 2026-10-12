@@ -55,7 +55,7 @@ from promptpotter.infrastructure.projections.cycle_index import (
     write_cycle_index,
 )
 from promptpotter.infrastructure.projections.live_dashboard.projection import materializing_over
-from promptpotter.infrastructure.runtime_flags import derive_run_state, is_checkin
+from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.account_spend import bank_spend, sandbox_cycle_dirs
 from promptpotter.infrastructure.store.account_trail import bank_trail
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
@@ -262,7 +262,7 @@ class CampaignStore:
             if dataset_name and campaign.dataset_name != dataset_name:
                 continue
             if lifecycle == "checkin":
-                if not is_checkin(self.cycle_dir(campaign.root_hop)):
+                if not self.in_checkin(campaign.root_hop):
                     continue
             elif lifecycle != "all" and campaign.lifecycle_status != lifecycle:
                 continue
@@ -380,8 +380,11 @@ class CampaignStore:
         if scan_cycle_facts(self._layout(hop).ledger).minted is None:
             self._append(hop, CycleMintedRecord(checkin=checkin))
 
+    def in_checkin(self, hop: CycleHop) -> bool:
+        return scan_cycle_facts(self._layout(hop).ledger).checkin
+
     def close_checkin(self, hop: CycleHop) -> None:
-        if scan_cycle_facts(self._layout(hop).ledger).checkin:
+        if self.in_checkin(hop):
             self._append(hop, CheckinClosedRecord())
 
     def mint_fork_cycle(

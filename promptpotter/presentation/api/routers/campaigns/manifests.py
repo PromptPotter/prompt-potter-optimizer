@@ -21,8 +21,8 @@ from promptpotter.application.datasets.origin_readiness import (
 )
 from promptpotter.application.pipeline_resolve import (
     CampaignPipelineResponse,
+    resolve_campaign_config,
     resolve_pipeline_at,
-    resolve_root_config,
 )
 from promptpotter.domain.campaign import LifecycleFilter
 from promptpotter.domain.pipeline_overlay import (
@@ -89,7 +89,7 @@ def get_campaign_checkin(stores: StoresDep, campaign_id: str) -> CheckinReopenRe
         )
     block = load_resolution(stores, draft)
     return CheckinReopenResponse(
-        draft=draft_wire(draft, stores.base_dir),
+        draft=draft_wire(stores, draft),
         resolution=block.last_resolution,
         raised=block.raised,
     )
@@ -164,4 +164,5 @@ def get_campaign_config_map(stores: StoresDep, campaign_id: str) -> ConfigMapRes
 
     Read over the config its root runs under, its draft while still authoring; 404 on cross-user reads.
     """
-    return config_map(resolve_root_config(stores, owned_campaign(stores, campaign_id)))
+    campaign = owned_campaign(stores, campaign_id)
+    return config_map(resolve_campaign_config(stores, campaign, campaign.root_hop))

@@ -32,10 +32,6 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 from promptpotter.infrastructure.store.layout import CampaignLayout, CycleLayout, in_inner_sandbox
 
 
-def is_checkin(cycle_dir: Path) -> bool:
-    return scan_cycle_facts(CycleLayout(cycle_dir).ledger).checkin
-
-
 def standing_controls(cycle_dir: Path) -> Controls:
     return scan_ledger_controls(CycleLayout(cycle_dir).ledger)
 
@@ -144,7 +140,7 @@ def read_run_state(
 
 def derive_run_state(cycle_dir: Path) -> RunState:
     ledger = CycleLayout(cycle_dir).ledger
-    checkin = is_checkin(cycle_dir)
+    checkin = scan_cycle_facts(ledger).checkin
     declared = scan_ledger_declared_phase(ledger)
     terminal = declared == RunPhase.TERMINAL
     settled = checkin or terminal
@@ -226,7 +222,6 @@ __all__ = [
     "armed_run_limits",
     "derive_run_state",
     "effective_lookahead",
-    "is_checkin",
     "read_run_state",
     "requested_lookahead",
     "run_phase_validator_epoch",

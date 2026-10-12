@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 
 from promptpotter import connectors
-from promptpotter.application.campaign_config import load_campaign_config
 from promptpotter.application.datasets.authored import read_authored_dataset
 from promptpotter.application.datasets.csv_ingest import (
     IngestError,
@@ -17,12 +16,12 @@ from promptpotter.application.datasets.csv_ingest import (
 from promptpotter.application.datasets.draft_build import overlay_from_campaign_config
 from promptpotter.application.datasets.draft_campaign import (
     DEFAULT_MAX_ROUNDS,
-    DEFAULT_SCORING_MATCHER,
     PREVIEW_ROWS,
     DraftCampaign,
     OptimizationOverrides,
     default_slug_from_filename,
     new_draft,
+    scoring_choice,
 )
 from promptpotter.application.datasets.loaders import bank_samples, resolve_dataset_items
 from promptpotter.application.datasets.prompts import (
@@ -31,12 +30,7 @@ from promptpotter.application.datasets.prompts import (
 )
 from promptpotter.application.jobs.launcher.checkin import create_checkin_campaign
 from promptpotter.application.origin_listing import canonical_origin_campaign
-from promptpotter.application.scoring.formula import (
-    DIALS_KEY,
-    parse_dials,
-    spell_dials,
-    split_scoring_block,
-)
+from promptpotter.application.pipeline_resolve import resolve_campaign_config
 from promptpotter.config.settings import DEFAULT_BACKEND_URL
 from promptpotter.connectors import DEFAULT_CONNECTOR
 from promptpotter.connectors.protocol import PROBE_WORKLOAD
@@ -44,9 +38,9 @@ from promptpotter.domain.bench import partition_bank
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.pipeline_parsing import merge_node_blocks
-from promptpotter.domain.scoring import anchored_criterion_dials
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.llm.capabilities import refresh_model_capabilities
+from promptpotter.infrastructure.store.checkin_draft_store import dataset_source
 from promptpotter.infrastructure.store.dataset_access import (
     backend_type_of_dataset,
     readable_dataset_dir,
@@ -178,11 +172,7 @@ async def draft_from_dataset(
     authored = read_authored_dataset(dataset_dir)
     cc = authored.campaign_config
     task = authored.task_description
-    spec = split_scoring_block(cc.scoring, judge_instrument=None)
-    matcher = (spec.per_sample or "").split("(", 1)[0].strip() or DEFAULT_SCORING_MATCHER
-    declared = parse_dials(cc.scoring.get(DIALS_KEY, "")) if isinstance(cc.scoring, dict) else {}
-    pinned = anchored_criterion_dials(spec.per_cell) if spec.per_cell else None
-    dials = spell_dials(declared or {name: d.weight for name, d in (pinned or {}).items()})
+    matcher, dials = scoring_choice(cc.scoring)
     # `is not None`, never `or`: 0 means "measure the origin and stop".
     authored_rounds = cc.optimization.max_rounds
     max_rounds = authored_rounds if authored_rounds is not None else DEFAULT_MAX_ROUNDS
@@ -192,7 +182,7 @@ async def draft_from_dataset(
         # A merge, not a replacement: the origin's frozen config is sparse.
         pipeline_overlay = merge_node_blocks(
             pipeline_overlay,
-            overlay_from_campaign_config(load_campaign_config(origin_campaign.config)),
+            overlay_from_campaign_config(resolve_campaign_config(stores, origin_campaign, None)),
         )
 
     origin_prompt_fields: dict[str, Any] = {}
@@ -217,7 +207,7 @@ async def draft_from_dataset(
         n_samples=len(rows),
         sample_preview=preview[:PREVIEW_ROWS],
         headers=["query", "ground_truth"],
-        source_file=f"dataset:{dataset_name}",
+        source_file=dataset_source(dataset_name),
         column_label_sets=_column_label_sets(["query", "ground_truth"], rows),
     )
     draft = draft.apply_resolution(
@@ -247,7 +237,7 @@ async def draft_from_dataset(
         stores,
         draft=draft,
         bank_items=rows,
-        source_file=f"dataset:{dataset_name}",
+        source_file=dataset_source(dataset_name),
         headers=("query", "ground_truth"),
     )
     return keyed
