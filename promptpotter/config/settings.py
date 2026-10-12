@@ -108,7 +108,8 @@ class Settings(BaseSettings):
 
     OBS_ENABLED: bool = True
 
-    MLFLOW_ENABLED: bool = False
+    # Unset: MLflow receives nothing. Set: that server takes each round as a run and each winner as a prompt version.
+    MLFLOW_TRACKING_URI: str = ""
 
     model_config = {"env_file": env_file_path(), "case_sensitive": True, "extra": "ignore"}
 

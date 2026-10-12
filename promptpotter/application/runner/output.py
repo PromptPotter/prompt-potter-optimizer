@@ -43,6 +43,7 @@ from promptpotter.infrastructure.store.layout import (
     sibling_kind,
 )
 from promptpotter.infrastructure.store.read_model import iter_jsonl
+from promptpotter.infrastructure.tracing.mlflow_server import register_export
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
@@ -55,6 +56,7 @@ if TYPE_CHECKING:
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 
 __all__ = [
+    "publish_export",
     "write_hard_samples_artifacts",
     "write_log_md",
     "write_review_md",
@@ -276,6 +278,18 @@ def _banked_rounds(session: Session, hop: CycleHop) -> list[RoundResult]:
     if not session.store.campaigns.standing_rounds(hop).rounds:
         return []
     return closed_rounds(session.store, hop, scoring.require_scorer())
+
+
+def publish_export(session: Session) -> None:
+    """Read back off disk, so the registry holds what ``export.json`` says and nothing newer."""
+    stores = session.store
+    # A sandbox's winners are the recursion's measurements, never an answer the operator asked for.
+    if stores.projects_root != stores.shared_root:
+        return
+    with graceful("Prompt registry write-back failed"):
+        export = stores.campaigns.read_export(session.hop)
+        if export is not None:
+            register_export(export, tenant_id=stores.tenant_id)
 
 
 def write_review_md(

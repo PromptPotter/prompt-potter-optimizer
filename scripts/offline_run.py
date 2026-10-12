@@ -1076,8 +1076,9 @@ def child_env(home: Path) -> dict[str, str]:
             env[key] = ""
     # The SDKs refuse an EMPTY key before sending; every transport they could reach is faked.
     env.update(dict.fromkeys(PROVIDER_KEYS, NOT_A_KEY))
-    env.update(dict.fromkeys(("LANGFUSE_ENABLED", "MLFLOW_ENABLED"), "false"))
-    env.update(PROMPTPOTTER_HOME=long_path(home), PYTHONUTF8="1")
+    env.update(LANGFUSE_ENABLED="false")
+    # A developer's own registry must never receive a synthetic campaign's winner.
+    env.update(PROMPTPOTTER_HOME=long_path(home), PYTHONUTF8="1", MLFLOW_TRACKING_URI="")
     return env
 
 

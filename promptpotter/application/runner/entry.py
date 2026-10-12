@@ -43,7 +43,11 @@ from promptpotter.application.runner.campaign_result import (
 from promptpotter.application.runner.inner.ruler import refresh_inner_rulers
 from promptpotter.application.runner.inner.spawn_context import publish_inner_spawn_context
 from promptpotter.application.runner.loop import run_round_loop, set_round_cap
-from promptpotter.application.runner.output import write_log_md, write_review_md
+from promptpotter.application.runner.output import (
+    publish_export,
+    write_log_md,
+    write_review_md,
+)
 from promptpotter.application.runner.round import flush_pending_decisions, round_plan
 from promptpotter.application.runner.termination import (
     RUN_ENDS,
@@ -829,6 +833,9 @@ def _finalize_run(
     if not is_paused:
         declare_run_stop(session, stop_reason, interrupted_by=pause_cause, spend=spend)
     if session.state.cycle_id and not is_paused:
+        # A diagnostic cycle answers a question about the optimizer; it has no winner to hand on.
+        if not diag:
+            publish_export(session)
         write_log_md(session, config)
         # Re-rendered once `final` is banked: the bench score is taken after the last round closes.
         if cycle is not None:

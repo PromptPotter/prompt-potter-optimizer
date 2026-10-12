@@ -64,6 +64,7 @@ The `.env` file (see `.env.example`) carries API keys and nothing else: where th
 | `LANGFUSE_PUBLIC_KEY` | optional | Langfuse cloud tracing |
 | `LANGFUSE_SECRET_KEY` | optional | Langfuse cloud tracing |
 | `LANGFUSE_HOST` | optional | Langfuse host URL |
+| `MLFLOW_TRACKING_URI` | optional | The operator's MLflow server: each round lands as a run and each finished cycle's winner as a prompt version — [`../operations/observability.md`](../operations/observability.md) § MLflow |
 
 Groq daily-volume model swap (when `120b` exhausts): [`05-troubleshooting.md § Groq daily token limit exhausted on 120b`](05-troubleshooting.md).
 

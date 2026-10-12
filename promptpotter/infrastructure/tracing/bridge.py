@@ -18,7 +18,7 @@ from promptpotter.infrastructure.tracing.events import (
 )
 from promptpotter.infrastructure.tracing.file_sink import FileSink
 from promptpotter.infrastructure.tracing.langfuse_sink import LangfuseSink
-from promptpotter.infrastructure.tracing.mlflow_sink import MLflowSink
+from promptpotter.infrastructure.tracing.mlflow_server import MLflowSink
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
@@ -59,7 +59,7 @@ class TracingProjection(Projection):
         sinks: list[TraceSink] = [FileSink(store_base_dir, hop)]
         if langfuse and langfuse.enabled:
             sinks.append(LangfuseSink(store_base_dir, hop.campaign_id, langfuse))
-        if settings.MLFLOW_ENABLED:
+        if settings.MLFLOW_TRACKING_URI:
             sinks.append(MLflowSink(store_base_dir))
         return cls(hop.cycle_id, sinks)
 

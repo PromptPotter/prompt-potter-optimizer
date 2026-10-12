@@ -44,9 +44,20 @@ The JSONL stream is canonical replay; the dashboard fields and the sparkline are
 
 Set `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_HOST` in `.env`, then `pip install -e ".[observability]"`. Trace shape: cycle = trace, round = span, each L1/L2/L3/critique call = LLM observation, backend match = span. A local shadow under `cycles/{cycle_id}/langfuse/` mirrors what's sent (with an id-map for cross-reference); a backfill helper replays historical traces uploaded later.
 
-## MLflow sink
+## MLflow
 
-`MLFLOW_ENABLED=true` (default false) logs each round as an MLflow run under `traces/mlruns/`, experiment `{tenant_id}/{cycle_id}`. Installs from `.[observability]` alongside the file + Langfuse sinks, as **`mlflow-skinny`** — the sink calls tracking APIs only, and full `mlflow` caps `cryptography<50`. MLflow 3.15 put that local file tree in maintenance mode, so the sink sets `MLFLOW_ALLOW_FILE_STORE=true`; without it the first round raises, and the migration MLflow points at (`sqlite:///`) needs SQLAlchemy, which skinny omits.
+`MLFLOW_TRACKING_URI` names the operator's MLflow server, and unset — the default — MLflow receives nothing. One server takes both halves (`infrastructure/tracing/mlflow_server.py`), which is what lets a prompt version name the run that won it. It installs from `.[observability]` as **`mlflow-skinny`**, the client alone: the server is the operator's own process — one running beside the box is `http://127.0.0.1:5000` — and its credentials are MLflow's own environment variables.
+
+**How the run went — rounds as runs.** `MLflowSink` opens the experiment `{tenant_id}/{cycle_id}` and logs each closed round as a run in it: accuracy, the total scored, whether it improved, and the winner's lineage id.
+
+**What it found — the winner as a prompt version.** `register_export` (reached through `application/runner/output.py::publish_export`) registers each finished cycle's winner as a version of the prompt `{tenant_id}.{dataset_name}`. The version's text is `export.json` rendered (`PromptExport.render()`), read back off disk, so the registry never holds a prompt the file does not; its tags are that file's identity, the node config the winner ran under and the bench headline on one line; and it is linked to the run of the round that crowned it.
+
+- **One version per cycle and prompt text.** A bench graded after the run restates that version's tags in place; a cycle that ends on a different prompt takes the next version.
+- **No alias is ever set or moved.** Promotion is the host's swap ([`../specs/roadmap.md`](../specs/roadmap.md) § Application radius), and a reader that wants the newest loads `prompts:/<name>@latest`.
+- **Not registered:** a diagnostic cycle's winner, and that of every cycle inside an L4 inner sandbox — those are the recursion's measurements, not an answer anyone asked for.
+- **A failed write is logged and never fails the run, and an unreachable server cannot hold one**: the client is bound to one attempt and ten seconds, where MLflow's own defaults retry for minutes. The offline run blanks the setting.
+
+What is still to build between the two tools, in order, is [`../specs/mlflow-interop.md`](../specs/mlflow-interop.md).
 
 **Both sinks sit downstream of two competing span conventions, and one must be chosen as primary before a third sink is added** ([`../research/external-constraints.md`](../research/external-constraints.md) § TOOL): OpenTelemetry GenAI, whose `gen_ai.*` attributes are all still *Development* (v1.42.0), so a version is pinned rather than head tracked; and Arize's OpenInference, which requires `openinference.span.kind` on every span.
 

@@ -94,7 +94,6 @@ Reads happen by opening the on-disk artifact tree. The read VERBS are the four w
                                         #   nothing (`seed_screen.py` argues it). None of it is served.
       decision-bank-{dataset}-{ts}.json #   decision-bank's paired reading and every decision under it;
                                         #   it spans campaigns, so it names no single source either
-    traces/mlruns/                      # the MLflow sink (regenerable, settings-gated)
     backends/{backend_id}/backend.json  # backend registration + synced API responses
     datasets/  benchmark-rows/  task-context/   # dataset tier — definition, materialized rows, decomposed context
 ```

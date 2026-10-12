@@ -18,7 +18,7 @@ from promptpotter.application.runner.campaign_result import (
     line_run,
     read_cycle_bench,
 )
-from promptpotter.application.runner.output import write_review_md
+from promptpotter.application.runner.output import publish_export, write_review_md
 from promptpotter.application.runner.termination import RUN_STOPS, run_stop_reason
 from promptpotter.application.views.readout import ReadoutProjection
 from promptpotter.domain.cycle_paths import CycleDir
@@ -110,6 +110,7 @@ async def _grade(stores: Stores, campaign: Campaign, hop: CycleHop) -> BenchScor
                     optimizer_phases=optimizer.phases,
                 )
     stores.campaigns.restate_export_bench(hop, score)
+    publish_export(session)
     write_review_md(
         session,
         accuracy_ceiling=config.accuracy_ceiling,

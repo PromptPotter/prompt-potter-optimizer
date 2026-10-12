@@ -117,16 +117,15 @@ benchmarks = [
 ]
 observability = [
     "langfuse>=2.0.0",  # why kept: per-call trace mirror (events.jsonl + cloud)
-    "mlflow-skinny>=3.15.0",  # why kept: peer optional sink alongside Langfuse,
-                        # gated on settings.MLFLOW_ENABLED (off by default).
+    "mlflow-skinny>=3.15.0",  # why kept: the client for the operator's own MLflow server —
+                        # rounds as runs, the winner as a prompt version — off until
+                        # settings.MLFLOW_TRACKING_URI names one.
                         # Per §0 dormant-but-named — the import path stays
-                        # so flipping the flag works without a code change.
+                        # so setting it works without a code change.
                         # Floor raised onto 3.15 to clear GHSA-7gwp-5pfp-969j (SSRF).
                         # SKINNY, not full `mlflow`, and the distinction is load-bearing twice
-                        # over. `mlflow_sink.py` calls only the tracking client — set_tracking_uri
-                        # / set_experiment / start_run / log_params / log_metrics / set_tags —
-                        # against a local `file://` store, which is exactly skinny's surface; the
-                        # module stays `import mlflow`, so nothing downstream moves. Full mlflow
+                        # over. `mlflow_server.py` calls only `MlflowClient` — tracking and the
+                        # prompt registry — which is exactly skinny's surface. Full mlflow
                         # requires `cryptography<50`, and it was the ONLY thing pinning this repo
                         # below the 50.0.0 that fixes GHSA-g6cj-pr64-35w5 (PKCS#7 Bleichenbacher
                         # oracle) — skinny declares no cryptography at all. It also drops the
