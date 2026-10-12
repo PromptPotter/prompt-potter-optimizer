@@ -689,17 +689,22 @@ def select_round_subset(
     ruler: DeltaRuler | None = None,
     anchor_floor: int = 0,
     leader_ids: Collection[str] | None = None,
+    worth: Mapping[int, float],
 ) -> list[Sample]:
     """Never ``fit_rasch`` here: the δ that CHOOSES the cells is the locked δ that SCORES them."""
     # `leader_ids` bounds the target θ to this race: *observations* carries the whole archive.
+    # `worth` is each cell's information per unit price; a cell it omits stands at the median.
     if budget <= 0 or not bank:
         return []
     if budget >= len(bank):
         return list(bank)
-    if ruler is None or not ruler.delta:
-        return list(bank[:budget])
-
     by_id = {int(s.id): s for s in bank}
+    strata = _shared_strata(bank)
+    if ruler is None or not ruler.delta:
+        # Stable, so an unpriced bank keeps its prefix and a cold subset stays frozen.
+        cold = sorted(by_id, key=lambda sid: -worth.get(sid, 1.0))
+        return [by_id[sid] for sid in _with_stratum_cover(cold, budget, strata)[:budget]]
+
     # A cell the ruler has not absorbed stands at the ruler's own centre with the population SE.
     delta_map = {sid: ruler.delta.get(sid, ruler.mu_delta) for sid in by_id}
     delta_se_map = {sid: ruler.delta_se.get(sid, ruler.sigma_delta) for sid in by_id}
@@ -722,13 +727,47 @@ def select_round_subset(
         delta_map,
         delta_se_map,
         list(by_id),
+        worth,
     )
-    ranked = _with_ruler_learning(decided, budget, delta_se_map)
+    ranked = _with_ruler_learning(decided, budget, delta_se_map, worth)
+    ranked = _with_stratum_cover(ranked, budget, strata)
     return [by_id[sid] for sid in _with_anchor_block(ranked, budget, ruler, anchor_floor)]
 
 
+def _shared_strata(bank: Sequence[Sample]) -> dict[int, frozenset[str]]:
+    """A pin value some cells share and others lack is a stratum: an L4 pool's dataset, its model."""
+    levels: dict[str, set[int]] = {}
+    for s in bank:
+        for key, value in (s.source_pin or {}).items():
+            levels.setdefault(f"{key}={value!r}", set()).add(int(s.id))
+    return {
+        int(s.id): frozenset(
+            level
+            for level, held in levels.items()
+            if int(s.id) in held and 1 < len(held) < len(bank)
+        )
+        for s in bank
+    }
+
+
+def _with_stratum_cover(
+    ranked: list[int], budget: int, strata: Mapping[int, frozenset[str]]
+) -> list[int]:
+    """Rank alone buys the best-priced stratum whole, and a win on one dataset or one model generalizes to none."""
+    uncovered = set().union(*strata.values())
+    cover: list[int] = []
+    for sid in ranked:
+        if len(cover) >= budget or not uncovered:
+            break
+        if strata[sid] & uncovered:
+            cover.append(sid)
+            uncovered -= strata[sid]
+    held = set(cover)
+    return [*cover, *(sid for sid in ranked if sid not in held)]
+
+
 def _with_ruler_learning(
-    decided: list[int], budget: int, delta_se_map: dict[int, float]
+    decided: list[int], budget: int, delta_se_map: dict[int, float], worth: Mapping[int, float]
 ) -> list[int]:
     """A pure-decision panel converges on one difficulty, where θ is logit-accuracy plus a constant."""
     slots = min(_RULER_LEARNING_SLOTS, max(budget - 1, 0))
@@ -737,7 +776,9 @@ def _with_ruler_learning(
     keep = decided[: budget - slots]
     held = set(keep)
     explore = sorted(
-        (sid for sid in decided if sid not in held), key=lambda sid: (-delta_se_map[sid], sid)
+        (sid for sid in decided if sid not in held),
+        # Unseen cells tie on the population SE, and the cheapest sharp one learns the ruler first.
+        key=lambda sid: (-delta_se_map[sid], -worth.get(sid, 1.0), sid),
     )
     return [*keep, *explore[:slots], *(sid for sid in decided[budget - slots :] if sid not in held)]
 

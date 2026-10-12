@@ -672,7 +672,7 @@ async def _optimize(
     bind_priced(session.state.priced_keys)
     refresh_rates_in_background()
     # Unconditional: the runner cannot know a child will recurse.
-    publish_inner_spawn_context(session, campaign_config)
+    publish_inner_spawn_context(session)
     # Round 0's cells need it too: their origin level is every candidate's baseline.
     refresh_inner_rulers(session, campaign_config, round_num=0)
     # Fresh per launch, keeping only the cycles this run measures FOR.

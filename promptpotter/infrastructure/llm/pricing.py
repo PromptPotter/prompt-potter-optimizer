@@ -210,19 +210,17 @@ def _as_tokens(raw: object) -> int | None:
 
 @functools.lru_cache(maxsize=1)
 def load_rates() -> RateTable:
-    models = _read_models(CACHE_PATH)
-    if models is not None:
-        return _models_to_rates(models)
-    models = _read_models(BUNDLED_PATH)
-    if models is not None:
-        logger.info("spend: using bundled rate floor at %s (no cache yet)", BUNDLED_PATH)
-        return _models_to_rates(models)
-    logger.warning(
-        "spend: no rate table available (cache %s + bundle %s both missing)",
-        CACHE_PATH,
-        BUNDLED_PATH,
-    )
-    return RateTable({})
+    bundled = _read_models(BUNDLED_PATH)
+    fetched = _read_models(CACHE_PATH)
+    if bundled is None and fetched is None:
+        logger.warning(
+            "spend: no rate table available (cache %s + bundle %s both missing)",
+            CACHE_PATH,
+            BUNDLED_PATH,
+        )
+        return RateTable({})
+    # The fetch lies OVER the floor: a row upstream never listed keeps the price the bundle gave it.
+    return _models_to_rates((bundled or {}) | (fetched or {}))
 
 
 def lookup_rate(model: str | None, provider: str | None) -> Rate | None:

@@ -25,7 +25,12 @@ from promptpotter.application.datasets.authored import (
 )
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, resolve_optimizer
 from promptpotter.domain.l4.proxies import INNER_RESULT_KEY, OUTER_PROXY_KEYS
-from promptpotter.domain.pipeline_schema import ManifestNodeOverlay, NodeKind, NodeRole
+from promptpotter.domain.pipeline_schema import (
+    ManifestNodeOverlay,
+    NodeKind,
+    NodeRole,
+    NodeSearchNarrowing,
+)
 from promptpotter.domain.spend import SpendCeilings
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.dataset_access import (
@@ -72,6 +77,8 @@ class InnerTask(StrictModel):
     inner_dataset: str | None = None
     inner_model: str | None = None
     inner_provider: str | None = None
+    # A model whose price is one host's cache is another instrument on the next host.
+    inner_route_order: list[str] | None = None
 
 
 def _level_slug(value: object) -> str:
@@ -101,7 +108,8 @@ class InnerTasks(StrictModel):
             )
         if not isinstance(axes, dict) or not axes:
             raise ValueError("`axes:` must be a non-empty mapping of cell field → list of levels")
-        griddable = set(InnerTask.model_fields) - {"id", "n_inner_rounds"}
+        # A route order belongs to ONE model, so it is declared on the cell and never crossed.
+        griddable = set(InnerTask.model_fields) - {"id", "n_inner_rounds", "inner_route_order"}
         for key, levels in axes.items():
             if key == "n_inner_rounds":
                 raise ValueError(
@@ -151,6 +159,7 @@ class InnerTasks(StrictModel):
                 task.inner_dataset_seed,
                 task.inner_model,
                 task.inner_provider,
+                tuple(task.inner_route_order or ()),
             )
             if (twin := seen_specs.get(key)) is not None:
                 raise ValueError(
@@ -184,6 +193,7 @@ class InnerTaskSpec(StrictModel):
     lives: LivesConfig | None = None
     inner_model: str | None = None
     inner_provider: str | None = None
+    inner_route_order: list[str] | None = None
     inner_optimizer_temperature: float | None = None
 
     def treatment(self) -> dict[str, Any]:
@@ -374,6 +384,7 @@ def resolve_inner_task(cells: InnerCells, sample: Sample) -> InnerTaskSpec:
         lives=cfg.inner_lives,
         inner_model=cell.inner_model,
         inner_provider=cell.inner_provider,
+        inner_route_order=cell.inner_route_order,
         inner_optimizer_temperature=cfg.inner_optimizer_temperature,
     )
 
@@ -410,10 +421,20 @@ def inner_instrument_config(
     po: dict[str, Any] = {k: dict(v) for k, v in (base.pipeline_overlay or {}).items()}
     node = dict(po.get(llm_node, {}))
     node["seed"] = spec.seed
+    narrowing = dict(base.optimizer_narrowing)
     if spec.inner_model:
         node["model"] = spec.inner_model
         if spec.inner_provider:
             node["provider"] = spec.inner_provider
+        # The cell's model is its ENVIRONMENT: one permitted value closes the axis the dataset left open.
+        own = narrowing.get(llm_node) or NodeSearchNarrowing()
+        narrowing[llm_node] = own.model_copy(
+            update={
+                "param_allowed_values": {**own.param_allowed_values, "model": [spec.inner_model]}
+            }
+        )
+    if spec.inner_route_order:
+        node["route_order"] = list(spec.inner_route_order)
     po[llm_node] = node
     return base.model_copy(
         update={
@@ -421,6 +442,7 @@ def inner_instrument_config(
             "dataset_split": None,
             "optimization": base.optimization.model_copy(update=opt_update),
             "pipeline_overlay": po,
+            "optimizer_narrowing": narrowing,
         }
     )
 

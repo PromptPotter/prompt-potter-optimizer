@@ -579,6 +579,7 @@ export interface PipelineRecord {
   inner_rounds_ran?: number;
   inner_round_budget?: number;
   inner_stop_reason?: string;
+  inner_origin_headroom?: number;
   inner_sent_usd?: number;
   inner_tokens?: number;
   [key: string]: unknown;

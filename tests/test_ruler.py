@@ -461,6 +461,26 @@ def test_an_arms_theta_interval_is_the_one_the_ruler_computes() -> None:
     assert bare is not None and (bare.ci_lo, bare.ci_hi) == (None, None)
 
 
+def test_a_priced_draw_still_spans_every_dataset_and_model_of_its_pool() -> None:
+    from promptpotter.application.intelligence.rasch import select_round_subset
+    from promptpotter.domain.sample import Sample
+
+    pool = [
+        Sample(id=i, query=f"{d}/{m}/{seed}", ground_truth=None, source_pin={"d": d, "m": m})
+        for i, (d, m, seed) in enumerate(
+            (d, m, seed) for d in ("easy", "hard") for m in ("small", "large") for seed in (0, 1)
+        )
+    ]
+    # Every `easy` cell on the `small` model outprices the rest: rank alone buys those and no other.
+    worth = {int(s.id): 9.0 if s.query.startswith("easy/small") else 1.0 for s in pool}
+
+    drawn = select_round_subset(pool, [], 3, worth=worth)
+
+    assert {s.source_pin["d"] for s in drawn} == {"easy", "hard"}  # type: ignore[index]
+    assert {s.source_pin["m"] for s in drawn} == {"small", "large"}  # type: ignore[index]
+    assert drawn[0].query == "easy/small/0"
+
+
 # 3. The L4 outer proxy — what one finished inner cycle says
 
 

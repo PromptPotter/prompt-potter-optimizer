@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from promptpotter.application.bench.children import DROPPED_MANDATORY_PLACEHOLDER
 from promptpotter.application.bench.node_context import NodeContext
 from promptpotter.application.intelligence.adaptive_queue_mechanism import (
+    CellReading,
     build_round_order,
+    information_per_price,
     parent_grades,
 )
 from promptpotter.application.intelligence.indexes.axis import NOISE_THRESHOLD
@@ -54,13 +56,18 @@ from promptpotter.application.optimizers.potter.l1.critique import critique_owed
 from promptpotter.application.optimizers.potter.l1.stats import review_reading, round_facts
 from promptpotter.application.optimizers.potter.pobb.checks import ABORT_LENS_SUPPRESS
 from promptpotter.application.optimizers.potter.race import PoBBRace
-from promptpotter.application.optimizers.potter.records import POTTER_MANIFEST, PotterRoundState
+from promptpotter.application.optimizers.potter.records import (
+    POTTER_MANIFEST,
+    PotterCheckpointKind,
+    PotterRoundState,
+)
 from promptpotter.application.optimizers.potter.resume import (
     POTTER_REPLAYERS,
     rederive_critiques,
     round_packages,
 )
 from promptpotter.application.optimizers.potter.state import PotterState, potter_state
+from promptpotter.application.scoring.formula.compiler import cell_channels_of
 from promptpotter.config.paths import optimizers_root
 from promptpotter.config.prompt_blocks import block_library, library_identity
 from promptpotter.domain.dashboard_rows import OptimizerLimit
@@ -105,6 +112,21 @@ class L1CritiqueKnobs(StrictModel):
     """The critique's call config is all it has; it takes no knob of its own."""
 
 
+def _origin_readings(rounds: Sequence[RoundResult]) -> dict[int, CellReading]:
+    """The ORIGIN's rows alone: the one arm every cell shares, so no edit under test moves a cell's rank."""
+    if not rounds:
+        return {}
+    out: dict[int, CellReading] = {}
+    for cell in rounds[0].results:
+        facts = cell.facts
+        se, headroom = facts.pipeline.mean_parent_level_se, facts.pipeline.inner_origin_headroom
+        usd, seconds = cell_channels_of(facts, cell.grade.fitness).get("cost"), facts.cost_s
+        if not cell.scored or se is None or headroom is None or usd is None or seconds is None:
+            continue
+        out[cell.sample_id] = CellReading(se, headroom, usd, seconds)
+    return out
+
+
 class AdaptiveQueue:
     """ONE order every arm walks: shared prefixes keep paired stats comparable."""
 
@@ -120,9 +142,11 @@ class AdaptiveQueue:
     def draw(self, ctx: NodeContext[AdaptiveQueueKnobs], pool: list[Sample]) -> Panel:
         view = ctx.difficulty
         knobs = ctx.knobs
+        readings = _origin_readings(ctx.rounds)
+        worth = information_per_price(readings)
         if not knobs.per_round_resubset or view.ruler is None:
             # On a COLD ruler a re-picked subset is difficulty-blind; freezing warms it fastest.
-            cells = select_round_subset(pool, [], knobs.sp_budget_round)
+            cells = select_round_subset(pool, [], knobs.sp_budget_round, worth=worth)
         else:
             own = build_observations(list(ctx.rounds))
             cells = select_round_subset(
@@ -134,6 +158,26 @@ class AdaptiveQueue:
                 anchor_floor=ctx.config.optimization.elimination_n_min,
                 # Only THIS cycle's arms are in the race the panel has to separate.
                 leader_ids={o.candidate_id for o in own},
+                worth=worth,
+            )
+        if worth and len(cells) < len(pool):
+            ctx.decide(
+                PotterCheckpointKind.PRICED_DRAW,
+                {
+                    "round_num": ctx.round_num,
+                    "ruler": view.ruler.anchor_id if view.ruler is not None else None,
+                    # Per cell: what its origin row reported, then the rank value read off it.
+                    "cells": {
+                        str(s.id): {
+                            "query": s.query,
+                            **readings[sid]._asdict(),
+                            "worth": worth[sid],
+                        }
+                        for s in pool
+                        if (sid := int(s.id)) in worth
+                    },
+                },
+                [int(s.id) for s in cells],
             )
         order = build_round_order(
             parent_grades(ctx.parent_rows), view.ruler, [int(s.id) for s in cells]

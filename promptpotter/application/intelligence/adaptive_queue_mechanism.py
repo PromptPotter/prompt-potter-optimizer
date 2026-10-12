@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import math
+import statistics
 from collections.abc import Iterable, Mapping, Sequence
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from promptpotter.domain.scoring import ROW_GRADES, is_hit
 from promptpotter.shared.statistics import sigmoid
@@ -14,10 +15,12 @@ if TYPE_CHECKING:
     from promptpotter.domain.scoring import GradedCell
 
 __all__ = [
+    "CellReading",
     "build_round_order",
     "decision_information_gain",
     "decision_order",
     "delta_learning_gain",
+    "information_per_price",
     "marginal_hit_probability",
     "parent_grades",
     "pick_value",
@@ -164,6 +167,36 @@ def build_round_order(
     return order
 
 
+class CellReading(NamedTuple):
+    """What one arm's row says a cell reads and costs, before any other arm is bought on it."""
+
+    level_se: float
+    # The share of the cell still open to a lift; a saturated cell reads sharply and decides nothing.
+    headroom: float
+    usd: float
+    seconds: float
+
+
+def information_per_price(readings: Mapping[int, CellReading]) -> dict[int, float]:
+    """headroom/(se²·price) over the MEDIAN, so an unreported cell stands at 1.0; price is dollars PLUS clock, each over the pool's median."""
+    priced = {
+        sid: r for sid, r in readings.items() if r.level_se > 0 and r.usd > 0 and r.seconds > 0
+    }
+    if not priced:
+        return {}
+    usd = statistics.median(r.usd for r in priced.values())
+    seconds = statistics.median(r.seconds for r in priced.values())
+    raw = {
+        sid: r.headroom / (r.level_se**2 * (r.usd / usd + r.seconds / seconds))
+        for sid, r in priced.items()
+    }
+    open_cells = [value for value in raw.values() if value > 0]
+    if not open_cells:
+        return {}
+    median = statistics.median(open_cells)
+    return {sid: value / median for sid, value in raw.items()}
+
+
 def decision_order(
     mu_c: float,
     var_c: float,
@@ -172,12 +205,14 @@ def decision_order(
     delta_map: dict[int, float],
     delta_se_map: dict[int, float],
     sample_ids: Iterable[int],
+    worth: Mapping[int, float],
 ) -> list[int]:
     """On ``decision_information_gain`` ALONE: summed, ``delta_learning_gain`` dominates; it overstates ONE arm's draw."""
     return sorted(
         sample_ids,
         key=lambda sid: (
-            -decision_information_gain(mu_c, var_c, mu_s, var_s, delta_map[sid], delta_se_map[sid]),
+            -decision_information_gain(mu_c, var_c, mu_s, var_s, delta_map[sid], delta_se_map[sid])
+            * worth.get(sid, 1.0),
             sid,
         ),
     )

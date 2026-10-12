@@ -348,8 +348,11 @@ observations under Laplace.
 `select_round_subset` (`intelligence/rasch.py`) ranks the whole bank on term 1 alone
 (`adaptive_queue_mechanism.py::decision_order`) against the best θ among the arms in this race, so
 *exploit* falls out of the ranking (samples on the contested band `δ_s ≈ leader θ` sort to the
-top). *Explore* is a reserved tail rather than a term: `_with_ruler_learning` gives the last few
-slots to the cells δ is least sure of, which holds the band open, and `_with_anchor_block` swaps
+top). Where cells differ in price, term 1 is weighted by `information_per_price`, read off the
+ORIGIN's rows so no arm under test moves a cell's rank. *Explore* is a reserved tail rather than a
+term: `_with_ruler_learning` gives the last few slots to the cells δ is least sure of, which holds
+the band open; `_with_stratum_cover` then fronts one cell per shared `source_pin` level, so a
+priced draw cannot narrow to one dataset or one model; and `_with_anchor_block` swaps
 already-anchored cells into the tail until the next ruler extension has enough to equate against.
 Summed, `delta_learning_gain` dominated — an unmeasured sample carries the population `σ_δ`, so
 unmeasured samples outranked measured ones and tied with each other, draining the bank in stored

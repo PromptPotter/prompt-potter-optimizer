@@ -36,6 +36,7 @@ class PotterCheckpointKind(CheckpointKind):
     ROUND_WINNER = "round_winner"
     ELIMINATION_CUT = "elimination_cut"
     LEADER_LOCK_IN = "leader_lock_in"
+    PRICED_DRAW = "priced_draw"
     L2_ESCALATION_TRIGGER = "l2_escalation_trigger"
     L3_ESCALATION_TRIGGER = "l3_escalation_trigger"
 

@@ -198,6 +198,7 @@ class PipelineData:
     inner_rounds_ran: int | None = None
     inner_round_budget: int | None = None
     inner_stop_reason: str | None = None
+    inner_origin_headroom: float | None = None
     inner_sent_usd: float | None = None
     inner_tokens: int | None = None
     # What only the DATASET names: observation keys, turn scalars, banked evaluator and judge terms.

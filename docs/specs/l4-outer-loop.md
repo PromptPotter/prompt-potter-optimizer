@@ -110,15 +110,21 @@ exposed to.
   and lands on the next `resume` — the case that silently re-partitions a corpus.
 - **No knob changes mid-run.** The baselines are read per inner mint; an edit splits the run into two
   fingerprint families.
-- **The model/provider pair is the panel's ENVIRONMENT axis**, held by the INNER dataset declining to list
-  `model` in its `optimizer.param_keys`: the engine would search it, and the instrument must not move
-  under the arms it measures.
+- **The model/provider pair is the panel's ENVIRONMENT axis**: the engine would search it, and the
+  instrument must not move under the arms it measures. A cell that names `inner_model` closes the axis
+  itself (`runner/inner/tasks.py::inner_instrument_config`), on any dataset; a cell that inherits the
+  dataset's model is held only by that dataset declining to list `model` in its `optimizer.param_keys`.
+- **A panel's datasets resolve ONE inner optimizer** (`runner/inner/tasks.py::resolve_inner_cells` raises
+  otherwise). The knobs their own `campaign.yaml` set differently are restated in `inner_nodes`.
 - **`max_inner_rounds ≥ 2`.** At 1 the trajectory is length-1 and the formula's two weighted delta terms
   silently double-count one measurement.
 - **`lives.start` sits well below `max_inner_rounds`.** Set near it, the bank cannot drain before the
   calendar cap: every inner runs full length regardless of quality, and the geometry loses its only brake.
-- **Inner-task count > `elimination_n_min`, and ≥ 6** — below that θ_se exceeds the point-lift and the
-  election correctly refuses to crown.
+- **Cells per round > `elimination_n_min`, and ≥ 6** — below that θ_se exceeds the point-lift and the
+  election correctly refuses to crown. The count is the round DRAW (`sp_budget_round`): equal to the
+  task list it is a census, below it the tasks are a pool and each round a subset of them.
+- **A new inner DATASET re-keys every banked cell; a new task on a dataset already present re-keys none**
+  — `_identity_config` hashes the whole `datasets` map into one fingerprint.
 - **CRN is the variance control, and the only one.** No replication knob beside it; an identical cell replays.
 - **`terminal_node` is the outer chain's last llm node (`runner/inner/tasks.py::InnerCells.terminal`).** An
   inner campaign consumes the ENTIRE outer config at once, and off-chain nodes lead `node_configs`, so only

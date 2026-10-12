@@ -8,7 +8,6 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
 
-from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.runner.inner.tasks import (
     InnerCells,
     InnerTasks,
@@ -20,7 +19,6 @@ from promptpotter.infrastructure.store.layout import inner_sandbox_dir
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.domain.ruler import DeltaRuler
@@ -60,29 +58,15 @@ _INNER_SPAWN: Annotated[
 ] = contextvars.ContextVar("promptpotter_inner_spawn")
 
 
-def _resolve_outer_panel(
-    session: Session, campaign_config: CampaignConfig, dataset_dir: Path
-) -> InnerTasks | None:
+def _resolve_outer_panel(session: Session, dataset_dir: Path) -> InnerTasks | None:
     """``None`` where the dataset owns no panel: owning one IS what makes a dataset outer."""
-    panel_path = inner_tasks_path(dataset_dir)
-    if not panel_path.is_file():
+    if not inner_tasks_path(dataset_dir).is_file():
         return None
     # The workload's panel, never a second read of the file the samples and fingerprint came from.
-    panel = InnerTasks.model_validate(session.backend_client.workload.experiment)
-    # A draw BELOW the panel narrows it silently, and a resubsetting sampler moves the cells per round.
-    selected = select_optimizer(campaign_config.optimization)
-    if (drawn := selected.round_cells(len(panel.tasks))) != len(panel.tasks):
-        raise ValueError(
-            f"{dataset_dir.name} declares a {len(panel.tasks)}-cell inner panel "
-            f"({panel_path.name}) but its optimizer's sampler `{selected.sampler.name}` draws "
-            f"{drawn} per round. The outer panel is a CENSUS, not a sample: every candidate "
-            "must run every cell or the comparison is not paired. Size the sampler to the "
-            "cell count, or change the panel."
-        )
-    return panel
+    return InnerTasks.model_validate(session.backend_client.workload.experiment)
 
 
-def publish_inner_spawn_context(session: Session, campaign_config: CampaignConfig) -> None:
+def publish_inner_spawn_context(session: Session) -> None:
     cycle_id = session.state.cycle_id
     dataset_dir = session.dataset_config_dir
     if not cycle_id or dataset_dir is None or not session.campaign_id:
@@ -95,7 +79,7 @@ def publish_inner_spawn_context(session: Session, campaign_config: CampaignConfi
         session.store.tenant_id,
         CycleHop(campaign_id=session.campaign_id, cycle_id=cycle_id),
     )
-    panel = _resolve_outer_panel(session, campaign_config, Path(dataset_dir))
+    panel = _resolve_outer_panel(session, Path(dataset_dir))
     cells = None if panel is None else resolve_inner_cells(session.store, panel)
     _INNER_SPAWN.set(
         InnerSpawnContext(

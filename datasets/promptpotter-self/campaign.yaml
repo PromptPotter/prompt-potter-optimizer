@@ -86,8 +86,9 @@ campaign_config:
     ceiling: {usd: 5.0, tokens: null}
     # Potter's knobs — the overlay on its manifest's nodes (assets/optimizers/potter/).
     nodes:
-      # = the panel size in inner_tasks.yaml, which run init refuses to differ. Above it the
-      # queue has nothing to select from; below it a variant is judged on a subset of cells.
+      # = the panel size in inner_tasks.yaml, so every round is a census of it. Above it the
+      # queue has nothing to select from; below it a round draws a subset, which is the pool
+      # mode `promptpotter-self-pool` runs and this calibration panel does not.
       adaptive_queue:
         config:
           sp_budget_round: 6

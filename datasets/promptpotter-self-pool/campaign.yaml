@@ -1,0 +1,57 @@
+campaign_config:
+  dataset_name: promptpotter-self-pool
+  # The same permitted set as `promptpotter-self`, for the reason stated there.
+  optimizer_narrowing:
+    l1_generate: &pp_pool_models
+      param_allowed_values:
+        model:
+          - openai/gpt-6-luna
+          - deepseek/deepseek-v4-flash:nitro
+          - qwen/qwen3.8-27b:nitro
+          - openai/gpt-oss-120b
+    l1_critique: *pp_pool_models
+    l2_context: *pp_pool_models
+    l3_plan: *pp_pool_models
+    checkin: *pp_pool_models
+  # C0 is measured on EVERY environment, once: it gives each one an origin row, a first outer δ
+  # and its price, which is what the round draw ranks on. Keep it equal to the pool size in
+  # `inner_tasks.yaml`.
+  sp_budget_origin: 6
+  # Lift alone: no time term reads on one scale across environments yet. A cell's seconds are
+  # mostly its environment's, so they price the DRAW (dollars plus clock, per origin cell), and
+  # only a cell-against-its-own-C0 ratio could score an arm for being quick.
+  scoring:
+    per_sample: max(0.0, min(1.0, (mean_round_delta + 1.0) / 3.0))
+  display_metric: ability
+  exclude_nodes: []
+  pipeline_overlay: {}
+  optimization:
+    max_rounds: 4
+    degradation_threshold: 0.4
+    elimination_n_min: 4
+    ceiling: {usd: 5.0, tokens: null}
+    nodes:
+      # The round DRAW, below the pool: 5 keeps `elimination_n_min` anchored cells and leaves 1
+      # slot for the environment the outer ruler knows least.
+      adaptive_queue:
+        config:
+          sp_budget_round: 5
+      l1_generate:
+        config:
+          prompt_family: l1_generate_self_optimizing
+          prompt_block_catalogue: 'off'
+          n_variants: 3
+      l1_critique:
+        config:
+          prompt_family: l1_critique_self_optimizing
+      l2_context:
+        config:
+          prompt_family: l2_context_self_optimizing
+      pobb:
+        config:
+          epsilon: 0.30
+      escalation:
+        config:
+          l1_patience: 2
+          l2_patience: 2
+          l3_patience: 1

@@ -45,12 +45,19 @@ class InnerCellFacts(StrictModel):
     inner_rounds_ran: int
     inner_round_budget: int
     inner_stop_reason: StopReason
+    # The share of origin rows still missed: 0 is a cell no arm can lift, however sharply it reads.
+    inner_origin_headroom: float | None
     # Reporting only, cumulative across attempts: billing is each call's own, and these enter no ledger.
     inner_sent_usd: float | None
     inner_tokens: int | None
 
 
 INNER_FACT_KEYS: tuple[str, ...] = tuple(InnerCellFacts.model_fields)
+
+
+def _origin_headroom(result: CycleResult) -> float | None:
+    accuracy = result.origin.accuracy if result.origin is not None else None
+    return None if accuracy is None else 1.0 - accuracy.value
 
 
 def inner_cell_facts(result: CycleResult) -> InnerCellFacts | None:
@@ -66,6 +73,7 @@ def inner_cell_facts(result: CycleResult) -> InnerCellFacts | None:
         inner_rounds_ran=result.n_rounds_after_origin,
         inner_round_budget=effective_round_budget(result),
         inner_stop_reason=result.stop_reason,
+        inner_origin_headroom=_origin_headroom(result),
         inner_sent_usd=result.spend.sent_usd if result.spend else None,
         inner_tokens=result.spend.total_tokens_used if result.spend else None,
     )

@@ -385,7 +385,7 @@ async def _freeze_cycle(
     assert campaign is not None, "the hop was enumerated off this campaign's manifest"
     session, config = await bind_cycle_session(stores, campaign, hop)
     # Each arm's task copies it: an L4 outer round proposes under its inner cells' optimizer.
-    publish_inner_spawn_context(session, config)
+    publish_inner_spawn_context(session)
     arm_diagnostic_scoring(session, config, source=RunSource.DECISION_BANK)
     params = session.pipeline_params
     session.control = replace(session.control, held_lookahead=parallel)
@@ -596,7 +596,7 @@ async def _grade(
                 decisions.append(replace(decision, plans=(_plan(point, 0), _plan(point, 1))))
                 continue
             # Every cycle froze before this one measures, so the context left bound is the last one's.
-            publish_inner_spawn_context(point.session, point.config)
+            publish_inner_spawn_context(point.session)
             try:
                 readings = (await _measure(point, 0), await _measure(point, 1))
             except DecisionBankError as stop:

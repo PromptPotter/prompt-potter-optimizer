@@ -70,7 +70,7 @@ async def _rescore_origin(stores: Stores, hop: CycleHop, k: RescoreCount) -> Noi
 
     session, campaign_config = await bind_cycle_session(stores, campaign, hop)
     # Normally `run_optimization`'s: a pp-self origin's connector dispatches no inner run without it.
-    publish_inner_spawn_context(session, campaign_config)
+    publish_inner_spawn_context(session)
 
     arm_diagnostic_scoring(session, campaign_config, source=RunSource.NOISE_FLOOR)
 

@@ -1,0 +1,83 @@
+domain: Prompt engineering and self-optimization for LLM pipelines
+pipeline_purpose: >-
+  Automatically evolve PromptPotter's optimizer prompt templates to accelerate inner-cycle convergence
+  across a pool of environments, each one dataset answered by one model (inner_tasks.yaml).
+data_characteristics: >-
+  Each sample is a whole inner run on one environment, and a round draws only some of the pool; the
+  mutation surface is four prose fields per inner node plus per-node panel layouts, and fitness is a
+  noisy numeric delta, so edits move the score but improvement is real and infrequent.
+optimization_goals: >-
+  Maximize mean_round_delta (the MEAN, over inner rounds, of the ability the parent that round ADOPTED,
+  minus its origin, in logits) on every environment drawn. It averages the staircase rather than
+  reading its last step: a lift bought in round 1 is worth more than the same lift bought in round 4.
+  So winning edits make the inner optimizer diagnose its own observed failures FASTER, on any task.
+key_challenges: >-
+  An edit fitted to one dataset's vocabulary or one model's habits reads well on the cells that showed
+  it and fails on the next draw; outer candidates also drift into a single recycled hypothesis instead
+  of grounding each edit in the specific inner failure the narratives show.
+upstream_context: >-
+  Outer optimization loop generates mutation proposals for optimizer prompt fields; inner cycle executes
+  with current optimizer prompts to produce outputs and compute scores.
+downstream_context: >-
+  Composite fitness scores are aggregated to select the best optimizer prompt configurations for the next
+  outer iteration.
+raw_description: |
+  # Task: evolve PromptPotter's own optimizer prompts, across many environments
+
+  Goal: the outer cycle mutates the **inner** cycle's L1 / L1_CRITIQUE / L2 / L3
+  optimizer prompts (four prose fields per inner node plus per-node panel layouts) so
+  inner cycles converge **faster and further** on whatever task they are handed.
+
+  ## What the inner cycle is solving (so you mutate toward the right behaviour)
+
+  There is no single inner benchmark. Each outer sample is one **environment**: one
+  dataset answered by one model, declared in `inner_tasks.yaml`. The datasets differ
+  in kind (multi-step reasoning, competition mathematics, arithmetic word problems)
+  and the models differ in size and habit, and a round shows you only some of them.
+  The inner run narratives name the environment each one came from.
+
+  So an edit that helps must help the inner *optimizer*, not one task. Do not name a
+  dataset's vocabulary, its answer labels or one model's quirks in an optimizer
+  prompt: the next round measures the same edit on environments where those words
+  mean nothing. A task the inner model looks bad at is a task it has not been tuned
+  for yet, not a task with a low ceiling. There is no target score.
+
+  Do NOT assume a failure mode — read one from the evidence. The critique and the
+  inner run narratives show what the inner loop actually did (which candidates it
+  generated, what its critique diagnosed, where its rounds stalled); each outer
+  candidate must name the observed inner deficiency it attacks, and say whether it
+  showed in one environment or in several.
+
+  ## Fitness
+
+  ONE number, in ``campaign.yaml::scoring``:
+
+  - ``mean_round_delta`` — the mean, over the inner rounds, of the ability the
+    parent that round ADOPTED, minus where the search started; in logits on that
+    environment's own difficulty-adjusted ruler. Linearly re-anchored into [0,1].
+
+  Better = the inner optimizer adopted a stronger prompt EARLY and kept it. A search
+  that flatlines for three rounds then jumps scores below one that climbed steadily
+  to the same place. A campaign that breaks its own measurement is floored, and a
+  collapsed arm is eliminated — both structurally, before scoring.
+
+  ## Mutation surface
+
+  - Per-node prose fields: ``persona``, ``task_intent``, ``instruction``,
+    ``thinking_style`` — plus a panel ``layout`` on the nodes that declare one
+  - The per-node set is ``pipeline.yaml::nodes.{node}.optimizer.param_keys``;
+    outer L1 may mutate any subset per round
+  - ``problem_description`` and ``answer_format`` carry the injection slots and
+    output contract, so they are not levers
+  - Out of scope (belongs to inner cycle): inner ``pipeline_params``, the inner
+    model (it is the environment), inner ``optimizer_llm``
+
+  ## Intuition (don't bake in — algo should rediscover)
+
+  - Dimensionality is non-uniform across the fields:
+    - bool / categorical slot → doubles state space
+    - free-prose slot (``instruction``, ``thinking_style``, ...) →
+      explodes it → more signal AND more noise per round
+  - Corollary: L2 / L3 shouldn't read early variance on a high-dim slot
+    as "axis unstable, avoid" — that's the slot doing what high-dim
+    slots do
