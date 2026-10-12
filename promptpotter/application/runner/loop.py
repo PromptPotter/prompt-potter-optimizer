@@ -157,6 +157,8 @@ async def run_round_loop(
 
     except RUN_ENDS as exc:
         stop_reason, error = end_run_on(exc, session, where=f"at round {round_num}")
+        # Before the finalize reads a selection: the stop may sit between an election and its close.
+        cycle.unwind_unclosed()
         return LoopEnd(
             stop_reason,
             error,

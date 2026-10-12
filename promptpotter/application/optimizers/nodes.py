@@ -541,7 +541,7 @@ class Selector(NodeMember, Protocol):
 
     @property
     def elects_partial(self) -> bool:
-        """Whether ``select`` can elect on panels a budget stop cut short; where it cannot, the cut round is unwound."""
+        """Whether ``select`` CAN elect on panels a budget stop cut short; whether the round MAY is ``panel_gate``'s. Neither, and the cut round is unwound."""
         ...
 
     def parent_cells(

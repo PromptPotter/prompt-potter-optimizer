@@ -221,30 +221,27 @@ async def measure_population(
     # Before the selector, which reads it; the parent rides under its own id so the ruler links it.
     bar_id = parent.opt_sp.id
     cycle.calibrate_ruler({**rows, bar_id: rows.get(bar_id, NO_CELLS).merged(parent_rows)})
-    if (ruler := cycle.difficulty.ruler) is not None:
-        # Fixed δ decouples the arms, so this is the fit `elect_round_winner` takes of the same rows.
-        abilities = candidate_abilities(
-            {ind.id: rows[ind.id] for ind in electable}, parent_rows, ruler
+    # Cold too: a selector elects on that θ, and the round's `AbilityReading.caveat` names it.
+    ruler = cycle.difficulty.ruler
+    # Fixed δ decouples the arms, so this is the fit `elect_round_winner` takes of the same rows.
+    abilities = candidate_abilities({ind.id: rows[ind.id] for ind in electable}, parent_rows, ruler)
+    scores = [
+        cs.model_copy(
+            update={
+                "theta": abilities.theta[cs.candidate_id],
+                "theta_se": abilities.theta_se[cs.candidate_id],
+            }
         )
-        scores = [
-            cs.model_copy(
-                update={
-                    "theta": abilities.theta[cs.candidate_id],
-                    "theta_se": abilities.theta_se[cs.candidate_id],
-                }
-            )
-            if cs.candidate_id in abilities.theta
-            else cs
-            for cs in scores
-        ]
-        scores = [
-            cs.model_copy(
-                update={"theta_caveat": arm_theta_caveat(rows[cs.candidate_id].cells, ruler)}
-            )
-            if cs.candidate_id in rows
-            else cs
-            for cs in scores
-        ]
+        if cs.candidate_id in abilities.theta
+        else cs
+        for cs in scores
+    ]
+    scores = [
+        cs.model_copy(update={"theta_caveat": arm_theta_caveat(rows[cs.candidate_id].cells, ruler)})
+        if cs.candidate_id in rows
+        else cs
+        for cs in scores
+    ]
     return Measured(
         rows=rows,
         scores=scores,

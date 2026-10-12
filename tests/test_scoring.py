@@ -28,6 +28,7 @@ from promptpotter.application.campaign_listing import list_campaigns
 from promptpotter.application.evidence.head_to_head import HeadToHead
 from promptpotter.application.evidence.read import subject_evidence
 from promptpotter.application.evidence.subjects import SubjectSpec
+from promptpotter.application.intelligence.rasch import candidate_abilities
 from promptpotter.application.optimizer_manifest import bind_optimizer
 from promptpotter.application.optimizers.potter.pobb.checks import EliminationGate, PoBBCheck
 from promptpotter.application.run_phase_control import RunControl
@@ -95,7 +96,7 @@ from promptpotter.domain.paired_reading import (
     ReadingState,
 )
 from promptpotter.domain.phase_views import BenchGradedView, ViewAnchors
-from promptpotter.domain.phases import CampaignPhase, RunPhase, StopReason
+from promptpotter.domain.phases import CampaignPhase, RunPhase, StopLoop, StopReason
 from promptpotter.domain.pipeline_schema import NodePromptInfo, PipelineNode, PipelineSchema
 from promptpotter.domain.results import (
     ArmOutcome,
@@ -1040,10 +1041,11 @@ _QUIET_CALLBACKS = types.SimpleNamespace(
 )
 
 
+@pytest.mark.parametrize("panel_gate", ["strict", "off"])
 @pytest.mark.parametrize(
     ("cut_round", "budget", "replayed", "parent_cells"), [(1, 17, 0, 2), (2, 5, 12, 4)]
 )
-def test_a_round_the_budget_cuts_elects_on_the_cells_it_paid_for(
+def test_a_round_the_budget_cuts_elects_only_past_the_panel_gate_and_stands_only_once_closed(
     built_stores,
     tmp_path,
     monkeypatch,
@@ -1052,6 +1054,7 @@ def test_a_round_the_budget_cuts_elects_on_the_cells_it_paid_for(
     budget: int,
     replayed: int,
     parent_cells: int,
+    panel_gate: str,
 ) -> None:
     """Round 1's parent is the origin: read on the cells run init banked, never bought a cell."""
     minted: list[str] = []
@@ -1085,7 +1088,9 @@ def test_a_round_the_budget_cuts_elects_on_the_cells_it_paid_for(
             book.declared = SpendCeilings(0.0, None)
         return sample.id % 2 == 0
 
-    cycle = _peer_cycle(built_stores, tmp_path, monkeypatch, "capo", nodes, even_cells)
+    cycle = _peer_cycle(
+        built_stores, tmp_path, monkeypatch, "capo", nodes, even_cells, panel_gate=panel_gate
+    )
     monkeypatch.setattr(node_context, "llm_call", _llm)
     session = cycle.session
     running.append(True)
@@ -1110,7 +1115,16 @@ def test_a_round_the_budget_cuts_elects_on_the_cells_it_paid_for(
     paid.clear()
 
     session.control = RunControl(book=book)
-    closed, cut = asyncio.run(execute_round(cycle, cut_round, search, _QUIET_CALLBACKS))  # type: ignore[arg-type]
+    cutting = execute_round(cycle, cut_round, search, _QUIET_CALLBACKS)  # type: ignore[arg-type]
+    if panel_gate == "strict":
+        with pytest.raises(StopLoop) as halted:
+            asyncio.run(cutting)
+        assert halted.value.reason is StopReason.SPEND_BUDGET, (
+            "the bound that cut it names the stop"
+        )
+        assert cycle.rounds[-1].round == cut_round - 1, "an arm was crowned on a holed panel"
+        return
+    closed, cut = asyncio.run(cutting)
     assert cut is StopReason.SPEND_BUDGET
     # The controller routes on this round before anything closes it: health rides it as built.
     assert closed.health is not None and closed.health.samples == len(closed.results)
@@ -1124,6 +1138,11 @@ def test_a_round_the_budget_cuts_elects_on_the_cells_it_paid_for(
     assert len(carried) == 3 and short.candidate_id not in carried, "elected below the floor"
     full = next(cs for cs in closed.candidate_scores[3:] if cs is not short)
     assert full.candidate_id in carried, "an offspring the budget paid for in full was dropped"
+    # A stop between this election and its close leaves no result: the run stands on what closed.
+    assert cycle.rounds[-1].round == cut_round
+    cycle.unwind_unclosed()
+    assert [rr.round for rr in cycle.rounds] == [0]
+    assert cycle.selection.round == 0
 
 
 class _ComposedPayload(RoundPayload, manifest="ga-composition"):
@@ -1322,6 +1341,17 @@ def test_the_bench_grades_the_pick_the_optimizer_declared_over_a_higher_composit
     picked = asyncio.run(execute_round(cycle, 1, search, _QUIET_CALLBACKS))[0]  # type: ignore[arg-type]
     assert (
         picked.selected_labels and picked.composite_fitness < cycle.origin_round.composite_fitness
+    )
+    # A cold ruler still reads a θ, and an arm carries the one an election takes of its rows.
+    assert cycle.difficulty.ruler is None
+    [crowned] = picked.selected_scores
+    [bar] = picked.reference_results.values()
+    cold = candidate_abilities(
+        {crowned.candidate_id: picked.all_candidate_results[crowned.candidate_id]}, bar, None
+    )
+    assert (crowned.theta, crowned.theta_se) == (
+        cold.theta[crowned.candidate_id],
+        cold.theta_se[crowned.candidate_id],
     )
     from promptpotter.application.runner.termination import target_tripped
 

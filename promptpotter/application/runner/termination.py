@@ -106,9 +106,15 @@ def origin_gate_tripped(
     return None
 
 
-def panel_gate_tripped(holed_rows: Sequence[GradedCell], mode: PanelGateMode) -> StopReason | None:
-    """``PANEL_CUT`` on ONE hole a declared bound cut: resuming re-cuts at the same place, unlike ``PAUSED``."""
-    if mode == "off" or not holed_rows:
+def panel_gate_tripped(
+    holed_rows: Sequence[GradedCell], cut: StopReason | None, mode: PanelGateMode
+) -> StopReason | None:
+    """The stop names the bound that made the hole: a budget's own, or ``PANEL_CUT``; a resume re-cuts both, unlike ``PAUSED``."""
+    if mode == "off":
+        return None
+    if cut is not None:
+        return cut
+    if not holed_rows:
         return None
     if any(cell.facts.error_category is ErrorCategory.HALTED for cell in holed_rows):
         return StopReason.PANEL_CUT

@@ -87,7 +87,7 @@ class RoundBuffer:
         for entry in self.candidates.values():
             if entry.scores is None or (stamped := fit.get(entry.scores.label)) is None:
                 continue
-            # An unset stamp is skipped: a cold ruler's absent θ must not blank a banked value.
+            # An unset stamp is skipped: an arm the election's fit left out keeps its banked value.
             entry.scores = entry.scores.model_copy(
                 update={k: v for k, v in stamped if v is not None}
             )

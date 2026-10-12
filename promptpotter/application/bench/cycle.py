@@ -287,6 +287,10 @@ class Cycle:
         self.rounds[slot] = rr
         return rr
 
+    def unwind_unclosed(self) -> None:
+        """``at_offset`` is a round's close: one a stop caught between election and close is no result."""
+        self.rounds = [rr for rr in self.rounds if rr.round == 0 or rr.at_offset is not None]
+
     def ability_after(self, results: CellSheet) -> AbilityReading | None:
         return self.difficulty.frontier(
             merge_known_outcomes(self.tracking.current_results, results)

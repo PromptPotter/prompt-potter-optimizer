@@ -45,6 +45,7 @@ from promptpotter.domain.phases import (
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.results import (
     ROUND_ADVANCE_INFO,
+    ArmOutcome,
     CandidateProposal,
     OverlapReading,
     RoundAdvance,
@@ -285,15 +286,28 @@ def _round_result(
     return elected_round.model_copy(update={"diagnostics": diagnostics})
 
 
-def _panel_gate(ctx: RoundContext, round_result: RoundResult) -> None:
+def _unbought_cells(arm: ScoredCandidate, cut: StopReason | None) -> int:
+    # Under a cut, a MEASURED arm short of its panel was stopped by no rule and no operator.
+    if cut is None or arm.outcome is not ArmOutcome.MEASURED:
+        return 0
+    return max(0, arm.expected_samples - arm.scored_samples)
+
+
+def _panel_gate(ctx: RoundContext, round_result: RoundResult, cut: StopReason | None) -> None:
     session = ctx.cycle.session
     round_num = ctx.round_num
     arm_rows = round_result.all_candidate_results
+    unbought = {c.candidate_id: _unbought_cells(c, cut) for c in round_result.candidate_scores}
+    holes = {
+        c.candidate_id: unscoreable_cells(arm_rows.get(c.candidate_id, NO_CELLS))
+        + unbought[c.candidate_id]
+        for c in round_result.candidate_scores
+    }
     # A broken arm also carries error rows, but its own outcome already charges it.
     holed = sorted(
         c.candidate_id
         for c in round_result.candidate_scores
-        if is_leader_eligible(c) and unscoreable_cells(arm_rows.get(c.candidate_id, NO_CELLS))
+        if is_leader_eligible(c) and holes[c.candidate_id]
     )
     # Sink is the LEDGER: the halt below unwinds before `persist_round`.
     ledger = session.state.ledger
@@ -307,17 +321,16 @@ def _panel_gate(ctx: RoundContext, round_result: RoundResult) -> None:
         },
         holed,
         node=None,
-        data={
-            "holes_by_candidate": {
-                c.candidate_id: unscoreable_cells(arm_rows.get(c.candidate_id, NO_CELLS))
-                for c in round_result.candidate_scores
-            }
-        },
+        data={"holes_by_candidate": holes},
         round=round_num,
     )
     holed_rows = [(cid, cell) for cid in holed for cell in arm_rows[cid] if cell.facts.errored]
-    opt = ctx.cycle.config.optimization
-    if (reason := panel_gate_tripped([cell for _, cell in holed_rows], opt.panel_gate)) is None:
+    reason = panel_gate_tripped(
+        [cell for _, cell in holed_rows],
+        cut if any(unbought[cid] for cid in holed) else None,
+        ctx.cycle.config.optimization.panel_gate,
+    )
+    if reason is None:
         return
     for cid, cell in holed_rows:
         logger.warning(
@@ -327,6 +340,15 @@ def _panel_gate(ctx: RoundContext, round_result: RoundResult) -> None:
             cell.sample_id,
             cell.facts.error or cell.facts.error_category,
         )
+    for cid in holed:
+        if unbought[cid]:
+            logger.warning(
+                "round %d panel HOLE: candidate %s — %d cell(s) the %s stop left unbought",
+                round_num,
+                cid,
+                unbought[cid],
+                reason.value,
+            )
     logger.warning(
         "Round %d halted BEFORE electing on an incomplete panel: %d of %d electable "
         "candidate(s) carry cells that returned no measurement. The round is not persisted "
@@ -504,7 +526,7 @@ async def execute_round(
         round=round_num,
         view=select_exit(callbacks.view_context, round_result),
     )
-    _panel_gate(ctx, round_result)
+    _panel_gate(ctx, round_result, measured.cut)
     # AFTER the panel gate: a round halted on a holed panel is unwound and re-run, never crowned.
     callbacks.on_election(round_result)
     cycle.absorb_round(round_result)

@@ -105,7 +105,9 @@ reach the racing stream under `paired_t`.
 - **Where it departs from the paper.** A race that starts with μ arms or fewer still walks its
   first block, so the selector has rows to rank; App. B races none. `paired_mean_t` floors the SE
   at `1/(4n)`, which moves a p only where the paired differences are nearly constant. And a round
-  the spend or token budget cuts is elected on the k of z_max blocks it paid for
+  the spend or token budget cuts is a holed panel like any other, so `optimization.panel_gate`
+  decides it: `strict` unwinds the round on the budget's own stop, and a `resume` under a raised
+  ceiling re-runs it whole. Under `off` it is elected on the k of z_max blocks it paid for
   (`Selector.elects_partial`): the population is kept among the arms that reached the coverage
   floor, its parent is read on the cells the archive already holds — round 1's origin on what
   run init scored — and the round is the run's last. Where no arm reached the floor, or the
