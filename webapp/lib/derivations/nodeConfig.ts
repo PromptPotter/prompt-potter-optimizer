@@ -53,7 +53,7 @@ export function permittedModels(
   const out: Record<string, readonly string[]> = {};
   for (const [node, params] of Object.entries(schema ?? {})) {
     const row = params.find((p) => p.key === "model");
-    if (row) out[node] = row.permitted ?? row.options;
+    if (row) out[node] = row.permitted;
   }
   return out;
 }
@@ -125,8 +125,6 @@ export function configRows(
     const nodeSeed = asObj(valuesSeed[n]);
     for (const p of params) {
       const baseValue = asRowValue(p.kind, p.value);
-      // `null` = same as the menu; `[]` = nothing may be picked. `??` keeps them apart.
-      const permitted = p.permitted ?? p.options;
       if (mode === "search-space") {
         rows.push({
           node: n,
@@ -136,7 +134,7 @@ export function configRows(
           value: baseValue,
           baseValue,
           locked: p.movable_by.length === 0,
-          allowed: permitted,
+          allowed: p.permitted,
           inSeed: false,
           source: p.source,
           neverAxis: p.never_axis,

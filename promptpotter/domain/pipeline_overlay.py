@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import logging
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Annotated, Any
 
@@ -15,14 +16,18 @@ from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS, WHO_ANSWERS_K
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Mapping, MutableMapping, Sequence
 
-    from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.domain.pipeline_schema import ParamSource, PipelineSchema
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "RESERVED_PIPELINE_PARAM_KEYS",
     "allowed_values_from_narrowing",
+    "apply_node_overlay",
     "fold_output_contract",
+    "merge_pipeline_params",
     "node_config_items",
     "overlay_is_locked_axis_only",
     "overlay_sets_model_outside_allowed",
@@ -44,6 +49,66 @@ def node_config_items(pp: dict[str, Any] | None) -> Iterator[tuple[str, dict[str
         if k in RESERVED_PIPELINE_PARAM_KEYS or not isinstance(v, dict):
             continue
         yield k, v
+
+
+def apply_node_overlay(
+    base: dict[str, Any],
+    overlay: Mapping[str, Any],
+    schema: PipelineSchema | None,
+    *,
+    source: ParamSource | None = None,
+    provenance: MutableMapping[str, dict[str, ParamSource]] | None = None,
+) -> dict[str, Any]:
+    merged = dict(base)
+    for node, cfg in overlay.items():
+        existing = merged.get(node)
+        if not (isinstance(existing, dict) and isinstance(cfg, dict)):
+            merged[node] = cfg
+            _stamp(provenance, source, node, cfg)
+            continue
+        node_obj = schema.get_node(node) if schema else None
+        param_types = node_obj.param_types if node_obj else {}
+        node_cfg = {**existing, **cfg}
+        for param, incoming in cfg.items():
+            prior = existing.get(param)
+            if (
+                param_types.get(param) == "object"
+                and isinstance(prior, dict)
+                and isinstance(incoming, dict)
+            ):
+                node_cfg[param] = {**prior, **incoming}
+        merged[node] = node_cfg
+        _stamp(provenance, source, node, cfg)
+    return merged
+
+
+def merge_pipeline_params(
+    base: dict[str, Any] | None,
+    overrides: dict[str, Any] | None,
+    schema: PipelineSchema | None,
+) -> dict[str, Any] | None:
+    if not overrides:
+        return base
+    merged = apply_node_overlay(base or {}, overrides, schema)
+    if schema:
+        # DECLARED, not the running chain: a node reached only by escalating exists.
+        _declared = {n.name for n in schema.declared_nodes}
+        for k, _cfg in list(node_config_items(merged)):
+            if k not in _declared:
+                logger.warning("Dropping LLM override for undeclared node %r", k)
+                del merged[k]
+    return merged
+
+
+def _stamp(
+    provenance: MutableMapping[str, dict[str, ParamSource]] | None,
+    source: ParamSource | None,
+    node: str,
+    cfg: object,
+) -> None:
+    if provenance is None or source is None or not isinstance(cfg, dict):
+        return
+    provenance.setdefault(node, {}).update(dict.fromkeys(cfg, source))
 
 
 def overlay_is_locked_axis_only(overlay: dict[str, Any] | None) -> bool:

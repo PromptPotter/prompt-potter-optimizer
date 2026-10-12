@@ -295,6 +295,19 @@ class OptSearchPoint(PromptTemplate):
             prompt_fields=pf,
         )
 
+    def node_prompt_fields(self, sp: JobSearchPoint) -> dict[str, dict[str, Any]]:
+        """Its own fields under the node *sp* renders them into; any other node's ride that node's config."""
+        by_node: dict[str, dict[str, Any]] = {}
+        for node, config in node_config_items(sp.pipeline_params):
+            fields = (
+                self.prompt_field_dict()
+                if "prompt" in config
+                else {f: config[f] for f in PROMPT_STRING_FIELDS if f in config}
+            )
+            if fields:
+                by_node[node] = fields
+        return by_node
+
     def as_origin(self, *, changes_description: str) -> OptSearchPoint:
         lineage = IndividualLineage(changes_description=changes_description)
         return self.model_copy(update={"lineage": lineage})

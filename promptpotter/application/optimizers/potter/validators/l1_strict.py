@@ -12,12 +12,11 @@ from promptpotter.application.optimizers.potter.dispatch.layout import (
     NODE_LAYOUTS,
     resolve_layout_override,
 )
-from promptpotter.application.pipeline_resolve import missing_template_vars
 from promptpotter.config.prompt_blocks import prompt_blocks
 from promptpotter.domain.opt_search_point import TEMPLATE_TOKEN_RE, PromptTemplate
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import PipelineSchema
-from promptpotter.domain.search_point import WHO_ANSWERS_KEYS
+from promptpotter.domain.search_point import WHO_ANSWERS_KEYS, missing_template_vars
 from promptpotter.domain.validators import LLMOutputValidator, ValidatorOutcome
 from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure
 

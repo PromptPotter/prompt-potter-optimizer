@@ -16,12 +16,7 @@ from promptpotter.application.runner.inner.spawn_context import publish_inner_sp
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.measurement_provenance import RunSource
-from promptpotter.domain.results import (
-    DiagnosticRunRecord,
-    RescoreCount,
-    candidate_label,
-    diagnostic_held,
-)
+from promptpotter.domain.results import DiagnosticRunRecord, RescoreCount
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.statistics import mean_ci
 
@@ -134,26 +129,18 @@ async def _rescore_origin(stores: Stores, hop: CycleHop, k: RescoreCount) -> Noi
     assert band is not None  # a RescoreCount is two or more
     mean_composite, ci_lo, ci_hi = band
 
-    source_accuracy = round_file.accuracy
-    workspace_accuracy = sum(accuracies) / len(accuracies)
-
     record = DiagnosticRunRecord(
         ts=utcnow_iso(),
         dataset=campaign.dataset_name,
         source_campaign=hop.campaign_id,
         source_cycle=hop.cycle_id,
-        source_label=candidate_label(0, 0),
         source_candidate_id=origin.candidate_id,
         config_hash=config_hash[:12],
-        samples_requested=len(scoring_set),
-        samples_added=0,
         workspace_n=len(scoring_set),
-        workspace_accuracy=workspace_accuracy,
-        workspace_composite=mean_composite,
-        source_campaign_accuracy=source_accuracy,
+        workspace_accuracy=sum(accuracies) / len(accuracies),
+        source_campaign_accuracy=round_file.accuracy,
         source_campaign_composite=source_composite,
         source_campaign_n=round_file.total,
-        held=diagnostic_held(workspace_accuracy, source_accuracy),
         noise_floor_k=k,
         noise_floor_mean=mean_composite,
         noise_floor_ci_lo=ci_lo,

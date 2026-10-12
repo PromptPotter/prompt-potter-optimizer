@@ -112,11 +112,9 @@ def schema_toggle_default(node: "PipelineNode") -> str:
     return ANSWER_AS_JSON if node.output_schema else ANSWER_AS_TEXT
 
 
-def _stated_permitted(
-    permitted: list[str], options: list[str], absent: list[str]
-) -> list[str] | None:
-    """Stated where it differs from the menu OR from the declaration: the editor drops an unstated set."""
-    return permitted if permitted != options or set(permitted) != set(absent) else None
+def _narrowing_stated(permitted: list[str], options: list[str], absent: list[str]) -> bool:
+    """Stated where it differs from the menu OR from the declaration; unstated, it IS the menu."""
+    return permitted != options or set(permitted) != set(absent)
 
 
 class NodeRole(enum.StrEnum):
@@ -417,8 +415,9 @@ class NodeConfigParam(StrictModel):
     held: bool = False
     # "unset" on a DATASET-scoped read, which has no campaign to attribute to.
     source: ParamSource = "unset"
-    # `None` = not stated (`_stated_permitted`), which is NOT `[]` (nothing may be picked).
-    permitted: list[str] | None = None
+    # The ticks an axis draws; `[]` on one is "nothing may be picked", never "not stated".
+    permitted: list[str] = Field(default_factory=list)
+    permitted_stated: bool = False
 
 
 class NodeReach(StrictModel):
@@ -491,7 +490,6 @@ class ModelCapability(StrictModel):
     input_usd_per_mtok: float | None = None
     output_usd_per_mtok: float | None = None
     modality: str = ""
-    moderated: bool | None = None
     fetched_at: str = ""
 
 
@@ -545,8 +543,8 @@ def narrowing_of(params: list[NodeConfigParam], intents: list[ParamIntent]) -> N
         axis = param.kind in ("enum", "model")
         if (len(intent.allowed) > 1) if axis else intent.open:
             keys.append(intent.key)
-        stated = param.permitted is not None
-        if axis and intent.allowed and (stated or set(intent.allowed) != set(param.options)):
+        stated = param.permitted_stated or set(intent.allowed) != set(param.options)
+        if axis and intent.allowed and stated:
             allowed[intent.key] = intent.allowed
     return NodeSearchNarrowing(param_keys=keys, param_allowed_values=allowed)
 
@@ -730,7 +728,8 @@ class PipelineSchema(StrictModel):
             declared_node = declared.get_node(n.name) if declared else None
             for key in sorted(keys - {OUTPUT_SCHEMA_KEY}):
                 options: list[str] = []
-                permitted: list[str] | None = None
+                permitted: list[str] = []
+                stated = False
                 # UNSET is a value the node RUNS: the fold writes nothing, so serve what it resolves to.
                 unset = schema_toggle_default(n) if key == SCHEMA_TOGGLE_PARAM else None
                 kind = n.param_kind(key)
@@ -744,28 +743,28 @@ class PipelineSchema(StrictModel):
                 elif kind == "model":
                     # The CATALOGUE, never the permitted set: narrowing must not shrink `options`.
                     options = list(model_menu or self.available_models)
-                    allowed = self.model_options(n)
-                    permitted = _stated_permitted(
-                        allowed,
+                    permitted = self.model_options(n)
+                    stated = _narrowing_stated(
+                        permitted,
                         options,
                         declared.model_options(declared_node)
                         if declared and declared_node
-                        else allowed,
+                        else permitted,
                     )
                 elif kind == "enum":
                     # What THIS CAMPAIGN declared, never the model-resolved space: the editor emits it back.
-                    narrowed = list(n.param_allowed_values[key])
+                    permitted = list(n.param_allowed_values[key])
                     absent = (
                         list(declared_node.param_allowed_values.get(key, ()))
                         if declared_node
-                        else narrowed
+                        else permitted
                     )
                     # The toggle's whole space is its menu; the run refuses `json` until a schema exists.
                     menu = (
                         [ANSWER_AS_TEXT, ANSWER_AS_JSON] if key == SCHEMA_TOGGLE_PARAM else absent
                     )
-                    options = list(dict.fromkeys([*menu, *narrowed]))
-                    permitted = _stated_permitted(narrowed, options, absent)
+                    options = list(dict.fromkeys([*menu, *permitted]))
+                    stated = _narrowing_stated(permitted, options, absent)
                 never: Literal["", "cost_lever", "schema_owned"] = (
                     "cost_lever"
                     if key in PARAM_FORBIDDEN_KEYS
@@ -789,6 +788,7 @@ class PipelineSchema(StrictModel):
                         kind=kind,
                         options=options,
                         permitted=permitted,
+                        permitted_stated=stated,
                         description=n.param_descriptions.get(key, ""),
                         never_axis=never,
                         movable_by=movable,
@@ -807,7 +807,8 @@ class PipelineSchema(StrictModel):
                         value=resolved.get("model", n.current_config.get("model")),
                         kind="model",
                         options=menu,
-                        permitted=_stated_permitted(allowed, menu, allowed),
+                        permitted=allowed,
+                        permitted_stated=_narrowing_stated(allowed, menu, allowed),
                         description="Optimizer model for this node — install-global by "
                         "default, operator-steerable on a fork.",
                         source=stamped.get("model", "unset"),

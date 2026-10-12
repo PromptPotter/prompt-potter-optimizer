@@ -28,7 +28,7 @@ from pydantic import BaseModel
 
 BASELINE = {
     # Every `.py` under the package.
-    "modules": 434,
+    "modules": 433,
     # Every `__init__.py` among them.
     "init_files": 55,
     # The `__init__.py` files that re-export names instead of staying empty.
@@ -42,11 +42,11 @@ BASELINE = {
     # Leaves of `OptSearchPoint` — what a run is handed.
     "opt_search_point_fields": 15,
     # Leaves of `CycleResult` — what a run produces.
-    "cycle_result_fields": 520,
+    "cycle_result_fields": 514,
     # Parameters annotated `Any`.
-    "any_params": 47,
+    "any_params": 46,
     # `dict[str, Any]` maps declared in `domain/`.
-    "domain_any_maps": 62,
+    "domain_any_maps": 67,
     # Models that opt out of `StrictModel`'s `extra="forbid"`.
     "models_lax": 3,
     # The prompt decomposition fields.
@@ -63,9 +63,9 @@ BASELINE = {
     # `tests/test_*.py` — `tests/CLAUDE.md` names what each one owns.
     "test_files": 6,
     # Test functions across them, each admitted through the charter's three axes.
-    "test_functions": 144,
+    "test_functions": 145,
     # Every property of every schema the generated contract offers the browser.
-    "served_fields": 1641,
+    "served_fields": 1620,
 }
 
 _REPO = Path(__file__).resolve().parents[1]

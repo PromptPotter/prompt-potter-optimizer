@@ -28,12 +28,13 @@ __all__ = ["KIND_OF_PAYLOAD", "PAYLOAD_MODEL_FOR_KIND", "CommandAcceptedBody"]
 _OUTER_OWNS_TREE = "An inner run's cycles live and die with the outer campaign."
 
 
-class ForkCyclePayload(CyclePayload, RunMode):
-    """The cut, and the shape of the fork's first run (``RunMode``) — one act, so one command.
+class ForkCyclePayload(CyclePayload):
+    """The cut, and the shape of the fork's first run (``mode``) — one act, so one command.
     A parent a producer still holds is paused by the applier once the fork's run is admitted."""
 
     inner_refusal: ClassVar[str | None] = INNER_LAUNCH_REFUSAL
 
+    mode: RunMode = RunMode()
     round: int = Field(default=0, ge=0)
     candidate_id: str = Field(default="", max_length=128)
     # Validated into a typed `CycleSeed` at the applier, which stamps the provenance the wire omits.
@@ -93,11 +94,13 @@ class ChangeRunLimitsPayload(CyclePayload):
         return data
 
 
-class StartRunPayload(CyclePayload, LaunchLimits, RunMode):
-    """A run of an existing cycle: what bounds it (``LaunchLimits``) and the shape it takes
-    (``RunMode``)."""
+class StartRunPayload(CyclePayload):
+    """A run of an existing cycle: what bounds it (``limits``) and the shape it takes (``mode``)."""
 
     inner_refusal: ClassVar[str | None] = INNER_LAUNCH_REFUSAL
+
+    limits: LaunchLimits = LaunchLimits()
+    mode: RunMode = RunMode()
 
 
 class StepCyclePayload(CyclePayload):
@@ -215,14 +218,12 @@ class ResolveOriginPayload(_CheckinPayload):
         return self.draft_id
 
 
-class StartCheckinPayload(_CheckinPayload, LaunchLimits):
-    """The draft says what the campaign IS; these limits bound what THIS launch spends.
-
-    No draft field holds them. Carrying neither is what made the web Start launch under a bare
-    ``LaunchLimits()`` while CLI ``new <file>`` — the same three seams, one argv away — passed a
-    halt target and a ceiling."""
+class StartCheckinPayload(_CheckinPayload):
+    """The draft says what the campaign IS; ``limits`` bounds what THIS launch spends, and no
+    draft field holds it."""
 
     campaign_id: str = Field(min_length=8, max_length=128)
+    limits: LaunchLimits = LaunchLimits()
     diag: bool = Field(default=False, description="Run the diagnostic shape.")
     backend_url: str = Field(
         default=DEFAULT_BACKEND_URL,
@@ -253,8 +254,9 @@ class SetConcurrentCyclesPayload(CommandPayload):
     max_concurrent_cycles: WireInt = Field(ge=1)
 
 
-class MintCampaignPayload(CommandPayload, LaunchLimits):
+class MintCampaignPayload(CommandPayload):
     dataset_name: str = Field(min_length=1, max_length=64)
+    limits: LaunchLimits = LaunchLimits()
     optimization: OptimizationOverrides | None = Field(
         default=None,
         description="Laid over the dataset's own `optimization` before the mint freezes it; only "

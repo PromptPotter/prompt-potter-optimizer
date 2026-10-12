@@ -3,9 +3,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.pipeline_resolve import missing_template_vars
 from promptpotter.domain.pipeline_schema import SCHEMA_OWNED_FIELDS, PipelineSchema
-from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
+from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS, missing_template_vars
 from promptpotter.domain.wounds import ValidationFailure
 
 if TYPE_CHECKING:

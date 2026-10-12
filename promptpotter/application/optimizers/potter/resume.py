@@ -16,11 +16,7 @@ from promptpotter.application.optimizers.potter.records import (
 )
 from promptpotter.application.optimizers.potter.state import potter_state
 from promptpotter.application.run_callbacks import RunCallbacks
-from promptpotter.application.scoring.selection import (
-    elect_round_winner,
-    paired_p_best,
-    recorded_parent,
-)
+from promptpotter.application.scoring.selection import elect_round_winner, paired_p_best
 from promptpotter.domain.scoring import NO_CELLS, is_answer_collapsed
 from promptpotter.infrastructure.llm.telemetry import reset_current_round, set_current_round
 from promptpotter.shared.errors import graceful
@@ -44,21 +40,15 @@ __all__ = ["POTTER_REPLAYERS", "rederive_critiques", "round_packages"]
 def _replay_round_winner(
     ctx: ReplayContext, inputs_ref: dict[str, Any], data: dict[str, Any]
 ) -> str:
-    """The parent is READ from the decision: a reconstructed panel re-elects differently under an unchanged scorer."""
-    parent = data.get("parent_cells")
-    if parent is None:
-        raise ValueError(
-            "this ROUND_WINNER decision carries no `parent_cells`, so the panel its election "
-            "ranked against is unrecoverable and the winner cannot be re-derived"
-        )
-    all_results = ctx.round_data.all_candidate_results
+    """The parent is the reference the round BANKED, never a panel rebuilt here: that one re-elects differently."""
+    round_data = ctx.round_data
     candidate_ids = [str(c) for c in (inputs_ref.get("candidate_ids") or [])]
     coverage_floor = int(inputs_ref["coverage_floor"])
     # `parent_bias` is read, never re-derived: a function of the round HISTORY this replay does not hold.
     winner_id, _ = elect_round_winner(
         candidate_ids,
-        all_results,
-        recorded_parent(parent),
+        round_data.all_candidate_results,
+        round_data.reference_results[str(inputs_ref["parent_id"])],
         coverage_floor,
         ctx.ruler,
         parent_bias=float(inputs_ref["parent_bias"]),

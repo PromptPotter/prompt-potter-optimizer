@@ -18,19 +18,23 @@ import {
   ToolbarSep,
   ToolbarSpacer,
 } from "@/components/ui";
-import { ABORT_LENS_LABELS, DISPLAY_METRICS } from "@/lib/api/types.generated";
+import {
+  ABORT_LENS_LABELS,
+  DISPLAY_METRICS,
+  SCORE_LENS_LABELS,
+} from "@/lib/api/types.generated";
 import { setScoringMask } from "@/lib/scoring-mask";
 import { TERMS } from "@/lib/terms";
+
+const lensOptions = (labels: Record<string, string>) =>
+  Object.entries(labels).map(([value, label]) => ({ value, label }));
 
 const LENS_OPTIONS: readonly { value?: string; label?: string; heading?: string }[] = [
   { value: "", label: "Realized" },
   { heading: "Scoring" },
-  { value: "score:accuracy", label: "Accuracy" },
+  ...lensOptions(SCORE_LENS_LABELS),
   { heading: "Abort off" },
-  ...Object.entries(ABORT_LENS_LABELS).map(([variant, label]) => ({
-    value: `abort:${variant}`,
-    label,
-  })),
+  ...lensOptions(ABORT_LENS_LABELS),
 ];
 
 export function CandidatesToolbar({ model: m }: { model: CandidatesModel }) {

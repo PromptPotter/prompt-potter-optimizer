@@ -48,13 +48,12 @@ class InnerCellFacts(StrictModel):
     # Reporting only, cumulative across attempts: billing is each call's own, and these enter no ledger.
     inner_sent_usd: float | None
     inner_tokens: int | None
-    inner_campaign_id: str
 
 
 INNER_FACT_KEYS: tuple[str, ...] = tuple(InnerCellFacts.model_fields)
 
 
-def inner_cell_facts(result: CycleResult, campaign_id: str) -> InnerCellFacts | None:
+def inner_cell_facts(result: CycleResult) -> InnerCellFacts | None:
     """``None`` where there is no trajectory (a floored cell, an unscored origin): absent, never zeroed."""
     levels = result.round_levels
     if result.origin_level is None or not levels:
@@ -69,7 +68,6 @@ def inner_cell_facts(result: CycleResult, campaign_id: str) -> InnerCellFacts | 
         inner_stop_reason=result.stop_reason,
         inner_sent_usd=result.spend.sent_usd if result.spend else None,
         inner_tokens=result.spend.total_tokens_used if result.spend else None,
-        inner_campaign_id=campaign_id,
     )
 
 

@@ -39,7 +39,7 @@ from promptpotter.domain.results import (
     ScoredCandidate,
 )
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import CellSheet, Grade, GradedCell, MeasuredCell
+from promptpotter.domain.scoring import CellSheet, GradedCell
 from promptpotter.domain.spend import SpendBucket, SpendCeilings, SpendRollup
 from promptpotter.domain.wounds import ValidationFailure
 from promptpotter.infrastructure.backend import BackendClient
@@ -65,40 +65,30 @@ def measurement(
     fitness: float | None = 1.0,
     *,
     objective: float | None = None,
-    **extra: Any,
-) -> dict[str, Any]:
-    if fitness is None:
-        return {"sample_id": sample_id, **extra}
-    return {
-        "sample_id": sample_id,
-        "hit": fitness > 0.5,
-        "fitness": fitness,
-        "objective": round(fitness * 0.6, 6) if objective is None else objective,
-        **extra,
-    }
+    **wire: Any,
+) -> GradedCell:
+    """``wire`` bends any key of the cell's record; an ungraded cell is ``fitness=None``."""
+    grade = (
+        {}
+        if fitness is None
+        else {
+            "fitness": fitness,
+            "objective": round(fitness * 0.6, 6) if objective is None else objective,
+        }
+    )
+    return GradedCell.from_wire({"sample_id": sample_id, **grade, **wire})
 
 
 def measurements(
-    grades: Sequence[float], sample_ids: Sequence[int] | None = None
-) -> list[dict[str, Any]]:
+    grades: Sequence[float], sample_ids: Sequence[int] | None = None, **wire: Any
+) -> list[GradedCell]:
     ids = range(len(grades)) if sample_ids is None else sample_ids
-    return [measurement(sid, g) for sid, g in zip(ids, grades, strict=True)]
+    return [measurement(sid, g, **wire) for sid, g in zip(ids, grades, strict=True)]
 
 
-def sheet(rows: Iterable[dict[str, Any]], scorer_id: str = "test") -> CellSheet:
-    """Each row under the grade it already carries: no formula runs."""
-
-    def graded(row: dict[str, Any]) -> GradedCell:
-        facts = MeasuredCell.from_wire(row)
-        # The grade and ``scored`` by the rule ``Scorer.grade`` applies.
-        if facts.errored:
-            return GradedCell(
-                facts, Grade(0.0, 0.0, None), facts.charged and not facts.verifier_graded
-            )
-        grade = Grade(row.get("fitness"), row.get("objective"), row.get("unscored"))
-        return GradedCell(facts, grade, grade.fitness is not None)
-
-    return CellSheet(scorer_id, tuple(graded(row) for row in rows))
+def sheet(cells: Iterable[GradedCell], scorer_id: str = "test") -> CellSheet:
+    """Each cell under the grade it already carries: no formula runs."""
+    return CellSheet(scorer_id, tuple(cells))
 
 
 def scored_candidate(
@@ -213,7 +203,6 @@ def degradation_health(
         samples=samples,
         structural_count=0,
         transient_count=0,
-        no_result_count=no_result,
         degraded_rate=degraded_rate,
         consecutive_degraded_rounds=0,
         prior_clean_rounds=0,
@@ -280,11 +269,12 @@ def round_result(
         "candidate_scores": measured + rejected,
         "all_candidate_results": {
             f"c{i}": sheet(
-                {
-                    "sample_id": sid,
-                    "predicted": "Uncertain" if i < collapsed or i < cut else t,
-                    "ground_truth": t,
-                }
+                measurement(
+                    sid,
+                    None,
+                    predicted="Uncertain" if i < collapsed or i < cut else t,
+                    ground_truth=t,
+                )
                 for sid, t in enumerate(_TRUTH[:2] if i < cut else _TRUTH)
             )
             for i in range(candidates_scored)

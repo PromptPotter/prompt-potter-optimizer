@@ -27,7 +27,6 @@ from promptpotter.application.origin import (
     CampaignOrigin,
     establish_campaign_origin,
 )
-from promptpotter.application.pipeline_resolve import apply_node_overlay
 from promptpotter.application.run_observers import (
     RunObservers,
     build_run_observers,
@@ -65,6 +64,7 @@ from promptpotter.domain.launch_limits import HeldLimits, RunMode, refuse_arm_ha
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.phases import STOP_REASON_INFO, PauseCause, StopOutcome, StopReason
 from promptpotter.domain.pipeline_overlay import (
+    apply_node_overlay,
     overlay_sets_model_outside_allowed,
     permitted_models_from_narrowing,
 )
@@ -243,7 +243,7 @@ async def _prepare_run(
     ) is not None:
         # After the scorer, which the stop this raises is finalized with.
         book.refuse_unpriced(cell, NEXT_CELL)
-    # `_CURRENT_ROUND` must be bound for what the origin pass spawns, or its measurements stamp `None`.
+    # Before the origin pass: its sample records name round 0, and an unbound round raises.
     cb.set_round(0)
     origin = await establish_campaign_origin(
         session,

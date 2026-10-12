@@ -39,7 +39,6 @@ from promptpotter.presentation.api.routers.backends import backends_router
 from promptpotter.presentation.api.routers.campaigns import campaigns_router
 from promptpotter.presentation.api.routers.commands import commands_router
 from promptpotter.presentation.api.routers.datasets import datasets_router
-from promptpotter.presentation.api.routers.diagnostics import diagnostics_router
 from promptpotter.presentation.api.routers.origins import origins_router
 from promptpotter.presentation.terminal.server_banner import render_server_banner
 from promptpotter.shared.clock import utcnow_iso
@@ -255,7 +254,6 @@ app.include_router(campaigns_router, prefix="/api/v1")
 app.include_router(active_router, prefix="/api/v1")
 app.include_router(datasets_router, prefix="/api/v1")
 app.include_router(origins_router, prefix="/api/v1")
-app.include_router(diagnostics_router, prefix="/api/v1")
 app.include_router(commands_router, prefix="/api/v1")
 app.include_router(auth_router, prefix="/api/v1")
 

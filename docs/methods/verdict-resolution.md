@@ -432,7 +432,7 @@ failing** is surfaced to Critique and L2/L3; **intermittent** is kept — it has
 (`domain/cells.py::HardSamples`): the cycle's graded cells laid on the cycle's ONE ruler
 (`Cycle.difficulty.ruler`) and the abilities the bench stamped — each arm's `ScoredCandidate.theta`,
 the frontier's `RoundResult.ability`. A δ there is the ruler's δ, and a sample the ruler does not
-carry is served in its `DeltaState` (`domain/ruler.py`) with no δ, no pick score and no `p_hat` —
+carry is served in its `DeltaState` (`domain/ruler.py`) with no δ and no pick score —
 never 0.0, which is a position on the scale. There is ONE file,
 `campaigns/{id}/cycles/{id}/hard_samples.json`, and a cycle that has not written one answers with
 its ledger's ruler over no cells. **Campaign scope names the cycle it reads**

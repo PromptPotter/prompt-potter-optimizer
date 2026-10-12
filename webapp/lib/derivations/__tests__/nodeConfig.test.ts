@@ -100,7 +100,8 @@ const schema: Record<string, NodeConfigParam[]> = {
       movable_by: ["proposer"],
       held: false,
       source: "dataset",
-      permitted: null,
+      permitted: ["openai/gpt-oss-120b", "openai/gpt-oss-20b"],
+      permitted_stated: false,
     },
     {
       key: "reasoning_effort",
@@ -112,7 +113,8 @@ const schema: Record<string, NodeConfigParam[]> = {
       movable_by: ["proposer"],
       held: false,
       source: "dataset",
-      permitted: null,
+      permitted: ["low", "medium", "high"],
+      permitted_stated: false,
     },
     {
       key: "temperature",
@@ -124,7 +126,8 @@ const schema: Record<string, NodeConfigParam[]> = {
       movable_by: ["proposer"],
       held: false,
       source: "dataset",
-      permitted: null,
+      permitted: [],
+      permitted_stated: false,
     },
     {
       key: "max_tokens",
@@ -136,7 +139,8 @@ const schema: Record<string, NodeConfigParam[]> = {
       movable_by: ["proposer"],
       held: false,
       source: "dataset",
-      permitted: null,
+      permitted: [],
+      permitted_stated: false,
     },
   ],
 };
@@ -151,7 +155,8 @@ describe("configRows (search-space mode)", () => {
     movable_by: [],
     held: false,
     source: "campaign",
-    permitted: null,
+    permitted: [],
+    permitted_stated: false,
     ...over,
   });
 
@@ -170,12 +175,12 @@ describe("configRows (search-space mode)", () => {
     expect(byKey.max_tokens?.locked).toBe(true);
   });
 
-  it("a row's menu is `options` and its ticks are `permitted` — null means they are the same", () => {
+  it("a row's menu is `options` and its ticks are the served `permitted`, empty included", () => {
     const rows = configRows(
       {
         n: [
           param({ key: "effort", kind: "enum", options: ["a", "b", "c"], permitted: ["a"] }),
-          param({ key: "fmt", kind: "enum", options: ["x", "y"] }),
+          param({ key: "fmt", kind: "enum", options: ["x", "y"], permitted: [] }),
         ],
       },
       {},
@@ -185,8 +190,7 @@ describe("configRows (search-space mode)", () => {
     const byKey = Object.fromEntries(rows.map((r) => [r.key, r]));
     expect(byKey.effort?.options).toEqual(["a", "b", "c"]);
     expect(byKey.effort?.allowed).toEqual(["a"]);
-    // Un-narrowed: `null` is NOT `[]`, and reading it as "nothing permitted" would empty the axis.
-    expect(byKey.fmt?.allowed).toEqual(["x", "y"]);
+    expect(byKey.fmt?.allowed).toEqual([]);
   });
 
   it("value and baseValue start equal, so an untouched row emits nothing", () => {
@@ -237,7 +241,8 @@ describe("configRows (values mode)", () => {
       movable_by: ["proposer"],
       held: false,
       source: "dataset",
-      permitted: null,
+      permitted: [],
+      permitted_stated: false,
     };
     const withNested = { llm_only: [...schema.llm_only!, nested] };
     const rows = configRows(withNested, {}, "values");
@@ -263,7 +268,8 @@ describe("configRows (values mode)", () => {
       movable_by: [],
       held: false,
       source: "dataset",
-      permitted: null,
+      permitted: [],
+      permitted_stated: false,
     };
     const withOwned = { llm_only: [...schema.llm_only!, owned] };
     const rows = configRows(withOwned, { llm_only: { answer_field: "answer" } }, "values");
@@ -297,7 +303,8 @@ describe("configRows (values mode)", () => {
       movable_by: open ? ["proposer"] : [],
       held: !open,
       source: "dataset",
-      permitted: null,
+      permitted: [],
+      permitted_stated: false,
     });
     const withPrompt = {
       llm_only: [...schema.llm_only!, prompt("instruction", true), prompt("persona", false)],
@@ -390,7 +397,8 @@ describe("permittedModels", () => {
       movable_by: [],
       held: false,
       source: "campaign",
-      permitted: null,
+      permitted: [],
+      permitted_stated: false,
       ...over,
     },
   ];
@@ -401,11 +409,7 @@ describe("permittedModels", () => {
     });
   });
 
-  it("falls to `options` on null — which is the menu BEING the permitted set", () => {
-    expect(permittedModels({ l1_generate: modelRow({}) })).toEqual({ l1_generate: ["a", "b"] });
-  });
-
-  it("keeps an EMPTY permitted set empty — nothing may be picked is not the same as null", () => {
+  it("keeps an EMPTY permitted set empty — nothing may be picked, never the menu", () => {
     expect(permittedModels({ l1_generate: modelRow({ permitted: [] }) })).toEqual({
       l1_generate: [],
     });
@@ -433,7 +437,6 @@ describe("effortLadder", () => {
     input_usd_per_mtok: null,
     output_usd_per_mtok: null,
     modality: "",
-    moderated: null,
     fetched_at: "",
     ...over,
   });

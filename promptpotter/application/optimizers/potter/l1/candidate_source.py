@@ -3,12 +3,12 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from promptpotter.application.optimizer_manifest import bound_inner_optimizer
 from promptpotter.application.optimizers.nodes import Proposals
 from promptpotter.application.optimizers.potter.l1.critique import ensure_prior_critique
 from promptpotter.application.optimizers.potter.l1.generate import L1Generation, l1_generate
 from promptpotter.application.optimizers.potter.l1.population import parse_population
 from promptpotter.application.optimizers.potter.validators.l1_invariants import detect_invariants
+from promptpotter.application.runner.inner.spawn_context import inner_optimizer
 from promptpotter.application.runner.round import proposal_summaries
 from promptpotter.domain.run_records import LLMCallRecord
 
@@ -40,7 +40,7 @@ async def propose_l1_population(ctx: NodeContext[L1GenerateKnobs], state: Potter
         runtime_failures=state.memory.wounds.runtime_failures,
         demo_ids=frozenset(s.id for s in ctx.demo_pool),
         shot_k_max=knobs.k_max,
-        inner_optimizer=bound_inner_optimizer(),
+        inner_optimizer=inner_optimizer(),
         prompt_block_catalogue=knobs.prompt_block_catalogue,
     )
     state.in_flight = state.snapshot(ctx.sample_index, generation)

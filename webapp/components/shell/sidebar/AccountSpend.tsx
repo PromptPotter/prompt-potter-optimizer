@@ -40,21 +40,21 @@ export function AccountSpend() {
   const cap = data.spend_budget_usd_total;
   const lifetime = data.spend_lifetime;
   const floor = lifetime.bill_is_floor;
-  const spent = fmtUsd(lifetime.billed_usd);
+  const billed = fmtUsd(lifetime.billed_usd);
   const priced = ratePricedText(lifetime.rate_priced_usd, lifetime.calls_rate_priced);
-  const exhausted = data.allowance_spent;
+  const exhausted = data.allowance_exhausted;
   const fill = data.spend_budget_used_share;
 
   const explain = (
     <div className="account-spend-explain">
       <p>
-        <strong>{floor ? `At least ${spent}` : spent}</strong> of real model spend across every
+        <strong>{floor ? `At least ${billed}` : billed}</strong> billed by providers across every
         campaign this account has run, deleted ones included.
       </p>
       <p>
         {cap === null
           ? "No allowance applies: this account runs on the box's own provider key."
-          : `The allowance is ${fmtUsd(cap)} for the life of the account${exhausted ? ", and it is spent — every result stays readable." : "."}`}
+          : `The allowance is ${fmtUsd(cap)} for the life of the account${exhausted ? ", and it is used up — every result stays readable." : "."}`}
       </p>
       {floor ? (
         <p>
@@ -79,7 +79,7 @@ export function AccountSpend() {
 
   return (
     <div className={cx("account-spend", exhausted && "account-spend-exhausted")}>
-      <span className="account-spend-label">{exhausted ? "Allowance spent" : "Spend"}</span>
+      <span className="account-spend-label">{exhausted ? "Allowance used up" : "Spend"}</span>
       <span className="account-spend-cap">
         {cap === null ? "no allowance" : `of ${fmtUsd(cap)}`}
       </span>

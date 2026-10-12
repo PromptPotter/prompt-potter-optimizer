@@ -24,7 +24,6 @@ from promptpotter.domain.optimizer_state import OptimizerState
 from promptpotter.domain.paired_reading import (
     READING_STATE_INFO,
     ArmPointer,
-    LiftReference,
     PairedReading,
     ReadingState,
     ReadingStateKind,
@@ -37,6 +36,7 @@ from promptpotter.domain.scoring import (
     CellSheet,
     GradedCell,
     WalkedCell,
+    fitness_bands,
     is_answer_collapsed,
 )
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
@@ -103,7 +103,6 @@ __all__ = [
     "closed_after_origin",
     "declared_selection",
     "degradation_reading",
-    "diagnostic_held",
     "individual_cells",
     "is_electable",
     "is_floor_pinned",
@@ -246,6 +245,12 @@ class ScoredCandidate(ScoreSummary):
     # Stamped, never re-derived: it covers each node's rendered ``prompt``, stripped from the above.
     sp_hash: str = ""
     prompt_fields: dict[str, Any] = Field(default_factory=dict)
+    node_prompt_fields: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        description="The prompt fields each node runs, by node: the individual's own under the "
+        "node its prompt is rendered into, and under any other node the ones that node's config "
+        "carries. A node with none is absent.",
+    )
     outcome: ArmOutcome
     scored_samples: int = 0
     expected_samples: int = 0
@@ -711,9 +716,7 @@ class DegradationHealth(StrictModel):
     samples: int
     structural_count: int
     transient_count: int
-    # The pipeline succeeded and emitted no extractable prediction; the backend stamps no warning.
-    no_result_count: int = 0
-    # Attempted cells that reported nothing (re-run); a ``no_result_count`` row ran (fix the format).
+    # Attempted cells that reported nothing (re-run).
     hole_count: int = 0
     # Panel cells never SENT: no row, and outside ``samples``.
     not_attempted: int = 0
@@ -891,13 +894,6 @@ class RoundOutcome(StrictModel):
         "could read no arm. NOT whose numbers the headline carries: that is `label`."
     )
     evaluators: dict[str, float] = Field(default_factory=dict)
-    reference_rule: LiftReference | None = Field(
-        default=None,
-        description="Which individual this round's arms were read against, as the `a` member of "
-        "each arm's `vs_reference`: the round's standing best (`best_so_far`), or the better of "
-        "the arm's own parents on the cells the arm measured (`parents`). `null` on round 0, "
-        "which reads no arm against anything.",
-    )
     # Not `improved` above, the selector's point estimate. `pending` until the overlap pass lands.
     overlap: OverlapReading
     diagnostics: RoundDiagnostics | None = None
@@ -1025,6 +1021,15 @@ class RoundResult(RoundOutcome):
             ScoreboardRow(rank=i, reading=self.arm_reading(c, cut=cuts[c.label]))
             for i, c in enumerate(ranked, start=1)
         ]
+
+    @computed_field(  # type: ignore[prop-decorator]
+        description="How many scored rows of `results` graded into each tenth of [0, 1], lowest "
+        "first: a band is closed above, so a 0.5 counts in the fifth and a 1.0 in the tenth. A row "
+        "carrying no verdict is in none — an uncharged error's 0.0 is a floor, not a low score."
+    )
+    @property
+    def fitness_bands(self) -> list[int]:
+        return fitness_bands(self.results)
 
     def sheet_of(self, individual_id: str) -> CellSheet:
         return InRunCells([self]).sheet(individual_id, RoleScope.DECISION)
@@ -1646,39 +1651,18 @@ class DiagnosticRunRecord(StrictModel):
     dataset: str
     source_campaign: str
     source_cycle: str
-    source_label: str
     source_candidate_id: str
     config_hash: str
-    samples_requested: int
-    samples_added: int
     workspace_n: int
     workspace_accuracy: float
-    workspace_composite: float
     source_campaign_accuracy: float | None
     source_campaign_composite: float
     source_campaign_n: int
-    held: bool | None = Field(
-        description="Did the verdict HOLD on the wider set — `workspace_accuracy` at or above "
-        "`source_campaign_accuracy`, under this layer's float tolerance. `None` where the source "
-        "carries no rate to compare against. Stored rather than left to each reader: the "
-        "tolerance is a decision about when two measured rates count as equal, and a surface "
-        "picking its own epsilon is a surface that can disagree with this one about whether a "
-        "candidate survived."
-    )
-    noise_floor_k: int | None = None
-    noise_floor_mean: float | None = None
-    noise_floor_ci_lo: float | None = None
-    noise_floor_ci_hi: float | None = None
-    noise_floor_raw: list[float] | None = None
-
-
-def diagnostic_held(
-    workspace_accuracy: float, source_campaign_accuracy: float | None
-) -> bool | None:
-    """The tolerance absorbs the float error of two means taken over different row counts."""
-    if source_campaign_accuracy is None:
-        return None
-    return workspace_accuracy + 1e-9 >= source_campaign_accuracy
+    noise_floor_k: int
+    noise_floor_mean: float
+    noise_floor_ci_lo: float
+    noise_floor_ci_hi: float
+    noise_floor_raw: list[float]
 
 
 RescoreCount = NewType("RescoreCount", int)

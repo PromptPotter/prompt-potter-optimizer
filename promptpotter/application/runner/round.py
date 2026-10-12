@@ -235,7 +235,6 @@ def _round_result(
         elected = cs_by_id[winner_id]
         best_opt_sp = next(ind for ind in measured.electable if ind.id == winner_id)
         best_results = measured.rows[winner_id]
-    lift_reference = ctx.cycle.config.optimization.lift_reference
     not_attempted = max(0, elected.expected_samples - elected.scored_samples) if winner_id else 0
     # Counted off the rows: an ungraded cell is already inside `scored_samples`.
     unscored = sum(1 for cell in best_results if cell.grade.unscored is not None)
@@ -257,7 +256,6 @@ def _round_result(
         improved=bool(winner_id),
         # Until `measure_overlap` lands, after every pick this round makes.
         overlap=OverlapReading.unpaired(ReadingState.PENDING, ctx.round_num, bool(winner_id)),
-        reference_rule=lift_reference,
         verdict_reason=selection.verdict_reason,
         elects_on=elects_on,
         prompt_fields=best_opt_sp.prompt_field_dict(),
@@ -384,7 +382,7 @@ def announce_opening(ctx: RoundContext) -> RoundOpening:
 
 
 def announce_population(
-    ctx: RoundContext, opening: RoundOpening, proposals: list[CandidateProposal], n_cells: int
+    ctx: RoundContext, opening: RoundOpening, proposals: list[CandidateProposal]
 ) -> None:
     """A mint is an EDGE SET: a held individual is minted again only for a parent no earlier mint names."""
     if (ledger := ctx.cycle.session.state.ledger) is not None:
@@ -416,7 +414,6 @@ def announce_population(
             opening=opening,
             candidates=proposal_summaries(proposals, ctx.round_num),
             collapses=collapse_counts(cp.validation_failures for cp in proposals),
-            n_scoring_samples=n_cells,
         ),
     )
 
@@ -484,7 +481,7 @@ async def execute_round(
     opening = announce_opening(ctx)
     population = await propose_population(ctx, plan, panel)
     assert cycle.tracking.current_sp is not None
-    announce_population(ctx, opening, population.proposals, len(panel.cells))
+    announce_population(ctx, opening, population.proposals)
 
     callbacks.on_phase(
         CampaignPhase.MEASURE,

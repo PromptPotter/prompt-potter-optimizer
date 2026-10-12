@@ -53,7 +53,7 @@ export function pairedReading(
     cell_set: { name: "reference_cells", basis: "declared", id: "set", dataset_hash: null, size: 10 },
     instrument_id: "i",
     scope: "decision",
-    spec: { interval_method: "student_t", alpha: 0.05, null_value: 0 },
+    spec: { alpha: 0.05, null_value: 0 },
     coverage: {
       state: over.coverage ?? "complete",
       shared: 10,
@@ -76,7 +76,7 @@ export function unreadOverlap(over: Partial<OverlapReading> = {}): OverlapReadin
       cell_set: null,
       instrument_id: null,
       scope: "report",
-      spec: { interval_method: "student_t", alpha: 0.05, null_value: 0 },
+      spec: { alpha: 0.05, null_value: 0 },
       coverage: null,
       headline: null,
       beside: [],
@@ -152,7 +152,6 @@ export function health(
     samples: 20,
     structural_count: 0,
     transient_count: 5,
-    no_result_count: 0,
     hole_count: 0,
     not_attempted: 0,
     unscored: 0,
@@ -254,6 +253,7 @@ export function courseNode(over: Partial<CourseNode> & Pick<CourseNode, "id">): 
     steered_by: null,
     task: null,
     run_standing: null,
+    deletable_stubs: 0,
     lens_criterion: null,
     lens_shift: null,
     ...over,
@@ -262,7 +262,6 @@ export function courseNode(over: Partial<CourseNode> & Pick<CourseNode, "id">): 
 
 export function sampleRow(over: Partial<DashboardSample> = {}): DashboardSample {
   return {
-    qi: 0,
     sample_id: null,
     status: "HIT",
     fitness: null,
@@ -280,12 +279,15 @@ export function sampleRow(over: Partial<DashboardSample> = {}): DashboardSample 
   };
 }
 
+const NO_FITNESS_BANDS = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
 export function currentRound(over: Partial<CurrentRound> = {}): CurrentRound {
   return {
     round: 0,
     active_node: null,
     measurement_node: null,
     candidates: [],
+    fitness_bands: NO_FITNESS_BANDS,
     nodes: {},
     racing: null,
     ...over,
@@ -296,6 +298,7 @@ export function liveRow(over: Partial<LiveCandidate> = {}): LiveCandidate {
   return {
     reading: armReading(),
     prompt_fields: null,
+    node_prompt_fields: {},
     resolved_pipeline_params: null,
     pipeline_overlay: null,
     samples: [],
@@ -319,6 +322,7 @@ export function scored(over: Partial<ScoredCandidate> = {}): ScoredCandidate {
     pipeline_overlay: null,
     resolved_pipeline_params: null,
     prompt_fields: {},
+    node_prompt_fields: {},
     outcome: "measured",
     scored_samples: 0,
     expected_samples: 0,
@@ -355,7 +359,6 @@ export function roundDoc(over: Partial<RoundResult> = {}): RoundResult {
     improved: false,
     elects_on: "ability",
     electable_count: 0,
-    reference_rule: null,
     verdict_reason: null,
     degraded_samples: 0,
     not_attempted: 0,
@@ -365,6 +368,7 @@ export function roundDoc(over: Partial<RoundResult> = {}): RoundResult {
     prompt_fields: {},
     pipeline_params: null,
     results: [],
+    fitness_bands: NO_FITNESS_BANDS,
     all_candidate_results: {},
     reference_results: {},
     candidates_scored: 0,

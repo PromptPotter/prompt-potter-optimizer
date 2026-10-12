@@ -235,7 +235,7 @@ def _join_head_to_head(
         dataset_name=resolved_dataset_name(session, campaign_config),
         dataset_hash=dataset_hash(dataset),
         split=campaign_config.dataset_split,
-        bench_ids=[s.id for s in partition.bench],
+        bench_rows=partition.bench_rows,
         scorer_id=scorer_of(campaign_config, verifier_graded=False).id,
         origin_params=plan.pipeline_params,
         origin=plan.cycle_id.removeprefix("cycle_"),

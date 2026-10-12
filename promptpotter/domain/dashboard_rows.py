@@ -74,11 +74,10 @@ def sample_status(facts: MeasuredCell, grade: Grade) -> SampleStatus:
 class DashboardSample(StrictModel):
     """One scored sample as `dashboard.json` serves it, display-trimmed and one shape in any state."""
 
-    qi: int = Field(description="Iteration position within the candidate's walk — the #000 column.")
     sample_id: int | None = Field(
         default=None,
-        description="Dataset sample id, which diverges from qi once the hard-sample sorter "
-        "drives the order. Null where the row carries none.",
+        description="Dataset sample id, which diverges from the row's position in the walk once "
+        "the hard-sample sorter drives the order. Null where the row carries none.",
     )
     status: SampleStatus = Field(description="The grading verdict.")
     fitness: float | None = Field(
@@ -143,6 +142,9 @@ class LiveCandidate(DashboardCandidate):
 
     # `OptSearchPoint.prompt_field_dict()` shape; with the resolved params, what a steered fork seeds from.
     prompt_fields: dict[str, Any] | None = None
+    node_prompt_fields: dict[str, dict[str, Any]] = Field(
+        default_factory=dict, description="`ScoredCandidate.node_prompt_fields`, from its seeding."
+    )
     resolved_pipeline_params: dict[str, Any] | None = None
     pipeline_overlay: dict[str, Any] | None = None
     samples: list[DashboardSample] = Field(default_factory=list)

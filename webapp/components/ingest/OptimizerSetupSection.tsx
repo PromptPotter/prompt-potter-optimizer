@@ -92,14 +92,16 @@ function OptimizerSetupInner({
       )}
 
       <PipelineFlow
-        view={doc?.view ?? null}
-        status={doc ? "ok" : error ? "error" : "loading"}
-        connector="PromptPotter"
-        reach={doc?.reach ?? null}
-        scope="optimizer"
-        nestsNode={doc?.measurement_node ?? null}
-        activeNode={null}
-        isLive={false}
+        layer={{
+          view: doc?.view ?? null,
+          status: doc ? "ok" : error ? "error" : "loading",
+          connector: "PromptPotter",
+          reach: doc?.reach ?? null,
+          scope: "optimizer",
+          nestsNode: doc?.measurement_node ?? null,
+          activeNode: null,
+          isLive: false,
+        }}
         tone="neutral"
       />
 

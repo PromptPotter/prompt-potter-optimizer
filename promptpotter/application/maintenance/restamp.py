@@ -20,7 +20,8 @@ from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.campaign import Campaign, CampaignResult
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.results import DiagnosticRunRecord
-from promptpotter.domain.run_records import CycleRecord, RoundClosedRecord, scored_cell
+from promptpotter.domain.run_records import CycleRecord, RoundClosedRecord
+from promptpotter.domain.scoring import GradedCell
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.projections.cycle_index import (
     read_cycle_index,
@@ -279,10 +280,10 @@ def _compact_record(rec: dict[str, Any]) -> dict[str, Any] | None:
     kind = rec.get("record_type")
     if kind == "sample_scored" and isinstance(result := rec.get("result"), dict):
         # The WRITER's own projection: a second stripper drifts, and each drift deletes a field.
-        facts, grade = scored_cell(result)
+        cell = GradedCell.from_wire(result)
         # Only the grade keys the record holds: a rewrite narrows a payload, it grades nothing.
-        banked = {k: v for k, v in grade.wire().items() if k in result}
-        lean = {**facts.ledger_wire(), **banked}
+        banked = {k: v for k, v in cell.grade.wire().items() if k in result}
+        lean = {**cell.facts.ledger_wire(), **banked}
         return None if lean == result else rec | {"result": lean}
     return None
 

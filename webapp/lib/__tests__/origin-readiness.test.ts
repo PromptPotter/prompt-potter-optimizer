@@ -1,45 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { DraftCampaignWire } from "../api";
-import { plainLanguageRecap, questionOptions, questionPatch } from "../origin-readiness";
-
-function draft(over: Partial<DraftCampaignWire> = {}): DraftCampaignWire {
-  return {
-    draft_id: "d_0123456789abcdef",
-    slug: "labtests",
-    sample_preview: [{ query: "Na", ground_truth: "Sodium" }],
-    n_samples: 42,
-    connector: "termnorm",
-    scoring_matcher: "label_match",
-    scoring_matchers: ["label_match"],
-    scoring_dials: "",
-    optimization_overrides: { max_rounds: 5, optimizer: "potter", nodes: {} },
-    raw_task_description: "",
-    schema_source: "backend",
-    model_capabilities: {},
-    reach: {},
-    is_single_node: false,
-    pipeline_overlay: {},
-    headers: ["input", "gt"],
-    column_query: "",
-    column_ground_truth: "",
-    field_provenance: {
-      "column.query": "unset",
-      "column.ground_truth": "unset",
-      task_description: "unset",
-    },
-    origin_prompt_fields: {},
-    candidate_library_size: 0,
-    created_at: "2026-05-30T00:00:00Z",
-    updated_at: "2026-05-30T00:00:00Z",
-    active_steps: ["llm_only"],
-    pipeline_view: null,
-    node_config_schema: {},
-    node_output_schema: {},
-    dependencies: [],
-    readiness: { complete: false, gaps: [] },
-    ...over,
-  };
-}
+import { questionOptions, questionPatch } from "../origin-readiness";
 
 describe("questionPatch / questionOptions (resolver answer-back loop)", () => {
   it("maps each field id to its draft-patch key", () => {
@@ -54,7 +14,7 @@ describe("questionPatch / questionOptions (resolver answer-back loop)", () => {
 
   it("rejects un-applicable answers so the caller skips them", () => {
     expect(questionPatch("max_rounds", "lots")).toBeNull();
-    expect(questionPatch("max_rounds", "999")).toBeNull();
+    expect(questionPatch("max_rounds", "2.5")).toBeNull();
     expect(questionPatch("column.query", "  ")).toBeNull();
     expect(questionPatch("backend.node_config", "x")).toBeNull();
     expect(questionPatch("nonsense", "x")).toBeNull();
@@ -64,21 +24,5 @@ describe("questionPatch / questionOptions (resolver answer-back loop)", () => {
     expect(questionOptions("column.query", [], ["a", "b"])).toEqual(["a", "b"]);
     expect(questionOptions("connector", ["termnorm"], ["a"])).toEqual(["termnorm"]);
     expect(questionOptions("task_description", [], ["a"])).toEqual([]);
-  });
-});
-
-describe("plainLanguageRecap", () => {
-  it("restates the campaign in jargon-free terms from confirmed fields", () => {
-    const text = plainLanguageRecap(
-      draft({
-        column_query: "input",
-        column_ground_truth: "gt",
-        raw_task_description: "map lab-test names to their codes",
-      }),
-    );
-    expect(text).toContain("map lab-test names to their codes");
-    expect(text).toContain("TermNorm pipeline");
-    expect(text).toContain("exact match");
-    expect(text).toContain("5 rounds");
   });
 });

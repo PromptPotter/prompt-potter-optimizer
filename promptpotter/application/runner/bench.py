@@ -36,13 +36,12 @@ from promptpotter.domain.bench import (
     OwnLevel,
     PassOutcome,
     PassStop,
+    bench_split,
     bench_status,
 )
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.paired_reading import (
     ROUND_LIFT_SPEC,
-    CellSet,
-    CellSetBasis,
     CellSetName,
     MemberAddress,
     PairedReading,
@@ -167,13 +166,7 @@ def bench_member(
         scope=RoleScope.BENCH,
         instrument_id=instrument_id,
         dataset_hash=None,
-        cell_set_id=_bench_split(bench_pass.sample_keys).id,
-    )
-
-
-def _bench_split(sample_keys: Sequence[str]) -> CellSet:
-    return CellSet.of(
-        CellSetName.BENCH_SPLIT, CellSetBasis.DECLARED, sample_keys, dataset_hash=None
+        cell_set_id=bench_split(bench_pass.sample_keys).id,
     )
 
 
@@ -233,7 +226,7 @@ def read_bench(
             state=status.state,
             a=None,
             b=None,
-            cell_set=None if passes is None else _bench_split(passes.origin.sample_keys),
+            cell_set=None if passes is None else bench_split(passes.origin.sample_keys),
             scope=RoleScope.BENCH,
             spec=ROUND_LIFT_SPEC,
             instrument_id=line.instrument_id,

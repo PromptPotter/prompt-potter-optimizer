@@ -4,17 +4,18 @@ import json
 import os
 import re
 import threading
+from abc import ABC, abstractmethod
 from bisect import bisect_right
 from collections import OrderedDict
 from collections.abc import Callable, Hashable, Iterable, Iterator, Sequence
 from itertools import islice
 from pathlib import Path
-from typing import Any, ClassVar, NamedTuple, Protocol, cast
+from typing import Any, ClassVar, NamedTuple, Protocol, cast, get_args
 
 from filelock import FileLock
 
 from promptpotter.config.settings import LOCK_TIMEOUT
-from promptpotter.domain.spend import bill_or_rate_usd
+from promptpotter.domain.run_records import SpendHoldRecord, TokenUsageRecord
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.io import (
     append_line,
@@ -120,17 +121,25 @@ def file_sig(path: Path) -> Signature | None:
 RecordClasses = tuple[type[StrictModel], ...]
 
 
-class LedgerFold[V](Protocol):
-    """`feed` takes a line VALIDATED as one of `records`; an empty roster takes every line as written, which is what reads an envelope alone. `value` is a snapshot."""
+class LedgerFold[R: StrictModel, V](Protocol):
+    """`feed` takes a line VALIDATED as one of `records`; `value` is a snapshot."""
 
     records: ClassVar[RecordClasses]
 
-    def feed(self, offset: int, record: Any) -> None: ...
+    def feed(self, offset: int, record: R) -> None: ...
 
     def value(self) -> V: ...
 
 
-def _by_record_type(folds: Iterable[LedgerFold[Any]]) -> dict[str, type[StrictModel]]:
+class LineFold[V](Protocol):
+    """`feed` takes EVERY line as written, which is what reads an envelope alone; `value` is a snapshot."""
+
+    def feed(self, offset: int, line: dict[str, Any]) -> None: ...
+
+    def value(self) -> V: ...
+
+
+def _by_record_type(folds: Iterable[LedgerFold[Any, Any]]) -> dict[str, type[StrictModel]]:
     return {
         model.model_fields["record_type"].default: model for fold in folds for model in fold.records
     }
@@ -151,82 +160,34 @@ class LedgerSpan(NamedTuple):
 LEDGER_INDEX_MAX = 256
 DERIVED_MAX = 4096
 
-_Roster = tuple[Callable[[], LedgerFold[Any]], ...]
+
+def _registered[K, I](registry: OrderedDict[K, I], key: K, make: Callable[[], I]) -> I:
+    index = registry.get(key)
+    if index is None:
+        index = registry[key] = make()
+        while len(registry) > LEDGER_INDEX_MAX:
+            registry.popitem(last=False)
+    else:
+        registry.move_to_end(key)
+    return index
 
 
-class LedgerIndex:
+class _LedgerTail(ABC):
     """A fold's `offset` is the PHYSICAL 0-based line index: what `CycleEventLog.append` assigns and an SSE `sequence` joins on."""
 
-    _registry: ClassVar[OrderedDict[tuple[Path, _Roster | None], LedgerIndex]] = OrderedDict()
-    _screened: ClassVar[list[Callable[[], LedgerFold[Any]]]] = []
-    _registry_lock: ClassVar[threading.Lock] = threading.Lock()
-
-    def __init__(
-        self, path: Path, roster: Sequence[Callable[[], LedgerFold[Any]]] | None = None
-    ) -> None:
+    def __init__(self, path: Path) -> None:
         self._path = path
-        self._own = None if roster is None else tuple(roster)
         self._lock = threading.Lock()
         self._reset()
 
-    @classmethod
-    def of(cls, path: Path, roster: _Roster) -> LedgerIndex:
-        shared = all(getattr(fold, "records", None) for fold in roster)
-        key = (path, None if shared else roster)
-        with cls._registry_lock:
-            if shared:
-                cls._screened.extend(fold for fold in roster if fold not in cls._screened)
-            index = cls._registry.get(key)
-            if index is None:
-                index = cls._registry[key] = cls(path, key[1])
-                while len(cls._registry) > LEDGER_INDEX_MAX:
-                    cls._registry.popitem(last=False)
-            else:
-                cls._registry.move_to_end(key)
-            return index
-
     def _reset(self) -> None:
-        roster = tuple(self._screened) if self._own is None else self._own
-        self._folds = [make() for make in roster]
-        self._by_type = {type(fold): fold for fold in self._folds}
         self._stopped: dict[type[Any], Exception] = {}
-        self._models = _by_record_type(self._folds)
-        self._screens_all = any(not fold.records for fold in self._folds)
-        probes = sorted(p.encode() for p in self._models)
-        self._screen = re.compile(b'"(' + b"|".join(re.escape(p) for p in probes) + b')"')
-        self._prefixes: dict[tuple[Callable[[], LedgerFold[Any]], int], LedgerFold[Any]] = {}
         self._sig: Signature | None = None
         self._bytes = 0
         self._lines = 0
 
-    def view[V](self, fold: Callable[[], LedgerFold[V]], until: int | None = None) -> V:
-        with self._lock:
-            if fold not in self._by_type:
-                self._reset()
-            self._refresh()
-            if (stopped := self._stopped.get(cast("type[Any]", fold))) is not None:
-                raise stopped
-            if until is None or until >= self._lines:
-                return cast("LedgerFold[V]", self._by_type[cast("type[Any]", fold)]).value()
-            prefix = self._prefixes.get((fold, until))
-            if prefix is None:
-                prefix = self._prefixes[(fold, until)] = self._fold_prefix(fold, until)
-            return cast("LedgerFold[V]", prefix).value()
-
-    def _fold_prefix(self, fold: Callable[[], LedgerFold[Any]], until: int) -> LedgerFold[Any]:
-        made = fold()
-        models = _by_record_type([made])
-        probes = tuple(f'"{p}"'.encode() for p in models)
-        for line, raw in enumerate(islice(_complete_lines(self._path, 0), until)):
-            if probes and not any(p in raw for p in probes):
-                continue
-            if (rec := _record_of(raw)) is None:
-                continue
-            if not models:
-                made.feed(line, rec)
-            elif (model := _model_of(models, rec)) is not None:
-                made.feed(line, model.model_validate(rec))
-        return made
+    @abstractmethod
+    def _feed(self, raw: bytes) -> None: ...
 
     def _refresh(self) -> None:
         sig = file_sig(self._path)
@@ -254,37 +215,131 @@ class LedgerIndex:
             return
         self._sig = sig
 
+
+class LedgerIndex(_LedgerTail):
+    """ONE per ledger, holding every typed fold any roster named: a line is screened and validated once."""
+
+    _registry: ClassVar[OrderedDict[Path, LedgerIndex]] = OrderedDict()
+    _screened: ClassVar[list[Callable[[], LedgerFold[Any, Any]]]] = []
+    _registry_lock: ClassVar[threading.Lock] = threading.Lock()
+
+    @classmethod
+    def of(cls, path: Path, roster: Sequence[Callable[[], LedgerFold[Any, Any]]]) -> LedgerIndex:
+        with cls._registry_lock:
+            cls._screened.extend(fold for fold in roster if fold not in cls._screened)
+            return _registered(cls._registry, path, lambda: cls(path))
+
+    def _reset(self) -> None:
+        super()._reset()
+        self._folds = [make() for make in self._screened]
+        self._by_type: dict[type[Any], LedgerFold[Any, Any]] = {
+            type(fold): fold for fold in self._folds
+        }
+        self._models = _by_record_type(self._folds)
+        probes = sorted(p.encode() for p in self._models)
+        self._screen = re.compile(b'"(' + b"|".join(re.escape(p) for p in probes) + b')"')
+        self._prefixes: dict[
+            tuple[Callable[[], LedgerFold[Any, Any]], int], LedgerFold[Any, Any]
+        ] = {}
+
+    def view[V](self, fold: Callable[[], LedgerFold[Any, V]], until: int | None = None) -> V:
+        with self._lock:
+            if fold not in self._by_type:
+                self._reset()
+            self._refresh()
+            if (stopped := self._stopped.get(cast("type[Any]", fold))) is not None:
+                raise stopped
+            if until is None or until >= self._lines:
+                return cast("LedgerFold[Any, V]", self._by_type[cast("type[Any]", fold)]).value()
+            prefix = self._prefixes.get((fold, until))
+            if prefix is None:
+                prefix = self._prefixes[(fold, until)] = self._fold_prefix(fold, until)
+            return cast("LedgerFold[Any, V]", prefix).value()
+
+    def _fold_prefix(
+        self, fold: Callable[[], LedgerFold[Any, Any]], until: int
+    ) -> LedgerFold[Any, Any]:
+        made = fold()
+        models = _by_record_type([made])
+        probes = tuple(f'"{p}"'.encode() for p in models)
+        for line, raw in enumerate(islice(_complete_lines(self._path, 0), until)):
+            if not any(p in raw for p in probes):
+                continue
+            if (rec := _record_of(raw)) is None:
+                continue
+            if (model := _model_of(models, rec)) is not None:
+                made.feed(line, model.model_validate(rec))
+        return made
+
     def _feed(self, raw: bytes) -> None:
-        if not self._screens_all and self._screen.search(raw) is None:
+        if self._screen.search(raw) is None:
             return
         rec = _record_of(raw)
-        if rec is None:
+        model = None if rec is None else _model_of(self._models, rec)
+        if model is None:
             return
-        model = _model_of(self._models, rec)
         record: StrictModel | None = None
         for fold in self._folds:
-            if type(fold) in self._stopped:
+            if type(fold) in self._stopped or model not in fold.records:
                 continue
             try:
-                if not fold.records:
-                    fold.feed(self._lines, rec)
-                elif model is not None and model in fold.records:
-                    if record is None:
-                        record = model.model_validate(rec)
-                    fold.feed(self._lines, record)
+                if record is None:
+                    record = model.model_validate(rec)
+                fold.feed(self._lines, record)
             except Exception as exc:
                 self._stopped[type(fold)] = exc
 
 
-class _Clock:
-    records: ClassVar[RecordClasses] = ()
+class LineIndex(_LedgerTail):
+    """One per (ledger, roster): a line fold is fed every line, so it shares no screened index."""
 
+    _registry: ClassVar[
+        OrderedDict[tuple[Path, tuple[Callable[[], LineFold[Any]], ...]], LineIndex]
+    ] = OrderedDict()
+    _registry_lock: ClassVar[threading.Lock] = threading.Lock()
+
+    def __init__(self, path: Path, roster: Sequence[Callable[[], LineFold[Any]]]) -> None:
+        self._roster = tuple(roster)
+        super().__init__(path)
+
+    @classmethod
+    def of(cls, path: Path, roster: tuple[Callable[[], LineFold[Any]], ...]) -> LineIndex:
+        with cls._registry_lock:
+            return _registered(cls._registry, (path, roster), lambda: cls(path, roster))
+
+    def _reset(self) -> None:
+        super()._reset()
+        self._folds: dict[type[Any], LineFold[Any]] = {
+            type(fold): fold for fold in (make() for make in self._roster)
+        }
+
+    def view[V](self, fold: Callable[[], LineFold[V]]) -> V:
+        with self._lock:
+            self._refresh()
+            if (stopped := self._stopped.get(cast("type[Any]", fold))) is not None:
+                raise stopped
+            return cast("LineFold[V]", self._folds[cast("type[Any]", fold)]).value()
+
+    def _feed(self, raw: bytes) -> None:
+        rec = _record_of(raw)
+        if rec is None:
+            return
+        for kind, fold in self._folds.items():
+            if kind in self._stopped:
+                continue
+            try:
+                fold.feed(self._lines, rec)
+            except Exception as exc:
+                self._stopped[kind] = exc
+
+
+class _Clock:
     def __init__(self) -> None:
         self._at: list[float] = []
 
-    def feed(self, offset: int, rec: dict[str, Any]) -> None:
+    def feed(self, offset: int, line: dict[str, Any]) -> None:
         last = self._at[-1] if self._at else float("-inf")
-        own = epoch_seconds(rec.get("timestamp"))
+        own = epoch_seconds(line.get("timestamp"))
         self._at.extend([last] * (offset - len(self._at)))
         self._at.append(last if own is None else max(last, own))
 
@@ -299,11 +354,11 @@ class Moment(NamedTuple):
     def span(self, ledger: Path) -> LedgerSpan:
         if ledger == self.ledger:
             return LedgerSpan(ledger, self.offset + 1)
-        own = LedgerIndex.of(self.ledger, (_Clock,)).view(_Clock)
+        own = LineIndex.of(self.ledger, (_Clock,)).view(_Clock)
         if not own:
             return LedgerSpan(ledger, 0)
         instant = own[min(self.offset, len(own) - 1)]
-        other = LedgerIndex.of(ledger, (_Clock,)).view(_Clock)
+        other = LineIndex.of(ledger, (_Clock,)).view(_Clock)
         return LedgerSpan(ledger, bisect_right(other, instant))
 
     def spans(self, chain: Sequence[LedgerSpan]) -> list[LedgerSpan]:
@@ -339,55 +394,43 @@ def derived[T](key: Hashable, *, sig: Hashable | None, compute: Callable[[], T])
     return value
 
 
-HOLD_TRAIL = frozenset({"spend_hold", "token_usage"})
-
-
-def _usd(raw: object) -> float | None:
-    return float(raw) if isinstance(raw, int | float) and not isinstance(raw, bool) else None
-
-
-def usage_row_figures(rec: dict[str, Any]) -> tuple[float | None, float | None]:
-    return _usd(rec.get("cost_usd")), _usd(rec.get("rate_priced_usd"))
-
-
-def usage_row_usd(rec: dict[str, Any]) -> float | None:
-    return bill_or_rate_usd(*usage_row_figures(rec))
+HoldTrailRecord = SpendHoldRecord | TokenUsageRecord
+HOLD_TRAIL: RecordClasses = get_args(HoldTrailRecord)
 
 
 class HeldSends:
     """A usage record with neither a bill nor a rate's price closes its hold in tokens alone: the money stays held."""
 
     def __init__(self) -> None:
-        self.open: dict[str, dict[str, Any]] = {}
-        self.unpriced: dict[str, Any] = {}
-        self._bounds: dict[str, Any] = {}
+        self.open: dict[str, SpendHoldRecord] = {}
+        self.unpriced: dict[str, float | None] = {}
+        self._bounds: dict[str, float | None] = {}
 
-    def track(self, rec: dict[str, Any]) -> None:
-        if (hold_id := rec.get("hold_id")) is None:
-            return
-        hold_id = str(hold_id)
-        if rec.get("record_type") == "spend_hold":
-            self.open[hold_id] = rec
-            self._bounds[hold_id] = rec.get("cost_usd")
-            return
-        self.open.pop(hold_id, None)
-        # A bill names a hold of another trail where a nested run's copy is carried onto its root.
-        if hold_id in self._bounds and usage_row_usd(rec) is None:
-            self.unpriced[hold_id] = self._bounds[hold_id]
+    def track(self, record: HoldTrailRecord) -> None:
+        if isinstance(record, SpendHoldRecord):
+            self.open[record.hold_id] = record
+            self._bounds[record.hold_id] = record.cost_usd
+        elif (hold_id := record.hold_id) is not None:
+            self.open.pop(hold_id, None)
+            # A bill names a hold of another trail where a nested run's copy is carried onto its root.
+            if hold_id in self._bounds and record.bill_or_rate_usd is None:
+                self.unpriced[hold_id] = self._bounds[hold_id]
 
 
-def held_tokens(hold: dict[str, Any]) -> int:
+def held_tokens(hold: SpendHoldRecord) -> int:
     """An uncapped reply holds no tokens: such a send is admitted only where no token ceiling stands."""
-    reply = hold["output_tokens"]
-    return 0 if reply is None else int(hold["input_tokens"]) + int(reply)
+    return 0 if hold.output_tokens is None else hold.input_tokens + hold.output_tokens
 
 
 __all__ = [
     "HOLD_TRAIL",
     "HeldSends",
+    "HoldTrailRecord",
     "LedgerFold",
     "LedgerIndex",
     "LedgerSpan",
+    "LineFold",
+    "LineIndex",
     "Moment",
     "RecordClasses",
     "Signature",
@@ -398,6 +441,4 @@ __all__ = [
     "fold_jsonl_from",
     "held_tokens",
     "iter_jsonl",
-    "usage_row_figures",
-    "usage_row_usd",
 ]

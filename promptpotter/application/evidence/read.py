@@ -188,6 +188,17 @@ class Evidence(StrictModel):
     generated_at: str
     scorer_id: str
     subjects: list[SubjectReading]
+    subjects_read: int = Field(
+        description="How many of `subjects` the selected metric reads on at least one cell."
+    )
+    branch_subjects: int = Field(
+        description="How many of `subjects` a winner chain stands behind: every one that is not "
+        "a campaign, which is its own origin."
+    )
+    chain_points: int | None = Field(
+        description="Points across every subject's `winner_chain`; null where no chain was "
+        "asked for."
+    )
     comparability: Comparability
     head_to_head: HeadToHead | None = None
     metric: MetricReading
@@ -454,6 +465,9 @@ def subject_evidence(
         generated_at=utcnow_iso(),
         scorer_id=grader.scorer.id,
         subjects=rows,
+        subjects_read=sum(1 for r in rows if r.n_cells),
+        branch_subjects=sum(1 for r in rows if r.kind != "campaign"),
+        chain_points=sum(len(r.winner_chain or ()) for r in rows) if include_winner_chain else None,
         comparability=comparability(rows),
         head_to_head=head_to_head(
             [HeadToHeadEntry(r, leaves[r.key]) for r in _campaign_channels(rows)], grader, wanted

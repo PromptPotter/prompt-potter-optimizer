@@ -101,21 +101,19 @@ from promptpotter.application.maintenance.storage_report import (
     WorkspaceStorageEntry,
     WorkspaceStorageResponse,
 )
-from promptpotter.application.optimizer_manifest import (
-    KnobRow,
-    NodeKnobs,
-    OptimizerEntry,
-    OptimizerKnobsResponse,
-    OptimizerRoster,
-    StartPrompt,
-)
 from promptpotter.application.origin_listing import DatasetIndexEntry, OriginEntry
 from promptpotter.application.pipeline_resolve import (
     CampaignPipelineResponse,
     CampaignRunsWith,
     DatasetPipelineResponse,
+    KnobRow,
+    NodeKnobs,
+    OptimizerEntry,
+    OptimizerKnobsResponse,
     OptimizerPipelineResponse,
+    OptimizerRoster,
     RunsWithParam,
+    StartPrompt,
     VendorModels,
 )
 from promptpotter.application.served_dashboard import (
@@ -164,6 +162,7 @@ from promptpotter.domain.dashboard_rows import (
     ServedRound,
 )
 from promptpotter.domain.l4.proxies import PanelPrecision
+from promptpotter.domain.launch_limits import LaunchLimits, RunMode
 from promptpotter.domain.opt_search_point import (
     EvidenceGrounding,
     IndividualLineage,
@@ -213,7 +212,6 @@ from promptpotter.domain.results import (
     ArmSpend,
     DegradationContext,
     DegradationHealth,
-    DiagnosticRunRecord,
     LineRate,
     LivesReading,
     OptimizerFact,
@@ -289,7 +287,6 @@ from promptpotter.presentation.api.routers.campaigns.manifests import (
     ForkPreviewResponse,
 )
 from promptpotter.presentation.api.routers.datasets.index import DatasetIndexResponse
-from promptpotter.presentation.api.routers.diagnostics import DiagnosticRunListResponse
 from promptpotter.presentation.api.routers.origins import OriginListResponse
 
 EXPORTED_MODELS: list[type] = [
@@ -311,7 +308,6 @@ EXPORTED_MODELS: list[type] = [
     LineRate,
     OptimizerFact,
     ServedRound,
-    DiagnosticRunRecord,
     ValidationFailure,
     RuntimeFailure,
     DegradationContext,
@@ -408,6 +404,8 @@ EXPORTED_MODELS: list[type] = [
     LineStanding,
     CyclesResponse,
     CommandAcceptedBody,
+    LaunchLimits,
+    RunMode,
     StartCheckinPayload,
     StartRunPayload,
     RunsWithParam,
@@ -464,7 +462,6 @@ EXPORTED_MODELS: list[type] = [
     DecisionAction,
     ActivityDecision,
     ActivityState,
-    DiagnosticRunListResponse,
     ConnectedAccount,
     MeResponse,
     QuotaStatus,
@@ -931,17 +928,24 @@ def _emit_verify_strategy_labels() -> str:
     )
 
 
-def _emit_abort_lens_labels() -> str:
+def _emit_lens_labels() -> str:
+    from promptpotter.application.mask.record import SCORE_LENS_LABELS, Lens
     from promptpotter.application.optimizers.potter.pobb.checks import ABORT_LENS_LABELS
 
-    rows = "\n".join(f"  {variant!r}: {label!r}," for variant, label in ABORT_LENS_LABELS.items())
+    def table(name: str, kind: typing.Literal["score", "abort"], labels: Mapping[str, str]) -> str:
+        rows = "\n".join(
+            f"  {Lens(kind, body).spelling!r}: {label!r}," for body, label in labels.items()
+        )
+        return f"export const {name}: Record<string, string> = {{\n{rows}\n}};"
+
     return (
-        "// Abort-lens variant -> operator label, in picklist order. Mirror of\n"
+        "// Each lens a picklist offers by name -> its label, keyed as the `lens=` it sends, in\n"
+        "// picklist order. Mirrors of application/mask/record.py::SCORE_LENS_LABELS and\n"
         "// pobb/checks.py::ABORT_LENS_LABELS, whose keys are asserted against\n"
         "// `ABORT_LENS_SUPPRESS` at import. Don't hand-list these.\n"
-        "export const ABORT_LENS_LABELS: Record<string, string> = {\n"
-        f"{rows}\n"
-        "};"
+        + table("SCORE_LENS_LABELS", "score", SCORE_LENS_LABELS)
+        + "\n\n"
+        + table("ABORT_LENS_LABELS", "abort", ABORT_LENS_LABELS)
     )
 
 
@@ -1144,7 +1148,7 @@ def main() -> int:
     blocks.append(_emit_pipeline_schema_words())
     blocks.append(_emit_display_metrics())
     blocks.append(_emit_verify_strategy_labels())
-    blocks.append(_emit_abort_lens_labels())
+    blocks.append(_emit_lens_labels())
     blocks.append(_emit_cell_term_meta())
     blocks.append(_emit_recent_step())
     blocks.append(_emit_cycle_path_grammar())

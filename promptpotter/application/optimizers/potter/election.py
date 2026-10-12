@@ -7,7 +7,6 @@ from promptpotter.application.optimizers.potter.records import PotterCheckpointK
 from promptpotter.application.scoring.selection import (
     closest_to_bar,
     elect_round_winner,
-    parent_cells,
     parent_selection_bias,
     readable_lifts,
 )
@@ -107,10 +106,10 @@ def elect_on_theta(
             "round_num": ctx.round_num,
             "coverage_floor": measured.coverage_floor,
             "parent_bias": parent_bias,
+            # Names which of the round's banked references the bar was; its rows are the close's.
+            "parent_id": measured.parent.opt_sp.id,
         },
         winner_id,
-        # The round file cannot carry the PARENT: on a won round `results` is the winner's rows.
-        data={"parent_cells": parent_cells(measured.parent_rows)},
     )
     crowned = next((ind for ind in measured.electable if ind.id == winner_id), ctx.parent)
     ctx.keep([crowned])

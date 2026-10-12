@@ -27,7 +27,7 @@ async def run_generation_only_round(ctx: RoundContext) -> None:
         NodeContext[L1GenerateKnobs](ctx, "l1_generate"), potter_state(cycle.working_state)
     )
     candidates = population.proposals
-    announce_population(ctx, opening, candidates, n_cells=0)
+    announce_population(ctx, opening, candidates)
 
     generated = RoundResult(
         round=round_num,

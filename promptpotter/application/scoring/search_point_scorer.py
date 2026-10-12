@@ -20,7 +20,7 @@ from promptpotter.domain.scoring import CellSheet, GradedCell, MeasuredCell, Wal
 from promptpotter.domain.spend import ROLE_SPEND_KIND
 from promptpotter.domain.validators import BrokenSignal, StopRule, StopSignal
 from promptpotter.infrastructure.llm.heartbeat import heartbeat
-from promptpotter.infrastructure.llm.telemetry import _CURRENT_ROUND, filed_as
+from promptpotter.infrastructure.llm.telemetry import current_round, filed_as
 from promptpotter.infrastructure.store import archive_queries
 from promptpotter.infrastructure.store.measurement_archive import ReplayFeed
 from promptpotter.shared.clock import utcnow_iso
@@ -183,7 +183,7 @@ async def _claim_cell(
                         session.state.ledger,
                         call_id=f"scoring:{sample.id}",
                         node="backend_scoring",
-                        round_num=_CURRENT_ROUND.get(),
+                        round_num=current_round(),
                         start_monotonic=time.monotonic(),
                         detail_fn=lambda: "another run is measuring this cell",
                     )

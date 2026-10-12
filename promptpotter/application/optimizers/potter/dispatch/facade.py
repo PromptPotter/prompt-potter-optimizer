@@ -8,7 +8,6 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from promptpotter.application.bench.llm_call import InjectionBreakdown
-from promptpotter.application.optimizer_manifest import bound_inner_optimizer
 from promptpotter.application.optimizers.potter.dispatch import compose
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     ArmDigest,
@@ -41,6 +40,7 @@ from promptpotter.application.optimizers.potter.dispatch.prompts import (
 from promptpotter.application.optimizers.potter.escalation.state import exploration_budget
 from promptpotter.application.optimizers.potter.knobs import potter_knobs
 from promptpotter.application.optimizers.potter.records import PotterRoundState
+from promptpotter.application.runner.inner.spawn_context import inner_optimizer
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
 from promptpotter.domain import ruler
 from promptpotter.domain.opt_search_point import TEMPLATE_TOKEN_RE, PromptTemplate
@@ -329,7 +329,7 @@ def build_bundle(ctx: NodeContext[Any], state: PotterState) -> InjectionBundle:
         is_origin_round=latest_round is origin_round,
         demo_pool=ctx.demo_pool,
         shot_k_max=knobs.l1_generate.k_max,
-        inner_optimizer=bound_inner_optimizer(),
+        inner_optimizer=inner_optimizer(),
     )
     return replace(bundle, silent_l1_panels=_silent_l1_panels(bundle))
 

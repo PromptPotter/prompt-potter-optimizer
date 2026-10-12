@@ -143,14 +143,16 @@ function PipelineSetupInner({
       ) : (
         <>
           <PipelineFlow
-            view={cv.view}
-            status={cv.schema.status}
-            connector={cv.connector}
-            reach={cv.reach}
-            scope="target"
-            nestsNode={null}
-            activeNode={null}
-            isLive={false}
+            layer={{
+              view: cv.view,
+              status: cv.schema.status,
+              connector: cv.connector,
+              reach: cv.reach,
+              scope: "target",
+              nestsNode: null,
+              activeNode: null,
+              isLive: false,
+            }}
             tone="neutral"
           />
           {showDetail && selected ? (

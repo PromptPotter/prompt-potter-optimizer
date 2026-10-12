@@ -94,14 +94,16 @@ export function OptimizerCard({ pipeline }: Props) {
       <div className="workflow-graph">
         <PipelineFlow
           bare
-          view={view}
-          status={pipeline ? "ok" : "loading"}
-          connector={null}
-          reach={pipeline?.reach ?? null}
-          scope="optimizer"
-          nestsNode={pipeline?.measurement_node ?? null}
-          activeNode={isLive && viewingLive ? activeId : null}
-          isLive={isLive}
+          layer={{
+            view,
+            status: pipeline ? "ok" : "loading",
+            connector: null,
+            reach: pipeline?.reach ?? null,
+            scope: "optimizer",
+            nestsNode: pipeline?.measurement_node ?? null,
+            activeNode: isLive && viewingLive ? activeId : null,
+            isLive,
+          }}
           tone="neutral"
           models={models}
         />

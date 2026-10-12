@@ -134,6 +134,22 @@ describe("candidateObserveConfig", () => {
     expect(r?.promptFields).toEqual({ instruction: "b" });
   });
 
+  it("a node reads the fields IT runs; the whole searchpoint reads the individual's own", () => {
+    const outer = roundDoc({
+      candidate_scores: [
+        scored({
+          label: "C1.1",
+          prompt_fields: { instruction: "own" },
+          node_prompt_fields: { l1_generate: { instruction: "node" } },
+        }),
+      ],
+    });
+    const fields = (node?: string) => candidateObserveConfig(outer, "C1.1", "x", node)?.promptFields;
+    expect(fields("l1_generate")).toEqual({ instruction: "node" });
+    expect(fields("l2_analyze")).toEqual({});
+    expect(fields()).toEqual({ instruction: "own" });
+  });
+
   it("returns null for a missing label / doc", () => {
     expect(candidateObserveConfig(doc, "C9.9", "x")).toBeNull();
     expect(candidateObserveConfig(null, "C2.1", "x")).toBeNull();

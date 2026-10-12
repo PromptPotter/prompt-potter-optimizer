@@ -124,9 +124,6 @@ class RuntimeFailure(StrictModel):
             "node whose config is captured in ``observed_config``."
         ),
     )
-    warning_types: dict[str, int] = Field(
-        description="Tally of each ``{node}:{warning}`` seen, by occurrence count.",
-    )
     degraded_rate: float = Field(
         description="Fraction of scored samples that emitted any pipeline warning.",
     )

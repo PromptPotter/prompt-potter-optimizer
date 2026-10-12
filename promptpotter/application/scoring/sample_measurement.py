@@ -43,7 +43,7 @@ from promptpotter.infrastructure.llm.spend_book import (
     SendBound,
 )
 from promptpotter.infrastructure.llm.telemetry import (
-    _CURRENT_ROUND,
+    current_round,
     emit_token_usage,
     rate_priced_usd,
 )
@@ -575,7 +575,7 @@ async def _send_cell(
             session.state.ledger,
             call_id=f"scoring:{sample.id}",
             node="backend_scoring",
-            round_num=_CURRENT_ROUND.get(),
+            round_num=current_round(),
             start_monotonic=time.monotonic(),
             on_suspend=envelope.on_suspend,
         )

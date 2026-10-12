@@ -11,7 +11,12 @@ from promptpotter.application.views.render.primitives import fmt_ci, fmt_pvalue
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.bench import BandedValue, BenchColumn, BenchScore, DatasetSplit
 from promptpotter.domain.campaign import ArmBudget, BenchSet
-from promptpotter.domain.paired_reading import READING_STATE_INFO, LiftEstimate, PairedReading
+from promptpotter.domain.paired_reading import (
+    READING_STATE_INFO,
+    CellSet,
+    LiftEstimate,
+    PairedReading,
+)
 from promptpotter.domain.spend import RATE_PRICED_LABEL, SPEND_KIND_LABELS
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.workspace import open_stores
@@ -117,6 +122,8 @@ def _bench_set_text(bench_set: BenchSet | None, field: str) -> str:
     value = getattr(bench_set, field)
     if isinstance(value, DatasetSplit):
         return f"bench {value.bench}, demo {value.demo}, seed {value.seed}"
+    if isinstance(value, CellSet):
+        return f"{value.id} ({value.size} cells)"
     if isinstance(value, dict):
         return ", ".join(f"{k}={v}" for k, v in sorted(value.items())) or "—"
     return "—" if value is None else str(value)

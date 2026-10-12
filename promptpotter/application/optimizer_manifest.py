@@ -6,9 +6,7 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, cast, get_args
-
-from pydantic import Field
+from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application import optimizers
 from promptpotter.application.campaign_config import DeterminismClamp, OptimizationConfig
@@ -33,7 +31,6 @@ from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.io import read_json, read_yaml
 from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
 from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
-from promptpotter.shared.plugin_registry import BUILT_IN
 
 if TYPE_CHECKING:
     from promptpotter.application.optimizers.nodes import (
@@ -47,25 +44,16 @@ if TYPE_CHECKING:
 shapes_optimizer_prompt(__name__)
 
 __all__ = [
-    "KnobRow",
-    "NodeKnobs",
-    "OptimizerEntry",
-    "OptimizerKnobsResponse",
-    "OptimizerRoster",
     "SelectedOptimizer",
-    "StartPrompt",
-    "bind_inner_optimizer",
     "bind_optimizer",
-    "bound_inner_optimizer",
     "bound_optimizer",
     "checkin_manifest",
     "declared_node_override",
     "get_optimizer_config_overrides",
     "llm_node_config",
     "llm_node_document",
-    "optimizer_knobs",
     "optimizer_prompt",
-    "optimizer_roster",
+    "prompt_body",
     "resolve_node_override",
     "resolve_optimizer",
     "resolved_overrides",
@@ -101,15 +89,6 @@ def _read_schemas(path: Path) -> dict[str, Any]:
 
 def _parse(document: Mapping[str, Any], schemas: Mapping[str, Any]) -> PipelineSchema:
     return parse_pipeline_response({**document, "resolved_schemas": dict(schemas)})
-
-
-class StartPrompt(StrictModel):
-    fields: dict[str, Any] = Field(description="The prompt body, by decomposition field")
-    version: str = Field(description="The `prompt_version` the node's config names")
-    versions_declared: int = Field(
-        description="How many versions the manifest declares for the node's prompt family — a "
-        "surface showing this one says so where there are more"
-    )
 
 
 @dataclass(frozen=True)
@@ -214,21 +193,6 @@ class SelectedOptimizer:
         member = optimizers.llm_nodes().get(node)
         return {} if member is None else dict(member.outer_levers)
 
-    def start_prompts(self) -> dict[str, StartPrompt]:
-        out: dict[str, StartPrompt] = {}
-        declared = [str(key) for key in self.document.get("resolved_prompts") or {}]
-        for node in self.schema.declared_nodes:
-            config = node.current_config
-            body = _prompt_body(self.document, config)
-            if body is not None:
-                family = str(config.get("prompt_family"))
-                out[node.name] = StartPrompt(
-                    fields=body,
-                    version=str(config.get("prompt_version") or ""),
-                    versions_declared=sum(k.partition("/")[0] == family for k in declared),
-                )
-        return out
-
     def prompt_hashes(self) -> dict[str, str]:
         """Under the bound L4 edit; a resume diverges at the first round whose banked stamp differs."""
         return {
@@ -254,7 +218,7 @@ class SelectedOptimizer:
 
     def _node_digest(self, node: str, declared: Mapping[str, Any]) -> str:
         cfg = self.call_config(node)
-        body = _prompt_body(self.document, cfg)
+        body = prompt_body(self.document, cfg)
         fields, renames = _resolved_prompt_parts(dict(declared))
         schema_key = _resolved_key(cfg.get("schema_family"), cfg.get("schema_version"))
         return stable_hash(
@@ -289,7 +253,7 @@ def _resolved_key(family: object, version: object) -> str | None:
     return f"{family}/{version}" if version is not None else str(family)
 
 
-def _prompt_body(document: Mapping[str, Any], config: Mapping[str, Any]) -> dict[str, Any] | None:
+def prompt_body(document: Mapping[str, Any], config: Mapping[str, Any]) -> dict[str, Any] | None:
     key = _resolved_key(config.get("prompt_family"), config.get("prompt_version"))
     body = (document.get("resolved_prompts") or {}).get(key) if key else None
     return dict(body) if isinstance(body, dict) else None
@@ -298,7 +262,7 @@ def _prompt_body(document: Mapping[str, Any], config: Mapping[str, Any]) -> dict
 def optimizer_prompt(
     node: str, config: Mapping[str, Any], document: Mapping[str, Any]
 ) -> OptimizerPromptTemplate:
-    body = _prompt_body(document, config)
+    body = prompt_body(document, config)
     if body is None:
         raise KeyError(
             f"Optimizer prompt for node {node!r} not found in resolved_prompts "
@@ -400,129 +364,6 @@ def select_optimizer(opt: OptimizationConfig) -> SelectedOptimizer:
     return resolve_optimizer(opt.optimizer, opt.nodes)
 
 
-KnobType = Literal["boolean", "integer", "number", "string", "array", "object"]
-
-_KNOB_TYPES: tuple[KnobType, ...] = get_args(KnobType)
-
-
-class KnobRow(StrictModel):
-    """One knob of one optimizer node, as a settings surface offers it."""
-
-    key: str = Field(description="The knob's name under `nodes.{node}.config`")
-    description: str = Field(description="What the knob does — its field description")
-    type: KnobType = Field(description="JSON Schema type the value takes")
-    options: list[str] | None = Field(
-        description="The closed set a string knob takes, in declared order; null when open"
-    )
-    nullable: bool = Field(description="Whether null is a legal value (an opt-in knob, off)")
-    minimum: float | None = Field(description="The least legal value, itself legal; null when none")
-    exclusive_minimum: float | None = Field(
-        description="A bound every legal value lies strictly above; null when none"
-    )
-    maximum: float | None = Field(
-        description="The greatest legal value, itself legal; null when none"
-    )
-    exclusive_maximum: float | None = Field(
-        description="A bound every legal value lies strictly below; null when none"
-    )
-    value: Any = Field(description="The value the manifest declares — a campaign's floor")
-
-
-class NodeKnobs(StrictModel):
-    node: str = Field(description="The manifest node that owns these knobs")
-    kind: str = Field(description="The node's type: sampler | eliminator | selector | …")
-    knobs: list[KnobRow] = Field(description="Its knobs, in declared order")
-
-
-class OptimizerKnobsResponse(StrictModel):
-    """Every knob an optimizer manifest's nodes take, each written to `optimization.nodes.{node}.config.{key}`."""
-
-    optimizer: str = Field(description="The manifest name, as `optimization.optimizer` names it")
-    version: str = Field(description="The manifest's own version")
-    nodes: list[NodeKnobs] = Field(description="Every node taking a knob, in declared order")
-
-
-def _knob_type(kind: Mapping[str, Any]) -> KnobType:
-    declared = kind.get("type") or ("object" if "properties" in kind else "string")
-    for known in _KNOB_TYPES:
-        if known == declared:
-            return known
-    raise ValueError(f"knob type {declared!r} is none of {', '.join(_KNOB_TYPES)}")
-
-
-def _knob_row(key: str, prop: Mapping[str, Any], defs: Mapping[str, Any], value: Any) -> KnobRow:
-    options = [
-        defs[ref["$ref"].rsplit("/", 1)[-1]] if "$ref" in ref else ref
-        for ref in prop.get("anyOf") or [prop]
-    ]
-    nullable = any(o.get("type") == "null" for o in options)
-    kind = next(o for o in options if o.get("type") != "null")
-    enum = kind.get("enum") or ([kind["const"]] if "const" in kind else None)
-    return KnobRow(
-        key=key,
-        description=str(prop.get("description") or ""),
-        type=_knob_type(kind),
-        options=[str(v) for v in enum] if enum else None,
-        nullable=nullable,
-        minimum=kind.get("minimum"),
-        exclusive_minimum=kind.get("exclusiveMinimum"),
-        maximum=kind.get("maximum"),
-        exclusive_maximum=kind.get("exclusiveMaximum"),
-        value=value,
-    )
-
-
-def optimizer_knobs(name: str) -> OptimizerKnobsResponse:
-    selected = resolve_optimizer(name, {})
-    nodes: list[NodeKnobs] = []
-    for node in selected.member_nodes:
-        schema = optimizers.member(node).knobs.model_json_schema()
-        declared = selected.declared_knobs(node).model_dump(mode="json")
-        rows = [
-            _knob_row(key, prop, schema.get("$defs") or {}, declared[key])
-            for key, prop in (schema.get("properties") or {}).items()
-        ]
-        if rows:
-            nodes.append(NodeKnobs(node=node, kind=str(selected.node(node).kind), knobs=rows))
-    return OptimizerKnobsResponse(optimizer=selected.name, version=selected.version, nodes=nodes)
-
-
-class OptimizerEntry(StrictModel):
-    """One optimizer this install can run, as a picker offers it."""
-
-    name: str = Field(description="The manifest name, as `optimization.optimizer` names it")
-    version: str = Field(description="The manifest's own version")
-    paper: str | None = Field(
-        description="The citation a paper preset reproduces; its declared knob values are that "
-        "paper's configuration. Null for an optimizer reproducing none"
-    )
-    origin: str | None = Field(
-        description="The installed package that registered it, as `<distribution>: <entry point>`; "
-        "null for one shipped with PromptPotter"
-    )
-
-
-class OptimizerRoster(StrictModel):
-    """The optimizers this install can run, the default first: one per runtime the registry holds."""
-
-    default: str = Field(description="What a campaign naming no `optimization.optimizer` runs")
-    optimizers: list[OptimizerEntry] = Field(description="The roster, the default first")
-
-
-def optimizer_roster() -> OptimizerRoster:
-    default = OptimizationConfig.model_fields["optimizer"].default
-    names = sorted(optimizers.runtimes(), key=lambda n: (n != default, n))
-    origins = optimizers.runtime_origins()
-    entries = []
-    for name in names:
-        selected = resolve_optimizer(name, {})
-        origin = None if origins[name] == BUILT_IN else origins[name]
-        entries.append(
-            OptimizerEntry(name=name, version=selected.version, paper=selected.paper, origin=origin)
-        )
-    return OptimizerRoster(default=default, optimizers=entries)
-
-
 @dataclass(frozen=True)
 class CheckinManifest:
     document: Mapping[str, Any]
@@ -558,20 +399,6 @@ def bound_optimizer() -> SelectedOptimizer:
             "`select_optimizer(config.optimization)` before anything reads a node"
         )
     return selected
-
-
-# The manifest an L4 outer's inner cells select, never the outer's own; `None` off the recursion.
-_INNER: contextvars.ContextVar[SelectedOptimizer | None] = contextvars.ContextVar(
-    "inner_optimizer", default=None
-)
-
-
-def bind_inner_optimizer(selected: SelectedOptimizer | None) -> None:
-    _INNER.set(selected)
-
-
-def bound_inner_optimizer() -> SelectedOptimizer | None:
-    return _INNER.get()
 
 
 def llm_node_document(node: str) -> tuple[PipelineNode, Mapping[str, Any], Mapping[str, Any]]:

@@ -133,9 +133,9 @@ async def rescore_parent(
             scoring_set,
             # The parent INDIVIDUAL's label, off the round it won — it reaches disk.
             label=cycle.rounds[-1].label,
+            sp=tr.current_sp,
             sp_hash=tr.current_sp.sp_hash(session.pipeline_schema),
             outcome=walk_outcome(scored),
-            resolved_pipeline_params=tr.current_sp.config_params,
         ),
     )
 
@@ -482,7 +482,7 @@ async def _walk_population(
             idx,
             n,
             opt_sp=population.individuals[idx],
-            resolved_pipeline_params=sps[idx].config_params,
+            sp=sps[idx],
             sample_order=order,
             n_priors=race.n_priors if race is not None else 0,
             pipeline_overlay=proposals[idx].pipeline_overlay or None,
@@ -545,7 +545,7 @@ def _catch_up(cycle: Cycle, sp: JobSearchPoint, sample: Sample, prior_id: str) -
         ),
     )
     walk.release()
-    _, cell = walk.launch(1, None)
+    _, cell = walk.launch(1)
 
     def commit() -> Sequence[GradedCell]:
         walk.collect()
@@ -617,9 +617,9 @@ def _conclude_candidate(
             [],
             dataset,
             label=label,
+            sp=candidate_sp,
             sp_hash=sp_hash,
             outcome=ArmOutcome.INVALID,
-            resolved_pipeline_params=candidate_sp.config_params,
         )
         return report.model_copy(update={"candidate_id": candidate_id}), NO_CELLS
 
@@ -652,9 +652,9 @@ def _conclude_candidate(
         results.cells,
         dataset,
         label=label,
+        sp=candidate_sp,
         sp_hash=sp_hash,
         outcome=walk_outcome(scored),
-        resolved_pipeline_params=candidate_sp.config_params,
         elimination_context=None if elimination is None else dict(elimination.context),
         elimination_reason=None if elimination is None else elimination.reason,
         breakage=breakage,

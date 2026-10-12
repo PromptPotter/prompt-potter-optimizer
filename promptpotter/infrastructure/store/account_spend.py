@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 from collections.abc import Iterable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple
+from typing import TYPE_CHECKING, ClassVar, NamedTuple
 
 from pydantic import Field
 
@@ -21,7 +21,9 @@ from promptpotter.infrastructure.ledger import CycleEventLog, ledger_chain
 from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import (
+    HOLD_TRAIL,
     HeldSends,
+    HoldTrailRecord,
     LedgerIndex,
     RecordClasses,
     held_tokens,
@@ -154,36 +156,34 @@ def _billed_of(usage: TokenUsageRecord) -> UserSpend:
     return UserSpend(billed or 0.0, tokens, 0, rate_priced_usd=rate_priced or 0.0)
 
 
-def _unreported_of(hold: dict[str, Any]) -> UserSpend:
+def _unreported_of(hold: SpendHoldRecord) -> UserSpend:
     """Unpriced lands in the token residue: `$0.00` would report an unpriceable send as a free one."""
     tokens = held_tokens(hold)
-    usd = hold.get("cost_usd")
-    if not isinstance(usd, int | float):
+    if hold.cost_usd is None:
         return UserSpend(0.0, 0, tokens, 0.0, tokens)
-    return UserSpend(0.0, 0, 0, float(usd), tokens)
+    return UserSpend(0.0, 0, 0, hold.cost_usd, tokens)
 
 
 class _Billed:
-    records: ClassVar[RecordClasses] = (SpendHoldRecord, TokenUsageRecord)
+    records: ClassVar[RecordClasses] = HOLD_TRAIL
 
     def __init__(self) -> None:
         self._total = ZERO_SPEND
         self._held = HeldSends()
 
-    def feed(self, offset: int, record: SpendHoldRecord | TokenUsageRecord) -> None:
+    def feed(self, offset: int, record: HoldTrailRecord) -> None:
         if isinstance(record, TokenUsageRecord) and not (record.cached or record.mirrored):
             self._total = self._total.plus(_billed_of(record))
-        # `HeldSends` is the spend book's too, which folds the lines as written.
-        self._held.track(record.model_dump(mode="json"))
+        self._held.track(record)
 
     def value(self) -> tuple[UserSpend, UserSpend]:
         held = ZERO_SPEND
-        for rec in self._held.open.values():
-            held = held.plus(_unreported_of(rec))
+        for hold in self._held.open.values():
+            held = held.plus(_unreported_of(hold))
         # Its bill already filed the tokens, as residue (:func:`_billed_of`); only the money is kept.
         for bound in self._held.unpriced.values():
-            if isinstance(bound, int | float):
-                held = held.plus(UserSpend(0.0, 0, 0, float(bound), 0))
+            if bound is not None:
+                held = held.plus(UserSpend(0.0, 0, 0, bound, 0))
         return self._total, held
 
 

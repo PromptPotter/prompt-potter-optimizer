@@ -136,12 +136,6 @@ export function useLineage({
   const parentId = cycleId ? rootCycleId(cycleId) : null;
   const isInheritedSibling = parentId != null && parentId !== cycleId;
 
-  const stubCount = useMemo(
-    () =>
-      courses.filter((c) => c.course_kind !== "root" && c.children.length === 0).length,
-    [courses],
-  );
-
   const cmd = useCommand<"cleanup-empty-cycles">("lineage-cleanup");
   const [cleanupOpen, setCleanupOpen] = useState(false);
   const [cleanupAcked, setCleanupAcked] = useState(false);
@@ -151,7 +145,7 @@ export function useLineage({
     error: cmd.failure?.message ?? null,
     cleaning: cmd.pending !== null,
     acked: cleanupAcked,
-    stubCount,
+    stubCount: tree?.deletable_stubs ?? 0,
     request: () => {
       cmd.clear();
       setCleanupOpen(true);

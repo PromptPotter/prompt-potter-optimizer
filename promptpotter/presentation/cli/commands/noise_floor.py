@@ -30,10 +30,7 @@ async def cmd_noise_floor(args: argparse.Namespace) -> CommandResult:
         raise SystemExit(f"ERROR: {exc}") from exc
 
     record = outcome.record
-    assert record.noise_floor_mean is not None
-    assert record.noise_floor_ci_lo is not None
-    assert record.noise_floor_ci_hi is not None
-    raw = ", ".join(f"{v:.4f}" for v in (record.noise_floor_raw or []))
+    raw = ", ".join(f"{v:.4f}" for v in record.noise_floor_raw)
     human = (
         f"noise-floor {campaign_id}/{cycle_id} C0: k={record.noise_floor_k} "
         f"composite {record.noise_floor_mean:.4f} "

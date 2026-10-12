@@ -41,7 +41,8 @@ Sequenced into lanes by dependency, not milestone number. **Front priority = Lan
 | C4 | Cross-user measurement panel (after P3) | pending (see § Ingest + chat-first web) |
 | C5 | MCP server mode (= **agent-tool parity**, see § Agent-tool parity) · user-editable `pipeline.yaml` in UI · **the connector as a unit** (see § The connector as a unit) | pending — the connector unit is a draft design, and its first dependency, Harbor's second skill-delivery mode, shipped; the editable half's gate is LIFTED: the served campaign pipeline resolution shipped (`architecture.md` § Two resolution seams), so the surface can now READ the value it would write back, and what remains is the write side alone |
 | C6 | Public-service hardening (Docker, metrics, rate-limit, billing) — `/health` shipped; **pull rate-limit/metrics forward if the beta opens past the allowlist** | pending |
-| C7 | Non-prompt targets + evolutionary operators · **agent harnesses** (§ Evolving agent harnesses) · multimodal · research extensions | pending — after v1, except the agent-harness half, pulled forward and part-shipped (§ Evolving agent harnesses) |
+| C7 | Non-prompt targets · **agent harnesses** (§ Evolving agent harnesses) · multimodal · research extensions | pending — after v1, except the agent-harness half, pulled forward and part-shipped (§ Evolving agent harnesses) |
+| C9 | **Variation and pools** — every optimizer's features as members any manifest composes and a campaign switches | **next, ahead of every other lane** — spec [`variation-and-pools.md`](variation-and-pools.md); the order is § Variation and pools |
 | C8 | **Mask abstraction** — backend organizing structure (alternative-criterion + transferability); M1 = scoring-function-swap divergence + minimal visual clues, then migrate every divergence trigger onto it | M1 + abort + the scoring write side shipped (see § Lineage mask) |
 
 **Parallel lane — the bench = M13, the project's closing focus** — owned by root [`CLAUDE.md`](../../CLAUDE.md) § The closing directive, which states the closing bar; this page holds its design, presets and stage order in § The optimizer plug point. SIFT joins as a preset — § SIFT reproduction.
@@ -87,7 +88,7 @@ A value that departs from its paper says so beside itself in the manifest.
 
 **Registration is the connectors' and judges' registry, folded.** `connectors/__init__.py::_load/_validate/_add/connector_origins` and its judges twin are one piece of code written twice, so member implementations get no third copy: one stdlib-only helper `(group, builtins, validate) → (table, origins)` serves all three, and a third party ships an optimizer as a manifest plus its members under two entry-point groups, `promptpotter.optimizer_nodes` and `promptpotter.optimizer_runtimes`. A served roster goes into `api-openapi.yaml` before the handler and serves each member's ORIGIN the way `connector_origins()` does — a plugin name greps to nothing in this tree. `IndividualLineage.source` is a free `str`, so `source="capo:capo_crossover"` needs no enum edit. Built-in members live under their preset's directory, a third party's in its own package.
 
-**Off the L4 ban by construction.** [`optimizers/potter/CLAUDE.md`](../../promptpotter/application/optimizers/potter/CLAUDE.md) § Add no 4th layer binds potter's controller. A preset is a sibling manifest with its own `default` pipeline, not a rung beside L1–L3: nothing escalates into another preset, a peer's own reflection runs inside its own nodes the way L4 expresses nesting as re-entrancy, and **no preset runs another's nodes** — a potter critique inside a peer's round would bill our algorithm to the peer.
+**Off the L4 ban by construction.** [`optimizers/potter/CLAUDE.md`](../../promptpotter/application/optimizers/potter/CLAUDE.md) § Add no 4th layer binds potter's controller. A preset is a sibling manifest with its own `default` pipeline, not a rung beside L1–L3: nothing escalates into another preset, and a peer's own reflection runs inside its own nodes the way L4 expresses nesting as re-entrancy. **A member is shared; a paper preset names only its paper's.** Any manifest may name any registered member (§ Variation and pools); what stays closed is a PAPER preset's own manifest — a potter critique inside a peer's round would bill our algorithm to the peer.
 
 **Measurement identity is the target's content, and holds no optimizer** ([`../architecture.md`](../architecture.md) § Three identities) — which is what makes an arm a peer proposes and we already measured replay free, and what makes an N-way head-to-head affordable at all. On L4 the target IS an optimizer, so its `Treatment` is that target's content and enters through `application/runner/inner/connector.py::_identity_config`; one rule, never a flip by site. L4 mutates whichever manifest its inner campaign selects, so it tunes any preset.
 
@@ -193,6 +194,103 @@ Optional and later: expansion overlapping measurement ("disaggregated") — need
 - **S3 — code artifacts + Polyglot**, only if S1's readings make the full reproduction worth it. Whether it runs through Harbor is open: Harbor may be more than a patched agent needs, but Polyglot grades by running each task's tests across several language toolchains, so SOMETHING must supply the sandbox — decide which when S3 opens, not before.
 
 Within a milestone the members are independent worktrees, each closing on `scripts/gate.py` green: S1 is two (the judge as a standalone module with its tests; the selector and gate against a stub rank until the judge merges).
+
+### Variation and pools — the bench as a laboratory for evolving prompts
+
+**The contract is [`variation-and-pools.md`](variation-and-pools.md).** This section owns the
+order and how the lane sits against the two milestones.
+
+**Tracked as C9.** Every optimizer here proposes by some mix of recombining what it holds and
+writing something new, and each built that mix into one sealed package: CAPO's crossover reads
+CAPO's state, potter's block library reaches potter's proposer alone, GEPA's merge is unrun
+because a paper individual has one field. The lane turns each of those into a member any manifest
+names and a campaign switches, and gives what they draw from one declared shape — the pool — so
+that "does recombination help" and "by arithmetic or through an LLM" are head-to-heads whose arms
+differ in one knob.
+
+**It is the next work, ahead of everything else, and it is part of M13.** The bench's claim is
+that every optimizer is a manifest; a member only its own optimizer can run is that claim half
+kept. The closing bar stays CAPO against potter with the optimizer the only difference
+(§ The optimizer plug point), and this lane adds no arm to that comparison.
+
+**For M14 it is evidence for the claim, not a second claim.** A crossover switched off in one
+knob, under the comparability guard, is "the components were fragmented and are executable here"
+demonstrated on a third component. Each ablation row is quoted from `rounds_to_separable`, never
+from a round's point lift.
+
+**What it must not become.** A fifth sealed optimizer; a second overlay beside
+`optimization.nodes`; a pool written by a file edit; a credit model that steers before a reading
+shows it informative.
+
+**Decided — build on these, do not re-ask.** Why each holds is
+[ADR-0007](../adr/0007-one-loop-shared-members.md).
+
+- Recombination is built once, and which node decides it — the proposer, the steering layer, or
+  a rule with no model — is a setting.
+- A reader restricted to a pool cannot emit a value the pool does not hold, and every value on a
+  child is traceable to the entry it came from.
+- A pool can be fixed or can grow, from inside the loop or from outside it, and the operator
+  chooses which of its entries are in play.
+- Where two answers are defensible the choice is a setting, and a preset picks its value.
+
+**The mechanism is NOT decided.** How a pool is held, how an entry is addressed and where a
+setting lives are stage 2's first act: propose the shape with the fewest new concepts — a pool
+reads most naturally as STATE the run holds, seeded at check-in and changed by recorded writes,
+with every setting on the member that reads it — check it against root `CLAUDE.md` § Pre-flight
+gate, and build that. The spec page's contracts below its goal are the current proposal, not a
+constraint.
+
+**The lane opens with planning done WITH the operator, and building follows it.** That pass
+explores how to reach the outcomes above with the fewest new concepts, and rewrites the order
+below and the spec's proposal sections to match what it finds — both are provisional until then.
+Once it closes, what still needs the operator is a paid run, a push, and the check-in layout
+shown as a sketch before it is built; every other choice inside a stage is made, stated in the
+report, and built.
+
+**Each stage starts by writing its closing check and watching it fail**, so "done" is the check
+turning green and never a reading of the diff. `.scratch/ga/7-build-plan.md` is the recon the
+planning pass starts from — what exists today, and one candidate design — never a plan to
+execute as written.
+
+#### Order
+
+Each stage closes on a verification, never a date.
+
+1. **Members off their runtime** (breaking). A member declares the typed slice it reads, so any
+   manifest names any registered member. *Closes when* the gate is green, every shipped manifest's
+   offline leg ([`../developer/offline-run.md`](../developer/offline-run.md)) decides and sends
+   what it did before, and one manifest runs a round with a member another optimizer's package
+   registered.
+2. **Pools.** The block library, the campaign's measured individuals and the demo pool behind one
+   declaration; potter's block knob replaced by a pool, an access and an active subset; closed
+   access by entry id in the response schema. *Closes when* potter's offline leg at access `off`
+   renders its proposer prompt unchanged, and a resumed run hands that proposer the pool its banked
+   round names.
+3. **Recombination on a host.** The spec, the materializer, and the three hosts — `l1_generate`,
+   `l2_context`, an `algorithm` node — with the mix on the opening node and the novelty allowance.
+   *Closes when* the offline leg produces arms under each host from the same pools, none from a
+   node at zero, and a two-parent child carries both edges.
+4. **Parent choice and survival as members**, each with a rule knob. *Closes when* `capo` is
+   re-expressed on them with its offline leg unchanged.
+5. **The three surfaces.** The served shape, the check-in region, the live reading and the steer,
+   with the terminal's `--set` writing the same draft. *Closes when* the cold browser walk switches
+   a host, narrows a pool and reads both back, and the terminal's draft for the same choices is
+   equal.
+6. **The mode head-to-head** (PAID). Two controlled arms, the host the only difference. *Closes
+   when* `evidence`'s head-to-head reads the pair `controlled` and names that knob. `<one-budget>`
+   binds dollars and wall clock; the arms are matched on incurred USD and on cells, and both
+   readings are reported.
+7. **L4 reach.** The mix and access as levers an outer arm sets. *Closes when* the one-cell
+   self-optimization leg shows an outer arm's mix on its inner cell's overlay and in that cell's
+   identity.
+8. **A pool fed while a campaign runs.** The command, its record, its replay. *Closes when* a
+   controlled arm refuses it, an ordinary campaign applies it at the next round boundary, a resume
+   replays it, and `evidence` reads the pair as differing on that pool.
+9. **Paper compositions.** EvoPrompt in its GA and DE forms, PhaseEvo and GEPA's merge, each a
+   manifest over the shared members plus its own templates. *Closes when* each runs its offline leg
+   and states every departure beside the value it departs from.
+
+Stages 5, 7, 8 and 9 share no seam and may run as separate worktrees once 3 lands.
 
 ### Probe rounds — what they mean, and why the lever is not wired
 

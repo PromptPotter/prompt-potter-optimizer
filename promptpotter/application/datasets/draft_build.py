@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any, Literal
 
@@ -98,6 +99,9 @@ class DraftCampaignWire(StrictModel):
     readiness: OriginReadiness = Field(
         description="The server's mint gate, recomputed on every draft response."
     )
+    recap: str = Field(
+        description="One plain sentence restating what this draft would run, for a surface to say."
+    )
 
 
 def overlay_from_campaign_config(config: CampaignConfig) -> dict[str, Any]:
@@ -157,6 +161,34 @@ def _wire_overrides(draft: DraftCampaign) -> OptimizationOverrides:
     )
 
 
+_SPOKEN_CONNECTOR = {"termnorm": "the TermNorm pipeline"}
+_SPOKEN_MATCHER = {"label_match": "an exact match against the target"}
+_TITLE_MAX_CHARS = 72
+
+
+def _task_title(task: str) -> str | None:
+    first = next((line.strip() for line in task.splitlines() if line.strip()), "")
+    title = re.sub(r"[.\s]+$", "", re.sub(r"^#+\s*", "", first))
+    return title if 0 < len(title) <= _TITLE_MAX_CHARS else None
+
+
+def _recap(draft: DraftCampaign) -> str:
+    title = _task_title(draft.raw_task_description)
+    lead = (
+        f"evolve a prompt for “{title}”"
+        if title
+        else f"evolve a prompt that turns each “{draft.column_query or 'your input'}” into "
+        f"the right “{draft.column_ground_truth or 'the target'}”"
+    )
+    rounds = draft.optimization_overrides["max_rounds"]
+    return (
+        f"PromptPotter will {lead} — "
+        f"running {_SPOKEN_CONNECTOR.get(draft.connector, draft.connector)}, "
+        f"scoring by {_SPOKEN_MATCHER.get(draft.scoring_matcher, draft.scoring_matcher)}, "
+        f"over {'1 round' if rounds == 1 else f'up to {rounds} rounds'}."
+    )
+
+
 def draft_wire(draft: DraftCampaign, workspace: Path | None = None) -> DraftCampaignWire:
     resolution = resolve_pipeline_for_draft(
         draft, campaign_id=draft.draft_id, cycle_id="", workspace=workspace
@@ -194,6 +226,7 @@ def draft_wire(draft: DraftCampaign, workspace: Path | None = None) -> DraftCamp
             for dep in draft_pipeline_dependencies(draft)
         ],
         readiness=origin_readiness(draft),
+        recap=_recap(draft),
     )
 
 

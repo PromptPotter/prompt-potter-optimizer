@@ -144,8 +144,10 @@ def start_run(
     return Applier.silent(
         lambda: launch(
             dispatcher,
-            ExistingCycle(_diag_target(dispatcher.stores, hop, payload), campaign, payload),
-            payload,
+            ExistingCycle(
+                _diag_target(dispatcher.stores, hop, payload.mode), campaign, payload.limits
+            ),
+            payload.mode,
         )
     )
 
@@ -194,7 +196,7 @@ def fork_cycle(
         try:
             # Declare no limits — the seed's reconciled ones govern at the runner seam.
             launched = await launch(
-                dispatcher, ExistingCycle(fork, campaign, LaunchLimits()), payload
+                dispatcher, ExistingCycle(fork, campaign, LaunchLimits()), payload.mode
             )
         except BaseException:
             # A start raises only BEFORE the run exists, so the stub is idle.
@@ -236,7 +238,7 @@ def mint_campaign(dispatcher: CommandDispatcher, payload: MintCampaignPayload) -
             dispatcher,
             FreshMint(
                 dataset_name=payload.dataset_name,
-                limits=payload,
+                limits=payload.limits,
                 optimization=optimization,
                 arm=payload.arm,
                 declared=payload.campaign_config,
@@ -263,7 +265,7 @@ def start_checkin(dispatcher: CommandDispatcher, start: StartCheckinPayload) -> 
                 CheckinStart(
                     hop=hop,
                     draft=gated,
-                    limits=start,
+                    limits=start.limits,
                     backend_url=start.backend_url,
                     backend_id=start.backend_id,
                 ),

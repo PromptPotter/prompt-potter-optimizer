@@ -34,7 +34,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-_CYCLE_LEDGER: ContextVar[CycleEventLog | None] = ContextVar("cycle_ledger", default=None)
+# No default: unbound is "never bound", and a bound ``None`` is the declared mute of a probe render.
+_CYCLE_LEDGER: ContextVar[CycleEventLog | None] = ContextVar("cycle_ledger")
 _CURRENT_ROUND: ContextVar[int | None] = ContextVar("current_round", default=None)
 
 
@@ -48,7 +49,24 @@ def reset_cycle_ledger(token: Token[CycleEventLog | None]) -> None:
 
 def active_cycle_ledger() -> CycleEventLog | None:
     """Ask before OPENING one: a second handle is a second appender, and ``append`` is not atomic."""
-    return _CYCLE_LEDGER.get()
+    return _CYCLE_LEDGER.get(None)
+
+
+def _bound_ledger(what: str) -> CycleEventLog | None:
+    try:
+        return _CYCLE_LEDGER.get()
+    except LookupError:
+        raise RuntimeError(
+            f"{what}: no cycle ledger is bound, so this record would reach no file. Bind one "
+            "where the entry binds its spend book (`build_run_observers`, `verb_ledger`)."
+        ) from None
+
+
+def billing_ledger(what: str) -> CycleEventLog:
+    ledger = _bound_ledger(what)
+    if ledger is None:
+        raise RuntimeError(f"{what}: the ledger is muted here, and a muted pass sends nothing")
+    return ledger
 
 
 _FILED_AS: ContextVar[TokenUsageKind | None] = ContextVar("filed_as", default=None)
@@ -70,7 +88,7 @@ def filed_kind(kind: TokenUsageKind) -> TokenUsageKind:
     return _FILED_AS.get() or kind
 
 
-def set_current_round(round_num: int | None) -> Token[int | None]:
+def set_current_round(round_num: int) -> Token[int | None]:
     return _CURRENT_ROUND.set(round_num)
 
 
@@ -78,9 +96,24 @@ def reset_current_round(token: Token[int | None]) -> None:
     _CURRENT_ROUND.reset(token)
 
 
+def current_round() -> int | None:
+    """``None`` outside any round, which only a record whose ``round`` is optional may carry."""
+    return _CURRENT_ROUND.get()
+
+
+def _sample_round() -> int:
+    round_num = _CURRENT_ROUND.get()
+    if round_num is None:
+        raise RuntimeError(
+            "a sample record names the round it was measured in and none is bound: "
+            "the entry driving this walk calls `RunCallbacks.set_round` first"
+        )
+    return round_num
+
+
 def _append_record(record: CycleRecord, ledger: CycleEventLog | None = None) -> int | None:
     if ledger is None:
-        ledger = _CYCLE_LEDGER.get()
+        ledger = _bound_ledger(type(record).__name__)
     if ledger is None:
         return None
     try:
@@ -149,7 +182,7 @@ def emit_token_usage(
         hold_id=hold_id,
         mirrored=mirrored,
         cached=cached,
-        round=_CURRENT_ROUND.get(),
+        round=current_round(),
         role=cand.role if (cand := measured_candidate()) else None,
     )
     return record if _append_record(record) is not None else None
@@ -228,7 +261,7 @@ def emit_spend_hold(
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cost_usd=cost_usd,
-            round=_CURRENT_ROUND.get(),
+            round=current_round(),
         ),
         ledger,
     )
@@ -277,7 +310,7 @@ def emit_error_record(
         message=message,
         traceback=traceback,
         stop_reason=stop_reason,
-        round=_CURRENT_ROUND.get(),
+        round=current_round(),
     )
     _append_record(record)
     return record
@@ -295,7 +328,7 @@ def emit_round_warning(
             kind=kind,
             severity=severity,
             message=message,
-            round=_CURRENT_ROUND.get(),
+            round=current_round(),
             detail=dict(detail or {}),
         )
     )
@@ -314,11 +347,10 @@ def emit_sample_started(
     sample_id: int,
     query: str,
     sample_lookahead: int,
-    stop_horizon: int | None,
 ) -> None:
     _append_record(
         SampleStartedRecord(
-            round=_CURRENT_ROUND.get() or 0,
+            round=_sample_round(),
             candidate_idx=candidate_idx,
             candidate_total=candidate_total,
             sample_idx=sample_idx,
@@ -326,7 +358,6 @@ def emit_sample_started(
             sample_id=int(sample_id),
             query_preview=query[:QUERY_PREVIEW_CHARS],
             sample_lookahead=int(sample_lookahead),
-            stop_horizon=stop_horizon,
         )
     )
 
@@ -344,14 +375,14 @@ def emit_sample_scored(
 ) -> None:
     _append_record(
         SampleScoredRecord(
-            round=_CURRENT_ROUND.get() or 0,
+            round=_sample_round(),
             candidate_idx=candidate_idx,
             candidate_total=candidate_total,
             individual_id=individual_id,
             role=role,
             sample_idx=sample_idx,
             sample_total=sample_total,
-            result=cell.ledger_wire(),
+            result=cell,
             running=running,
         )
     )
@@ -359,8 +390,10 @@ def emit_sample_scored(
 
 __all__ = [
     "active_cycle_ledger",
+    "billing_ledger",
     "bind_priced",
     "call_priced",
+    "current_round",
     "emit_command",
     "emit_command_ack",
     "emit_error_record",

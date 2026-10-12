@@ -436,7 +436,7 @@ def test_the_hard_sample_view_reads_the_one_ruler_and_fits_nothing() -> None:
     off = warm.samples[7]
     assert off.state is DeltaState.UNLINKED and off.label == DELTA_STATE_LABEL[off.state]
     assert off.delta is None and off.delta_se is None
-    assert off.pick_score is None and off.p_hat is None
+    assert off.pick_score is None
     assert warm.sample_order == [1, 3, 2, 7]
     # The stamped θ orders the arms, not the hit rate: "b" answered everything and holds no θ.
     assert warm.candidate_order == ["a", "b"]

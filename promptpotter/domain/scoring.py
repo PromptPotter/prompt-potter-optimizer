@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import math
 from collections import Counter
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -16,7 +17,13 @@ from typing import (
     get_type_hints,
 )
 
-from pydantic import GetJsonSchemaHandler, TypeAdapter
+from pydantic import (
+    GetJsonSchemaHandler,
+    PlainSerializer,
+    PlainValidator,
+    TypeAdapter,
+    WithJsonSchema,
+)
 from pydantic.json_schema import JsonSchemaValue
 from pydantic_core import core_schema
 
@@ -28,7 +35,9 @@ from promptpotter.domain.wire_record import (
     REST,
     WireRecord,
     always_as,
+    real,
     record_of,
+    text,
     typed_record,
     whole,
 )
@@ -191,7 +200,6 @@ class PipelineData:
     inner_stop_reason: str | None = None
     inner_sent_usd: float | None = None
     inner_tokens: int | None = None
-    inner_campaign_id: str | None = None
     # What only the DATASET names: observation keys, turn scalars, banked evaluator and judge terms.
     observations: Mapping[str, Any] = field(default_factory=dict, metadata=REST)
 
@@ -377,11 +385,22 @@ class Grade(NamedTuple):
     objective: float | None
     unscored: str | None
 
+    @classmethod
+    def from_wire(cls, row: Mapping[str, object]) -> Grade:
+        fitness, objective, unscored = (row.get(key) for key in cls._fields)
+        return cls(
+            None if fitness is None else real(fitness, "Grade.fitness"),
+            None if objective is None else real(objective, "Grade.objective"),
+            None if unscored is None else text(unscored, "Grade.unscored"),
+        )
+
     def wire(self) -> dict[str, object]:
         if self.unscored is not None:
             return {"unscored": self.unscored}
         return {"fitness": self.fitness, "objective": self.objective}
 
+
+_ERRORED = Grade(0.0, 0.0, None)
 
 GRADE_KEYS: frozenset[str] = frozenset(Grade._fields)
 
@@ -414,7 +433,20 @@ SHEET_ROW: type = typed_record(
 class GradedCell:
     facts: MeasuredCell
     grade: Grade
-    scored: bool
+
+    @classmethod
+    def of(cls, facts: MeasuredCell, grade: Grade) -> GradedCell:
+        return cls(facts, _ERRORED if facts.errored else grade)
+
+    @classmethod
+    def from_wire(cls, row: Mapping[str, object]) -> GradedCell:
+        return cls.of(MeasuredCell.from_wire(row), Grade.from_wire(row))
+
+    @property
+    def scored(self) -> bool:
+        if self.grade.fitness is None:
+            return False
+        return not self.facts.errored or (self.facts.charged and not self.facts.verifier_graded)
 
     @property
     def key(self) -> str:
@@ -439,13 +471,26 @@ class GradedCell:
 
     def filed(self, facts: MeasuredCell) -> GradedCell:
         """Only a field no formula reads may differ from the facts this grade was read off."""
-        return GradedCell(facts, self.grade, self.scored)
+        return GradedCell.of(facts, self.grade)
 
     def wire(self) -> dict[str, object]:
         return {**self.facts.wire(), **self.grade.wire()}
 
     def ledger_wire(self) -> dict[str, object]:
         return {**self.facts.ledger_wire(), **self.grade.wire()}
+
+
+def _ledger_cell(cell: GradedCell | Mapping[str, object]) -> GradedCell:
+    return GradedCell.from_wire(cell.ledger_wire() if isinstance(cell, GradedCell) else cell)
+
+
+# Narrowed on the way IN as on the way out, so a record built live equals itself read back.
+LedgerCell = Annotated[
+    GradedCell,
+    PlainValidator(_ledger_cell),
+    PlainSerializer(GradedCell.ledger_wire),
+    WithJsonSchema({"type": "object", "additionalProperties": True}),
+]
 
 
 @dataclass(frozen=True)
@@ -556,22 +601,17 @@ class Scorer:
     def grade(self, facts: MeasuredCell) -> GradedCell:
         """Only ``ScoringTermMissingError`` resolves to UNSCORED; its parent halts loud."""
         if facts.errored:
-            return GradedCell(
-                facts, Grade(0.0, 0.0, None), facts.charged and not facts.verifier_graded
-            )
+            return GradedCell.of(facts, _ERRORED)
         try:
             fitness = self.fitness(facts)
             # In this order: the composite reads the correctness it is composed OF.
             objective = fitness if self.objective is None else self.objective(facts, fitness)
         except ScoringTermMissingError as exc:
-            return GradedCell(facts, Grade(None, None, str(exc)), False)
-        return GradedCell(facts, Grade(fitness, objective, None), True)
+            return GradedCell.of(facts, Grade(None, None, str(exc)))
+        return GradedCell.of(facts, Grade(fitness, objective, None))
 
     def sheet(self, facts: Iterable[MeasuredCell]) -> CellSheet:
         return CellSheet(self.id, tuple(self.grade(cell) for cell in facts))
-
-    def read(self, rows: Iterable[Mapping[str, Any]]) -> CellSheet:
-        return self.sheet(MeasuredCell.from_wire(row) for row in rows)
 
 
 CellGrade = Literal["fitness", "objective"]
@@ -593,6 +633,21 @@ def extract_item_label(c: Any) -> str:
 def is_hit(fitness: float | None) -> bool:
     """Display and stratification ONLY, never a rate: graded formulas never reach the ceiling."""
     return fitness is not None and fitness >= HIT_THRESHOLD
+
+
+FITNESS_BANDS = 10
+
+
+def fitness_bands(cells: Iterable[GradedCell]) -> list[int]:
+    """Scored rows per tenth of [0, 1], each band closed above and a zero in the first."""
+    bands = [0] * FITNESS_BANDS
+    for cell in cells:
+        fitness = cell.grade.fitness
+        if not cell.scored or fitness is None:
+            continue
+        band = math.ceil(round(fitness * FITNESS_BANDS, 9)) - 1
+        bands[min(FITNESS_BANDS - 1, max(0, band))] += 1
+    return bands
 
 
 class GradeColumn(NamedTuple):
@@ -805,6 +860,7 @@ def is_answer_collapsed(cells: Sequence[GradedCell]) -> bool:
 
 __all__ = [
     "DEFAULT_SCORER_ID",
+    "FITNESS_BANDS",
     "GRADE_KEYS",
     "HIT_THRESHOLD",
     "LEDGER_PIPELINE_KEYS",
@@ -822,6 +878,7 @@ __all__ = [
     "GradeColumn",
     "GradedCell",
     "JudgeReading",
+    "LedgerCell",
     "MeasuredCell",
     "NodeWarning",
     "PipelineData",
@@ -837,6 +894,7 @@ __all__ = [
     "anchored_criterion",
     "anchored_criterion_dials",
     "enumerable_truth_labels",
+    "fitness_bands",
     "ground_truth_text",
     "is_answer_collapsed",
     "is_hit",

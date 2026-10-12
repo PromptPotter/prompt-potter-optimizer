@@ -62,7 +62,6 @@ class InitEnterView(_View):
     max_rounds: int = 0
     patience: int | None = None
     sp_budget_round: int = 0
-    dataset_size: int = 0
     model: str = ""
     composite_fitness_formula: str | None = None
     composite_fitness_formula_short: str | None = None
@@ -118,7 +117,6 @@ class CandidatesGeneratedView(_View):
     kind: Literal["candidates_generated"] = "candidates_generated"
     n_candidates: int
     source: Literal["disk", "llm"]
-    n_scoring_samples: int
     clone_labels: tuple[str, ...]
     sp_diff: SpDiffView
 

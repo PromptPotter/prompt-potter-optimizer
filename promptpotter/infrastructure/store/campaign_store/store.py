@@ -590,6 +590,22 @@ class CampaignStore:
                 return f"has descendant {other.name}"
         return None
 
+    def deletable_stubs(self, hop: CycleHop) -> list[CycleHop]:
+        """What ``cleanup-empty-cycles`` at *hop* deletes: its root's stub forks, never the active cycle."""
+        root_id = root_cycle_id(hop.cycle_id)
+        active = read_active_pointer(self._base_dir)
+        stubs: list[CycleHop] = []
+        for cycle_dir in self.campaign_cycle_dirs(hop.campaign_id):
+            fork = CycleHop(campaign_id=hop.campaign_id, cycle_id=cycle_dir.name)
+            index = read_cycle_index(cycle_dir)
+            if index is None or index.parent_cycle_id != root_id or fork.cycle_id == root_id:
+                continue
+            if (fork.campaign_id, fork.cycle_id) != active and (
+                self._stub_deletion_blocked(fork) is None
+            ):
+                stubs.append(fork)
+        return stubs
+
     def try_delete_stub_cycle(self, hop: CycleHop) -> tuple[bool, str]:
         blocked = self._stub_deletion_blocked(hop)
         if blocked is not None:

@@ -24,6 +24,7 @@ from promptpotter.domain.spend import (
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.identity.migration import registered_user_id
 from promptpotter.infrastructure.identity.paths import default_identity_paths
+from promptpotter.infrastructure.llm.send_pacing import set_rate_tenant
 from promptpotter.infrastructure.llm.spend_book import (
     SpendBook,
     spending_under,
@@ -211,7 +212,7 @@ class QuotaStatus(StrictModel):
         "`rate_priced_usd`, over `spend_budget_usd_total`, at most 1. `None` where no ceiling "
         "bounds the account."
     )
-    allowance_spent: bool = Field(
+    allowance_exhausted: bool = Field(
         description="Admission's own answer: the next launch is refused for want of allowance. "
         "Headroom in either unit, after what running launches hold, the unreported sends and the "
         "unpriced grace. False on an account no ceiling bounds."
@@ -269,7 +270,7 @@ def quota_status(*, stores: Stores, job_registry: JobRegistry) -> QuotaStatus:
         spend_lifetime=LifetimeSpend.of(spent),
         spend_budget_usd_total=ceilings.usd,
         spend_budget_used_share=_used_share(spent.sent_usd, ceilings.usd),
-        allowance_spent=wallet.exhausted,
+        allowance_exhausted=wallet.exhausted,
         tokens_used_total=spent.used_tokens,
         token_budget_total=ceilings.tokens,
         token_budget_used_share=_used_share(spent.used_tokens, ceilings.tokens),
@@ -398,6 +399,7 @@ async def paid_verb(
         )
     # Offloaded: admission globs every cycle ledger.
     book = await asyncio.to_thread(_admit_spend, stores=stores, bucket=bucket)
+    set_rate_tenant(str(stores.identity.tenant_id))
     with spending_under(book):
         yield book
 

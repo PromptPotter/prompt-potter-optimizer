@@ -28,7 +28,9 @@ __all__ = [
     "REST",
     "WireRecord",
     "always_as",
+    "real",
     "record_of",
+    "text",
     "typed_record",
     "whole",
 ]
@@ -47,7 +49,7 @@ def _mistyped(value: object, where: str, declared: str) -> TypeError:
     return TypeError(f"{where} holds {value!r} ({type(value).__name__}), declared {declared}")
 
 
-def _real(value: object, where: str) -> float:
+def real(value: object, where: str) -> float:
     # `bool` is an `int` subclass, so a backend answering `true` would read as a number.
     if type(value) is float:
         if isfinite(value):
@@ -63,7 +65,7 @@ def whole(value: object, where: str) -> int:
     raise _mistyped(value, where, "an integer")
 
 
-def _text(value: object, where: str) -> str:
+def text(value: object, where: str) -> str:
     if type(value) is str:
         return value
     if isinstance(value, str):
@@ -104,7 +106,7 @@ class _Frozen(dict[str, Any]):
         return _Frozen, (dict(self),)
 
 
-_SCALARS: dict[object, Callable[..., object]] = {float: _real, int: whole, str: _text, bool: _flag}
+_SCALARS: dict[object, Callable[..., object]] = {float: real, int: whole, str: text, bool: _flag}
 _RECORDS: dict[object, WireRecord[Any]] = {}
 _HELPERS: dict[str, object] = {
     **{reader.__name__: reader for reader in _SCALARS.values()},

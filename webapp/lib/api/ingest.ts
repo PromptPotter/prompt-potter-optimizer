@@ -9,7 +9,7 @@ import type {
   ResolveOriginResponse,
   StartCheckinResponse,
 } from "./types";
-import type { StartCheckinPayload } from "./types.generated";
+import type { LaunchLimits, StartCheckinPayload } from "./types.generated";
 
 export async function postIngestDataset(
   file: File,
@@ -89,13 +89,13 @@ export async function postEditDraftCampaign(
   });
 }
 // Per press, never draft state: a reopened check-in must not show a budget nobody re-entered.
-export type StartCheckinOptions = Partial<Omit<StartCheckinPayload, "campaign_id">>;
+export type StartCheckinOptions = Partial<
+  Omit<StartCheckinPayload, "campaign_id" | "limits">
+> & { limits?: Partial<LaunchLimits> };
 
 const START_KEYS: { [K in keyof Required<StartCheckinOptions>]: true } = {
-  halt_at_accuracy: true,
-  ceiling: true,
+  limits: true,
   diag: true,
-  step_rounds: true,
   backend_url: true,
   backend_id: true,
 };

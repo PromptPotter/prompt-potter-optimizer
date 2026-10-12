@@ -71,14 +71,14 @@ from promptpotter.domain.run_records import (
     SpawnedRecord,
     TokenUsageRecord,
     WallClock,
-    scored_cell,
 )
-from promptpotter.domain.scoring import MeasuredCell, WalkedCell
+from promptpotter.domain.scoring import WalkedCell
 from promptpotter.domain.spend import CloseSpend, SpendRollup, TokenUsageKind
 from promptpotter.infrastructure.store.read_model import (
     LedgerFold,
     LedgerIndex,
     LedgerSpan,
+    LineIndex,
     RecordClasses,
     iter_jsonl,
 )
@@ -351,27 +351,24 @@ class Progress(NamedTuple):
 
 
 class _Progress:
-    # Every line, as written, so it rides an index of its own (``PROGRESS_FOLDS``), never LEDGER_FOLDS.
-    records: ClassVar[RecordClasses] = ()
-
     def __init__(self) -> None:
         self._held = Progress()
 
-    def feed(self, offset: int, rec: dict[str, Any]) -> None:
-        kind = rec.get("record_type")
+    def feed(self, offset: int, line: dict[str, Any]) -> None:
+        kind = line.get("record_type")
         # A heartbeat proves the process alive, not that it progressed.
         if kind == "llm_call_progress":
             return
         held = self._held
         if kind == "flight":
-            waiting = rec.get("waiting")
+            waiting = line.get("waiting")
             since = waiting.get("since") if isinstance(waiting, dict) else None
             held = held._replace(
                 waiting_since=float(since) if isinstance(since, int | float) else None
             )
         elif kind == "run_phase":
             held = held._replace(waiting_since=None)
-        at = epoch_seconds(rec.get("timestamp"))
+        at = epoch_seconds(line.get("timestamp"))
         self._held = held if at is None else held._replace(progressed_at=at)
 
     def value(self) -> Progress:
@@ -505,12 +502,8 @@ class StandingRounds(NamedTuple):
         ]
 
 
-def _scored_facts(rec: dict[str, Any]) -> MeasuredCell:
-    return scored_cell(rec["result"])[0]
-
-
 def _walked_cell(scored: SampleScoredRecord) -> WalkedCell | None:
-    facts = scored_cell(scored.result)[0]
+    facts = scored.result.facts
     if not facts.sample_key or facts.answer is None:
         return None
     return facts.sample_key, facts.sample_id, facts.answer, facts.cached
@@ -625,6 +618,20 @@ class _Standing:
             elections=dict(held.elections),
             decisions={n: list(made) for n, made in held.decisions.items()},
         )
+
+
+class _Answers:
+    records: ClassVar[RecordClasses] = (SampleScoredRecord,)
+
+    def __init__(self) -> None:
+        self._found: set[str] = set()
+
+    def feed(self, offset: int, record: SampleScoredRecord) -> None:
+        if (answer := record.result.facts.answer) is not None:
+            self._found.add(answer)
+
+    def value(self) -> frozenset[str]:
+        return frozenset(self._found)
 
 
 class _DeclaredPhase:
@@ -755,6 +762,7 @@ LEDGER_FOLDS = (
     _LaunchClaim,
     _Rulers,
     _Standing,
+    _Answers,
     _DeclaredPhase,
     _Verify,
     _Spend,
@@ -764,7 +772,7 @@ LEDGER_FOLDS = (
 )
 
 
-def _view[V](ledger_path: Path, fold: Callable[[], LedgerFold[V]]) -> V:
+def _view[V](ledger_path: Path, fold: Callable[[], LedgerFold[Any, V]]) -> V:
     return LedgerIndex.of(ledger_path, LEDGER_FOLDS).view(fold)
 
 
@@ -834,7 +842,7 @@ def scan_cell_formula(spans: Iterable[LedgerSpan]) -> str | None:
 
 
 def scan_ledger_progress(ledger_path: Path) -> Progress:
-    return LedgerIndex.of(ledger_path, PROGRESS_FOLDS).view(_Progress)
+    return LineIndex.of(ledger_path, PROGRESS_FOLDS).view(_Progress)
 
 
 def scan_ledger_ruler(spans: Iterable[LedgerSpan], dataset_name: str) -> DeltaRuler | None:
@@ -1006,7 +1014,7 @@ def _unworked_seconds(rows: list[dict[str, Any]]) -> float | None:
     for rec in rows:
         if rec.get("record_type") != "sample_scored":
             continue
-        facts = _scored_facts(rec)
+        facts = SampleScoredRecord.model_validate(rec).result.facts
         if facts.cached:
             continue
         seconds = facts.pipeline.unworked_s
@@ -1019,12 +1027,7 @@ def _unworked_seconds(rows: list[dict[str, Any]]) -> float | None:
 def scan_ledger_answers(ledger_paths: Iterable[Path]) -> set[str]:
     found: set[str] = set()
     for path in ledger_paths:
-        for rec in iter_jsonl(path, record_types=frozenset({"sample_scored"})):
-            # The screen is a raw-line substring probe, so the kind is asked again here.
-            if rec.get("record_type") != "sample_scored":
-                continue
-            if (answer := _scored_facts(rec).answer) is not None:
-                found.add(answer)
+        found |= _view(path, _Answers)
     return found
 
 

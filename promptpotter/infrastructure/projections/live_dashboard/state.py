@@ -13,6 +13,7 @@ from promptpotter.domain.phases import DashboardState, RunPhase, StopReason
 from promptpotter.domain.results import DisplayMetric, RunStanding
 from promptpotter.domain.round_audit import LoopWarning, NodeBlock
 from promptpotter.domain.run_records import RunWiringRecord
+from promptpotter.domain.scoring import fitness_bands
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.clock import utcnow_iso
@@ -96,8 +97,16 @@ class CurrentRound(StrictModel):
     active_node: str | None = None
     measurement_node: str | None = None
     candidates: list[LiveCandidate] = Field(default_factory=list)
+    fitness_bands: list[int] = Field(
+        description="How many scored rows across `candidates` graded into each tenth of [0, 1], "
+        "lowest first, banded as a closed round's `fitness_bands` is."
+    )
     nodes: dict[str, NodeBlock] = Field(default_factory=dict)
     racing: RacingBlock | None = None
+
+    @classmethod
+    def unentered(cls) -> CurrentRound:
+        return cls(fitness_bands=fitness_bands(()))
 
 
 class DashboardFacts(StrictModel):
@@ -168,7 +177,7 @@ class DashboardFacts(StrictModel):
 
     catch_up_log: list[CatchUpLogEntry] = Field(default_factory=list)
 
-    current_round: CurrentRound = Field(default_factory=CurrentRound)
+    current_round: CurrentRound = Field(default_factory=CurrentRound.unentered)
 
     error: DashboardError | None = None
 
@@ -226,7 +235,7 @@ class LiveDashboardState(DashboardFacts):
             # A resumed run grades its selection again; the prior pass graded a stale one.
             "bench_score": None,
             "bench_pass": None,
-            "current_round": CurrentRound(),
+            "current_round": CurrentRound.unentered(),
             "current_query_payload": None,
             "current_sample_id": None,
             "open_sample_ids": [],

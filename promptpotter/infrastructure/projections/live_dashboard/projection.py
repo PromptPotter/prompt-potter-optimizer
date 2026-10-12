@@ -50,9 +50,8 @@ from promptpotter.domain.run_records import (
     SampleScoredRecord,
     SampleStartedRecord,
     TokenUsageRecord,
-    scored_cell,
 )
-from promptpotter.domain.scoring import MeasuredCell
+from promptpotter.domain.scoring import GradedCell, MeasuredCell, fitness_bands
 from promptpotter.domain.spend import CeilingMeter, MeteredSpend, SpendRollup
 from promptpotter.infrastructure.ledger import ledger_chain, open_with_history
 from promptpotter.infrastructure.projections.audit_trail import build_node_block
@@ -400,13 +399,13 @@ class LiveDashboardProjection(Projection):
         self._schedule_persist()
 
     def _handle_sample_scored(self, record: SampleScoredRecord) -> None:
-        facts, grade = scored_cell(record.result)
+        facts, grade = record.result.facts, record.result.grade
         ci, ct = record.candidate_idx, record.candidate_total
         qi, qt = record.sample_idx or 0, record.sample_total or 0
         self._open_samples.pop(facts.sample_id, None)
         self._absorb_sample_scored(facts, last_in_candidate=(qi + 1 >= qt))
         if ci != NO_ROUND_SLOT:
-            self._buffer.append_sample(ci, ct, qi, qt, facts, grade, record.running)
+            self._buffer.append_sample(ci, ct, qt, facts, grade, record.running)
         elif (bench_pass := self.state.bench_pass) is not None:
             self.state.bench_pass = bench_pass.model_copy(
                 update={
@@ -604,6 +603,11 @@ class LiveDashboardProjection(Projection):
             active_node=self._active_node(),
             measurement_node=self._measurement_node,
             candidates=build_candidate_rows(self._buffer, self.short_formula_template),
+            fitness_bands=fitness_bands(
+                GradedCell.of(s.facts, s.grade)
+                for slot in self._buffer.candidates.values()
+                for s in slot.samples
+            ),
             nodes=self._current_round_nodes(),
             racing=build_racing_block(self._buffer),
         )

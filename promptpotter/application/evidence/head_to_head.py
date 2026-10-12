@@ -246,7 +246,6 @@ class HeadToHeadRow(StrictModel):
     incurred_usd_ratio: float | None
     optimizer_incurred_usd_ratio: float | None
     worked_ratio: float | None
-    concurrent_with: list[str]
 
 
 class SelectionPair(StrictModel):
@@ -372,10 +371,6 @@ def head_to_head(
         else None
     )
     verdict = None if verdict_absent is not None else guard.state is not GuardState.DIFFERS
-    concurrent = {
-        g.row.campaign_id: [o.row.campaign_id for o in read if o is not g and _overlapped(g, o)]
-        for g in read
-    }
     return HeadToHead(
         rows=[
             g.row.model_copy(
@@ -383,7 +378,6 @@ def head_to_head(
                     "guard": g.row.guard
                     if reference is None or g.row.bench.graded is None
                     else _guard([g, reference], None),
-                    "concurrent_with": concurrent[g.row.campaign_id],
                     **_ratios(g.row, base),
                 }
             )
@@ -402,7 +396,7 @@ def head_to_head(
             verdict,
             guard,
             len(read) - len(graded) - len(ungraded_arms),
-            [cid for cid, others in concurrent.items() if others],
+            [g.row.campaign_id for g in read if any(_overlapped(g, o) for o in read if o is not g)],
             uncontrolled=[
                 g.row.campaign_id for g in read if g.row.guard.state is GuardState.UNCONTROLLED
             ],
@@ -523,7 +517,7 @@ def _read(
             dataset_name=campaign.dataset_name,
             dataset_hash=drawn.dataset_hash,
             split=drawn.split,
-            bench_ids=drawn.bench_ids,
+            bench_rows=drawn.bench_rows,
             scorer_id=scorer.id,
             origin_params=None if origin_round is None else origin_round.close.pipeline_params,
             origin=campaign.root_content_hash,
@@ -575,7 +569,6 @@ def _read(
             incurred_usd_ratio=None,
             optimizer_incurred_usd_ratio=None,
             worked_ratio=None,
-            concurrent_with=[],
         ),
         origin=origin_pass,
         selected=selected_pass,

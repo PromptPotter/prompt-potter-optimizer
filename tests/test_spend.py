@@ -89,6 +89,17 @@ def on_jumping_clock[**P, T](test: Callable[P, Coroutine[Any, Any, T]]) -> Calla
     return run
 
 
+@pytest.fixture
+def run_bound(tmp_path: Path) -> Iterator[None]:
+    from promptpotter.infrastructure.llm import telemetry
+
+    ledger = telemetry.set_cycle_ledger(CycleEventLog(tmp_path / "bound.jsonl"))
+    round_num = telemetry.set_current_round(1)
+    yield
+    telemetry.reset_current_round(round_num)
+    telemetry.reset_cycle_ledger(ledger)
+
+
 # 1. What a call costs
 
 
@@ -344,7 +355,7 @@ async def _grade_twice(
 
 
 async def test_a_second_grading_of_one_comparison_is_not_re_billed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, run_bound: None
 ) -> None:
     """The replay is still METERED, flagged ``cached``: grading cost is invariant to cache history."""
     calls, metered, score = await _grade_twice(tmp_path, monkeypatch, reply="A")
@@ -368,7 +379,7 @@ async def test_a_second_grading_of_one_comparison_is_not_re_billed(
 
 
 def test_a_field_a_client_cannot_send_is_refused_and_the_gateway_wire_holds(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, run_bound: None
 ) -> None:
     """A banked reply is keyed on node config, never the wire, so the gateway body is pinned whole."""
     from pydantic import BaseModel, Field
@@ -799,7 +810,9 @@ async def _round(
 
 
 @on_jumping_clock
-async def test_sample_lookahead_changes_the_bill_and_never_the_record(tmp_path: Path) -> None:
+async def test_sample_lookahead_changes_the_bill_and_never_the_record(
+    tmp_path: Path, run_bound: None
+) -> None:
     dataset = [Sample(id=i, query=f"q{i}", ground_truth=str(i % 2)) for i in range(1, 9)]
 
     d1 = await _walk(dataset, armed=1, cut_at=None)
@@ -957,7 +970,9 @@ async def test_a_resumed_arm_re_reads_its_cells_and_still_reaches_its_bench(
 
     # Another campaign's run banks both replies; this arm only ever replays them.
     telemetry.bind_priced(set())
+    other = telemetry.set_cycle_ledger(CycleEventLog(tmp_path / "other.jsonl"))
     await round_calls()
+    telemetry.reset_cycle_ledger(other)
 
     dataset = [Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(4)]
     step = {"solve": StepUsage(input=10, output=5, cost_usd=0.01)}
@@ -1163,7 +1178,6 @@ async def test_cell_envelope_cancels_the_inner_campaign(tmp_path: Path, monkeypa
             shared_root=tmp_path,
             spawn_campaign_id="ppself__aaaaaa",
             spawn_cycle_id="cycle_deadbeef0000",
-            asking_cycle_id="cycle_deadbeef0000",
             enclosing=(),
             # No inner dataset resolved: the stubbed inner run never reads one.
             cells=InnerCells(
@@ -1608,9 +1622,7 @@ def test_a_nested_runs_send_is_held_and_billed_on_its_roots_ledger(
             kind="optimizer", node="n", input_tokens=10, output_tokens=5, rate_priced_usd=0.02
         )
     )
-    facts = inner_cell_facts(
-        cycle_result([0.4], 0.3, []).model_copy(update={"spend": silent}), "inner"
-    )
+    facts = inner_cell_facts(cycle_result([0.4], 0.3, []).model_copy(update={"spend": silent}))
     assert facts is not None and silent.total_used_usd == 0.0
     row = MeasuredCell(
         sample_id=0,
@@ -1691,7 +1703,7 @@ def test_a_send_that_left_and_named_no_price_stays_held_at_its_bound(
 
 
 def test_one_unit_of_work_resends_from_one_budget_whichever_loop_asks(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, run_bound: None
 ) -> None:
     import httpx
     import openai
@@ -1804,7 +1816,7 @@ def test_a_backend_cell_is_never_sent_again_while_it_may_still_bill(
 
 
 def test_a_container_trial_reruns_on_the_budget_its_connector_sized(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, run_bound: None
 ) -> None:
     from promptpotter.application.scoring.cell_envelope import CellEnvelope
     from promptpotter.connectors import harbor
@@ -2122,7 +2134,7 @@ def test_a_send_no_rate_bounds_stops_the_run_on_one_reason_at_init_and_at_its_ce
     open_book.hold(unpriced, unpriced, "backend", what="the next cell")
 
 
-def test_a_controlled_arms_ceiling_is_its_searchs_incurred_cost() -> None:
+def test_a_controlled_arms_ceiling_is_its_searchs_incurred_cost(run_bound: None) -> None:
     """Arms replay each other's cells: a ceiling on the BILL hands the second arm a bigger search."""
     from promptpotter.domain.run_records import TokenUsageRecord
     from promptpotter.infrastructure.llm.spend_book import (
