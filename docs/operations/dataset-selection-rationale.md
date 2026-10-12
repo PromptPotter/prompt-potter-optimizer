@@ -115,9 +115,11 @@ Three things the table is for, none of them the headline number:
 
 ## Deferred research
 
-One candidate may still earn a slot, pending an empirical check.
+Candidates that may still earn a slot, each pending an empirical check.
 
 **AA-Omniscience** (`ArtificialAnalysis/AA-Omniscience-Public`, N=600 public / 6000 full, 42 topics, released 2025-11). Asymmetric scoring (+correct / −hallucinated / 0 abstain) gives L2 a real second knob: a candidate that hallucinates 30% and one that abstains 30% score differently at identical correctness. **Open question — floor risk**, since AA reports even the best frontier models scoring only slightly above 0 on the Omniscience Index. But the calibration axis means lift can come from teaching abstention without raising raw correctness, and its rubric is different enough that the proxy-anchor projection issue does not apply. **Verify with a 50-sample recon before committing.**
+
+**The Popper task families** (Cropper & Morel, [arXiv 2005.02259](https://arxiv.org/abs/2005.02259); § 5; tasks ship in `logic-and-learning-lab/Popper` under `examples/`). **Buttons** — which *n* of *p* buttons win, loosely after the IGGP game *buttons and lights*, generated at two sizes of *p*. **Robots** — a strategy moving a robot to the top row of an *n*×*n* grid. **List transformations** — `addhead`, `dropk`, `droplast`, `evens`, `finddup`, `last`, `len`, `member`, `sorted`, `threesame`. The first two are generated from a size parameter, so difficulty is a dial and each setting is its own cut ([`../../datasets/CLAUDE.md`](../../datasets/CLAUDE.md) § Re-cutting a dataset needs a NEW name). Each task is an examples file, a background-knowledge file and a bias file, and its target is a short logic program, so they are a new family beside deduction and planning and several small cells for the L4 panel rather than one large one. **Two cuts, and they are different datasets:** the pipeline labels a held-out example given the background and the labelled ones (exact match, but binary gold, so read criteria 1b and 6 first), or it emits the program and Prolog entailment grades it (deterministic, but the grader needs SWI-Prolog). Not HF-loadable and published in 2020, so criteria 7 and 8 both cost something. Origin is unmeasured: **recon at the bar before wiring either cut.** The optimizer these tasks come from is [`../specs/roadmap.md`](../specs/roadmap.md) § Ecosystem outreach's.
 
 ## Update protocol
 

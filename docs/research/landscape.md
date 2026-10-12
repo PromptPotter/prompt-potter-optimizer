@@ -145,6 +145,54 @@ judge vs evaluation per step) is the accounting our budget meter should be able 
 
 **Checked** 2026-09-24 — v1 only, no repository linked in the paper.
 
+## RRSI — Regularized Recursive Self-Improvement of Agent Harnesses (Google Research)
+
+**What.** Xia et al., [arXiv 2609.24972](https://arxiv.org/abs/2609.24972) (2026-09-21), code at
+[`google-research/rrsi`](https://github.com/google-research/rrsi) (Apache-2.0),
+[project page](https://regularized-rsi.com/). Same harness-evolution line as SIFT and the Darwin
+Gödel Machine: a frozen model, and a loop that proposes and selects edits to the **harness**
+(prompts, control flow, tools, memory, sub-agents). Its claim is that the loop overfits the tasks
+it evolves on, and its answer is to leave the edit space open and regularize the search instead.
+Proposal side: an annealed cap on how many independent edits one candidate may bundle, a proposer
+conditioned on the full edit history, and a redirect to untried components when a run stalls.
+Selection side: a critic screens each candidate for suite-specific logic **before** it is
+evaluated (a regex denylist plus an LLM review), a noise-adjusted floor rejects gains inside
+evaluation variance, a cost rule makes added inference tokens pay for themselves in measured gain,
+and components that stopped helping are pruned. Three instances — Terminal-Bench 2.1, Harvey LAB,
+EngDesign — each evolved on one suite and then run unchanged on held-out benchmarks.
+
+The number worth remembering is the ablation (Table 2, Harvey LAB only), not the headline:
+
+| Variant | Evolve | ID held-out | OOD avg. | Tokens/trial (M) |
+|---|---|---|---|---|
+| H_0, no evolution | 89.4 | 86.9 | 39.7 | 1.56 |
+| Unregularized evolution | 92.8 | 88.9 | 40.3 | 3.80 |
+| RRSI | 90.5 | 89.2 | 43.6 | 2.42 |
+
+The unconstrained loop posts the best score of any variant on the tasks it practiced, +0.6 out of
+distribution, at 2.4× the tokens. The abstract's headline is up to +6.0 on the evolve split and up
+to +4.3 out of distribution.
+
+**Verdict — reference (as a design), not yet decided as a constraint.** It optimizes agent source
+on the harness side of [`related-work.md`](related-work.md) § Three layers, with no
+prompt-optimization baselines, so it is not a peer for M13. What it measures is the failure an
+outer loop of ours would have: a gain on the evolve set that does not transfer. Whether that binds
+L4 is a call for [`external-constraints.md`](external-constraints.md) once the paper has been read
+through, not one this entry makes.
+
+**Worth taking.** (1) **The noise-adjusted floor**: a per-instance noise band δ, bootstrapped over
+trials of the base evaluation (`rrsi/calibrate.py`), that a gain must clear — the same question
+PoBB answers, asked as a fixed threshold. (2) **The leakage critic before evaluation**: reject a
+candidate for benchmark-specific logic without paying to score it. (3) **The cost rule**: an
+accepted edit must buy its added tokens with measured gain. (4) **The annealed edit budget**, so a
+measured change stays attributable to one mechanism. (5) The reporting shape: evolve, in-distribution
+held-out and out-of-distribution as separate columns beside tokens per trial.
+
+**Checked** 2026-10-11 — README, abstract and Table 2 read from the arXiv HTML; the method and the
+other two domains' results not read through, and the operator has not read it. Last push
+2026-09-23, ~1.4k stars. The README's results table lists JobBench (OOD) at +4.7, above the
+abstract's "up to 4.3" — unreconciled.
+
 ## DSPy — GEPA, MIPROv2, BootstrapFewShot
 
 **What.** [`stanfordnlp/dspy`](https://github.com/stanfordnlp/dspy) (MIT): a program of typed

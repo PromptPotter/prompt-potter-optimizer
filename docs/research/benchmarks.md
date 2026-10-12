@@ -44,6 +44,7 @@ Two ways to misread the bar:
 | 1 | **BBEH** | Headline benchmark — carries the head-to-head against peer optimizers. Measured 28% **at the bar (`gpt-oss-20b @ low`), which is no longer what the dataset runs**: `datasets/bbeh/pipeline.yaml` admits only `mistralai/mistral-small-3.2-24b-instruct` and `campaign.yaml` overrides nothing. The 28% predates that repin — re-measure before quoting it against anything. |
 | 2 | **HotpotQA** | Queued. Most valuable head-to-head addition after BBEH (MIPROv2/GEPA/adv-CoT all use it), but **not wired** — no loader, no `hotpotqa_f1` scorer. Unmeasured, and deliberately unprojected. |
 | 3 | **AIME 2025** | In band at 30%, wired. Limited by size (30 problems, no split), not by headroom. |
+| 4 | **Chess puzzles (imec)** | Candidate, **not wired and unmeasured at the bar**. 1,118 Lichess puzzles in a published 559 / 559 development / test split, stratified by puzzle length (one to five moves) and rating (400–2,800), scored by exact match on the move — [arXiv 2610.00416](https://arxiv.org/abs/2610.00416), code and renewal scripts at [`imec-ailabs/Automatic-Prompt-Optimization-with-Chess`](https://github.com/imec-ailabs/Automatic-Prompt-Optimization-with-Chess) (Apache-2.0; the Lichess export is CC0). What earns it the slot: six DSPy optimizers (GEPA, MIPROv2, SIMBA, COPRO, BootstrapFewShot, BootstrapRandomSearch) are already published on that split across eight models, for about $800 in total, so one more arm lands beside existing rows. Two things to settle before wiring: `gpt-oss-20b` is not in their panel and their weakest models stay far behind, so the risk at the bar is the **floor**, which a rating cut can move; and a multi-move puzzle counts only when every move is right, which the scorer has to reproduce. Abstract, setup and section takeaways read 2026-10-11; the results tables not. |
 | — | **`justlogic-d234`** | Not a publication benchmark — the **focus instrument**, where the optimizer's own behaviour is measured round over round. By far the most-measured dataset here. |
 | — | **`justlogic-d234-held`** | The head-to-head's bench instrument: that dataset's search and demo pools under a wider bench (`datasets/justlogic-d234-held/dataset.md`). Unmeasured. |
 | — | **`reactome-typeql-42`** | TypeDB's query-writing benchmark, run by their own harness (`datasets/reactome-typeql-42/dataset.md`): the model writes TypeQL, the query is executed and its result graded. Outside the head-to-head — the comparison is against TypeDB's published rows, on the model the operator picks. Development screens only so far ([`model-screens.md`](../../datasets/reactome-typeql-42/model-screens.md)). |
@@ -135,7 +136,9 @@ Definition only; instance assembly TBD. PromptPotter is the reference solver.
   instances, baked-in split) for depth, both HuggingFace-native. Both sit *above* the 20b bar and are
   listed on size and split quality — a PEvol-Bench run implies a stronger reference model than the
   focus instrument uses. **LiveBench** is the contamination-resistant watch item, with the caveat that
-  monthly refreshes invalidate cross-cycle comparisons mid-campaign.
+  monthly refreshes invalidate cross-cycle comparisons mid-campaign. The **chess puzzles** of
+  § Order of use are the other renewable one: a canonical split today, fresh puzzles and an
+  adjustable rating band when it saturates.
 - **Long-term node-type coverage.** LLM-only: MMLU-Pro, MATH, LiveBench · retrieval+LLM: HotpotQA,
   PopQA, FEVER · multi-step agent: GAIA, τ-bench · code pipeline: SWE-bench · long-context: LongBench,
   FRAMES. Aspiration: ship our own procedurally-generated instances.

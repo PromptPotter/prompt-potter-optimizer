@@ -270,7 +270,14 @@ Beyond ranked items 3 and 4:
   (2026) tested DSPy, TextGrad and GEPA across four model families. Edits that help one benchmark
   often fail on another, and the effect depends on edit type × task type.
   [Prompting Inversion](https://arxiv.org/abs/2510.22251) (2025) reports a scaffold that helps
-  GPT-4o and *hurts* GPT-5; its numeric table is unverified. Two consequences:
+  GPT-4o and *hurts* GPT-5; its numeric table is unverified.
+  [Benchmarking Prompt Optimization With Chess](https://arxiv.org/abs/2610.00416) (2026; abstract,
+  setup and section takeaways read, tables not) moved each of eight models' winning prompts onto
+  the other seven: of 49 pairs, 31 improved, 16 got worse and two were unchanged, and the prompt
+  with the largest gain on its own model degraded five of the seven others. Transfer is a property
+  of the pair, not of the prompt. Its puzzle gains also did not carry into game play by a
+  significant margin, so a lift on the scored task is not a lift on the task next to it. Two
+  consequences:
   - A **model swap is a new optimization run**, never a copy of the winner, so an export has to
     name the model it was won on.
   - Pitch mid-tier and open-weight serving models first. Gains shrink or invert on the strongest
