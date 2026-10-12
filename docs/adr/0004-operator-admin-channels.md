@@ -89,7 +89,8 @@ systemd service, long-polling `getUpdates`, dropping any update whose `chat.id` 
 the configured operator's, supporting `/block`, `/unblock`, `/blocked` over the blocklist
 writers in `infrastructure/identity/blocklist.py`. The same charter covers the one-shot
 notices the API process fires when an account first exists (`notify_operator`,
-`forward_new_account_to_crm`): outbound-only, best-effort, no inbound door.
+`forward_new_account_to_crm`) and the bot's own half-hourly send of what every account did
+(`forward_trail_to_briefing`): outbound-only, best-effort, no inbound door.
 
 This is the most secure option *and* the cheapest to self-host: no Cloudflare Access
 config, no SSH conduit, no exposed endpoint — one systemd unit and three env vars.
@@ -127,6 +128,19 @@ where an external driver is unavoidable, behind an edge-broker + app-token condu
 identity/deployment config is a block. Adding a new operator-admin action amends
 architecture.md § Identity first, per the CLAUDE.md pre-flight Q4 sub-rule and
 ADR-0002 gate #5.
+
+### What the gate does not cover — site records (2026-10-12)
+
+`/site-records/{table}` is an inbound, internet-reachable route behind a static token, which is
+option A's shape, and the maintainer admitted it knowingly. The gate above is about **privileged
+identity or deployment mutations**; this route carries neither. It keeps rows the operator's own
+website sends (visits, messages, a newsletter list) so that no outside party stores them, and
+nothing that decides who may act reads one. The token does live in a third-party cloud, so the
+residual risk is stated rather than waved off: a leak exposes and can pollute those rows, which hold
+visitor addresses and subscriber emails. It reaches no blocklist, no grant, no session and no
+campaign. Rotate `SITE_RECORDS_TOKEN` on suspicion; putting an edge broker in front (option C)
+remains open and needs no code change. Contract: [`../architecture.md`](../architecture.md)
+§ Site records.
 
 ### Confirmation
 

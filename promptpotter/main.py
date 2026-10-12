@@ -38,6 +38,7 @@ from promptpotter.presentation.api.routers.campaigns import campaigns_router
 from promptpotter.presentation.api.routers.commands import commands_router
 from promptpotter.presentation.api.routers.datasets import datasets_router
 from promptpotter.presentation.api.routers.origins import origins_router
+from promptpotter.presentation.api.routers.site_records import site_records_router
 from promptpotter.presentation.terminal.server_banner import render_server_banner
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import PotterError
@@ -217,6 +218,7 @@ app.include_router(datasets_router, prefix="/api/v1")
 app.include_router(origins_router, prefix="/api/v1")
 app.include_router(commands_router, prefix="/api/v1")
 app.include_router(auth_router, prefix="/api/v1")
+app.include_router(site_records_router, prefix="/api/v1")
 
 # A catch-all, so it MUST stay the last route registered: Starlette resolves in order.
 if WEBAPP_DIR.exists():

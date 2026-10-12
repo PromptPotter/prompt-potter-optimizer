@@ -607,6 +607,18 @@ Control-remote commands — the zero-trust rule that a control-plane mutation is
 the lowest-trust zone. Permanent contract:
 [`adr/0004-operator-admin-channels.md`](adr/0004-operator-admin-channels.md).
 
+#### Site records — Persistence with an ingress of its own
+
+Not a sixth kind. The operator's public website keeps its visit log, its contact messages and its
+newsletter list on this box, so no outside party stores them, and what sends them is an automation
+that holds no session. `/site-records/{table}` therefore opens to one bearer token
+(`Settings.SITE_RECORDS_TOKEN`; unset, the routes answer 404) and to nothing else, and it writes one
+append-only file per table under `site_records/`: beside `identity/`, outside every tenant. It
+carries no campaign state and no identity config, it reaches no ledger, and nothing in the loop
+reads a row. That is what separates it from the admin route
+[`adr/0004-operator-admin-channels.md`](adr/0004-operator-admin-channels.md) rejects: a leaked token
+reaches these rows and never the auth gate. Owner: `application/site_records.py`.
+
 ### Everything material lives on disk, in human-readable form
 
 The

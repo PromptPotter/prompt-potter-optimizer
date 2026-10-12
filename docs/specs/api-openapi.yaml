@@ -103,6 +103,8 @@ tags:
       Workspace-scoped dataset ingest. These endpoints mint a durable `checkin`
       campaign and mutate its server-held `DraftCampaign` before the loop runs;
       the eventual Start IS a command (`/commands/start-checkin`) declared above.
+  - name: site-records
+    description: Rows the operator's own website keeps on this box, behind one token.
   - name: cycles
     description: |
       Read-only cycle reads. `descend` is the one inner-descent mechanism across
@@ -2843,6 +2845,93 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
 
+  /site-records/{table}:
+    parameters:
+      - name: table
+        in: path
+        required: true
+        schema: { type: string, pattern: '^[a-z][a-z0-9_]{0,31}$' }
+    post:
+      operationId: postSiteRecord
+      summary: Keep one row the operator's website sent.
+      description: |
+        Not a Control-remote command: no ledger, no tenant, no session. The one
+        machine ingress (`docs/architecture.md` § Site records), open to the bearer
+        of `SITE_RECORDS_TOKEN` and absent (404) while that is unset. The row is
+        stamped with this box's time. A `key` makes it stand in for the row kept
+        under that key before it; the key rides the body because an address is logged.
+      tags: [site-records]
+      security: [{ SiteRecordsToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: 'openapi.generated.json#/components/schemas/SiteRecordBody' }
+      responses:
+        '200':
+          description: The row as kept.
+          content:
+            application/json:
+              schema: { $ref: 'openapi.generated.json#/components/schemas/SiteRecordWire' }
+        '401':
+          description: The token is missing or wrong.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '413':
+          description: The row or its key is too long.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    get:
+      operationId: getSiteRecords
+      summary: Read a table back, optionally from a time on.
+      description: |
+        One record per key where rows carry one, the newest standing; every added
+        row otherwise. `since` filters on the time this box kept the row. A table
+        nothing was kept in answers an empty list.
+      tags: [site-records]
+      security: [{ SiteRecordsToken: [] }]
+      parameters:
+        - name: since
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: The rows kept.
+          content:
+            application/json:
+              schema: { $ref: 'openapi.generated.json#/components/schemas/SiteRecordsResponse' }
+        '401':
+          description: The token is missing or wrong.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    delete:
+      operationId: deleteSiteRecords
+      summary: Retention — drop the added rows kept before a time.
+      description: |
+        A keyed row is the newest word on its subject and is never dropped by age.
+      tags: [site-records]
+      security: [{ SiteRecordsToken: [] }]
+      parameters:
+        - name: before
+          in: query
+          required: true
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: How many rows went.
+          content:
+            application/json:
+              schema: { $ref: 'openapi.generated.json#/components/schemas/SiteRecordsDropped' }
+        '401':
+          description: The token is missing or wrong.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
 components:
   parameters:
     IdempotencyKey:
@@ -4409,6 +4498,12 @@ components:
             $ref: '#/components/schemas/ErrorEnvelope'
 
   securitySchemes:
+    SiteRecordsToken:
+      type: http
+      scheme: bearer
+      description: |
+        `Settings.SITE_RECORDS_TOKEN`, sent by the operator's own automation. It
+        opens `/site-records/{table}` and nothing else, and no session opens that.
     SessionCookie:
       type: apiKey
       in: cookie

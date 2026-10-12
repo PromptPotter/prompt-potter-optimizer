@@ -79,6 +79,11 @@ class Settings(BaseSettings):
     ADMIN_BOT_CHAT_ID: str = ""
     ADMIN_BOT_PASSPHRASE: str = ""
     N8N_SIGNUP_WEBHOOK_URL: str = ""
+    N8N_TRAIL_WEBHOOK_URL: str = ""
+    N8N_TRAIL_WEBHOOK_SECRET: str = ""
+
+    # Unset: `/site-records` does not exist. Set: whoever bears it reads and writes those rows.
+    SITE_RECORDS_TOKEN: str = ""
 
     # LIFETIME total over the account's whole ledger, not per day; the box's operator is exempt.
     FREE_TIER_SPEND_CAP_USD: float = 0.30
@@ -103,7 +108,8 @@ class Settings(BaseSettings):
 
     OBS_ENABLED: bool = True
 
-    MLFLOW_ENABLED: bool = False
+    # Unset: MLflow receives nothing. Set: that server takes each round as a run and each winner as a prompt version.
+    MLFLOW_TRACKING_URI: str = ""
 
     model_config = {"env_file": env_file_path(), "case_sensitive": True, "extra": "ignore"}
 

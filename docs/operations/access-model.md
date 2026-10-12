@@ -224,6 +224,11 @@ not backend-supplied.
   wired, so the address alone would let whichever has the weaker email handling assert the declared
   one. Unset EMAIL means no browser identity ever claims the box. Inferring it would hand a
   fresh public box to whichever stranger signed in first.
+- **One route opens to a token instead of a session:** `/api/v1/site-records/{table}`, where the
+  operator's own website keeps its visit log, messages and newsletter list
+  (`deps.py::require_site_records_token`, constant-time compared). `SITE_RECORDS_TOKEN` unset, it
+  answers 404. It reads and writes `site_records/` and nothing else, outside every tenant; why that
+  is not the admin route ADR-0004 rejects is that ADR's § What the gate does not cover.
 - **Blocklist edits never have an inbound door** — delivered out-of-band by the on-box,
   outbound-only Telegram bot (`presentation/admin_bot.py`, ADR-0004). This is the zero-trust rule.
 - **Response headers** (`presentation/api/middleware/headers.py::ResponseHeadersMiddleware`, one middleware): `nosniff`, `X-Frame-Options:
@@ -357,6 +362,21 @@ Set `N8N_SIGNUP_WEBHOOK_URL` in the same env file and the app POSTs `{email, nam
 **Copy the path from the workflow's webhook node, not from its file name** — the two drift, and a `POST`-only webhook answers *"not registered"* to the browser GET you would naturally test it with, so a wrong path and a live-but-unreachable one look identical. Confirm with the receiving side's own API rather than by probing the URL.
 
 It does not contradict the one rule: the traffic is outbound-only and carries contact details, never a credential, so a breach at n8n reaches your mailing list rather than your auth gate.
+
+### What accounts did, into your morning briefing (optional)
+
+Set `N8N_TRAIL_WEBHOOK_URL` and `N8N_TRAIL_WEBHOOK_SECRET` in the **bot's** env file and the admin bot POSTs, every half hour, what every account did in the last 24 hours: `{as_of, window_hours, accounts: [{who, rows}], unreadable}`, each row one `/trail` line. The secret travels as the `X-Trail-Secret` header, so the receiver can refuse a stranger who learned the address. Each send is the whole window, so the receiver keeps only the newest and a box that was offline shows as an old `as_of`, never as a quiet day (`admin_bot.py::forward_trail_to_briefing`).
+
+A briefing that wants this section cannot ask for it: asking would be an inbound read across every tenant, which the one rule forbids. So the box tells, and the briefing prints what it was last told.
+
+### Your website's records on this box (optional)
+
+Set `SITE_RECORDS_TOKEN` in the **app's** env file to a long random string and restart the app. An
+automation that sends `Authorization: Bearer <token>` can then keep rows per table: `POST
+/api/v1/site-records/{table}` with `{row, key}` keeps one (a `key` makes it stand in for the row kept
+under that key before), `GET …?since=<time>` reads them back, and `DELETE …?before=<time>` drops the
+added rows older than a retention window while leaving keyed rows alone. The rows are files under
+`site_records/` in the data directory, so the box's backup is their only copy.
 
 ### Secret hygiene
 

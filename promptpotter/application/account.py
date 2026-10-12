@@ -7,6 +7,7 @@ the retry, which reads as the same fact twice and never as one missing.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import NamedTuple
 
@@ -19,8 +20,14 @@ from promptpotter.infrastructure.store.account_trail import (
 )
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.infrastructure.store.user_store import ConsentRecord, Torn, User, read_accounts
-from promptpotter.shared.clock import utcnow_iso
+from promptpotter.infrastructure.store.user_store import (
+    AccountDir,
+    ConsentRecord,
+    Torn,
+    User,
+    read_accounts,
+)
+from promptpotter.shared.clock import epoch_seconds, utcnow_iso
 from promptpotter.shared.identity import acting_principal_id
 
 
@@ -93,6 +100,20 @@ def tenant_trail(stores: Stores) -> Trail:
     )
 
 
+def _scanned(
+    accounts: Iterable[AccountDir], unreadable: list[str]
+) -> Iterator[tuple[AccountDir, list[TrailLine]]]:
+    """A ledger that will not scan costs its own workspace and no other: it is named, then skipped."""
+    for account in accounts:
+        try:
+            found = list(workspace_lines(CampaignStore(account.workspace)))
+        except Exception:
+            if account.workspace.name not in unreadable:
+                unreadable.append(account.workspace.name)
+            continue
+        yield account, found
+
+
 def trail_by_email(projects_root: Path, email: str) -> Trail:
     """The operator-admin read (ADR-0004) of what one PERSON did, across every workspace on the box.
 
@@ -110,14 +131,7 @@ def trail_by_email(projects_root: Path, email: str) -> Trail:
     )
     unreadable = [account.workspace.name for account in accounts if isinstance(account.user, Torn)]
     lines: list[TrailLine] = []
-    for account in accounts if own else ():
-        try:
-            found = list(workspace_lines(CampaignStore(account.workspace)))
-        except Exception:
-            # A ledger that will not scan costs its own workspace and no other.
-            if account.workspace.name not in unreadable:
-                unreadable.append(account.workspace.name)
-            continue
+    for account, found in _scanned(accounts if own else (), unreadable):
         if not isinstance(account.user, Torn) and account.user.user_id in own:
             lines += found
         else:
@@ -129,7 +143,35 @@ def trail_by_email(projects_root: Path, email: str) -> Trail:
     return Trail(own, in_time_order(lines), unreadable)
 
 
+class AccountTrail(NamedTuple):
+    # The email, else the id: an account no provider vouched an address for still acted.
+    who: str
+    trail: Trail
+
+
+def trails_since(projects_root: Path, since: float) -> tuple[list[AccountTrail], list[str]]:
+    """The operator-admin read (ADR-0004) of what EVERY account did from ``since`` (epoch) on.
+
+    One trail per workspace that has a line, whoever acted in it, then the workspaces that could
+    not be read.
+    """
+    accounts = read_accounts(projects_root)
+    unreadable = [account.workspace.name for account in accounts if isinstance(account.user, Torn)]
+    trails: list[AccountTrail] = []
+    for account, found in _scanned(accounts, unreadable):
+        recent = [line for line in found if (epoch_seconds(line.at) or 0.0) >= since]
+        if recent and not isinstance(account.user, Torn):
+            trails.append(
+                AccountTrail(
+                    account.user.email or account.user.user_id,
+                    Trail(frozenset({account.user.user_id}), in_time_order(recent), []),
+                )
+            )
+    return trails, unreadable
+
+
 __all__ = [
+    "AccountTrail",
     "Arrival",
     "Trail",
     "accept_terms",
@@ -138,4 +180,5 @@ __all__ = [
     "sign_in",
     "tenant_trail",
     "trail_by_email",
+    "trails_since",
 ]

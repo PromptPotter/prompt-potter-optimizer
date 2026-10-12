@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 import os
 from typing import Annotated
 
@@ -55,6 +56,16 @@ def build_stores_from_identity(identity: IdentityDep) -> Stores:
 StoresDep = Annotated[Stores, Depends(build_stores_from_identity)]
 
 
+def require_site_records_token(request: Request) -> None:
+    """Unset, the door does not exist. Set, it opens to the bearer of it and to no session."""
+    token = settings.SITE_RECORDS_TOKEN.strip()
+    if not token:
+        raise NotFoundError("Not found")
+    sent = request.headers.get("authorization", "")
+    if not hmac.compare_digest(sent.encode(), f"Bearer {token}".encode()):
+        raise UnauthorizedError("site-records token required")
+
+
 def get_backend_or_404(backend_id: str, stores: Stores) -> BackendConnection:
     backend = stores.backends.get(backend_id)
     if not backend:
@@ -87,5 +98,6 @@ __all__ = [
     "build_stores_from_identity",
     "decode_descend",
     "get_backend_or_404",
+    "require_site_records_token",
     "resolve_identity",
 ]

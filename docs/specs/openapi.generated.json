@@ -6992,6 +6992,7 @@
         "title": "IndividualLineage",
         "type": "object"
       },
+      "JsonValue": {},
       "JudgeReadingRecord": {
         "description": "A :class:`JudgeReading` on the wire; a key is absent where the judge said nothing.",
         "properties": {
@@ -13654,6 +13655,93 @@
         "title": "SheetRow",
         "type": "object"
       },
+      "SiteRecordBody": {
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "default": "",
+            "description": "Set, this row stands in for the one kept under the same key before it",
+            "title": "Key",
+            "type": "string"
+          },
+          "row": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "description": "What to keep, returned as sent",
+            "title": "Row",
+            "type": "object"
+          }
+        },
+        "required": [
+          "row"
+        ],
+        "title": "SiteRecordBody",
+        "type": "object"
+      },
+      "SiteRecordWire": {
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "description": "When this box kept the row, UTC",
+            "title": "At",
+            "type": "string"
+          },
+          "key": {
+            "description": "Empty on a row that is only ever added",
+            "title": "Key",
+            "type": "string"
+          },
+          "row": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "description": "The row as it was sent",
+            "title": "Row",
+            "type": "object"
+          }
+        },
+        "required": [
+          "at",
+          "key",
+          "row"
+        ],
+        "title": "SiteRecordWire",
+        "type": "object"
+      },
+      "SiteRecordsDropped": {
+        "additionalProperties": false,
+        "properties": {
+          "dropped": {
+            "description": "Rows removed",
+            "title": "Dropped",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "dropped"
+        ],
+        "title": "SiteRecordsDropped",
+        "type": "object"
+      },
+      "SiteRecordsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "records": {
+            "description": "In the order kept; one per key where rows carry one",
+            "items": {
+              "$ref": "#/components/schemas/SiteRecordWire"
+            },
+            "title": "Records",
+            "type": "array"
+          }
+        },
+        "required": [
+          "records"
+        ],
+        "title": "SiteRecordsResponse",
+        "type": "object"
+      },
       "SpawnedBy": {
         "additionalProperties": false,
         "description": "The outer work-item an L4 inner cycle was spawned to measure.",
@@ -17944,6 +18032,160 @@
         "summary": "Get Active Session",
         "tags": [
           "Sessions"
+        ]
+      }
+    },
+    "/api/v1/site-records/{table}": {
+      "delete": {
+        "description": "Retention: drop the added rows kept before ``before``. A keyed row stays.",
+        "operationId": "delete_site_records_api_v1_site_records__table__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "table",
+            "required": true,
+            "schema": {
+              "title": "Table",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "before",
+            "required": true,
+            "schema": {
+              "title": "Before",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiteRecordsDropped"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Site Records",
+        "tags": [
+          "Site records"
+        ]
+      },
+      "get": {
+        "description": "Every row kept from ``since`` on; a table nothing was kept in answers empty.",
+        "operationId": "get_site_records_api_v1_site_records__table__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "table",
+            "required": true,
+            "schema": {
+              "title": "Table",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Since",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiteRecordsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Site Records",
+        "tags": [
+          "Site records"
+        ]
+      },
+      "post": {
+        "description": "Keep one row. The key rides the body, never the address: an address is logged.",
+        "operationId": "post_site_record_api_v1_site_records__table__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "table",
+            "required": true,
+            "schema": {
+              "title": "Table",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SiteRecordBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiteRecordWire"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Site Record",
+        "tags": [
+          "Site records"
         ]
       }
     },

@@ -7,7 +7,7 @@ from typing import Any
 
 import httpx
 
-from promptpotter.application.account import trail_by_email
+from promptpotter.application.account import trail_by_email, trails_since
 from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.application.jobs.install_spend import read_install_spend
 from promptpotter.application.jobs.quota import overrun
@@ -29,6 +29,7 @@ from promptpotter.infrastructure.identity.grants import (
 from promptpotter.infrastructure.identity.migration import registered_user_id
 from promptpotter.infrastructure.identity.paths import IdentityPaths, default_identity_paths
 from promptpotter.infrastructure.tls import tls_context
+from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.identity import CAMPAIGN_CAP_BY_NAME, capabilities_from_names
 
 logger = logging.getLogger(__name__)
@@ -40,6 +41,8 @@ _USAGE = (
     "/grant <sub_user_id> <capabilities>\n/revoke <sub_user_id>\n/grants\n/spend\n/trail <email>"
 )
 _TELEGRAM_MAX_CHARS = 4096
+_TRAIL_WINDOW_H = 24
+_TRAIL_FORWARD_EVERY_S = 1800
 
 
 def parse_command(text: str, passphrase: str | None) -> tuple[str, str] | None:
@@ -258,6 +261,36 @@ def forward_new_account_to_crm(
     return True
 
 
+def forward_trail_to_briefing() -> bool:
+    """What every account did in the last day, sent OUT for the operator's briefing to print.
+
+    Sent whole each time: the receiver keeps the newest, so a missed send costs freshness only.
+    """
+    url = settings.N8N_TRAIL_WEBHOOK_URL.strip()
+    if not url:
+        return False
+    trails, unreadable = trails_since(DEFAULT_PROJECTS_ROOT, time.time() - _TRAIL_WINDOW_H * 3600)
+    try:
+        with httpx.Client(timeout=10, verify=tls_context()) as client:
+            resp = client.post(
+                url,
+                headers={"X-Trail-Secret": settings.N8N_TRAIL_WEBHOOK_SECRET.strip()},
+                json={
+                    "as_of": utcnow_iso(),
+                    "window_hours": _TRAIL_WINDOW_H,
+                    "accounts": [{"who": who, "rows": trail_rows(trail)} for who, trail in trails],
+                    "unreadable": unreadable,
+                },
+            )
+    except httpx.HTTPError:
+        logger.warning("Trail forward failed", exc_info=True)
+        return False
+    if resp.status_code != 200:
+        logger.warning("Trail forward refused: HTTP %d", resp.status_code)
+        return False
+    return True
+
+
 def _process_update(
     update: dict[str, Any], client: httpx.Client, chat_id: str, passphrase: str | None
 ) -> None:
@@ -291,7 +324,14 @@ def run_bot(token: str, chat_id: str, passphrase: str | None) -> None:
     with httpx.Client(
         base_url=base_url, timeout=_POLL_TIMEOUT_S + 10, verify=tls_context()
     ) as client:
+        forward_due = 0.0
         while True:
+            if time.monotonic() >= forward_due:
+                forward_due = time.monotonic() + _TRAIL_FORWARD_EVERY_S
+                try:
+                    forward_trail_to_briefing()
+                except Exception:
+                    logger.exception("trail forward failed; channel stays up")
             try:
                 params: dict[str, Any] = {"timeout": _POLL_TIMEOUT_S}
                 if offset is not None:

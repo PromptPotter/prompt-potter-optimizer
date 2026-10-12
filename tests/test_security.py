@@ -681,6 +681,7 @@ async def test_an_accounts_trail_holds_its_sign_in_its_consent_and_its_commands_
 ) -> None:
     import argparse
     import types
+    from typing import Any
 
     from fastapi import BackgroundTasks
 
@@ -843,6 +844,43 @@ async def test_an_accounts_trail_holds_its_sign_in_its_consent_and_its_commands_
         reply[0],
         "Could not read: torn-account",
     ], "one torn account file cost the reply for a readable one"
+
+    # The briefing is TOLD the same lines: every account at once, the last day only.
+    sent: list[Any] = []
+
+    class Wire:
+        def __init__(self, **_: object) -> None: ...
+
+        def __enter__(self) -> Wire:
+            return self
+
+        def __exit__(self, *_: object) -> None: ...
+
+        def post(self, url: str, *, headers: dict[str, str], json: dict[str, Any]) -> object:
+            sent.append((url, headers, json))
+            return types.SimpleNamespace(status_code=200)
+
+    monkeypatch.setattr(admin_bot.httpx, "Client", Wire)
+    assert not admin_bot.forward_trail_to_briefing() and not sent, "an unset webhook was sent to"
+    monkeypatch.setattr(admin_bot.settings, "N8N_TRAIL_WEBHOOK_URL", " https://n8n.example/t ")
+    monkeypatch.setattr(admin_bot.settings, "N8N_TRAIL_WEBHOOK_SECRET", "s3")
+    assert admin_bot.forward_trail_to_briefing()
+    ((url, headers, told),) = sent
+    assert (url, headers) == ("https://n8n.example/t", {"X-Trail-Secret": "s3"})
+    assert told["unreadable"] == ["torn-account"]
+    assert {
+        account["who"].lower(): [row.split(" ", 2)[2] for row in account["rows"]]
+        for account in told["accounts"]
+    } == {
+        "ada@x.com": [
+            "account_created",
+            "signed_in google",
+            f"terms_accepted {TERMS_VERSION}",
+            "signed_in google by bob-id",
+            "mint-campaign by ",
+        ],
+        "bob@x.com": ["account_created"],
+    }, "the briefing was told a day other than the last one, or an account's lines under another"
     (torn / "user.json").unlink()
 
     monkeypatch.setattr(admin_bot, "_TELEGRAM_MAX_CHARS", len("\n".join(reply)) - 1)
@@ -862,6 +900,69 @@ async def test_an_accounts_trail_holds_its_sign_in_its_consent_and_its_commands_
     )
     assert "set-cookie" not in refused.headers
     assert sorted(paths.sessions_dir.iterdir()) == open_sessions, "a refused sign-in left a session"
+
+
+def test_site_records_open_to_the_token_alone_and_retention_spares_a_keyed_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from starlette.testclient import TestClient
+
+    from promptpotter.application import site_records
+    from promptpotter.config.settings import settings
+    from promptpotter.infrastructure.store.site_records import SiteRecordStore
+    from promptpotter.main import app
+
+    store = SiteRecordStore(tmp_path / "site_records")
+    monkeypatch.setattr(site_records, "default_site_record_store", lambda: store)
+    client = TestClient(app)
+    door = "/api/v1/site-records/"
+    bearer = {"Authorization": "Bearer t0ken"}
+
+    assert client.get(door + "visits", headers=bearer).status_code == 404, (
+        "the door stood open on a box that set no token"
+    )
+    monkeypatch.setattr(settings, "SITE_RECORDS_TOKEN", "t0ken")
+    for stranger in ({}, {"Authorization": "Bearer t0ke"}, {"Authorization": "t0ken"}):
+        assert client.get(door + "visits", headers=stranger).status_code == 401
+        assert client.post(door + "visits", headers=stranger, json={"row": {}}).status_code == 401
+    assert not (tmp_path / "site_records").exists(), "a stranger's row was kept"
+
+    monkeypatch.setattr(site_records, "utcnow_iso", lambda: "2000-01-01T00:00:00Z")
+    for body in (
+        {"row": {"path": "/"}},
+        {"row": {"state": "pending"}, "key": "ada@x.com"},
+        {"row": {"state": "confirmed"}, "key": "ada@x.com"},
+    ):
+        assert client.post(door + "mixed", headers=bearer, json=body).status_code == 200
+    monkeypatch.undo()
+    monkeypatch.setattr(site_records, "default_site_record_store", lambda: store)
+    monkeypatch.setattr(settings, "SITE_RECORDS_TOKEN", "t0ken")
+    assert (
+        client.post(door + "mixed", headers=bearer, json={"row": {"path": "/new"}}).json()["at"]
+        > "2020"
+    ), "the row was stamped with a time other than this box's"
+
+    def rows(since: str = "") -> list[object]:
+        answer = client.get(
+            door + "mixed", headers=bearer, params={"since": since} if since else {}
+        )
+        return [record["row"] for record in answer.json()["records"]]
+
+    assert rows() == [{"path": "/"}, {"state": "confirmed"}, {"path": "/new"}], (
+        "a keyed row read back twice, or the row it replaced outlived it"
+    )
+    assert rows("2020-01-01T00:00:00Z") == [{"path": "/new"}]
+    dropped = client.delete(
+        door + "mixed", headers=bearer, params={"before": "2020-01-01T00:00:00Z"}
+    )
+    assert dropped.json() == {"dropped": 1}
+    assert rows() == [{"state": "confirmed"}, {"path": "/new"}], (
+        "retention took a keyed row: a subscriber who changed nothing for the window was forgotten"
+    )
+    assert client.get(door + "../identity", headers=bearer).status_code == 404
+    assert client.get(door + "Not-A-Table", headers=bearer).status_code == 404, (
+        "a table name reached the filesystem unchecked"
+    )
 
 
 # 3. Unattended deletes
