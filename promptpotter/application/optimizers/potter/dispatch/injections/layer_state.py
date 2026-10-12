@@ -13,6 +13,7 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
 from promptpotter.application.optimizers.potter.dispatch.layout import (
     L1_LAYOUT_SLOTS,
     NODE_LAYOUTS,
+    VOLATILE_SLOT,
     resolve_node_layout,
 )
 from promptpotter.application.optimizers.potter.dispatch.prompts import (
@@ -146,11 +147,13 @@ def _r_l1_layout(b: InjectionBundle) -> list[Item]:
     ]
     offered = NODE_LAYOUTS["l1_generate"].possible - b.silent_l1_panels
     if unplaced := sorted(offered - set(layout.all_placeholders())):
-        lines.append(f"  in no slot, available to place: {', '.join(unplaced)}")
+        # The whole edit, ready to copy: a slot left to choose comes back as the axis under repair.
+        lines.append("  in no slot; to place one, answer its line as written:")
+        lines += [f'  "{panel}": "{VOLATILE_SLOT}"' for panel in unplaced]
     return [
         Item(
-            "CURRENT L1 LAYOUT — each panel l1_generate reads today, and the slot it fills:\n"
-            + "\n".join(lines)
+            "CURRENT L1 LAYOUT — each panel l1_generate reads today, and the slot of ITS OWN "
+            "prompt it fills:\n" + "\n".join(lines)
         )
     ]
 
@@ -176,7 +179,7 @@ def _r_task_context(b: InjectionBundle) -> list[Item]:
 @signal(
     "critique",
     kind=InjectionKind.TRACE,
-    # The distiller's whole output quota: failure_highlights <=3x320c + priority_fix 320c + axes.
+    # Above the distiller's whole quota: 3 clusters (label 60c, `CLUSTER_IDS_SHOWN` ids, claim 240c) + priority_fix 320c + axes.
     char_cap=2000,
     citable=True,
 )

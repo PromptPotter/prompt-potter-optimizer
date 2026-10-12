@@ -12,18 +12,24 @@ from promptpotter.application.optimizers.potter.dispatch.facade import (
     DispatchHub,
     build_bundle,
 )
+from promptpotter.application.optimizers.potter.dispatch.injections.panels import (
+    clustered_sample_ids,
+)
 from promptpotter.application.optimizers.potter.dispatch.prompts import (
     load_optimizer_prompt,
 )
-from promptpotter.application.optimizers.potter.dispatch.schemas import L1CritiqueOutput
+from promptpotter.application.optimizers.potter.dispatch.schemas import (
+    CLUSTER_ROWS_MIN,
+    L1CritiqueOutput,
+)
 from promptpotter.application.optimizers.potter.records import PotterRoundState
-from promptpotter.domain.optimizer_state import CritiqueReadout
+from promptpotter.domain.optimizer_state import CritiqueReadout, FailureClusterReadout
 from promptpotter.domain.phases import StopLoop, StopReason
 from promptpotter.infrastructure.llm.telemetry import emit_round_warning
 from promptpotter.shared.errors import SendRefusedError
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterable, Sequence
 
     from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.optimizers.potter.state import PotterState
@@ -35,6 +41,7 @@ __all__ = [
     "critique_owed",
     "ensure_prior_critique",
     "run_l1_critique",
+    "spanning_clusters",
 ]
 
 
@@ -95,11 +102,28 @@ async def ensure_prior_critique(ctx: NodeContext[Any], state: PotterState) -> No
     logger.info("Round %d critique distilled late; this round's generator reads it.", prior.round)
 
 
+def spanning_clusters(
+    clusters: Iterable[FailureClusterReadout], rows: Iterable[int]
+) -> tuple[list[FailureClusterReadout], list[FailureClusterReadout]]:
+    """The seam the wire cannot hold (``strict: False``): kept on the marked rows it names, ``CLUSTER_ROWS_MIN`` at least."""
+    marked = set(rows)
+    kept: list[FailureClusterReadout] = []
+    dropped: list[FailureClusterReadout] = []
+    for cluster in clusters:
+        ids = sorted({i for i in cluster["sample_ids"] if i in marked})
+        if len(ids) >= CLUSTER_ROWS_MIN:
+            kept.append({**cluster, "sample_ids": ids})
+        else:
+            dropped.append(cluster)
+    return kept, dropped
+
+
 async def run_l1_critique(ctx: NodeContext[Any], state: PotterState) -> CritiqueReadout:
     """Materialized to a dict so persistence does not drag Pydantic into the domain serialization path."""
     session = state.session
     bundle = build_bundle(ctx, state)
     filled = DispatchHub.fill(load_optimizer_prompt("l1_critique"), bundle, node="l1_critique")
+    round_num = ctx.rounds[-1].round
 
     result, _prompt, _repairs = await run_optimizer_node(
         template_name="l1_critique",
@@ -108,7 +132,7 @@ async def run_l1_critique(ctx: NodeContext[Any], state: PotterState) -> Critique
         response_model=L1CritiqueOutput,
         context=LLMCallContext(
             ledger=session.state.ledger,
-            round_num=ctx.rounds[-1].round,
+            round_num=round_num,
             cache=session.store.optimizer_reuse,
             injections=filled.breakdown,
         ),
@@ -116,4 +140,23 @@ async def run_l1_critique(ctx: NodeContext[Any], state: PotterState) -> Critique
     assert isinstance(result, L1CritiqueOutput), (
         f"l1_critique must return L1CritiqueOutput, got {type(result).__name__}"
     )
-    return cast(CritiqueReadout, result.model_dump())
+    critique = cast(CritiqueReadout, result.model_dump())
+    kept, dropped = spanning_clusters(critique["failure_highlights"], clustered_sample_ids(bundle))
+    if dropped:
+        emit_round_warning(
+            kind="critique_cluster_dropped",
+            message=(
+                f"round {round_num} critique: {len(dropped)} of {len(kept) + len(dropped)} "
+                f"clusters span fewer than {CLUSTER_ROWS_MIN} rows the panels marked — dropped; "
+                f"the generator targets the {len(kept)} that do"
+            ),
+            detail={
+                "round": round_num,
+                "kept": len(kept),
+                "dropped": [
+                    {"mechanism": c["mechanism"], "sample_ids": c["sample_ids"]} for c in dropped
+                ],
+            },
+        )
+    critique["failure_highlights"] = kept
+    return critique

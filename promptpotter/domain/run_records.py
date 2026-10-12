@@ -605,6 +605,8 @@ RoundWarningKind = Literal[
     "layer_terminate_blank",
     # `l1_generate` ran with its MANDATORY critique panel empty.
     "l1_critique_unavailable",
+    # A critique cluster spanning fewer marked rows than a cluster is: dropped before the generator reads it.
+    "critique_cluster_dropped",
     # Nothing failed: the round promoted an arm the origin panel does not back (`runner/round.py`).
     "round_not_advanced",
 ]

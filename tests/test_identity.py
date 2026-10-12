@@ -741,6 +741,23 @@ def test_emittable_params_are_declared_and_an_invented_one_is_rejected(tmp_path:
     assert [f.reason for f in found] == ["unknown_param"]
 
 
+def test_a_cluster_spans_two_marked_rows_or_the_generator_never_reads_it() -> None:
+    from promptpotter.application.optimizers.potter.l1.critique import spanning_clusters
+
+    # `minItems` is advisory on a `strict: False` wire, so the seam decides: a repeated or unmarked id spans nothing.
+    cluster = {"mechanism": "m", "claim": "c"}
+    kept, dropped = spanning_clusters(
+        [
+            {**cluster, "sample_ids": [9, 3, 9]},
+            {**cluster, "sample_ids": [7, 7]},
+            {**cluster, "sample_ids": [3, 42]},
+        ],
+        [3, 7, 9],
+    )
+    assert [c["sample_ids"] for c in kept] == [[3, 9]]
+    assert [c["sample_ids"] for c in dropped] == [[7, 7], [3, 42]]
+
+
 # 3. Contamination of a scored prompt
 
 
@@ -923,7 +940,7 @@ def test_no_held_out_row_reaches_a_round_panel_or_an_archive_view() -> None:
         partition_bank([*bank, bank[0].model_copy(update={"id": 60, "bench_only": True})], split)
 
     contaminating = [Observation("bench_arm", sid, 0.0) for sid in held]
-    panel = select_round_subset(list(part.search), contaminating, 20)
+    panel = select_round_subset(list(part.search), contaminating, 20, worth={})
     assert held.isdisjoint(s.id for s in panel)
 
     index = SampleIndex(sample_ids=part.admitted_ids)

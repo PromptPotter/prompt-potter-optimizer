@@ -15,6 +15,7 @@ __all__ = [
     "PARSE_FAILURE_TOOLING",
     "PARSE_FAILURE_WRONG_TYPE",
     "CritiqueReadout",
+    "FailureClusterReadout",
     "OptimizerState",
     "RoundPayload",
     "UnregisteredPayloadError",
@@ -31,12 +32,18 @@ PARSE_FAILURE_CHARGED: frozenset[str] = frozenset(
 )
 
 
+class FailureClusterReadout(TypedDict):
+    sample_ids: list[int]
+    mechanism: str
+    claim: str
+
+
 class CritiqueReadout(TypedDict, total=False):
     """A domain-local mirror, so a round file round-trips without the optimizer's schema in scope."""
 
     priority_fix: str
     suggested_axes: list[str]
-    failure_highlights: list[str]
+    failure_highlights: list[FailureClusterReadout]
 
 
 class RoundPayload(StrictModel):

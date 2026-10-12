@@ -201,8 +201,8 @@ def build_l1_response_schema(
     required = variant_items.setdefault("required", [])
     if "evidence_grounding" not in required:
         required.insert(0, "evidence_grounding")
-    if "targets_cluster" not in required:
-        required.append("targets_cluster")
+    if "targets_rows" not in required:
+        required.append("targets_rows")
 
     # Rename LAST: every key above is addressed by its real field name.
     field_names = effective_l1_field_names()

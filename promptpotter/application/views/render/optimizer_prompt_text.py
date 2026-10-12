@@ -10,6 +10,9 @@ if TYPE_CHECKING:
 
 shapes_optimizer_prompt(__name__)
 
+# What bounds the critique panel: a cluster's size is its count, and a target needs only two of its rows.
+CLUSTER_IDS_SHOWN = 12
+
 
 def fmt_pct(x: float | None, spec: str = "{:.1%}") -> str:
     return "—" if x is None else spec.format(x)
@@ -51,9 +54,15 @@ def format_l1_critique_for_prompt(
     if sa:
         parts.append(f"Axes: {', '.join(sa)}")
     if fh := critique.get("failure_highlights"):
-        parts.append("Failures:")
-        for h in fh[:3]:
-            parts.append(f"  {h}")
+        parts.append(
+            "Clusters (target ONE by its rows; the edit must hold for every row it spans):"
+        )
+        for c in fh[:3]:
+            ids = c["sample_ids"]
+            # The panels' own mark, so a row this panel names is a row the generator may target.
+            shown = " ".join(f"[#{i}]" for i in ids[:CLUSTER_IDS_SHOWN])
+            more = f" +{len(ids) - CLUSTER_IDS_SHOWN}" if len(ids) > CLUSTER_IDS_SHOWN else ""
+            parts.append(f"  {c['mechanism']} ({len(ids)} rows: {shown}{more}) — {c['claim']}")
     if not parts:
         return ""
     # `critique` is in the citation enum, and a variant grounding on it cites this heading.

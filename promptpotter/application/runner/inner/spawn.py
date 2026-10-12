@@ -128,9 +128,11 @@ def _lift_shape(result: CycleResult) -> str:
 @shapes_optimizer_prompt
 def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
     """Authored under ``TRANSCRIPT_REASONING_CAP``, so the outer transcripts render never clips it."""
+    # Two cells of a pool share a dataset and a seed, so the model is what tells them apart.
+    env = f"{spec.inner_dataset} on {spec.inner_model}" if spec.inner_model else spec.inner_dataset
     if (floor := floor_reason(result)) is not None:
         return (
-            f"INNER {spec.inner_dataset} seed-{spec.seed}: {floor} — scored at the floor "
+            f"INNER {env} seed-{spec.seed}: {floor} — scored at the floor "
             f"(optimizer-prompt-owned); stop={result.stop_reason}."
         )
     assert result.origin_level is not None
@@ -140,7 +142,7 @@ def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
     series = parent_level_series(result)
     mean = sum(series) / len(series)
     lines = [
-        f"INNER {spec.inner_dataset} seed-{spec.seed}: origin {origin:+.2f}"
+        f"INNER {env} seed-{spec.seed}: origin {origin:+.2f}"
         f" -> mean-over-rounds D{mean - origin:+.3f} (the scored lift)"
         f", ended {levels[-1]:+.2f} (D{levels[-1] - origin:+.3f}), peak {max(levels):+.2f}"
         f" over {result.n_rounds_after_origin} of {len(series)} rounds; stop={result.stop_reason}.",
@@ -150,11 +152,10 @@ def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
     critiques = {r: rnd.optimizer_state.payload.feedback() for r, rnd in by_round.items()}
     highlight = next(
         (
-            h
+            f"{cluster['mechanism']}: {cluster['claim']}"
             for r in sorted(by_round)
             if (c := critiques.get(r))
-            for h in c.get("failure_highlights") or []
-            if h.strip()
+            for cluster in c.get("failure_highlights") or []
         ),
         None,
     )

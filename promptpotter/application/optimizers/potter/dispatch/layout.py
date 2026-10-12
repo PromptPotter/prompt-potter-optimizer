@@ -132,7 +132,7 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
     ),
     # Both raw sources sit on the floor: each renders only at the recursion level it means something.
     "l1_critique": NodeLayoutSpec(
-        # A transcript is indivisible, so this alone decides how many fit; two, beside the frame.
+        # Every miss is admitted ahead of this, so it decides only how many transcripts fit beside them.
         discretionary_chars=7_500,
         possible=frozenset(
             {
@@ -154,7 +154,8 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
                 "origin_strengths",
             }
         ),
-        mandatory=frozenset({"diagnostics"}),
+        # The matched pair a cluster's rows come from, one silent where the other fires: a marked row always renders.
+        mandatory=frozenset({"diagnostics", "failing_samples", "inner_narratives"}),
         floor=L1Layout(
             problem_description=[
                 "measurand",

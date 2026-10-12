@@ -159,6 +159,11 @@ def long_path(p: Path) -> str:
 
 
 _MARKER = re.compile(r"Variant ([\w.]+):")
+_ROW_MARK = re.compile(r"\[#(\d+)\]")
+
+
+def _marks(text: str) -> list[int]:
+    return list(dict.fromkeys(int(m) for m in _ROW_MARK.findall(text)))
 
 
 def _variant(tag: str, rng: random.Random) -> str:
@@ -301,9 +306,15 @@ class FakeLLM:
                 for i in range(item.get("minItems") or item["maxItems"])
             ]
         elif node.startswith("L1Critique"):
+            # Read off the prompt as a model would: the rows a cluster may span are the `[#id]` marks.
+            ids = _marks(prompt)
             obj["failure_highlights"] = [
-                f"critique {idx}: sample chain broke at a negation; predicted vs GT differ",
-                f"critique {idx}: quantifier scope misread in a conditional premise",
+                {
+                    "sample_ids": ids[k : k + 2],
+                    "mechanism": f"negation tracking {idx}.{k}",
+                    "claim": f"critique {idx}: the chain breaks at a negation; said and truth differ",
+                }
+                for k in range(0, min(len(ids), 4), 2)
             ]
             obj["priority_fix"] = f"instruction: track every negation explicitly (critique {idx})"
             obj["suggested_axes"] = ["instruction", "thinking_style"]
@@ -335,7 +346,11 @@ class FakeLLM:
         v["prompt_fields_updates"] = {
             "instruction": _variant(f"g{idx}v{i}", random.Random(f"l1:{idx}:{i}"))
         }
-        v["targets_cluster"] = f"cluster-{idx}-{i}"
+        # As a model would: one cluster line of the CRITIQUE panel, else the first rows any panel marks.
+        clusters = [
+            ids for line in prompt.splitlines() if " rows: " in line and (ids := _marks(line))
+        ]
+        v["targets_rows"] = (clusters[i % len(clusters)] if clusters else _marks(prompt))[:2]
         v["changes_description"] = f"Rewrite the instruction (generation {idx}, variant {i})."
         return v
 

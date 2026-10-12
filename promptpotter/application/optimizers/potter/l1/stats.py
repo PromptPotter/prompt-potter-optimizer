@@ -15,7 +15,7 @@ from promptpotter.application.optimizers.potter.validators.l2_behavior import ru
 from promptpotter.application.views.render.optimizer_prompt_text import (
     format_l1_critique_for_prompt,
 )
-from promptpotter.domain.optimizer_state import PARSE_FAILURE_CHARGED
+from promptpotter.domain.optimizer_state import PARSE_FAILURE_CHARGED, CritiqueReadout
 from promptpotter.domain.results import OptimizerFact, RoundResult, rounds_without_advance
 from promptpotter.domain.round_audit import RoundAudit
 from promptpotter.domain.wounds import COLLAPSE_WORDS
@@ -127,13 +127,20 @@ def _behavior_per_round(
     l1_out: list[list[CheckResult]] = []
     l2_out: list[list[CheckResult]] = []
     prior_audits: list[RoundAudit] = []
+    # A round's generator reads the critique of the round BEFORE it.
+    read_critique: CritiqueReadout | None = None
     for round_data, audit in zip(rounds, audits, strict=True):
+        payload = round_data.optimizer_state.payload_as(PotterRoundState)
+        clusters = tuple(
+            frozenset(c["sample_ids"]) for c in (read_critique or {}).get("failure_highlights", [])
+        )
+        read_critique = payload.critique
         if audit is None:
             l1_out.append([])
             l2_out.append([])
             continue
-        payload = round_data.optimizer_state.payload_as(PotterRoundState)
         ctx = ValidatorContext(
+            clusters=clusters,
             prior_rounds=list(prior_audits),
             citable=None if payload.l1_citable is None else tuple(payload.l1_citable),
             context_object=context_object,

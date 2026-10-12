@@ -42,7 +42,7 @@ def _truncate(max_len: int) -> Callable[[Any], Any]:
 
 VARIANT_PROSE_MAX = 320
 
-CITATION_MAX = 120
+CITATION_MAX = 160
 
 
 def _drop_blank_values(value: object) -> object:
@@ -62,7 +62,14 @@ def _truncate_marked(max_len: int) -> Callable[[Any], Any]:
     return _v
 
 
+CLUSTER_MECHANISM_MAX = 60
+CLUSTER_CLAIM_MAX = 240
+# A cluster is a MECHANISM, and one row shows no mechanism: the next generator rewrites around that row.
+CLUSTER_ROWS_MIN = 2
+
 __all__ = [
+    "CLUSTER_ROWS_MIN",
+    "FailureCluster",
     "L1CritiqueOutput",
     "L1GenerateOutput",
     "L1Variant",
@@ -87,24 +94,27 @@ class L1Variant(OptimizerResponseModel):
 
     # Field order is GENERATION order; optional at the PARSE boundary only, REQUIRED on the wire (`l1_wire_schema.py`).
     evidence_grounding: VariantEvidenceGrounding | None = None
-    targets_cluster: str = ""
+    # Rows, never a label: a name is coined freely on a `strict: False` wire, an id is checked against the prompt.
+    targets_rows: list[int] = Field(
+        default_factory=list,
+        json_schema_extra={"minItems": CLUSTER_ROWS_MIN},
+        description=(
+            "The rows this edit must hold for, by their `[#id]` marks — at least two, and all "
+            "inside ONE critique cluster where the CRITIQUE panel lists clusters."
+        ),
+    )
     pipeline_overlay: dict[str, dict[str, Any]] = Field(
         default_factory=dict,
         description=(
-            "Nested {node: {param: value}} — scalar backend tunables, and "
-            '"output_schema_descriptions.<path>": prose, which rewrites the `description` of that '
-            "field of the node's output schema. Each is a param under ITS NODE like any other, "
-            "NEVER a top-level key beside the nodes. Paths are FIXED: you describe a field, never "
-            "rename or invent one. Scalar params (temperature, tokens, effort) are a last resort: "
-            "at most one, and only where a panel or a runtime failure points there."
+            "Nested {node: {param: value}} — scalar backend tunables and "
+            "`output_schema_descriptions.<path>` prose, each a param under ITS NODE, NEVER a "
+            "top-level key beside the nodes. Scalar params (temperature, tokens, effort) are a "
+            "last resort: at most one, and only where a panel or a runtime failure points there."
         ),
     )
     prompt_fields_updates: Annotated[dict[str, str], BeforeValidator(_drop_blank_values)] = Field(
         default_factory=dict,
-        description=(
-            "Top-level prompt-template fields; the open ones are grafted from the "
-            "active PipelineSchema at runtime."
-        ),
+        description="Top-level prompt-template fields: {field: new full text}.",
     )
     shot_ids: list[int] | None = Field(
         None,
@@ -185,15 +195,35 @@ def _renamed_variant(items: tuple[tuple[str, str], ...]) -> type[L1Variant]:
     return create_model("L1Variant", __base__=L1Variant, **overrides)
 
 
+class FailureCluster(OptimizerResponseModel):
+    # GENERATION order: the ids commit the cluster to rows before the prose can name one. `minItems`
+    # is advisory on a `strict: False` wire; `l1/critique.py::spanning_clusters` is what decides.
+    sample_ids: list[int] = Field(
+        json_schema_extra={"minItems": CLUSTER_ROWS_MIN},
+        description=(
+            "The rows this cluster spans, by the `[#id]` marks in the panels — at least two. "
+            "Two rows that fail for different reasons are two clusters, never one."
+        ),
+    )
+    mechanism: Annotated[str, BeforeValidator(_truncate_marked(CLUSTER_MECHANISM_MAX))] = Field(
+        max_length=CLUSTER_MECHANISM_MAX,
+        description=("The ONE root cause, as a short label naming the cognitive move that fails."),
+    )
+    claim: Annotated[str, BeforeValidator(_truncate_marked(CLUSTER_CLAIM_MAX))] = Field(
+        max_length=CLUSTER_CLAIM_MAX,
+        description=(
+            "WHY these rows land wrong, in your own words: the step that breaks and what was "
+            "said against the truth. General over the cluster, never one row's procedure."
+        ),
+    )
+
+
 class L1CritiqueOutput(OptimizerResponseModel):
-    # FIRST on purpose: the tail truncates first, and these quotes are the costliest drop.
-    failure_highlights: Annotated[list[str], BeforeValidator(_truncate(3))] = Field(
+    # FIRST on purpose: the tail truncates first, and the clusters are what the generator targets.
+    failure_highlights: Annotated[list[FailureCluster], BeforeValidator(_truncate(3))] = Field(
         default_factory=list,
         max_length=3,
-        description=(
-            "One diagnosis per DISTINCT failure cluster, ≤3 — claim, broken reasoning step, "
-            "predicted vs GT. Each item ≤320 chars (downstream truncates)."
-        ),
+        description="One per DISTINCT failure cluster, ≤3, largest first.",
     )
     priority_fix: Annotated[str, BeforeValidator(_truncate_marked(320))] = Field(
         default="",

@@ -22,17 +22,21 @@
                 ],
                 "default": null
               },
-              "targets_cluster": {
-                "default": "",
-                "title": "Targets Cluster",
-                "type": "string"
+              "targets_rows": {
+                "description": "The rows this edit must hold for, by their `[#id]` marks — at least two, and all inside ONE critique cluster where the CRITIQUE panel lists clusters.",
+                "items": {
+                  "type": "integer"
+                },
+                "minItems": 2,
+                "title": "Targets Rows",
+                "type": "array"
               },
               "pipeline_overlay": {
                 "additionalProperties": {
                   "additionalProperties": true,
                   "type": "object"
                 },
-                "description": "Nested {node: {param: value}} — scalar backend tunables, and \"output_schema_descriptions.<path>\": prose, which rewrites the `description` of that field of the node's output schema. Each is a param under ITS NODE like any other, NEVER a top-level key beside the nodes. Paths are FIXED: you describe a field, never rename or invent one. Scalar params (temperature, tokens, effort) are a last resort: at most one, and only where a panel or a runtime failure points there.",
+                "description": "Nested {node: {param: value}} — scalar backend tunables and `output_schema_descriptions.<path>` prose, each a param under ITS NODE, NEVER a top-level key beside the nodes. Scalar params (temperature, tokens, effort) are a last resort: at most one, and only where a panel or a runtime failure points there.",
                 "title": "Pipeline Overlay",
                 "type": "object"
               },
@@ -40,7 +44,7 @@
                 "additionalProperties": {
                   "type": "string"
                 },
-                "description": "Top-level prompt-template fields; the open ones are grafted from the active PipelineSchema at runtime.",
+                "description": "Top-level prompt-template fields: {field: new full text}.",
                 "title": "Prompt Fields Updates",
                 "type": "object"
               },
@@ -81,7 +85,7 @@
                 "type": "string"
               },
               "citation": {
-                "maxLength": 120,
+                "maxLength": 160,
                 "title": "Citation",
                 "type": "string"
               }
@@ -122,12 +126,47 @@
       "name": "l1_critique",
       "strict": false,
       "schema": {
+        "$defs": {
+          "FailureCluster": {
+            "additionalProperties": false,
+            "properties": {
+              "sample_ids": {
+                "description": "The rows this cluster spans, by the `[#id]` marks in the panels — at least two. Two rows that fail for different reasons are two clusters, never one.",
+                "items": {
+                  "type": "integer"
+                },
+                "minItems": 2,
+                "title": "Sample Ids",
+                "type": "array"
+              },
+              "mechanism": {
+                "description": "The ONE root cause, as a short label naming the cognitive move that fails.",
+                "maxLength": 60,
+                "title": "Mechanism",
+                "type": "string"
+              },
+              "claim": {
+                "description": "WHY these rows land wrong, in your own words: the step that breaks and what was said against the truth. General over the cluster, never one row's procedure.",
+                "maxLength": 240,
+                "title": "Claim",
+                "type": "string"
+              }
+            },
+            "required": [
+              "sample_ids",
+              "mechanism",
+              "claim"
+            ],
+            "title": "FailureCluster",
+            "type": "object"
+          }
+        },
         "additionalProperties": false,
         "properties": {
           "failure_highlights": {
-            "description": "One diagnosis per DISTINCT failure cluster, ≤3 — claim, broken reasoning step, predicted vs GT. Each item ≤320 chars (downstream truncates).",
+            "description": "One per DISTINCT failure cluster, ≤3, largest first.",
             "items": {
-              "type": "string"
+              "$ref": "#/$defs/FailureCluster"
             },
             "maxItems": 3,
             "title": "Failure Highlights",
@@ -223,7 +262,7 @@
               ],
               "type": "string"
             },
-            "description": "Which prompt slot each evidence panel fills. Name a panel to MOVE it to that slot; a panel you omit stays where it is, and a panel is only ever in one place. Keyed by PANEL, one slot string each, as the CURRENT L1 LAYOUT listing is: {\"critique\": \"thinking_style\", \"failing_samples\": \"thinking_style\"} moves two panels into one slot. Slot order within the prompt is the floor's and does not move — what you choose is which slot a panel speaks from.",
+            "description": "Where in the READING node's own prompt each evidence panel is rendered. A slot is a position in that prompt, never the target-prompt field the evidence is about: the reader gets every placed panel whichever slot holds it. Name a panel to MOVE it to that slot; one you omit stays where it is, and a panel is only ever in one place. Keyed by PANEL, one slot string each.",
             "propertyNames": {
               "enum": [
                 "answer_distribution",

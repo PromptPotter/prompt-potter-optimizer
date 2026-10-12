@@ -170,8 +170,14 @@ resolved_prompts:
       THINK FIRST — diverge, then converge. Before writing any variant, name {{n_variants}} distinct
       MECHANISMS for why the parent fails, then develop each one a panel supports. A round's chance of a
       lift climbs steeply with the number of distinct mechanisms tested, so stopping at one or two
-      forfeits most of the round. Where the critique names fewer clusters than you have slots, take the
-      rest from another panel and cite that panel — never invent a cluster to fill a slot.
+      forfeits most of the round. Where the critique names fewer clusters than you have slots, spend
+      the spare slot on a SECOND mechanism for the largest cluster — targets_rows names rows a panel
+      marks, so a slot never invents a failure.
+
+      AN EDIT HOLDS FOR THE WHOLE CLUSTER. The cluster you target spans every row it lists, and the
+      change you write must help each of them: a procedure for one row's problem, a worked answer to
+      one query, or one row's vocabulary pasted into the instruction is a per-row patch the other rows
+      never meet — and the scorer measures them all.
 
       SPREAD ACROSS MECHANISM AXES, NOT ACROSS FIELDS. Two edits to different fields that make the same
       cognitive change are ONE hypothesis, and are scored as one. The axes:
@@ -182,11 +188,11 @@ resolved_prompts:
         - RECOMBINATION — take a mechanism that MEASURABLY worked, on another cluster or in an earlier
           round, and apply it where it has not been tried. Cite the panel that measured it.
 
-      VARIANT 1 IS THE METHOD REWRITE while the parent misses over a third of its samples. It replaces
-      instruction, thinking_style and task_intent TOGETHER, as one procedure in one voice and one
-      hypothesis: how to read each construct the SAMPLE TRANSCRIPTS show misread, the test that decides
-      the answer, and two or three short worked inferences of the move those traces miss. The other
-      variants stay one mechanism each.
+      VARIANT 1 IS THE METHOD REWRITE while the parent misses over a third of its samples. It targets
+      the largest cluster and replaces instruction, thinking_style and task_intent TOGETHER, as one
+      procedure in one voice and one hypothesis: how to read each construct the SAMPLE TRANSCRIPTS show
+      misread, the test that decides the answer, and two or three short worked inferences of the move
+      those traces miss. The other variants stay one mechanism each.
 
       TEMPERAMENT — read escalation_panel.exploration_budget and mutation_memory. If mutation_memory
       shows a recent addition scored at or BELOW its parent, cut it rather than piling on. At wide (a
@@ -205,8 +211,8 @@ resolved_prompts:
     thinking_style: ''
     answer_format: |-
       Return JSON: {"variants": [...]}. Each variant, IN THIS ORDER:
-        - "evidence_grounding": {field, citation}. citation is the shortest verbatim span that pins the cited entry, <=120c.
-        - "targets_cluster": the ONE failure this variant attacks — the critique's cluster label verbatim where one fits, else your own short name for a failure the panel you cite actually shows. Only the METHOD REWRITE may share its target, with ONE other variant.
+        - "evidence_grounding": {field, citation}. citation is the shortest verbatim span that pins the cited entry, <=160c.
+        - "targets_rows": the rows this variant's edit must hold for, as `[#id]` ids — at least 2, all from ONE cluster of the CRITIQUE panel where it lists clusters, else rows of one panel that fail the same way. Two variants share a cluster only as two DIFFERENT mechanisms for it.
         - The delta slots, carrying ONLY what changes: omit a field you keep, since an empty string or the current text is no edit.
           * "pipeline_overlay": nested {node: {param: value}}, as its schema description states.
           * "prompt_fields_updates": flat {field: new full text}, over the prompt fields its schema offers.
@@ -231,38 +237,31 @@ resolved_prompts:
       reasoning").
 
 
-      failure_highlights: ONE ENTRY PER CLUSTER YOU NAME — a DIFFERENT root cause each, largest first,
-      up to 3. The next L1 gives each candidate a different entry, so a single entry spends its whole
-      round on one idea: every group FAILING SAMPLES shows failing for its own reason is its own entry,
-      and only misses that truly share one root are one. Label each with the MECHANISM and its share of
-      the misses ("Coordinate geometry (4 of 9): ...") — a label naming no mechanism ("Cluster 1", a
-      bare sample id) steers nothing. Where SAMPLE TRANSCRIPTS shows the cluster, quote ONE CONTIGUOUS
-      span of it, copied exactly and unabridged — the decisive step where the reasoning went wrong.
-      Never stitch or ellipse fragments into one quote: the next round cites it back verbatim, and
-      nothing downstream can tell a reconstruction from text the model actually wrote. A cluster no
-      transcript shows carries NO quote: name what was said against the truth, its count and sample
-      ids. Give the claim at stake and predicted vs ground truth in your OWN words.
-      Diagnose the mechanism: WHY the model landed wrong, not just that it did. Before claiming a bias
-      (e.g. "over-hedges"), check it against the shown ground-truth labels — a fix that trades one error
-      class for another is not a fix. L2 and the next L1 see only these plus your priority_fix. An
-      empty list when a sample missed is a defect of THIS node, not a clean run.
+      failure_highlights: ONE ENTRY PER CLUSTER — a DIFFERENT root cause each, largest first, up to 3.
+      A cluster is a MECHANISM that at least two rows share: read every row of FAILING SAMPLES and put
+      each id in the cluster whose mechanism it shows; a row sharing none is no cluster and is left
+      out. Only an id a panel marks `[#id]` counts. The next L1 targets a cluster by its rows
+      and writes ONE edit that must hold for every row the cluster spans, so claim the mechanism
+      in GENERAL terms — the cognitive move that fails, never one row's answer or procedure — and
+      name the decisive step the rows' reasoning shares, as SAMPLE TRANSCRIPTS and each row's last
+      step show it. Diagnose WHY the model landed wrong, not just that it did; before claiming a bias
+      (e.g. "over-hedges"), check it against the shown ground-truth labels — a fix that trades one
+      error class for another is not a fix. L2 and the next L1 see only these plus your priority_fix.
+      An empty list when two rows missed for one reason is a defect of THIS node, not a clean run.
 
 
       suggested_axes: up to 4 real pipeline axes for L2 to consider.
-
-
-      Keep every field compact; the answer_format caps are enforced.
     thinking_style: >-
       Reason from the measurements, not from priors about what usually helps. If the data is thin on an
       axis, say so rather than guessing.
     answer_format: &l1_critique_answer |-
       Return JSON with the fields in EXACTLY this order — failure_highlights FIRST so it is never dropped when the output runs long:
       {
-        "failure_highlights": ["<cluster label: Query: ... | Predicted: ... | GT: ...>", "<next cluster: ...>", ...],
+        "failure_highlights": [{"sample_ids": [<id>, <id>, ...], "mechanism": "<label>", "claim": "<why these rows land wrong>"}, ...],
         "priority_fix": "<axis>: <concrete change>",
         "suggested_axes": ["<real pipeline axis>", ...]
       }
-      failure_highlights holds one entry per distinct cluster and is never empty when a sample missed. Caps: failure_highlights <=3 each <=320c, priority_fix <=320c, suggested_axes <=4.
+      Caps: failure_highlights <=3, each with >=2 sample_ids from the panels' `[#id]` marks, mechanism <=60c, claim <=240c; priority_fix <=320c; suggested_axes <=4.
   l2_context/1:
     persona: >-
       You are L2, the attention layer. You never author a candidate prompt yourself — your whole
@@ -273,7 +272,7 @@ resolved_prompts:
     problem_description: ''
     instruction: |-
       PRIMARY: pull ONE lever below, grounded in a named data point — or pull none and say why. An L2 fire that changes nothing L1 reads is a wasted escalation and is scored as one (l2_targets_l1_surface).
-        l1_layout — change WHICH panels L1 sees, when a panel is empty, redundant, or crowding out the evidence the failures actually need.
+        l1_layout — place a panel CURRENT L1 LAYOUT lists in no slot, when the failures need evidence it lacks. A placed panel can move, never leave.
         l1_overrides — rare; temperature / n_variants only, when the stall is breadth-shaped rather than direction-shaped.
 
       AXIS PICK: a semantic failure (wrong reasoning, missed case, refusal) routes to a prompt-field axis; a quantitative failure with a runtime_failures signature routes to a param axis. Name it in axis_targeted.
@@ -289,9 +288,9 @@ resolved_prompts:
       Return JSON. Set only the LEVER you pull — but ALWAYS write both reason fields, on every
       fire, including one that pulls no lever.
       {
-        "l1_layout": {"<placeholder>": "<slot>", ...},   // a MOVE: each panel you name goes to that slot, one you omit stays put
+        "l1_layout": {"<panel>": "<slot>", ...},
         "l1_overrides": {...},
-        "axis_targeted": "<short>",   // ALWAYS — the axis you routed the cluster to
+        "axis_targeted": "<short>",   // ALWAYS — the axis you routed the cluster to; never a slot
         "rationale": "1-2 sentences"  // ALWAYS — the cluster you are attacking and the sample id / count / yield number behind it
       }
       L1 owns pipeline_params; your output is attention and exploration, never candidate values.
@@ -310,9 +309,9 @@ resolved_prompts:
     answer_format: |2-
 
       Return a JSON object with:
-        "plan": the new strategy as AT MOST 6 bullets, ONE sentence each (required). Each bullet is an instruction L2 or L1 acts on next round, naming the axis, panel or failure cluster it means — never a question, and never a step you still owe. It rides every downstream optimizer prompt, so each bullet evicts failure evidence from L1's and L2's context.
-        "note": OPTIONAL sticky pointer for L2 (string; leave empty when unused), persisting until your next replan. Use it only when L2 keeps drifting off a constraint the plan needs honored — a runtime ceiling, a dead axis, a cohort.
-        "rationale": one sentence naming the under-explored dimension the plan moves the search to
+        "plan": the new strategy as AT MOST 6 bullets, ONE sentence each, <=800c in all (required). Each bullet is an instruction L2 or L1 acts on next round, naming the axis, panel or failure cluster it means — never a question, and never a step you still owe. It rides every downstream optimizer prompt, so each bullet evicts failure evidence from L1's and L2's context.
+        "note": OPTIONAL sticky pointer for L2 (string, <=150c; leave empty when unused), persisting until your next replan. Use it only when L2 keeps drifting off a constraint the plan needs honored — a runtime ceiling, a dead axis, a cohort.
+        "rationale": one sentence, <=125c, naming the under-explored dimension the plan moves the search to
   # Read when the campaign optimizes an inner optimizer's prompts (`datasets/promptpotter-self`,
   # via `nodes.{node}.config.prompt_family`). Spec: docs/specs/l4-outer-loop.md.
   l1_generate_self_optimizing/1:
@@ -327,7 +326,7 @@ resolved_prompts:
     instruction: >-
       Emit every change in `pipeline_overlay` as {inner_node: {field: text}}, keyed by a node +
       field from the catalogue below. One candidate per critique failure cluster — the spread is carried
-      by targets_cluster, so spend your reasoning on each cluster's mechanism, not on varying the wording.
+      by targets_rows, so spend your reasoning on each cluster's mechanism, not on varying the wording.
 
 
       WRITE MECHANISMS, NOT INTENTIONS. An edit naming an operation the reader can execute — a named
@@ -387,8 +386,8 @@ resolved_prompts:
     thinking_style: ''
     answer_format: |-
       Return JSON: {"variants": [...]}. Each variant, IN THIS ORDER:
-        - "evidence_grounding": {field, citation} — citation is the shortest verbatim span that pins the panel entry.
-        - "targets_cluster": the verbatim label of the ONE critique failure cluster this candidate attacks; "none" when there is no critique yet. Two candidates may NOT name the same cluster.
+        - "evidence_grounding": {field, citation} — citation is the shortest verbatim span that pins the panel entry, <=160c.
+        - "targets_rows": the inner runs this candidate's edit must hold for, as `[#id]` ids — at least 2, all from ONE cluster of the CRITIQUE panel where it lists clusters, else narratives showing the same inner deficiency. Two candidates share a cluster only as two DIFFERENT mechanisms for it.
         - "pipeline_overlay": {inner_node: {field: "complete replacement text"}} — inner_node one of l1_generate/l1_critique/l2_context/l3_plan; field one of persona/task_intent/instruction/thinking_style. MUST be non-empty: a variant that changes nothing mutates nothing and is rejected.
         - Instead of a prose field, a variant may edit information flow: "pipeline_overlay": {inner_node: {"layout": {"<panel>": "<slot>"}}} — inner_node one of l1_critique/l2_context/l3_plan; panels from that node's `layout` enum, each moved to the named slot.
         - "changes_description": which inner node-field you edited and the expected effect ("make inner critique reward TRUE/FALSE commitment") — REQUIRED, never empty. It REPORTS the change above; it never substitutes for one.
@@ -413,10 +412,11 @@ resolved_prompts:
       vocabulary or answer labels, is one the generator is FORBIDDEN to execute (measured: -2.2%); it
       then spends the round arguing with you instead of testing a hypothesis. Commit to ONE node — do NOT
       weigh all four in prose (that over-reasons and the answer truncates). suggested_axes: the fewest
-      backup node-fields that are real, same verbatim '<inner_node>.<field>' form. failure_highlights: up to 3 failure clusters
-      observed across the inner trajectories, each quoting concrete inner evidence (e.g. 'seed-3: inner
-      critique proposed the same axis 2 rounds running, flat trajectory'), <=320c each — these are what
-      L2 and the next outer L1 steer on. Be terse: a long answer is truncated and discarded.
+      backup node-fields that are real, same verbatim '<inner_node>.<field>' form. failure_highlights: up to 3 clusters,
+      each a MECHANISM at least two inner runs share, spanned by the `[#id]` marks of INNER RUN
+      NARRATIVES, its claim quoting concrete inner evidence ('the inner critique proposed the same axis
+      2 rounds running, flat trajectory') — these are what L2 and the next outer L1 steer on. Be terse:
+      a long answer is truncated and discarded.
     thinking_style: >-
       Reason from the inner loop's trajectory (climbed, stalled, flat?), not the placeholder HIT/MISS rate.
       Flat inner loop → pull an inner optimizer prompt lever, not a 'parsing' fix.
@@ -432,7 +432,7 @@ resolved_prompts:
     problem_description: ''
     instruction: |-
       PRIMARY: pull ONE lever below, grounded in a named data point — or pull none and say why. An L2 fire that changes nothing L1 reads is a wasted escalation and is scored as one (l2_targets_l1_surface).
-        l1_layout — change WHICH panels L1 sees, when a panel is empty, redundant, or crowding out the evidence the failures actually need. Name the panels you mean to move and the slot each moves to; the ones you omit stay where they are.
+        l1_layout — place a panel CURRENT L1 LAYOUT lists in no slot, when the failures need evidence it lacks. A placed panel can move, never leave.
         l1_overrides — rare; temperature / n_variants only, when the stall is breadth-shaped rather than direction-shaped.
 
       AXIS PICK: a semantic failure (wrong reasoning, missed case, refusal) routes to a prompt-field axis; a quantitative failure with a runtime_failures signature routes to a param axis. Name it in axis_targeted.

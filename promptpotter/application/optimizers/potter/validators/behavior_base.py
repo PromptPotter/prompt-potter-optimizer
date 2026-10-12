@@ -18,6 +18,8 @@ class ValidatorContext:
     context_object: list[str] = field(default_factory=list)
     exploration_budget: str | None = None
     peaked_axes: frozenset[str] = field(default_factory=frozenset)
+    # The row sets of the critique this round's generator read; empty where it read none.
+    clusters: tuple[frozenset[int], ...] = ()
 
 
 CheckFn = Callable[[RoundAudit, ValidatorContext], CheckResult]

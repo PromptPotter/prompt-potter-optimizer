@@ -7,7 +7,7 @@ import { fmtValue } from "@/lib/format";
 // The LLM's output as the audit twin banked it, not a served model: read defensively.
 interface Variant {
   evidence_grounding?: { field?: string; citation?: string } | null;
-  targets_cluster?: string | null;
+  targets_rows?: number[] | null;
   pipeline_overlay?: Record<string, unknown> | null;
   prompt_fields_updates?: Record<string, unknown> | null;
   changes_description?: string | null;
@@ -84,10 +84,10 @@ export function L1Variants({ variants }: { variants: Variant[] }) {
         </div>
       )}
 
-      {shown.targets_cluster && (
+      {shown.targets_rows && shown.targets_rows.length > 0 && (
         <div className="l1v-block">
-          <span className="l1v-block-head">Targets</span>
-          <p className="l1v-targets">{shown.targets_cluster}</p>
+          <span className="l1v-block-head">Targets rows</span>
+          <p className="l1v-targets">{shown.targets_rows.map((id) => `#${id}`).join(" ")}</p>
         </div>
       )}
 

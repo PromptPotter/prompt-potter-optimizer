@@ -58,12 +58,11 @@ SCHEMA_RENAME_INSTRUCTION = (
 )
 
 LAYOUT_SCHEMA_INSTRUCTION = (
-    "Which prompt slot each evidence panel fills. Name a panel to MOVE it to that "
-    "slot; a panel you omit stays where it is, and a panel is only ever in one "
-    "place. Keyed by PANEL, one slot string each, as the CURRENT L1 LAYOUT listing "
-    'is: {"critique": "thinking_style", "failing_samples": "thinking_style"} moves '
-    "two panels into one slot. Slot order within the prompt "
-    "is the floor's and does not move — what you choose is which slot a panel speaks from."
+    "Where in the READING node's own prompt each evidence panel is rendered. A slot is a "
+    "position in that prompt, never the target-prompt field the evidence is about: the "
+    "reader gets every placed panel whichever slot holds it. Name a panel to MOVE it to "
+    "that slot; one you omit stays where it is, and a panel is only ever in one place. "
+    "Keyed by PANEL, one slot string each."
 )
 
 
@@ -83,6 +82,9 @@ MISS_QUERY_CAP = 100
 MISS_PREDICTED_CAP = 60
 MISS_GT_CAP = 40
 MISS_NOTE_CAP = 120
+MISS_STEP_CAP = 160
+# The panel is mandatory on the critique, so this is what bounds its prompt on a dataset of any size.
+MISS_ROWS_CAP = 40
 MEMORY_ROUND_CAP = 4
 MEMORY_FIELD_CAP = 2
 MEMORY_VALUE_CAP = 90
@@ -263,6 +265,8 @@ __all__ = [
     "MISS_NOTE_CAP",
     "MISS_PREDICTED_CAP",
     "MISS_QUERY_CAP",
+    "MISS_ROWS_CAP",
+    "MISS_STEP_CAP",
     "NEAR_MISS_RENDER_CAP",
     "NODE_FAILURE_RENDER_CAP",
     "RUNTIME_FAILURE_RECENCY_WINDOW",

@@ -11,6 +11,7 @@ from promptpotter.application.optimizers.potter.dispatch.injections.registry imp
     STALL_EXPLORATION,
     injection_table,
 )
+from promptpotter.application.optimizers.potter.dispatch.schemas import CLUSTER_ROWS_MIN
 from promptpotter.application.optimizers.potter.validators.behavior_base import (
     CheckFn,
     ValidatorContext,
@@ -43,6 +44,9 @@ def _shown_l1_prompt(audit: RoundAudit) -> str:
     fields = {} if block is None else block.input.template_fields
     return " ".join(str(v) for v in fields.values() if isinstance(v, str))
 
+
+# The mark `panels.py::clustered_sample_ids` rosters: a row a cluster, and so a variant, may name.
+_ROW_MARK_RE = re.compile(r"\[#(\d+)\]")
 
 # Alphabetic-start, 3+ chars: it seeds substring matches, not set overlap.
 _PHRASE_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z_\-]{2,}")
@@ -225,38 +229,42 @@ def _check_changes_description_english(audit: RoundAudit, ctx: ValidatorContext)
     )
 
 
-def _check_distinct_clusters(audit: RoundAudit, ctx: ValidatorContext) -> CheckResult:
-    """SCORED, never rejected: rejecting the duplicate would leave the round measuring one arm."""
+def _check_targets_a_cluster(audit: RoundAudit, ctx: ValidatorContext) -> CheckResult:
+    """The seam for ``targets_rows``: the wire's ``minItems`` binds nothing, and an id is checkable where a label is not."""
     variants = extract_l1_variants(audit)
     if not variants:
-        return CheckResult("distinct_clusters", True, "no variants emitted")
-    seen: dict[str, int] = {}
+        return CheckResult("targets_a_cluster", True, "no variants emitted")
+    marked = {int(m) for m in _ROW_MARK_RE.findall(_shown_l1_prompt(audit))}
+    offenders: list[tuple[str, str]] = []
     for i, v in enumerate(variants):
-        # The method rewrite may share a cluster with one single-mechanism variant.
-        if i == 0 and len(v.get("prompt_fields_updates") or {}) > 1:
-            continue
-        cluster = str(v.get("targets_cluster") or "").strip().lower()
-        if cluster and cluster != "none":
-            seen[cluster] = seen.get(cluster, 0) + 1
-    shared = sum(n for n in seen.values() if n > 1)
-    if shared:
+        rows = {r for r in v.get("targets_rows") or [] if isinstance(r, int)}
+        if len(rows) < CLUSTER_ROWS_MIN:
+            offenders.append((f"C{i + 1}", f"{len(rows)}_rows"))
+        elif not rows <= marked:
+            offenders.append((f"C{i + 1}", f"unmarked={sorted(rows - marked)[:3]}"))
+        elif ctx.clusters and not any(rows <= cluster for cluster in ctx.clusters):
+            offenders.append((f"C{i + 1}", "spans_clusters"))
+    if offenders:
+        sample = ", ".join(f"{label}({reason})" for label, reason in offenders[:3])
         return CheckResult(
-            "distinct_clusters",
+            "targets_a_cluster",
             False,
-            f"{shared}/{len(variants)} variants target a cluster another already took",
+            f"{len(offenders)}/{len(variants)} variants target no cluster: {sample}",
         )
     return CheckResult(
-        "distinct_clusters", True, f"{len(variants)}/{len(variants)} target distinct clusters"
+        "targets_a_cluster",
+        True,
+        f"{len(variants)}/{len(variants)} variants target ≥{CLUSTER_ROWS_MIN} rows of one cluster",
     )
 
 
 CHECK_REGISTRY: dict[str, CheckFn] = {
+    "targets_a_cluster": _check_targets_a_cluster,
     "context_object_honored": _check_context_object_honored,
     "param_scope_discipline": _check_param_scope_discipline,
     "not_only_param_variants": _check_not_only_param_variants,
     "evidence_grounding_present": _check_evidence_grounding_present,
     "changes_description_english": _check_changes_description_english,
-    "distinct_clusters": _check_distinct_clusters,
 }
 
 

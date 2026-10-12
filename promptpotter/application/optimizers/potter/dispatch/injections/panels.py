@@ -22,6 +22,8 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
     MISS_NOTE_CAP,
     MISS_PREDICTED_CAP,
     MISS_QUERY_CAP,
+    MISS_ROWS_CAP,
+    MISS_STEP_CAP,
     NEAR_MISS_RENDER_CAP,
     NODE_FAILURE_RENDER_CAP,
     PRECISION_ARM_ROWS,
@@ -432,20 +434,11 @@ def _paired_cell(
     return (lift - base, bar)
 
 
-@signal(
-    "inner_narratives",
-    kind=InjectionKind.MEASUREMENT,
-    char_cap=None,
-    citable=True,
-)
-def _r_inner_narratives(b: InjectionBundle) -> list[Item]:
+def _narrated_cells(b: InjectionBundle) -> list[tuple[float, float, float | None, GradedCell]]:
+    """Ranked on the upper bound: a point-estimate rank leads with whichever cell noise put first."""
     origin = {r.sample_id: r for r in b.origin_per_sample}
-    scored = _inner_narrated(b)
-    if not scored:
-        return []
-    # Ranked on the upper bound: a point-estimate rank leads with whichever cell noise put first.
     cells = []
-    for lift, r in scored:
+    for lift, r in _inner_narrated(b):
         # At the origin the paired difference is a cell against itself, a `+0.000` that is no null.
         d, bar = (
             (lift, r.facts.pipeline.mean_parent_level_se)
@@ -454,6 +447,29 @@ def _r_inner_narratives(b: InjectionBundle) -> list[Item]:
         )
         cells.append((d + _CELL_SEPARATION_SIGMAS * (bar or 0.0), d, bar, r))
     cells.sort(key=lambda c: c[0])
+    return cells
+
+
+def clustered_sample_ids(b: InjectionBundle) -> list[int]:
+    """The rows a critique cluster may span, and the only ones a panel marks ``[#id]``: the misses shown and the cells edits keep losing, or one level up the narrated cells."""
+    if narrated := _narrated_cells(b):
+        return [r.sample_id for *_, r in narrated[:INNER_NARRATIVE_RENDER_CAP]]
+    return [
+        *(r.sample_id for _, r in _shown_misses(b)),
+        *(sid for sid, _ in _repeatedly_lost(_edits(b))),
+    ]
+
+
+@signal(
+    "inner_narratives",
+    kind=InjectionKind.MEASUREMENT,
+    char_cap=None,
+    citable=True,
+)
+def _r_inner_narratives(b: InjectionBundle) -> list[Item]:
+    cells = _narrated_cells(b)
+    if not cells:
+        return []
     n_worse = sum(1 for c in cells if c[0] < 0.0)
     unit = b.measured_unit
     shown = cells[:INNER_NARRATIVE_RENDER_CAP]
@@ -493,11 +509,13 @@ def _r_inner_narratives(b: InjectionBundle) -> list[Item]:
         )
     sections = [Item(header)]
     for i, (_upper, d, bar, r) in enumerate(shown):
-        label = str(r.facts.query or r.sample_id or "inner")[:80]
+        label = str(r.facts.query or "inner")[:80]
         mark = f"{d:+.3f}" + (f" ±{bar:.3f}" if bar is not None else " (unpriced)")
         trace = r.facts.pipeline.reasoning_trace or ""
         cap = INNER_NARRATIVE_CAP if i < full_cells else INNER_NARRATIVE_SUMMARY_CAP
-        sections.append(Item(f"[{label}] {mark}\n{_head_at_line(trace, cap)}", trusted=False))
+        sections.append(
+            Item(f"[#{r.sample_id}] {label} {mark}\n{_head_at_line(trace, cap)}", trusted=False)
+        )
     return sections
 
 
@@ -596,6 +614,32 @@ def _verifier_outcome(cell: GradedCell) -> str:
     return "".join(f" | {p}" for p in parts)
 
 
+def _ordered_misses(b: InjectionBundle) -> list[tuple[float | None, GradedCell]]:
+    """Easiest first on the cycle's ruler; a miss the ruler does not carry trails, unordered."""
+    scored = [(_miss_difficulty(b, r), r) for r in _misses(b)]
+    graded = sorted(((d, r) for d, r in scored if d is not None), key=lambda dr: dr[0])
+    return [*graded, *((None, r) for d, r in scored if d is None)]
+
+
+def _cluster_rows(b: InjectionBundle) -> frozenset[int]:
+    critique = b.digest.critique or {}
+    return frozenset(i for c in critique.get("failure_highlights") or [] for i in c["sample_ids"])
+
+
+def _shown_misses(b: InjectionBundle) -> list[tuple[float | None, GradedCell]]:
+    """Unclustered, the ``MISS_ROWS_CAP`` easiest; once a critique clustered them, the rows its clusters span."""
+    ordered = _ordered_misses(b)
+    if clustered := _cluster_rows(b):
+        return [(d, r) for d, r in ordered if r.sample_id in clustered]
+    return ordered[:MISS_ROWS_CAP]
+
+
+def _last_step(trace: str, cap: int) -> str:
+    """The tail: a trace's wrong step is usually its conclusion, and the transcript panel shows the head."""
+    text = " ".join(trace.split())
+    return text if len(text) <= cap else "…" + text[-cap:]
+
+
 @signal(
     "failing_samples",
     kind=InjectionKind.MEASUREMENT,
@@ -620,61 +664,51 @@ def _r_failing_samples(b: InjectionBundle) -> list[Item]:
                 "round — treat its score as ABSENT, not as a failure."
             )
         ]
-    scored = [(_miss_difficulty(b, r), r) for r in rows]
-    graded = [(d, r) for d, r in scored if d is not None]
-    ungraded = [r for d, r in scored if d is None]
-    graded.sort(key=lambda dr: dr[0])
+    graded = [d for d, _ in _ordered_misses(b) if d is not None]
     # A δ shared by a run of cells is the ruler's prior, not a reading: a tie carries no order.
-    tied = {d for d, n in Counter(d for d, _ in graded).items() if n > 1}
-    ordered: list[tuple[float | None, GradedCell]] = [
-        *graded,
-        *((None, r) for r in ungraded),
-    ]
-    grouped = _truth_labels(b.trajectory_results) is not None
-    if grouped:
-        groups: dict[tuple[str, str], list[str]] = {}
-        for delta, r in ordered:
-            pair = (
-                r.facts.predicted[:MISS_PREDICTED_CAP],
-                r.facts.ground_truth[:MISS_GT_CAP],
+    tied = {d for d, n in Counter(graded).items() if n > 1}
+    shown = _shown_misses(b)
+    # One row per miss, never a tally by label: a cluster is a MECHANISM, and only the stem and
+    # the last step can show one.
+    rows_out = [
+        Item(
+            f"  [#{r.sample_id}] "
+            + ("δ=?" if delta is None else ("δ=tied" if delta in tied else f"δ={delta:+.2f}"))
+            + f" | {_query_stem(r, MISS_QUERY_CAP)}"
+            + (
+                _verifier_outcome(r)
+                if verifier
+                else f" | said: {r.facts.predicted[:MISS_PREDICTED_CAP]}"
+                f" | true: {r.facts.ground_truth[:MISS_GT_CAP]}"
             )
-            mark = "" if delta is None else ("(tied)" if delta in tied else f"({delta:+.1f})")
-            groups.setdefault(pair, []).append(f"#{r.sample_id}{mark}")
-        rows_out = [
-            Item(f"  said {said}, true {true} — {len(ids)}: {' '.join(ids)}", trusted=False)
-            for (said, true), ids in sorted(groups.items(), key=lambda kv: -len(kv[1]))
-        ]
-        ruled = (
-            "grouped by what was said against the truth, largest group first; inside a group the "
-            "ids run easiest first by δ on the cycle's fixed ruler — the leading ids are the "
+            + (
+                f" | last step: {_last_step(trace, MISS_STEP_CAP)}"
+                if (trace := r.facts.pipeline.reasoning_trace)
+                else ""
+            ),
+            trusted=False,
         )
-        cold = "grouped by what was said against the truth; the difficulty ruler is still cold"
-    else:
-        ruled = "difficulty δ from the cycle's fixed ruler; easiest first — the top rows are the "
-        cold = "the difficulty ruler is still cold, so these are unordered"
-        # No row cap, and one item per miss: how many fit is the composition's call.
-        rows_out = [
-            Item(
-                f"  [#{r.sample_id}] "
-                + ("δ=?" if delta is None else ("δ=tied" if delta in tied else f"δ={delta:+.2f}"))
-                + f" | {_query_stem(r, MISS_QUERY_CAP)}"
-                + (
-                    _verifier_outcome(r)
-                    if verifier
-                    else f" | said: {r.facts.predicted[:MISS_PREDICTED_CAP]}"
-                    f" | true: {r.facts.ground_truth[:MISS_GT_CAP]}"
-                ),
-                trusted=False,
-            )
-            for delta, r in ordered
-        ]
+        for delta, r in shown
+    ]
+    held = (
+        ""
+        if len(shown) == len(rows)
+        else f", the {len(shown)} the critique clustered shown"
+        if _cluster_rows(b)
+        else f", the {len(shown)} easiest shown"
+    )
     header = (
-        f"FAILING SAMPLES ({len(rows)} still unsolved — latest outcome per {b.measured_unit} "
+        f"FAILING SAMPLES ({len(rows)} still unsolved{held} — latest outcome per {b.measured_unit} "
         "across the configurations tried so far, not one round's score; "
-        + (f"{ruled}winnable ones" if graded else cold)
         + (
-            f". `{'(tied)' if grouped else 'δ=tied'}` is the ruler's prior, not a reading of that "
-            "cell — those rows carry no order among themselves and no claim that any is winnable"
+            "difficulty δ from the cycle's fixed ruler; easiest first — the top rows are the "
+            "winnable ones"
+            if graded
+            else "the difficulty ruler is still cold, so these are unordered"
+        )
+        + (
+            ". `δ=tied` is the ruler's prior, not a reading of that cell — those rows carry no "
+            "order among themselves and no claim that any is winnable"
             if tied
             else ""
         )
@@ -934,7 +968,8 @@ def _r_rare_hit_samples(b: InjectionBundle) -> list[Item]:
     header = "RARE-HIT SAMPLES (cracked by ≤3 of ≥10 attempts — replicate the unlock pattern):"
     rows = [
         Item(
-            f"  [#{sid}] {query}… → {hits}/{total} hit by "
+            # No `[#id]` mark: an archive intractable is no row of this round's clusters.
+            f"  sample {sid}: {query}… → {hits}/{total} hit by "
             + ", ".join(pointer[:24] for pointer in cracked_by[:2]),
             trusted=False,
         )
