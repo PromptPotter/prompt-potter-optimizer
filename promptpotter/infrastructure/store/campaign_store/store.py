@@ -57,6 +57,7 @@ from promptpotter.infrastructure.projections.cycle_index import (
 from promptpotter.infrastructure.projections.live_dashboard.projection import materializing_over
 from promptpotter.infrastructure.runtime_flags import derive_run_state, is_checkin
 from promptpotter.infrastructure.store.account_spend import bank_spend, sandbox_cycle_dirs
+from promptpotter.infrastructure.store.account_trail import bank_trail
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     StandingRounds,
     scan_cycle_facts,
@@ -315,14 +316,20 @@ class CampaignStore:
         self._set_lifecycle(campaign_id, "active", changed_at, reason)
         return True
 
+    def _bank(self, cycle_dirs: list[Path], *, campaign_id: str, cycle_id: str = "") -> None:
+        """Destroyers only: what a subject cost and what was commanded on it outlive its rows."""
+        for bank in (bank_spend, bank_trail):
+            bank(
+                workspace=self._base_dir,
+                cycle_dirs=cycle_dirs,
+                campaign_id=campaign_id,
+                cycle_id=cycle_id,
+            )
+
     def bank_all_before_removal(self) -> None:
         """Removal only: banking a subject that keeps its rows counts the money twice."""
         for campaign_dir in self.iter_campaign_dirs():
-            bank_spend(
-                workspace=self._base_dir,
-                cycle_dirs=self.campaign_cycle_dirs(campaign_dir.name),
-                campaign_id=campaign_dir.name,
-            )
+            self._bank(self.campaign_cycle_dirs(campaign_dir.name), campaign_id=campaign_dir.name)
 
     def delete_campaign(
         self,
@@ -338,11 +345,7 @@ class CampaignStore:
             return False
         self._guard_and_release(campaign_id, "delete")
         # After the guard: a tombstone beside a refused delete's rows counts the money twice.
-        bank_spend(
-            workspace=self._base_dir,
-            cycle_dirs=self.campaign_cycle_dirs(campaign_id),
-            campaign_id=campaign_id,
-        )
+        self._bank(self.campaign_cycle_dirs(campaign_id), campaign_id=campaign_id)
         # Before the tree goes: the off-tree inner sandboxes are keyed by these ids.
         inner_cycle_ids: list[str] = []
         if inner_sandbox_root is not None:
@@ -367,12 +370,7 @@ class CampaignStore:
         if not sandbox.exists():
             return
         # Keyed on the sandbox directory: inner cycle ids are content-addressed and repeat across them.
-        bank_spend(
-            workspace=self._base_dir,
-            cycle_dirs=sandbox_cycle_dirs(sandbox),
-            campaign_id=campaign_id,
-            cycle_id=sandbox.name,
-        )
+        self._bank(sandbox_cycle_dirs(sandbox), campaign_id=campaign_id, cycle_id=sandbox.name)
         rmtree_robust(sandbox)
 
     def load(self, hop: CycleHop) -> CycleIndex | None:
@@ -612,12 +610,7 @@ class CampaignStore:
             return False, blocked
         cycle_dir = self.cycle_dir(hop)
         # After the refusal, before the rmtree: an origin-scored stub already paid for round 0.
-        bank_spend(
-            workspace=self._base_dir,
-            cycle_dirs=[cycle_dir],
-            campaign_id=hop.campaign_id,
-            cycle_id=hop.cycle_id,
-        )
+        self._bank([cycle_dir], campaign_id=hop.campaign_id, cycle_id=hop.cycle_id)
         rmtree_robust(cycle_dir)
         return True, ""
 

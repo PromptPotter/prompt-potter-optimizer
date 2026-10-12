@@ -64,6 +64,7 @@ ProjectionKind = Literal[
     "spend_hold",
     "spend_tombstone",
     "token_usage",
+    "trail_tombstone",
     # Synthesized by the ledger tail (``CycleLedgerTail``); on no ledger.
     "stream_snapshot",
 ]

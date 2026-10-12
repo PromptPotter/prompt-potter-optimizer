@@ -49,6 +49,7 @@ from promptpotter.domain.run_records import (
     SpendHoldRecord,
     SpendTombstoneRecord,
     TokenUsageRecord,
+    TrailTombstoneRecord,
 )
 
 __all__ = ["Projection"]
@@ -97,6 +98,8 @@ _ROUTES: dict[type, str | None] = {
     LaunchReleasedRecord: None,
     # Banked by `store/account_spend.py` for a cycle that no longer exists.
     SpendTombstoneRecord: None,
+    # Banked by `store/account_trail.py`, likewise.
+    TrailTombstoneRecord: None,
     AccountEventRecord: None,
     PricedKeyRecord: None,
     # Read off the ledger by `spend_book.py`: money moves on the bill alone.

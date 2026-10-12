@@ -56,6 +56,7 @@ from promptpotter.domain.run_records import (
     SpendHoldRecord,
     SpendTombstoneRecord,
     TokenUsageRecord,
+    TrailTombstoneRecord,
 )
 from promptpotter.domain.spend import TokenAccount, prefix_reading
 from promptpotter.domain.strict_model import StrictModel
@@ -103,6 +104,7 @@ SILENT_RECORDS = (
     SpendHoldRecord,
     SpendTombstoneRecord,
     TokenUsageRecord,
+    TrailTombstoneRecord,
 )
 
 ActivityKind = Literal[

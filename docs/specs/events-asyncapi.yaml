@@ -276,6 +276,9 @@ components:
             # so it reaches no cycle subscriber — listed because the enum's rule
             # is the union, not the subset a given channel happens to carry.
             - spend_tombstone
+            # The commands a deleted campaign or cycle carried, banked the same
+            # way (``TrailTombstoneRecord``). Rides the WORKSPACE ledger.
+            - trail_tombstone
             # An account's own history — created, signed in, terms accepted
             # (``AccountEventRecord``). Rides the WORKSPACE ledger, so it reaches
             # no cycle subscriber.
@@ -349,6 +352,7 @@ components:
             - $ref: '#/components/schemas/LaunchReleasedPayload'
             - $ref: '#/components/schemas/CheckinClosedPayload'
             - $ref: '#/components/schemas/SpendTombstonePayload'
+            - $ref: '#/components/schemas/TrailTombstonePayload'
             - $ref: '#/components/schemas/AccountEventPayload'
 
     # ---- The run's current state, stamped on every frame ----
@@ -1555,6 +1559,42 @@ components:
           type: number
         unreported_tokens:
           type: integer
+        timestamp:
+          type: string
+          format: date-time
+
+    TrailTombstonePayload:
+      type: object
+      description: |
+        TrailTombstoneRecord — the commands a deleted campaign or cycle carried,
+        banked on the WORKSPACE ledger before the delete so that what was done
+        outlives the data. Reaches no cycle subscriber.
+      required: [campaign_id, commands, timestamp]
+      additionalProperties: false
+      properties:
+        campaign_id:
+          type: string
+        cycle_id:
+          type: string
+          description: Empty for a whole-campaign bank.
+        commands:
+          type: array
+          items:
+            type: object
+            required: [at, kind, subject, user_id]
+            additionalProperties: false
+            properties:
+              at:
+                type: string
+                format: date-time
+              kind:
+                type: string
+              subject:
+                type: string
+                description: The campaign and cycle the command addressed.
+              user_id:
+                type: string
+                description: The acting principal.
         timestamp:
           type: string
           format: date-time

@@ -20,6 +20,7 @@ from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.phases import RunPhase, StopReason
 from promptpotter.domain.run_records import RunPhaseRecord
 from promptpotter.infrastructure.ledger import CycleEventLog
+from promptpotter.infrastructure.store.account_spend import sandbox_cycle_dirs
 from promptpotter.infrastructure.store.io import write_json
 from promptpotter.infrastructure.store.layout import (
     CycleLayout,
@@ -756,9 +757,15 @@ async def test_an_accounts_trail_holds_its_sign_in_its_consent_and_its_commands_
     CycleEventLog.open_workspace(stores.base_dir).append(
         command("mint-campaign", "2999-01-01T00:00:00Z")
     )
+    # A third ledger, off the workspace tree: the campaign's inner sandbox.
+    sandbox = inner_sandbox(stores, hop.campaign_id, hop.cycle_id)
+    (inner_cycle,) = sandbox_cycle_dirs(sandbox)
+    CycleEventLog.open(CycleDir(inner_cycle)).append(command("inner-run", "1999-01-01T00:00:00Z"))
+    inner_line = ("inner-run", f"camp-trail>{inner_cycle.parent.parent.name}/{inner_cycle.name}")
 
     trail = account.tenant_trail(stores)
-    assert [(line.what, line.subject) for line in trail.lines] == [
+    assert trail.lines[0][1:3] == inner_line, "what ran in a campaign's inner sandbox left no line"
+    assert [(line.what, line.subject) for line in trail.lines[1:]] == [
         ("start-run", "camp-trail/cycle_trail0000000"),
         ("account_created", ""),
         ("signed_in", "google"),
@@ -767,11 +774,24 @@ async def test_an_accounts_trail_holds_its_sign_in_its_consent_and_its_commands_
     ], "an account event left no line or left two, or the merge lost the order"
     ada = stores.users.load()
     assert ada is not None and ada.terms_accepted is not None
-    assert (trail.lines[1].at, trail.lines[3].at) == (
+    assert (trail.lines[2].at, trail.lines[4].at) == (
         ada.created_at,
         ada.terms_accepted.accepted_at,
     ), "one fact carries two times: the account file says one and its record another"
-    assert {line.actor for line in trail.lines[1:4]} == trail.own == {str(identity.user_id)}
+    assert {line.actor for line in trail.lines[2:5]} == trail.own == {str(identity.user_id)}
+
+    # Deleting what was commanded does not delete that it was, and tells it once.
+    for keep_results in (True, False):
+        stores.campaigns.delete_campaign(
+            hop.campaign_id,
+            keep_results=keep_results,
+            changed_at="",
+            inner_sandbox_root=sandbox.parent,
+        )
+        assert account.tenant_trail(stores).lines == trail.lines, (
+            "a deleted campaign took its commands with it, or told them twice"
+        )
+    assert not sandbox.exists()
 
     # Bob has an account of his own, opened by whichever request came first, and acts for Ada
     # as her delegate: under his id, in her workspace.
@@ -790,9 +810,9 @@ async def test_an_accounts_trail_holds_its_sign_in_its_consent_and_its_commands_
     account.sign_in(build_stores(for_ada, projects_root=projects))
 
     reply = admin_bot.handle_command("trail", " ada@X.com ", actor="t").splitlines()
-    assert reply[0].startswith("ada@X.com: 6 lines") and len(reply) == 7
-    assert reply[3].endswith(" signed_in google"), "the account's own line named an actor"
-    assert reply[5].endswith(" signed_in google by bob-id"), (
+    assert reply[0].startswith("ada@X.com: 7 lines") and len(reply) == 8
+    assert reply[4].endswith(" signed_in google"), "the account's own line named an actor"
+    assert reply[6].endswith(" signed_in google by bob-id"), (
         "what a delegate did in this workspace is not told apart from what its owner did"
     )
     bobs = admin_bot.handle_command("trail", "bob@x.com", actor="t").splitlines()
@@ -806,7 +826,7 @@ async def test_an_accounts_trail_holds_its_sign_in_its_consent_and_its_commands_
 
     said = await trail_verb.cmd_trail(argparse.Namespace(email="ada@x.com"))
     assert said.human.splitlines() == reply[1:], "the terminal and the bot read two trails"
-    assert said.data["accounts"] == [str(identity.user_id)] and len(said.data["lines"]) == 6
+    assert said.data["accounts"] == [str(identity.user_id)] and len(said.data["lines"]) == 7
     nobody = await trail_verb.cmd_trail(argparse.Namespace(email="nobody@x.com"))
     assert nobody.data == {"accounts": [], "lines": [], "unreadable": []}, (
         "the verb answers in one shape when there is an account and another when there is none"

@@ -470,6 +470,29 @@ class SpendTombstoneRecord(StrictModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
+class BankedCommand(StrictModel):
+    model_config = ConfigDict(frozen=True)
+
+    at: str
+    kind: str
+    # The campaign and cycle it addressed, as the trail read it before they went.
+    subject: str
+    user_id: str
+
+
+class TrailTombstoneRecord(StrictModel):
+    """On the WORKSPACE ledger, so deleting what was commanded cannot delete that it was."""
+
+    model_config = ConfigDict(frozen=True)
+
+    record_type: Literal["trail_tombstone"] = "trail_tombstone"
+    campaign_id: str
+    # Empty for a whole-campaign bank; with `campaign_id`, the key of the re-bank guard.
+    cycle_id: str = ""
+    commands: tuple[BankedCommand, ...]
+    timestamp: str = Field(default_factory=utcnow_iso)
+
+
 class LLMCallStartRecord(StrictModel):
     """Pairs with :class:`LLMCallRecord` via ``call_id``, so a long call does not look frozen."""
 
@@ -1144,6 +1167,7 @@ CycleRecord = Annotated[
     | SpawnedRecord
     | SpendHoldRecord
     | SpendTombstoneRecord
+    | TrailTombstoneRecord
     | TokenUsageRecord,
     Field(discriminator="record_type"),
 ]
