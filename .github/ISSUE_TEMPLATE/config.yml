@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: A question, or something private
+    url: https://promptpotter.com/contact
+    about: Reaches the maintainer directly. Use this for anything that should not be public.

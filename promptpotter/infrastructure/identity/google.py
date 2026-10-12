@@ -49,7 +49,7 @@ class GoogleProviderClient:
             "response_type": "code",
             "client_id": self._config.client_id,
             "redirect_uri": self._config.redirect_uri,
-            "scope": "openid email profile",
+            "scope": "openid email",
             "state": state,
             "nonce": nonce,
             "access_type": "online",
