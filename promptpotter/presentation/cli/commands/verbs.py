@@ -833,6 +833,14 @@ VERBS: tuple[Verb, ...] = (
         "stand in line. Read-only, zero spend.",
     ),
     Verb(
+        "trail",
+        "trail:cmd_trail",
+        help="What an account did, oldest first, in UTC: its sign-ins, its consent and every "
+        "command, the terminal's own included. Bare, this tenant's; with an EMAIL, every account "
+        "on the box that carries it. Read-only, zero spend.",
+        args=(Arg("email", nargs="?", default="", help="An account's email address."),),
+    ),
+    Verb(
         "set-concurrent-cycles",
         "lifecycle:cmd_set_concurrent_cycles",
         help="How many campaigns this account may hold at once, queued launches included. At most "

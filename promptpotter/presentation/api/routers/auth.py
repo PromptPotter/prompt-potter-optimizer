@@ -5,11 +5,11 @@ from __future__ import annotations
 import logging
 import secrets
 from typing import Annotated, Any
-from urllib.parse import quote_plus
 
 from fastapi import APIRouter, BackgroundTasks, Path, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
+from promptpotter.application.account_trail import record_account_event
 from promptpotter.application.jobs.account_activity import (
     ActivityGroupBy,
     ActivityResponse,
@@ -32,11 +32,13 @@ from promptpotter.infrastructure.identity.migration import maybe_claim_default, 
 from promptpotter.infrastructure.identity.provider_config import SUPPORTED_PROVIDERS
 from promptpotter.infrastructure.identity.user import derive_user_id
 from promptpotter.infrastructure.identity.verifier import IDTokenInvalidError
+from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.infrastructure.store.user_store import ConsentRecord, count_accounts
 from promptpotter.presentation.admin_bot import forward_new_account_to_crm, notify_operator
 from promptpotter.presentation.api.deps import IdentityDep, JobRegistryDep, StoresDep
 from promptpotter.presentation.api.middleware.oidc import (
     SESSION_COOKIE_NAME,
+    identity_of_session,
     resolve_access_state,
 )
 from promptpotter.shared.clock import utcnow_iso
@@ -122,12 +124,12 @@ def _require_provider_client(bundle: IdentityBundle, provider: str) -> Any:
     )
 
 
-def _redirect_with_error(code: str, *, email: str | None = None) -> RedirectResponse:
-    """The callback is browser-navigated: raising would dump raw JSON into the tab."""
-    qs = f"auth_error={code}"
-    if email:
-        qs += f"&email={quote_plus(email)}"
-    return RedirectResponse(url=f"/?{qs}", status_code=303)
+def _redirect_with_error(code: str) -> RedirectResponse:
+    """The callback is browser-navigated: raising would dump raw JSON into the tab.
+
+    A CODE and nothing else: the access log keeps this URL, so it never carries who tried.
+    """
+    return RedirectResponse(url=f"/?auth_error={code}", status_code=303)
 
 
 @auth_router.get("/login/{provider}")
@@ -211,12 +213,18 @@ async def callback(
             identity.email,
         )
 
-    session_id, _data = bundle.session_store.create(
+    session_id, session = bundle.session_store.create(
         user_id=str(user_id),
         tenant_id=str(user_id),
         issuer=identity.issuer,
         subject=identity.subject,
         email=identity.email,
+        provider=identity.provider,
+    )
+    # Resolved as every later request resolves it, so a delegate's sign-in lands where its commands do.
+    record_account_event(
+        build_stores(identity_of_session(session, bundle), projects_root=DEFAULT_PROJECTS_ROOT),
+        "signed_in",
         provider=identity.provider,
     )
 
@@ -278,6 +286,7 @@ def me(
         email=email,
     )
     if is_new_account:
+        record_account_event(stores, "account_created")
         background.add_task(
             _announce_new_account,
             email=email,
@@ -362,6 +371,7 @@ def accept_terms(body: AcceptTermsBody, stores: StoresDep) -> TermsConsent:
     )
     record = ConsentRecord(version=TERMS_VERSION, accepted_at=utcnow_iso())
     stores.users.save(user.model_copy(update={"terms_accepted": record}))
+    record_account_event(stores, "terms_accepted", version=TERMS_VERSION)
     return TermsConsent(terms_version=TERMS_VERSION, terms_accepted_version=TERMS_VERSION)
 
 

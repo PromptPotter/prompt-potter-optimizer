@@ -251,6 +251,31 @@ def test_untrusted_signals_are_fenced_trusted_signals_are_not() -> None:
         ), f"selection at budget {budget} left a fence open"
 
 
+def test_the_access_log_drops_the_oauth_callbacks_query_and_no_other() -> None:
+    import logging
+
+    from promptpotter.config.logging import _CallbackPathOnly
+
+    def logged(path: str) -> str:
+        record = logging.LogRecord(
+            name="uvicorn.access",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg='%s - "%s %s HTTP/%s" %d',
+            args=("127.0.0.1:1", "GET", path, "1.1", 303),
+            exc_info=None,
+        )
+        assert _CallbackPathOnly().filter(record), "the line itself must still be logged"
+        return record.getMessage()
+
+    line = logged("/api/v1/auth/callback/google?state=one-time-state&code=one-time-code")
+    assert "one-time" not in line, "the one-time code or state reached the access log"
+    assert "/api/v1/auth/callback/google " in line
+    kept = "/api/v1/cycles?campaign_id=camp-1"
+    assert kept in logged(kept), "a query that is no secret was cut from the log"
+
+
 # 2. Delegation
 
 
@@ -583,6 +608,119 @@ def test_a_steer_the_campaign_never_sanctioned_cannot_pass_as_a_clean_fork() -> 
     )
     assert steers_disallowed_model(config, {"l1_generate": {"route_order": ["a", "b"]}}), (
         "a cost lever passed as clean; no permitted set can sanction one"
+    )
+
+
+async def test_an_accounts_trail_holds_its_sign_in_its_consent_and_its_commands_in_time_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import types
+
+    from fastapi import BackgroundTasks
+
+    from promptpotter.application.account_trail import account_trail
+    from promptpotter.config.settings import TERMS_VERSION
+    from promptpotter.domain.campaign import Campaign
+    from promptpotter.domain.run_records import CommandRecord
+    from promptpotter.infrastructure.identity.bundle import PendingAuth
+    from promptpotter.infrastructure.identity.google import ProviderIdentity
+    from promptpotter.infrastructure.identity.paths import IdentityPaths
+    from promptpotter.infrastructure.identity.session import OIDCSessionStore
+    from promptpotter.infrastructure.store.stores import build_stores
+    from promptpotter.presentation import admin_bot
+    from promptpotter.presentation.api.middleware.oidc import identity_of_session
+    from promptpotter.presentation.api.routers import auth
+
+    projects = tmp_path / "projects"
+    monkeypatch.setattr(auth, "DEFAULT_PROJECTS_ROOT", projects)
+    monkeypatch.setattr(admin_bot, "DEFAULT_PROJECTS_ROOT", projects)
+
+    async def exchange_code(**_: str) -> ProviderIdentity:
+        return ProviderIdentity(
+            issuer="https://accounts.example", subject="s1", email="Ada@x.com", provider="google"
+        )
+
+    paths = IdentityPaths(root=tmp_path / "identity")
+    sessions = OIDCSessionStore(paths.sessions_dir)
+    bundle = types.SimpleNamespace(
+        paths=paths,
+        config=types.SimpleNamespace(configured=("google",)),
+        session_store=sessions,
+        google=types.SimpleNamespace(exchange_code=exchange_code),
+        github=None,
+        consume_state=lambda state: PendingAuth(provider="google", nonce="n", created_at=0.0),
+    )
+    request = types.SimpleNamespace(
+        app=types.SimpleNamespace(state=types.SimpleNamespace(identity_bundle=bundle)),
+        query_params={"state": "st", "code": "co"},
+        url=types.SimpleNamespace(scheme="https"),
+    )
+
+    signed_in = await auth.callback(request, "google")
+    session_id = signed_in.headers["set-cookie"].split("=", 1)[1].split(";", 1)[0]
+    session = sessions.read(session_id)
+    assert session is not None
+    identity = identity_of_session(session, bundle)
+    stores = build_stores(identity, projects_root=projects)
+    auth.me(request, BackgroundTasks(), identity, stores)
+    auth.me(request, BackgroundTasks(), identity, stores)
+    auth.accept_terms(auth.AcceptTermsBody(version=TERMS_VERSION), stores)
+
+    def command(kind: str, at: str) -> CommandRecord:
+        return CommandRecord(command_id=kind, kind=kind, idempotency_key=kind, timestamp=at)
+
+    # One before every account event and one after, on two ledgers: only a merge by time places both.
+    hop = CycleHop(campaign_id="camp-trail", cycle_id="cycle_trail0000000")
+    stores.campaigns.create_campaign(
+        Campaign(
+            campaign_id=hop.campaign_id,
+            dataset_name="ds1",
+            created_at="",
+            root_cycle_id=hop.cycle_id,
+        )
+    )
+    stores.campaigns.mint_cycle(hop)
+    CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(hop))).append(
+        command("start-run", "2000-01-01T00:00:00Z")
+    )
+    CycleEventLog.open_workspace(stores.base_dir).append(
+        command("mint-campaign", "2999-01-01T00:00:00Z")
+    )
+
+    trail = account_trail(stores.base_dir)
+    assert [(line.what, line.subject) for line in trail] == [
+        ("start-run", "camp-trail/cycle_trail0000000"),
+        ("signed_in", "google"),
+        ("account_created", ""),
+        ("terms_accepted", TERMS_VERSION),
+        ("mint-campaign", ""),
+    ], "a sign-in, the account's creation or a consent left no line, or the merge lost the order"
+    assert {line.actor for line in trail[1:4]} == {str(identity.user_id)}
+
+    reply = admin_bot.handle_command("trail", " ada@X.com ", actor="t").splitlines()
+    assert reply[0].startswith("ada@x.com: 5 lines") and len(reply) == 6
+    assert reply[2].endswith(" signed_in google"), "the account's own line named an actor"
+    assert admin_bot.handle_command("trail", "nobody@x.com", actor="t") == (
+        "No account with email nobody@x.com."
+    )
+
+    torn = projects / "torn-account"
+    torn.mkdir()
+    (torn / "user.json").write_text("{not json", encoding="utf-8")
+    assert admin_bot.handle_command("trail", "nobody@x.com", actor="t").splitlines() == [
+        "No account with email nobody@x.com.",
+        "Could not read: torn-account",
+    ], "an account file that cannot be read went unnamed, so the one asked for may hide in it"
+    assert admin_bot.handle_command("trail", "ada@x.com", actor="t").splitlines()[:2] == [
+        reply[0],
+        "Could not read: torn-account",
+    ], "one torn account file cost the reply for a readable one"
+    (torn / "user.json").unlink()
+
+    monkeypatch.setattr(admin_bot, "_TELEGRAM_MAX_CHARS", len("\n".join(reply)) - 1)
+    cut = admin_bot.handle_command("trail", "ada@x.com", actor="t").splitlines()
+    assert cut[0].endswith("(1 earlier dropped)") and cut[1:] == reply[2:], (
+        "an over-long trail was not cut at its oldest line"
     )
 
 

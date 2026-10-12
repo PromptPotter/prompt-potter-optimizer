@@ -52,6 +52,8 @@ __all__ = [
     "MINT_KIND_LABELS",
     "OPERATOR_ORIGIN_SOURCES",
     "RECORD_ADAPTER",
+    "AccountEvent",
+    "AccountEventRecord",
     "BackendWarningRecord",
     "BenchCheckpointKind",
     "CandidateMintedRecord",
@@ -521,6 +523,22 @@ class LLMCallRecord(StrictModel):
     payload_kind: Literal["llm_call", "synthesized"] = "llm_call"
     call_id: str = ""
     payload: dict[str, Any] = Field(default_factory=dict)
+    timestamp: str = Field(default_factory=utcnow_iso)
+
+
+AccountEvent = Literal["account_created", "signed_in", "terms_accepted"]
+
+
+class AccountEventRecord(StrictModel):
+    """On the WORKSPACE ledger; ``user_id`` is the acting principal, a delegate's own id in its delegator's tenant."""
+
+    model_config = ConfigDict(frozen=True)
+
+    record_type: Literal["account_event"] = "account_event"
+    event: AccountEvent
+    user_id: str
+    # The provider of a sign-in, the version of a terms acceptance.
+    detail: dict[str, str] = Field(default_factory=dict)
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
@@ -1083,6 +1101,7 @@ class SpawnedRecord(StrictModel):
 
 CycleRecord = Annotated[
     ResumeCheckpointRecord
+    | AccountEventRecord
     | BackendWarningRecord
     | CandidateMintedRecord
     | CandidateScoredRecord

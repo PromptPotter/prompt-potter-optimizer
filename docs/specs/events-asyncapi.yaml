@@ -276,6 +276,10 @@ components:
             # so it reaches no cycle subscriber — listed because the enum's rule
             # is the union, not the subset a given channel happens to carry.
             - spend_tombstone
+            # An account's own history — created, signed in, terms accepted
+            # (``AccountEventRecord``). Rides the WORKSPACE ledger, so it reaches
+            # no cycle subscriber.
+            - account_event
             # A cell or an optimizer / judge call the campaign's search priced —
             # billed fresh or metered as a replay (``PricedKeyRecord``), so a
             # resumed launch prices it once.
@@ -345,6 +349,7 @@ components:
             - $ref: '#/components/schemas/LaunchReleasedPayload'
             - $ref: '#/components/schemas/CheckinClosedPayload'
             - $ref: '#/components/schemas/SpendTombstonePayload'
+            - $ref: '#/components/schemas/AccountEventPayload'
 
     # ---- The run's current state, stamped on every frame ----
     # Mirrors `promptpotter/domain/activity.py`. The tail folds the ledger up to each frame —
@@ -1550,6 +1555,30 @@ components:
           type: number
         unreported_tokens:
           type: integer
+        timestamp:
+          type: string
+          format: date-time
+
+    AccountEventPayload:
+      type: object
+      description: |
+        AccountEventRecord — one fact of an account's own history, on the
+        WORKSPACE ledger beside the commands that address no cycle. Reaches no
+        cycle subscriber.
+      required: [event, user_id, timestamp]
+      additionalProperties: false
+      properties:
+        event:
+          type: string
+          enum: [account_created, signed_in, terms_accepted]
+        user_id:
+          type: string
+          description: The acting principal — a delegate's own id in its delegator's tenant.
+        detail:
+          type: object
+          description: The provider of a sign-in, the version of a terms acceptance.
+          additionalProperties:
+            type: string
         timestamp:
           type: string
           format: date-time

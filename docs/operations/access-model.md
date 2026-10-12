@@ -346,6 +346,7 @@ Three placement rules:
 | `/grant <sub_user_id> step,create` | Delegates an **attenuated** sub-principal (ADR-0005): the delegate acts in your workspace holding only those capabilities. |
 | `/revoke <sub_user_id>` | Removes a delegation (the user reverts to owning only their own empty workspace). |
 | `/grants` | Replies with the current delegations. |
+| `/trail alice@example.com` | Replies with her account trail, oldest first: account created, each sign-in, each terms acceptance, and every command she issued with the campaign and cycle it addressed. Page views are not recorded; spend is `/spend`. An account whose `user.json` cannot be read is named in the reply, since it could not be matched. The terminal's `trail <email>` reads the same. |
 
 With `ADMIN_BOT_PASSPHRASE` set, prefix **every** message with it — it is not a session, so a bare `/spend` is refused like any other: `my-word /block alice@example.com`. A refused message and one that never arrived look identical in Telegram; `journalctl -u <service>-admin-bot` is where they differ (`Ignoring message (N chars, gated=…)`). Messages from any chat id other than yours are ignored the same way. Delegation capabilities are ADR-0005's ladder; a `<sub_user_id>` is the canonical id shown in the delegate's own account modal (`/auth/me`). Every change is recorded to `blocklist_audit.jsonl` or `grants_audit.jsonl` in `.promptpotter/identity/`, an audit trail you can `cat` on the box.
 

@@ -4,6 +4,7 @@ from pathlib import Path
 
 from pydantic import ConfigDict, Field
 
+from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.io import (
     read_json_optional,
@@ -78,11 +79,46 @@ class UserStore:
         return user
 
 
-def count_accounts(projects_root: Path) -> int:
+def account_dirs(projects_root: Path) -> list[WorkspaceDir]:
     """A CROSS-tenant read, so it takes the projects root: a tenant-scoped `Stores` cannot name another tenant's dir."""
     if not projects_root.is_dir():
-        return 0
-    return sum(1 for child in projects_root.iterdir() if (child / "user.json").is_file())
+        return []
+    return sorted(
+        WorkspaceDir(child) for child in projects_root.iterdir() if (child / "user.json").is_file()
+    )
 
 
-__all__ = ["ConsentRecord", "User", "UserStore", "count_accounts"]
+def count_accounts(projects_root: Path) -> int:
+    return len(account_dirs(projects_root))
+
+
+def accounts_by_email(
+    projects_root: Path, email: str
+) -> tuple[list[tuple[WorkspaceDir, User]], list[str]]:
+    """Several where one address signed in through more than one provider: the id is per issuer.
+
+    The second list names the accounts whose ``user.json`` could not be read, by their dir name.
+    """
+    wanted = email.strip().lower()
+    found: list[tuple[WorkspaceDir, User]] = []
+    unreadable: list[str] = []
+    for tenant_dir in account_dirs(projects_root):
+        try:
+            user = UserStore(tenant_dir).load()
+        except Exception:
+            # One torn file must not hide every OTHER account; it is named, since it may be the one asked for.
+            unreadable.append(tenant_dir.name)
+            continue
+        if user is not None and user.email is not None and user.email.strip().lower() == wanted:
+            found.append((tenant_dir, user))
+    return found, unreadable
+
+
+__all__ = [
+    "ConsentRecord",
+    "User",
+    "UserStore",
+    "account_dirs",
+    "accounts_by_email",
+    "count_accounts",
+]

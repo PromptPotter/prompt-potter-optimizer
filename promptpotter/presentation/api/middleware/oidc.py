@@ -66,12 +66,7 @@ def _delegated_identity(data: SessionData, grant: PrincipalGrant) -> IdentityCon
     )
 
 
-def _identity_context_from_session(
-    session_id: str, bundle: IdentityBundle
-) -> IdentityContext | None:
-    data = bundle.session_store.read(session_id)
-    if data is None:
-        return None
+def identity_of_session(data: SessionData, bundle: IdentityBundle) -> IdentityContext:
     grant = read_grant(bundle.paths.grants, data.user_id)
     if grant is not None:
         return _delegated_identity(data, grant)
@@ -86,6 +81,13 @@ def _identity_context_from_session(
         claims={"subject": data.subject},
         capabilities=_session_capabilities(access_state),
     )
+
+
+def _identity_context_from_session(
+    session_id: str, bundle: IdentityBundle
+) -> IdentityContext | None:
+    data = bundle.session_store.read(session_id)
+    return None if data is None else identity_of_session(data, bundle)
 
 
 class OIDCMiddleware:
@@ -114,4 +116,9 @@ def install_oidc_middleware(app: FastAPI) -> None:
     app.add_middleware(OIDCMiddleware)
 
 
-__all__ = ["SESSION_COOKIE_NAME", "install_oidc_middleware", "resolve_access_state"]
+__all__ = [
+    "SESSION_COOKIE_NAME",
+    "identity_of_session",
+    "install_oidc_middleware",
+    "resolve_access_state",
+]

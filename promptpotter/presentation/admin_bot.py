@@ -7,6 +7,7 @@ from typing import Any
 
 import httpx
 
+from promptpotter.application.account_trail import trail_by_email, trail_row, unreadable_note
 from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.application.jobs.install_spend import read_install_spend
 from promptpotter.application.jobs.quota import overrun
@@ -35,8 +36,9 @@ _POLL_TIMEOUT_S = 50
 _RETRY_BACKOFF_S = 5
 _USAGE = (
     "Commands:\n/block <email>\n/unblock <email>\n/blocked\n"
-    "/grant <sub_user_id> <capabilities>\n/revoke <sub_user_id>\n/grants\n/spend"
+    "/grant <sub_user_id> <capabilities>\n/revoke <sub_user_id>\n/grants\n/spend\n/trail <email>"
 )
+_TELEGRAM_MAX_CHARS = 4096
 
 
 def parse_command(text: str, passphrase: str | None) -> tuple[str, str] | None:
@@ -80,7 +82,35 @@ def handle_command(command: str, argument: str, actor: str) -> str:
         return _handle_grant_command(command, argument, actor, paths)
     if command == "spend":
         return _render_install_spend()
+    if command == "trail":
+        return _render_trail(argument)
     return _USAGE
+
+
+def _render_trail(argument: str) -> str:
+    email = argument.strip().lower()
+    if not email:
+        return "Usage: /trail <email>"
+    trail = trail_by_email(DEFAULT_PROJECTS_ROOT, email)
+    note = unreadable_note(trail.unreadable)
+    if trail.lines is None:
+        return "\n".join(part for part in (f"No account with email {email}.", note) if part)
+    rows = [trail_row(line) for line in trail.lines]
+
+    def head(dropped: int) -> str:
+        counted = f"{email}: {len(rows)} lines, UTC" + (
+            f" ({dropped} earlier dropped)" if dropped else ""
+        )
+        return "\n".join(part for part in (counted, note) if part)
+
+    room = _TELEGRAM_MAX_CHARS - len(head(len(rows)))
+    kept = 0
+    for row in reversed(rows):
+        room -= len(row) + 1
+        if room < 0:
+            break
+        kept += 1
+    return "\n".join([head(len(rows) - kept), *rows[len(rows) - kept :]])
 
 
 def _render_install_spend() -> str:

@@ -40,6 +40,17 @@ class _QuietPolls(logging.Filter):
         return not (self._POLLED.match(path_str) or base.endswith(self._SUFFIX))
 
 
+class _CallbackPathOnly(logging.Filter):
+    # The provider redirects back with the one-time `code` and `state` in the query.
+    _CALLBACK = re.compile(r"^/api/v1/auth/callback/[^/?]+\?")
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        if isinstance(args, tuple) and len(args) >= 5 and self._CALLBACK.match(str(args[2])):
+            record.args = (*args[:2], str(args[2]).split("?", 1)[0], *args[3:])
+        return True
+
+
 def setup_logging(
     level: int = logging.INFO,
     *,
@@ -62,6 +73,7 @@ def setup_logging(
         logging.getLogger("promptpotter.application").setLevel(logging.WARNING)
         logging.getLogger("promptpotter.infrastructure").setLevel(logging.WARNING)
     logging.getLogger("uvicorn.access").addFilter(_QuietPolls())
+    logging.getLogger("uvicorn.access").addFilter(_CallbackPathOnly())
 
 
 def silence_proactor_disconnect_noise() -> None:

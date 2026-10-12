@@ -19,6 +19,7 @@ __all__ = [
 
 # A missing kind is a HOLE, not a filter: the tail still consumes its offset, and the client reconnects.
 ProjectionKind = Literal[
+    "account_event",
     "backend_warning",
     "candidate_minted",
     "candidate_scored",

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import get_args
 
 from promptpotter.domain.run_records import (
+    AccountEventRecord,
     BackendWarningRecord,
     CandidateMintedRecord,
     CandidateScoredRecord,
@@ -96,6 +97,7 @@ _ROUTES: dict[type, str | None] = {
     LaunchReleasedRecord: None,
     # Banked by `store/account_spend.py` for a cycle that no longer exists.
     SpendTombstoneRecord: None,
+    AccountEventRecord: None,
     PricedKeyRecord: None,
     # Read off the ledger by `spend_book.py`: money moves on the bill alone.
     SpendHoldRecord: None,

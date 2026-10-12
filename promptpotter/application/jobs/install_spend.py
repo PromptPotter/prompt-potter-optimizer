@@ -14,7 +14,7 @@ from promptpotter.infrastructure.store.account_spend import (
     sum_user_spend,
 )
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
-from promptpotter.infrastructure.store.user_store import User, UserStore
+from promptpotter.infrastructure.store.user_store import User, UserStore, account_dirs
 
 
 class AccountUsage(NamedTuple):
@@ -30,11 +30,7 @@ class AccountUsage(NamedTuple):
 
 def read_install_spend(projects_root: Path) -> list[AccountUsage]:
     rows: list[AccountUsage] = []
-    if not projects_root.is_dir():
-        return rows
-    for tenant_dir in sorted(projects_root.iterdir()):
-        if not tenant_dir.is_dir():
-            continue
+    for tenant_dir in account_dirs(projects_root):
         try:
             user = UserStore(tenant_dir).load()
             if user is None:
@@ -57,8 +53,8 @@ def read_install_spend(projects_root: Path) -> list[AccountUsage]:
     return rows
 
 
-def _account_row(user: User, tenant_dir: Path) -> AccountUsage:
-    campaigns = CampaignStore(WorkspaceDir(tenant_dir))
+def _account_row(user: User, tenant_dir: WorkspaceDir) -> AccountUsage:
+    campaigns = CampaignStore(tenant_dir)
     return AccountUsage(
         user_id=user.user_id,
         email=user.email,

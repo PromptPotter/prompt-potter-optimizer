@@ -10,6 +10,7 @@ from promptpotter.domain.phase_views import BenchEnterView
 from promptpotter.domain.phases import STOP_REASON_INFO, CampaignPhase, GateDecision, RunPhase
 from promptpotter.domain.results import DegradationHealth, HealthCause, candidate_label
 from promptpotter.domain.run_records import (
+    AccountEventRecord,
     BackendWarningRecord,
     CandidateMintedRecord,
     CandidateScoredRecord,
@@ -74,6 +75,7 @@ __all__ = [
 
 # A tail never validates these (`projection_envelope.py::NON_ACTIVITY_KINDS`); `_item` is total over the rest.
 SILENT_RECORDS = (
+    AccountEventRecord,
     BackendWarningRecord,
     CheckinClosedRecord,
     CycleFinalRecord,
