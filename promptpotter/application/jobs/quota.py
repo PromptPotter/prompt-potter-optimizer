@@ -10,6 +10,7 @@ from typing import NamedTuple
 
 from pydantic import Field
 
+from promptpotter.application.account import account_of
 from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.jobs.registry import UNRESOLVED_HOP, JobRegistry
 from promptpotter.config.settings import settings
@@ -259,11 +260,7 @@ def _machine_binds(limit: int) -> str | None:
 
 def quota_status(*, stores: Stores, job_registry: JobRegistry) -> QuotaStatus:
     """Usage is uncapped, so an account past its ceiling reads its overage."""
-    user = stores.users.get_or_create(
-        user_id=str(stores.identity.user_id),
-        tenant_id=str(stores.identity.tenant_id),
-        email=stores.identity.email,
-    )
+    user = account_of(stores)
     wallet = read_account_wallet(user=user, stores=stores, job_registry=job_registry)
     spent, ceilings = wallet.spent, wallet.ceilings
     return QuotaStatus(
@@ -348,9 +345,7 @@ def admit_launch(
 
 def _admit_spend(*, stores: Stores, bucket: str) -> SpendBook:
     """Nothing is reserved: the book itself refuses a call that would pass the headroom."""
-    user = stores.users.get_or_create(
-        user_id=str(stores.identity.user_id), tenant_id=str(stores.identity.tenant_id)
-    )
+    user = account_of(stores)
     spends_own_key = spends_the_hosts_own_key(stores)
     # The host is exempt in the RATE arm too: the meter bounds a stranger on the host's key.
     if not spends_own_key and not _consume_rate_token(f"{bucket}:{user.user_id}"):
@@ -618,12 +613,7 @@ def set_concurrent_cycles(*, stores: Stores, limit: int) -> User:
             code="concurrency_above_machine",
             details={"requested": limit, "machine_ceiling": ceiling},
         )
-    user = stores.users.get_or_create(
-        user_id=str(stores.identity.user_id),
-        tenant_id=str(stores.identity.tenant_id),
-        email=stores.identity.email,
-    )
-    updated = user.model_copy(update={"max_concurrent_cycles": limit})
+    updated = account_of(stores).model_copy(update={"max_concurrent_cycles": limit})
     stores.users.save(updated)
     return updated
 

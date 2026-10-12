@@ -2472,7 +2472,7 @@ def test_host_wallet_ceilings_hold_in_both_units(
             campaigns=types.SimpleNamespace(
                 iter_cycle_ledgers=lambda: ledgers, workspace=tmp_path / "ws"
             ),
-            users=types.SimpleNamespace(get_or_create=lambda **_: free_tier),
+            users=types.SimpleNamespace(load=lambda: free_tier),
         )
 
     def _ledger(name: str, *, model: str) -> list[Path]:

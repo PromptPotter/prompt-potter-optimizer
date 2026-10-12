@@ -1574,11 +1574,9 @@ components:
         user_id:
           type: string
           description: The acting principal — a delegate's own id in its delegator's tenant.
-        detail:
-          type: object
+        subject:
+          type: string
           description: The provider of a sign-in, the version of a terms acceptance.
-          additionalProperties:
-            type: string
         timestamp:
           type: string
           format: date-time

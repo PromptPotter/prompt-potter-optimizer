@@ -1,7 +1,6 @@
 import asyncio
 import contextlib
 import logging
-import time
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -13,9 +12,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import Field
 from scalar_fastapi import get_scalar_api_reference
-from starlette.datastructures import MutableHeaders
 from starlette.middleware.gzip import GZipMiddleware
-from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.application.jobs.reaper import periodic_sweep
@@ -32,6 +29,7 @@ from promptpotter.infrastructure.identity.bundle import build_identity_bundle
 from promptpotter.infrastructure.identity.paths import default_identity_paths
 from promptpotter.presentation.admin_bot import notify_operator
 from promptpotter.presentation.api.deps import auth_is_open
+from promptpotter.presentation.api.middleware.headers import ResponseHeadersMiddleware
 from promptpotter.presentation.api.middleware.oidc import install_oidc_middleware
 from promptpotter.presentation.api.routers.active import active_router
 from promptpotter.presentation.api.routers.auth import auth_router
@@ -184,48 +182,11 @@ app.add_middleware(
 install_oidc_middleware(app)
 
 
-class SecurityHeadersMiddleware:
-    """The ONE header seam. Pure ASGI: ``BaseHTTPMiddleware`` buffers the body and breaks SSE teardown."""
-
-    def __init__(self, app: ASGIApp) -> None:
-        self.app = app
-
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http":
-            await self.app(scope, receive, send)
-            return
-        is_api = scope.get("path", "").startswith("/api/v1/")
-        is_https = scope.get("scheme") == "https"
-        began = time.perf_counter()
-
-        async def send_with_headers(message: Message) -> None:
-            if message["type"] == "http.response.start":
-                headers = MutableHeaders(scope=message)
-                headers.setdefault("x-content-type-options", "nosniff")
-                headers.setdefault("x-frame-options", "DENY")
-                headers.setdefault("referrer-policy", "strict-origin-when-cross-origin")
-                if is_https:
-                    headers.setdefault(
-                        "strict-transport-security", "max-age=63072000; includeSubDomains"
-                    )
-                headers.setdefault(
-                    "content-security-policy",
-                    "default-src 'none'; frame-ancestors 'none'"
-                    if is_api
-                    else "frame-ancestors 'none'; base-uri 'self'; object-src 'none'",
-                )
-                if is_api:
-                    headers["cache-control"] = "no-store"
-                    elapsed_ms = (time.perf_counter() - began) * 1000
-                    headers["server-timing"] = f"app;dur={elapsed_ms:.1f}"
-            await send(message)
-
-        await self.app(scope, receive, send_with_headers)
-
+WEBAPP_DIR = webapp_static_root()
 
 # Inside the header seam; GZip passes ``text/event-stream`` through, so SSE is never buffered.
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
-app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(ResponseHeadersMiddleware, webapp_dir=WEBAPP_DIR)
 
 
 _health = APIRouter(tags=["Health"])
@@ -258,7 +219,6 @@ app.include_router(commands_router, prefix="/api/v1")
 app.include_router(auth_router, prefix="/api/v1")
 
 # A catch-all, so it MUST stay the last route registered: Starlette resolves in order.
-WEBAPP_DIR = webapp_static_root()
 if WEBAPP_DIR.exists():
     app.mount("/", StaticFiles(directory=WEBAPP_DIR, html=True), name="webapp")
 

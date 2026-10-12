@@ -15,14 +15,13 @@ import { clearReadCache, readThrough } from "@/lib/read-cache";
 
 export type AuthStatus = "loading" | "authed" | "unauthed";
 
-// `code`/`email` are non-null only after an OIDC callback bounced back with a failure.
+// `code` is non-null only after an OIDC callback bounced back with a failure.
 export interface AuthPrompt {
   open: boolean;
   code: string | null;
-  email: string | null;
 }
 
-const PROMPT_CLOSED: AuthPrompt = { open: false, code: null, email: null };
+const PROMPT_CLOSED: AuthPrompt = { open: false, code: null };
 
 interface AuthCtx {
   status: AuthStatus;
@@ -86,7 +85,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   const openAuthPrompt = useCallback(
-    () => setAuthPrompt({ open: true, code: null, email: null }),
+    () => setAuthPrompt({ open: true, code: null }),
     [],
   );
   const closeAuthPrompt = useCallback(() => setAuthPrompt(PROMPT_CLOSED), []);
@@ -97,9 +96,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const url = new URL(window.location.href);
     const code = url.searchParams.get("auth_error");
     if (!code) return;
-    setAuthPrompt({ open: true, code, email: url.searchParams.get("email") });
+    setAuthPrompt({ open: true, code });
     url.searchParams.delete("auth_error");
-    url.searchParams.delete("email");
     window.history.replaceState({}, "", url.toString());
   }, []);
   /* eslint-enable react-hooks/set-state-in-effect */

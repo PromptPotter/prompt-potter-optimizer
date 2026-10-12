@@ -23,35 +23,28 @@ function GoogleMark() {
   );
 }
 
-const AUTH_ERROR_FALLBACK = (): string => "Something went wrong during sign-in. Try again.";
+const AUTH_ERROR_FALLBACK = "Something went wrong during sign-in. Try again.";
 
-const AUTH_ERROR_COPY: Record<string, (email: string | null) => string> = {
-  state_invalid_or_expired: () =>
+const AUTH_ERROR_COPY: Record<string, string> = {
+  state_invalid_or_expired:
     "That sign-in took too long and expired. Try Continue with Google again.",
-  code_exchange_failed: () => "We couldn't verify your sign-in with Google. Try again.",
-  provider_returned_error: () => "Google sign-in was cancelled. Try again when you're ready.",
-  callback_missing_params: () => "That sign-in link was incomplete. Try again.",
-  signin_unavailable: () =>
-    "Sign-in is temporarily unavailable. Open a GitHub issue and we'll fix it.",
+  code_exchange_failed: "We couldn't verify your sign-in with Google. Try again.",
+  provider_returned_error: "Google sign-in was cancelled. Try again when you're ready.",
+  callback_missing_params: "That sign-in link was incomplete. Try again.",
+  signin_unavailable: "Sign-in is temporarily unavailable. Open a GitHub issue and we'll fix it.",
 };
-
-function authErrorMessage(code: string, email: string | null): string {
-  const fn = AUTH_ERROR_COPY[code] ?? AUTH_ERROR_FALLBACK;
-  return fn(email);
-}
 
 interface Props {
   // `?auth_error=` from the /auth/callback/{provider} 303, forwarded by the modal.
   errorCode?: string | null;
-  errorEmail?: string | null;
 }
 
-export function AuthCore({ errorCode, errorEmail }: Props) {
+export function AuthCore({ errorCode }: Props) {
   return (
     <div className="auth-core">
       {errorCode ? (
         <p className="account-error" role="alert">
-          {authErrorMessage(errorCode, errorEmail ?? null)}
+          {AUTH_ERROR_COPY[errorCode] ?? AUTH_ERROR_FALLBACK}
         </p>
       ) : null}
 

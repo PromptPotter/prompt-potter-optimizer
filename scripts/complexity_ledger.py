@@ -28,7 +28,7 @@ from pydantic import BaseModel
 
 BASELINE = {
     # Every `.py` under the package.
-    "modules": 435,
+    "modules": 438,
     # Every `__init__.py` among them.
     "init_files": 55,
     # The `__init__.py` files that re-export names instead of staying empty.
@@ -63,7 +63,7 @@ BASELINE = {
     # `tests/test_*.py` — `tests/CLAUDE.md` names what each one owns.
     "test_files": 6,
     # Test functions across them, each admitted through the charter's three axes.
-    "test_functions": 147,
+    "test_functions": 148,
     # Every property of every schema the generated contract offers the browser.
     "served_fields": 1620,
 }

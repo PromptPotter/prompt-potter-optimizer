@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import NamedTuple
 
 from pydantic import ConfigDict, Field
 
@@ -10,7 +11,6 @@ from promptpotter.infrastructure.store.io import (
     read_json_optional,
     write_json,
 )
-from promptpotter.shared.clock import utcnow_iso
 
 
 class ConsentRecord(StrictModel):
@@ -65,19 +65,6 @@ class UserStore:
     def save(self, user: User) -> None:
         write_json(self._path(), user.model_dump())
 
-    def get_or_create(self, *, user_id: str, tenant_id: str, email: str | None = None) -> User:
-        existing = self.load()
-        if existing is not None:
-            return existing
-        user = User(
-            user_id=user_id,
-            tenant_id=tenant_id,
-            email=email,
-            created_at=utcnow_iso(),
-        )
-        self.save(user)
-        return user
-
 
 def account_dirs(projects_root: Path) -> list[WorkspaceDir]:
     """A CROSS-tenant read, so it takes the projects root: a tenant-scoped `Stores` cannot name another tenant's dir."""
@@ -92,33 +79,39 @@ def count_accounts(projects_root: Path) -> int:
     return len(account_dirs(projects_root))
 
 
-def accounts_by_email(
-    projects_root: Path, email: str
-) -> tuple[list[tuple[WorkspaceDir, User]], list[str]]:
-    """Several where one address signed in through more than one provider: the id is per issuer.
+class Torn(NamedTuple):
+    """A ``user.json`` that would not load."""
 
-    The second list names the accounts whose ``user.json`` could not be read, by their dir name.
-    """
-    wanted = email.strip().lower()
-    found: list[tuple[WorkspaceDir, User]] = []
-    unreadable: list[str] = []
+    why: str
+
+
+class AccountDir(NamedTuple):
+    workspace: WorkspaceDir
+    user: User | Torn
+
+
+def read_accounts(projects_root: Path) -> list[AccountDir]:
+    """Every cross-tenant read of WHO starts here, so one file that will not load costs its own row and no other."""
+    accounts: list[AccountDir] = []
     for tenant_dir in account_dirs(projects_root):
         try:
             user = UserStore(tenant_dir).load()
-        except Exception:
-            # One torn file must not hide every OTHER account; it is named, since it may be the one asked for.
-            unreadable.append(tenant_dir.name)
+        except Exception as exc:
+            accounts.append(AccountDir(tenant_dir, Torn(f"{type(exc).__name__}: {exc}")))
             continue
-        if user is not None and user.email is not None and user.email.strip().lower() == wanted:
-            found.append((tenant_dir, user))
-    return found, unreadable
+        # Gone between the listing and the read: an account that is being deleted is not one.
+        if user is not None:
+            accounts.append(AccountDir(tenant_dir, user))
+    return accounts
 
 
 __all__ = [
+    "AccountDir",
     "ConsentRecord",
+    "Torn",
     "User",
     "UserStore",
     "account_dirs",
-    "accounts_by_email",
     "count_accounts",
+    "read_accounts",
 ]

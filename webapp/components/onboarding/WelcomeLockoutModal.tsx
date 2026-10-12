@@ -8,7 +8,7 @@ import { AuthCore } from "@/components/login/AuthCore";
 // Mounted ONCE (app/page.tsx): every trigger calls `openAuthPrompt()`, never an `open` prop.
 export function WelcomeLockoutModal() {
   const { authPrompt, closeAuthPrompt } = useAuth();
-  const { open, code: errorCode, email: errorEmail } = authPrompt;
+  const { open, code: errorCode } = authPrompt;
 
   if (!open) return null;
 
@@ -34,7 +34,7 @@ export function WelcomeLockoutModal() {
             .
           </p>
 
-          <AuthCore errorCode={errorCode} errorEmail={errorEmail} />
+          <AuthCore errorCode={errorCode} />
 
           <div style={{ flex: 1 }} />
 

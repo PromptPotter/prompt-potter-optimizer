@@ -34,7 +34,6 @@ from promptpotter.domain.results import (
 )
 from promptpotter.domain.ruler import DeltaRuler
 from promptpotter.domain.run_records import (
-    AccountEventRecord,
     CandidateMintedRecord,
     CandidateScoredRecord,
     CandidateStartedRecord,
@@ -1025,27 +1024,6 @@ def _unworked_seconds(rows: list[dict[str, Any]]) -> float | None:
     return total
 
 
-class _Trail:
-    records: ClassVar[RecordClasses] = (AccountEventRecord, CommandRecord)
-
-    def __init__(self) -> None:
-        self._found: list[AccountEventRecord | CommandRecord] = []
-
-    def feed(self, offset: int, record: AccountEventRecord | CommandRecord) -> None:
-        self._found.append(record)
-
-    def value(self) -> tuple[AccountEventRecord | CommandRecord, ...]:
-        return tuple(self._found)
-
-
-# Its own roster: `LEDGER_FOLDS` is fed in every process, and only the operator's read holds these.
-TRAIL_FOLDS = (_Trail,)
-
-
-def scan_ledger_trail(ledger_path: Path) -> tuple[AccountEventRecord | CommandRecord, ...]:
-    return LedgerIndex.of(ledger_path, TRAIL_FOLDS).view(_Trail)
-
-
 def scan_ledger_answers(ledger_paths: Iterable[Path]) -> set[str]:
     found: set[str] = set()
     for path in ledger_paths:
@@ -1185,7 +1163,6 @@ __all__ = [
     "scan_ledger_scoring_lock",
     "scan_ledger_spend",
     "scan_ledger_spend_by_round",
-    "scan_ledger_trail",
     "scan_ledger_verify",
     "scan_ledger_walks",
     "scan_ledger_wall_clock",

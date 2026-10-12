@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
+from promptpotter.application.account import account_of
 from promptpotter.application.commands.dispatcher import Applier
 from promptpotter.application.jobs import quota
 from promptpotter.application.jobs.launcher.admission import withdraw_queued
@@ -39,12 +40,9 @@ def _clamp_to_account_ceilings(
 ) -> tuple[SpendCeilings, SpendCeilings]:
     """Only a SUPPLIED arm is clamped: composing an absent one writes a ceiling nobody moved."""
     stores = dispatcher.stores
-    user = stores.users.get_or_create(
-        user_id=str(stores.identity.user_id), tenant_id=str(stores.identity.tenant_id)
-    )
     return quota.clamp_budget_change(
         requested=change,
-        user=user,
+        user=account_of(stores),
         stores=stores,
         job_registry=dispatcher.job_registry,
         hop=hop,

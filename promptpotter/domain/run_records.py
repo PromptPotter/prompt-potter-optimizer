@@ -538,7 +538,7 @@ class AccountEventRecord(StrictModel):
     event: AccountEvent
     user_id: str
     # The provider of a sign-in, the version of a terms acceptance.
-    detail: dict[str, str] = Field(default_factory=dict)
+    subject: str = ""
     timestamp: str = Field(default_factory=utcnow_iso)
 
 

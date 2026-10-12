@@ -1,6 +1,7 @@
 "use client";
 
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { buildIsStale } from "@/lib/api";
 import s from "./ErrorBoundary.module.css";
 
 interface Props {
@@ -14,7 +15,12 @@ interface State {
   reload: ReloadOutcome | null;
 }
 
-const STALE_BUILD = /ChunkLoadError|Failed to load chunk|Loading chunk \S+ failed|dynamically imported module|Importing a module script failed/i;
+const MISSING_CHUNK = /ChunkLoadError|Failed to load chunk|Loading chunk \S+ failed|dynamically imported module|Importing a module script failed/i;
+
+// Two faces of one cause: a piece of the old build is gone from disk, or the old build read an answer the new API shaped.
+function fromStaleBuild(error: Error): boolean {
+  return buildIsStale() || MISSING_CHUNK.test(`${error.name} ${error.message}`);
+}
 
 // Reload ONCE. A time, not a flag, so a later rebuild heals too without anyone clearing it.
 const RELOAD_STAMP = "promptpotter.chunk-reload-at";
@@ -42,7 +48,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
     console.error("[dashboard] render error", error, info.componentStack);
-    if (STALE_BUILD.test(`${error.name} ${error.message}`)) {
+    if (fromStaleBuild(error)) {
       this.setState({ reload: reloadOnceForStaleBuild() });
     }
   }
@@ -50,7 +56,7 @@ export class ErrorBoundary extends Component<Props, State> {
   render(): ReactNode {
     const { error, reload } = this.state;
     if (!error) return this.props.children;
-    const stale = STALE_BUILD.test(`${error.name} ${error.message}`);
+    const stale = fromStaleBuild(error);
     return (
       <div role="alert" className={s.panel}>
         <h1 className={s.heading}>
@@ -60,8 +66,8 @@ export class ErrorBoundary extends Component<Props, State> {
           {!stale
             ? "A render error never writes to disk — your campaign is untouched. Reloading usually clears it; if it repeats, the console has the component stack."
             : reload === "already-tried"
-              ? "Your campaign is untouched — the app was rebuilt while this tab was open, so a piece of it is no longer on disk. Reloading was tried once already and the file is still missing, which usually means a build is still running; wait for it to finish, then reload."
-              : "Your campaign is untouched — the app was rebuilt while this tab was open, so a piece of it is no longer on disk. Reload once the build has finished."}
+              ? "Your campaign is untouched — the app was rebuilt while this tab was open, so this tab no longer matches it. Reloading was tried once already and did not clear it, which usually means a build is still running; wait for it to finish, then reload."
+              : "Your campaign is untouched — the app was rebuilt while this tab was open, so this tab no longer matches it. Reload once the build has finished."}
         </p>
         <pre className={s.detail}>{error.message}</pre>
         <button type="button" className={s.action} onClick={() => window.location.reload()}>

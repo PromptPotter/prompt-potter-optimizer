@@ -1,4 +1,4 @@
-import { API } from "./client";
+import { API, send } from "./client";
 import { mintIdempotencyKey, throwApiError } from "./errors";
 import { postCommand } from "./commands";
 import type {
@@ -18,10 +18,9 @@ export async function postIngestDataset(
   const form = new FormData();
   form.append("file", file);
   if (slug) form.append("slug", slug);
-  const r = await fetch(`${API}/datasets/ingest`, {
+  const r = await send(`${API}/datasets/ingest`, {
     method: "POST",
     body: form,
-    cache: "no-store",
   });
   if (!r.ok) await throwApiError(r);
   return (await r.json()) as DraftCampaignWire;
@@ -33,11 +32,10 @@ export async function postUploadCandidateLibrary(
   const form = new FormData();
   form.append("file", file);
   form.append("draft_id", draftId);
-  const r = await fetch(`${API}/datasets/draft/candidate-library`, {
+  const r = await send(`${API}/datasets/draft/candidate-library`, {
     method: "POST",
     headers: { "Idempotency-Key": mintIdempotencyKey() },
     body: form,
-    cache: "no-store",
   });
   if (!r.ok) await throwApiError(r);
   return (await r.json()) as DraftCampaignWire;
@@ -46,32 +44,29 @@ export async function postBuildCandidateLibraryFromColumn(
   draftId: string,
   column: string,
 ): Promise<DraftCampaignWire> {
-  const r = await fetch(`${API}/datasets/draft/candidate-library/from-column`, {
+  const r = await send(`${API}/datasets/draft/candidate-library/from-column`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "Idempotency-Key": mintIdempotencyKey(),
     },
     body: JSON.stringify({ draft_id: draftId, column }),
-    cache: "no-store",
   });
   if (!r.ok) await throwApiError(r);
   return (await r.json()) as DraftCampaignWire;
 }
 // Mints a durable `checkin` campaign from the dataset's CURRENT config; nothing runs until `postStartCheckin`.
 export async function postDraftFromDataset(name: string): Promise<DraftCampaignWire> {
-  const r = await fetch(`${API}/datasets/${encodeURIComponent(name)}/draft`, {
+  const r = await send(`${API}/datasets/${encodeURIComponent(name)}/draft`, {
     method: "POST",
-    cache: "no-store",
   });
   if (!r.ok) await throwApiError(r);
   return (await r.json()) as DraftCampaignWire;
 }
 // Unlike `postDraftFromDataset`, reproduces the origin's prompt verbatim, with `campaign_origin` lineage.
 export async function postDraftFromOrigin(originId: string): Promise<DraftCampaignWire> {
-  const r = await fetch(`${API}/origins/${encodeURIComponent(originId)}/draft`, {
+  const r = await send(`${API}/origins/${encodeURIComponent(originId)}/draft`, {
     method: "POST",
-    cache: "no-store",
   });
   if (!r.ok) await throwApiError(r);
   return (await r.json()) as DraftCampaignWire;
@@ -115,10 +110,7 @@ export async function postStartCheckin(
 export async function getCampaignCheckin(
   campaignId: string,
 ): Promise<CheckinReopenResponse> {
-  const r = await fetch(
-    `${API}/campaigns/${encodeURIComponent(campaignId)}/checkin`,
-    { cache: "no-store" },
-  );
+  const r = await send(`${API}/campaigns/${encodeURIComponent(campaignId)}/checkin`);
   if (!r.ok) await throwApiError(r);
   return (await r.json()) as CheckinReopenResponse;
 }

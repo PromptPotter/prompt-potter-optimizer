@@ -7,10 +7,11 @@ from typing import Any
 
 import httpx
 
-from promptpotter.application.account_trail import trail_by_email, trail_row, unreadable_note
+from promptpotter.application.account import trail_by_email
 from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.application.jobs.install_spend import read_install_spend
 from promptpotter.application.jobs.quota import overrun
+from promptpotter.application.views.trail import trail_notes, trail_rows
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.config.settings import settings
@@ -88,20 +89,20 @@ def handle_command(command: str, argument: str, actor: str) -> str:
 
 
 def _render_trail(argument: str) -> str:
-    email = argument.strip().lower()
+    email = argument.strip()
     if not email:
         return "Usage: /trail <email>"
     trail = trail_by_email(DEFAULT_PROJECTS_ROOT, email)
-    note = unreadable_note(trail.unreadable)
-    if trail.lines is None:
-        return "\n".join(part for part in (f"No account with email {email}.", note) if part)
-    rows = [trail_row(line) for line in trail.lines]
+    notes = trail_notes(trail)
+    if not trail.own:
+        return "\n".join([f"No account with email {email}.", *notes])
+    rows = trail_rows(trail)
 
     def head(dropped: int) -> str:
         counted = f"{email}: {len(rows)} lines, UTC" + (
             f" ({dropped} earlier dropped)" if dropped else ""
         )
-        return "\n".join(part for part in (counted, note) if part)
+        return "\n".join([counted, *notes])
 
     room = _TELEGRAM_MAX_CHARS - len(head(len(rows)))
     kept = 0

@@ -226,9 +226,9 @@ not backend-supplied.
   fresh public box to whichever stranger signed in first.
 - **Blocklist edits never have an inbound door** — delivered out-of-band by the on-box,
   outbound-only Telegram bot (`presentation/admin_bot.py`, ADR-0004). This is the zero-trust rule.
-- **Response headers** (`main.py::SecurityHeadersMiddleware`, one middleware): `nosniff`, `X-Frame-Options:
+- **Response headers** (`presentation/api/middleware/headers.py::ResponseHeadersMiddleware`, one middleware): `nosniff`, `X-Frame-Options:
   DENY`, `Referrer-Policy`, HSTS on https; CSP strict (`default-src 'none'`) on JSON API paths,
-  frame-only on the webapp document; `Cache-Control: no-store` on `/api/v1/*`.
+  frame-only on the webapp document; `Cache-Control: no-store` on `/api/v1/*`, `no-cache` on every page, and `immutable` only on a content-named file under `/_next/static/` that was actually served. Every `/api/v1/*` answer also names the webapp build being served (`X-Webapp-Build`), so a tab left open across a deploy knows it is the old one.
 - **PP↔TermNorm** is authenticated with a shared bearer token (`Authorization: Bearer`,
   constant-time compared on the TermNorm side) plus TermNorm's IP allowlist
   (`connectors/termnorm.py`, `infrastructure/backend.py`); the deploy provisions the shared secret.
@@ -346,7 +346,7 @@ Three placement rules:
 | `/grant <sub_user_id> step,create` | Delegates an **attenuated** sub-principal (ADR-0005): the delegate acts in your workspace holding only those capabilities. |
 | `/revoke <sub_user_id>` | Removes a delegation (the user reverts to owning only their own empty workspace). |
 | `/grants` | Replies with the current delegations. |
-| `/trail alice@example.com` | Replies with her account trail, oldest first: account created, each sign-in, each terms acceptance, and every command she issued with the campaign and cycle it addressed. Page views are not recorded; spend is `/spend`. An account whose `user.json` cannot be read is named in the reply, since it could not be matched. The terminal's `trail <email>` reads the same. |
+| `/trail alice@example.com` | Replies with what she did, oldest first: account created, each sign-in, each terms acceptance, and each command still on a ledger, with the campaign and cycle it addressed where it addressed one. It covers everything in a workspace she owns, a delegate's lines marked `by <id>`, and her own lines in a workspace she acts in as a delegate, marked with that workspace. A deleted campaign takes its commands with it, and an inner sandbox's ledgers are not walked. Page views are not recorded; spend is `/spend`. A workspace that cannot be read is named in the reply, since what it holds is missing. The terminal's `trail <email>` reads the same. |
 
 With `ADMIN_BOT_PASSPHRASE` set, prefix **every** message with it — it is not a session, so a bare `/spend` is refused like any other: `my-word /block alice@example.com`. A refused message and one that never arrived look identical in Telegram; `journalctl -u <service>-admin-bot` is where they differ (`Ignoring message (N chars, gated=…)`). Messages from any chat id other than yours are ignored the same way. Delegation capabilities are ADR-0005's ladder; a `<sub_user_id>` is the canonical id shown in the delegate's own account modal (`/auth/me`). Every change is recorded to `blocklist_audit.jsonl` or `grants_audit.jsonl` in `.promptpotter/identity/`, an audit trail you can `cat` on the box.
 

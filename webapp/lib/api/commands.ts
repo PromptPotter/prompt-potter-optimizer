@@ -1,5 +1,5 @@
 import { encodeDescend, pathRoot, type CyclePath } from "../ids";
-import { API } from "./client";
+import { API, send } from "./client";
 import { mintIdempotencyKey, throwApiError } from "./errors";
 import type {
   CommandKind,
@@ -18,14 +18,13 @@ export async function postCommand<T = CommandAcceptedBody>(
   kind: CommandKind,
   payload: Record<string, unknown>,
 ): Promise<T> {
-  const r = await fetch(`${API}/commands/${kind}`, {
+  const r = await send(`${API}/commands/${kind}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "Idempotency-Key": mintIdempotencyKey(),
     },
     body: JSON.stringify({ kind, payload }),
-    cache: "no-store",
   });
   if (!r.ok) await throwApiError(r);
   return (await r.json()) as T;

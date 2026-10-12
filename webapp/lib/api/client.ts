@@ -1,5 +1,22 @@
 export const API = "/api/v1";
 
+// Stamped by the build (`next.config.ts`); the server names the build it serves on every API answer.
+const BUILD = process.env.NEXT_PUBLIC_WEBAPP_BUILD;
+let serverMovedOn = false;
+
+export function buildIsStale(): boolean {
+  return serverMovedOn;
+}
+
+// The ONE door to the API: every call is uncached, and every answer is checked against this tab's build.
+export async function send(url: string, init: RequestInit = {}): Promise<Response> {
+  const r = await fetch(url, { cache: "no-store", ...init });
+  const serving = r.headers.get("X-Webapp-Build");
+  // Only noted, never acted on here: a reload would drop an ingest draft or a command in flight.
+  if (BUILD && serving && serving !== BUILD) serverMovedOn = true;
+  return r;
+}
+
 // `errorId` greps the server log line (`main.py::_error_response`).
 export class ApiError extends Error {
   constructor(
@@ -48,9 +65,7 @@ async function toApiError(r: Response, url: string): Promise<ApiError> {
 }
 
 export async function jget<T>(url: string, signal?: AbortSignal): Promise<T> {
-  const init: RequestInit = { cache: "no-store" };
-  if (signal) init.signal = signal;
-  const r = await fetch(url, init);
+  const r = await send(url, { signal: signal ?? null });
   if (!r.ok) throw await toApiError(r, url);
   return (await r.json()) as T;
 }
@@ -61,14 +76,12 @@ export async function jpost<T>(
   body: unknown,
   signal?: AbortSignal,
 ): Promise<T> {
-  const init: RequestInit = {
+  const r = await send(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
-    cache: "no-store",
-  };
-  if (signal) init.signal = signal;
-  const r = await fetch(url, init);
+    signal: signal ?? null,
+  });
   if (!r.ok) throw await toApiError(r, url);
   return (await r.json()) as T;
 }
@@ -87,9 +100,7 @@ async function jgetWithValidator<T>(
 ): Promise<Conditional<T>> {
   const headers: Record<string, string> = {};
   if (validator) headers[requestHeader] = validator;
-  const init: RequestInit = { cache: "no-store", headers };
-  if (signal) init.signal = signal;
-  const r = await fetch(url, init);
+  const r = await send(url, { headers, signal: signal ?? null });
   if (r.status === 304) return { kind: "not_modified" };
   if (!r.ok) throw await toApiError(r, url);
   return { kind: "ok", data: (await r.json()) as T, validator: r.headers.get(responseHeader) };

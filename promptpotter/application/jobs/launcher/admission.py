@@ -6,6 +6,7 @@ import time
 from typing import TYPE_CHECKING, NoReturn
 
 from promptpotter import connectors
+from promptpotter.application.account import account_of
 from promptpotter.application.jobs.quota import (
     admit_launch,
     check_launch_quotas,
@@ -31,7 +32,6 @@ from promptpotter.domain.phases import (
 from promptpotter.domain.run_records import ErrorRecord, RunPhaseRecord
 from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.infrastructure.store.user_store import User
 from promptpotter.shared.errors import ConflictError, CycleBusyError, MachineBusyError
 from promptpotter.shared.identity import acting_principal_id
 
@@ -107,14 +107,6 @@ async def probe_backend(backend_type: str, backend_url: str) -> BackendUnreachab
     return None
 
 
-def _user_of(stores: Stores) -> User:
-    return stores.users.get_or_create(
-        user_id=str(stores.identity.user_id),
-        tenant_id=str(stores.identity.tenant_id),
-        email=stores.identity.email,
-    )
-
-
 def request_launch(
     *,
     stores: Stores,
@@ -122,7 +114,7 @@ def request_launch(
     dataset_name: str,
     hop: CycleHop = UNRESOLVED_HOP,
 ) -> Job:
-    user = _user_of(stores)
+    user = account_of(stores)
     # ONE gate: the quota count and the slot count come off the same on-disk jobs.
     with job_registry.admission_gate():
         check_launch_quotas(user=user, stores=stores, job_registry=job_registry, hop=hop)
@@ -207,7 +199,7 @@ async def admit_and_hold(
     request: LaunchRequest, *, stores: Stores, job_registry: JobRegistry, job: Job
 ) -> HeldLimits:
     """The request's config is resolved IN here, after the queue wait, so the ceiling admitted is the one the run starts under."""
-    user = _user_of(stores)
+    user = account_of(stores)
     # A fresh mint has no cycle yet: nothing to claim, and no seed or standing ceiling to read.
     hop = None if request.hop == UNRESOLVED_HOP else request.hop
     if job.queued:

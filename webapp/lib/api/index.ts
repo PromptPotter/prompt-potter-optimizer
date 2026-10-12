@@ -1,4 +1,10 @@
-export { ApiError, failureKind, type Conditional, type FailureKind } from "./client";
+export {
+  ApiError,
+  buildIsStale,
+  failureKind,
+  type Conditional,
+  type FailureKind,
+} from "./client";
 export * from "./types";
 export * from "./reads";
 export * from "./account";

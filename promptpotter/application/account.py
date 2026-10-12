@@ -1,0 +1,141 @@
+"""An account's life, written and read back.
+
+Each fact is stamped ONCE and written to the workspace ledger before ``user.json``, so no account
+and no consent exists without its record; a write that fails between the two repeats the record on
+the retry, which reads as the same fact twice and never as one missing.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import NamedTuple
+
+from promptpotter.domain.run_records import AccountEvent, AccountEventRecord
+from promptpotter.infrastructure.ledger import CycleEventLog
+from promptpotter.infrastructure.store.account_trail import (
+    TrailLine,
+    in_time_order,
+    workspace_lines,
+)
+from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
+from promptpotter.infrastructure.store.stores import Stores
+from promptpotter.infrastructure.store.user_store import ConsentRecord, Torn, User, read_accounts
+from promptpotter.shared.clock import utcnow_iso
+from promptpotter.shared.identity import acting_principal_id
+
+
+def _record(stores: Stores, event: AccountEvent, *, at: str, subject: str = "") -> None:
+    CycleEventLog.open_workspace(stores.base_dir).append(
+        AccountEventRecord(
+            event=event,
+            user_id=acting_principal_id(stores.identity),
+            subject=subject,
+            timestamp=at,
+        )
+    )
+
+
+class Arrival(NamedTuple):
+    user: User
+    # This call opened the account: the one moment there is somebody new to announce.
+    opened: bool
+
+
+def arrive(stores: Stores) -> Arrival:
+    """The ONE place an account comes into being, whichever request reaches it first."""
+    existing = stores.users.load()
+    if existing is not None:
+        return Arrival(existing, opened=False)
+    identity = stores.identity
+    user = User(
+        user_id=str(identity.user_id),
+        tenant_id=str(identity.tenant_id),
+        email=identity.email,
+        created_at=utcnow_iso(),
+    )
+    _record(stores, "account_created", at=user.created_at)
+    stores.users.save(user)
+    return Arrival(user, opened=True)
+
+
+def account_of(stores: Stores) -> User:
+    return arrive(stores).user
+
+
+def sign_in(stores: Stores) -> Arrival:
+    arrival = arrive(stores)
+    _record(stores, "signed_in", at=utcnow_iso(), subject=stores.identity.provider or "")
+    return arrival
+
+
+def accept_terms(stores: Stores, version: str) -> User:
+    """``accepted_at`` is this server's clock, never the client's: its legal weight rests on that."""
+    consent = ConsentRecord(version=version, accepted_at=utcnow_iso())
+    user = account_of(stores).model_copy(update={"terms_accepted": consent})
+    _record(stores, "terms_accepted", at=consent.accepted_at, subject=version)
+    stores.users.save(user)
+    return user
+
+
+class Trail(NamedTuple):
+    # Whose it is: empty where no readable account carries the email asked for.
+    own: frozenset[str]
+    lines: list[TrailLine]
+    # Workspaces that could not be read, so what they hold is missing from ``lines``.
+    unreadable: list[str]
+
+
+def tenant_trail(stores: Stores) -> Trail:
+    return Trail(
+        frozenset({acting_principal_id(stores.identity)}),
+        in_time_order(workspace_lines(stores.campaigns)),
+        [],
+    )
+
+
+def trail_by_email(projects_root: Path, email: str) -> Trail:
+    """The operator-admin read (ADR-0004) of what one PERSON did, across every workspace on the box.
+
+    Everything in a workspace they own, whoever did it, and their own lines in anyone else's: a
+    delegate acts in its delegator's workspace. Several ids where one address signed in through more
+    than one provider, since the id is per issuer.
+    """
+    wanted = email.strip().lower()
+    accounts = read_accounts(projects_root)
+    own = frozenset(
+        account.user.user_id
+        for account in accounts
+        if not isinstance(account.user, Torn)
+        and (account.user.email or "").strip().lower() == wanted
+    )
+    unreadable = [account.workspace.name for account in accounts if isinstance(account.user, Torn)]
+    lines: list[TrailLine] = []
+    for account in accounts if own else ():
+        try:
+            found = list(workspace_lines(CampaignStore(account.workspace)))
+        except Exception:
+            # A ledger that will not scan costs its own workspace and no other.
+            if account.workspace.name not in unreadable:
+                unreadable.append(account.workspace.name)
+            continue
+        if not isinstance(account.user, Torn) and account.user.user_id in own:
+            lines += found
+        else:
+            lines += [
+                line._replace(subject=f"{account.workspace.name}:{line.subject}")
+                for line in found
+                if line.actor in own
+            ]
+    return Trail(own, in_time_order(lines), unreadable)
+
+
+__all__ = [
+    "Arrival",
+    "Trail",
+    "accept_terms",
+    "account_of",
+    "arrive",
+    "sign_in",
+    "tenant_trail",
+    "trail_by_email",
+]

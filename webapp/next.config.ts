@@ -1,7 +1,15 @@
+import fs from "node:fs";
 import path from "node:path";
 import type { NextConfig } from "next";
 
+// Written by `npm run build` before Next starts and exported with `public/`, so the server reads
+// the same id this bakes into the client. Absent under `next dev`, where nothing is compared.
+const buildStamp = path.resolve(__dirname, "public", "build-id.txt");
+
 const nextConfig: NextConfig = {
+  env: {
+    NEXT_PUBLIC_WEBAPP_BUILD: fs.existsSync(buildStamp) ? fs.readFileSync(buildStamp, "utf8") : "",
+  },
   output: "export",
   typescript: { ignoreBuildErrors: true },
   reactCompiler: true,

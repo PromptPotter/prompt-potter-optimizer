@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "prebuild": "node -e \"require('fs').writeFileSync('public/build-id.txt', Date.now().toString(36))\"",
     "build": "next build",
     "start": "next start",
     "lint": "eslint --cache --cache-strategy content",

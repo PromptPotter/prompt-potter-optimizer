@@ -9,7 +9,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, BackgroundTasks, Path, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
-from promptpotter.application.account_trail import record_account_event
+from promptpotter.application import account
 from promptpotter.application.jobs.account_activity import (
     ActivityGroupBy,
     ActivityResponse,
@@ -32,22 +32,25 @@ from promptpotter.infrastructure.identity.migration import maybe_claim_default, 
 from promptpotter.infrastructure.identity.provider_config import SUPPORTED_PROVIDERS
 from promptpotter.infrastructure.identity.user import derive_user_id
 from promptpotter.infrastructure.identity.verifier import IDTokenInvalidError
-from promptpotter.infrastructure.store.stores import build_stores
-from promptpotter.infrastructure.store.user_store import ConsentRecord, count_accounts
+from promptpotter.infrastructure.store.user_store import count_accounts
 from promptpotter.presentation.admin_bot import forward_new_account_to_crm, notify_operator
-from promptpotter.presentation.api.deps import IdentityDep, JobRegistryDep, StoresDep
+from promptpotter.presentation.api.deps import (
+    IdentityDep,
+    JobRegistryDep,
+    StoresDep,
+    build_stores_from_identity,
+)
 from promptpotter.presentation.api.middleware.oidc import (
     SESSION_COOKIE_NAME,
     identity_of_session,
     resolve_access_state,
 )
-from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import (
     ConflictError,
     NotFoundError,
     ServiceUnavailableError,
 )
-from promptpotter.shared.identity import AccessState, display_name
+from promptpotter.shared.identity import AccessState, IdentityContext, display_name
 
 logger = logging.getLogger(__name__)
 
@@ -158,6 +161,7 @@ async def login(
 @auth_router.get("/callback/{provider}")
 async def callback(
     request: Request,
+    background: BackgroundTasks,
     provider: Annotated[str, Path(pattern=r"^[a-z]+$", max_length=16)],
 ) -> RedirectResponse:
     if provider not in SUPPORTED_PROVIDERS:
@@ -221,12 +225,16 @@ async def callback(
         email=identity.email,
         provider=identity.provider,
     )
-    # Resolved as every later request resolves it, so a delegate's sign-in lands where its commands do.
-    record_account_event(
-        build_stores(identity_of_session(session, bundle), projects_root=DEFAULT_PROJECTS_ROOT),
-        "signed_in",
-        provider=identity.provider,
-    )
+    try:
+        # Resolved as every later request resolves it, so a delegate's sign-in lands where its commands do.
+        signed_in = identity_of_session(session, bundle)
+        arrival = account.sign_in(build_stores_from_identity(signed_in))
+    except Exception:
+        # Refused rather than let through unrecorded: the trail's promise is that no sign-in is missing.
+        logger.exception("A %s sign-in could not be recorded", provider)
+        bundle.session_store.delete(session_id)
+        return _redirect_with_error("signin_unavailable")
+    _announce_if_opened(background, arrival, signed_in)
 
     response = RedirectResponse(url="/", status_code=303)
     response.set_cookie(
@@ -256,7 +264,7 @@ def _announce_new_account(
     *, email: str | None, name: str | None, user_id: str, access_state: AccessState
 ) -> None:
     who = email or f"(no email) {user_id}"
-    # Read after `get_or_create` returned, so the arriving account is inside the total.
+    # Read once the account is on disk, so the arriving account is inside the total.
     total = count_accounts(DEFAULT_PROJECTS_ROOT)
     notify_operator(
         f"New PromptPotter account: {who}\n"
@@ -265,6 +273,20 @@ def _announce_new_account(
     )
     # Fires regardless of `access_state`: a blocked account is still a contact worth keeping.
     forward_new_account_to_crm(email=email, name=name, user_id=user_id, account_count=total)
+
+
+def _announce_if_opened(
+    background: BackgroundTasks, arrival: account.Arrival, identity: IdentityContext
+) -> None:
+    """After the response, never on it."""
+    if arrival.opened:
+        background.add_task(
+            _announce_new_account,
+            email=identity.email,
+            name=display_name(identity.email),
+            user_id=str(identity.user_id),
+            access_state=identity.access_state,
+        )
 
 
 @auth_router.get("/me", response_model=MeResponse)
@@ -278,22 +300,10 @@ def me(
     connected = [ConnectedAccount(provider=provider, email=email)] if provider else []
     configured = set(bundle.config.configured)
     available = sorted(configured - {provider}) if provider else sorted(configured)
-    # `load() is None` is the one moment an account comes into being; its announcement runs after the response, never on it.
-    is_new_account = stores.users.load() is None
-    user = stores.users.get_or_create(
-        user_id=str(identity.user_id),
-        tenant_id=str(identity.tenant_id),
-        email=email,
-    )
-    if is_new_account:
-        record_account_event(stores, "account_created")
-        background.add_task(
-            _announce_new_account,
-            email=email,
-            name=name,
-            user_id=str(identity.user_id),
-            access_state=access_state,
-        )
+    # Opened at sign-in as a rule; here for an open box, which has none, and for a session that outlived its files.
+    arrival = account.arrive(stores)
+    _announce_if_opened(background, arrival, identity)
+    user = arrival.user
     return MeResponse(
         user_id=str(identity.user_id),
         tenant_id=str(identity.tenant_id),
@@ -319,22 +329,13 @@ def get_quota_status(job_registry: JobRegistryDep, stores: StoresDep) -> QuotaSt
 @auth_router.get("/user-settings", response_model=UserSettings)
 def get_user_settings(stores: StoresDep) -> UserSettings:
     """The current user's preferences."""
-    user = stores.users.get_or_create(
-        user_id=str(stores.identity.user_id),
-        tenant_id=str(stores.identity.tenant_id),
-        email=stores.identity.email,
-    )
-    return UserSettings(demo_mode_enabled=user.demo_mode_enabled)
+    return UserSettings(demo_mode_enabled=account.account_of(stores).demo_mode_enabled)
 
 
 @auth_router.patch("/user-settings", response_model=UserSettings)
 def patch_user_settings(body: UserSettings, stores: StoresDep) -> UserSettings:
     """Persist a preference change for the current user."""
-    user = stores.users.get_or_create(
-        user_id=str(stores.identity.user_id),
-        tenant_id=str(stores.identity.tenant_id),
-        email=stores.identity.email,
-    )
+    user = account.account_of(stores)
     stores.users.save(user.model_copy(update={"demo_mode_enabled": body.demo_mode_enabled}))
     return UserSettings(demo_mode_enabled=body.demo_mode_enabled)
 
@@ -364,14 +365,7 @@ def accept_terms(body: AcceptTermsBody, stores: StoresDep) -> TermsConsent:
             code="terms_version_stale",
             details={"expected": TERMS_VERSION, "received": body.version},
         )
-    user = stores.users.get_or_create(
-        user_id=str(stores.identity.user_id),
-        tenant_id=str(stores.identity.tenant_id),
-        email=stores.identity.email,
-    )
-    record = ConsentRecord(version=TERMS_VERSION, accepted_at=utcnow_iso())
-    stores.users.save(user.model_copy(update={"terms_accepted": record}))
-    record_account_event(stores, "terms_accepted", version=TERMS_VERSION)
+    account.accept_terms(stores, TERMS_VERSION)
     return TermsConsent(terms_version=TERMS_VERSION, terms_accepted_version=TERMS_VERSION)
 
 

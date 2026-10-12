@@ -251,10 +251,19 @@ def test_untrusted_signals_are_fenced_trusted_signals_are_not() -> None:
         ), f"selection at budget {budget} left a fence open"
 
 
-def test_the_access_log_drops_the_oauth_callbacks_query_and_no_other() -> None:
+def test_the_access_log_drops_the_oauth_callbacks_query_and_no_other(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import logging
 
-    from promptpotter.config.logging import _CallbackPathOnly
+    from promptpotter.config.logging import setup_logging
+
+    # Through the logger as the server sets it up: a filter nobody installed cuts nothing.
+    root, access, httpx = (logging.getLogger(name) for name in ("", "uvicorn.access", "httpx"))
+    levels = (root.level, httpx.level)
+    monkeypatch.setattr(root, "handlers", [])
+    monkeypatch.setattr(access, "filters", [])
+    setup_logging()
 
     def logged(path: str) -> str:
         record = logging.LogRecord(
@@ -266,14 +275,18 @@ def test_the_access_log_drops_the_oauth_callbacks_query_and_no_other() -> None:
             args=("127.0.0.1:1", "GET", path, "1.1", 303),
             exc_info=None,
         )
-        assert _CallbackPathOnly().filter(record), "the line itself must still be logged"
+        assert access.filter(record), "the line itself must still be logged"
         return record.getMessage()
 
-    line = logged("/api/v1/auth/callback/google?state=one-time-state&code=one-time-code")
-    assert "one-time" not in line, "the one-time code or state reached the access log"
-    assert "/api/v1/auth/callback/google " in line
-    kept = "/api/v1/cycles?campaign_id=camp-1"
-    assert kept in logged(kept), "a query that is no secret was cut from the log"
+    try:
+        line = logged("/api/v1/auth/callback/google?state=one-time-state&code=one-time-code")
+        assert "one-time" not in line, "the one-time code or state reached the access log"
+        assert "/api/v1/auth/callback/google " in line
+        kept = "/api/v1/cycles?campaign_id=camp-1"
+        assert kept in logged(kept), "a query that is no secret was cut from the log"
+    finally:
+        root.setLevel(levels[0])
+        httpx.setLevel(levels[1])
 
 
 # 2. Delegation
@@ -611,14 +624,66 @@ def test_a_steer_the_campaign_never_sanctioned_cannot_pass_as_a_clean_fork() -> 
     )
 
 
+def test_a_page_is_re_asked_on_every_visit_and_only_a_hashed_file_is_kept(tmp_path: Path) -> None:
+    from starlette.applications import Starlette
+    from starlette.requests import Request
+    from starlette.responses import JSONResponse
+    from starlette.routing import Mount, Route
+    from starlette.staticfiles import StaticFiles
+    from starlette.testclient import TestClient
+
+    from promptpotter.main import app
+    from promptpotter.presentation.api.middleware.headers import ResponseHeadersMiddleware
+
+    assert any(m.cls is ResponseHeadersMiddleware for m in app.user_middleware), (
+        "the server no longer mounts the header seam"
+    )
+
+    site = tmp_path / "out"
+    (site / "_next" / "static" / "chunks").mkdir(parents=True)
+    (site / "index.html").write_text("<html></html>", encoding="utf-8")
+    (site / "_next" / "static" / "chunks" / "abc123.js").write_text("0", encoding="utf-8")
+
+    async def me(_: Request) -> JSONResponse:
+        return JSONResponse({})
+
+    served = Starlette(
+        routes=[Route("/api/v1/auth/me", me), Mount("/", StaticFiles(directory=site, html=True))]
+    )
+    client = TestClient(ResponseHeadersMiddleware(served, webapp_dir=site))
+
+    def kept(path: str, status: int) -> str:
+        answer = client.get(path)
+        assert answer.status_code == status, path
+        return answer.headers["cache-control"]
+
+    assert kept("/", 200) == "no-cache", (
+        "a page may be answered from a browser's copy after a deploy, "
+        "so the old build runs against the new API"
+    )
+    assert "immutable" in kept("/_next/static/chunks/abc123.js", 200)
+    assert kept("/_next/static/chunks/asked-mid-build.js", 404) == "no-cache", (
+        "a chunk that was not there yet is kept as missing for a year"
+    )
+    assert kept("/api/v1/auth/me", 200) == "no-store"
+
+    assert "x-webapp-build" not in client.get("/api/v1/auth/me").headers
+    (site / "build-id.txt").write_text("b2\n", encoding="utf-8")
+    assert client.get("/api/v1/auth/me").headers["x-webapp-build"] == "b2", (
+        "a tab cannot tell that the server moved on to another build"
+    )
+    assert "x-webapp-build" not in client.get("/").headers
+
+
 async def test_an_accounts_trail_holds_its_sign_in_its_consent_and_its_commands_in_time_order(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    import argparse
     import types
 
     from fastapi import BackgroundTasks
 
-    from promptpotter.application.account_trail import account_trail
+    from promptpotter.application import account
     from promptpotter.config.settings import TERMS_VERSION
     from promptpotter.domain.campaign import Campaign
     from promptpotter.domain.run_records import CommandRecord
@@ -628,12 +693,15 @@ async def test_an_accounts_trail_holds_its_sign_in_its_consent_and_its_commands_
     from promptpotter.infrastructure.identity.session import OIDCSessionStore
     from promptpotter.infrastructure.store.stores import build_stores
     from promptpotter.presentation import admin_bot
+    from promptpotter.presentation.api import deps
     from promptpotter.presentation.api.middleware.oidc import identity_of_session
     from promptpotter.presentation.api.routers import auth
+    from promptpotter.presentation.cli.commands import trail as trail_verb
+    from promptpotter.shared.identity import IdentityContext, TenantId, UserId
 
     projects = tmp_path / "projects"
-    monkeypatch.setattr(auth, "DEFAULT_PROJECTS_ROOT", projects)
-    monkeypatch.setattr(admin_bot, "DEFAULT_PROJECTS_ROOT", projects)
+    for module in (auth, deps, admin_bot, trail_verb):
+        monkeypatch.setattr(module, "DEFAULT_PROJECTS_ROOT", projects)
 
     async def exchange_code(**_: str) -> ProviderIdentity:
         return ProviderIdentity(
@@ -656,14 +724,16 @@ async def test_an_accounts_trail_holds_its_sign_in_its_consent_and_its_commands_
         url=types.SimpleNamespace(scheme="https"),
     )
 
-    signed_in = await auth.callback(request, "google")
+    announcing = BackgroundTasks()
+    signed_in = await auth.callback(request, announcing, "google")
     session_id = signed_in.headers["set-cookie"].split("=", 1)[1].split(";", 1)[0]
     session = sessions.read(session_id)
     assert session is not None
     identity = identity_of_session(session, bundle)
     stores = build_stores(identity, projects_root=projects)
-    auth.me(request, BackgroundTasks(), identity, stores)
-    auth.me(request, BackgroundTasks(), identity, stores)
+    auth.me(request, announcing, identity, stores)
+    auth.me(request, announcing, identity, stores)
+    assert len(announcing.tasks) == 1, "a new account was announced other than exactly once"
     auth.accept_terms(auth.AcceptTermsBody(version=TERMS_VERSION), stores)
 
     def command(kind: str, at: str) -> CommandRecord:
@@ -687,21 +757,59 @@ async def test_an_accounts_trail_holds_its_sign_in_its_consent_and_its_commands_
         command("mint-campaign", "2999-01-01T00:00:00Z")
     )
 
-    trail = account_trail(stores.base_dir)
-    assert [(line.what, line.subject) for line in trail] == [
+    trail = account.tenant_trail(stores)
+    assert [(line.what, line.subject) for line in trail.lines] == [
         ("start-run", "camp-trail/cycle_trail0000000"),
-        ("signed_in", "google"),
         ("account_created", ""),
+        ("signed_in", "google"),
         ("terms_accepted", TERMS_VERSION),
         ("mint-campaign", ""),
-    ], "a sign-in, the account's creation or a consent left no line, or the merge lost the order"
-    assert {line.actor for line in trail[1:4]} == {str(identity.user_id)}
+    ], "an account event left no line or left two, or the merge lost the order"
+    ada = stores.users.load()
+    assert ada is not None and ada.terms_accepted is not None
+    assert (trail.lines[1].at, trail.lines[3].at) == (
+        ada.created_at,
+        ada.terms_accepted.accepted_at,
+    ), "one fact carries two times: the account file says one and its record another"
+    assert {line.actor for line in trail.lines[1:4]} == trail.own == {str(identity.user_id)}
+
+    # Bob has an account of his own, opened by whichever request came first, and acts for Ada
+    # as her delegate: under his id, in her workspace.
+    bob = IdentityContext(
+        user_id=UserId("bob-id"), tenant_id=TenantId("bob-id"), email="bob@x.com", provider="google"
+    )
+    assert account.arrive(build_stores(bob, projects_root=projects)).opened
+    assert not account.arrive(build_stores(bob, projects_root=projects)).opened
+    for_ada = IdentityContext(
+        user_id=identity.user_id,
+        tenant_id=identity.tenant_id,
+        email="bob@x.com",
+        provider="google",
+        claims={"principal": "bob-id"},
+    )
+    account.sign_in(build_stores(for_ada, projects_root=projects))
 
     reply = admin_bot.handle_command("trail", " ada@X.com ", actor="t").splitlines()
-    assert reply[0].startswith("ada@x.com: 5 lines") and len(reply) == 6
-    assert reply[2].endswith(" signed_in google"), "the account's own line named an actor"
+    assert reply[0].startswith("ada@X.com: 6 lines") and len(reply) == 7
+    assert reply[3].endswith(" signed_in google"), "the account's own line named an actor"
+    assert reply[5].endswith(" signed_in google by bob-id"), (
+        "what a delegate did in this workspace is not told apart from what its owner did"
+    )
+    bobs = admin_bot.handle_command("trail", "bob@x.com", actor="t").splitlines()
+    assert [row.split(" ", 2)[2] for row in bobs[1:]] == [
+        "account_created",
+        f"signed_in {stores.base_dir.name}:google",
+    ], "what a person did as a delegate is missing from their own trail"
     assert admin_bot.handle_command("trail", "nobody@x.com", actor="t") == (
         "No account with email nobody@x.com."
+    )
+
+    said = await trail_verb.cmd_trail(argparse.Namespace(email="ada@x.com"))
+    assert said.human.splitlines() == reply[1:], "the terminal and the bot read two trails"
+    assert said.data["accounts"] == [str(identity.user_id)] and len(said.data["lines"]) == 6
+    nobody = await trail_verb.cmd_trail(argparse.Namespace(email="nobody@x.com"))
+    assert nobody.data == {"accounts": [], "lines": [], "unreadable": []}, (
+        "the verb answers in one shape when there is an account and another when there is none"
     )
 
     torn = projects / "torn-account"
@@ -711,17 +819,29 @@ async def test_an_accounts_trail_holds_its_sign_in_its_consent_and_its_commands_
         "No account with email nobody@x.com.",
         "Could not read: torn-account",
     ], "an account file that cannot be read went unnamed, so the one asked for may hide in it"
-    assert admin_bot.handle_command("trail", "ada@x.com", actor="t").splitlines()[:2] == [
+    assert admin_bot.handle_command("trail", " ada@X.com ", actor="t").splitlines()[:2] == [
         reply[0],
         "Could not read: torn-account",
     ], "one torn account file cost the reply for a readable one"
     (torn / "user.json").unlink()
 
     monkeypatch.setattr(admin_bot, "_TELEGRAM_MAX_CHARS", len("\n".join(reply)) - 1)
-    cut = admin_bot.handle_command("trail", "ada@x.com", actor="t").splitlines()
+    cut = admin_bot.handle_command("trail", " ada@X.com ", actor="t").splitlines()
     assert cut[0].endswith("(1 earlier dropped)") and cut[1:] == reply[2:], (
         "an over-long trail was not cut at its oldest line"
     )
+
+    def unrecordable(_: object) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(account, "sign_in", unrecordable)
+    open_sessions = sorted(paths.sessions_dir.iterdir())
+    refused = await auth.callback(request, BackgroundTasks(), "google")
+    assert refused.headers["location"] == "/?auth_error=signin_unavailable", (
+        "a sign-in the trail could not record went through, or answered the tab with raw JSON"
+    )
+    assert "set-cookie" not in refused.headers
+    assert sorted(paths.sessions_dir.iterdir()) == open_sessions, "a refused sign-in left a session"
 
 
 # 3. Unattended deletes

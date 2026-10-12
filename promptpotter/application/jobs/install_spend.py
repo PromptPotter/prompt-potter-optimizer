@@ -14,7 +14,7 @@ from promptpotter.infrastructure.store.account_spend import (
     sum_user_spend,
 )
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
-from promptpotter.infrastructure.store.user_store import User, UserStore, account_dirs
+from promptpotter.infrastructure.store.user_store import Torn, User, read_accounts
 
 
 class AccountUsage(NamedTuple):
@@ -30,27 +30,30 @@ class AccountUsage(NamedTuple):
 
 def read_install_spend(projects_root: Path) -> list[AccountUsage]:
     rows: list[AccountUsage] = []
-    for tenant_dir in account_dirs(projects_root):
+    for account in read_accounts(projects_root):
+        if isinstance(account.user, Torn):
+            rows.append(_unreadable_row(account.workspace, account.user.why))
+            continue
         try:
-            user = UserStore(tenant_dir).load()
-            if user is None:
-                continue
-            rows.append(_account_row(user, tenant_dir))
+            rows.append(_account_row(account.user, account.workspace))
         except Exception as exc:
-            # One torn file must not blind `/spend` to every OTHER account; the dir name is the account id.
-            rows.append(
-                AccountUsage(
-                    user_id=tenant_dir.name,
-                    email=None,
-                    spent=UserSpend(0.0, 0, 0),
-                    ceilings=SpendCeilings(),
-                    campaigns=0,
-                    cycles=0,
-                    unreadable=f"{type(exc).__name__}: {exc}",
-                )
-            )
+            # A ledger that will not scan is the same row as a `user.json` that will not load.
+            rows.append(_unreadable_row(account.workspace, f"{type(exc).__name__}: {exc}"))
     rows.sort(key=lambda r: (r.spent.sent_usd, r.spent.used_tokens), reverse=True)
     return rows
+
+
+def _unreadable_row(tenant_dir: WorkspaceDir, why: str) -> AccountUsage:
+    # The dir name is the account id.
+    return AccountUsage(
+        user_id=tenant_dir.name,
+        email=None,
+        spent=UserSpend(0.0, 0, 0),
+        ceilings=SpendCeilings(),
+        campaigns=0,
+        cycles=0,
+        unreadable=why,
+    )
 
 
 def _account_row(user: User, tenant_dir: WorkspaceDir) -> AccountUsage:
