@@ -96,6 +96,7 @@ Reads happen by opening the on-disk artifact tree. The read VERBS are the four w
                                         #   it spans campaigns, so it names no single source either
     backends/{backend_id}/backend.json  # backend registration + synced API responses
     datasets/  benchmark-rows/  task-context/   # dataset tier — definition, materialized rows, decomposed context
+    uploads/{sha256[:16]}.{ext}         # every file dropped on ingest, kept before parsing; never served
 ```
 
 **Why this shape.** Telemetry is *temporal* — each cycle owns its `dashboard.json`, so `tail cycles/{cycle_id}/dashboard.json` follows exactly the cycle you're watching. Audit is *structural* — frozen records keyed by the cycle that produced them. Cycles sit flat because a fork tree keyed by `parent_cycle_id` scales where nested fork-of-fork directories don't. `measurements/` is a cross-cycle peer of `campaigns/`, so a fresh `new` on an unchanged declaration cache-hits every origin sample yet still gets its own `campaign_id` and trajectory; `optimizer_reuse/` is its peer on the optimizer's leg and `judge_reuse/` on scoring's.

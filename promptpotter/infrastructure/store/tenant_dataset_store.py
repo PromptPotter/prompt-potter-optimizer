@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -10,6 +11,7 @@ from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.store.io import (
     read_json_optional,
     read_yaml_optional,
+    write_bytes,
     write_json,
     write_text,
     write_yaml,
@@ -98,6 +100,13 @@ class TenantDatasetStore:
                 "items": serialized,
             },
         )
+        return path
+
+    def keep_upload(self, blob: bytes, extension: str) -> Path:
+        """Every upload, kept BEFORE it is parsed, so a file the parser refused or crashed on can be re-read."""
+        suffix = f".{extension}" if extension.isalnum() and len(extension) <= 8 else ""
+        path = self._base_dir / "uploads" / f"{hashlib.sha256(blob).hexdigest()[:16]}{suffix}"
+        write_bytes(path, blob)
         return path
 
     def task_context_path(self, name: str) -> Path:

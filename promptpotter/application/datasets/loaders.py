@@ -4,16 +4,16 @@ import importlib
 import logging
 import random
 import re
-import sys
 from collections.abc import Callable
-from pathlib import Path
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.config.paths import benchmark_datasets_root
 from promptpotter.domain.sample import ArchiveEntry, Sample
-from promptpotter.infrastructure.store.dataset_access import readable_dataset_rows
+from promptpotter.infrastructure.store.dataset_access import held_rows
 from promptpotter.infrastructure.store.measurement_archive import config_key
 from promptpotter.shared.answer_text import GSM8K_ANSWER_RE
+from promptpotter.shared.extras import Extra, require_extra
 from promptpotter.shared.hashing import ADDRESS_HEX, stable_hash
 
 if TYPE_CHECKING:
@@ -25,25 +25,8 @@ logger = logging.getLogger(__name__)
 
 
 def hf_load_dataset() -> Any:
-    # The repo's own `datasets/` is a namespace package on `sys.path[0]` and shadows HuggingFace's.
-    shadow = sys.modules.get("datasets")
-    if shadow is not None and getattr(shadow, "__file__", None) is None:
-        del sys.modules["datasets"]
-    saved = list(sys.path)
-    try:
-        sys.path[:] = [
-            p
-            for p in saved
-            if not (d := Path(p or ".") / "datasets").is_dir() or (d / "__init__.py").is_file()
-        ]
-        return importlib.import_module("datasets").load_dataset
-    except ModuleNotFoundError:
-        raise ModuleNotFoundError(
-            "The 'datasets' library is required for this benchmark. "
-            'Install the benchmarks extras: pip install -e ".[benchmarks]"'
-        ) from None
-    finally:
-        sys.path[:] = saved
+    require_extra(Extra.BENCHMARKS)
+    return importlib.import_module("datasets").load_dataset
 
 
 def samples_from_dicts(items: list[dict[str, Any]]) -> list[Sample]:
@@ -184,10 +167,21 @@ def _load_justlogic_held(depths: tuple[int, ...]) -> list[Sample]:
     ]
 
 
-DATASET_LOADERS: dict[str, Callable[..., list[Sample]]] = {
-    "gsm8k": load_gsm8k,
-    "aime_2025": load_aime_2025,
-    "bbeh": load_bbeh,
+@dataclass(frozen=True, slots=True)
+class BankLoader:
+    load: Callable[[], list[Sample]]
+    # What a FETCH imports; a bank already materialized needs nothing installed.
+    extra: Extra | None
+
+
+def _hf(load: Callable[[], list[Sample]]) -> BankLoader:
+    return BankLoader(load, Extra.BENCHMARKS)
+
+
+DATASET_LOADERS: dict[str, BankLoader] = {
+    "gsm8k": _hf(load_gsm8k),
+    "aime_2025": _hf(load_aime_2025),
+    "bbeh": _hf(load_bbeh),
 }
 """Map dataset name → loader, for the benchmarks whose cut is fixed.
 
@@ -197,7 +191,7 @@ a bare membership test here reports False for every valid ``justlogic-dNNN``.
 """
 
 
-def dataset_loader(dataset_name: str) -> Callable[[], list[Sample]] | None:
+def dataset_loader(dataset_name: str) -> BankLoader | None:
     fixed = DATASET_LOADERS.get(dataset_name)
     if fixed is not None:
         return fixed
@@ -205,8 +199,8 @@ def dataset_loader(dataset_name: str) -> Callable[[], list[Sample]] | None:
     if depths is None:
         return None
     if dataset_name.endswith(_JUSTLOGIC_HELD_SUFFIX):
-        return lambda: _load_justlogic_held(depths)
-    return lambda: _load_justlogic(depths)
+        return _hf(lambda: _load_justlogic_held(depths))
+    return _hf(lambda: _load_justlogic(depths))
 
 
 def loadable_dataset_names() -> list[str]:
@@ -223,17 +217,21 @@ def loadable_dataset_names() -> list[str]:
     return [*sorted(DATASET_LOADERS), *cuts]
 
 
-def resolve_dataset_items(stores: Stores, dataset_name: str) -> list[dict[str, Any]]:
-    ds: dict[str, Any] | None = readable_dataset_rows(stores, dataset_name)
+def fetch_dataset_items(stores: Stores, dataset_name: str) -> list[dict[str, Any]]:
+    """The ladder's last rung: fetch through the registered loader and bank the rows."""
     loader = dataset_loader(dataset_name)
-    if not (ds and ds.get("items")) and loader is not None:
-        logger.info("Loading dataset '%s' from registry ...", dataset_name)
-        loader_items = loader()
-        stores.tenant_datasets.save_benchmark_rows(dataset_name, loader_items)
-        ds = {"items": [s.model_dump() for s in loader_items]}
-    if not (ds and ds.get("items")):
+    if loader is None:
         return []
-    return [it.model_dump() if isinstance(it, Sample) else it for it in ds["items"]]
+    logger.info("Loading dataset '%s' from registry ...", dataset_name)
+    loader_items = loader.load()
+    stores.tenant_datasets.save_benchmark_rows(dataset_name, loader_items)
+    return [s.model_dump() for s in loader_items]
+
+
+def resolve_dataset_items(stores: Stores, dataset_name: str) -> list[dict[str, Any]]:
+    """The one row ladder: what is held (`held_rows`), else a fetch."""
+    held = held_rows(stores, dataset_name)
+    return held if held is not None else fetch_dataset_items(stores, dataset_name)
 
 
 def archive_entry(

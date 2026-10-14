@@ -57,6 +57,15 @@ def _encoding_lines(non_utf8: str | None) -> tuple[str, ...]:
     )
 
 
+def _offer_lines(offer: frozenset[str] | None, faults: list[str]) -> tuple[str, ...]:
+    if offer is None:
+        return (f"{DIM}Offer: every install dataset (DATASET_OFFER unset){RESET}",)
+    return (
+        f"{DIM}Offer: {', '.join(sorted(offer))}{RESET}",
+        *(f"{YELLOW}  WARNING: {fault}{RESET}" for fault in faults),
+    )
+
+
 def render_server_banner(
     *,
     brand_name: str,
@@ -66,6 +75,8 @@ def render_server_banner(
     auth_open: bool,
     providers: tuple[str, ...],
     non_utf8: str | None,
+    offer: frozenset[str] | None,
+    offer_faults: list[str],
 ) -> str:
     header_plain = f"Running {brand_name} {version} in {environment} mode."
     info_lines = (
@@ -79,6 +90,7 @@ def render_server_banner(
         f"{DIM}Data: {data_root}{RESET}",
         *_auth_lines(auth_open=auth_open, providers=providers),
         *_encoding_lines(non_utf8),
+        *_offer_lines(offer, offer_faults),
     )
     glyph_lines = [_glyph_row(row, shade) for row, shade in zip(_GLYPH_PLAIN, _SHADE, strict=True)]
     blank_glyph_col = " " * _GLYPH_WIDTH

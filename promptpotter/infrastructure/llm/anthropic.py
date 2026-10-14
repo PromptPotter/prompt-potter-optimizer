@@ -16,6 +16,7 @@ from promptpotter.infrastructure.llm.send_pacing import (
 )
 from promptpotter.infrastructure.llm.spend_book import Billed, CallLabel
 from promptpotter.infrastructure.tls import tls_context
+from promptpotter.shared.extras import Extra, require_extra
 
 if TYPE_CHECKING:
     from anthropic import AsyncAnthropic
@@ -74,13 +75,9 @@ class AnthropicClient(LLMClientBase):
 
     def _ensure_client(self) -> AsyncAnthropic:
         if self._client is None:
-            try:
-                from anthropic import AsyncAnthropic, DefaultAsyncHttpxClient
-            except ImportError as err:
-                raise ImportError(
-                    "anthropic package not installed. "
-                    'Install the anthropic extras: pip install -e ".[anthropic]"'
-                ) from err
+            require_extra(Extra.ANTHROPIC)
+            from anthropic import AsyncAnthropic, DefaultAsyncHttpxClient
+
             # No SDK retries — see `OpenAICompatibleClient._ensure_client`.
             self._client = AsyncAnthropic(
                 api_key=self._api_key,

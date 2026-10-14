@@ -57,6 +57,7 @@ from promptpotter.shared.errors import (
     cell_failure,
     is_provider_credit_refusal,
 )
+from promptpotter.shared.extras import Extra, install_hint, installed
 from promptpotter.shared.hashing import stable_hash
 
 if TYPE_CHECKING:
@@ -403,14 +404,12 @@ async def _version_check(_http: httpx.AsyncClient, _base_url: str) -> str | None
 
 
 async def _preflight(_backend_url: str) -> str | None:
-    try:
-        from harbor.trial.trial import Trial  # noqa: F401
-    except ImportError:
+    if not installed(Extra.HARBOR):
         return (
-            f"the 'harbor' extra is not importable from {sys.executable}.\n"
+            f"the 'harbor' extra is not installed for {sys.executable}.\n"
             f"  If that is not this repo's .venv, re-run with the venv's interpreter:\n"
             f"    .venv\\Scripts\\python.exe -m promptpotter ...\n"
-            f'  If it IS the venv, install the extra: pip install -e ".[harbor]"'
+            f"  If it IS the venv, install the extra: {install_hint(Extra.HARBOR)}"
         )
 
     if (encoding := non_utf8_encoding()) is not None:

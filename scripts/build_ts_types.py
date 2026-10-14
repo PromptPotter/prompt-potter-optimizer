@@ -48,6 +48,7 @@ from promptpotter.application.datasets.origin_readiness import (
     OriginResolution,
     RaisedCommand,
 )
+from promptpotter.application.datasets.startability import DatasetStartBlock
 from promptpotter.application.evidence.comparison import (
     ArmReplicate,
     Comparability,
@@ -479,6 +480,7 @@ EXPORTED_MODELS: list[type] = [
     StartPrompt,
     OptimizerPipelineResponse,
     DatasetIndexEntry,
+    DatasetStartBlock,
     DatasetIndexResponse,
     OriginEntry,
     OriginListResponse,

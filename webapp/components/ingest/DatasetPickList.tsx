@@ -19,7 +19,10 @@ export function DatasetPickList({
   if (origins.length === 0 && datasets.length === 0) {
     return (
       <div className="chat-msg ai ingest-picklist">
-        <p>Drop a CSV, TSV, JSON, or Excel file below to start — any column names work.</p>
+        <p>
+          Drop a table below to start — CSV or TSV in any separator or encoding, JSON, JSONL,
+          Excel or OpenDocument. Any column names work.
+        </p>
       </div>
     );
   }
@@ -65,7 +68,7 @@ export function DatasetPickList({
                 <button
                   type="button"
                   className="ingest-pick-btn"
-                  disabled={busy}
+                  disabled={busy || d.start_block !== null}
                   title="Make an origin with the check-in assistant"
                   onClick={() => onPick(d)}
                 >
@@ -74,6 +77,12 @@ export function DatasetPickList({
                   </span>
                   <span className="ingest-pick-meta">{d.n_samples ?? "—"}</span>
                 </button>
+                {d.start_block ? (
+                  <p className="ingest-pick-why">
+                    {d.summary ? `${d.summary} ` : ""}
+                    {d.start_block.explanation}
+                  </p>
+                ) : null}
               </li>
             ))}
           </ul>

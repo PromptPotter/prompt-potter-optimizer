@@ -55,11 +55,14 @@ api = [
     "cryptography>=50.0.0",    # why kept: RS256 / ES256 JWS verification for OIDC ID tokens (Stage-1 identity foundation, ADR-0002). Floor past PYSEC-2026-35/36 + CVE-2026-26007, and now past GHSA-g6cj-pr64-35w5 (PKCS#7 Bleichenbacher oracle, fixed in 50.0.0). Held at 49 until `observability` moved off full mlflow, which required `cryptography<50`.
 ]
 excel = [
-    # why kept: .xlsx ingest (`application/datasets/csv_ingest.py::_read_xlsx`) + the
-    # ground-truth builder (`datasets/dataset_builder.py`). Lazy behind an install guard, so
-    # its absence is an ingest error naming this extra — `settings.HARDENED_MODE` refuses the
+    # why kept: .xlsx ingest (`application/datasets/tabular_ingest.py::_xlsx_records`) + the
+    # ground-truth builder (`datasets/dataset_builder.py`). Lazy behind `shared/extras.py::require_extra`,
+    # so its absence is a typed refusal naming this extra — `settings.HARDENED_MODE` refuses the
     # format as policy, which is a separate answer to a separate question.
     "openpyxl>=3.1.0",
+    # why kept: pre-2007 .xls (BIFF) ingest, which openpyxl cannot read and a first-time user's
+    # sheet often is. Pure Python, no transitive deps; `.ods` needs nothing (stdlib zip + XML).
+    "xlrd>=2.0.1",
 ]
 dspy = [
     # why kept: `presentation/teleprompter.py` (PromptPotterOpt) + the `dspy` connector, which
@@ -150,6 +153,7 @@ all = [
     "sse-starlette>=2.4.1",
     "cryptography>=50.0.0",
     "openpyxl>=3.1.0",
+    "xlrd>=2.0.1",
     "jupyterlab>=4.0",
     "ipython>=8.0",
     "langfuse>=2.0.0",
@@ -253,6 +257,7 @@ module = [
     "mlflow.*",
     "scalar_fastapi.*",
     "openpyxl.*",
+    "xlrd.*",
     "datasets.*",
     "dspy.*",
     "harbor.*",
@@ -352,14 +357,14 @@ DEP002 = [
     "mypy",
     "deptry",
     "types-PyYAML",      # stub-only package: consumed by mypy, never imported
-    # Reached only through `importlib.import_module` (`datasets/loaders.py::hf_load_dataset`),
+    # Reached only through `importlib.import_module` (`application/datasets/loaders.py::hf_load_dataset`),
     # which a static scan cannot see — the indirection is load-bearing, because a literal
     # `from datasets import …` resolves to this repo's own top-level `datasets/` directory.
     "datasets",
 ]
 # Optional features — imported lazily with install-message guards.
 # Declared in extras ([excel], [benchmarks], [observability], [anthropic], [jupyter]).
-DEP001 = ["openpyxl", "datasets", "langfuse", "anthropic", "IPython"]
+DEP001 = ["openpyxl", "xlrd", "datasets", "langfuse", "anthropic", "IPython"]
 # Imported directly and deliberately left transitive: `infrastructure/llm/litellm_sends.py` wraps
 # the entry point HARBOR calls, so it must be the litellm Harbor resolved — a pin of our own could
 # split the two, and the meter would wrap a copy the agent never sends through.

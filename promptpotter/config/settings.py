@@ -68,6 +68,14 @@ class Settings(BaseSettings):
     # Rejects binary/Office uploads at ingest: xlsx is a macro / zip-bomb / XXE vector.
     HARDENED_MODE: bool = False
 
+    # Comma-separated install datasets a non-host account sees; unset, all of them (a developer's install).
+    DATASET_OFFER: str = ""
+
+    @property
+    def dataset_offer(self) -> frozenset[str] | None:
+        names = frozenset(n.strip() for n in self.DATASET_OFFER.split(",") if n.strip())
+        return names or None
+
     # Unset: no browser sign-in can claim the box, and it has no admin identity.
     HOST_ADMIN_EMAIL: str = ""
 

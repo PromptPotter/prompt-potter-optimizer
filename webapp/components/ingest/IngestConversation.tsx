@@ -146,7 +146,7 @@ export function IngestComposer() {
       canSend={flow.awaitingContext}
       placeholder={flow.awaitingContext ? "Describe the task…" : "Drop a dataset file…"}
       onFile={flow.onDatasetFile}
-      accept=".csv,.tsv,.json,.jsonl,.ndjson,.xlsx,text/csv,application/json"
+      accept=".csv,.tsv,.tab,.txt,.json,.jsonl,.ndjson,.xlsx,.xlsm,.xls,.ods,text/csv,application/json"
       attachLabel="Attach a dataset file"
       attachDisabled={flow.busy}
       tools={<ComposerTools />}

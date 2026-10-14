@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
 from promptpotter import connectors
 from promptpotter.connectors.protocol import Connector
-from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.store.io import read_json_tolerant, read_yaml_optional
 from promptpotter.infrastructure.store.layout import validate_dataset_name
@@ -28,7 +28,7 @@ class DatasetAccessError(NotFoundError):
 class DatasetRef:
     name: str
     title: str | None
-    n_samples: int | None
+    summary: str | None
     tier: Literal["yours", "install"]
 
 
@@ -120,19 +120,24 @@ def extract_panel_rows(
         ) from exc
 
 
+def _dataset_connector(stores: Stores, dataset_name: str) -> Connector | None:
+    backend_type = backend_type_of_dataset(stores, dataset_name)
+    connector = connectors.registered().get(backend_type)
+    if connector is None and backend_type:
+        # A connector this PROCESS lacks: its panel is unreadable, never empty.
+        raise ValueError(
+            f"Dataset {dataset_name!r} declares backend_type {backend_type!r}, which this "
+            f"process has no connector for. Restart the server."
+        )
+    return connector
+
+
 def dataset_panel_rows(
     stores: Stores, dataset_name: str, *, experiment: dict[str, Any] | None = None
 ) -> list[dict[str, Any]] | None:
     """*experiment* is the panel a cycle pinned: a campaign is read off what it measured."""
-    backend_type = backend_type_of_dataset(stores, dataset_name)
-    connector = connectors.registered().get(backend_type)
+    connector = _dataset_connector(stores, dataset_name)
     if connector is None:
-        if backend_type:
-            # A connector this PROCESS lacks: its panel is unreadable, never empty.
-            raise ValueError(
-                f"Dataset {dataset_name!r} declares backend_type {backend_type!r}, which this "
-                f"process has no connector for. Restart the server."
-            )
         return None
     if experiment is None:
         experiment = dataset_experiment(readable_dataset_dir(stores, dataset_name), connector)
@@ -152,6 +157,20 @@ def readable_dataset_rows(stores: Stores, name: str) -> dict[str, Any] | None:
         return rows
     shipped = read_json_tolerant(stores.benchmarks_root / name / "cache.json")
     return shipped if isinstance(shipped, dict) and shipped.get("items") else None
+
+
+def held_rows(stores: Stores, name: str) -> list[dict[str, Any]] | None:
+    """The rows readable WITHOUT a fetch: the ladder's first rung (`loaders.resolve_dataset_items`).
+
+    A connector that owns a panel answers from it ALONE: rows cached under the same name describe
+    another instrument, so an absent panel holds nothing.
+    """
+    connector = _dataset_connector(stores, name)
+    if connector is not None and connector.experiment_file:
+        return dataset_panel_rows(stores, name)
+    raw = readable_dataset_rows(stores, name)
+    items = raw.get("items") if raw is not None else None
+    return items if isinstance(items, list) else None
 
 
 def readable_task_context(stores: Stores, name: str) -> TaskDecomposition:
@@ -176,9 +195,7 @@ def list_readable_datasets(stores: Stores) -> list[DatasetRef]:
     for slug in stores.tenant_datasets.list_slugs():
         dataset_dir = stores.tenant_datasets.dataset_dir(slug)
         own.add(slug)
-        refs.append(
-            DatasetRef(slug, _read_title(dataset_dir), _read_n_samples(stores, slug), "yours")
-        )
+        refs.append(_dataset_ref(stores, slug, dataset_dir, "yours"))
 
     if stores.benchmarks_root.is_dir():
         for entry in sorted(stores.benchmarks_root.iterdir()):
@@ -190,40 +207,43 @@ def list_readable_datasets(stores: Stores) -> list[DatasetRef]:
                 validate_dataset_name(entry.name)
             except ValueError:
                 continue
-            refs.append(
-                DatasetRef(
-                    entry.name, _read_title(entry), _read_n_samples(stores, entry.name), "install"
-                )
-            )
+            refs.append(_dataset_ref(stores, entry.name, entry, "install"))
     return refs
 
 
-def _read_title(dataset_dir: Path) -> str | None:
+def _dataset_ref(
+    stores: Stores, name: str, dataset_dir: Path, tier: Literal["yours", "install"]
+) -> DatasetRef:
+    title, summary = _read_heading(dataset_dir)
+    return DatasetRef(name, title, summary, tier)
+
+
+_MARKUP = re.compile(r"\*\*|__|`|\[([^\]]*)\]\([^)]*\)")
+
+
+def _read_heading(dataset_dir: Path) -> tuple[str | None, str | None]:
+    """The ``# `` title, and the first sentence of the paragraph under it as plain text."""
     md = dataset_dir / "dataset.md"
     if not md.is_file():
-        return None
+        return None, None
+    title: str | None = None
+    paragraph: list[str] = []
     for line in md.read_text(encoding="utf-8").splitlines():
         stripped = line.strip()
-        if stripped.startswith("# "):
-            return stripped[2:].strip() or None
-    return None
-
-
-def _read_n_samples(stores: Stores, name: str) -> int | None:
-    """``None`` when unmaterialized, NOT ``0``: zero is the state that stops a mint."""
-    try:
-        if (panel := dataset_panel_rows(stores, name)) is not None:
-            return len(panel)
-    except (ValueError, OSError, ImportError, BackendUnreachableError):
-        return None
-    raw = readable_dataset_rows(stores, name)
-    if raw is None:
-        return None
-    row_count = raw.get("row_count")
-    if isinstance(row_count, int):
-        return row_count
-    items = raw.get("items")
-    return len(items) if isinstance(items, list) else None
+        if title is None:
+            if stripped.startswith("# "):
+                title = stripped[2:].strip() or None
+            continue
+        if not stripped:
+            if paragraph:
+                break
+            continue
+        if stripped.startswith("#"):
+            break
+        paragraph.append(stripped)
+    text = _MARKUP.sub(lambda m: m.group(1) or "", " ".join(paragraph))
+    sentence = re.split(r"(?<=[.!?])\s", text, maxsplit=1)[0].strip()
+    return title, sentence or None
 
 
 __all__ = [
@@ -234,6 +254,7 @@ __all__ = [
     "dataset_pipeline_path",
     "declared_backend_type",
     "extract_panel_rows",
+    "held_rows",
     "is_dataset_dir",
     "list_readable_datasets",
     "readable_dataset_dir",

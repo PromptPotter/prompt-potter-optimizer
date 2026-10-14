@@ -14,6 +14,7 @@ from promptpotter.infrastructure.llm.send_failure import failed_send
 from promptpotter.infrastructure.llm.send_pacing import SendBudget, parse_retry_after
 from promptpotter.infrastructure.tls import tls_context
 from promptpotter.shared.errors import ErrorCategory, graceful
+from promptpotter.shared.extras import Extra, install_hint, installed
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,12 @@ class LangfuseLogger:
         self._open_observations: dict[str, Any] = {}
         self._rate_limit_until: float = 0.0
 
+        if self.enabled and not installed(Extra.OBSERVABILITY):
+            logger.warning(
+                "Langfuse disabled: the observability extra is not installed — %s",
+                install_hint(Extra.OBSERVABILITY),
+            )
+            self.enabled = False
         if self.enabled:
             try:
                 from langfuse import Langfuse
@@ -56,12 +63,6 @@ class LangfuseLogger:
                     secret_key=settings.LANGFUSE_SECRET_KEY,
                     host=settings.LANGFUSE_HOST,
                 )
-            except ImportError:
-                logger.warning(
-                    "langfuse package not installed — observability disabled. "
-                    'Install: pip install -e ".[observability]"'
-                )
-                self.enabled = False
             except Exception:
                 logger.warning("Failed to initialize Langfuse", exc_info=True)
                 self.enabled = False

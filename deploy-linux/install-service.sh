@@ -105,6 +105,8 @@ User=$RUN_USER
 WorkingDirectory=$WORK_DIR
 EnvironmentFile=$ENV_FILE
 ${DATA_DIR:+Environment=PROMPTPOTTER_HOME=$DATA_DIR}
+# A benchmark's first fetch caches under HF_HOME; ProtectHome=read-only shuts ~/.cache.
+Environment=HF_HOME=$WRITE_PATH/.cache/huggingface
 ExecStart=$INSTALL_DIR/.venv/bin/python -m uvicorn $APP_MODULE \\
     --host $BIND_HOST --port $BIND_PORT --workers 1 --proxy-headers \\
     --forwarded-allow-ips=127.0.0.1

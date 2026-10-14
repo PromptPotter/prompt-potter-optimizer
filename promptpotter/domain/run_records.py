@@ -564,7 +564,9 @@ class LLMCallRecord(StrictModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-AccountEvent = Literal["account_created", "signed_in", "terms_accepted"]
+AccountEvent = Literal[
+    "account_created", "signed_in", "terms_accepted", "uploaded", "request_refused"
+]
 
 
 class AccountEventRecord(StrictModel):
@@ -575,7 +577,8 @@ class AccountEventRecord(StrictModel):
     record_type: Literal["account_event"] = "account_event"
     event: AccountEvent
     user_id: str
-    # The provider of a sign-in, the version of a terms acceptance.
+    # The provider of a sign-in, the version of a terms acceptance, the file an upload was kept as,
+    # what a refused request asked and was told.
     subject: str = ""
     timestamp: str = Field(default_factory=utcnow_iso)
 

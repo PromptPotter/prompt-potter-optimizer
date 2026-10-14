@@ -20,11 +20,7 @@ from promptpotter.application.commands.payloads import (
     ResolveOriginPayload,
     StartCheckinPayload,
 )
-from promptpotter.application.datasets.authored import (
-    dataset_campaign_config,
-    read_campaign_config_file,
-)
-from promptpotter.application.datasets.csv_ingest import IngestError
+from promptpotter.application.datasets.authored import read_campaign_config_file
 from promptpotter.application.datasets.draft_campaign import (
     SETTABLE_SCALARS,
     EditDraftPatch,
@@ -34,6 +30,7 @@ from promptpotter.application.datasets.draft_campaign import (
 from promptpotter.application.datasets.ingest import SlugTakenError, ingest_draft
 from promptpotter.application.datasets.origin_readiness import origin_readiness
 from promptpotter.application.datasets.origin_resolve import FINDING_PATCH_KEYS
+from promptpotter.application.datasets.tabular_ingest import IngestError
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.campaign import ArmRequest
 from promptpotter.domain.connector import BackendUnreachableError
@@ -41,7 +38,6 @@ from promptpotter.domain.launch_limits import RunMode
 from promptpotter.infrastructure.store.dataset_access import (
     DatasetAccessError,
     backend_type_of_dataset,
-    readable_dataset_dir,
 )
 from promptpotter.presentation.cli.commands.launch import (
     backend_reach_line,
@@ -245,7 +241,7 @@ def _arm_request(raw: str | None) -> ArmRequest | None:
         raise SystemExit(f"ERROR: --arm {raw!r}: {exc}") from exc
 
 
-def _named_mint(args: argparse.Namespace, stores: Stores) -> MintCampaignPayload:
+def _named_mint(args: argparse.Namespace) -> MintCampaignPayload:
     declared = None
     if args.config:
         file_config = read_campaign_config_file(Path(args.config))
@@ -260,16 +256,6 @@ def _named_mint(args: argparse.Namespace, stores: Stores) -> MintCampaignPayload
             "that names one.\n\n" + no_dataset_hint()
         )
     knobs = _set_knobs(args.sets)
-    try:
-        dataset_campaign_config(
-            readable_dataset_dir(stores, dataset_name), optimization=knobs, declared=declared
-        )
-    except DatasetAccessError:
-        raise SystemExit(
-            f"ERROR: no dataset named {dataset_name!r}.\n\n" + no_dataset_hint()
-        ) from None
-    except PotterError as exc:
-        raise SystemExit(f"ERROR: --set rejected: {exc}") from None
     arm = _arm_request(args.arm)
     task_text = (
         Path(args.task_file).read_text(encoding="utf-8") if args.task_file else args.task_text
@@ -300,7 +286,7 @@ async def _new(args: argparse.Namespace) -> CommandResult:
     setup_logging(style="full" if args.verbose else "cli")
     if not (args.dataset and Path(args.dataset).is_file()):
         stores = open_stores(args)
-        return await mint_and_run(stores, _named_mint(args, stores), inline_launch(args))
+        return await mint_and_run(stores, _named_mint(args), inline_launch(args))
     if args.arm is not None:
         raise SystemExit("ERROR: --arm mints a committed dataset's campaign, not a raw file")
     try:
@@ -317,6 +303,12 @@ async def mint_and_run(stores: Stores, mint: MintCampaignPayload, inline: Inline
         )
     except BackendUnreachableError as exc:
         return backend_unreachable_result(exc)
+    except DatasetAccessError:
+        raise SystemExit(
+            f"ERROR: no dataset named {mint.dataset_name!r}.\n\n" + no_dataset_hint()
+        ) from None
+    except PotterError as exc:
+        raise SystemExit(f"ERROR: {exc}") from None
     held = held_run(outcome.result)
     checkin_line("campaign", f"minted {held.session.campaign_id}")
     return await _run_origin(held, diag=mint.diag)

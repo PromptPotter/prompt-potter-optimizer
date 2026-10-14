@@ -11,12 +11,12 @@ from typing import TYPE_CHECKING, Any
 from promptpotter import connectors
 from promptpotter.application import optimizers
 from promptpotter.application.bench.resume_and_fork.replayers import replayers
-from promptpotter.application.datasets.csv_ingest import read_candidate_library_file
 from promptpotter.application.datasets.loaders import (
     bank_samples,
     resolve_dataset_items,
     samples_from_dicts,
 )
+from promptpotter.application.datasets.tabular_ingest import read_candidate_library_file
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizer_manifest import resolve_optimizer
 from promptpotter.application.pipeline_resolve import (

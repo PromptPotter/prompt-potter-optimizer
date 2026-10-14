@@ -8,9 +8,6 @@ from pydantic import Field
 from promptpotter.application.commands.dispatcher import CommandCall
 from promptpotter.application.commands.draft_editing import dispatch_draft_patch
 from promptpotter.application.commands.payloads import EditDraftCampaignPayload
-from promptpotter.application.datasets.csv_ingest import (
-    parse_candidate_library,
-)
 from promptpotter.application.datasets.draft_build import DraftCampaignWire, draft_wire
 from promptpotter.application.datasets.draft_campaign import EditDraftPatch
 from promptpotter.application.datasets.draft_patch import candidate_library_from_column
@@ -20,17 +17,14 @@ from promptpotter.application.datasets.ingest import (
     draft_from_dataset_name,
     ingest_draft,
 )
+from promptpotter.application.datasets.tabular_ingest import parse_candidate_library
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.presentation.api.deps import (
     StoresDep,
 )
 from promptpotter.presentation.api.routers.commands import ensure_idempotency_key
 from promptpotter.presentation.api.routers.datasets._router import datasets_router
-from promptpotter.shared.errors import (
-    ConflictError,
-    ContentTooLargeError,
-    PayloadInvalidError,
-)
+from promptpotter.shared.errors import ConflictError, ContentTooLargeError
 
 
 def _candidate_library_call(
@@ -67,7 +61,10 @@ async def ingest_dataset(
     stores: StoresDep,
     file: Annotated[
         UploadFile,
-        File(description="Tabular upload (CSV/TSV/JSON/JSONL/XLSX); any columns."),
+        File(
+            description="Any tabular file (delimited text in any encoding, JSON, JSONL, "
+            "XLSX, XLS, ODS), read off its bytes; any columns."
+        ),
     ],
     slug: Annotated[str | None, Form(description="Optional slug override.")] = None,
 ) -> DraftCampaignWire:
@@ -81,8 +78,6 @@ async def ingest_dataset(
         draft = await ingest_draft(
             stores=stores, blob=blob, filename=file.filename or "", slug=slug
         )
-    except ValueError as exc:
-        raise PayloadInvalidError(str(exc), details={"reason": "bad_slug"}) from None
     except SlugTakenError as exc:
         raise ConflictError(
             f"A dataset named '{exc.slug}' already exists.",
@@ -112,12 +107,6 @@ async def upload_candidate_library(
     idemp = ensure_idempotency_key(idempotency_key)
     blob = await _read_capped(request, file, MAX_UPLOAD_BYTES)
     terms = parse_candidate_library(blob, file.filename or "")
-    if not terms:
-        raise PayloadInvalidError(
-            "The candidate library has no usable entries (every line was blank).",
-            code="ingest_failed",
-            details={"reason": "empty"},
-        )
     return await dispatch_draft_patch(stores, _candidate_library_call(draft_id, terms, idemp))
 
 

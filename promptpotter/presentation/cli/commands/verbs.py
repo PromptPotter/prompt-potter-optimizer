@@ -869,10 +869,16 @@ VERBS: tuple[Verb, ...] = (
     Verb(
         "trail",
         "trail:cmd_trail",
-        help="What an account did, oldest first, in UTC: its sign-ins, its consent and every "
-        "command, the terminal's own included. Bare, this tenant's; with an EMAIL, every account "
-        "on the box that carries it. Read-only, zero spend.",
+        help="What an account did, oldest first, in UTC: its sign-ins, its consent, every upload, every attempt "
+        "the server refused and every command, the terminal's own included. Bare, this tenant's; "
+        "with an EMAIL, every account on the box that carries it. Read-only, zero spend.",
         args=(Arg("email", nargs="?", default="", help="An account's email address."),),
+    ),
+    Verb(
+        "offer-extras",
+        "offer:cmd_offer_extras",
+        help="The pyproject extras the datasets this deployment offers (DATASET_OFFER) need to "
+        "fetch their samples, one per line — what `deploy-linux/update.sh` installs. Read-only.",
     ),
     Verb(
         "set-concurrent-cycles",

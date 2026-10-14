@@ -12,7 +12,7 @@ from promptpotter.application.campaign_config import CampaignConfig, merge_confi
 from promptpotter.application.campaign_config import (
     load_campaign_config as validate_campaign_config,
 )
-from promptpotter.application.datasets.csv_ingest import read_candidate_library_file
+from promptpotter.application.datasets.tabular_ingest import read_candidate_library_file
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.scoring.formula import compile_scorer, split_scoring_block
 from promptpotter.domain.scoring import Scorer

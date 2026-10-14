@@ -76,7 +76,8 @@ OpenAI/Anthropic/OpenRouter only if named. `.env.example` is the full template.
 **Dataset has no loader.** Two paths:
 
 - **Tenant/client dataset (common):** don't write a loader — ingest it (above). The parser
-  (`application/datasets/csv_ingest.py`) handles CSV/TSV/JSON/JSONL/XLSX.
+  (`application/datasets/tabular_ingest.py`) reads the format from the bytes: any-separator text in
+  any common encoding, JSON/JSONL, XLSX/XLS/ODS.
 - **New bundled benchmark (rare):** register a loader returning `list[Sample]`
   (`domain/sample.py`) in `DATASET_LOADERS`, and draft
   `datasets/<name>/{campaign.yaml, pipeline.yaml, task_description.md, dataset.md, prompts/<node>.yaml}` against

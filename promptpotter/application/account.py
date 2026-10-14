@@ -84,6 +84,16 @@ def accept_terms(stores: Stores, version: str) -> User:
     return user
 
 
+def record_refusal(stores: Stores, *, subject: str) -> None:
+    """A person's attempt the server turned down: without it, a failed first try leaves no trace."""
+    _record(stores, "request_refused", at=utcnow_iso(), subject=subject)
+
+
+def record_upload(stores: Stores, *, filename: str, kept: Path) -> None:
+    """Names the kept bytes beside the refusal that may follow, so the trail leads to the file."""
+    _record(stores, "uploaded", at=utcnow_iso(), subject=f"{filename} -> uploads/{kept.name}")
+
+
 class Trail(NamedTuple):
     # Whose it is: empty where no readable account carries the email asked for.
     own: frozenset[str]
@@ -177,6 +187,8 @@ __all__ = [
     "accept_terms",
     "account_of",
     "arrive",
+    "record_refusal",
+    "record_upload",
     "sign_in",
     "tenant_trail",
     "trail_by_email",

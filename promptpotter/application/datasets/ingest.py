@@ -6,13 +6,8 @@ from pathlib import Path
 from typing import Any
 
 from promptpotter import connectors
+from promptpotter.application.account import record_upload
 from promptpotter.application.datasets.authored import read_authored_dataset
-from promptpotter.application.datasets.csv_ingest import (
-    IngestError,
-    closed_label_set,
-    format_from_filename,
-    read_tabular,
-)
 from promptpotter.application.datasets.draft_build import overlay_from_campaign_config
 from promptpotter.application.datasets.draft_campaign import (
     DEFAULT_MAX_ROUNDS,
@@ -23,10 +18,21 @@ from promptpotter.application.datasets.draft_campaign import (
     new_draft,
     scoring_choice,
 )
-from promptpotter.application.datasets.loaders import bank_samples, resolve_dataset_items
+from promptpotter.application.datasets.loaders import bank_samples
 from promptpotter.application.datasets.prompts import (
     list_dataset_prompts,
     load_dataset_prompt,
+)
+from promptpotter.application.datasets.startability import (
+    checkin_items,
+    labelled_rows,
+    offered_dataset_dir,
+)
+from promptpotter.application.datasets.tabular_ingest import (
+    IngestError,
+    closed_label_set,
+    file_extension,
+    read_tabular,
 )
 from promptpotter.application.jobs.launcher.checkin import create_checkin_campaign
 from promptpotter.application.origin_listing import canonical_origin_campaign
@@ -41,10 +47,7 @@ from promptpotter.domain.pipeline_parsing import merge_node_blocks
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.llm.capabilities import refresh_model_capabilities
 from promptpotter.infrastructure.store.checkin_draft_store import dataset_source
-from promptpotter.infrastructure.store.dataset_access import (
-    backend_type_of_dataset,
-    readable_dataset_dir,
-)
+from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
 from promptpotter.infrastructure.store.layout import validate_dataset_name
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import NotFoundError
@@ -105,9 +108,14 @@ async def ingest_draft(
     slug: str | None = None,
     backend_url: str = DEFAULT_BACKEND_URL,
 ) -> DraftCampaign:
-    table = read_tabular(blob, fmt=format_from_filename(filename or "upload.csv"))
+    kept = stores.tenant_datasets.keep_upload(blob, file_extension(filename))
+    record_upload(stores, filename=filename, kept=kept)
+    table = read_tabular(blob, filename)
     base_slug = (slug or default_slug_from_filename(filename or "upload")).lower()
-    validate_dataset_name(base_slug)
+    try:
+        validate_dataset_name(base_slug)
+    except ValueError as exc:
+        raise IngestError(reason="bad_slug", message=str(exc)) from None
     # Raised before the check-in campaign is minted, so a collision leaves no orphan.
     if stores.tenant_datasets.slug_exists(base_slug):
         raise SlugTakenError(base_slug, stores.tenant_datasets.suggest_free_slug(base_slug))
@@ -138,28 +146,13 @@ async def ingest_draft(
 async def draft_from_dataset(
     *,
     stores: Stores,
-    dataset_dir: Path,
     dataset_name: str,
     overrides: dict[str, Any] | None = None,
     origin_campaign: Campaign | None = None,
 ) -> DraftCampaign:
-    items = resolve_dataset_items(stores, dataset_name)
-    rows: list[dict[str, str]] = [
-        {"query": str(it["query"]), "ground_truth": str(it["ground_truth"])}
-        for it in items
-        if it.get("query") and it.get("ground_truth")
-    ]
-    if not rows:
-        raise IngestError(
-            reason="empty",
-            message=(
-                f"Dataset {dataset_name!r} has no usable (query, ground_truth) rows. A draft is "
-                f"built from a labelled sample table; a VERIFIER-GRADED dataset (backend_type "
-                f"`harbor` or `promptpotter`) has none — its cells come from the connector's "
-                f"`experiment_file` and carry no label — so it cannot be drafted through this "
-                f"path yet and is launched with `python -m promptpotter new {dataset_name}`."
-            ),
-        )
+    dataset_dir = offered_dataset_dir(stores, dataset_name)
+    items = checkin_items(stores, dataset_name)
+    rows = labelled_rows(items)
 
     await refresh_capabilities(stores)
     # An origin reuse reads the node declaration off ITS connector, not the shared file's.
@@ -245,11 +238,7 @@ async def draft_from_dataset(
 
 
 async def draft_from_dataset_name(*, stores: Stores, dataset_name: str) -> DraftCampaign:
-    return await draft_from_dataset(
-        stores=stores,
-        dataset_dir=readable_dataset_dir(stores, dataset_name),
-        dataset_name=dataset_name,
-    )
+    return await draft_from_dataset(stores=stores, dataset_name=dataset_name)
 
 
 async def draft_from_origin(*, stores: Stores, origin_id: str) -> DraftCampaign:
@@ -262,7 +251,6 @@ async def draft_from_origin(*, stores: Stores, origin_id: str) -> DraftCampaign:
         overrides["origin_prompt_fields"] = dict(seed.origin_prompt_fields)
     return await draft_from_dataset(
         stores=stores,
-        dataset_dir=readable_dataset_dir(stores, campaign.dataset_name),
         dataset_name=campaign.dataset_name,
         overrides=overrides,
         origin_campaign=campaign,

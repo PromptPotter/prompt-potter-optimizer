@@ -2420,12 +2420,12 @@ paths:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '422':
           description: |
-            Parse / shape failure — undecodable bytes, unparseable file, no
-            header row, or zero data rows. `details.reason` carries the specific
-            failure (`bad_csv`, `bad_json`, `empty`, `too_large`, `bad_slug`,
-            `unsupported_format`, or `hardened_blocked` for an XLSX upload when
-            the server runs `HARDENED_MODE`). Column names are NOT validated
-            here (header-agnostic ingest).
+            Parse / shape failure — not a table at all (a PDF, a Word file),
+            unparseable, no header row, or zero data rows. The format, encoding
+            and separator are read off the bytes, never the extension.
+            `details.reason` carries the specific failure, one of
+            `ErrorEnvelope.code`'s `ingest_failed` reasons.
+            Column names are NOT validated here (header-agnostic ingest).
           content:
             application/json:
               schema:
@@ -2654,7 +2654,17 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
         '404':
-          description: Unknown dataset, or one outside this tenant (existence-leak gate).
+          description: |
+            Unknown dataset, one outside this tenant (existence-leak gate), or an
+            install dataset this deployment does not offer (`DATASET_OFFER`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '422':
+          description: |
+            `dataset_unstartable` — a check-in cannot open the dataset here, for the
+            reason `GET /datasets` already served as its `start_block`
+            (`details.reason`).
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
@@ -2817,7 +2827,7 @@ paths:
         '422':
           description: |
             Parse failure or empty library. `details.reason` is the specific
-            failure (`bad_csv`, `bad_json`, `unsupported_format`, `empty`).
+            failure, one of `ErrorEnvelope.code`'s `ingest_failed` reasons.
           content:
             application/json:
               schema:
@@ -3098,8 +3108,8 @@ components:
             `admission_gate_stuck` (503 — a process is wedged inside the
             machine-wide admission window, so occupancy cannot be read and
             nothing was started; retryable),
-            `ingest_failed` / `origin_incomplete` / `pipeline_config_invalid`
-            (422), `stored_config_invalid` (500). Generic families:
+            `ingest_failed` / `dataset_unstartable` / `extra_missing` / `origin_incomplete` /
+            `pipeline_config_invalid` (422), `stored_config_invalid` (500). Generic families:
             `bad_request` (400), `unauthenticated`
             (401), `capability_denied` (403), `not_found` (404), `too_large`
             (413), `request_invalid` (422), `service_unavailable` (503),
@@ -3119,6 +3129,8 @@ components:
             - cycle_busy
             - backend_unreachable
             - ingest_failed
+            - dataset_unstartable
+            - extra_missing
             - origin_incomplete
             - pipeline_config_invalid
             - stored_config_invalid
@@ -3143,7 +3155,7 @@ components:
           description: |
             Short hex handle stamped on EVERY error response and written to the
             same server log line (`api error [<id>] <method> <path> -> <status>
-            <code>`; a 500 logs its traceback under the same handle). It is the
+            <code>[/<reason>]`; a 500 logs its traceback under the same handle). It is the
             one thing that ties an opaque client-side failure to its server-side
             cause, so a bug report quotes it instead of a wall-clock guess — the
             webapp surfaces it through Account → Copy diagnostics. Minted at the
@@ -3179,12 +3191,18 @@ components:
               The REMEDY is the connector probe's own and rides `message`: a
               surface renders that, never a sentence rebuilt from these two,
               which cannot say why.
-            * `ingest_failed` (422 on `/datasets/ingest`) — `reason`
-              ∈ `bad_csv` | `bad_json` | `empty` | `too_large` | `bad_slug` |
-              `unsupported_format` | `hardened_blocked`. (Ingest is
-              header-agnostic — it no longer rejects on column names; column
-              identity is resolved on the draft, gated at mint. `hardened_blocked`
-              is an XLSX upload refused while the server runs `HARDENED_MODE`.)
+            * `ingest_failed` (422 on `/datasets/ingest` and a candidate-library upload) — `reason`
+              ∈ `unreadable` | `bad_json` | `empty` | `too_large` | `bad_slug` |
+              `unsupported_format` | `hardened_blocked` | `missing_column` | `missing_value`. (Ingest is header-agnostic — it does not reject
+              on column names; column identity is resolved on the draft, gated
+              at mint. `hardened_blocked` is a spreadsheet upload refused while
+              the server runs `HARDENED_MODE`.)
+            * `dataset_unstartable` (422 on `/datasets/{name}/draft`) —
+              `reason` ∈ `verifier_graded` | `empty` | `missing_extra` | `unreadable`, the same value
+              `DatasetIndexEntry.start_block.reason` serves.
+            * `extra_missing` (422 wherever a path needs an optional install
+              this server lacks — a bank's fetch, a spreadsheet read) — `extra`,
+              the `pyproject.toml` extra to install; `message` names the command.
             * `origin_incomplete` (422 on `/commands/start-checkin`)
               — `gaps`: a list of `{field, reason, hint}` objects naming each
               origin field that still blocks mint. `reason` ∈ `unset` |

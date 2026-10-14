@@ -9,7 +9,6 @@ from typing import Any, ClassVar
 
 from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.datasets.authored import dataset_campaign_config
-from promptpotter.application.datasets.csv_ingest import Table, materialize_samples
 from promptpotter.application.datasets.draft_build import (
     default_campaign_json,
     draft_task_context,
@@ -19,6 +18,7 @@ from promptpotter.application.datasets.draft_campaign import (
     committed_pipeline_json,
 )
 from promptpotter.application.datasets.origin_readiness import FieldGap, origin_readiness
+from promptpotter.application.datasets.tabular_ingest import Table, materialize_samples
 from promptpotter.application.initialization.wiring import bind_cycle_session, init_services
 from promptpotter.application.jobs.launcher.admission import (
     admit_and_hold,
@@ -41,7 +41,6 @@ from promptpotter.domain.campaign import ArmRequest, Campaign
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.launch_limits import LaunchLimits
 from promptpotter.infrastructure.store.dataset_access import (
-    DatasetAccessError,
     declared_backend_type,
     readable_dataset_dir,
 )
@@ -73,19 +72,13 @@ def assert_origin_ready(draft: DraftCampaign) -> None:
         raise OriginIncompleteError(readiness.gaps)
 
 
-def _declared_dataset(stores: Stores, dataset_name: str) -> tuple[Path, str]:
-    try:
-        dataset_root = readable_dataset_dir(stores, dataset_name)
-    except DatasetAccessError:
-        raise LaunchError(f"dataset not found: {dataset_name!r}") from None
-    return dataset_root, declared_backend_type(dataset_root)
-
-
 @dataclass(frozen=True, slots=True)
 class FreshMint:
     verb: ClassVar[str] = "mint"
 
     dataset_name: str
+    # Resolved once, where the request is built (`commands/launching.py::mint_campaign`).
+    dataset_root: Path
     limits: LaunchLimits
     optimization: Mapping[str, Any]
     arm: ArmRequest | None
@@ -99,17 +92,15 @@ class FreshMint:
         return UNRESOLVED_HOP
 
     def backend(self, stores: Stores) -> tuple[str, str]:
-        return _declared_dataset(stores, self.dataset_name)[1], self.backend_url
+        return declared_backend_type(self.dataset_root), self.backend_url
+
+    def dataset_campaign_config(self) -> CampaignConfig:
+        return dataset_campaign_config(
+            self.dataset_root, optimization=self.optimization, declared=self.declared
+        )
 
     def campaign_config(self, stores: Stores) -> CampaignConfig:
-        dataset_root, _ = _declared_dataset(stores, self.dataset_name)
-        return under_declared_record(
-            stores,
-            dataset_campaign_config(
-                dataset_root, optimization=self.optimization, declared=self.declared
-            ),
-            self.arm,
-        )
+        return under_declared_record(stores, self.dataset_campaign_config(), self.arm)
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,7 +116,8 @@ class ExistingCycle:
         return self.campaign.dataset_name
 
     def backend(self, stores: Stores) -> tuple[str, str]:
-        return _declared_dataset(stores, self.dataset_name)[1], self.campaign.backend_url
+        dataset_root = readable_dataset_dir(stores, self.dataset_name)
+        return declared_backend_type(dataset_root), self.campaign.backend_url
 
     def campaign_config(self, stores: Stores) -> CampaignConfig:
         return resolve_campaign_config(stores, self.campaign, self.hop)
@@ -139,7 +131,6 @@ async def hold_fresh_mint(
     # Bound only after the mint, so the failure path knows whether a cycle exists to stamp.
     hop: CycleHop | None = None
     try:
-        dataset_root, _ = _declared_dataset(stores, dataset_name)
         held = await admit_and_hold(request, stores=stores, job_registry=job_registry, job=job)
 
         _t0 = time.perf_counter()
@@ -152,9 +143,7 @@ async def hold_fresh_mint(
         )
         logger.info("mint[%s]: init_services=%.2fs", dataset_name, time.perf_counter() - _t0)
 
-        campaign_config = dataset_campaign_config(
-            dataset_root, optimization=request.optimization, declared=request.declared
-        )
+        campaign_config = request.dataset_campaign_config()
 
         minted = await mint_framed_cycle(
             session,

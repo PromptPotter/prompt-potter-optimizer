@@ -185,7 +185,7 @@ python -m promptpotter new tickets.csv --set task_description="classify support 
 python -m promptpotter resume
 ```
 
-Bring a **labeled dataset** — input/output pairs as CSV, TSV, JSON, JSONL or `.xlsx` — and say what the job is. No key set yet? `new` offers to write one on first run. `resume` picks up wherever the last run stopped: Ctrl+C pauses a campaign rather than losing it.
+Bring a **labeled dataset** — input/output pairs as any delimited text, JSON, JSONL or a spreadsheet (`.xlsx`, `.xls`, `.ods`) — and say what the job is. No key set yet? `new` offers to write one on first run. `resume` picks up wherever the last run stopped: Ctrl+C pauses a campaign rather than losing it.
 
 > [!IMPORTANT]
 > **`new` needs a pipeline backend to score against** — the default is [TermNorm](https://github.com/runfish5/TermNorm-excel) on `:8000`, and a campaign refuses to start without one ([setting it up by hand](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/manual/03-first-campaign.md#no-backend)).

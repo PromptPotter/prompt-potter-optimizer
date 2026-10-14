@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 from pydantic import ValidationError
 
 from promptpotter.application.campaign_config import merge_config_layers
-from promptpotter.application.datasets.csv_ingest import candidate_library_from_rows
 from promptpotter.application.datasets.draft_campaign import (
     EditDraftPatch,
     NodeOutputEdit,
@@ -13,6 +12,7 @@ from promptpotter.application.datasets.draft_campaign import (
     load_checkin_draft,
     rendered_pipeline_json,
 )
+from promptpotter.application.datasets.tabular_ingest import candidate_library_from_rows
 from promptpotter.application.optimizer_manifest import resolve_optimizer
 from promptpotter.application.pipeline_resolve import draft_config_rows
 from promptpotter.application.scoring.formula import SCORING_FUNCTIONS, parse_dials, spell_dials

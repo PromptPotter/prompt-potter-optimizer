@@ -17,8 +17,8 @@ from promptpotter.application.commands.dispatcher import (
     refused_on_an_arm,
 )
 from promptpotter.application.commands.draft_editing import reread_draft
-from promptpotter.application.datasets.authored import dataset_campaign_config
 from promptpotter.application.datasets.origin_readiness import save_checkin_draft
+from promptpotter.application.datasets.startability import offered_dataset_dir
 from promptpotter.application.evidence.subjects import SubjectSpec
 from promptpotter.application.jobs.launcher import launch as launcher
 from promptpotter.application.jobs.launcher.checkin import CheckinStart, load_checkin_for_start
@@ -39,7 +39,6 @@ from promptpotter.domain.launch_limits import LaunchLimits, RunMode
 from promptpotter.domain.pipeline_overlay import steers_disallowed_model
 from promptpotter.domain.pipeline_schema import ParamIntent, narrowing_of
 from promptpotter.domain.run_records import CycleSeed, OriginSource
-from promptpotter.infrastructure.store.dataset_access import readable_dataset_dir
 from promptpotter.infrastructure.store.session_pointer import cleanup_stub_fork_if_empty
 from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
 from promptpotter.shared.identity import (
@@ -229,27 +228,20 @@ def _cleanup_failed_fork(stores: Stores, parent_hop: CycleHop, new_cycle_id: str
 
 def mint_campaign(dispatcher: CommandDispatcher, payload: MintCampaignPayload) -> Applier[object]:
     async def _apply_mint() -> Launched:
-        optimization = payload.optimization_sent
-        # Refused here, before a slot is asked for: a queued mint would refuse it only later.
-        dataset_campaign_config(
-            readable_dataset_dir(dispatcher.stores, payload.dataset_name),
-            optimization=optimization,
+        request = FreshMint(
+            dataset_name=payload.dataset_name,
+            dataset_root=offered_dataset_dir(dispatcher.stores, payload.dataset_name),
+            limits=payload.limits,
+            optimization=payload.optimization_sent,
+            arm=payload.arm,
             declared=payload.campaign_config,
+            task_text=payload.task_text,
+            backend_url=payload.backend_url,
+            backend_id=payload.backend_id,
         )
-        return await launch(
-            dispatcher,
-            FreshMint(
-                dataset_name=payload.dataset_name,
-                limits=payload.limits,
-                optimization=optimization,
-                arm=payload.arm,
-                declared=payload.campaign_config,
-                task_text=payload.task_text,
-                backend_url=payload.backend_url,
-                backend_id=payload.backend_id,
-            ),
-            RunMode(diag=payload.diag),
-        )
+        # Refused here, before a slot is asked for: a queued mint would refuse it only later.
+        request.dataset_campaign_config()
+        return await launch(dispatcher, request, RunMode(diag=payload.diag))
 
     return Applier.silent(_apply_mint)
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import json
 import random
 import types
 from dataclasses import replace
@@ -961,6 +962,43 @@ def test_no_held_out_row_reaches_a_round_panel_or_an_archive_view() -> None:
     )
 
 
+_EXPORTED_ROWS = [
+    {"query": "Café au lait?", "label": "Getränk"},
+    {"query": "Smørrebrød", "label": "Essen"},
+]
+
+
+@pytest.mark.parametrize(
+    ("filename", "blob"),
+    [
+        (
+            "excel.csv",
+            "query;label\r\nCafé au lait?;Getränk\r\nSmørrebrød;Essen\r\n".encode("cp1252"),
+        ),
+        (
+            "unicode.txt",
+            "query\tlabel\nCafé au lait?\tGetränk\nSmørrebrød\tEssen\n".encode("utf-16"),
+        ),
+        (
+            "bare.txt",
+            "query\tlabel\nCafé au lait?\tGetränk\nSmørrebrød\tEssen\n".encode("utf-16-le"),
+        ),
+        ("bom.csv", "query,label\nCafé au lait?,Getränk\nSmørrebrød,Essen\n".encode("utf-8-sig")),
+        (
+            "lines.json",
+            "\n".join(json.dumps(r, ensure_ascii=False) for r in _EXPORTED_ROWS).encode(),
+        ),
+    ],
+)
+def test_an_exported_table_reads_to_the_labels_it_holds(filename: str, blob: bytes) -> None:
+    """A mis-decoded label grades every cell against text the person never wrote, with no error."""
+    from promptpotter.application.datasets.tabular_ingest import read_tabular
+
+    table = read_tabular(blob, filename)
+    assert table.headers == ("query", "label")
+    assert list(table.rows) == _EXPORTED_ROWS
+
+
 def test_the_check_in_model_reads_no_held_out_row(
     built_stores: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -971,8 +1009,9 @@ def test_the_check_in_model_reads_no_held_out_row(
 
     bank = [Sample(id=i, query=f"claim {i}", ground_truth="TRUE") for i in range(40)]
     built_stores.tenant_datasets.save_benchmark_rows("heldout", bank)
-    dataset_dir = tmp_path / "heldout"
-    dataset_dir.mkdir()
+    dataset_dir = built_stores.tenant_datasets.dataset_dir("heldout")
+    dataset_dir.mkdir(parents=True)
+    (dataset_dir / "pipeline.yaml").write_text("{}\n", encoding="utf-8")
     (dataset_dir / "campaign.yaml").write_text(
         "campaign_config:\n  scoring: label_match(predicted, ground_truth)\n"
         "  dataset_split:\n    bench: 30\n  optimization:\n    degradation_threshold: 0.4\n",
@@ -984,11 +1023,7 @@ def test_the_check_in_model_reads_no_held_out_row(
 
     monkeypatch.setattr(ingest, "refresh_capabilities", _offline)
     monkeypatch.setattr(ingest, "fetch_backend_nodes", _offline)
-    draft = asyncio.run(
-        ingest.draft_from_dataset(
-            stores=built_stores, dataset_dir=dataset_dir, dataset_name="heldout"
-        )
-    )
+    draft = asyncio.run(ingest.draft_from_dataset(stores=built_stores, dataset_name="heldout"))
     content, _ = build_origin_consultation(draft)
     held = partition_bank(bank, DatasetSplit(bench=30)).bench
     assert not [s.id for s in held if f'"{s.query}"' in content], "a bench row reached the resolver"

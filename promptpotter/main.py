@@ -14,6 +14,8 @@ from pydantic import Field
 from scalar_fastapi import get_scalar_api_reference
 from starlette.middleware.gzip import GZipMiddleware
 
+from promptpotter.application.account import record_refusal
+from promptpotter.application.datasets.startability import offer_faults
 from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.application.jobs.reaper import periodic_sweep
 from promptpotter.application.jobs.registry import JobRegistry
@@ -28,7 +30,11 @@ from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.identity.bundle import build_identity_bundle
 from promptpotter.infrastructure.identity.paths import default_identity_paths
 from promptpotter.presentation.admin_bot import notify_operator
-from promptpotter.presentation.api.deps import auth_is_open
+from promptpotter.presentation.api.deps import (
+    auth_is_open,
+    build_stores_from_identity,
+    resolve_identity,
+)
 from promptpotter.presentation.api.middleware.headers import ResponseHeadersMiddleware
 from promptpotter.presentation.api.middleware.oidc import install_oidc_middleware
 from promptpotter.presentation.api.routers.active import active_router
@@ -41,7 +47,7 @@ from promptpotter.presentation.api.routers.origins import origins_router
 from promptpotter.presentation.api.routers.site_records import site_records_router
 from promptpotter.presentation.terminal.server_banner import render_server_banner
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import PotterError
+from promptpotter.shared.errors import PotterError, UnauthorizedError, graceful
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -75,6 +81,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             auth_open=auth_is_open(bundle),
             providers=bundle.config.configured,
             non_utf8=non_utf8_encoding(),
+            offer=settings.dataset_offer,
+            offer_faults=offer_faults(),
         ),
         flush=True,
     )
@@ -110,6 +118,19 @@ async def scalar_docs() -> Response:
     return doc
 
 
+def _bank_refusal(request: Request, subject: str, status: int) -> None:
+    """An attempt (a write, or anything that broke) by a signed-in person lands on their trail."""
+    if request.method in ("GET", "HEAD", "OPTIONS") and status < 500:
+        return
+    try:
+        identity = resolve_identity(request)
+    except UnauthorizedError:
+        return
+    # The person's response outranks the record of it; the log line still names the refusal.
+    with graceful("could not bank the refusal on the account's trail"):
+        record_refusal(build_stores_from_identity(identity), subject=subject)
+
+
 # The ONE flat envelope (`api-openapi.yaml::ErrorEnvelope`); no route raises HTTPException.
 def _error_response(
     request: Request,
@@ -121,15 +142,27 @@ def _error_response(
     exc_info: bool = False,
 ) -> JSONResponse:
     error_id = uuid.uuid4().hex[:12]
+    reason = f"/{details['reason']}" if details and "reason" in details else ""
     logger.log(
         logging.ERROR if exc_info else logging.WARNING,
-        "api error [%s] %s %s -> %d %s",
+        "api error [%s] %s %s -> %d %s%s",
         error_id,
         request.method,
         request.url.path,
         status,
         code,
+        reason,
         exc_info=exc_info,
+    )
+    facts = "".join(
+        f" {key}={value}"
+        for key, value in (details or {}).items()
+        if key != "reason" and isinstance(value, (str, int))
+    )
+    _bank_refusal(
+        request,
+        f"{request.method} {request.url.path} -> {status} {code}{reason} [{error_id}]{facts}: {message}",
+        status,
     )
     body: dict[str, object] = {"error": code, "message": message, "error_id": error_id}
     if details:

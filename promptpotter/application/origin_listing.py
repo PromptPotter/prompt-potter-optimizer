@@ -14,6 +14,11 @@ from promptpotter.application.datasets.authored import (
 )
 from promptpotter.application.datasets.loaders import bank_samples, resolve_dataset_items
 from promptpotter.application.datasets.prompts import has_dataset_prompts
+from promptpotter.application.datasets.startability import (
+    DatasetStartBlock,
+    dataset_reading,
+    offered,
+)
 from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.pipeline_resolve import (
     dataset_pipeline_declaration,
@@ -119,19 +124,38 @@ class DatasetIndexEntry(StrictModel):
             "anyone using the install. A ``yours`` slug shadows an ``install`` one."
         ),
     )
+    summary: str | None = Field(
+        default=None,
+        description="What the dataset is, in one plain sentence (the first under `dataset.md`'s title).",
+    )
     n_samples: int | None = Field(
         default=None,
         description=(
-            "Sample bank size from ``cache.json``; ``null`` when the cache has not been "
-            "materialized, which is not the same as a dataset holding zero usable rows."
+            "Rows held without a fetch (the connector's panel, else the materialized bank); "
+            "``null`` when none are, which is not the same as a dataset holding zero usable rows."
+        ),
+    )
+    start_block: DatasetStartBlock | None = Field(
+        description=(
+            "``null`` = a check-in can open it here. Otherwise why not: the same reading "
+            "``POST /datasets/{name}/draft`` refuses with."
         ),
     )
 
 
 def list_datasets(stores: Stores) -> list[DatasetIndexEntry]:
     return [
-        DatasetIndexEntry(name=ref.name, title=ref.title, tier=ref.tier, n_samples=ref.n_samples)
+        DatasetIndexEntry(
+            name=ref.name,
+            title=ref.title,
+            tier=ref.tier,
+            summary=ref.summary,
+            n_samples=reading.n_held,
+            start_block=reading.block,
+        )
         for ref in list_readable_datasets(stores)
+        if offered(stores, ref.name)
+        for reading in (dataset_reading(stores, ref.name),)
     ]
 
 
@@ -214,11 +238,12 @@ def _campaign_backed_origins(stores: Stores, n_samples: dict[str, int | None]) -
 
 def list_origins(stores: Stores) -> list[OriginEntry]:
     datasets = list_readable_datasets(stores)
-    campaign_backed = _campaign_backed_origins(stores, {r.name: r.n_samples for r in datasets})
+    n_held = {r.name: dataset_reading(stores, r.name).n_held for r in datasets}
+    campaign_backed = _campaign_backed_origins(stores, n_held)
     taken = {o.origin_id for o in campaign_backed}
     prepared: list[OriginEntry] = []
     for ref in datasets:
-        if ref.tier != "yours" or not ref.n_samples:
+        if ref.tier != "yours" or not n_held[ref.name]:
             continue
         dataset_dir = stores.tenant_datasets.dataset_dir(ref.name)
         if not has_dataset_prompts(dataset_dir) or not is_dataset_dir(dataset_dir):
@@ -231,7 +256,7 @@ def list_origins(stores: Stores) -> list[OriginEntry]:
                 origin_id=origin_id,
                 dataset_name=ref.name,
                 label=ref.title or "",
-                n_samples=ref.n_samples,
+                n_samples=n_held[ref.name],
                 prepared=True,
             )
         )

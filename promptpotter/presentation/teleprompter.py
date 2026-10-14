@@ -9,12 +9,13 @@ import sys
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.shared.extras import Extra, require_extra
+
 try:
     from dspy.teleprompt import Teleprompter
-except ModuleNotFoundError as exc:
-    raise ModuleNotFoundError(
-        "promptpotter.presentation.teleprompter needs DSPy — `pip install promptpotter[dspy]`"
-    ) from exc
+except ModuleNotFoundError:
+    require_extra(Extra.DSPY)
+    raise
 else:
     # DSPy parks lazy stand-ins in `sys.modules`; importing a SUBMODULE of an unloaded one fails.
     for _parked in list(sys.modules.values()):

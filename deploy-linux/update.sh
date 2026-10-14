@@ -64,6 +64,15 @@ fi
 # uv is fetched to ~/.local/bin (outside .venv, so a sync never wipes it).
 command -v uv >/dev/null 2>&1 || { command -v "$HOME/.local/bin/uv" >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh; }
 ( cd "$INSTALL_DIR" && PATH="$HOME/.local/bin:$PATH" uv sync --frozen --extra all )
+# The datasets this box offers (DATASET_OFFER) name the extras their fetch needs; read off the
+# synced code, so a second sync adds exactly those. Unset offer, empty list, no second sync.
+offer_out="$(cd "$INSTALL_DIR" && .venv/bin/python -m promptpotter offer-extras)"
+offer_extras=()
+for extra in $offer_out; do offer_extras+=(--extra "$extra"); done
+if (( ${#offer_extras[@]} )); then
+  ( cd "$INSTALL_DIR" && PATH="$HOME/.local/bin:$PATH" uv sync --frozen --extra all "${offer_extras[@]}" )
+  ok "offered datasets' extras installed: ${offer_extras[*]}"
+fi
 # A dep rebuild relabels new .venv files user_home_t; re-apply the persisted
 # bin_t rule (set by install-service.sh) so systemd can still exec them under
 # SELinux enforcing — otherwise the service silently 203/EXEC crash-loops.

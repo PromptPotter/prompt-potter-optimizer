@@ -3166,10 +3166,23 @@ export interface DatasetIndexEntry {
    * (benchmarks, demos, ``promptpotter-self``) — tracked in git, so readable
    * by anyone using the install. A ``yours`` slug shadows an ``install`` one. */
   tier: 'yours' | 'install';
-  /** Sample bank size from ``cache.json``; ``null`` when the cache has not been
-   * materialized, which is not the same as a dataset holding zero usable
-   * rows. */
+  /** What the dataset is, in one plain sentence (the first under `dataset.md`'s
+   * title). */
+  summary: string | null;
+  /** Rows held without a fetch (the connector's panel, else the materialized bank);
+   * ``null`` when none are, which is not the same as a dataset holding zero
+   * usable rows. */
   n_samples: number | null;
+  /** ``null`` = a check-in can open it here. Otherwise why not: the same reading
+   * ``POST /datasets/{name}/draft`` refuses with. */
+  start_block: DatasetStartBlock | null;
+}
+
+export interface DatasetStartBlock {
+  /** Why a check-in cannot open this dataset here. */
+  reason: 'verifier_graded' | 'empty' | 'missing_extra' | 'unreadable';
+  /** The reason, as a sentence for the person choosing. */
+  explanation: string;
 }
 
 export interface DatasetIndexResponse {

@@ -1901,7 +1901,7 @@
         "properties": {
           "file": {
             "contentMediaType": "application/octet-stream",
-            "description": "Tabular upload (CSV/TSV/JSON/JSONL/XLSX); any columns.",
+            "description": "Any tabular file (delimited text in any encoding, JSON, JSONL, XLSX, XLS, ODS), read off its bytes; any columns.",
             "title": "File",
             "type": "string"
           },
@@ -4491,13 +4491,36 @@
                 "type": "null"
               }
             ],
-            "description": "Sample bank size from ``cache.json``; ``null`` when the cache has not been materialized, which is not the same as a dataset holding zero usable rows.",
+            "description": "Rows held without a fetch (the connector's panel, else the materialized bank); ``null`` when none are, which is not the same as a dataset holding zero usable rows.",
             "title": "N Samples"
           },
           "name": {
             "description": "Slug used as the path segment under `datasets/`.",
             "title": "Name",
             "type": "string"
+          },
+          "start_block": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DatasetStartBlock"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "``null`` = a check-in can open it here. Otherwise why not: the same reading ``POST /datasets/{name}/draft`` refuses with."
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the dataset is, in one plain sentence (the first under `dataset.md`'s title).",
+            "title": "Summary"
           },
           "tier": {
             "description": "``yours`` = user-owned Origin under ``projects/{tenant}/datasets/{slug}/``. ``install`` = content that ships with the product at ``datasets/{slug}/`` (benchmarks, demos, ``promptpotter-self``) — tracked in git, so readable by anyone using the install. A ``yours`` slug shadows an ``install`` one.",
@@ -4523,7 +4546,8 @@
         },
         "required": [
           "name",
-          "tier"
+          "tier",
+          "start_block"
         ],
         "title": "DatasetIndexEntry",
         "type": "object"
@@ -4783,6 +4807,26 @@
           "bench"
         ],
         "title": "DatasetSplit",
+        "type": "object"
+      },
+      "DatasetStartBlock": {
+        "additionalProperties": false,
+        "properties": {
+          "explanation": {
+            "description": "The reason, as a sentence for the person choosing.",
+            "title": "Explanation",
+            "type": "string"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/StartBlock",
+            "description": "Why a check-in cannot open this dataset here."
+          }
+        },
+        "required": [
+          "reason",
+          "explanation"
+        ],
+        "title": "DatasetStartBlock",
         "type": "object"
       },
       "DatasetStorageEntry": {
@@ -14001,6 +14045,16 @@
         },
         "title": "SpendRollup",
         "type": "object"
+      },
+      "StartBlock": {
+        "enum": [
+          "verifier_graded",
+          "empty",
+          "missing_extra",
+          "unreadable"
+        ],
+        "title": "StartBlock",
+        "type": "string"
       },
       "StartCheckinResponse": {
         "additionalProperties": false,
