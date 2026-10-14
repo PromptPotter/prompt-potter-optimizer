@@ -10,10 +10,13 @@ from promptpotter.shared.clock import duration_words, utcnow_iso
 from promptpotter.shared.errors import ErrorCategory
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from promptpotter.domain.run_records import RebaseRequest
 
 __all__ = [
     "DASHBOARD_STATE_PAUSE_WORDS",
+    "INNER_ARMS_REFUSAL",
     "INNER_GATE_REFUSAL",
     "INNER_LAUNCH_REFUSAL",
     "INNER_PAUSE_REFUSAL",
@@ -27,6 +30,7 @@ __all__ = [
     "DeclaredRunPhase",
     "ErrorRecord",
     "GateDecision",
+    "GateKind",
     "LaunchStage",
     "PauseCause",
     "PauseReading",
@@ -120,7 +124,7 @@ class RunPhase(enum.StrEnum):
     - ``starting``: a claimed launch past the queue, its process coming up.
     - ``running``: a process is attached and driving the cycle.
     - ``paused``: the worker exited and the cycle stays active and resumable.
-    - ``gate``: holding at the round-0 origin gate for an operator decision.
+    - ``gate``: holding for the operator, at the round-0 origin gate or for a round's arms.
     - ``detached``: active with no process holding its lock; derived at the read, never stored.
     - ``terminal``: the cycle finished, and its stop reason says why.
     """
@@ -141,6 +145,9 @@ DeclaredRunPhase = Literal[RunPhase.RUNNING, RunPhase.PAUSED, RunPhase.GATE, Run
 LaunchStage = Literal[RunPhase.QUEUED, RunPhase.STARTING]
 
 GateDecision = Literal["rescore", "proceed", "abort"]
+
+# What a ``gate`` declaration holds for: the origin's verdict, or the arms a round measures.
+GateKind = Literal["origin", "arms"]
 
 
 class PauseCause(enum.StrEnum):
@@ -179,7 +186,7 @@ class ProducerState(enum.StrEnum):
     IDLE = "idle"
     # Attached, getting nowhere: no heartbeat, or only heartbeats past the wedge window, no cell open.
     WEDGED = "wedged"
-    # Attached and waiting on the operator at the origin gate; it appends nothing until answered.
+    # Attached and waiting on the operator at a gate; it appends nothing until answered.
     HELD = "held"
     # No process holds the cycle, and its last word was that it was running: it died where it stood.
     SILENT = "silent"
@@ -330,6 +337,7 @@ INNER_PAUSE_REFUSAL = (
     "An inner run stops with the outer run that spawned it. Pause the outer run instead."
 )
 INNER_GATE_REFUSAL = "An inner run never holds at the origin gate."
+INNER_ARMS_REFUSAL = "An inner run never holds for an operator's arms."
 INNER_SKIP_REFUSAL = (
     "An inner run is one cell of an outer measurement, and a cut searchpoint would change what "
     "that cell measured."
@@ -337,12 +345,16 @@ INNER_SKIP_REFUSAL = (
 
 
 class RunState(NamedTuple):
-    """``inner``: the cycle is an L4 inner run, which answers every run verb for itself."""
+    """``inner``: the cycle is an L4 inner run, which answers every run verb for itself.
+
+    ``gate`` and ``drafts`` are the standing hold's own, set only while the phase is ``gate``."""
 
     run_phase: RunPhase
     producer: ProducerReading
     pause: PauseReading | None = None
     inner: bool = False
+    gate: GateKind | None = None
+    drafts: int = 0
 
     @property
     def resumable(self) -> bool:
@@ -375,9 +387,21 @@ class RunState(NamedTuple):
         """Why `origin-gate-decision` is refused; empty where it is admitted."""
         if self.inner:
             return INNER_GATE_REFUSAL
-        if RUN_PHASE_INFO[self.run_phase].awaits_operator:
+        return "" if self.gate == "origin" else "This cycle is not holding at its origin gate."
+
+    def arms_refusal(self, keep: Sequence[int]) -> str:
+        """Why `submit-arms` keeping the drafts at *keep* is refused; empty where it is admitted."""
+        if self.inner:
+            return INNER_ARMS_REFUSAL
+        if self.gate != "arms":
+            return "This cycle is not holding for a round's arms."
+        if not keep:
             return ""
-        return "This cycle is not holding at its origin gate."
+        if not self.drafts:
+            return "No proposer ran this round, so there is no draft to keep."
+        if stray := sorted(i for i in keep if i >= self.drafts):
+            return f"This round holds drafts 0 to {self.drafts - 1}; there is no draft {stray}."
+        return ""
 
     @property
     def admission(self) -> RunAdmission:
@@ -458,14 +482,14 @@ RUN_PHASE_INFO: dict[RunPhase, RunPhaseInfo] = {
     ),
     # Blocked on the operator, so it leads the dock.
     RunPhase.GATE: RunPhaseInfo(
-        "Origin gate",
+        "Holding",
         False,
         False,
         False,
         True,
         0,
         None,
-        "At origin gate — decide in the chat.",
+        "Holding for you — the chat says what it waits on.",
         "awaiting your decision",
         "awaiting your decision",
     ),

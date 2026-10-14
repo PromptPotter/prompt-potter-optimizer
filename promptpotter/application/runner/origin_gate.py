@@ -2,20 +2,17 @@
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
 import logging
 import sys
-import time
-from typing import TYPE_CHECKING, Literal, get_args
+from typing import TYPE_CHECKING, get_args
 
 from promptpotter.application.datasets.loaders import sample_dataset
-from promptpotter.application.run_observers import declare_run_phase
+from promptpotter.application.run_observers import declare_gate, declare_running
 from promptpotter.application.runner.measurement import rescore_parent
+from promptpotter.application.runner.operator_hold import hold_for_operator
 from promptpotter.application.runner.round import emit_origin_round
 from promptpotter.application.runner.termination import origin_gate_tripped
-from promptpotter.domain.phases import GateDecision, RunPhase, StopReason
-from promptpotter.infrastructure.llm.heartbeat import heartbeat
+from promptpotter.domain.phases import GateDecision, StopReason
 
 if TYPE_CHECKING:
     from promptpotter.application.bench.cycle import Cycle
@@ -27,10 +24,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = ["run_origin_gate"]
-
-_GATE_POLL_S = 1.0
-
-_GateOutcome = Literal["rescore", "proceed", "abort", "pause"]
 
 _DECISIONS: tuple[str, ...] = get_args(GateDecision)
 
@@ -60,10 +53,12 @@ async def run_origin_gate(
                 f"\n  [ORIGIN GATE: {grade}] type {keys} then Enter (or use the webapp):",
                 flush=True,
             )
-        declare_run_phase(session, RunPhase.GATE)
+        declare_gate(session, "origin")
 
-        outcome = await _await_gate_decision(session)
-        if outcome == "pause":
+        outcome = await hold_for_operator(
+            session, session.control.take_gate_decision, node="origin_gate", round_num=0
+        )
+        if outcome is None:
             return StopReason.PAUSED
         if outcome == "abort":
             logger.warning("Origin gate: abort — ending cycle (origin_gate).")
@@ -73,7 +68,7 @@ async def run_origin_gate(
                 "Origin gate: proceed — entering L1 against a %s origin (operator override).",
                 grade,
             )
-            declare_run_phase(session, RunPhase.RUNNING)
+            declare_running(session)
             return None
 
         logger.warning("Origin gate: re-scoring the origin force-fresh.")
@@ -88,39 +83,8 @@ async def run_origin_gate(
         if origin_gate_tripped(cycle.origin_round.health, mode) is None:
             new_grade = cycle.origin_round.health.grade if cycle.origin_round.health else "unknown"
             logger.warning("Origin gate: re-scored origin is %s — entering L1.", new_grade)
-            declare_run_phase(session, RunPhase.RUNNING)
+            declare_running(session)
             return None
-
-
-async def _await_gate_decision(session: Session) -> _GateOutcome:
-    """Rides the shared heartbeat: writing nothing of its own, a gated cycle reads as detached while alive."""
-    ledger = session.state.ledger
-    beat = (
-        None
-        if ledger is None
-        else asyncio.create_task(
-            heartbeat(
-                ledger,
-                call_id=f"origin_gate:{session.state.cycle_id}",
-                node="origin_gate",
-                round_num=0,
-                start_monotonic=time.monotonic(),
-            )
-        )
-    )
-    try:
-        while True:
-            if session.control.pause_requested():
-                return "pause"
-            decided = session.control.take_gate_decision()
-            if decided is not None:
-                return decided
-            await asyncio.sleep(_GATE_POLL_S)
-    finally:
-        if beat is not None:
-            beat.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await beat
 
 
 async def _rescore_and_reemit(

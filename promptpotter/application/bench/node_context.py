@@ -95,7 +95,7 @@ class NodeContext[K: StrictModel]:
         proposed = session.store.campaigns.round_proposals(session.hop, self.round_num)
         return None if proposed is None else list(proposed.proposals)
 
-    def bank_proposals(self, proposals: Sequence[CandidateProposal]) -> None:
+    def bank_proposals(self, proposals: Sequence[CandidateProposal], *, submitted: bool) -> None:
         """Banked beside what they were composed from, so a resume asks whether that round still says the same."""
         ledger = self._round.cycle.session.state.ledger
         if self._round.detached or ledger is None:
@@ -106,6 +106,7 @@ class NodeContext[K: StrictModel]:
                 round=self.round_num,
                 consumed=round_document_digest(rounds[-1]) if rounds else "",
                 proposals=list(proposals),
+                submitted=submitted,
             )
         )
 

@@ -454,11 +454,12 @@ export interface EvidenceGrounding {
 
 /** One variation node's act: which node ran, whether it asked a model, and the loci it wrote. */
 export interface Variation {
-  /** `{manifest}:{node}` of the variation node that ran. */
+  /** `{manifest}:{node}` of the variation node that ran; `operator` where a person
+   * wrote it. */
   node: string;
   /** `deterministic`: a function of its inputs and the run's seed. `llm`: a model's
-   * reply. */
-  mode: 'deterministic' | 'llm';
+   * reply. `operator`: a person's own edit, submitted at the arm gate. */
+  mode: 'deterministic' | 'llm' | 'operator';
   /** The loci it left different from what it was handed, by `locus_name`: the first
    * one's against the first parent, a later one's against the variation
    * before it. */
@@ -1849,7 +1850,7 @@ export interface CycleListEntry {
    * 'terminal' pairs with `stop_reason` for the reason label. */
   run_phase: 'checkin' | 'queued' | 'starting' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal';
   /** A process holds this cycle (`ProducerReading.attached`, derived with
-   * `run_phase`): running, held at the origin gate, or running out a pause.
+   * `run_phase`): running, holding for the operator, or running out a pause.
    * What the dock counts as in flight. */
   producer_attached: boolean;
   /** How the cycle reads on a row: `run_phase` and `stop_reason` as one word and
@@ -2868,7 +2869,7 @@ export interface DecisionFact {
 export interface DecisionAction {
   label: string;
   variant: 'primary' | 'ghost' | 'danger';
-  kind: 'pause-cycle' | 'origin-gate-decision' | 'skip-searchpoint' | 'set-sample-lookahead' | 'start-run' | 'step-cycle' | 'fork-cycle' | 'mint-campaign' | 'start-checkin' | 'verify-candidate' | 'grade-bench' | 'change-run-limits' | 'set-concurrent-cycles' | 'cancel-queued-run' | 'delete-cycle' | 'cleanup-empty-cycles' | 'archive-campaign' | 'unarchive-campaign' | 'delete-campaign' | 'set-campaign-label' | 'register-backend' | 'replace-dataset' | 'compact-archive' | 'edit-draft-campaign' | 'resolve-origin';
+  kind: 'pause-cycle' | 'origin-gate-decision' | 'submit-arms' | 'skip-searchpoint' | 'set-sample-lookahead' | 'start-run' | 'step-cycle' | 'fork-cycle' | 'mint-campaign' | 'start-checkin' | 'verify-candidate' | 'grade-bench' | 'change-run-limits' | 'set-concurrent-cycles' | 'cancel-queued-run' | 'delete-cycle' | 'cleanup-empty-cycles' | 'archive-campaign' | 'unarchive-campaign' | 'delete-campaign' | 'set-campaign-label' | 'register-backend' | 'replace-dataset' | 'compact-archive' | 'edit-draft-campaign' | 'resolve-origin';
   /** The whole command payload, the cycle's address and `descend` tail included. */
   payload: Record<string, unknown>;
 }
@@ -3445,6 +3446,16 @@ export interface OptimizationOverrides {
    * ``config.model`` all ride here; each node validates its own knobs when
    * the optimizer is selected. */
   nodes: Record<string, ManifestNodeOverlay>;
+  /** Hold every round, before any arm is measured, until the operator answers with
+   * the arms it measures (`submit-arms`). ``off`` (default) never holds.
+   * ``review``: the proposers run, their proposals are drafts, and the
+   * operator keeps any of them by index, adds arms of their own, or both.
+   * ``author``: no proposer runs and every arm is the operator's. An arm of
+   * theirs is an edit of the round's parent — prompt fields, a pipeline
+   * overlay — and is measured and elected like any other. The hold has no
+   * deadline; a pause ends it resumably, and a resume holds again unless an
+   * answer was already banked. */
+  arm_gate: 'off' | 'review' | 'author';
 }
 
 /** What an operator set on one config row: a free param's padlock, or an axis's ticks. */
@@ -3659,7 +3670,7 @@ export type DashboardState = 'init' | 'origin' | 'proposing' | 'scoring' | 'betw
 export type LifecycleFilter = 'active' | 'archived' | 'deleted' | 'checkin' | 'all';
 
 // Every kind `POST /commands/{kind}` dispatches (domain/command_kinds.py).
-export type CommandKind = 'archive-campaign' | 'cancel-queued-run' | 'change-run-limits' | 'cleanup-empty-cycles' | 'compact-archive' | 'delete-campaign' | 'delete-cycle' | 'edit-draft-campaign' | 'fork-cycle' | 'grade-bench' | 'mint-campaign' | 'origin-gate-decision' | 'pause-cycle' | 'register-backend' | 'replace-dataset' | 'resolve-origin' | 'set-campaign-label' | 'set-concurrent-cycles' | 'set-sample-lookahead' | 'skip-searchpoint' | 'start-checkin' | 'start-run' | 'step-cycle' | 'unarchive-campaign' | 'verify-candidate';
+export type CommandKind = 'archive-campaign' | 'cancel-queued-run' | 'change-run-limits' | 'cleanup-empty-cycles' | 'compact-archive' | 'delete-campaign' | 'delete-cycle' | 'edit-draft-campaign' | 'fork-cycle' | 'grade-bench' | 'mint-campaign' | 'origin-gate-decision' | 'pause-cycle' | 'register-backend' | 'replace-dataset' | 'resolve-origin' | 'set-campaign-label' | 'set-concurrent-cycles' | 'set-sample-lookahead' | 'skip-searchpoint' | 'start-checkin' | 'start-run' | 'step-cycle' | 'submit-arms' | 'unarchive-campaign' | 'verify-candidate';
 
 // Why a cycle ended (domain/phases.py::StopReason).
 export type StopReason = 'perfect_score' | 'max_rounds' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted';
@@ -3749,7 +3760,7 @@ export const RUN_PHASE_INFO: Record<RunPhase, RunPhaseInfo> = {
   'starting': { label: "Starting", walks: false, settled: false, authoring: false, awaits_operator: false, dock_priority: 1, parked: "coming up", parked_attached: "coming up" },
   'running': { label: "Running", walks: true, settled: false, authoring: false, awaits_operator: false, dock_priority: 1, parked: "", parked_attached: "" },
   'paused': { label: "Paused", walks: false, settled: false, authoring: false, awaits_operator: false, dock_priority: 2, parked: "resumable", parked_attached: "stopping at its next checkpoint" },
-  'gate': { label: "Origin gate", walks: false, settled: false, authoring: false, awaits_operator: true, dock_priority: 0, parked: "awaiting your decision", parked_attached: "awaiting your decision" },
+  'gate': { label: "Holding", walks: false, settled: false, authoring: false, awaits_operator: true, dock_priority: 0, parked: "awaiting your decision", parked_attached: "awaiting your decision" },
   'detached': { label: "Detached", walks: false, settled: false, authoring: false, awaits_operator: false, dock_priority: 3, parked: "producer gone", parked_attached: "producer gone" },
   'terminal': { label: "Ended", walks: false, settled: true, authoring: false, awaits_operator: false, dock_priority: 3, parked: "", parked_attached: "writing its last files" },
 };

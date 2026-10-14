@@ -29,7 +29,11 @@ from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.config.settings import DEFAULT_BACKEND_ID, DEFAULT_BACKEND_URL
 from promptpotter.domain.campaign import ArmRequest
-from promptpotter.domain.command_kinds import OriginGateDecisionPayload
+from promptpotter.domain.command_kinds import (
+    OriginGateDecisionPayload,
+    SubmitArmsPayload,
+    SubmittedArm,
+)
 from promptpotter.domain.results import CycleResult
 from promptpotter.infrastructure.identity.migration import registered_or_default_identity
 from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
@@ -37,6 +41,8 @@ from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.shared.errors import NotFoundError
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.launch_limits import LaunchLimits, RunMode
@@ -53,6 +59,7 @@ __all__ = [
     "reindex_measurement_archive",
     "restore_measurement_archive",
     "run_campaign",
+    "submit_arms",
     "submit_gate_decision",
 ]
 
@@ -103,6 +110,24 @@ async def submit_gate_decision(stores: Stores, hop: CycleHop, decision: GateDeci
     )
 
 
+async def submit_arms(
+    stores: Stores, hop: CycleHop, arms: Sequence[SubmittedArm], keep: Sequence[int] = ()
+) -> None:
+    """Answer a cycle holding for a round's arms: *arms* of the host's own, drafts kept by index.
+
+    Raises ``ConflictError`` where it is not holding, or where *keep* names no draft of the hold.
+    """
+    await CommandDispatcher(stores).dispatch_cycle_command(
+        CommandCall(
+            SubmitArmsPayload(
+                campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, arms=list(arms), keep=list(keep)
+            ),
+            uuid.uuid4().hex,
+        ),
+        expected_version=None,
+    )
+
+
 async def run_campaign(
     session: Session,
     train_data: list[Sample],
@@ -118,7 +143,8 @@ async def run_campaign(
 
     *limits* set the run's budget over the config's own; a host holds no slot, so none is admitted.
     *readout_sink* receives each readout line as it is written.
-    Blocks at round 0 under ``origin_gate: strict`` until ``submit_gate_decision`` answers.
+    Blocks at round 0 under ``origin_gate: strict`` until ``submit_gate_decision`` answers, and at
+    every round under an ``arm_gate`` until ``submit_arms`` does.
     """
     if not session.campaign_id:
         minted = await mint_framed_cycle(

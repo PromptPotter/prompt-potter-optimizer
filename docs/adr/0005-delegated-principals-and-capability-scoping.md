@@ -66,7 +66,7 @@ Every control-plane verb requires a capability, checked in **one place**: the co
 
 | Cap | Gates (real command kinds) | Kind |
 |---|---|---|
-| `campaign.step` | `skip-searchpoint`, `pause-cycle`, `origin-gate-decision`, `step-cycle` | stepwise / bounded |
+| `campaign.step` | `skip-searchpoint`, `pause-cycle`, `origin-gate-decision`, `submit-arms`, `step-cycle` | stepwise / bounded |
 | `campaign.run` | `start-run`, `fork-cycle`, `start-checkin`, `verify-candidate`, `grade-bench`, `cancel-queued-run` | autonomous |
 | `campaign.create` | `mint-campaign`, `register-backend`, `edit-draft-campaign`, `resolve-origin` | create |
 | `campaign.budget` | `change-run-limits` (raise a ceiling), `set-concurrent-cycles` | budget |

@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "DEFAULT_ORIGIN_BUDGET",
+    "ArmGateMode",
     "CampaignConfig",
     "DeterminismClamp",
     "Estimand",
@@ -45,6 +46,7 @@ DEFAULT_ORIGIN_BUDGET: int = 40
 
 OriginGateMode = Literal["strict", "critical_only", "off"]
 PanelGateMode = Literal["strict", "off"]
+ArmGateMode = Literal["off", "review", "author"]
 
 
 class Scope(StrEnum):
@@ -300,6 +302,20 @@ class OptimizationConfig(StrictModel):
             "gate. The operator overrides knowingly with a plain ``resume`` — "
             "round 0 is already on disk, so the loop skips the gate and goes "
             "straight to L1."
+        ),
+    )
+
+    arm_gate: Annotated[ArmGateMode, Knob(Scope.POLICY, Estimand.GATE)] = Field(
+        "off",
+        description=(
+            "Hold every round, before any arm is measured, until the operator answers with "
+            "the arms it measures (`submit-arms`). ``off`` (default) never holds. "
+            "``review``: the proposers run, their proposals are drafts, and the operator "
+            "keeps any of them by index, adds arms of their own, or both. ``author``: no "
+            "proposer runs and every arm is the operator's. An arm of theirs is an edit of "
+            "the round's parent — prompt fields, a pipeline overlay — and is measured and "
+            "elected like any other. The hold has no deadline; a pause ends it resumably, "
+            "and a resume holds again unless an answer was already banked."
         ),
     )
 

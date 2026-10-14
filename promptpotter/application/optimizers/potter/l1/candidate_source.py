@@ -93,7 +93,7 @@ async def _generate_or_load(ctx: NodeContext[L1GenerateKnobs], state: PotterStat
 
     # A banked EMPTY population replays as zero candidates on every resume: a permanent parse failure.
     if candidates:
-        ctx.bank_proposals(candidates)
+        ctx.bank_proposals(candidates, submitted=False)
     return generation
 
 

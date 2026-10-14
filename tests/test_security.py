@@ -12,7 +12,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from factories import SANDBOX_CAMPAIGN, inner_sandbox, round_result, scored_candidate
+from factories import (
+    SANDBOX_CAMPAIGN,
+    inner_sandbox,
+    round_result,
+    scored_candidate,
+    walking_cycle,
+)
 
 from promptpotter.application.jobs.reaper import reclaim_orphan_sandboxes
 from promptpotter.domain.command_kinds import CommandKind
@@ -446,26 +452,6 @@ async def test_a_delegate_cannot_withdraw_its_owners_queued_launch(
     assert gone is not None and gone.released, "a delegate could not leave its place"
 
 
-def _walking_cycle(stores: Stores) -> tuple[CycleHop, Path]:
-    from promptpotter.domain.campaign import Campaign
-    from promptpotter.infrastructure.producer_lock import hold_cycle
-
-    hop = CycleHop(campaign_id="camp-cmd", cycle_id="cycle_cmd00000000")
-    stores.campaigns.create_campaign(
-        Campaign(
-            campaign_id=hop.campaign_id,
-            dataset_name="ds1",
-            created_at="",
-            root_cycle_id=hop.cycle_id,
-        )
-    )
-    stores.campaigns.mint_cycle(hop)
-    cycle_dir = stores.campaigns.cycle_dir(hop)
-    CycleEventLog.open(CycleDir(cycle_dir)).append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
-    hold_cycle(cycle_dir)
-    return hop, cycle_dir
-
-
 async def test_a_skip_marks_the_cycle_babysat_only_where_a_searchpoint_was_cut(
     built_stores: Stores,
 ) -> None:
@@ -478,7 +464,7 @@ async def test_a_skip_marks_the_cycle_babysat_only_where_a_searchpoint_was_cut(
     from promptpotter.infrastructure.runtime_flags import standing_controls
     from promptpotter.shared.errors import ConflictError
 
-    hop, cycle_dir = _walking_cycle(built_stores)
+    hop, cycle_dir = walking_cycle(built_stores)
     dispatcher = CommandDispatcher(built_stores)
     ledger = CycleEventLog.open(CycleDir(cycle_dir))
     control = RunControl(cycle_dir=cycle_dir)
@@ -540,7 +526,7 @@ async def test_a_loop_command_no_loop_will_take_is_refused_not_acked_and_dropped
     from promptpotter.infrastructure.runtime_flags import derive_run_state
     from promptpotter.shared.errors import ConflictError
 
-    hop, cycle_dir = _walking_cycle(built_stores)
+    hop, cycle_dir = walking_cycle(built_stores)
     dispatcher = CommandDispatcher(built_stores)
     ledger = CycleEventLog.open(CycleDir(cycle_dir))
     control = RunControl(cycle_dir=cycle_dir)
@@ -563,7 +549,7 @@ async def test_a_loop_command_no_loop_will_take_is_refused_not_acked_and_dropped
         token = set_cycle_ledger(ledger)
         try:
             assert control.take_gate_decision() is None, "a refused decision reached the gate"
-            ledger.append(RunPhaseRecord(run_phase=RunPhase.GATE))
+            ledger.append(RunPhaseRecord(run_phase=RunPhase.GATE, gate="origin"))
             await decide("gate-open")
             assert control.take_gate_decision() == "abort"
             assert control.take_gate_decision() is None

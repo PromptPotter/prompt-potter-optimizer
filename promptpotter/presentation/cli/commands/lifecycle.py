@@ -4,6 +4,7 @@ import argparse
 import logging
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.commands.payloads import (
@@ -25,9 +26,11 @@ from promptpotter.domain.command_kinds import (
     OriginGateDecisionPayload,
     PauseCyclePayload,
     SkipSearchpointPayload,
+    SubmitArmsPayload,
 )
 from promptpotter.domain.launch_limits import RoundsCap
 from promptpotter.domain.phases import GateDecision
+from promptpotter.infrastructure.store.io import read_yaml
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.workspace import (
     cycle_scoped,
@@ -50,6 +53,7 @@ __all__ = [
     "cmd_set_concurrent_cycles",
     "cmd_set_limits",
     "cmd_step_cycle",
+    "cmd_submit_arms",
     "cmd_unarchive",
 ]
 
@@ -218,6 +222,31 @@ async def cmd_origin_gate(args: argparse.Namespace) -> CommandResult:
         human=(
             f"{campaign_id}/{cycle_id} -> origin gate: {decision}. A cycle holding at the gate "
             "acts on it within a second; one that is not clears it when it next arrives there."
+        ),
+    )
+
+
+async def cmd_submit_arms(args: argparse.Namespace) -> CommandResult:
+    keep: list[int] = args.keep
+    try:
+        arms = [] if args.file is None else read_yaml(Path(args.file))
+        sent = await cycle_scoped(
+            open_stores(args), args, SubmitArmsPayload, "submit arms to", arms=arms, keep=keep
+        )
+    except (OSError, ValueError) as exc:
+        raise SystemExit(f"ERROR: {exc}") from exc
+    if isinstance(sent, CommandResult):
+        return sent
+    campaign_id, cycle_id = sent.campaign_id, sent.cycle_id
+    authored = len(sent.arms)
+    logger.info(
+        "run control: %s/%s -> %d arm(s), drafts kept %s", campaign_id, cycle_id, authored, keep
+    )
+    return CommandResult(
+        data={"campaign_id": campaign_id, "cycle_id": cycle_id, "arms": authored, "keep": keep},
+        human=(
+            f"{campaign_id}/{cycle_id} -> {authored} arm(s) submitted, {len(keep)} draft(s) "
+            "kept. The round measures them within a second."
         ),
     )
 

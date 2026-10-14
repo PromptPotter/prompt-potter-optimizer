@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "FEW_SHOT_BLOCK",
+    "OPERATOR_SOURCE",
     "ORIGIN_SOURCE",
     "SHOTS_LOCUS",
     "TEMPLATE_TOKEN_RE",
@@ -127,6 +128,7 @@ class EvidenceGrounding(StrictModel):
 
 
 ORIGIN_SOURCE = "origin"
+OPERATOR_SOURCE = "operator"
 
 SHOTS_LOCUS = "shot_ids"
 """The shots' locus: one ordered list, so its order is part of its value."""
@@ -134,7 +136,7 @@ SHOTS_LOCUS = "shot_ids"
 Locus = str | tuple[str, str]
 """A prompt field by name, ``SHOTS_LOCUS``, or a ``(node, param)`` of the configuration."""
 
-VariationMode = Literal["deterministic", "llm"]
+VariationMode = Literal["deterministic", "llm", "operator"]
 
 
 def node_source(manifest: str, node: str) -> str:
@@ -150,10 +152,13 @@ class Variation(StrictModel):
 
     model_config = ConfigDict(frozen=True)
 
-    node: str = Field(description="`{manifest}:{node}` of the variation node that ran.")
+    node: str = Field(
+        description="`{manifest}:{node}` of the variation node that ran; `operator` where a "
+        "person wrote it."
+    )
     mode: VariationMode = Field(
         description="`deterministic`: a function of its inputs and the run's seed. `llm`: a "
-        "model's reply."
+        "model's reply. `operator`: a person's own edit, submitted at the arm gate."
     )
     loci: list[str] = Field(
         default_factory=list,

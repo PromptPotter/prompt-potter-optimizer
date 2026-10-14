@@ -419,6 +419,9 @@ class CampaignStore:
     def round_proposals(self, hop: CycleHop, round_num: int) -> RoundProposedRecord | None:
         return self.standing_rounds(hop).proposals.get(round_num)
 
+    def round_submission(self, hop: CycleHop, round_num: int) -> RoundProposedRecord | None:
+        return self.standing_rounds(hop).submitted.get(round_num)
+
     def restate_optimizer_state(self, hop: CycleHop, rr: RoundResult) -> None:
         CycleEventLog.open(CycleDir(self.cycle_dir(hop))).append(
             OptimizerStateRecord(round=rr.round, optimizer_state=rr.optimizer_state)

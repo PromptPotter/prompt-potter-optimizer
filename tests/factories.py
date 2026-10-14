@@ -24,11 +24,12 @@ from promptpotter.domain.bench import (
     OwnLevel,
     bench_status,
 )
-from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
+from promptpotter.domain.campaign import Campaign
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.optimizer_state import OptimizerState
 from promptpotter.domain.paired_reading import PairedReading, ReadingState
-from promptpotter.domain.phases import StopReason
+from promptpotter.domain.phases import RunPhase, StopReason
 from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
 from promptpotter.domain.results import (
     ArmOutcome,
@@ -38,12 +39,15 @@ from promptpotter.domain.results import (
     RoundResult,
     ScoredCandidate,
 )
+from promptpotter.domain.run_records import RunPhaseRecord
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import CellSheet, GradedCell
 from promptpotter.domain.spend import SpendBucket, SpendCeilings, SpendRollup
 from promptpotter.domain.wounds import ValidationFailure
 from promptpotter.infrastructure.backend import BackendClient
+from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.spend_book import CeilingMeter, SpendBook
+from promptpotter.infrastructure.producer_lock import hold_cycle
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.io import write_json
 from promptpotter.infrastructure.store.layout import inner_sandbox_dir, sandbox_owner_path
@@ -166,6 +170,24 @@ def loop_session(
     )
     session.source = RunSource.OPTIMIZATION_LOOP
     return session
+
+
+def walking_cycle(stores: Stores) -> tuple[CycleHop, Path]:
+    """A minted cycle a producer holds and has declared running: what a loop command lands on."""
+    hop = CycleHop(campaign_id="camp-cmd", cycle_id="cycle_cmd00000000")
+    stores.campaigns.create_campaign(
+        Campaign(
+            campaign_id=hop.campaign_id,
+            dataset_name="ds1",
+            created_at="",
+            root_cycle_id=hop.cycle_id,
+        )
+    )
+    stores.campaigns.mint_cycle(hop)
+    cycle_dir = stores.campaigns.cycle_dir(hop)
+    CycleEventLog.open(CycleDir(cycle_dir)).append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
+    hold_cycle(cycle_dir)
+    return hop, cycle_dir
 
 
 SANDBOX_CAMPAIGN = "testds__20260101-000000"

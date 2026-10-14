@@ -7,6 +7,7 @@ from pathlib import Path
 from promptpotter.domain.dashboard_rows import RunLimits
 from promptpotter.domain.phases import (
     STOP_REASON_INFO,
+    GateKind,
     LaunchStage,
     PauseCause,
     PauseReading,
@@ -106,6 +107,8 @@ def read_run_state(
     silent_for_s: float | None,
     open_for_s: float | None,
     claimed: LaunchStage | None = None,
+    gate: GateKind | None = None,
+    drafts: int = 0,
 ) -> RunState:
     """`held` alone decides attachment; the clocks only grade it, so a quiet producer reads WEDGED, still attached."""
     absent = ProducerReading.of(ProducerState.ABSENT)
@@ -134,14 +137,14 @@ def read_run_state(
     if pause_requested or declared == RunPhase.PAUSED:
         return RunState(RunPhase.PAUSED, producer)
     if producer.state is ProducerState.HELD:
-        return RunState(RunPhase.GATE, producer)
+        return RunState(RunPhase.GATE, producer, gate=gate, drafts=drafts)
     return RunState(RunPhase.RUNNING if producer.attached else RunPhase.DETACHED, producer)
 
 
 def derive_run_state(cycle_dir: Path) -> RunState:
     ledger = CycleLayout(cycle_dir).ledger
     checkin = scan_cycle_facts(ledger).checkin
-    declared = scan_ledger_declared_phase(ledger)
+    declared, gate, drafts = scan_ledger_declared_phase(ledger)
     terminal = declared == RunPhase.TERMINAL
     settled = checkin or terminal
     producer_held = cycle_held(cycle_dir)
@@ -163,6 +166,8 @@ def derive_run_state(cycle_dir: Path) -> RunState:
         if progress.waiting_since is None
         else max(0.0, now - progress.waiting_since),
         claimed=None if claim is None or not held(Path(claim.claimant_lock)) else claim.stage,
+        gate=gate,
+        drafts=drafts,
     )._replace(inner=in_inner_sandbox(cycle_dir))
     if run.run_phase is not RunPhase.PAUSED:
         return run

@@ -8,6 +8,7 @@ from pydantic import Field
 
 from promptpotter import connectors
 from promptpotter.application.campaign_config import (
+    ArmGateMode,
     CampaignConfig,
     OptimizationConfig,
     load_campaign_config,
@@ -63,6 +64,10 @@ class OptimizationOverrides(StrictModel):
     nodes: dict[str, ManifestNodeOverlay] = Field(
         default_factory=dict,
         description=OptimizationConfig.model_fields["nodes"].description,
+    )
+    arm_gate: ArmGateMode = Field(
+        OptimizationConfig.model_fields["arm_gate"].default,
+        description=OptimizationConfig.model_fields["arm_gate"].description,
     )
 
 

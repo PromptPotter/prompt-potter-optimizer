@@ -33,6 +33,17 @@ is the history layer. **Never the root of a patch just shipped** — that root s
 
 A leading `NEXT` marks the one to take up cold when nothing else is in hand.
 
+- **NEXT — the arm gate holds for an operator whose arms two peers cannot race.** Under
+  `optimization.arm_gate: author` CAPO stops at `optimizers/capo/members.py::_objective` (its
+  seeders, skipped with the proposers, never built the initial population) and GEPA at
+  `optimizers/gepa/members.py::MinibatchGate.race` (it reads its own proposer's `Reflected`), both
+  AFTER the operator answered. The root is the typed slice of
+  [`variation-and-pools.md`](variation-and-pools.md): an operator's arms are a proposer's output like
+  any other, so the gate is a registered member a manifest names and every reader takes its slice
+  from, never a branch in `runner/round.py::propose_population`. Owed with it: `review` and the
+  resume replay of a banked answer, neither driven by a test or a run. Re-test: the authored-round
+  test parametrized over every registered optimizer.
+
 - **NEXT — the prompt cache is a cost lever only on a route that stays on ONE host, and nothing
   makes a route stay.** `infrastructure/llm/openai_compat.py`, `connectors/harbor.py` and
   `connectors/dbllmbench.py` pin hosts only where a node config names `route_order` by hand. An

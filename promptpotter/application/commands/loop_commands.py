@@ -14,10 +14,17 @@ if TYPE_CHECKING:
         PauseCyclePayload,
         SetSampleLookaheadPayload,
         SkipSearchpointPayload,
+        SubmitArmsPayload,
     )
     from promptpotter.domain.cycle_paths import CycleHop
 
-__all__ = ["origin_gate_decision", "pause_cycle", "set_sample_lookahead", "skip_searchpoint"]
+__all__ = [
+    "origin_gate_decision",
+    "pause_cycle",
+    "set_sample_lookahead",
+    "skip_searchpoint",
+    "submit_arms",
+]
 
 
 def pause_cycle(
@@ -33,6 +40,14 @@ def origin_gate_decision(
     hop: CycleHop,
 ) -> Applier[object]:
     return Applier.for_loop(dispatcher.run_state(hop).gate_refusal)
+
+
+def submit_arms(
+    dispatcher: CommandDispatcher, payload: SubmitArmsPayload, campaign: Campaign, hop: CycleHop
+) -> Applier[object]:
+    return refused_on_an_arm(campaign) or Applier.for_loop(
+        dispatcher.run_state(hop).arms_refusal(payload.keep)
+    )
 
 
 def skip_searchpoint(

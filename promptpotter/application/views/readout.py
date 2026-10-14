@@ -69,6 +69,7 @@ from promptpotter.domain.run_records import (
     RaceCatchUpRecord,
     RaceStandingRecord,
     RoundClosedRecord,
+    RoundProposedRecord,
     RoundStandingRecord,
     RoundWarningRecord,
     RunPhaseRecord,
@@ -210,6 +211,24 @@ class ReadoutProjection(Projection):
     def _handle_run_phase(self, record: RunPhaseRecord) -> None:
         if record.spend is not None:
             self._write(render_run_spend(record.spend))
+        if record.gate == "arms":
+            # ASCII-only: a cp1252 console is one of this line's sinks.
+            n = self._round_num
+            self._write(f"\n  [ARM GATE] round {n} holds for the operator's arms")
+            for idx, draft in enumerate(record.drafts):
+                lineage = draft.opt_sp.lineage
+                said = lineage.changes_description.encode("ascii", "replace").decode()
+                self._write(f"    draft {idx} ({lineage.source or 'unsourced'}): {said or '-'}")
+            if not record.drafts:
+                self._write("    no proposer ran: every arm this round measures is the operator's")
+            self._write("    answer: python -m promptpotter submit-arms --file <arms.yaml>")
+
+    def _handle_round_proposed(self, record: RoundProposedRecord) -> None:
+        if record.submitted:
+            self._write(
+                f"  [ARM GATE] round {record.round}: the operator answered with "
+                f"{len(record.proposals)} arm(s); each is a round_proposed record on the ledger"
+            )
 
     def _handle_round_standing(self, record: RoundStandingRecord) -> None:
         self._anchors = record.anchors

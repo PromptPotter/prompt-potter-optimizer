@@ -19,6 +19,7 @@ from promptpotter.application.optimizers.nodes import (
     round_state,
 )
 from promptpotter.application.run_callbacks import RunCallbacks
+from promptpotter.application.runner.arm_gate import arm_gate_mode, operator_arms
 from promptpotter.application.runner.bench import grade_round_selection, reserve_selection_pass
 from promptpotter.application.runner.measurement import measure_population
 from promptpotter.application.runner.output import (
@@ -447,17 +448,9 @@ async def _walk(ctx: RoundContext, proposers: Sequence[Proposer], panel: Panel) 
     return proposals
 
 
-async def propose_population(ctx: RoundContext, plan: RoundPlan, panel: Panel) -> Proposals:
-    if plan.seeders and not ctx.cycle.population:
-        seeded = await _walk(ctx, plan.seeders, panel)
-        ctx.cycle.population = [
-            p.opt_sp
-            for p in seeded.proposals
-            if not fatal_validation_failures(p.validation_failures)
-        ]
-    population = await _walk(ctx, plan.proposers, panel)
+def _one_arm_each(ctx: RoundContext, proposals: list[CandidateProposal]) -> list[CandidateProposal]:
     seen: dict[str, CandidateProposal] = {}
-    for idx, proposal in enumerate(population.proposals):
+    for idx, proposal in enumerate(proposals):
         candidate_id = arm_id(proposal, ctx.round_num, idx)
         if (arm := seen.get(candidate_id)) is None:
             seen[candidate_id] = proposal
@@ -474,7 +467,26 @@ async def propose_population(ctx: RoundContext, plan: RoundPlan, panel: Panel) -
         if edges != arm.opt_sp.lineage.parent_ids:
             lineage = arm.opt_sp.lineage.model_copy(update={"parent_ids": edges})
             arm.opt_sp = arm.opt_sp.model_copy(update={"lineage": lineage})
-    return replace(population, proposals=list(seen.values()))
+    return list(seen.values())
+
+
+async def propose_population(ctx: RoundContext, plan: RoundPlan, panel: Panel) -> Proposals:
+    gate = arm_gate_mode(ctx)
+    if gate == "author":
+        population = Proposals([])
+    else:
+        if plan.seeders and not ctx.cycle.population:
+            seeded = await _walk(ctx, plan.seeders, panel)
+            ctx.cycle.population = [
+                p.opt_sp
+                for p in seeded.proposals
+                if not fatal_validation_failures(p.validation_failures)
+            ]
+        population = await _walk(ctx, plan.proposers, panel)
+    arms = _one_arm_each(ctx, population.proposals)
+    if gate != "off":
+        arms = _one_arm_each(ctx, await operator_arms(ctx, arms))
+    return replace(population, proposals=arms)
 
 
 async def _adapt(ctx: RoundContext, plan: RoundPlan, round_result: RoundResult) -> None:

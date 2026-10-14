@@ -193,7 +193,7 @@ the one the terminal and an auth-off web session resolve. `program` rides the ba
 **`origin_gate` defaults to `strict` and a host has no TTY**, so `run_campaign` blocks at round 0
 until something answers — `await
 submit_gate_decision(stores, hop, "rescore"|"proceed"|"abort")` from another task once the cycle
-holds at its gate (one sent earlier is refused, never kept), or set the knob off. The run readout lands in the cycle's `readout.log` whatever the host passes; `readout_sink=print`
+holds at its gate (one sent earlier is refused, never kept), or set the knob off. **`arm_gate` defaults to `off`**; under `review` or `author` the run blocks every round until `await submit_arms(stores, hop, arms, keep=())` answers with the arms it measures. The run readout lands in the cycle's `readout.log` whatever the host passes; `readout_sink=print`
 shows it as it is written, and `presentation/terminal/completion.py::report_completion` prints
 the closing box.
 

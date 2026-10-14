@@ -17,6 +17,7 @@ from promptpotter.domain.phase_views import PhaseView, RunSpendView, ViewAnchors
 from promptpotter.domain.phases import (
     STOP_REASON_INFO,
     ErrorRecord,
+    GateKind,
     LaunchStage,
     PauseCause,
     RunPhase,
@@ -160,12 +161,23 @@ class RunPhaseRecord(StrictModel):
     cause: PauseCause | None = None
     detail: str = ""
     spend: RunSpendView | None = None
+    gate: GateKind | None = None
+    # What an ``arms`` hold offers to keep, in the order `submit-arms --keep` indexes.
+    drafts: list[CandidateProposal] = Field(default_factory=list)
     timestamp: str = Field(default_factory=utcnow_iso)
 
     @model_validator(mode="after")
     def _paused_says_why(self) -> RunPhaseRecord:
         if self.run_phase is RunPhase.PAUSED and (self.stop_reason is None or self.cause is None):
             raise ValueError("a paused declaration names its stop reason and its cause")
+        return self
+
+    @model_validator(mode="after")
+    def _gate_says_which(self) -> RunPhaseRecord:
+        if (self.run_phase is RunPhase.GATE) != (self.gate is not None):
+            raise ValueError("a gate declaration, and only one, names what it holds for")
+        if self.drafts and self.gate != "arms":
+            raise ValueError("only a hold for a round's arms offers drafts")
         return self
 
     @classmethod
@@ -247,7 +259,9 @@ class OptimizerStateRecord(StrictModel):
 
 
 class RoundProposedRecord(StrictModel):
-    """Replayed on a resume into the round, unless a digest the round ``consumed`` has moved."""
+    """Replayed on a resume into the round, unless a digest the round ``consumed`` has moved.
+
+    ``submitted`` is the operator's answer at the arm gate: the arms the round measures."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -255,6 +269,7 @@ class RoundProposedRecord(StrictModel):
     round: int
     consumed: str
     proposals: list[CandidateProposal]
+    submitted: bool = False
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
@@ -863,7 +878,7 @@ class WallClock(StrictModel):
     unbracketed_call_s: dict[str, dict[str, float]] = Field(default_factory=dict)
     # Round (JSON key) → seconds to its FIRST close: the last is a ruler restamp or a rewind's re-run.
     round_ended_s: dict[str, float] = Field(default_factory=dict)
-    # HUMAN time at the origin gate, never folded into a machine leg.
+    # HUMAN time at a gate, never folded into a machine leg.
     gate_s: float = 0.0
     # ``elapsed_s`` minus every CLOCK leg.
     unattributed_s: float | None = None

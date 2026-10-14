@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import ClassVar, Self
+from typing import Annotated, Any, ClassVar, Self
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from promptpotter.domain.phases import (
+    INNER_ARMS_REFUSAL,
     INNER_GATE_REFUSAL,
     INNER_PAUSE_REFUSAL,
     INNER_SKIP_REFUSAL,
     GateDecision,
 )
+from promptpotter.domain.search_point import PROMPT_STRING_FIELDS
 from promptpotter.domain.strict_model import StrictModel, WireInt
 from promptpotter.shared.identity import (
     CAMPAIGN_BUDGET_CAP,
@@ -34,6 +36,8 @@ __all__ = [
     "PauseCyclePayload",
     "SetSampleLookaheadPayload",
     "SkipSearchpointPayload",
+    "SubmitArmsPayload",
+    "SubmittedArm",
 ]
 
 
@@ -64,6 +68,7 @@ class CommandKind(StrEnum):
         CAMPAIGN_STEP_CAP,
         "origin-gate",
     )
+    SUBMIT_ARMS = "submit-arms", "loop_commands:submit_arms", CAMPAIGN_STEP_CAP, "submit-arms"
     SKIP_SEARCHPOINT = (
         "skip-searchpoint",
         "loop_commands:skip_searchpoint",
@@ -232,6 +237,48 @@ class OriginGateDecisionPayload(LoopPayload):
     inner_refusal: ClassVar[str | None] = INNER_GATE_REFUSAL
 
     decision: GateDecision
+
+
+class SubmittedArm(StrictModel):
+    """One arm an operator wrote: an EDIT of the round's parent, never a whole individual."""
+
+    prompt_fields: dict[str, str] = Field(
+        default_factory=dict,
+        description="The prompt fields this arm rewrites, by name; every other one is the "
+        "parent's.",
+    )
+    pipeline_overlay: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        description="`{node: {param: value}}` laid over the parent's pipeline params.",
+    )
+    changes_description: str = Field(min_length=1, max_length=2000)
+
+    @model_validator(mode="after")
+    def _edits_the_parent(self) -> SubmittedArm:
+        if unknown := sorted(set(self.prompt_fields) - set(PROMPT_STRING_FIELDS)):
+            raise ValueError(f"an arm rewrites prompt fields {PROMPT_STRING_FIELDS}, not {unknown}")
+        if not self.prompt_fields and not self.pipeline_overlay:
+            raise ValueError("an arm that edits nothing is the round's parent")
+        return self
+
+
+class SubmitArmsPayload(LoopPayload):
+    inner_refusal: ClassVar[str | None] = INNER_ARMS_REFUSAL
+
+    arms: list[SubmittedArm] = Field(default_factory=list, max_length=32)
+    keep: list[Annotated[int, Field(strict=True, ge=0)]] = Field(
+        default_factory=list,
+        max_length=64,
+        description="The drafts to measure as proposed, by their index at the hold.",
+    )
+
+    @model_validator(mode="after")
+    def _answers_with_an_arm(self) -> SubmitArmsPayload:
+        if not self.arms and not self.keep:
+            raise ValueError("an answer to the arm gate carries an arm of its own or keeps a draft")
+        if len(set(self.keep)) != len(self.keep):
+            raise ValueError("a draft is kept once")
+        return self
 
 
 _KIND_NAMED = {kind.payload_name: kind for kind in CommandKind}

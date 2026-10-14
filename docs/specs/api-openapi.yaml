@@ -378,6 +378,43 @@ paths:
         '409': { $ref: '#/components/responses/VersionConflict' }
         '422': { $ref: '#/components/responses/PayloadInvalid' }
 
+  /commands/submit-arms:
+    post:
+      operationId: submitArms
+      summary: Answer the arm gate with the arms a round measures.
+      description: |
+        Delivered to a runner holding for a round's arms (`run_phase: gate`
+        under `optimization.arm_gate`): the round measures nothing until the
+        operator names its arms. `arms` are edits of the round's parent the
+        operator wrote; `keep` takes drafts the proposers made, by the index
+        the hold lists them under. The command on the cycle's ledger IS the
+        answer: the gate reads it there, banks the round's arms, and acks it
+        `applied`. Refused (409) while the cycle is not holding for arms, and
+        where `keep` names a draft the hold does not offer — every index is
+        one under `arm_gate: author`, where no proposer ran.
+      tags: [cycle-control]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ExpectedVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CommandEnvelope'
+                - type: object
+                  required: [kind, payload]
+                  properties:
+                    kind: { const: submit-arms }
+                    payload: { $ref: '#/components/schemas/SubmitArmsPayload' }
+      responses:
+        '202': { $ref: '#/components/responses/CommandAccepted' }
+        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
+        '403': { $ref: '#/components/responses/CapabilityDenied' }
+        '409': { $ref: '#/components/responses/VersionConflict' }
+        '422': { $ref: '#/components/responses/PayloadInvalid' }
+
   /commands/skip-searchpoint:
     post:
       operationId: skipSearchpoint
@@ -3175,7 +3212,7 @@ components:
 
     # Mirrors promptpotter/domain/phases.py::RunAdmission — served on every dashboard body
     # (`ServedDashboard`, `WarmingDashboard`), every `/cycles` entry and every `/tree` course, and the answer
-    # `start-run` / `step-cycle` / `pause-cycle` / `origin-gate-decision` / `skip-searchpoint` /
+    # `start-run` / `step-cycle` / `pause-cycle` / `origin-gate-decision` / `submit-arms` / `skip-searchpoint` /
     # `set-sample-lookahead` are refused on (409). An INNER cycle answers every run verb but the
     # look-ahead with that verb's own sentence — the one `inner_cycle_unaddressed` (422) carries
     # when the verb is sent at it — so it is offered no verb the command would refuse.
@@ -3266,6 +3303,45 @@ components:
                 `rescore` re-scores the origin force-fresh and re-evaluates the
                 gate; `proceed` overrides the gate into L1; `abort` ends the
                 cycle with `StopReason.ORIGIN_GATE`.
+
+    SubmittedArm:
+      type: object
+      required: [changes_description]
+      additionalProperties: false
+      description: |
+        One arm an operator wrote: an EDIT of the round's parent. It carries
+        at least one of `prompt_fields` / `pipeline_overlay`.
+      properties:
+        prompt_fields:
+          type: object
+          additionalProperties: { type: string }
+          description: The prompt fields this arm rewrites, by name; every other one is the parent's.
+        pipeline_overlay:
+          type: object
+          additionalProperties: { type: object, additionalProperties: true }
+          description: '`{node: {param: value}}` laid over the parent''s pipeline params.'
+        changes_description:
+          type: string
+          minLength: 1
+          maxLength: 2000
+
+    SubmitArmsPayload:
+      allOf:
+        - $ref: '#/components/schemas/CycleRef'
+        - type: object
+          additionalProperties: false
+          description: At least one of `arms` / `keep` is non-empty.
+          properties:
+            arms:
+              type: array
+              maxItems: 32
+              items: { $ref: '#/components/schemas/SubmittedArm' }
+            keep:
+              type: array
+              maxItems: 64
+              uniqueItems: true
+              items: { type: integer, minimum: 0 }
+              description: The drafts to measure as proposed, by their index at the hold.
 
     SkipSearchpointPayload:
       $ref: '#/components/schemas/CycleRef'

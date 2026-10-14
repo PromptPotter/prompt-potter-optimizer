@@ -159,7 +159,7 @@ class CycleListEntry(StrictModel):
         description="The single run-state value (RunPhase). Computed once by derive_run_state from lifecycle + control flags + freshness; every picker dot and badge reads this, none re-derive it. 'checkin' wins first (the campaign hasn't run); 'terminal' pairs with `stop_reason` for the reason label.",
     )
     producer_attached: bool = Field(
-        description="A process holds this cycle (`ProducerReading.attached`, derived with `run_phase`): running, held at the origin gate, or running out a pause. What the dock counts as in flight.",
+        description="A process holds this cycle (`ProducerReading.attached`, derived with `run_phase`): running, holding for the operator, or running out a pause. What the dock counts as in flight.",
     )
     status: RunStatus = Field(
         description="How the cycle reads on a row: `run_phase` and `stop_reason` as one word and "

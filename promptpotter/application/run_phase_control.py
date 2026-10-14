@@ -21,6 +21,8 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import Control
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from promptpotter.domain.command_kinds import SubmitArmsPayload
+
 __all__ = ["Flight", "FlightGauge", "RunControl"]
 
 
@@ -126,6 +128,14 @@ class RunControl:
         command_id, decision = standing[0]
         emit_command_ack(command_id=command_id, status="applied", effect={"decision": decision})
         return cast("GateDecision", decision)
+
+    def standing_submission(self) -> tuple[str, SubmitArmsPayload] | None:
+        """Read, not taken: the round's arms are banked before `take_submission` acks them."""
+        standing = self._inbox().submissions
+        return standing[0] if standing else None
+
+    def take_submission(self, command_id: str, *, arms: int) -> None:
+        emit_command_ack(command_id=command_id, status="applied", effect={"arms": arms})
 
     def sample_lookahead(self) -> int:
         if self.held_lookahead is not None:

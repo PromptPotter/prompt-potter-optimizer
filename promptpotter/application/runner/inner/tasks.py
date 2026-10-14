@@ -401,8 +401,9 @@ def inner_instrument_config(
         "max_rounds": spec.n_rounds,
         "lives": spec.lives,
         "ceiling": SpendCeilings(),
-        # The origin gate's await is unbounded, and an instrument cannot ask a human anything.
+        # Each gate's await is unbounded, and an instrument cannot ask a human anything.
         "origin_gate": "off",
+        "arm_gate": "off",
         # Under 2PL θ is in units of 1/a and each cycle graduates on its OWN CV, so the panel would average a mixture of scales.
         "enable_2pl_graduation": False,
         "nodes": _inner_manifest_nodes(

@@ -25,7 +25,7 @@ Phase events (the bench's `CampaignPhase` in `domain/phases.py` — `init`, `ori
 
 **What we can publish is `ledger open → first improvement`, fully decomposed. What we cannot publish is `clean machine → first improvement`.** Installing the package, pulling an image, materializing a benchmark's rows and `init_services` all run before the ledger's first record, are observed by nothing, and are unrecoverable after the fact — so `elapsed_s` starts at the ledger, and the `init` leg beside it is preflight plus cycle construction, which reads under two seconds. Anyone quoting that leg as a setup measurement is out by orders of magnitude. `ORIGIN` also fires before `INIT` on every ledger, so the legs are not in reading order.
 
-`gate_s` is the one HUMAN leg — time held at the origin gate — and is never folded into a machine one. `unworked_s` is the opposite correction: seconds cells were not *allowed* to spend (machine suspend, or queued behind the shared limiter), summed off each cell's own envelope, and `None` where no cell ran under one. A headline counting a suspended box as work is not publishable, which is why absent and zero stay apart.
+`gate_s` is the one HUMAN leg — time held at a gate, the origin's or a round's arm gate — and is never folded into a machine one. `unworked_s` is the opposite correction: seconds cells were not *allowed* to spend (machine suspend, or queued behind the shared limiter), summed off each cell's own envelope, and `None` where no cell ran under one. A headline counting a suspended box as work is not publishable, which is why absent and zero stay apart.
 
 ## Per-sample race stream
 

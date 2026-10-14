@@ -12,6 +12,7 @@ from promptpotter.domain.command_kinds import (
     PauseCyclePayload,
     SetSampleLookaheadPayload,
     SkipSearchpointPayload,
+    SubmitArmsPayload,
 )
 from promptpotter.domain.opt_search_point import IndividualLineage
 from promptpotter.domain.optimizer_state import OptimizerState
@@ -22,7 +23,7 @@ from promptpotter.domain.phase_views import (
     VerifyEnterView,
     VerifyGradedView,
 )
-from promptpotter.domain.phases import CampaignPhase, ErrorRecord, RunPhase
+from promptpotter.domain.phases import CampaignPhase, ErrorRecord, GateKind, RunPhase
 from promptpotter.domain.results import (
     ArmOutcome,
     IndividualWalk,
@@ -222,6 +223,7 @@ class Controls(NamedTuple):
     skips: tuple[str, ...] = ()
     lookahead: LookaheadAsk | None = None
     gate_decisions: tuple[tuple[str, str], ...] = ()
+    submissions: tuple[tuple[str, SubmitArmsPayload], ...] = ()
 
 
 class _Controls:
@@ -275,6 +277,8 @@ class _Controls:
                 held = held._replace(skips=(*held.skips, command_id))
             case OriginGateDecisionPayload(decision=decision):
                 held = held._replace(gate_decisions=(*held.gate_decisions, (command_id, decision)))
+            case SubmitArmsPayload() as submitted:
+                held = held._replace(submissions=(*held.submissions, (command_id, submitted)))
             case SetSampleLookaheadPayload(cells=cells, auto=auto):
                 if held.lookahead is not None:
                     self._kinds.pop(held.lookahead.command_id, None)
@@ -297,6 +301,10 @@ class _Controls:
         elif kind is OriginGateDecisionPayload:
             held = held._replace(
                 gate_decisions=tuple(d for d in held.gate_decisions if d[0] != command_id)
+            )
+        elif kind is SubmitArmsPayload:
+            held = held._replace(
+                submissions=tuple(s for s in held.submissions if s[0] != command_id)
             )
         else:
             ask = held.lookahead
@@ -420,6 +428,8 @@ def _before[V](held: Mapping[Any, V], rnd: int | None) -> dict[Any, V]:
 class StandingRounds(NamedTuple):
     rounds: dict[int, StandingRound]
     proposals: dict[int, RoundProposedRecord]
+    # The operator's answer at the arm gate, beside the drafts it answered and never over them.
+    submitted: dict[int, RoundProposedRecord]
     restated: dict[int, OptimizerState]
     arms: dict[tuple[int, int], ArmWalk]
     passes: dict[_Pass, dict[str, WalkedCell]]
@@ -432,12 +442,13 @@ class StandingRounds(NamedTuple):
 
     @classmethod
     def none(cls) -> StandingRounds:
-        return cls({}, {}, {}, {}, {}, {}, {})
+        return cls({}, {}, {}, {}, {}, {}, {}, {})
 
     def displaced(self, entered: int | None, rewound: int | None) -> StandingRounds:
         return self._replace(
             rounds=_before(self.rounds, entered),
             proposals=_before(self.proposals, rewound),
+            submitted=_before(self.submitted, rewound),
             restated=_before(self.restated, entered),
             arms=_before(self.arms, entered),
             passes=_before(self.passes, entered),
@@ -464,6 +475,7 @@ class StandingRounds(NamedTuple):
         return StandingRounds(
             rounds=dict(sorted({**prefix.rounds, **closed}.items())),
             proposals={**prefix.proposals, **later.proposals},
+            submitted={**prefix.submitted, **later.submitted},
             restated={},
             arms=dict(sorted({**prefix.arms, **later.arms}.items())),
             passes={**prefix.passes, **later.passes},
@@ -568,7 +580,7 @@ class _Standing:
                 if (closed := held.rounds.get(rnd)) is not None:
                     held.rounds[rnd] = closed._replace(standing=record.run_standing)
             case RoundProposedRecord():
-                held.proposals[rnd] = record
+                (held.submitted if record.submitted else held.proposals)[rnd] = record
             case OptimizerStateRecord():
                 if (closed := held.rounds.get(rnd)) is None:
                     held.restated[rnd] = record.optimizer_state
@@ -612,6 +624,7 @@ class _Standing:
         return held._replace(
             rounds=dict(held.rounds),
             proposals=dict(held.proposals),
+            submitted=dict(held.submitted),
             restated=dict(held.restated),
             arms={key: arm._replace(cells=dict(arm.cells)) for key, arm in held.arms.items()},
             passes={k: dict(taken) for k, taken in held.passes.items()},
@@ -634,16 +647,22 @@ class _Answers:
         return frozenset(self._found)
 
 
+class DeclaredPhase(NamedTuple):
+    run_phase: str = ""
+    gate: GateKind | None = None
+    drafts: int = 0
+
+
 class _DeclaredPhase:
     records: ClassVar[RecordClasses] = (RunPhaseRecord,)
 
     def __init__(self) -> None:
-        self._declared = ""
+        self._declared = DeclaredPhase()
 
     def feed(self, offset: int, record: RunPhaseRecord) -> None:
-        self._declared = record.run_phase.value
+        self._declared = DeclaredPhase(record.run_phase.value, record.gate, len(record.drafts))
 
-    def value(self) -> str:
+    def value(self) -> DeclaredPhase:
         return self._declared
 
 
@@ -883,7 +902,7 @@ def scan_ledger_walks(spans: Iterable[LedgerSpan]) -> list[IndividualWalk[Walked
     return walks
 
 
-def scan_ledger_declared_phase(ledger_path: Path) -> str:
+def scan_ledger_declared_phase(ledger_path: Path) -> DeclaredPhase:
     return _view(ledger_path, _DeclaredPhase)
 
 
@@ -1141,6 +1160,7 @@ __all__ = [
     "ArmWalk",
     "Controls",
     "CycleFacts",
+    "DeclaredPhase",
     "LedgerSpend",
     "LookaheadAsk",
     "PauseAsk",

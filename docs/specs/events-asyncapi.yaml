@@ -587,6 +587,18 @@ components:
             metered_tokens: { type: integer }
             usd_cap: { type: [number, 'null'] }
             token_cap: { type: [integer, 'null'] }
+        gate:
+          type: [string, 'null']
+          enum: [origin, arms, null]
+          description: |
+            What a `gate` declaration holds for — the origin's verdict, or the
+            arms a round measures. Set on `gate` and on nothing else.
+        drafts:
+          type: integer
+          minimum: 0
+          description: |
+            How many drafts an `arms` hold offers to keep, by index into the
+            round's `round_proposed`; 0 where no proposer ran.
         timestamp: { type: string, format: date-time }
 
     RoundEnteredPayload:
@@ -610,6 +622,8 @@ components:
         RoundProposedRecord — what a round's proposer generated. `consumed` is
         the digest of the round it read to do so; `proposals` is a list of
         `CandidateProposal`. A resume walking back into the round replays them.
+        `submitted` marks the operator's answer at the arm gate instead: the
+        arms the round measures, standing beside the drafts it answered.
       required: [round, consumed, proposals, timestamp]
       additionalProperties: false
       properties:
@@ -618,6 +632,7 @@ components:
         proposals:
           type: array
           items: { type: object, additionalProperties: true }
+        submitted: { type: boolean }
         timestamp: { type: string, format: date-time }
 
     RoundClosedPayload:

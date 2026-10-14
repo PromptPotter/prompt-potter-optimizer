@@ -28,13 +28,13 @@ from pydantic import BaseModel
 
 BASELINE = {
     # Every `.py` under the package.
-    "modules": 441,
+    "modules": 443,
     # Every `__init__.py` among them.
     "init_files": 55,
     # The `__init__.py` files that re-export names instead of staying empty.
     "reexport_shims": 5,
     # Campaign-config knobs, plus the node knobs each optimizer member declares.
-    "config_leaf_fields": 79,
+    "config_leaf_fields": 80,
     # `Settings` fields — what the environment can set.
     "settings_env": 39,
     # The upper-case constants `config/settings.py` exports.
@@ -63,9 +63,9 @@ BASELINE = {
     # `tests/test_*.py` — `tests/CLAUDE.md` names what each one owns.
     "test_files": 6,
     # Test functions across them, each admitted through the charter's three axes.
-    "test_functions": 151,
+    "test_functions": 152,
     # Every property of every schema the generated contract offers the browser.
-    "served_fields": 1628,
+    "served_fields": 1630,
 }
 
 _REPO = Path(__file__).resolve().parents[1]

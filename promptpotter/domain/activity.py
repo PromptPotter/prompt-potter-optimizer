@@ -7,7 +7,13 @@ from pydantic import ConfigDict, Field
 from promptpotter.domain.command_kinds import CommandKind
 from promptpotter.domain.cycle_paths import CyclePath, command_address
 from promptpotter.domain.phase_views import BenchEnterView
-from promptpotter.domain.phases import STOP_REASON_INFO, CampaignPhase, GateDecision, RunPhase
+from promptpotter.domain.phases import (
+    STOP_REASON_INFO,
+    CampaignPhase,
+    GateDecision,
+    GateKind,
+    RunPhase,
+)
 from promptpotter.domain.results import DegradationHealth, HealthCause, candidate_label
 from promptpotter.domain.run_records import (
     AccountEventRecord,
@@ -274,6 +280,24 @@ def _origin_gate(address: CyclePath, health: DegradationHealth | None) -> Activi
     )
 
 
+def _arms_gate(round_num: int | None, drafts: list[DecisionFact]) -> ActivityDecision:
+    """No button: an arm is written text, so the answer is the verb the lead names."""
+    held = "The round" if round_num is None else f"Round {round_num}"
+    drafted = (
+        "Keep a draft below with `--keep <index>`, add arms of your own in the file, or both."
+        if drafts
+        else "No proposer ran: every arm this round measures is yours."
+    )
+    return ActivityDecision(
+        title=f"{held} holds for your arms",
+        lead=f"{held} measures nothing until you answer with "
+        f"`python -m promptpotter submit-arms --file <arms.yaml>`. {drafted}",
+        facts=drafts,
+        reasons=[],
+        actions=[],
+    )
+
+
 class _BenchPass(NamedTuple):
     candidate: str | None
     who: str
@@ -305,16 +329,18 @@ class ActivityFeed:
         self._notices: list[ActivityItem] = []
         self._round: int | None = None
         self._bench: _BenchPass | None = None
-        self._at_gate = False
+        self._gate: GateKind | None = None
+        self._offered: list[DecisionFact] = []
         self._origin_health: DegradationHealth | None = None
 
     def state(self, address: CyclePath) -> ActivityState:
         """*address* is passed in: a decision's commands need it, and a ledger does not name its own path."""
-        return ActivityState(
-            status=self._status,
-            notices=list(self._notices),
-            decision=_origin_gate(address, self._origin_health) if self._at_gate else None,
-        )
+        decision: ActivityDecision | None = None
+        if self._gate == "origin":
+            decision = _origin_gate(address, self._origin_health)
+        elif self._gate == "arms":
+            decision = _arms_gate(self._round, self._offered)
+        return ActivityState(status=self._status, notices=list(self._notices), decision=decision)
 
     def read(self, sequence: int, record: CycleRecord) -> ActivityItem | None:
         self._declared(record)
@@ -333,7 +359,14 @@ class ActivityFeed:
             case RunPhaseRecord():
                 self._status = None
                 # The hold lasts to the next declaration, so a re-score under way is still at the gate.
-                self._at_gate = record.run_phase == RunPhase.GATE
+                self._gate = record.gate
+                self._offered = [
+                    DecisionFact(
+                        label=f"draft {idx} · {candidate_label(self._round or 0, idx)}",
+                        value=draft.opt_sp.lineage.changes_description or "—",
+                    )
+                    for idx, draft in enumerate(record.drafts)
+                ]
                 if record.run_phase == RunPhase.RUNNING:
                     self._notices = [n for n in self._notices if LIFETIME[n.kind] != "run"]
             case RoundClosedRecord(round=0):

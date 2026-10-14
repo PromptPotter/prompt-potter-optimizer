@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from contextvars import Token
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizer_manifest import select_optimizer
@@ -15,6 +15,7 @@ from promptpotter.application.views.readout import ReadoutProjection, StatusFn
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.dashboard_rows import RunLimits
 from promptpotter.domain.phases import (
+    GateKind,
     PauseCause,
     RunPhase,
     StopOutcome,
@@ -46,25 +47,37 @@ from promptpotter.infrastructure.tracing.langfuse_client import langfuse_trace_u
 from promptpotter.shared.measurement_context import instrument_depth
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.domain.phase_views import RunSpendView
+    from promptpotter.domain.results import CandidateProposal
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "RunObservers",
     "build_run_observers",
-    "declare_run_phase",
+    "declare_gate",
     "declare_run_stop",
     "declare_run_wiring",
+    "declare_running",
     "run_limits_from",
 ]
 
 
-def declare_run_phase(session: Session, phase: Literal[RunPhase.RUNNING, RunPhase.GATE]) -> None:
+def declare_running(session: Session) -> None:
     ledger = session.state.ledger
     if ledger is not None:
-        ledger.append(RunPhaseRecord(run_phase=phase))
+        ledger.append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
+
+
+def declare_gate(
+    session: Session, gate: GateKind, *, drafts: Sequence[CandidateProposal] = ()
+) -> None:
+    ledger = session.state.ledger
+    if ledger is not None:
+        ledger.append(RunPhaseRecord(run_phase=RunPhase.GATE, gate=gate, drafts=list(drafts)))
 
 
 def declare_run_stop(
@@ -255,7 +268,7 @@ def _bind_observers(
     ledger.bind(tracing)
     session.state.ledger = ledger
     # Any declaration after a `terminal` one retires that ending (`ledger_scan.py::_CycleFacts`).
-    declare_run_phase(session, RunPhase.RUNNING)
+    declare_running(session)
 
     callbacks = (
         RunCallbacks(ledger=ledger)

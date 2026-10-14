@@ -4159,7 +4159,7 @@
             "description": "Why the cycle reads `paused` — what caused it, who asked and what the operator does next (`RunState.pause`); null in every other phase."
           },
           "producer_attached": {
-            "description": "A process holds this cycle (`ProducerReading.attached`, derived with `run_phase`): running, held at the origin gate, or running out a pause. What the dock counts as in flight.",
+            "description": "A process holds this cycle (`ProducerReading.attached`, derived with `run_phase`): running, holding for the operator, or running out a pause. What the dock counts as in flight.",
             "title": "Producer Attached",
             "type": "boolean"
           },
@@ -9272,6 +9272,17 @@
         "additionalProperties": false,
         "description": "The bench's own loop config, plus which optimizer runs and its overlay. An optimizer's knobs\nare its nodes' ``config`` in its manifest, never fields here.",
         "properties": {
+          "arm_gate": {
+            "default": "off",
+            "description": "Hold every round, before any arm is measured, until the operator answers with the arms it measures (`submit-arms`). ``off`` (default) never holds. ``review``: the proposers run, their proposals are drafts, and the operator keeps any of them by index, adds arms of their own, or both. ``author``: no proposer runs and every arm is the operator's. An arm of theirs is an edit of the round's parent — prompt fields, a pipeline overlay — and is measured and elected like any other. The hold has no deadline; a pause ends it resumably, and a resume holds again unless an answer was already banked.",
+            "enum": [
+              "off",
+              "review",
+              "author"
+            ],
+            "title": "Arm Gate",
+            "type": "string"
+          },
           "ceiling": {
             "$ref": "#/components/schemas/SpendCeilings",
             "default": {
@@ -9407,6 +9418,17 @@
         "additionalProperties": false,
         "description": "The ``max_rounds`` bound gates the operator EDIT path only; the trusted internal\n``draft_from_dataset`` builds the dict directly, so a reused dataset may exceed it.",
         "properties": {
+          "arm_gate": {
+            "default": "off",
+            "description": "Hold every round, before any arm is measured, until the operator answers with the arms it measures (`submit-arms`). ``off`` (default) never holds. ``review``: the proposers run, their proposals are drafts, and the operator keeps any of them by index, adds arms of their own, or both. ``author``: no proposer runs and every arm is the operator's. An arm of theirs is an edit of the round's parent — prompt fields, a pipeline overlay — and is measured and elected like any other. The hold has no deadline; a pause ends it resumably, and a resume holds again unless an answer was already banked.",
+            "enum": [
+              "off",
+              "review",
+              "author"
+            ],
+            "title": "Arm Gate",
+            "type": "string"
+          },
           "max_rounds": {
             "default": 5,
             "description": "Round ceiling for the campaign. 0 = measure the origin and stop.",
@@ -11918,7 +11940,7 @@
         "type": "object"
       },
       "RunPhase": {
-        "description": "The one run-state vocabulary every surface reads.\n\n- ``checkin``: still authoring its origin; holds no machine slot.\n- ``queued``: a launch claimed the cycle and waits for a machine slot.\n- ``starting``: a claimed launch past the queue, its process coming up.\n- ``running``: a process is attached and driving the cycle.\n- ``paused``: the worker exited and the cycle stays active and resumable.\n- ``gate``: holding at the round-0 origin gate for an operator decision.\n- ``detached``: active with no process holding its lock; derived at the read, never stored.\n- ``terminal``: the cycle finished, and its stop reason says why.",
+        "description": "The one run-state vocabulary every surface reads.\n\n- ``checkin``: still authoring its origin; holds no machine slot.\n- ``queued``: a launch claimed the cycle and waits for a machine slot.\n- ``starting``: a claimed launch past the queue, its process coming up.\n- ``running``: a process is attached and driving the cycle.\n- ``paused``: the worker exited and the cycle stays active and resumable.\n- ``gate``: holding for the operator, at the round-0 origin gate or for a round's arms.\n- ``detached``: active with no process holding its lock; derived at the read, never stored.\n- ``terminal``: the cycle finished, and its stop reason says why.",
         "enum": [
           "checkin",
           "queued",
@@ -14743,16 +14765,17 @@
             "type": "array"
           },
           "mode": {
-            "description": "`deterministic`: a function of its inputs and the run's seed. `llm`: a model's reply.",
+            "description": "`deterministic`: a function of its inputs and the run's seed. `llm`: a model's reply. `operator`: a person's own edit, submitted at the arm gate.",
             "enum": [
               "deterministic",
-              "llm"
+              "llm",
+              "operator"
             ],
             "title": "Mode",
             "type": "string"
           },
           "node": {
-            "description": "`{manifest}:{node}` of the variation node that ran.",
+            "description": "`{manifest}:{node}` of the variation node that ran; `operator` where a person wrote it.",
             "title": "Node",
             "type": "string"
           }

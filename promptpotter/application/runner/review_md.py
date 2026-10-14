@@ -325,7 +325,7 @@ def _render_wall_clock(clock: WallClock | None) -> list[str]:
     ]
     for phase, seconds in sorted(clock.phase_s.items(), key=lambda kv: -kv[1]):
         lines.append(f"- {phase}: {_minutes(seconds)}")
-    lines.append(f"- origin gate (a human waiting): {_minutes(clock.gate_s)}")
+    lines.append(f"- a gate (a human waiting): {_minutes(clock.gate_s)}")
     for bucket, node, seconds in _node_rows(clock.unbracketed_call_s):
         lines.append(f"- `{node}` calls outside every phase ({bucket}): {_minutes(seconds)}")
     lines.append(

@@ -46,6 +46,13 @@ def _inside_arg(raw: str) -> CyclePath:
         raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
+def _draft_indices_arg(raw: str) -> list[int]:
+    try:
+        return [int(part) for part in raw.split(",") if part.strip()]
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"expected draft indices like `0,2`, got {raw!r}") from exc
+
+
 _TRANSITION_REASON = Arg(
     "--reason", default="", help="Optional operator-supplied reason for the transition."
 )
@@ -724,6 +731,33 @@ VERBS: tuple[Verb, ...] = (
         help="Cut the candidate currently being scored, at its next sample boundary. The round "
         "carries on with the rest. Defaults to the active cycle.",
         args=(ACTIVE_CAMPAIGN, ACTIVE_CYCLE),
+    ),
+    Verb(
+        "submit-arms",
+        "lifecycle:cmd_submit_arms",
+        help="Answer a cycle holding for a round's arms (`optimization.arm_gate`): the arms it "
+        "measures are the ones in --file, the drafts --keep names, or both. Refused where the "
+        "cycle is not holding for arms. Defaults to the active cycle.",
+        args=(
+            Arg(
+                "--file",
+                default=None,
+                metavar="ARMS.YAML",
+                help="A YAML list of arms, each an edit of the round's parent: "
+                "`changes_description` (required), `prompt_fields` ({field: text}), "
+                "`pipeline_overlay` ({node: {param: value}}).",
+            ),
+            Arg(
+                "--keep",
+                type=_draft_indices_arg,
+                default=[],
+                metavar="0,2",
+                help="Drafts to measure as proposed, by the 0-based index the hold lists them "
+                "under. Refused under `arm_gate: author`, where there are none.",
+            ),
+            ACTIVE_CAMPAIGN,
+            ACTIVE_CYCLE,
+        ),
     ),
     Verb(
         "origin-gate",

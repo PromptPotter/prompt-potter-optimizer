@@ -221,6 +221,7 @@ async def draft_from_dataset(
                 **OptimizationOverrides().model_dump(mode="json"),
                 "max_rounds": max_rounds,
                 "optimizer": cc.optimization.optimizer,
+                "arm_gate": cc.optimization.arm_gate,
                 "nodes": {n: o.model_dump(mode="json") for n, o in cc.optimization.nodes.items()},
             },
             "pipeline_overlay": pipeline_overlay,

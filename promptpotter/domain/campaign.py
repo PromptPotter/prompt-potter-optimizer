@@ -145,7 +145,7 @@ class ArmCost(StrictModel):
 
     @property
     def worked_s(self) -> float | None:
-        """Less each launch's origin gate, a human's, and the time its cells were not allowed to spend."""
+        """Less each launch's gates, a human's, and the time its cells were not allowed to spend."""
         worked = [
             max(0.0, run.clock.elapsed_s - run.clock.gate_s - (run.clock.unworked_s or 0.0))
             for run in self.launches

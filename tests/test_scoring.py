@@ -1241,6 +1241,87 @@ def test_one_round_composes_a_peers_crossover_with_potters_racing_selector(
     )
 
 
+def test_an_authored_round_measures_the_operators_arm_and_asks_no_proposer(
+    built_stores, tmp_path, monkeypatch
+) -> None:
+    from factories import walking_cycle
+
+    from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
+    from promptpotter.application.runner import operator_hold
+    from promptpotter.domain.command_kinds import SubmitArmsPayload, SubmittedArm
+    from promptpotter.infrastructure.llm.telemetry import set_current_round, set_cycle_ledger
+    from promptpotter.infrastructure.producer_lock import release_cycle
+    from promptpotter.infrastructure.runtime_flags import derive_run_state
+    from promptpotter.shared.errors import ConflictError
+
+    hop, cycle_dir = walking_cycle(built_stores)
+    ledger = set_cycle_ledger(CycleEventLog.open(CycleDir(cycle_dir)))
+    slot = set_current_round(1)
+    measured: list[str] = []
+
+    def solves(prompt: str, _sample: Sample) -> bool:
+        measured.append(prompt)
+        return "Operator" in prompt
+
+    async def _asked(*_a: Any, **_k: Any) -> Any:
+        raise AssertionError("an authored round asked a generator for an arm")
+
+    def submit(key: str) -> Any:
+        payload = SubmitArmsPayload(
+            campaign_id=hop.campaign_id,
+            cycle_id=hop.cycle_id,
+            arms=[
+                SubmittedArm(
+                    prompt_fields={"instruction": "Operator wrote this."},
+                    changes_description="the operator's own wording",
+                )
+            ],
+        )
+        return CommandDispatcher(built_stores).dispatch_cycle_command(
+            CommandCall(payload, key), expected_version=None
+        )
+
+    try:
+        cycle = _peer_cycle(
+            built_stores, tmp_path, monkeypatch, "potter", {}, solves, arm_gate="author"
+        )
+        monkeypatch.setattr(node_context, "llm_call", _asked)
+        monkeypatch.setattr(operator_hold, "_POLL_S", 0.0)
+        session = cycle.session
+        session.campaign_id, session.state.cycle_id = hop.campaign_id, hop.cycle_id
+        session.control = RunControl(cycle_dir=cycle_dir)
+        search = list(session.scoring.require_partition().search)
+        measured.clear()
+
+        async def authored() -> RoundResult:
+            with pytest.raises(ConflictError):
+                await submit("arms-before-the-hold")
+
+            async def answer() -> None:
+                while derive_run_state(cycle_dir).gate != "arms":
+                    await asyncio.sleep(0)
+                await submit("arms-at-the-hold")
+
+            (closed, cut), _ = await asyncio.gather(
+                execute_round(cycle, 1, search, _QUIET_CALLBACKS),  # type: ignore[arg-type]
+                answer(),
+            )
+            assert cut is None
+            return closed
+
+        closed = asyncio.run(authored())
+    finally:
+        release_cycle(cycle_dir)
+        reset_current_round(slot)
+        reset_cycle_ledger(ledger)
+
+    [arm] = closed.candidate_scores
+    assert arm.prompt_fields["instruction"] == "Operator wrote this."
+    assert any("Operator wrote this." in prompt for prompt in measured)
+    [minted] = [r for _, r in session.state.ledger.iter() if isinstance(r, CandidateMintedRecord)]
+    assert [made.mode for made in minted.lineage.variations] == ["operator"]
+
+
 def test_capos_split_nodes_make_the_children_its_one_crossover_made_for_the_same_draws(
     built_stores, tmp_path, monkeypatch, in_round
 ) -> None:
