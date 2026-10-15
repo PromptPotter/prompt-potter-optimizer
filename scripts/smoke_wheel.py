@@ -115,7 +115,9 @@ def main() -> int:
             str(port),
             "--log-level",
             "warning",
-        ]
+        ],
+        # A local harness: a closed box answers this read 401 by design.
+        env={**os.environ, "PROMPTPOTTER_AUTH": "off"},
     )
     try:
         # Poll the exit code beside the socket: a crash during startup is a process that is gone.

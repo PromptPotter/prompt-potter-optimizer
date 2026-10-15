@@ -291,8 +291,8 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
     guards = DispatchHub.render("guard_breaches", bundle)
     for leaked in ("UNTRUSTED", poisoned_value, poisoned_query):
         assert leaked not in guards, "LLM-authored evidence reached the prompt as text"
-    for trusted in ("plan", "task_context"):
-        assert "UNTRUSTED" not in DispatchHub.render(trusted, bundle), "a trusted signal was fenced"
+    for panel in ("plan", "task_context"):
+        assert "UNTRUSTED" not in DispatchHub.render(panel, bundle), "a trusted signal was fenced"
 
     # The slot L2 asked for is LLM-authored: it renders only as a name from the closed vocabulary.
     def shown(slot: str) -> str:

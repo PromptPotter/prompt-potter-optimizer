@@ -110,7 +110,8 @@ def _require_bundle(request: Request) -> IdentityBundle:
     return bundle
 
 
-def _require_provider_client(bundle: IdentityBundle, provider: str) -> Any:
+def _require_provider_client(bundle: IdentityBundle, provider: str) -> tuple[str, Any]:
+    """The server's own name for the provider beside its client: no URL text travels on."""
     if provider == "google":
         if bundle.google is None:
             raise NotFoundError(
@@ -118,7 +119,7 @@ def _require_provider_client(bundle: IdentityBundle, provider: str) -> Any:
                 code="provider_not_configured",
                 details={"provider": provider},
             )
-        return bundle.google
+        return "google", bundle.google
     if provider == "github":
         if bundle.github is None:
             raise NotFoundError(
@@ -126,7 +127,7 @@ def _require_provider_client(bundle: IdentityBundle, provider: str) -> Any:
                 code="provider_not_configured",
                 details={"provider": provider},
             )
-        return bundle.github
+        return "github", bundle.github
     raise NotFoundError(
         f"unknown provider {provider!r}", code="provider_unknown", details={"provider": provider}
     )
@@ -171,17 +172,10 @@ async def login(
     request: Request,
     provider: Annotated[str, Path(pattern=r"^[a-z]+$", max_length=16)],
 ) -> RedirectResponse:
-    if provider not in SUPPORTED_PROVIDERS:
-        raise NotFoundError(
-            f"unknown provider {provider!r}",
-            code="provider_unknown",
-            details={"provider": provider},
-        )
-    bundle = _require_bundle(request)
-    client = _require_provider_client(bundle, provider)
+    name, client = _require_provider_client(_require_bundle(request), provider)
     state = secrets.token_urlsafe(32)
     nonce = secrets.token_urlsafe(32)
-    if provider == "google":
+    if name == "google":
         url = client.authorize_url(state=state, nonce=nonce)
     else:
         url = client.authorize_url(state=state)
@@ -190,7 +184,7 @@ async def login(
         response,
         request,
         key=OAUTH_FLOW_COOKIE_NAME,
-        value=f"{provider}.{state}.{nonce}",
+        value=f"{name}.{state}.{nonce}",
         max_age=_OAUTH_FLOW_TTL_S,
     )
     return response
