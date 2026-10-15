@@ -109,6 +109,21 @@ A leading `NEXT` marks the one to take up cold when nothing else is in hand.
   and `git grep -hoE 'from "next(/[a-z/-]+)?"' -- webapp | sort | uniq -c` recounts the imports,
   which is the size of the job.
 
+- **The journeys hand-write what the engine has no seam to produce.** `tests/test_archive.py::_stand_round`
+  and `tests/test_scoring.py::_h2h_campaign` append the ledger sequence a closed round leaves (entered,
+  minted, scored, election, closed, standing), which only `runner/` otherwise writes;
+  `test_scoring.py::_peer_cycle` stands a `Cycle` up over a fake backend by hand and `_reference_reading`
+  drives `runner/measurement.py::_ReferencePairs` through namespaces; `test_ruler.py` § 2 builds an
+  `AbilityReading` beside `bench/difficulty.py::_reading`; `test_security.py` § 1 reaches
+  `_render_guard_breaches`, `_require_capability_for` and `_guard_and_release` by private name. Each is
+  a second writer or reader of a shape the engine owns, so a change to the shape can pass the suite and
+  break the run, or the reverse. Action: one public seam per line — a round close that appends the
+  sequence, a `read_reference_pair` over two cell sheets, a `difficulty.reading(theta, ruler, …)`, a
+  public guard-breach render — and the journey calls it. **Rides with:** any change to the record
+  sequence a round appends, to `_ReferencePairs`, to `difficulty._reading` or to the guard render.
+  **Re-test:** `grep -nE "_stand_round|_h2h_campaign|_peer_cycle|_ReferencePairs|_render_guard_breaches|_require_capability_for|_guard_and_release" tests/*.py`
+  — a hit is a journey still writing the engine's shape itself.
+
 ## Open — surfaced by the head-to-head arc
 
 Filed at the operator's ask rather than under the multi-arc bar above. A leading **INVESTIGATE**

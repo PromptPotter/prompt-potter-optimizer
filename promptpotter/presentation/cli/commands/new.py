@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, NoReturn
 import yaml
 from pydantic import ValidationError
 
-from promptpotter.application.campaign_config import load_campaign_config as _load_cfg
+from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.commands.draft_editing import dispatch_draft_patch
 from promptpotter.application.commands.launching import dispatch_start_checkin
@@ -53,7 +53,6 @@ from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.workspace import open_stores
 from promptpotter.presentation.cli.parsers import launch_limits_from_args
 from promptpotter.presentation.cli.session import no_dataset_hint
-from promptpotter.presentation.terminal.startup_checklist import checkin_line
 from promptpotter.shared.errors import PotterError
 
 if TYPE_CHECKING:
@@ -78,6 +77,10 @@ _SET_FIELDS: frozenset[str] = (SETTABLE_SCALARS - set(FINDING_PATCH_KEYS.values(
 
 def _settable() -> str:
     return ", ".join([*sorted(_SET_FIELDS | _SET_KNOBS), f"{_NODES}.<node>.<knob>"])
+
+
+def _checkin_line(step: str, detail: str) -> None:
+    logger.info("✓ %-13s — %s", step, detail)
 
 
 def _sets_to_patch(sets: list[str]) -> EditDraftPatch:
@@ -173,7 +176,7 @@ async def _ingest_checkin(args: argparse.Namespace) -> str:
         ) from None
 
     campaign_id = draft.draft_id
-    checkin_line("ingest", f"{draft.n_samples} rows → check-in '{draft.slug}' ({campaign_id})")
+    _checkin_line("ingest", f"{draft.n_samples} rows → check-in '{draft.slug}' ({campaign_id})")
 
     # Dispatched, as the browser's: a direct draft write records nothing and re-bills every retry.
     try:
@@ -189,7 +192,7 @@ async def _ingest_checkin(args: argparse.Namespace) -> str:
 
         last_turn: OriginLastResolution | None = None
         if not origin_readiness(draft).complete:
-            checkin_line("origin resolver", "running AI check-in")
+            _checkin_line("origin resolver", "running AI check-in")
             # One turn: a residual gap surfaces below with --set instructions, not more LLM turns.
             turn = await dispatch_origin_resolution(
                 stores,
@@ -204,7 +207,7 @@ async def _ingest_checkin(args: argparse.Namespace) -> str:
     if not readiness.complete:
         _raise_incomplete(readiness.gaps, last_turn)
 
-    checkin_line("origin", f"complete — check-in '{draft.slug}' ready")
+    _checkin_line("origin", f"complete — check-in '{draft.slug}' ready")
     return campaign_id
 
 
@@ -225,7 +228,7 @@ async def _hold_ingested_checkin(args: argparse.Namespace) -> HeldRun:
         ),
         inline=inline_launch(args),
     )
-    checkin_line("campaign", f"started check-in {campaign_id}")
+    _checkin_line("campaign", f"started check-in {campaign_id}")
     return held_run(launched)
 
 
@@ -245,7 +248,7 @@ def _named_mint(args: argparse.Namespace) -> MintCampaignPayload:
     declared = None
     if args.config:
         file_config = read_campaign_config_file(Path(args.config))
-        declared = _load_cfg(file_config)
+        declared = CampaignConfig.model_validate(file_config)
     dataset_name = (
         args.dataset or args.dataset_name or (declared.dataset_name if declared else None)
     )
@@ -310,7 +313,7 @@ async def mint_and_run(stores: Stores, mint: MintCampaignPayload, inline: Inline
     except PotterError as exc:
         raise SystemExit(f"ERROR: {exc}") from None
     held = held_run(outcome.result)
-    checkin_line("campaign", f"minted {held.session.campaign_id}")
+    _checkin_line("campaign", f"minted {held.session.campaign_id}")
     return await _run_origin(held, diag=mint.diag)
 
 
@@ -318,13 +321,13 @@ async def _run_origin(held: HeldRun, *, diag: bool) -> CommandResult:
     session = held.session
     dataset_name = session.dataset_name or "?"
     backend_type = backend_type_of_dataset(session.store, dataset_name)
-    checkin_line("backend", backend_reach_line(backend_type, session.backend_client.base_url))
-    checkin_line("dataset", f"{dataset_name} ({len(session.samples)} queries)")
-    checkin_line("pipeline", pipeline_summary(session, session.pipeline_params))
+    _checkin_line("backend", backend_reach_line(backend_type, session.backend_client.base_url))
+    _checkin_line("dataset", f"{dataset_name} ({len(session.samples)} queries)")
+    _checkin_line("pipeline", pipeline_summary(session, session.pipeline_params))
 
     logger.info("Campaign: %s", session.store.campaigns.campaign_root_dir(session.campaign_id))
 
-    checkin_line("origin", "launching origin scoring")
+    _checkin_line("origin", "launching origin scoring")
     result = await run_inline(held, mode=RunMode(diag=diag))
     return cycle_result_command(session, result)
 

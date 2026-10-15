@@ -163,6 +163,9 @@ def build_l1_response_schema(
         # Bounded HERE: the winner's descriptions become the next round's parent, so an unbounded one compounds.
         for key in described:
             param_props[key] = {"type": "string", "maxLength": SCHEMA_DESCRIPTION_MAX_CHARS}
+        assert param_props.keys() <= keys, (
+            f"{node_name}: the schema offers a key the node declares no param for"
+        )
         if not param_props:
             continue
         pp_properties[node_name] = {

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 
-from promptpotter.application.diagnostics.noise_floor import NoiseFloorError, measure_noise_floor
+from promptpotter.application.diagnostics.noise_floor import measure_noise_floor
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.results import BankedSearchPointError
@@ -12,6 +12,7 @@ from promptpotter.presentation.cli.commands.workspace import (
     resolve_campaign,
     resolve_cycle,
 )
+from promptpotter.shared.errors import DiagnosticError
 
 
 async def cmd_noise_floor(args: argparse.Namespace) -> CommandResult:
@@ -26,7 +27,7 @@ async def cmd_noise_floor(args: argparse.Namespace) -> CommandResult:
             hop=CycleHop(campaign_id=campaign_id, cycle_id=cycle_id),
             k=args.k,
         )
-    except (NoiseFloorError, BankedSearchPointError) as exc:
+    except (DiagnosticError, BankedSearchPointError) as exc:
         raise SystemExit(f"ERROR: {exc}") from exc
 
     record = outcome.record

@@ -164,6 +164,8 @@ def build_round_order(
         else:
             order.append(hit_stratum[hi])
             hi += 1
+    if sorted(order) != sorted(sample_ids):
+        raise ValueError("build_round_order: the order is not a permutation of the panel")
     return order
 
 

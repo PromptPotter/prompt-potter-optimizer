@@ -47,7 +47,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_walks,
 )
 from promptpotter.infrastructure.store.layout import CycleLayout
-from promptpotter.shared.errors import ConflictError
+from promptpotter.shared.errors import DiagnosticError
 from promptpotter.shared.measurement_context import MeasurementRole, RoleScope
 
 if TYPE_CHECKING:
@@ -58,7 +58,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "VerifyError",
     "derive_verify_samples",
     "pick_fresh",
     "read_verify",
@@ -83,10 +82,6 @@ def derive_verify_samples(
 def rounds_since_verified(verified_rounds: Iterable[int], *, round_num: int) -> int:
     """Over the cycle's OWN passes: a fork inherits its parent's measurements, not its assurance."""
     return round_num - max(verified_rounds, default=0)
-
-
-class VerifyError(ConflictError):
-    """Campaign, round or candidate missing on disk."""
 
 
 @dataclass(frozen=True)
@@ -207,13 +202,13 @@ def read_verify(stores: Stores, hop: CycleHop, banked: VerifyPass, scorer: Score
 
     fresh = rows(list(banked.walk().cells))
     if not fresh:
-        raise VerifyError(f"the verify pass of {banked.label} holds no answer in the archive.")
+        raise DiagnosticError(f"the verify pass of {banked.label} holds no answer in the archive.")
     standing = stores.campaigns.standing_rounds(hop).rounds
     campaign = stores.campaigns.load_campaign(hop.campaign_id)
     if campaign is None:
-        raise VerifyError(f"campaign {hop.campaign_id!r} has no manifest on disk.")
+        raise DiagnosticError(f"campaign {hop.campaign_id!r} has no manifest on disk.")
     if 0 not in standing:
-        raise VerifyError(
+        raise DiagnosticError(
             f"{hop.campaign_id}/{hop.cycle_id} holds no closed round 0, so {banked.label} has no "
             "origin to be read over."
         )
@@ -250,7 +245,7 @@ def _scored_candidate(
         for entry in held.close.candidate_scores:
             if entry.candidate_id == candidate_id:
                 return round_num, entry
-    raise VerifyError(
+    raise DiagnosticError(
         f"no round of {hop.campaign_id}/{hop.cycle_id} scored candidate {candidate_id!r}."
     )
 
@@ -266,7 +261,7 @@ async def verify_candidate(
 ) -> VerifyOutcome:
     campaign = stores.campaigns.load_campaign(hop.campaign_id)
     if campaign is None:
-        raise VerifyError(f"campaign {hop.campaign_id!r} has no manifest on disk.")
+        raise DiagnosticError(f"campaign {hop.campaign_id!r} has no manifest on disk.")
     round_num, entry = _scored_candidate(stores, hop, candidate_id)
     label = entry.label
 
@@ -303,7 +298,7 @@ async def verify_candidate(
         unmeasured=len(unmeasured),
     )
     if samples is not None and samples > budget:
-        raise VerifyError(
+        raise DiagnosticError(
             f"--samples {samples} is above this candidate's verify budget of {budget} "
             f"({round_cells} cells per candidate per round, lifted by the "
             f"rounds run since the last verification, capped at {len(unmeasured)} unmeasured). "
@@ -337,7 +332,6 @@ async def verify_candidate(
         )
         try:
             scored = await diagnostic_pass(
-                VerifyError,
                 score_search_point(
                     jsp,
                     picked,
@@ -359,7 +353,7 @@ async def verify_candidate(
             )
             reading = read_verify(stores, hop, banked, session.scoring.require_scorer())
             if reading.fresh.accuracy is None:
-                raise VerifyError(
+                raise DiagnosticError(
                     f"the fresh cells of {label!r} produced no scoreable sample — there is "
                     "nothing to read beside the recorded measurement."
                 )
@@ -406,6 +400,6 @@ async def verify_on_saturation(
             strategy="random",
             seed=None,
         )
-    except (VerifyError, BankedSearchPointError) as exc:
+    except (DiagnosticError, BankedSearchPointError) as exc:
         logger.info("verify skipped for %s: %s", winner_id, exc)
         return None

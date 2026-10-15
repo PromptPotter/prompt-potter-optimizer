@@ -36,3 +36,6 @@ def get_site_records(table: str, since: str = "") -> SiteRecordsResponse:
 def delete_site_records(table: str, before: str) -> SiteRecordsDropped:
     """Retention: drop the added rows kept before ``before``. A keyed row stays."""
     return drop_site_records_before(table, before)
+
+
+assert any(dep.dependency is require_site_records_token for dep in site_records_router.dependencies)

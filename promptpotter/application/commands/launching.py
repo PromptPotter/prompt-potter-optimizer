@@ -20,9 +20,8 @@ from promptpotter.application.commands.draft_editing import reread_draft
 from promptpotter.application.datasets.origin_readiness import save_checkin_draft
 from promptpotter.application.datasets.startability import offered_dataset_dir
 from promptpotter.application.evidence.subjects import SubjectSpec
-from promptpotter.application.jobs.launcher import launch as launcher
 from promptpotter.application.jobs.launcher.checkin import CheckinStart, load_checkin_for_start
-from promptpotter.application.jobs.launcher.launch import Inline, Launched, LaunchRequest
+from promptpotter.application.jobs.launcher.launch import Inline, Launched, launch
 from promptpotter.application.jobs.launcher.mint_and_start import (
     ExistingCycle,
     FreshMint,
@@ -64,22 +63,11 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "dispatch_start_checkin",
     "fork_cycle",
-    "launch",
     "mint_campaign",
     "start_checkin",
     "start_run",
     "step_cycle",
 ]
-
-
-async def launch(dispatcher: CommandDispatcher, request: LaunchRequest, mode: RunMode) -> Launched:
-    return await launcher.launch(
-        request,
-        stores=dispatcher.stores,
-        job_registry=dispatcher.job_registry,
-        mode=mode,
-        inline=dispatcher.inline,
-    )
 
 
 _NODE_INTENTS: TypeAdapter[dict[str, list[ParamIntent]]] = TypeAdapter(dict[str, list[ParamIntent]])
@@ -142,11 +130,13 @@ def start_run(
         return declined
     return Applier.silent(
         lambda: launch(
-            dispatcher,
             ExistingCycle(
                 _diag_target(dispatcher.stores, hop, payload.mode), campaign, payload.limits
             ),
             payload.mode,
+            stores=dispatcher.stores,
+            job_registry=dispatcher.job_registry,
+            inline=dispatcher.inline,
         )
     )
 
@@ -158,7 +148,13 @@ def step_cycle(
         return declined
     limits = LaunchLimits(step_rounds=payload.rounds)
     return Applier.silent(
-        lambda: launch(dispatcher, ExistingCycle(hop, campaign, limits), RunMode())
+        lambda: launch(
+            ExistingCycle(hop, campaign, limits),
+            RunMode(),
+            stores=dispatcher.stores,
+            job_registry=dispatcher.job_registry,
+            inline=dispatcher.inline,
+        )
     )
 
 
@@ -197,7 +193,11 @@ def fork_cycle(
         try:
             # Declare no limits — the seed's reconciled ones govern at the runner seam.
             launched = await launch(
-                dispatcher, ExistingCycle(fork, campaign, LaunchLimits()), payload.mode
+                ExistingCycle(fork, campaign, LaunchLimits()),
+                payload.mode,
+                stores=stores,
+                job_registry=dispatcher.job_registry,
+                inline=dispatcher.inline,
             )
         except BaseException:
             # A start raises only BEFORE the run exists, so the stub is idle.
@@ -241,7 +241,13 @@ def mint_campaign(dispatcher: CommandDispatcher, payload: MintCampaignPayload) -
         )
         # Refused here, before a slot is asked for: a queued mint would refuse it only later.
         request.dataset_campaign_config()
-        return await launch(dispatcher, request, RunMode(diag=payload.diag))
+        return await launch(
+            request,
+            RunMode(diag=payload.diag),
+            stores=dispatcher.stores,
+            job_registry=dispatcher.job_registry,
+            inline=dispatcher.inline,
+        )
 
     return Applier.silent(_apply_mint)
 
@@ -255,7 +261,6 @@ def start_checkin(dispatcher: CommandDispatcher, start: StartCheckinPayload) -> 
         try:
             hop, gated = load_checkin_for_start(stores, campaign_id)
             return await launch(
-                dispatcher,
                 CheckinStart(
                     hop=hop,
                     draft=gated,
@@ -264,6 +269,9 @@ def start_checkin(dispatcher: CommandDispatcher, start: StartCheckinPayload) -> 
                     backend_id=start.backend_id,
                 ),
                 RunMode(diag=start.diag),
+                stores=stores,
+                job_registry=dispatcher.job_registry,
+                inline=dispatcher.inline,
             )
         except OriginIncompleteError:
             # Lifecycle stays ``checkin``, so the operator resolves the gaps and retries.

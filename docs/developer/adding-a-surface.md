@@ -18,7 +18,7 @@ tests. Add new ones the same way — never as a `test_structure` scan.
 
 | You want to add… | Recipe | What actually catches you |
 |---|---|---|
-| A telemetry event / ledger record | [§1](#1-a-ledger-record--telemetry-event) | Import-time: `_ROUTES` (`projections/base.py`) must answer for every `CycleRecord` arm — the trace is a subscriber under the same table |
+| A telemetry event / ledger record | [§1](#1-a-ledger-record--telemetry-event) | Import-time: `Projection._route_table` (`projections/base.py`) must answer for every `CycleRecord` arm — the trace is a subscriber under the same table |
 | A prompt injection (`{{slot}}`) | [§2](#2-a-prompt-injection) | Init-time: the `injection_table()` guard + `validate_template()` |
 | A dashboard / view field | [§3](#3-a-dashboard--view-field) | Breaks loud — a wrong/empty dashboard |
 | A resume / decision checkpoint | [§4](#4-a-resume--decision-checkpoint-kind) | Import-time: `decisions.py` + `replayers.py` asserts |
@@ -54,7 +54,7 @@ on each projection that surfaces the fact** (`LiveDashboardProjection` for `dash
 which is exactly what the guard prevents.
 
 **Guard (an import-time raise, not a standing test — see
-[`tests/CLAUDE.md`](../../tests/CLAUDE.md) § Structural invariants):** `_ROUTES` must answer
+[`tests/CLAUDE.md`](../../tests/CLAUDE.md) § Structural invariants):** `Projection._route_table` must answer
 for every `CycleRecord` arm, and which arms are deliberately unfolded is stated there with
 each one's reason rather than here — a second list is what let the first one go wrong.
 
@@ -137,8 +137,8 @@ mirror onto decides the cost, so ask first *whose* fact it is:
   neither is null on every live row until the round closes. The webapp seam is `CandidateRow`
   (`lib/types/candidate.ts` + `lib/derivations/round-candidates.ts`, which maps both halves
   through ONE function).
-- **Per-ROUND** → mirror onto `RoundSummary` *and* hand-write the line in
-  `projections/live_dashboard/round_summary.py`.
+- **Per-ROUND** → declare it on `RoundSummary` (`domain/dashboard_rows.py`) and set it in
+  `RoundSummary.of`, beside it, which reads the round's close.
 
 Reach for the round-level route only when the fact genuinely isn't a candidate's, and only for a
 fact a panel renders: one the engine alone reads stays on `RoundOutcome`, and a served copy of it
@@ -369,9 +369,9 @@ machine-checked at all; skip them and every gate stays green over a surface nobo
 | 1 | **Name the scope the read is a fact ABOUT**, and address it by that entity's id | A read keyed on the wrong entity is not a bug you find later — it answers *plausibly and wrongly* |
 | 2 | **Declare path + response schema in `docs/specs/api-openapi.yaml`, before the handler** | Root `CLAUDE.md` § Pre-flight gate. That file has **no enforcer** for reads, so this one is a review act — the only step on the page nothing can catch |
 | 3 | **Resolve in `application/`, never in the router** | ADR-0006 (`cli/` + `embedded_run.py` must reach it) and `presentation/CLAUDE.md` § Out-of-bounds |
-| 4 | **Give the route a `response_model` and register it in `scripts/build_ts_types.py::EXPORTED_MODELS`** | Now `--only openapi` and `--only ts-types` cover it, and `webapp/CLAUDE.md` § A wire shape is GENERATED keeps its hand-write escape closed |
-| 5 | **Serve provenance for anything the client could otherwise infer** | A closed set belongs on the server (`webapp/CLAUDE.md`). Every value the browser has to *diff* to explain becomes a client twin that drifts |
-| 6 | **Add the row to `webapp/CLAUDE.md` § Display-data sources** | A data class with no row is a data class with no owner, and the gap fills itself with stores |
+| 4 | **Give the route a `response_model` and register it in `scripts/build_ts_types.py::EXPORTED_MODELS`** | Now `--only openapi` and `--only ts-types` cover it, and `webapp/lib/CLAUDE.md` § A wire shape is GENERATED keeps its hand-write escape closed |
+| 5 | **Serve provenance for anything the client could otherwise infer** | A closed set belongs on the server (`webapp/lib/CLAUDE.md`). Every value the browser has to *diff* to explain becomes a client twin that drifts |
+| 6 | **Add the row to `webapp/lib/CLAUDE.md` § Display-data sources** | A data class with no row is a data class with no owner, and the gap fills itself with stores |
 | 7 | **Run it and look at the panel** | §3's rule, and it binds hardest here: a served field that is declared, typed and never *written* renders as nothing, and no check that could exist would see it |
 
 **Reads and the polling rule.** `roadmap.md` § Hard ordering requires new webapp data panels to

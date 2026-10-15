@@ -7,11 +7,11 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.application import optimizers
 from promptpotter.application.bench.children import DROPPED_MANDATORY_PLACEHOLDER
-from promptpotter.application.optimizers.potter.dispatch import prompts as _opt_prompts
 from promptpotter.application.optimizers.potter.dispatch.layout import (
     NODE_LAYOUTS,
     resolve_layout_override,
 )
+from promptpotter.application.optimizers.potter.dispatch.prompts import base_optimizer_template
 from promptpotter.config.prompt_blocks import prompt_blocks
 from promptpotter.domain.opt_search_point import TEMPLATE_TOKEN_RE, PromptTemplate
 from promptpotter.domain.pipeline_overlay import node_config_items
@@ -208,7 +208,7 @@ def _optimizer_template_failures(
         }
         if not prose:
             continue
-        base = _opt_prompts.base_optimizer_template(inner, node_name)
+        base = base_optimizer_template(inner, node_name)
         declared = sorted(set(TEMPLATE_TOKEN_RE.findall(base.render())))
         if not declared:
             continue
@@ -347,7 +347,7 @@ def _parent_field_text(
         inherited = parent.get(field)
         if isinstance(inherited, str) and inherited:
             return inherited
-    template = _opt_prompts.base_optimizer_template(inner, node)
+    template = base_optimizer_template(inner, node)
     current = getattr(template, field, "")
     return current if isinstance(current, str) else ""
 

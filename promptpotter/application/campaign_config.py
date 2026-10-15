@@ -35,7 +35,6 @@ __all__ = [
     "apply_cycle_seed",
     "estimand_doc",
     "knob_label",
-    "load_campaign_config",
     "merge_config_layers",
     "merge_node_overlays",
     "under_record",
@@ -483,12 +482,6 @@ class CampaignConfig(StrictModel):
         run, so no later edit to its dataset's files reaches a resume, a fork or a served read of
         it — less, for an *arm*, what its head-to-head's record owns (:func:`under_record`)."""
         return self.model_dump(mode="json", exclude=_RECORD_OWNED if arm else None)
-
-
-def load_campaign_config(raw: dict[str, Any] | CampaignConfig) -> CampaignConfig:
-    if isinstance(raw, CampaignConfig):
-        return raw
-    return CampaignConfig.model_validate(raw)
 
 
 def merge_config_layers(base: dict[str, Any], over: Mapping[str, Any]) -> dict[str, Any]:

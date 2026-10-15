@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import sys
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
@@ -268,14 +267,7 @@ class OpenAICompatibleClient(LLMClientBase):
 
     def _ensure_client(self) -> AsyncOpenAI:
         if self._client is None:
-            try:
-                from openai import AsyncOpenAI, DefaultAsyncHttpxClient
-            except ImportError as err:
-                raise ImportError(
-                    f"openai is a core dependency, so its absence means {sys.executable} is not "
-                    "the interpreter promptpotter was installed into. Re-run from the repo venv — "
-                    "installing openai here would hide the broken install, not fix it."
-                ) from err
+            from openai import AsyncOpenAI, DefaultAsyncHttpxClient
 
             # No SDK retries: each is a second bill; `LLMClientBase._admitted_send` is the one loop.
             kwargs: dict[str, Any] = {

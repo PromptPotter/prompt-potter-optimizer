@@ -106,6 +106,7 @@ _INIT_SIGMA_DELTA = 2.0
 # Weak inverse-gamma hyperprior on each variance: stops σ → 0 under sparse data.
 _EB_NU0 = 1.0
 _EB_S0_SQ = 1.0
+assert _EB_NU0 > 0 and _EB_S0_SQ > 0, "a zero prior lets a θ SE reach 0, and every gate fires"
 
 # Where p saturates, an unbounded step jumps into the opposite saturation, hardest on the arms furthest above centre.
 _MAX_NEWTON_STEP = 1.0

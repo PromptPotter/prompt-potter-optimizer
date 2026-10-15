@@ -11,7 +11,6 @@ from promptpotter.application.campaign_config import (
     ArmGateMode,
     CampaignConfig,
     OptimizationConfig,
-    load_campaign_config,
 )
 from promptpotter.application.scoring.formula import (
     DIALS_KEY,
@@ -337,7 +336,7 @@ def default_campaign_config(draft: DraftCampaign) -> CampaignConfig:
     optimization.update(dict(connector.default_optimization))
     optimization["optimizer"] = overrides["optimizer"]
     optimization["nodes"] = dict(overrides["nodes"])
-    return load_campaign_config(
+    return CampaignConfig.model_validate(
         {
             "dataset_name": draft.slug,
             "scoring": draft_scoring_block(draft),

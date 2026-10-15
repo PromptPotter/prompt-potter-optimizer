@@ -4,15 +4,12 @@ import argparse
 from pathlib import Path
 from typing import Any
 
-from promptpotter.application.diagnostics.decision_bank import (
-    DecisionBankError,
-    plan_totals,
-    run_decision_bank,
-)
+from promptpotter.application.diagnostics.decision_bank import plan_totals, run_decision_bank
 from promptpotter.config.logging import setup_logging
 from promptpotter.infrastructure.store.io import read_yaml
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.workspace import open_stores
+from promptpotter.shared.errors import DiagnosticError
 
 
 def _usd(value: float | None) -> str:
@@ -47,7 +44,7 @@ async def cmd_decision_bank(args: argparse.Namespace) -> CommandResult:
             max_usd=args.max_usd,
             parallel=args.parallel,
         )
-    except DecisionBankError as exc:
+    except DiagnosticError as exc:
         raise SystemExit(f"ERROR: {exc}") from exc
 
     compared = "the variant" if args.variant is not None else "the base under the next seed"

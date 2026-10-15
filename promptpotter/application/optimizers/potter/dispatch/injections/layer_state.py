@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import TYPE_CHECKING
 
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     L3_PLAN_MAX_CHARS,
@@ -20,16 +21,16 @@ from promptpotter.application.optimizers.potter.dispatch.prompts import (
     effective_optimizer_prompts,
 )
 from promptpotter.application.optimizers.potter.escalation.state import ExplorationBudget
-from promptpotter.application.views.render.optimizer_prompt_text import (
-    critique_axes,
-    format_l1_critique_for_prompt,
-)
 from promptpotter.domain.connector import unit_plural
 from promptpotter.domain.pipeline_schema import SCHEMA_RENAME_PARAM
 from promptpotter.domain.results_health import evidence_starved_node
 from promptpotter.domain.run_records import MAX_AUTO_REBASES
 from promptpotter.domain.search_point import PROMPT_STRING_FIELDS
 from promptpotter.domain.value_tree import visibility_of
+
+if TYPE_CHECKING:
+    from promptpotter.domain.optimizer_state import CritiqueReadout
+    from promptpotter.domain.pipeline_schema import PipelineSchema
 
 logger = logging.getLogger(__name__)
 
@@ -174,6 +175,61 @@ def _r_task_context(b: InjectionBundle) -> list[Item]:
     if not pairs:
         return []
     return [Item("TASK CONTEXT:\n" + "\n".join(f"  {k}: {v}" for k, v in pairs))]
+
+
+# What bounds the critique panel: a cluster's size is its count, and a target needs only two of its rows.
+CLUSTER_IDS_SHOWN = 12
+
+
+def critique_axes(schema: PipelineSchema, *, offers_shots: bool) -> frozenset[str]:
+    out: set[str] = set(schema.open_prompt_fields()) | ({"shot_ids"} if offers_shots else set())
+    for node in schema.nodes:
+        if node.name:
+            out.add(node.name)
+        for pk in node.param_keys:
+            out.add(pk)
+            if node.name:
+                out.add(f"{node.name}.{pk}")
+    return frozenset(out)
+
+
+def _priority_fix_axis(priority_fix: str) -> str:
+    head, sep, _ = priority_fix.partition(":")
+    axis = head.strip()
+    return axis if sep and axis.isidentifier() else ""
+
+
+def format_l1_critique_for_prompt(
+    critique: CritiqueReadout | None, axes: frozenset[str] | None = None
+) -> str:
+    if not critique:
+        return ""
+    parts: list[str] = []
+    pf = critique.get("priority_fix") or ""
+    if pf:
+        parts.append(f"Fix: {pf}")
+    sa = list(critique.get("suggested_axes") or [])
+    # The steer's own axis leads its menu, so `Fix:` and `Axes:` never name different things.
+    if lead := _priority_fix_axis(pf):
+        sa = [lead, *(a for a in sa if a != lead)]
+    if axes is not None:
+        sa = [a for a in sa if a in axes]
+    if sa:
+        parts.append(f"Axes: {', '.join(sa)}")
+    if fh := critique.get("failure_highlights"):
+        parts.append(
+            "Clusters (target ONE by its rows; the edit must hold for every row it spans):"
+        )
+        for c in fh[:3]:
+            ids = c["sample_ids"]
+            # The panels' own mark, so a row this panel names is a row the generator may target.
+            shown = " ".join(f"[#{i}]" for i in ids[:CLUSTER_IDS_SHOWN])
+            more = f" +{len(ids) - CLUSTER_IDS_SHOWN}" if len(ids) > CLUSTER_IDS_SHOWN else ""
+            parts.append(f"  {c['mechanism']} ({len(ids)} rows: {shown}{more}) — {c['claim']}")
+    if not parts:
+        return ""
+    # `critique` is in the citation enum, and a variant grounding on it cites this heading.
+    return "\n".join(["CRITIQUE (last round's failures, distilled):", *parts])
 
 
 @signal(

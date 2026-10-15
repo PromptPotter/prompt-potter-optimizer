@@ -8,7 +8,7 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-from promptpotter.application.campaign_config import load_campaign_config
+from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.diagnostics.seed_screen import class_floor, draw_bank
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.mint import prepare_fresh_cycle, resolve_cycle_plan
@@ -31,7 +31,7 @@ from promptpotter.application.runner.inner.tasks import (
     resolve_inner_task,
 )
 from promptpotter.application.served_dashboard import ServedDashboard, served_dashboard
-from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
+from promptpotter.application.views.render.primitives import fmt_pct
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.l4.proxies import (
     INNER_RESULT_KEY,
@@ -72,7 +72,6 @@ from promptpotter.shared.measurement_context import (
 )
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
     from promptpotter.domain.results import CycleResult
     from promptpotter.domain.sample import Sample
@@ -374,7 +373,9 @@ async def _run_inner_campaign(
 
     campaign_config = inner_instrument_config(
         spec,
-        load_campaign_config(dict(_cells(ctx).by_dataset[spec.inner_dataset].campaign_config)),
+        CampaignConfig.model_validate(
+            dict(_cells(ctx).by_dataset[spec.inner_dataset].campaign_config)
+        ),
         llm_node=session.llm_node_name(),
         n_scored=len(train_data),
     )

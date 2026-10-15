@@ -61,6 +61,9 @@ def distinct_valid_cells(sheet: CellSheet) -> int:
 
 # E[max of k standard normals], k = 1..6; the last entry stands for any wider round.
 _EXPECTED_MAX_Z: tuple[float, ...] = (0.0, 0.0, 0.5642, 0.8463, 1.0294, 1.1630, 1.2672)
+assert _EXPECTED_MAX_Z[:2] == (0.0, 0.0) and list(_EXPECTED_MAX_Z) == sorted(_EXPECTED_MAX_Z), (
+    "a lone arm carries no curse, and a wider round never a smaller one"
+)
 
 
 def parent_selection_bias(rounds: Sequence[RoundResult]) -> float:

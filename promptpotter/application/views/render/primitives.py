@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.results import ArmOutcome, overlap_line, scoreboard_rank_key
+from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -51,6 +52,11 @@ def fmt_ci(lower: float | None, upper: float | None, *, spec: str) -> str:
     if lower is None or upper is None:
         return "—"
     return f"[{spec.format(lower)}, {spec.format(upper)}]"
+
+
+@shapes_optimizer_prompt
+def fmt_pct(x: float | None, spec: str = "{:.1%}") -> str:
+    return "—" if x is None else spec.format(x)
 
 
 def fmt_fitness(score: float | None) -> str:

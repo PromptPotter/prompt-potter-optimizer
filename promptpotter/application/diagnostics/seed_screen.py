@@ -9,7 +9,7 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Literal
 
 from promptpotter.application.bench.task_context import campaign_framing
-from promptpotter.application.campaign_config import load_campaign_config
+from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.datasets.authored import (
     dataset_campaign_path,
     read_campaign_config_file,
@@ -31,6 +31,7 @@ from promptpotter.domain.scoring import (
 )
 from promptpotter.infrastructure.store.io import write_json
 from promptpotter.shared.clock import utcnow_iso
+from promptpotter.shared.errors import DiagnosticError
 
 if TYPE_CHECKING:
     from promptpotter.domain.sample import Sample
@@ -40,14 +41,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["SeedScreenError", "class_floor", "draw_bank", "screen_inner_seeds"]
+__all__ = ["class_floor", "draw_bank", "screen_inner_seeds"]
 
 
 SeedVerdict = Literal["reject", "suspect", "unsettled", "pass", "no_floor"]
-
-
-class SeedScreenError(Exception):
-    """A resolved-state failure the CLI shell maps to a clean ``SystemExit``."""
 
 
 @dataclass(frozen=True)
@@ -161,7 +158,7 @@ def class_floor(bank: list[Sample]) -> float | None:
     if all_verifier_graded(labels):
         return None
     if any(is_verifier_graded(gt) for gt in labels):
-        raise SeedScreenError(
+        raise DiagnosticError(
             "this bank mixes labelled and verifier-graded rows, so a constant answer's score "
             "would be taken over the labelled part alone and read as the whole bank's floor."
         )
@@ -201,7 +198,7 @@ async def screen_inner_seeds(
 ) -> SeedScreenOutcome:
     # Argument checks BEFORE anything is built: `init_services` spends a backend handshake.
     if parallel < 1:
-        raise SeedScreenError(f"--parallel must be at least 1, got {parallel}.")
+        raise DiagnosticError(f"--parallel must be at least 1, got {parallel}.")
     async with paid_verb(stores=stores, bucket="seed-screen", hop=None):
         return await _screen(stores, identity, dataset_name, seeds, n_samples, repeat, parallel)
 
@@ -218,14 +215,14 @@ async def _screen(
     session = await init_services(dataset_name=dataset_name, identity=identity, stores=stores)
     all_samples = session.samples
     if not all_samples:
-        raise SeedScreenError(f"dataset {dataset_name!r} loaded zero samples.")
+        raise DiagnosticError(f"dataset {dataset_name!r} loaded zero samples.")
 
     file_config: dict[str, Any] = {}
     if session.dataset_config_dir is not None:
         cfg_path = dataset_campaign_path(session.dataset_config_dir)
         if cfg_path.exists():
             file_config = read_campaign_config_file(cfg_path)
-    campaign_config = load_campaign_config(file_config)
+    campaign_config = CampaignConfig.model_validate(file_config)
     arm_diagnostic_scoring(session, campaign_config, source=RunSource.SEED_SCREEN)
     pipeline_params = session.pipeline_params
     # `run_walks` re-reads this at every launch boundary and clamps it to the backend's ceiling.
@@ -266,7 +263,6 @@ async def _screen(
             # A screen answers for no campaign, so its bills land on the workspace's ledger.
             with diagnostic_trace(stores, None):
                 passed = await diagnostic_pass(
-                    SeedScreenError,
                     score_search_point(
                         origin_sp,
                         bank,
@@ -281,7 +277,7 @@ async def _screen(
             rows = passed.sheet.cells
             scored = [cell.hit for cell in rows]
             if not scored:
-                raise SeedScreenError(
+                raise DiagnosticError(
                     f"seed {seed} pass {i}: the origin pass returned no scoreable row — the "
                     "screen measured nothing and must not report a bank on that basis."
                 )

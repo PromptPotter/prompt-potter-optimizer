@@ -58,14 +58,33 @@ change should break it, never under the harm it prevents, and a subject with no 
 its owner's file, never a seventh file. `test_files` is a ledger dimension, which is what makes the
 count binding rather than advisory.
 
+## One journey per section
+
+**The count is held structurally, not by review.** Each `# N.` section is ONE test function: a
+journey down the production path the section owns — a round scored, elected, eliminated and
+stopped; a run billed up to its ceiling; a cell filed, replayed and forked — asserting every
+decision along the way. A fact is an `assert` with a message naming the invariant, inside the
+journey that produces it; a table of values is a `for` over cases inside that same function, never
+a `parametrize`. A path that forks (live vs. folded back on resume, root vs. fork) may be a second
+function named for the fork; nothing else is.
+
+- **A new fact rides its section's journey** as one more assertion. Adding a function is adding a
+  section — a ledger event (`test_functions` moves) with its reason in the commit body.
+- **A journey may be slow.** Minutes are fine; a second function to shave seconds is not.
+- **What a journey would only re-check about a SHAPE** — a field that cannot be negative, a set that
+  must be a subset, a table that must be complete — moves into the production seam as a raise or an
+  import-time assert (§ Structural invariants) and leaves the suite.
+- The first failing assert names its invariant; the rest of the journey is re-read, not re-split.
+
 **The ledger ratchet** — owned by root [`CLAUDE.md`](../CLAUDE.md) `<surface-ledger>`; here it is
-a gate check and never a test, and a test added or removed re-stamps its baseline.
+a gate check and never a test: a section added or removed re-stamps `test_functions`, and a
+production module a journey newly imports, or stops importing, re-stamps `test_reach`.
 
 ## Structural invariants live in production, not tests
 
 This is the **destination** for anything axis 1 rejects, not a footnote. A wiring guarantee worth
 enforcing becomes a **check in the module that owns the registry** — in the accessor that completes
-it, or at import for a table built there (`application/CLAUDE.md` § Subpackages says which) — so it
+it, or at import for a table built there (`application/initialization/CLAUDE.md` § Registries complete says which) — so it
 fails loud before a run spends, costs nothing to maintain, and needs no
 test to update. They exist across the package, e.g.
 one replayer per decision kind (`application/bench/resume_and_fork/replayers.py::replayers`),
@@ -80,15 +99,14 @@ the thing they validate, never as a repo-wide structure scan.
 ([`../docs/developer/offline-run.md`](../docs/developer/offline-run.md)) and put the diff in the
 commit body. Answer the three axes in order. The first "no" ends it. Then ask whether the CODE can
 carry it instead — an import-time assert, a raise at the seam, a type that cannot hold the wrong
-value — and prefer that. If a test it is, it rides its owner's existing section by adding a
-function, or a row to a sibling that already builds the same input — **never a new file**, and
-never a new section invented to house it. Both counts are ledger rows (`test_files`,
-`test_functions`), so a function names its invariant in the commit body and a file goes red.
+value — and prefer that. If a test it is, it is one more assertion in its owner's journey
+(§ One journey per section).
 
 ## Mock strategy
 
 No pytest-mock plugin. `monkeypatch` for async, stdlib `unittest.mock` when needed. More than
-2–3 monkeypatches in one test means it is testing wiring that should be an import-time assert.
+2–3 monkeypatches in one step of a journey means that step is testing wiring that should be an
+import-time assert; a journey of many steps carries each step's patches.
 
 **Never fake a strict model.** A `SimpleNamespace` stand-in for a Pydantic model is the one
 construct that can carry a wrong number past every gate: rename a field and ruff, mypy and pytest
@@ -125,9 +143,7 @@ composite (a hit threshold reading the composite, a stop reading accuracy).
 
 ## Frozen cycle fixtures
 
-**None, on either side.** Vitest builds the SERVED shape from the generated types
-([`../webapp/CLAUDE.md`](../webapp/CLAUDE.md) § Testing posture): a banked `dashboard.json` cast to
-a served type asserts fields the wire no longer carries.
+**None, on either side.** **The webapp's** — owned by [`../webapp/CLAUDE.md`](../webapp/CLAUDE.md) § Testing posture.
 
 **No Python frozen manifests** — one fires on a **field rename** (axis 1), and the harm it names,
 an `extra_forbidden` **raised at load**, is loud (axis 2). An on-disk-compat guarantee belongs in

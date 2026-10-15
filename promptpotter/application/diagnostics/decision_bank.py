@@ -50,7 +50,7 @@ from promptpotter.infrastructure.llm.spend_book import SendBound, SpendBook, spe
 from promptpotter.infrastructure.llm.telemetry import active_cycle_ledger
 from promptpotter.infrastructure.store.io import write_json
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import ConflictError, ErrorCategory, SendRefusedError
+from promptpotter.shared.errors import DiagnosticError, ErrorCategory, SendRefusedError
 from promptpotter.shared.hashing import dataset_hash
 from promptpotter.shared.measurement_context import MeasurementRole, RoleScope
 from promptpotter.shared.statistics import exact_paired_reading, paired_mean_t
@@ -69,7 +69,6 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "ArmLifts",
-    "DecisionBankError",
     "plan_totals",
     "read_arm",
     "read_bank",
@@ -77,10 +76,6 @@ __all__ = [
 ]
 
 Overrides = dict[str, dict[str, Any]]
-
-
-class DecisionBankError(ConflictError):
-    """A resolved-state failure; the CLI shell maps it to a clean ``SystemExit``."""
 
 
 class _RefusingBook(SpendBook):
@@ -336,7 +331,7 @@ async def _propose(cycle: Cycle, round_num: int, panel: Panel, arm: Arm) -> Prop
 
 def _open_cycle(session: Session, config: CampaignConfig, origin: RoundResult) -> Cycle:
     if origin.opt_sp is None:
-        raise DecisionBankError("round 0 names no origin individual.")
+        raise DiagnosticError("round 0 names no origin individual.")
     cycle = Cycle.start(
         origin.opt_sp,
         origin.origin,
@@ -443,7 +438,7 @@ async def _freeze_cycle(
                 population = await asyncio.create_task(_propose(cycle, round_num, panel, arm))
             except SendRefusedError as refusal:
                 if dry is None:
-                    raise DecisionBankError(
+                    raise DiagnosticError(
                         f"{hop.campaign_id} round {round_num}: {refusal} — no arm was measured."
                     ) from refusal
             point.populations.append(population)
@@ -499,7 +494,6 @@ async def _measure(point: _Frozen, side: int) -> ArmLifts:
     members: list[MemberRows] = []
     for individual_id, sp in point.walks[side]:
         scored = await diagnostic_pass(
-            DecisionBankError,
             score_search_point(
                 sp, point.cells, point.session, label="decision_bank", measured=None
             ),
@@ -530,7 +524,7 @@ async def run_decision_bank(
 ) -> DecisionBankOutcome:
     """No ``variant`` grades ``base`` against itself under another seed: the noise floor."""
     if variant is not None and resolved_overrides(variant) == resolved_overrides(base):
-        raise DecisionBankError(
+        raise DiagnosticError(
             "the variant resolves to the optimizer the base runs — no node of it names a "
             "prompt field, a rename or a model the base does not already carry."
         )
@@ -581,7 +575,7 @@ async def _grade(
             )
         ]
         if not frozen:
-            raise DecisionBankError(
+            raise DiagnosticError(
                 f"no decision of {dataset_name!r} re-derives off disk ({skipped or 'none recorded'})."
             )
         for point in frozen:
@@ -599,7 +593,7 @@ async def _grade(
             publish_inner_spawn_context(point.session)
             try:
                 readings = (await _measure(point, 0), await _measure(point, 1))
-            except DecisionBankError as stop:
+            except DiagnosticError as stop:
                 # Whole decisions only: a pair one arm half-measured compares nothing.
                 stopped = str(stop)
                 break
@@ -615,7 +609,7 @@ async def _grade(
     if dry is not None:
         return DecisionBankOutcome(dataset_name, arms, decisions, skipped, None, None, None)
     if not pairs:
-        raise DecisionBankError(f"no decision was measured whole: {stopped}")
+        raise DiagnosticError(f"no decision was measured whole: {stopped}")
     reading = read_bank(pairs)
     path = stores.diagnostic_runs.sidecar_path(
         f"decision-bank-{dataset_name}-{utcnow_iso()[:19].replace(':', '')}.json"

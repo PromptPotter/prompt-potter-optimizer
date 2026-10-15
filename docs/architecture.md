@@ -718,7 +718,7 @@ the Langfuse and MLflow sinks are directly supported and **off by default**: a t
 running either flips a flag or adds `.env` creds, never changes code, which is why both paths stay
 import-alive while dormant. Why they read as dead to every sweep that counts readers, and why they
 must not be deleted, is
-[`../promptpotter/infrastructure/CLAUDE.md`](../promptpotter/infrastructure/CLAUDE.md)
+[`../promptpotter/infrastructure/tracing/CLAUDE.md`](../promptpotter/infrastructure/tracing/CLAUDE.md)
 § Tracing — fan-out only, and DORMANT ON PURPOSE.
 
 The Langfuse schema is the **orientation point**: even with no sink wired, events conform to it, so
@@ -741,7 +741,7 @@ derives under its own formula ([`concepts/scoring-and-memory.md`](concepts/scori
 § Rescore-on-load) — stamped with the
 `dataset_name` it measured and never with a campaign, so its scopes are
 **dataset** and **workspace** only — owned by
-[`../promptpotter/infrastructure/CLAUDE.md`](../promptpotter/infrastructure/CLAUDE.md)
+[`../promptpotter/infrastructure/store/CLAUDE.md`](../promptpotter/infrastructure/store/CLAUDE.md)
 § The archive is not scoped by campaign. The
 archive is the Workspace datastore — a peer of `campaigns/`, never
 siloed into a campaign dir. **Cross-cycle, cross-session,
@@ -782,8 +782,8 @@ The entry points (**how many there are, and the parity rule over them, is owned 
   declaration's description, a verdict's reason and advice, an error's message), kept beside that
   model so no surface re-derives it.
 - **A registry whose members import back up the stack completes at a declared step, never at
-  import** — owned by [`../promptpotter/application/CLAUDE.md`](../promptpotter/application/CLAUDE.md)
-  § Subpackages, which also says why the judge table still builds at import.
+  import** — owned by [`../promptpotter/application/initialization/CLAUDE.md`](../promptpotter/application/initialization/CLAUDE.md)
+  § Registries complete at a declared step.
 - **One carrier per parameter bundle** — what a launch asks, admission admits and the run holds
   is one `LaunchLimits`, what a run may spend is one `SpendCeilings` from the payload to the
   served read (a `None` arm unmetered — or, in a change, untouched), and every `dispatch_*`

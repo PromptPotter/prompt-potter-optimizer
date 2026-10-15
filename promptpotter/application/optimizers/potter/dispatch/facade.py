@@ -18,12 +18,8 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
 )
 from promptpotter.application.optimizers.potter.dispatch.compose import (
     SECTION_SEP,
-)
-from promptpotter.application.optimizers.potter.dispatch.compose import (
-    PanelCoverage as ComposeCoverage,
-)
-from promptpotter.application.optimizers.potter.dispatch.compose import (
-    select as compose_select,
+    PanelCoverage,
+    select,
 )
 from promptpotter.application.optimizers.potter.dispatch.injections.registry import (
     injection_table,
@@ -112,7 +108,7 @@ class FilledPrompt(NamedTuple):
     template: PromptTemplate
     injection_vars: dict[str, str]
     rendered: dict[str, str]
-    coverage: dict[str, ComposeCoverage]
+    coverage: dict[str, PanelCoverage]
 
     @property
     def breakdown(self) -> InjectionBreakdown:
@@ -160,7 +156,7 @@ class DispatchHub:
     def render(name: str, bundle: InjectionBundle) -> str:
         """Routed through selection, never joined here, so fencing and blank-line boundaries have one implementation."""
         items = DispatchHub.render_items(name, bundle)
-        text, _ = compose_select({name: items}, [name], _NO_CEILING)
+        text, _ = select({name: items}, [name], _NO_CEILING)
         return text[name]
 
     @staticmethod
@@ -178,7 +174,7 @@ class DispatchHub:
         budget = NODE_LAYOUTS[node].discretionary_chars if node in NODE_LAYOUTS else _NO_CEILING
         whole = frozenset(n for n in order if (sig := table.get(n)) and not sig.kind.divisible)
         mandatory = NODE_LAYOUTS[node].mandatory
-        rendered, coverage = compose_select(items, order, budget, exempt=whole, mandatory=mandatory)
+        rendered, coverage = select(items, order, budget, exempt=whole, mandatory=mandatory)
         # The other half of `l1_layout_missing_mandatory`: that one guards against L2 EXCISING them.
         if starved := sorted(
             n for n in mandatory if coverage[n].produced and not coverage[n].placed

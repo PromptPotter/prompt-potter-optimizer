@@ -165,7 +165,7 @@ def report_throttle_stall(seconds: float) -> None:
         logger.debug("throttle-stall sink raised; continuing", exc_info=True)
 
 
-def set_abort_check(predicate: Callable[[], bool] | None) -> None:
+def set_abort_check(predicate: Callable[[], bool]) -> None:
     _ABORT_CHECK.set(predicate)
 
 

@@ -9,9 +9,6 @@ import yaml
 from pydantic import ValidationError
 
 from promptpotter.application.campaign_config import CampaignConfig, merge_config_layers
-from promptpotter.application.campaign_config import (
-    load_campaign_config as validate_campaign_config,
-)
 from promptpotter.application.datasets.tabular_ingest import read_candidate_library_file
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.scoring.formula import compile_scorer, split_scoring_block
@@ -78,7 +75,7 @@ def read_campaign_config_file(path: Path) -> dict[str, Any]:
 
 def load_dataset_campaign_config(path: Path) -> CampaignConfig:
     try:
-        return validate_campaign_config(read_campaign_config_file(path))
+        return CampaignConfig.model_validate(read_campaign_config_file(path))
     except ValidationError as exc:
         reason = "; ".join(f"{'.'.join(map(str, e['loc']))}: {e['msg']}" for e in exc.errors())
         raise StoredConfigInvalidError(path=str(path), reason=reason) from exc
@@ -87,7 +84,7 @@ def load_dataset_campaign_config(path: Path) -> CampaignConfig:
 def with_optimization(config: CampaignConfig, overrides: Mapping[str, Any]) -> CampaignConfig:
     merged = merge_config_layers(config.model_dump(mode="json"), {"optimization": dict(overrides)})
     try:
-        out = validate_campaign_config(merged)
+        out = CampaignConfig.model_validate(merged)
     except ValidationError as exc:
         first = exc.errors()[0]
         where = ".".join(str(p) for p in first["loc"])

@@ -38,7 +38,7 @@ from promptpotter.infrastructure.llm.litellm_sends import litellm_sends_billed_a
 from promptpotter.infrastructure.llm.openai_compat import cell_gateway_body, sent_effort
 from promptpotter.infrastructure.llm.registry import openai_compat_spec
 from promptpotter.infrastructure.llm.send_failure import failed_send
-from promptpotter.infrastructure.llm.send_pacing import SendBudget, drawn_budget
+from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS, SendBudget, drawn_budget
 from promptpotter.infrastructure.llm.spend_book import (
     Billed,
     CallLabel,
@@ -124,6 +124,7 @@ _AGENT_TOOLS: dict[str, tuple[tuple[str, str], ...]] = {
 _PACKAGE_MANAGERS = ("apt-get", "dnf", "yum", "apk", "pacman", "brew", "pkg", "zypper")
 
 _CELL_ATTEMPTS = 3
+assert _CELL_ATTEMPTS < SEND_ATTEMPTS, "a trial holds a container: it reruns less than a send"
 _INFRA_BACKOFF_S = 45.0
 
 # A terminus-2 summarize pass is three calls (`_summarize`).

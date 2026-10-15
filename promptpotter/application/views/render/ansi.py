@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, assert_never
 
-from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
 from promptpotter.application.views.render.primitives import (
     BOLD,
     CYAN,
@@ -17,6 +16,7 @@ from promptpotter.application.views.render.primitives import (
     _round_rule,
     _scoreboard,
     fmt_coverage,
+    fmt_pct,
 )
 from promptpotter.domain.bench import BENCH_STATE_INFO
 from promptpotter.domain.candidate_diff import group_diff_keys

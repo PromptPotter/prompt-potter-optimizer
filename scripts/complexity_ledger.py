@@ -29,7 +29,7 @@ from pydantic import BaseModel
 
 BASELINE = {
     # Every `.py` under the package.
-    "modules": 446,
+    "modules": 443,
     # Every `__init__.py` among them.
     "init_files": 55,
     # The `__init__.py` files that re-export names instead of staying empty.
@@ -63,12 +63,13 @@ BASELINE = {
     "claude_md": 21,
     # `tests/test_*.py` — `tests/CLAUDE.md` names what each one owns.
     "test_files": 6,
-    # Test functions across them, each admitted through the charter's three axes.
-    "test_functions": 153,
+    # Test functions across them: one journey per `# N.` section, plus the forks a section names
+    # (`tests/CLAUDE.md` § One journey per section).
+    "test_functions": 25,
     # Modules a test run imports: our own, followed through their module-level imports, plus
     # each outside distribution's top name. A test that reaches the server app or an extra
     # moves it as one function does not.
-    "test_reach": 404,
+    "test_reach": 356,
     # Every property of every schema the generated contract offers the browser.
     "served_fields": 1634,
 }

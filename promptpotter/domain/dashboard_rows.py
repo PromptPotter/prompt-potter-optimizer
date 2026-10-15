@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
-from typing import Any, Literal, get_args
+from typing import TYPE_CHECKING, Any, Literal, get_args
 
 from pydantic import ConfigDict, Field
 
@@ -18,11 +18,15 @@ from promptpotter.domain.results import (
     line_by_individual,
     overlap_line,
 )
+from promptpotter.domain.results_health import critical_health_title
 from promptpotter.domain.ruler import AbilityReading, series_levels
 from promptpotter.domain.scoring import Grade, MeasuredCell, SampleStatus, is_hit
 from promptpotter.domain.spend import SpendCeilings
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.wounds import ValidationFailure
+
+if TYPE_CHECKING:
+    from promptpotter.domain.run_records import RoundClosedRecord
 
 __all__ = [
     "SAMPLE_MOVEMENT_LABELS",
@@ -216,6 +220,29 @@ class RoundSummary(StrictModel):
     # ``None`` on a non-L4 round. The VERDICT rides `candidates[].reading.vs_reference`.
     panel_precision: PanelPrecision | None = None
     optimizer_facts: list[OptimizerFact] = Field(default_factory=list)
+
+    @classmethod
+    def of(cls, closed: RoundClosedRecord, panel_precision: PanelPrecision | None) -> RoundSummary:
+        arms = closed.cells.arms
+        longest = arms[max(arms, key=lambda k: (len(arms[k]), k))] if arms else []
+        return cls(
+            round=closed.round,
+            leading=closed.leading_arm,
+            selected=closed.selected_arms,
+            accuracy=closed.accuracy,
+            composite_fitness=None if closed.accuracy is None else closed.composite_fitness,
+            total=closed.total,
+            ability=closed.ability,
+            improved=None if closed.round == 0 else closed.improved,
+            verdict_reason=None if closed.round == 0 else closed.verdict_reason,
+            candidates=[DashboardCandidate(reading=reading) for reading in closed.arm_readings()],
+            selection=list(dict.fromkeys(sample_id for _, sample_id, _, _ in longest)),
+            health=closed.health,
+            health_alert=critical_health_title(closed.round, closed.health),
+            overlap=closed.overlap,
+            panel_precision=panel_precision,
+            optimizer_facts=closed.optimizer_facts,
+        )
 
 
 class ServedRound(RoundSummary):

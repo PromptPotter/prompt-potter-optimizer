@@ -3104,7 +3104,9 @@ components:
             specifics: `version_conflict` (409), `idempotency_key_missing` (400),
             `command_kind_unknown` (404), `slug_collision` (409),
             `inner_cycle_unaddressed` (422 — a kind that is the outer run's, sent a `descend` tail),
-            `machine_busy` (409), `cycle_busy` (409), `backend_unreachable` (503),
+            `machine_busy` (409), `cycle_busy` (409), `diagnostic_refused` (409 — a
+            diagnostic verb found nothing it could read: no closed origin, a pass that
+            measured no cell, an argument past its budget), `backend_unreachable` (503),
             `admission_gate_stuck` (503 — a process is wedged inside the
             machine-wide admission window, so occupancy cannot be read and
             nothing was started; retryable),
@@ -3127,6 +3129,7 @@ components:
             - slug_collision
             - machine_busy
             - cycle_busy
+            - diagnostic_refused
             - backend_unreachable
             - ingest_failed
             - dataset_unstartable

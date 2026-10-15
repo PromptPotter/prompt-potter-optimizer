@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import argparse
 
-from promptpotter.application.diagnostics.seed_screen import SeedScreenError, screen_inner_seeds
+from promptpotter.application.diagnostics.seed_screen import screen_inner_seeds
 from promptpotter.config.logging import setup_logging
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.workspace import open_stores
+from promptpotter.shared.errors import DiagnosticError
 
 
 async def cmd_seed_screen(args: argparse.Namespace) -> CommandResult:
@@ -22,7 +23,7 @@ async def cmd_seed_screen(args: argparse.Namespace) -> CommandResult:
             repeat=args.repeat,
             parallel=args.parallel,
         )
-    except SeedScreenError as exc:
+    except DiagnosticError as exc:
         raise SystemExit(f"ERROR: {exc}") from exc
 
     rows = outcome.readings

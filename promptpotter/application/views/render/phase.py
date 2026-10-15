@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
 from promptpotter.application.views.render.primitives import (
     BOLD,
     GREEN,
@@ -12,6 +11,7 @@ from promptpotter.application.views.render.primitives import (
     _node_line,
     fmt_coverage,
     fmt_fitness,
+    fmt_pct,
     overlap_series,
 )
 from promptpotter.domain.connector import MeasuredUnit, unit_count

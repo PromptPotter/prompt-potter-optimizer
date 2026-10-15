@@ -55,8 +55,7 @@ from promptpotter.application.optimizers.potter.records import (
     PotterCheckpointKind,
 )
 from promptpotter.application.optimizers.potter.validators.l3_output import run_l3_output_validators
-from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
-from promptpotter.application.views.render.primitives import fmt_fitness
+from promptpotter.application.views.render.primitives import fmt_fitness, fmt_pct
 from promptpotter.domain.phase_views import OptimizerStepEnterView, OptimizerStepExitView
 from promptpotter.domain.phases import StopLoop, StopReason
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay

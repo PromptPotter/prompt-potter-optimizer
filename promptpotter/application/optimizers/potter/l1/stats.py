@@ -4,6 +4,9 @@ from dataclasses import dataclass
 from typing import Literal
 
 from promptpotter.application.optimizers.nodes import CheckResult, ReviewReading, ReviewStat
+from promptpotter.application.optimizers.potter.dispatch.injections.layer_state import (
+    format_l1_critique_for_prompt,
+)
 from promptpotter.application.optimizers.potter.records import PotterRoundState
 from promptpotter.application.optimizers.potter.validators.behavior_base import ValidatorContext
 from promptpotter.application.optimizers.potter.validators.l1_behavior import (
@@ -12,9 +15,6 @@ from promptpotter.application.optimizers.potter.validators.l1_behavior import (
     run_all_checks,
 )
 from promptpotter.application.optimizers.potter.validators.l2_behavior import run_all_l2_checks
-from promptpotter.application.views.render.optimizer_prompt_text import (
-    format_l1_critique_for_prompt,
-)
 from promptpotter.domain.optimizer_state import PARSE_FAILURE_CHARGED, CritiqueReadout
 from promptpotter.domain.results import OptimizerFact, RoundResult, rounds_without_advance
 from promptpotter.domain.round_audit import RoundAudit

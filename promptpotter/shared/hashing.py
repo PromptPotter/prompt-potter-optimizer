@@ -257,9 +257,14 @@ def module_source_digest(*sources: ModuleType | NormalizedSource) -> str:
 
 
 def stable_hash(value: Any, *, length: int = ID_HEX) -> str:
-    # Every stored key is cut from this canonical form: a change here re-keys the archive.
     blob = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(blob).hexdigest()[:length]
+
+
+CANONICAL_PIN: dict[str, Any] = {"b": 0.1, "a": {"ü": [1.5, None], "A": "Zürich 東京"}}
+assert stable_hash(CANONICAL_PIN, length=ADDRESS_HEX) == "bff2239dc003d203bdf1154c1e7222c6", (
+    "every stored key is cut from this canonical form: a change here re-keys the archive"
+)
 
 
 def _sorted_pairs(dataset: list[Any]) -> list[tuple[str, str]]:

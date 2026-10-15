@@ -13,7 +13,6 @@ from promptpotter.application.campaign_config import (
     CampaignConfig,
     OptimizationConfig,
     apply_cycle_seed,
-    load_campaign_config,
     under_record,
 )
 from promptpotter.application.datasets.authored import (
@@ -699,7 +698,7 @@ def resolve_campaign_config(
     if draft is not None:
         return checkin_campaign_config(stores, draft)
     try:
-        frozen = load_campaign_config(frozen_config(stores, campaign))
+        frozen = CampaignConfig.model_validate(frozen_config(stores, campaign))
     except ValidationError as exc:
         raise StoredConfigInvalidError(
             path=f"campaigns/{campaign.campaign_id}/campaign.json::config",

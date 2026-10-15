@@ -21,6 +21,7 @@ from promptpotter.application.mask.divergence import (
 from promptpotter.application.mask.load import load_mask_record
 from promptpotter.application.mask.record import MaskRound
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.shared.errors import DiagnosticError
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
@@ -31,11 +32,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["AbReplayError", "AbReport", "ab_replay_cycle"]
-
-
-class AbReplayError(Exception):
-    """The addressed campaign cannot be replayed off disk."""
+__all__ = ["AbReport", "ab_replay_cycle"]
 
 
 @dataclass(frozen=True)
@@ -162,7 +159,7 @@ def ab_replay_cycle(
         None,
     )
     if round_0 is None:
-        raise AbReplayError(
+        raise DiagnosticError(
             f"{hop.campaign_id}/{hop.cycle_id} has no scored round 0, so there is no origin to "
             "calibrate the δ ruler on and every replayed decision would be read against nothing."
         )

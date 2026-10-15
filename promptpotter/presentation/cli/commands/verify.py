@@ -7,7 +7,7 @@ from pydantic import ValidationError
 
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.commands.payloads import VerifyCandidatePayload
-from promptpotter.application.diagnostics.verify import VerifyError, VerifyOutcome
+from promptpotter.application.diagnostics.verify import VerifyOutcome
 from promptpotter.application.evidence.subjects import parse_subject
 from promptpotter.application.views.render.primitives import fmt_ci
 from promptpotter.config.logging import setup_logging
@@ -17,6 +17,7 @@ from promptpotter.domain.results import BankedSearchPointError
 from promptpotter.infrastructure.store.stores import descend_store
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.workspace import open_stores, resolve_campaign_hint
+from promptpotter.shared.errors import DiagnosticError
 
 
 def _level(level: BandedValue | None) -> str:
@@ -53,7 +54,7 @@ async def cmd_verify(args: argparse.Namespace) -> CommandResult:
             ),
             expected_version=None,
         )
-    except (VerifyError, BankedSearchPointError, ValidationError) as exc:
+    except (DiagnosticError, BankedSearchPointError, ValidationError) as exc:
         raise SystemExit(f"ERROR: {exc}") from exc
 
     outcome = dispatched.result

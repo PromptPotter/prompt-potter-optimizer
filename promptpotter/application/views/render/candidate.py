@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
 from promptpotter.application.views.render.primitives import (
     CYAN,
     DIM,
@@ -12,6 +11,7 @@ from promptpotter.application.views.render.primitives import (
     YELLOW,
     _fmt_delta,
     fmt_ci,
+    fmt_pct,
 )
 from promptpotter.domain.candidate_diff import flatten_sp_summary
 from promptpotter.domain.connector import MeasuredUnit, unit_count

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 
-from promptpotter.application.bench.resume_and_fork.ab_replay import AbReplayError
 from promptpotter.application.cycle_listing import active_pointer
 from promptpotter.application.diagnostics.ab import ab_replay_campaign
 from promptpotter.config.logging import setup_logging
@@ -18,6 +17,7 @@ from promptpotter.presentation.cli.commands.workspace import (
     resolve_cycle,
 )
 from promptpotter.presentation.cli.session import no_dataset_hint
+from promptpotter.shared.errors import DiagnosticError
 
 
 def _target(args: argparse.Namespace, stores: Stores) -> CycleHop:
@@ -51,7 +51,7 @@ async def cmd_ab(args: argparse.Namespace) -> CommandResult:
     stores = open_stores(args)
     try:
         report = await ab_replay_campaign(stores=stores, hop=_target(args, stores))
-    except (AbReplayError, BankedSearchPointError) as exc:
+    except (DiagnosticError, BankedSearchPointError) as exc:
         raise SystemExit(f"ERROR: {exc}") from exc
 
     scope = (

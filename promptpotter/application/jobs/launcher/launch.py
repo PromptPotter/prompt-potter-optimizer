@@ -61,10 +61,10 @@ async def _hold(
 
 async def launch(
     request: LaunchRequest,
+    mode: RunMode,
     *,
     stores: Stores,
     job_registry: JobRegistry,
-    mode: RunMode,
     inline: Inline | None,
 ) -> Launched:
     """Call AFTER everything a person types: a slot held across an interactive check-in is lost."""

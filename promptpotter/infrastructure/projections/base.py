@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import get_args
+from collections.abc import Callable
+from typing import Any, ClassVar, get_args
 
 from promptpotter.domain.run_records import (
     AccountEventRecord,
@@ -54,80 +55,88 @@ from promptpotter.domain.run_records import (
 
 __all__ = ["Projection"]
 
+type _Handler = Callable[[Projection, Any], None]
 
-_ROUTES: dict[type, str | None] = {
-    PhaseRecord: "_handle_phase",
-    RunPhaseRecord: "_handle_run_phase",
-    RunWiringRecord: "_handle_run_wiring",
-    BackendWarningRecord: "_handle_backend_warning",
-    RoundEnteredRecord: "_handle_round_entered",
-    RoundClosedRecord: "_handle_round_closed",
-    RoundStandingRecord: "_handle_round_standing",
-    CandidateStartedRecord: "_handle_candidate_started",
-    SampleOrderRecord: "_handle_sample_order",
-    SampleStartedRecord: "_handle_sample_started",
-    SampleScoredRecord: "_handle_sample_scored",
-    CandidateScoredRecord: "_handle_candidate_scored",
-    FlightRecord: "_handle_flight",
-    RaceStandingRecord: "_handle_race_standing",
-    RaceCatchUpRecord: "_handle_race_catch_up",
-    ResumeCheckpointRecord: "_handle_decision",
-    TokenUsageRecord: "_handle_token_usage",
-    LLMCallStartRecord: "_handle_llm_call_start",
-    LLMCallProgressRecord: "_handle_llm_call_progress",
-    LLMCallRecord: "_handle_llm_call",
-    ErrorRecord: "_handle_error",
-    RoundWarningRecord: "_handle_round_warning",
-    CandidateMintedRecord: "_handle_candidate_minted",
-    ElectionRecord: "_handle_election",
-    # Applied where written (`application/commands/dispatcher.py`); the pair is audit trail only.
-    CommandRecord: None,
-    CommandAckRecord: None,
-    CycleSeedRecord: None,
-    RulerRecord: None,
-    RunLimitsRecord: None,
-    ScoringLockedRecord: None,
-    CycleMintedRecord: None,
-    CheckinClosedRecord: None,
-    CycleFinalRecord: None,
-    CycleSupersededRecord: None,
-    ForkGradedRecord: None,
-    InterventionRecord: None,
-    SpawnedRecord: None,
-    LaunchClaimRecord: None,
-    LaunchReleasedRecord: None,
-    # Banked by `store/account_spend.py` for a cycle that no longer exists.
-    SpendTombstoneRecord: None,
-    # Banked by `store/account_trail.py`, likewise.
-    TrailTombstoneRecord: None,
-    AccountEventRecord: None,
-    PricedKeyRecord: None,
-    # Read off the ledger by `spend_book.py`: money moves on the bill alone.
-    SpendHoldRecord: None,
-    RoundProposedRecord: "_handle_round_proposed",
-    OptimizerStateRecord: "_handle_optimizer_state",
-}
-
-_arms = frozenset(get_args(get_args(CycleRecord)[0]))
-if frozenset(_ROUTES) != _arms:
-    raise RuntimeError(
-        "_ROUTES must answer for every CycleRecord arm — an unanswered one is dispatched "
-        "nowhere and nothing says so: "
-        f"missing {sorted(a.__name__ for a in _arms - frozenset(_ROUTES))}, "
-        f"unbacked {sorted(a.__name__ for a in frozenset(_ROUTES) - _arms)}."
-    )
-del _arms
+_ARMS = frozenset(get_args(get_args(CycleRecord)[0]))
 
 
 class Projection:
     #: The ``Cut`` folded to, stamped by a fold that materializes itself. ``-1`` = nothing folded yet.
     at_offset: int = -1
+    _routes: ClassVar[dict[type[CycleRecord], _Handler | None]]
+
+    def __init_subclass__(cls) -> None:
+        super().__init_subclass__()
+        routes = cls._route_table()
+        if frozenset(routes) != _ARMS:
+            raise RuntimeError(
+                f"{cls.__name__}._route_table must answer for every CycleRecord arm — an "
+                "unanswered one is dispatched nowhere and nothing says so: "
+                f"missing {sorted(a.__name__ for a in _ARMS - frozenset(routes))}, "
+                f"unbacked {sorted(a.__name__ for a in frozenset(routes) - _ARMS)}."
+            )
+        cls._routes = routes
+
+    @classmethod
+    def _route_table(cls) -> dict[type[CycleRecord], _Handler | None]:
+        return {
+            PhaseRecord: cls._handle_phase,
+            RunPhaseRecord: cls._handle_run_phase,
+            RunWiringRecord: cls._handle_run_wiring,
+            BackendWarningRecord: cls._handle_backend_warning,
+            RoundEnteredRecord: cls._handle_round_entered,
+            RoundClosedRecord: cls._handle_round_closed,
+            RoundStandingRecord: cls._handle_round_standing,
+            CandidateStartedRecord: cls._handle_candidate_started,
+            SampleOrderRecord: cls._handle_sample_order,
+            SampleStartedRecord: cls._handle_sample_started,
+            SampleScoredRecord: cls._handle_sample_scored,
+            CandidateScoredRecord: cls._handle_candidate_scored,
+            FlightRecord: cls._handle_flight,
+            RaceStandingRecord: cls._handle_race_standing,
+            RaceCatchUpRecord: cls._handle_race_catch_up,
+            ResumeCheckpointRecord: cls._handle_decision,
+            TokenUsageRecord: cls._handle_token_usage,
+            LLMCallStartRecord: cls._handle_llm_call_start,
+            LLMCallProgressRecord: cls._handle_llm_call_progress,
+            LLMCallRecord: cls._handle_llm_call,
+            ErrorRecord: cls._handle_error,
+            RoundWarningRecord: cls._handle_round_warning,
+            CandidateMintedRecord: cls._handle_candidate_minted,
+            ElectionRecord: cls._handle_election,
+            RoundProposedRecord: cls._handle_round_proposed,
+            OptimizerStateRecord: cls._handle_optimizer_state,
+            # Applied where written (`application/commands/dispatcher.py`); the pair is audit trail only.
+            CommandRecord: None,
+            CommandAckRecord: None,
+            CycleSeedRecord: None,
+            RulerRecord: None,
+            RunLimitsRecord: None,
+            ScoringLockedRecord: None,
+            CycleMintedRecord: None,
+            CheckinClosedRecord: None,
+            CycleFinalRecord: None,
+            CycleSupersededRecord: None,
+            ForkGradedRecord: None,
+            InterventionRecord: None,
+            SpawnedRecord: None,
+            LaunchClaimRecord: None,
+            LaunchReleasedRecord: None,
+            # Banked by `store/account_spend.py` for a cycle that no longer exists.
+            SpendTombstoneRecord: None,
+            # Banked by `store/account_trail.py`, likewise.
+            TrailTombstoneRecord: None,
+            AccountEventRecord: None,
+            PricedKeyRecord: None,
+            # Read off the ledger by `spend_book.py`: money moves on the bill alone.
+            SpendHoldRecord: None,
+        }
 
     def on_record(self, record: CycleRecord, offset: int) -> None:
         self.at_offset = offset
-        hook = _ROUTES.get(type(record))
-        if hook is not None:
-            getattr(self, hook)(record)
+        handler = self._routes[type(record)]
+        if handler is not None:
+            handler(self, record)
 
     def _handle_phase(self, record: PhaseRecord) -> None: ...
     def _handle_run_phase(self, record: RunPhaseRecord) -> None: ...

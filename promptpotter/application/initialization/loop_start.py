@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Callable, Iterator
+from collections.abc import Awaitable, Iterator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
@@ -47,6 +47,7 @@ from promptpotter.infrastructure.llm.telemetry import (
     set_cycle_ledger,
 )
 from promptpotter.judges.registry import build_evaluators
+from promptpotter.shared.errors import DiagnosticError
 from promptpotter.shared.hashing import dataset_hash
 
 if TYPE_CHECKING:
@@ -129,18 +130,16 @@ def arm_diagnostic_scoring(
     session.scoring.partition = partition_bank(session.samples, campaign_config.dataset_split)
 
 
-async def diagnostic_pass(
-    error: Callable[[str], Exception], scoring: Awaitable[ScoredWalk]
-) -> ScoredWalk:
+async def diagnostic_pass(scoring: Awaitable[ScoredWalk]) -> ScoredWalk:
     """Nothing above a diagnostic verb catches the round loop's ``StopLoop``."""
     try:
         scored = await scoring
     except StopLoop as stop:
         info = STOP_REASON_INFO[stop.reason]
         unmeasured = "" if stop.unmeasured is None else f", {stop.unmeasured} cell(s) unmeasured"
-        raise error(f"{info.label}{unmeasured}. {info.next_step}".strip()) from None
+        raise DiagnosticError(f"{info.label}{unmeasured}. {info.next_step}".strip()) from None
     if scored.stopped is not None:
-        raise error(
+        raise DiagnosticError(
             f"Scoring stopped after {len(scored.sheet)} cell(s): {scored.stopped}. A reading "
             "over part of the pass would describe the stop, not the configuration."
         )

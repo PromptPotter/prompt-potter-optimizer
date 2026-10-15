@@ -4,8 +4,7 @@ import json
 from typing import Any
 
 from promptpotter.application.views.render.heatmap import render_hard_sample_heatmap
-from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct as _fmt_pct
-from promptpotter.application.views.render.primitives import fmt_fitness, overlap_series
+from promptpotter.application.views.render.primitives import fmt_fitness, fmt_pct, overlap_series
 from promptpotter.application.views.view_models import (
     ForkSummaryView,
     HardSamplesView,
@@ -105,7 +104,7 @@ def _render_round_cost(rd: RoundDigestView) -> str:
 
 def _render_round(rd: RoundDigestView, *, formula: str | None) -> list[str]:
     parts: list[str] = [
-        f"### Round {rd.round} — {rd.label} ({_fmt_pct(rd.accuracy)})",
+        f"### Round {rd.round} — {rd.label} ({fmt_pct(rd.accuracy)})",
         "",
         f"- improved: **{'yes' if rd.improved else 'no'}**",
         f"- samples: {rd.total}",

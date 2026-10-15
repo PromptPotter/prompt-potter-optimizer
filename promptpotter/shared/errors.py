@@ -134,6 +134,11 @@ class ConflictError(PotterError):
     code = "version_conflict"
 
 
+class DiagnosticError(PotterError):
+    http_status = 409
+    code = "diagnostic_refused"
+
+
 class MachineBusyError(PotterError):
     """The holder may be the caller's OWN run, so the message stays neutral."""
 
@@ -383,6 +388,7 @@ __all__ = [
     "ContentTooLargeError",
     "CycleBusyError",
     "DatasetIdentityError",
+    "DiagnosticError",
     "ErrorCategory",
     "MachineBusyError",
     "NotFoundError",

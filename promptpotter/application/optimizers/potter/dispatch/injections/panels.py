@@ -43,7 +43,7 @@ from promptpotter.application.scoring.classification import scoreable_rows
 from promptpotter.application.scoring.evaluators import DEFAULT_CELL_FORMULA, compute_accuracy
 from promptpotter.application.scoring.paired import FlippedCells, flipped_keys
 from promptpotter.application.scoring.row_diagnostics import judge_readings
-from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
+from promptpotter.application.views.render.primitives import fmt_pct
 from promptpotter.domain.candidate_diff import (
     IDEA_MATCH_MARK,
     candidate_delta,

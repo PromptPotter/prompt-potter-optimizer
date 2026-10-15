@@ -61,9 +61,6 @@ from promptpotter.infrastructure.projections.live_dashboard.blocks import (
     build_racing_block,
 )
 from promptpotter.infrastructure.projections.live_dashboard.round_buffer import RoundBuffer
-from promptpotter.infrastructure.projections.live_dashboard.round_summary import (
-    build_round_summary,
-)
 from promptpotter.infrastructure.projections.live_dashboard.state import (
     BackendWarning,
     BenchPassProgress,
@@ -261,7 +258,7 @@ class LiveDashboardProjection(Projection):
         closed = self._closed.get(record.round)
         if closed is not None:
             prior = [r for r in self.state.rounds if r.round != closed.round]
-            summary = build_round_summary(closed, record.panel_precision)
+            summary = RoundSummary.of(closed, record.panel_precision)
             self.state.rounds = sorted([*prior, self._with_bench(summary)], key=lambda r: r.round)
         self._flush_pending_persist()
 

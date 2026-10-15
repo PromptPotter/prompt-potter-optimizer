@@ -33,7 +33,7 @@ from promptpotter.infrastructure.store.read_model import (
     file_sig,
     fold_jsonl_from,
 )
-from promptpotter.shared.hashing import ADDRESS_HEX, stable_hash
+from promptpotter.shared.hashing import ADDRESS_HEX, CANONICAL_PIN, stable_hash
 
 ANSWER_KEY = "answer"
 _INDEX_FOLD_KEY = "k"
@@ -46,6 +46,11 @@ _FILES_MAX_BYTES = 32 << 20
 
 def config_key(node_configs: list[tuple[str, dict[str, Any]]]) -> str:
     return stable_hash(node_configs, length=ADDRESS_HEX)
+
+
+assert config_key([("solve", CANONICAL_PIN)]) == "f50c75d3792a48e09028a5e79dacd742", (
+    "a moved configuration key strands every banked cell filed under the old one"
+)
 
 
 def _cell_key(node_configs: list[tuple[str, dict[str, Any]]], sample_key: str) -> str:

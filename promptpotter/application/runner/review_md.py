@@ -4,8 +4,12 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, get_args
 
 from promptpotter.application.optimizers.nodes import CheckResult, ReviewReading, ReviewStat
-from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
-from promptpotter.application.views.render.primitives import fmt_ci, fmt_fitness, overlap_series
+from promptpotter.application.views.render.primitives import (
+    fmt_ci,
+    fmt_fitness,
+    fmt_pct,
+    overlap_series,
+)
 from promptpotter.domain.bench import BandedValue, BenchColumn, BenchReading, BenchScore
 from promptpotter.domain.paired_reading import LiftEstimate
 from promptpotter.domain.phases import StopReason, stop_next_step
