@@ -4,6 +4,62 @@ All notable changes to this project will be documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.8.17] — 2026-10-15
+
+> The first people from the internet ran on app.promptpotter.com; what they hit is closed at the root. The arm gate, any table, critique clusters, verify as a banked pass, scoring dials, the trail, MLflow, an L4 environment pool; underneath, typed records end to end and a browser that computes nothing. 81 commits since `v0.8.16`.
+
+### Added
+
+- **Arm gate.** `optimization.arm_gate: off | review | author`; `submit-arms --file arms.yaml` from every entry point; one `operator_hold` with the origin gate. (83d018110)
+- **Any table.** `tabular_ingest` reads CSV, XLS, ODS, JSONL off the bytes; every upload kept at `projects/{tenant}/uploads/` and ledgered; `DATASET_OFFER`, `offer-extras`. (c5a797904)
+- **Critique clusters.** `FailureCluster` (`sample_ids`, mechanism, claim); `failing_samples` one row per miss; `targets_rows`. (6e67223ff)
+- **L4 environment pool.** `promptpotter-self-pool`; `information_per_price` draws banked as `priced_draw`. (f2df668be)
+- **Verify as a banked pass.** `verify:enter / graded / exit` on the ledger; reading on fresh cells, lift over C0 paired per cell; `--strategy random|hard`. (c80995e79)
+- **Scoring dials.** `dials:` in a scoring block, `lock_criterion` at the origin, one `Criterion` at three rungs. (49960194a)
+- **The trail.** `AccountEventRecord` on the workspace ledger; `account_trail`; `trail` verb and `/trail <email>`; briefing webhook; `/site-records/{table}`. (e76e00e06, 7f7519c20, 3847d6b1c)
+- **MLflow server.** `MLFLOW_TRACKING_URI`: a run per closed round, the winner a prompt version. (32bbbc124)
+- **Prompt library with provenance.** `PromptBlock` carries source, paper, locator, the models and scores behind it. (c8d8d245e)
+- **Third-party optimizer** from `examples/optimizer-plugin/` via `promptpotter.optimizer_nodes` / `optimizer_runtimes`; runs under every bench feature, cannot yet name another optimizer's members (roadmap C9). (a8b99b489)
+- **`Connector.extra`**: launch refuses `422 extra_missing`; a dataset lists `missing_extra`. (a0731cbc8)
+- **Auth closes by default.** `PROMPTPOTTER_AUTH`; login bound by cookie; `/machine-status` scoped to the account; CSP; redaction scrubs tracebacks; Harbor rosters pinned on disk; CI least-privilege, SHA-pinned actions. (351aba55c, 44bc0c0dd)
+- `CITATION.cff`, `SECURITY.md`, `LicenseRef-MIT-RG`, `publish.yml` checks the tag against both. (this release)
+- `pin-roster` verb; `update.sh [REF]` deploys a named tag and prints it. (7e3453636)
+- `PROMPTPOTTER_ENV_FILE` names the configuration file, as `PROMPTPOTTER_HOME` names the data root. (71f2357c9)
+
+### Changed
+
+- **BREAKING — start clean.** Typed records end to end (63a03e6bf, de806381b, d06116e24, d5123b5fb); `AccountEventRecord.detail` → `subject` (2ccaaae7a); `ROUND_WINNER` keeps `parent_id` only, decisions lose `interval_method` (11a618f26).
+- **Renames.** `csv_ingest` → `tabular_ingest` (c5a797904) · `MLFLOW_ENABLED` → `MLFLOW_TRACKING_URI`, `traces/mlruns/` gone (32bbbc124) · `targets_cluster` → `targets_rows` (6e67223ff) · `scoring_composite` → `scoring_matcher` (49960194a) · `ScoreEntry.invalid_reason` → `collapsed_by` (166597f9b).
+- Backend host is operator config, `TERMNORM_URL` on `Connector.endpoint`. (351aba55c)
+- One config read, one `DiagnosticError` (`diagnostic_refused`), one embedded `launch(...)`; `require_core`. (d995a935d)
+- Self-fed read index, in-memory trace sink. (d6560d6d4)
+- `gate.py` runs every CI check; `--staged`; LF everywhere; a `CLAUDE.md` per subpackage. (33e55ca34)
+- The gate admits on each check's measured cores, seconds and rss, and runs every check without the desk's `.env` or workspace; `e2e/serve.mjs` takes `--auth=on|off`. (71f2357c9)
+- The browser reads served facts and derives none. (0d8011635, 576dc9459, aa1d126c4, 6bff54f46, 4a43a48ee, 6e7e5a827)
+- One launch carrier `JobSpec`; `set-limits` sends `ceiling {usd, tokens}`. (5e5805c88, 1366816cf, 9be2e7cda, b308db671, 755de5ef5)
+- Surface ledger and offline parity run (38140fccd); `.python-version` (85a6aefc0); tests filed by the code they own (3f36d45dc, c5148ab6e); docs cut to obligation lines (ef305bb20, 3a8b3e211, 6c08a205f).
+- Google sign-in asks `openid email` only (1fec24d63); `TERMS_VERSION` 2026-10-11 (6291955ef); login page mark and tagline (961c53ff8).
+
+### Fixed
+
+- A budget-cut round is a holed panel; a stop between election and close unwinds the round. (4b5bacb99)
+- Collapsed proposals drop from the scoreboard, never rank at 0.0. (166597f9b)
+- The ladder reads true stall depth under `l1_patience: 0`. (bf309c312)
+- `extend_ruler` runs to a fixpoint; `_cap_runaway` off by one. (0d6ebe376)
+- `spreadsheetbench-s10` model; `reset` keeps `.cache`; null token counts read as zero; `unmeasured_delta` notice. (ef305bb20)
+- A clamped call keeps its own seed; the offline fake answers by node, seed and turn. (d5e92e5b0)
+- OAuth flow cookie carries the server's provider name (CodeQL py/cookie-injection). (44bc0c0dd)
+- Secret settings are `SecretStr`; the redactor keys on type, so webhook URLs are covered. (7e3453636)
+- Chat pipeline hero (692f9a129); Playwright tiers never retry (a0731cbc8); MLflow rename landed whole (32bbbc124).
+
+### Removed
+
+- `ENVIRONMENT`; `register-backend`, tenant `backend_url`, the backend registry. (351aba55c)
+- `load_campaign_config`, the startup checklist, the round-summary projection. (d995a935d)
+- `GET /diagnostic-runs` and 35 unread served fields. (0d8011635)
+- `resolve_root_config`, `draft_campaign_config`, `build_cycle_config`. (5a257ca72)
+- The 17-card mask form; `useVerifyRuns`. (49960194a, c80995e79)
+
 ## [0.8.16] — 2026-10-06
 
 > PromptPotter stops being one optimizer and becomes a **bench that optimizers run on**. Every optimizer, ours included, is a manifest the bench executes: it inherits measurement, the content-addressed archive, one spend ledger, persistence, all five entry points and the control plane. CAPO, LEVI and GEPA ship as presets at their paper configurations, and every result is graded the same way on a held-out bench set that no optimizer ever sees. A head-to-head now holds two optimizers to one instrument and one budget, and Compare puts them side by side. Around the bench, a run got lighter: it runs in its own process, a low spend ceiling no longer throttles how many cells are out, and the screens reading it answer in milliseconds. 78 commits since `v0.8.15`.

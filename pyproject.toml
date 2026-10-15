@@ -1,15 +1,26 @@
 [build-system]
-requires = ["setuptools>=68.0", "wheel"]
+requires = ["setuptools>=77.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "promptpotter"
-version = "0.8.16"
+version = "0.8.17"
 description = "Automatic prompt optimization for LLMs — give it a dataset, it finds a better prompt"
 readme = "README.md"
-license = "MIT"
-authors = [{name = "PromptPotter Contributors"}]
-keywords = ["prompt-optimization", "llm", "fastapi", "evaluation"]
+# MIT plus a revocation clause, so not the SPDX "MIT": the text is the LICENSE file.
+license = "LicenseRef-MIT-RG"
+license-files = ["LICENSE"]
+authors = [{name = "David Streuli"}]
+keywords = [
+    "prompt-optimization",
+    "automatic-prompt-engineering",
+    "prompt-engineering",
+    "llm-evaluation",
+    "evolutionary-search",
+    "dspy",
+    "gepa",
+    "llm",
+]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Framework :: FastAPI",
@@ -170,7 +181,8 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/PromptPotter/prompt-potter-optimizer"
+Homepage = "https://promptpotter.com"
+Source = "https://github.com/PromptPotter/prompt-potter-optimizer"
 Repository = "https://github.com/PromptPotter/prompt-potter-optimizer"
 Documentation = "https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/manual/README.md"
 Changelog = "https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/CHANGELOG.md"

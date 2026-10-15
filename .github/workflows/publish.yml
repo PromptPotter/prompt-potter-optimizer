@@ -21,16 +21,22 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
-      # First, before anything is built: nothing else in this repo pins the tag and
-      # `pyproject.toml` together, and a version uploaded to an index can neither be
-      # recalled nor re-uploaded. Skipped on dispatch, where there is no tag to agree with.
-      - name: The tag must match pyproject
+      # First, before anything is built: nothing else in this repo pins the tag,
+      # `pyproject.toml` and `CITATION.cff` together, and a version uploaded to an index
+      # can neither be recalled nor re-uploaded. Skipped on dispatch, where there is no
+      # tag to agree with.
+      - name: The tag must match pyproject and CITATION.cff
         if: github.event_name == 'release'
         run: |
           declared=$(python3 -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          cited=$(sed -n 's/^version: *//p' CITATION.cff)
           tagged="${GITHUB_REF_NAME#v}"
           if [ "$declared" != "$tagged" ]; then
             echo "::error::tag $GITHUB_REF_NAME means $tagged, pyproject.toml says $declared"
+            exit 1
+          fi
+          if [ "$cited" != "$tagged" ]; then
+            echo "::error::tag $GITHUB_REF_NAME means $tagged, CITATION.cff says $cited"
             exit 1
           fi
 

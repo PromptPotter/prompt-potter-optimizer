@@ -1,0 +1,25 @@
+# GitHub reads this for the "Cite this repository" button. `version` and
+# `date-released` follow each release; publish.yml refuses a tag they disagree with.
+cff-version: 1.2.0
+message: "If you use PromptPotter, please cite it as below."
+type: software
+title: "PromptPotter: LLM-Driven Evolution of Prompts and Pipelines"
+authors:
+  - family-names: Streuli
+    given-names: David
+version: 0.8.17
+date-released: 2026-10-15
+repository-code: https://github.com/PromptPotter/prompt-potter-optimizer
+url: https://promptpotter.com
+license-url: https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/LICENSE
+keywords:
+  - prompt optimization
+  - automatic prompt engineering
+  - evolutionary search
+  - large language models
+abstract: >-
+  PromptPotter evolves a prompt and its pipeline's parameters together against a
+  labeled dataset: it proposes candidates, scores each one, cuts a losing candidate
+  as soon as the evidence says it will not win, and keeps every measurement behind
+  the winner. Every optimizer, its own included, runs as a manifest on one bench,
+  scored by one evaluator on a held-out set.

@@ -2415,7 +2415,7 @@ wheels = [
 
 [[package]]
 name = "promptpotter"
-version = "0.8.16"
+version = "0.8.17"
 source = { editable = "." }
 dependencies = [
     { name = "filelock" },
