@@ -18,7 +18,7 @@ from promptpotter.domain.run_records import (
 from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_cycle_facts
 from promptpotter.infrastructure.store.layout import CycleLayout
-from promptpotter.infrastructure.store.read_model import LedgerSpan, Moment
+from promptpotter.infrastructure.store.read_model import LedgerSpan, Moment, appended_here
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +111,10 @@ class CycleEventLog:
         return self._path
 
     def append(self, record: CycleRecord) -> int:
-        line = RECORD_ADAPTER.dump_json(record, fallback=str) + b"\n"
+        # A scored cell's five appends are five moments, never one record: the hold before its send
+        # (ADR-0003), a bill per send, the start as the live marker, the priced key, the score.
+        raw = RECORD_ADAPTER.dump_json(record, fallback=str)
+        line = raw + b"\n"
         try:
             fh = self._path.open("ab")
         except FileNotFoundError:
@@ -125,6 +128,8 @@ class CycleEventLog:
         self._catch_up(end - len(line))
         offset = self._next_offset
         self._next_offset, self._end = offset + 1, end
+        # The run's own controls poll this ledger per cell; its own appends must not cost them a read.
+        appended_here(self._path, raw, range(end - len(line), end))
         self._fan_out(record, offset)
         return offset
 

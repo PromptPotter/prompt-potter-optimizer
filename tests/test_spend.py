@@ -86,6 +86,7 @@ from promptpotter.domain.phases import REFUSAL_STOPS, PauseCause, RunPhase, Stop
 from promptpotter.domain.pipeline_schema import PipelineNode, WebSpendBound
 from promptpotter.domain.results import ArmOutcome
 from promptpotter.domain.run_records import (
+    RECORD_ADAPTER,
     CandidateScoredRecord,
     ConfigOverrides,
     CycleSeed,
@@ -93,6 +94,7 @@ from promptpotter.domain.run_records import (
     ForkRemainder,
     ForkSpec,
     ForkTrigger,
+    RunLimitsRecord,
     RunPhaseRecord,
     SpendHoldRecord,
     SpendTombstoneRecord,
@@ -154,7 +156,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_spend_by_round,
 )
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
-from promptpotter.infrastructure.store.io import write_json, write_jsonl
+from promptpotter.infrastructure.store.io import append_line, write_json, write_jsonl
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache
 from promptpotter.infrastructure.store.read_model import LedgerSpan, iter_jsonl
@@ -1359,6 +1361,14 @@ def test_a_runs_book_holds_each_send_at_its_bound_and_stops_the_run_at_its_ceili
     declare(SpendCeilings(), RoundsCap(max_rounds=3))
     assert _round_bounds(session, config) == (3, None), "a mid-run round cap reached no loop"
     assert control.budget_tripped() is None, "a lifted ceiling still governed the run"
+    # Another PROCESS's ceiling lands as bytes no append in this one handed over, behind its own.
+    append_line(
+        CycleLayout(cycle_dir).ledger,
+        RECORD_ADAPTER.dump_json(RunLimitsRecord(ceiling=SpendCeilings(0.50, None))).decode(),
+    )
+    assert control.budget_tripped() == StopReason.SPEND_BUDGET, (
+        "a ceiling another process appended was hidden behind this process's own appends"
+    )
     declare(SpendCeilings(), RoundsCap(max_rounds=None))
     assert _round_bounds(session, config) == (None, None), (
         "a LIFT of the round cap reads as no cap, never a fall back to the config's"

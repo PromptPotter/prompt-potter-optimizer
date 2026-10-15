@@ -215,6 +215,27 @@ class _LedgerTail(ABC):
             return
         self._sig = sig
 
+    def _take(self, raw: bytes, at: range) -> None:
+        with self._lock:
+            if self._sig is None or self._bytes != at.start:
+                return
+            self._feed(raw)
+            self._lines += 1
+            self._bytes = at.stop
+            sig = file_sig(self._path)
+            # Another process may have appended past ours already: a stale signature has the next view read it.
+            if sig is not None and sig[0] == self._sig[0] and sig[1] == at.stop:
+                self._sig = sig
+
+
+def appended_here(path: Path, raw: bytes, at: range) -> None:
+    with LedgerIndex._registry_lock:
+        indexes: list[_LedgerTail] = [i for p, i in LedgerIndex._registry.items() if p == path]
+    with LineIndex._registry_lock:
+        indexes += [i for (p, _), i in LineIndex._registry.items() if p == path]
+    for index in indexes:
+        index._take(raw, at)
+
 
 class LedgerIndex(_LedgerTail):
     """ONE per ledger, holding every typed fold any roster named: a line is screened and validated once."""
@@ -435,6 +456,7 @@ __all__ = [
     "RecordClasses",
     "Signature",
     "append_row",
+    "appended_here",
     "derived",
     "file_sig",
     "fold_jsonl",
