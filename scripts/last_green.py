@@ -79,26 +79,18 @@ class LastGreen:
             digest.update(rel.encode() + b"\0" + self._hash(rel))
         return digest.hexdigest()
 
-    def _load(self) -> tuple[dict[str, str], dict[str, int]]:
+    def _load(self) -> dict[str, str]:
         try:
-            stored = json.loads(self._STORE.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return {}, {}
-        return stored["green"], stored["rss_mb"]
+            return dict(json.loads(self._STORE.read_text(encoding="utf-8"))["green"])
+        except (OSError, ValueError, KeyError, TypeError):
+            return {}
 
     def holds(self, name: str, key: str) -> bool:
-        return self._load()[0].get(name) == key
+        return self._load().get(name) == key
 
-    def peak_mb(self, name: str) -> int | None:
-        return self._load()[1].get(name)
-
-    def record(
-        self, verdicts: Mapping[str, str | None], peaks_mb: Mapping[str, int | None] = {}
-    ) -> None:
-        green, peaks = self._load()
-        stored = {
-            "green": {n: k for n, k in {**green, **verdicts}.items() if k is not None},
-            "rss_mb": {n: p for n, p in {**peaks, **peaks_mb}.items() if p is not None},
-        }
+    def record(self, verdicts: Mapping[str, str | None]) -> None:
+        green = {n: k for n, k in {**self._load(), **verdicts}.items() if k is not None}
         self._STORE.parent.mkdir(exist_ok=True)
-        self._STORE.write_text(json.dumps(stored, indent=1, sort_keys=True), encoding="utf-8")
+        self._STORE.write_text(
+            json.dumps({"green": green}, indent=1, sort_keys=True), encoding="utf-8"
+        )

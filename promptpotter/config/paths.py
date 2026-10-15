@@ -12,6 +12,7 @@ PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 _PROJECT_NAME = "promptpotter"
 
 _ENV_HOME = "PROMPTPOTTER_HOME"
+_ENV_FILE = "PROMPTPOTTER_ENV_FILE"
 
 
 @lru_cache(maxsize=1)
@@ -80,6 +81,9 @@ def checkin_manifest_path() -> Path:
 
 def env_file_path() -> Path:
     """The install's, never the CWD's: under a wheel that scatters one `.env` per working directory."""
+    override = os.environ.get(_ENV_FILE)
+    if override:
+        return Path(override).expanduser().resolve()
     checkout = source_checkout_root()
     return (checkout if checkout is not None else user_data_root()) / ".env"
 

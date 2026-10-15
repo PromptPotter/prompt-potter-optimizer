@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-// PROMPTPOTTER_AUTH unset closes `deps.py::auth_is_open`; a session is a file minted directly.
+// `--auth=on` closes `deps.py::auth_is_open`; a session is a file minted directly.
 
 // `__dirname`, not `import.meta.url`: Playwright's loader compiles this file to CommonJS.
 const WEBAPP = path.resolve(__dirname, "..");
@@ -40,10 +40,9 @@ export async function startFakeIssuer(
 
   // Annotated: the ambient `process.env` is narrowed, so its spread has no `delete`-able members.
   const env: NodeJS.ProcessEnv = { ...process.env, PP_E2E_PORT: port, PROMPTPOTTER_HOME: home };
-  // Deleted, not inherited: the runner's own shell may carry either.
-  delete env.PROMPTPOTTER_AUTH;
+  // Deleted, not inherited: the runner's own shell may carry it.
   delete env.PP_E2E_RESET;
-  const proc = spawn("node", [path.join(WEBAPP, "e2e", "serve.mjs")], {
+  const proc = spawn("node", [path.join(WEBAPP, "e2e", "serve.mjs"), "--auth=on"], {
     cwd: WEBAPP,
     stdio: "inherit",
     env,

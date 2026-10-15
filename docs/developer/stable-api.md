@@ -131,17 +131,19 @@ The yield-drought escalation rule (`l2_axis_yield_drought`) is permanent — no 
 
 ## 4b. Roots — where the package reads and writes
 
-Three roots, owned by `promptpotter/config/paths.py`. A fork may rely on the resolution
+Four roots, owned by `promptpotter/config/paths.py`. A fork may rely on the resolution
 rules; the constants themselves are internal.
 
 | Root | Resolves to | Contents |
 |---|---|---|
 | **Install content** | `promptpotter/assets/` inside the package | The optimizer's own `pipeline.yaml` + `resolved_schemas.json` + `sets/{name}.yaml`, and the exported dashboard. Ships in the wheel; ours, not the operator's. |
 | **User data** | `$PROMPTPOTTER_HOME` → the checkout's `.promptpotter/` when running from a source tree → the OS app-data dir | Campaigns, sessions, measurements, jobs, identity. |
+| **Configuration** | `$PROMPTPOTTER_ENV_FILE` → the checkout's `.env` when running from a source tree → the user-data root's `.env` | Keys and postures (`PROMPTPOTTER_AUTH`). A process variable outranks the file. The gate names an absent file, so no verdict reads the desk's configuration. |
 | **Benchmarks** | the checkout's `datasets/` → `promptpotter/assets/benchmarks/` | Sample dataset **definitions**, read-only on both shapes. Anything DERIVED from one lands in the user-data root, never beside the definition ([`infrastructure/store/CLAUDE.md`](../../promptpotter/infrastructure/store/CLAUDE.md) § Dataset content has two tiers). A tenant dataset of the same name shadows an installed one. |
 
-**`PROMPTPOTTER_HOME` is stable.** Set it to relocate the whole user-data tree; it is
-read once at import, so it is an environment decision, not a runtime one.
+**`PROMPTPOTTER_HOME` and `PROMPTPOTTER_ENV_FILE` are stable.** Set the first to relocate the
+whole user-data tree and the second to read another configuration file; each is read once at
+import, so it is an environment decision, not a runtime one.
 
 **`$PROMPTPOTTER_HOME/optimizers/{name}/pipeline.yaml` and `$PROMPTPOTTER_HOME/checkin/pipeline.yaml`
 are stable, and they are the install assets an operator may shadow.** Present, one replaces the

@@ -32,7 +32,7 @@ from urllib.parse import urlsplit
 
 import httpx
 import yaml
-from gate import OFFLINE_CHILDREN, end_children_with_this_process, memory_budget_mb
+from gate import end_children_with_this_process, memory_budget_mb
 from last_green import OFFLINE_RUN, OFFLINE_RUN_READS, LastGreen
 
 from promptpotter.application import optimizers
@@ -1219,7 +1219,7 @@ def main() -> int:
         child_args += [f"--optimizer={name}" for name in arm_names]
     t0 = time.monotonic()
 
-    width = min(OFFLINE_CHILDREN, memory_budget_mb() // CHILD_MB)
+    width = min(8, os.cpu_count() or 2, memory_budget_mb() // CHILD_MB)
     pool = ThreadPoolExecutor(max(1, width))
 
     def run_child(name: str, workspace: Path, log: str, rounds: int, *extra: str) -> int:

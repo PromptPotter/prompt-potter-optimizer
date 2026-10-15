@@ -32,15 +32,14 @@ function runs(project: string) {
 
 function server(port: string, env: Record<string, string>, reusable: boolean) {
   return {
-    command: "node e2e/serve.mjs",
+    command: "node e2e/serve.mjs --auth=off",
     url: `http://127.0.0.1:${port}/api/v1/health`,
     // The COLD server is never reused: `serve.mjs` resets the workspace at startup, and adopting a running one silently skips it.
     reuseExistingServer: reusable && !process.env.CI,
     timeout: 120_000,
     stdout: "pipe" as const,
     stderr: "pipe" as const,
-    // Here, not in `serve.mjs`: `e2e/fake_issuer.ts` spawns the same script with auth unset.
-    env: { PP_E2E_PORT: port, PROMPTPOTTER_AUTH: "off", ...env },
+    env: { PP_E2E_PORT: port, ...env },
   };
 }
 

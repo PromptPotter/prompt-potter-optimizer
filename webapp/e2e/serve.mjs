@@ -16,6 +16,13 @@ const PYTHON =
     ? path.join(REPO, ".venv", "Scripts", "python.exe")
     : path.join(REPO, ".venv", "bin", "python");
 
+// Auth posture is what tells the worlds apart, so it is an argument: an inherited or `.env` value would decide it unseen.
+const AUTH = process.argv.find((arg) => arg.startsWith("--auth="))?.slice("--auth=".length);
+if (AUTH !== "on" && AUTH !== "off") {
+  console.error("[e2e] serve.mjs needs --auth=on or --auth=off");
+  process.exit(2);
+}
+
 for (const [what, where, remedy] of [
   ["venv interpreter", PYTHON, 'pip install -e ".[all,dev]"'],
   ["static export", path.join(WEBAPP, "out", "index.html"), "npm run build"],
@@ -75,8 +82,8 @@ const server = spawn(
     cwd: REPO,
     stdio: ["inherit", "pipe", "pipe"],
     env: {
-      // PROMPTPOTTER_AUTH is INHERITED, never set here: `fake_issuer.ts` closes auth by leaving it unset.
       ...process.env,
+      PROMPTPOTTER_AUTH: AUTH,
       // This interpreter is cp1252; the live display writes box-drawing characters.
       PYTHONUTF8: "1",
     },

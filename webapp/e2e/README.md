@@ -36,10 +36,10 @@ operator's workspace.
 
 **One spec inside `cold` brings a THIRD**, and it is not a fourth world: `onboarding-signed-in`
 needs an identity that is signed in and is not the host, which neither server above can produce
-because both pass `PROMPTPOTTER_AUTH=off`. So `fake_issuer.ts` runs the same `serve.mjs` with
-that one variable unset — same preflight, same fault tee, same interpreter — over a workspace it
-mints and deletes per file. Auth posture is the whole difference, which is why that variable is
-declared by each caller rather than inside the script.
+because both start `serve.mjs --auth=off`. So `fake_issuer.ts` runs the same script with
+`--auth=on` — same preflight, same fault tee, same interpreter — over a workspace it mints and
+deletes per file. Auth posture is the whole difference, which is why `serve.mjs` refuses to start
+without it rather than inherit one.
 
 | Variable | Default | For |
 |---|---|---|
