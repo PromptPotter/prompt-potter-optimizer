@@ -303,6 +303,9 @@ no wire, so declaring a token on one fails the registry guard.
 
 ## Conventions
 
+- **An optional import is DECLARED, on `Connector.extra`** — launch refuses on it
+  (`admission.py::probe_backend`) and the listing blocks on it before a row is read
+  (`startability.py::dataset_extra`), so no connector checks `installed()` itself.
 - Wire adapters are pure functions: `(query, pipeline_params) -> dict`.
   No I/O, no logging beyond debug-level drops. The `identity_config` layer never reaches one —
   `sample_measurement.py::measure_sample` removes it first.

@@ -3201,7 +3201,8 @@ components:
               `reason` ∈ `verifier_graded` | `empty` | `missing_extra` | `unreadable`, the same value
               `DatasetIndexEntry.start_block.reason` serves.
             * `extra_missing` (422 wherever a path needs an optional install
-              this server lacks — a bank's fetch, a spreadsheet read) — `extra`,
+              this server lacks — a bank's fetch, a spreadsheet read, a launch on a
+              connector that declares one) — `extra`,
               the `pyproject.toml` extra to install; `message` names the command.
             * `origin_incomplete` (422 on `/commands/start-checkin`)
               — `gaps`: a list of `{field, reason, hint}` objects naming each

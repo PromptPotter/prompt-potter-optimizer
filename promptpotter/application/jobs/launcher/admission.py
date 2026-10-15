@@ -33,6 +33,7 @@ from promptpotter.domain.run_records import ErrorRecord, RunPhaseRecord
 from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import ConflictError, CycleBusyError, MachineBusyError
+from promptpotter.shared.extras import MissingExtraError, missing
 from promptpotter.shared.identity import acting_principal_id
 
 if TYPE_CHECKING:
@@ -95,11 +96,15 @@ def release_slot(
         logger.exception("failed to record launch stop for job %s", job_id)
 
 
-async def probe_backend(backend_type: str, backend_url: str) -> BackendUnreachableError | None:
+async def probe_backend(
+    backend_type: str, backend_url: str
+) -> BackendUnreachableError | MissingExtraError | None:
     # A campaign that outlived its dataset dir: ``connectors.get`` is strict and would raise.
     if not backend_type:
         return None
     connector = connectors.get(backend_type)
+    if connector.extra is not None and (absent := missing(connector.extra)):
+        return MissingExtraError(connector.extra, absent)
     if connector.preflight is None:
         return None
     if (down := await connector.preflight(backend_url)) is not None:

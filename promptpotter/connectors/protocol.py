@@ -15,6 +15,7 @@ from promptpotter.domain.pipeline_schema import NodeRole, NodeSpendBound
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.value_tree import Delivery
 from promptpotter.infrastructure.llm.send_pacing import CELL_WAIT_S, SEND_ATTEMPTS
+from promptpotter.shared.extras import Extra
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -152,6 +153,9 @@ class Connector:
     expected_revision: str | None = None
 
     version_check: VersionCheck | None = None
+
+    extra: Extra | None = None
+    """What a cell imports beyond core; absent, launch refuses and the listing blocks before a read."""
 
     preflight: PreflightFn | None = None
     """``None`` opts out: an in-process backend has nothing to probe."""

@@ -72,7 +72,7 @@ async def open_session(
     stores: Stores | None = None,
     program: object | None = None,
 ) -> Session:
-    """Open a session on *dataset_name*; raises ``BackendUnreachableError`` where its backend is down.
+    """Open a session on *dataset_name*; raises what ``probe_backend`` refuses a launch on.
 
     *stores* names the workspace and whose it is; unset, the local operator's own.
     *program* rides the backend client as ``InProcessWorkload.program``, for an in-process backend.

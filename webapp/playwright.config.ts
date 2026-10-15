@@ -49,8 +49,7 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 1 : 0,
-  reporter: process.env.CI ? [["github"], ["html", { open: "never" }]] : [["list"]],
+  reporter: process.env.CI ? [["github"]] : [["list"]],
   timeout: 60_000,
   expect: { timeout: 15_000 },
   use: {
@@ -63,6 +62,8 @@ export default defineConfig({
     {
       name: "walk",
       testMatch: /walk[/\\].*\.spec\.ts/,
+      // Cold and spend never retry: their workspace resets once per RUN, so a retry is a different test.
+      retries: process.env.CI ? 1 : 0,
       use: { ...devices["Desktop Chrome"], baseURL: WALK_URL },
     },
     {
