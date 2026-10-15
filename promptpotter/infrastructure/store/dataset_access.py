@@ -79,14 +79,22 @@ def declared_backend_type(dataset_dir: Path) -> str:
     return bt.lower()
 
 
-def backend_type_of_dataset(stores: Stores, dataset_name: str) -> str:
-    """Tolerant, unlike :func:`declared_backend_type`: a campaign outlives its dataset dir."""
+def backend_type_at(dataset_dir: Path) -> str:
+    """Tolerant, unlike :func:`declared_backend_type`: a survey reads past one bad file."""
     try:
-        raw = read_yaml_optional(dataset_pipeline_path(readable_dataset_dir(stores, dataset_name)))
-    except (OSError, ValueError, DatasetAccessError):
+        raw = read_yaml_optional(dataset_pipeline_path(dataset_dir))
+    except (OSError, ValueError):
         return ""
     bt = (raw or {}).get("backend_type")
     return bt.lower() if isinstance(bt, str) else ""
+
+
+def backend_type_of_dataset(stores: Stores, dataset_name: str) -> str:
+    """Tolerant: a campaign outlives its dataset dir."""
+    try:
+        return backend_type_at(readable_dataset_dir(stores, dataset_name))
+    except DatasetAccessError:
+        return ""
 
 
 def dataset_experiment(config_dir: Path, connector: Connector) -> dict[str, Any] | None:
@@ -248,6 +256,7 @@ def _read_heading(dataset_dir: Path) -> tuple[str | None, str | None]:
 
 __all__ = [
     "DatasetAccessError",
+    "backend_type_at",
     "backend_type_of_dataset",
     "dataset_experiment",
     "dataset_panel_rows",

@@ -29,6 +29,7 @@ from promptpotter.shared.errors import (
     SendRefusedError,
     cell_failure,
 )
+from promptpotter.shared.extras import Extra
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Coroutine, Mapping
@@ -420,6 +421,7 @@ CONNECTOR = Connector(
     execution="in_process",
     wire_adapter=dspy_wire_adapter,
     in_process_run=_in_process_run,
+    extra=Extra.DSPY,
     holds_own_sends=True,
     sent_spend_bound=_sent_spend_bound,
     # A DSPy model string is litellm's: the provider is its prefix.

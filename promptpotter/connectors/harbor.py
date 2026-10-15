@@ -6,7 +6,6 @@ import json
 import logging
 import os
 import re
-import sys
 import tempfile
 import time
 from dataclasses import dataclass
@@ -57,7 +56,7 @@ from promptpotter.shared.errors import (
     cell_failure,
     is_provider_credit_refusal,
 )
-from promptpotter.shared.extras import Extra, install_hint, installed
+from promptpotter.shared.extras import Extra
 from promptpotter.shared.hashing import stable_hash
 
 if TYPE_CHECKING:
@@ -404,14 +403,6 @@ async def _version_check(_http: httpx.AsyncClient, _base_url: str) -> str | None
 
 
 async def _preflight(_backend_url: str) -> str | None:
-    if not installed(Extra.HARBOR):
-        return (
-            f"the 'harbor' extra is not installed for {sys.executable}.\n"
-            f"  If that is not this repo's .venv, re-run with the venv's interpreter:\n"
-            f"    .venv\\Scripts\\python.exe -m promptpotter ...\n"
-            f"  If it IS the venv, install the extra: {install_hint(Extra.HARBOR)}"
-        )
-
     if (encoding := non_utf8_encoding()) is not None:
         return (
             f"this interpreter decodes files as {encoding!r}, not UTF-8, "
@@ -1187,6 +1178,7 @@ CONNECTOR = Connector(
     holds_own_sends=True,
     extract_experiment=_extract_experiment,
     in_process_run=_in_process_run,
+    extra=Extra.HARBOR,
     preflight=_preflight,
     expected_revision=EXPECTED_HARBOR_SERIES,
     version_check=_version_check,
