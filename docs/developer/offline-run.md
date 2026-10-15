@@ -17,7 +17,8 @@ PROMPTPOTTER_HOME=.scratch/offline-home .venv/Scripts/python.exe scripts/offline
 .venv/Scripts/python.exe scripts/offline_run.py --digests
 ```
 
-`--rounds` (each campaign's `max_rounds`) and `--rows` (the synthetic bank) size it.
+`--rounds` (each campaign's `max_rounds`; the interrupted legs run one round, their contract being
+the pause and the resume rather than the search) and `--rows` (the synthetic bank) size it.
 `--bench-trigger manual` fails on a bench cell sent by the launch, then asks for the pass as an operator does (`grade_line_bench`), so
 its `decisions.json` holds the same rounds and headline as the default `at_end` run's.
 Run it from the tree under test with that tree's own venv — a worktree probe run through another
@@ -32,7 +33,7 @@ docs or webapp edit reruns nothing. `--changed` leaves it out: it proves a landi
 over the same sources — the package, `datasets/`, `examples/`, the two lock files and this script,
 by content — is left standing, and the script says `unchanged since green` and exits 0. Name a
 different home, or pass `--against`, to run it regardless; a default-argument green by hand is
-the gate check's green too (`scripts/kept_verdict.py`).
+the gate check's green too (`scripts/last_green.py`).
 
 `--controlled` proves the controlled comparison instead ([`../architecture.md`](../architecture.md)
 § The controlled comparison): two workspaces, each running the arms `--optimizer` names (potter and
@@ -70,7 +71,7 @@ a laptop with none. In each workspace:
 | `decisions.json` | Every decision the run made, canonical: ids mapped to candidate labels; timestamps, paths and hashes dropped; floats rounded; concurrent records compared as sets. `harness` adds the stop reason, the unrouted URLs and the call counts. |
 | `run.log` | The child's stdout and stderr. |
 | `resumed/` | The same campaign in a workspace of its own, paused at a round boundary and ended on a session rebuilt from disk. |
-| `interrupted/`, `interrupted-twice/` | The first optimizer launched by the CLI's own `main` as a terminal dispatches it, under one and under two SIGINTs, then `resume`d. |
+| `interrupted/`, `interrupted-twice/` | The first optimizer's one-round campaign launched by the CLI's own `main` as a terminal dispatches it, under one and under two SIGINTs, then `resume`d. |
 
 **The interrupted legs are the Ctrl+C contract, run**: `new` must exit 130 with its slot released and
 its producer lock dropped — the cycle `paused` after one SIGINT — its `mint-campaign` record must

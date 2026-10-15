@@ -9,7 +9,7 @@ A thin index over the per-layer `CLAUDE.md` tree for the `promptpotter/` Python 
 | Subpackage | Owns | CLAUDE.md |
 |---|---|---|
 | `domain/` | Frozen Pydantic models, pure types, `JobSearchPoint` / `OptSearchPoint` / `PromptTemplate`, `PipelineSchema`. No I/O. | [`domain/CLAUDE.md`](domain/CLAUDE.md) |
-| `application/` | Use-case layer: initialization, runner, scoring, intelligence. | [`application/CLAUDE.md`](application/CLAUDE.md) |
+| `application/` | Use-case layer: initialization, runner, scoring, intelligence — its table routes to each subpackage that holds a contract. | [`application/CLAUDE.md`](application/CLAUDE.md) |
 | `application/bench/` | The harness every optimizer runs inside: `Cycle`, the `llm_call` chokepoint, the bench's `checkin` node, generic resume / fork. | [`application/bench/CLAUDE.md`](application/bench/CLAUDE.md) |
 | `application/optimizers/potter/` | The L1 / L2 / L3 **agent contracts** + dispatch + escalation + PoBB. What each layer reads / writes / decides, when each escalates / heals. | [`application/optimizers/potter/CLAUDE.md`](application/optimizers/potter/CLAUDE.md) |
 | `application/evidence/` | The cross-subject read (`GET /evidence`, CLI `evidence`): what a subject is, what a cell can be asked for, and what the roster jointly says. | [`application/evidence/CLAUDE.md`](application/evidence/CLAUDE.md) |
@@ -20,11 +20,7 @@ A thin index over the per-layer `CLAUDE.md` tree for the `promptpotter/` Python 
 
 ## What the chain costs
 
-Each subpackage's `CLAUDE.md` auto-loads by directory proximity and **deepest wins**, so working in `application/optimizers/potter/` pulls root, this index, `application/` and the layer's own — every word spent before you type a character. Two rules follow.
-
-**A page you add to a layer is paid by everyone who edits there**, not just the reader who wanted it. So a fact belongs in the layer's `CLAUDE.md` only if it is a RULE binding a set of symbols; mechanism belongs at its definition site, in the module's own docstring, where it costs nothing until someone opens the file.
-
-**Every page is capped** — `scripts/gate.py::_INSTRUCTION_MAX_WORDS`; one that reaches it is trimmed or split.
+Each subpackage's `CLAUDE.md` auto-loads by directory proximity and **deepest wins**, so working in `application/optimizers/potter/` pulls root, this index, `application/` and the layer's own — every word spent before you type a character. **What a layer's page may hold, and its cap** — owned by [`../docs/developer/conventions.md`](../docs/developer/conventions.md) § Prose in the source; a fact added here is paid by every session that edits beneath it.
 
 ## Where L4 lives
 

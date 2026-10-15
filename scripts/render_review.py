@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from promptpotter.application.bench.task_context import campaign_framing
-from promptpotter.application.campaign_config import load_campaign_config
+from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.datasets.authored import scorer_of
 from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.application.optimizer_manifest import select_optimizer
@@ -33,7 +33,7 @@ def main(argv: list[str]) -> int:
 
     manifest_path = CampaignLayout(cycle_dir.parent.parent).manifest
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    config = load_campaign_config(manifest["config"])
+    config = CampaignConfig.model_validate(manifest["config"])
 
     # ``projects/{tenant}/campaigns/{id}/cycles/{cycle}``: the tenant is three levels up.
     tenant_dir = cycle_dir.parents[3]

@@ -49,7 +49,7 @@ What this file owns, and where each rule is stated. Names only — the section i
 
 ## The archive is not scoped by campaign
 
-**`measurements/` is ONE content-addressed tree per workspace, it outlives the campaigns that filled it, and a row is filed under the dataset it MEASURED — never under the campaign that paid for it.** So "what did this campaign cost on disk" is not a question the archive answers, and **counting beats recalling**: `compact-archive inventory --dataset <name>` prints configurations, answers and bytes by dataset, role and age. The consequences, and the reversibility that makes them survivable, are [`infrastructure/CLAUDE.md`](promptpotter/infrastructure/CLAUDE.md) § The archive is not scoped by campaign.
+**A row is filed under the dataset it MEASURED, never the campaign that paid for it** — owned by [`infrastructure/store/CLAUDE.md`](promptpotter/infrastructure/store/CLAUDE.md) § The archive is not scoped by campaign; count with its command before any per-campaign disk claim.
 
 ## STOP — no backward compatibility, ever
 
@@ -89,9 +89,8 @@ Six *situational* guardrails against recurring AI blind spots. The trigger and t
 ## Commands
 
 ```bash
-# Every `python` below is the repo venv (`.venv/Scripts/python.exe` | `.venv/bin/python`). Bare `python` fails SILENTLY:
-# it imports promptpotter but not its deps, so a run starts, replays cache, and dies at the first live LLM call.
-# `gate.py` re-execs to dodge this; the CLI cannot, or it would break the Ctrl+C pause contract.
+# Every `python` below is the repo venv (`.venv/Scripts/python.exe` | `.venv/bin/python`). Bare `python` refuses at
+# `import promptpotter`, naming the core dependencies it lacks; `gate.py` re-execs into its own venv instead.
 pip install -e ".[all,dev]"                                  # `benchmarks` and `harbor` are OUT of `all` deliberately — add one only when you need it; harbor wants a container runtime
 python scripts/gate.py                                       # EVERY check CI runs, in the locked env. --py / --web to halve it, --only NAME for the one check that owns what you touched
 python scripts/gate.py --release                             # BEFORE cutting a release: the dashboard lock against npm's advisory DB + every open Dependabot alert. Network-bound, so never in the default run
@@ -117,7 +116,7 @@ The **front door is a browser chat** — a human-in-the-loop copilot: the operat
 ## Conventions
 
 - Full style + code-shape + git rules, and the four banned words → [`docs/developer/conventions.md`](docs/developer/conventions.md).
-- **Git — don't commit by default:** **never `git commit` or `git push` unless the operator says so** (a commit ask is not a push ask). **Sole standing exception:** where a project instruction already grants autonomous commits. Ruff format + check before any commit — `scripts/gate.py` runs both, and `--staged` is the pre-commit hook.
+- **Git — don't commit by default:** **never `git commit` or `git push` unless the operator says so** (a commit ask is not a push ask). **Sole standing exception:** where a project instruction already grants autonomous commits.
 - **Vocabulary:** say "node" never service/building-block; **"optimizer prompt" never "meta-prompt"** — a prompt the optimizer *runs on*, whose opposite is the **target prompt** it *produces* during optimization (`OptSearchPoint` vs `JobSearchPoint`); for L4 say **outer/inner** (position) and **self-optimization** (the arrangement), never "meta"; **"run init" / the INIT phase, never "bootstrap"** — the chain from `new`/`resume` to round 1 (`application/initialization/`), which the operator already sees as `INIT` / `✓ Initialized`; the word survives ONLY for machine provisioning (`deploy-linux/bootstrap.sh`) and external proper nouns (DSPy `BootstrapFewShot`); domain framing = evolution (generation/population/fitness/mutation/selection/individual).
 - **Sample look-ahead is browser-only, and the ABSENCE is the boundary** — the one deliberate `<entry-point-parity>` inversion, so a missing CLI verb / config key / dataset knob is the gate, never an oversight to fix. Why it is declared rather than merely unimplemented: [`presentation/CLAUDE.md`](promptpotter/presentation/CLAUDE.md) § Sample look-ahead.
 - **Fewest dependencies possible** in both repos — reach for the stdlib or a small hand-rolled helper before adding a package; every new dependency must earn its place. **Core is the engine; a surface is an extra** — owned by [`ADR-0006`](docs/adr/0006-embeddable-core-and-extras.md), which settles the boundary on MEASURED reachability rather than on argument.

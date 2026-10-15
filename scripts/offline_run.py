@@ -32,19 +32,13 @@ from urllib.parse import urlsplit
 
 import httpx
 import yaml
-from gate import (
-    OFFLINE_CHILD_MB,
-    OFFLINE_CHILDREN,
-    end_children_with_this_process,
-    memory_budget_mb,
-)
-from kept_verdict import OFFLINE_RUN, OFFLINE_RUN_READS, KeptVerdicts
+from gate import OFFLINE_CHILDREN, end_children_with_this_process, memory_budget_mb
+from last_green import OFFLINE_RUN, OFFLINE_RUN_READS, LastGreen
 
 from promptpotter.application import optimizers
 from promptpotter.application.campaign_config import (
     CampaignConfig,
     OptimizationConfig,
-    load_campaign_config,
 )
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.datasets.authored import (
@@ -107,6 +101,10 @@ RESUMED = "resumed"
 INTERRUPTED = {1: "interrupted", 2: "interrupted-twice"}
 # Past the origin's panel, inside the first round's walk.
 INTERRUPT_AT_CELL = 25
+# The Ctrl+C contract is the pause and the resume, not the search: one round ends the cycle soonest.
+TERMINAL_ROUNDS = 1
+# Peak commit of one campaign process `main` forks, rounded up.
+CHILD_MB = 120
 RESUME_APPENDS = ("phases", "run_phases", "candidates_minted", "rulers")
 NOT_A_KEY = "offline-run-not-a-key"
 PROVIDER_KEYS = ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY")
@@ -579,12 +577,12 @@ def campaign_config(
     if optimizer != templated or pinned:
         # Its draws follow the campaign's id unless a clamp seeds them, and every run mints an id.
         opt["determinism"] = {"seed": 0}
-    sampler = select_optimizer(load_campaign_config(raw).optimization).sampler
+    sampler = select_optimizer(CampaignConfig.model_validate(raw).optimization).sampler
     if sampler.size_knob is not None:
         nodes = opt.setdefault("nodes", {})
         block = nodes[sampler.name] = dict(nodes.get(sampler.name) or {})
         block["config"] = {**(block.get("config") or {}), sampler.size_knob: ROUND_CELLS}
-    return load_campaign_config(raw)
+    return CampaignConfig.model_validate(raw)
 
 
 def text_templates(config: CampaignConfig) -> dict[str, str]:
@@ -1123,7 +1121,12 @@ def main() -> int:
         action="append",
         help="default: every installed optimizer; under --controlled, the arms (potter and capo)",
     )
-    ap.add_argument("--rounds", type=int, default=4, help="max_rounds per campaign")
+    ap.add_argument(
+        "--rounds",
+        type=int,
+        default=4,
+        help="max_rounds per campaign; the interrupted legs run one",
+    )
     ap.add_argument("--rows", type=int, default=200, help="synthetic bank size")
     ap.add_argument("--digests", action="store_true", help="print the L4 identity digests")
     ap.add_argument(
@@ -1189,7 +1192,7 @@ def main() -> int:
 
     asked = [f"--{k}={v}" for k, v in sorted(vars(args).items()) if v != ap.get_default(k)]
     run = " ".join([OFFLINE_RUN, *(a for a in asked if not a.startswith("--against="))])
-    kept = KeptVerdicts.open()
+    kept = LastGreen.open()
     key = None if kept is None else kept.key(OFFLINE_RUN_READS)
     home = named_home()
     if args.against is None and stands_green(home, run, key):
@@ -1204,21 +1207,19 @@ def main() -> int:
     stamp["workspaces"] = names
     (home / STAMP).write_text(json.dumps(stamp, indent=1) + "\n", encoding="utf-8")
     # One workspace each: a shared archive and δ ruler let one optimizer's run move another's.
-    child_args = [
-        "--rounds", str(args.rounds), "--rows", str(args.rows),
-        "--bench-trigger", args.bench_trigger,
-    ]  # fmt: skip
+    child_args = ["--rows", str(args.rows), "--bench-trigger", args.bench_trigger]
     if args.controlled:
         child_args += [f"--optimizer={name}" for name in arm_names]
     t0 = time.monotonic()
 
-    width = min(OFFLINE_CHILDREN, memory_budget_mb() // OFFLINE_CHILD_MB)
+    width = min(OFFLINE_CHILDREN, memory_budget_mb() // CHILD_MB)
     pool = ThreadPoolExecutor(max(1, width))
 
-    def run_child(name: str, workspace: Path, log: str, *extra: str) -> int:
+    def run_child(name: str, workspace: Path, log: str, rounds: int, *extra: str) -> int:
+        child = [sys.executable, __file__, "--child", name, f"--rounds={rounds}", *child_args]
         with (workspace / log).open("w", encoding="utf-8") as out:
             return subprocess.run(
-                [sys.executable, __file__, "--child", name, *child_args, *extra],
+                [*child, *extra],
                 cwd=workspace,
                 env=child_env(workspace),
                 stdout=out,
@@ -1227,11 +1228,11 @@ def main() -> int:
 
     def spawn(name: str, workspace: Path, *extra: str) -> Future[int]:
         workspace.mkdir()
-        return pool.submit(run_child, name, workspace, "run.log", *extra)
+        return pool.submit(run_child, name, workspace, "run.log", args.rounds, *extra)
 
     def terminal(workspace: Path, verb: str, interrupts: int) -> int:
         flags = (f"--terminal={verb}", f"--interrupts={interrupts}")
-        return run_child(names[0], workspace, f"{verb}.log", *flags)
+        return run_child(names[0], workspace, f"{verb}.log", TERMINAL_ROUNDS, *flags)
 
     children = {name: spawn(name, home / name) for name in names}
     stopped = (

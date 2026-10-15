@@ -48,19 +48,20 @@ def _is_type_checking(test: ast.expr) -> bool:
     )
 
 
-def _runtime_nodes(node: ast.AST) -> Iterator[ast.AST]:
+def _runtime_nodes(node: ast.AST, *, deferred: bool) -> Iterator[ast.AST]:
     yield node
     for child in ast.iter_child_nodes(node):
         if isinstance(node, ast.If) and _is_type_checking(node.test) and child in node.body:
             continue
-        yield from _runtime_nodes(child)
+        if not deferred and isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        yield from _runtime_nodes(child, deferred=deferred)
 
 
-def _imported(node: ast.AST, importer: str, is_package: bool) -> set[str]:
-    modules = _modules()
+def _import_names(node: ast.AST, importer: str, is_package: bool, *, deferred: bool) -> set[str]:
     home = importer if is_package else importer.rpartition(".")[0]
     found: set[str] = set()
-    for sub in _runtime_nodes(node):
+    for sub in _runtime_nodes(node, deferred=deferred):
         if isinstance(sub, ast.Import):
             found.update(a.name for a in sub.names)
         elif isinstance(sub, ast.ImportFrom):
@@ -70,6 +71,12 @@ def _imported(node: ast.AST, importer: str, is_package: bool) -> set[str]:
                 base = ".".join([*up, base] if base else up)
             found.add(base)
             found.update(f"{base}.{a.name}" for a in sub.names)
+    return found
+
+
+def _imported(node: ast.AST, importer: str, is_package: bool) -> set[str]:
+    modules = _modules()
+    found = _import_names(node, importer, is_package, deferred=True)
     return {modules[name] for name in found if name in modules}
 
 
@@ -220,6 +227,7 @@ def _record(pytest_args: list[str]) -> int:
     current: list[set[str]] = []
     opened: set[str] = set()
     listed: set[str] = set()
+    collected: set[str] = set()
 
     def started(code: Any, _offset: int) -> object:
         # A module body is an import, which the import graph already answers for.
@@ -235,6 +243,8 @@ def _record(pytest_args: list[str]) -> int:
             (opened if event == "open" else listed).add(target)
 
     class Ran:
+        whole_suite = True
+
         @pytest.hookimpl(wrapper=True)
         def pytest_runtest_protocol(self, item: pytest.Item) -> Iterator[None]:
             current.append(ran.setdefault(item.nodeid.partition("[")[0], set()))
@@ -244,18 +254,25 @@ def _record(pytest_args: list[str]) -> int:
             finally:
                 current.pop()
 
+        def pytest_collection_finish(self, session: pytest.Session) -> None:
+            collected.update(item.nodeid.partition("[")[0] for item in session.items)
+            self.whole_suite &= session.config.args_source is pytest.Config.ArgsSource.TESTPATHS
+
+        def pytest_deselected(self) -> None:
+            self.whole_suite = False
+
+    plugin = Ran()
     before = _hashed()
     sys.addaudithook(audited)
     monitoring.use_tool_id(tool, "tests_owning")
     monitoring.register_callback(tool, monitoring.events.PY_START, started)
     monitoring.set_events(tool, monitoring.events.PY_START)
     try:
-        code = int(pytest.main(["-p", "no:xdist", *pytest_args], plugins=[Ran()]))
+        code = int(pytest.main(["-p", "no:xdist", *pytest_args], plugins=[plugin]))
     finally:
         monitoring.set_events(tool, 0)
         monitoring.free_tool_id(tool)
-    suite = _suite()
-    if code or suite is None or suite.keys() - ran.keys() or before != _hashed():
+    if code or not plugin.whole_suite or collected - ran.keys() or before != _hashed():
         # A failed, partial or mid-edit run describes no tree: the old record stands.
         return code
     # Bytecode is the hashed source over again, and it is most of what a session opens.

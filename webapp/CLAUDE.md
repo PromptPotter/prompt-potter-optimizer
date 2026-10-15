@@ -7,14 +7,14 @@ Next.js + React + TypeScript, static export at `out/` mounted at the domain root
 The rules a change here breaks most often. Each names the section that states it.
 
 - Never compute a score, ordering or mask → § Scoring authority
-- One source per data class → § Display-data sources
-- One address, `viewedPath` → § Viewed identity — one address (CyclePath)
-- Classify a failure, never bucket it; one hook per direction — `useRead`, `useCommand` → § Failure handling — classify, don't bucket
+- One source per data class → [`lib/CLAUDE.md`](lib/CLAUDE.md) § Display-data sources
+- One address, `viewedPath` → [`lib/CLAUDE.md`](lib/CLAUDE.md) § Viewed identity — one address (CyclePath)
+- Classify a failure, never bucket it; one hook per direction — `useRead`, `useCommand` → [`lib/CLAUDE.md`](lib/CLAUDE.md) § Failure handling — classify, don't bucket
 - No hand-rolled primitive; teaching prose is never `title=` → [`components/CLAUDE.md`](components/CLAUDE.md) § Component conventions
 - The masthead owns "where is this run"; no pane repeats it → [`components/CLAUDE.md`](components/CLAUDE.md) § Component conventions
-- Barrel order IS the cascade → § Stylesheet organization (cascade order is load-bearing)
-- No raw px for type or space, no new breakpoint → § Stylesheet organization (cascade order is load-bearing)
-- A wire type is generated, never written → § A wire shape is GENERATED — never hand-declared
+- Barrel order IS the cascade → [`app/CLAUDE.md`](app/CLAUDE.md) § Stylesheet organization (cascade order is load-bearing)
+- No raw px for type or space, no new breakpoint → [`app/CLAUDE.md`](app/CLAUDE.md) § Stylesheet organization (cascade order is load-bearing)
+- A wire type is generated, never written → [`lib/CLAUDE.md`](lib/CLAUDE.md) § A wire shape is GENERATED — never hand-declared
 
 ## Owned elsewhere
 
@@ -25,9 +25,17 @@ Each rule binds this layer but is stated by the file governing the artifact it c
 - **Visual identity and copy register** — owned by [`BRAND.md`](../../promptpotter-web/BRAND.md) in the sibling site repo (`runfish5/promptpotter-web`); never introduce a parallel design spec, tokens doc or theme-decision file, and read every value as `var(--…)`.
 - **What `dashboard.json` guarantees its readers** — owned by [`../promptpotter/infrastructure/CLAUDE.md`](../promptpotter/infrastructure/CLAUDE.md) § Persistence; poll it and trust it, never reconstruct a served field from a second source.
 - **Which model a new field lands on to reach a panel** — owned by [`../docs/developer/adding-a-surface.md`](../docs/developer/adding-a-surface.md) § 3; a panel reading a field no writer sets is the half-wiring that recipe exists to prevent.
-- **The lineage tree — forks, crowns, θ** — owned by [`../promptpotter/infrastructure/CLAUDE.md`](../promptpotter/infrastructure/CLAUDE.md) § The lineage tree; this layer renders what `/tree` serves and derives no lineage of its own.
+- **The lineage tree — forks, crowns, θ** — owned by [`../promptpotter/infrastructure/store/CLAUDE.md`](../promptpotter/infrastructure/store/CLAUDE.md) § The lineage tree; this layer renders what `/tree` serves and derives no lineage of its own.
 - **The check list this layer's gate runs** — owned by `scripts/gate.py`; run `python scripts/gate.py --web`.
 - **Where a distributor's brand values come from** — owned by [`../deploy-linux/README.md`](../deploy-linux/README.md) § Running it under your own name; a new `lib/brand.ts` field is unreachable until `deploy-linux/brand-env.sh` exports its `NEXT_PUBLIC_*`.
+
+## Subdirectory contracts
+
+| Subdirectory | Owns | CLAUDE.md |
+|---|---|---|
+| `app/` | The stylesheet barrel, tokens, overflow and box sizing. | [`app/CLAUDE.md`](app/CLAUDE.md) |
+| `lib/` | Display-data sources, generated wire types, the viewed address, polling, failure handling, brand. | [`lib/CLAUDE.md`](lib/CLAUDE.md) |
+| `components/` | Layout tiers, primitives, component conventions, render-cost guards. | [`components/CLAUDE.md`](components/CLAUDE.md) |
 
 ## Scoring authority
 
@@ -40,74 +48,6 @@ Shapes this layer must not introduce, each of which arrives looking reasonable:
 
 The pure helpers in `lib/derivations/*` are not an exception: they group, lay out and format served data, and introduce no number that was not already on the wire.
 
-## Stylesheet organization (cascade order is load-bearing)
-
-All CSS lives under `app/styles/`, imported by the ordered barrel `app/styles/index.css` — the only stylesheet `app/layout.tsx` imports. Lightning CSS inlines those `@import`s into one sheet, so **the barrel order IS the cascade**: a rule moved between files must keep its relative order in it. **Every `components/ui/*.module.css` sits in `@layer ui`**, so an unlayered call-site class beats a primitive default; the `*` reset sits in `@layer ui.reset` beneath them. Never reintroduce a `globals.css`. `foundation/` (whitelabel-safe skeleton) imports first, `domains/` (one file per feature, each with its co-located `@media`) after, the two cross-cutting tail files last so their overrides win.
-
-Component-specific rules belong in their domain file, or a co-located `*.module.css` once the component is refactored. A new `@media` breakpoint reuses a `--bp-*` token; a novel value is a deliberate act, read in the diff. **Type, space and COLOUR come from tokens, never a literal** — `--text-*`, `--space-*` and the hues in `foundation/tokens.css`, the space scale fluid above its smallest steps so a phone contracts without a media query. Greys are exempt: a wash has no hue to name. **Nothing enforces this** — shape scans are excluded by [`../tests/CLAUDE.md`](../tests/CLAUDE.md), axis 1; Stylelint is the admissible replacement. A categorical chart takes its Nth ink from `theme.ts` — `seriesColor` for a `<canvas>`, `seriesVar` everywhere else — never a local array. **Only a `<canvas>` needs `getCss` to resolve a token** — inline SVG and `style={{}}` read `var()` off the cascade and repaint on a theme flip, so a theme-tick beside one is apparatus for nothing. It reaches inline `style={{fontSize}}` in TSX too. Three exceptions: the `16px` on a touch text input (iOS focus-zoom; a token merely equal to 16 today would take the suppressor with it); sub-4px hairlines, which are tile-grid geometry; and `fontSize: 0`, which hides text.
-
-**A box states no width or height of its own**: `.box-grid` lays boxes in columns no narrower than `--box-min`, unbounded content scrolls under `--box-scroll-max`, a chart is `--chart-h` tall; `--reading-measure` caps PROSE, never a box.
-
-**`overflow:hidden` on a wrapper whose content can outgrow it DELETES that content** — silently: every screenshot reads as a clean layout. Wrappers that can overflow take `overflow-x:auto`; a fixed width takes `min(…,100%)`, since `max-width:100%` cannot beat a larger `min-width`. **A `viewBox`'d SVG at `width:100%` fails the same way, harder to see** — it *scales*, so a strip built for N nodes compresses until the labels collide. Give it its intrinsic width and let a wrapper scroll — and where it must fit a narrower box, shrink the GEOMETRY and stop printing the text (`forest-layout::Density`, `ROOMY` vs `DENSE`). Never the scale. Width, clipping, scaling: none is caught statically.
-
-State classes compose with `cx()` (`lib/cx.ts`) — `cx("hs-cell", folded && "folded")` — never a template string.
-
-## Display-data sources
-
-The surfaces in this table back the dashboard. **Read from the right one, and pick one source per data class**.
-
-| Surface | Reached by | Holds |
-|---|---|---|
-| `dashboard.json` | `lib/poll.tsx` → `useCycleStream()` | in-flight `current_round` + `rounds[]` completed summaries. **Sole source** for FitnessChart, TrendChart and the masthead's chip row — its BEST (the served `run_standing` pair, selection against origin), its STATE, BENCH, ROUNDS and SPEND |
-| `/tree` | `lib/lineage.tsx` | the served genealogy, `course → candidate → course` at any depth |
-| `/campaigns/{id}/cycles/{id}/rounds/{n}` | `lib/hooks/useRound.ts`, lazy | the round, whole — per-sample results, scoreboard, closing OSP — folded off the cycle's ledger, so a fork answers for the rounds it inherited; `rounds/round_NNNN.json` is its checkout and no surface fetches it |
-| the AUDIT TWIN `/campaigns/{id}/cycles/{id}/rounds/{n}/audit` | `lib/hooks/useRoundNodes.ts`, lazy | the per-node LLM I/O, which lives ONLY here |
-| `/datasets/{name}/cells` | `lib/hooks/useCells.ts` — shared through `lib/hard-samples.tsx`, or read by a narrowed `MeasurementsPane` preset | the MEASUREMENT LOG of one scope: the ranked samples, the candidates and every measured cell, the live round merged once on the server. **Sole source** for the hard-samples strip, the preview window and every list of measured cells; one answer opens off `/cells/{answer}` |
-| `/campaigns/{id}/pipeline?at=` | `lib/hooks/useConnector.ts` → `ConnectorProvider`, keyed on `(campaign, cycle, at)` | the campaign's resolved pipeline — node graph, per-param `value` + `source`, `options` + `permitted`, served `reach`, the output contract RESOLVED at `at`, model capabilities. **Sole source** for every config row, model chip, lock glyph, reach ring and provenance badge. A CHECK-IN rides `StaticConnectorProvider` and the campaign LIST reads `CampaignSummary.runs_with` — each a second TRANSPORT of the same answer, never a second source to overlay, merge or diff against (`frontend-surface-contract.md::I9`) |
-
-The rules, none of them derivable from the surfaces themselves:
-
-- **A "merge in-flight with historical" or "fall back to the round file when the dashboard hasn't written X yet" branch is the stitch pattern this section exists to prevent.** Where two genuinely are ONE series — the hard-samples dots — the SERVER merges them and the client still reads one source.
-- **Take a WHOLE candidate row from whichever half has it, and choose the half ONCE.** Never fill one in from the other per field, which puts a bar and its whisker on two different polls.
-- **One served pipeline resolution, addressed by campaign — no call site may choose its own source.** **A prop may name WHICH campaign/round to read; it may never name WHERE to read from.** Provenance is served per param (`source`), so a badge or a fold computed as a client-side diff against a dataset default is the drift — `frontend-surface-contract.md::I9` is the invariant.
-- **ONE band per CHANNEL, and no scale field.** A per-BAR scale must not come back — a band rescaled onto a bar that did not produce it goes silently undrawn. Both bands are 95%, because two whiskers drawn alike have to mean alike.
-- **A bar-chart channel is declared ONCE**, in `components/candidates/series.ts`. Never a bare string literal joined back into a plugin.
-- **An arm's key is its served `reading.arm` — `(round, label)` — never a live `candidate_id`.** A candidate has no lineage id until it is scored, so joining on one resolves every closed round and no live one.
-- **`id` alone is NOT a key — the address is `(path, id)`.** A supersede leaves the retired side on the timeline and a repair re-measures without re-minting, so both sides can share a `candidate_id`. Key rows on `nodeKeyOf`, and split with `splitRetired` into one collapsed row per branch.
-- **`reading.election.selected: false` says nothing on its own** — a round that HELD reads exactly like one still scoring, so ask `reading.election.held`. `pickWinner` has no first-candidate fallback and must not grow one.
-- **The SIDEBAR's campaign row reads `/cycles`, not the tree**, following the served successor POINTER `index.json::superseded_by`. A pointer rather than a status, because a parent that had already stopped for its own reason cannot also say "rebased" without destroying its real `stop_reason`.
-- **Two axes, kept apart.** NAVIGATION (`workspace::viewedPath` + `viewedCandidateId`) is written ONLY by the sidebar; INSPECTION (`SelectionContext.candidate`) by a bar click. **A bar click never navigates** — one slot for both makes the chart its own input. A selection is MINTED by `selectedCandidateOf` and nowhere else.
-- **The audit twin selects on `round === current_round.round`, not on "has this round closed"**: the twin is flushed AT close, so the escalation calls that fire next land only in the live block. `useRoundNodes.ts` is the single resolver; never split that switch.
-
-## A wire shape is GENERATED — never hand-declared
-
-**Every response type comes from `lib/api/types.generated.ts`**, emitted by `scripts/build_ts_types.py` off the Pydantic model and held current by the gate's `ts-types` check; a hand-written interface drifts behind its model with every gate green. To add a shape: register the model in that script's `EXPORTED_MODELS`, regenerate, re-export it from `lib/api/types.ts`.
-
-**The allowed escapes are narrow.** A route with no `response_model` has nothing to generate from, so its shape stays hand-written *and says so* (`lib/types/pipeline.ts::PipelineDoc`, the `/optimizer-pipeline` envelope — its `view` half IS generated, never hand-mirrored). And a narrow alias is **derived**, never re-declared — `export type ActivityWindow = ActivityResponse["window"]` reads the closed set back off the generated interface. Re-typing the members is the thing this rule forbids.
-
-**A closed set belongs on the server.** If you find a union declared only in TypeScript, that is the bug — the only named version of it lives here and nothing can catch a rename.
-
-**`lib/api` is write modules plus one read module, not one file.** `errors.ts` (`throwApiError`, `mintIdempotencyKey`, `IngestApiError` — it lands first; the others throw through it) · `commands.ts` (the closed-set `/commands/{kind}` highway) · `ingest.ts` (the writes that CREATE what a command later addresses) · `account.ts` (per-user identity, which is why it is not a command). `reads.ts` stays whole: it is one job.
-
-## Viewed identity — one address (CyclePath)
-
-**"What am I looking at?" has ONE answer — `viewedPath`, and no surface may keep a second.** It is a **`CyclePath`** (`lib/ids.ts`): the chain of `(campaign, cycle)` hops from top-level root to leaf, mirroring the engine's re-entrant `.promptpotter/.inner/` sandbox. `lib/workspace.tsx` owns it as `pinnedPath` + `following`, with `viewedPath` derived. Drilling in is `drillInto(campaignId, cycleId)` (the workspace appends the hop; callers just name a run), backing out `backToOuter()`.
-
-**Navigation POLICY has one owner and one entry — `workspace.tsx::navigate(path, opts)`.** What a move does beyond the address — resuming where a campaign was left (`resume`, the campaign list's own), sending a check-in to Chat, returning from a workspace view, leaving the phone's list screen — is decided there, and `openView` is the one place a view switches. A surface names where to go and reads `useWorkspace()` itself; a navigation callback handed down from the shell is a second owner. What the workspace does NOT hold is the registry: `/cycles` × `/campaigns` and their one `buildForest` join are `lib/registry.tsx`'s, read by the surfaces that list campaigns.
-
-**Everything that DISPLAYS re-roots to the LEAF hop; only conversation identity stays on the ROOT.** Leaf: the dashboard stream, connector/pipeline hero, hard-samples panes, chat activity feed, and the selection axes (`SelectionProvider` keyed on `leafCycleId`). Root: ingest/compose-new-campaign and Files — so drilling in never mints a thread or moves ingest off the outer conversation. Leaf ids derive at the consumer (`pathLeaf`); `useLeafIsL4` is likewise the workspace's single answer rather than a per-surface lookup. **A command is addressed like a read: by the whole path** (`lib/api/commands.ts::cycleAddress`). Whether a verb acts on an inner run is the server's answer and its sentence (`payloads.py::CyclePayload.inner_refusal`), so no surface re-targets a verb onto the root hop or disables one with a reason of its own.
-
-**Deep-link carries the WHOLE address, and it lives in the HASH** — `lib/address.ts` owns the syntax (`#/c/<campaign>/<cycle>/<tab>/k/<candidate>/t/<offset>`, `#/account/<pane>`), `lib/workspace.tsx` is its sole reader and writer. The replayed MOMENT (`at`, an offset in the viewed leaf's ledger) is part of it, stamped with the path it is an offset into so it lapses when the view moves; every read OF that address takes it from `workspace.tsx::useMomentAt` — the dashboard, a round, the cycle-scope cells, and the campaign's tree, which the server cuts family-wide at that instant — and the ray never does, being the axis the moment is picked on. The hash rather than the path because the app is `output: "export"` behind `StaticFiles(html=True)`: there is no SPA fallback, so a real route would 404 on reload. Three parts, all required: the PATH; the CANDIDATE, because a FORK's parked node names nothing without it (same reason DESELECTING returns to the course whose TIMELINE it renders on, never to its own path with a null candidate); and the VIEW. Malformed → the view is left alone, never reset. The cycle's universal `cycle_` prefix is stripped there and nowhere else — `ids.ts::encodeCyclePath` is also the server's `?descend=` wire format and stays byte-exact.
-
-## Polling shape
-
-**One clock.** Every polled read is a `useRead` with `intervalMs`, registered on the one beat in `lib/read-cache.ts`: a watch is due on wall-clock multiples of its own interval, so two reads on one cadence cannot drift, and a hidden tab stops the beat. **One invalidation** — `invalidateReads(name?)` — is what a landed command, a phase change and a returning tab all call; a counter threaded into a hook to force a re-read is a second one. Four rules bind beside it:
-
-- **ONE tree per campaign, fetched ONCE and ADDRESSED into — never a second genealogy read.** The server's recursion already reaches every fork and inner run, so a leaf surface addresses into it: a masked body is a strict **superset**, and a per-cycle row meets its node on `reading.arm`, carried through the timeline renumber for exactly this. Ask the tree.
-- **`/ray` is the CHRONOLOGY, not a second tree.** The tree answers *what descends from what*, the ray *what happened when* — a fork's records interleave with its parent's. Server-side they share one family walk, so they cannot disagree about which cycles a campaign holds.
-- **A ray item and an SSE frame arrive READ** — `RayItem.activity` is one record's line, `ProjectionEnvelope.activity` the run's current state, both from `promptpotter/domain/activity.py::ActivityFeed`. The browser translates no record, folds no stream and reads no frame's `payload`; a line that reads wrong is fixed there.
-- **Exactly one live channel (`useCycleEvents`) and one history channel (`/ray`).** The ray gets no SSE join and the tail no `since=`; either would be a redundant mechanism, and the ledger mtime bumps on every append, so the conditional poll surfaces a new event within one tick anyway.
-
 ## The chat thread — rendered, never authored
 
 Three rules a plausible edit undoes. Positioning and the open conversational endpoint are [`../docs/specs/chat-foundation.md`](../docs/specs/chat-foundation.md)'s; these are the implementation half.
@@ -115,24 +55,6 @@ Three rules a plausible edit undoes. Positioning and the open conversational end
 - **The imprint is the generic `step`.** Everything the Potter *does* — an optimizer LLM call, a web search, a code execution, an MCP call, a backend match — is one `step`: icon + label + status + optional duration/cost. A new `ProjectionKind` reads into that same family; **no new item kind.** `candidate` and `round` are the optimizer specialization layered on top, and they are what a reusing team deletes (`components/chat/README.md`).
 - **Activity and decision items are rendered, never authored by the client** — message items are the only ones the operator and assistant write, and that line is what keeps the thread honest. **One deliberate crossing:** a run that has ENDED is neither, so the client freezes a snapshot of *served values* into the list as a `run` item. Values rather than a pointer, because `resume` re-animates `dashboard.json` and `resume --from N` rewrites the round files beneath it.
 - **A non-item is not the same as discarded.** `sample_order` yields no item, but `LiveDashboardProjection` absorbs it to `declared_sample_order`, and that one served copy drives the run card's "next in line" (the served `dash.walk`) — the stream carries no second one to read off a frame. A *declared* order, never a promise: PoBB can stop a candidate before its tail is reached, so no surface may word it as "will".
-
-## Failure handling — classify, don't bucket
-
-**Every read rides `lib/hooks/useRead.ts`** — one keyed hook owning the gate, the abort, the auth idle, `reportIncident` and the tagged `idle | loading | ready | failed` a caller branches on; `intervalMs` is its polled form, and a hand-rolled `useEffect` fetch beside it is a second mechanism. **A read is NAMED by its descriptor** — one `{ id, load }` builder per endpoint in `lib/api/reads.ts`, and no fetch for that endpoint anywhere else. Every instance holding the same `id` shares one flight, one last body and one clock (`lib/read-cache.ts`), so a remount paints at once and revalidates behind it, and two call sites share a read by calling the same builder rather than by spelling a key alike.
-
-**Every write rides `lib/hooks/useCommand.ts`**, for the same reason in the other direction: `slot.run(verb, send, then?)` owns the double-submit guard, the pending mark, `onAuthError`, `reportIncident`, the classified sentence and the `invalidateReads()` that follows a landed write. It NEVER throws, never retries, and never reports an address gone — a write's 404 is a missing capability. The caller keeps only its own: which subject, whether the control is enabled, the confirmation, the success side effect. The operator sentence is `operatorMessage(e, kind)` (`lib/api/errors.ts`), one per kind — rendering `err.message` is the I2 violation.
-
-**A bare `catch` is the bug.** Every failure, read or write, is classified once at the transport seam by `failureKind(err)` (`lib/api/client.ts`) into `transient | auth | gone | denied | invalid`, and callers branch on that, never on a status literal. Both seams throw one family — `IngestApiError` IS an `ApiError`; a write error class outside it classifies as `transient` at every status. `transient` is the safe default — 5xx, network and parse errors all land there — because the directions are asymmetric: mistaking transient for `gone` destroys the operator's view, the reverse costs one retry.
-
-**A pending state is a CLAIM that a read is coming — so whatever marks the read started must be the same condition that issues it.** A claim whose fetch no-ops (e.g. waiting on a dataset name from a later read) reports "loading" forever, and `transient`/`invalid` cannot catch it: there is no failure to classify. Guard the claim and the fetch with one value, and release the mark in the effect's own CLEANUP — "on every abort path" is not enough while the release is async: cleanup runs before the next effect body, a `load`'s release a microtask after that body has already read the mark and returned.
-
-**`useRead`'s `survive` needs something to survive ON.** It keeps the last good read under an `invalid` and hands it back as `kept`, so the caller renders the failure as the operator's own input only where `kept !== null` — with nothing kept, `invalid` is a dead read like any other, and the message must not render inside a branch the missing data has switched off (`/evidence` 400s on a selection with no scored rows). One status, two meanings: the kind alone cannot tell them apart.
-
-**`gone` (404) is terminal and must stop the poll.** One owner acts — `workspace.tsx::reportAddressGone` unpins and resumes following — and **only the address's own authoritative read may report it**: list membership is not an existence test (`frontend-surface-contract.md::I7`).
-
-The detector is the dashboard poll, the one read that speaks for the address: its route answers `warming_up` at 200 for a cycle still at check-in, so a 404 there means the cycle dir itself is gone. `useRead` confirms it over `GONE_CONFIRM_LIMIT` consecutive misses (a single 404 is a mint race), stops that read's clock and calls its `onGone`. Everyone else reacts locally without voting — notably `useCycleEvents`, whose `EventSource` **cannot see a status** and would auto-reconnect a 404 forever, so it subscribes only while the address is live.
-
-**Every failure is reportable, and carries ids only.** `lib/diagnostics.ts` records each with the `error_id` the API stamps on its envelope (I7), localStorage-backed so it survives the reload the bug provokes. **Never** measurements or prompt text — the same rule `view-memory.tsx` states.
 
 ## State reset on prop change
 
@@ -151,17 +73,6 @@ It runs **during render**, so the reset and the re-render commit together — no
 **A reset may SEED from view memory instead of clearing** — `lib/view-memory.tsx`, one localStorage record per campaign with TTL and LRU applied in the codec so no caller can forget them. It is `useSyncExternalStore`-backed, so a restore rides the same render-phase reset rather than a post-paint effect. **A DISPLAY preference is not view memory** and must not be filed there: it is per device and permanent, so it rides `useLocalStorage` under one named key (`lib/theme.ts`, `lib/tree-prefs.ts`) and expires with neither the TTL nor the LRU. Nor is it a `UserSettings` field — no server logic reads how this browser draws.
 
 **Nothing in that record is a measurement, and that is a hard rule** — ids, flags and UI keys only. The NAVIGATION axis (`viewedPath` + `viewedCandidateId`) is remembered — every field in it is an id. The INSPECTION axis (`SelectionContext.candidate`) is ids and a label too, and is not remembered: nothing restores it yet. A scoring or sample-set mask is excluded for the same reason: restoring one silently means the operator reads masked numbers as the record.
-
-## Render-cost guards (do not regress)
-
-Per-poll re-renders cascade through the chart tree by default. **Any chart consuming `dash` is `React.memo`-wrapped with its `useMemo`s keyed on the narrowest stable derivation** (`dash?.rounds`), never on `dash` itself. Two consequences:
-
-- **Geometry keys on STRUCTURE, live values ride outside it.** The forest and dendrogram layouts memo on the served `tree` + `expanded` set, not `dash` identity. The per-candidate overlays (`valueByKey` / `thetaByKey`) sit deliberately outside that memo, so a per-sample tick repaints node text without re-flowing geometry. Don't fold a live value into the structure.
-- **Anything riding the chart's `options` memo must be a stable identity.** `onSelect` / `onGeometry` are `useCallback`s: an inline arrow there defeats the memo *and* forces a `chart.update()` on every poll tick.
-
-## Brand identity / "About this unit"
-
-`lib/brand.ts` is the single source of brand identity, each field `NEXT_PUBLIC_*`-overridable for whitelabel, feeding the Web App Manifest, the schema.org JSON-LD, and the Account → "About this unit" pane. Version is server-owned (`APP_VERSION`), read live from `/api/v1/health`. **Never render a "verified" state while `BRAND.verification` says `self-declared`.**
 
 ## Testing posture
 

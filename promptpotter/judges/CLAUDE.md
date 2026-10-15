@@ -193,7 +193,7 @@ silently is how `NOT_ATTEMPTED` becomes a zero that flatters an evasive model.
 key, no plugin shadowing a built-in, a broken plugin fatal, `judge_origins()` as the audit surface.
 A built-in is a `_BUILTIN` row rather than a walked module because one module declares several
 judges; the table completes where the connector table does
-([`../application/CLAUDE.md`](../application/CLAUDE.md) § Subpackages). The reasoning, and the
+([`../application/initialization/CLAUDE.md`](../application/initialization/CLAUDE.md) § Registries complete). The reasoning, and the
 trusted-code boundary, are owned by [`../connectors/CLAUDE.md`](../connectors/CLAUDE.md) §§
 Registering a connector · A connector is trusted code.
 

@@ -54,7 +54,9 @@ def main() -> int:
         out_path = directory / "resolved_schemas.json"
         # `ensure_ascii=False`: escaped prose cannot reproduce the committed output byte for byte.
         out_path.write_text(
-            json.dumps(resolved, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+            json.dumps(resolved, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+            newline="\n",
         )
         print(f"wrote {len(resolved)} schemas to {out_path}")
     return 0

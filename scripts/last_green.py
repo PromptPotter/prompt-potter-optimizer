@@ -16,7 +16,7 @@ REPO = Path(__file__).resolve().parents[1]
 # No prose is among them, so a docs edit reruns nothing that only RUNS the engine.
 ENGINE_RUNTIME = ("promptpotter/", "datasets/", "examples/", "pyproject.toml", "uv.lock")
 OFFLINE_RUN = "offline-run"
-OFFLINE_RUN_READS = (*ENGINE_RUNTIME, "scripts/offline_run.py", "scripts/kept_verdict.py")
+OFFLINE_RUN_READS = (*ENGINE_RUNTIME, "scripts/offline_run.py", "scripts/last_green.py")
 
 
 def reads(rel: str, prefixes: Sequence[str]) -> bool:
@@ -25,8 +25,8 @@ def reads(rel: str, prefixes: Sequence[str]) -> bool:
     return rel.startswith(inside) or bool(outside and not rel.startswith(outside))
 
 
-class KeptVerdicts:
-    _STORE = REPO / ".gate_cache" / "green.json"
+class LastGreen:
+    _STORE = REPO / ".gate_cache" / "last_green.json"
     # What `npm ci` leaves naming the tree it installed: whether the install still matches the lock.
     _INSTALLED = ("webapp/node_modules/.package-lock.json",)
 
@@ -39,7 +39,7 @@ class KeptVerdicts:
         self._tools = hashlib.sha256("\0".join(tools).encode()).digest()
 
     @classmethod
-    def open(cls) -> KeptVerdicts | None:
+    def open(cls) -> LastGreen | None:
         """``None`` under ``CI``, and where git cannot list the tree: a key over no files matches every tree."""
         if os.environ.get("CI"):
             return None
@@ -79,22 +79,26 @@ class KeptVerdicts:
             digest.update(rel.encode() + b"\0" + self._hash(rel))
         return digest.hexdigest()
 
-    def _kept(self) -> dict[str, str]:
+    def _load(self) -> tuple[dict[str, str], dict[str, int]]:
         try:
-            kept: dict[str, str] = json.loads(self._STORE.read_text(encoding="utf-8"))
+            stored = json.loads(self._STORE.read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            return {}
-        return kept
+            return {}, {}
+        return stored["green"], stored["rss_mb"]
 
     def holds(self, name: str, key: str) -> bool:
-        return self._kept().get(name) == key
+        return self._load()[0].get(name) == key
 
-    def record(self, verdicts: Mapping[str, str | None]) -> None:
-        kept = self._kept()
-        for name, key in verdicts.items():
-            if key is None:
-                kept.pop(name, None)
-            else:
-                kept[name] = key
+    def peak_mb(self, name: str) -> int | None:
+        return self._load()[1].get(name)
+
+    def record(
+        self, verdicts: Mapping[str, str | None], peaks_mb: Mapping[str, int | None] = {}
+    ) -> None:
+        green, peaks = self._load()
+        stored = {
+            "green": {n: k for n, k in {**green, **verdicts}.items() if k is not None},
+            "rss_mb": {n: p for n, p in {**peaks, **peaks_mb}.items() if p is not None},
+        }
         self._STORE.parent.mkdir(exist_ok=True)
-        self._STORE.write_text(json.dumps(kept, indent=1, sort_keys=True), encoding="utf-8")
+        self._STORE.write_text(json.dumps(stored, indent=1, sort_keys=True), encoding="utf-8")

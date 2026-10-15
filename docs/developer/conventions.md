@@ -51,7 +51,8 @@ collects everything else.
 - **A `CLAUDE.md` is billed to every session beneath it, so it holds rules binding a set of
   symbols** — mechanism goes to the module docstring, an incident to the commit body, and the
   Recompute Test in [`../CLAUDE.md`](../CLAUDE.md) § Editing a doc applies to these files too. No
-  page grows past `scripts/gate.py::_INSTRUCTION_MAX_WORDS`; one that reaches it is trimmed or split.
+  page grows past `scripts/gate.py::_INSTRUCTION_MAX_WORDS`, and no chain — every `CLAUDE.md` that
+  auto-loads in one directory — past `_INSTRUCTION_CHAIN_MAX_BYTES`; one that reaches it is trimmed or split.
 - **A cut fact has a DESTINATION, and the ladder is priced by who pays.** A line
   in a hot module is billed to every future session that opens it, needed or
   not, so a fact goes to the cheapest rung that still reaches the reader who
@@ -86,9 +87,8 @@ collects everything else.
   `state.py` ×2, `base.py` ×2 and `shared/identity.py` keep their names. **Verify rather than
   trust this line:** a genuine clash produces an `import … as` between two COLLIDING modules, and
   the `import … as` forms that do exist rename a generic name away from a local binding — the
-  opposite evidence. Re-open only for a name whose own package cannot resolve it. The two failures that ARE
-  renames — a second word for something the repo already names, and a name that stopped describing
-  its contents — are owned by root [`CLAUDE.md`](../../CLAUDE.md) § STOP.
+  opposite evidence. Re-open only for a name whose own package cannot resolve it. **The failures that ARE renames** —
+  owned by root [`CLAUDE.md`](../../CLAUDE.md) § STOP.
 - **Four banned words**, in identifiers and prose alike. **node** — never
   "building block", never "service". **eval** — use loop / round / scoring /
   fitness (the `Evaluator` class is the sole exception). **legacy** — either the
@@ -128,7 +128,7 @@ collects everything else.
   reads back as `RoundResult`, `dashboard.json` as its projection model — then direct field access is
   the natural reading, not an aspiration defended by `.get()`/`isinstance` at every key. A dict
   walk survives only in a cross-cycle SURVEY that must outlive one corrupt neighbour
-  (`read_json_tolerant`, infrastructure `CLAUDE.md` § Picking a JSON reader). Converting an
+  (`read_json_tolerant`, `infrastructure/store/CLAUDE.md` § Picking a JSON reader). Converting an
   existing walk is standing maintenance: do it when you touch the module.
 - **String-keyed *call* dispatch is a defect** — it hides the caller→handler
   edge from `grep`, so "is this method live?" costs a multi-hop tour.
@@ -175,14 +175,15 @@ helpers used by one caller **in the same file**.
 ## Tests
 
 - **Subtractive.** Each guards a named invariant. No volume tests, ≤2–3
-  monkeypatches per test. See [`tests/CLAUDE.md`](../../tests/CLAUDE.md).
+  monkeypatches per step of a journey. See [`tests/CLAUDE.md`](../../tests/CLAUDE.md).
 - **Delete-don't-update.** When a contract is renamed/restructured, delete
   the old test and write a fresh one. Never port assertions.
 
 ## CLI / running
 
-- **Timeouts: 30s default for ALL commands.** Increase only when explicitly
-  told "ready for data collection".
+- **A foreground command gets 30 s.** Anything that needs longer — the gate, a build, a
+  campaign — is backgrounded and its notification awaited, never given a longer foreground
+  timeout or wrapped in `timeout N` (root `CLAUDE.md` `<wall-clock>`).
 - **A campaign launch is backgrounded and SUPERVISED, never fired and left** —
   stdout to a log under `.scratch/`. Which autonomy mode may launch one without
   asking is root [`CLAUDE.md`](../../CLAUDE.md) § Working principles.

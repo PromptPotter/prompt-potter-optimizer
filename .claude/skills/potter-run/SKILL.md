@@ -59,7 +59,7 @@ covered, re-read state from disk — that is what makes turn 0 and turn 100 the 
 
 Then **one line**: `mode · what's live · next action`. Nothing else before it.
 
-Reads happen by opening files; the read VERBS are the three whose reading is in no file — `evidence` (a comparison ACROSS subjects), `cycles` (run state, derived against the clock; `--inside <campaign>::<cycle>` lists an L4 inner run's) and `machine-status` (occupancy and the queue `cancel-queued` names a job from). Campaign detail lives in
+Reads happen by opening files; **the read VERBS** — owned by root `CLAUDE.md` § Commands; here `cycles --inside <campaign>::<cycle>` lists an L4 inner run's, and `machine-status` names the job `cancel-queued` takes. Campaign detail lives in
 `campaigns/<campaign_id>/{campaign.json,log.md}`, per-cycle detail in
 `cycles/<cycle_id>/{index.json,dashboard.json,log.md,readout.log,rounds/}`, per-round node I/O in
 `.runtime/cache/rounds/round_NNNN.json`. **Open JSON as UTF-8 explicitly** — a default read on

@@ -33,7 +33,7 @@ datasets/{name}/
 
 `load_dataset_node_overlay` → `configure_and_apply_pipeline()` (`promptpotter/application/pipeline_resolve.py`) merges the overlay onto each wire payload. **The dataset owns its task model** in `nodes.{node}.config.model` — every LLM node must declare one, or `configure_and_apply_pipeline` raises a loud setup error (no silent fall-through to the backend's own default).
 
-**`route_order` is the third key on that overlay, and only two of the three are locked.** `model` names WHAT answers, `provider` the GATEWAY it is asked through, and `route_order: [<host>, …]` which of that gateway's upstream HOSTS to try, in order (`nodes.{name}.config.route_order`; `current_config` carries it to `llm_call` untouched). Names are the gateway's own `provider_name` — read them off `served_by` in the ledger, never from a catalogue. **Which of the three the optimizer may search** — owned by [`../promptpotter/application/optimizers/potter/CLAUDE.md`](../promptpotter/application/optimizers/potter/CLAUDE.md) § The optimizer never searches the GATEWAY or the ROUTE; a dataset opens `model` by listing it in `optimizer.param_keys` and bounds it with `param_allowed_values.model` (absent ⇒ the whole `available_models` menu). Why an order pays at all: [`../promptpotter/infrastructure/CLAUDE.md`](../promptpotter/infrastructure/CLAUDE.md) § LLM client.
+**`route_order` is the third key on that overlay, and only two of the three are locked.** `model` names WHAT answers, `provider` the GATEWAY it is asked through, and `route_order: [<host>, …]` which of that gateway's upstream HOSTS to try, in order (`nodes.{name}.config.route_order`; `current_config` carries it to `llm_call` untouched). Names are the gateway's own `provider_name` — read them off `served_by` in the ledger, never from a catalogue. **Which of the three the optimizer may search** — owned by [`../promptpotter/application/optimizers/potter/CLAUDE.md`](../promptpotter/application/optimizers/potter/CLAUDE.md) § The optimizer never searches the GATEWAY or the ROUTE; a dataset opens `model` by listing it in `optimizer.param_keys` and bounds it with `param_allowed_values.model` (absent ⇒ the whole `available_models` menu). Why an order pays at all: [`../promptpotter/infrastructure/llm/CLAUDE.md`](../promptpotter/infrastructure/llm/CLAUDE.md) § LLM client.
 
 ## Registered datasets
 
@@ -67,7 +67,7 @@ The remaining work lives in ONE place — [`../docs/specs/l4-outer-loop.md`](../
 **Don't hand-edit it, and don't reason about origin cost from it.** It holds
 `{name, created_at, source_file, row_count, items}`, read into `session.samples` at wiring.
 **A file *here* is the SHIPPED bank; a fetched one is the operator's** — owned by
-[`../promptpotter/infrastructure/CLAUDE.md`](../promptpotter/infrastructure/CLAUDE.md)
+[`../promptpotter/infrastructure/store/CLAUDE.md`](../promptpotter/infrastructure/store/CLAUDE.md)
 § Dataset content has two tiers; nothing writes a bank into this directory. It is **not** an
 origin score cache: measurements
 live in the tenant-global content-addressed `measurements/` archive

@@ -21,7 +21,7 @@ operator instead of doing it themselves. The bar on any defect found while addin
 | Name | File | Wire shape | Session | Use |
 |---|---|---|---|---|
 | `termnorm` | `termnorm.py` | `{query, steps, node_config}` posted to `/matches` | `POST /sessions` handshake with terms array | TermNorm production backend |
-| `promptpotter` | `application/runner/inner/connector.py` — application machinery, so it lives there and the table loads it by name (`__init__.py::_APPLICATION_BUILT_INS`); nothing in this package imports `application/` | `{query, optimizer_prompt_overrides}` → in-process inner cycle (`in_process_run` → `runner/inner/spawn.py`) | Noop (no remote service) | Optimizer-of-the-optimizer (L4) |
+| `promptpotter` | `application/runner/inner/connector.py` — application machinery, so it lives there and the table loads it by name (`__init__.py::_APPLICATION_BUILT_INS`); nothing in this package imports `application/`; its rules are [`runner/inner/CLAUDE.md`](../application/runner/inner/CLAUDE.md)'s | `{query, optimizer_prompt_overrides}` → in-process inner cycle (`in_process_run` → `runner/inner/spawn.py`) | Noop (no remote service) | Optimizer-of-the-optimizer (L4) |
 | `dspy` | `dspy_module.py` | `{query, prompt, params}` → the caller's `dspy.Module` | Noop (no remote service) | PromptPotter as a DSPy `Teleprompter` (`presentation/teleprompter.py`) |
 | `harbor` | `harbor.py` | `{query, prompt, model, provider, agent_kwargs}` → one containerized Harbor trial (`in_process_run` → `Trial.create(...).run()`) | Noop (no remote service) | Tuning an agent that works in a sandbox, graded by the task's own verifier |
 | `dbllmbench` | `dbllmbench.py` | `{query, prompt, config}` → one `db-llm-bench` run of that question in a container (`in_process_run` → `docker run <runner_image>`) | Noop (no remote service) | Tuning the prompt of a query-writing benchmark whose harness executes the query and grades the result |
@@ -82,23 +82,6 @@ Sibling campaigns are sibling tasks each building their own client, so neither s
 What an inner cell spawns UNDER is not the workload: it names a cycle init has not minted yet,
 and moves every round.
 
-- **`promptpotter`** — `in_process_run` is a thin delegate to
-  `application/runner/inner/spawn.py::run_inner_cycle`, because running a whole inner campaign is
-  heavy orchestration and belongs in `application/runner`. Its graph is SERVED
-  (`pipeline_declaration`) off the manifest the panel's cells run, so no dataset mirrors a node.
-  What a change there must keep, each stated at its site:
-  - **The inner campaign runs in its own `asyncio.Task`** (`spawn.py::_run_inner_campaign`).
-    `_CYCLE_LEDGER` + `_CURRENT_ROUND` (`infrastructure/llm/telemetry.py`), `_ABORT_CHECK`
-    (`infrastructure/llm/send_pacing.py`) and the optimizer-prompt overrides are per-task
-    ContextVars: the child's COPY is how `_ABORT_CHECK` carries the outer's pause inward, and how
-    the outer L1's mutations reach the inner optimizer and never the outer's.
-  - **Sandboxes are a FLAT per-cycle registry** `<workspace>/.inner/<key>/`, never physically
-    nested (`infrastructure/store/layout.py`) — no active-pointer collision, no machine slot held,
-    and the recursion stays **re-entrant** at L5+.
-  - **The sandbox owner is `spawn_cycle_id`, the asker is the last of `enclosing`, and a fork moves only the asker**
-    (`spawn_context.py::retarget_inner_spawn`).
-  - One process, no networking; a localhost-endpoint worker mode would be a new `execution` value
-    with no core-loop edit.
 - **`harbor`** — `in_process_run` builds a `TrialConfig` and awaits Harbor's own
   `Trial.create(...).run()`; the container, the verifier and the reward file are all theirs, so
   this connector shapes payloads and reads a number rather than orchestrating anything. What it
@@ -264,7 +247,7 @@ it instead and is named in `__init__.py::_APPLICATION_BUILT_INS`, because **this
 nothing from `application/`** (`scripts/gate.py::_LAYERING`). `registered()` walks both, merges the
 `promptpotter.connectors` entry points and runs `_validate` over both, once per process.
 **The connector table completes at a declared step, never at import** — owned by
-[`../application/CLAUDE.md`](../application/CLAUDE.md) § Subpackages; nothing here may read the
+[`../application/initialization/CLAUDE.md`](../application/initialization/CLAUDE.md) § Registries complete; nothing here may read the
 table at module scope, and a check that must fail before a run spends is the connector's
 `completion_check`, which that step runs. A connector shipped from **another** package declares the entry point
 instead and touches nothing here ([`stable-api.md`](../../docs/developer/stable-api.md) §1).

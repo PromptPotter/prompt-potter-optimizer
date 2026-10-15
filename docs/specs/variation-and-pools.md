@@ -163,7 +163,7 @@ campaign-config field and no second overlay.
 
 **One served shape, drawn at three moments; the terminal reaches each.** Every element is a served
 field — the class tag, the pool roster, the grouping and the nesting are never derived in the
-browser — owned by [`../../webapp/CLAUDE.md`](../../webapp/CLAUDE.md) § A wire shape is GENERATED.
+browser — owned by [`../../webapp/lib/CLAUDE.md`](../../webapp/lib/CLAUDE.md) § A wire shape is GENERATED.
 
 - **Check-in — configuring.** Two regions, one draft: what is tested each round (the mix, as
   counts and a total) and the pools, each with its active subset and the variation nodes that draw

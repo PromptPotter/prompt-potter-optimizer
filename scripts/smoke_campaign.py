@@ -24,7 +24,7 @@ try:
 except ImportError:
     pass
 
-from promptpotter.application.campaign_config import load_campaign_config  # noqa: E402
+from promptpotter.application.campaign_config import CampaignConfig  # noqa: E402
 from promptpotter.application.datasets.authored import (  # noqa: E402
     dataset_campaign_path,
     read_campaign_config_file,
@@ -114,7 +114,7 @@ async def _run(args: argparse.Namespace) -> int:
         )
         return 4
 
-    campaign_config = load_campaign_config(
+    campaign_config = CampaignConfig.model_validate(
         _build_config(
             args.dataset,
             samples=args.samples,

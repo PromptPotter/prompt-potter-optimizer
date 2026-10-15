@@ -91,13 +91,16 @@ logs/
 
 # Local dev tools
 .claude/*
+!.claude/settings.json
+!.claude/digest.py
 !.claude/skills/
 .claude/skills/*
 !.claude/skills/potter-run/
 !.claude/skills/potter-self/
 !.claude/skills/potter-box/
+!.claude/skills/digest/
+!.claude/skills/serve/
 !.claude/hooks/
-.claude/hooks/doc_drift_ratio.py
 tools
 .playwright-cli/
 

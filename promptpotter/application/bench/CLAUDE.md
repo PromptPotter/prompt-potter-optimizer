@@ -1,5 +1,7 @@
 # application/bench/ — the harness every optimizer runs inside
 
+**An optimizer's own state rides `Cycle` opaque, as `working_state`, and its replay is its runtime's, never `resume_and_fork/`'s.** A member is handed `node_context` in the cycle's place, never the `Cycle`; every optimizer's child is admitted through `children` before a cell is bought; `difficulty` is the δ ruler any selector reads, a view over archive facts under an explicit scope.
+
 **The bench never imports an optimizer** — owned by [`../CLAUDE.md`](../CLAUDE.md) § Layer rule; nothing here reaches past `optimizers/__init__.py` and `optimizers/nodes.py`.
 
 ## Load-bearing

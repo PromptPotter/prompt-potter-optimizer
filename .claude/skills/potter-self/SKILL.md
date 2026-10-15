@@ -44,7 +44,7 @@ Cycle root: `.promptpotter/projects/{tenant}/campaigns/{campaign_id}/cycles/{cyc
 | 5 | `{cycle_dir}/dashboard.json` | Round-by-round composite trajectory + recent rules |
 | 6 | `{cycle_dir}/prompts/{node}.yaml` | Current `PromptTemplate` for each pipeline node — the *target* of L1's mutations (read-only here) |
 
-Reads happen by opening files; the read VERBS are the three whose reading is in no file — `evidence` (a comparison ACROSS subjects), `cycles` (run state) and `machine-status` (occupancy and the queue). The file tree is the dashboard.
+Reads happen by opening files; **the read VERBS** — owned by root `CLAUDE.md` § Commands. The file tree is the dashboard.
 
 ## Live-run supervision
 

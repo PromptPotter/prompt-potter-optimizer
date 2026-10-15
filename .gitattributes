@@ -1,13 +1,7 @@
-# Normalize all text to LF in the index so a generator's committed output is one byte shape
-# on every platform — otherwise a Windows `newline=None` write (CRLF) drifts against a CI
-# `git diff --exit-code` run on Linux, and only a local `core.autocrlf` hides it.
-* text=auto
-
-# A generator writes LF and its gate compares bytes, so its output is LF in every checkout.
-*.generated.* text eol=lf
-
-# Shell scripts must stay LF — CRLF breaks the `#!` shebang on Linux deploy boxes.
-*.sh text eol=lf
+# Text is LF in the index AND in every checkout, whatever `core.autocrlf` says: the editing tools
+# and the generators write LF, CRLF breaks a `#!` shebang on the Linux box and in `.githooks/`,
+# and a CRLF working copy makes every LF write a warning on every git call.
+* text=auto eol=lf
 
 # ALWAYS diff source, whatever the content sniffer decides. One NUL byte — used as a key
 # separator inside a template literal — made git call a whole hook file binary, so it stat-lined

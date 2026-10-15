@@ -24,6 +24,7 @@ import typing
 from collections.abc import Iterator
 from pathlib import Path
 
+import tests_owning
 from pydantic import BaseModel
 
 BASELINE = {
@@ -59,11 +60,15 @@ BASELINE = {
     # Function-local imports of the package's own modules.
     "deferred_imports": 6,
     # `CLAUDE.md` files under the package.
-    "claude_md": 10,
+    "claude_md": 21,
     # `tests/test_*.py` — `tests/CLAUDE.md` names what each one owns.
     "test_files": 6,
     # Test functions across them, each admitted through the charter's three axes.
     "test_functions": 153,
+    # Modules a test run imports: our own, followed through their module-level imports, plus
+    # each outside distribution's top name. A test that reaches the server app or an extra
+    # moves it as one function does not.
+    "test_reach": 404,
     # Every property of every schema the generated contract offers the browser.
     "served_fields": 1634,
 }
@@ -96,6 +101,33 @@ def _count_test_functions(files: list[Path]) -> int:
         for f in files
         for line in f.read_text(encoding="utf-8").splitlines()
     )
+
+
+def _count_test_reach(test_files: list[Path], graph: dict[str, set[str]]) -> int:
+    local = {p.stem for p in _TESTS_ROOT.glob("*.py")} | {"tests", "__future__"}
+    roots: set[str] = set()
+    for path in [*test_files, _TESTS_ROOT / "conftest.py", _TESTS_ROOT / "factories.py"]:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        name = tests_owning._module_name(path.relative_to(_REPO).as_posix())
+        roots |= tests_owning._import_names(tree, name, False, deferred=True)
+    reached: set[str] = set()
+    todo = list(roots)
+    while todo:
+        name = todo.pop()
+        if name in reached or name not in graph:
+            continue
+        reached.add(name)
+        parts = name.split(".")
+        todo.extend(".".join(parts[:i]) for i in range(1, len(parts)))
+        todo.extend(graph[name])
+    outside = {
+        top
+        for name in roots.union(*(graph[m] for m in reached))
+        if (top := name.split(".")[0]) not in local
+        and top != "promptpotter"
+        and top not in sys.stdlib_module_names
+    }
+    return len(reached) + len(outside)
 
 
 # What the browser is OFFERED — every property of every schema in the generated contract, so the
@@ -265,7 +297,7 @@ def _imports_own_package(node: ast.AST) -> typing.TypeGuard[ast.stmt | ast.expr]
     )
 
 
-def _source_counts(py_files: list[Path]) -> dict[str, int]:
+def _source_counts(py_files: list[Path], graph: dict[str, set[str]]) -> dict[str, int]:
     """The four counts read off source, in ONE parse and one walk per module.
 
     A deferred import counts once per function enclosing it, so a closure's import is charged to
@@ -280,7 +312,12 @@ def _source_counts(py_files: list[Path]) -> dict[str, int]:
         source = path.read_text(encoding="utf-8")
         lines = source.splitlines()
         in_domain = domain_root in path.parents
-        for node, depth in _nodes(ast.parse(source)):
+        tree = ast.parse(source)
+        name = tests_owning._module_name(path.relative_to(_REPO).as_posix())
+        graph[name] = tests_owning._import_names(
+            tree, name, path.name == "__init__.py", deferred=False
+        )
+        for node, depth in _nodes(tree):
             if isinstance(node, _Function):
                 args = node.args
                 annotations = [a.annotation for a in args.posonlyargs + args.args + args.kwonlyargs]
@@ -325,7 +362,8 @@ def compute_ledger() -> dict[str, int]:
 
     py_files = _package_files("*.py")
     init_files = [p for p in py_files if p.name == "__init__.py"]
-    source = _source_counts(py_files)
+    graph: dict[str, set[str]] = {}
+    source = _source_counts(py_files, graph)
     priced: collections.Counter[str] = collections.Counter()
     for runtime in optimizers.runtimes().values():
         priced.update(runtime.priced_surface)
@@ -351,6 +389,7 @@ def compute_ledger() -> dict[str, int]:
         "claude_md": len(_package_files("CLAUDE.md")),
         "test_files": len(test_files := _test_files()),
         "test_functions": _count_test_functions(test_files),
+        "test_reach": _count_test_reach(test_files, graph),
         "served_fields": _count_served_fields(),
     }
 

@@ -36,8 +36,8 @@ the smaller one alone. The compaction is good when the downstream task still suc
 
 ## Traces
 
-The compactor runs today as an operator-local script (`.claude/digest.py`, untracked, so a fresh
-checkout does not have it). Every call appends one row to a ledger beside it: the question, the
+The compactor is a session-side script (`.claude/digest.py`). Every call appends one row to a
+ledger beside it: the question, the
 worker's answer (the line ranges, or the digest text), a content hash per source with the source
 itself kept once, and the session's verdict (`enough` or `re-read anyway because …`). The ledger
 and the source copies are per-machine and never committed.

@@ -40,7 +40,7 @@ def main() -> int:
     if prior == content:
         print(f"{_OUT_PATH.relative_to(_REPO)} — up to date.")
         return 0
-    _OUT_PATH.write_text(content, encoding="utf-8")
+    _OUT_PATH.write_text(content, encoding="utf-8", newline="\n")
     print(f"{_OUT_PATH.relative_to(_REPO)} — regenerated.")
     return 0
 
