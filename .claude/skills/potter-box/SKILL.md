@@ -96,7 +96,8 @@ ssh potter-box 'bash -s -- restart' < .claude/skills/potter-box/open-termnorm.sh
 `BACKEND_DIR` is unset on this box, so TermNorm keeps its old code until this runs.
 
 ```bash
-ssh -t potter-box 'cd ~/potter/prompt-potter-optimizer/deploy-linux && ./update.sh'   # sudo prompts
+ssh -t potter-box 'cd ~/potter/prompt-potter-optimizer/deploy-linux && ./update.sh'           # sudo prompts
+ssh -t potter-box 'cd ~/potter/prompt-potter-optimizer/deploy-linux && ./update.sh v0.8.17'   # a release, by its tag
 ```
 
 Three things that cost time to learn:

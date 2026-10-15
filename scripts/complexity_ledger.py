@@ -29,7 +29,7 @@ from pydantic import BaseModel
 
 BASELINE = {
     # Every `.py` under the package.
-    "modules": 442,
+    "modules": 443,
     # Every `__init__.py` among them.
     "init_files": 55,
     # The `__init__.py` files that re-export names instead of staying empty.

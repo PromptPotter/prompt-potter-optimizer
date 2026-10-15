@@ -40,8 +40,8 @@ class LangfuseLogger:
         self.enabled = bool(
             enabled
             and settings.LANGFUSE_ENABLED
-            and settings.LANGFUSE_SECRET_KEY
-            and settings.LANGFUSE_PUBLIC_KEY
+            and settings.LANGFUSE_SECRET_KEY.get_secret_value()
+            and settings.LANGFUSE_PUBLIC_KEY.get_secret_value()
         )
         self.client = None
         self._trace_metadata: dict[str, Any] = {}
@@ -59,8 +59,8 @@ class LangfuseLogger:
                 from langfuse import Langfuse
 
                 self.client = Langfuse(
-                    public_key=settings.LANGFUSE_PUBLIC_KEY,
-                    secret_key=settings.LANGFUSE_SECRET_KEY,
+                    public_key=settings.LANGFUSE_PUBLIC_KEY.get_secret_value(),
+                    secret_key=settings.LANGFUSE_SECRET_KEY.get_secret_value(),
                     host=settings.LANGFUSE_HOST,
                 )
             except Exception:
@@ -392,7 +392,10 @@ class LangfuseLogger:
         if observation_id:
             body["observationId"] = observation_id
         url = f"{settings.LANGFUSE_HOST}/api/public/dataset-run-items"
-        auth = (settings.LANGFUSE_PUBLIC_KEY, settings.LANGFUSE_SECRET_KEY)
+        auth = (
+            settings.LANGFUSE_PUBLIC_KEY.get_secret_value(),
+            settings.LANGFUSE_SECRET_KEY.get_secret_value(),
+        )
 
         def post() -> bool:
             resp = httpx.post(url, auth=auth, json=body, timeout=30, verify=tls_context())

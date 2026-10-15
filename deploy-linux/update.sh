@@ -4,8 +4,10 @@
 # configured). Force-matches origin, so it never stalls on a diverged box —
 # tracked files mirror the remote; .env / runtime data are gitignored and survive.
 #
-#   ./update.sh
+#   ./update.sh            # the tracked branch's tip
+#   ./update.sh v0.8.17    # a tag, branch or commit on origin — a release deploy names its tag
 set -euo pipefail
+REF="${1:-}"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ -f "$HERE/deploy.config" ]] && source "$HERE/deploy.config"
@@ -36,7 +38,21 @@ source "$HERE/uv.sh"
 say()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 ok()   { printf '  \033[1;32m✓\033[0m %s\n' "$*"; }
 bad()  { printf '  \033[1;31m✗\033[0m %s\n' "$*"; }
-sync() { git -C "$1" fetch --quiet origin && git -C "$1" reset --hard --quiet "@{u}"; }   # mirror origin
+# The commit $2 names on origin after the fetch; a branch name is origin's copy, never the box's.
+resolve_ref() {
+  if [[ -z "$2" ]]; then git -C "$1" rev-parse --verify --quiet '@{u}^{commit}'; return; fi
+  git -C "$1" rev-parse --verify --quiet "refs/remotes/origin/$2^{commit}" \
+    || git -C "$1" rev-parse --verify --quiet "refs/tags/$2^{commit}" \
+    || git -C "$1" rev-parse --verify --quiet "$2^{commit}"
+}
+# Mirror ONE commit of origin and say which: a deploy that cannot name its commit cannot be checked.
+sync() {
+  local sha
+  git -C "$1" fetch --quiet --tags origin
+  sha="$(resolve_ref "$1" "$2")" || { bad "'$2' names nothing on origin — a tag, a branch or a commit"; exit 1; }
+  git -C "$1" reset --hard --quiet "$sha"
+  ok "$(basename "$1") at $(git -C "$1" describe --tags --always) ($(git -C "$1" rev-parse --short HEAD))"
+}
 
 # --- preflight: refuse the placeholder fallback -----------------------------
 # Without deploy.config, INSTALL_DIR defaults to a generic placeholder that
@@ -52,7 +68,7 @@ fi
 say "app: $INSTALL_DIR"
 self_sha() { sha256sum "$HERE/update.sh" 2>/dev/null | cut -d' ' -f1; }
 self_before="$(self_sha)"
-sync "$INSTALL_DIR"
+sync "$INSTALL_DIR" "$REF"
 # `sync` can replace THIS script, and bash keeps reading the descriptor it already opened — so the
 # remainder of the run is the PRE-sync copy, and every fix to this file lands one deploy late while
 # printing the old behaviour's output. Re-exec the new copy once, guarded against a loop.
@@ -115,7 +131,7 @@ systemctl cat "$BOT_SERVICE_NAME.service" >/dev/null 2>&1 && sudo systemctl rest
 # --- backend (optional): sync → deps → restart ------------------------------
 if [[ -n "$BACKEND_DIR" ]]; then
   say "backend: $BACKEND_DIR"
-  sync "$BACKEND_DIR"
+  sync "$BACKEND_DIR" ""   # REF names a commit of THIS repo; the backend rides its own tracked tip
   [[ -x "$BACKEND_DIR/.venv/bin/pip" ]] && "$BACKEND_DIR/.venv/bin/pip" install -q -r "$BACKEND_DIR/requirements.txt"
   [[ -n "$BACKEND_SERVICE" ]] && sudo systemctl restart "$BACKEND_SERVICE"
 fi

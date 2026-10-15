@@ -172,12 +172,15 @@ curl -I https://$PUBLIC_HOSTNAME/api/v1/health
 ## Updating later — one command
 
 ```bash
-cd "$INSTALL_DIR/deploy-linux" && ./update.sh   # deploy-linux lives inside the repo
+cd "$INSTALL_DIR/deploy-linux" && ./update.sh            # deploy-linux lives inside the repo
+cd "$INSTALL_DIR/deploy-linux" && ./update.sh v0.8.17    # a release: name its tag
 ```
 
-It mirrors origin, refreshes deps, rebuilds the webapp and restarts the app — plus the backend when
-`BACKEND_DIR` is set. Re-runnable, and it never stalls on a diverged box: tracked files are
-force-matched to origin while `.env` and runtime survive. Five things worth knowing:
+It mirrors origin — the tracked branch's tip, or the tag, branch or commit you name, printed as
+`git describe` before anything else moves — refreshes deps, rebuilds the webapp and restarts the
+app, plus the backend when `BACKEND_DIR` is set. Re-runnable, and it never stalls on a diverged
+box: tracked files are force-matched to that commit while `.env` and runtime survive. Five things
+worth knowing:
 
 - **The sync can replace the script mid-run**, so it re-execs the new copy once and says so — a fix
   to `update.sh` itself takes effect on the deploy that ships it.

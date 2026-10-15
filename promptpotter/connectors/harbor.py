@@ -197,7 +197,7 @@ def _pinned_roster(dataset: str, version: str) -> list[dict[str, Any]]:
     except FileNotFoundError:
         raise ValueError(
             f"harbor connector: {dataset}@{version} has no pinned roster ({path.name}). Pin it "
-            f"once with `python -m promptpotter.connectors.harbor {dataset} {version}`."
+            f"once with `python -m promptpotter pin-roster {dataset} {version}`."
         ) from None
     return list(pin["tasks"])
 
@@ -1236,9 +1236,3 @@ __all__ = [
     "harbor_wire_adapter",
     "pin_roster",
 ]
-
-
-if __name__ == "__main__":
-    import sys
-
-    sys.stdout.write(f"{pin_roster(*sys.argv[1:3])}\n")

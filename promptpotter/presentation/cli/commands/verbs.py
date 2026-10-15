@@ -878,6 +878,19 @@ VERBS: tuple[Verb, ...] = (
         "fetch their samples, one per line — what `deploy-linux/update.sh` installs. Read-only.",
     ),
     Verb(
+        "pin-roster",
+        "pin_roster:cmd_pin_roster",
+        help="Pin a published Harbor dataset's task roster into the harbor connector's resources "
+        "(`harbor-roster.<dataset>@<version>.json`) — the ONE fetch of Harbor's registry, so no "
+        "run ever dials it. Refuses to overwrite a pin the registry has since moved: a panel is "
+        "never re-cut under the name it had; delete the file to re-cut on purpose. Needs the "
+        "`harbor` extra. Network only, zero LLM spend.",
+        args=(
+            Arg("dataset", help="The dataset's registry name (`harbor dataset list`)."),
+            Arg("version", help="Its published version — a pin names one, never 'latest'."),
+        ),
+    ),
+    Verb(
         "set-concurrent-cycles",
         "lifecycle:cmd_set_concurrent_cycles",
         help="How many campaigns this account may hold at once, queued launches included. At most "

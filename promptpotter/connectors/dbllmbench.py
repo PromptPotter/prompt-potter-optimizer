@@ -166,7 +166,9 @@ def _model_entry(cfg: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, str]
         claude: dict[str, Any] = {"model": model, "max_tokens": reply}
         if effort is not None:
             claude["effort"] = effort
-        return {"claude": claude}, {"ANTHROPIC_API_KEY": settings.ANTHROPIC_API_KEY}
+        return {"claude": claude}, {
+            "ANTHROPIC_API_KEY": settings.ANTHROPIC_API_KEY.get_secret_value()
+        }
     if spec is None:
         raise RuntimeError(
             f"dbllmbench connector: provider {provider!r} is neither {_ANTHROPIC!r} nor an "
@@ -187,7 +189,9 @@ def _model_entry(cfg: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, str]
     }
     if extra:
         entry["extra_body"] = extra
-    return {"openai-compatible": entry}, {_KEY_ENV: getattr(settings, spec.api_key_attr)}
+    return {"openai-compatible": entry}, {
+        _KEY_ENV: getattr(settings, spec.api_key_attr).get_secret_value()
+    }
 
 
 def _asset(cfg: Mapping[str, Any], key: str) -> str:
@@ -209,7 +213,7 @@ def harness_config(cfg: Mapping[str, Any], prompt: str) -> tuple[dict[str, Any],
     if db in _DB_DEFAULT_USERS:
         auth: dict[str, Any] = {
             "username": settings.DBLLMBENCH_DB_USERNAME or _DB_DEFAULT_USERS[db],
-            "password": settings.DBLLMBENCH_DB_PASSWORD or "password",
+            "password": settings.DBLLMBENCH_DB_PASSWORD.get_secret_value() or "password",
         }
         if db == "typedb":
             auth["tls"] = settings.DBLLMBENCH_DB_TLS

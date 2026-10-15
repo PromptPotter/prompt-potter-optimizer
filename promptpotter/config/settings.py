@@ -4,6 +4,7 @@ import tomllib
 from importlib.metadata import version
 from typing import Literal
 
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings
 
 from promptpotter.config.paths import env_file_path, source_checkout_root
@@ -42,10 +43,11 @@ class Settings(BaseSettings):
     def allowed_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",") if origin.strip()]
 
-    OPENAI_API_KEY: str = ""
-    ANTHROPIC_API_KEY: str = ""
-    GROQ_API_KEY: str = ""
-    OPENROUTER_API_KEY: str = ""
+    # `SecretStr` IS the secrecy: the log redactor scrubs every such field whatever its name, and no repr shows one.
+    OPENAI_API_KEY: SecretStr = SecretStr("")
+    ANTHROPIC_API_KEY: SecretStr = SecretStr("")
+    GROQ_API_KEY: SecretStr = SecretStr("")
+    OPENROUTER_API_KEY: SecretStr = SecretStr("")
 
     # provider -> [rpm, tpm] per rolling 60s; a missing provider or a null slot is unthrottled.
     RATE_LIMITS: dict[str, list[int | None]] = {}
@@ -53,16 +55,16 @@ class Settings(BaseSettings):
     # Read ONLY by the termnorm connector's `endpoint` and `auth_token` hooks: a second backend
     # declares its own. The URL is the operator's alone, so the token never travels elsewhere.
     TERMNORM_URL: str = "http://127.0.0.1:8000"
-    TERMNORM_TOKEN: str = ""
+    TERMNORM_TOKEN: SecretStr = SecretStr("")
 
     # Empty is upstream's local compose stack; read only by `connectors/dbllmbench.py::harness_config`.
     DBLLMBENCH_DB_URL: str = ""
     DBLLMBENCH_DB_USERNAME: str = ""
-    DBLLMBENCH_DB_PASSWORD: str = ""
+    DBLLMBENCH_DB_PASSWORD: SecretStr = SecretStr("")
     DBLLMBENCH_DB_TLS: bool = False
 
-    LANGFUSE_PUBLIC_KEY: str = ""
-    LANGFUSE_SECRET_KEY: str = ""
+    LANGFUSE_PUBLIC_KEY: SecretStr = SecretStr("")
+    LANGFUSE_SECRET_KEY: SecretStr = SecretStr("")
     LANGFUSE_HOST: str = "https://cloud.langfuse.com"
     LANGFUSE_ENABLED: bool = True
 
@@ -84,15 +86,16 @@ class Settings(BaseSettings):
     HOST_ADMIN_ISSUER: str = ""
 
     # Declared here, never read from `os.environ`: a bare environ read ignores `env_file_path()`.
-    ADMIN_BOT_TELEGRAM_TOKEN: str = ""
+    ADMIN_BOT_TELEGRAM_TOKEN: SecretStr = SecretStr("")
     ADMIN_BOT_CHAT_ID: str = ""
-    ADMIN_BOT_PASSPHRASE: str = ""
-    N8N_SIGNUP_WEBHOOK_URL: str = ""
-    N8N_TRAIL_WEBHOOK_URL: str = ""
-    N8N_TRAIL_WEBHOOK_SECRET: str = ""
+    ADMIN_BOT_PASSPHRASE: SecretStr = SecretStr("")
+    # A webhook URL is the credential: whoever holds it fires the workflow.
+    N8N_SIGNUP_WEBHOOK_URL: SecretStr = SecretStr("")
+    N8N_TRAIL_WEBHOOK_URL: SecretStr = SecretStr("")
+    N8N_TRAIL_WEBHOOK_SECRET: SecretStr = SecretStr("")
 
     # Unset: `/site-records` does not exist. Set: whoever bears it reads and writes those rows.
-    SITE_RECORDS_TOKEN: str = ""
+    SITE_RECORDS_TOKEN: SecretStr = SecretStr("")
 
     # LIFETIME total over the account's whole ledger, not per day; the box's operator is exempt.
     FREE_TIER_SPEND_CAP_USD: float = 0.30

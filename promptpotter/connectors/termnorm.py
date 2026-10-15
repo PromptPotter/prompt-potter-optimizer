@@ -133,7 +133,7 @@ def _termnorm_endpoint() -> str:
 
 
 def _termnorm_auth_token() -> str | None:
-    return settings.TERMNORM_TOKEN or None
+    return settings.TERMNORM_TOKEN.get_secret_value() or None
 
 
 CONNECTOR = Connector(

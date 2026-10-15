@@ -47,7 +47,7 @@ StoresDep = Annotated[Stores, Depends(build_stores_from_identity)]
 
 def require_site_records_token(request: Request) -> None:
     """Unset, the door does not exist. Set, it opens to the bearer of it and to no session."""
-    token = settings.SITE_RECORDS_TOKEN.strip()
+    token = settings.SITE_RECORDS_TOKEN.get_secret_value().strip()
     if not token:
         raise NotFoundError("Not found")
     sent = request.headers.get("authorization", "")

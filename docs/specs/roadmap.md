@@ -257,7 +257,9 @@ execute as written.
 Each stage closes on a verification, never a date.
 
 1. **Members off their runtime** (breaking). A member declares the typed slice it reads, so any
-   manifest names any registered member. *Closes when* the gate is green, every shipped manifest's
+   manifest names any registered member. A plugin whose members read only `NodeContext`
+   (`examples/optimizer-plugin/`) already runs under every bench feature; this stage is what lets
+   its manifest name potter's or CAPO's members beside its own, and the reverse. *Closes when* the gate is green, every shipped manifest's
    offline leg ([`../developer/offline-run.md`](../developer/offline-run.md)) decides and sends
    what it did before, and one manifest runs a round with a member another optimizer's package
    registered.

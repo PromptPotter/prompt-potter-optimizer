@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 import re
 
+from pydantic import SecretStr
+
 from promptpotter.config.settings import settings
 
 REDACTED = "***REDACTED***"
@@ -16,19 +18,16 @@ _KEY_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"sk-lf-[a-z0-9-]+"),
 )
 
-# A setting is secret by its NAME: a new `*_TOKEN` field is covered the moment it is declared.
-_SECRET_SUFFIXES: tuple[str, ...] = ("_KEY", "_TOKEN", "_SECRET", "_PASSWORD", "_PASSPHRASE")
-
 _TRACEBACK = logging.Formatter()
 
 
 def _snapshot_secret_values() -> tuple[str, ...]:
+    # A setting is secret by its TYPE: a `SecretStr` field is covered the moment it is declared, whatever its name.
     return tuple(
-        v.strip()
+        value
         for name in type(settings).model_fields
-        if name.endswith(_SECRET_SUFFIXES)
-        and isinstance(v := getattr(settings, name), str)
-        and v.strip()
+        if isinstance(held := getattr(settings, name), SecretStr)
+        and (value := held.get_secret_value().strip())
     )
 
 

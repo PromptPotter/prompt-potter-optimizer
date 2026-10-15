@@ -87,7 +87,7 @@ def _rate_caps(provider: str) -> tuple[int | None, int | None]:
 def _make_openai_compat(provider: str, spec: ProviderSpec) -> OpenAICompatibleClient:
     rpm, tpm = _rate_caps(provider)
     return OpenAICompatibleClient(
-        api_key=getattr(settings, spec.api_key_attr),
+        api_key=getattr(settings, spec.api_key_attr).get_secret_value(),
         provider=provider,
         spec=spec,
         rate_limiter=build_rate_limiter(rpm, tpm),

@@ -216,7 +216,7 @@ def _send_message(client: httpx.Client, chat_id: str, text: str) -> None:
 
 def notify_operator(text: str) -> bool:
     """Best-effort: ``False`` and never a raise, so a notice cannot fail the request behind it."""
-    token = settings.ADMIN_BOT_TELEGRAM_TOKEN.strip()
+    token = settings.ADMIN_BOT_TELEGRAM_TOKEN.get_secret_value().strip()
     chat_id = settings.ADMIN_BOT_CHAT_ID.strip()
     if not token or not chat_id:
         logger.info("Operator notice skipped (admin bot not configured): %s", text)
@@ -239,7 +239,7 @@ def notify_operator(text: str) -> bool:
 def forward_new_account_to_crm(
     email: str | None, name: str | None, user_id: str, account_count: int
 ) -> bool:
-    url = settings.N8N_SIGNUP_WEBHOOK_URL.strip()
+    url = settings.N8N_SIGNUP_WEBHOOK_URL.get_secret_value().strip()
     if not url:
         logger.info("CRM forward skipped (N8N_SIGNUP_WEBHOOK_URL not set): %s", email or user_id)
         return False
@@ -266,7 +266,7 @@ def forward_trail_to_briefing() -> bool:
 
     Sent whole each time: the receiver keeps the newest, so a missed send costs freshness only.
     """
-    url = settings.N8N_TRAIL_WEBHOOK_URL.strip()
+    url = settings.N8N_TRAIL_WEBHOOK_URL.get_secret_value().strip()
     if not url:
         return False
     trails, unreadable = trails_since(DEFAULT_PROJECTS_ROOT, time.time() - _TRAIL_WINDOW_H * 3600)
@@ -274,7 +274,9 @@ def forward_trail_to_briefing() -> bool:
         with httpx.Client(timeout=10, verify=tls_context()) as client:
             resp = client.post(
                 url,
-                headers={"X-Trail-Secret": settings.N8N_TRAIL_WEBHOOK_SECRET.strip()},
+                headers={
+                    "X-Trail-Secret": settings.N8N_TRAIL_WEBHOOK_SECRET.get_secret_value().strip()
+                },
                 json={
                     "as_of": utcnow_iso(),
                     "window_hours": _TRAIL_WINDOW_H,
@@ -367,9 +369,9 @@ def run_bot(token: str, chat_id: str, passphrase: str | None) -> None:
 def main() -> int:
     setup_logging()
     complete_registries(every_treatment=False)
-    token = settings.ADMIN_BOT_TELEGRAM_TOKEN.strip()
+    token = settings.ADMIN_BOT_TELEGRAM_TOKEN.get_secret_value().strip()
     chat_id = settings.ADMIN_BOT_CHAT_ID.strip()
-    passphrase = settings.ADMIN_BOT_PASSPHRASE.strip() or None
+    passphrase = settings.ADMIN_BOT_PASSPHRASE.get_secret_value().strip() or None
     if not token or not chat_id:
         logger.error(
             "ADMIN_BOT_TELEGRAM_TOKEN and ADMIN_BOT_CHAT_ID must be set "

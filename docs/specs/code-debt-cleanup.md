@@ -150,8 +150,9 @@ and delete the entry if the answer is no.
 - **A resume from a pause at the origin's boundary runs round 0 again.** The cells replay, so the
   round file comes back with every cell `cached` and no token counts, the ledger holds a
   second round-0 election, and potter sends `l1_critique` a second time. A pause one round later
-  resumes with every decision equal. Unknown whether the second round 0 is the intended warm
-  restamp or a boundary the resume fold misses. **Rides with:** any change to
+  resumes with every decision equal. The re-close itself is declared (`runner/loop.py::run_round_loop`:
+  until an L1 round closes, every launch re-closes round 0, since a stopped run's file passed no
+  gate); open is whether the critique re-send should read the banked `optimizer_state` instead. **Rides with:** any change to
   `projection.py::resolve_resume_state` or the origin round in `runner/entry.py`. **Re-test:**
   `scripts/offline_run.py --rounds 1 --rows 60` — `decisions MOVED` on the resume line means it
   still does.

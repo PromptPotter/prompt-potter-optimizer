@@ -26,6 +26,7 @@ from factories import (
     walking_cycle,
 )
 from fastapi import BackgroundTasks
+from pydantic import SecretStr
 
 from promptpotter.application import account, site_records
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
@@ -137,7 +138,7 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
             build()
 
     secret = "gsk_redact_me_xxxxxxxxxxxxxxxxxxxxxxx"
-    monkeypatch.setattr(settings_mod.settings, "GROQ_API_KEY", secret, raising=False)
+    monkeypatch.setattr(settings_mod.settings, "GROQ_API_KEY", SecretStr(secret), raising=False)
     record = logging.LogRecord(
         name="t",
         level=logging.INFO,
@@ -155,7 +156,7 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
 
     # A traceback is rendered output too: httpx puts the bot token in its error's URL.
     bot_token = "123456:telegram-bot-token-xyz"
-    monkeypatch.setattr(settings_mod.settings, "ADMIN_BOT_TELEGRAM_TOKEN", bot_token)
+    monkeypatch.setattr(settings_mod.settings, "ADMIN_BOT_TELEGRAM_TOKEN", SecretStr(bot_token))
     try:
         raise RuntimeError(f"404 for url 'https://api.telegram.org/bot{bot_token}/getUpdates'")
     except RuntimeError:
@@ -163,14 +164,15 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
     log_redaction.SecretRedactionFilter().filter(failed)
     assert bot_token not in logging.Formatter().format(failed), "a traceback carried the bot token"
 
-    # Secrecy is read off the field NAME: a setting declared tomorrow needs no redactor edit.
+    # Secrecy is read off the field TYPE: a `SecretStr` declared tomorrow under any name needs no redactor edit.
     class Grown(settings_mod.Settings):
-        SOME_FUTURE_TOKEN: str = ""
+        SOME_FUTURE_WEBHOOK_URL: SecretStr = SecretStr("")
 
-    monkeypatch.setattr(log_redaction, "settings", Grown(SOME_FUTURE_TOKEN="future-secret-value"))
-    future = logging.LogRecord("t", logging.INFO, "", 0, "t=%s", ("future-secret-value",), None)
+    hook = "https://hooks.example/future-secret-value"
+    monkeypatch.setattr(log_redaction, "settings", Grown(SOME_FUTURE_WEBHOOK_URL=hook))
+    future = logging.LogRecord("t", logging.INFO, "", 0, "posting to %s", (hook,), None)
     log_redaction.SecretRedactionFilter().filter(future)
-    assert "future-secret-value" not in future.getMessage(), "a new *_TOKEN setting leaked"
+    assert "future-secret-value" not in future.getMessage(), "a new SecretStr setting leaked"
 
     # Through the logger as the server sets it up: a filter nobody installed cuts nothing.
     root, access, httpx = (logging.getLogger(name) for name in ("", "uvicorn.access", "httpx"))
@@ -322,7 +324,7 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
 
     with pytest.raises(NotFoundError):
         knock("Bearer t0ken")
-    monkeypatch.setattr(settings_mod.settings, "SITE_RECORDS_TOKEN", "t0ken")
+    monkeypatch.setattr(settings_mod.settings, "SITE_RECORDS_TOKEN", SecretStr("t0ken"))
     for stranger in (None, "Bearer t0ke", "t0ken"):
         with pytest.raises(UnauthorizedError):
             knock(stranger)

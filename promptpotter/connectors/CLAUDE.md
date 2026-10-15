@@ -93,8 +93,8 @@ and moves every round.
   campaign, never listed in `param_keys`, absent means the Agent Skill; it enters identity as the
   node config it is. **The panel is the workload's `experiment`**, its published roster read by
   `resolve_experiment` off `resources/harbor-roster.<dataset>@<version>.json` — written once by
-  `python -m promptpotter.connectors.harbor <dataset> <version>`, which refuses to overwrite a pin
-  upstream has since moved, so no read ever fetches the registry — and `extract_experiment` publishes nothing. **Trial scratch goes to the
+  the `pin-roster` verb (`python -m promptpotter pin-roster <dataset> <version>`), which refuses to
+  overwrite a pin upstream has since moved, so no read ever fetches the registry — and `extract_experiment` publishes nothing. **Trial scratch goes to the
   system temp dir, never the workspace**, and nothing durable lives there — reward, digest and token
   counts belong in the measurement archive. **The one thing a cell leaves on the Docker host is its
   task image** (`hb__<content hash>`, one per distinct task environment, never one per cell); a hard

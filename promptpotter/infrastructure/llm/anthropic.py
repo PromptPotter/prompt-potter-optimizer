@@ -70,7 +70,7 @@ class AnthropicClient(LLMClientBase):
         rate_limiter: RateLimiter | None = None,
     ):
         super().__init__(provider="anthropic", display_name="Anthropic", rate_limiter=rate_limiter)
-        self._api_key = api_key or settings.ANTHROPIC_API_KEY
+        self._api_key = api_key or settings.ANTHROPIC_API_KEY.get_secret_value()
         self._client: AsyncAnthropic | None = None
 
     def _ensure_client(self) -> AsyncAnthropic:
