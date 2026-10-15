@@ -169,6 +169,9 @@ def _merged_config(
     # The determinism clamp goes LAST: it must beat every per-call override, steered temperature included.
     if config_overrides := get_optimizer_config_overrides():
         merged = {**merged, **config_overrides}
+        # Except the seed a call brings: `NodeContext.ask` draws it FROM the clamp's, one per call.
+        if "seed" in overrides:
+            merged["seed"] = overrides["seed"]
     return merged
 
 

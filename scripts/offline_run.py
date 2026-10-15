@@ -168,9 +168,9 @@ def _variant(tag: str, rng: random.Random) -> str:
 
 
 class SchemaFiller:
-    def __init__(self, schema: dict[str, Any], *, node: str, idx: int) -> None:
+    def __init__(self, schema: dict[str, Any], *, node: str, call: str) -> None:
         self.node = node
-        self.idx = idx
+        self.call = call
         self.defs: dict[str, Any] = {**schema.get("$defs", {}), **schema.get("definitions", {})}
 
     def resolve(self, s: dict[str, Any]) -> dict[str, Any]:
@@ -202,7 +202,7 @@ class SchemaFiller:
             items = s.get("items", {})
             return [self.fill(items, (*path, str(i))) for i in range(s.get("minItems", 0))]
         if t == "string":
-            text = f"{'.'.join(path) or 'value'} {self.node} {self.idx}".ljust(
+            text = f"{'.'.join(path) or 'value'} {self.node} {self.call}".ljust(
                 s.get("minLength", 0), "x"
             )
             return text[: s["maxLength"]] if "maxLength" in s else text
@@ -216,14 +216,14 @@ class SchemaFiller:
 
 
 class FakeLLM:
-    """An answer follows its node's CALL ORDINAL, never the prompt's wording."""
+    """An answer follows the CALL's identity, never the prompt's wording nor the arrival order."""
 
     def __init__(self, capture: Path, templates: dict[str, str]) -> None:
         self.capture = capture
         self.templates = templates
         self.prefixes = {node: template.split("{{")[0] for node, template in templates.items()}
         self.calls: dict[str, int] = {}
-        self.n = 0
+        self.turns: dict[tuple[str, int | None], int] = {}
 
     def _text_node(self, prompt: str) -> str:
         opened = [node for node, prefix in self.prefixes.items() if prompt.startswith(prefix)]
@@ -235,23 +235,29 @@ class FakeLLM:
         prompt = "\n".join(str(m["content"]) for m in body["messages"])
         schema = body.get("response_format", {}).get("json_schema")
         node = schema["name"] if schema else self._text_node(prompt)
-        idx = self.calls.get(node, 0)
-        self.calls[node] = idx + 1
+        self.calls[node] = self.calls.get(node, 0) + 1
+        # Concurrent sends of one node land in any order; their seeds (`NodeContext.ask`) tell
+        # them apart, and sends sharing a seed are sequential, so their turn is theirs alone.
+        seed: int | None = body.get("seed")
+        turn = self.turns.get((node, seed), 0)
+        self.turns[node, seed] = turn + 1
+        call = str(turn) if seed is None else f"{seed}.{turn}"
         if schema:
-            filler = SchemaFiller(schema["schema"], node=node, idx=idx)
+            filler = SchemaFiller(schema["schema"], node=node, call=call)
             obj = filler.fill(schema["schema"], ())
-            content = json.dumps(self._shape(node, idx, obj, filler, schema["schema"], prompt))
+            content = json.dumps(
+                self._shape(node, call, turn, obj, filler, schema["schema"], prompt)
+            )
         else:
-            content = self._text(node, idx, prompt)
-        self.n += 1
-        (self.capture / f"{self.n:04d}_{node}_{idx}.json").write_text(
+            content = self._text(node, call, prompt)
+        (self.capture / f"{node}_{call}.json").write_text(
             json.dumps(
                 {"request": body, "response": content}, indent=1, sort_keys=True, ensure_ascii=False
             ),
             encoding="utf-8",
         )
         return {
-            "id": f"offline-{node}-{idx}",
+            "id": f"offline-{node}-{call}",
             "object": "chat.completion",
             "created": 0,
             "model": body["model"],
@@ -271,9 +277,9 @@ class FakeLLM:
             },
         }
 
-    def _text(self, node: str, idx: int, prompt: str) -> str:
-        rng = random.Random(f"{node}:{idx}")
-        fresh = _variant(f"{node}.{idx}", rng)
+    def _text(self, node: str, call: str, prompt: str) -> str:
+        rng = random.Random(f"{node}:{call}")
+        fresh = _variant(f"{node}.{call}", rng)
         template = self.templates[node]
         if "<prompt>" in template:
             # Rephrasing the individual's own instruction keeps its parent's marker, so its skill.
@@ -282,7 +288,7 @@ class FakeLLM:
         if "```" in template:
             return f"```\n{fresh}\n```"
         if "array" in template:
-            return json.dumps([_variant(f"{node}.{idx}.{i}", rng) for i in range(LISTED)])
+            return json.dumps([_variant(f"{node}.{call}.{i}", rng) for i in range(LISTED)])
         raise KeyError(
             f"offline run: llm node {node!r}'s template asks for no form the fake writes"
         )
@@ -290,7 +296,8 @@ class FakeLLM:
     def _shape(
         self,
         node: str,
-        idx: int,
+        call: str,
+        turn: int,
         obj: dict[str, Any],
         filler: SchemaFiller,
         schema: dict[str, Any],
@@ -299,7 +306,7 @@ class FakeLLM:
         if node.startswith("L1Generate"):
             item = filler.resolve(filler.resolve(schema)["properties"]["variants"])
             obj["variants"] = [
-                self._variant_edit(idx, i, filler, filler.resolve(item["items"]), prompt)
+                self._variant_edit(turn, i, filler, filler.resolve(item["items"]), prompt)
                 for i in range(item.get("minItems") or item["maxItems"])
             ]
         elif node.startswith("L1Critique"):
@@ -308,47 +315,52 @@ class FakeLLM:
             obj["failure_highlights"] = [
                 {
                     "sample_ids": ids[k : k + 2],
-                    "mechanism": f"negation tracking {idx}.{k}",
-                    "claim": f"critique {idx}: the chain breaks at a negation; said and truth differ",
+                    "mechanism": f"negation tracking {call}.{k}",
+                    "claim": f"critique {call}: the chain breaks at a negation; said and truth differ",
                 }
                 for k in range(0, min(len(ids), 4), 2)
             ]
-            obj["priority_fix"] = f"instruction: track every negation explicitly (critique {idx})"
+            obj["priority_fix"] = f"instruction: track every negation explicitly (critique {call})"
             obj["suggested_axes"] = ["instruction", "thinking_style"]
         elif node.startswith("L2Context"):
             obj["axis_targeted"] = "instruction"
-            obj["rationale"] = f"L2 fire {idx}: L1 stalled on the instruction axis."
+            obj["rationale"] = f"L2 fire {call}: L1 stalled on the instruction axis."
             obj.pop("fork_proposal", None)
             obj.pop("terminate_proposal", None)
         elif node.startswith("L3Plan"):
-            obj["plan"] = f"Replan {idx}: L1 rewrites the instruction to track negation explicitly."
-            obj["note"] = f"l3 note {idx}"
-            obj["rationale"] = f"L2 stalled twice (replan {idx})"
+            obj["plan"] = (
+                f"Replan {call}: L1 rewrites the instruction to track negation explicitly."
+            )
+            obj["note"] = f"l3 note {call}"
+            obj["rationale"] = f"L2 stalled twice (replan {call})"
             obj.pop("fork_proposal", None)
             obj.pop("terminate_proposal", None)
         return obj
 
     def _variant_edit(
-        self, idx: int, i: int, filler: SchemaFiller, item: dict[str, Any], prompt: str
+        self, generation: int, i: int, filler: SchemaFiller, item: dict[str, Any], prompt: str
     ) -> dict[str, Any]:
+        """*generation* is the call's turn whatever its seed: the `SKILL` trajectory is keyed on it."""
         v: dict[str, Any] = filler.fill(item, ("variants", str(i)))
         grounding = filler.resolve(item["properties"]["evidence_grounding"])
         cited = filler.resolve(grounding["properties"]["field"])["enum"]
         # A citation must quote the prompt; the offset is a function of the call, not the text.
-        start = h("cite", idx, i) % max(len(prompt) - 60, 1)
+        start = h("cite", generation, i) % max(len(prompt) - 60, 1)
         v["evidence_grounding"] = {
             "field": cited[i % len(cited)],
             "citation": prompt[start : start + 40],
         }
         v["prompt_fields_updates"] = {
-            "instruction": _variant(f"g{idx}v{i}", random.Random(f"l1:{idx}:{i}"))
+            "instruction": _variant(f"g{generation}v{i}", random.Random(f"l1:{generation}:{i}"))
         }
         # As a model would: one cluster line of the CRITIQUE panel, else the first rows any panel marks.
         clusters = [
             ids for line in prompt.splitlines() if " rows: " in line and (ids := _marks(line))
         ]
         v["targets_rows"] = (clusters[i % len(clusters)] if clusters else _marks(prompt))[:2]
-        v["changes_description"] = f"Rewrite the instruction (generation {idx}, variant {i})."
+        v["changes_description"] = (
+            f"Rewrite the instruction (generation {generation}, variant {i})."
+        )
         return v
 
 
@@ -1001,7 +1013,7 @@ def _ledger(ledger: list[dict[str, Any]], canon: Canon) -> dict[str, Any]:
             entry.update({k: (r.get("ruler") or {}).get(k) for k in RULER_KEYS})
         out[name].append(_as_sets(canon(entry)) if kind == "decision" else canon(entry))
     # Concurrent arms append in arrival order; the SET per round is what a comparison reads.
-    for name in ("decisions", "round_warnings"):
+    for name in ("decisions", "round_warnings", "optimizer_calls"):
         out[name].sort(key=lambda x: (x.get("round") or 0, json.dumps(x, sort_keys=True)))
     out["candidates_minted"].sort(key=lambda x: (x.get("round") or 0, x.get("idx") or 0))
     return out

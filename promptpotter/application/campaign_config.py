@@ -125,11 +125,12 @@ class DeterminismClamp(StrictModel):
     seed: Annotated[int | None, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
         None,
         description=(
-            "Sampling seed every optimizer node sends. Temperature 0 pins the distribution and "
-            "not the draw, so without a seed the provider is still free to sample differently "
-            "on identical input. It rides `hash_call`, so two campaigns differing only here "
-            "bank separate replies rather than serving one campaign's answer under the other's "
-            "name. `None` (default) sends none."
+            "Sampling seed every optimizer node sends, or draws its per-call seed from where it "
+            "asks several things in one step, so concurrent asks stay distinct draws. Temperature "
+            "0 pins the distribution and not the draw, so without a seed the provider is still "
+            "free to sample differently on identical input. It rides `hash_call`, so two "
+            "campaigns differing only here bank separate replies rather than serving one "
+            "campaign's answer under the other's name. `None` (default) sends none."
         ),
     )
     route_order: Annotated[list[str] | None, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(

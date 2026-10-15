@@ -113,7 +113,9 @@ re-key an inner cell leaves equal.
 - **The backend** is TermNorm's wire: one `llm_only` node, whose answer is correct with probability
   `k/10`, `k` read off the `Variant <tag>:` marker in the rendered prompt. Potter's markers follow
   a scripted trajectory that fires L2 and L3; every other marker draws its `k` from its name.
-- **The optimizer LLM** answers by node and CALL ORDINAL, never by the prompt's wording. A
+- **The optimizer LLM** answers by CALL IDENTITY, never by the prompt's wording or the order
+  concurrent sends arrive in: the node, the request's seed, and the call's turn among sends sharing
+  both. A
   structured call names its node in its response schema and gets a minimal valid instance, shaped
   per potter node. A paper preset's text call is matched to the llm node whose manifest template
   it opens with, and answered in the form that template asks for — a `<prompt>` block, a fenced
