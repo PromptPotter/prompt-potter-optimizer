@@ -501,6 +501,17 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
     assert (errored.grade.fitness, errored.grade.objective, errored.scored) == (0.0, 0.0, False), (
         "an errored row is graded 0.0 without evaluating a formula that would raise on it"
     )
+    # Arithmetic is on floats, so a tenant's formula cannot buy unbounded CPU or memory.
+    for formula in ("'x' * 10**10", "abs('x')", "label_match(predicted, 'x' * 10**10)"):
+        with pytest.raises(ValueError):
+            compile_scorer(formula, verifier_graded=False)
+    for formula in ("9**9**9", "pow(9, pow(9, 9))", "predicted * 10**10", "-predicted"):
+        with pytest.raises(ScoringFormulaError):
+            compile_scorer(formula, verifier_graded=False).grade(channels())
+    halved = compile_scorer("label_match(predicted, 'p') * 2**-1", verifier_graded=False)
+    assert halved.grade(channels()).grade.fitness == 0.5, (
+        "a helper's string argument or float arithmetic was refused"
+    )
 
     # A dial reads its term against the origin and never sums a raw unit.
     def solve(

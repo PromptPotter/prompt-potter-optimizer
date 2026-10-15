@@ -7,7 +7,6 @@ from promptpotter.application.jobs.quota import quota_status
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.workspace import open_stores
-from promptpotter.shared.identity import acting_principal_id
 
 __all__ = ["cmd_machine_status"]
 
@@ -15,7 +14,7 @@ __all__ = ["cmd_machine_status"]
 async def cmd_machine_status(args: argparse.Namespace) -> CommandResult:
     stores = open_stores(args)
     jobs = JobRegistry.attach()
-    status = machine_status(jobs, principal_id=acting_principal_id(stores.identity))
+    status = machine_status(jobs, stores.identity)
     account = quota_status(stores=stores, job_registry=jobs)
     lines = [
         f"running {status.running} of {status.capacity} (ceiling {status.ceiling}), "

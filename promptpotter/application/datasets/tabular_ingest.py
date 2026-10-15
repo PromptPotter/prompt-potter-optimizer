@@ -13,10 +13,11 @@ import io
 import json
 import random
 import zipfile
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
+from itertools import repeat
 from pathlib import Path
-from typing import Any, Literal
+from typing import IO, Any, Literal
 from xml.etree import ElementTree
 
 from promptpotter.config.settings import settings
@@ -27,6 +28,8 @@ from promptpotter.shared.extras import Extra, require_extra
 
 # Per-upload row cap, an order of magnitude above any shipped bank: bounds the draft's footprint.
 MAX_SAMPLES = 50_000
+MAX_COLUMNS = 1_024
+_MAX_SCANNED_ROWS = 2 * MAX_SAMPLES
 
 # A spreadsheet is a zip of XML: what it INFLATES to is the bound, not what was uploaded.
 _MAX_INFLATED_BYTES = 256 * 1024 * 1024
@@ -259,11 +262,13 @@ def _jsonl_records(text: str) -> list[dict[str, Any]]:
 def _unique_headers(raw: Iterable[Any]) -> list[str]:
     """A blank header is named by position, a repeated one numbered: a column is never dropped."""
     headers: list[str] = []
+    taken: set[str] = set()
     for i, cell in enumerate(raw, start=1):
         name = _stringify_cell(cell) or f"column_{i}"
         base, n = name, 2
-        while name in headers:
+        while name in taken:
             name, n = f"{base}_{n}", n + 1
+        taken.add(name)
         headers.append(name)
     return headers
 
@@ -277,6 +282,11 @@ def _records_to_table(records: Iterable[dict[Any, Any]]) -> Table:
             if key not in seen:
                 seen.add(key)
                 keys.append(key)
+        if len(keys) > MAX_COLUMNS:
+            raise IngestError(
+                reason="too_large",
+                message=f"Upload exceeds the per-file cap of {MAX_COLUMNS} columns.",
+            )
         cells = {key: _stringify_cell(value) for key, value in rec.items()}
         if not any(cells.values()):
             continue
@@ -307,15 +317,27 @@ def _stringify_cell(value: Any) -> str:
     return str(value).strip()
 
 
-def _sheet_records(rows: Iterator[list[Any]]) -> Iterator[dict[str, Any]]:
-    header = list(next(rows, None) or ())
+def _sheet_records(rows: Iterable[Sequence[Any]]) -> Iterator[dict[str, Any]]:
+    scanned = _scan_bounded(rows)
+    header = list(next((r for r in scanned if any(map(_stringify_cell, r))), ()))
     while header and not _stringify_cell(header[-1]):
         header.pop()
     if not header:
         raise IngestError(reason="unreadable", message="The sheet has no header row.")
     headers = _unique_headers(header)
-    for cells in rows:
+    for cells in scanned:
         yield {h: _sheet_cell(c) for h, c in zip(headers, cells, strict=False)}
+
+
+# A blank row is skipped, never free: a run of them is the file's claim, so it counts toward a ceiling.
+def _scan_bounded(rows: Iterable[Sequence[Any]]) -> Iterator[Sequence[Any]]:
+    for scanned, cells in enumerate(rows, start=1):
+        if scanned > _MAX_SCANNED_ROWS:
+            raise IngestError(
+                reason="too_large",
+                message=f"Upload exceeds the per-file cap of {_MAX_SCANNED_ROWS} rows, blank ones included.",
+            )
+        yield cells
 
 
 def _sheet_cell(value: Any) -> Any:
@@ -323,7 +345,7 @@ def _sheet_cell(value: Any) -> Any:
     return int(value) if isinstance(value, float) and value.is_integer() else value
 
 
-def _xlsx_records(blob: bytes) -> list[dict[str, Any]]:
+def _xlsx_records(blob: bytes) -> Iterator[dict[str, Any]]:
     require_extra(Extra.EXCEL)
     import openpyxl  # lazy: an extra, and off the hot text path
 
@@ -335,62 +357,93 @@ def _xlsx_records(blob: bytes) -> list[dict[str, Any]]:
         ws = wb.active
         if ws is None:
             raise IngestError(reason="unreadable", message="Excel workbook has no active sheet.")
-        return list(_sheet_records(list(r) for r in ws.iter_rows(values_only=True)))
+        # The declared <dimension> and row `r=` gaps are the file's claim: the caps bound the walk.
+        ws.reset_dimensions()
+        yield from _sheet_records(
+            ws.iter_rows(max_row=_MAX_SCANNED_ROWS + 1, max_col=MAX_COLUMNS + 1, values_only=True)
+        )
     finally:
         wb.close()
 
 
-def _xls_records(blob: bytes) -> list[dict[str, Any]]:
+def _xls_records(blob: bytes) -> Iterator[dict[str, Any]]:
     require_extra(Extra.EXCEL)
     import xlrd  # lazy: an extra, and off the hot text path
 
     try:
-        sheet = xlrd.open_workbook(file_contents=blob, on_demand=True).sheet_by_index(0)
+        # Ragged: a row holds its own cells, never padded to the widest one.
+        book = xlrd.open_workbook(file_contents=blob, on_demand=True, ragged_rows=True)
+        sheet = book.sheet_by_index(0)
     except Exception as exc:  # xlrd raises its own grab-bag on bad blobs
         raise IngestError(reason="unreadable", message=f"Excel parse failed: {exc}") from None
-    return list(_sheet_records(sheet.row_values(i) for i in range(sheet.nrows)))
+    return _sheet_records(sheet.row_values(i, end_colx=MAX_COLUMNS + 1) for i in range(sheet.nrows))
 
 
-_ODS = {
-    "table": "urn:oasis:names:tc:opendocument:xmlns:table:1.0",
-    "text": "urn:oasis:names:tc:opendocument:xmlns:text:1.0",
-}
+_TABLE_NS = "{urn:oasis:names:tc:opendocument:xmlns:table:1.0}"
+_ODS_TABLE = f"{_TABLE_NS}table"
+_ODS_ROW = f"{_TABLE_NS}table-row"
+_ODS_TEXT_P = "{urn:oasis:names:tc:opendocument:xmlns:text:1.0}p"
 
 
-def _ods_records(blob: bytes) -> list[dict[str, Any]]:
+def _ods_records(blob: bytes) -> Iterator[dict[str, Any]]:
     with zipfile.ZipFile(io.BytesIO(blob)) as zf:
         try:
-            root = ElementTree.fromstring(zf.read("content.xml"))
-        except (KeyError, ElementTree.ParseError) as exc:
+            source = zf.open("content.xml")  # inflates no further than its declared size
+        except KeyError as exc:
             raise IngestError(
                 reason="unreadable", message=f"OpenDocument parse failed: {exc}"
             ) from None
-    sheet = root.find(".//table:table", _ODS)
-    if sheet is None:
-        raise IngestError(reason="unreadable", message="The OpenDocument file has no sheet.")
-    return list(_sheet_records(_ods_rows(sheet)))
+        with source:
+            try:
+                yield from _sheet_records(_ods_rows(source))
+            except ElementTree.ParseError as exc:
+                raise IngestError(
+                    reason="unreadable", message=f"OpenDocument parse failed: {exc}"
+                ) from None
 
 
-def _ods_rows(sheet: ElementTree.Element) -> Iterator[list[str]]:
-    # A repeat count pads a sheet to a million blank rows: expanded only while it carries a value.
-    repeat = f"{{{_ODS['table']}}}number-rows-repeated"
-    for row in sheet.iter(f"{{{_ODS['table']}}}table-row"):
-        cells = _ods_cells(row)
-        if not any(cells):
-            continue
-        for _ in range(int(row.get(repeat, "1"))):
-            yield cells
-
-
-def _ods_cells(row: ElementTree.Element) -> list[str]:
-    repeat = f"{{{_ODS['table']}}}number-columns-repeated"
+# Streamed: every element is dropped once read, so memory holds one open path and one cell.
+# A repeat count is the file's claim, and blank tails repeat to the sheet's edge: blanks expand
+# only once a value follows, a valued row streams to the row cap, a row stops one past the
+# column cap, and a blank row yields once whatever it declares.
+def _ods_rows(source: IO[bytes]) -> Iterator[list[str]]:
+    rows_repeated = f"{_TABLE_NS}number-rows-repeated"
+    columns_repeated = f"{_TABLE_NS}number-columns-repeated"
+    path: list[ElementTree.Element] = []
+    table: ElementTree.Element | None = None
+    row: ElementTree.Element | None = None
+    cell: ElementTree.Element | None = None
     cells: list[str] = []
-    for cell in row:
-        value = "\n".join("".join(p.itertext()) for p in cell.findall("text:p", _ODS))
-        cells.extend([value] * (int(cell.get(repeat, "1")) if value else 1))
-    while cells and not cells[-1]:
-        cells.pop()
-    return cells
+    blanks = 0
+    for event, elem in ElementTree.iterparse(source, events=("start", "end")):
+        if event == "start":
+            if table is None and elem.tag == _ODS_TABLE:
+                table = elem
+            elif row is not None and cell is None and path[-1] is row:
+                cell = elem
+            elif table is not None and row is None and elem.tag == _ODS_ROW:
+                row, cells, blanks = elem, [], 0
+            path.append(elem)
+            continue
+        path.pop()
+        if elem is cell:
+            cell = None
+            value = "\n".join("".join(p.itertext()) for p in elem.findall(_ODS_TEXT_P))
+            count = int(elem.get(columns_repeated, "1"))
+            if not value:
+                blanks += count
+            elif len(cells) <= MAX_COLUMNS:
+                cells.extend([""] * min(blanks, MAX_COLUMNS + 1 - len(cells)))
+                cells.extend([value] * min(count, MAX_COLUMNS + 1 - len(cells)))
+                blanks = 0
+        elif elem is row:
+            row = None
+            yield from repeat(cells, int(elem.get(rows_repeated, "1"))) if cells else ([],)
+        elif elem is table:
+            return
+        if cell is None and path:
+            path[-1].remove(elem)
+    raise IngestError(reason="unreadable", message="The OpenDocument file has no sheet.")
 
 
 def materialize_samples(

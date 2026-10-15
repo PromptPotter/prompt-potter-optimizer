@@ -63,6 +63,8 @@ PreflightFn = Callable[[str], Awaitable[str | None]]
 # Read as the client opens its connection, never at import; `None` sends no auth header.
 AuthTokenFn = Callable[[], str | None]
 
+EndpointFn = Callable[[], str]
+
 # `(node name, node config) -> what one run of that node can bill`.
 SentSpendBound = Callable[[str, Mapping[str, Any]], NodeSpendBound | None]
 
@@ -90,6 +92,9 @@ class Connector:
 
     experiment_file: str = ""
     """A panel file in the dataset's config dir that OWNS its rows; empty: the loader registry's."""
+
+    serves_uploads: bool = False
+    """A check-in may name it: it runs an uploaded table's rows, and nothing beside them."""
 
     extract_experiment: Callable[[dict[str, Any]], list[dict[str, Any]]] | None = None
     """Rows in panel order: ``source_pin`` enters ``Sample.key``; a ``None`` ground truth IS the shape."""
@@ -160,6 +165,9 @@ class Connector:
     preflight: PreflightFn | None = None
     """``None`` opts out: an in-process backend has nothing to probe."""
 
+    endpoint: EndpointFn | None = None
+    """Where a ``remote_http`` backend listens: the operator's config, never a request's word."""
+
     auth_token: AuthTokenFn | None = None
 
     completion_check: Callable[[], None] | None = None
@@ -188,12 +196,16 @@ class Connector:
     available_models: tuple[str, ...] = ()
     """The MENU, never what a node permits; a model needing a ``max_tokens`` floor needs a registry profile."""
 
+    def base_url(self) -> str:
+        return self.endpoint().rstrip("/") if self.endpoint is not None else ""
+
 
 __all__ = [
     "PACKAGE_CACHE_KEY",
     "PROBE_WORKLOAD",
     "AuthTokenFn",
     "Connector",
+    "EndpointFn",
     "ExperimentResolver",
     "InProcessRun",
     "InProcessWorkload",

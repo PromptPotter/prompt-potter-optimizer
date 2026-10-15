@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-// PROMPTPOTTER_AUTH unset plus a dummy `oidc.json` closes both doors of `deps.py::auth_is_open`; a session is a file minted directly.
+// PROMPTPOTTER_AUTH unset closes `deps.py::auth_is_open`; a session is a file minted directly.
 
 // `__dirname`, not `import.meta.url`: Playwright's loader compiles this file to CommonJS.
 const WEBAPP = path.resolve(__dirname, "..");
@@ -26,7 +26,7 @@ export async function startFakeIssuer(
   mkdirSync(path.join(identityDir, "sessions"), { recursive: true });
 
   const baseURL = `http://127.0.0.1:${port}`;
-  // Only its PRESENCE matters (`ProviderConfigBundle.configured`); nothing dials out.
+  // A provider for `/me` to list; nothing dials out.
   writeFileSync(
     path.join(identityDir, "oidc.json"),
     JSON.stringify({

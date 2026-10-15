@@ -37,7 +37,6 @@ from promptpotter.application.datasets.tabular_ingest import (
 from promptpotter.application.jobs.launcher.checkin import create_checkin_campaign
 from promptpotter.application.origin_listing import canonical_origin_campaign
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
-from promptpotter.config.settings import DEFAULT_BACKEND_URL
 from promptpotter.connectors import DEFAULT_CONNECTOR
 from promptpotter.connectors.protocol import PROBE_WORKLOAD
 from promptpotter.domain.bench import partition_bank
@@ -51,6 +50,7 @@ from promptpotter.infrastructure.store.dataset_access import backend_type_of_dat
 from promptpotter.infrastructure.store.layout import validate_dataset_name
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import NotFoundError
+from promptpotter.shared.identity import CAMPAIGN_CREATE_CAP, require_capability
 
 # Enforced by the web boundary only; the CLI relies on the per-row cap in ``read_tabular``.
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
@@ -58,13 +58,11 @@ MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 logger = logging.getLogger(__name__)
 
 
-async def fetch_backend_nodes(
-    connector_name: str, *, backend_url: str = DEFAULT_BACKEND_URL
-) -> dict[str, Any]:
+async def fetch_backend_nodes(connector_name: str) -> dict[str, Any]:
     connector = connectors.get(connector_name)
     if connector.execution == "in_process":
         return {}
-    client = BackendClient(connector, backend_url, workload=PROBE_WORKLOAD)
+    client = BackendClient(connector, workload=PROBE_WORKLOAD)
     try:
         resp = await client.fetch_pipeline()
     except (KeyboardInterrupt, asyncio.CancelledError):
@@ -80,6 +78,12 @@ async def fetch_backend_nodes(
 
 async def refresh_capabilities(stores: Stores) -> None:
     await refresh_model_capabilities(Path(stores.base_dir))
+
+
+async def _open_checkin(stores: Stores) -> None:
+    """Every check-in ingress starts here: the gate is asked before anything is kept or fetched."""
+    require_capability(stores.identity, CAMPAIGN_CREATE_CAP, subject="check-in mint")
+    await refresh_capabilities(stores)
 
 
 def _column_label_sets(
@@ -106,8 +110,8 @@ async def ingest_draft(
     blob: bytes,
     filename: str,
     slug: str | None = None,
-    backend_url: str = DEFAULT_BACKEND_URL,
 ) -> DraftCampaign:
+    await _open_checkin(stores)
     kept = stores.tenant_datasets.keep_upload(blob, file_extension(filename))
     record_upload(stores, filename=filename, kept=kept)
     table = read_tabular(blob, filename)
@@ -119,8 +123,7 @@ async def ingest_draft(
     # Raised before the check-in campaign is minted, so a collision leaves no orphan.
     if stores.tenant_datasets.slug_exists(base_slug):
         raise SlugTakenError(base_slug, stores.tenant_datasets.suggest_free_slug(base_slug))
-    await refresh_capabilities(stores)
-    backend_nodes = await fetch_backend_nodes(DEFAULT_CONNECTOR, backend_url=backend_url)
+    backend_nodes = await fetch_backend_nodes(DEFAULT_CONNECTOR)
 
     preview = [dict(row) for row in table.rows[:PREVIEW_ROWS]]
     draft = new_draft(
@@ -150,11 +153,11 @@ async def draft_from_dataset(
     overrides: dict[str, Any] | None = None,
     origin_campaign: Campaign | None = None,
 ) -> DraftCampaign:
+    await _open_checkin(stores)
     dataset_dir = offered_dataset_dir(stores, dataset_name)
     items = checkin_items(stores, dataset_name)
     rows = labelled_rows(items)
 
-    await refresh_capabilities(stores)
     # An origin reuse reads the node declaration off ITS connector, not the shared file's.
     backend_nodes = await fetch_backend_nodes(
         origin_campaign.backend_type

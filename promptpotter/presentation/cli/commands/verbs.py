@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 from typing import get_args
 
-from promptpotter.config.settings import DEFAULT_BACKEND_ID, DEFAULT_BACKEND_URL
 from promptpotter.domain.cycle_paths import CyclePath, decode_cycle_path
 from promptpotter.domain.launch_limits import RoundsCap
 from promptpotter.domain.phases import GateDecision
@@ -110,8 +109,6 @@ VERBS: tuple[Verb, ...] = (
                 "confirms an origin field, e.g. `--set task_description='map names to codes'` or "
                 "`--set column.query=input`, applied before the resolver runs.",
             ),
-            Arg("--backend-url", default=DEFAULT_BACKEND_URL),
-            Arg("--backend-id", default=DEFAULT_BACKEND_ID),
             Arg(
                 "--arm",
                 default=None,

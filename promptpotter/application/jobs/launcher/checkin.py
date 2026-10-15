@@ -30,7 +30,6 @@ from promptpotter.domain.launch_limits import LaunchLimits
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.checkin_draft_store import dataset_source_of
 from promptpotter.infrastructure.store.stores import Stores, owned_campaign
-from promptpotter.shared.identity import CAMPAIGN_CREATE_CAP, require_capability
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
@@ -48,8 +47,6 @@ def create_checkin_campaign(
     source_file: str = "",
     headers: tuple[str, ...] = (),
 ) -> tuple[str, str, DraftCampaign]:
-    # Gated HERE, at the mint, not on the routes above it: every ingress reaches this one function.
-    require_capability(stores.identity, CAMPAIGN_CREATE_CAP, subject="check-in mint")
     hop = mint_checkin_skeleton(stores, slug=draft.slug, backend_type=draft.connector)
     campaign_id = hop.campaign_id
     # The bank lands FIRST: ``write_resolution`` patches ``cache.json`` and no-ops without one.
@@ -85,15 +82,13 @@ class CheckinStart:
     hop: CycleHop
     draft: DraftCampaign
     limits: LaunchLimits
-    backend_url: str
-    backend_id: str
 
     @property
     def dataset_name(self) -> str:
         return self.draft.slug
 
-    def backend(self, stores: Stores) -> tuple[str, str]:
-        return self.draft.connector, self.backend_url
+    def backend_type(self, stores: Stores) -> str:
+        return self.draft.connector
 
     def campaign_config(self, stores: Stores) -> CampaignConfig:
         return checkin_campaign_config(stores, self.draft)
@@ -122,8 +117,6 @@ async def _commit_checkin(stores: Stores, request: CheckinStart) -> Session:
         origin_override = draft.committed_prompt_fields() if authored else None
 
     session = await init_services(
-        backend_url=request.backend_url,
-        backend_id=request.backend_id,
         dataset_name=dataset_name,
         identity=stores.identity,
         stores=stores,

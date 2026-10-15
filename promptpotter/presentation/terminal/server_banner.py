@@ -70,7 +70,6 @@ def render_server_banner(
     *,
     brand_name: str,
     version: str,
-    environment: str,
     data_root: Path,
     auth_open: bool,
     providers: tuple[str, ...],
@@ -78,7 +77,7 @@ def render_server_banner(
     offer: frozenset[str] | None,
     offer_faults: list[str],
 ) -> str:
-    header_plain = f"Running {brand_name} {version} in {environment} mode."
+    header_plain = f"Running {brand_name} {version}."
     info_lines = (
         f"{BOLD}{header_plain}{RESET}",
         f"{DIM}{'-' * len(header_plain)}{RESET}",

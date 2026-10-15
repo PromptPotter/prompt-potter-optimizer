@@ -69,8 +69,9 @@ def _shadowed(relative: Path, shipped: Path) -> Path:
     return override if override.is_file() else shipped
 
 
-def optimizer_manifest_path(name: str, shipped: Path) -> Path:
-    return _shadowed(Path("optimizers") / name / "pipeline.yaml", shipped / "pipeline.yaml")
+def optimizer_manifest_path(shipped: Path) -> Path:
+    """Keyed by the registered runtime's own directory, so no requested name ever reaches a path."""
+    return _shadowed(Path("optimizers") / shipped.name / "pipeline.yaml", shipped / "pipeline.yaml")
 
 
 def checkin_manifest_path() -> Path:

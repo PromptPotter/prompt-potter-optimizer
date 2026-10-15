@@ -10,16 +10,21 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import io
 import json
 import random
+import re
 import types
+import zipfile
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
+import openpyxl
 import pytest
 import yaml
 from factories import pipeline_schema
+from pydantic import ValidationError
 
 from promptpotter.application.bench import llm_call as call_mod
 from promptpotter.application.bench.children import admission_failures, overlay_failures
@@ -31,6 +36,7 @@ from promptpotter.application.campaign_config import (
     OptimizationConfig,
 )
 from promptpotter.application.commands.launching import _parse_cycle_seed
+from promptpotter.application.commands.payloads import MintCampaignPayload, StartCheckinPayload
 from promptpotter.application.datasets import ingest
 from promptpotter.application.datasets.draft_campaign import (
     EditDraftPatch,
@@ -39,8 +45,7 @@ from promptpotter.application.datasets.draft_campaign import (
 )
 from promptpotter.application.datasets.draft_patch import apply_draft_patch, plan_draft_patch
 from promptpotter.application.datasets.origin_resolve import build_origin_consultation
-from promptpotter.application.datasets.tabular_ingest import read_tabular
-from promptpotter.application.initialization.wiring import _resolve_backend_id
+from promptpotter.application.datasets.tabular_ingest import IngestError, read_tabular
 from promptpotter.application.intelligence.indexes.sample import SampleFoldRow, SampleIndex
 from promptpotter.application.intelligence.rasch import Observation, select_round_subset
 from promptpotter.application.jobs.launcher.checkin import create_checkin_campaign
@@ -83,8 +88,10 @@ from promptpotter.application.runner.inner.connector import (
 )
 from promptpotter.application.runner.inner.spawn import inner_campaign_id
 from promptpotter.application.runner.inner.tasks import InnerTaskSpec
+from promptpotter.config.settings import settings
 from promptpotter.connectors import DEFAULT_CONNECTOR, get
-from promptpotter.domain.backend import BackendConnection
+from promptpotter.connectors import harbor as harbor_connector
+from promptpotter.connectors.protocol import PROBE_WORKLOAD
 from promptpotter.domain.bench import DatasetSplit, partition_bank
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
@@ -107,6 +114,7 @@ from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.run_records import ConfigOverrides, CycleSeed, ScoringLockedRecord
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
+from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.request import ChatRequest
 from promptpotter.infrastructure.llm.response import LLMResponse
@@ -116,6 +124,7 @@ from promptpotter.infrastructure.store.io import read_yaml, write_yaml
 from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.judges.protocol import JudgeSpec, JudgeStage
+from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.hashing import source_facts, stable_hash
 from promptpotter.shared.identity import default_identity
 
@@ -368,6 +377,34 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     )
     assert readable_dataset_dir(sandbox, "innerbench") == tenant_copy, "the cell ran another tier"
 
+    # A Harbor panel reads its pinned roster and never dials out; upstream repinning re-cuts nothing.
+    def no_fetch(*_a: object, **_k: object) -> None:
+        raise AssertionError("a panel read fetched Harbor's registry")
+
+    monkeypatch.setattr(harbor_connector.httpx, "get", no_fetch)
+    for name in ("spreadsheetbench-s10", "spreadsheetbench-s20", "harbor-tbench-regex-log"):
+        resolved = experiment_outside_run(_DATASETS / name)
+        include = read_yaml(_DATASETS / name / "harbor_tasks.yaml")["tasks_include"]
+        assert resolved is not None and [t["id"] for t in resolved["tasks"]] == include, (
+            f"{name} resolved another panel than its include list"
+        )
+    with pytest.raises(ValueError):
+        harbor_connector._resolve_experiment(
+            {"harbor_dataset": "unpinned", "harbor_dataset_version": "9"}
+        )
+    roster = [{"id": "a", "git_url": "u", "git_commit_id": "c1", "path": "a"}]
+    published = [roster]
+    monkeypatch.setattr(harbor_connector, "_ROSTER_DIR", tmp_path)
+    monkeypatch.setattr(harbor_connector, "_registry_roster", lambda *_: published[0])
+    pin = harbor_connector.pin_roster("bench", "1.0")
+    assert harbor_connector.pin_roster("bench", "1.0") == pin, "an unchanged registry re-pinned"
+    published[0] = [{**roster[0], "git_commit_id": "c2"}]
+    with pytest.raises(ValueError):
+        harbor_connector.pin_roster("bench", "1.0")
+    assert harbor_connector._pinned_roster("bench", "1.0") == roster, (
+        "a repinned registry moved the panel under the name it had"
+    )
+
 
 # 2. The config a campaign runs
 
@@ -498,6 +535,10 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         authored == frozen(pipeline_overlay={"llm_only": {"config": contract}}).pipeline_overlay
     ), "an authored output froze another contract than the overlay spells"
     assert authored["llm_only"]["answer_field"] == "code", "the answer slot is not the last field"
+    # A check-in names only a connector that runs its upload; a container one is never chosen there.
+    for foreign in ("dbllmbench", "harbor", "dspy", "no-such"):
+        with pytest.raises(PayloadInvalidError):
+            frozen(connector=foreign)
 
     # A row reads as the search space its ticks and padlock drew.
     params = [
@@ -692,21 +733,14 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     found = admission_failures(wiped, {"l1_generate": {"invented_knob": 1}}, outer_schema)
     assert [f.reason for f in found] == ["unknown_param"], "an invented knob was admitted"
 
-    # The backend row names the endpoint the run actually reached.
-    built_stores.backends.register(
-        BackendConnection(
-            id="box", name="n", backend_type="termnorm", base_url="http://10.0.0.5:8000"
-        )
-    )
-    resolved = _resolve_backend_id(built_stores, "local", "http://10.0.0.5:8000/", "termnorm", "n")
-    assert resolved == "box" and len(built_stores.backends.list_all()) == 1, (
-        "one endpoint was filed under two backend rows"
-    )
-    minted = _resolve_backend_id(built_stores, "box", "http://127.0.0.1:8000", "termnorm", "n")
-    row = built_stores.backends.get(minted)
-    assert minted != "box" and row is not None and row.base_url == "http://127.0.0.1:8000", (
-        "a run's measurements were filed under an endpoint it never reached"
-    )
+    # The endpoint is the operator's config: a request that names one is refused, not followed.
+    termnorm = BackendClient(get("termnorm"), workload=PROBE_WORKLOAD)
+    assert termnorm.base_url == settings.TERMNORM_URL.rstrip("/"), "the client left its config"
+    for wire in (StartCheckinPayload, MintCampaignPayload):
+        with pytest.raises(ValidationError):
+            wire.model_validate(
+                {"campaign_id": "c" * 8, "dataset_name": "d", "backend_url": "http://evil"}
+            )
 
     # The YAML a config is written to never reinterprets a string it wrote.
     path = tmp_path / "hazards.yaml"
@@ -751,6 +785,78 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
         assert (table.headers, list(table.rows)) == (("query", "label"), _EXPORTED_ROWS), (
             f"{filename}: an exported table read to labels it does not hold"
         )
+
+    # An OpenDocument repeat count is the file's claim: blanks keep their columns, tails stay
+    # unexpanded, and a valued repeat stops at the cap instead of allocating what it declares.
+    def ods(*rows: str) -> bytes:
+        ns = " ".join(
+            f'xmlns:{p}="urn:oasis:names:tc:opendocument:xmlns:{p}:1.0"'
+            for p in ("office", "table", "text")
+        )
+        body = f"<table:table>{''.join(rows)}</table:table>"
+        content = f"<office:document-content {ns}>{body}</office:document-content>"
+        out = io.BytesIO()
+        with zipfile.ZipFile(out, "w") as zf:
+            zf.writestr("mimetype", "application/vnd.oasis.opendocument.spreadsheet")
+            zf.writestr("content.xml", content)
+        return out.getvalue()
+
+    def row(*cells: str, repeat: int = 1) -> str:
+        tag = f'table:table-row table:number-rows-repeated="{repeat}"'
+        return f"<{tag}>{''.join(cells)}</table:table-row>"
+
+    def cell(value: str, repeat: int = 1) -> str:
+        tag = f'table:table-cell table:number-columns-repeated="{repeat}"'
+        return f"<{tag}>{f'<text:p>{value}</text:p>' if value else ''}</table:table-cell>"
+
+    tail = cell("", 16_384)
+    sheet = ods(
+        row(cell("query"), cell("", 2), cell("label"), tail),
+        row(cell("Café"), cell("", 2), cell("Getränk", 1_000_000_000), tail),
+        row(tail, repeat=1_048_000),
+    )
+    assert read_tabular(sheet, "s.ods").rows == (
+        {"query": "Café", "column_2": "", "column_3": "", "label": "Getränk"},
+    ), "an OpenDocument repeat shifted a column or expanded a blank tail"
+    for refused in (
+        ods(row(cell("query"), cell("label", 1_000_000_000)), row(cell("x", 1_000_000_000))),
+        ods(row(cell("query")), row(cell("q"), repeat=1_000_000_000)),
+    ):
+        with pytest.raises(IngestError) as caught:
+            read_tabular(refused, "s.ods")
+        assert caught.value.reason == "too_large", "a declared repeat read past the caps"
+    header_row = row(cell("query"), cell("label"))
+    plain = ods(header_row, *(row(*map(cell, r.values())) for r in _EXPORTED_ROWS))
+    assert list(read_tabular(plain, "s.ods").rows) == _EXPORTED_ROWS, "an OpenDocument misread"
+
+    # An Excel <dimension> and row number are claims too: the caps bound the walk, not the sheet.
+    def xlsx(dimension: str, last_row: int) -> bytes:
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        assert ws is not None
+        for r in ({"query": "query", "label": "label"}, *_EXPORTED_ROWS):
+            ws.append(list(r.values()))
+        written = io.BytesIO()
+        wb.save(written)
+        out = io.BytesIO()
+        with zipfile.ZipFile(written) as src, zipfile.ZipFile(out, "w") as dst:
+            for info in src.infolist():
+                data = src.read(info)
+                if info.filename == "xl/worksheets/sheet1.xml":
+                    text = re.sub(
+                        r'<dimension ref="[^"]*"', f'<dimension ref="{dimension}"', data.decode()
+                    )
+                    data = re.sub(r'r="([AB]?)3"', rf'r="\g<1>{last_row}"', text).encode()
+                dst.writestr(info, data)
+        return out.getvalue()
+
+    assert list(read_tabular(xlsx("A1:B3", 3), "s.xlsx").rows) == _EXPORTED_ROWS
+    assert list(read_tabular(xlsx("A1:XFD1048576", 3), "s.xlsx").rows) == _EXPORTED_ROWS, (
+        "a declared Excel dimension padded the walk"
+    )
+    with pytest.raises(IngestError) as caught:
+        read_tabular(xlsx("A1:B3", 1_048_576), "s.xlsx")
+    assert caught.value.reason == "too_large", "a run of blank Excel rows went uncounted"
 
     # No held-out row reaches a round panel or an archive view.
     bank = [Sample(id=i, query=f"claim {i}", ground_truth="TRUE") for i in range(60)]

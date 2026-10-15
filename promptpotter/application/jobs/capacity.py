@@ -8,10 +8,13 @@ from pydantic import Field
 from promptpotter.config.settings import settings
 from promptpotter.domain.phases import QUEUE_STARTS_ITSELF
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.infrastructure.identity.migration import is_host
 from promptpotter.infrastructure.llm.send_pacing import throttle_stall_seconds
+from promptpotter.shared.identity import acting_principal_id
 
 if TYPE_CHECKING:
     from promptpotter.application.jobs.registry import JobRegistry
+    from promptpotter.shared.identity import IdentityContext
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +132,8 @@ class MachineStatusResponse(StrictModel):
     )
     holder: MachineHolder | None = Field(
         default=None,
-        description="The oldest live run, whoever owns it; null when nothing is running.",
+        description="The oldest live run where it is the caller's own tenant's, or the caller is "
+        "the host; null otherwise — another tenant's run is counted in `running` and never named.",
     )
     queue: list[MachineQueueEntry] = Field(
         default_factory=list,
@@ -149,8 +153,9 @@ class MachineStatusResponse(StrictModel):
     )
 
 
-def machine_status(jobs: JobRegistry, *, principal_id: str) -> MachineStatusResponse:
-    """The caller's own run counts: occupancy is not relative to who asks. Blocking: threadpool it."""
+def machine_status(jobs: JobRegistry, identity: IdentityContext) -> MachineStatusResponse:
+    """Occupancy as counts; what is named is the caller's own, or anything to the host. Blocking: threadpool it."""
+    principal_id = acting_principal_id(identity)
     live = len(jobs.list_running())
     capacity = resolve_run_capacity(live)
     oldest = jobs.holder()
@@ -159,7 +164,7 @@ def machine_status(jobs: JobRegistry, *, principal_id: str) -> MachineStatusResp
     busy = live >= capacity
     holder = (
         None
-        if oldest is None
+        if oldest is None or not (oldest.user_id == str(identity.user_id) or is_host(identity))
         else MachineHolder(
             user=oldest.user_id,
             campaign_id=oldest.campaign_id,

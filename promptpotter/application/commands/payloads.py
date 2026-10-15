@@ -6,7 +6,6 @@ from pydantic import Field, SerializerFunctionWrapHandler, model_serializer, mod
 
 from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.datasets.draft_campaign import EditDraftPatch, OptimizationOverrides
-from promptpotter.config.settings import DEFAULT_BACKEND_ID, DEFAULT_BACKEND_URL
 from promptpotter.domain.campaign import ArmRequest
 from promptpotter.domain.command_kinds import (
     LOOP_TAKEN,
@@ -160,14 +159,6 @@ class SetCampaignLabelPayload(CampaignPayload):
     label: str = Field(max_length=200)
 
 
-class RegisterBackendPayload(CommandPayload):
-    name: str = Field(min_length=1, max_length=128)
-    backend_type: str = Field(min_length=1, max_length=64)
-    base_url: str = Field(min_length=1, max_length=2048)
-    # Auto-derived from `name` when omitted (`workspace_edits.py::_slugify_backend_id`).
-    id: str | None = Field(default=None, max_length=64, pattern=r"^[a-z][a-z0-9-]*$")
-
-
 class ReplaceDatasetPayload(CommandPayload):
     slug: str = Field(min_length=1, max_length=64)
 
@@ -225,18 +216,6 @@ class StartCheckinPayload(_CheckinPayload):
     campaign_id: str = Field(min_length=8, max_length=128)
     limits: LaunchLimits = LaunchLimits()
     diag: bool = Field(default=False, description="Run the diagnostic shape.")
-    backend_url: str = Field(
-        default=DEFAULT_BACKEND_URL,
-        min_length=1,
-        max_length=2048,
-        description="Where the draft's connector reaches its backend",
-    )
-    backend_id: str = Field(
-        default=DEFAULT_BACKEND_ID,
-        min_length=1,
-        max_length=64,
-        description="The registry id that backend is recorded under",
-    )
 
     @property
     def checkin_campaign_id(self) -> str:
@@ -283,18 +262,6 @@ class MintCampaignPayload(CommandPayload):
         max_length=16384,
         description="The task description to frame from, in place of the dataset's own",
     )
-    backend_url: str = Field(
-        default=DEFAULT_BACKEND_URL,
-        min_length=1,
-        max_length=2048,
-        description="Where the dataset's connector reaches its backend",
-    )
-    backend_id: str = Field(
-        default=DEFAULT_BACKEND_ID,
-        min_length=1,
-        max_length=64,
-        description="The registry id that backend is recorded under",
-    )
 
     @property
     def optimization_sent(self) -> dict[str, Any]:
@@ -319,12 +286,7 @@ class MintCampaignPayload(CommandPayload):
 
 
 # `replace-dataset` / `compact-archive` stay OUTSIDE: the generic door then refuses them by type.
-WorkspacePayload = (
-    RegisterBackendPayload
-    | CancelQueuedRunPayload
-    | SetConcurrentCyclesPayload
-    | MintCampaignPayload
-)
+WorkspacePayload = CancelQueuedRunPayload | SetConcurrentCyclesPayload | MintCampaignPayload
 
 # Resolved by NAME (`CommandKind.payload_name`): a kind whose model is missing fails right here.
 KIND_OF_PAYLOAD: dict[type[CommandPayload], CommandKind] = {

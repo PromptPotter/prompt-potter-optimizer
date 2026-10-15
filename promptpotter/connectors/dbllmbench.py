@@ -405,15 +405,16 @@ async def _in_process_run(
             (work / "skills").mkdir()
             (work / "skills" / "candidate.md").write_text(prompt, encoding="utf-8", newline="\n")
         # Upstream's template from its `{{skills}}` slot down: the candidate replaces the rest.
+        # The template path rides as `$1`, never spliced into the script: it is node config.
         cut = (
-            f"sed -n '/{{{{skills}}}}/,$p' {template} > /tmp/template.txt "
+            "sed -n '/{{skills}}/,$p' \"$1\" > /tmp/template.txt "
             f"&& cp /tmp/template.txt {_WORK}/template.txt "
             f"&& exec db-llm-bench {_WORK}/config.yml {_WORK}/out.json"
         )
         args = ["--pull", "never", "--add-host", "host.docker.internal:host-gateway"]
         for key in env:
             args += ["-e", key]
-        args += ["-v", f"{work}:{_WORK}", str(image), "sh", "-c", cut]
+        args += ["-v", f"{work}:{_WORK}", str(image), "sh", "-c", cut, "sh", str(template)]
         with machine_step():
             code, log = await run_cell_container(name, *args, env=env, timeout=_CELL_WAIT_S)
         try:

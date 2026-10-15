@@ -16,7 +16,6 @@ from promptpotter.application.maintenance.archive_maintenance import (
     iter_cycle_ledgers,
 )
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, benchmark_datasets_root
-from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.campaign import Campaign, CampaignResult
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.results import DiagnosticRunRecord
@@ -100,14 +99,6 @@ _SURFACES: tuple[_Surface, ...] = (
         model_cls=CampaignConfig,
         rewrite=_as_pruned,
         benchmark_globs=("*/campaign.yaml",),
-    ),
-    _Surface(
-        title="Backend records (backends/*/backend.json) — pruned only",
-        verb="pruned",
-        workspace_globs=("*/backends/*/backend.json",),
-        key_path=(),
-        model_cls=BackendConnection,
-        rewrite=_as_pruned,
     ),
     _Surface(
         title="User records (user.json) — pruned only",

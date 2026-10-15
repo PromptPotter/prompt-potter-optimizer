@@ -27,7 +27,6 @@ from promptpotter.application.runner.grade_bench import grade_line_bench
 from promptpotter.application.views.readout import StatusFn
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
-from promptpotter.config.settings import DEFAULT_BACKEND_ID, DEFAULT_BACKEND_URL
 from promptpotter.domain.campaign import ArmRequest
 from promptpotter.domain.command_kinds import (
     OriginGateDecisionPayload,
@@ -67,8 +66,6 @@ __all__ = [
 async def open_session(
     dataset_name: str,
     *,
-    backend_url: str = DEFAULT_BACKEND_URL,
-    backend_id: str = DEFAULT_BACKEND_ID,
     stores: Stores | None = None,
     program: object | None = None,
 ) -> Session:
@@ -81,13 +78,11 @@ async def open_session(
     complete_registries(every_treatment=False)
     if stores is None:
         stores = build_stores(registered_or_default_identity(), projects_root=DEFAULT_PROJECTS_ROOT)
-    down = await probe_backend(backend_type_of_dataset(stores, dataset_name), backend_url)
+    down = await probe_backend(backend_type_of_dataset(stores, dataset_name))
     if down is not None:
         raise down
     return await init_services(
         dataset_name=dataset_name,
-        backend_url=backend_url,
-        backend_id=backend_id,
         identity=stores.identity,
         stores=stores,
         program=program,

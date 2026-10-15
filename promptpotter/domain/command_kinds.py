@@ -152,13 +152,6 @@ class CommandKind(StrEnum):
         CAMPAIGN_LIFECYCLE_CAP,
         "rename",
     )
-    # Reached by the verb named, but written by init wiring rather than through the command.
-    REGISTER_BACKEND = (
-        "register-backend",
-        "workspace_edits:register_backend",
-        CAMPAIGN_CREATE_CAP,
-        "new",
-    )
     # A dataset slug is in the measurement cache key: repointing one re-addresses every campaign on it.
     REPLACE_DATASET = (
         "replace-dataset",

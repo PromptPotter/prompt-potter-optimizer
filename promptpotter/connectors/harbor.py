@@ -20,7 +20,6 @@ from promptpotter.connectors.protocol import (
     Connector,
     InProcessWorkload,
 )
-from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import LLMSpendBound
 from promptpotter.domain.spend import StepUsage, TokenAccount
@@ -129,9 +128,10 @@ _INFRA_BACKOFF_S = 45.0
 
 # A terminus-2 summarize pass is three calls (`_summarize`).
 _TERMINUS_SUMMARY_CALLS = 3
-_REGISTRY_ATTEMPTS = 3
-_REGISTRY_BACKOFF_S = 2.0
 _REGISTRY_TIMEOUT_S = 30.0
+# Flat beside the overlay: `pyproject.toml` package-data ships `connectors/resources/*.json`.
+_ROSTER_DIR = Path(__file__).parent / "resources"
+_REGISTRY_NAME = re.compile(r"[\w.-]+")
 
 _HARNESS_NETWORK_FAILURE = re.compile(
     r"no such host|Temporary failure in name resolution|failed to fetch oauth token|"
@@ -181,36 +181,39 @@ def _system_skill_template(template: str, prompt: str) -> str:
     return block.replace("{", "{{").replace("}", "}}") + template
 
 
+def _roster_path(dataset: str, version: str) -> Path:
+    for part in (dataset, version):
+        if not _REGISTRY_NAME.fullmatch(part):
+            raise ValueError(f"harbor connector: {part!r} is not a registry name.")
+    return _ROSTER_DIR / f"harbor-roster.{dataset}@{version}.json"
+
+
 @functools.cache
-def _registry_tasks(dataset: str, version: str) -> list[dict[str, Any]]:
+def _pinned_roster(dataset: str, version: str) -> list[dict[str, Any]]:
+    # A read never dials out: the roster is what `pin_roster` wrote, or nothing.
+    path = _roster_path(dataset, version)
+    try:
+        pin = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise ValueError(
+            f"harbor connector: {dataset}@{version} has no pinned roster ({path.name}). Pin it "
+            f"once with `python -m promptpotter.connectors.harbor {dataset} {version}`."
+        ) from None
+    return list(pin["tasks"])
+
+
+def _registry_roster(dataset: str, version: str) -> list[dict[str, Any]]:
     from harbor.constants import DEFAULT_REGISTRY_URL
     from harbor.models.registry import DatasetSpec
 
     # Not `JsonRegistryClient`: its `requests.get` takes no timeout.
-    budget = SendBudget(None, attempts=_REGISTRY_ATTEMPTS)
-    while True:
-        try:
-            response = httpx.get(
-                DEFAULT_REGISTRY_URL,
-                timeout=_REGISTRY_TIMEOUT_S,
-                follow_redirects=True,
-                verify=tls_context(),
-            )
-            response.raise_for_status()
-            break
-        except httpx.HTTPError as exc:
-            wait = budget.resend_wait(base_s=_REGISTRY_BACKOFF_S)
-            if wait is None:
-                raise BackendUnreachableError(
-                    "harbor",
-                    DEFAULT_REGISTRY_URL,
-                    f"registry fetch failed {budget.attempts} times: {exc}",
-                ) from exc
-            logger.warning(
-                "harbor registry fetch %d/%d failed: %s", budget.resent, budget.attempts, exc
-            )
-            time.sleep(wait)
-
+    response = httpx.get(
+        DEFAULT_REGISTRY_URL,
+        timeout=_REGISTRY_TIMEOUT_S,
+        follow_redirects=True,
+        verify=tls_context(),
+    )
+    response.raise_for_status()
     specs = {
         spec.version: spec
         for spec in map(DatasetSpec.model_validate, response.json())
@@ -238,6 +241,28 @@ def _registry_tasks(dataset: str, version: str) -> list[dict[str, Any]]:
     ]
 
 
+def pin_roster(dataset: str, version: str) -> Path:
+    """The ONE fetch of Harbor's registry, an operator step: its file serves every later read."""
+    path = _roster_path(dataset, version)
+    tasks = _registry_roster(dataset, version)
+    # The registry is a file on upstream's main branch: a version is no promise its roster holds.
+    if path.is_file() and json.loads(path.read_text(encoding="utf-8"))["tasks"] != tasks:
+        raise ValueError(
+            f"harbor connector: the registry now publishes a different {dataset}@{version} "
+            f"roster than {path.name} pins. The pin stands — a panel is never re-cut under the "
+            f"name it had (`datasets/CLAUDE.md`); delete the file only to re-cut on purpose."
+        )
+    # One task per line: a re-pin's diff reads task by task.
+    lines = ",\n".join(f"  {json.dumps(t)}" for t in tasks)
+    path.write_text(
+        f'{{"harbor_dataset": {json.dumps(dataset)}, '
+        f'"harbor_dataset_version": {json.dumps(version)}, "tasks": [\n{lines}\n]}}\n',
+        encoding="utf-8",
+        newline="\n",
+    )
+    return path
+
+
 def _resolve_experiment(panel: Mapping[str, Any]) -> dict[str, Any]:
     if inline := panel.get("tasks"):
         return {**panel, "tasks": list(inline)}
@@ -254,7 +279,7 @@ def _resolve_experiment(panel: Mapping[str, Any]) -> dict[str, Any]:
             f"`harbor_dataset_version`. Resolving 'latest' would put a moving roster behind a "
             f"fixed dataset name, so the version is required."
         )
-    tasks = _registry_tasks(str(dataset), str(version))
+    tasks = _pinned_roster(str(dataset), str(version))
 
     include = panel.get("tasks_include")
     if not include:
@@ -1209,4 +1234,11 @@ __all__ = [
     "REWARD_KEY",
     "TASKS_FILE",
     "harbor_wire_adapter",
+    "pin_roster",
 ]
+
+
+if __name__ == "__main__":
+    import sys
+
+    sys.stdout.write(f"{pin_roster(*sys.argv[1:3])}\n")

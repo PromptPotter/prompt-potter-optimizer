@@ -145,8 +145,9 @@ def spend_book(
 
 
 def backend_client(**declared: Any) -> BackendClient:
+    declared.setdefault("endpoint", lambda: "http://backend")
     connector = Connector("fake", lambda query, params: {"query": query}, **declared)
-    return BackendClient(connector, "http://backend", workload=PROBE_WORKLOAD)
+    return BackendClient(connector, workload=PROBE_WORKLOAD)
 
 
 def workspace(root: Path) -> Stores:

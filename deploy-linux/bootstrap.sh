@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Linux bootstrap — clones the repo, installs Python 3.13 if missing, installs
-# Node.js 20 if missing, sets up a venv, builds the webapp, and creates an .env.
+# Node.js (CI's major) if missing, sets up a venv, builds the webapp, and creates an .env.
 # Idempotent: safe to re-run. Reads adopter values from deploy.config — see
 # deploy.config.example.
 set -euo pipefail
@@ -30,6 +30,7 @@ die()  { printf '\033[1;31mxx \033[0m %s\n' "$*" >&2; exit 1; }
 # set_env_kv + the brand fan-out, shared with update.sh.
 source "$HERE/brand-env.sh"
 source "$HERE/health.sh"
+source "$HERE/uv.sh"
 
 [[ "$(uname -s)" == "Linux" ]] || die "this script is Linux-only"
 [[ "$REPO_URL" != *"CHANGE-ME"* ]] || die "edit REPO_URL at the top of bootstrap.sh first (or pass REPO_URL=...)"
@@ -75,18 +76,27 @@ else
     esac
 fi
 
-# --- 3. Node 20+ ---------------------------------------------------------
-if command -v node >/dev/null 2>&1 && [[ "$(node -v | cut -dv -f2 | cut -d. -f1)" -ge 20 ]]; then
+# --- 3. Node (CI's major) ------------------------------------------------
+NODE_MAJOR=22
+if command -v node >/dev/null 2>&1 && [[ "$(node -v | cut -dv -f2 | cut -d. -f1)" -ge "$NODE_MAJOR" ]]; then
     say "node $(node -v) already installed"
 else
     case "$PKG" in
         dnf)
-            say "installing node.js via dnf (Fedora ships 20+)"
+            say "installing node.js via dnf"
             sudo dnf install -y nodejs npm
             ;;
         apt)
-            say "installing node.js 20 via NodeSource"
-            curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+            # NodeSource's apt repo behind its signing key — apt verifies every package; no script runs as root.
+            say "installing node.js $NODE_MAJOR via the NodeSource apt repo"
+            sudo apt-get update
+            sudo apt-get install -y ca-certificates gnupg
+            sudo install -d -m 0755 /etc/apt/keyrings
+            curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+                | sudo gpg --dearmor --yes -o /etc/apt/keyrings/nodesource.gpg
+            echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_$NODE_MAJOR.x nodistro main" \
+                | sudo tee /etc/apt/sources.list.d/nodesource.list >/dev/null
+            sudo apt-get update
             sudo apt-get install -y nodejs
             ;;
     esac
@@ -109,9 +119,8 @@ if [[ ! -d .venv ]]; then
 fi
 say "installing python deps from uv.lock (this can take a minute)"
 # Install the exact pinned graph from uv.lock — same source of truth as CI.
-# uv is fetched to ~/.local/bin (outside .venv, so a sync never wipes it).
-command -v uv >/dev/null 2>&1 || python3 -m pip install --user -q uv
-PATH="$HOME/.local/bin:$PATH" uv sync --frozen --extra all --extra dev
+ensure_uv
+"$UV" sync --frozen --extra all --extra dev
 
 # --- 5. env file ---------------------------------------------------------
 if [[ ! -f "$ENV_FILE" ]]; then
@@ -165,7 +174,7 @@ fi
 say "building webapp (static export → $WEBAPP_DIR/out/)"
 brand_export_webapp   # Next inlines NEXT_PUBLIC_* at build time — the rebuild IS the rename
 cd "$WEBAPP_DIR"
-npm install
+npm ci
 npm run build
 cd ..
 

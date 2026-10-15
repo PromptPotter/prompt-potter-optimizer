@@ -233,7 +233,7 @@ not backend-supplied.
   outbound-only Telegram bot (`presentation/admin_bot.py`, ADR-0004). This is the zero-trust rule.
 - **Response headers** (`presentation/api/middleware/headers.py::ResponseHeadersMiddleware`, one middleware): `nosniff`, `X-Frame-Options:
   DENY`, `Referrer-Policy`, HSTS on https; CSP strict (`default-src 'none'`) on JSON API paths,
-  frame-only on the webapp document; `Cache-Control: no-store` on `/api/v1/*`, `no-cache` on every page, and `immutable` only on a content-named file under `/_next/static/` that was actually served. Every `/api/v1/*` answer also names the webapp build being served (`X-Webapp-Build`), so a tab left open across a deploy knows it is the old one.
+  same-origin only on the webapp document (inline script and style admitted, no plugin, no foreign base, form or frame parent); `Cache-Control: no-store` on `/api/v1/*`, `no-cache` on every page, and `immutable` only on a content-named file under `/_next/static/` that was actually served. Every `/api/v1/*` answer also names the webapp build being served (`X-Webapp-Build`), so a tab left open across a deploy knows it is the old one.
 - **PP↔TermNorm** is authenticated with a shared bearer token (`Authorization: Bearer`,
   constant-time compared on the TermNorm side) plus TermNorm's IP allowlist
   (`connectors/termnorm.py`, `infrastructure/backend.py`); the deploy provisions the shared secret.
@@ -300,7 +300,7 @@ Each is idempotent.
 
 1. **Apply the hardened unit** — `./install-service.sh`, then `systemctl status $APP_NAME` and the health curl. If it fails to start, the first suspects are `ProtectSystem=strict` (add the offending write path to `ReadWritePaths`) and `SystemCallFilter`. `MemoryDenyWriteExecute` is deliberately **omitted** — add it only after a clean smoke test.
 2. **(Optional) cgroup bound** — `MEMORY_MAX="2G"` in `deploy.config`, re-run `install-service.sh`. Turns the pp-self memory-starvation OS-kill into a clean cgroup OOM.
-3. **Provision the PP↔TermNorm token.** A **first** install has `bootstrap.sh` generate the shared `TERMNORM_TOKEN`; on an already-installed box **it will not re-run** — its `REPO_URL` guard exits first — so set the same token by hand in both `.env` files, with `TERMNORM_REQUIRE_AUTH=true` on TermNorm's side.
+3. **Provision the PP↔TermNorm token.** A **first** install has `bootstrap.sh` generate the shared `TERMNORM_TOKEN`; on an already-installed box **it will not re-run** — its `REPO_URL` guard exits first — so set the same token by hand in both `.env` files, with `TERMNORM_REQUIRE_AUTH=true` on TermNorm's side. The token goes only to `TERMNORM_URL` (default `http://127.0.0.1:8000`), PP's own `.env` — no request or CLI flag names a backend host.
 4. **Restart BOTH services.** TermNorm to start requiring the token, and PromptPotter because it reads `TERMNORM_TOKEN` once at boot rather than per call. Verify against `127.0.0.1:8000/status`: no `Authorization` → **401**, bearer → **200**. PP's reachability probe uses a separate unauthenticated client that only checks TCP connect, so enabling auth does not break it.
 5. **Confirm TermNorm's IP allowlist** (`backend-api/config/users.json`) lists PP's source IP. Co-located loopback is already there; a *remote* PP needs its IP added, or `/matches` removed from `protected_paths` to rely on the bearer token alone.
 6. **Never run TermNorm's dev launcher in prod** — `start-server-py-LLMs.sh` binds `0.0.0.0:8000` where the systemd unit binds loopback.

@@ -68,7 +68,7 @@ Every control-plane verb requires a capability, checked in **one place**: the co
 |---|---|---|
 | `campaign.step` | `skip-searchpoint`, `pause-cycle`, `origin-gate-decision`, `submit-arms`, `step-cycle` | stepwise / bounded |
 | `campaign.run` | `start-run`, `fork-cycle`, `start-checkin`, `verify-candidate`, `grade-bench`, `cancel-queued-run` | autonomous |
-| `campaign.create` | `mint-campaign`, `register-backend`, `edit-draft-campaign`, `resolve-origin` | create |
+| `campaign.create` | `mint-campaign`, `edit-draft-campaign`, `resolve-origin` | create |
 | `campaign.budget` | `change-run-limits` (raise a ceiling), `set-concurrent-cycles` | budget |
 | `campaign.lifecycle` | `archive-/delete-/unarchive-campaign`, `delete-cycle`, `cleanup-empty-cycles`, `set-campaign-label`, `replace-dataset`, `compact-archive` | destructive |
 | `campaign.babysit` | a **direct edit** of an optimizer-owned / origin-locked value — wired to the `fork-cycle` axis-unlock (§4) | privileged / provenance-tainting |
@@ -76,7 +76,7 @@ Every control-plane verb requires a capability, checked in **one place**: the co
 
 The ladder is the point: a delegate with `campaign.step` but **not** `campaign.run` can advance the search one bounded action at a time, each a small checkable spend, but cannot fire an autonomous loop.
 
-Three deltas from the original strawman, all deliberate. `fork-cycle` sits at **run**, not step, because an operator fork mints *and launches* an autonomous continuation. `register-backend` folds into `campaign.create` rather than earning its own cap — a delegate that may author campaigns may register the backend they run against. And `replace-dataset` sits at **lifecycle**, not create, because a dataset slug is part of the measurement cache key, so repointing one re-addresses every campaign that already measured against it.
+Two deltas from the original strawman, both deliberate. `fork-cycle` sits at **run**, not step, because an operator fork mints *and launches* an autonomous continuation. And `replace-dataset` sits at **lifecycle**, not create, because a dataset slug is part of the measurement cache key, so repointing one re-addresses every campaign that already measured against it.
 
 **A route is the only way to add a verb, so the route set is what the ladder is checked against.** A capability column covers only kinds that dispatch, so a route calling its handler directly would read as covered while gated by nothing and recorded nowhere. `routers/commands.py` therefore paths every typed route by its `CommandKind` member, which makes the gap unwritable rather than merely known.
 

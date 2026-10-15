@@ -5,9 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import NamedTuple
 
-from promptpotter.application.jobs.quota import is_host_tenant_dir, lifetime_ceilings
+from promptpotter.application.jobs.quota import lifetime_ceilings
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.spend import SpendCeilings
+from promptpotter.infrastructure.identity.migration import is_host_tenant_dir
 from promptpotter.infrastructure.store.account_spend import (
     UserSpend,
     account_ledgers,

@@ -7,6 +7,7 @@ set -euo pipefail
 # --- config + knobs -----------------------------------------------------
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ -f "$HERE/deploy.config" ]] && source "$HERE/deploy.config"
+source "$HERE/hardening.sh"
 APP_NAME="${APP_NAME:-myapp}"
 SERVICE_NAME="${SERVICE_NAME:-$APP_NAME}"
 BOT_SERVICE_NAME="${BOT_SERVICE_NAME:-$SERVICE_NAME-admin-bot}"
@@ -104,12 +105,8 @@ ${DATA_DIR:+Environment=PROMPTPOTTER_HOME=$DATA_DIR}
 ExecStart=$INSTALL_DIR/.venv/bin/python -m $ADMIN_BOT_MODULE
 Restart=on-failure
 RestartSec=5s
-# Hardening — the bot only needs to read .env + write the identity dir under the data root.
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=full
-ProtectHome=read-only
-ReadWritePaths=$WRITE_PATH
+$(unit_hardening "$WRITE_PATH")
+
 [Install]
 WantedBy=multi-user.target
 EOF

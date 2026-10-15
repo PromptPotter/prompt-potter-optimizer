@@ -16,8 +16,10 @@ class _CliFormatter(logging.Formatter):
             line = f"{record.levelname}: {record.getMessage()}"
         else:
             line = record.getMessage()
-        if record.exc_info:
-            line = f"{line}\n{self.formatException(record.exc_info)}"
+        if record.exc_info and not record.exc_text:
+            record.exc_text = self.formatException(record.exc_info)
+        if record.exc_text:
+            line = f"{line}\n{record.exc_text}"
         return line
 
 
@@ -64,9 +66,16 @@ def setup_logging(
         handler.setFormatter(_CliFormatter())
     else:
         handler.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=LOG_DATE_FORMAT))
-    handler.addFilter(SecretRedactionFilter())
     root.setLevel(level)
     root.addHandler(handler)
+    # Every handler, not only ours: uvicorn's own carry `propagate=False` tracebacks past root.
+    redaction = SecretRedactionFilter()
+    for lg in (root, *logging.Logger.manager.loggerDict.values()):
+        for h in getattr(lg, "handlers", ()):
+            # A re-run swaps the snapshot rather than stacking a second one beside it.
+            for stale in [f for f in h.filters if isinstance(f, SecretRedactionFilter)]:
+                h.removeFilter(stale)
+            h.addFilter(redaction)
     logging.getLogger("httpx").setLevel(logging.WARNING)
     if style == "cli":
         # Deep layers stay quiet: the presentation layer prints the summary.

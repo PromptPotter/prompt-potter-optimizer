@@ -12,6 +12,7 @@ from __future__ import annotations
 import dataclasses
 import logging
 import os
+import sys
 import types
 from pathlib import Path
 from typing import Any
@@ -29,6 +30,8 @@ from fastapi import BackgroundTasks
 from promptpotter.application import account, site_records
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.commands.payloads import CancelQueuedRunPayload
+from promptpotter.application.datasets.ingest import ingest_draft
+from promptpotter.application.jobs.capacity import machine_status
 from promptpotter.application.jobs.launcher.admission import request_launch, withdraw_queued
 from promptpotter.application.jobs.quota import paid_verb
 from promptpotter.application.jobs.reaper import reclaim_orphan_sandboxes, sweep_dead_cycles
@@ -70,7 +73,6 @@ from promptpotter.domain.run_records import CommandAckRecord, CommandRecord, Run
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure
-from promptpotter.infrastructure.identity.bundle import PendingAuth
 from promptpotter.infrastructure.identity.google import ProviderIdentity
 from promptpotter.infrastructure.identity.grants import (
     grant_principal,
@@ -97,7 +99,11 @@ from promptpotter.infrastructure.store.site_records import SiteRecord, SiteRecor
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.presentation.api import deps
 from promptpotter.presentation.api.deps import require_site_records_token
-from promptpotter.presentation.api.middleware.oidc import _delegated_identity, identity_of_session
+from promptpotter.presentation.api.middleware.oidc import (
+    SESSION_COOKIE_NAME,
+    _delegated_identity,
+    identity_of_session,
+)
 from promptpotter.presentation.api.routers import auth
 from promptpotter.shared.errors import (
     ConflictError,
@@ -146,6 +152,25 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
     assert "gsk_redact_me" not in rendered, "a configured key reached the log"
     assert "sk-leaked" not in rendered, "a stray key-shaped value reached the log"
     assert log_redaction.REDACTED in rendered
+
+    # A traceback is rendered output too: httpx puts the bot token in its error's URL.
+    bot_token = "123456:telegram-bot-token-xyz"
+    monkeypatch.setattr(settings_mod.settings, "ADMIN_BOT_TELEGRAM_TOKEN", bot_token)
+    try:
+        raise RuntimeError(f"404 for url 'https://api.telegram.org/bot{bot_token}/getUpdates'")
+    except RuntimeError:
+        failed = logging.LogRecord("t", logging.WARNING, "", 0, "poll failed", None, sys.exc_info())
+    log_redaction.SecretRedactionFilter().filter(failed)
+    assert bot_token not in logging.Formatter().format(failed), "a traceback carried the bot token"
+
+    # Secrecy is read off the field NAME: a setting declared tomorrow needs no redactor edit.
+    class Grown(settings_mod.Settings):
+        SOME_FUTURE_TOKEN: str = ""
+
+    monkeypatch.setattr(log_redaction, "settings", Grown(SOME_FUTURE_TOKEN="future-secret-value"))
+    future = logging.LogRecord("t", logging.INFO, "", 0, "t=%s", ("future-secret-value",), None)
+    log_redaction.SecretRedactionFilter().filter(future)
+    assert "future-secret-value" not in future.getMessage(), "a new *_TOKEN setting leaked"
 
     # Through the logger as the server sets it up: a filter nobody installed cuts nothing.
     root, access, httpx = (logging.getLogger(name) for name in ("", "uvicorn.access", "httpx"))
@@ -330,6 +355,29 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
         with pytest.raises(NotFoundError):
             site_records.kept_site_records(name, "")
 
+    # Machine occupancy names no other tenant's run: it reaches a stranger as counts alone.
+    registry = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1)
+    ada_hop = CycleHop(campaign_id="camp-ada", cycle_id="cycle_ada")
+    registry.create(user_id="ada-id", principal_id="ada-id", hop=ada_hop, dataset_name="ds1")
+    waiting = registry.request_slot(user_id="ada-id", principal_id="ada-id", dataset_name="ds1")
+
+    def who(user_id: str) -> IdentityContext:
+        return IdentityContext(
+            user_id=UserId(user_id), tenant_id=TenantId(user_id), issuer="https://accounts.example"
+        )
+
+    seen_by_eve = machine_status(registry, who("eve-id"))
+    assert (seen_by_eve.running, seen_by_eve.queued) == (1, 1), "occupancy depended on who asked"
+    served = seen_by_eve.model_dump_json()
+    for named in ("ada-id", ada_hop.campaign_id, ada_hop.cycle_id, waiting.job_id):
+        assert named not in served, "another tenant's run was named to a stranger"
+    for reader, why in (
+        (who("ada-id"), "an account could not see its own oldest run"),
+        (IdentityContext(user_id=UserId("host"), tenant_id=TenantId("host")), "the host lost it"),
+    ):
+        holder = machine_status(registry, reader).holder
+        assert holder is not None and holder.cycle_id == ada_hop.cycle_id, why
+
 
 # 2. Delegation
 
@@ -429,6 +477,12 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
     await withdraw(delegate, delegates.job_id)
     gone = registry.get(delegates.job_id)
     assert gone is not None and gone.released, "a delegate could not leave its place"
+
+    # A check-in is refused before anything of it is kept or fetched.
+    before = sorted(Path(delegate.base_dir).rglob("*"))
+    with pytest.raises(NotFoundError):
+        await ingest_draft(stores=delegate, blob=b"q,a\nx,y\n", filename="t.csv")
+    assert sorted(Path(delegate.base_dir).rglob("*")) == before, "a refused upload was kept"
 
     # A loop command is acted on by the loop it reached, or refused — never acked and dropped.
     hop, cycle_dir = walking_cycle(owner)
@@ -551,16 +605,47 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
         session_store=sessions,
         google=types.SimpleNamespace(exchange_code=exchange_code),
         github=None,
-        consume_state=lambda state: PendingAuth(provider="google", nonce="n", created_at=0.0),
     )
     request = types.SimpleNamespace(
         app=types.SimpleNamespace(state=types.SimpleNamespace(identity_bundle=bundle)),
         query_params={"state": "st", "code": "co"},
         url=types.SimpleNamespace(scheme="https"),
+        cookies={},
     )
+
+    def cookies(response: Any) -> dict[str, str]:
+        return {
+            name: value.split(";", 1)[0]
+            for name, _, value in (
+                header.partition("=") for header in response.headers.getlist("set-cookie")
+            )
+        }
+
+    # Login CSRF: a callback is honoured only in the browser that started its flow.
+    for started, why in (
+        ({}, "a callback with no flow of this browser's behind it signed someone in"),
+        (
+            {auth.OAUTH_FLOW_COOKIE_NAME: "google.other.n"},
+            "another flow's state signed this browser in",
+        ),
+        (
+            {auth.OAUTH_FLOW_COOKIE_NAME: "github.st.n"},
+            "a flow started at one provider closed at another",
+        ),
+    ):
+        request.cookies = started
+        refused_flow = await auth.callback(request, BackgroundTasks(), "google")
+        assert refused_flow.headers["location"] == "/?auth_error=state_invalid_or_expired", why
+        assert SESSION_COOKIE_NAME not in cookies(refused_flow), why
+    assert not paths.sessions_dir.exists(), "a refused flow left a session"
+    request.cookies = {auth.OAUTH_FLOW_COOKIE_NAME: "google.st.n"}
     announcing = BackgroundTasks()
     signed_in = await auth.callback(request, announcing, "google")
-    session = sessions.read(signed_in.headers["set-cookie"].split("=", 1)[1].split(";", 1)[0])
+    set_by_sign_in = cookies(signed_in)
+    assert set_by_sign_in[auth.OAUTH_FLOW_COOKIE_NAME] in ('""', ""), (
+        "a used flow stayed replayable"
+    )
+    session = sessions.read(set_by_sign_in[SESSION_COOKIE_NAME])
     assert session is not None
     identity = identity_of_session(session, bundle)
     stores = build_stores(identity, projects_root=projects)
@@ -652,7 +737,7 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
     assert refused.headers["location"] == "/?auth_error=signin_unavailable", (
         "a sign-in the trail could not record went through, or answered the tab with raw JSON"
     )
-    assert "set-cookie" not in refused.headers
+    assert SESSION_COOKIE_NAME not in cookies(refused)
     assert sorted(paths.sessions_dir.iterdir()) == open_sessions, "a refused sign-in left a session"
 
 

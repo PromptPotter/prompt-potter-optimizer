@@ -7,7 +7,6 @@ from pathlib import Path
 from promptpotter.config.paths import benchmark_datasets_root
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath, WorkspaceDir
-from promptpotter.infrastructure.store.backend_store import BackendStore
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.checkin_draft_store import CheckinDraftStore
 from promptpotter.infrastructure.store.dataset_replace import heal_pending_replacements
@@ -36,7 +35,6 @@ class Stores:
     shared_root: Path
     benchmarks_root: Path
     identity: IdentityContext
-    backends: BackendStore
     tenant_datasets: TenantDatasetStore
     campaigns: CampaignStore
     checkin: CheckinDraftStore
@@ -78,7 +76,6 @@ def build_stores(
         shared_root=shared,
         benchmarks_root=bench_root,
         identity=identity,
-        backends=BackendStore(tenant_dir),
         # Rooted with the caches: a sandbox isolates campaign STATE, and a dataset is not state.
         tenant_datasets=TenantDatasetStore(tenant_workspace(shared, identity.tenant_id)),
         campaigns=CampaignStore(tenant_dir),

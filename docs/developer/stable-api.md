@@ -171,7 +171,7 @@ The programmatic peer of §5's verbs — `application/embedded_run.py`, for a ho
 one campaign inside its own event loop:
 
 ```python
-session = await open_session(dataset_name, *, backend_url=…, backend_id=…, stores=None,
+session = await open_session(dataset_name, *, stores=None,
                              program=None)
 result = await run_campaign(session, train_data, campaign_config, *, readout_sink=None,
                             langfuse_session_id=None, limits, mode)

@@ -62,10 +62,10 @@ function useConnectorViewEngine(campaignId: string | null, at: string | null): C
           ? "loading"
           : "error";
 
-  const connector = resp?.connector ?? null;
+  const backendType = resp?.backend_type ?? null;
   const activeId = useMemo(
-    () => (connector ? backends.find((b) => b.name === connector)?.id ?? null : null),
-    [connector, backends],
+    () => (backendType ? backends.find((b) => b.id === backendType)?.id ?? null : null),
+    [backendType, backends],
   );
 
   // Our own API down is the dashboard banner's to say: a failed read is unknown, not offline.
@@ -81,7 +81,7 @@ function useConnectorViewEngine(campaignId: string | null, at: string | null): C
       const others = pipelineStatus === "error" ? backends : [];
       return { ...EMPTY, schema: { ...EMPTY.schema, status: pipelineStatus }, others };
     }
-    const active = resp.connector ? backends.find((b) => b.name === resp.connector) ?? null : null;
+    const active = backends.find((b) => b.id === resp.backend_type) ?? null;
     const baseUrl = active?.base_url ?? null;
     return {
       connector: resp.connector,

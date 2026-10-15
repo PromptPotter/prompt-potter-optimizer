@@ -5,9 +5,8 @@
 # second owner of a list that has one, drifting silently the moment upstream repinned. What this
 # file commits is the NAME, the VERSION and which tasks we take. The version is the pin that
 # matters: "latest" would put a moving roster behind a fixed dataset name, and upstream moving a
-# commit under this version lands as a NEW measurement identity rather than as stale rows
-# re-served, because each resolved pin is folded into its own sample's content address
-# (`connectors/harbor.py::_task_pin`).
+# commit under this version never reaches this panel — the roster is pinned once
+# (`connectors/harbor.py::pin_roster`) and re-pinning refuses rather than re-cut the name.
 harbor_dataset: spreadsheetbench-verified
 harbor_dataset_version: "1.0"
 

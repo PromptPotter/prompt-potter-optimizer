@@ -1,0 +1,12 @@
+{"harbor_dataset": "terminal-bench-sample", "harbor_dataset_version": "2.0", "tasks": [
+  {"id": "build-cython-ext", "git_url": "https://github.com/laude-institute/terminal-bench-2-0-sample.git", "git_commit_id": "7e917f35c281188532772312d4ad91ca9274febc", "path": "sample\\build-cython-ext"},
+  {"id": "chess-best-move", "git_url": "https://github.com/laude-institute/terminal-bench-2-0-sample.git", "git_commit_id": "7e917f35c281188532772312d4ad91ca9274febc", "path": "sample\\chess-best-move"},
+  {"id": "configure-git-webserver", "git_url": "https://github.com/laude-institute/terminal-bench-2-0-sample.git", "git_commit_id": "7e917f35c281188532772312d4ad91ca9274febc", "path": "sample\\configure-git-webserver"},
+  {"id": "fix-code-vulnerability", "git_url": "https://github.com/laude-institute/terminal-bench-2-0-sample.git", "git_commit_id": "7e917f35c281188532772312d4ad91ca9274febc", "path": "sample\\fix-code-vulnerability"},
+  {"id": "log-summary-date-ranges", "git_url": "https://github.com/laude-institute/terminal-bench-2-0-sample.git", "git_commit_id": "7e917f35c281188532772312d4ad91ca9274febc", "path": "sample\\log-summary-date-ranges"},
+  {"id": "polyglot-c-py", "git_url": "https://github.com/laude-institute/terminal-bench-2-0-sample.git", "git_commit_id": "7e917f35c281188532772312d4ad91ca9274febc", "path": "sample\\polyglot-c-py"},
+  {"id": "qemu-alpine-ssh", "git_url": "https://github.com/laude-institute/terminal-bench-2-0-sample.git", "git_commit_id": "7e917f35c281188532772312d4ad91ca9274febc", "path": "sample\\qemu-alpine-ssh"},
+  {"id": "qemu-startup", "git_url": "https://github.com/laude-institute/terminal-bench-2-0-sample.git", "git_commit_id": "7e917f35c281188532772312d4ad91ca9274febc", "path": "sample\\qemu-startup"},
+  {"id": "regex-log", "git_url": "https://github.com/laude-institute/terminal-bench-2-0-sample.git", "git_commit_id": "7e917f35c281188532772312d4ad91ca9274febc", "path": "sample\\regex-log"},
+  {"id": "sqlite-with-gcov", "git_url": "https://github.com/laude-institute/terminal-bench-2-0-sample.git", "git_commit_id": "7e917f35c281188532772312d4ad91ca9274febc", "path": "sample\\sqlite-with-gcov"}
+]}

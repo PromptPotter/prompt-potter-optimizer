@@ -230,7 +230,7 @@ leaderboard picks.
 - **The operator reads a report between other work and acts on its first line**, so a reply is one
   shape: a sentence, or a compact box, or 3–5 bullets. Combine only to put an anomaly flag above
   the state line. Interpret results; never dump CLI output.
-- **Warn only from this allowlist** — backend `/status` non-200 or refused (`{backend_url}` is the
+- **Warn only from this allowlist** — backend `/status` non-200 or refused (`TERMNORM_URL` in `.env` is the
   backend, default `:8000`; the PromptPotter API on `:8001` has no `/status` and 404s there); the
   active pointer naming a different dataset than requested; recent
   `measurements/cells/{config_key}.jsonl` showing empty `predicted` strings. Documented config is

@@ -175,7 +175,7 @@ Each profile is a named, stable conformance level. Newer profiles compose with o
 | `POST /campaigns/{c}/cycles/{cy}/stop` | `pause-cycle` (folded — pause is the single operator-interrupt; no `stop-cycle`) |
 | `DELETE /campaigns/{c}/cycles/{cy}` | `delete-cycle` |
 | `POST /campaigns/{c}/cycles/{cy}/cleanup-empty` | `cleanup-empty-cycles` |
-| `POST /backends` | `register-backend` |
+| `POST /backends` | dropped — a backend is a connector at the operator's configured endpoint |
 | `POST /backends/{id}/sync` | dropped — no backend sync verb exists |
 
 **Closed inbound set draft.** The full enumeration lives in `docs/specs/api-openapi.yaml` and is the single source of truth for the inbound surface; the ADR keeps only the migration table above + the category map below. Categories (= OpenAPI `tags`): cycle-control (pause / step / rewind — `pause-cycle` is the single operator-interrupt, no separate stop/resume-cycle), cycle-lifecycle (fork / delete / cleanup-empty / archive / mint-campaign / start-run), budget (run-limits / sample), pipeline-params (change-pipeline-param / reset-pipeline-overlay), scoring (change-scoring-composite), operator-feedback (mark / unmark hard-sample / annotate-round / endorse-candidate), backends (register). All v0 — operator-redline cycle precedes any handler.

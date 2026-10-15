@@ -53,6 +53,11 @@ def _validate(c: object, origin: str) -> Connector:
         )
     if c.execution == "in_process" and c.auth_token is not None:
         raise RuntimeError(f"{where}: execution='in_process' has no wire — drop auth_token.")
+    if (c.execution == "remote_http") != (c.endpoint is not None):
+        raise RuntimeError(
+            f"{where}: execution={c.execution!r} requires endpoint "
+            f"{'set' if c.execution == 'remote_http' else 'unset'}."
+        )
     if c.cells_hold_the_machine and c.execution != "in_process":
         raise RuntimeError(f"{where}: cells_hold_the_machine needs execution='in_process'.")
     if c.compose_overlay is not None and not c.cells_hold_the_machine:

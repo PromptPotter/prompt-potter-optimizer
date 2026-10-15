@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 
 from pydantic import ValidationError
 
+from promptpotter import connectors
 from promptpotter.application.campaign_config import merge_config_layers
 from promptpotter.application.datasets.draft_campaign import (
     EditDraftPatch,
@@ -64,6 +65,13 @@ def plan_draft_patch(stores: Stores, draft: DraftCampaign, patch: EditDraftPatch
         raise PayloadInvalidError(
             f"patch.scoring_matcher {patch.scoring_matcher!r} is not one of the matchers "
             f"{sorted(SCORING_FUNCTIONS)}."
+        )
+    if patch.connector is not None and not (
+        (chosen := connectors.registered().get(patch.connector)) and chosen.serves_uploads
+    ):
+        raise PayloadInvalidError(
+            f"patch.connector {patch.connector!r} does not serve an uploaded table; one of "
+            f"{sorted(n for n, c in connectors.registered().items() if c.serves_uploads)}."
         )
     if patch.scoring_dials is not None:
         # Canonical spelling, so two drafts declaring the same criterion mint the same block.

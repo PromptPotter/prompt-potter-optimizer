@@ -170,8 +170,6 @@ async def _fork_operator_steer(args: argparse.Namespace, ctx: SessionCtx) -> Hel
     """C0 is INHERITED; a steer to a non-PERMITTED model needs ``campaign.babysit``, the dispatcher's gate: this only warns."""
     # The overlay is typed by the backend's own schema, which only a session holds.
     typing_session = await init_services(
-        backend_url=ctx.campaign.backend_url,
-        backend_id=ctx.campaign.backend_id,
         dataset_name=ctx.campaign.dataset_name,
         identity=ctx.store.identity,
     )
@@ -277,8 +275,6 @@ async def _pivot_to_fresh(
         ctx.store,
         MintCampaignPayload(
             dataset_name=drift.dataset_name,
-            backend_url=ctx.campaign.backend_url,
-            backend_id=ctx.campaign.backend_id,
             limits=launch_limits_from_args(args),
         ),
         inline_launch(args),

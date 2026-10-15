@@ -128,6 +128,10 @@ async def _termnorm_version_check(
 _EXPECTED_REVISION: str | None = None
 
 
+def _termnorm_endpoint() -> str:
+    return settings.TERMNORM_URL
+
+
 def _termnorm_auth_token() -> str | None:
     return settings.TERMNORM_TOKEN or None
 
@@ -136,9 +140,11 @@ CONNECTOR = Connector(
     name="termnorm",
     wire_adapter=termnorm_wire_adapter,
     session_factory=TermNormSession,
+    serves_uploads=True,
     expected_revision=_EXPECTED_REVISION,
     version_check=_termnorm_version_check,
     preflight=_termnorm_preflight,
+    endpoint=_termnorm_endpoint,
     auth_token=_termnorm_auth_token,
     # The knee on `llm_only`: past it the wall clock stops falling and the call tail grows.
     max_cells_in_flight=16,

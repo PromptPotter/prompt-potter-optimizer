@@ -164,7 +164,6 @@ async def _ingest_checkin(args: argparse.Namespace) -> str:
             blob=file_path.read_bytes(),
             filename=file_path.name,
             slug=args.slug,
-            **({"backend_url": args.backend_url} if args.backend_url else {}),
         )
     except IngestError as exc:
         raise SystemExit(f"ERROR: could not parse {file_path.name}: {exc.message}") from None
@@ -220,8 +219,6 @@ async def _hold_ingested_checkin(args: argparse.Namespace) -> HeldRun:
             StartCheckinPayload(
                 campaign_id=campaign_id,
                 diag=args.diag,
-                backend_url=args.backend_url,
-                backend_id=args.backend_id,
                 limits=launch_limits_from_args(args),
             ),
             uuid.uuid4().hex,
@@ -272,8 +269,6 @@ def _named_mint(args: argparse.Namespace) -> MintCampaignPayload:
             diag=args.diag,
             campaign_config=declared,
             task_text=task_text,
-            backend_url=args.backend_url,
-            backend_id=args.backend_id,
             limits=launch_limits_from_args(args),
         )
     except ValidationError as exc:

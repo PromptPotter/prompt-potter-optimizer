@@ -5,20 +5,21 @@ from typing import Literal
 from fastapi import APIRouter
 from pydantic import Field
 
+from promptpotter import connectors
 from promptpotter.application.jobs.launcher.admission import probe_backend
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.presentation.api.deps import StoresDep, get_backend_or_404
+from promptpotter.presentation.api.deps import IdentityDep
 from promptpotter.shared.clock import utcnow_iso
+from promptpotter.shared.errors import NotFoundError
 
 backends_router = APIRouter(prefix="/backends", tags=["Backends"])
 
 
 class BackendResponse(StrictModel):
-    id: str = Field(description="Backend identifier")
-    name: str = Field(description="Human-readable backend name")
-    backend_type: str = Field(description="Backend type (e.g. 'default')")
-    base_url: str = Field(description="Backend API base URL")
-    created_at: str = Field(description="ISO 8601 creation timestamp")
+    id: str = Field(description="The connector's name, as `pipeline.yaml::backend_type` names it")
+    base_url: str = Field(
+        description="Where the operator configured it; empty for an in-process one"
+    )
 
 
 BackendReachability = Literal["live", "unreachable", "error"]
@@ -37,31 +38,27 @@ class BackendHealthResponse(StrictModel):
 
 
 @backends_router.get("", response_model=list[BackendResponse])
-def list_backends(stores: StoresDep) -> list[BackendResponse]:
-    """List all registered backends."""
+def list_backends(_identity: IdentityDep) -> list[BackendResponse]:
+    """Every registered connector, at the endpoint the operator configured for it."""
     return [
-        BackendResponse(
-            id=b.id,
-            name=b.name,
-            backend_type=b.backend_type,
-            base_url=b.base_url,
-            created_at=b.created_at,
-        )
-        for b in stores.backends.list_all()
+        BackendResponse(id=name, base_url=connector.base_url())
+        for name, connector in sorted(connectors.registered().items())
     ]
 
 
 @backends_router.get("/{backend_id}/health", response_model=BackendHealthResponse)
-async def get_backend_health(backend_id: str, stores: StoresDep) -> BackendHealthResponse:
+async def get_backend_health(backend_id: str, _identity: IdentityDep) -> BackendHealthResponse:
     """Whether a launch against this backend would be admitted, by the reading admission itself takes.
 
-    A down backend is an answer, never an error; only a missing ``backend_id`` answers 404.
+    A down backend is an answer, never an error; only an unregistered ``backend_id`` answers 404.
     """
-    backend = get_backend_or_404(backend_id, stores)
-    down = await probe_backend(backend.backend_type, backend.base_url)
+    connector = connectors.registered().get(backend_id)
+    if connector is None:
+        raise NotFoundError(f"Backend '{backend_id}' not found")
+    down = await probe_backend(connector.name)
     return BackendHealthResponse(
-        backend_id=backend_id,
-        base_url=backend.base_url,
+        backend_id=connector.name,
+        base_url=connector.base_url(),
         status="live" if down is None else "unreachable",
         checked_at=utcnow_iso(),
         detail=None if down is None else str(down),

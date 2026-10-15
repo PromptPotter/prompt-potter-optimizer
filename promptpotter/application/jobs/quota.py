@@ -23,8 +23,7 @@ from promptpotter.domain.spend import (
     declare_ceiling,
 )
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.identity.migration import registered_user_id
-from promptpotter.infrastructure.identity.paths import default_identity_paths
+from promptpotter.infrastructure.identity.migration import is_host
 from promptpotter.infrastructure.llm.send_pacing import set_rate_tenant
 from promptpotter.infrastructure.llm.spend_book import (
     SpendBook,
@@ -45,7 +44,6 @@ from promptpotter.infrastructure.store.user_store import User
 from promptpotter.shared.errors import ConflictError, PayloadInvalidError, PotterError
 from promptpotter.shared.identity import (
     CAMPAIGN_BUDGET_CAP,
-    TERMINAL_IDENTITY_ID,
     has_capability,
 )
 
@@ -578,19 +576,8 @@ def lifetime_ceilings(*, user: User, spends_own_key: bool) -> SpendCeilings:
     )
 
 
-def _is_host(*, terminal: bool, user_id: str) -> bool:
-    """Terminal detection is passed IN: merged, an identity omitting an issuer reads as the host."""
-    claimed = registered_user_id(default_identity_paths().default_claim_marker)
-    return terminal or (claimed is not None and user_id == claimed)
-
-
 def spends_the_hosts_own_key(stores: Stores) -> bool:
-    return _is_host(terminal=stores.identity.issuer is None, user_id=str(stores.identity.user_id))
-
-
-def is_host_tenant_dir(user_id: str) -> bool:
-    """The DIRECTORY-walk reading: no issuer survives on disk."""
-    return _is_host(terminal=user_id == TERMINAL_IDENTITY_ID, user_id=user_id)
+    return is_host(stores.identity)
 
 
 def concurrent_cycles_writable(stores: Stores) -> bool:
@@ -644,7 +631,6 @@ __all__ = [
     "concurrent_cycles_writable",
     "declare_run_ceiling",
     "hold_run_limits",
-    "is_host_tenant_dir",
     "lifetime_ceilings",
     "next_launch_ceiling",
     "overrun",

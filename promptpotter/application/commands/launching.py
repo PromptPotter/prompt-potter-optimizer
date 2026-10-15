@@ -236,8 +236,6 @@ def mint_campaign(dispatcher: CommandDispatcher, payload: MintCampaignPayload) -
             arm=payload.arm,
             declared=payload.campaign_config,
             task_text=payload.task_text,
-            backend_url=payload.backend_url,
-            backend_id=payload.backend_id,
         )
         # Refused here, before a slot is asked for: a queued mint would refuse it only later.
         request.dataset_campaign_config()
@@ -261,13 +259,7 @@ def start_checkin(dispatcher: CommandDispatcher, start: StartCheckinPayload) -> 
         try:
             hop, gated = load_checkin_for_start(stores, campaign_id)
             return await launch(
-                CheckinStart(
-                    hop=hop,
-                    draft=gated,
-                    limits=start.limits,
-                    backend_url=start.backend_url,
-                    backend_id=start.backend_id,
-                ),
+                CheckinStart(hop=hop, draft=gated, limits=start.limits),
                 RunMode(diag=start.diag),
                 stores=stores,
                 job_registry=dispatcher.job_registry,

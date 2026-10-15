@@ -1958,10 +1958,6 @@ export interface StartCheckinPayload {
   limits: LaunchLimits;
   /** Run the diagnostic shape. */
   diag: boolean;
-  /** Where the draft's connector reaches its backend */
-  backend_url: string;
-  /** The registry id that backend is recorded under */
-  backend_id: string;
 }
 
 /** A run of an existing cycle: what bounds it (``limits``) and the shape it takes (``mode``). */
@@ -2869,7 +2865,7 @@ export interface DecisionFact {
 export interface DecisionAction {
   label: string;
   variant: 'primary' | 'ghost' | 'danger';
-  kind: 'pause-cycle' | 'origin-gate-decision' | 'submit-arms' | 'skip-searchpoint' | 'set-sample-lookahead' | 'start-run' | 'step-cycle' | 'fork-cycle' | 'mint-campaign' | 'start-checkin' | 'verify-candidate' | 'grade-bench' | 'change-run-limits' | 'set-concurrent-cycles' | 'cancel-queued-run' | 'delete-cycle' | 'cleanup-empty-cycles' | 'archive-campaign' | 'unarchive-campaign' | 'delete-campaign' | 'set-campaign-label' | 'register-backend' | 'replace-dataset' | 'compact-archive' | 'edit-draft-campaign' | 'resolve-origin';
+  kind: 'pause-cycle' | 'origin-gate-decision' | 'submit-arms' | 'skip-searchpoint' | 'set-sample-lookahead' | 'start-run' | 'step-cycle' | 'fork-cycle' | 'mint-campaign' | 'start-checkin' | 'verify-candidate' | 'grade-bench' | 'change-run-limits' | 'set-concurrent-cycles' | 'cancel-queued-run' | 'delete-cycle' | 'cleanup-empty-cycles' | 'archive-campaign' | 'unarchive-campaign' | 'delete-campaign' | 'set-campaign-label' | 'replace-dataset' | 'compact-archive' | 'edit-draft-campaign' | 'resolve-origin';
   /** The whole command payload, the cycle's address and `descend` tail included. */
   payload: Record<string, unknown>;
 }
@@ -3019,16 +3015,10 @@ export interface HealthResponse {
 }
 
 export interface BackendResponse {
-  /** Backend identifier */
+  /** The connector's name, as `pipeline.yaml::backend_type` names it */
   id: string;
-  /** Human-readable backend name */
-  name: string;
-  /** Backend type (e.g. 'default') */
-  backend_type: string;
-  /** Backend API base URL */
+  /** Where the operator configured it; empty for an in-process one */
   base_url: string;
-  /** ISO 8601 creation timestamp */
-  created_at: string;
 }
 
 export interface BackendHealthResponse {
@@ -3103,7 +3093,9 @@ export interface MachineStatusResponse {
    * A launch is then QUEUED rather than refused, so this reads as 'you will
    * wait', not 'you cannot start'. */
   busy: boolean;
-  /** The oldest live run, whoever owns it; null when nothing is running. */
+  /** The oldest live run where it is the caller's own tenant's, or the caller is
+   * the host; null otherwise — another tenant's run is counted in `running`
+   * and never named. */
   holder: MachineHolder | null;
   /** The CALLER's own waiting launches, oldest first — everything a client needs to
    * say 'queued, position 3' and to offer a cancel. Own is the PRINCIPAL that
@@ -3683,7 +3675,7 @@ export type DashboardState = 'init' | 'origin' | 'proposing' | 'scoring' | 'betw
 export type LifecycleFilter = 'active' | 'archived' | 'deleted' | 'checkin' | 'all';
 
 // Every kind `POST /commands/{kind}` dispatches (domain/command_kinds.py).
-export type CommandKind = 'archive-campaign' | 'cancel-queued-run' | 'change-run-limits' | 'cleanup-empty-cycles' | 'compact-archive' | 'delete-campaign' | 'delete-cycle' | 'edit-draft-campaign' | 'fork-cycle' | 'grade-bench' | 'mint-campaign' | 'origin-gate-decision' | 'pause-cycle' | 'register-backend' | 'replace-dataset' | 'resolve-origin' | 'set-campaign-label' | 'set-concurrent-cycles' | 'set-sample-lookahead' | 'skip-searchpoint' | 'start-checkin' | 'start-run' | 'step-cycle' | 'submit-arms' | 'unarchive-campaign' | 'verify-candidate';
+export type CommandKind = 'archive-campaign' | 'cancel-queued-run' | 'change-run-limits' | 'cleanup-empty-cycles' | 'compact-archive' | 'delete-campaign' | 'delete-cycle' | 'edit-draft-campaign' | 'fork-cycle' | 'grade-bench' | 'mint-campaign' | 'origin-gate-decision' | 'pause-cycle' | 'replace-dataset' | 'resolve-origin' | 'set-campaign-label' | 'set-concurrent-cycles' | 'set-sample-lookahead' | 'skip-searchpoint' | 'start-checkin' | 'start-run' | 'step-cycle' | 'submit-arms' | 'unarchive-campaign' | 'verify-candidate';
 
 // Why a cycle ended (domain/phases.py::StopReason).
 export type StopReason = 'perfect_score' | 'max_rounds' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted';

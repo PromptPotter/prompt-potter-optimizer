@@ -9,7 +9,7 @@ from promptpotter.infrastructure.identity.paths import default_identity_paths
 from promptpotter.infrastructure.store.io import read_json, write_json
 from promptpotter.infrastructure.store.layout import CampaignLayout
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.identity import default_identity
+from promptpotter.shared.identity import TERMINAL_IDENTITY_ID, default_identity
 
 if TYPE_CHECKING:
     from promptpotter.shared.identity import IdentityContext
@@ -61,6 +61,21 @@ def registered_user_id(marker_path: Path) -> str | None:
     return uid if isinstance(uid, str) and uid and uid != "default" else None
 
 
+def _is_host(*, terminal: bool, user_id: str) -> bool:
+    """Terminal detection is passed IN: merged, an identity omitting an issuer reads as the host."""
+    claimed = registered_user_id(default_identity_paths().default_claim_marker)
+    return terminal or (claimed is not None and user_id == claimed)
+
+
+def is_host(identity: IdentityContext) -> bool:
+    return _is_host(terminal=identity.issuer is None, user_id=str(identity.user_id))
+
+
+def is_host_tenant_dir(user_id: str) -> bool:
+    """The DIRECTORY-walk reading: no issuer survives on disk."""
+    return _is_host(terminal=user_id == TERMINAL_IDENTITY_ID, user_id=user_id)
+
+
 def _rewrite_campaign_ownership(campaigns_root: Path, user_id: str) -> None:
     """Any OTHER owner is left alone: a multi-user install holds campaigns that are someone else's."""
     if not campaigns_root.is_dir():
@@ -85,4 +100,10 @@ def _rewrite_campaign_ownership(campaigns_root: Path, user_id: str) -> None:
         logger.info("Rebound %d campaigns to user %s", rewritten, user_id)
 
 
-__all__ = ["maybe_claim_default", "registered_or_default_identity", "registered_user_id"]
+__all__ = [
+    "is_host",
+    "is_host_tenant_dir",
+    "maybe_claim_default",
+    "registered_or_default_identity",
+    "registered_user_id",
+]

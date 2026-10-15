@@ -350,7 +350,7 @@ def resolve_optimizer(name: str, nodes: Mapping[str, ManifestNodeOverlay]) -> Se
         shipped = optimizers.runtime(name).manifest_dir
     except KeyError as exc:
         raise NotFoundError(f"No optimizer named {name!r}", code="optimizer_unknown") from exc
-    path = optimizer_manifest_path(name, shipped)
+    path = optimizer_manifest_path(shipped)
     overlay = {node: dict(o.config) for node, o in sorted(nodes.items())}
     try:
         return _select(name, shipped, path, _stamp(path), json.dumps(overlay, sort_keys=True))

@@ -1331,38 +1331,20 @@
       "BackendResponse": {
         "additionalProperties": false,
         "properties": {
-          "backend_type": {
-            "description": "Backend type (e.g. 'default')",
-            "title": "Backend Type",
-            "type": "string"
-          },
           "base_url": {
-            "description": "Backend API base URL",
+            "description": "Where the operator configured it; empty for an in-process one",
             "title": "Base Url",
             "type": "string"
           },
-          "created_at": {
-            "description": "ISO 8601 creation timestamp",
-            "title": "Created At",
-            "type": "string"
-          },
           "id": {
-            "description": "Backend identifier",
+            "description": "The connector's name, as `pipeline.yaml::backend_type` names it",
             "title": "Id",
-            "type": "string"
-          },
-          "name": {
-            "description": "Human-readable backend name",
-            "title": "Name",
             "type": "string"
           }
         },
         "required": [
           "id",
-          "name",
-          "backend_type",
-          "base_url",
-          "created_at"
+          "base_url"
         ],
         "title": "BackendResponse",
         "type": "object"
@@ -7992,7 +7974,7 @@
                 "type": "null"
               }
             ],
-            "description": "The oldest live run, whoever owns it; null when nothing is running."
+            "description": "The oldest live run where it is the caller's own tenant's, or the caller is the host; null otherwise — another tenant's run is counted in `running` and never named."
           },
           "notice": {
             "anyOf": [
@@ -15583,7 +15565,7 @@
     },
     "/api/v1/backends": {
       "get": {
-        "description": "List all registered backends.",
+        "description": "Every registered connector, at the endpoint the operator configured for it.",
         "operationId": "list_backends_api_v1_backends_get",
         "responses": {
           "200": {
@@ -15609,7 +15591,7 @@
     },
     "/api/v1/backends/{backend_id}/health": {
       "get": {
-        "description": "Whether a launch against this backend would be admitted, by the reading admission itself takes.\n\nA down backend is an answer, never an error; only a missing ``backend_id`` answers 404.",
+        "description": "Whether a launch against this backend would be admitted, by the reading admission itself takes.\n\nA down backend is an answer, never an error; only an unregistered ``backend_id`` answers 404.",
         "operationId": "get_backend_health_api_v1_backends__backend_id__health_get",
         "parameters": [
           {
@@ -17912,7 +17894,7 @@
     },
     "/api/v1/machine-status": {
       "get": {
-        "description": "Machine occupancy: how many campaigns may run here and how many do, holders across users included.",
+        "description": "Machine occupancy: how many campaigns may run here and how many do; another tenant's runs only as counts.",
         "operationId": "get_machine_status_api_v1_machine_status_get",
         "responses": {
           "200": {

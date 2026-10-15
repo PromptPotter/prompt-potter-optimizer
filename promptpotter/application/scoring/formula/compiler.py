@@ -28,6 +28,21 @@ from promptpotter.domain.spend import StepUsage, TokenAccount, bill_or_rate_usd
 from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.hashing import stable_hash
 
+# Every arithmetic operand passes through here: an int never grows past a float, so `9**9**9`
+# raises OverflowError at once, and a string or list can never be repeated.
+_NUMERIC = "__numeric__"
+
+
+def _numeric(value: object) -> float:
+    if isinstance(value, int | float):
+        return float(value)
+    raise TypeError(f"arithmetic takes numbers, not {type(value).__name__}")
+
+
+def _pow(base: object, exponent: object) -> float:
+    return float(_numeric(base) ** _numeric(exponent))
+
+
 SAFE_BUILTINS = {
     "__builtins__": {
         "min": min,
@@ -40,9 +55,10 @@ SAFE_BUILTINS = {
         "log": math.log,
         "sqrt": math.sqrt,
         "exp": math.exp,
-        "pow": pow,
+        "pow": _pow,
     }
 }
+_EVAL_BUILTINS = {"__builtins__": {**SAFE_BUILTINS["__builtins__"], _NUMERIC: _numeric}}
 
 
 # No Attribute (kills ``().__class__...``), comprehension, lambda, walrus or subscript.
@@ -86,9 +102,30 @@ _CALLABLE_NAMES: frozenset[str] = frozenset(SAFE_BUILTINS["__builtins__"]) | fro
 )
 
 
+def _helper_arguments(tree: ast.AST) -> set[int]:
+    return {
+        id(arg)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id in SCORING_FUNCTIONS
+        for arg in (*node.args, *(kw.value for kw in node.keywords))
+    }
+
+
 def validate_ast(tree: ast.AST, *, source: str) -> None:
+    helper_arguments = _helper_arguments(tree)
     for node in ast.walk(tree):
         kind = type(node)
+        if isinstance(node, ast.Constant) and not (
+            node.value is None
+            or isinstance(node.value, int | float)
+            or (isinstance(node.value, str) and id(node) in helper_arguments)
+        ):
+            raise ValueError(
+                f"Scoring formula rejected — the constant {node.value!r} in {source}. A formula "
+                "is numeric; a string is only an argument to a scoring helper."
+            )
         if kind not in _ALLOWED_AST_NODES:
             raise ValueError(
                 f"Scoring formula rejected — disallowed syntax {kind.__name__!r} "
@@ -106,6 +143,24 @@ def validate_ast(tree: ast.AST, *, source: str) -> None:
             )
 
 
+def _as_number(operand: ast.expr) -> ast.expr:
+    call = ast.Call(func=ast.Name(id=_NUMERIC, ctx=ast.Load()), args=[operand], keywords=[])
+    return ast.copy_location(call, operand)
+
+
+class _NumericOperands(ast.NodeTransformer):
+    def visit_BinOp(self, node: ast.BinOp) -> ast.BinOp:
+        self.generic_visit(node)
+        node.left, node.right = _as_number(node.left), _as_number(node.right)
+        return node
+
+    def visit_UnaryOp(self, node: ast.UnaryOp) -> ast.UnaryOp:
+        self.generic_visit(node)
+        if not isinstance(node.op, ast.Not):
+            node.operand = _as_number(node.operand)
+        return node
+
+
 class CompiledExpression(NamedTuple):
     names: frozenset[str]
     evaluate: Callable[[dict[str, Any], str], float]
@@ -115,12 +170,12 @@ def compile_expression(formula: str, *, source: str) -> CompiledExpression:
     """A term the record lacks raises ``ScoringTermMissingError``, which a read side reports as *unscorable*."""
     tree = ast.parse(formula, f"<{source}>", "eval")
     validate_ast(tree, source=source)
-    code = compile(tree, f"<{source}>", "eval")
     names = frozenset(node.id for node in ast.walk(tree) if isinstance(node, ast.Name))
+    code = compile(ast.fix_missing_locations(_NumericOperands().visit(tree)), f"<{source}>", "eval")
 
     def _evaluate(namespace: dict[str, Any], subject: str) -> float:
         try:
-            raw = eval(code, SAFE_BUILTINS, namespace)
+            raw = eval(code, _EVAL_BUILTINS, namespace)
         except NameError as exc:
             carried = sorted(k for k, v in namespace.items() if not callable(v))
             raise ScoringTermMissingError(

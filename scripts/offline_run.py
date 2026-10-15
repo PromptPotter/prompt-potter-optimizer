@@ -94,7 +94,6 @@ if TYPE_CHECKING:
     from promptpotter.infrastructure.store.stores import Stores
 
 DATASET = "justlogic-d234"
-BACKEND_URL = "http://127.0.0.1:8000"
 STAMP = "offline-run.json"
 CONTROLLED = ("controlled", "controlled-bare")
 RESUMED = "resumed"
@@ -596,9 +595,7 @@ def text_templates(config: CampaignConfig) -> dict[str, str]:
 async def rebound_session(stores: Stores, hop: CycleHop) -> tuple[Session, CampaignConfig]:
     campaign = stores.campaigns.load_campaign(hop.campaign_id)
     assert campaign is not None
-    session = await open_session(
-        DATASET, backend_url=BACKEND_URL, backend_id=DATASET, stores=stores
-    )
+    session = await open_session(DATASET, stores=stores)
     config = resolve_campaign_config(stores, campaign, hop)
     configure_and_apply_pipeline(session, config)
     session.campaign_id = hop.campaign_id
@@ -632,9 +629,7 @@ async def run_one(
 
     stores = build_stores(default_identity(), projects_root=DEFAULT_PROJECTS_ROOT)
     stores.tenant_datasets.save_benchmark_rows(DATASET, samples)
-    session = await open_session(
-        DATASET, backend_url=BACKEND_URL, backend_id=DATASET, stores=stores
-    )
+    session = await open_session(DATASET, stores=stores)
     configure_and_apply_pipeline(session, config)
     result = await run_campaign(
         session,
@@ -711,7 +706,7 @@ def run_terminal(
         yaml.safe_dump({"campaign_config": config.model_dump(mode="json", exclude_unset=True)}),
         encoding="utf-8",
     )
-    new = ["new", DATASET, f"--config={declared}", f"--backend-url={BACKEND_URL}"]
+    new = ["new", DATASET, f"--config={declared}"]
     sys.argv = ["promptpotter", *(new if verb == "new" else [verb])]
     # A child of a pool thread may inherit SIGINT ignored; a terminal's process never does.
     signal.signal(signal.SIGINT, signal.default_int_handler)
@@ -746,8 +741,8 @@ def interrupted(
     if interrupts == 1 and stopped.run_phase is not RunPhase.PAUSED:
         return False, f"one SIGINT left the cycle {stopped.run_phase}, not paused"
     (mint,) = _commands(cycle.parents[3] / ".workspace" / "events.jsonl")["mint-campaign"]
-    if not mint["campaign_config"] or mint["backend_url"] != BACKEND_URL:
-        return False, f"the mint-campaign record carries no config or backend: {sorted(mint)}"
+    if not mint["campaign_config"]:
+        return False, f"the mint-campaign record carries no config: {sorted(mint)}"
     if rc := spawn_terminal(workspace, "resume", 0):
         return False, f"`resume` after {interrupts} SIGINT exited {rc}"
     ended = derive_run_state(cycle)

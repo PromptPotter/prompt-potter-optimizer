@@ -8,11 +8,26 @@ function escapeHtml(raw: string): string {
     .replace(/"/g, "&quot;");
 }
 
-// Artifacts quote tenant rows, so raw HTML is escaped; a private `Marked`, since `marked.use` mutates the global.
+// Browsers drop C0 controls and spaces inside a scheme, so the test reads the URL as they do; `&` could
+// spell a colon as an entity, so a URL without an allowed scheme passes only if it has neither.
+function isSafeHref(href: string): boolean {
+  const seen = href.replace(/[\u0000- ]/g, "");
+  return /^(https?|mailto):/i.test(seen) || !/[:&\\]/.test(seen);
+}
+
+// Artifacts quote tenant rows, so raw HTML is escaped, an unsafe link renders as its text, and an
+// image as its alt text: no generated artifact embeds one, and any src is a request the tenant aims.
+// A private `Marked`, since `marked.use` mutates the global.
 const safeMarked = new Marked({
   renderer: {
     html(token) {
       return escapeHtml(token.raw);
+    },
+    link(token) {
+      return isSafeHref(token.href) ? false : this.parser.parseInline(token.tokens);
+    },
+    image(token) {
+      return escapeHtml(token.text);
     },
   },
 });

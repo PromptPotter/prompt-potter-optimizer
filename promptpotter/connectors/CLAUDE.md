@@ -91,8 +91,10 @@ and moves every round.
   [`external-constraints.md`](../../docs/research/external-constraints.md) § SKILL). **`nodes.agent.config.skill_delivery: system_prompt` is the
   second channel** — the skill body at the head of terminus-2's prompt template — fixed per
   campaign, never listed in `param_keys`, absent means the Agent Skill; it enters identity as the
-  node config it is. **The panel is the workload's `experiment`**, its published roster pinned by
-  `resolve_experiment`, and `extract_experiment` publishes nothing. **Trial scratch goes to the
+  node config it is. **The panel is the workload's `experiment`**, its published roster read by
+  `resolve_experiment` off `resources/harbor-roster.<dataset>@<version>.json` — written once by
+  `python -m promptpotter.connectors.harbor <dataset> <version>`, which refuses to overwrite a pin
+  upstream has since moved, so no read ever fetches the registry — and `extract_experiment` publishes nothing. **Trial scratch goes to the
   system temp dir, never the workspace**, and nothing durable lives there — reward, digest and token
   counts belong in the measurement archive. **The one thing a cell leaves on the Docker host is its
   task image** (`hb__<content hash>`, one per distinct task environment, never one per cell); a hard
@@ -275,14 +277,20 @@ points would make the table depend on this distribution's installed metadata, so
 source-tree run would find zero backends. The property worth protecting — a half-wired connector fails before a run
 spends, never mid-campaign — lives in the validator, not in the channel it arrived through.
 
-## The credential rides the connector
+## The credential and the endpoint ride the connector
 
 **`Connector.auth_token() -> str | None` is the ONLY route by which a bearer token reaches
-the wire, and a `BackendClient` (`infrastructure/backend.py`) is built from the `Connector` it
-HOLDS** — it reads each declared capability off that connector where it is used, and a caller
-reads one off the client. Never name a credential at a construction site: a `settings.TERMNORM_TOKEN` passed
-there reaches whatever `remote_http` connector was resolved, POSTing TermNorm's secret to its host. An `in_process` connector has
-no wire, so declaring a token on one fails the registry guard.
+the wire, `Connector.endpoint() -> str` the ONLY place its host comes from, and a `BackendClient`
+(`infrastructure/backend.py`) is built from the `Connector` it HOLDS** — it reads each declared
+capability off that connector where it is used, and a caller reads one off the client. Both are
+operator config (`settings.TERMNORM_URL` beside `TERMNORM_TOKEN`), so no request, CLI flag or
+campaign field can aim the token at another host. An `in_process` connector has no wire, so
+declaring a token or an endpoint on one fails the registry guard, as does a `remote_http` one
+declaring no endpoint.
+
+**A check-in names only a connector with `serves_uploads`** (`draft_patch.py`): one that runs an
+uploaded table's rows and nothing beside them. A connector whose cells read operator files or
+start containers is never a tenant's choice.
 
 ## Conventions
 

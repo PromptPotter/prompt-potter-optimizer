@@ -4,14 +4,13 @@
 # pins every task to a commit; copying those rows into this repo would make us a second owner of
 # a list that has one, and our copy would drift the moment upstream repinned — silently, since
 # nothing compares them. What this file commits is the NAME, the VERSION and which tasks we take;
-# the connector resolves the rest (`connectors/harbor.py::_registry_tasks`) and Harbor fetches
+# the connector resolves the rest off its pinned roster (`connectors/harbor.py::pin_roster`) and Harbor fetches
 # and caches the task bytes, the same way a benchmark bank is fetched rather than shipped
 # (`datasets/CLAUDE.md` § cache.json is the item bank).
 #
 # The version is REQUIRED and is the pin that matters: resolving "latest" would put a moving
-# roster behind a fixed dataset name. Upstream moving a commit under this version is not silent
-# either — each resolved pin is folded into its own sample's content address, so it lands as a
-# new measurement identity instead of stale rows re-served against bytes nobody read.
+# roster behind a fixed dataset name. Upstream moving a commit under this version never reaches
+# this panel: the pinned roster stands, and re-pinning it refuses rather than re-cut the name.
 harbor_dataset: terminal-bench-sample
 harbor_dataset_version: "2.0"
 

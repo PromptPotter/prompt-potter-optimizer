@@ -1122,7 +1122,7 @@ def _widest(results: Sequence[Result]) -> tuple[int, int, list[str]]:
 
 
 # `api`: mypy resolves fastapi. `harbor`, `dspy`: a test skipped for a missing extra never ran.
-_PINNED_EXTRAS = ("dev", "api", "harbor", "dspy")
+_PINNED_EXTRAS = ("dev", "api", "harbor", "dspy", "excel")
 _LOCK_INPUTS = ("pyproject.toml", "uv.lock")
 _LOCK_STAMP = _PINNED / "gate-lock.sha256"
 

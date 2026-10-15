@@ -84,15 +84,13 @@ class FreshMint:
     arm: ArmRequest | None
     declared: CampaignConfig | None
     task_text: str | None
-    backend_url: str
-    backend_id: str
 
     @property
     def hop(self) -> CycleHop:
         return UNRESOLVED_HOP
 
-    def backend(self, stores: Stores) -> tuple[str, str]:
-        return declared_backend_type(self.dataset_root), self.backend_url
+    def backend_type(self, stores: Stores) -> str:
+        return declared_backend_type(self.dataset_root)
 
     def dataset_campaign_config(self) -> CampaignConfig:
         return dataset_campaign_config(
@@ -115,9 +113,8 @@ class ExistingCycle:
     def dataset_name(self) -> str:
         return self.campaign.dataset_name
 
-    def backend(self, stores: Stores) -> tuple[str, str]:
-        dataset_root = readable_dataset_dir(stores, self.dataset_name)
-        return declared_backend_type(dataset_root), self.campaign.backend_url
+    def backend_type(self, stores: Stores) -> str:
+        return declared_backend_type(readable_dataset_dir(stores, self.dataset_name))
 
     def campaign_config(self, stores: Stores) -> CampaignConfig:
         return resolve_campaign_config(stores, self.campaign, self.hop)
@@ -135,8 +132,6 @@ async def hold_fresh_mint(
 
         _t0 = time.perf_counter()
         session = await init_services(
-            backend_url=request.backend_url,
-            backend_id=request.backend_id,
             dataset_name=dataset_name,
             identity=stores.identity,
             stores=stores,

@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import hmac
 import logging
 import secrets
 from typing import Annotated, Any
 
-from fastapi import APIRouter, BackgroundTasks, Path, Request
+from fastapi import APIRouter, BackgroundTasks, Path, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from promptpotter.application import account
@@ -55,6 +56,10 @@ from promptpotter.shared.identity import AccessState, IdentityContext, display_n
 logger = logging.getLogger(__name__)
 
 auth_router = APIRouter(prefix="/auth", tags=["Auth"])
+
+# `provider.state.nonce` of the sign-in this browser started; the callback honours no other.
+OAUTH_FLOW_COOKIE_NAME = "promptpotter_oauth_flow"
+_OAUTH_FLOW_TTL_S = 600
 
 
 class ConnectedAccount(StrictModel):
@@ -127,12 +132,38 @@ def _require_provider_client(bundle: IdentityBundle, provider: str) -> Any:
     )
 
 
+def _set_auth_cookie(
+    response: Response, request: Request, *, key: str, value: str, max_age: int
+) -> None:
+    response.set_cookie(
+        key=key,
+        value=value,
+        max_age=max_age,
+        httponly=True,
+        secure=request.url.scheme == "https",
+        samesite="lax",
+        path="/",
+    )
+
+
+def _flow_nonce(request: Request, provider: str, state: str) -> str | None:
+    """This browser's flow nonce for `provider`, iff `state` is that flow's: no other browser's login lands here."""
+    started = request.cookies.get(OAUTH_FLOW_COOKIE_NAME, "")
+    flow_provider, _, rest = started.partition(".")
+    flow_state, _, nonce = rest.partition(".")
+    if flow_provider != provider or not nonce:
+        return None
+    return nonce if hmac.compare_digest(flow_state.encode(), state.encode()) else None
+
+
 def _redirect_with_error(code: str) -> RedirectResponse:
     """The callback is browser-navigated: raising would dump raw JSON into the tab.
 
     A CODE and nothing else: the access log keeps this URL, so it never carries who tried.
     """
-    return RedirectResponse(url=f"/?auth_error={code}", status_code=303)
+    response = RedirectResponse(url=f"/?auth_error={code}", status_code=303)
+    response.delete_cookie(OAUTH_FLOW_COOKIE_NAME, path="/")
+    return response
 
 
 @auth_router.get("/login/{provider}")
@@ -150,12 +181,19 @@ async def login(
     client = _require_provider_client(bundle, provider)
     state = secrets.token_urlsafe(32)
     nonce = secrets.token_urlsafe(32)
-    bundle.register_state(state, provider, nonce)
     if provider == "google":
         url = client.authorize_url(state=state, nonce=nonce)
     else:
         url = client.authorize_url(state=state)
-    return RedirectResponse(url=url, status_code=307)
+    response = RedirectResponse(url=url, status_code=307)
+    _set_auth_cookie(
+        response,
+        request,
+        key=OAUTH_FLOW_COOKIE_NAME,
+        value=f"{provider}.{state}.{nonce}",
+        max_age=_OAUTH_FLOW_TTL_S,
+    )
+    return response
 
 
 @auth_router.get("/callback/{provider}")
@@ -183,14 +221,14 @@ async def callback(
     if not state or not code:
         return _redirect_with_error("callback_missing_params")
 
-    pending = bundle.consume_state(state)
-    if pending is None or pending.provider != provider:
+    nonce = _flow_nonce(request, provider, state)
+    if nonce is None:
         return _redirect_with_error("state_invalid_or_expired")
 
     try:
         if provider == "google":
             identity: ProviderIdentity = await bundle.google.exchange_code(  # type: ignore[union-attr]
-                code=code, expected_nonce=pending.nonce
+                code=code, expected_nonce=nonce
             )
         else:
             identity = await bundle.github.exchange_code(code=code)  # type: ignore[union-attr]
@@ -237,15 +275,10 @@ async def callback(
     _announce_if_opened(background, arrival, signed_in)
 
     response = RedirectResponse(url="/", status_code=303)
-    response.set_cookie(
-        key=SESSION_COOKIE_NAME,
-        value=session_id,
-        max_age=60 * 60 * 24 * 7,
-        httponly=True,
-        secure=request.url.scheme == "https",
-        samesite="lax",
-        path="/",
+    _set_auth_cookie(
+        response, request, key=SESSION_COOKIE_NAME, value=session_id, max_age=60 * 60 * 24 * 7
     )
+    response.delete_cookie(OAUTH_FLOW_COOKIE_NAME, path="/")
     return response
 
 

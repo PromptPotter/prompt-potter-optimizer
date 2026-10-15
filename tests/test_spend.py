@@ -1882,7 +1882,7 @@ def test_a_runs_book_holds_each_send_at_its_bound_and_stops_the_run_at_its_ceili
             examples=[example],
         )
         client = BackendClient(
-            dspy_module.CONNECTOR, "", workload=InProcessWorkload(experiment=None, program=program)
+            dspy_module.CONNECTOR, workload=InProcessWorkload(experiment=None, program=program)
         )
         config = {"prompt": "Answer.", "model": "openai/gpt-x", "max_calls": 2, "max_tokens": 50}
         pairs = {dspy_module.PROGRAM_NODE: client.priced_as(config)}

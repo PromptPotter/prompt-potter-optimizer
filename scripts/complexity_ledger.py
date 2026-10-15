@@ -29,7 +29,7 @@ from pydantic import BaseModel
 
 BASELINE = {
     # Every `.py` under the package.
-    "modules": 443,
+    "modules": 442,
     # Every `__init__.py` among them.
     "init_files": 55,
     # The `__init__.py` files that re-export names instead of staying empty.
@@ -37,9 +37,9 @@ BASELINE = {
     # Campaign-config knobs, plus the node knobs each optimizer member declares.
     "config_leaf_fields": 80,
     # `Settings` fields — what the environment can set.
-    "settings_env": 40,
+    "settings_env": 41,
     # The upper-case constants `config/settings.py` exports.
-    "settings_const": 5,
+    "settings_const": 3,
     # Leaves of `OptSearchPoint` — what a run is handed.
     "opt_search_point_fields": 15,
     # Leaves of `CycleResult` — what a run produces.
@@ -71,7 +71,7 @@ BASELINE = {
     # moves it as one function does not.
     "test_reach": 356,
     # Every property of every schema the generated contract offers the browser.
-    "served_fields": 1634,
+    "served_fields": 1631,
 }
 
 _REPO = Path(__file__).resolve().parents[1]

@@ -1,0 +1,11 @@
+# Actions are pinned to commit SHAs; this is what moves a pin when upstream tags a release.
+# Package security updates need no entry here: they are the repository setting's.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]

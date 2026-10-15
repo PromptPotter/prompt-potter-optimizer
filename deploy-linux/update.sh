@@ -31,6 +31,7 @@ ENV_FILE="${ENV_FILE:-$INSTALL_DIR/.env}"
 source "$HERE/brand-env.sh"
 # wait_healthy — shared with every other script that starts something.
 source "$HERE/health.sh"
+source "$HERE/uv.sh"
 
 say()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 ok()   { printf '  \033[1;32m✓\033[0m %s\n' "$*"; }
@@ -61,16 +62,15 @@ if [[ -z "${UPDATE_REEXECED:-}" && -n "$self_before" && "$(self_sha)" != "$self_
   exec bash "$HERE/update.sh" "$@"
 fi
 # Install the exact pinned graph from uv.lock — same source of truth as CI.
-# uv is fetched to ~/.local/bin (outside .venv, so a sync never wipes it).
-command -v uv >/dev/null 2>&1 || { command -v "$HOME/.local/bin/uv" >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh; }
-( cd "$INSTALL_DIR" && PATH="$HOME/.local/bin:$PATH" uv sync --frozen --extra all )
+ensure_uv
+( cd "$INSTALL_DIR" && "$UV" sync --frozen --extra all )
 # The datasets this box offers (DATASET_OFFER) name the extras their fetch needs; read off the
 # synced code, so a second sync adds exactly those. Unset offer, empty list, no second sync.
 offer_out="$(cd "$INSTALL_DIR" && .venv/bin/python -m promptpotter offer-extras)"
 offer_extras=()
 for extra in $offer_out; do offer_extras+=(--extra "$extra"); done
 if (( ${#offer_extras[@]} )); then
-  ( cd "$INSTALL_DIR" && PATH="$HOME/.local/bin:$PATH" uv sync --frozen --extra all "${offer_extras[@]}" )
+  ( cd "$INSTALL_DIR" && "$UV" sync --frozen --extra all "${offer_extras[@]}" )
   ok "offered datasets' extras installed: ${offer_extras[*]}"
 fi
 # A dep rebuild relabels new .venv files user_home_t; re-apply the persisted
@@ -105,7 +105,7 @@ fi
 # install upstream at the next deploy.
 [[ -f "$ENV_FILE" ]] && brand_write_env "$ENV_FILE"
 brand_export_webapp
-[[ -d "$INSTALL_DIR/$WEBAPP_DIR" ]] && ( cd "$INSTALL_DIR/$WEBAPP_DIR" && npm install --silent && npm run build )
+[[ -d "$INSTALL_DIR/$WEBAPP_DIR" ]] && ( cd "$INSTALL_DIR/$WEBAPP_DIR" && npm ci --silent && npm run build )
 sudo systemctl restart "$SERVICE_NAME"
 # The admin bot is a SEPARATE unit running the SAME checkout, so a sync that touched its code
 # leaves it on the old one until something restarts it — and nothing did. Silent, because a bot

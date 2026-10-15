@@ -76,9 +76,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         render_server_banner(
             brand_name=settings.BRAND_SERVICE_NAME,
             version=app.version,
-            environment=settings.ENVIRONMENT,
             data_root=user_data_root(),
-            auth_open=auth_is_open(bundle),
+            auth_open=auth_is_open(),
             providers=bundle.config.configured,
             non_utf8=non_utf8_encoding(),
             offer=settings.dataset_offer,

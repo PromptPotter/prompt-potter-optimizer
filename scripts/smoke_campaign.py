@@ -99,9 +99,7 @@ async def _run(args: argparse.Namespace) -> int:
     print(f"[smoke] campaigns:    {project_dir / 'campaigns'}", flush=True)
     print(f"[smoke] dataset runs: {project_dir / 'dataset_runs'}", flush=True)
 
-    session = await open_session(
-        args.dataset, backend_url=args.backend_url, backend_id=args.dataset
-    )
+    session = await open_session(args.dataset)
 
     schema = session.pipeline_schema
     if not schema.available_models:
@@ -191,7 +189,6 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--variants", type=int, default=3, help="L1 candidates per round")
     p.add_argument("--rounds", type=int, default=1, help="max_rounds")
     p.add_argument("--patience", type=int, default=1, help="l1_patience (consecutive stalls)")
-    p.add_argument("--backend-url", default="http://127.0.0.1:8000")
     return p.parse_args()
 
 

@@ -95,22 +95,18 @@ export function ConnectorInspector({ view }: Props) {
           <div className="connector-pop-switch">
             <div className="head">Other backends</div>
             <ul>
-              {others.map((b) => {
-                const sameLabel = b.name.toLowerCase() === b.backend_type.toLowerCase();
-                return (
-                  <li key={b.id}>
-                    <button
-                      type="button"
-                      className="alt"
-                      disabled
-                      title="Switching is read-only today — see connection-security docs"
-                    >
-                      <span className="alt-name">{b.name}</span>
-                      {!sameLabel && <span className="alt-type">{b.backend_type}</span>}
-                    </button>
-                  </li>
-                );
-              })}
+              {others.map((b) => (
+                <li key={b.id}>
+                  <button
+                    type="button"
+                    className="alt"
+                    disabled
+                    title="Switching is read-only today — see connection-security docs"
+                  >
+                    <span className="alt-name">{b.id}</span>
+                  </button>
+                </li>
+              ))}
             </ul>
           </div>
         )}

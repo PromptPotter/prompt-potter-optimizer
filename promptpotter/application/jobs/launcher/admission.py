@@ -96,9 +96,7 @@ def release_slot(
         logger.exception("failed to record launch stop for job %s", job_id)
 
 
-async def probe_backend(
-    backend_type: str, backend_url: str
-) -> BackendUnreachableError | MissingExtraError | None:
+async def probe_backend(backend_type: str) -> BackendUnreachableError | MissingExtraError | None:
     # A campaign that outlived its dataset dir: ``connectors.get`` is strict and would raise.
     if not backend_type:
         return None
@@ -107,8 +105,9 @@ async def probe_backend(
         return MissingExtraError(connector.extra, absent)
     if connector.preflight is None:
         return None
-    if (down := await connector.preflight(backend_url)) is not None:
-        return BackendUnreachableError(connector.name, backend_url, down)
+    base_url = connector.base_url()
+    if (down := await connector.preflight(base_url)) is not None:
+        return BackendUnreachableError(connector.name, base_url, down)
     return None
 
 
@@ -214,7 +213,7 @@ async def admit_and_hold(
             claim_cycle(stores, job_registry, promoted, hop)
 
     t0 = time.perf_counter()
-    if (down := await probe_backend(*request.backend(stores))) is not None:
+    if (down := await probe_backend(request.backend_type(stores))) is not None:
         raise down
     t_probe = time.perf_counter()
     declared, operator = declare_run_ceiling(

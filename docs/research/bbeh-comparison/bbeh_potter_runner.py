@@ -74,7 +74,6 @@ async def run_bbeh_campaign(
     test_by_task: dict[str, list[Record]],
     *,
     output_path: Path,
-    backend_url: str = "http://127.0.0.1:8000",
     max_rounds: int | None = None,
     n_variants: int | None = None,
     sp_budget_round: int | None = None,
@@ -94,7 +93,7 @@ async def run_bbeh_campaign(
     print(f"GLOBAL OPTIMIZATION ({len(train_norm)} train samples)")
     print("=" * 60)
 
-    session = await open_session("bbeh", backend_url=backend_url)
+    session = await open_session("bbeh")
     try:
         campaign_config = build_campaign_config(
             max_rounds=max_rounds,

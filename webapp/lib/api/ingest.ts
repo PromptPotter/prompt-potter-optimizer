@@ -91,8 +91,6 @@ export type StartCheckinOptions = Partial<
 const START_KEYS: { [K in keyof Required<StartCheckinOptions>]: true } = {
   limits: true,
   diag: true,
-  backend_url: true,
-  backend_id: true,
 };
 
 // `campaignId` is the draft's `draft_id`; sparse, so the `CommandRecord` shows what the operator declared.

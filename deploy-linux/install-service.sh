@@ -7,6 +7,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ -f "$HERE/deploy.config" ]] && source "$HERE/deploy.config"
 source "$HERE/health.sh"
+source "$HERE/hardening.sh"
 APP_NAME="${APP_NAME:-myapp}"
 SERVICE_NAME="${SERVICE_NAME:-$APP_NAME}"
 APP_MODULE="${APP_MODULE:-myapp.main:app}"
@@ -115,32 +116,7 @@ RestartSec=3s
 # A run is its own process (jobs/launcher/run_job.py), so a restart of the API signals the API
 # alone: a paid run in flight finishes and is judged by its own lock when the API returns.
 KillMode=process
-# --- hardening (kernel-enforced blast-radius floor) ---------------------
-# uvicorn needs no privileges: drop every capability, deny privilege gain,
-# and make the whole filesystem read-only except the ONE directory it writes.
-NoNewPrivileges=true
-CapabilityBoundingSet=
-AmbientCapabilities=
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=read-only
-ReadWritePaths=$WRITE_PATH
-UMask=0077
-# kernel + process surface the app never touches
-RestrictSUIDSGID=true
-RestrictRealtime=true
-RestrictNamespaces=true
-LockPersonality=true
-ProtectKernelTunables=true
-ProtectKernelModules=true
-ProtectKernelLogs=true
-ProtectControlGroups=true
-ProtectClock=true
-ProtectHostname=true
-ProtectProc=invisible
-SystemCallArchitectures=native
-SystemCallFilter=@system-service
-SystemCallFilter=~@privileged ~@resources
+$(unit_hardening "$WRITE_PATH")
 ${MEMORY_MAX:+MemoryMax=$MEMORY_MAX}
 # If the service fails to start after tightening, the usual first suspects are
 # ProtectSystem=strict (add the offending write path to ReadWritePaths) or the

@@ -21,6 +21,35 @@ describe("renderMarkdownSafe", () => {
     expect(html).not.toContain("<script");
   });
 
+  it.each([
+    ["javascript link", "[click](javascript:alert(1))"],
+    ["javascript link, mixed case and tab", "[click](JavaScript\t:alert(1))"],
+    ["javascript reference link", "[click][r]\n\n[r]: javascript:alert(1)"],
+    ["entity-spelled colon", "[click](javascript&#58;alert(1))"],
+    ["data link", "[click](data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==)"],
+    ["vbscript link", "[click](vbscript:msgbox(1))"],
+  ])("renders a %s as its text alone", (_name, payload) => {
+    const html = renderMarkdownSafe(payload);
+    expect(html).not.toMatch(/<a\s/i);
+    expect(html).toContain("click");
+  });
+
+  it.each([
+    ["remote image", "![beacon](https://evil/?x)"],
+    ["relative image", "![beacon](/api/v1/x)"],
+  ])("renders a %s as its alt text, requesting nothing", (_name, payload) => {
+    const html = renderMarkdownSafe(payload);
+    expect(html).not.toMatch(/<img/i);
+    expect(html).not.toContain("evil");
+    expect(html).toContain("beacon");
+  });
+
+  it("keeps http, https, mailto and relative links", () => {
+    for (const href of ["https://example.org/a", "http://example.org", "mailto:a@b.c", "rounds/round_0001.json", "#top"]) {
+      expect(renderMarkdownSafe(`[x](${href})`)).toMatch(/<a href="/);
+    }
+  });
+
   it("still renders the markdown the viewer exists to show", () => {
     const html = renderMarkdownSafe(
       ["# Round 2", "", "- improved: **yes**", "", "`composite_fitness`", "", "| a | b |", "| - | - |", "| 1 | 2 |"].join("\n"),

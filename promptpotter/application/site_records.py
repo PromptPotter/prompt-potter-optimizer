@@ -7,16 +7,14 @@ no outside party stores them. What a table means is the sender's: nothing here r
 from __future__ import annotations
 
 import json
-import re
 
 from pydantic import Field, JsonValue
 
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.site_records import SiteRecord, default_site_record_store
 from promptpotter.shared.clock import epoch_seconds, utcnow_iso
-from promptpotter.shared.errors import BadRequestError, ContentTooLargeError, NotFoundError
+from promptpotter.shared.errors import BadRequestError, ContentTooLargeError
 
-_TABLE = re.compile(r"[a-z][a-z0-9_]{0,31}")
 _MAX_ROW_CHARS = 16_384
 # An email address at its longest.
 _MAX_KEY_CHARS = 320
@@ -46,12 +44,6 @@ class SiteRecordsDropped(StrictModel):
     dropped: int = Field(description="Rows removed")
 
 
-def _table(name: str) -> str:
-    if not _TABLE.fullmatch(name):
-        raise NotFoundError(f"No table {name!r}")
-    return name
-
-
 def _epoch(stamp: str, what: str) -> float:
     at = epoch_seconds(stamp)
     if at is None:
@@ -64,7 +56,7 @@ def keep_site_record(table: str, body: SiteRecordBody) -> SiteRecordWire:
     if len(json.dumps(body.row)) > _MAX_ROW_CHARS or len(body.key) > _MAX_KEY_CHARS:
         raise ContentTooLargeError(f"A row holds at most {_MAX_ROW_CHARS} characters")
     record = SiteRecord(at=utcnow_iso(), key=body.key, row=body.row)
-    default_site_record_store().keep(_table(table), record)
+    default_site_record_store().keep(table, record)
     return SiteRecordWire(**record._asdict())
 
 
@@ -73,7 +65,7 @@ def kept_site_records(table: str, since: str) -> SiteRecordsResponse:
     return SiteRecordsResponse(
         records=[
             SiteRecordWire(**record._asdict())
-            for record in default_site_record_store().kept(_table(table))
+            for record in default_site_record_store().kept(table)
             if (epoch_seconds(record.at) or 0.0) >= floor
         ]
     )
@@ -81,7 +73,7 @@ def kept_site_records(table: str, since: str) -> SiteRecordsResponse:
 
 def drop_site_records_before(table: str, before: str) -> SiteRecordsDropped:
     return SiteRecordsDropped(
-        dropped=default_site_record_store().drop_before(_table(table), _epoch(before, "before"))
+        dropped=default_site_record_store().drop_before(table, _epoch(before, "before"))
     )
 
 

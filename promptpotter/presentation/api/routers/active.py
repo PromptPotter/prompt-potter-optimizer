@@ -22,7 +22,6 @@ from promptpotter.presentation.api.deps import (
     decode_descend,
 )
 from promptpotter.presentation.api.routers.campaigns._conditional import conditional_json
-from promptpotter.shared.identity import acting_principal_id
 
 active_router = APIRouter()
 
@@ -78,9 +77,9 @@ def get_cycles(
 
 @active_router.get("/machine-status", response_model=MachineStatusResponse, tags=["Sessions"])
 def get_machine_status(identity: IdentityDep, jobs: JobRegistryDep) -> MachineStatusResponse:
-    """Machine occupancy: how many campaigns may run here and how many do, holders across users included."""
-    # `identity` is what 401s an unauthenticated read of cross-user holders; sync, so the blocking read stays off the event loop.
-    return machine_status(jobs, principal_id=acting_principal_id(identity))
+    """Machine occupancy: how many campaigns may run here and how many do; another tenant's runs only as counts."""
+    # Sync, so the blocking read stays off the event loop.
+    return machine_status(jobs, identity)
 
 
 @active_router.get(

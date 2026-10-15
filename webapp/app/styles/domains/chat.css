@@ -104,7 +104,6 @@
   cursor:not-allowed;opacity:.7
 }
 .connector-pop-switch .alt-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
-.connector-pop-switch .alt-type{font-size:var(--text-xs);letter-spacing:.04em;text-transform:uppercase;color:var(--color-text-secondary)}
 .connector-pop-foot{margin-top:8px;padding-top:6px;border-top:1px dashed var(--color-border);font-size:var(--text-xs);color:var(--color-text-secondary);font-style:italic;text-align:center}
 .wf-hero-node.llm.wf-hero-node-multi{
   flex-direction:column;align-items:stretch;gap:0;

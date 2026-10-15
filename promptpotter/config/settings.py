@@ -2,6 +2,7 @@ import codecs
 import locale
 import tomllib
 from importlib.metadata import version
+from typing import Literal
 
 from pydantic_settings import BaseSettings
 
@@ -22,14 +23,12 @@ APP_VERSION: str = _app_version()
 # Bumping it re-prompts every user for consent; keep in sync with the site's /terms + /privacy.
 TERMS_VERSION: str = "2026-10-11"
 
-DEFAULT_BACKEND_URL = "http://127.0.0.1:8000"
-DEFAULT_BACKEND_ID = "local"
-
 LOCK_TIMEOUT: float = 5.0  # seconds before treating lock as stale
 
 
 class Settings(BaseSettings):
-    ENVIRONMENT: str = "development"
+    # `off` runs every request as the CLI's on-disk identity: a local harness, never a served box.
+    PROMPTPOTTER_AUTH: Literal["on", "off"] = "on"
 
     # A fork edits `deploy-linux/deploy.config`'s brand block; `brand-env.sh` mirrors it here.
     BRAND_SHORT_NAME: str = "PromptPotter"
@@ -51,7 +50,9 @@ class Settings(BaseSettings):
     # provider -> [rpm, tpm] per rolling 60s; a missing provider or a null slot is unthrottled.
     RATE_LIMITS: dict[str, list[int | None]] = {}
 
-    # Read ONLY by the termnorm connector's `auth_token` hook: a second backend declares its own.
+    # Read ONLY by the termnorm connector's `endpoint` and `auth_token` hooks: a second backend
+    # declares its own. The URL is the operator's alone, so the token never travels elsewhere.
+    TERMNORM_URL: str = "http://127.0.0.1:8000"
     TERMNORM_TOKEN: str = ""
 
     # Empty is upstream's local compose stack; read only by `connectors/dbllmbench.py::harness_config`.
@@ -132,8 +133,6 @@ def non_utf8_encoding() -> str | None:
 
 __all__ = [
     "APP_VERSION",
-    "DEFAULT_BACKEND_ID",
-    "DEFAULT_BACKEND_URL",
     "LOCK_TIMEOUT",
     "TERMS_VERSION",
     "Settings",

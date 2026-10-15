@@ -119,7 +119,7 @@ tags:
 #
 # Sources of this draft:
 #   - sanctioned POSTs migrated off active.py / backends.py (fork,
-#     delete, cleanup-empty, register-backend).
+#     delete, cleanup-empty).
 #   - 2 CLI verbs hoisted into the wire surface (mint-campaign = `new`,
 #     start-run = `resume` / launcher per ADR-0001 control plane).
 #   - M12-new commands (pause, step, rewind-to-round, change-run-limits,
@@ -133,8 +133,7 @@ tags:
 #     operationId per path. Path tail matches `CommandEnvelope.kind`.
 #   - declares `Idempotency-Key` (every command). State-mutating
 #     cycle-scoped commands additionally declare `Expected-Version`.
-#     Workspace-scoped backend commands (register-backend,
-#     register-backend) intentionally omit `Expected-Version` —
+#     Workspace-scoped commands intentionally omit `Expected-Version` —
 #     they do not mutate a specific cycle's ledger offset.
 #   - declares a request body schema that pins `kind` to a const literal
 #     and refers to a per-kind `*Payload` schema in components.schemas.
@@ -1243,34 +1242,6 @@ paths:
         '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
         '403': { $ref: '#/components/responses/CapabilityDenied' }
         '409': { $ref: '#/components/responses/VersionConflict' }
-        '422': { $ref: '#/components/responses/PayloadInvalid' }
-
-  /commands/register-backend:
-    post:
-      operationId: registerBackend
-      summary: Register a new backend connection (workspace-scoped).
-      description: |
-        Migrated from `POST /api/v1/backends`, a route that no longer exists. Workspace-scoped,
-        no `Expected-Version` — the target is the backend registry, not a cycle.
-      tags: [backends]
-      parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              allOf:
-                - $ref: '#/components/schemas/CommandEnvelope'
-                - type: object
-                  required: [kind, payload]
-                  properties:
-                    kind: { const: register-backend }
-                    payload: { $ref: '#/components/schemas/RegisterBackendPayload' }
-      responses:
-        '202': { $ref: '#/components/responses/CommandAccepted' }
-        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
-        '403': { $ref: '#/components/responses/CapabilityDenied' }
         '422': { $ref: '#/components/responses/PayloadInvalid' }
 
   /commands/edit-draft-campaign:
@@ -2750,14 +2721,16 @@ paths:
         operator's `MACHINE_RUN_CAPACITY` ceiling, lowered while the shared
         provider throttle is saturated and never raised above it.
 
-        Occupancy is not relative to who asks, so the caller's own run counts in
-        `running` and their own holder record is named like anyone else's. The
-        one caller-scoped field is `queue`, which lists only their waiting
-        launches; everyone else's are counted in `queued`.
+        Occupancy is not relative to who asks: every run counts in `running`
+        and every waiting launch in `queued`. What names a run is scoped to
+        the caller — `queue` and `refused` list only their own launches, and
+        `holder` is served only where the oldest live run is their tenant's
+        (the host reads it whoever owns it), so another tenant's job is a
+        count and never an id.
       tags: [Sessions]
       responses:
         '200':
-          description: Machine occupancy and the oldest live run, if any.
+          description: Machine occupancy, and the oldest live run where the caller may see it.
           content:
             application/json:
               schema:
@@ -3870,22 +3843,6 @@ components:
             The task description this campaign is framed from, in place of the
             dataset's `task_description.md`. The CLI's `new --task-text` /
             `--task-file`, sent as the text.
-        backend_url:
-          type: string
-          minLength: 1
-          maxLength: 2048
-          default: http://127.0.0.1:8000
-          description: |
-            Where the dataset's connector reaches its backend. The CLI's
-            `new --backend-url`.
-        backend_id:
-          type: string
-          minLength: 1
-          maxLength: 64
-          default: local
-          description: |
-            The registry id that backend is recorded under (`/backends`). The
-            CLI's `new --backend-id`.
 
     StartRunPayload:
       allOf:
@@ -3956,32 +3913,6 @@ components:
                 - { type: integer }
                 - { type: boolean }
                 - { type: 'null' }
-
-    RegisterBackendPayload:
-      type: object
-      required: [name, backend_type, base_url]
-      additionalProperties: false
-      properties:
-        name:
-          type: string
-          minLength: 1
-          maxLength: 128
-          description: Human-readable backend name.
-        backend_type:
-          type: string
-          minLength: 1
-          maxLength: 64
-          description: Backend connector type (e.g. `termnorm`, `promptpotter`).
-        base_url:
-          type: string
-          format: uri
-          description: Backend API base URL (trailing slash stripped server-side).
-        id:
-          type: string
-          minLength: 1
-          maxLength: 64
-          pattern: '^[a-z][a-z0-9-]*$'
-          description: 'Custom backend id; auto-derived from `name` when omitted.'
 
 
     # ---- Forward-scope payloads (beyond v0; same closed-set policy) ----
@@ -4429,23 +4360,6 @@ components:
           type: boolean
           default: false
           description: Run the diagnostic shape, as `mint-campaign`'s `diag` does.
-        backend_url:
-          type: string
-          minLength: 1
-          maxLength: 2048
-          default: http://127.0.0.1:8000
-          description: |
-            Where the draft's connector reaches its backend, as on `mint-campaign`.
-            A launch fact rather than a draft field: the draft names the connector,
-            not the host it answers on. The CLI's `new <file> --backend-url`.
-        backend_id:
-          type: string
-          minLength: 1
-          maxLength: 64
-          default: local
-          description: |
-            The registry id that backend is recorded under (`/backends`). The
-            CLI's `new <file> --backend-id`.
 
     # A check-in keeps its provisional `cycle_chk_{rand}` id as the permanent root: drift
     # reads `root_content_hash`, never the parsed id.

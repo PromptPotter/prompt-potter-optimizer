@@ -7,6 +7,8 @@ but by `drop_before`, which is how a published retention window is kept true.
 from __future__ import annotations
 
 import json
+import os
+import re
 import threading
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -14,6 +16,9 @@ from typing import Any, NamedTuple
 from promptpotter.config.paths import user_data_root
 from promptpotter.infrastructure.store.io import append_jsonl, read_text_optional, write_jsonl
 from promptpotter.shared.clock import epoch_seconds
+from promptpotter.shared.errors import NotFoundError
+
+_TABLE = re.compile(r"[a-z][a-z0-9_]{0,31}")
 
 
 class SiteRecord(NamedTuple):
@@ -32,7 +37,12 @@ class SiteRecordStore:
         self._root = root
 
     def _path(self, table: str) -> Path:
-        return self._root / f"{table}.jsonl"
+        """The sender names the table, so the name is held to one file directly under the root."""
+        root = os.path.normpath(self._root)
+        path = os.path.normpath(os.path.join(root, f"{table}.jsonl"))
+        if not _TABLE.fullmatch(table) or not path.startswith(root + os.sep):
+            raise NotFoundError(f"No table {table!r}")
+        return Path(path)
 
     def keep(self, table: str, record: SiteRecord) -> None:
         with _WRITING:

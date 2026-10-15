@@ -12,6 +12,13 @@ _API = "/api/v1/"
 # A build names these files by their content, so one that was served never changes.
 _CONTENT_NAMED = "/_next/static/"
 _SERVED = (200, 206, 304)
+_API_CSP = "default-src 'none'; frame-ancestors 'none'"
+# 'unsafe-inline': the export inlines per-page RSC scripts, and a 304 revalidation carries no body to hash.
+_WEBAPP_CSP = (
+    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; "
+    "form-action 'self'"
+)
 
 
 def cache_policy(*, api: bool, path: str, status: int) -> str:
@@ -62,12 +69,7 @@ class ResponseHeadersMiddleware:
                     headers.setdefault(
                         "strict-transport-security", "max-age=63072000; includeSubDomains"
                     )
-                headers.setdefault(
-                    "content-security-policy",
-                    "default-src 'none'; frame-ancestors 'none'"
-                    if api
-                    else "frame-ancestors 'none'; base-uri 'self'; object-src 'none'",
-                )
+                headers.setdefault("content-security-policy", _API_CSP if api else _WEBAPP_CSP)
                 headers["cache-control"] = cache_policy(
                     api=api, path=path, status=message["status"]
                 )

@@ -148,9 +148,9 @@ class MachineSlots:
 
 
 class BackendClient:
-    def __init__(self, connector: Connector, base_url: str, *, workload: InProcessWorkload) -> None:
+    def __init__(self, connector: Connector, *, workload: InProcessWorkload) -> None:
         self._connector = connector
-        self.base_url = base_url.rstrip("/")
+        self.base_url = connector.base_url()
         self.workload = workload
         self.backpressure = Backpressure("cells")
         self._guard = connector.session_factory()
