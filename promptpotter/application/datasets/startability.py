@@ -172,34 +172,27 @@ def checkin_items(stores: Stores, name: str) -> list[dict[str, Any]]:
     return fetched
 
 
-def _offer() -> dict[str, Path | None]:
-    """Each offered name, with the install dataset it names; ``None`` where it names none."""
+def _offer() -> dict[str, Path]:
+    """The install dataset each offered name names, the offer whole or refused: boot and deploy both."""
     root = install_datasets_root()
-    return {
-        name: root / name if is_dataset_dir(root / name) else None
-        for name in sorted(settings.dataset_offer or ())
-    }
+    offer = {name: root / name for name in sorted(settings.dataset_offer or ())}
+    if absent := [name for name, path in offer.items() if not is_dataset_dir(path)]:
+        raise NotFoundError(f"DATASET_OFFER names no dataset in this install: {', '.join(absent)}")
+    return offer
 
 
 def offer_extras() -> set[Extra]:
-    """What the deployment must install so every dataset it offers can run, the offer whole or refused."""
-    offer = _offer()
-    found = [path for path in offer.values() if path is not None]
-    if len(found) < len(offer):
-        absent = ", ".join(name for name, path in offer.items() if path is None)
-        raise NotFoundError(f"DATASET_OFFER names no dataset in this install: {absent}")
-    return {extra for path in found if (extra := dataset_extra(path))}
+    """What the deployment must install so every dataset it offers can run."""
+    return {extra for path in _offer().values() if (extra := dataset_extra(path))}
 
 
 def offer_faults() -> list[str]:
-    """Each offered name this install cannot honour, as a line for the boot banner."""
-    faults: list[str] = []
-    for name, found in _offer().items():
-        if found is None:
-            faults.append(f"{name}: no such dataset in this install")
-        elif (extra := missing_extra(found)) is not None:
-            faults.append(f"{name}: needs the `{extra}` extra — {install_hint(extra)}")
-    return faults
+    """Each offered dataset whose extra this install lacks, as a line for the boot banner."""
+    return [
+        f"{name}: needs the `{extra}` extra — {install_hint(extra)}"
+        for name, path in _offer().items()
+        if (extra := missing_extra(path)) is not None
+    ]
 
 
 __all__ = [

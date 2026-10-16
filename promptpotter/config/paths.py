@@ -52,6 +52,12 @@ def user_data_root() -> Path:
     return _os_app_data_dir()
 
 
+def install_cache_root() -> Path:
+    """What derives from the installed code alone, so every home on one install shares it."""
+    checkout = source_checkout_root()
+    return (checkout if checkout is not None else _os_app_data_dir()) / ".cache"
+
+
 def default_jobs_dir() -> Path:
     return user_data_root() / "jobs"
 
@@ -111,6 +117,7 @@ __all__ = [
     "checkin_manifest_path",
     "default_jobs_dir",
     "env_file_path",
+    "install_cache_root",
     "install_datasets_root",
     "optimizer_manifest_path",
     "optimizers_root",

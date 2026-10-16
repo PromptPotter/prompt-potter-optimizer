@@ -17,6 +17,7 @@ import time
 import tomllib
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 from typing import Literal
 
@@ -102,6 +103,8 @@ class Selection:
     changed: tuple[str, ...] | None = None
     # ``None`` is the whole check.
     narrowed: tuple[str, ...] | None = None
+    # The py lane's probes not kept green, asked in one host process.
+    probes: tuple[_Probe, ...] = ()
 
     @classmethod
     def build(cls, staged: bool, changed: bool) -> Selection:
@@ -292,11 +295,12 @@ class _Probe:
     judge: Callable[[str], Outcome] | None = None
     fresh: bool = False
 
-    def __call__(self, _sel: Selection) -> Outcome:
-        return _PROBES.answer(self)
+    def __call__(self, sel: Selection) -> Outcome:
+        return _ask_together(sel.probes if self in sel.probes else (self,))[self]
 
 
-def _ask_together(probes: Sequence[_Probe]) -> dict[_Probe, Outcome]:
+@cache
+def _ask_together(probes: tuple[_Probe, ...]) -> dict[_Probe, Outcome]:
     ordered = sorted(probes, key=lambda probe: not probe.fresh)
     before = [_snapshot(probe.regenerates) for probe in ordered]
     sources = json.dumps([probe.source for probe in ordered])
@@ -314,27 +318,6 @@ def _ask_together(probes: Sequence[_Probe]) -> dict[_Probe, Outcome]:
         else:
             verdicts[probe] = _stale(probe.regenerates, prior)
     return verdicts
-
-
-class _Probes:
-    def __init__(self) -> None:
-        self._turn = threading.Lock()
-        self._due: tuple[_Probe, ...] = ()
-        self._answers: dict[_Probe, Outcome] = {}
-
-    def expect(self, due: Sequence[_Probe]) -> None:
-        self._due = tuple(due)
-
-    def answer(self, probe: _Probe) -> Outcome:
-        with self._turn:
-            if probe not in self._answers:
-                batch = self._due if probe in self._due else (probe,)
-                asked = [p for p in batch if p not in self._answers]
-                self._answers.update(_ask_together(asked))
-            return self._answers[probe]
-
-
-_PROBES = _Probes()
 
 
 # CR is absent deliberately: `read_text` translates line endings.
@@ -988,15 +971,15 @@ def main() -> int:
 
     # `--staged` checks less than any key names, so it neither reads nor records a green.
     store = None if args.staged else LastGreen.open()
-    # The py lane's probes share one host; another lane's probe is asked alone.
-    _PROBES.expect(
-        [
+    sel = dataclasses.replace(
+        sel,
+        probes=tuple(
             c.run
             for c in checks
             if c.kind == "py"
             and isinstance(c.run, _Probe)
             and not (store is not None and c.kept(store, c.key(store)))
-        ]
+        ),
     )
     started = time.monotonic()
     # CI's configuration, never the desk's: no `.env` and no workspace, or a verdict reads either.
@@ -1020,9 +1003,8 @@ def main() -> int:
     label = "staged" if args.staged else "+".join(sorted(kinds)) + ("/changed" * args.changed)
     if failed:
         print(
-            "\nBefore editing: find where the failing fact is DECIDED, not where it shows, and fix it"
-            "\nthere. A check that is green on rerun, or red only on this machine, is a question"
-            "\nabout the gate or the desk, never a fix."
+            "\nChange the failing fact where it is DECIDED, not where it shows. Green on rerun, or"
+            "\nred only on this machine, is a defect in the gate or the desk, never a pass."
         )
         print(
             f"\ngate[{label}]: {len(results)} checks, {len(failed)} failed{unchanged}, {total:.1f}s"

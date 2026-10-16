@@ -344,15 +344,29 @@ def _hub_rows(draw: Callable[[Row], Drawn]) -> Callable[[Source], BankLoader]:
     return lambda src: _bank(src, lambda: _hub_split(src), draw)
 
 
-BANK_RECIPES: dict[str, Callable[[Source], BankLoader]] = {
-    "aime": _hub_rows(lambda row: (row["problem"], str(row["answer"]))),
-    "bbeh_mini": lambda src: _bank(
+def _cell(value: object) -> str:
+    return _plain_number(value) if isinstance(value, float) else str(value)
+
+
+def _columns(src: Source) -> BankLoader:
+    """Two columns of a hub split: `query` and `truth` name them, `truth_prefix` leads the answer,
+    and `where` names a boolean column a row must hold."""
+    query, truth, prefix, where = (
+        src["query"],
+        src["truth"],
+        src.get("truth_prefix", ""),
+        src.get("where"),
+    )
+    return _bank(
         src,
-        lambda: [row for row in _hub_split(src) if row["mini"]],
-        lambda row: (row["input"], row["target"]),
-    ),
+        lambda: [row for row in _hub_split(src) if where is None or row[where]],
+        lambda row: (str(row[query]), f"{prefix}{_cell(row[truth])}"),
+    )
+
+
+BANK_RECIPES: dict[str, Callable[[Source], BankLoader]] = {
+    "columns": _columns,
     "hotpotqa": _hub_rows(_hotpotqa),
-    "gsm_hard": _hub_rows(lambda row: (row["input"], f"#### {_plain_number(row['target'])}")),
     "trec": lambda src: _bank(
         src,
         _class_label_rows(
@@ -371,8 +385,6 @@ BANK_RECIPES: dict[str, Callable[[Source], BankLoader]] = {
     ),
     "arc": _hub_rows(_arc),
     "instruction_induction": lambda src: _bank(src, lambda: _instruction_induction_rows(src)),
-    "bbh": _hub_rows(lambda row: (row["input"], row["target"])),
-    "mgsm": _hub_rows(lambda row: (row["question"], f"#### {row['answer_number']}")),
     "justlogic": _justlogic_bank,
     "screen_taste": lambda src: _bank(src, lambda: _screen_taste_rows(src)),
 }

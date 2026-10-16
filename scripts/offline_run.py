@@ -100,8 +100,6 @@ INTERRUPTED = {1: "interrupted", 2: "interrupted-twice"}
 INTERRUPT_AT_CELL = 25
 # The Ctrl+C contract is the pause and the resume, not the search: one round ends the cycle soonest.
 TERMINAL_ROUNDS = 1
-# Campaign processes at once: each holds about one core and peaks near 120 MB.
-WIDTH = min(8, os.cpu_count() or 2)
 RESUME_APPENDS = ("phases", "run_phases", "candidates_minted", "rulers")
 NOT_A_KEY = "offline-run-not-a-key"
 PROVIDER_KEYS = ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY")
@@ -1064,12 +1062,14 @@ def named_home() -> Path:
     return Path(named.removeprefix("\\\\?\\")).expanduser().resolve()
 
 
-def stands_green(home: Path, run: str, key: str | None) -> bool:
+def stands_green(home: Path, run: str, kept: LastGreen | None, key: str | None) -> bool:
+    """Green in the gate's store under these flags, and this home still holds that run."""
+    if kept is None or key is None or not kept.holds(run, key):
+        return False
     try:
-        stamp = json.loads((home / STAMP).read_text(encoding="utf-8"))
+        return bool(json.loads((home / STAMP).read_text(encoding="utf-8")).get("run") == run)
     except (OSError, ValueError):
         return False
-    return key is not None and (stamp.get("run"), stamp.get("green")) == (run, key)
 
 
 def claim_home(home: Path, stamp: dict[str, object]) -> Path:
@@ -1196,7 +1196,7 @@ def main() -> int:
     kept = LastGreen.open()
     key = None if kept is None else kept.key(OFFLINE_RUN_READS)
     home = named_home()
-    if args.against is None and stands_green(home, run, key):
+    if args.against is None and stands_green(home, run, kept, key):
         print(f"offline run: unchanged since green -- {home}")
         return 0
     stamp: dict[str, object] = {"offline": True, "note": LABEL, "run": run}
@@ -1213,7 +1213,9 @@ def main() -> int:
         child_args += [f"--optimizer={name}" for name in arm_names]
     t0 = time.monotonic()
 
-    pool = ThreadPoolExecutor(WIDTH)
+    # Every campaign at once: from 8 to 12 at a time the wall clock measured flat on 12 cores.
+    tasks = len(names) if args.controlled else 2 * len(names) + len(INTERRUPTED)
+    pool = ThreadPoolExecutor(min(tasks, os.cpu_count() or 2))
 
     def run_child(name: str, workspace: Path, log: str, rounds: int, *extra: str) -> int:
         child = [sys.executable, __file__, "--child", name, f"--rounds={rounds}", *child_args]
@@ -1261,9 +1263,9 @@ def main() -> int:
             continue
         if args.controlled:
             continue
-        run = json.loads((workspace / "decisions.json").read_text(encoding="utf-8"))["run"]
+        ran = json.loads((workspace / "decisions.json").read_text(encoding="utf-8"))["run"]
         (cycle,) = (workspace / "projects").glob("*/campaigns/*/cycles/*")
-        bench = run["bench"]
+        bench = ran["bench"]
         failed += not _graded(bench)
         lift = None if bench is None else bench["vs_origin"]["headline"]
         headline = (
@@ -1273,7 +1275,7 @@ def main() -> int:
             if bench is None
             else f"none ({bench['vs_origin']['state']})"
         )
-        print(f"{name}: {run['stop_reason']}, bench lift {headline} -- {cycle}")
+        print(f"{name}: {ran['stop_reason']}, bench lift {headline} -- {cycle}")
         if args.against is not None:
             print(
                 f"{name}: against {args.against}: {moved_against(workspace, args.against / name)}"
@@ -1306,12 +1308,9 @@ def main() -> int:
         print("\n".join(line for line in lines if line.startswith(("skip on", "arm ", "head-to-"))))
     print(f"wall clock {time.monotonic() - t0:.0f}s")
     # Filed only where the sources read the same after the run as before it.
+    # Filed under the flags it ran with: bare, that is the gate's check of the same name.
     if not failed and kept is not None and key == kept.key(OFFLINE_RUN_READS):
-        (home / STAMP).write_text(
-            json.dumps({**stamp, "green": key}, indent=1) + "\n", encoding="utf-8"
-        )
-        if run == OFFLINE_RUN:  # the gate's check of the same name stands on this run too
-            kept.record({OFFLINE_RUN: key})
+        kept.record({run: key})
     return 1 if failed else 0
 
 

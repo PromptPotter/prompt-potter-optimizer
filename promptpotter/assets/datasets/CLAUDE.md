@@ -49,8 +49,9 @@ install content has a chain: a tenant upload is whole.
 **A definition's rows are a recipe plus the data half beside it** (`application/datasets/loaders.py`):
 `recipe` names the code in `BANK_RECIPES` (rows) or `PANEL_RECIPES` (a connector-owned panel built into the
 tenant tier), and every other key is the cut — `hub:` / `github:` with its pinned `rev`, splits, configs,
-caps. A section with no `hub:`/`github:` is INLINE: its keys are the rows' inputs. A
-new cut is a new definition, never a recipe edit. **Every fetched source is pinned to a commit** — an
+caps. A section with no `hub:`/`github:` is INLINE: its keys are the rows' inputs. A bank that is two
+columns of a hub split takes `recipe: columns`; code is only for a cut that builds text. A new cut is a
+new definition, never a recipe edit. **Every fetched source is pinned to a commit** — an
 unpinned one raises at parse; a moving ref re-cuts the bank under the name it already has.
 
 ## A ceiling is DECLARED, or the clock that needs it reports nothing
