@@ -176,6 +176,13 @@ def _times(left: float, each: float | None) -> int:
     return int(left / each)
 
 
+def _admits(left: float, each: float | None, reserve: bool) -> int:
+    """The ceiling admits while any of it is left, so a run stops AT its cap; the reserve is what
+    bounds the calls out when it is reached."""
+    n = _times(left, each)
+    return n if reserve or each is None or left <= 0 else max(n, 1)
+
+
 class SpendBook(Projection):
     def __init__(
         self,
@@ -304,7 +311,7 @@ class SpendBook(Projection):
         ):
             if limit is not None:
                 left = limit - used - sum(v for k, v in out.items() if k != beside)
-                yield ErrorCategory.SPEND_CEILING, reserve, _times(left, each)
+                yield ErrorCategory.SPEND_CEILING, reserve, _admits(left, each, reserve)
         used_t = self.tokens_spent + self.tokens_unreported + self.set_aside_tokens
         for reserve, limit_t, out_t, each_t in (
             (False, ceiling.tokens, self._held_tokens, held.tokens),
@@ -312,7 +319,7 @@ class SpendBook(Projection):
         ):
             if limit_t is not None:
                 left_t = limit_t - used_t - sum(v for k, v in out_t.items() if k != beside)
-                yield ErrorCategory.TOKEN_CEILING, reserve, _times(left_t, each_t)
+                yield ErrorCategory.TOKEN_CEILING, reserve, _admits(left_t, each_t, reserve)
 
     def held_at(self, label: CallLabel, bound: SendBound) -> SendBound:
         most = self._billed_most.get(label.node)
@@ -393,18 +400,21 @@ class SpendBook(Projection):
     def _refusal(self, category: ErrorCategory, reserve: bool, each: SendBound, what: str) -> str:
         limit = "account reserve" if reserve else "ceiling"
         if category is ErrorCategory.SPEND_CEILING:
-            unreported = (
-                f", ${self.usd_unreported:.4f} unreported (sends no bill priced)"
-                if self.usd_unreported
-                else ""
-            )
-            cap = (self.reserve if reserve else self.ceiling).usd
-            out = self._out_usd if reserve else self._held_usd
+            cap = (self.reserve if reserve else self.ceiling).usd or 0.0
+            out = sum((self._out_usd if reserve else self._held_usd).values())
+            owed = [
+                (self.usd_metered, CEILING_METER_LABELS[self.meters]),
+                (self.usd_unreported, "unreported"),
+                (out, "in calls still out"),
+                (self.set_aside_usd, "set aside for the bench"),
+            ]
+            left = cap - sum(usd for usd, _ in owed)
+            said = ", ".join(f"${usd:.4f} {name}" for usd, name in owed if usd)
+            if left <= 0:
+                return f"{what} was not sent: the ${cap:.2f} {limit} is used up ({said})"
             return (
-                f"{what} holds ${each.usd:.4f} while it is out, and the ${cap:.4f} {limit} "
-                f"holds ${self.usd_metered:.4f} {CEILING_METER_LABELS[self.meters]}{unreported}, "
-                f"${sum(out.values()):.4f} for calls out and "
-                f"${self.set_aside_usd:.4f} set aside for the bench"
+                f"{what} was not sent: it may cost up to ${each.usd or 0.0:.4f} and the "
+                f"${cap:.2f} {limit} has ${left:.4f} left ({said})"
             )
         if each.tokens is None:
             return f"{what}: nothing caps its reply, so it cannot run under a token ceiling"
