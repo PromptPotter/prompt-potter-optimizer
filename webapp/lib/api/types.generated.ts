@@ -2990,9 +2990,9 @@ export interface QuotaStatus {
    * `rate_priced_usd`, over `spend_budget_usd_total`, at most 1. `None` where
    * no ceiling bounds the account. */
   spend_budget_used_share: number | null;
-  /** Admission's own answer: the next launch is refused for want of allowance.
-   * Headroom in either unit, after what running launches hold, the unreported
-   * sends and the unpriced grace. False on an account no ceiling bounds. */
+  /** The allowance is SPENT in either unit, unreported sends counted. What a
+   * running launch holds is not spent: a run declaring no cap holds the whole
+   * headroom. False on an account no ceiling bounds. */
   allowance_exhausted: boolean;
   tokens_used_total: number;
   token_budget_total: number | null;

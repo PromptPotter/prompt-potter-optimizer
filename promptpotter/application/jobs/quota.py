@@ -210,9 +210,9 @@ class QuotaStatus(StrictModel):
         "bounds the account."
     )
     allowance_exhausted: bool = Field(
-        description="Admission's own answer: the next launch is refused for want of allowance. "
-        "Headroom in either unit, after what running launches hold, the unreported sends and the "
-        "unpriced grace. False on an account no ceiling bounds."
+        description="The allowance is SPENT in either unit, unreported sends counted. What a "
+        "running launch holds is not spent: a run declaring no cap holds the whole headroom. "
+        "False on an account no ceiling bounds."
     )
     tokens_used_total: int
     token_budget_total: int | None
@@ -257,15 +257,17 @@ def _machine_binds(limit: int) -> str | None:
 def quota_status(*, stores: Stores, job_registry: JobRegistry) -> QuotaStatus:
     """Usage is uncapped, so an account past its ceiling reads its overage."""
     user = account_of(stores)
-    wallet = read_account_wallet(user=user, stores=stores, job_registry=job_registry)
-    spent, ceilings = wallet.spent, wallet.ceilings
+    # No reservation is read: this reports what was spent, and admission alone weighs what is held.
+    ceilings = lifetime_ceilings(user=user, spends_own_key=spends_the_hosts_own_key(stores))
+    spent = sum_user_spend(ledgers=account_ledgers(stores.campaigns))
     # The launches `max_concurrent_cycles` binds: a scoring pass is not among them.
     launches = job_registry.list_launches(user_id=user.user_id)
     return QuotaStatus(
         spend_lifetime=LifetimeSpend.of(spent),
         spend_budget_usd_total=ceilings.usd,
         spend_budget_used_share=_used_share(spent.sent_usd, ceilings.usd),
-        allowance_exhausted=wallet.exhausted,
+        allowance_exhausted=(ceilings.usd is not None and spent.at_most_usd >= ceilings.usd)
+        or (ceilings.tokens is not None and spent.at_most_tokens >= ceilings.tokens),
         tokens_used_total=spent.used_tokens,
         token_budget_total=ceilings.tokens,
         token_budget_used_share=_used_share(spent.used_tokens, ceilings.tokens),

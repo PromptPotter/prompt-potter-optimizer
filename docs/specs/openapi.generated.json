@@ -11208,7 +11208,7 @@
         "description": "An account's usage against the limits its next launch is gated on.\n\nThe spend and token pairs are LIFETIME, used-ever against the account's total ceilings; the\ncampaign pair is per-day, because one is an allowance and the other an abuse limit.",
         "properties": {
           "allowance_exhausted": {
-            "description": "Admission's own answer: the next launch is refused for want of allowance. Headroom in either unit, after what running launches hold, the unreported sends and the unpriced grace. False on an account no ceiling bounds.",
+            "description": "The allowance is SPENT in either unit, unreported sends counted. What a running launch holds is not spent: a run declaring no cap holds the whole headroom. False on an account no ceiling bounds.",
             "title": "Allowance Exhausted",
             "type": "boolean"
           },
