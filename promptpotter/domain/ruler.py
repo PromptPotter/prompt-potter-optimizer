@@ -4,16 +4,45 @@ from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from enum import StrEnum
 from statistics import NormalDist
-from typing import Literal, NamedTuple
+from typing import TYPE_CHECKING, Literal, NamedTuple
 
 from pydantic import ConfigDict, Field
 
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.hashing import stable_hash
 
+if TYPE_CHECKING:
+    from promptpotter.domain.sample import Sample
+
 # A bare δ is 1PL (a ≡ 1); a ``(δ, a)`` pair is 2PL.
 RulerEntry = float | tuple[float, float]
-Ruler = Mapping[int, RulerEntry]
+# Keyed by what the cell IS (`Sample.key`), never its position: one scale reads every shape alike.
+Ruler = Mapping[str, RulerEntry]
+
+
+class RulerScope(StrictModel):
+    """What one δ scale spans: one scorer's cells on ONE dataset. Arms link a scale only through
+    cells they share, and two datasets share none, so a δ is never compared across datasets."""
+
+    model_config = ConfigDict(frozen=True)
+
+    scorer: str
+    dataset: str
+
+
+class CellScopes(NamedTuple):
+    """The dataset each cell measures, by `Sample.key`; one scorer reads them all, so the dataset
+    alone tells two `RulerScope`s apart."""
+
+    by_key: Mapping[str, str]
+
+    @classmethod
+    def of(cls, samples: Iterable[Sample], dataset: str) -> CellScopes:
+        return cls({s.key: s.measured_dataset or dataset for s in samples})
+
+    def spanned(self, keys: Iterable[str]) -> int:
+        return len({self.by_key[k] for k in keys})
+
 
 # A cold id carries the OBJECTIVE: flat δ depends on no fit, so nothing else separates two readings.
 _FLAT_PREFIX = "flat"
@@ -32,6 +61,8 @@ BAND_COLLAPSE_LOGITS = 1.0
 class ThetaCaveat(StrEnum):
     """A state in which θ is NOT ability; every number still renders, so WHICH fired is the fact."""
 
+    # The cells span several `RulerScope`s, which share no cell, so no one δ scale reads them. Round AND arm scope.
+    DISJOINT_SCOPES = "disjoint_scopes"
     # No δ scale: θ is logit-accuracy on the arm's own subset, comparable only to another cold θ.
     COLD_RULER = "cold_ruler"
     # The INSTRUMENT: the ruler itself spans almost nothing, so no draw could have been wider.
@@ -52,6 +83,12 @@ class ThetaCaveatInfo(NamedTuple):
 
 
 THETA_CAVEAT_INFO: dict[ThetaCaveat, ThetaCaveatInfo] = {
+    ThetaCaveat.DISJOINT_SCOPES: ThetaCaveatInfo(
+        "θ mixes datasets that share no scale",
+        "These cells measure more than one dataset, and a difficulty is only ever fitted within "
+        "one, so θ here averages scales that never met. Read each dataset's cells on their own; "
+        "a lift paired on the same cells still holds.",
+    ),
     ThetaCaveat.COLD_RULER: ThetaCaveatInfo(
         "θ is not ability yet",
         "No difficulty ruler has been fitted, so θ is plain accuracy on the logit scale, read on "
@@ -105,9 +142,12 @@ def theta_caveat(
     round_span: float | None,
     ruler_span: float | None,
     unlinked: int,
+    scopes: int,
     pinned_share: float | None = None,
 ) -> ThetaCaveat | None:
     """A ``None`` span or share is no verdict; the order is severity."""
+    if scopes > 1:
+        return ThetaCaveat.DISJOINT_SCOPES
     if calibration_model is None:
         return ThetaCaveat.COLD_RULER
     if round_span is not None and ruler_span is not None:
@@ -126,10 +166,12 @@ __all__ = [
     "DELTA_STATE_LABEL",
     "THETA_CAVEAT_INFO",
     "CalibrationModel",
+    "CellScopes",
     "DeltaRuler",
     "DeltaState",
     "Ruler",
     "RulerEntry",
+    "RulerScope",
     "RulerStanding",
     "ThetaCaveat",
     "ThetaCaveatInfo",
@@ -160,7 +202,7 @@ def ruler_entry(value: RulerEntry) -> tuple[float, float]:
 
 
 def anchor_id_of(
-    delta: Mapping[int, float],
+    delta: Mapping[str, float],
     mu_delta: float,
     sigma_delta: float,
     calibration_model: CalibrationModel,
@@ -168,7 +210,7 @@ def anchor_id_of(
     """Computed once at lock and carried verbatim: anchored extension grows the membership, not the id."""
     return stable_hash(
         [
-            [[sid, delta[sid]] for sid in sorted(delta)],
+            [[key, delta[key]] for key in sorted(delta)],
             mu_delta,
             sigma_delta,
             calibration_model,
@@ -179,10 +221,10 @@ def anchor_id_of(
 class DeltaRuler(StrictModel):
     model_config = ConfigDict(frozen=True)
 
-    delta: dict[int, float]
-    delta_se: dict[int, float]
+    delta: dict[str, float]
+    delta_se: dict[str, float]
     # 2PL only; empty under 1PL, where a ≡ 1.
-    discrimination: dict[int, float] = Field(default_factory=dict)
+    discrimination: dict[str, float] = Field(default_factory=dict)
     mu_delta: float
     sigma_delta: float
     # Every later read must use THIS θ prior, or the extension is regularized apart from the anchor.
@@ -190,10 +232,10 @@ class DeltaRuler(StrictModel):
     calibration_model: CalibrationModel
     anchor_id: str
 
-    def entries(self) -> dict[int, RulerEntry]:
+    def entries(self) -> dict[str, RulerEntry]:
         return {
-            sid: ((d, self.discrimination[sid]) if sid in self.discrimination else d)
-            for sid, d in self.delta.items()
+            key: ((d, self.discrimination[key]) if key in self.discrimination else d)
+            for key, d in self.delta.items()
         }
 
     @property
@@ -201,30 +243,30 @@ class DeltaRuler(StrictModel):
         """In logits; near zero, θ is logit-accuracy plus a constant, whatever the cell count."""
         return max(self.delta.values()) - min(self.delta.values()) if self.delta else 0.0
 
-    def band_span(self, sample_ids: Iterable[int]) -> tuple[float, float] | None:
+    def band_span(self, cells: Iterable[str]) -> tuple[float, float] | None:
         """``(round_span, ruler_span)``. Inside a thin band 1PL reduces to ``θ = logit(accuracy) + c``."""
-        on = [self.delta[sid] for sid in sample_ids if sid in self.delta]
+        on = [self.delta[key] for key in cells if key in self.delta]
         if len(on) < 2 or len(self.delta) < 2:
             return None
         return (max(on) - min(on), self.delta_span)
 
-    def pinned_share(self, sample_ids: Iterable[int]) -> float | None:
+    def pinned_share(self, cells: Iterable[str]) -> float | None:
         """A continuous fit produces no ties, so a shared δ is the PRIOR standing in for a measurement."""
         shared = {d for d, n in Counter(self.delta.values()).items() if n > 1}
-        on = [self.delta[sid] for sid in sample_ids if sid in self.delta]
+        on = [self.delta[key] for key in cells if key in self.delta]
         if not on:
             return None
         return sum(1 for d in on if d in shared) / len(on)
 
-    def unlinked(self, sample_ids: Iterable[int]) -> int:
-        return sum(1 for sid in set(sample_ids) if sid not in self.delta)
+    def unlinked(self, cells: Iterable[str]) -> int:
+        return sum(1 for key in set(cells) if key not in self.delta)
 
-    def entries_covering(self, sample_ids: Iterable[int]) -> dict[int, RulerEntry]:
-        """PoBB only, where the paired comparison absorbs it: an uncarried id reads the prior centre, never 0.0."""
+    def entries_covering(self, cells: Iterable[str]) -> dict[str, RulerEntry]:
+        """PoBB only, where the paired comparison absorbs it: an uncarried cell reads the prior centre, never 0.0."""
         out = self.entries()
-        for sid in sample_ids:
-            if sid not in out:
-                out[sid] = self.mu_delta
+        for key in cells:
+            if key not in out:
+                out[key] = self.mu_delta
         return out
 
 

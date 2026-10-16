@@ -360,14 +360,15 @@ class AxisIndex:
             if rounds[-1].candidate_scores
             else ""
         )
-        prev_hits = {sid: cell.hit for sid, cell in rounds[-2].results.on_ruler.items()}
+        prev_hits = {key: cell.hit for key, cell in rounds[-2].results.by_key().items()}
 
         count = 0
-        for sid, cell in rounds[-1].results.on_ruler.items():
-            if sid not in prev_hits:
+        for key, cell in rounds[-1].results.by_key().items():
+            if key not in prev_hits:
                 continue
+            sid = cell.sample_id
             new_hit = cell.hit
-            old_hit = prev_hits[sid]
+            old_hit = prev_hits[key]
             if new_hit != old_hit:
                 self._flips.append(
                     {

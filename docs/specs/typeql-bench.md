@@ -10,8 +10,8 @@ queries into a visible error.
 This spec is the plan for optimizing the TypeQL prompt on that benchmark and handing the result
 back in a form their own tooling verifies. What is built is described where it lives:
 [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md) (the `dbllmbench` connector) and
-[`datasets/reactome-typeql-42/dataset.md`](../../datasets/reactome-typeql-42/dataset.md) (the
-protocol, the published rows, the cut, how to stand the database up).
+the `reactome-typeql-42` tenant definition's `README.md` (the protocol, the published rows, the
+cut, how to stand the database up).
 
 ## Decisions
 
@@ -74,5 +74,5 @@ runs the reported cells:
 - **The tool-using agent.** TypeDB ships an MCP server, and Harbor's agent config takes MCP
   servers. An agent that inspects the schema and runs queries before answering is a different
   measurement — many turns, not comparable to the published rows — so it is its own dataset with
-  its own `dataset.md`. It is the first thing to do when TypeDB work resumes.
+  its own `README.md`. It is the first thing to do when TypeDB work resumes.
 - **Text2TypeQL** (`typedb-osi/text2typeql`) as a source of generic TypeQL few-shot material.

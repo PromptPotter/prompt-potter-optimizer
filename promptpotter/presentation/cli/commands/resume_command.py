@@ -293,7 +293,7 @@ async def _resume(args: argparse.Namespace) -> CommandResult:
     if not campaign_id or not cycle_id:
         raise SystemExit(
             "ERROR: No active session.\n\n"
-            "To start a campaign, run `new` against a dataset:\n\n" + no_dataset_hint()
+            "To start a campaign, run `new` against a dataset:\n\n" + no_dataset_hint(stores)
         )
     ctx = load_session(stores, CycleHop(campaign_id=campaign_id, cycle_id=cycle_id))
     campaign = ctx.campaign

@@ -4,8 +4,9 @@ from typing import TYPE_CHECKING
 
 from promptpotter.application.commands.dispatcher import Applier
 from promptpotter.application.diagnostics import verify
-from promptpotter.application.jobs.quota import paid_verb
+from promptpotter.application.jobs.launcher.admission import paid_pass
 from promptpotter.application.runner.grade_bench import grade_line_bench
+from promptpotter.domain.spend import SpendCeilings
 
 if TYPE_CHECKING:
     from promptpotter.application.commands.dispatcher import CommandDispatcher
@@ -27,7 +28,9 @@ def verify_candidate(
 ) -> Applier[object]:
     async def _apply_verify() -> verify.VerifyOutcome:
         # Taken HERE, not inside `verify_candidate`: the loop's saturation check calls that under its book.
-        async with paid_verb(stores=dispatcher.stores, bucket="verify", hop=hop):
+        async with paid_pass(
+            stores=dispatcher.stores, verb="verify", hop=hop, declared=SpendCeilings()
+        ):
             return await verify.verify_candidate(
                 stores=dispatcher.stores,
                 hop=hop,

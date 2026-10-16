@@ -14,7 +14,7 @@ or talks to a network except through one of these seams.
 
 ## Persistence — one ingress, two projections
 
-**Sole ingress:** the per-cycle `CycleEventLog` (`ledger.py`, `cycles/{cycle_id}/.runtime/ledger.jsonl`). **There is no second ingress, ever.** The writer-side API above it is `RunCallbacks` (`application/run_callbacks.py`), a typed event constructor over `CycleEventLog.append`. A fork's file holds only its own appends: the parent's prefix is WALKED from the cut its `CycleMintedRecord` names, never copied. `append` is not crash-atomic, and a rewrite goes tmp + `os.replace` keeping the line count, since the line index IS `sequence`.
+**Sole ingress:** the per-cycle `CycleEventLog` (`ledger.py`, `cycles/{cycle_id}/.runtime/ledger.jsonl`). **There is no second ingress, ever.** The writer-side API above it is `RunCallbacks` (`application/run_callbacks.py`), a typed event constructor over `CycleEventLog.append`. A fork's file holds only its own appends: the parent's prefix is WALKED from the cut its `CycleMintedRecord` names, never copied. `append`, like every append to or rewrite of a shared file, serializes inside `store/io.py` (`append_line`, `rewrite_lines`, `replace_lines`): Windows runs `O_APPEND` as seek-then-write, and the record overwritten is lost without an error. It is not crash-atomic, and a rewrite goes tmp + `os.replace` keeping the line count, since the line index IS `sequence`.
 
 Per-call telemetry firing from deep inside the dispatch chain uses the `emit_*` shape instead (`llm/telemetry.py`) — same canonical ledger. **Which shape a new surface takes** — owned by [`../application/CLAUDE.md`](../application/CLAUDE.md) § Conventions.
 

@@ -39,5 +39,5 @@ export interface ConnectorView {
   reach: Record<string, NodeReach> | null;
   // Empty is UNKNOWN (an unresolved catalogue), never "this model supports nothing".
   modelCapabilities: CapabilityMenu;
-  nests: NestedPipelineRef | null;
+  nests: NestedPipelineRef[];
 }

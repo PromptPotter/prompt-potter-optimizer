@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 import statistics
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING, NamedTuple
 
 from promptpotter.domain.scoring import ROW_GRADES, is_hit
@@ -24,6 +24,7 @@ __all__ = [
     "marginal_hit_probability",
     "parent_grades",
     "pick_value",
+    "stratum_shares",
     "update_theta_posterior",
 ]
 
@@ -111,23 +112,24 @@ def pick_value(
     ) + delta_learning_gain(mu_c, var_c, delta_s, se_delta_s)
 
 
-def parent_grades(parent_rows: Iterable[GradedCell]) -> dict[int, float]:
+def parent_grades(parent_rows: Iterable[GradedCell]) -> dict[str, float]:
     """CORRECTNESS, not the composite: ``is_hit`` reads every sub-1.0 ``per_cell`` composite as a miss."""
-    return {cell.sample_id: ROW_GRADES["fitness"].read(cell) for cell in parent_rows if cell.scored}
+    return {cell.key: ROW_GRADES["fitness"].read(cell) for cell in parent_rows if cell.scored}
 
 
 def build_round_order(
-    parent_grades: Mapping[int, float],
+    parent_grades: Mapping[str, float],
     ruler: DeltaRuler | None,
-    sample_ids: Sequence[int],
+    cells: Mapping[int, str],
 ) -> list[int]:
+    """*cells* maps each slot on the panel to its ``Sample.key``: grades and δ read by key, ties break by slot."""
     # `None` (never answered) has its own stratum: read as a miss, an unshared panel leads with its easiest cell.
     # An unmeasured δ stands at the ruler's CENTRE, never 0.0, which is a position on this scale.
     miss_stratum: list[int] = []
     hit_stratum: list[int] = []
     unknown_stratum: list[int] = []
-    for sid in sample_ids:
-        grade = parent_grades.get(sid)
+    for sid, key in cells.items():
+        grade = parent_grades.get(key)
         if grade is None:
             unknown_stratum.append(sid)
         else:
@@ -137,7 +139,7 @@ def build_round_order(
     known = ruler.delta if ruler is not None else {}
 
     def _delta(sid: int) -> float:
-        return known.get(sid, centre)
+        return known.get(cells[sid], centre)
 
     miss_stratum.sort(key=lambda sid: (_delta(sid), sid))
     hit_stratum.sort(key=lambda sid: (-_delta(sid), sid))
@@ -146,7 +148,7 @@ def build_round_order(
 
     order: list[int] = []
     mi, hi, ui = 0, 0, 0
-    for pos in range(1, len(sample_ids) + 1):
+    for pos in range(1, len(cells) + 1):
         take_hit = pos % 4 == 0
         if (
             take_hit
@@ -164,7 +166,7 @@ def build_round_order(
         else:
             order.append(hit_stratum[hi])
             hi += 1
-    if sorted(order) != sorted(sample_ids):
+    if sorted(order) != sorted(cells):
         raise ValueError("build_round_order: the order is not a permutation of the panel")
     return order
 
@@ -177,6 +179,21 @@ class CellReading(NamedTuple):
     headroom: float
     usd: float
     seconds: float
+
+
+def stratum_shares(sizes: list[int], budget: int) -> list[int]:
+    """Equal shares of *budget*; a stratum short of its share hands the rest to the others."""
+    shares = [0] * len(sizes)
+    left = budget
+    open_ = [i for i, n in enumerate(sizes) if n > 0]
+    while left > 0 and open_:
+        each, extra = divmod(left, len(open_))
+        for j, i in enumerate(open_):
+            take = min(sizes[i] - shares[i], each + (j < extra))
+            shares[i] += take
+            left -= take
+        open_ = [i for i in open_ if shares[i] < sizes[i]]
+    return shares
 
 
 def information_per_price(readings: Mapping[int, CellReading]) -> dict[int, float]:

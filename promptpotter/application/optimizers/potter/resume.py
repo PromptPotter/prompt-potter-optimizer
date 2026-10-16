@@ -18,7 +18,7 @@ from promptpotter.application.optimizers.potter.state import potter_state
 from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.scoring.selection import elect_round_winner, paired_p_best
 from promptpotter.domain.scoring import NO_CELLS, is_answer_collapsed
-from promptpotter.infrastructure.llm.telemetry import reset_current_round, set_current_round
+from promptpotter.infrastructure.llm.telemetry import at_round
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
@@ -61,12 +61,12 @@ def _pobb_replay_snapshot(
 ) -> float | None:
     """``None`` where a cell the live check fit on is no longer among the arm's rows."""
     arm = ctx.round_data.all_candidate_results.get(inputs_ref["candidate_id"], NO_CELLS)
-    rows = {cell.ruler_key: cell for cell in arm}
-    cells = [int(s) for s in data["candidate_sample_ids"]]
+    rows = arm.by_key()
+    cells = [str(key) for key in data["candidate_cells"]]
     if any(cell not in rows for cell in cells):
         return None
     priors = {
-        pid: {int(cell): float(grade) for cell, grade in grades.items()}
+        pid: {str(cell): float(grade) for cell, grade in grades.items()}
         for pid, grades in data["prior_histories"].items()
     }
     fit = paired_p_best([rows[cell] for cell in cells], priors, ctx.ruler)
@@ -145,26 +145,22 @@ async def rederive_critiques(
                 continue
             seat = _seat_on(cycle, restated, rr)
             # Outside the round loop this ContextVar still holds whatever the last round set.
-            token = set_current_round(rr.round)
-            try:
-                with graceful(f"round {rr.round} critique re-derivation failed"):
-                    state = rr.optimizer_state.model_copy(
-                        update={
-                            "payload": payload.model_copy(
-                                update={"critique": await run_l1_critique(*seat)}
-                            )
-                        }
-                    )
-                    restated[slot] = rr.model_copy(update={"optimizer_state": state})
-                    campaign_store.restate_optimizer_state(hop, restated[slot])
-                    logger.warning(
-                        "Round %d critique re-distilled: its input package drifted when the "
-                        "round was repaired, so the recorded one described evidence that no "
-                        "longer exists.",
-                        rr.round,
-                    )
-            finally:
-                reset_current_round(token)
+            with at_round(rr.round), graceful(f"round {rr.round} critique re-derivation failed"):
+                state = rr.optimizer_state.model_copy(
+                    update={
+                        "payload": payload.model_copy(
+                            update={"critique": await run_l1_critique(*seat)}
+                        )
+                    }
+                )
+                restated[slot] = rr.model_copy(update={"optimizer_state": state})
+                campaign_store.restate_optimizer_state(hop, restated[slot])
+                logger.warning(
+                    "Round %d critique re-distilled: its input package drifted when the "
+                    "round was repaired, so the recorded one described evidence that no "
+                    "longer exists.",
+                    rr.round,
+                )
     finally:
         cycle.replay_priors(restated)
     return restated

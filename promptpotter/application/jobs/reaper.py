@@ -51,7 +51,7 @@ def reclaim_orphan_sandboxes(projects_root: Path) -> int:
             continue
         workspace = tenant_workspace(projects_root, owner.tenant_id)
         owner_hop = CycleHop(campaign_id=owner.campaign_id, cycle_id=owner.cycle_id)
-        if CampaignStore(workspace).load(owner_hop) is not None:
+        if CampaignStore(workspace).load(owner_hop, moment=None) is not None:
             continue
         try:
             CampaignStore(workspace).delete_inner_sandbox(sandbox, campaign_id=owner.campaign_id)

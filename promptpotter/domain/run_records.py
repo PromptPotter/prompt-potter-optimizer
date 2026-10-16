@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import enum
-from typing import Annotated, Any, Literal, get_args
+import os
+from pathlib import Path, PurePosixPath
+from typing import Annotated, Any, Literal, NamedTuple, get_args
 
 from pydantic import ConfigDict, Field, TypeAdapter, model_validator
 
 from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.connector import MeasuredUnit
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.dashboard_rows import RunLimits
 from promptpotter.domain.l4.proxies import PanelPrecision
 from promptpotter.domain.launch_limits import RoundsCap
@@ -35,8 +38,8 @@ from promptpotter.domain.results import (
     ScoredCandidate,
     ScoreSummary,
 )
-from promptpotter.domain.ruler import DeltaRuler, ThetaCaveat
-from promptpotter.domain.scoring import LedgerCell
+from promptpotter.domain.ruler import DeltaRuler, RulerScope, ThetaCaveat
+from promptpotter.domain.scoring import LedgerCell, WalkedCell
 from promptpotter.domain.spend import (
     SpendCeilings,
     TokenUsageKind,
@@ -49,6 +52,7 @@ from promptpotter.shared.hashing import shapes_optimizer_prompt
 from promptpotter.shared.measurement_context import MeasurementRole
 
 __all__ = [
+    "FORK_TRAITS",
     "MAX_AUTO_REBASES",
     "MINT_KIND_LABELS",
     "OPERATOR_ORIGIN_SOURCES",
@@ -79,6 +83,7 @@ __all__ = [
     "ForkGradedRecord",
     "ForkRemainder",
     "ForkSpec",
+    "ForkTraits",
     "ForkTrigger",
     "InterventionRecord",
     "LLMCallProgressRecord",
@@ -90,6 +95,8 @@ __all__ = [
     "OriginSource",
     "PhaseRecord",
     "PricedKeyRecord",
+    "ProviderEasedRecord",
+    "ProviderHoldRecord",
     "RaceCatchUpRecord",
     "RaceStandingRecord",
     "ResumeCheckpointRecord",
@@ -110,6 +117,8 @@ __all__ = [
     "SpendHoldRecord",
     "TokenUsageRecord",
     "WallClock",
+    "parent_address",
+    "sibling_cycle_id",
 ]
 
 
@@ -220,6 +229,32 @@ class BackendWarningRecord(StrictModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
+class ProviderHoldRecord(StrictModel):
+    """A 429 episode's open or strike, heard by a ledger from its own sends."""
+
+    model_config = ConfigDict(frozen=True)
+
+    record_type: Literal["provider_hold"] = "provider_hold"
+    sender: str
+    scope: str
+    strikes: int
+    # Epoch: a throttle past it stops the run instead of holding it.
+    gives_up_at: float
+    reading: BackpressureReading
+    timestamp: str = Field(default_factory=utcnow_iso)
+
+
+class ProviderEasedRecord(StrictModel):
+    """The provider answers the sender again: told at once to every ledger that heard the hold."""
+
+    model_config = ConfigDict(frozen=True)
+
+    record_type: Literal["provider_eased"] = "provider_eased"
+    sender: str
+    held_s: float
+    timestamp: str = Field(default_factory=utcnow_iso)
+
+
 class RoundEnteredRecord(StrictModel):
     """Entering N displaces N and every later round; ``rewound`` discards their proposals too."""
 
@@ -259,7 +294,7 @@ class OptimizerStateRecord(StrictModel):
 
 
 class RoundProposedRecord(StrictModel):
-    """Replayed on a resume into the round, unless a digest the round ``consumed`` has moved.
+    """Banked by the bench once per round; replayed on a resume unless a digest the round ``consumed`` has moved.
 
     ``submitted`` is the operator's answer at the arm gate: the arms the round measures."""
 
@@ -270,6 +305,8 @@ class RoundProposedRecord(StrictModel):
     consumed: str
     proposals: list[CandidateProposal]
     submitted: bool = False
+    # The manifest pipeline whose walk made the arms, or the arm gate that answered them.
+    walk: str = "default"
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
@@ -382,12 +419,23 @@ class RaceStandingRecord(_ArmFact):
 
 
 class RaceCatchUpRecord(_ArmFact):
-    """The race's priors caught up on the just-measured sample; absence ⇒ cache covered it."""
+    """The catch-up walks one just-measured cell took: no slot writes their cells, this does."""
 
     record_type: Literal["race_catch_up"] = "race_catch_up"
     member: str
-    sample_id: int
-    prior_ids: list[str]
+    # The cell's ``Sample.key``: every address below names it.
+    sample_key: str
+    # By prior.
+    cells: dict[str, WalkedCell] = Field(min_length=1)
+
+    @property
+    def prior_ids(self) -> list[str]:
+        return list(self.cells)
+
+    @property
+    def sample_id(self) -> int:
+        """The cell's row in the dataset the walks measured, as a readout names it."""
+        return next(iter(self.cells.values()))[1]
 
 
 class TokenUsageRecord(StrictModel):
@@ -544,8 +592,10 @@ class LLMCallProgressRecord(StrictModel):
     node: str
     round: int | None = None
     elapsed_s: float
-    # Set by the inner-campaign heartbeat (``runner/inner/spawn.py``); ``None`` on an ordinary one.
     detail: str | None = None
+    # The cycle the waited-on cell runs (`Connector.cell_hop`), in THIS cycle's sandbox: the two
+    # hops are the `CyclePath` the drill-in opens. ``None`` on an ordinary call.
+    inner: CycleHop | None = None
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
@@ -666,22 +716,31 @@ class ForkDirection(enum.StrEnum):
     EQUIVALENT = "equivalent"
 
 
+class ForkTraits(NamedTuple):
+    """What a cut implies, each half independent of the others."""
+
+    direction: ForkDirection
+    # The δ scale read through the cut is the child's OWN, extended in place: the child derives
+    # and grows it as its parent would have, where any other fork reads none of its parent's.
+    continues_scale: bool
+
+
 # Derived from the trigger, never stored. Exhaustiveness is checked at import below.
-FORK_DIRECTION: dict[ForkTrigger, ForkDirection] = {
-    ForkTrigger.OPERATOR_DIAG: ForkDirection.OFFSHOOT,
-    ForkTrigger.OPERATOR_STEERED: ForkDirection.OFFSHOOT,
-    ForkTrigger.OPERATOR_REWIND: ForkDirection.SUPERSEDE,
-    ForkTrigger.OPTIMIZER_REBASE: ForkDirection.SUPERSEDE,
-    ForkTrigger.SCORING_DIVERGENCE: ForkDirection.SUPERSEDE,
+FORK_TRAITS: dict[ForkTrigger, ForkTraits] = {
+    ForkTrigger.OPERATOR_DIAG: ForkTraits(ForkDirection.OFFSHOOT, False),
+    ForkTrigger.OPERATOR_STEERED: ForkTraits(ForkDirection.OFFSHOOT, False),
+    ForkTrigger.OPERATOR_REWIND: ForkTraits(ForkDirection.SUPERSEDE, True),
+    ForkTrigger.OPTIMIZER_REBASE: ForkTraits(ForkDirection.SUPERSEDE, True),
+    ForkTrigger.SCORING_DIVERGENCE: ForkTraits(ForkDirection.SUPERSEDE, True),
 }
 
-_undirected = [t for t in ForkTrigger if t not in FORK_DIRECTION]
-if _undirected:
+_untraited = [t for t in ForkTrigger if t not in FORK_TRAITS]
+if _untraited:
     raise RuntimeError(
-        f"ForkTrigger members missing from FORK_DIRECTION: {_undirected}. A cut whose "
+        f"ForkTrigger members missing from FORK_TRAITS: {_untraited}. A cut whose "
         "direction nobody declared renders as an offshoot, which is a lie half the time."
     )
-del _undirected
+del _untraited
 
 
 MintKind = Literal["session", "divergent_resume", "user_fork", "auto_rebase"]
@@ -861,7 +920,7 @@ class LedgerFit(StrictModel):
 
     theta: float | None = None
     theta_se: float | None = None
-    # This ARM's own reason θ is not ability — only ever ``FLOOR_PINNED``.
+    # This ARM's own reason θ is not ability (`candidate_report.py::arm_theta_caveat`).
     theta_caveat: ThetaCaveat | None = None
     vs_reference: PairedReading | None = None
 
@@ -925,13 +984,14 @@ class ElectionRecord(StrictModel):
 
 
 class RulerRecord(StrictModel):
-    """Written WHOLE, last per ``dataset_name`` wins: a torn append falls back to a whole ruler."""
+    """Written WHOLE, last per ``scope`` wins: a torn append falls back to a whole ruler."""
 
     model_config = ConfigDict(frozen=True)
 
     record_type: Literal["ruler"] = "ruler"
     ruler: DeltaRuler
-    dataset_name: str
+    # Its δ keys are `Sample.key`, which name a cell anywhere.
+    scope: RulerScope
     round: int
     timestamp: str = Field(default_factory=utcnow_iso)
 
@@ -1000,12 +1060,16 @@ class ForkSpec(StrictModel):
     from_round: int | None = None
     from_candidate_id: str | None = None
     seed: CycleSeed | None = None
-    # The MEASURED direction; `None` ⇒ the trigger implies it (`FORK_DIRECTION`).
+    # The MEASURED direction; `None` ⇒ the trigger implies it (`FORK_TRAITS`).
     direction: ForkDirection | None = None
 
     @property
+    def traits(self) -> ForkTraits:
+        return FORK_TRAITS[self.trigger]
+
+    @property
     def resolved_direction(self) -> ForkDirection:
-        return self.direction or FORK_DIRECTION[self.trigger]
+        return self.direction or self.traits.direction
 
 
 class SpawnedBy(StrictModel):
@@ -1031,7 +1095,7 @@ class SpawnedBy(StrictModel):
         description="WHY this cell ran (`MeasurementRole`). A backfill is spawned outside the round's shared order to fill a paired comparison, and reading one as the candidate's own panel cell makes a repaired round unreproducible. Null for the origin.",
     )
     task: str = Field(
-        description="The panel cell this run measured — the outer query, e.g. `justlogic-d234/seed-0` (`inner_tasks.yaml::tasks[].id`). The candidate fields do NOT identify a run: every task runs for every candidate, so one candidate's spawns are as many as the panel has cells and are told apart only by this.",
+        description="The panel cell this run measured — the outer query, e.g. `justlogic/d234/seed-0` (`dataset.yaml::panel.tasks[].id`). The candidate fields do NOT identify a run: every task runs for every candidate, so one candidate's spawns are as many as the panel has cells and are told apart only by this.",
     )
 
 
@@ -1041,7 +1105,9 @@ class CycleMintedRecord(StrictModel):
     model_config = ConfigDict(frozen=True)
 
     record_type: Literal["cycle_minted"] = "cycle_minted"
-    parent_cycle_id: str | None = None
+    # The parent's cycle dir relative to this one's, POSIX-separated (`parent_address`): `../<id>`
+    # for a sibling in this campaign, a longer path for a cycle in another tree.
+    parent: str | None = None
     forked_at_offset: int | None = None
     fork: ForkSpec | None = None
     # The cycle reads ``RunPhase.CHECKIN`` until a :class:`CheckinClosedRecord` follows.
@@ -1050,12 +1116,30 @@ class CycleMintedRecord(StrictModel):
 
     @model_validator(mode="after")
     def _fork_is_whole(self) -> CycleMintedRecord:
-        parts = (self.parent_cycle_id, self.forked_at_offset, self.fork)
+        parts = (self.parent, self.forked_at_offset, self.fork)
         if any(p is None for p in parts) and any(p is not None for p in parts):
-            raise ValueError("a fork carries parent_cycle_id, forked_at_offset and fork together")
+            raise ValueError("a fork carries its parent, forked_at_offset and fork together")
         if self.checkin and self.fork is not None:
             raise ValueError("a fork is cut from a cycle that ran; it is never minted in check-in")
         return self
+
+    def parent_cycle_dir(self, cycle_dir: Path) -> Path | None:
+        """The ONE resolution of the parent this record names, from the dir of the cycle it mints."""
+        return None if self.parent is None else Path(os.path.normpath(cycle_dir / self.parent))
+
+
+def parent_address(cycle_dir: Path, parent_dir: Path) -> str:
+    """What a mint record names its parent by: a path, so a cycle in another tree is one too."""
+    return PurePosixPath(*Path(os.path.relpath(parent_dir, cycle_dir)).parts).as_posix()
+
+
+def sibling_cycle_id(parent: str | None) -> str | None:
+    """The parent's cycle id where it is a sibling in the same campaign; ``None`` for a root or a
+    cycle cut from another tree, which no reader of this campaign's cycles can reach."""
+    if parent is None:
+        return None
+    parts = PurePosixPath(parent).parts
+    return parts[1] if len(parts) == 2 and parts[0] == ".." else None
 
 
 class CheckinClosedRecord(StrictModel):
@@ -1169,6 +1253,8 @@ CycleRecord = Annotated[
     | LLMCallStartRecord
     | OptimizerStateRecord
     | PhaseRecord
+    | ProviderEasedRecord
+    | ProviderHoldRecord
     | RaceCatchUpRecord
     | RaceStandingRecord
     | RoundClosedRecord

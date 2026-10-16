@@ -6,15 +6,25 @@ import random
 import re
 import threading
 import time
+import weakref
 from collections import deque
 from collections.abc import AsyncIterator, Callable, Iterator, Mapping
 from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.backend import BackpressureReading
+from promptpotter.infrastructure.llm.spend_book import bound_spend_book
+from promptpotter.infrastructure.llm.telemetry import (
+    bound_ledger,
+    emit_provider_eased,
+    emit_provider_hold,
+)
 from promptpotter.shared.errors import ErrorCategory, RequestTooLargeError, SendRefusedError
+
+if TYPE_CHECKING:
+    from promptpotter.infrastructure.ledger import CycleEventLog
 
 logger = logging.getLogger(__name__)
 
@@ -277,9 +287,7 @@ class Backpressure:
 
     def __init__(self, sender: str) -> None:
         self.sender = sender
-        self.on_change: Callable[[], None] | None = None
         self._out = 0
-        self._queued = 0
         self._at_once: int | None = None
         self._opened = 0
         self._strikes = 0
@@ -287,25 +295,25 @@ class Backpressure:
         self._since: float | None = None
         self._since_epoch: float | None = None
         self._resumes_at_epoch: float | None = None
+        self._gives_up_at = 0.0
+        self._scope = ""
         self._detail = ""
+        # Shared by every run in the process: a ledger hears a hold from its own sends, and its
+        # end at once, sending or not.
+        self._heard: weakref.WeakKeyDictionary[CycleEventLog, int] = weakref.WeakKeyDictionary()
 
     @asynccontextmanager
     async def send(self) -> AsyncIterator[int]:
         abort = _ABORT_CHECK.get()
-        self._queued += 1
-        try:
-            if self._hold() > 0:
-                self._changed()
-            while (hold := self._hold()) > 0:
-                if abort is not None and abort():
-                    raise asyncio.CancelledError(f"backpressure wait aborted ({self.sender})")
-                started = time.monotonic()
-                await asyncio.sleep(min(1.0, hold))
-                report_throttle_stall(time.monotonic() - started)
-        finally:
-            self._queued -= 1
+        self._announce()
+        while (hold := self._hold()) > 0:
+            if abort is not None and abort():
+                raise asyncio.CancelledError(f"backpressure wait aborted ({self.sender})")
+            started = time.monotonic()
+            await asyncio.sleep(min(1.0, hold))
+            report_throttle_stall(time.monotonic() - started)
+            self._announce()
         self._out += 1
-        self._changed()
         try:
             yield self._opened
         finally:
@@ -330,9 +338,11 @@ class Backpressure:
             )
         # Only a send made since the latest cooldown opened speaks for the provider now.
         if ticket != self._opened:
+            self._announce()
             return
         if self._since is None:
             self._since, self._since_epoch = now, time.time()
+            self._gives_up_at = self._since_epoch + _GIVE_UP_S
         elif now - self._since >= _GIVE_UP_S:
             raise SendRefusedError(
                 f"{self.sender} has answered nothing but throttles for "
@@ -345,33 +355,26 @@ class Backpressure:
         retry_after = parse_retry_after(headers)
         wait = retry_after + 1.0 if retry_after else _cooldown_s(self._strikes)
         self._resumes_at, self._resumes_at_epoch = now + wait, time.time() + wait
-        self._detail = detail
-        logger.warning(
-            "%s: the provider is throttling (%s) — every send held %.0fs, then %d at once: %s",
-            self.sender,
-            scope,
-            wait,
-            self._at_once,
-            detail,
-        )
-        self._changed()
+        self._scope, self._detail = scope, detail
+        self._announce()
 
     def eased(self, ticket: int) -> None:
         if ticket != self._opened:
+            self._announce()
             return
         if self._since is not None:
-            logger.warning("%s: the provider answers again", self.sender)
+            held_s = time.monotonic() - self._since
+            for ledger in list(self._heard):
+                emit_provider_eased(ledger=ledger, sender=self.sender, held_s=held_s)
+            self._heard.clear()
         self._since = self._since_epoch = self._resumes_at_epoch = None
         self._resumes_at = 0.0
         self._strikes = 0
-        # A reading still renders while sends queue on the cap; it must not carry a finished episode's.
-        self._detail = ""
         if self._at_once is not None and self._out >= self._at_once:
             self._at_once += 1
-        self._changed()
 
     def reading(self) -> BackpressureReading | None:
-        if self._since_epoch is None and self._queued == 0:
+        if self._since_epoch is None:
             return None
         return BackpressureReading(
             sender=self.sender,
@@ -381,9 +384,26 @@ class Backpressure:
             detail=self._detail,
         )
 
-    def _changed(self) -> None:
-        if self.on_change is not None:
-            self.on_change()
+    def _announce(self) -> None:
+        if (reading := self.reading()) is None:
+            return
+        here = bound_ledger(f"{self.sender}'s provider hold")
+        if here is None:
+            return
+        # A nested run sends under its root's book, so the root hears what holds its cells.
+        book = bound_spend_book()
+        root = book.ledger if book is not None and book.foreign(here) else None
+        for ledger in (here,) if root is None else (here, root):
+            if self._heard.get(ledger) != self._strikes:
+                self._heard[ledger] = self._strikes
+                emit_provider_hold(
+                    ledger=ledger,
+                    sender=self.sender,
+                    scope=self._scope,
+                    strikes=self._strikes,
+                    gives_up_at=self._gives_up_at,
+                    reading=reading,
+                )
 
 
 async def held_wait(total_sec: float, label: str) -> None:

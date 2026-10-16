@@ -3,13 +3,16 @@ import { useState, type ReactNode } from "react";
 import { pipelineReadStatus } from "@/lib/derivations";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { useCycleStream } from "@/lib/poll";
-import { useNestedPipelines } from "@/lib/hooks/useNestedPipelines";
+import { CAMPAIGN_LAYER, useNestedPipelines } from "@/lib/hooks/useNestedPipelines";
 import { useOptimizerPipeline } from "@/lib/hooks/useOptimizerPipeline";
 import { ConnectorInspector } from "./ConnectorInspector";
 import { PipelineFlow, type PipelineLayer } from "./PipelineFlow";
 
 interface Layer extends PipelineLayer {
   key: string;
+  // The layer it nests in; a level holds one layer per dataset the level above measures.
+  parent: string | null;
+  level: number;
   // Not the connector name — pp-self's target and the optimizer both report "PromptPotter".
   label: string;
 }
@@ -46,6 +49,8 @@ export function PipelineStack({ datasetName }: Props) {
   const layers: Layer[] = [
     {
       key: "optimizer",
+      parent: null,
+      level: 0,
       label: cv.optimizer ? `the ${cv.optimizer} optimization loop` : "the optimization loop",
       view: optimizer?.view ?? null,
       status: pipelineReadStatus({
@@ -61,19 +66,23 @@ export function PipelineStack({ datasetName }: Props) {
       isLive,
     },
     {
-      key: "campaign",
+      key: CAMPAIGN_LAYER,
+      parent: "optimizer",
+      level: CAMPAIGN_LEVEL,
       label: datasetName ?? "this campaign's pipeline",
       view: cv.view,
       status: cv.schema.status,
       connector: cv.connector,
       reach: cv.reach,
       scope: "target",
-      nestsNode: cv.nests?.node ?? null,
+      nestsNode: cv.nests[0]?.node ?? null,
       activeNode,
       isLive,
     },
     ...nested.layers.map((l) => ({
-      key: l.dataset,
+      key: l.key,
+      parent: l.parent,
+      level: CAMPAIGN_LEVEL + 1 + l.depth,
       label: l.dataset,
       view: l.view,
       status: l.status,
@@ -86,42 +95,45 @@ export function PipelineStack({ datasetName }: Props) {
       isLive: false,
     })),
   ];
-  const anchor = layers.length - 1;
-  // Indices count from the OUTSIDE in, so a choice survives deeper levels resolving.
+  const anchor = Math.max(...layers.map((l) => l.level));
+  // Levels count from the OUTSIDE in, so a choice survives deeper levels resolving.
   const start = Math.min(outermost, anchor);
+  const at = (level: number) => layers.filter((l) => l.level === level);
+  const inspected = at(anchor)[0]?.key;
 
   const zoomStrip = (
     <div className="pipeline-zoom">
-      {layers.slice(0, anchor).map((l, i) => {
-        const shown = i >= start;
+      {Array.from({ length: anchor }, (_, level) => {
+        const shown = level >= start;
+        const named = at(level);
+        const label = named.length === 1 ? named[0]!.label : `${named.length} datasets`;
         return (
           <button
-            key={l.key}
+            key={level}
             type="button"
             className="pipeline-zoom-btn"
             aria-controls="pipeline-stack"
             aria-pressed={shown}
-            aria-label={`Show ${l.label}`}
-            title={`${shown ? "Hide" : "Show"} ${l.label}`}
-            onClick={() => setOutermost(shown ? i + 1 : i)}
+            aria-label={`Show ${label}`}
+            title={`${shown ? "Hide" : "Show"} ${label}`}
+            onClick={() => setOutermost(shown ? level + 1 : level)}
           >
-            <ZoomGlyph depth={anchor - i + 1} />
+            <ZoomGlyph depth={anchor - level + 1} />
           </button>
         );
       })}
     </div>
   );
 
-  const draw = (i: number): ReactNode => {
-    const l = layers[i];
-    if (!l) return null;
+  const draw = (l: Layer): ReactNode => {
+    const inner = layers.filter((c) => c.parent === l.key);
     return (
       <PipelineFlow
         key={l.key}
         layer={l}
-        inspector={i === anchor ? <ConnectorInspector view={cv} /> : undefined}
-        nested={i < anchor ? draw(i + 1) : undefined}
-        tone={(anchor - i) % 2 === 0 ? "accent" : "neutral"}
+        inspector={l.key === inspected ? <ConnectorInspector view={cv} /> : undefined}
+        nested={inner.length > 0 ? inner.map(draw) : undefined}
+        tone={(anchor - l.level) % 2 === 0 ? "accent" : "neutral"}
       />
     );
   };
@@ -129,7 +141,7 @@ export function PipelineStack({ datasetName }: Props) {
   return (
     <div className="pipeline-stack" id="pipeline-stack">
       {zoomStrip}
-      {draw(start)}
+      {at(start).map(draw)}
       {nested.truncated && (
         <p className="pipeline-stack-note">Stack incomplete — {nested.truncated}.</p>
       )}

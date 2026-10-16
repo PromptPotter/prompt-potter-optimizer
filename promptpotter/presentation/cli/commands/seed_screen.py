@@ -22,6 +22,8 @@ async def cmd_seed_screen(args: argparse.Namespace) -> CommandResult:
             n_samples=args.n_samples,
             repeat=args.repeat,
             parallel=args.parallel,
+            model=args.model,
+            provider=args.provider,
         )
     except DiagnosticError as exc:
         raise SystemExit(f"ERROR: {exc}") from exc
@@ -56,8 +58,9 @@ async def cmd_seed_screen(args: argparse.Namespace) -> CommandResult:
         else ""
     )
     passes = len(rows[0].origin_reads)
+    environment = outcome.dataset_name + ("" if outcome.solver is None else f" @ {outcome.solver}")
     human = (
-        f"seed-screen {outcome.dataset_name}: {len(rows)} seed(s), {passes} origin pass(es) each"
+        f"seed-screen {environment}: {len(rows)} seed(s), {passes} origin pass(es) each"
         f" over {rows[0].n} rows.\n{verdict}{table}\n"
         + (
             f"UNSETTLED (margin within 2 SE): {unsettled} — re-run those at a higher --repeat "

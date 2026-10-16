@@ -10,6 +10,7 @@ from promptpotter.application.intelligence.adaptive_queue_mechanism import (
     build_round_order,
     information_per_price,
     parent_grades,
+    stratum_shares,
 )
 from promptpotter.application.intelligence.indexes.axis import NOISE_THRESHOLD
 from promptpotter.application.intelligence.rasch import (
@@ -42,6 +43,7 @@ from promptpotter.application.optimizers.potter.escalation.rules import (
 from promptpotter.application.optimizers.potter.generation_only import run_generation_only_round
 from promptpotter.application.optimizers.potter.knobs import (
     AdaptiveQueueKnobs,
+    CellStrata,
     EscalationKnobs,
     L1GenerateKnobs,
     PoBBKnobs,
@@ -127,6 +129,16 @@ def _origin_readings(rounds: Sequence[RoundResult]) -> dict[int, CellReading]:
     return out
 
 
+def _strata(pool: list[Sample], by: CellStrata) -> list[list[Sample]]:
+    """In first-seen order; `none` is the pool whole."""
+    if by == "none":
+        return [pool]
+    out: dict[str, list[Sample]] = {}
+    for s in pool:
+        out.setdefault(s.measured_dataset or "", []).append(s)
+    return list(out.values())
+
+
 class AdaptiveQueue:
     """ONE order every arm walks: shared prefixes keep paired stats comparable."""
 
@@ -144,15 +156,16 @@ class AdaptiveQueue:
         knobs = ctx.knobs
         readings = _origin_readings(ctx.rounds)
         worth = information_per_price(readings)
-        if not knobs.per_round_resubset or view.ruler is None:
-            # On a COLD ruler a re-picked subset is difficulty-blind; freezing warms it fastest.
-            cells = select_round_subset(pool, [], knobs.sp_budget_round, worth=worth)
-        else:
-            own = build_observations(list(ctx.rounds))
-            cells = select_round_subset(
-                pool,
+        own = build_observations(list(ctx.rounds))
+
+        def pick(stratum: list[Sample], budget: int) -> list[Sample]:
+            if not knobs.per_round_resubset or view.ruler is None:
+                # On a COLD ruler a re-picked subset is difficulty-blind; freezing warms it fastest.
+                return select_round_subset(stratum, [], budget, worth=worth)
+            return select_round_subset(
+                stratum,
                 [*view.observations, *own],
-                knobs.sp_budget_round,
+                budget,
                 ruler=view.ruler,
                 # Enough anchored cells for the next extension to equate against.
                 anchor_floor=ctx.config.optimization.elimination_n_min,
@@ -160,6 +173,10 @@ class AdaptiveQueue:
                 leader_ids={o.candidate_id for o in own},
                 worth=worth,
             )
+
+        strata = _strata(pool, knobs.strata)
+        shares = stratum_shares([len(s) for s in strata], knobs.sp_budget_round)
+        cells = [cell for s, n in zip(strata, shares, strict=True) if n for cell in pick(s, n)]
         if worth and len(cells) < len(pool):
             ctx.decide(
                 PotterCheckpointKind.PRICED_DRAW,
@@ -180,7 +197,7 @@ class AdaptiveQueue:
                 [int(s.id) for s in cells],
             )
         order = build_round_order(
-            parent_grades(ctx.parent_rows), view.ruler, [int(s.id) for s in cells]
+            parent_grades(ctx.parent_rows), view.ruler, {int(s.id): s.key for s in cells}
         )
         by_id = {int(s.id): s for s in cells}
         # Every cell closes a block: PoBB decides after each one.
@@ -364,7 +381,7 @@ class PotterRuntime(nodes.OptimizerRuntime):
             ),
         )
 
-    def opening(self, ctx: RoundContext) -> nodes.RoundOpening:
+    def opening(self, ctx: RoundContext, walk: nodes.RoundWalk) -> nodes.RoundOpening:
         cycle = ctx.cycle
         state = potter_state(cycle.working_state)
         knobs = potter_knobs(cycle.optimizer)

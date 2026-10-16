@@ -4,16 +4,17 @@ import asyncio
 import logging
 import secrets
 import threading
+import time
 from collections import Counter
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from json import JSONDecodeError
 from pathlib import Path
-from typing import ClassVar, Literal, get_args
+from typing import Annotated, ClassVar, Literal, assert_never, get_args
 
 from filelock import Timeout
-from pydantic import ConfigDict, TypeAdapter
+from pydantic import ConfigDict, Field, TypeAdapter
 
 from promptpotter.application.jobs.capacity import resolve_run_capacity
 from promptpotter.application.jobs.interlock import (
@@ -23,14 +24,18 @@ from promptpotter.application.jobs.interlock import (
     this_producer_lock,
 )
 from promptpotter.config.paths import default_jobs_dir
+from promptpotter.config.settings import settings
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import LaunchStage, RunPhase
 from promptpotter.domain.spend import SpendCeilings
 from promptpotter.infrastructure.store.io import read_json, write_json
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import ServiceUnavailableError
+from promptpotter.shared.errors import ConflictError, ServiceUnavailableError
 
 logger = logging.getLogger(__name__)
+
+# Each ask takes the machine-wide admission lock.
+_QUEUE_POLL_S = 2.0
 
 # The slot is held before the mint resolves the cycle it will name; `update_target` fills it in.
 UNRESOLVED_HOP = CycleHop(campaign_id="", cycle_id="")
@@ -41,6 +46,33 @@ _JOB_STAGES: frozenset[RunPhase] = frozenset(
 )
 SLOT_STAGES: frozenset[RunPhase] = frozenset({RunPhase.STARTING, RunPhase.RUNNING})
 assert SLOT_STAGES < _JOB_STAGES, "a slot stage no job can be in"
+
+
+@dataclass(frozen=True)
+class CampaignLaunch:
+    """A campaign run: its hop is UNRESOLVED until a fresh mint names the cycle."""
+
+    __pydantic_config__: ClassVar[ConfigDict] = ConfigDict(extra="forbid")
+
+    dataset_name: str
+    kind: Literal["campaign_launch"] = "campaign_launch"
+
+
+# Every paid verb that scores outside a run; each is its own rate bucket.
+ScoringVerb = Literal["bench", "noise-floor", "probe-reasoning", "seed-screen", "verify"]
+
+
+@dataclass(frozen=True)
+class ScoringPass:
+    """A paid verb scoring outside any run: its hop is the cycle it scores, or none at all."""
+
+    __pydantic_config__: ClassVar[ConfigDict] = ConfigDict(extra="forbid")
+
+    verb: ScoringVerb
+    kind: Literal["scoring_pass"] = "scoring_pass"
+
+
+JobHolder = Annotated[CampaignLaunch | ScoringPass, Field(discriminator="kind")]
 
 
 @dataclass(frozen=False)
@@ -55,7 +87,8 @@ class Job:
     principal_id: str
     campaign_id: str
     cycle_id: str
-    dataset_name: str
+    # WHAT holds (or waits for) the slot.
+    holder: JobHolder
     stage: JobStage
     created_at: str
     started_at: str | None
@@ -68,6 +101,19 @@ class Job:
     producer_id: str = ""
     # Non-empty IS the refused launch: set only where it was never admitted.
     refusal: str = ""
+
+    @property
+    def what(self) -> str:
+        """What holds the slot, in words: every surface naming a job says it this way."""
+        resolved = self.hop != UNRESOLVED_HOP
+        where = f"{self.campaign_id}/{self.cycle_id}"
+        match self.holder:
+            case CampaignLaunch(dataset_name=dataset):
+                return where if resolved else f"a new campaign on {dataset}"
+            case ScoringPass(verb=verb):
+                return f"{verb} on {where if resolved else 'the workspace'}"
+            case _:
+                assert_never(self.holder)
 
     @property
     def hop(self) -> CycleHop:
@@ -112,7 +158,7 @@ class JobRegistry:
         user_id: str,
         principal_id: str,
         hop: CycleHop,
-        dataset_name: str,
+        holder: JobHolder,
         stage: JobStage = RunPhase.STARTING,
     ) -> Job:
         job_id = secrets.token_urlsafe(12)
@@ -123,7 +169,7 @@ class JobRegistry:
             principal_id=principal_id,
             campaign_id=hop.campaign_id,
             cycle_id=hop.cycle_id,
-            dataset_name=dataset_name,
+            holder=holder,
             stage=stage,
             created_at=now,
             started_at=None,
@@ -152,7 +198,7 @@ class JobRegistry:
         *,
         user_id: str,
         principal_id: str,
-        dataset_name: str,
+        holder: JobHolder,
         hop: CycleHop = UNRESOLVED_HOP,
     ) -> Job:
         """Count, capacity and write stay under the gate with no ``await`` between them."""
@@ -161,12 +207,27 @@ class JobRegistry:
             live = len(running)
             stage: JobStage = RunPhase.STARTING if live < self._capacity(live) else RunPhase.QUEUED
             return self.create(
-                user_id=user_id,
-                principal_id=principal_id,
-                hop=hop,
-                dataset_name=dataset_name,
-                stage=stage,
+                user_id=user_id, principal_id=principal_id, hop=hop, holder=holder, stage=stage
             )
+
+    async def await_claim(self, job_id: str) -> None:
+        """A poll, not a signal: the slot frees in another process, and only the jobs dir is shared."""
+        deadline = time.monotonic() + settings.QUEUE_MAX_WAIT_S
+        while not await asyncio.to_thread(self.claim_next, job_id):
+            job = self.get(job_id)
+            if job is None or job.released:
+                raise ConflictError(
+                    "This launch was withdrawn from the queue. Nothing ran and nothing was spent.",
+                    code="queue_withdrawn",
+                )
+            if time.monotonic() >= deadline:
+                raise ConflictError(
+                    f"This launch waited {settings.QUEUE_MAX_WAIT_S / 3600:.0f}h for a free slot "
+                    f"and was withdrawn. Nothing ran and nothing was spent; start it again when "
+                    f"the machine is quieter.",
+                    code="queue_expired",
+                )
+            await asyncio.sleep(_QUEUE_POLL_S)
 
     def queue_order(self) -> list[Job]:
         """Least-served first: plain FIFO lets one account's burst push everyone else behind it."""
@@ -194,10 +255,6 @@ class JobRegistry:
                 return False
             self.release(job_id)
             return True
-
-    def holder(self) -> Job | None:
-        running = self.list_running()
-        return min(running, key=lambda j: j.created_at) if running else None
 
     def mark_admitted(self, job_id: str, reserve: SpendCeilings) -> None:
         job = self.get(job_id)
@@ -304,8 +361,11 @@ class JobRegistry:
         return self.get(job.job_id) or job
 
     def list_running(self, *, user_id: str | None = None) -> list[Job]:
-        """A reconciling READ, deliberately: a job whose producer is gone is released here."""
-        return self._reconciled(lambda j: j.holds_slot, user_id=user_id)
+        """Oldest first. A reconciling READ, deliberately: a job whose producer is gone is released
+        here."""
+        out = self._reconciled(lambda j: j.holds_slot, user_id=user_id)
+        out.sort(key=lambda j: (j.created_at, j.job_id))
+        return out
 
     def list_queued(self, *, user_id: str | None = None) -> list[Job]:
         out = self._reconciled(lambda j: j.queued, user_id=user_id)
@@ -323,11 +383,39 @@ class JobRegistry:
         return out
 
     def running_job_for(self, hop: CycleHop) -> Job | None:
-        return next((j for j in self.list_running() if j.hop == hop), None)
+        """The RUN holding *hop*: a scoring pass on it bills no ceiling of the cycle's."""
+        return next(
+            (
+                j
+                for j in self.list_running()
+                if j.hop == hop and isinstance(j.holder, CampaignLaunch)
+            ),
+            None,
+        )
 
-    def list_created_today(self, *, user_id: str | None = None) -> list[Job]:
+    def pass_on(self, hop: CycleHop) -> Job | None:
+        """A scoring pass billing *hop*: a run there would be a second biller its ceiling never sees."""
+        return next(
+            (j for j in self.list_running() if j.hop == hop and isinstance(j.holder, ScoringPass)),
+            None,
+        )
+
+    def list_launches(self, *, user_id: str | None = None) -> list[Job]:
+        """Campaign launches in flight, queued included: what an account's concurrency limit holds."""
+        return [
+            j
+            for j in (*self.list_running(user_id=user_id), *self.list_queued(user_id=user_id))
+            if isinstance(j.holder, CampaignLaunch)
+        ]
+
+    def list_launched_today(self, *, user_id: str | None = None) -> list[Job]:
+        """Campaign launches only: a scoring pass is load, never a campaign the daily quota counts."""
         today = utcnow_iso()[:10]
-        return [j for j in self.list_all(user_id=user_id) if j.created_at.startswith(today)]
+        return [
+            j
+            for j in self.list_all(user_id=user_id)
+            if j.created_at.startswith(today) and isinstance(j.holder, CampaignLaunch)
+        ]
 
     def _persist(self, job: Job) -> None:
         write_json(self._path(job.job_id), asdict(job))
@@ -340,7 +428,11 @@ class JobRegistry:
 
 __all__ = [
     "UNRESOLVED_HOP",
+    "CampaignLaunch",
     "Job",
+    "JobHolder",
     "JobRegistry",
     "JobStage",
+    "ScoringPass",
+    "ScoringVerb",
 ]

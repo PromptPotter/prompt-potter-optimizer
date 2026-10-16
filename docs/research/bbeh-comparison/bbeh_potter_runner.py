@@ -33,10 +33,9 @@ from promptpotter.domain.sample import Sample
 from promptpotter.infrastructure.llm.spend_book import spending_under, unbounded_spend_book
 from promptpotter.presentation.terminal.completion import report_completion
 
-# datasets/bbeh/ is the SoT for everything about the task — pipeline.yaml drives the
-# target-layer schema (read by open_session via dataset_name="bbeh"), campaign.yaml
-# carries every loop-control knob and the optimizer LLM, task_description.md the framing.
-_BBEH_CAMPAIGN_YAML = Path(__file__).resolve().parents[3] / "datasets" / "bbeh" / "campaign.yaml"
+# The bbeh definition is the SoT for everything about the task — its `pipeline` section drives
+# the target-layer schema (read by open_session via dataset_name="bbeh", which resolves it in the
+# account's own tier), its `campaign` section carries every loop-control knob, task.md the framing.
 
 
 def _normalize(examples: list[Record]) -> list[Sample]:
@@ -46,12 +45,13 @@ def _normalize(examples: list[Record]) -> list[Sample]:
 
 
 def build_campaign_config(
+    dataset_dir: Path,
     *,
     max_rounds: int | None = None,
     n_variants: int | None = None,
     sp_budget_round: int | None = None,
 ) -> CampaignConfig:
-    """Load ``datasets/bbeh/campaign.yaml`` and merge any non-None overrides on top.
+    """Load ``bbeh/dataset.yaml::campaign`` and merge any non-None overrides on top.
 
     Overrides are ad-hoc notebook conveniences; the file stays the project default and the SoT
     for CLI runs. The optimizer LLM is install-global
@@ -66,7 +66,7 @@ def build_campaign_config(
     if sp_budget_round is not None:
         nodes["adaptive_queue"] = {"config": {"sp_budget_round": sp_budget_round}}
     optimization: dict[str, Any] = {"max_rounds": max_rounds or 5, "nodes": nodes}
-    return with_optimization(load_dataset_campaign_config(_BBEH_CAMPAIGN_YAML), optimization)
+    return with_optimization(load_dataset_campaign_config(dataset_dir), optimization)
 
 
 async def run_bbeh_campaign(
@@ -95,20 +95,22 @@ async def run_bbeh_campaign(
 
     session = await open_session("bbeh")
     try:
+        assert session.dataset is not None, "open_session resolves the dataset it names"
         campaign_config = build_campaign_config(
+            session.dataset.directory,
             max_rounds=max_rounds,
             n_variants=n_variants,
             sp_budget_round=sp_budget_round,
         )
         pipeline_params = configure_and_apply_pipeline(session, campaign_config)
-        # The model this run actually reaches, resolved from datasets/bbeh/pipeline.yaml — never
+        # The model this run actually reaches, resolved from `bbeh/dataset.yaml::pipeline` — never
         # shared_config's MODEL_ID, which describes the route the Colab peers take. Raise rather
         # than default: a results file naming the wrong model is worse than no results file.
         llm_node = session.llm_node_name()
         target_model = (pipeline_params.get(llm_node) or {}).get("model")
         if not target_model:
             raise RuntimeError(
-                f"node {llm_node!r} resolved no model — datasets/bbeh/pipeline.yaml must pin one."
+                f"node {llm_node!r} resolved no model — `bbeh/dataset.yaml::pipeline` must pin one."
             )
 
         cycle_result = await run_campaign(

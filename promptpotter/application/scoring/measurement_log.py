@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.bench.difficulty import calibrate_delta_ruler
 from promptpotter.application.datasets.authored import (
-    dataset_campaign_path,
     dataset_scorer,
     load_dataset_campaign_config,
 )
@@ -24,7 +23,11 @@ from promptpotter.application.pipeline_resolve import (
     dataset_pipeline_declaration,
     experiment_outside_run,
 )
-from promptpotter.application.scoring.closed_rounds import campaign_scorer, walked_rows
+from promptpotter.application.scoring.closed_rounds import (
+    campaign_ruler_scope,
+    campaign_scorer,
+    walked_rows,
+)
 from promptpotter.application.scoring.sample_measurement import interpolate_prompt
 from promptpotter.domain.cells import (
     Cell,
@@ -57,8 +60,8 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 )
 from promptpotter.infrastructure.store.dataset_access import (
     dataset_panel_rows,
-    readable_dataset_dir,
     readable_dataset_rows,
+    resolve_dataset,
 )
 from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
 from promptpotter.infrastructure.store.read_model import Moment, derived
@@ -182,7 +185,7 @@ def _assemble(
 
 def open_cell(stores: Stores, name: str, answer: str) -> Cell:
     """The answer need not have been measured UNDER *name*: a walk replays a cell by content."""
-    dataset_dir = readable_dataset_dir(stores, name)
+    dataset = resolve_dataset(stores, name)
     filed = stores.archive.answer(answer)
     if filed is None:
         raise NotFoundError(f"Answer '{answer}' not found")
@@ -191,10 +194,10 @@ def open_cell(stores: Stores, name: str, answer: str) -> Cell:
         raise NotFoundError(f"Answer '{answer}' is filed under a configuration no index describes")
     filed = stores.archive.whole(filed)
     declared = dataset_pipeline_declaration(
-        stores, dataset_dir, experiment_outside_run(dataset_dir)
+        stores, dataset, experiment_outside_run(stores, dataset)
     )
     schema = parse_pipeline_response(declared) if declared is not None else None
-    return _assemble(described, filed, dataset_scorer(dataset_dir).grade(filed.cell), schema)
+    return _assemble(described, filed, dataset_scorer(dataset.directory).grade(filed.cell), schema)
 
 
 def campaign_scope_cycle(stores: Stores, campaign_id: str) -> CycleHop:
@@ -239,8 +242,9 @@ def _load_dataset_rows(
 ) -> tuple[dict[str, Any], dict[int, dict[str, Any]]]:
     """Missing rows are a bank-less dataset, never an unknown one; only a scope with no roster answers empty."""
     raw: dict[str, Any] | None
+    dataset = resolve_dataset(stores, name)
     try:
-        panel = dataset_panel_rows(stores, name, experiment=experiment)
+        panel = dataset_panel_rows(stores, dataset, experiment=experiment)
     except (ValueError, OSError, ImportError) as exc:
         raise PayloadInvalidError(
             f"Dataset {name!r} declares a connector-owned panel that could not be read: {exc}",
@@ -250,7 +254,7 @@ def _load_dataset_rows(
     if panel is not None:
         raw = {"name": name, "items": [s.model_dump() for s in samples_from_dicts(panel)]}
     else:
-        raw = readable_dataset_rows(stores, name)
+        raw = readable_dataset_rows(stores, dataset)
     if raw is None:
         raw = {"name": name, "items": []}
     sample_lookup: dict[int, dict[str, Any]] = {}
@@ -285,7 +289,7 @@ def _artifact_scope_store(
     return leaf_store, leaf.campaign_id, leaf.cycle_id
 
 
-def _cycle_view(stores: Stores, hop: CycleHop, name: str) -> HardSamples:
+def _cycle_view(stores: Stores, hop: CycleHop, slots: Mapping[str, int]) -> HardSamples:
     """A missing ``hard_samples.json`` is never a ruler state: the ledger's ruler over no cells stands in."""
     cycle_dir = cycle_dir_for(stores.base_dir, hop)
     if not cycle_dir.exists():
@@ -293,32 +297,44 @@ def _cycle_view(stores: Stores, hop: CycleHop, name: str) -> HardSamples:
     written = read_hard_samples(CycleLayout(cycle_dir).hard_samples)
     if written is not None:
         return written
+    scope = campaign_ruler_scope(stores, hop.campaign_id)
+    if scope is None:
+        raise NotFoundError(f"Campaign '{hop.campaign_id}' not found")
     return build_hard_samples(
         [],
-        stores.campaigns.read_ruler(hop, dataset_name=name),
+        stores.campaigns.read_ruler(hop, scope=scope, moment=None),
         frontier=None,
         arm_theta={},
         parent_grades={},
+        slots=slots,
         cycle_id=hop.cycle_id,
     )
 
 
-def _resolve_scope_artifact(stores: Stores, hop: CycleHop | None, name: str) -> HardSamples:
+def _resolve_scope_artifact(
+    stores: Stores, hop: CycleHop | None, name: str, slots: Mapping[str, int]
+) -> HardSamples:
     if hop is not None:
-        return _cycle_view(stores, hop, name)
-    scorer = dataset_scorer(readable_dataset_dir(stores, name))
+        return _cycle_view(stores, hop, slots)
+    scorer = dataset_scorer(resolve_dataset(stores, name).directory)
     knobs = _dataset_campaign_config(stores, name).optimization
     n_min, enable_2pl = knobs.elimination_n_min, knobs.enable_2pl_graduation
 
     def build() -> HardSamples:
         observations = build_archive_observations(
-            stores, dataset_name=name, scorer=scorer, sample_ids=None
+            stores, dataset_name=name, scorer=scorer, admitted=None
         )
         ruler, _ = calibrate_delta_ruler(
             None, n_min, enable_2pl=enable_2pl, archive_obs=observations
         )
         return build_hard_samples(
-            observations, ruler, frontier=None, arm_theta={}, parent_grades={}, cycle_id=None
+            observations,
+            ruler,
+            frontier=None,
+            arm_theta={},
+            parent_grades={},
+            slots=slots,
+            cycle_id=None,
         )
 
     key = ("dataset_hard_samples", stores.archive.base_dir, name, scorer.id, n_min, enable_2pl)
@@ -349,6 +365,8 @@ class _LeaderboardPage:
     raw: dict[str, Any]
     sample_lookup: dict[int, dict[str, Any]]
     view: HardSamples
+    # Each row's ``Sample.key``: the view holds its samples by content.
+    key_of: dict[int, str]
     candidates: list[CellCandidate]
     cells: list[CellRow]
     order: HardSampleOrder
@@ -377,8 +395,10 @@ def _resolve_leaderboard_page(
         raise BadRequestError("at replays one cycle's ledger: it needs scope=cycle and its ids")
     hop = _scope_cycle(art_store, scope, art_campaign, art_cycle)
     raw, sample_lookup = _load_dataset_rows(stores, name, *_recorded_roster(art_store, hop))
-    view = _resolve_scope_artifact(art_store, hop, name)
-    in_view = [sid for sid in view.sample_order if sid in sample_lookup]
+    slots = {s.key: int(s.id) for s in samples_from_dicts(raw["items"])}
+    key_of = {sid: key for key, sid in slots.items()}
+    view = _resolve_scope_artifact(art_store, hop, name, slots)
+    in_view = [slots[k] for k in view.sample_order if slots.get(k) in sample_lookup]
     selection = in_view + sorted(sample_lookup.keys() - set(in_view))
     selected = _trim_unmeasured(selection, set(in_view), max_unmeasured)[:limit]
 
@@ -386,18 +406,19 @@ def _resolve_leaderboard_page(
 
     resolved, ranked = rank_hard_samples(
         view,
-        selected,
-        measured={c.sample_id for c in cells if c.fitness is not None},
+        {key_of[sid]: sid for sid in selected},
+        measured={key_of[c.sample_id] for c in cells if c.fitness is not None},
         order=order or _dataset_campaign_config(stores, name).hard_sample_order,
     )
     return _LeaderboardPage(
         raw=raw,
         sample_lookup=sample_lookup,
         view=view,
+        key_of=key_of,
         candidates=candidates,
         cells=cells,
         order=resolved,
-        ranked=ranked,
+        ranked=[slots[key] for key in ranked],
     )
 
 
@@ -422,7 +443,7 @@ def _cycle_cells(
     """A column is an INDIVIDUAL, named by the arm it first was, so one a later round carried is served once."""
     cycle_dir = cycle_dir_for(stores.base_dir, hop)
     moment = None if at is None else Moment(CycleLayout(cycle_dir).ledger, at)
-    chain = ledger_chain(CycleDir(cycle_dir), moment)
+    chain = ledger_chain(CycleDir(cycle_dir), moment=moment)
     walks = scan_ledger_walks(chain)
     candidates: dict[str, CellCandidate] = {}
     cells: list[CellRow] = []
@@ -451,7 +472,7 @@ def _cycle_cells(
 
 def _dataset_cells(stores: Stores, name: str, wanted: set[int]) -> ScopeCells:
     """A column is a CONFIGURATION's population: the archive names no individual or walk, so no ``RoleScope``."""
-    scorer = dataset_scorer(readable_dataset_dir(stores, name))
+    scorer = dataset_scorer(resolve_dataset(stores, name).directory)
     archive = stores.archive
     sigs = archive.cell_signatures()
     candidates: list[CellCandidate] = []
@@ -481,7 +502,7 @@ def _dataset_cells(stores: Stores, name: str, wanted: set[int]) -> ScopeCells:
 
 
 def _dataset_campaign_config(stores: Stores, name: str) -> CampaignConfig:
-    return load_dataset_campaign_config(dataset_campaign_path(readable_dataset_dir(stores, name)))
+    return load_dataset_campaign_config(resolve_dataset(stores, name).directory)
 
 
 def _graded(cells: list[CellRow]) -> list[float]:
@@ -543,7 +564,7 @@ def measurement_log(
 
     def _item(sid: int) -> DatasetItem:
         graded = _graded(by_sample.get(sid, []))
-        on_ruler = page.view.difficulty(sid)
+        on_ruler = page.view.difficulty(page.key_of[sid])
         return DatasetItem(
             sample_id=sid,
             query=sample_lookup[sid]["query"],

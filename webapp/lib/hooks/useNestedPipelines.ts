@@ -14,7 +14,11 @@ import type {
 } from "@/lib/api";
 import type { PipelineStatus } from "@/lib/types";
 
+// One per dataset a level's cells measure, so a level holds several; `parent` is the enclosing layer's `key`.
 export interface NestedLayer {
+  key: string;
+  parent: string;
+  depth: number;
   dataset: string;
   connector: string | null;
   view: PipelineView | null;
@@ -28,76 +32,94 @@ export interface NestedLayer {
 const MAX_DEPTH = 6;
 
 export interface NestedPipelines {
+  // Breadth-first: every layer follows the one it nests in.
   layers: NestedLayer[];
   truncated: string | null;
 }
 
 const EMPTY: NestedPipelines = { layers: [], truncated: null };
 
-function nestedPipelinesRead(root: NestedPipelineRef): ReadDescriptor<NestedPipelines> {
+interface Pending {
+  ref: NestedPipelineRef;
+  parent: string;
+  depth: number;
+  // The datasets above it on its own branch: a sibling may name one, an ancestor may not.
+  above: ReadonlySet<string>;
+}
+
+function pending(roots: NestedPipelineRef[], parent: string): Pending[] {
+  return roots.map((ref) => ({ ref, parent, depth: 0, above: new Set<string>() }));
+}
+
+// The `parent` of every layer the campaign's own pipeline nests.
+export const CAMPAIGN_LAYER = "campaign";
+
+function nestedPipelinesRead(roots: NestedPipelineRef[]): ReadDescriptor<NestedPipelines> {
   return {
-    id: `nested-pipelines\x1f${root.node}>${root.dataset}`,
+    id: `nested-pipelines\x1f${roots.map((r) => `${r.node}>${r.dataset}`).join("\x1e")}`,
     load: async (signal) => {
       const layers: NestedLayer[] = [];
-      const seen = new Set<string>();
-      let next: NestedPipelineRef | null = root;
+      const queue = pending(roots, CAMPAIGN_LAYER);
       let truncated: string | null = null;
-      while (next) {
-        if (seen.has(next.dataset)) {
-          truncated = `${next.dataset} nests itself`;
-          break;
+      for (let next = queue.shift(); next; next = queue.shift()) {
+        const { ref, depth, above } = next;
+        if (above.has(ref.dataset)) {
+          truncated = `${ref.dataset} nests itself`;
+          continue;
         }
-        if (layers.length >= MAX_DEPTH) {
+        if (depth >= MAX_DEPTH) {
           truncated = `stopped at ${MAX_DEPTH} layers`;
-          break;
+          continue;
         }
-        seen.add(next.dataset);
         let resp: DatasetPipelineResponse;
         try {
-          const level = datasetPipelineRead(next.dataset);
+          const level = datasetPipelineRead(ref.dataset);
           resp = await readThrough(level.id, level.load, signal);
         } catch (e) {
           if (signal.aborted) throw e;
-          truncated = `${next.dataset} unavailable (${failureKind(e)})`;
-          break;
+          truncated = `${ref.dataset} unavailable (${failureKind(e)})`;
+          continue;
         }
+        const key = `${next.parent}>${ref.dataset}`;
         layers.push({
-          dataset: next.dataset,
+          key,
+          parent: next.parent,
+          depth,
+          dataset: ref.dataset,
           connector: resp.connector,
           view: resp.view,
           schema: resp.node_config_schema,
           reach: resp.reach,
-          nestsNode: resp.nests?.node ?? null,
+          nestsNode: resp.nests[0]?.node ?? null,
           status: "ok",
         });
-        next = resp.nests;
+        const below = new Set(above).add(ref.dataset);
+        queue.push(...resp.nests.map((r) => ({ ref: r, parent: key, depth: depth + 1, above: below })));
       }
       return { kind: "ok", data: { layers, truncated }, validator: null };
     },
   };
 }
 
-export function useNestedPipelines(
-  root: NestedPipelineRef | null,
-  enabled: boolean,
-): NestedPipelines {
-  const read = useRead(enabled && root ? nestedPipelinesRead(root) : null);
+export function useNestedPipelines(roots: NestedPipelineRef[], enabled: boolean): NestedPipelines {
+  const read = useRead(enabled && roots.length > 0 ? nestedPipelinesRead(roots) : null);
 
-  if (!enabled || !root) return EMPTY;
+  if (!enabled || roots.length === 0) return EMPTY;
   if (read.status === "ready") return read.data;
   // Publish the named level now: zero layers would make the caller's level innermost for a frame.
   return {
-    layers: [
-      {
-        dataset: root.dataset,
-        connector: null,
-        view: null,
-        schema: null,
-        reach: null,
-        nestsNode: null,
-        status: "loading",
-      },
-    ],
+    layers: roots.map((ref) => ({
+      key: `${CAMPAIGN_LAYER}>${ref.dataset}`,
+      parent: CAMPAIGN_LAYER,
+      depth: 0,
+      dataset: ref.dataset,
+      connector: null,
+      view: null,
+      schema: null,
+      reach: null,
+      nestsNode: null,
+      status: "loading",
+    })),
     truncated: null,
   };
 }

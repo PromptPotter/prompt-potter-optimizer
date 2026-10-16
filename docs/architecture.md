@@ -92,9 +92,11 @@ that registry alone ([`../promptpotter/application/CLAUDE.md`](../promptpotter/a
 § Layer rule).
 
 **The bench walks the manifest's `default` pipeline, once per round, and its
-`initial_population` pipeline where the run carries no population** — the proposers there make
-the individuals a cold run starts from, and the bench keeps the ones it admits
-(`runner/round.py::propose_population`). Every other `pipelines:` entry is the optimizer's own,
+`initial_population` pipeline in a round the run enters with no population** — as a round of its
+own, whose arms are the seeds read against C0, or ahead of `default`, whose walk mates from the
+seeds and races them with its offspring, as the manifest's `initial_population_walks` declares.
+Whichever walk made a round's arms, the bench banks them as that round's `RoundProposedRecord`,
+naming the walk (`runner/round.py::propose_population`). Every other `pipelines:` entry is the optimizer's own,
 run by its own members: an alternative its controller picks at a round boundary (potter's,
 § Escalation — potter's controller); the bench never chooses.
 
@@ -193,7 +195,7 @@ its own; `application/jobs/mint.py` refuses a later arm on any other, or on a ke
 What controlled switches, one site each: the SEARCH is the prompt's own fields
 (`mint.py::_prompt_axes_only` — every other axis the dataset opens is held at its origin value, so
 no arm is graded on a sampling or reasoning setting a rival could not move); MEMORY is the arm's own line
-(`store/archive_queries.py`'s fence — the δ ruler at `RulerScope` `campaign`, the sample and axis
+(`store/archive_queries.py`'s fence — the δ ruler, the sample and axis
 indexes, the fold), while the CACHE still replays any cell, priced; the check-in never re-runs; the bench pass is the
 launch's own (`mint.py::_under_declaration` mints a `manual` arm `at_end`, on its manifest); fork and skip commands are refused 409 (`commands/dispatcher.py`); the ceiling meters the
 search's incurred USD, the bench pass beside it (`domain/spend.py::CeilingMeter`). The declared
@@ -309,7 +311,7 @@ it, ignore it, and keep accumulating evidence on the same candidate.
 repeating on ONE candidate are that candidate's fault: its **`DegradationCheck`**
 (`application/scoring/classification.py::DegradationCheck`) — a bench check, run on every
 optimizer's arms whatever its eliminator — stops it as **`broken`** once its fraction of failed
-measurements crosses the per-campaign `degradation_threshold` (e.g. `0.4` on gsm8k) or, by
+measurements crosses the per-campaign `degradation_threshold` (e.g. `0.4`) or, by
 default, on a single fatal-classified sighting (`optimization.degradation_fatal_fastpath`). A
 broken arm is charged to the candidate as a wound the next proposals read, and recorded apart
 from **`eliminated`**, which only the optimizer's eliminator says (`ScoredCandidate.outcome`).
@@ -386,11 +388,11 @@ world is a strict containment hierarchy:
   first-class tiers, served by one read path: (a) **user-uploaded**
   datasets at `projects/{tenant}/datasets/{slug}/` — the
   Workspace ⊃ Dataset containment, identity-scoped, tenant-private;
-  (b) **install-global benchmarks** at repo-root `datasets/{name}/` — install-scoped, read-only, admin-visible only via the `GET /datasets` list endpoint identity filter. Which names exist is `datasets/` itself; never enumerate them here.
+  (b) **install-global templates** at `promptpotter/assets/datasets/{name}/` — install-scoped, read-only, admin-visible only via the `GET /datasets` list endpoint identity filter. Which names exist is that tree itself; never enumerate them here.
   The two tiers serve different purposes (operator
-  benchmarking vs tenant work); both share the `pipeline.yaml` /
-  `campaign.yaml` / `task_description.md` shape.
-  This tier holds **datasets only** — the optimizer's own pipeline is install content under the package (`config/paths.py::optimizer_assets_root`), never a target in this tier. A checkout resolves benchmark definitions from `datasets/`; a wheel ships the same definitions as install content and resolves them there. Either way the tier is **read-only**, so a benchmark's materialized rows are not kept in it: they are the operator's, and `readable_dataset_rows` resolves them from the tenant tree (`store/dataset_access.py`).
+  benchmarking vs tenant work); both share the `dataset.yaml` /
+  `task.md` / `origin.yaml` shape.
+  This tier holds **datasets only** — the optimizer's own pipeline is install content under the package (`config/paths.py::optimizer_assets_root`), never a target in this tier. Checkout and wheel resolve install definitions from the one package path (`config/paths.py::install_datasets_root`). Either way the tier is **read-only**, so a benchmark's materialized rows are not kept in it: they are the operator's, and `readable_dataset_rows` resolves them from the tenant tree (`store/dataset_access.py`).
 - **Campaign** — one declared optimization effort: a dataset, a
   pipeline origin, context text, **and the optimizer manifest it
   runs** (`optimizer:` plus its node overlay). A **first-class entity** and a **cycle tree** — root
@@ -419,10 +421,10 @@ world is a strict containment hierarchy:
 #### Two resolution seams
 
 **Two resolution seams, and they answer different questions.** The **dataset-file** seam is
-`readable_dataset_dir` — it picks the dir (tenant slug first, repo benchmark second) once at init
-and stamps it on `Session.dataset_config_dir`; every downstream dataset-file loader (node
-overlay, starting prompts, origin prompt) reads that resolved dir — none recompute a
-repo-relative `datasets/{name}/` path. So an ingested tenant dataset is first-class to the whole
+`resolve_dataset` — it picks the tier (tenant slug first, install content second) once at init
+and stamps the `ResolvedDataset` on `Session.dataset`; every downstream dataset-file loader (node
+overlay, starting prompts, origin prompt) reads that resolved value — none recompute an
+install-relative `{name}/` path. So an ingested tenant dataset is first-class to the whole
 loop, not just to the mint that created it. That seam answers *which bytes on disk*.
 
 The **effective-config** seam is `application/pipeline_resolve.py` — `resolve_campaign_config`
@@ -439,7 +441,7 @@ particular — which is why a campaign still AUTHORING its origin consumes no da
 at all: `CampaignStore.in_checkin` selects which layers exist, and the draft is that campaign's own
 layer until Start freezes it. Its config is `pipeline_resolve.py::checkin_campaign_config`, the one
 answer every read before Start and Start itself take — over a reused dataset, that dataset's
-`campaign.yaml` under the draft's own choices.
+`dataset.yaml::campaign` under the draft's own choices.
 
 **`nodes.*.config` is therefore the SEED a new campaign starts from, never the answer for one
 that has already started** — the campaign layer above it is what makes an answer
@@ -457,7 +459,7 @@ wearing three names. What survives is *not* an entity:
 
 - **`Session`** (`application/initialization/session.py`) — the in-process
   **wiring object**: stores, LLM clients, connectors, the resolved
-  `dataset_config_dir`. It is services + identity, not a persisted tier.
+  `dataset`. It is services + identity, not a persisted tier.
 - **`active_session.json`** — the operator's *pointer* into the
   Workspace: the tenant's latest launch, which `resume` defaults to. It is
   not the live set — several cycles can run at once, each saying so by its
@@ -844,7 +846,7 @@ conversion, API key prompts) — load-bearing, per §0.5.
 **Every entry point that starts a loop admits through `jobs/launcher/admission.py`** —
 a launch that reserves its own slot is the bug, because the machine cannot report
 occupancy it was not told about. Two steps, and which one a caller waits in decides
-where it waits: `request_launch` accepts (the caller's own ceilings, then a machine
+where it waits: `request_job` accepts (the caller's own ceilings, then a machine
 slot or a place in line), `admit_and_hold` holds it through the irreversible half.
 
 A full box queues rather than refuses. **The queue is `Job` records in the jobs dir** —
@@ -1000,10 +1002,9 @@ the PR description.
   actual cross-cycle database. Per § Measurement archive (the actual database) it's a
   separate persistence layer from the ledger; never collapse the two.
 
-- **Per-dataset configs in `datasets/{name}/`** (`pipeline.yaml`,
-  `campaign.yaml`, `prompts/{node}.yaml`,
-  `task_context.yaml`, `dataset.md`, `task_description.md`) — the operator's primary
-  interface for adding a new dataset. Configs are the source of truth —
+- **Per-dataset configs in `projects/{tenant}/datasets/{name}/`** (`dataset.yaml`,
+  `origin.yaml`, `task.md`, `README.md`; the shipped templates in `promptpotter/assets/datasets/`
+  add each family's `family.yaml`) — the operator's primary interface for adding a new dataset. Configs are the source of truth —
   no parallel default ladders elsewhere.
   A cleanup PR cannot move a default into PromptPotter code; if a
   setting needs a default, it goes in the dataset's config file.

@@ -28,7 +28,7 @@ from promptpotter.domain.search_point import PROMPT_STRING_FIELDS
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
-    from promptpotter.application.optimizer_manifest import SelectedOptimizer
+    from promptpotter.application.runner.inner.tasks import InnerCells
 
 shapes_optimizer_prompt(__name__)
 
@@ -104,7 +104,7 @@ def build_l1_response_schema(
     pipeline_schema: PipelineSchema,
     *,
     citable_fields: Sequence[str],
-    inner_optimizer: SelectedOptimizer | None,
+    inner_cells: InnerCells | None,
     silent_panels: Collection[str] = (),
     schema_field_rename: bool = False,
     n_variants: int | None = None,
@@ -151,7 +151,7 @@ def build_l1_response_schema(
                 param_props[param] = {}
             # Only on the recursion; elsewhere the declaration is prompt text that never binds.
             ceiling = OPTIMIZER_PROMPT_FIELD_MAX_CHARS.get(param)
-            if ceiling is not None and inner_optimizer is not None:
+            if ceiling is not None and inner_cells is not None:
                 param_props[param]["maxLength"] = ceiling
         # The one lever that can break a parser: locked, it is absent from the schema, never policed per round.
         if not schema_field_rename:

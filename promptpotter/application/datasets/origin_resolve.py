@@ -23,7 +23,7 @@ from promptpotter.application.datasets.origin_readiness import (
     resolution_block,
     save_checkin_draft,
 )
-from promptpotter.application.jobs.quota import paid_verb
+from promptpotter.application.jobs.quota import paid_call
 from promptpotter.application.scoring.formula.matchers import extraction_note_for_scoring
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.search_point import PROMPT_STRING_FIELDS
@@ -129,7 +129,7 @@ async def resolve_origin_turn(
     token = set_cycle_ledger(context.ledger)
     try:
         # No launch admitted this call and no run's book watches it; a check-in has no producer.
-        async with paid_verb(stores=stores, bucket="turn", hop=None):
+        async with paid_call(stores=stores, bucket="turn"):
             raw, repair_attempts = await run_checkin(
                 consultation_instruction=consultation_instruction,
                 user_content=user_content,

@@ -33,7 +33,7 @@ export interface AbilityReading {
   ruler_span: number | null;
   round_span: number | null;
   calibration_model: '1PL' | '2PL' | null;
-  caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | 'floor_pinned' | null;
+  caveat: 'disjoint_scopes' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | 'floor_pinned' | null;
 }
 
 /** A verify pass under a named scorer: the candidate on fresh cells, beside its decided ones. */
@@ -114,7 +114,7 @@ export interface ArmAbility {
   /** Upper bound of the same interval. */
   ci_hi: number | null;
   /** Why `theta` is not this arm's ability, of the ARM's own scope. */
-  caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | 'floor_pinned' | null;
+  caveat: 'disjoint_scopes' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | 'floor_pinned' | null;
 }
 
 /** What one arm's round decided about it. Built by :meth:`of` alone. */
@@ -346,7 +346,7 @@ export interface ValidationFailure {
    * ``optimizer_prompt_parse_failure`` / ``optimizer_prompt_unexpected_type``
    * (generator-side failure), ``steers_inner_stopping`` (an L4 override
    * telling the inner loop when to STOP rather than how to search — it edits
-   * the frame `mean_round_delta` averages over instead of the search it
+   * the frame `mean_bench_lift` averages over instead of the search it
    * measures), ``steers_across_seeds`` (an L4 override making an inner node
    * reason over the seed panel, which exists only one level up — the rule
    * renders empty where it lands), ``guts_inherited_contract`` (an L4
@@ -435,7 +435,7 @@ export interface ScoredCandidate {
   vs_reference: PairedReading | null;
   theta: number | null;
   theta_se: number | null;
-  theta_caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | 'floor_pinned' | null;
+  theta_caveat: 'disjoint_scopes' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | 'floor_pinned' | null;
 }
 
 /** One rank-ordered row of a round's scoreboard: an arm's reading at its rank. */
@@ -563,6 +563,7 @@ export interface PipelineRecord {
   step_tokens?: Record<string, StepTokenUsage>;
   diagnostics?: DiagnosticsRecord;
   unworked_s?: number;
+  mean_bench_lift?: number;
   mean_round_delta?: number;
   error?: string;
   result_ranking?: unknown[];
@@ -581,6 +582,8 @@ export interface PipelineRecord {
   inner_round_budget?: number;
   inner_stop_reason?: string;
   inner_origin_headroom?: number;
+  inner_bench_origin_level?: number;
+  inner_bench_final_lift?: number;
   inner_sent_usd?: number;
   inner_tokens?: number;
   [key: string]: unknown;
@@ -1673,9 +1676,9 @@ export interface DatasetPipelineResponse {
   /** Every param each node carries, valueless — what `reach` is summed over */
   node_config_schema: Record<string, NodeConfigParam[]>;
   reach: Record<string, NodeReach>;
-  /** The pipeline this one nests in turn; the only wire naming it before a cell has
-   * spawned */
-  nests: NestedPipelineRef | null;
+  /** The pipelines this one nests in turn, one per dataset its cells measure; the
+   * only wire naming them before a cell has spawned */
+  nests: NestedPipelineRef[];
 }
 
 /** The tenant's latest launch — not the set of live runs, which is `run_phase` on `/cycles`. */
@@ -1707,7 +1710,7 @@ export interface SpawnedBy {
    * for the origin. */
   role: string | null;
   /** The panel cell this run measured — the outer query, e.g.
-   * `justlogic-d234/seed-0` (`inner_tasks.yaml::tasks[].id`). The candidate
+   * `justlogic/d234/seed-0` (`dataset.yaml::panel.tasks[].id`). The candidate
    * fields do NOT identify a run: every task runs for every candidate, so one
    * candidate's spawns are as many as the panel has cells and are told apart
    * only by this. */
@@ -1797,6 +1800,20 @@ export interface LiftCost {
   absent: 'no_lift' | 'unpriced_tokens' | 'zero_spend' | null;
 }
 
+/** One dataset's rows of a bench spanning several, read apart: a level is never averaged */
+export interface BenchScope {
+  /** The dataset these rows measure; `None` is the one the cycle is filed under. */
+  dataset: string | null;
+  rows: number;
+  /** `None` where the origin's pass read nothing. */
+  origin: OwnLevel | null;
+  /** `None` where the selection's read nothing. */
+  selected: OwnLevel | null;
+  /** `selected` over `origin` on this dataset's rows alone; `None` where either
+   * read nothing. */
+  vs_origin: PairedReading | null;
+}
+
 /** The headline: the selection and the origin, scored on a bench set no optimizer node read. */
 export interface BenchScore {
   bench_size: number;
@@ -1816,6 +1833,10 @@ export interface BenchScore {
    * compared. */
   vs_origin: PairedReading;
   cost: LiftCost;
+  /** Per dataset, where the bench rows measure several; empty on one. The two
+   * levels above then read no column, since two datasets' levels never
+   * average, while `vs_origin` still pairs every row. */
+  scopes: BenchScope[];
   /** The headline on one line — both levels, the lift in each column and the held-
    * out row count, or `status.sentence` where the bench is not graded. The
    * ONE wording of it: the completion box, the `bench` verb and every screen
@@ -2116,8 +2137,9 @@ export interface CampaignPipelineResponse {
   /** Keyed by the provider and model each node's rows carry AT this searchpoint */
   model_capabilities: Record<string, Record<string, ModelCapability>>;
   reach: Record<string, NodeReach>;
-  /** The inner pipeline this chain nests, if any — the L4 drill-in, on this read */
-  nests: NestedPipelineRef | null;
+  /** The inner pipelines this chain nests, one per dataset its cells measure — the
+   * L4 drill-in, on this read */
+  nests: NestedPipelineRef[];
   is_single_node: boolean;
 }
 
@@ -2341,6 +2363,10 @@ export interface SubjectReading {
   spend_to_round: Record<string, number>;
   cell_means: Record<string, number>;
   values: Record<string, number>;
+  /** The subject's values on the cells it was graded on HELD OUT — its bench pass,
+   * which only a round's selection has — keyed like `values` and never pooled
+   * with them: two scopes never pair. */
+  bench_values: Record<string, number>;
   value: number | null;
   ci_lo: number | null;
   ci_hi: number | null;
@@ -2377,6 +2403,42 @@ export interface MetricReading {
   covered_cells: string[];
   pairwise: PairwiseComparison[];
   n_tests: number;
+}
+
+/** One cell as an ENVIRONMENT, the block the subjects are compared within. ``snr`` is the */
+export interface EnvironmentReading {
+  cell: string;
+  held_out: boolean;
+  n_subjects: number;
+  /** Best subject minus worst at this cell; null below two. */
+  spread: number | null;
+  signal_sd: number | null;
+  /** `signal_sd` over the roster's residual SD; null where no residual was read. */
+  snr: number | null;
+  /** The subject the metric's direction favours here; null where it has none. */
+  best_subject: string | null;
+}
+
+/** Friedman over the cells every subject scored — each cell ranks the subjects, ties at average */
+export interface RankAgreement {
+  n_cells: number;
+  n_subjects: number;
+  statistic: number;
+  df: number;
+  p_value: number;
+  kendall_w: number;
+  /** Each subject's mean rank across the cells. 1 is the value the metric's
+   * direction favours, or the lowest value where it has no direction. */
+  mean_rank: Record<string, number>;
+}
+
+/** How many of a subject's own cells moved, by sign — a lift's BREADTH beside its mean. Served */
+export interface LiftProfile {
+  key: string;
+  n_cells: number;
+  lifted: number;
+  flat: number;
+  dropped: number;
 }
 
 export interface DatasetSplit {
@@ -2500,6 +2562,10 @@ export interface Evidence {
   variance: EvidenceVariance | null;
   power: EvidencePower | null;
   order_confound: OrderConfound | null;
+  environments: EnvironmentReading[];
+  rank_agreement: RankAgreement | null;
+  /** Empty under a metric that is not a delta. */
+  lift_profiles: LiftProfile[];
   ranking_computed: boolean;
   edits: RankedEdit[];
   spread: EditSpread;
@@ -2551,8 +2617,8 @@ export interface LineageDivergence {
 export interface ForkStamp {
   kind: 'root' | 'fork' | 'diag' | 'inner';
   trigger: string;
-  /** Which side of the cut the run CONTINUES on (`FORK_DIRECTION`): `offshoot`
-   * hangs off a line that keeps running, `supersede` IS the line. */
+  /** Which side of the cut the run CONTINUES on (`FORK_TRAITS`): `offshoot` hangs
+   * off a line that keeps running, `supersede` IS the line. */
   direction: 'offshoot' | 'supersede' | 'equivalent' | null;
   /** Who cut the fork, as its fork record names them: an account or delegate id,
    * `system`, or the layer and round that proposed it. An id, never a display
@@ -2754,7 +2820,7 @@ export interface CourseNode {
   /** Fork trigger; empty for roots and inner runs. */
   trigger: string;
   /** Which side of this cut the run CONTINUES on, derived from `trigger`
-   * (`FORK_DIRECTION`). `offshoot` = this branch hangs off a line that keeps
+   * (`FORK_TRAITS`). `offshoot` = this branch hangs off a line that keeps
    * running; `supersede` = this branch IS the line and the PARENT is what was
    * left behind. Null for roots and inner runs, which were not cut from
    * anything. Served, never derived in the client — the two read identically
@@ -2821,7 +2887,7 @@ export interface RayResponse {
 /** One outbound SSE frame, whose receiver treats an unknown field as a drift signal. */
 export interface ProjectionEnvelope {
   /** Closed-set discriminator; every CycleRecord record_type, plus stream_snapshot. */
-  kind: 'account_event' | 'backend_warning' | 'candidate_minted' | 'candidate_scored' | 'candidate_started' | 'checkin_closed' | 'decision' | 'command' | 'command_ack' | 'cycle_final' | 'cycle_minted' | 'cycle_seed' | 'cycle_superseded' | 'election' | 'error' | 'flight' | 'fork_graded' | 'intervention' | 'launch_claim' | 'launch_released' | 'llm_call_progress' | 'llm_call' | 'llm_call_start' | 'optimizer_state' | 'phase' | 'priced_key' | 'race_catch_up' | 'race_standing' | 'round_closed' | 'round_entered' | 'round_proposed' | 'round_standing' | 'round_warning' | 'ruler' | 'run_limits' | 'run_phase' | 'run_wiring' | 'sample_order' | 'sample_scored' | 'sample_started' | 'scoring_locked' | 'spawned' | 'spend_hold' | 'spend_tombstone' | 'token_usage' | 'trail_tombstone' | 'stream_snapshot';
+  kind: 'account_event' | 'backend_warning' | 'candidate_minted' | 'candidate_scored' | 'candidate_started' | 'checkin_closed' | 'decision' | 'command' | 'command_ack' | 'cycle_final' | 'cycle_minted' | 'cycle_seed' | 'cycle_superseded' | 'election' | 'error' | 'flight' | 'fork_graded' | 'intervention' | 'launch_claim' | 'launch_released' | 'llm_call_progress' | 'llm_call' | 'llm_call_start' | 'optimizer_state' | 'phase' | 'priced_key' | 'provider_eased' | 'provider_hold' | 'race_catch_up' | 'race_standing' | 'round_closed' | 'round_entered' | 'round_proposed' | 'round_standing' | 'round_warning' | 'ruler' | 'run_limits' | 'run_phase' | 'run_wiring' | 'sample_order' | 'sample_scored' | 'sample_started' | 'scoring_locked' | 'spawned' | 'spend_hold' | 'spend_tombstone' | 'token_usage' | 'trail_tombstone' | 'stream_snapshot';
   /** Target cycle the frame describes; redundant with the channel address but
    * stamped per-frame for fan-in demux. */
   cycle_id: string;
@@ -3015,7 +3081,7 @@ export interface HealthResponse {
 }
 
 export interface BackendResponse {
-  /** The connector's name, as `pipeline.yaml::backend_type` names it */
+  /** The connector's name, as `dataset.yaml::pipeline.backend_type` names it */
   id: string;
   /** Where the operator configured it; empty for an in-process one */
   base_url: string;
@@ -3034,12 +3100,35 @@ export interface BackendHealthResponse {
   detail: string | null;
 }
 
-export interface MachineHolder {
-  /** user_id of the operator whose run owns the slot */
+/** A campaign run: its hop is UNRESOLVED until a fresh mint names the cycle. */
+export interface CampaignLaunch {
+  dataset_name: string;
+  kind: 'campaign_launch';
+}
+
+/** A paid verb scoring outside any run: its hop is the cycle it scores, or none at all. */
+export interface ScoringPass {
+  verb: 'bench' | 'noise-floor' | 'probe-reasoning' | 'seed-screen' | 'verify';
+  kind: 'scoring_pass';
+}
+
+/** One held slot, whoever holds it: a campaign run or a paid verb's scoring pass. */
+export interface MachineSlot {
+  job_id: string;
+  /** The job in words (`Job.what`), worded once for every surface: a run's
+   * `campaign/cycle`, a mint's dataset, or a scoring pass's verb and the
+   * cycle or workspace it scores. */
+  what: string;
+  /** WHAT holds the slot, by `kind`: a `campaign_launch` (its run is a cycle
+   * `/cycles` lists) or a `scoring_pass` (a paid verb with no cycle of its
+   * own). */
+  holder: CampaignLaunch | ScoringPass;
+  /** user_id of the account whose job holds the slot */
   user: string;
-  campaign_id: string;
-  cycle_id: string;
-  /** ISO start time of the holding run; null if still pending */
+  /** The CALLER's account holds it — a delegate's job is its owner's. The test a
+   * surface listing the account's own jobs filters on. */
+  mine: boolean;
+  /** ISO time the holder started running; null while it is still starting */
   started_at: string | null;
 }
 
@@ -3049,9 +3138,13 @@ export interface MachineNotice {
   detail: string;
 }
 
+/** Always a launch: a scoring pass finding no slot is refused, never queued. */
 export interface MachineQueueEntry {
   job_id: string;
-  dataset_name: string;
+  /** The job in words (`Job.what`), worded once for every surface: a run's
+   * `campaign/cycle`, a mint's dataset, or a scoring pass's verb and the
+   * cycle or workspace it scores. */
+  what: string;
   created_at: string;
   /** 1-based place in the machine-wide drain order at the moment of this read.
    * Least-served-first, so it moves as other accounts start and finish — it
@@ -3061,10 +3154,10 @@ export interface MachineQueueEntry {
 
 export interface MachineRefusal {
   job_id: string;
-  dataset_name: string;
-  /** Empty where the launch was a mint refused before a campaign existed */
-  campaign_id: string;
-  cycle_id: string;
+  /** The job in words (`Job.what`), worded once for every surface: a run's
+   * `campaign/cycle`, a mint's dataset, or a scoring pass's verb and the
+   * cycle or workspace it scores. */
+  what: string;
   /** When the launch was refused */
   released_at: string;
   /** The refusal, in the words the launch's own error carried */
@@ -3083,20 +3176,21 @@ export interface MachineStatusResponse {
   /** `capacity` below `ceiling`, worded once for the terminal and the usage tab;
    * null where the machine admits its whole ceiling. */
   held_back: string | null;
-  /** Campaigns currently live on the machine. */
-  running: number;
-  /** Launches waiting for a slot, machine-wide — an occupancy figure like
-   * `running`, not a list. Who they belong to is deliberately not served;
-   * `queue` carries the caller's own. */
+  /** Slots held machine-wide, whoever holds them — the occupancy figure, which
+   * `running` may list fewer of. */
+  occupied: number;
+  /** The held slots this caller may see, oldest first — live campaigns and paid
+   * scoring passes alike. Every slot under `MACHINE_STATUS_SCOPE=all` or to
+   * the host; otherwise the caller's own, another account's being counted in
+   * `occupied` alone. */
+  running: MachineSlot[];
+  /** Launches waiting for a slot, machine-wide — a count, not a list. Who they
+   * belong to is deliberately not served; `queue` carries the caller's own. */
   queued: number;
-  /** True iff `running >= capacity` — no slot free for anyone, the caller included.
-   * A launch is then QUEUED rather than refused, so this reads as 'you will
-   * wait', not 'you cannot start'. */
+  /** True iff `occupied` reaches `capacity` — no slot free for anyone, the caller
+   * included. A launch is then QUEUED rather than refused, so this reads as
+   * 'you will wait', not 'you cannot start'. */
   busy: boolean;
-  /** The oldest live run where it is the caller's own tenant's, or the caller is
-   * the host; null otherwise — another tenant's run is counted in `running`
-   * and never named. */
-  holder: MachineHolder | null;
   /** The CALLER's own waiting launches, oldest first — everything a client needs to
    * say 'queued, position 3' and to offer a cancel. Own is the PRINCIPAL that
    * launched them, the test `cancel-queued-run` applies. Other entries are
@@ -3125,8 +3219,8 @@ export interface OptimizerPipelineResponse {
   /** The graph topology — the same shape a campaign pipeline serves */
   view: PipelineView | null;
   /** The node of `view` that runs the measurement — where a campaign's pipeline
-   * nests under this graph, as `nests.node` names it per campaign. Null where
-   * the manifest declares no measurement node. */
+   * nests under this graph, as each `nests[].node` names it per campaign.
+   * Null where the manifest declares no measurement node. */
   measurement_node: string | null;
   /** Per-node typed config rows, so the node detail renders the optimizer's own
    * knobs through the canonical config element rather than a chip and a JSON
@@ -3149,16 +3243,17 @@ export interface OptimizerPipelineResponse {
 
 /** One row in the dataset registry — backs the Dashboard ``New campaign`` view. */
 export interface DatasetIndexEntry {
-  /** Slug used as the path segment under `datasets/`. */
+  /** The definition's path under its tier, `/`-separated. */
   name: string;
-  /** Display title (from `dataset.md`). */
+  /** Display title (from `README.md`). */
   title: string | null;
   /** ``yours`` = user-owned Origin under ``projects/{tenant}/datasets/{slug}/``.
-   * ``install`` = content that ships with the product at ``datasets/{slug}/``
-   * (benchmarks, demos, ``promptpotter-self``) — tracked in git, so readable
-   * by anyone using the install. A ``yours`` slug shadows an ``install`` one. */
+   * ``install`` = content that ships with the product at
+   * ``assets/datasets/{name}/`` (benchmarks, demos, ``promptpotter-self``) —
+   * tracked in git, so readable by anyone using the install. A ``yours`` slug
+   * shadows an ``install`` one. */
   tier: 'yours' | 'install';
-  /** What the dataset is, in one plain sentence (the first under `dataset.md`'s
+  /** What the dataset is, in one plain sentence (the first under `README.md`'s
    * title). */
   summary: string | null;
   /** Rows held without a fetch (the connector's panel, else the materialized bank);
@@ -3909,7 +4004,8 @@ export const RATE_PRICED_LABEL = 'priced at our rate';
 
 // What each θ caveat says. Mirror of domain/ruler.py::THETA_CAVEAT_INFO — the single
 // wording; the terminal prints the same `head`.
-export const THETA_CAVEAT_INFO: Record<'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | 'floor_pinned', { head: string; body: string }> = {
+export const THETA_CAVEAT_INFO: Record<'disjoint_scopes' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | 'floor_pinned', { head: string; body: string }> = {
+  'disjoint_scopes': { head: "θ mixes datasets that share no scale", body: "These cells measure more than one dataset, and a difficulty is only ever fitted within one, so θ here averages scales that never met. Read each dataset's cells on their own; a lift paired on the same cells still holds." },
   'cold_ruler': { head: "θ is not ability yet", body: "No difficulty ruler has been fitted, so θ is plain accuracy on the logit scale, read on each candidate's own cells. These θ compare to each other and to nothing else." },
   'flat_ruler': { head: "θ is not ability here", body: "The ruler itself spans almost nothing, so every cell counts the same and θ is accuracy plus a constant. That is the instrument, not this round's draw — no round could have read wider." },
   'collapsed_band': { head: "θ is not ability this round", body: "This round bought a thin slice of a wide ruler. Inside a band that narrow every cell is equally hard, so ranking on θ ranks on accuracy. That is the draw, not the instrument." },
@@ -4029,7 +4125,10 @@ export const CELL_TERM_META: CellTermMeta[] = [
   { name: 'ground_truth_rank', direction: 'low', description: 'Where the truth landed in the ranking; 1 is the top.', dial: null, primary: false },
   { name: 'latency', direction: 'low', description: 'Seconds the cell took when measured; a replay keeps them.', dial: "anchored", primary: true },
   { name: 'unworked', direction: 'low', description: 'Seconds the cell sat blocked (suspend, rate-limit queue).', dial: "anchored", primary: false },
-  { name: 'lift', direction: 'high', description: "L4: the inner campaign's mean lift over its own origin.", dial: null, primary: false },
+  { name: 'bench_lift', direction: 'high', description: "L4: the inner campaign's mean lift over its origin on its held-out rows.", dial: null, primary: false },
+  { name: 'bench_origin', direction: 'high', description: "L4: the inner origin's headline on the held-out rows.", dial: null, primary: false },
+  { name: 'bench_final_lift', direction: 'high', description: 'L4: the held-out lift the inner campaign ended on.', dial: null, primary: false },
+  { name: 'lift', direction: 'high', description: "L4: the inner campaign's mean θ lift over its own origin.", dial: null, primary: false },
   { name: 'origin', direction: 'high', description: "L4: the inner campaign's origin level.", dial: null, primary: false },
   { name: 'final_lift', direction: 'high', description: 'L4: the lift the inner campaign ended on.', dial: null, primary: false },
   { name: 'peak_lift', direction: 'high', description: 'L4: the best lift the inner campaign reached.', dial: null, primary: false },

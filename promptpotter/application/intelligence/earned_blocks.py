@@ -8,13 +8,15 @@ from promptpotter.domain.candidate_diff import candidate_delta
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.scoring import ANSWER_SPACE_CAP
 from promptpotter.infrastructure.ledger import ledger_chain
-from promptpotter.infrastructure.store.archive_queries import walked_answers
+from promptpotter.infrastructure.store.archive_queries import (
+    as_of_moment,
+    campaign_fenced,
+    walked_answers,
+)
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_standing_rounds
-from promptpotter.infrastructure.store.io import read_json_optional
-from promptpotter.infrastructure.store.layout import CampaignLayout, campaign_cycles_dir
-from promptpotter.shared.measurement_context import instrument_mode
 
 if TYPE_CHECKING:
+    from promptpotter.domain.paired_reading import MemberAddress
     from promptpotter.domain.results import ScoredCandidate
     from promptpotter.domain.run_records import RoundClosedRecord
     from promptpotter.infrastructure.store.stores import Stores
@@ -69,15 +71,24 @@ def _accumulate(
     dataset: str,
     acc: dict[tuple[str, str, str], list[float]],
     fields_of: Mapping[str, dict[str, Any]],
+    counted: set[MemberAddress],
 ) -> None:
-    earned = [(cand, lift) for cand in closed.candidate_scores if (lift := _credible_lift(cand))]
+    earned: list[tuple[ScoredCandidate, str, float]] = []
+    for cand in closed.candidate_scores:
+        if (lift := _credible_lift(cand)) is None:
+            continue
+        reading = cand.vs_reference
+        assert reading is not None and reading.a is not None and reading.b is not None
+        # A reading is its address: a fork's chain and a repair's re-close each carry it again.
+        if reading.b.address not in counted:
+            counted.add(reading.b.address)
+            earned.append((cand, reading.a.address.individual_id, lift))
     if not earned:
         return
     fit = _answer_space_signature(stores, closed, dataset)
     # Diffed against the individual the lift was READ against: a round's arms may have several parents.
-    for cand, lift in earned:
-        assert cand.vs_reference is not None and cand.vs_reference.a is not None
-        reference = fields_of.get(cand.vs_reference.a.address.individual_id)
+    for cand, reference_id, lift in earned:
+        reference = fields_of.get(reference_id)
         if reference is None:
             continue
         delta = candidate_delta(cand.prompt_fields, reference, None, None)
@@ -87,27 +98,24 @@ def _accumulate(
 
 
 def mine_earned_blocks(stores: Stores) -> dict[str, list[EarnedBlock]]:
-    """Empty under instrument mode: it reads the campaign TREE, which the evidence epoch never sees."""
-    if instrument_mode() is not None:
+    """The campaign TREE, so empty for an arm or an instrument's cell; a task re-read at a moment
+    mines the tree as it stood then."""
+    if campaign_fenced():
         return {}
+    moment = as_of_moment()
 
     acc: dict[tuple[str, str, str], list[float]] = defaultdict(list)
-    for campaign_dir in stores.campaigns.iter_campaign_dirs():
-        cycles_dir = campaign_cycles_dir(campaign_dir)
-        if not cycles_dir.is_dir():
-            continue
-        # The manifest, never the directory name: a dataset name carrying `__` splits wrong.
-        manifest = read_json_optional(CampaignLayout(campaign_dir).manifest)
-        dataset = str((manifest or {}).get("dataset_name") or campaign_dir.name)
-        for cycle_dir in sorted(p for p in cycles_dir.iterdir() if p.is_dir()):
-            standing = scan_standing_rounds(ledger_chain(CycleDir(cycle_dir)))
+    counted: set[MemberAddress] = set()
+    for campaign in stores.campaigns.list_campaigns(lifecycle="all"):
+        for cycle_dir in stores.campaigns.campaign_cycle_dirs(campaign.campaign_id):
+            standing = scan_standing_rounds(ledger_chain(CycleDir(cycle_dir), moment=moment))
             fields_of = {
                 cand.candidate_id: cand.prompt_fields
                 for held in standing.rounds.values()
                 for cand in held.close.candidate_scores
             }
             for held in standing.rounds.values():
-                _accumulate(stores, held.close, dataset, acc, fields_of)
+                _accumulate(stores, held.close, campaign.dataset_name, acc, fields_of, counted)
 
     by_fit: dict[str, list[EarnedBlock]] = defaultdict(list)
     for (fit, field, block), lifts in acc.items():

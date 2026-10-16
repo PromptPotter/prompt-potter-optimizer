@@ -193,6 +193,12 @@ components:
             # A backend attempt that failed and will be tried again
             # (`BackendWarningRecord`).
             - backend_warning
+            # A provider's 429 episode on one sender — its open and each later
+            # throttle, told to each ledger whose sends it holds
+            # (`ProviderHoldRecord`), then its ease, told to each of them at
+            # once (`ProviderEasedRecord`).
+            - provider_hold
+            - provider_eased
             # One arm's walk, a fact per record; `flight` alone names no arm.
             - candidate_started
             - sample_order
@@ -319,6 +325,8 @@ components:
             - $ref: '#/components/schemas/OptimizerStatePayload'
             - $ref: '#/components/schemas/RoundStandingPayload'
             - $ref: '#/components/schemas/BackendWarningPayload'
+            - $ref: '#/components/schemas/ProviderHoldPayload'
+            - $ref: '#/components/schemas/ProviderEasedPayload'
             - $ref: '#/components/schemas/CandidateStartedPayload'
             - $ref: '#/components/schemas/SampleOrderPayload'
             - $ref: '#/components/schemas/SampleStartedPayload'
@@ -619,7 +627,8 @@ components:
     RoundProposedPayload:
       type: object
       description: |
-        RoundProposedRecord — what a round's proposer generated. `consumed` is
+        RoundProposedRecord — the arms a round's walk made, banked by the bench
+        once per round; `walk` names the manifest pipeline. `consumed` is
         the digest of the round it read to do so; `proposals` is a list of
         `CandidateProposal`. A resume walking back into the round replays them.
         `submitted` marks the operator's answer at the arm gate instead: the
@@ -633,6 +642,7 @@ components:
           type: array
           items: { type: object, additionalProperties: true }
         submitted: { type: boolean }
+        walk: { type: string }
         timestamp: { type: string, format: date-time }
 
     RoundClosedPayload:
@@ -664,9 +674,8 @@ components:
     RoundCells:
       type: object
       description: |
-        Where a round's rows are in the archive, by row set. Each address is
-        `[sample_id, answer, replayed]`, in walk order: the answer the cell
-        store files, and whether this walk took it as a replay.
+        Where a round's rows are in the archive, by row set, each a
+        `WalkedCell`, in walk order.
       required: [head, arms, references, overlap]
       additionalProperties: false
       properties:
@@ -681,16 +690,24 @@ components:
           type: object
           additionalProperties: { $ref: '#/components/schemas/WalkedCells' }
 
+    WalkedCell:
+      type: array
+      description: |
+        One cell's archive address, `[sample_key, sample_id, answer, replayed]`:
+        the content key two walks pair on, the slot in the dataset that measured
+        it, the answer the cell store files, and whether this walk took it as a
+        replay.
+      prefixItems:
+        - { type: string }
+        - { type: integer }
+        - { type: string }
+        - { type: boolean }
+      minItems: 4
+      maxItems: 4
+
     WalkedCells:
       type: array
-      items:
-        type: array
-        prefixItems:
-          - { type: integer }
-          - { type: string }
-          - { type: boolean }
-        minItems: 3
-        maxItems: 3
+      items: { $ref: '#/components/schemas/WalkedCell' }
 
     OptimizerStatePayload:
       type: object
@@ -745,6 +762,36 @@ components:
         final: { type: boolean }
         query: { type: string }
         detail: { type: string }
+        timestamp: { type: string, format: date-time }
+
+    ProviderHoldPayload:
+      type: object
+      description: |
+        ProviderHoldRecord — a provider's 429 episode on one sender, told to a
+        ledger from that ledger's own sends: each throttle it has not heard.
+        `reading` is the `BackpressureReading` the OpenAPI file declares. A
+        throttle past `gives_up_at` (epoch seconds) stops the run.
+      required: [sender, scope, strikes, gives_up_at, reading, timestamp]
+      additionalProperties: false
+      properties:
+        sender: { type: string }
+        scope: { type: string }
+        strikes: { type: integer, minimum: 1 }
+        gives_up_at: { type: number }
+        reading: { type: object, additionalProperties: true }
+        timestamp: { type: string, format: date-time }
+
+    ProviderEasedPayload:
+      type: object
+      description: |
+        ProviderEasedRecord — the provider answers the sender again, told at
+        once to every ledger that heard its hold; `held_s` is how long the
+        episode held.
+      required: [sender, held_s, timestamp]
+      additionalProperties: false
+      properties:
+        sender: { type: string }
+        held_s: { type: number, minimum: 0 }
         timestamp: { type: string, format: date-time }
 
     ViewAnchors:
@@ -959,7 +1006,7 @@ components:
         backpressure:
           type: [object, 'null']
           additionalProperties: true
-          description: The `BackpressureReading` the OpenAPI file declares.
+          description: Always `null`; a provider's hold is `provider_hold`.
         timestamp: { type: string, format: date-time }
 
     RaceStandingPayload:
@@ -981,16 +1028,20 @@ components:
 
     RaceCatchUpPayload:
       description: |
-        RaceCatchUpRecord — the priors the race caught up on the sample just
-        measured; absent where the archive already held them.
+        RaceCatchUpRecord — the catch-up walks the sample just measured took,
+        each prior's cell by its archive address. No slot writes a catch-up's
+        cells, so this record is where a line's memory finds them.
       allOf:
         - $ref: '#/components/schemas/ArmAddress'
         - type: object
-          required: [member, sample_id, prior_ids]
+          required: [member, sample_key, cells]
           properties:
             member: { type: string, minLength: 1 }
-            sample_id: { type: integer }
-            prior_ids: { type: array, items: { type: string } }
+            sample_key: { type: string, minLength: 1 }
+            cells:
+              type: object
+              minProperties: 1
+              additionalProperties: { $ref: '#/components/schemas/WalkedCell' }
 
     ErrorPayload:
       type: object
@@ -1224,18 +1275,25 @@ components:
       type: object
       description: |
         RulerRecord — a δ ruler as it stands, written WHOLE at lock and after
-        every extension; the last record for a `dataset_name` wins. Not a
+        every extension; the last record for a `scope` wins. Not a
         progress event: the tail frames it, the activity line stays silent, so it is declared for the union.
-      required: [ruler, dataset_name, round, timestamp]
+      required: [ruler, scope, round, timestamp]
       additionalProperties: false
       properties:
         ruler:
           type: object
           additionalProperties: true
-          description: The `DeltaRuler` model dump.
-        dataset_name:
-          type: string
-          description: Whose sample ids the δ keys are — an L4 outer ledger carries the inner scale too.
+          description: The `DeltaRuler` model dump; its δ are keyed by `Sample.key`.
+        scope:
+          type: object
+          description: |
+            What one scale links: a scorer on one dataset. δ on two scopes are not
+            comparable. An L4 outer ledger carries one per inner seat dataset too.
+          required: [scorer, dataset]
+          additionalProperties: false
+          properties:
+            scorer: { type: string }
+            dataset: { type: string }
         round:
           type: integer
           minimum: 0
@@ -1320,19 +1378,21 @@ components:
       type: object
       description: |
         CycleMintedRecord — the cycle exists; the first line of its own ledger.
-        A fork carries `parent_cycle_id`, `forked_at_offset` (the line of the
+        A fork carries `parent`, `forked_at_offset` (the line of the
         parent's ledger its history begins at) and `fork` (the `ForkSpec`, less
-        its seed) together; a root carries none. A ledger chain is walked off
-        this record alone. `checkin` marks a cycle minted while its campaign is
-        still authoring its origin: it reads `run_phase: checkin` until a
-        `checkin_closed` record follows.
+        its seed) together; a root carries none. `parent` is the parent cycle's
+        directory as a POSIX path relative to this cycle's own — `../{cycle_id}`
+        for a sibling, a longer path for a fork of another tree's cycle. A
+        ledger chain is walked off this record alone. `checkin` marks a cycle
+        minted while its campaign is still authoring its origin: it reads
+        `run_phase: checkin` until a `checkin_closed` record follows.
       required: [timestamp]
       additionalProperties: false
       properties:
         checkin:
           type: boolean
           default: false
-        parent_cycle_id:
+        parent:
           type: [string, 'null']
         forked_at_offset:
           type: [integer, 'null']
@@ -1759,6 +1819,18 @@ components:
         elapsed_s:
           type: number
           minimum: 0
+        detail:
+          type: [string, 'null']
+        inner:
+          type: [object, 'null']
+          description: |
+            The `CycleHop` the waited-on L4 cell runs, in this cycle's sandbox;
+            null on an ordinary call.
+          required: [campaign_id, cycle_id]
+          additionalProperties: false
+          properties:
+            campaign_id: { type: string, minLength: 1 }
+            cycle_id: { type: string, minLength: 1 }
         timestamp:
           type: string
           format: date-time

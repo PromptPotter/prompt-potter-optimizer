@@ -22,7 +22,6 @@ from promptpotter.application.jobs.mint import (
     finalize_checkin_to_active,
     mint_checkin_skeleton,
     resolve_cycle_plan,
-    write_plan_seed,
 )
 from promptpotter.application.pipeline_resolve import checkin_campaign_config
 from promptpotter.domain.cycle_paths import CycleHop
@@ -131,7 +130,6 @@ async def _commit_checkin(stores: Stores, request: CheckinStart) -> Session:
     )
 
     finalize_checkin_to_active(session, campaign_config, hop=hop, cycle_plan=plan)
-    write_plan_seed(stores, hop, plan)
     return session
 
 

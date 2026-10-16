@@ -1,0 +1,6 @@
+source:
+  depths: [2, 3, 4]
+
+campaign:
+  optimization:
+    ceiling: {usd: 0.15}

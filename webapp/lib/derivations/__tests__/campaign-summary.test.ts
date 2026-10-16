@@ -132,6 +132,7 @@ describe("benchReading", () => {
       selected: null,
       vs_origin: { ...pairedReading(0, [0, 0]), state: "not_held", coverage: null, headline: null, beside: [] },
       cost: { lift_per_usd: null, absent: "no_lift" },
+      scopes: [],
       line: "The campaign's dataset_split holds no bench rows out.",
     };
     expect(benchReading(unheld).sub).toBe(unheld.line);
@@ -162,6 +163,7 @@ describe("benchReading", () => {
       },
       vs_origin: pairedReading(0.5, [0.2, 0.8], { rateA: 0 }),
       cost: { lift_per_usd: 1.25, absent: null },
+      scopes: [],
       line: "accuracy 0.500 selected (round 3) · 0.000 origin · lift +0.500 · 10 held-out rows",
     };
     const stat = benchReading(graded);

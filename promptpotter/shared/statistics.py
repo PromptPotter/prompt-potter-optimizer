@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import math
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from functools import cache
 from statistics import NormalDist
-from typing import Literal
+from typing import Literal, NamedTuple
 
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
@@ -192,58 +193,6 @@ def sign_posterior(wins: int, losses: int) -> float:
     return 1.0 - _beta_cdf(0.5, wins + 1, losses + 1)
 
 
-def _signed_rank_counts(n: int) -> list[int]:
-    total = n * (n + 1) // 2
-    counts = [0] * (total + 1)
-    counts[0] = 1
-    for rank in range(1, n + 1):
-        for w in range(total, rank - 1, -1):
-            counts[w] += counts[w - rank]
-    return counts
-
-
-def exact_paired_reading(
-    candidate_scores: list[float],
-    prior_scores: list[float],
-    *,
-    alpha: float = 0.05,
-) -> tuple[float, float | None, float | None, float | None, int]:
-    """Wilcoxon signed-rank; both bracket ends are ``None`` where *alpha* is unreachable at *n*."""
-    diffs = [c - p for c, p in zip(candidate_scores, prior_scores, strict=True)]
-    nonzero = [d for d in diffs if d != 0.0]
-    n = len(nonzero)
-    walsh = sorted((a + b) / 2.0 for i, a in enumerate(nonzero) for b in nonzero[i:])
-    mid = len(walsh) // 2
-    shift = (
-        0.0
-        if not walsh
-        else (walsh[mid] if len(walsh) % 2 else (walsh[mid - 1] + walsh[mid]) / 2.0)
-    )
-    if n < 2:
-        return (shift, None, None, None, n)
-
-    counts = _signed_rank_counts(n)
-    draws = float(2**n)
-    total = n * (n + 1) // 2
-    by_magnitude = sorted(range(n), key=lambda i: abs(nonzero[i]))
-    observed = sum(rank for rank, i in enumerate(by_magnitude, start=1) if nonzero[i] > 0.0)
-    # Doubled, so a half-integer centre never needs a tolerance to compare against.
-    deviation = abs(2 * observed - total)
-    p = min(1.0, sum(c for w, c in enumerate(counts) if abs(2 * w - total) >= deviation) / draws)
-
-    # k = the largest lower tail still inside alpha/2; 0 says this width cannot bracket at alpha.
-    cumulative = 0
-    k = 0
-    for w, c in enumerate(counts):
-        cumulative += c
-        if cumulative / draws > alpha / 2.0:
-            break
-        k = w + 1
-    if k < 1:
-        return (shift, None, None, p, n)
-    return (shift, walsh[k - 1], walsh[len(walsh) - k], p, n)
-
-
 def holm_adjusted(p_values: list[float]) -> list[float]:
     """In INPUT order. Holm, not Benjamini-Hochberg: pairs that SHARE arms are dependent."""
     m = len(p_values)
@@ -256,6 +205,78 @@ def holm_adjusted(p_values: list[float]) -> list[float]:
         running = max(running, (m - rank) * p_values[idx])
         out[idx] = min(1.0, running)
     return out
+
+
+def _gamma_q(a: float, x: float) -> float:
+    """The regularized upper incomplete gamma Q(a, x): the series below a + 1, Lentz's fraction above."""
+    if x <= 0.0:
+        return 1.0
+    front = math.exp(-x + a * math.log(x) - math.lgamma(a))
+    if x < a + 1.0:
+        term = total = 1.0 / a
+        ap = a
+        for _ in range(500):
+            ap += 1.0
+            term *= x / ap
+            total += term
+            if abs(term) < abs(total) * 1e-15:
+                break
+        return 1.0 - front * total
+    tiny = 1e-300
+    b = x + 1.0 - a
+    c = 1.0 / tiny
+    d = 1.0 / b
+    h = d
+    for i in range(1, 500):
+        an = -i * (i - a)
+        b += 2.0
+        d = an * d + b
+        d = 1.0 / (d if abs(d) > tiny else tiny)
+        c = b + an / c
+        c = c if abs(c) > tiny else tiny
+        delta = d * c
+        h *= delta
+        if abs(delta - 1.0) < 1e-15:
+            break
+    return front * h
+
+
+def chi2_sf(x: float, df: int) -> float:
+    return _gamma_q(df / 2.0, x / 2.0)
+
+
+class FriedmanReading(NamedTuple):
+    statistic: float
+    df: int
+    p_value: float
+    kendall_w: float
+    mean_ranks: list[float]
+
+
+def friedman(blocks: Sequence[Sequence[float]]) -> FriedmanReading | None:
+    """Each block holds the SAME treatments in one order; ties share average rank and correct the
+    statistic. ``None`` below two blocks or two treatments, or where every block is one tie."""
+    n = len(blocks)
+    k = len(blocks[0]) if blocks else 0
+    if n < 2 or k < 2:
+        return None
+    if any(len(block) != k for block in blocks):
+        raise ValueError("friedman: every block ranks the same treatments")
+    ranked = [_average_ranks(list(block)) for block in blocks]
+    rank_sum = [sum(ranks[j] for ranks in ranked) for j in range(k)]
+    ties = sum(t**3 - t for block in blocks for t in Counter(block).values())
+    correction = 1.0 - ties / (n * k * (k * k - 1))
+    if correction <= 0.0:
+        return None
+    raw = 12.0 / (n * k * (k + 1)) * sum(s * s for s in rank_sum) - 3.0 * n * (k + 1)
+    statistic = raw / correction
+    return FriedmanReading(
+        statistic=statistic,
+        df=k - 1,
+        p_value=chi2_sf(statistic, k - 1),
+        kendall_w=statistic / (n * (k - 1)),
+        mean_ranks=[s / n for s in rank_sum],
+    )
 
 
 def two_way_effect_sds(

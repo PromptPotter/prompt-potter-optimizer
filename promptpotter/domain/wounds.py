@@ -75,7 +75,7 @@ class ValidationFailure(StrictModel):
             "``l1_provider_empty_response`` / ``optimizer_prompt_parse_failure`` "
             "/ ``optimizer_prompt_unexpected_type`` (generator-side failure), "
             "``steers_inner_stopping`` (an L4 override telling the inner loop when to STOP "
-            "rather than how to search — it edits the frame `mean_round_delta` averages over "
+            "rather than how to search — it edits the frame `mean_bench_lift` averages over "
             "instead of the search it measures), "
             "``steers_across_seeds`` (an L4 override making an inner node reason over the seed "
             "panel, which exists only one level up — the rule renders empty where it lands), "

@@ -90,10 +90,11 @@ class RoundDigestView:
 @dataclass(frozen=True)
 class HardSamplesView:
     artifact: HardSamples
-    sample_query_lookup: dict[int, str]
+    # By ``Sample.key``, as the artifact holds its samples.
+    sample_query_lookup: dict[str, str]
     # It ranks the leaderboard block, not the matrix.
     order: HardSampleOrder
-    ranked: tuple[int, ...]
+    ranked: tuple[str, ...]
 
 
 @dataclass(frozen=True)

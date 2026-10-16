@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { type ReactNode, useMemo } from "react";
 import { cx } from "@/lib/cx";
 import { useSelectNode } from "@/lib/hooks/useSelectNode";
 import { fmtPct0, fmtSigned, fmtThetaSe, sideTone } from "@/lib/format";
@@ -126,8 +126,13 @@ function shortOrigin(originId: string): string {
   return originId.startsWith("cycle_") ? originId.slice(6, 14) : originId.slice(0, 8);
 }
 
-function RunRow({ run, ctx }: { run: RunGroup; ctx: TreeCtx }) {
+function RunRow({ run, ctx: shared }: { run: RunGroup; ctx: TreeCtx }) {
   const { campaign } = run;
+  // Whatever the preference says: a self-optimization candidate CONTAINS its inner runs.
+  const ctx = useMemo(
+    () => (campaign.self_optimization ? { ...shared, showCandidates: true } : shared),
+    [shared, campaign.self_optimization],
+  );
   const rootPath: CyclePath = [
     { campaignId: campaign.campaign_id, cycleId: campaign.root_cycle_id },
   ];

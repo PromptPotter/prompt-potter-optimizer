@@ -6,9 +6,10 @@
 # Every value below cites the section it comes from. Where the bench runs LEVI differently from
 # the paper, `docs/methods/candidate-elimination.md` § LEVI mapping and deviations lists it.
 #
-# Round 1 is the calibration round (Alg. 1): the seeds and the origin are scored on the discovery
-# set, the proxy is chosen from those rows and the archive is seeded. Every later round is
-# one paradigm-shift period (Alg. 2, App. F): `interval - 1` refinements and one paradigm shift.
+# Round 1 is the calibration round (Alg. 1): it walks `initial_population`, the seeds and the
+# origin are scored on the discovery set, the proxy is chosen from those rows and the archive is
+# seeded. Every later round walks `default`, one paradigm-shift period (Alg. 2, App. F):
+# `interval - 1` refinements and one paradigm shift.
 #
 # Editing a `resolved_prompts` field below changes what every LEVI call reads; the text is the
 # paper's own (App. E.6, E.7), with its `{placeholder}`s spelled as `{{placeholder}}`.
@@ -47,8 +48,7 @@ nodes:
       # GEPA's reflection minibatch (arXiv 2507.19457), whose suite its prompt runs use (§4.2).
       feedback_failures: 3
   # The paradigm-shift route (§3.2, App. F): the large model, one call per period. Gemini 3 Flash
-  # is the paper's paradigm-shift model (App. A); max_tokens 4,096 (App. F). The seed pass sends
-  # this node's template too: the paper publishes no seed template for a prompt (App. E.1 is code).
+  # is the paper's paradigm-shift model (App. A); max_tokens 4,096 (App. F).
   levi_paradigm_shift:
     type: llm
     config:
@@ -62,6 +62,18 @@ nodes:
       # Every 10 evaluations, over k = 3 clusters of the occupied cells (App. B, App. F).
       interval: 10
       n_clusters: 3
+  # The seed pass `M_l.DIVERSESEED` (Alg. 1), on the paradigm-shift model. It sends the paradigm
+  # shift's template: the paper publishes no seed template for a prompt (App. E.1 is code).
+  levi_seed:
+    type: llm
+    config:
+      prompt_family: levi_paradigm_shift
+      prompt_version: 1
+      temperature: 1.0
+      max_tokens: 4096
+      provider: openrouter
+      model: google/gemini-3-flash-preview
+      rewrites: prompt
       # n_diverse_seeds = 4 (App. B, Table 5): with the origin, the 5 calibration prompts (App. A).
       n_diverse_seeds: 4
   # A 150-problem discovery set (App. I); K_proxy = 30 of {30, 40}, weights (r, s, c) =
@@ -94,6 +106,10 @@ pipelines:
     - levi_paradigm_shift
     - score
     - map_elites
+  initial_population:
+    - levi_seed
+# The calibration round (Alg. 1) is a round of its own: its arms are the seeds, read against C0.
+initial_population_walks: alone
 resolved_prompts:
   # App. E.6: "Prompt-optimization mutation (single-prompt artifact)".
   levi_refine/1:

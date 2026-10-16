@@ -253,44 +253,33 @@
             "type": "string"
           },
           "l1_layout": {
-            "additionalProperties": {
-              "enum": [
-                "persona",
-                "task_intent",
-                "thinking_style",
-                "problem_description"
-              ],
-              "type": "string"
-            },
-            "description": "Where in the READING node's own prompt each evidence panel is rendered. A slot is a position in that prompt, never the target-prompt field the evidence is about: the reader gets every placed panel whichever slot holds it. Name a panel to MOVE it to that slot; one you omit stays where it is, and a panel is only ever in one place. Keyed by PANEL, one slot string each.",
-            "propertyNames": {
-              "enum": [
-                "answer_distribution",
-                "archive_top_runs",
-                "axis_memory",
-                "budget_state",
-                "confounds",
-                "critique",
-                "demo_pool",
-                "detectable_move",
-                "diagnostics",
-                "escalation_panel",
-                "failing_samples",
-                "inner_narratives",
-                "l1_wounds",
-                "measurand",
-                "mutation_memory",
-                "origin_strengths",
-                "pipeline_param_catalogue",
-                "plan",
-                "precision",
-                "prompt_block_catalogue",
-                "rare_hit_samples",
-                "rendered_prompt",
-                "sample_provenance",
-                "sample_transcripts",
-                "task_context"
-              ]
+            "additionalProperties": false,
+            "description": "Where in the READING node's own prompt each evidence panel is rendered. A slot is a position in that prompt, never the target-prompt field the evidence is about: the reader gets every placed panel whichever slot holds it. Keyed by SLOT — the four properties are the only slots there are — each listing the panels to place there: a listed panel MOVES to that slot, an omitted one stays where it is, and a panel is only ever in one place. Legal panels: answer_distribution, archive_top_runs, axis_memory, budget_state, confounds, critique, demo_pool, detectable_move, diagnostics, escalation_panel, failing_samples, inner_narratives, l1_wounds, measurand, mutation_memory, origin_strengths, pipeline_param_catalogue, plan, precision, prompt_block_catalogue, rare_hit_samples, rendered_prompt, sample_provenance, sample_transcripts, task_context.",
+            "properties": {
+              "persona": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "task_intent": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "thinking_style": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "problem_description": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
             },
             "title": "L1 Layout",
             "type": "object"

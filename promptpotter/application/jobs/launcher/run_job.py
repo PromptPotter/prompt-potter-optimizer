@@ -63,7 +63,7 @@ class JobSpec(StrictModel):
     jobs_dir: Path
     projects_root: Path
     shared_root: Path
-    benchmarks_root: Path
+    install_datasets_root: Path
 
 
 def spawn_job(job_registry: JobRegistry, spec: JobSpec, *, stores: Stores) -> None:
@@ -186,7 +186,7 @@ class HeldRun:
             jobs_dir=self.job_registry.jobs_dir,
             projects_root=stores.projects_root,
             shared_root=stores.shared_root,
-            benchmarks_root=stores.benchmarks_root,
+            install_datasets_root=stores.install_datasets_root,
         )
 
     def detach(self, *, mode: RunMode) -> None:
@@ -219,7 +219,7 @@ async def run_job(spec: JobSpec) -> StopOutcome | None:
     stores = build_stores(
         spec.identity,
         projects_root=spec.projects_root,
-        benchmarks_root=spec.benchmarks_root,
+        install_datasets_root=spec.install_datasets_root,
         shared_root=spec.shared_root,
     )
     job_registry = JobRegistry(spec.jobs_dir, capacity=resolve_run_capacity)

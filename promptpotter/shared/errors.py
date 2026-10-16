@@ -148,17 +148,15 @@ class MachineBusyError(PotterError):
     def __init__(
         self,
         *,
+        holding: str,
         holder_user: str,
-        campaign_id: str,
-        cycle_id: str,
         started_at: str | None,
     ) -> None:
         super().__init__(
             "Every run slot on this machine is taken. Try again once one finishes.",
             details={
+                "holding": holding,
                 "holder_user": holder_user,
-                "campaign_id": campaign_id,
-                "cycle_id": cycle_id,
                 "started_at": started_at,
             },
         )
@@ -243,20 +241,7 @@ class RequestTooLargeError(RuntimeError):
             f"`promptpotter/assets/optimizers/potter/pipeline.yaml` at a tier whose per-minute cap "
             f"exceeds {requested} tokens (e.g. OpenRouter, or a paid Groq tier) — "
             f"the free Groq on_demand tier caps at {limit}\n"
-            f"  - or shorten the optimizer prompt (task_description.md)."
-        )
-
-
-class RulerUnpersistedError(PotterError):
-    code = "ruler_unpersisted"
-
-    def __init__(self, stamped_id: str, *, campaign_id: str, cycle_id: str) -> None:
-        super().__init__(
-            f"cycle {cycle_id} (campaign {campaign_id}) stamps δ ruler {stamped_id} on its "
-            "rounds but its ledger holds no RulerRecord, so those θ cannot be reproduced and "
-            "resuming would silently continue on a different scale. Start a fresh campaign; the "
-            "measurement archive is content-addressed and re-scores its cells from cache.",
-            details={"ruler_id": stamped_id, "campaign_id": campaign_id, "cycle_id": cycle_id},
+            f"  - or shorten the optimizer prompt (the dataset's task.md)."
         )
 
 
@@ -397,7 +382,6 @@ __all__ = [
     "PromptCompositionError",
     "RequestTooLargeError",
     "ResumeDivergenceError",
-    "RulerUnpersistedError",
     "SendRefusedError",
     "ServiceUnavailableError",
     "StoredConfigInvalidError",

@@ -3,6 +3,7 @@ from __future__ import annotations
 import collections
 import logging
 import random
+import re
 import statistics
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
@@ -10,17 +11,14 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from promptpotter.application.bench.task_context import campaign_framing
 from promptpotter.application.campaign_config import CampaignConfig
-from promptpotter.application.datasets.authored import (
-    dataset_campaign_path,
-    read_campaign_config_file,
-)
+from promptpotter.application.datasets.authored import load_dataset_campaign_config
 from promptpotter.application.initialization.loop_start import (
     arm_diagnostic_scoring,
     diagnostic_pass,
     diagnostic_trace,
 )
 from promptpotter.application.initialization.wiring import init_services
-from promptpotter.application.jobs.quota import paid_verb
+from promptpotter.application.jobs.launcher.admission import paid_pass
 from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.measurement_provenance import RunSource
@@ -29,6 +27,7 @@ from promptpotter.domain.scoring import (
     is_verifier_graded,
     modal_answer_share,
 )
+from promptpotter.domain.spend import SpendCeilings
 from promptpotter.infrastructure.store.io import write_json
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import DiagnosticError
@@ -41,7 +40,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["class_floor", "draw_bank", "screen_inner_seeds"]
+__all__ = ["class_floor", "draw_bank", "draw_bench", "screen_inner_seeds"]
 
 
 SeedVerdict = Literal["reject", "suspect", "unsettled", "pass", "no_floor"]
@@ -149,6 +148,8 @@ class SeedReading:
 @dataclass(frozen=True)
 class SeedScreenOutcome:
     dataset_name: str
+    # The solver pinned over the dataset's own, or ``None`` where the dataset's node config answered.
+    solver: str | None
     readings: list[SeedReading]
     artifact_path: str
 
@@ -186,6 +187,14 @@ def draw_bank(all_samples: list[Sample], n: int, seed: int) -> list[Sample]:
     return random.Random(seed).sample(all_samples, min(n, len(all_samples)))
 
 
+def draw_bench(all_samples: list[Sample], bank: list[Sample], n: int, seed: int) -> list[Sample]:
+    """The held-out rows BESIDE a drawn bank, by content: the bank a screen passed stays the search pool byte for byte."""
+    taken = {s.key for s in bank}
+    rest = [s for s in all_samples if s.key not in taken]
+    drawn = random.Random(seed).sample(rest, min(n, len(rest)))
+    return [s.model_copy(update={"bench_only": True}) for s in drawn]
+
+
 async def screen_inner_seeds(
     *,
     stores: Stores,
@@ -195,12 +204,18 @@ async def screen_inner_seeds(
     n_samples: int,
     repeat: int = 3,
     parallel: int = 1,
+    model: str | None = None,
+    provider: str | None = None,
 ) -> SeedScreenOutcome:
     # Argument checks BEFORE anything is built: `init_services` spends a backend handshake.
     if parallel < 1:
         raise DiagnosticError(f"--parallel must be at least 1, got {parallel}.")
-    async with paid_verb(stores=stores, bucket="seed-screen", hop=None):
-        return await _screen(stores, identity, dataset_name, seeds, n_samples, repeat, parallel)
+    if provider and not model:
+        raise DiagnosticError("--provider is the gateway a --model is asked through; pass both.")
+    async with paid_pass(stores=stores, verb="seed-screen", hop=None, declared=SpendCeilings()):
+        return await _screen(
+            stores, identity, dataset_name, seeds, n_samples, repeat, parallel, model, provider
+        )
 
 
 async def _screen(
@@ -211,18 +226,31 @@ async def _screen(
     n_samples: int,
     repeat: int,
     parallel: int,
+    model: str | None,
+    provider: str | None,
 ) -> SeedScreenOutcome:
     session = await init_services(dataset_name=dataset_name, identity=identity, stores=stores)
     all_samples = session.samples
     if not all_samples:
         raise DiagnosticError(f"dataset {dataset_name!r} loaded zero samples.")
 
-    file_config: dict[str, Any] = {}
-    if session.dataset_config_dir is not None:
-        cfg_path = dataset_campaign_path(session.dataset_config_dir)
-        if cfg_path.exists():
-            file_config = read_campaign_config_file(cfg_path)
-    campaign_config = CampaignConfig.model_validate(file_config)
+    dataset_dir = None if session.dataset is None else session.dataset.directory
+    campaign_config = (
+        CampaignConfig.model_validate({})
+        if dataset_dir is None
+        else load_dataset_campaign_config(dataset_dir)
+    )
+    if model:
+        # The ENVIRONMENT pin an L4 pool cell carries (`panel.tasks[].inner_model`), laid on the
+        # dataset's own node config, so a (dataset, solver) pair is screened as its cell would run.
+        llm_node = session.llm_node_name()
+        po = dict(campaign_config.pipeline_overlay)
+        po[llm_node] = {
+            **po.get(llm_node, {}),
+            "model": model,
+            **({"provider": provider} if provider else {}),
+        }
+        campaign_config = campaign_config.model_copy(update={"pipeline_overlay": po})
     arm_diagnostic_scoring(session, campaign_config, source=RunSource.SEED_SCREEN)
     pipeline_params = session.pipeline_params
     # `run_walks` re-reads this at every launch boundary and clamps it to the backend's ceiling.
@@ -238,14 +266,22 @@ async def _screen(
             ceiling,
         )
     # The run's C0 framing: the origin must be the prompt the campaign will actually score.
-    origin_sp = resolve_origin_opt_search_point(
+    origin = resolve_origin_opt_search_point(
         [session.llm_node_name()],
-        session.dataset_config_dir,
+        dataset_dir,
         pipeline_params=pipeline_params,
         schema=session.pipeline_schema,
-    ).to_job_search_point(
+    )
+    if session.pipeline_schema.prompt_node_names() and not any(origin.prompt_field_dict().values()):
+        # A campaign's check-in writes the missing prompt; a screen has none, so a bare question
+        # would be graded under no answer grammar and the matcher's misses read as the model's.
+        raise DiagnosticError(
+            f"dataset {dataset_name!r} declares no `{session.llm_node_name()}` prompt in its "
+            "origin.yaml, so its origin is the bare question. Write one before screening."
+        )
+    origin_sp = origin.to_job_search_point(
         schema=session.pipeline_schema,
-        framing=campaign_framing(stores, campaign_config, dataset_name),
+        framing=campaign_framing(stores, campaign_config, session.dataset),
         demo=session.scoring.require_partition().demo,
     )
 
@@ -313,17 +349,22 @@ async def _screen(
 
     # No ledger event: a screen is not a run, nor a `DiagnosticRunRecord` (a re-scored origin).
     readings.sort(key=lambda r: r.rank_key)
+    solver_tag = "" if model is None else "-" + re.sub(r"[^A-Za-z0-9.-]+", "-", model)
     path = stores.diagnostic_runs.sidecar_path(
-        f"seed-screen-{dataset_name}-{utcnow_iso()[:10]}.json"
+        f"seed-screen-{dataset_name}{solver_tag}-{utcnow_iso()[:10]}.json"
     )
     write_json(
         path,
         {
             "ts": utcnow_iso(),
             "dataset": dataset_name,
+            "solver": model,
+            "provider": provider,
             "n_samples": n_samples,
             "readings": [r.as_dict() for r in readings],
         },
     )
     logger.info("seed-screen: wrote %d reading(s) -> %s", len(readings), path)
-    return SeedScreenOutcome(dataset_name=dataset_name, readings=readings, artifact_path=str(path))
+    return SeedScreenOutcome(
+        dataset_name=dataset_name, solver=model, readings=readings, artifact_path=str(path)
+    )

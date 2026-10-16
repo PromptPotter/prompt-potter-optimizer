@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import pathlib
-from collections.abc import Iterable, Mapping
+from collections import Counter
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from pydantic import Field, computed_field
@@ -13,9 +15,11 @@ from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.layout import inner_sandboxes_dir
 from promptpotter.infrastructure.store.measurement_archive import (
+    CellRewrite,
     MovedFields,
     answer_line,
     answer_of,
+    cold_size,
     rejoined,
 )
 from promptpotter.shared.clock import utcnow_iso
@@ -24,7 +28,6 @@ from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
     from promptpotter.domain.sample import FiledAnswer
-    from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive
     from promptpotter.infrastructure.store.stores import Stores
 
 __all__ = [
@@ -248,7 +251,7 @@ def inventory_measurement_archive(
     *,
     dataset: str | None = None,
 ) -> ArchiveInventory:
-    """Off the cell files: an evidence read hides a controlled line's answers behind its scope."""
+    """Off the cell files: an evidence read hides what lies outside its task's memory fence."""
     archive = stores.archive
     now = datetime.now(UTC)
     by_dataset: dict[str, _Tally] = {}
@@ -293,19 +296,93 @@ def inventory_measurement_archive(
 
 
 @dataclass(frozen=True, slots=True)
-class _FilePlan:
-    lines: list[str]
-    cold: list[MovedFields]
-    before: int
-    after: int
+class _Moved:
+    rows: int
+    bytes_before: int
+    bytes_after: int
+    cold_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
+class _Purged:
+    rows: int
+    freed: int
+
+
+@dataclass(frozen=True, slots=True)
+class _Conflict:
+    """The cold payload names an answer the detail file no longer holds, so nothing was touched."""
+
+
+@dataclass(frozen=True, slots=True)
+class _FileOutcome:
+    # `None`: the file holds nothing this pass moves.
+    change: _Moved | _Purged | _Conflict | None
+    skipped: Mapping[str, int] = field(default_factory=dict)
+    unrestorable: int = 0
+
+
+_Transform = Callable[[list[str], list[MovedFields]], tuple[CellRewrite | None, _FileOutcome]]
+
+
+def _each_file(
+    stores: Stores, file_keys: Iterable[str], verb: str, transform: _Transform, *, apply: bool
+) -> ArchiveReport:
+    def gated(lines: list[str], cold: list[MovedFields]) -> tuple[CellRewrite | None, _FileOutcome]:
+        rewrite, outcome = transform(lines, cold)
+        return (rewrite if apply else None), outcome
+
+    outcomes: list[_FileOutcome] = []
+    for file_key in file_keys:
+        with graceful(f"{verb} {file_key}"):
+            outcomes.append(stores.archive.rewrite_cell_file(file_key, gated))
+    return _folded(outcomes, applied=apply)
+
+
+def _folded(outcomes: Iterable[_FileOutcome], *, applied: bool) -> ArchiveReport:
+    touched = rows = before = after = cold = conflicts = purged = unrestorable = 0
+    skipped: Counter[str] = Counter()
+    for outcome in outcomes:
+        skipped.update(outcome.skipped)
+        unrestorable += outcome.unrestorable
+        match outcome.change:
+            case _Moved() as moved:
+                touched += 1
+                rows += moved.rows
+                before += moved.bytes_before
+                after += moved.bytes_after
+                cold += moved.cold_bytes
+            case _Purged() as gone:
+                touched += 1
+                rows += gone.rows
+                purged += gone.rows
+                # Rides `bytes_before` so `bytes_freed` reads positive with no negative cold figure.
+                before += gone.freed
+            case _Conflict():
+                conflicts += 1
+            case None:
+                pass
+    return ArchiveReport(
+        files_touched=touched,
+        rows_moved=rows,
+        bytes_before=before,
+        bytes_after=after,
+        cold_bytes=cold,
+        conflicts=conflicts,
+        purged=purged + unrestorable,
+        rows_skipped_by_role=dict(skipped),
+        applied=applied,
+        notes=_notes(conflicts=conflicts, unrestorable=unrestorable),
+    )
 
 
 # A cell FILE spans datasets and roles, so scope is read off each ANSWER: by file, a pass moves another dataset's rows.
-def _plan_compaction(
-    lines: list[str], *, dataset: str | None, stamped_at: str, skipped: dict[str, int]
-) -> _FilePlan | None:
+def _compacted(
+    lines: list[str], cold: list[MovedFields], *, dataset: str | None, stamped_at: str
+) -> tuple[CellRewrite | None, _FileOutcome]:
     out: list[str] = []
-    cold: list[MovedFields] = []
+    moving: list[MovedFields] = []
+    skipped: dict[str, int] = {}
 
     for line, answer in _parsed(lines):
         if answer is None or not _in_scope(answer, dataset) or answer.compaction is not None:
@@ -326,14 +403,16 @@ def _plan_compaction(
             out.append(line)
             continue
 
-        cold.append(MovedFields(answer.answer, PipelineData(**moved)))
+        moving.append(MovedFields(answer.answer, PipelineData(**moved)))
         absent: dict[str, Any] = dict.fromkeys(moved)
         kept = replace(answer.cell, pipeline=replace(pipeline, **absent))
         out.append(answer_line(replace(answer, cell=kept, compaction=stamped_at)))
 
-    if not cold:
-        return None
-    return _FilePlan(lines=out, cold=cold, before=_size(lines), after=_size(out))
+    if not moving:
+        return None, _FileOutcome(None, skipped=skipped)
+    payload = [*cold, *moving]
+    moved_off = _Moved(len(moving), _size(lines), _size(out), cold_size(payload) - cold_size(cold))
+    return CellRewrite(out, payload), _FileOutcome(moved_off, skipped=skipped)
 
 
 def compact_measurement_archive(
@@ -345,49 +424,16 @@ def compact_measurement_archive(
     writers = archive_writers(stores.shared_root)
     if writers:
         return _blocked(writers)
+    transform = partial(_compacted, dataset=dataset, stamped_at=utcnow_iso())
+    return _each_file(stores, stores.archive.file_keys(), "compact", transform, apply=apply)
 
-    archive = stores.archive
-    stamped_at = utcnow_iso()
-    touched = rows = before = after = cold_bytes = 0
-    skipped: dict[str, int] = {}
 
-    for file_key in archive.file_keys():
-        with graceful(f"compact {file_key}"):
-            plan = _plan_compaction(
-                archive.detail_lines(file_key),
-                dataset=dataset,
-                stamped_at=stamped_at,
-                skipped=skipped,
-            )
-            if plan is None:
-                continue
-            before += plan.before
-            after += plan.after
-            rows += len(plan.cold)
-            touched += 1
-            payload = [*(archive.read_cold(file_key) or []), *plan.cold]
-            held = archive.cold_bytes_on_disk(file_key)
-            if apply:
-                # Cold first: a crash between the two reads as a no-op; the reverse loses the fields.
-                cold_bytes += archive.write_cold(file_key, payload) - held
-                archive.replace_detail(file_key, plan.lines)
-            else:
-                cold_bytes += archive.cold_size(payload) - held
-
-    return ArchiveReport(
-        files_touched=touched,
-        rows_moved=rows,
-        bytes_before=before,
-        bytes_after=after,
-        cold_bytes=cold_bytes,
-        rows_skipped_by_role=skipped,
-        applied=apply,
-    )
+_Split = tuple[dict[str, MovedFields], list[MovedFields]]
 
 
 def _split_cold(
     answers: list[tuple[str, FiledAnswer | None]], cold: list[MovedFields], dataset: str | None
-) -> tuple[dict[str, MovedFields], list[MovedFields]] | None:
+) -> _Split | None:
     scoped = {a.answer: _in_scope(a, dataset) for _, a in answers if a is not None}
     mine: dict[str, MovedFields] = {}
     rest: list[MovedFields] = []
@@ -401,11 +447,27 @@ def _split_cold(
     return mine, rest
 
 
-def _swap_cold(archive: MeasurementArchive, file_key: str, rest: list[MovedFields]) -> None:
-    if rest:
-        archive.write_cold(file_key, rest)
-    else:
-        archive.drop_cold(file_key)
+def _restored(
+    lines: list[str], cold: list[MovedFields], *, dataset: str | None
+) -> tuple[CellRewrite | None, _FileOutcome]:
+    answers = _parsed(lines)
+    unrestorable = sum(
+        1 for _, a in answers if a and a.purged is not None and _in_scope(a, dataset)
+    )
+    split = _split_cold(answers, cold, dataset)
+    if split is None:
+        return None, _FileOutcome(_Conflict(), unrestorable=unrestorable)
+    mine, rest = split
+    if not mine:
+        return None, _FileOutcome(None, unrestorable=unrestorable)
+    new_lines = [
+        answer_line(replace(rejoined(a, mine[a.answer].pipeline), compaction=None))
+        if a is not None and a.answer in mine
+        else line
+        for line, a in answers
+    ]
+    moved_back = _Moved(len(mine), _size(lines), _size(new_lines), 0)
+    return CellRewrite(new_lines, rest), _FileOutcome(moved_back, unrestorable=unrestorable)
 
 
 def restore_measurement_archive(
@@ -417,51 +479,26 @@ def restore_measurement_archive(
     writers = archive_writers(stores.shared_root)
     if writers:
         return _blocked(writers)
+    transform = partial(_restored, dataset=dataset)
+    return _each_file(stores, stores.archive.file_keys(), "restore", transform, apply=apply)
 
-    archive = stores.archive
-    touched = rows = before = after = conflicts = purged = 0
 
-    for file_key in archive.file_keys():
-        with graceful(f"restore {file_key}"):
-            lines = archive.detail_lines(file_key)
-            answers = _parsed(lines)
-            purged += sum(
-                1 for _, a in answers if a and a.purged is not None and _in_scope(a, dataset)
-            )
-            cold = archive.read_cold(file_key)
-            if cold is None:
-                continue
-            split = _split_cold(answers, cold, dataset)
-            if split is None:
-                conflicts += 1
-                continue
-            mine, rest = split
-            if not mine:
-                continue
-            new_lines = [
-                answer_line(replace(rejoined(a, mine[a.answer].pipeline), compaction=None))
-                if a is not None and a.answer in mine
-                else line
-                for line, a in answers
-            ]
-            before += _size(lines)
-            after += _size(new_lines)
-            rows += len(mine)
-            touched += 1
-            if apply:
-                archive.replace_detail(file_key, new_lines)
-                _swap_cold(archive, file_key, rest)
-
-    return ArchiveReport(
-        files_touched=touched,
-        rows_moved=rows,
-        bytes_before=before,
-        bytes_after=after,
-        conflicts=conflicts,
-        purged=purged,
-        applied=apply,
-        notes=_notes(conflicts=conflicts, unrestorable=purged),
-    )
+def _purged(
+    lines: list[str], cold: list[MovedFields], *, dataset: str | None, stamped_at: str
+) -> tuple[CellRewrite | None, _FileOutcome]:
+    answers = _parsed(lines)
+    split = _split_cold(answers, cold, dataset)
+    if split is None:
+        return None, _FileOutcome(_Conflict())
+    mine, rest = split
+    if not mine:
+        return None, _FileOutcome(None)
+    stamped = [
+        answer_line(replace(a, purged=stamped_at)) if a is not None and a.answer in mine else line
+        for line, a in answers
+    ]
+    gone = _Purged(len(mine), cold_size(cold) - cold_size(rest))
+    return CellRewrite(stamped, rest), _FileOutcome(gone)
 
 
 def purge_cold_store(
@@ -473,49 +510,8 @@ def purge_cold_store(
     writers = archive_writers(stores.shared_root)
     if writers:
         return _blocked(writers)
-
-    archive = stores.archive
-    stamped_at = utcnow_iso()
-    touched = freed = rows = conflicts = 0
-    for file_key in archive.file_keys():
-        cold = archive.read_cold(file_key)
-        if cold is None:
-            continue
-        with graceful(f"purge {file_key}"):
-            answers = _parsed(archive.detail_lines(file_key))
-            split = _split_cold(answers, cold, dataset)
-            if split is None:
-                conflicts += 1
-                continue
-            mine, rest = split
-            if not mine:
-                continue
-            touched += 1
-            rows += len(mine)
-            freed += archive.cold_bytes_on_disk(file_key) - (archive.cold_size(rest) if rest else 0)
-            if apply:
-                # Stamp before dropping: a crash between leaves a false "gone" `restore` corrects.
-                archive.replace_detail(
-                    file_key,
-                    [
-                        answer_line(replace(a, purged=stamped_at))
-                        if a is not None and a.answer in mine
-                        else line
-                        for line, a in answers
-                    ],
-                )
-                _swap_cold(archive, file_key, rest)
-
-    # `freed` rides `bytes_before` so `bytes_freed` reads positive with no negative cold figure.
-    return ArchiveReport(
-        files_touched=touched,
-        bytes_before=freed,
-        rows_moved=rows,
-        conflicts=conflicts,
-        purged=rows,
-        applied=apply,
-        notes=_notes(conflicts=conflicts),
-    )
+    transform = partial(_purged, dataset=dataset, stamped_at=utcnow_iso())
+    return _each_file(stores, stores.archive.cold_file_keys(), "purge", transform, apply=apply)
 
 
 def reindex_measurement_archive(stores: Stores) -> dict[str, int]:

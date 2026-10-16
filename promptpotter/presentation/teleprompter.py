@@ -24,10 +24,7 @@ else:
                 getattr(_parked, "__file__", None)
 
 from promptpotter.application.campaign_config import OptimizationConfig
-from promptpotter.application.datasets.authored import (
-    dataset_campaign_path,
-    load_dataset_campaign_config,
-)
+from promptpotter.application.datasets.authored import load_dataset_campaign_config
 from promptpotter.application.datasets.loaders import samples_from_dicts
 from promptpotter.application.embedded_run import open_session, run_campaign
 from promptpotter.application.optimizer_manifest import select_optimizer
@@ -40,9 +37,8 @@ from promptpotter.connectors.dspy_module import (
 )
 from promptpotter.domain.launch_limits import LaunchLimits, RunMode
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
+from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.identity.migration import registered_or_default_identity
-from promptpotter.infrastructure.store.dataset_access import dataset_pipeline_path
-from promptpotter.infrastructure.store.io import write_text, write_yaml
 from promptpotter.infrastructure.store.stores import build_stores
 
 if TYPE_CHECKING:
@@ -50,6 +46,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from promptpotter.domain.export import PromptExport
+    from promptpotter.infrastructure.store.stores import Stores
 
 __all__ = ["Node", "PromptPotterOpt", "compile_loop"]
 
@@ -133,13 +130,12 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
         program = DspyProgram(student=student, metric=self.metric, examples=list(trainset))
 
         stores = build_stores(registered_or_default_identity(), projects_root=DEFAULT_PROJECTS_ROOT)
-        dataset_dir = stores.tenant_datasets.dataset_dir(self.dataset_name)
-        self._write_dataset_dir(dataset_dir)
-        stores.tenant_datasets.save_benchmark_rows(self.dataset_name, rows)
+        dataset_dir = self._write_definition(stores)
+        stores.tenant_datasets.save_materialized_rows(self.dataset_name, rows)
         session = await open_session(self.dataset_name, stores=stores, program=program)
         try:
             # No overrides: the file this compile just wrote IS the projection of `loop` and `node`.
-            config = load_dataset_campaign_config(dataset_campaign_path(dataset_dir))
+            config = load_dataset_campaign_config(dataset_dir)
             configure_and_apply_pipeline(session, config)
             result = await run_campaign(
                 session,
@@ -159,29 +155,25 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
             return student
         return _with_instructions(student, self.export.render())
 
-    def _write_dataset_dir(self, dataset_dir: Path) -> None:
-        write_text(dataset_dir / "task_description.md", self.task_description)
-        write_yaml(
-            dataset_pipeline_path(dataset_dir),
-            dataset_pipeline(
+    def _write_definition(self, stores: Stores) -> Path:
+        return stores.tenant_datasets.write_definition(
+            self.dataset_name,
+            pipeline=dataset_pipeline(
                 model=self.node.model,
                 temperature=self.node.temperature,
                 extra=self.node.extra,
                 tune=self.node.tune,
                 allowed=self.node.allowed,
             ),
-        )
-        write_yaml(
-            dataset_campaign_path(dataset_dir),
-            {
-                "campaign_config": {
-                    "dataset_name": self.dataset_name,
-                    # The caller's metric already graded the sample; the formula carries it through.
-                    "scoring": self.scoring,
-                    "display_metric": "accuracy",
-                    "optimization": self.loop.model_dump(mode="json", exclude_unset=True),
-                }
+            campaign={
+                # The caller's metric already graded the sample; the formula carries it through.
+                "scoring": self.scoring,
+                "display_metric": "accuracy",
+                "optimization": self.loop.model_dump(mode="json", exclude_unset=True),
             },
+            description=self.task_description,
+            framing=TaskDecomposition(),
+            origin={},
         )
 
 

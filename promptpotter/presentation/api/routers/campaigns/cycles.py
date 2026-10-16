@@ -75,7 +75,7 @@ def get_cycle_round(
     cycle = view_cycle(
         stores, (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), *decode_descend(descend))
     )
-    closed = served_round(cycle.stores, cycle.hop, round_num, cycle.moment(at))
+    closed = served_round(cycle.stores, cycle.hop, round_num, moment=cycle.moment(at))
     if closed is None:
         raise NotFoundError(
             f"Round {round_num} of '{cycle.hop.campaign_id}/{cycle.hop.cycle_id}' is not closed"
@@ -140,5 +140,6 @@ def get_lineage_tree(
         raise BadRequestError(str(exc)) from exc
     replayed = view_cycle(stores, decode_descend(at_cycle)) if at_cycle else root
     return model_json(
-        lensed_tree(stores, path, selected, sample_ids, replayed.moment(at)), headers=headers
+        lensed_tree(stores, path, selected, sample_ids, moment=replayed.moment(at)),
+        headers=headers,
     )

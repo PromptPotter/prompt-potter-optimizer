@@ -5,7 +5,7 @@ from pydantic import Field
 
 from promptpotter.application.campaign_config import OptimizationConfig
 from promptpotter.application.cycle_listing import CyclesResponse, active_pointer, list_cycles
-from promptpotter.application.jobs.capacity import MachineStatusResponse, machine_status
+from promptpotter.application.jobs.machine_status import MachineStatusResponse, machine_status
 from promptpotter.application.pipeline_resolve import (
     OptimizerKnobsResponse,
     OptimizerPipelineResponse,
@@ -77,9 +77,9 @@ def get_cycles(
 
 @active_router.get("/machine-status", response_model=MachineStatusResponse, tags=["Sessions"])
 def get_machine_status(identity: IdentityDep, jobs: JobRegistryDep) -> MachineStatusResponse:
-    """Machine occupancy: how many campaigns may run here and how many do; another tenant's runs only as counts."""
+    """Machine occupancy: how many campaigns may run here and how many do, and the slots the caller may see."""
     # Sync, so the blocking read stays off the event loop.
-    return machine_status(jobs, identity)
+    return machine_status(jobs, identity=identity)
 
 
 @active_router.get(

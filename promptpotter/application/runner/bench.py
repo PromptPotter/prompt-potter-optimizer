@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import partial
 from statistics import fmean
 from typing import TYPE_CHECKING, NamedTuple
@@ -28,6 +28,7 @@ from promptpotter.domain.bench import (
     BenchPass,
     BenchPasses,
     BenchReading,
+    BenchScope,
     BenchScore,
     BenchSubject,
     BenchTrigger,
@@ -39,7 +40,7 @@ from promptpotter.domain.bench import (
     bench_split,
     bench_status,
 )
-from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.cycle_paths import CycleHop, CyclePath
 from promptpotter.domain.paired_reading import (
     ROUND_LIFT_SPEC,
     CellSetName,
@@ -73,24 +74,23 @@ if TYPE_CHECKING:
 
 __all__ = [
     "BenchLine",
-    "PassReading",
-    "bench_member",
     "bench_members",
     "bench_selection",
-    "bench_walk",
+    "bench_series",
     "declare_bench",
     "grade_round_selection",
     "graded",
+    "member_on_bench",
     "own_level",
     "pair_on_bench",
     "read_bench",
-    "read_pass",
     "reserve_selection_pass",
     "score_on_bench",
 ]
 
 
-class PassReading(NamedTuple):
+class _PassReading(NamedTuple):
+    bench_pass: BenchPass
     # `None` where the pass read nothing; `outcome.state` then says why.
     reading: BenchReading | None
     outcome: PassOutcome
@@ -111,51 +111,83 @@ class BenchLine:
 
 
 class _Graded(NamedTuple):
-    origin: PassReading
-    selected_pass: BenchPass | None
-    selected: PassReading | None
+    origin: _PassReading
+    selected: _PassReading | None
+    members: tuple[MemberRows | None, MemberRows | None]
     vs_origin: PairedReading | None
 
 
-def bench_walk(bench_pass: BenchPass) -> IndividualWalk[WalkedCell]:
+def _bench_walk(bench_pass: BenchPass) -> IndividualWalk[WalkedCell]:
     return IndividualWalk(
         bench_pass.candidate_id, frozenset({MeasurementRole.BENCH}), bench_pass.cells
     )
 
 
-def read_pass(
+def _read_pass(
     stores: Stores, bench_pass: BenchPass, scorer: Scorer, *, tolerance: int
-) -> PassReading:
+) -> _PassReading:
     """A pass stopped short, or past *tolerance* unscored rows, reads NOTHING, never a level over fewer rows."""
     expected = len(bench_pass.sample_keys)
-    held_out = individual_cells([bench_walk(bench_pass)], bench_pass.candidate_id, RoleScope.BENCH)
+    held_out = individual_cells([_bench_walk(bench_pass)], bench_pass.candidate_id, RoleScope.BENCH)
     sheet = walked_rows(stores, held_out, scorer).standing()
     scored = len(sheet.scoreable)
 
-    def unread(state: ReadingState) -> PassReading:
+    def unread(state: ReadingState) -> _PassReading:
         outcome = PassOutcome(state, bench_pass.stop, scored, expected, bench_pass.reads_before)
-        return PassReading(None, outcome, sheet)
+        return _PassReading(bench_pass, None, outcome, sheet)
 
     if bench_pass.stop is not None:
         return unread(ReadingState.PASS_STOPPED)
     if expected - scored > tolerance:
         return unread(ReadingState.PAST_TOLERANCE)
+    # Rows on several datasets read no level: `BenchScore.scopes` reads each apart.
+    own = (
+        own_level(sheet)
+        if len(bench_pass.by_dataset()) < 2
+        else OwnLevel(accuracy=None, composite=None, n=scored)
+    )
     reading = BenchReading.read(
-        own_level(sheet),
+        own,
         round=bench_pass.round,
         sp_hash=bench_pass.sp_hash,
         headline=BENCH_HEADLINE,
     )
     outcome = PassOutcome(ReadingState.READ, None, scored, expected, bench_pass.reads_before)
-    return PassReading(reading, outcome, sheet)
+    return _PassReading(bench_pass, reading, outcome, sheet)
 
 
-def bench_member(
-    hop: CycleHop, bench_pass: BenchPass, read: PassReading, *, instrument_id: str
-) -> MemberRows:
+def bench_series(
+    stores: Stores, passes: BenchPasses | None, scorer: Scorer, *, rounds: Sequence[RoundOutcome]
+) -> tuple[float | None, list[float | None]]:
+    """Per L1 round, the STANDING selection's headline on the bench rows, held forward across rounds that held; ``None`` where its pass read nothing or was never sent."""
+    if passes is None:
+        return None, []
+    read = partial(_read_pass, stores, scorer=scorer, tolerance=passes.tolerance)
+
+    def headline(bench_pass: BenchPass) -> float | None:
+        reading = read(bench_pass).reading
+        return None if reading is None or reading.level is None else reading.level.value
+
+    standing = origin = headline(passes.origin)
+    series: list[float | None] = []
+    for outcome in rounds:
+        if outcome.selected_labels:
+            assert outcome.opt_sp is not None, "a round that selected names the individual"
+            taken = passes.pass_of(outcome.opt_sp.id)
+            # Ungraded (an `at_end` line's, or a pause cut its pass): never the one it displaced.
+            standing = None if taken is None else headline(taken)
+        series.append(standing)
+    return origin, series
+
+
+def _bench_member(path: CyclePath, read: _PassReading, *, instrument_id: str) -> MemberRows | None:
+    """A pass that read nothing is no member."""
+    if read.reading is None:
+        return None
+    bench_pass = read.bench_pass
     return MemberRows(
         address=MemberAddress(
-            path=(hop,),
+            path=path,
             individual_id=bench_pass.candidate_id,
             arm=None,
             pass_role=MeasurementRole.BENCH,
@@ -240,7 +272,46 @@ def read_bench(
         selected=None if selected is None else selected.reading,
         vs_origin=vs_origin,
         cost=LiftCost.of(vs_origin, line.spend),
+        scopes=[] if graded is None else _read_scopes(graded, line.instrument_id),
     )
+
+
+def _on_rows(sheet: CellSheet, keys: Sequence[str]) -> CellSheet:
+    held = set(keys)
+    return sheet.where(lambda cell: cell.key in held)
+
+
+def _read_scopes(graded: _Graded, instrument_id: str) -> list[BenchScope]:
+    """Each dataset's rows read and paired apart; none where the bench measures one."""
+    groups = graded.origin.bench_pass.by_dataset()
+    if len(groups) < 2:
+        return []
+
+    def level(read: _PassReading | None, keys: list[str]) -> OwnLevel | None:
+        if read is None or read.reading is None:
+            return None
+        return own_level(_on_rows(read.sheet, keys))
+
+    def narrowed(member: MemberRows | None, keys: list[str]) -> MemberRows | None:
+        if member is None:
+            return None
+        return replace(member, sheet=_on_rows(member.sheet, keys), cell_set_id=bench_split(keys).id)
+
+    scopes: list[BenchScope] = []
+    for dataset, keys in sorted(groups.items(), key=lambda group: group[0] or ""):
+        a, b = (narrowed(m, keys) for m in graded.members)
+        scopes.append(
+            BenchScope(
+                dataset=dataset,
+                rows=len(keys),
+                origin=level(graded.origin, keys),
+                selected=level(graded.selected, keys),
+                vs_origin=None
+                if a is None or b is None or graded.vs_origin is None
+                else pair_on_bench(a, b, sample_keys=keys, instrument_id=instrument_id),
+            )
+        )
+    return scopes
 
 
 def bench_members(
@@ -250,14 +321,7 @@ def bench_members(
     *,
     line: BenchLine,
 ) -> tuple[MemberRows | None, MemberRows | None]:
-    graded = _grade_bench(stores, passes, scorer, line)
-
-    def member(bench_pass: BenchPass | None, read: PassReading | None) -> MemberRows | None:
-        if bench_pass is None or read is None or read.reading is None:
-            return None
-        return bench_member(line.hop, bench_pass, read, instrument_id=line.instrument_id)
-
-    return member(passes.origin, graded.origin), member(graded.selected_pass, graded.selected)
+    return _grade_bench(stores, passes, scorer, line).members
 
 
 def _standing_pass(passes: BenchPasses, run: LineRun) -> BenchPass | None:
@@ -267,23 +331,22 @@ def _standing_pass(passes: BenchPasses, run: LineRun) -> BenchPass | None:
 
 
 def _grade_bench(stores: Stores, passes: BenchPasses, scorer: Scorer, line: BenchLine) -> _Graded:
-    read = partial(read_pass, stores, scorer=scorer, tolerance=passes.tolerance)
+    read = partial(_read_pass, stores, scorer=scorer, tolerance=passes.tolerance)
+    member = partial(_bench_member, (line.hop,), instrument_id=line.instrument_id)
     origin = read(passes.origin)
+    a = member(origin)
     selected_pass = _standing_pass(passes, line.run)
     if selected_pass is None:
-        return _Graded(origin, None, None, None)
+        return _Graded(origin, None, (a, None), None)
     # One pass read twice is one member: the pair says `same_individual`, never a 0.0 lift.
     selected = origin if selected_pass == passes.origin else read(selected_pass)
-    if origin.reading is None or selected.reading is None:
-        return _Graded(origin, selected_pass, selected, None)
-    instrument_id = line.instrument_id
+    b = member(selected)
+    if a is None or b is None:
+        return _Graded(origin, selected, (a, b), None)
     vs_origin = pair_on_bench(
-        bench_member(line.hop, passes.origin, origin, instrument_id=instrument_id),
-        bench_member(line.hop, selected_pass, selected, instrument_id=instrument_id),
-        sample_keys=passes.origin.sample_keys,
-        instrument_id=instrument_id,
+        a, b, sample_keys=passes.origin.sample_keys, instrument_id=line.instrument_id
     )
-    return _Graded(origin, selected_pass, selected, vs_origin)
+    return _Graded(origin, selected, (a, b), vs_origin)
 
 
 def _reads_before(session: Session) -> int:
@@ -304,29 +367,57 @@ async def score_on_bench(
     round_num: int,
     cb: RunCallbacks,
 ) -> BenchPass:
-    sp_hash = search_point.sp_hash(session.pipeline_schema)
-    bench = list(session.scoring.require_partition().bench)
-    # Counted before the send, so the pass is never one of its own readers.
-    reads_before = _reads_before(session)
     # No `round=` on the bracket: it would move the dashboard's round back to the one being graded.
     cb.on_phase(
         CampaignPhase.BENCH,
         "enter",
         view=BenchEnterView(
-            subject=subject, label=label, sp_hash=sp_hash, round=round_num, rows=len(bench)
+            subject=subject,
+            label=label,
+            sp_hash=search_point.sp_hash(session.pipeline_schema),
+            round=round_num,
+            rows=len(session.scoring.require_partition().bench),
         ),
     )
     try:
-        scored = await score_search_point(
-            search_point,
-            bench,
-            session,
-            label=MeasurementRole.BENCH,
-            measured=None,
-            slot=ArmSlot(NO_ROUND_SLOT, 0, individual_id),
+        return await _pass_on_bench(
+            session, search_point, individual_id=individual_id, round_num=round_num
         )
     finally:
         cb.on_phase(CampaignPhase.BENCH, "exit")
+
+
+async def member_on_bench(
+    session: Session,
+    search_point: JobSearchPoint,
+    *,
+    path: CyclePath,
+    individual_id: str,
+    round_num: int,
+) -> MemberRows | None:
+    """A pass outside the line's record, read on the line's rule."""
+    taken = await _pass_on_bench(
+        session, search_point, individual_id=individual_id, round_num=round_num
+    )
+    scorer = session.scoring.require_scorer()
+    read = _read_pass(session.store, taken, scorer, tolerance=_tolerance(session))
+    return _bench_member(path, read, instrument_id=session.instrument_id)
+
+
+async def _pass_on_bench(
+    session: Session, search_point: JobSearchPoint, *, individual_id: str, round_num: int
+) -> BenchPass:
+    bench = list(session.scoring.require_partition().bench)
+    # Counted before the send, so the pass is never one of its own readers.
+    reads_before = _reads_before(session)
+    scored = await score_search_point(
+        search_point,
+        bench,
+        session,
+        label=MeasurementRole.BENCH,
+        measured=None,
+        slot=ArmSlot(NO_ROUND_SLOT, 0, individual_id),
+    )
     stop: PassStop | None = None
     if scored.stopped is not None:
         signal = scored.signal
@@ -339,12 +430,13 @@ async def score_on_bench(
     return BenchPass(
         round=round_num,
         candidate_id=individual_id,
-        sp_hash=sp_hash,
+        sp_hash=search_point.sp_hash(session.pipeline_schema),
         cells=scored.cells,
         sample_keys=[s.key for s in bench],
         stop=stop,
         scorer_id=session.scoring.require_scorer().id,
         reads_before=reads_before,
+        measured_datasets={s.key: s.measured_dataset for s in bench if s.measured_dataset},
     )
 
 
@@ -369,7 +461,7 @@ def graded(
 ) -> None:
     """The one write a line's passes are folded from: a pass no call here follows is lost with the process."""
     tolerance = _tolerance(session)
-    read = read_pass(
+    read = _read_pass(
         session.store, bench_pass, session.scoring.require_scorer(), tolerance=tolerance
     )
     cb.on_phase(
@@ -414,7 +506,9 @@ async def grade_round_selection(
 
 
 def _with_selection(passes: BenchPasses, taken: BenchPass) -> BenchPasses:
-    return passes.model_copy(update={"selections": {**passes.selections, taken.round: taken}})
+    return passes.model_copy(
+        update={"selections": {**passes.selections, taken.candidate_id: taken}}
+    )
 
 
 def reserve_selection_pass(cycle: Cycle, session: Session) -> None:
@@ -488,6 +582,7 @@ async def bench_selection(
             stop=PassStop(cause=reason, warning=None),
             scorer_id=session.scoring.require_scorer().id,
             reads_before=_reads_before(session),
+            measured_datasets=origin.measured_datasets,
         )
     graded(cb, session, selected, subject="selected", label=picked.selected_labels[0])
     return _with_selection(banked, selected)

@@ -41,9 +41,9 @@ def main() -> int:
     )
 
     # `pyproject.toml::package-data` decides this, and a typo there drops a whole tree silently.
-    bench = paths.benchmark_datasets_root()
+    bench = paths.install_datasets_root()
     assert bench.is_dir(), f"benchmark definitions absent from the wheel: {bench}"
-    assert (bench / "promptpotter-self" / "campaign.yaml").is_file(), (
+    assert (bench / "promptpotter-self" / "panel" / "dataset.yaml").is_file(), (
         f"{bench} exists but carries no dataset definitions"
     )
     assert paths.PACKAGE_ROOT in bench.parents or bench.is_relative_to(paths.PACKAGE_ROOT), (
@@ -78,7 +78,7 @@ def main() -> int:
 
     store = build_stores(default_identity(), projects_root=paths.DEFAULT_PROJECTS_ROOT)
     assert store.base_dir.is_relative_to(home_path), f"store rooted at {store.base_dir}"
-    assert store.benchmarks_root == bench
+    assert store.install_datasets_root == bench
 
     from promptpotter.main import app
 

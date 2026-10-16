@@ -8,12 +8,13 @@ from typing import Any, Literal, NamedTuple
 
 from pydantic import Field, ValidationError
 
+from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.jobs.quota import next_launch_ceiling
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
-from promptpotter.application.runner.campaign_result import read_cycle_bench
+from promptpotter.application.runner.campaign_result import cycle_bench
 from promptpotter.domain.backend import ServedBackpressure
 from promptpotter.domain.bench import BenchScore
-from promptpotter.domain.campaign import Campaign, ceiling_meter
+from promptpotter.domain.campaign import ceiling_meter
 from promptpotter.domain.cycle_listing import RunStatus
 from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop
 from promptpotter.domain.dashboard_rows import RunLimits, ServedRound, served_rounds
@@ -282,19 +283,20 @@ class _Standing(NamedTuple):
 
 
 def binding_run_limits(
-    stores: Stores, hop: CycleHop, campaign: Campaign | None, run: RunState
+    stores: Stores, hop: CycleHop, config: CampaignConfig | None, run: RunState
 ) -> RunLimits | None:
     """``None`` on a cycle that has declared no wiring — one still in check-in."""
-    wiring = scan_ledger_run_wiring(ledger_chain(CycleDir(cycle_dir_for(stores.base_dir, hop))))
-    return None if wiring is None else _binding(stores, hop, campaign, run, wiring.run_limits)
+    wiring = scan_ledger_run_wiring(
+        ledger_chain(CycleDir(cycle_dir_for(stores.base_dir, hop)), moment=None)
+    )
+    return None if wiring is None else _binding(stores, hop, config, run, wiring.run_limits)
 
 
 def _binding(
-    stores: Stores, hop: CycleHop, campaign: Campaign | None, run: RunState, declared: RunLimits
+    stores: Stores, hop: CycleHop, config: CampaignConfig | None, run: RunState, declared: RunLimits
 ) -> RunLimits:
     limits = declared
-    if campaign is not None and not run.producer.appending:
-        config = resolve_campaign_config(stores, campaign, hop)
+    if config is not None and not run.producer.appending:
         limits = limits.model_copy(
             update={
                 "ceiling": next_launch_ceiling(config, stores=stores, hop=hop),
@@ -307,9 +309,11 @@ def _binding(
 def _remainder(
     stores: Stores, hop: CycleHop, limits: RunLimits | None, meter: CeilingMeter | None
 ) -> ForkRemainder:
-    chain = ledger_chain(CycleDir(cycle_dir_for(stores.base_dir, hop)))
+    chain = ledger_chain(CycleDir(cycle_dir_for(stores.base_dir, hop)), moment=None)
     return ForkRemainder.of(
-        rounds_closed=closed_after_origin(list(stores.campaigns.standing_rounds(hop).rounds)),
+        rounds_closed=closed_after_origin(
+            list(stores.campaigns.standing_rounds(hop, moment=None).rounds)
+        ),
         max_rounds=None if limits is None else limits.max_rounds,
         metered_usd=None
         if meter is None
@@ -321,10 +325,11 @@ def _remainder(
 def fork_remainder(stores: Stores, hop: CycleHop) -> ForkRemainder:
     campaign = stores.campaigns.load_campaign(hop.campaign_id)
     run = derive_run_state(cycle_dir_for(stores.base_dir, hop))
+    config = None if campaign is None else resolve_campaign_config(stores, campaign, hop)
     return _remainder(
         stores,
         hop,
-        binding_run_limits(stores, hop, campaign, run),
+        binding_run_limits(stores, hop, config, run),
         None if campaign is None else ceiling_meter(campaign.arm),
     )
 
@@ -494,7 +499,8 @@ def served_dashboard(
         )
     if at is not None:
         return _serve(state, run=run, meter=meter, standing=None)
-    limits = _binding(stores, hop, campaign, run, state.run_limits)
+    config = None if campaign is None else resolve_campaign_config(stores, campaign, hop)
+    limits = _binding(stores, hop, config, run, state.run_limits)
     armed = standing_controls(cycle_path)
     return _serve(
         state,
@@ -507,7 +513,9 @@ def served_dashboard(
             verify=scan_ledger_verify(CycleLayout(cycle_path).ledger),
             verify_stale_after=verify_stale_after(cycle_path),
             fork_remainder=_remainder(stores, hop, limits, meter),
-            bench_score=None if campaign is None else read_cycle_bench(stores, campaign, hop),
+            bench_score=None
+            if campaign is None or config is None
+            else cycle_bench(stores, campaign, hop, config),
             at=time.time(),
         ),
     )

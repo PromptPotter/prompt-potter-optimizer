@@ -11,7 +11,12 @@ from promptpotter.application.runner.output import (
     write_log_md,
     write_review_md,
 )
-from promptpotter.application.runner.round import announce_opening, announce_population
+from promptpotter.application.runner.round import (
+    announce_opening,
+    announce_population,
+    bank_walk,
+    round_plan,
+)
 from promptpotter.domain.paired_reading import ReadingState
 from promptpotter.domain.results import OverlapReading, RoundResult
 
@@ -19,14 +24,16 @@ from promptpotter.domain.results import OverlapReading, RoundResult
 async def run_generation_only_round(ctx: RoundContext) -> None:
     cycle, cb, round_num = ctx.cycle, ctx.callbacks, ctx.round_num
     session = cycle.session
-    cb.set_round(round_num)
     cb.on_round_entered(round_num)
 
-    opening = announce_opening(ctx)
+    walk = round_plan(cycle.optimizer).walk(cycle.population)
+    opening = announce_opening(ctx, walk)
     population = await propose_l1_population(
         NodeContext[L1GenerateKnobs](ctx, "l1_generate"), potter_state(cycle.working_state)
     )
     candidates = population.proposals
+    # Banked unmeasured: the resume after `--diag` measures these very arms.
+    bank_walk(ctx, walk, candidates)
     announce_population(ctx, opening, candidates)
 
     generated = RoundResult(

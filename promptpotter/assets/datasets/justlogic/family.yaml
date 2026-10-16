@@ -1,0 +1,92 @@
+source:
+  hub: michaelchenkj/JustLogic
+  rev: 98603ec6ea79c5da6c2e2c45f0ada2bfedad1e98
+  recipe: justlogic
+  split: train
+  train_per_depth: 200
+  held_per_depth: 300
+
+pipeline:
+  description: >-
+    JustLogic deductive-reasoning benchmark (Chen 2025), depths 2-4 (iid mix). 3-class TRUE/FALSE/Uncertain
+    claim evaluation against premises. Routes through TermNorm /matches with the llm_only pipeline.
+  # One model under two ROUTES (`:nitro` and plain), and the `model` axis stays closed on it: this is
+  # the L4 inner instrument, and opening the axis would let L1 flip the host while reporting a prompt,
+  # which is the confound `route_order` is forbidden for, wearing a model name.
+  available_models:
+    - openai/gpt-oss-20b:nitro
+    - openai/gpt-oss-20b
+  nodes:
+    llm_only:
+      description: >-
+        Direct LLM generation on the TermNorm backend at JustLogic depths 2-4 (iid mix) — a wider inner
+        instrument than d23. ':nitro' for throughput. Adds depth 4 below the d2-3
+        cut to lower the origin and widen the optimizable band. The 2026-07-13 recon read d3+ as collapsed-to-Uncertain
+        and called it a capability wall; this cut RE-TESTS that as an addressable hedging behaviour the
+        loop can correct in the first 2-3 rounds — 'Uncertain' is reserved for genuine indeterminacy, never
+        a hedge against difficulty.
+      config:
+        provider: openrouter
+        output_schema:
+          type: object
+          properties:
+            reasoning:
+              type: string
+              description: At most five short steps, one line each.
+            answer:
+              type: string
+              enum:
+                - 'TRUE'
+                - 'FALSE'
+                - Uncertain
+              description: The label.
+          required:
+            - reasoning
+            - answer
+          additionalProperties: false
+        answer_field: answer
+
+campaign:
+  display_metric: ability
+  scoring:
+    per_sample: label_match(predicted, ground_truth)
+    # Cost is charged in TOKENS, not seconds. Latency is `tokens x provider_rate`, and only the
+    # first factor is the prompt's: measured on one fixed cell set, the rate halved between two
+    # runs (median 2.94s -> 1.50s, -49%) while tokens moved +7%. Charging seconds therefore
+    # charged the weather, and because round 0 replays cached rows carrying an OLDER run's
+    # `step_timings`, the origin alone paid it — 31 of its 40 cells sat above the 2s knee, so it
+    # scored 0.371 against 0.500 accuracy while every same-day candidate scored ~1.00x. That
+    # inverted the ranking: the origin came LAST for being measured on a slow day.
+    #
+    # 692 is C0's median `tokens` (input+output) on this dataset+model (40 cells, 2026-09-24), so
+    # the origin sits at ~1.0x and only GROWTH past it is charged — which is what we want priced,
+    # since the winning prompts grew +7%, +7%, +23% across three rounds while accuracy stayed flat.
+    # Re-pin it on any model or origin change; it is a typed constant standing in for an
+    # origin-relative term.
+    # BOUNDED: the length factor falls from 1.0 at the pin toward 0.92 and never below, so length
+    # can cost a cell at most 8% of its worth and accuracy dominates — the guarantee is
+    # `docs/concepts/scoring-and-memory.md` § Composite. Smooth, so no token is a cliff.
+    # `per_cell` rather than folding it into `per_sample`: a correct-but-expensive answer must stay
+    # a HIT, or L1 is sent to repair reasoning that was right.
+    per_cell: fitness * (0.92 + 0.08 * 692.0 / max(692.0, tokens))
+  # The bench set the headline is read on; the search draws only the rest of the bank. An L4
+  # inner cell ignores it — its drawn rows are its whole bank.
+  # `demo` opens the shot surface, CAPO's `few_shot` and potter's `l1_generate.k_max` alike.
+  # One split for both cuts, so `justlogic/d234-held`'s search and demo pools are `d234`'s rows; its
+  # bench is the 30 it ranks plus its bank's 900 bench-only rows (`d234-held/README.md`).
+  dataset_split:
+    bench: 30
+    demo: 50
+  optimization:
+    max_rounds: 5
+    # Potter's knobs — the overlay on its manifest's nodes (assets/optimizers/potter/).
+    nodes:
+      adaptive_queue:
+        config:
+          sp_budget_round: 34
+      l1_generate:
+        config:
+          n_variants: 3
+      pobb:
+        config:
+          epsilon: 0.3

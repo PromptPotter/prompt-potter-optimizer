@@ -219,7 +219,7 @@ class CommandDispatcher:
         campaign_id, cycle_id = hop.campaign_id, hop.cycle_id
         campaign = owned_campaign(self.stores, campaign_id)
         cycle_dir = self.stores.campaigns.cycle_dir(hop)
-        if self.stores.campaigns.load(hop) is None:
+        if self.stores.campaigns.load(hop, moment=None) is None:
             raise NotFoundError(
                 f"cycle not found: {campaign_id}/{cycle_id}", code="command_target_not_found"
             )
@@ -270,7 +270,7 @@ class CommandDispatcher:
         campaign_id = call.payload.checkin_campaign_id
         campaign = owned_campaign(self.stores, campaign_id)
         cycle_dir = self.stores.campaigns.cycle_dir(campaign.root_hop)
-        if self.stores.campaigns.load(campaign.root_hop) is None:
+        if self.stores.campaigns.load(campaign.root_hop, moment=None) is None:
             raise NotFoundError(
                 f"check-in cycle not found: {campaign_id}/{campaign.root_cycle_id}",
                 code="command_target_not_found",

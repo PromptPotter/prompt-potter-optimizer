@@ -98,7 +98,7 @@ async def l1_generate(
         build_l1_response_schema(
             pipeline_schema,
             citable_fields=citable,
-            inner_optimizer=bundle.inner_optimizer,
+            inner_cells=bundle.inner_cells,
             silent_panels=breakdown.silent,
             schema_field_rename=schema_field_rename,
             n_variants=n_variants,

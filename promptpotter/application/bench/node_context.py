@@ -21,6 +21,7 @@ from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.results import CandidateProposal, round_document_digest
 from promptpotter.domain.run_records import RoundProposedRecord
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.infrastructure.llm.telemetry import at_round
 from promptpotter.shared.errors import SendRefusedError, graceful
 from promptpotter.shared.measurement_context import (
     NO_ROUND_SLOT,
@@ -48,7 +49,26 @@ if TYPE_CHECKING:
     from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.domain.wounds import ValidationFailure
 
-__all__ = ["NodeContext", "measure_as_parent"]
+__all__ = ["NodeContext", "bank_proposals", "measure_as_parent"]
+
+
+def bank_proposals(
+    round_: RoundContext, proposals: Sequence[CandidateProposal], *, walk: str, submitted: bool
+) -> None:
+    """Banked beside what they were composed from, so a resume asks whether that round still says the same."""
+    ledger = round_.cycle.session.state.ledger
+    if round_.detached or ledger is None:
+        return
+    rounds = round_.cycle.rounds
+    ledger.append(
+        RoundProposedRecord(
+            round=round_.round_num,
+            consumed=round_document_digest(rounds[-1]) if rounds else "",
+            proposals=list(proposals),
+            submitted=submitted,
+            walk=walk,
+        )
+    )
 
 
 async def measure_as_parent(
@@ -94,21 +114,6 @@ class NodeContext[K: StrictModel]:
             return None
         proposed = session.store.campaigns.round_proposals(session.hop, self.round_num)
         return None if proposed is None else list(proposed.proposals)
-
-    def bank_proposals(self, proposals: Sequence[CandidateProposal], *, submitted: bool) -> None:
-        """Banked beside what they were composed from, so a resume asks whether that round still says the same."""
-        ledger = self._round.cycle.session.state.ledger
-        if self._round.detached or ledger is None:
-            return
-        rounds = self.rounds
-        ledger.append(
-            RoundProposedRecord(
-                round=self.round_num,
-                consumed=round_document_digest(rounds[-1]) if rounds else "",
-                proposals=list(proposals),
-                submitted=submitted,
-            )
-        )
 
     def restate(self, payload: RoundPayload) -> None:
         cycle = self._round.cycle
@@ -322,7 +327,9 @@ class NodeContext[K: StrictModel]:
         )
 
     async def show_next_round(self) -> None:
-        await self.optimizer.runtime.show_round(replace(self._round, round_num=self.round_num + 1))
+        shown = self.round_num + 1
+        with at_round(shown):
+            await self.optimizer.runtime.show_round(replace(self._round, round_num=shown))
 
     def decide(
         self, kind: str, inputs: dict[str, Any], outcome: Any, *, data: dict[str, Any] | None = None

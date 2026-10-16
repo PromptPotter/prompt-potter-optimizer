@@ -269,7 +269,7 @@ def billed_spend(ledgers: Iterable[Path]) -> UserSpend:
 
 def history_spend(cycle_dir: CycleDir) -> UserSpend:
     """A hold in the prefix is its owner's: a bill past the cut may close it."""
-    *prefix, own = ledger_chain(cycle_dir)
+    *prefix, own = ledger_chain(cycle_dir, moment=None)
     total = billed_spend([own.path])
     for span in prefix:
         billed, _ = LedgerIndex.of(span.path, _SPEND_FOLDS).view(_Billed, span.until)

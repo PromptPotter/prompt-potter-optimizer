@@ -115,6 +115,8 @@ high-water, as its own signal.
 round's `AbilityReading.caveat` for the scale states, the candidate row for the 0% floor — is
 stated on that enum's members. A sound round can carry a pinned arm, and a pinned arm can sit on a sound ruler.
 
+- **Disjoint datasets** (`disjoint_scopes`, both scopes, checked first). Each `RulerScope` is its own
+  scale, so θ over several datasets' cells mixes scales; a lift paired on shared cells still holds.
 - **The 0% floor** (`floor_pinned`, per-ARM). An arm that misses every cell gives the fit no
   information, so θ pins to the same constant regardless of which samples it saw — every zero arm
   reads identically. At 0% the column is a floor, not a measurement, and any lift computed from it
@@ -164,8 +166,8 @@ stated on that enum's members. A sound round can carry a pinned arm, and a pinne
   own answer, and it is not θ.** `RoundResult.overlap` (`domain/results.py::OverlapReading`) reads
   C0 and each individual the optimizer has since declared its pick — the best-so-far the bench
   grades, by the rule above, never a composite high-water (`domain/results.py::best_line`, the
-  same line for every optimizer) — on the ORIGIN PANEL (`domain/results.py::origin_panel`) — cells the
-  origin answered, fixed for the life of the cycle, each new best topped up onto them once. Fixed because a set re-chosen from what the line happened to share CONTRACTED as the
+  same line for every optimizer) — on the ORIGIN PANEL (`domain/results.py::origin_panel`) — per
+  dataset, the cells the origin answered, or the line's where C0 sat none, every member topped up onto them once. Fixed because a set re-chosen from what the line happened to share CONTRACTED as the
   line grew, so consecutive rounds' bars answered different questions and a winner that shared
   too little simply had no bar. It is a rate, not an ability, so it needs
   no ruler and no adjustment — which is the point: it is what remains readable when the scale
@@ -243,7 +245,7 @@ provisional, and say so rather than passing it on.
   `p_floor` is above the spec's `alpha`, whatever the t interval says
   (`domain/paired_reading.py::interval_side`) — Student-t over a few `{-1, 0, 1}` differences
   reads below what any exact test on them can, so a round separates only where enough cells
-  differ to carry it. `exact_paired_reading` the `decision-bank` verb, `min_detectable_effect` and `panel_precision`
+  differ to carry it. `min_detectable_effect` and `panel_precision` serve
   the reads; none reaches anything the election calls. One member crossed over: `sign_posterior` bounds the ELIMINATION threshold
   (`candidate-elimination.md` § The θ rule, step 4), because a bar is absolute and a rank is not.
   The election still ranks on the unbounded posterior, and deliberately — bounding it moved a
@@ -266,9 +268,9 @@ re-deriving a different one from a grown archive, and a fork inherits its parent
 **On the recursion the scale is the SPAWNER's, not the cell's.** An inner cell's evidence epoch
 hides everything banked before it started, so the only arms it could fit against are its own —
 the δ would come out of the treatment under test, and byte-identical origin rows would read θ
-a whole winning margin apart. `application/runner/inner/ruler.py` fits it once at the outer
-round boundary, pooled over every arm that dataset has banked, and hands it down through
-instrument mode; the cell reads on it rather than deriving one. Same anchor for every candidate
+a whole winning margin apart. `application/runner/inner/ruler.py` anchors one per seat dataset at
+the outer round boundary and extends it there each round over every arm that dataset has banked,
+handing it down through instrument mode; the cell reads on it rather than deriving one. Same anchor for every candidate
 measured against a cell, so the origin level genuinely cancels in `variant − origin`.
 
 ## What this is for — separability
@@ -410,7 +412,7 @@ discordance-potential samples.
 is what hides it.** Where the parent's base rate is low enough that the candidate misses its
 MISS stratum too, miss-first also buys cells that cannot discriminate; but they near-tie rather than
 tie, and the k=4 probe above is then the entire discordant width — one cell. Ties narrow both SEs, so
-`p_best` reads DECISIVE rather than undecided and the gate fires on every arm (`sealqa-longseal-12`:
+`p_best` reads DECISIVE rather than undecided and the gate fires on every arm (`sealqa/longseal-12`:
 four cut at `elimination_n_min`, identical to six decimals). Expect a confident cut, never a blind
 one, and read `n_discordant` on the p_best stream to tell the two doors apart.
 

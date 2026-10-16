@@ -112,6 +112,9 @@ pipelines:
     - population
   initial_population:
     - capo_init
+# Alg. 1 races the initial population together with the first offspring (lines 3-12): round 1
+# walks `initial_population`, then `default` mates from what it made.
+initial_population_walks: before_default
 resolved_prompts:
   # App. D.3, Table 9: "CAPO cross-over meta-prompt template".
   capo_crossover/1:

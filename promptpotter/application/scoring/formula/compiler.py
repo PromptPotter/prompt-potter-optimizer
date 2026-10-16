@@ -251,6 +251,9 @@ _CHANNEL_READERS: dict[str, Callable[[MeasuredCell, float | None], float | None]
     # `cost_s`, never `total_time`: a replayed row's `total_time` is zeroed.
     "latency": lambda facts, _fitness: facts.cost_s,
     "unworked": lambda facts, _fitness: facts.pipeline.unworked_s,
+    "bench_lift": lambda facts, _fitness: facts.pipeline.mean_bench_lift,
+    "bench_origin": lambda facts, _fitness: facts.pipeline.inner_bench_origin_level,
+    "bench_final_lift": lambda facts, _fitness: facts.pipeline.inner_bench_final_lift,
     "lift": lambda facts, _fitness: facts.pipeline.mean_round_delta,
     "origin": lambda facts, _fitness: facts.pipeline.inner_origin_level,
     "final_lift": lambda facts, _fitness: facts.pipeline.inner_final_lift,
@@ -296,7 +299,12 @@ CELL_TERMS: dict[str, CellTerm] = {
     "unworked": CellTerm(
         "low", "Seconds the cell sat blocked (suspend, rate-limit queue).", "anchored"
     ),
-    "lift": CellTerm("high", "L4: the inner campaign's mean lift over its own origin."),
+    "bench_lift": CellTerm(
+        "high", "L4: the inner campaign's mean lift over its origin on its held-out rows."
+    ),
+    "bench_origin": CellTerm("high", "L4: the inner origin's headline on the held-out rows."),
+    "bench_final_lift": CellTerm("high", "L4: the held-out lift the inner campaign ended on."),
+    "lift": CellTerm("high", "L4: the inner campaign's mean θ lift over its own origin."),
     "origin": CellTerm("high", "L4: the inner campaign's origin level."),
     "final_lift": CellTerm("high", "L4: the lift the inner campaign ended on."),
     "peak_lift": CellTerm("high", "L4: the best lift the inner campaign reached."),

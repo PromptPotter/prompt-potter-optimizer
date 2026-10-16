@@ -228,10 +228,9 @@ def draft_wire(stores: Stores, draft: DraftCampaign) -> DraftCampaignWire:
     )
 
 
-def default_campaign_json(draft: DraftCampaign) -> dict[str, Any]:
+def default_campaign_block(draft: DraftCampaign) -> dict[str, Any]:
     """Without the node overlay: the mint splits that onto the per-campaign snapshot."""
-    config = default_campaign_config(draft)
-    return {"campaign_config": config.model_dump(mode="json", exclude_defaults=True)}
+    return default_campaign_config(draft).model_dump(mode="json", exclude_defaults=True)
 
 
 def draft_task_context(draft: DraftCampaign) -> TaskDecomposition:

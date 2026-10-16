@@ -1,9 +1,8 @@
-"""Build the release wheel: stage the two derived asset trees, then ``uv build``.
+"""Build the release wheel: stage the exported dashboard, then ``uv build``.
 
-``webapp/out`` and ``datasets/`` are build artifacts ``pyproject.toml`` declares as package-data:
-unstaged, its globs match nothing QUIETLY and the wheel serves an API with no dashboard or dataset.
-Datasets are selected by ``git ls-files``, so ``.gitignore`` stays the one cache/definition split.
-A missing ``webapp/out`` is a hard error: build the webapp first, or say ``--no-webapp``.
+``webapp/out`` is a build artifact ``pyproject.toml`` declares as package-data: unstaged, its glob
+matches nothing QUIETLY and the wheel serves an API with no dashboard. A missing ``webapp/out`` is a
+hard error: build the webapp first, or say ``--no-webapp``.
 """
 
 from __future__ import annotations
@@ -20,8 +19,6 @@ _REPO = Path(__file__).resolve().parents[1]
 _ASSETS = _REPO / "promptpotter" / "assets"
 _WEBAPP_SRC = _REPO / "webapp" / "out"
 _WEBAPP_DST = _ASSETS / "webapp"
-_DATASETS_DST = _ASSETS / "benchmarks"
-_STAGED_BANNER = "<!-- generated from datasets/ by scripts/build_release.py — do not edit -->"
 
 
 def _clear(dst: Path) -> None:
@@ -34,41 +31,6 @@ def stage_webapp() -> int:
     _clear(_WEBAPP_DST)
     shutil.copytree(_WEBAPP_SRC, _WEBAPP_DST, ignore=shutil.ignore_patterns("*.map"))
     return sum(1 for p in _WEBAPP_DST.rglob("*") if p.is_file())
-
-
-def stage_datasets() -> int:
-    listing = subprocess.run(
-        ["git", "ls-files", "-z", "datasets/"],
-        cwd=_REPO,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    rel_paths = [p for p in listing.stdout.split("\0") if p]
-    _clear(_DATASETS_DST)
-    for rel in rel_paths:
-        src = _REPO / rel
-        if not src.is_file():  # tracked but deleted in the working tree
-            continue
-        # A staged `CLAUDE.md` is found by Grep with links that resolve nowhere; a `.py` under `assets/` the complexity ledger refuses.
-        if src.name == "CLAUDE.md" or src.suffix == ".py":
-            continue
-        dst = _DATASETS_DST / Path(rel).relative_to("datasets")
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src, dst)
-        # NOT applied to `task_description.md`: that file reaches the model, where a banner is prompt text.
-        if dst.name == "dataset.md":
-            dst.write_text(
-                f"{_STAGED_BANNER}\n\n{src.read_text(encoding='utf-8')}", encoding="utf-8"
-            )
-    (_DATASETS_DST / "README.md").write_text(
-        f"{_STAGED_BANNER}\n\n# Staged benchmark definitions\n\n"
-        "Generated copies of the tracked files under `datasets/`, written by\n"
-        "`scripts/build_release.py::stage_datasets` so the wheel ships them. **Edit the source, "
-        "never this tree** — the next release build overwrites it whole.\n",
-        encoding="utf-8",
-    )
-    return sum(1 for p in _DATASETS_DST.rglob("*") if p.is_file())
 
 
 def main() -> int:
@@ -99,8 +61,6 @@ def main() -> int:
         return 1
     else:
         print(f"webapp    : {stage_webapp()} files -> {_WEBAPP_DST.relative_to(_REPO)}")
-
-    print(f"benchmarks: {stage_datasets()} files -> {_DATASETS_DST.relative_to(_REPO)}")
 
     if args.stage_only:
         return 0
@@ -162,7 +122,9 @@ def _wheel_problem(wheel: Path, *, expect_webapp: bool) -> tuple[str | None, int
 
     # One probe per package-data glob: a tree-level probe passes on a glob that ships one of its three files.
     required = {
-        "assets/benchmarks": "promptpotter/assets/benchmarks/",
+        "assets/datasets/**/*.yaml": "promptpotter/assets/datasets/defaults.yaml",
+        "assets/datasets/**/*.md": "promptpotter/assets/datasets/justlogic/task.md",
+        "assets/datasets/**/*.json": "promptpotter/assets/datasets/email-tagging/rows.json",
         "assets/optimizers/*/*.yaml": "promptpotter/assets/optimizers/potter/pipeline.yaml",
         "assets/optimizers/*/*.json": "promptpotter/assets/optimizers/potter/resolved_schemas.json",
         "assets/checkin/*.yaml": "promptpotter/assets/checkin/pipeline.yaml",
@@ -176,16 +138,12 @@ def _wheel_problem(wheel: Path, *, expect_webapp: bool) -> tuple[str | None, int
     ]
     if missing:
         return (
-            f"{wheel.name} is missing {', '.join(missing)}. The files were staged, so "
-            "this is a package-data glob in pyproject.toml that matches nothing.",
+            f"{wheel.name} is missing {', '.join(missing)}: a package-data glob in "
+            "pyproject.toml matches nothing.",
             0,
         )
-    # email-tagging's caches are hand-authored demo samples, the one deliberate exception (see .gitignore).
-    leaked = [n for n in names if n.endswith("cache.json") and "email-tagging" not in n]
-    if leaked:
-        return f"{wheel.name} carries HuggingFace caches: {leaked}", 0
 
-    # `.py` is exempt only outside `assets/`: `assets/benchmarks` ships whatever `git ls-files datasets/` returns.
+    # `.py` is exempt only outside `assets/`: a package-data glob ships whatever sits under it.
     payload = [
         n
         for n in names

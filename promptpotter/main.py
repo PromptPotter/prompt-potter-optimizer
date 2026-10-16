@@ -57,7 +57,7 @@ def _telegram_shutdown_notice(registry: JobRegistry) -> None:
     """A clean exit 0 leaves ``Restart=on-failure`` quiet; a SIGKILL or OOM never reaches this hook."""
     running = registry.list_running()
     if running:
-        interrupted = ", ".join(f"{job.hop.campaign_id}/{job.hop.cycle_id}" for job in running)
+        interrupted = ", ".join(job.what for job in running)
         notify_operator(
             f"⚠ {settings.BRAND_SERVICE_NAME} stopped with {len(running)} run(s) in flight: "
             f"{interrupted}\nResume from the campaign once it is back up."

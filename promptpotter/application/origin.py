@@ -25,7 +25,6 @@ from promptpotter.application.scoring.formula import (
 from promptpotter.application.scoring.metrics import INVALID_SCORES, compute_composite_fitness
 from promptpotter.application.scoring.query_loop import ArmSlot
 from promptpotter.application.scoring.search_point_scorer import score_search_point
-from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase
@@ -44,6 +43,9 @@ from promptpotter.domain.run_records import (
 )
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
+from promptpotter.infrastructure.store.dataset_access import ORIGIN_FILE
+from promptpotter.infrastructure.store.layout import CycleLayout
+from promptpotter.infrastructure.store.read_model import Moment
 from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.measurement_context import MeasurementRole
 
@@ -102,7 +104,7 @@ def try_inherit_fork_origin(
         return None
 
     store = session.store.campaigns
-    index = store.load(session.hop)
+    index = store.load(session.hop, moment=None)
     if index is None or index.fork is None or index.parent_cycle_id is None:
         return None
     parent = index.parent_cycle_id
@@ -113,9 +115,11 @@ def try_inherit_fork_origin(
 
     parent_round = closed_round(
         session.store,
-        CycleHop(campaign_id=session.campaign_id, cycle_id=parent),
+        session.hop,
         from_round,
         session.scoring.require_scorer(),
+        # The fork's chain at its mint, its first record: the parent as cut, before any own close.
+        moment=Moment(CycleLayout(store.cycle_dir(session.hop)).ledger, 0),
     )
     if parent_round is None:
         return None
@@ -186,11 +190,11 @@ def resolve_origin_opt_search_point(
     elif dataset_dir is not None and names and has_dataset_prompts(dataset_dir):
         for node_name in names:
             try:
-                template = load_node_prompt(dataset_dir, node_name, "default")
+                template = load_node_prompt(dataset_dir, node_name)
             except FileNotFoundError:
                 continue
             origin = OptSearchPoint.from_prompt_fields(template.prompt_fields()).as_origin(
-                changes_description=f"Origin from {dataset_dir}/prompts/ ({node_name})"
+                changes_description=f"Origin from {dataset_dir}/{ORIGIN_FILE} ({node_name})"
             )
             break
 
@@ -212,13 +216,13 @@ async def establish_campaign_origin(
 ) -> CampaignOrigin:
     resolved_origin = resolve_origin_opt_search_point(
         prompt_node_names=session.pipeline_schema.prompt_node_names(),
-        dataset_dir=session.dataset_config_dir,
+        dataset_dir=None if session.dataset is None else session.dataset.directory,
         seed=seed,
         pipeline_params=session.pipeline_params,
         schema=session.pipeline_schema,
     )
     # The SAME read identity uses; handed in, it could be a value the cycle id never saw.
-    framing = campaign_framing(session.store, campaign_config, session.dataset_name)
+    framing = campaign_framing(session.store, campaign_config, session.dataset)
     pipeline_schema = session.pipeline_schema
     sp = resolved_origin.to_job_search_point(
         schema=pipeline_schema, framing=framing, demo=session.scoring.require_partition().demo

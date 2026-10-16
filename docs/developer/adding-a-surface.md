@@ -214,11 +214,11 @@ The hard half, and the one that has no default. Five questions, each with a cons
 - **What decides whether that row was good — a label, or a number something else produced?**
   That is the ANSWER SHAPE, declared in `extract_experiment` and nowhere else; § The answer shape
   on the same page has what each choice commits you to.
-- **What is the formula?** `campaign.yaml::scoring` — `per_sample` is *was this cell RIGHT*,
+- **What is the formula?** `dataset.yaml::campaign.scoring` — `per_sample` is *was this cell RIGHT*,
   `per_cell` the optional composite of what it was WORTH (latency, cost, reliability), and θ is
   fit on the second. Namespace: [`stable-api.md`](stable-api.md) § 2. **Start with `per_sample`
   alone.** A cost term needs a MEASURED anchor, and the first campaign is what measures it.
-- **What may the optimizer move?** `nodes.{node}.optimizer.param_keys` in `pipeline.yaml`. The
+- **What may the optimizer move?** `nodes.{node}.optimizer.param_keys` in `dataset.yaml::pipeline`. The
   prompt is a lever only if the node declares `prompt_info` — a `remote_http` backend serves that
   over `GET /pipeline`, an `in_process` one must declare it, or every variant would score
   identically as no-skill: run init refuses that shape
@@ -237,7 +237,9 @@ published benchmarks and does not apply to a private backend, but steps 2–4 do
 ### Step 3 — Wire it
 
 The connector file, then the dataset directory
-([`datasets/CLAUDE.md`](../../datasets/CLAUDE.md) § Canonical layout). Every tunable starts at its
+([`promptpotter/assets/datasets/CLAUDE.md`](../../promptpotter/assets/datasets/CLAUDE.md) § Canonical layout). **A dataset file is a
+partial** — owned by that page's section of the name; a new connector's dataset therefore states its
+own `backend_type` and `backend_name`, which the default names for TermNorm. Every tunable starts at its
 **floor**, never its centre —
 [`optimizers/potter/CLAUDE.md`](../../promptpotter/application/optimizers/potter/CLAUDE.md)
 § Origin = conservative floor.
@@ -307,7 +309,7 @@ needs an import the others do not is its own module (`bench.py`), so the rest do
 (`new` / `resume`, which mint or extend a cycle), **lifecycle** (`archive` / `delete` /
 `unarchive` / `reset`), **manifest-edit** (`rename`, which rewrites `campaign.json` in place
 and leaves the tree and every measurement where they are), **diagnostic** (`ab` / `verify` /
-`noise-floor` / `seed-screen` / `decision-bank`, which must not perturb an existing cycle's measurements), or
+`noise-floor` / `seed-screen`, which must not perturb an existing cycle's measurements), or
 **maintenance** (`reindex` / `restamp` / `compact-archive`, which rewrite stored artifacts on
 purpose). A maintenance verb owes two things a diagnostic does not: it is dry-run by default,
 and it refuses while a producer could still be writing what it rewrites

@@ -4,13 +4,12 @@ import logging
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, ClassVar
 
 from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.datasets.authored import dataset_campaign_config
 from promptpotter.application.datasets.draft_build import (
-    default_campaign_json,
+    default_campaign_block,
     draft_task_context,
 )
 from promptpotter.application.datasets.draft_campaign import (
@@ -41,8 +40,10 @@ from promptpotter.domain.campaign import ArmRequest, Campaign
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.launch_limits import LaunchLimits
 from promptpotter.infrastructure.store.dataset_access import (
+    ResolvedDataset,
     declared_backend_type,
-    readable_dataset_dir,
+    declared_pipelines,
+    resolve_dataset,
 )
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import PayloadInvalidError
@@ -76,9 +77,8 @@ def assert_origin_ready(draft: DraftCampaign) -> None:
 class FreshMint:
     verb: ClassVar[str] = "mint"
 
-    dataset_name: str
     # Resolved once, where the request is built (`commands/launching.py::mint_campaign`).
-    dataset_root: Path
+    dataset: ResolvedDataset
     limits: LaunchLimits
     optimization: Mapping[str, Any]
     arm: ArmRequest | None
@@ -89,12 +89,16 @@ class FreshMint:
     def hop(self) -> CycleHop:
         return UNRESOLVED_HOP
 
+    @property
+    def dataset_name(self) -> str:
+        return self.dataset.name
+
     def backend_type(self, stores: Stores) -> str:
-        return declared_backend_type(self.dataset_root)
+        return declared_backend_type(self.dataset.directory)
 
     def dataset_campaign_config(self) -> CampaignConfig:
         return dataset_campaign_config(
-            self.dataset_root, optimization=self.optimization, declared=self.declared
+            self.dataset.directory, optimization=self.optimization, declared=self.declared
         )
 
     def campaign_config(self, stores: Stores) -> CampaignConfig:
@@ -114,7 +118,7 @@ class ExistingCycle:
         return self.campaign.dataset_name
 
     def backend_type(self, stores: Stores) -> str:
-        return declared_backend_type(readable_dataset_dir(stores, self.dataset_name))
+        return declared_backend_type(resolve_dataset(stores, self.dataset_name).directory)
 
     def campaign_config(self, stores: Stores) -> CampaignConfig:
         return resolve_campaign_config(stores, self.campaign, self.hop)
@@ -144,7 +148,7 @@ async def hold_fresh_mint(
             session,
             campaign_config,
             session.samples,
-            campaign_id=fresh_campaign_id(session, campaign_config),
+            campaign_id=fresh_campaign_id(session),
             task_text=request.task_text,
             arm=request.arm,
             limits=request.limits,
@@ -179,17 +183,23 @@ def materialize_and_write_origin(
         ground_truth_col=draft.column_ground_truth,
         order_seed=order_seed,
     )
+    pipeline = committed_pipeline_json(draft)
+    prompt = draft.committed_prompt_fields()
     stores.tenant_datasets.write_committed_dataset(
         draft.slug,
         samples=samples,
         sample_order_seed=order_seed,
         source_file=draft.source_file,
         headers=draft.headers,
-        pipeline_json=committed_pipeline_json(draft),
-        campaign_json=default_campaign_json(draft),
-        task_description=draft.raw_task_description,
-        prompt_default=draft.committed_prompt_fields(),
-        task_context=draft_task_context(draft),
+    )
+    stores.tenant_datasets.write_definition(
+        draft.slug,
+        pipeline=pipeline,
+        campaign=default_campaign_block(draft),
+        description=draft.raw_task_description,
+        framing=draft_task_context(draft),
+        # Every step: one bearing no prompt reads none, and each one bearing one starts here.
+        origin=dict.fromkeys(declared_pipelines(pipeline).get("default", []), prompt),
     )
     persist_origin_candidate_library(stores, draft.slug, draft)
 

@@ -36,7 +36,7 @@ from promptpotter.infrastructure.llm.send_pacing import (
     under_budget,
 )
 from promptpotter.infrastructure.llm.spend_book import CallLabel
-from promptpotter.infrastructure.llm.telemetry import call_priced, emit_token_usage
+from promptpotter.infrastructure.llm.telemetry import claim_call_price, emit_token_usage
 from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache, hash_call
 from promptpotter.shared.errors import OptimizerTimeoutError
 from promptpotter.shared.hashing import shapes_optimizer_prompt
@@ -383,8 +383,8 @@ async def llm_call(
         duration_s = call.elapsed_s()
 
     # A cache hit is metered too, once per campaign: incurred cost stays invariant to cache history.
-    counted = cache_key is not None and call_priced(cache_key)
-    if replayed is not None and not counted:
+    first = cache_key is not None and claim_call_price(cache_key)
+    if replayed is not None and first:
         emit_token_usage(
             node=label,
             kind="optimizer",

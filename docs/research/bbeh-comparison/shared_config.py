@@ -17,6 +17,8 @@ API_BASE = "https://api.groq.com/openai/v1"
 
 # ── Dataset ────────────────────────────────────────────────────────
 HF_DATASET = "BBEH/bbeh"
+# `loaders.py::HF_PINS`'s commit for this repo, copied: Colab cannot import it.
+HF_REVISION = "08e07a803851822c04399782ece3c4a07ce419f9"
 SPLIT_SEED = 42
 # BBEH mini ships 20 examples per task. Every method — PromptPotter and every peer optimizer —
 # trains on the first 10 and tests on the second 10, so the comparison is on ONE test set.
@@ -46,7 +48,7 @@ def load_and_split() -> tuple[list[Record], dict[str, list[Record]]]:
     from datasets import load_dataset
 
     by_task: dict[str, list[Record]] = {}
-    for ex in load_dataset(HF_DATASET)["train"]:
+    for ex in load_dataset(HF_DATASET, revision=HF_REVISION)["train"]:
         if ex["mini"] != 1:
             continue
         record = {"input": ex["input"], "target": ex["target"], "task": ex["task"]}
@@ -77,7 +79,7 @@ def export_results(
 
     ``model`` names the model the run ACTUALLY reached. It is a parameter rather than the
     ``MODEL_ID`` constant because PromptPotter resolves its target from
-    ``datasets/bbeh/pipeline.yaml``, not from this file — stamping the constant reported a model
+    ``bbeh/dataset.yaml::pipeline``, not from this file — stamping the constant reported a model
     the run never called on the single most load-bearing field in the results.
     """
     import json

@@ -2,23 +2,14 @@ from __future__ import annotations
 
 import json
 import logging
-from pathlib import Path
-from typing import Literal
 
 from pydantic import Field
 
 from promptpotter.application.bench.task_context import campaign_framing
-from promptpotter.application.datasets.authored import (
-    dataset_campaign_path,
-    load_dataset_campaign_config,
-)
+from promptpotter.application.datasets.authored import load_dataset_campaign_config
 from promptpotter.application.datasets.loaders import bank_samples, resolve_dataset_items
 from promptpotter.application.datasets.prompts import has_dataset_prompts
-from promptpotter.application.datasets.startability import (
-    DatasetStartBlock,
-    dataset_reading,
-    offered,
-)
+from promptpotter.application.datasets.startability import dataset_reading, offered
 from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.pipeline_resolve import (
     dataset_pipeline_declaration,
@@ -28,13 +19,15 @@ from promptpotter.application.pipeline_resolve import (
 from promptpotter.application.runner.campaign_ids import build_origin_cycle_id
 from promptpotter.domain.bench import partition_bank
 from promptpotter.domain.campaign import Campaign
+from promptpotter.domain.dataset_start import DatasetStartBlock
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.dataset_access import (
     DatasetAccessError,
-    is_dataset_dir,
+    DatasetTier,
+    ResolvedDataset,
     list_readable_datasets,
-    readable_dataset_dir,
+    resolve_dataset,
 )
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import (
@@ -55,21 +48,23 @@ __all__ = [
 ]
 
 
-def prospective_origin_id(stores: Stores, dataset_dir: Path, dataset_name: str) -> str | None:
+def prospective_origin_id(stores: Stores, dataset: ResolvedDataset) -> str | None:
     """Not ``resolve_pipeline_for_campaign``: a dataset with no campaign has no manifest to freeze."""
+    dataset_dir = dataset.directory
     try:
-        experiment = experiment_outside_run(dataset_dir)
-        schema = parse_pipeline_response(
-            dataset_pipeline_declaration(stores, dataset_dir, experiment) or {}
-        )
-        cfg = load_dataset_campaign_config(dataset_campaign_path(dataset_dir))
+        experiment = experiment_outside_run(stores, dataset)
+        declared = dataset_pipeline_declaration(stores, dataset, experiment)
+        if declared is None:
+            return None
+        schema = parse_pipeline_response(declared)
+        cfg = load_dataset_campaign_config(dataset_dir)
         active = schema.active_steps_excluding(cfg.exclude_nodes)
         if not active:
             return None
         base_pp = resolve_pipeline_config_params(
             active,
             cfg.pipeline_overlay,
-            dataset_dir,
+            dataset,
             schema,
             judges=cfg.judges,
             experiment=experiment,
@@ -82,7 +77,7 @@ def prospective_origin_id(stores: Stores, dataset_dir: Path, dataset_name: str) 
             pipeline_params=base_pp,
             schema=schema,
         )
-        items = resolve_dataset_items(stores, dataset_name)
+        items = resolve_dataset_items(stores, dataset)
         if not items:
             return None
         partition = partition_bank(bank_samples(items), cfg.dataset_split)
@@ -90,7 +85,7 @@ def prospective_origin_id(stores: Stores, dataset_dir: Path, dataset_name: str) 
             opt_sp,
             schema,
             list(partition.search),
-            framing=campaign_framing(stores, cfg, dataset_name),
+            framing=campaign_framing(stores, cfg, dataset),
             demo=partition.demo,
         ).removeprefix("cycle_")
     except (
@@ -104,7 +99,7 @@ def prospective_origin_id(stores: Stores, dataset_dir: Path, dataset_name: str) 
         PayloadInvalidError,
     ):
         # A SURVEY: an unreadable neighbour drops itself, never the list. Direct reads still raise.
-        logger.exception("origins: prospective origin id failed for %s", dataset_name)
+        logger.exception("origins: prospective origin id failed for %s", dataset.name)
         return None
 
 
@@ -114,19 +109,19 @@ class DatasetIndexEntry(StrictModel):
     Wire shape pinned in ``docs/specs/api-openapi.yaml::DatasetIndexEntry``.
     """
 
-    name: str = Field(description="Slug used as the path segment under `datasets/`.")
-    title: str | None = Field(default=None, description="Display title (from `dataset.md`).")
-    tier: Literal["yours", "install"] = Field(
+    name: str = Field(description="The definition's path under its tier, `/`-separated.")
+    title: str | None = Field(default=None, description="Display title (from `README.md`).")
+    tier: DatasetTier = Field(
         description=(
             "``yours`` = user-owned Origin under ``projects/{tenant}/datasets/{slug}/``. "
-            "``install`` = content that ships with the product at ``datasets/{slug}/`` "
+            "``install`` = content that ships with the product at ``assets/datasets/{name}/`` "
             "(benchmarks, demos, ``promptpotter-self``) — tracked in git, so readable by "
             "anyone using the install. A ``yours`` slug shadows an ``install`` one."
         ),
     )
     summary: str | None = Field(
         default=None,
-        description="What the dataset is, in one plain sentence (the first under `dataset.md`'s title).",
+        description="What the dataset is, in one plain sentence (the first under `README.md`'s title).",
     )
     n_samples: int | None = Field(
         default=None,
@@ -146,16 +141,16 @@ class DatasetIndexEntry(StrictModel):
 def list_datasets(stores: Stores) -> list[DatasetIndexEntry]:
     return [
         DatasetIndexEntry(
-            name=ref.name,
+            name=ref.dataset.name,
             title=ref.title,
-            tier=ref.tier,
+            tier=ref.dataset.tier,
             summary=ref.summary,
             n_samples=reading.n_held,
             start_block=reading.block,
         )
         for ref in list_readable_datasets(stores)
-        if offered(stores, ref.name)
-        for reading in (dataset_reading(stores, ref.name),)
+        if offered(stores, ref.dataset.name)
+        for reading in (dataset_reading(stores, ref.dataset.name),)
     ]
 
 
@@ -206,7 +201,7 @@ def _campaign_backed_origins(stores: Stores, n_samples: dict[str, int | None]) -
     for origin_id, group in _campaigns_by_origin(stores).items():
         canonical = _canonical(group)
         try:
-            readable_dataset_dir(stores, canonical.dataset_name)
+            resolve_dataset(stores, canonical.dataset_name)
         except DatasetAccessError:
             logger.info(
                 "origins: skipping origin %s — dataset %r no longer resolves",
@@ -218,7 +213,7 @@ def _campaign_backed_origins(stores: Stores, n_samples: dict[str, int | None]) -
         scores = [
             origin.accuracy
             for c in group
-            if (index := stores.campaigns.load(c.root_hop)) is not None
+            if (index := stores.campaigns.load(c.root_hop, moment=None)) is not None
             for origin in index.rounds[:1]
             if origin.round == 0 and origin.accuracy is not None
         ]
@@ -238,25 +233,25 @@ def _campaign_backed_origins(stores: Stores, n_samples: dict[str, int | None]) -
 
 def list_origins(stores: Stores) -> list[OriginEntry]:
     datasets = list_readable_datasets(stores)
-    n_held = {r.name: dataset_reading(stores, r.name).n_held for r in datasets}
+    n_held = {r.dataset.name: dataset_reading(stores, r.dataset.name).n_held for r in datasets}
     campaign_backed = _campaign_backed_origins(stores, n_held)
     taken = {o.origin_id for o in campaign_backed}
     prepared: list[OriginEntry] = []
     for ref in datasets:
-        if ref.tier != "yours" or not n_held[ref.name]:
+        dataset = ref.dataset
+        if dataset.tier != "yours" or not n_held[dataset.name]:
             continue
-        dataset_dir = stores.tenant_datasets.dataset_dir(ref.name)
-        if not has_dataset_prompts(dataset_dir) or not is_dataset_dir(dataset_dir):
+        if not has_dataset_prompts(dataset.directory):
             continue
-        origin_id = prospective_origin_id(stores, dataset_dir, ref.name)
+        origin_id = prospective_origin_id(stores, dataset)
         if origin_id is None or origin_id in taken:
             continue
         prepared.append(
             OriginEntry(
                 origin_id=origin_id,
-                dataset_name=ref.name,
+                dataset_name=dataset.name,
                 label=ref.title or "",
-                n_samples=n_held[ref.name],
+                n_samples=n_held[dataset.name],
                 prepared=True,
             )
         )

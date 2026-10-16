@@ -119,8 +119,8 @@ def _check_task_context_present(
             "`task_context` carries every field the operator wrote about the task, and it is the "
             "only panel feeding l1_generate's task_intent slot. Empty, that slot renders as the "
             "static template alone: the generator proposes edits knowing the failing samples and "
-            "nothing about what the pipeline is for. Ship a `task_description.md` beside the "
-            "dataset — the first mint decomposes it — or pass `--task-file` / `--task-text`."
+            "nothing about what the pipeline is for. Ship a `task.md` in the "
+            "dataset's definition — the first mint decomposes its body — or pass `--task-file` / `--task-text`."
         ),
     )
 

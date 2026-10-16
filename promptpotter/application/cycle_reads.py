@@ -109,7 +109,7 @@ class _MarkedSheet(CellSheet):
 
 
 def served_round(
-    stores: Stores, hop: CycleHop, round_num: int, moment: Moment | None = None
+    stores: Stores, hop: CycleHop, round_num: int, *, moment: Moment | None
 ) -> RoundResult | None:
     """A served projection: the round a resume, a fork and the round file read carries no ``status``."""
     graded_under = campaign_scorer(stores, hop.campaign_id)

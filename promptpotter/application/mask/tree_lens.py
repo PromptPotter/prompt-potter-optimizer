@@ -136,9 +136,10 @@ def lensed_tree(
     path: CyclePath,
     lens: Lens | None,
     samples: frozenset[int] | None,
-    moment: Moment | None = None,
+    *,
+    moment: Moment | None,
 ) -> CourseNode:
-    tree = build_lineage_tree(stores, path, moment)
+    tree = build_lineage_tree(stores, path, moment=moment)
     if lens is None and not samples:
         return tree
     if lens is not None and lens.kind == "abort":

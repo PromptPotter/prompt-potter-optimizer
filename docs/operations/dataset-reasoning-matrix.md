@@ -1,22 +1,22 @@
-# Dataset Reasoning Matrix — Per-Dataset `pipeline.yaml` Defaults
+# Dataset Reasoning Matrix — Per-Dataset `pipeline` Defaults
 
-Single canonical view of the model + reasoning_effort + max_tokens defaults shipped with each dataset's `pipeline.yaml`. Operators tune per-cycle via overrides; this table is the **starting point**, not the only valid setting.
+Single canonical view of the model + reasoning_effort + max_tokens defaults shipped with each dataset's `dataset.yaml::pipeline`. Operators tune per-cycle via overrides; this table is the **starting point**, not the only valid setting.
 
 | Dataset | model (default) | `reasoning_effort` | `max_tokens` | Notes |
 |---|---|---|---|---|
 | `aime_2025` | `openai/gpt-oss-20b:nitro` | model floor | absent | Competition math. Chosen on price ($0.03/$0.14) with `:nitro` routing to the highest-throughput provider at no cost premium. |
 | `gsm8k` | `openai/gpt-oss-120b` | `medium` | absent | Grade-school math word problems. Medium reasoning is enough. |
-| `bbeh` | `mistralai/mistral-small-3.2-24b-instruct` (openrouter) | `low` | absent | "Big-Bench Extra Hard" puzzles. `low` is intentional — the rationale in `task_description.md` is written against Groq's `gpt-oss-20b` output ceiling, which is where the dataset's screening numbers were taken; `available_models` now admits this model only. |
-| `justlogic-d234` | `openai/gpt-oss-20b:nitro` | model floor | absent | JustLogic (Chen 2025), 3-class deductive reasoning. iid random mix of depths 2, 3, 4 (200/depth from HF `train`, seed=42, interleaved). Each depth cut is a separate dataset name sharing no cache key with another — never compare across cuts (`datasets/CLAUDE.md` § L4). |
-| `justlogic-d234-held` | `openai/gpt-oss-20b:nitro` | model floor | absent | `justlogic-d234`'s pin, verbatim; the cut is `datasets/justlogic-d234-held/dataset.md`'s. |
+| `bbeh` | `mistralai/mistral-small-3.2-24b-instruct` (openrouter) | `low` | absent | "Big-Bench Extra Hard" puzzles. `low` is intentional — the rationale in `task.md` is written against Groq's `gpt-oss-20b` output ceiling, which is where the dataset's screening numbers were taken; `available_models` now admits this model only. |
+| `justlogic/d234` | `openai/gpt-oss-20b:nitro` | model floor | absent | JustLogic (Chen 2025), 3-class deductive reasoning. iid random mix of depths 2, 3, 4 (200/depth from HF `train`, seed=42, interleaved). Each depth cut is a separate dataset name sharing no cache key with another — never compare across cuts (`promptpotter/assets/datasets/CLAUDE.md` § L4). |
+| `justlogic/d234-held` | `openai/gpt-oss-20b:nitro` | model floor | absent | `justlogic/d234`'s pin, verbatim; the cut is `justlogic/d234-held/README.md`'s. |
 | `lca-termnorm` | `openai/gpt-oss-120b` | n/a | absent (`null`) | Multi-node TermNorm pipeline; not a single-call reasoning dataset. |
 | `lca-bom-termnorm` | `entity_profiling` → `openai/gpt-oss-20b` | `low` (entity_profiling) | absent (`null`) | Tenant material-matching pipeline (`web_search → entity_profiling → token_matching`, no `llm_ranking`). `entity_profiling` emits **native** `json_schema` and pins `reasoning_effort: low` — the cap is load-bearing, see § The Groq output ceiling. Multi-node, so the single-call columns describe the profiling node only. Tenant config on disk, gitignored. |
-| `spreadsheetbench-s10` | `inception/mercury-2.5` (agent) | unset | `4096` (a spend limit) | Harbor agent episode: the prompt is an injected `SKILL.md`. The agent model is chosen under § The agent model on a Harbor dataset. |
-| `spreadsheetbench-s20` | `qwen/qwen3.7-flash` (agent, `route_order: [alibaba]`) | `none` | `4096` (a spend limit) | s10's episode on twenty tasks, the search panel; origin on all twenty, fifteen per candidate per round. Pinned to the configuration the Qwen campaign on s10 ran its origin with, so their shared cells replay. |
-| `sealqa-longseal-12` | `qwen/qwen3.7-flash:nitro` (agent) | unset | `4096` (a spend limit) | Harbor agent episode, `max_turns: 4`, graded by a `gpt-oss-120b` judge. Same selection section. |
-| `reactome-typeql-42` | `xiaomi/mimo-v2.6-flash`, pinned to `xiaomi` | `none` | `8192` (upstream's reply cap) | TypeDB's query-generation benchmark: the model writes TypeQL, the harness executes it and feeds errors back. The development model only, chosen on price in [`model-screens.md`](../../datasets/reactome-typeql-42/model-screens.md) § One run per question, three models. |
+| `spreadsheetbench/s10` | `inception/mercury-2.5` (agent) | unset | `4096` (a spend limit) | Harbor agent episode: the prompt is an injected `SKILL.md`. The agent model is chosen under § The agent model on a Harbor dataset. |
+| `spreadsheetbench/s20` | `qwen/qwen3.7-flash` (agent, `route_order: [alibaba]`) | `none` | `4096` (a spend limit) | s10's episode on twenty tasks, the search panel; origin on all twenty, fifteen per candidate per round. Pinned to the configuration the Qwen campaign on s10 ran its origin with, so their shared cells replay. |
+| `sealqa/longseal-12` | `qwen/qwen3.7-flash:nitro` (agent) | unset | `4096` (a spend limit) | Harbor agent episode, `max_turns: 4`, graded by a `gpt-oss-120b` judge. Same selection section. |
+| `reactome-typeql-42` | `xiaomi/mimo-v2.6-flash`, pinned to `xiaomi` | `none` | `8192` (upstream's reply cap) | TypeDB's query-generation benchmark: the model writes TypeQL, the harness executes it and feeds errors back. The development model only, chosen on price in its tenant definition's `README.md`. |
 
-`max_tokens` is **never** set as a numeric default in any dataset's `pipeline.yaml` node config — the provider ceiling applies. Held by convention, not by a test, so check the overlay rather than assuming. **A Harbor agent node is the exception:** there `max_tokens`, `max_input_tokens` and `max_turns` are the limits we send the agent, and the only thing its cell's spend is bounded by — leave one out and no cell runs under a spend ceiling (`connectors/harbor.py::_sent_spend_bound`).
+`max_tokens` is **never** set as a numeric default in any dataset's `dataset.yaml::pipeline` node config — the provider ceiling applies. Held by convention, not by a test, so check the overlay rather than assuming. **A Harbor agent node is the exception:** there `max_tokens`, `max_input_tokens` and `max_turns` are the limits we send the agent, and the only thing its cell's spend is bounded by — leave one out and no cell runs under a spend ceiling (`connectors/harbor.py::_sent_spend_bound`).
 
 **The default for a new dataset** is `openai/gpt-oss-20b:nitro` via OpenRouter with no `reasoning_effort` — cheapest, fastest, and it leaves L1 headroom.
 
@@ -49,7 +49,7 @@ a slow bank read as a slow model. A
 marginal with an alias named beside it is one contrast under several headings, never several.
 `--grid dataset,llm_only.model` crosses two of them for which COMBINATION leads; every other factor
 is marginalised into the cells and named there. **Aliasing is what a hand-assembled roster earns** —
-a panel declaring `axes:` (`inner_tasks.yaml`) generates the full product, and a full product cannot
+a panel declaring `axes:` (`dataset.yaml::panel`) generates the full product, and a full product cannot
 alias. That is the reason to generate the cells rather than list them.
 
 **A ranking is tied to the dataset's I/O shape.** JustLogic sends a long premise block and returns a short label plus a reasoning trace, so input dominates and per-Mtok *input* price carries weight it would not carry on a generate-heavy task. Rank in the operator's order: **speed, then cost, then quality** — the metric catalogue's own keys, so the order is a pick rather than a re-derivation. Accuracy from a 10-row draw is **not** comparable to the 40-row panel bank — `draw_bank` samples, so a 10-draw is a different bank, not a prefix.
@@ -77,7 +77,7 @@ On a Harbor dataset the model runs inside an agent episode (`terminus-2`), and t
 - **Two models are banned from every agent and LLM pipeline on cost:** `google/gemini-3.5-flash` and `qwen/qwen3.6-27b`. A model that costs an order of magnitude more per cell than the current candidates is not screened at all.
 - **Pin one host per model, and probe hosts first.** The same weights ran at 11.5 tok/s on one host and 120 tok/s on another (`qwen/qwen3.5-9b` on DeepInfra vs. Venice). A screen pins each model to one host through `route_order`, so every result names who served it.
 
-### Pilot: `spreadsheetbench-s10`, all ten cells
+### Pilot: `spreadsheetbench/s10`, all ten cells
 
 Measured 2026-09-16, origin only, one pinned host per model. Column meanings:
 - **Agent s:** median agent-phase seconds.
@@ -102,7 +102,7 @@ The WikiSkill paper's models are marked †. Qwen-3.5-4B is not served on OpenRo
 
 **Dropped in the first screen, which ran before the harness fixes:** never opened the skill — `gpt-oss-20b:nitro` (the only model near 30 s, at 13 s), `gpt-oss-120b:nitro` (19 s), `mistral-nemo`; too slow — `gpt-5-nano` (219–330 s), `nemotron-3.5-lightning` (166 s), `nemotron-3-nano` (104 s); hit the 20-turn cap at about 5× the cost — `ministral-3b`, `nova-micro`.
 
-### Pilot: `sealqa-longseal-12`, all twelve cells
+### Pilot: `sealqa/longseal-12`, all twelve cells
 
 Measured 2026-09-16, origin only, with the same hosts as above. **Correct** comes from the campaign's judges. The trial's own reward only says whether the episode left an answer, so it reads 1.0 on almost every cell.
 
@@ -123,8 +123,8 @@ What the pilot established:
 
 The campaigns were retired and their artifacts kept locally in `.scratch/retired-campaigns-2026-09-24/` (`digest.md` is one line per cycle); what they decided:
 
-- **A ten-cell cut is used up in two promotions.** `inception/mercury-2.5` on `spreadsheetbench-s10` (advanced mode) took the overlap line from 4 to 6 to 8 of the same ten cells in two rounds and found no winner in the four after. Neither promotion was separable on its own — both intervals include zero, so `rounds_to_separable` stayed unset while `rounds_to_improved` was 1. A further campaign needs a larger cut, which is what `spreadsheetbench-s20` is.
-- **Headroom alone is not enough.** `qwen/qwen3.7-flash` at `none` found nothing that beat the origin on `spreadsheetbench-s10` or on `-s20`.
+- **A ten-cell cut is used up in two promotions.** `inception/mercury-2.5` on `spreadsheetbench/s10` (advanced mode) took the overlap line from 4 to 6 to 8 of the same ten cells in two rounds and found no winner in the four after. Neither promotion was separable on its own — both intervals include zero, so `rounds_to_separable` stayed unset while `rounds_to_improved` was 1. A further campaign needs a larger cut, which is what `spreadsheetbench/s20` is.
+- **Headroom alone is not enough.** `qwen/qwen3.7-flash` at `none` found nothing that beat the origin on `spreadsheetbench/s10` or on `/s20`.
 - **SealQA's floor moves under an edit to `task_intent` and `instruction`** — decomposing the question's constraints and verifying each one, aimed at misread temporal ordinals (`qwen/qwen3.7-flash:nitro`, twenty cells). No lift interval was stamped, so it is a level, not a separable promotion.
 - **On a label-mapping upload the lever is the label list, then the catch-all** (`swiss-invoices-eval`, a tenant upload: 20 invoices onto 25 account codes): list every code with a one-line description, then force an explicit category match before the catch-all. `openai/gpt-oss-20b` at `low` was the best-value arm, every lift interval clear of zero; at `high` it reached a perfect score whose last step was not separable.
 
@@ -136,7 +136,7 @@ On `reactome-typeql-42` the model writes a query, the harness runs it, and a rej
 - **A model's listed price is its cheapest host's.** `deepseek/deepseek-v4.1-flash` lists at $0.003 per M input tokens, which is one host of thirty; the others charge $0.025 to $0.45. A cost is only known for a pinned host or from the bill.
 - **This is the development model only.** The published rows are Claude Sonnet 5 and DeepSeek V4 Pro, and the reported cells run on the operator's pick.
 
-The screens, their bills and the hour each was read are the dataset's own record: [`datasets/reactome-typeql-42/model-screens.md`](../../datasets/reactome-typeql-42/model-screens.md).
+The screens, their bills and the hour each was read are the dataset's own record: its tenant definition's `README.md`.
 
 ## Pick the model for what the run does
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import os
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Unpack
@@ -21,7 +22,7 @@ from promptpotter.domain.export import PromptExport, parse_prompt_export
 from promptpotter.domain.launch_limits import RoundsCap
 from promptpotter.domain.phases import ErrorRecord, LaunchStage, ProducerState, StopReason
 from promptpotter.domain.results import RoundResult
-from promptpotter.domain.ruler import DeltaRuler
+from promptpotter.domain.ruler import DeltaRuler, RulerScope
 from promptpotter.domain.run_records import (
     CheckinClosedRecord,
     CycleFinal,
@@ -45,6 +46,7 @@ from promptpotter.domain.run_records import (
     RunPhaseRecord,
     SpawnedBy,
     SpawnedRecord,
+    parent_address,
 )
 from promptpotter.domain.spend import SpendCeilings
 from promptpotter.domain.value_tree import ValueLeaf
@@ -183,6 +185,17 @@ class CampaignStore:
             for cycle_dir in self.campaign_cycle_dirs(campaign_id)
             if (ledger := CycleLayout(cycle_dir).ledger).is_file()
         ]
+
+    def campaign_walk_spans(self, campaign_id: str) -> list[LedgerSpan]:
+        """Each cycle's whole chain, so a cycle lifted from another tree remembers its prefix."""
+        widest: dict[Path, int | None] = {}
+        for cycle_dir in self.campaign_cycle_dirs(campaign_id):
+            for path, until in ledger_chain(CycleDir(cycle_dir), moment=None):
+                if not path.is_file():
+                    continue
+                held = widest.get(path, 0)
+                widest[path] = None if until is None or held is None else max(held, until)
+        return [LedgerSpan(path, until) for path, until in widest.items()]
 
     def iter_cycle_ledgers(self) -> list[Path]:
         return [
@@ -373,8 +386,8 @@ class CampaignStore:
         self._bank(sandbox_cycle_dirs(sandbox), campaign_id=campaign_id, cycle_id=sandbox.name)
         rmtree_robust(sandbox)
 
-    def load(self, hop: CycleHop) -> CycleIndex | None:
-        return read_cycle_index(self.cycle_dir(hop))
+    def load(self, hop: CycleHop, *, moment: Moment | None) -> CycleIndex | None:
+        return read_cycle_index(self.cycle_dir(hop), moment=moment)
 
     def mint_cycle(self, hop: CycleHop, *, checkin: bool = False) -> None:
         if scan_cycle_facts(self._layout(hop).ledger).minted is None:
@@ -388,21 +401,18 @@ class CampaignStore:
             self._append(hop, CheckinClosedRecord())
 
     def mint_fork_cycle(
-        self, parent: CycleHop, new_cycle_id: str, spec: ForkSpec, *, from_round: int
-    ) -> CycleHop:
-        child = CycleHop(campaign_id=parent.campaign_id, cycle_id=new_cycle_id)
-        # Read at the mint: the only moment the offset is true of a parent still running.
-        cut = CycleEventLog.open(CycleDir(self.cycle_dir(parent))).next_offset
+        self, child: CycleHop, parent_dir: Path, spec: ForkSpec, *, cut: int, from_round: int
+    ) -> None:
+        """*parent_dir* may lie in another tree: the record names it by path, never by id."""
         self._append(
             child,
             CycleMintedRecord(
-                parent_cycle_id=parent.cycle_id,
+                parent=parent_address(self.cycle_dir(child), parent_dir),
                 forked_at_offset=cut,
                 fork=spec.model_copy(update={"seed": None}),
             ),
         )
         self._append(child, RoundEnteredRecord(round=from_round, rewound=True))
-        return child
 
     def grade_fork(self, hop: CycleHop, direction: ForkDirection) -> None:
         self._append(hop, ForkGradedRecord(direction=direction))
@@ -413,14 +423,15 @@ class CampaignStore:
     def record_spawned(self, hop: CycleHop, spawned_by: SpawnedBy) -> None:
         self._append(hop, SpawnedRecord(spawned_by=spawned_by))
 
-    def standing_rounds(self, hop: CycleHop, moment: Moment | None = None) -> StandingRounds:
-        return scan_standing_rounds(ledger_chain(CycleDir(self.cycle_dir(hop)), moment))
+    def standing_rounds(self, hop: CycleHop, *, moment: Moment | None) -> StandingRounds:
+        return scan_standing_rounds(ledger_chain(CycleDir(self.cycle_dir(hop)), moment=moment))
 
     def round_proposals(self, hop: CycleHop, round_num: int) -> RoundProposedRecord | None:
-        return self.standing_rounds(hop).proposals.get(round_num)
+        held = self.standing_rounds(hop, moment=None).proposals.get(round_num)
+        return None if held is None else held.record
 
     def round_submission(self, hop: CycleHop, round_num: int) -> RoundProposedRecord | None:
-        return self.standing_rounds(hop).submitted.get(round_num)
+        return self.standing_rounds(hop, moment=None).submitted.get(round_num)
 
     def restate_optimizer_state(self, hop: CycleHop, rr: RoundResult) -> None:
         CycleEventLog.open(CycleDir(self.cycle_dir(hop))).append(
@@ -435,7 +446,7 @@ class CampaignStore:
         layout = self._layout(hop)
         if not layout.ledger.exists():
             raise NotFoundError(f"cycle {hop.cycle_id!r} has no ledger on disk")
-        max_complete = max(self.standing_rounds(hop).rounds, default=-1)
+        max_complete = max(self.standing_rounds(hop, moment=None).rounds, default=-1)
         if after_round > max_complete:
             raise BadRequestError(
                 f"--from {after_round}: ledger only has completed rounds 0..{max_complete}"
@@ -573,12 +584,12 @@ class CampaignStore:
         return [
             self._list_entry(cycle_dir, index)
             for cycle_dir in self._cycle_dirs()
-            if (index := read_cycle_index(cycle_dir)) is not None
+            if (index := read_cycle_index(cycle_dir, moment=None)) is not None
         ]
 
     def _stub_deletion_blocked(self, hop: CycleHop) -> str | None:
         cycle_dir = self.cycle_dir(hop)
-        if self.load(hop) is None:
+        if self.load(hop, moment=None) is None:
             return "not on disk"
         if derive_run_state(cycle_dir).producer.attached:
             return "a producer holds it — pause it or let it end first"
@@ -588,9 +599,10 @@ class CampaignStore:
         own = scan_standing_rounds([LedgerSpan(CycleLayout(cycle_dir).ledger)]).rounds
         if own:
             return f"closed {len(own)} round(s) of its own — cycle ran real work"
+        here = Path(os.path.normpath(cycle_dir))
         for other in self.campaign_cycle_dirs(hop.campaign_id):
             minted = scan_cycle_facts(CycleLayout(other).ledger).minted
-            if minted is not None and minted.parent_cycle_id == hop.cycle_id:
+            if minted is not None and minted.parent_cycle_dir(other) == here:
                 return f"has descendant {other.name}"
         return None
 
@@ -601,7 +613,7 @@ class CampaignStore:
         stubs: list[CycleHop] = []
         for cycle_dir in self.campaign_cycle_dirs(hop.campaign_id):
             fork = CycleHop(campaign_id=hop.campaign_id, cycle_id=cycle_dir.name)
-            index = read_cycle_index(cycle_dir)
+            index = read_cycle_index(cycle_dir, moment=None)
             if index is None or index.parent_cycle_id != root_id or fork.cycle_id == root_id:
                 continue
             if (fork.campaign_id, fork.cycle_id) != active and (
@@ -713,15 +725,19 @@ class CampaignStore:
         return raw if isinstance(raw, dict) else None
 
     def write_ruler(
-        self, hop: CycleHop, ruler: DeltaRuler, *, dataset_name: str, round_num: int
+        self, hop: CycleHop, ruler: DeltaRuler, *, scope: RulerScope, round_num: int
     ) -> None:
         cycle_dir = self.cycle_dir(hop)
         CycleEventLog.open(CycleDir(cycle_dir)).append(
-            RulerRecord(ruler=ruler, dataset_name=dataset_name, round=round_num)
+            RulerRecord(ruler=ruler, scope=scope, round=round_num)
         )
 
-    def read_ruler(self, hop: CycleHop, *, dataset_name: str) -> DeltaRuler | None:
-        return scan_ledger_ruler(continued_chain(CycleDir(self.cycle_dir(hop))), dataset_name)
+    def read_ruler(
+        self, hop: CycleHop, *, scope: RulerScope, moment: Moment | None
+    ) -> DeltaRuler | None:
+        return scan_ledger_ruler(
+            continued_chain(CycleDir(self.cycle_dir(hop)), moment=moment), scope
+        )
 
 
 __all__ = ["CampaignStore"]

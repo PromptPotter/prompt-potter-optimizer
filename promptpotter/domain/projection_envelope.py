@@ -45,6 +45,8 @@ ProjectionKind = Literal[
     "optimizer_state",
     "phase",
     "priced_key",
+    "provider_eased",
+    "provider_hold",
     "race_catch_up",
     "race_standing",
     "round_closed",

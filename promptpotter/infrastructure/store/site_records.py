@@ -9,12 +9,12 @@ from __future__ import annotations
 import json
 import os
 import re
-import threading
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, NamedTuple
 
 from promptpotter.config.paths import user_data_root
-from promptpotter.infrastructure.store.io import append_jsonl, read_text_optional, write_jsonl
+from promptpotter.infrastructure.store.io import append_jsonl, read_lines, rewrite_lines
 from promptpotter.shared.clock import epoch_seconds
 from promptpotter.shared.errors import NotFoundError
 
@@ -28,8 +28,16 @@ class SiteRecord(NamedTuple):
     row: dict[str, Any]
 
 
-# One process serves the API, so one lock orders an append against a rewrite.
-_WRITING = threading.Lock()
+def _latest(lines: list[str]) -> list[SiteRecord]:
+    latest: dict[str | int, SiteRecord] = {}
+    for number, line in enumerate(lines):
+        try:
+            record = SiteRecord(**json.loads(line))
+        except (ValueError, TypeError):
+            # A line torn by a crash costs itself and no other.
+            continue
+        latest[record.key or number] = record
+    return list(latest.values())
 
 
 class SiteRecordStore:
@@ -45,28 +53,22 @@ class SiteRecordStore:
         return Path(path)
 
     def keep(self, table: str, record: SiteRecord) -> None:
-        with _WRITING:
-            append_jsonl(self._path(table), record._asdict())
+        append_jsonl(self._path(table), record._asdict())
 
     def kept(self, table: str) -> list[SiteRecord]:
-        latest: dict[str | int, SiteRecord] = {}
-        for number, line in enumerate(read_text_optional(self._path(table)).splitlines()):
-            try:
-                record = SiteRecord(**json.loads(line))
-            except (ValueError, TypeError):
-                # A line torn by a crash costs itself and no other.
-                continue
-            latest[record.key or number] = record
-        return list(latest.values())
+        return _latest(read_lines(self._path(table)))
 
     def drop_before(self, table: str, before: float) -> int:
         """A keyed row is the newest word on its subject and has no age: only added rows go."""
-        with _WRITING:
-            records = self.kept(table)
+
+        def dropped(lines: list[str]) -> tuple[Iterator[str] | None, int]:
+            records = _latest(lines)
             staying = [r for r in records if r.key or (epoch_seconds(r.at) or 0.0) >= before]
-            if len(staying) != len(records):
-                write_jsonl(self._path(table), (r._asdict() for r in staying))
-            return len(records) - len(staying)
+            gone = len(records) - len(staying)
+            out = (json.dumps(r._asdict(), ensure_ascii=False) + "\n" for r in staying)
+            return (out if gone else None), gone
+
+        return rewrite_lines(self._path(table), dropped)
 
 
 def default_site_record_store() -> SiteRecordStore:

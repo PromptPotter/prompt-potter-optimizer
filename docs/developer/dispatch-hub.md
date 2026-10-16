@@ -193,8 +193,8 @@ This is where the reader's mental model of a round usually starts: candidates we
 
 ### Current state
 
-- **`rendered_prompt`** ← `opt_sp.render_fields()` **⊕ `effective_optimizer_prompts(pipeline_schema, pipeline_params, inner_optimizer)`**
-  - `inner_optimizer` is the manifest the INNER campaign selects (`runner/inner/spawn_context.py::inner_optimizer`, resolved per cell by `runner/inner/tasks.py::resolve_inner_cells`, the resolution `_identity_config` fingerprints), never the outer's own: a CAPO inner is shown, and its edits checked against, CAPO's prompts. `l1_strict`'s inner-prompt checks and the wire schema's `maxLength` read the same binding.
+- **`rendered_prompt`** ← `opt_sp.render_fields()` **⊕ `effective_optimizer_prompts(pipeline_schema, pipeline_params, inner_cells)`**
+  - Each node's base prompt is `inner_template`'s: the manifest whose lever the node is across the panel's cells (`runner/inner/tasks.py::InnerCells.owners`), never the outer's own — a CAPO inner is shown, and its edits checked against, CAPO's prompts. `l1_strict`'s inner-prompt checks and the wire schema's `maxLength` read the same binding.
   - Both halves render one LABELLED section per field — `[field]` for the target prompt, `[node.field]` for the inner optimizer prompts. The override schema keys on those names, so an unlabelled blob would ask the generator to attribute a paragraph whose boundary the render had stripped. `render_fields()` walks the order `render()` joins, so one cannot claim a boundary the other lacks, and carries each field's OWN value: only `target_fields(framing)` splices the campaign's upstream/downstream framing into `problem_description`, and a replacement written over a spliced value would absorb that framing as prose the next render splices around again. The framing reaches L1 through `task_context` instead.
   - Structurally L1_SCORE's output: each round's winner becomes next round's `opt_sp`, so its render is the next parent prompt. The cycle lives in orchestration, not the diagram.
   - The panel is **the artifact under edit**, and on the recursion that is not the searchpoint: an L4 outer point's prompt fields reach no node (`prompt_node_names()` is empty there), while the real levers are the inner nodes' own `PromptTemplate` fields carried as `pipeline_params`. Both halves render, each empty where it is not the mutation surface — so a normal campaign is bit-identical and L4 stops rendering a MANDATORY panel as nothing. Base ⊕ the parent's adopted overrides, whole fields only: every mutation here is a complete-field replacement, so a truncated render would be worse than an absent one (hence the cap sits above the recursion's own ~10k bundle).
@@ -282,7 +282,7 @@ One injection is L2-only: `l1_signal_catalogue` — the cross-slot mandatory rul
 ```json
 {
   "axis_targeted": "...",
-  "l1_layout": {"<panel>": "<slot>", ...},
+  "l1_layout": {"<slot>": ["<panel>", ...], ...},
   "l1_overrides": {...},
   "rationale": "...",
   "fork_proposal": null,
@@ -298,7 +298,7 @@ Every field is optional at the PARSE boundary — a missing one leaves the corre
 
 - `axis_targeted`: prose naming the axis this fire routed the failure cluster to — its evidence anchor, read by `l2_evidence_anchored`. Deliberately **not** a steering surface: L1 reads its axes from `axis_memory`, which is derived from measurement.
 - `rationale`: the diagnosis behind the fire, and the only thing separating a steer from a guess. Carried forward as `described`, the fire's exit-view line — a fire mints no individual, so the parent keeps its own lineage; an absent one is REPORTED there, never replaced by a stand-in sentence — a placeholder makes an undiagnosed fire read exactly like a diagnosed one.
-- `l1_layout`: **a per-slot EDIT, not a replacement layout** — `coerce_l1_layout(raw, base=node_layout("l1_generate", memory))` applies the named slots and keeps the rest, the same rule `resolve_node_layout` gives L4's `layout` param; a replacement silently loses every signal L2 did not restate. Then validated per `validate_l1_layout` above — HARD failures roll back to the prior, SOFT outcomes ride along on `PotterState.memory.wounds.l2_guard_breaches`.
+- `l1_layout`: **a per-slot EDIT, not a replacement layout** — `coerce_l1_layout(raw, base=node_layout("l1_generate", memory))` moves the listed panels and keeps the rest, the same rule `resolve_node_layout` gives L4's `layout` param; a replacement silently loses every signal L2 did not restate. Then validated per `validate_l1_layout` above — HARD failures roll back to the prior, SOFT outcomes ride along on `PotterState.memory.wounds.l2_guard_breaches`.
 - `l1_overrides`: the keys `L2Context.steers` names, numeric values only, laid key by key over the node's standing steer.
 
 ### How L2 steers L1

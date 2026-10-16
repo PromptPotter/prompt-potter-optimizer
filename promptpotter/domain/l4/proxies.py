@@ -17,11 +17,17 @@ logger = logging.getLogger(__name__)
 
 
 class OuterSampleProxies(StrictModel):
-    """Its field may NOT be defaulted: a cycle that cannot fill it is floored or excluded, never zeroed."""
+    """Neither field may be defaulted: a cycle that cannot fill one is floored or excluded, never zeroed."""
 
     model_config = ConfigDict(frozen=True)
 
-    # A PLAUSIBILITY bound: a difference of two logit abilities is unbounded, so ±4 binds only a runaway fit.
+    # The SCORED term: the standing selection's headline on the cell's held-out rows minus the
+    # origin's on the same rows, in accuracy points, averaged over the round budget. A promotion
+    # on the rows the search selected on is in-sample and reads here only if it holds on fresh ones.
+    mean_bench_lift: float = Field(ge=-1.0, le=1.0)
+    # The search pool's own reading of the same trajectory, in θ logits on one ruler, served beside
+    # the scored term. A PLAUSIBILITY bound: two logit abilities differ without bound, so ±4 binds
+    # only a runaway fit.
     mean_round_delta: float = Field(ge=-4.0, le=4.0)
 
 
@@ -47,6 +53,9 @@ class InnerCellFacts(StrictModel):
     inner_stop_reason: StopReason
     # The share of origin rows still missed: 0 is a cell no arm can lift, however sharply it reads.
     inner_origin_headroom: float | None
+    # The origin's headline on the held-out rows, and where the last standing selection landed against it.
+    inner_bench_origin_level: float | None
+    inner_bench_final_lift: float | None
     # Reporting only, cumulative across attempts: billing is each call's own, and these enter no ledger.
     inner_sent_usd: float | None
     inner_tokens: int | None
@@ -66,6 +75,8 @@ def inner_cell_facts(result: CycleResult) -> InnerCellFacts | None:
     if result.origin_level is None or not levels:
         return None
     origin = result.origin_level
+    bench_origin = result.bench_origin_level
+    bench_last = result.bench_round_levels[-1] if result.bench_round_levels else None
     return InnerCellFacts(
         inner_origin_level=origin,
         inner_final_lift=levels[-1] - origin,
@@ -74,6 +85,10 @@ def inner_cell_facts(result: CycleResult) -> InnerCellFacts | None:
         inner_round_budget=effective_round_budget(result),
         inner_stop_reason=result.stop_reason,
         inner_origin_headroom=_origin_headroom(result),
+        inner_bench_origin_level=bench_origin,
+        inner_bench_final_lift=(
+            None if bench_origin is None or bench_last is None else bench_last - bench_origin
+        ),
         inner_sent_usd=result.spend.sent_usd if result.spend else None,
         inner_tokens=result.spend.total_tokens_used if result.spend else None,
     )
@@ -84,12 +99,24 @@ def effective_round_budget(result: CycleResult) -> int:
     return ran if result.round_budget is None else max(result.round_budget, ran)
 
 
-def parent_level_series(result: CycleResult) -> list[float]:
+def _held_forward(levels: Sequence[float], result: CycleResult) -> list[float]:
     """Padded forward to the ROUND BUDGET: a mean over the series length is a different estimand per cell."""
-    levels = result.round_levels
     if not levels:
         return []
-    return levels + [levels[-1]] * (effective_round_budget(result) - len(levels))
+    budget = len(levels) if result.round_budget is None else max(result.round_budget, len(levels))
+    return [*levels, *([levels[-1]] * (budget - len(levels)))]
+
+
+def parent_level_series(result: CycleResult) -> list[float]:
+    return _held_forward(result.round_levels, result)
+
+
+def bench_level_series(result: CycleResult) -> list[float]:
+    """Empty where any round's bench pass read nothing: a hole held forward scores a pass nobody read."""
+    levels = result.bench_round_levels
+    if any(level is None for level in levels):
+        return []
+    return _held_forward([level for level in levels if level is not None], result)
 
 
 def mean_parent_level_se(result: CycleResult) -> float | None:
@@ -126,6 +153,12 @@ def no_evidence_reason(result: CycleResult) -> str | None:
         return "its origin was never scored, so there is no floor to difference its rounds against"
     if not result.round_levels:
         return "it held no parent levels to difference against its origin"
+    if result.bench_origin_level is None:
+        return "its origin's bench pass read nothing, so there is no held-out floor to difference against"
+    if holes := [r + 1 for r, level in enumerate(result.bench_round_levels) if level is None]:
+        return f"the bench pass of round(s) {holes} read nothing, so its held-out series has a hole"
+    if not result.bench_round_levels:
+        return "it held no bench levels to difference against its origin's"
     return None
 
 
@@ -142,8 +175,8 @@ def floor_reason(result: CycleResult) -> str | None:
 
 
 def _floor_proxies() -> OuterSampleProxies:
-    """``-1`` is the bottom of the scoring formula's re-anchoring window, so the composed fitness is exactly 0.0."""
-    return OuterSampleProxies(mean_round_delta=-1.0)
+    """``-1`` sits at or below the bottom of every re-anchoring window, so the composed fitness is exactly 0.0."""
+    return OuterSampleProxies(mean_bench_lift=-1.0, mean_round_delta=-1.0)
 
 
 def compute_outer_proxies(result: CycleResult) -> OuterSampleProxies:
@@ -156,10 +189,13 @@ def compute_outer_proxies(result: CycleResult) -> OuterSampleProxies:
         # The inner cycle forwarded its own spend onto the outer ledger as it ran.
         raise CellUnscoreableError(reason, spent={})
 
-    assert result.origin_level is not None  # guaranteed by no_evidence_reason
+    # Both guaranteed by no_evidence_reason.
+    assert result.origin_level is not None and result.bench_origin_level is not None
+    bench = bench_level_series(result)
     # Levels are abilities in LOGITS on the fixed ruler; nothing normalizes for difficulty.
     levels = parent_level_series(result)
     return OuterSampleProxies(
+        mean_bench_lift=sum(bench) / len(bench) - result.bench_origin_level,
         mean_round_delta=sum(levels) / len(levels) - result.origin_level,
     )
 
@@ -227,6 +263,7 @@ __all__ = [
     "InnerCellFacts",
     "OuterSampleProxies",
     "PanelPrecision",
+    "bench_level_series",
     "cell_values",
     "compute_outer_proxies",
     "floor_reason",

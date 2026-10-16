@@ -88,10 +88,8 @@ def env_file_path() -> Path:
     return (checkout if checkout is not None else user_data_root()) / ".env"
 
 
-def benchmark_datasets_root() -> Path:
-    """The checkout's `datasets/`, else the packaged ones — never `site-packages/datasets`, HuggingFace's own."""
-    checkout = source_checkout_root()
-    return checkout / "datasets" if checkout is not None else PACKAGE_ROOT / "assets" / "benchmarks"
+def install_datasets_root() -> Path:
+    return PACKAGE_ROOT / "assets" / "datasets"
 
 
 def webapp_static_root() -> Path:
@@ -109,11 +107,11 @@ DEFAULT_PROJECTS_ROOT = user_data_root() / "projects"
 __all__ = [
     "DEFAULT_PROJECTS_ROOT",
     "PACKAGE_ROOT",
-    "benchmark_datasets_root",
     "checkin_assets_root",
     "checkin_manifest_path",
     "default_jobs_dir",
     "env_file_path",
+    "install_datasets_root",
     "optimizer_manifest_path",
     "optimizers_root",
     "source_checkout_root",

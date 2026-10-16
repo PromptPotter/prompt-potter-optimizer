@@ -10,17 +10,23 @@ from pydantic import Field
 from promptpotter.application.evidence.comparison import (
     ArmReplicate,
     Comparability,
+    EnvironmentReading,
     EvidencePower,
     EvidenceVariance,
+    LiftProfile,
     MetricReading,
     OrderConfound,
+    RankAgreement,
     SubjectMember,
     comparability,
+    environments,
+    lift_profiles,
     metric_measurand,
     metric_reading,
     order_confound,
     pair_subjects,
     power,
+    rank_agreement,
     replicates,
     stamp_comparable,
     variance,
@@ -53,6 +59,7 @@ from promptpotter.application.evidence.subjects import (
     WinnerChainPoint,
     authorship_of,
     parse_subject,
+    parse_tree_address,
 )
 from promptpotter.application.mask.load import load_mask_record
 from promptpotter.application.mask.scenario import scenario_spine
@@ -87,7 +94,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_walks,
     scan_standing_rounds,
 )
-from promptpotter.infrastructure.store.io import read_json_tolerant
+from promptpotter.infrastructure.store.io import read_json_tolerant, validate_path_component
 from promptpotter.infrastructure.store.layout import (
     CampaignLayout,
     CycleLayout,
@@ -210,6 +217,11 @@ class Evidence(StrictModel):
     variance: EvidenceVariance | None = None
     power: EvidencePower | None = None
     order_confound: OrderConfound | None = None
+    environments: list[EnvironmentReading] = Field(default_factory=list)
+    rank_agreement: RankAgreement | None = None
+    lift_profiles: list[LiftProfile] = Field(
+        default_factory=list, description="Empty under a metric that is not a delta."
+    )
     ranking_computed: bool = False
     edits: list[RankedEdit] = Field(default_factory=list)
     spread: EditSpread = Field(default_factory=EditSpread)
@@ -266,11 +278,16 @@ def select_evidence(
 ) -> Evidence:
     specs = [_named(stores, parse_subject(raw)) for raw in subjects]
     if dataset:
+        pool = parse_tree_address(dataset)
+        try:
+            leaf = descend_store(stores, pool.inside)
+        except (BadRequestError, NotFoundError) as exc:
+            raise ValueError(str(exc)) from exc
         named = {s.key for s in specs}
         specs += [
             spec
-            for cid in campaigns_on_dataset(stores, dataset)
-            if (spec := SubjectSpec("campaign", cid)).key not in named
+            for cid in campaigns_on_dataset(leaf, pool.name)
+            if (spec := SubjectSpec("campaign", cid, inside=pool.inside)).key not in named
         ]
     axes = [a.strip() for a in grid.split(",") if a.strip()]
     if grid and len(axes) != 2:
@@ -294,6 +311,7 @@ class _ChainPoint(NamedTuple):
     candidate_id: str
     label: str
     sheet: CellSheet
+    bench: CellSheet
     arm: ArmWalk
 
 
@@ -303,8 +321,8 @@ class _Cycle(NamedTuple):
     walks: list[IndividualWalk[WalkedCell]]
     scorer: Scorer
 
-    def sheet(self, individual_id: str) -> CellSheet:
-        measured = individual_cells(self.walks, individual_id, RoleScope.REPORT)
+    def sheet(self, individual_id: str, scope: RoleScope = RoleScope.REPORT) -> CellSheet:
+        measured = individual_cells(self.walks, individual_id, scope)
         return walked_rows(self.stores, measured, self.scorer).standing()
 
     def point(
@@ -321,6 +339,7 @@ class _Cycle(NamedTuple):
                 candidate_id=found,
                 label=named or found,
                 sheet=self.sheet(found),
+                bench=self.sheet(found, RoleScope.BENCH),
                 arm=arm,
             )
         return None
@@ -330,7 +349,7 @@ def _open_cycle(stores: Stores, campaign_id: str, cycle_dir: Path) -> _Cycle | N
     graded_under = campaign_scorer(stores, campaign_id)
     if graded_under is None:
         return None
-    chain = list(ledger_chain(CycleDir(cycle_dir)))
+    chain = ledger_chain(CycleDir(cycle_dir), moment=None)
     return _Cycle(stores, scan_standing_rounds(chain), scan_ledger_walks(chain), graded_under)
 
 
@@ -360,6 +379,7 @@ class _SubjectRead(NamedTuple):
 
     head: _Head
     channels: dict[str, dict[str, float]]
+    bench_channels: dict[str, dict[str, float]]
     cycle: _CycleFacts
 
 
@@ -376,21 +396,21 @@ def subject_evidence(
     wanted: dict[str, SubjectSpec] = {s.key: s for s in specs}
     located = {key: at for key, spec in wanted.items() if (at := _at(stores, spec)) is not None}
     answering = {
-        key: (leaf_stores, campaign_dir)
-        for key, (leaf_stores, campaign_dir) in located.items()
+        key: at
+        for key, at in located.items()
         if derived(
-            ("evidence_answers", campaign_dir, key),
-            sig=_files_read(leaf_stores, wanted[key], campaign_dir),
-            compute=partial(_answers, leaf_stores, wanted[key], campaign_dir),
+            ("evidence_answers", at.campaign_dir, key),
+            sig=_files_read(at),
+            compute=partial(_answers, at, wanted[key]),
         )
     }
     owners: dict[tuple[tuple[tuple[str, str], ...], str], tuple[Stores, Campaign]] = {}
-    for key, (leaf_stores, _) in answering.items():
+    for key, at in answering.items():
         spec = wanted[key]
-        campaign = leaf_stores.campaigns.load_campaign(spec.campaign_id)
+        campaign = at.stores.campaigns.load_campaign(spec.campaign_id)
         if campaign is not None:
             inside = tuple((h.campaign_id, h.cycle_id) for h in spec.inside)
-            owners.setdefault((inside, spec.campaign_id), (leaf_stores, campaign))
+            owners.setdefault((inside, spec.campaign_id), (at.stores, campaign))
     grader = (
         comparison_grader(sorted(owners.values(), key=lambda o: o[1].created_at))
         if owners
@@ -398,23 +418,21 @@ def subject_evidence(
     )
     reads: dict[str, _SubjectRead] = {}
     leaves: dict[str, Stores] = {}
-    for key, (leaf_stores, campaign_dir) in answering.items():
+    for key, at in answering.items():
         spec = wanted[key]
-        read = partial(_read_subject, leaf_stores, spec, campaign_dir)
+        read = partial(_read_subject, at, spec)
         # A lens grades through the campaign's resolved config, which no signature here covers.
         found = (
             read()
             if spec.lens
             else derived(
-                ("evidence_subject", campaign_dir, spec.key),
-                sig=_files_read(leaf_stores, spec, campaign_dir),
-                compute=read,
+                ("evidence_subject", at.campaign_dir, spec.key), sig=_files_read(at), compute=read
             )
         )
         if found is None:
             continue
         reads[key] = found
-        leaves[key] = leaf_stores
+        leaves[key] = at.stores
     heads = {key: found.head for key, found in reads.items()}
     channels_by_subject = {key: found.channels for key, found in reads.items()}
 
@@ -434,6 +452,7 @@ def subject_evidence(
             head,
             compiled,
             channels_by_subject[key],
+            reads[key].bench_channels,
             reads[key].cycle,
             include_winner_chain=include_winner_chain,
             include_config=include_config,
@@ -460,6 +479,9 @@ def subject_evidence(
 
     edits = _ranked(unranked, f"edits:{measurand.key}")
     scored = {r.key: r.values for r in rows if r.values}
+    held_out = {r.key: r.bench_values for r in rows if r.bench_values}
+    decomposition = variance(scored)
+    direction = spec_metric.higher_is_better
     reading = metric_reading(spec_metric, rows, available, members=members, measurand=measurand)
     return Evidence(
         generated_at=utcnow_iso(),
@@ -482,9 +504,12 @@ def subject_evidence(
         factors=factors(rows, levels, spec_metric),
         grid=grid_reading(rows, levels, spec_metric, grid) if grid else None,
         replicates=replicates(rows),
-        variance=(decomposition := variance(scored)),
+        variance=decomposition,
         power=power(decomposition, rows),
         order_confound=order_confound(rows),
+        environments=environments(scored, held_out, decomposition, higher_is_better=direction),
+        rank_agreement=rank_agreement(scored, higher_is_better=direction),
+        lift_profiles=lift_profiles(scored) if spec_metric.unit == "delta" else [],
         ranking_computed=include_ranking,
         edits=edits,
         spread=_edit_spread(edits),
@@ -504,40 +529,55 @@ def _campaign_channels(rows: list[SubjectReading]) -> list[SubjectReading]:
     return [r for r in rows if r.key in picked]
 
 
-def _at(stores: Stores, spec: SubjectSpec) -> tuple[Stores, Path] | None:
+class _Located(NamedTuple):
+    """The address resolved ONCE — sandbox, campaign dir, cycle dir — before any path is read."""
+
+    stores: Stores
+    campaign_dir: Path
+    cycle_dir: Path
+
+
+def _at(stores: Stores, spec: SubjectSpec) -> _Located | None:
     """`None`, never a raise: one mistyped id or deleted sandbox must not fail every other subject."""
     try:
         leaf = descend_store(stores, spec.inside)
-    except (BadRequestError, NotFoundError):
+        campaign_dir = next(
+            (d for d in leaf.campaigns.iter_campaign_dirs() if d.name == spec.campaign_id), None
+        )
+        if campaign_dir is None:
+            return None
+        # The root cycle by the manifest, never a directory walk: a fork sits beside it.
+        manifest = read_json_tolerant(CampaignLayout(campaign_dir).manifest, {})
+        cycle_id = validate_path_component(spec.cycle_id or str(manifest.get("root_cycle_id", "")))
+    except (BadRequestError, NotFoundError, ValueError):
         return None
-    campaign_dir = next(
-        (d for d in leaf.campaigns.iter_campaign_dirs() if d.name == spec.campaign_id), None
-    )
-    return None if campaign_dir is None else (leaf, campaign_dir)
+    return _Located(leaf, campaign_dir, campaign_cycles_dir(campaign_dir) / cycle_id)
 
 
-def _files_read(stores: Stores, spec: SubjectSpec, campaign_dir: Path) -> Hashable:
+def _files_read(at: _Located) -> Hashable:
     """A fork's inherited prefix is unsigned on purpose: nothing before a cut is rewritten."""
-    manifest = CampaignLayout(campaign_dir).manifest
-    cycle_id = spec.cycle_id or str(read_json_tolerant(manifest, {}).get("root_cycle_id", ""))
-    layout = CycleLayout(campaign_cycles_dir(campaign_dir) / cycle_id)
-    signed = (manifest, layout.ledger)
-    return (stores.archive.signature(), *(file_sig(path) for path in signed))
+    signed = (CampaignLayout(at.campaign_dir).manifest, CycleLayout(at.cycle_dir).ledger)
+    return (at.stores.archive.signature(), *(file_sig(path) for path in signed))
 
 
-def _answers(stores: Stores, spec: SubjectSpec, campaign_dir: Path) -> bool:
-    head = _resolve_head(stores, spec, campaign_dir)
+def _answers(at: _Located, spec: SubjectSpec) -> bool:
+    head = _resolve_head(at, spec)
     return head is not None and bool(head.point.sheet)
 
 
-def _read_subject(stores: Stores, spec: SubjectSpec, campaign_dir: Path) -> _SubjectRead | None:
-    head = _resolve_head(stores, spec, campaign_dir)
+def _read_subject(at: _Located, spec: SubjectSpec) -> _SubjectRead | None:
+    head = _resolve_head(at, spec)
     if head is None:
         return None
     channels = cell_channels(head.point.sheet)
     if not channels:
         return None
-    return _SubjectRead(head, channels, _cycle_facts(head.cycle_dir, head.dataset_name))
+    return _SubjectRead(
+        head,
+        channels,
+        cell_channels(head.point.bench),
+        _cycle_facts(head.cycle_dir, head.dataset_name),
+    )
 
 
 def _member(spec: SubjectSpec, head: _Head, cycle: _CycleFacts) -> SubjectMember:
@@ -570,18 +610,17 @@ def _member_rows(
     )
 
 
-def _resolve_head(stores: Stores, spec: SubjectSpec, campaign_dir: Path) -> _Head | None:
-    manifest = read_json_tolerant(CampaignLayout(campaign_dir).manifest, {})
+def _resolve_head(at: _Located, spec: SubjectSpec) -> _Head | None:
+    stores, cycle_dir = at.stores, at.cycle_dir
+    manifest = read_json_tolerant(CampaignLayout(at.campaign_dir).manifest, {})
     dataset_name = _dataset_name(manifest)
     if spec.kind == "campaign":
-        # The root cycle by the manifest, never a directory walk: a fork sits beside it as `cycle_x_fork_y`.
-        cycle_dir = campaign_cycles_dir(campaign_dir) / str(manifest.get("root_cycle_id", ""))
         cycle = _open_cycle(stores, spec.campaign_id, cycle_dir)
         origin = cycle.point(0) if cycle is not None else None
         if origin is None:
             return None
         c0 = _masked(origin, spec.samples)
-        c0_index = read_cycle_index(cycle_dir)
+        c0_index = read_cycle_index(cycle_dir, moment=None)
         return _Head(
             cycle_dir=cycle_dir,
             label=spec.campaign_id,
@@ -592,11 +631,10 @@ def _resolve_head(stores: Stores, spec: SubjectSpec, campaign_dir: Path) -> _Hea
             human_intervened=c0_index is not None and c0_index.human_intervened,
         )
 
-    cycle_dir = campaign_cycles_dir(campaign_dir) / spec.cycle_id
     cycle = _open_cycle(stores, spec.campaign_id, cycle_dir)
     if cycle is None:
         return None
-    index = read_cycle_index(cycle_dir)
+    index = read_cycle_index(cycle_dir, moment=None)
     scenario, chain = (None, None)
     if spec.lens:
         resolved = _scenario(stores, spec, cycle)
@@ -630,7 +668,9 @@ def _authorship(cycle_dir: Path, point: _ChainPoint, index: CycleIndex | None) -
     source = next(
         (
             c.lineage.source
-            for c in scan_standing_rounds(ledger_chain(CycleDir(cycle_dir))).candidates()
+            for c in scan_standing_rounds(
+                ledger_chain(CycleDir(cycle_dir), moment=None)
+            ).candidates()
             if c.candidate_id == point.candidate_id
         ),
         "",
@@ -642,7 +682,10 @@ def _authorship(cycle_dir: Path, point: _ChainPoint, index: CycleIndex | None) -
 def _masked(point: _ChainPoint, samples: frozenset[int] | None) -> _ChainPoint:
     if samples is None:
         return point
-    return point._replace(sheet=point.sheet.where(lambda cell: cell.sample_id in samples))
+    return point._replace(
+        sheet=point.sheet.where(lambda cell: cell.sample_id in samples),
+        bench=point.bench.where(lambda cell: cell.sample_id in samples),
+    )
 
 
 def _scenario(
@@ -786,7 +829,7 @@ def _spend_to_round(by_round: Mapping[int, SpendRollup]) -> dict[str, float]:
 
 
 def _cycle_facts(cycle_dir: Path, dataset_name: str) -> _CycleFacts:
-    chain = ledger_chain(CycleDir(cycle_dir))
+    chain = ledger_chain(CycleDir(cycle_dir), moment=None)
     standing = scan_standing_rounds(chain).rounds
     origin = standing[0].close if 0 in standing else None
     spend_by_round = scan_ledger_spend_by_round(chain)
@@ -809,12 +852,14 @@ def _reading_row(
     head: _Head,
     compiled: CompiledExpression,
     channels: dict[str, dict[str, float]],
+    bench_channels: dict[str, dict[str, float]],
     cycle: _CycleFacts,
     *,
     include_winner_chain: bool,
     include_config: bool,
 ) -> SubjectReading:
     values, unscorable = _score_cells(compiled, channels)
+    bench_values, _ = _score_cells(compiled, bench_channels)
     arm = head.point.arm
     value, ci_lo, ci_hi, n_cells = merge_cells(values)
     return SubjectReading(
@@ -858,6 +903,7 @@ def _reading_row(
         spend_to_round=cycle.spend_to_round,
         cell_means=_cell_means(channels),
         values=values,
+        bench_values=bench_values,
         value=value,
         ci_lo=ci_lo,
         ci_hi=ci_hi,

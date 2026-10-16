@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import threading
 from abc import ABC, abstractmethod
@@ -12,16 +11,9 @@ from itertools import islice
 from pathlib import Path
 from typing import Any, ClassVar, NamedTuple, Protocol, cast, get_args
 
-from filelock import FileLock
-
-from promptpotter.config.settings import LOCK_TIMEOUT
 from promptpotter.domain.run_records import SpendHoldRecord, TokenUsageRecord
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.store.io import (
-    append_line,
-    ensure_parent_dir,
-    open_text_robust,
-)
+from promptpotter.infrastructure.store.io import append_line, open_text_robust
 from promptpotter.shared.clock import epoch_seconds
 
 
@@ -93,18 +85,9 @@ def fold_jsonl_from(path: Path, key: str, offset: int) -> tuple[dict[str, dict[s
     return out, offset
 
 
-def _lock_for(path: Path) -> FileLock:
-    lock_path = path.with_suffix(path.suffix + ".lock")
-    ensure_parent_dir(lock_path)
-    return FileLock(str(lock_path), timeout=LOCK_TIMEOUT)
-
-
-def append_row(path: Path, *rows: dict[str, Any]) -> int:
-    lines = [json.dumps(row, ensure_ascii=False) for row in rows]
-    # Locked only against a concurrent compaction, which truncates and replaces.
-    with _lock_for(path):
-        append_line(path, "\n".join(lines))
-    return sum(len(line.encode("utf-8")) + len(os.linesep) for line in lines)
+def append_row(path: Path, *rows: dict[str, Any]) -> range:
+    lines = "\n".join(json.dumps(row, ensure_ascii=False) for row in rows)
+    return append_line(path, lines.encode("utf-8"))
 
 
 Signature = tuple[int, int, int]
@@ -372,15 +355,17 @@ class Moment(NamedTuple):
     ledger: Path
     offset: int
 
+    @property
+    def instant(self) -> float:
+        """The wall clock its ledger had reached at its offset: what another store is cut at."""
+        own = LineIndex.of(self.ledger, (_Clock,)).view(_Clock)
+        return own[min(self.offset, len(own) - 1)] if own else float("-inf")
+
     def span(self, ledger: Path) -> LedgerSpan:
         if ledger == self.ledger:
             return LedgerSpan(ledger, self.offset + 1)
-        own = LineIndex.of(self.ledger, (_Clock,)).view(_Clock)
-        if not own:
-            return LedgerSpan(ledger, 0)
-        instant = own[min(self.offset, len(own) - 1)]
         other = LineIndex.of(ledger, (_Clock,)).view(_Clock)
-        return LedgerSpan(ledger, bisect_right(other, instant))
+        return LedgerSpan(ledger, bisect_right(other, self.instant))
 
     def spans(self, chain: Sequence[LedgerSpan]) -> list[LedgerSpan]:
         out: list[LedgerSpan] = []

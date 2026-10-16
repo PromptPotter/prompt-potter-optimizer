@@ -9,6 +9,7 @@ from promptpotter.domain.run_records import LLMCallProgressRecord
 from promptpotter.shared.clock import SUSPEND_GRACE_S, sleep_measuring_suspend
 
 if TYPE_CHECKING:
+    from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.infrastructure.ledger import CycleEventLog
     from promptpotter.infrastructure.llm.base import LLMClientBase
 
@@ -37,6 +38,7 @@ async def heartbeat(
     round_num: int | None,
     start_monotonic: float,
     detail_fn: Callable[[], str | None] | None = None,
+    inner_fn: Callable[[], CycleHop | None] | None = None,
     on_suspend: Callable[[float], None] | None = None,
 ) -> None:
     """``ledger=None`` still ticks, so a missing ledger cannot disarm ``on_suspend``."""
@@ -53,17 +55,18 @@ async def heartbeat(
                 node=node,
                 round=round_num,
                 elapsed_s=elapsed,
-                detail=_safe_detail(detail_fn),
+                detail=_safe_read(detail_fn),
+                inner=_safe_read(inner_fn),
             )
         )
 
 
-def _safe_detail(detail_fn: Callable[[], str | None] | None) -> str | None:
-    """A detail read can raise on another process's write; it must never fail the call."""
-    if detail_fn is None:
+def _safe_read[T](read: Callable[[], T | None] | None) -> T | None:
+    """A beat's read can raise on another process's write; it must never fail the call."""
+    if read is None:
         return None
     try:
-        return detail_fn()
+        return read()
     except Exception as exc:
-        logger.warning("heartbeat detail unavailable — %s: %s", exc.__class__.__name__, exc)
+        logger.warning("heartbeat read unavailable — %s: %s", exc.__class__.__name__, exc)
         return None

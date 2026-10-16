@@ -29,25 +29,25 @@ from pydantic import BaseModel
 
 BASELINE = {
     # Every `.py` under the package.
-    "modules": 443,
+    "modules": 444,
     # Every `__init__.py` among them.
     "init_files": 55,
     # The `__init__.py` files that re-export names instead of staying empty.
     "reexport_shims": 5,
     # Campaign-config knobs, plus the node knobs each optimizer member declares.
-    "config_leaf_fields": 80,
+    "config_leaf_fields": 81,
     # `Settings` fields — what the environment can set.
-    "settings_env": 41,
+    "settings_env": 42,
     # The upper-case constants `config/settings.py` exports.
     "settings_const": 3,
     # Leaves of `OptSearchPoint` — what a run is handed.
     "opt_search_point_fields": 15,
     # Leaves of `CycleResult` — what a run produces.
-    "cycle_result_fields": 514,
+    "cycle_result_fields": 605,
     # Parameters annotated `Any`.
-    "any_params": 46,
+    "any_params": 47,
     # `dict[str, Any]` maps declared in `domain/`.
-    "domain_any_maps": 67,
+    "domain_any_maps": 68,
     # Models that opt out of `StrictModel`'s `extra="forbid"`.
     "models_lax": 3,
     # The prompt decomposition fields.
@@ -71,7 +71,7 @@ BASELINE = {
     # moves it as one function does not.
     "test_reach": 356,
     # Every property of every schema the generated contract offers the browser.
-    "served_fields": 1631,
+    "served_fields": 1666,
 }
 
 _REPO = Path(__file__).resolve().parents[1]
@@ -79,10 +79,9 @@ _PACKAGE_ROOT = _REPO / "promptpotter"
 
 # ``assets/`` is install DATA the package reads, never code it imports — the optimizer
 # manifest, the exported dashboard, the benchmark dataset definitions. Counting it as
-# conceptual surface is wrong on its own terms, and it is not hypothetical: two of the
-# three asset trees are STAGED there by ``scripts/build_release.py`` before a wheel is
-# built, so a developer who has cut a release once carries ``datasets/CLAUDE.md`` inside
-# the package and the ratchet goes red on a file nobody wrote.
+# conceptual surface is wrong on its own terms: the dashboard is STAGED there by
+# ``scripts/build_release.py`` before a wheel is built, and ``assets/datasets/CLAUDE.md``
+# documents data, not a layer.
 _ASSETS_ROOT = _PACKAGE_ROOT / "assets"
 
 # The suite beside the package. `tests/CLAUDE.md` fixes its files and admits a function only

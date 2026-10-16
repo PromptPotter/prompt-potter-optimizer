@@ -146,7 +146,7 @@ async def run_campaign(
             session,
             campaign_config,
             train_data,
-            campaign_id=fresh_campaign_id(session, campaign_config),
+            campaign_id=fresh_campaign_id(session),
             task_text=None,
             arm=arm,
             limits=limits,

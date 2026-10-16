@@ -16,7 +16,6 @@ from promptpotter.application.campaign_config import (
     under_record,
 )
 from promptpotter.application.datasets.authored import (
-    dataset_campaign_path,
     load_dataset_campaign_config,
     scorer_of,
     with_optimization,
@@ -45,11 +44,7 @@ from promptpotter.application.optimizer_manifest import (
     resolve_optimizer,
     select_optimizer,
 )
-from promptpotter.application.runner.inner.tasks import (
-    inner_tasks_path,
-    is_self_optimization,
-    load_inner_tasks,
-)
+from promptpotter.application.runner.inner.tasks import is_self_optimization, parse_resolved
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.pipeline_overlay import (
     apply_node_overlay,
@@ -87,18 +82,21 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_le
 from promptpotter.infrastructure.store.checkin_draft_store import dataset_source_of
 from promptpotter.infrastructure.store.dataset_access import (
     DatasetAccessError,
+    ResolvedDataset,
+    dataset_connector,
     dataset_experiment,
-    dataset_pipeline_path,
-    readable_dataset_dir,
+    declared_pipelines,
+    definition_files,
+    read_dataset_definition,
+    read_dataset_pipeline,
+    resolve_dataset,
 )
-from promptpotter.infrastructure.store.io import read_yaml_optional
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import derived, file_sig
 from promptpotter.infrastructure.store.stores import descend_store, owned_campaign
 from promptpotter.judges.registry import judge_instrument
 from promptpotter.shared.errors import (
     BadRequestError,
-    CellUnscoreableError,
     NotFoundError,
     PayloadInvalidError,
     StoredConfigInvalidError,
@@ -109,7 +107,6 @@ from promptpotter.shared.plugin_registry import BUILT_IN
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from promptpotter.connectors.protocol import Connector
     from promptpotter.domain.campaign import Campaign
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.run_records import CycleSeed
@@ -144,6 +141,7 @@ __all__ = [
     "dataset_pipeline_declaration",
     "draft_config_rows",
     "frozen_config",
+    "line_config",
     "measurement_node",
     "merge_declared_layers",
     "optimizer_knobs",
@@ -156,15 +154,13 @@ __all__ = [
     "resolve_pipeline_for_dataset",
     "resolve_pipeline_for_draft",
     "resolve_pipeline_for_optimizer",
-    "resolved_dataset_name",
-    "root_config_resolves",
 ]
 
 
 def resolve_pipeline_config_params(
     active: list[str],
     campaign_overlay: Mapping[str, Any],
-    dataset_dir: Path | None,
+    dataset: ResolvedDataset | None,
     schema: PipelineSchema,
     judges: Mapping[str, JudgeSpec] | None = None,
     *,
@@ -177,7 +173,7 @@ def resolve_pipeline_config_params(
     params = merge_declared_layers(
         active,
         campaign_overlay,
-        dataset_dir,
+        None if dataset is None else dataset.directory,
         schema,
         workspace=workspace,
         base_config=base_config,
@@ -186,7 +182,7 @@ def resolve_pipeline_config_params(
     return apply_identity_layer(
         params,
         active,
-        dataset_dir,
+        dataset,
         schema,
         stores=stores,
         judges=judges,
@@ -327,7 +323,7 @@ def _apply_model_floors(
 def apply_identity_layer(
     pipeline_params: dict[str, Any],
     active: list[str],
-    dataset_dir: Path | None,
+    dataset: ResolvedDataset | None,
     schema: PipelineSchema,
     *,
     stores: Stores | None,
@@ -336,7 +332,7 @@ def apply_identity_layer(
     provenance: MutableMapping[str, dict[str, ParamSource]] | None = None,
 ) -> dict[str, Any]:
     # LAST and unoverridable: the connector's and the judges' ONE channel into the archive key.
-    contributions = _identity_contributions(stores, dataset_dir, experiment, judges, active)
+    contributions = _identity_contributions(stores, dataset, experiment, judges, active)
     identity = {node: cfg for node, cfg in contributions.items() if node in active}
     if identity:
         pipeline_params = apply_node_overlay(
@@ -345,18 +341,13 @@ def apply_identity_layer(
     return pipeline_params
 
 
-def _connector_of(raw: Mapping[str, Any] | None) -> Connector | None:
-    return connectors.registered().get(str((raw or {}).get("backend_type") or ""))
-
-
-def _dataset_connector(dataset_dir: Path) -> Connector | None:
-    return _connector_of(read_yaml_optional(dataset_pipeline_path(dataset_dir)))
-
-
 def overlay_dataset_pipeline(served: dict[str, Any], local: Mapping[str, Any]) -> dict[str, Any]:
-    out = dict(served.get("data") or served)
-    if "pipelines" in local:
-        out["pipelines"] = local["pipelines"]
+    out = dict(served)
+    # The definition names the backend it runs: what the operator chose outranks a self-description.
+    if local.get("backend_name"):
+        out["backend_name"] = local["backend_name"]
+    if pipelines := declared_pipelines(local):
+        out["pipelines"] = pipelines
     # The operator's model MENU bounds the L1 enum; dropped, the service's catalogue is searched.
     if local.get("available_models"):
         out["available_models"] = local["available_models"]
@@ -365,36 +356,43 @@ def overlay_dataset_pipeline(served: dict[str, Any], local: Mapping[str, Any]) -
 
 
 def dataset_pipeline_declaration(
-    stores: Stores, dataset_dir: Path, experiment: Mapping[str, Any] | None
+    stores: Stores, dataset: ResolvedDataset, experiment: Mapping[str, Any] | None
 ) -> dict[str, Any] | None:
-    local = read_yaml_optional(dataset_pipeline_path(dataset_dir))
-    connector = _connector_of(local)
-    if local is None or connector is None or connector.pipeline_declaration is None:
-        return local
-    return overlay_dataset_pipeline(connector.pipeline_declaration(stores, experiment), local)
-
-
-def experiment_outside_run(dataset_dir: Path | None) -> Mapping[str, Any] | None:
-    if dataset_dir is None:
+    definition = read_dataset_definition(dataset.directory)
+    if definition is None:
         return None
-    connector = _dataset_connector(dataset_dir)
-    return None if connector is None else dataset_experiment(dataset_dir, connector)
+    connector = connectors.registered().get(definition.backend_type)
+    if connector is None or connector.pipeline_declaration is None:
+        return definition.pipeline
+    return overlay_dataset_pipeline(
+        connector.pipeline_declaration(stores, dataset, experiment), definition.pipeline
+    )
+
+
+def experiment_outside_run(
+    stores: Stores, dataset: ResolvedDataset | None
+) -> Mapping[str, Any] | None:
+    if dataset is None:
+        return None
+    connector = dataset_connector(dataset)
+    read = None if connector is None else dataset_experiment(stores, dataset, connector)
+    return None if read is None else read.experiment
 
 
 def _identity_contributions(
     stores: Stores | None,
-    dataset_dir: Path | None,
+    dataset: ResolvedDataset | None,
     experiment: Mapping[str, Any] | None,
     judges: Mapping[str, JudgeSpec] | None,
     active: list[str],
 ) -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
-    if dataset_dir is not None:
-        connector = _dataset_connector(dataset_dir)
+    if dataset is not None:
+        connector = dataset_connector(dataset)
         if connector is not None and connector.identity_config is not None:
             if stores is None:
-                raise ValueError(f"{dataset_dir}: its connector's identity needs the stores")
-            out.update(connector.identity_config(stores, dataset_dir, experiment))
+                raise ValueError(f"{dataset.name}: its connector's identity needs the stores")
+            out.update(connector.identity_config(stores, dataset, experiment))
     if judges and active:
         # The TERMINAL step: a judge grades the answer that node emits.
         out.setdefault(active[-1], {})[JUDGE_INSTRUMENT_KEY] = judge_instrument(judges)
@@ -414,7 +412,7 @@ def _resolve_active_schema(
     filtered = pipeline_schema
     if exclude:
         filtered = pipeline_schema.filter_to_steps(active)
-    # Declared UNION the running chain: `promptpotter-self` declares `l2_context` / `l3_plan`
+    # Declared UNION the running chain: `promptpotter-self/panel` declares `l2_context` / `l3_plan`
     # off-chain on purpose, and a dataset declaring fewer nodes than it runs must lose none.
     declared = dataset_declared_nodes(dataset_dir) if dataset_dir is not None else frozenset()
     if declared:
@@ -442,7 +440,7 @@ def _apply_starting_prompts(
     prompt_nodes = [n for n in filtered.prompt_node_names() if n in active]
     prompt_info_by_node = {n.name: n.prompt_info for n in filtered.nodes}
     for pnode in prompt_nodes:
-        template = load_node_prompt(dataset_dir, pnode, "default")
+        template = load_node_prompt(dataset_dir, pnode)
         rendered = template.render()
         pinfo = prompt_info_by_node.get(pnode)
         declared = pinfo.template_variables if pinfo else []
@@ -453,14 +451,12 @@ def _apply_starting_prompts(
                 f"template variables {missing} — the backend injects these by literal "
                 f"{{{{name}}}} substitution, so without them the query / research / output "
                 f"schema never reach the model. Add the placeholders to "
-                f"datasets/{dataset_name}/prompts/[{pnode}|default].yaml "
+                f"{dataset_name}'s origin.yaml under `{pnode}` "
                 f"(node declares: {declared}).",
                 code="pipeline_config_invalid",
             )
         pipeline_params.setdefault(pnode, {})["prompt"] = rendered
-        logger.info(
-            "Starting prompt: %s/prompts/[%s|default].yaml → %s", dataset_name, pnode, pnode
-        )
+        logger.info("Starting prompt: %s origin.yaml[%s]", dataset_name, pnode)
 
 
 def _validate_prompt_reach(
@@ -493,7 +489,7 @@ def _validate_prompt_reach(
             f"dataset {dataset_name!r} ships starting prompts but no active node in {active} "
             f"declares `prompt_info`, so the rendered prompt is dropped before the wire and "
             f"every cell runs with an empty system prompt. An LLM node must declare it, in "
-            f"GET /pipeline or in the dataset's pipeline.yaml.",
+            f"GET /pipeline or in the dataset's `dataset.yaml::pipeline`.",
             code="pipeline_config_invalid",
         )
     if not names_prompt_fields:
@@ -520,20 +516,15 @@ def _validate_model_ownership(
         if node_obj and node_obj.is_llm and not pipeline_params.get(name, {}).get("model"):
             raise PayloadInvalidError(
                 f"dataset {dataset_name!r}: LLM node {name!r} has no owned model. "
-                f"Declare it in the dataset's pipeline.yaml::nodes.{name}.config.model "
+                f"Declare it in the dataset's dataset.yaml::pipeline.nodes.{name}.config.model "
                 f"— the dataset owns its task model, never the backend default.",
                 code="pipeline_config_invalid",
             )
 
 
-def resolved_dataset_name(session: Session, campaign_config: CampaignConfig) -> str:
-    """Must equal the mint seam's ``Campaign.dataset_name``, or measurements file under a dead name."""
-    return campaign_config.dataset_name or session.dataset_name or ""
-
-
 class CampaignPipelineResponse(StrictModel):
     """One campaign's pipeline at one searchpoint — the body of ``GET /campaigns/{id}/pipeline``.
-    The peer of ``readable_dataset_dir`` one question up: that seam answers which bytes are on disk,
+    The peer of ``resolve_dataset`` one question up: that seam answers which bytes are on disk,
     this one which values a campaign runs (``architecture.md`` § Two resolution seams)."""
 
     campaign_id: str
@@ -564,8 +555,9 @@ class CampaignPipelineResponse(StrictModel):
         description="Keyed by the provider and model each node's rows carry AT this searchpoint"
     )
     reach: dict[str, NodeReach]
-    nests: NestedPipelineRef | None = Field(
-        description="The inner pipeline this chain nests, if any — the L4 drill-in, on this read"
+    nests: list[NestedPipelineRef] = Field(
+        description="The inner pipelines this chain nests, one per dataset its cells measure — "
+        "the L4 drill-in, on this read"
     )
     is_single_node: bool
 
@@ -603,7 +595,7 @@ def _evolved_overlay(stores: Stores, at: SubjectSpec) -> tuple[dict[str, Any], d
         return {}, {}
     hop = CycleHop(campaign_id=at.campaign_id, cycle_id=at.cycle_id)
     # Newest round first: a re-measured point answers from the round that measured it last.
-    for held in reversed(stores.campaigns.standing_rounds(hop).rounds.values()):
+    for held in reversed(stores.campaigns.standing_rounds(hop, moment=None).rounds.values()):
         for cand in held.close.candidate_scores:
             if cand.candidate_id == at.candidate_id:
                 return dict(cand.pipeline_overlay or {}), dict(cand.resolved_pipeline_params or {})
@@ -614,14 +606,23 @@ def measurement_node(view: PipelineView | None) -> str | None:
     return next((n.id for n in (view.nodes if view else []) if n.kind == "measurement"), None)
 
 
-def nested_pipeline_ref(dataset_dir: Path, view: PipelineView | None) -> NestedPipelineRef | None:
-    try:
-        panel = load_inner_tasks(inner_tasks_path(dataset_dir))
-    except CellUnscoreableError:
-        # A read-only view must not raise where the runner would.
-        return None
+def nested_pipeline_refs(
+    dataset: ResolvedDataset,
+    experiment: Mapping[str, Any] | None,
+    view: PipelineView | None,
+) -> list[NestedPipelineRef]:
+    """One per dataset the cells' inner campaigns measure, by name."""
     node = measurement_node(view)
-    return NestedPipelineRef(node=node, dataset=panel.inner_benchmark) if node else None
+    connector = dataset_connector(dataset)
+    if node is None or experiment is None or connector is None:
+        return []
+    if not is_self_optimization(connector.name):
+        return []
+    resolved = parse_resolved(experiment)
+    return [
+        NestedPipelineRef(node=node, dataset=name)
+        for name in sorted(set(resolved.datasets.values()))
+    ]
 
 
 def resolved_output_schemas(
@@ -642,9 +643,9 @@ def resolved_output_schemas(
     return out
 
 
-def _dataset_dir_of(stores: Stores, campaign: Campaign) -> Path | None:
+def _dataset_of(stores: Stores, campaign: Campaign) -> ResolvedDataset | None:
     try:
-        return readable_dataset_dir(stores, campaign.dataset_name)
+        return resolve_dataset(stores, campaign.dataset_name)
     except DatasetAccessError:
         # A campaign outlives its dataset dir; its frozen config still answers.
         return None
@@ -667,10 +668,10 @@ def checkin_campaign_config(
     """What Start freezes. ``session_chain`` is the live backend's, which only Start holds."""
     canonical = dataset_source_of(draft.source_file)
     if canonical is None:
-        # A fresh upload commits its overlay and chain into its own `pipeline.yaml`.
+        # A fresh upload commits its overlay and chain into its own `dataset.yaml::pipeline`.
         return with_optimization(default_campaign_config(draft), draft.optimization_overrides)
-    dataset_dir = readable_dataset_dir(stores, canonical)
-    declared = load_dataset_campaign_config(dataset_campaign_path(dataset_dir))
+    dataset_dir = resolve_dataset(stores, canonical).directory
+    declared = load_dataset_campaign_config(dataset_dir)
     overrides, narrowing = split_overlay(draft.pipeline_overlay)
     update: dict[str, Any] = {
         "pipeline_overlay": {**declared.pipeline_overlay, **overrides},
@@ -687,8 +688,7 @@ def checkin_campaign_config(
 
 
 def _declared_chain(dataset_dir: Path) -> list[str]:
-    local = read_yaml_optional(dataset_pipeline_path(dataset_dir)) or {}
-    return [str(step) for step in (local.get("pipelines") or {}).get("default") or []]
+    return declared_pipelines(read_dataset_pipeline(dataset_dir) or {}).get("default", [])
 
 
 def resolve_campaign_config(
@@ -738,7 +738,7 @@ class _Merge:
 
 @dataclass(frozen=True)
 class _CampaignMerge(_Merge):
-    dataset_dir: Path | None
+    dataset: ResolvedDataset | None
     hop: CycleHop
     raw: dict[str, Any] | None
     seed: CycleSeed | None
@@ -758,7 +758,7 @@ class _CampaignMerge(_Merge):
 def _draft_merge(stores: Stores, draft: DraftCampaign) -> _Merge:
     schema = parse_pipeline_response(rendered_pipeline_json(draft))
     cfg = checkin_campaign_config(stores, draft)
-    # Still the operator's own layer here, where a fresh upload's Start files it in `pipeline.yaml`.
+    # Still the operator's own layer here, where a fresh upload's Start files it in `dataset.yaml::pipeline`.
     overrides, narrowing = split_overlay(draft.pipeline_overlay)
     active, filtered = _resolve_active_schema(
         schema,
@@ -789,12 +789,13 @@ def _draft_merge(stores: Stores, draft: DraftCampaign) -> _Merge:
 
 
 def _campaign_merge(stores: Stores, campaign: Campaign, at: SubjectSpec) -> _CampaignMerge:
-    dataset_dir = _dataset_dir_of(stores, campaign)
+    dataset = _dataset_of(stores, campaign)
+    dataset_dir = None if dataset is None else dataset.directory
     hop = CycleHop(campaign_id=campaign.campaign_id, cycle_id=at.cycle_id or campaign.root_cycle_id)
     # The cycle's recorded merge first: the committed dataset file carries no `param_keys` at all.
     raw = stores.campaigns.read_resolved_pipeline(hop)
-    if raw is None and dataset_dir:
-        raw = dataset_pipeline_declaration(stores, dataset_dir, experiment_outside_run(dataset_dir))
+    if raw is None and dataset is not None:
+        raw = dataset_pipeline_declaration(stores, dataset, experiment_outside_run(stores, dataset))
     schema = parse_pipeline_response(raw or {"nodes": {}, "pipelines": {"default": []}})
     seed = stores.campaigns.read_cycle_seed(hop)
     cfg = resolve_campaign_config(stores, campaign, hop)
@@ -820,7 +821,7 @@ def _campaign_merge(stores: Stores, campaign: Campaign, at: SubjectSpec) -> _Cam
         cfg=cfg,
         params=params,
         provenance=provenance,
-        dataset_dir=dataset_dir,
+        dataset=dataset,
         hop=hop,
         raw=raw,
         seed=seed,
@@ -856,8 +857,8 @@ def resolve_pipeline_for_draft(
         node_output_schema=resolved_output_schemas(m.filtered, params),
         model_capabilities=_served_menu(m, params, stores.base_dir),
         reach=reach_map(rows),
-        # A dataset dir is what declares an inner panel, and a check-in has none yet.
-        nests=None,
+        # A dataset dir is what declares inner cells, and a check-in has none yet.
+        nests=[],
         is_single_node=m.filtered.is_single_node,
     )
 
@@ -900,16 +901,18 @@ def resolve_pipeline_for_campaign(
         )
 
     m = _campaign_merge(stores, campaign, at)
+    # Recorded first: a live resolve recomputes a banked identity off a roster it never ran.
+    experiment = stores.campaigns.read_resolved_experiment(m.hop) or experiment_outside_run(
+        stores, m.dataset
+    )
     params = apply_identity_layer(
         m.params,
         m.active,
-        m.dataset_dir,
+        m.dataset,
         m.filtered,
         stores=stores,
         judges=m.cfg.judges,
-        # Recorded first: a live resolve recomputes a banked identity off a roster it never ran.
-        experiment=stores.campaigns.read_resolved_experiment(m.hop)
-        or experiment_outside_run(m.dataset_dir),
+        experiment=experiment,
         provenance=m.provenance,
     )
     params = m.with_seed(params)
@@ -932,8 +935,8 @@ def resolve_pipeline_for_campaign(
         campaign_id=campaign.campaign_id,
         cycle_id=m.hop.cycle_id,
         dataset_name=campaign.dataset_name,
-        connector=str((m.raw or {}).get("backend_name") or campaign.dataset_name),
-        # The campaign's FROZEN kind — one `pipeline.yaml` serves every campaign on the slug.
+        connector=str((m.raw or {}).get("backend_name", "")),
+        # The campaign's FROZEN kind — one definition serves every campaign on the slug.
         backend_type=campaign.backend_type,
         self_optimization=is_self_optimization(campaign.backend_type),
         optimizer=m.cfg.optimization.optimizer,
@@ -944,7 +947,9 @@ def resolve_pipeline_for_campaign(
         node_output_schema=resolved_output_schemas(m.filtered, params),
         model_capabilities=_served_menu(m, params, stores.base_dir),
         reach=reach_map(rows),
-        nests=nested_pipeline_ref(m.dataset_dir, m.filtered.view) if m.dataset_dir else None,
+        nests=[]
+        if m.dataset is None
+        else nested_pipeline_refs(m.dataset, experiment, m.filtered.view),
         is_single_node=m.filtered.is_single_node,
     )
 
@@ -986,31 +991,32 @@ class DatasetPipelineResponse(StrictModel):
         description="Every param each node carries, valueless — what `reach` is summed over"
     )
     reach: dict[str, NodeReach]
-    nests: NestedPipelineRef | None = Field(
-        description="The pipeline this one nests in turn; the only wire naming it before a cell "
-        "has spawned"
+    nests: list[NestedPipelineRef] = Field(
+        description="The pipelines this one nests in turn, one per dataset its cells measure; the "
+        "only wire naming them before a cell has spawned"
     )
 
 
 def resolve_pipeline_for_dataset(stores: Stores, dataset_name: str) -> DatasetPipelineResponse:
-    dataset_dir = readable_dataset_dir(stores, dataset_name)
-    raw = dataset_pipeline_declaration(stores, dataset_dir, experiment_outside_run(dataset_dir))
+    dataset = resolve_dataset(stores, dataset_name)
+    experiment = experiment_outside_run(stores, dataset)
+    raw = dataset_pipeline_declaration(stores, dataset, experiment)
     if raw is None:
-        raise NotFoundError(f"Dataset '{dataset_name}' has no pipeline.yaml")
-    cfg = load_dataset_campaign_config(dataset_campaign_path(dataset_dir))
+        raise NotFoundError(f"Dataset '{dataset_name}' declares no pipeline")
+    cfg = load_dataset_campaign_config(dataset.directory)
     _, filtered = _resolve_active_schema(
         parse_pipeline_response(raw),
         exclude=list(cfg.exclude_nodes),
         narrowing=cfg.optimizer_narrowing,
-        dataset_dir=dataset_dir,
+        dataset_dir=dataset.directory,
     )
     rows = filtered.node_config_schema()
     return DatasetPipelineResponse(
-        connector=str(raw.get("backend_name") or raw.get("name") or dataset_name).strip(),
+        connector=str(raw.get("backend_name", "")),
         view=filtered.view,
         node_config_schema=rows,
         reach=reach_map(rows),
-        nests=nested_pipeline_ref(dataset_dir, filtered.view),
+        nests=nested_pipeline_refs(dataset, experiment, filtered.view),
     )
 
 
@@ -1048,7 +1054,7 @@ class OptimizerPipelineResponse(StrictModel):
     )
     measurement_node: str | None = Field(
         description="The node of `view` that runs the measurement — where a campaign's pipeline "
-        "nests under this graph, as `nests.node` names it per campaign. Null where the manifest "
+        "nests under this graph, as each `nests[].node` names it per campaign. Null where the manifest "
         "declares no measurement node."
     )
     node_config_schema: dict[str, list[NodeConfigParam]] = Field(
@@ -1268,16 +1274,16 @@ def campaign_runs_with(stores: Stores, campaign: Campaign) -> CampaignRunsWith |
     )
 
 
-def root_config_resolves(stores: Stores, campaign: Campaign) -> bool:
-    """False where the list serves a row's config-bound readings null, never a failed read."""
-
-    def scoreable(_draft: DraftCampaign | None) -> bool:
-        config = resolve_campaign_config(stores, campaign, campaign.root_hop)
+def line_config(stores: Stores, campaign: Campaign, holder: CycleHop) -> CampaignConfig | None:
+    """``None`` is a row whose config-bound readings are served null, never a failed list."""
+    try:
+        config = resolve_campaign_config(stores, campaign, holder)
         # A config naming no formula resolves and still grades nothing.
         scorer_of(config, verifier_graded=False)
-        return True
-
-    return bool(_root_read(stores, campaign, "root_config", scoreable))
+    except _ROOT_UNRESOLVED:
+        # Silent: `campaign_runs_with` logs the same root's cause, once per change.
+        return None
+    return config
 
 
 def _root_read[T](
@@ -1304,7 +1310,8 @@ def _root_read[T](
 def _root_key(
     stores: Stores, campaign: Campaign, root: Path, draft: DraftCampaign | None
 ) -> tuple[Any, ...]:
-    dataset_dir = _dataset_dir_of(stores, campaign)
+    dataset = _dataset_of(stores, campaign)
+    dataset_dir = None if dataset is None else dataset.directory
     # The seed's VALUE, never its ledger's stat: a running root appends there on every sample.
     seed = stores.campaigns.read_cycle_seed(campaign.root_hop)
     return (
@@ -1313,9 +1320,8 @@ def _root_key(
         campaign.dataset_name,
         campaign.root_cycle_id,
         dataset_dir,
-        file_sig(dataset_pipeline_path(dataset_dir)) if dataset_dir is not None else None,
-        # A check-in on a reused dataset reads that dataset's declaration live.
-        file_sig(dataset_campaign_path(dataset_dir)) if dataset_dir is not None else None,
+        # A check-in on a reused dataset reads that dataset's declaration live, defaults included.
+        *(() if dataset_dir is None else (file_sig(p) for p in definition_files(dataset_dir))),
         file_sig(CycleLayout(root).resolved_pipeline),
         None if seed is None else stable_hash(seed.model_dump(mode="json")),
         None if draft is None else stable_hash(draft.to_disk()),
@@ -1366,8 +1372,9 @@ def configure_and_apply_pipeline(
 ) -> dict[str, Any]:
 
     exclude = list(campaign_config.exclude_nodes)
-    dataset_name = resolved_dataset_name(session, campaign_config)
-    dataset_dir = session.dataset_config_dir
+    dataset_name = session.measured_dataset
+    dataset = session.dataset
+    dataset_dir = None if dataset is None else dataset.directory
 
     active, filtered = _resolve_active_schema(
         session.pipeline_schema,
@@ -1381,7 +1388,7 @@ def configure_and_apply_pipeline(
     pipeline_params = resolve_pipeline_config_params(
         active,
         campaign_config.pipeline_overlay,
-        dataset_dir,
+        dataset,
         filtered,
         judges=campaign_config.judges,
         experiment=session.backend_client.workload.experiment,

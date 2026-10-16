@@ -17,7 +17,7 @@ from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS, SendBudge
 from promptpotter.infrastructure.llm.spend_book import CallLabel
 from promptpotter.infrastructure.llm.telemetry import (
     active_cycle_ledger,
-    call_priced,
+    claim_call_price,
     current_round,
     emit_token_usage,
 )
@@ -72,8 +72,8 @@ async def ask(stage: JudgeStage, prompt: str, *, judge: str) -> tuple[str, str]:
             return "", f"{type(exc).__name__}: {exc}"
 
     # Once per campaign: a grading its ledger already priced is not metered on a later replay.
-    counted = key is not None and call_priced(key)
-    if cached is not None and not counted:
+    first = key is not None and claim_call_price(key)
+    if cached is not None and first:
         emit_token_usage(
             node=f"{judge}:{stage.role}",
             kind="judge",

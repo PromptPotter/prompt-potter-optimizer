@@ -23,7 +23,7 @@ The whole tool is one system prompt and one model. `--bench` scores a system pro
 `.claude/digest-bench.jsonl` (did the quoted lines contain the answer, and how much came back), so
 a candidate prompt is one `--system-file` away from a number — which is all an optimizer needs.
 That number is span recall, the cheap screen; the measurement it stands in for is
-`datasets/compaction/README.md` § Scoring.
+`.claude/skills/digest/compaction/README.md` § Scoring.
 
 The key is `DIGEST_OPENROUTER_API_KEY` (environment, else the repo's `.env`) — its own key, so this
 spend never lands on a campaign's.

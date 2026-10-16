@@ -84,14 +84,10 @@ VERBS: tuple[Verb, ...] = (
             Arg(
                 "--config",
                 default=None,
-                help="Campaign config JSON override (defaults to datasets/<name>/campaign.yaml).",
+                help="A definition file whose `campaign` section replaces the dataset's own.",
             ),
-            Arg("--task-file", default=None, help="Override datasets/<name>/task_description.md"),
-            Arg(
-                "--task-text",
-                default=None,
-                help="Override datasets/<name>/task_description.md inline",
-            ),
+            Arg("--task-file", default=None, help="Override the dataset's task.md"),
+            Arg("--task-text", default=None, help="Override the dataset's task.md inline"),
             Arg(
                 "--slug",
                 default=None,
@@ -381,7 +377,9 @@ VERBS: tuple[Verb, ...] = (
                 "dataset",
                 nargs="?",
                 default="",
-                help="Pool every campaign on this dataset, beside any --subject names.",
+                help="Pool every campaign on this dataset, beside any --subject names. With "
+                "';in=<outer_campaign>::<outer_cycle>' (the same codec as a subject's), the L4 inner "
+                "campaigns of that outer cycle's sandbox.",
             ),
             Arg(
                 "--subject",
@@ -467,8 +465,8 @@ VERBS: tuple[Verb, ...] = (
         args=(
             Arg(
                 "dataset",
-                help="ANY dataset whose seeded bank draws are being screened (e.g. 'justlogic-d234'). "
-                "Not an L4-only verb: it resolves that dataset's own campaign.yaml and origin, so a "
+                help="ANY dataset whose seeded bank draws are being screened (e.g. 'justlogic/d234'). "
+                "Not an L4-only verb: it resolves that dataset's own definition and origin, so a "
                 "screen needs no inner loop and no self-optimizing campaign.",
             ),
             Arg(
@@ -508,73 +506,21 @@ VERBS: tuple[Verb, ...] = (
                 "press the browser arms and a round spends — that control belongs to `new`/`resume`, "
                 "which have a round to spend it at. Clamped to the backend's own ceiling.",
             ),
-        ),
-    ),
-    Verb(
-        "decision-bank",
-        "decision_bank:cmd_decision_bank",
-        help="Debug diagnostic (NOT a loop feature): replay every closed round's propose "
-        "step under two optimizer-prompt arms and measure each arm's proposals on the "
-        "cells that round read its parent on — a paired, one-round reading of a prompt "
-        "variant. A DRY RUN unless --max-usd is passed. Mints no cycle.",
-        args=(
             Arg(
-                "dataset",
-                help="Dataset whose campaigns' closed rounds are the bank (e.g. 'justlogic-d234').",
-            ),
-            Arg(
-                "--campaign",
-                dest="campaigns",
-                action="append",
-                default=[],
-                help="Restrict the bank to this campaign id; repeat for several (default: every one).",
-            ),
-            Arg(
-                "--base",
-                dest="base",
+                "--model",
+                dest="model",
                 default=None,
-                help="YAML of optimizer overrides the BASE arm proposes under, `{node: {prompt field: "
-                "text, model: …}}` — the shape an L4 arm declares. Default: the optimizer as each "
-                "campaign's manifest resolves it. A `model` pins one proposer model across the bank.",
+                help="Pin the solver over the dataset's own declared model, the way an L4 pool "
+                "environment pins it (`panel.inner_model`): the screen then answers for "
+                "the (dataset, solver) pair a pool cell would run, with the dataset's effort, output "
+                "cap and temperature kept. Absent: the dataset's declared model.",
             ),
             Arg(
-                "--variant",
-                dest="variant",
+                "--provider",
+                dest="provider",
                 default=None,
-                help="YAML of optimizer overrides for the arm under test, same shape. Omitted, the base "
-                "is graded against ITSELF under the next seed — the instrument's own noise floor.",
-            ),
-            Arg(
-                "--seed",
-                dest="seed",
-                type=int,
-                default=0,
-                help="Seed both arms' proposers draw with (default 0). Re-running one seed replays its "
-                "base generations and their cells from the caches.",
-            ),
-            Arg(
-                "--cells",
-                dest="cells",
-                type=int,
-                default=None,
-                help="Cap each decision's panel at its first N cells (default: every cell the round "
-                "read its parent on).",
-            ),
-            Arg(
-                "--max-usd",
-                dest="max_usd",
-                type=float,
-                default=None,
-                help="The run's spend ceiling; a send that does not fit is refused before it leaves. "
-                "OMITTED = DRY RUN: nothing is sent, and the calls, cells and dollar bound are printed.",
-            ),
-            Arg(
-                "--parallel",
-                dest="parallel",
-                type=int,
-                default=1,
-                help="Cells to hold in flight within each proposal's pass (default 1), clamped to the "
-                "backend's own ceiling.",
+                help="The gateway --model is asked through (`panel.inner_provider`). "
+                "Needs --model.",
             ),
         ),
     ),

@@ -30,6 +30,8 @@ from promptpotter.domain.run_records import (
     OptimizerStateRecord,
     PhaseRecord,
     PricedKeyRecord,
+    ProviderEasedRecord,
+    ProviderHoldRecord,
     RaceCatchUpRecord,
     RaceStandingRecord,
     ResumeCheckpointRecord,
@@ -84,6 +86,8 @@ class Projection:
             RunPhaseRecord: cls._handle_run_phase,
             RunWiringRecord: cls._handle_run_wiring,
             BackendWarningRecord: cls._handle_backend_warning,
+            ProviderHoldRecord: cls._handle_provider_hold,
+            ProviderEasedRecord: cls._handle_provider_eased,
             RoundEnteredRecord: cls._handle_round_entered,
             RoundClosedRecord: cls._handle_round_closed,
             RoundStandingRecord: cls._handle_round_standing,
@@ -142,6 +146,8 @@ class Projection:
     def _handle_run_phase(self, record: RunPhaseRecord) -> None: ...
     def _handle_run_wiring(self, record: RunWiringRecord) -> None: ...
     def _handle_backend_warning(self, record: BackendWarningRecord) -> None: ...
+    def _handle_provider_hold(self, record: ProviderHoldRecord) -> None: ...
+    def _handle_provider_eased(self, record: ProviderEasedRecord) -> None: ...
     def _handle_round_entered(self, record: RoundEnteredRecord) -> None: ...
     def _handle_round_proposed(self, record: RoundProposedRecord) -> None: ...
     def _handle_round_closed(self, record: RoundClosedRecord) -> None: ...

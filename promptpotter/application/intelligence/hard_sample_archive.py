@@ -28,18 +28,18 @@ def _population_cells(
     sig: list[list[Any]],
     *,
     scorer: Scorer,
-) -> tuple[tuple[int, float, str], ...]:
-    """``(sample_id, objective, grade)``; memoized by archive dir AND scorer: the grade is the READER's formula."""
+) -> tuple[tuple[str, float, str], ...]:
+    """``(Sample.key, objective, grade)``; memoized by archive dir AND scorer: the grade is the READER's formula."""
 
-    def grade() -> tuple[tuple[int, float, str], ...]:
+    def grade() -> tuple[tuple[str, float, str], ...]:
         held = archive_queries.load_population(stores, entry)
         return tuple(
-            (cell.sample_id, float(objective), answer.provenance)
+            (cell.key, float(objective), answer.provenance)
             for answer, cell in zip(held, scorer.sheet(a.cell for a in held), strict=True)
             if cell.scored and (objective := cell.grade.objective) is not None
         )
 
-    # A controlled line's memory moves without its files moving, so it is never memoized.
+    # A fenced task's memory moves with its ledgers and moment, never its files: never memoized.
     if archive_queries.memory_scoped():
         return grade()
     key = (
@@ -57,10 +57,10 @@ def build_archive_observations(
     *,
     dataset_name: str | None,
     scorer: Scorer,
-    sample_ids: frozenset[int] | None,
+    admitted: frozenset[str] | None,
     origin_sp_hash: str | None = None,
 ) -> list[Observation]:
-    """*sample_ids* is the SEARCH pool: the archive is filed by dataset, so bench rows sit here and must reach no ruler."""
+    """*admitted* is the SEARCH pool's keys: the archive is filed by dataset, so bench rows sit here and must reach no ruler."""
     obs: list[Observation] = []
     sigs = archive_queries.population_signatures(stores, dataset_name=dataset_name)
     folded = {
@@ -81,8 +81,8 @@ def build_archive_observations(
             else _population_cells(stores, entry, sigs.get(key) or [], scorer=scorer)
         )
         obs.extend(
-            Observation(candidate_id, sample_id, response)
-            for sample_id, response, grade in cells
-            if meets_grade(grade, _RULER_GRADE) and (sample_ids is None or sample_id in sample_ids)
+            Observation(candidate_id, cell, response)
+            for cell, response, grade in cells
+            if meets_grade(grade, _RULER_GRADE) and (admitted is None or cell in admitted)
         )
     return dedup_observations(obs)

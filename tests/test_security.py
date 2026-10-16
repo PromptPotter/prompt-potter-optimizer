@@ -32,11 +32,14 @@ from promptpotter.application import account, site_records
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.commands.payloads import CancelQueuedRunPayload
 from promptpotter.application.datasets.ingest import ingest_draft
-from promptpotter.application.jobs.capacity import machine_status
-from promptpotter.application.jobs.launcher.admission import request_launch, withdraw_queued
-from promptpotter.application.jobs.quota import paid_verb
+from promptpotter.application.jobs.launcher.admission import (
+    paid_pass,
+    request_job,
+    withdraw_queued,
+)
+from promptpotter.application.jobs.machine_status import machine_status
 from promptpotter.application.jobs.reaper import reclaim_orphan_sandboxes, sweep_dead_cycles
-from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.application.jobs.registry import CampaignLaunch, JobRegistry
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     CycleSlice,
     InjectionBundle,
@@ -72,6 +75,7 @@ from promptpotter.domain.pipeline_overlay import (
 from promptpotter.domain.round_diagnostics import RoundDiagnostics, SampleDiag
 from promptpotter.domain.run_records import CommandAckRecord, CommandRecord, RunPhaseRecord
 from promptpotter.domain.search_point import TaskDecomposition
+from promptpotter.domain.spend import SpendCeilings
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure
 from promptpotter.infrastructure.identity.google import ProviderIdentity
@@ -298,7 +302,7 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
 
     # The slot L2 asked for is LLM-authored: it renders only as a name from the closed vocabulary.
     def shown(slot: str) -> str:
-        breach = unplaceable_edit({"critique": slot})
+        breach = unplaceable_edit({slot: ["critique"]})
         assert breach is not None
         return _render_guard_breaches([breach], "L2")
 
@@ -357,28 +361,33 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
         with pytest.raises(NotFoundError):
             site_records.kept_site_records(name, "")
 
-    # Machine occupancy names no other tenant's run: it reaches a stranger as counts alone.
+    # Machine occupancy names no other account's slot: it reaches a stranger as a count alone.
     registry = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1)
     ada_hop = CycleHop(campaign_id="camp-ada", cycle_id="cycle_ada")
-    registry.create(user_id="ada-id", principal_id="ada-id", hop=ada_hop, dataset_name="ds1")
-    waiting = registry.request_slot(user_id="ada-id", principal_id="ada-id", dataset_name="ds1")
+    held = registry.create(
+        user_id="ada-id", principal_id="ada-id", hop=ada_hop, holder=CampaignLaunch("ds1")
+    )
 
     def who(user_id: str) -> IdentityContext:
         return IdentityContext(
             user_id=UserId(user_id), tenant_id=TenantId(user_id), issuer="https://accounts.example"
         )
 
-    seen_by_eve = machine_status(registry, who("eve-id"))
-    assert (seen_by_eve.running, seen_by_eve.queued) == (1, 1), "occupancy depended on who asked"
+    seen_by_eve = machine_status(registry, identity=who("eve-id"))
+    assert seen_by_eve.occupied == 1, "occupancy depended on who asked"
     served = seen_by_eve.model_dump_json()
-    for named in ("ada-id", ada_hop.campaign_id, ada_hop.cycle_id, waiting.job_id):
-        assert named not in served, "another tenant's run was named to a stranger"
+    for named in ("ada-id", ada_hop.campaign_id, ada_hop.cycle_id, held.job_id):
+        assert named not in served, "another account's slot was named to a stranger"
+    host = IdentityContext(user_id=UserId("host"), tenant_id=TenantId("host"))
     for reader, why in (
-        (who("ada-id"), "an account could not see its own oldest run"),
-        (IdentityContext(user_id=UserId("host"), tenant_id=TenantId("host")), "the host lost it"),
+        (who("ada-id"), "an account lost its own slot"),
+        (host, "the host lost it"),
     ):
-        holder = machine_status(registry, reader).holder
-        assert holder is not None and holder.cycle_id == ada_hop.cycle_id, why
+        assert [s.job_id for s in machine_status(registry, identity=reader).running] == [
+            held.job_id
+        ], why
+    monkeypatch.setattr(settings_mod.settings, "MACHINE_STATUS_SCOPE", "all")
+    assert machine_status(registry, identity=who("eve-id")).running, "`all` still hid the slot"
 
 
 # 2. Delegation
@@ -462,8 +471,8 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
     )
     # A full box: every launch takes a place in line.
     registry = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 0)
-    owners = request_launch(stores=owner, job_registry=registry, dataset_name="ds1")
-    delegates = request_launch(stores=delegate, job_registry=registry, dataset_name="ds1")
+    owners = request_job(stores=owner, job_registry=registry, holder=CampaignLaunch("ds1"))
+    delegates = request_job(stores=delegate, job_registry=registry, holder=CampaignLaunch("ds1"))
     assert owners.queued and delegates.queued
     assert owners.user_id == delegates.user_id, "one account: the quota key cannot tell them apart"
 
@@ -507,7 +516,7 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
         ]
 
     def intervened() -> bool:
-        index = owner.campaigns.load(hop)
+        index = owner.campaigns.load(hop, moment=None)
         assert index is not None
         return index.human_intervened
 
@@ -760,7 +769,9 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
 
     # A launch holds its cycle from the moment it is accepted; a full box queues it.
     registry = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 0)
-    job = request_launch(stores=built_stores, job_registry=registry, dataset_name="ds1", hop=hop)
+    job = request_job(
+        stores=built_stores, job_registry=registry, holder=CampaignLaunch("ds1"), hop=hop
+    )
     assert job.queued
     claimed = derive_run_state(cycle_dir)
     assert (claimed.run_phase, claimed.producer.state) == (RunPhase.QUEUED, ProducerState.CLAIMED)
@@ -768,9 +779,11 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     assert claimed.pause_refusal, "a queued launch was offered a pause no loop can take"
     delete_refused()
     with pytest.raises(CycleBusyError):
-        request_launch(stores=built_stores, job_registry=registry, dataset_name="ds1", hop=hop)
-    with pytest.raises(ConflictError):
-        async with paid_verb(stores=built_stores, bucket="bench", hop=hop):
+        request_job(
+            stores=built_stores, job_registry=registry, holder=CampaignLaunch("ds1"), hop=hop
+        )
+    with pytest.raises(CycleBusyError):
+        async with paid_pass(stores=built_stores, verb="bench", hop=hop, declared=SpendCeilings()):
             pass
     assert withdraw_queued(built_stores, registry, job.job_id, principal_id=job.principal_id), (
         "the launch's own principal could not withdraw it"
@@ -790,7 +803,7 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     with pytest.raises(ConflictError):
         hold_cycle(cycle_dir)
     delete_refused()
-    standing = campaigns.load(hop)
+    standing = campaigns.load(hop, moment=None)
     assert standing is not None and standing.finished_at is None
     # A fresh heartbeat with no lock held is still dead.
     release_cycle(cycle_dir)
@@ -798,7 +811,7 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     gone = derive_run_state(cycle_dir).producer
     assert (gone.state, gone.attached) == (ProducerState.SILENT, False)
     assert sweep_dead_cycles(built_stores.projects_root) == 1
-    swept = campaigns.load(hop)
+    swept = campaigns.load(hop, moment=None)
     assert swept is not None and swept.stop_reason is StopReason.PRODUCER_VANISHED
     assert sweep_dead_cycles(built_stores.projects_root) == 0, "one dead producer was swept twice"
     # A finished run still writing its last files holds the cycle against a delete.

@@ -18,7 +18,7 @@ its unit of work's OWNER sized and opened (a cell, an optimizer call, a grading,
 counting its own attempts multiplies under every loop around it, so a send under no budget raises
 (`drawn_budget`). A caller meters
 only a cache replay; a diagnostic verb binds its ledger through `loop_start.py::diagnostic_trace`
-and its rate share through `jobs/quota.py::paid_verb`, and a send missing either raises.
+and its rate share through `jobs/launcher/admission.py::paid_pass` (or `jobs/quota.py::paid_call`), and a send missing either raises.
 
 **Provider selection is always EXPLICIT** — the caller passes it to
 `registry.get_llm_client`, sourced from the optimizer node's `config.provider`. No

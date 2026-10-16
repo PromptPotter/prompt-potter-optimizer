@@ -355,10 +355,36 @@ class LeviParadigmShiftKnobs(RewriteKnobs):
         description="k: the clusters k-means cuts the occupied cells into; each hands its best "
         "elite to the paradigm shift as a representative.",
     )
+
+
+class LeviSeedKnobs(RewriteKnobs):
     n_diverse_seeds: Annotated[int, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
         ge=1,
         description="The seeds the calibration round asks for, each shown every prompt before it.",
     )
+
+
+class LeviSeed:
+    """The seed pass `M_l.DIVERSESEED` (Alg. 1): the calibration round's arms."""
+
+    name: ClassVar[str] = "levi_seed"
+    kind: ClassVar[NodeKind] = NodeKind.LLM
+    opens: ClassVar[bool] = True
+    knobs: ClassVar[type[StrictModel]] = LeviSeedKnobs
+
+    async def propose(
+        self, ctx: NodeContext[LeviSeedKnobs], panel: Panel, proposals: Proposals
+    ) -> Proposals:
+        origin = ctx.origin
+        shown: list[tuple[OptSearchPoint, float | None]] = [(origin, None)]
+        seeds: list[CandidateProposal] = []
+        for i in range(ctx.knobs.n_diverse_seeds):
+            raw = await ctx.ask(prompts.paradigm_shift_prompt(ctx, shown), i)
+            proposal = child(ctx, [origin], raw, f"diverse seed {i + 1}")
+            seeds.append(proposal)
+            if not proposal.validation_failures:
+                shown.append((proposal.opt_sp, None))
+        return nodes.Proposals(seeds)
 
 
 class LeviParadigmShift:
@@ -373,27 +399,8 @@ class LeviParadigmShift:
         self, ctx: NodeContext[LeviParadigmShiftKnobs], panel: Panel, proposals: Proposals
     ) -> Proposals:
         state = nodes.state_as(ctx, LeviRoundState).payload
-        knobs = ctx.knobs
-        offset = len(proposals.proposals)
-        if state.calibration is None:
-            added = await self._seeds(ctx, knobs.n_diverse_seeds, offset)
-        else:
-            added = [await self._shift(ctx, state, knobs.n_clusters, offset)]
-        return nodes.Proposals([*proposals.proposals, *added])
-
-    async def _seeds(
-        self, ctx: NodeContext[LeviParadigmShiftKnobs], n: int, offset: int
-    ) -> list[CandidateProposal]:
-        origin = ctx.origin
-        shown: list[tuple[OptSearchPoint, float | None]] = [(origin, None)]
-        proposals: list[CandidateProposal] = []
-        for i in range(n):
-            raw = await ctx.ask(prompts.paradigm_shift_prompt(ctx, shown), offset + i)
-            proposal = child(ctx, [origin], raw, f"diverse seed {i + 1}")
-            proposals.append(proposal)
-            if not proposal.validation_failures:
-                shown.append((proposal.opt_sp, None))
-        return proposals
+        shift = await self._shift(ctx, state, ctx.knobs.n_clusters, len(proposals.proposals))
+        return nodes.Proposals([*proposals.proposals, shift])
 
     async def _shift(
         self,
@@ -402,7 +409,10 @@ class LeviParadigmShift:
         n_clusters: int,
         idx: int,
     ) -> CandidateProposal:
-        assert state.calibration is not None
+        if state.calibration is None:
+            raise ValueError(
+                "levi_paradigm_shift: no calibration stands, so no elite to shift from"
+            )
         centroids = np.asarray(state.calibration.centroids)
         occupied = np.asarray([centroids[e.cell] for e in state.elites])
         k = min(n_clusters, len(state.elites))
@@ -464,9 +474,7 @@ class LeviRefine:
     ) -> Proposals:
         state = nodes.state_as(ctx, LeviRoundState).payload
         shift = ctx.knobs_of(LeviParadigmShift.name, LeviParadigmShiftKnobs)
-        # The calibration round refines nothing: its seeds are the evaluations it spends.
-        n = 0 if state.calibration is None else shift.interval - 1
-        asked = [self._refinement(ctx, state, i) for i in range(n)]
+        asked = [self._refinement(ctx, state, i) for i in range(shift.interval - 1)]
         replies = await ctx.ask_each({i: p for i, (_, p) in enumerate(asked)})
         return nodes.Proposals(
             [
@@ -513,7 +521,7 @@ def _replay_proxy_selected(
     )
 
 
-_PROPOSERS = (LeviParadigmShift.name, LeviRefine.name)
+_PROPOSERS = (LeviSeed.name, LeviParadigmShift.name, LeviRefine.name)
 
 
 class LeviRuntime(nodes.OptimizerRuntime):
@@ -533,16 +541,19 @@ class LeviRuntime(nodes.OptimizerRuntime):
         return nodes.rows_read_packages(rounds, _PROPOSERS)
 
     def arms(self, selected: SelectedOptimizer) -> int:
-        shift = selected.knobs_of(LeviParadigmShift.name, LeviParadigmShiftKnobs)
-        return max(shift.n_diverse_seeds, shift.interval)
+        seeds = selected.knobs_of(LeviSeed.name, LeviSeedKnobs).n_diverse_seeds
+        return max(
+            seeds, selected.knobs_of(LeviParadigmShift.name, LeviParadigmShiftKnobs).interval
+        )
 
     def round_cells_ceiling(self, selected: SelectedOptimizer, pool: int) -> int:
         shift = selected.knobs_of(LeviParadigmShift.name, LeviParadigmShiftKnobs)
+        seeds = selected.knobs_of(LeviSeed.name, LeviSeedKnobs).n_diverse_seeds
         discovery = selected.knobs_of(ProxyCss.name, ProxyCssKnobs).discovery
         proxy = selected.round_cells(pool)
         if not proxy:
             return 0
-        return max((shift.n_diverse_seeds + 1) * discovery, (shift.interval + 1) * proxy)
+        return max((seeds + 1) * discovery, (shift.interval + 1) * proxy)
 
     def round_facts(
         self, selected: SelectedOptimizer, round_result: RoundResult
@@ -572,5 +583,5 @@ class LeviRuntime(nodes.OptimizerRuntime):
         ]
 
 
-MEMBERS = (ProxyCss(), LeviParadigmShift(), LeviRefine(), MapElites())
+MEMBERS = (ProxyCss(), LeviSeed(), LeviParadigmShift(), LeviRefine(), MapElites())
 RUNTIME = LeviRuntime()

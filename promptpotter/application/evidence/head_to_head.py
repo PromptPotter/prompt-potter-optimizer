@@ -473,7 +473,7 @@ def _campaign(entry: HeadToHeadEntry) -> Campaign:
 
 def _status(stores: Stores, campaign: Campaign) -> RunStatus:
     holder = stores.campaigns.line_holder(campaign.root_hop)
-    index = stores.campaigns.load(holder)
+    index = stores.campaigns.load(holder, moment=None)
     run = derive_run_state(stores.campaigns.cycle_dir(holder))
     return RunStatus.of(run.run_phase, None if index is None else index.stop_reason)
 
@@ -509,7 +509,7 @@ def _read(
     )
 
     drawn = stores.campaigns.read_bank_partition(hop)
-    origin_round = stores.campaigns.standing_rounds(hop).rounds.get(0)
+    origin_round = stores.campaigns.standing_rounds(hop, moment=None).rounds.get(0)
     bench_set = (
         None
         if drawn is None or campaign.root_content_hash is None

@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from typing import TYPE_CHECKING, Any, Literal
 
+from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.results import ScoreSummary
 from promptpotter.domain.run_records import (
@@ -16,6 +17,9 @@ from promptpotter.domain.run_records import (
     CycleRecord,
     ErrorRecord,
     PricedKeyRecord,
+    ProviderEasedRecord,
+    ProviderHoldRecord,
+    RaceCatchUpRecord,
     RoundWarningKind,
     RoundWarningRecord,
     SampleScoredRecord,
@@ -23,7 +27,7 @@ from promptpotter.domain.run_records import (
     SpendHoldRecord,
     TokenUsageRecord,
 )
-from promptpotter.domain.scoring import GradedCell
+from promptpotter.domain.scoring import GradedCell, WalkedCell
 from promptpotter.domain.spend import TokenAccount, TokenUsageKind
 from promptpotter.infrastructure.llm.pricing import compute_usd
 from promptpotter.shared.measurement_context import MeasurementRole, measured_candidate
@@ -52,7 +56,7 @@ def active_cycle_ledger() -> CycleEventLog | None:
     return _CYCLE_LEDGER.get(None)
 
 
-def _bound_ledger(what: str) -> CycleEventLog | None:
+def bound_ledger(what: str) -> CycleEventLog | None:
     try:
         return _CYCLE_LEDGER.get()
     except LookupError:
@@ -63,7 +67,7 @@ def _bound_ledger(what: str) -> CycleEventLog | None:
 
 
 def billing_ledger(what: str) -> CycleEventLog:
-    ledger = _bound_ledger(what)
+    ledger = bound_ledger(what)
     if ledger is None:
         raise RuntimeError(f"{what}: the ledger is muted here, and a muted pass sends nothing")
     return ledger
@@ -88,12 +92,14 @@ def filed_kind(kind: TokenUsageKind) -> TokenUsageKind:
     return _FILED_AS.get() or kind
 
 
-def set_current_round(round_num: int) -> Token[int | None]:
-    return _CURRENT_ROUND.set(round_num)
-
-
-def reset_current_round(token: Token[int | None]) -> None:
-    _CURRENT_ROUND.reset(token)
+@contextmanager
+def at_round(round_num: int) -> Iterator[None]:
+    """The ONE binder of the round: a run binds 0 for its whole span, each round its own inside it."""
+    token = _CURRENT_ROUND.set(round_num)
+    try:
+        yield
+    finally:
+        _CURRENT_ROUND.reset(token)
 
 
 def current_round() -> int | None:
@@ -101,19 +107,19 @@ def current_round() -> int | None:
     return _CURRENT_ROUND.get()
 
 
-def _sample_round() -> int:
+def bound_round() -> int:
     round_num = _CURRENT_ROUND.get()
     if round_num is None:
         raise RuntimeError(
-            "a sample record names the round it was measured in and none is bound: "
-            "the entry driving this walk calls `RunCallbacks.set_round` first"
+            "a record names the round it was measured in and none is bound: "
+            "the entry driving this walk binds one first (`at_round`)"
         )
     return round_num
 
 
 def _append_record(record: CycleRecord, ledger: CycleEventLog | None = None) -> int | None:
     if ledger is None:
-        ledger = _bound_ledger(type(record).__name__)
+        ledger = bound_ledger(type(record).__name__)
     if ledger is None:
         return None
     try:
@@ -215,27 +221,57 @@ def emit_backend_warning(
     )
 
 
-def emit_priced_key(priced_key: str) -> None:
-    _append_record(PricedKeyRecord(priced_key=priced_key))
+def emit_provider_hold(
+    *,
+    ledger: CycleEventLog,
+    sender: str,
+    scope: str,
+    strikes: int,
+    gives_up_at: float,
+    reading: BackpressureReading,
+) -> None:
+    _append_record(
+        ProviderHoldRecord(
+            sender=sender, scope=scope, strikes=strikes, gives_up_at=gives_up_at, reading=reading
+        ),
+        ledger,
+    )
 
 
+def emit_provider_eased(*, ledger: CycleEventLog, sender: str, held_s: float) -> None:
+    _append_record(ProviderEasedRecord(sender=sender, held_s=held_s), ledger)
+
+
+# Cells (`ReplayFeed.cell_key`) and calls (`call:{reuse key}`), per CAMPAIGN and never per spend
+# book: a nested run spends under its root's book.
 _PRICED: ContextVar[set[str] | None] = ContextVar("priced", default=None)
 
 
 def bind_priced(priced: set[str]) -> None:
+    """The run's campaign: a cell or call it priced once replays free for it ever after."""
     _PRICED.set(priced)
 
 
-def call_priced(key: str) -> bool:
+def campaign_priced(key: str) -> bool:
+    priced = _PRICED.get()
+    return priced is not None and key in priced
+
+
+def claim_campaign_price(key: str) -> bool:
+    """Whether this reading of *key* is its campaign's first, which this call claims; outside a
+    campaign's run every reading is."""
     priced = _PRICED.get()
     if priced is None:
-        return False
-    name = f"call:{key}"
-    if name in priced:
         return True
-    priced.add(name)
-    emit_priced_key(name)
-    return False
+    if key in priced:
+        return False
+    priced.add(key)
+    _append_record(PricedKeyRecord(priced_key=key))
+    return True
+
+
+def claim_call_price(reuse_key: str) -> bool:
+    return claim_campaign_price(f"call:{reuse_key}")
 
 
 def emit_spend_hold(
@@ -350,7 +386,7 @@ def emit_sample_started(
 ) -> None:
     _append_record(
         SampleStartedRecord(
-            round=_sample_round(),
+            round=bound_round(),
             candidate_idx=candidate_idx,
             candidate_total=candidate_total,
             sample_idx=sample_idx,
@@ -375,7 +411,7 @@ def emit_sample_scored(
 ) -> None:
     _append_record(
         SampleScoredRecord(
-            round=_sample_round(),
+            round=bound_round(),
             candidate_idx=candidate_idx,
             candidate_total=candidate_total,
             individual_id=individual_id,
@@ -388,16 +424,43 @@ def emit_sample_scored(
     )
 
 
+def emit_race_catch_up(
+    *,
+    member: str,
+    candidate_idx: int,
+    candidate_total: int,
+    sample_key: str,
+    cells: dict[str, WalkedCell],
+) -> None:
+    _append_record(
+        RaceCatchUpRecord(
+            round=bound_round(),
+            candidate_idx=candidate_idx,
+            candidate_total=candidate_total,
+            member=member,
+            sample_key=sample_key,
+            cells=cells,
+        )
+    )
+
+
 __all__ = [
     "active_cycle_ledger",
+    "at_round",
     "billing_ledger",
     "bind_priced",
-    "call_priced",
+    "bound_ledger",
+    "bound_round",
+    "campaign_priced",
+    "claim_call_price",
+    "claim_campaign_price",
     "current_round",
     "emit_command",
     "emit_command_ack",
     "emit_error_record",
-    "emit_priced_key",
+    "emit_provider_eased",
+    "emit_provider_hold",
+    "emit_race_catch_up",
     "emit_round_warning",
     "emit_sample_scored",
     "emit_sample_started",
@@ -405,8 +468,6 @@ __all__ = [
     "filed_as",
     "filed_kind",
     "rate_priced_usd",
-    "reset_current_round",
     "reset_cycle_ledger",
-    "set_current_round",
     "set_cycle_ledger",
 ]

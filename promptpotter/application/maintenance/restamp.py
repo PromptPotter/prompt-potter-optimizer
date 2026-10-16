@@ -1,21 +1,22 @@
 from __future__ import annotations
 
 import json
-import os
 import pathlib
 import types
 from collections import Counter
 from collections.abc import Callable
+from functools import reduce
 from typing import Any, NamedTuple, Union, get_args, get_origin
 
 import yaml
 from pydantic import BaseModel, ValidationError
 
-from promptpotter.application.campaign_config import CampaignConfig
+from promptpotter.application.campaign_config import CampaignConfig, merge_config_layers
+from promptpotter.application.datasets.authored import campaign_file_block
 from promptpotter.application.maintenance.archive_maintenance import (
     iter_cycle_ledgers,
 )
-from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, benchmark_datasets_root
+from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.domain.campaign import Campaign, CampaignResult
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.results import DiagnosticRunRecord
@@ -27,11 +28,13 @@ from promptpotter.infrastructure.projections.cycle_index import (
     write_cycle_index,
 )
 from promptpotter.infrastructure.runtime_flags import derive_run_state
+from promptpotter.infrastructure.store.dataset_access import definition_files
 from promptpotter.infrastructure.store.io import (
     read_json_optional,
+    rewrite_lines,
     write_yaml,
 )
-from promptpotter.infrastructure.store.layout import CycleLayout
+from promptpotter.infrastructure.store.layout import CycleLayout, inner_sandboxes_dir
 from promptpotter.infrastructure.store.read_model import iter_jsonl
 from promptpotter.infrastructure.store.user_store import User
 
@@ -54,6 +57,16 @@ def _as_pruned(pruned: dict[str, Any], doc: dict[str, Any]) -> dict[str, Any]:
     return pruned
 
 
+def _whole(_path: pathlib.Path) -> dict[str, Any]:
+    return {}
+
+
+def _definition_ancestors(path: pathlib.Path) -> dict[str, Any]:
+    """A definition layer is a partial: it validates laid over the layers above it."""
+    above = definition_files(path.parent)[:-1]
+    return reduce(merge_config_layers, (campaign_file_block(p) for p in above), {})
+
+
 class _Surface(NamedTuple):
     title: str
     verb: str
@@ -62,7 +75,8 @@ class _Surface(NamedTuple):
     key_path: tuple[str, ...]
     model_cls: type[BaseModel]
     rewrite: _Rewrite
-    benchmark_globs: tuple[str, ...] = ()
+    # What the pruned record is laid over before it validates.
+    laid_over: Callable[[pathlib.Path], dict[str, Any]] = _whole
 
 
 # Inner record first for a document addressed twice. No round close: pruning cannot restore a rename.
@@ -92,13 +106,14 @@ _SURFACES: tuple[_Surface, ...] = (
         rewrite=_as_pruned,
     ),
     _Surface(
-        title="Dataset templates (datasets/*/campaign.yaml::campaign_config) — pruned only",
+        # The tenant tier only: install content is source, edited as source and never by a verb.
+        title="Your dataset definitions (datasets/**/dataset.yaml::campaign) — pruned only",
         verb="pruned",
-        workspace_globs=("*/datasets/*/campaign.yaml",),
-        key_path=("campaign_config",),
+        workspace_globs=("*/datasets/**/dataset.yaml",),
+        key_path=("campaign",),
         model_cls=CampaignConfig,
         rewrite=_as_pruned,
-        benchmark_globs=("*/campaign.yaml",),
+        laid_over=_definition_ancestors,
     ),
     _Surface(
         title="User records (user.json) — pruned only",
@@ -190,7 +205,7 @@ def _process(path: pathlib.Path, surface: _Surface, *, apply: bool, tally: _Tall
 
     pruned, dropped = _prune_to_schema(raw, surface.model_cls)
     try:
-        surface.model_cls.model_validate(pruned)
+        surface.model_cls.model_validate(merge_config_layers(surface.laid_over(path), pruned))
     except ValidationError as exc:
         tally.failed += 1
         print(f"  FAIL  {path}: still invalid after pruning — {exc.error_count()} error(s)")
@@ -224,12 +239,12 @@ def restamp_campaign_configs(*, apply: bool) -> dict[str, int]:
         print("  absent — nothing to re-stamp.")
         return {"rewritten": 0, "failed": 0, "skipped": 0}
 
-    benchmarks = benchmark_datasets_root()
+    # A sandbox is a projects root of its own, and its manifests load through the same models.
+    roots = [root, *sorted(inner_sandboxes_dir(root).glob("*"))]
     tallies = [_Tally() for _ in _SURFACES]
     for surface, tally in zip(_SURFACES, tallies, strict=True):
-        paths = [p for g in surface.workspace_globs for p in root.glob(g)]
-        paths += [p for g in surface.benchmark_globs for p in benchmarks.glob(g)]
-        for path in sorted(set(paths)):
+        paths = {p for r in roots for g in surface.workspace_globs for p in r.glob(g)}
+        for path in sorted(paths):
             _process(path, surface, apply=apply, tally=tally)
 
     for surface, tally in zip(_SURFACES, tallies, strict=True):
@@ -279,37 +294,42 @@ def _compact_record(rec: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
-def _compact_one(path: pathlib.Path, *, apply: bool, gone: Counter[str]) -> tuple[int, int, int]:
+def _compacted(
+    held: list[str], *, apply: bool
+) -> tuple[list[str] | None, tuple[int, int, int, Counter[str]]]:
     before = after = rewritten = 0
     lines: list[str] = []
-    with path.open(encoding="utf-8") as fh:
-        for line in fh:
-            before += len(line)
-            try:
-                rec = json.loads(line)
-            except json.JSONDecodeError:
-                # An unparseable line is still a line: keep the offsets honest.
-                lines.append(line)
-                after += len(line)
-                continue
-            # Prune BEFORE projecting: a stale key on the record makes the reader skip the line.
-            rec, dropped = _prune_record(rec)
-            gone.update(dropped)
-            out = _compact_record(rec)
-            if out is None and not dropped:
-                lines.append(line)
-                after += len(line)
-                continue
-            out = out if out is not None else rec
-            rewritten += 1
-            new_line = json.dumps(out, separators=(",", ":"), default=str) + "\n"
-            lines.append(new_line)
-            after += len(new_line)
-    if apply and rewritten:
-        # Never in place: a torn rewrite loses the cycle.
-        tmp = path.with_suffix(path.suffix + ".tmp")
-        tmp.write_text("".join(lines), encoding="utf-8")
-        os.replace(tmp, path)
+    gone: Counter[str] = Counter()
+    for line in held:
+        before += len(line)
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            # An unparseable line is still a line: keep the offsets honest.
+            lines.append(line)
+            after += len(line)
+            continue
+        # Prune BEFORE projecting: a stale key on the record makes the reader skip the line.
+        rec, dropped = _prune_record(rec)
+        gone.update(dropped)
+        out = _compact_record(rec)
+        if out is None and not dropped:
+            lines.append(line)
+            after += len(line)
+            continue
+        out = out if out is not None else rec
+        rewritten += 1
+        new_line = json.dumps(out, separators=(",", ":"), default=str) + "\n"
+        lines.append(new_line)
+        after += len(new_line)
+    return (lines if apply and rewritten else None), (before, after, rewritten, gone)
+
+
+def _compact_one(path: pathlib.Path, *, apply: bool, gone: Counter[str]) -> tuple[int, int, int]:
+    before, after, rewritten, dropped = rewrite_lines(
+        path, lambda held: _compacted(held, apply=apply)
+    )
+    gone.update(dropped)
     return before, after, rewritten
 
 
@@ -365,7 +385,7 @@ def reproject_cycle_indexes(*, apply: bool) -> dict[str, int]:
     touched = failed = 0
     for cycle_dir in cycle_dirs:
         try:
-            index = read_cycle_index(cycle_dir)
+            index = read_cycle_index(cycle_dir, moment=None)
             if index is None:
                 continue
             on_disk = read_json_optional(CycleLayout(cycle_dir).manifest)

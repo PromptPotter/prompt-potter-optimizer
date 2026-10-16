@@ -61,9 +61,14 @@ async def measure_overlap(
     origin = ordered[0]
     # The origin's OWN round, never every cell read since: a later re-score would move the exam.
     origin_round = next(rr for rr in cycle.rounds if rr.round == origin.round)
+    scopes = cycle.difficulty.scopes
     panel = origin_panel(
         measured_cells(origin_round.results),
+        line_cells=set[int]().union(
+            *(measured_cells(pairs.cells_of(s, held)) for s in ordered[1:])
+        ),
         poolable={s.id for s in scoring_pool},
+        scope_of={s.id: scopes.by_key[s.key] for s in scoring_pool},
         size=cycle.optimizer.round_cells(len(scoring_pool)),
     )
     keep = set(panel)

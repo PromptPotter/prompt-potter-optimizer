@@ -1,0 +1,8 @@
+source:
+  depths: [2, 3, 4]
+  held_tail: true
+
+campaign:
+  optimization:
+    # The head-to-head budget: one peer round at its paper's own ranges fits under it.
+    ceiling: {usd: 0.3}

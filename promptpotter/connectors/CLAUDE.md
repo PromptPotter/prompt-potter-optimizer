@@ -3,7 +3,7 @@
 Each connector packages everything PromptPotter needs to talk to one
 backend kind. A connector is one file under this package exporting a
 ``Connector(...)`` binding (`protocol.py`) as `CONNECTOR`. Operating one is local too: model/provider switches go in
-`datasets/{name}/pipeline.yaml::nodes.{name}.config`, picked from the menu
+`dataset.yaml::pipeline.nodes.{name}.config`, picked from the menu
 `Connector.available_models` seeds into that file — never in the backend's repo.
 
 **Adding one is local to `connectors/<name>.py` + a dataset directory, and the way that
@@ -75,7 +75,7 @@ a `harbor` cell holds a container, spends real money and takes minutes.
 
 **Per-run state is the `workload` argument, never a ContextVar or a module cache.**
 `InProcessWorkload` (`protocol.py`) is built once by `init_services` and held by the run's own
-`BackendClient`: the `experiment_file` its samples came from, already through
+`BackendClient`: the `panel` its samples came from, already through
 `Connector.resolve_experiment`, and the `program` an embedded host passes to `open_session`. The
 run's samples, its workload and its identity fingerprint all read that one resolved document.
 Sibling campaigns are sibling tasks each building their own client, so neither sees the other's.
@@ -94,7 +94,7 @@ and moves every round.
   node config it is. **The panel is the workload's `experiment`**, its published roster read by
   `resolve_experiment` off `resources/harbor-roster.<dataset>@<version>.json` — written once by
   the `pin-roster` verb (`python -m promptpotter pin-roster <dataset> <version>`), which refuses to
-  overwrite a pin upstream has since moved, so no read ever fetches the registry — and `extract_experiment` publishes nothing. **Trial scratch goes to the
+  overwrite a pin upstream has since moved, so no read ever fetches the registry — and `extract_experiment` publishes nothing. **A local task's `path` is pinned relative to its panel's directory**, which `resolve_experiment` records beside the tasks, so its sample key reads the same on every machine; and the panel's `agent.kwargs` may set no key `nodes.agent.config` owns. **Trial scratch goes to the
   system temp dir, never the workspace**, and nothing durable lives there — reward, digest and token
   counts belong in the measurement archive. **The one thing a cell leaves on the Docker host is its
   task image** (`hb__<content hash>`, one per distinct task environment, never one per cell); a hard
@@ -300,16 +300,17 @@ start containers is never a tenant's choice.
 - Wire adapters are pure functions: `(query, pipeline_params) -> dict`.
   No I/O, no logging beyond debug-level drops. The `identity_config` layer never reaches one —
   `sample_measurement.py::measure_sample` removes it first.
-- `extract_experiment` returns the panel's rows and is declared exactly where `experiment_file`
-  is (`__init__.py::_validate`); a connector with no panel file states its answer shape on the
+- `extract_experiment` returns the panel's rows, and declaring it is what `owns_panel`
+  reads; a connector with no panel states its answer shape on the
   rows its dataset loads. The retrieval term index is run init's, never a connector's.
-- **A declared `experiment_file` OWNS its dataset's panel, and
+- **A connector that `owns_panel` OWNS its dataset's `panel`, and
   `dataset_access.py::dataset_experiment` is its ONE reader** — `init_services`, and every read
   outside a run: `GET /datasets`, `/origins`, `/cells` and the campaign pipeline. L4's
   `runner/inner/` reads the panel off the run's workload, never the file. Ordered before the row
   ladder, never a fallback: rows cached under the same name describe a different instrument, and
   a resolver that knows only MATERIALIZED banks answers a connector-owned one EMPTY, which is not
-  a fact about the dataset. Panel ORDER is the `sample_id` (`samples_from_dicts` numbers positionally).
+  a fact about the dataset. Panel ORDER is the `sample_id` (`samples_from_dicts` numbers positionally);
+  the δ scale keys a cell by `Sample.key`, so a reorder moves no δ.
 - **`query` is whatever addresses one unit of work, and on an episodic backend that is an ID.**
   A judge falling back to it then grades against an identifier, so a task carrying a real question
   declares it and it rides `Sample.question` (`domain/sample.py`) — the only channel that reaches

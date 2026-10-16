@@ -23,6 +23,7 @@ from promptpotter.application.views.render.phase import (
     render_progress_table,
     render_round_stats,
     round_verdict_basis,
+    stop_lines,
 )
 from promptpotter.application.views.render.primitives import (
     DIM,
@@ -41,6 +42,7 @@ from promptpotter.application.views.render.primitives import (
     display_tags,
 )
 from promptpotter.application.views.render.sample import fmt_query_result
+from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.phase_views import (
@@ -49,7 +51,7 @@ from promptpotter.domain.phase_views import (
     RoundStartView,
     ViewAnchors,
 )
-from promptpotter.domain.phases import CampaignPhase
+from promptpotter.domain.phases import CampaignPhase, StopOutcome, stop_reason_outcome
 from promptpotter.domain.results import (
     ArmOutcome,
     ScoreboardRankKey,
@@ -66,6 +68,8 @@ from promptpotter.domain.run_records import (
     LLMCallRecord,
     LLMCallStartRecord,
     PhaseRecord,
+    ProviderEasedRecord,
+    ProviderHoldRecord,
     RaceCatchUpRecord,
     RaceStandingRecord,
     RoundClosedRecord,
@@ -100,6 +104,10 @@ logger = logging.getLogger(__name__)
 StatusFn = Callable[[str], None]
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _clock(epoch: float) -> str:
+    return time.strftime("%H:%M:%S", time.localtime(epoch))
 
 
 class ReadoutProjection(Projection):
@@ -138,6 +146,7 @@ class ReadoutProjection(Projection):
         self._readout: Path | None = None
         self._cycle_dir: Path | None = None
         self._verdict: RoundCompleteView | None = None
+        self._held: dict[str, BackpressureReading] = {}
 
     @classmethod
     def for_campaign(
@@ -175,7 +184,7 @@ class ReadoutProjection(Projection):
         if self._readout is None:
             return
         try:
-            append_line(self._readout, _ANSI_RE.sub("", line))
+            append_line(self._readout, _ANSI_RE.sub("", line).encode("utf-8"))
         except OSError as exc:
             # Said once: a readout that just ends reads as a run that stopped.
             logger.warning("readout.log stopped at %s: %s", self._readout, exc)
@@ -203,7 +212,9 @@ class ReadoutProjection(Projection):
             and view.resumed_from_round > 1
             and self._cycle_dir is not None
         ):
-            standing = scan_standing_rounds(ledger_chain(CycleDir(self._cycle_dir))).rounds
+            standing = scan_standing_rounds(
+                ledger_chain(CycleDir(self._cycle_dir), moment=None)
+            ).rounds
             self._closed = {
                 n: held.close for n, held in standing.items() if n < view.resumed_from_round
             }
@@ -211,6 +222,13 @@ class ReadoutProjection(Projection):
     def _handle_run_phase(self, record: RunPhaseRecord) -> None:
         if record.spend is not None:
             self._write(render_run_spend(record.spend))
+        if record.stop_reason is not None:
+            # Every entry point's readout ends on why, so no completion box repeats it.
+            head, *rest = stop_lines(record.stop_reason, detail=record.detail)
+            ink = DIM if stop_reason_outcome(record.stop_reason) is StopOutcome.SUCCESS else YELLOW
+            self._write(f"\n  {ink}■ {head}{RESET}")
+            for line in rest:
+                self._write(f"    {line}")
         if record.gate == "arms":
             # ASCII-only: a cp1252 console is one of this line's sinks.
             n = self._round_num
@@ -261,6 +279,31 @@ class ReadoutProjection(Projection):
         prefix = f"{glyph} {round_tag}".rstrip()
         self._write(f"  {YELLOW}{prefix} {record.message}{RESET}")
 
+    def _handle_provider_eased(self, record: ProviderEasedRecord) -> None:
+        if self._held.pop(record.sender, None) is not None:
+            after = fmt_elapsed(record.held_s)
+            self._write(f"  {GREEN}✓ {record.sender} answers again after {after}{RESET}")
+
+    def _handle_provider_hold(self, record: ProviderHoldRecord) -> None:
+        sender = record.sender
+        held, shown = record.reading, self._held.get(sender)
+        if held == shown:
+            return
+        self._held[sender] = held
+        hold = "" if held.resumes_at is None else f" · sends held until {_clock(held.resumes_at)}"
+        if held.at_once is not None:
+            hold += f", then {held.at_once} at once"
+        if shown is not None and shown.since == held.since:
+            self._write(
+                f"  {YELLOW}⚠ still rate-limited · {sender}, throttle {record.strikes}{hold}{RESET}"
+            )
+            return
+        said = f' · "{held.detail}"' if held.detail else ""
+        self._write(
+            f"  {YELLOW}⚠ RATE-LIMITED · {sender} ({record.scope}){said}{hold}"
+            f" · the run stops if still throttled at {_clock(record.gives_up_at)}{RESET}"
+        )
+
     def _handle_llm_call_progress(self, record: LLMCallProgressRecord) -> None:
         """``detail`` prints VERBATIM: a bare tick proves only liveness, and a healthy inner campaign reads as frozen."""
         round_tag = f"r{record.round}" if record.round is not None else ""
@@ -268,6 +311,8 @@ class ReadoutProjection(Projection):
         line = f"  · {node_label} still waiting · {record.elapsed_s:.0f}s"
         if record.detail:
             line += f" · {record.detail}"
+        if record.inner is not None:
+            line += f" · inner {record.inner.campaign_id}/{record.inner.cycle_id}"
         self._write(f"  {DIM}{line}{RESET}")
 
     def _handle_llm_call(self, record: LLMCallRecord) -> None:

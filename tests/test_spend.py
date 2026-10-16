@@ -39,6 +39,7 @@ from openai.types.chat import ChatCompletion
 from pydantic import BaseModel, Field
 
 import promptpotter.infrastructure.llm.spend_book as spending
+from promptpotter.application.account import account_of
 from promptpotter.application.bench import llm_call as call_mod
 from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.commands.dispatcher import CommandDispatcher
@@ -46,23 +47,26 @@ from promptpotter.application.commands.limits_and_queue import _apply_change_run
 from promptpotter.application.diagnostics.noise_floor import measure_noise_floor
 from promptpotter.application.diagnostics.probe_reasoning import probe_reasoning
 from promptpotter.application.diagnostics.seed_screen import screen_inner_seeds
+from promptpotter.application.jobs.launcher.admission import paid_pass
 from promptpotter.application.jobs.launcher.run_job import HeldRun, JobSpec
+from promptpotter.application.jobs.machine_status import machine_status
 from promptpotter.application.jobs.quota import (
     QuotaExceededError,
     admit_launch,
     clamp_budget_change,
-    paid_verb,
+    paid_call,
     spends_the_hosts_own_key,
 )
 from promptpotter.application.jobs.reaper import reclaim_orphan_sandboxes
-from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.application.jobs.registry import CampaignLaunch, JobRegistry
+from promptpotter.application.optimizer_manifest import resolve_optimizer
 from promptpotter.application.optimizers.potter.pobb.checks import PoBBCheck
 from promptpotter.application.optimizers.potter.race import CatchUpPool
 from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.entry import _arm_spend_book
 from promptpotter.application.runner.grade_bench import grade_line_bench
 from promptpotter.application.runner.inner import spawn, spawn_context
-from promptpotter.application.runner.inner.tasks import InnerCells, load_inner_tasks
+from promptpotter.application.runner.inner.tasks import InnerCell, InnerCells, parse_panel
 from promptpotter.application.runner.loop import _round_bounds
 from promptpotter.application.runner.measurement import _skips_on_record
 from promptpotter.application.runner.termination import run_stop_reason
@@ -156,7 +160,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_spend_by_round,
 )
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
-from promptpotter.infrastructure.store.io import append_line, write_json, write_jsonl
+from promptpotter.infrastructure.store.io import append_line, write_jsonl
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache
 from promptpotter.infrastructure.store.read_model import LedgerSpan, iter_jsonl
@@ -171,7 +175,7 @@ from promptpotter.shared.errors import (
     CellInfrastructureError,
     CellSendRefusedError,
     CellUnscoreableError,
-    ConflictError,
+    CycleBusyError,
     ErrorCategory,
     SendRefusedError,
 )
@@ -222,9 +226,8 @@ def on_jumping_clock[**P, T](test: Callable[P, Coroutine[Any, Any, T]]) -> Calla
 @pytest.fixture
 def run_bound(tmp_path: Path) -> Iterator[None]:
     ledger = telemetry.set_cycle_ledger(CycleEventLog(tmp_path / "bound.jsonl"))
-    round_num = telemetry.set_current_round(1)
-    yield
-    telemetry.reset_current_round(round_num)
+    with telemetry.at_round(1):
+        yield
     telemetry.reset_cycle_ledger(ledger)
 
 
@@ -586,6 +589,7 @@ class _OrderedFakeBackend:
             self._inflight -= 1
         return MeasuredCell(
             sample_id=sample.id,
+            sample_key=sample.key,
             query=sample.query,
             ground_truth=sample.ground_truth or "",
             predicted=sample.ground_truth or "",
@@ -632,6 +636,7 @@ def _walk_over(
     cached: dict[int, Any] | None = None,
     banked: dict[int, Any] | None = None,
     rereads: list[int] | None = None,
+    keyed: str = "cell",
 ) -> Any:
     class _Recorder:
         def scores(self, cells: Any) -> Any:
@@ -659,8 +664,7 @@ def _walk_over(
         deprecated_samples={},
         recorder=_Recorder(),
         claim_cell=None,
-        cell_keys={s.id: f"cell_{s.id}" for s in dataset},
-        counted={f"cell_{sid}" for sid in rereads or ()},
+        cell_keys={s.id: f"{keyed}_{s.id}" for s in dataset},
         rereads=frozenset(rereads or ()),
     )
     return query_loop.Walk(dataset, ctx, checks, measured_candidate_context(measured))
@@ -701,6 +705,8 @@ async def _walk(
     cap_usd: float | None = None,
 ) -> dict[str, Any]:
     backend = _OrderedFakeBackend(len(dataset))
+    priced: set[str] = set()
+    telemetry.bind_priced(priced)
     banked: dict[int, Any] = {}
     depths: list[int] = []
     committed: list[int] = []
@@ -730,6 +736,7 @@ async def _walk(
     priors = CatchUpPool(
         PoBBCheck(pobb_knobs(), n_min=6, n_samples=len(dataset), ruler=None),
         _backfill,
+        "elimination",
     )
     priors.admit("parent", [], JobSearchPoint())
 
@@ -778,7 +785,7 @@ async def _walk(
         "entries": list(backend.entries),
         "committed": committed,
         "banked": banked,
-        "priced": set(walk.ctx.counted),
+        "priced": set(priced),
         "returned": returned,
         "billed": book.usd_metered,
         "max_depth": max(depths) if depths else 0,
@@ -853,7 +860,7 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
     stores = build_stores(
         signup,
         projects_root=built_stores.projects_root,
-        benchmarks_root=built_stores.benchmarks_root,
+        install_datasets_root=built_stores.install_datasets_root,
     )
     held = HeldLimits(
         halt_at_accuracy=0.9,
@@ -891,7 +898,7 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
     rebuilt = build_stores(
         spec.identity,
         projects_root=spec.projects_root,
-        benchmarks_root=spec.benchmarks_root,
+        install_datasets_root=spec.install_datasets_root,
         shared_root=spec.shared_root,
     )
     assert spends_the_hosts_own_key(rebuilt) is spends_the_hosts_own_key(stores) is False, (
@@ -1045,38 +1052,40 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
     monkeypatch.setattr(spawn, "_run_inner_campaign", _hanging_inner)
     inner = tmp_path / "inner"
     inner.mkdir()
-    # Loaded through the real validator: the run resolves its panel ONCE and carries it.
-    write_json(
-        inner / "inner_tasks.yaml",
+    # Through the real validator: the run resolves its panel ONCE and carries it.
+    seat = {"kind": "seat", "id": "justlogic-d234/seed-0", "inner_dataset_seed": 0}
+    panel = parse_panel(
         {
-            "inner_benchmark": "justlogic-d234",
+            "inner_benchmark": "justlogic/d234",
             "inner_benchmark_config": {
                 "n_samples_per_inner_round": 24,
+                "n_samples_bench": 8,
                 "max_inner_rounds": 7,
             },
-            "tasks": [{"id": "justlogic-d234/seed-0", "inner_dataset_seed": 0}],
-        },
+            "tasks": [seat],
+        }
     )
     spawning = spawn_context._INNER_SPAWN.set(
         spawn_context.InnerSpawnContext(
             inner_sandbox_root=inner,
-            dataset_config_dir=inner,
             identity=default_identity(),
             shared_root=inner,
             spawn_campaign_id="ppself__aaaaaa",
             spawn_cycle_id="cycle_deadbeef0000",
             enclosing=(),
-            # No inner dataset resolved: the stubbed inner run never reads one.
+            # No inner dataset read: the stubbed inner run never opens one.
             cells=InnerCells(
-                panel=load_inner_tasks(inner / "inner_tasks.yaml"), by_dataset={}, treatment="o"
+                cells=tuple(panel.tasks),
+                by_dataset={
+                    "justlogic/d234": InnerCell({}, None, resolve_optimizer("potter", {}), "o")
+                },
+                specs={s.id: panel._seat_spec("o", s) for s in panel.tasks},
             ),
         )
     )
     token = telemetry.set_cycle_ledger(CycleEventLog(inner / "outer.jsonl"))
     query = "justlogic-d234/seed-0"
-    cell = Sample(
-        id=0, query=query, ground_truth=None, source_pin={"id": query, "inner_dataset_seed": 0}
-    )
+    cell = Sample(id=0, query=query, ground_truth=None, source_pin={**seat, "instrument": "i"})
     # The connector DECLARES the seconds, the scoring seam enforces them, as in `measure_sample`.
     envelope = CellEnvelope(spawn.inner_cell_envelope_s(cell, {}), attempts=1, label=query)
     try:
@@ -1140,9 +1149,11 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
     )
     taken = [s.id for s in reread[:3]]
     walk = _walk_over(reread, session, checks=[], cached=banked, rereads=taken)
-    bench = _walk_over(reread, session, checks=[], cached=banked)
+    bench = _walk_over(reread, session, checks=[], cached=banked, keyed="bench")
     token = telemetry.set_cycle_ledger(ledger)
     try:
+        # The stopped launch priced the cells it took.
+        telemetry.bind_priced({f"cell_{sid}" for sid in taken})
         with spending_under(arm):
             halted = await _stopped_by_operator(
                 query_loop.run_walks([walk], session, keep_cut=False)
@@ -1165,16 +1176,16 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
     )
     assert arm.usd_metered == pytest.approx(0.04), "the arm's book read another bill than metered"
     priced = scan_ledger_priced_keys([ledger.path])
-    assert {f"cell_{s.id}" for s in reread} <= priced and len(priced) == len(reread) + 2, (
+    assert {f"bench_{s.id}" for s in reread} <= priced and len(priced) == len(reread) + 2, (
         "the ledger names another set of priced calls than the arm paid for"
     )
 
-    # A ledger index serves the file as it stands: grown, compacted and raced.
+    # A ledger index serves the file as it stands: grown, compacted, raced and shared.
     index = CycleEventLog.open(CycleDir(tmp_path / "index"))
 
-    def bill(n: int, round: int | None = None) -> None:
+    def bill(n: int, round: int | None = None, log: CycleEventLog = index) -> None:
         for _ in range(n):
-            index.append(
+            log.append(
                 TokenUsageRecord(
                     kind="backend",
                     node="llm_only",
@@ -1240,6 +1251,21 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
         f"a reader racing the writer saw a torn bill: {[s for s in seen if s[0] != s[1]][:3]}"
     )
     assert tailed() == cold() and cold()[1] == 2 + 40, "the index lost a row written under a race"
+    start = threading.Barrier(4)
+
+    def flood() -> None:
+        own = CycleEventLog(index.path)
+        start.wait()
+        bill(100, log=own)
+
+    writers = [threading.Thread(target=flood) for _ in range(4)]
+    for writer in writers:
+        writer.start()
+    for writer in writers:
+        writer.join()
+    assert tailed() == cold() and cold()[1] == 2 + 40 + 4 * 100, (
+        "writers sharing one file — the server's command beside the run's records — lost a bill"
+    )
 
 
 # 3. Ceilings
@@ -1364,7 +1390,7 @@ def test_a_runs_book_holds_each_send_at_its_bound_and_stops_the_run_at_its_ceili
     # Another PROCESS's ceiling lands as bytes no append in this one handed over, behind its own.
     append_line(
         CycleLayout(cycle_dir).ledger,
-        RECORD_ADAPTER.dump_json(RunLimitsRecord(ceiling=SpendCeilings(0.50, None))).decode(),
+        RECORD_ADAPTER.dump_json(RunLimitsRecord(ceiling=SpendCeilings(0.50, None))),
     )
     assert control.budget_tripped() == StopReason.SPEND_BUDGET, (
         "a ceiling another process appended was hidden behind this process's own appends"
@@ -1378,7 +1404,7 @@ def test_a_runs_book_holds_each_send_at_its_bound_and_stops_the_run_at_its_ceili
     moved = CycleHop(campaign_id="camp-4", cycle_id="cycle_budget0001")
     registry = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1)
     job = registry.request_slot(
-        user_id="default", principal_id="default", dataset_name="ds1", hop=moved
+        user_id="default", principal_id="default", holder=CampaignLaunch("ds1"), hop=moved
     )
     registry.mark_admitted(job.job_id, SpendCeilings(0.30, 5_000_000))
     at_tokens = TokenUsageRecord(
@@ -1469,17 +1495,6 @@ def test_a_runs_book_holds_each_send_at_its_bound_and_stops_the_run_at_its_ceili
     assert owed.fits(worst, worst) == 0 and owed.exhausted() is not None, (
         "a send's room is the ceiling less EVERYTHING owed: bills, unpriced sends, the set-aside"
     )
-
-    # A send no rate bounds is refused under a dollar ceiling and sent under none.
-    unpriced = SendBound(input_tokens=100, output_tokens=100, usd=None, unpriced=("m (p)",))
-    capped = spend_book(5.0, usd_reserve=None)
-    with pytest.raises(SendRefusedError) as at_cell:
-        capped.hold(unpriced, unpriced, "backend", what="the next cell")
-    assert run_stop_reason(at_cell.value) is StopReason.NO_RATE, (
-        "an unpriced send stopped as another"
-    )
-    assert capped.exhausted() is None, "no ceiling was reached: nothing was held or counted"
-    unbounded_spend_book().hold(unpriced, unpriced, "backend", what="the next cell")
 
     # A price list that could not be fetched is an outage, never an unpriced call.
     fetches: list[str] = []
@@ -1810,6 +1825,7 @@ def test_a_runs_book_holds_each_send_at_its_bound_and_stops_the_run_at_its_ceili
     episode = harbor._Episode(
         query="task",
         task={},
+        task_root=tmp_path,
         reward_key="reward",
         agent_name="terminus-2",
         agent_kwargs={},
@@ -1882,7 +1898,8 @@ def test_a_runs_book_holds_each_send_at_its_bound_and_stops_the_run_at_its_ceili
             examples=[example],
         )
         client = BackendClient(
-            dspy_module.CONNECTOR, workload=InProcessWorkload(experiment=None, program=program)
+            dspy_module.CONNECTOR,
+            workload=InProcessWorkload(experiment=None, experiment_dir=None, program=program),
         )
         config = {"prompt": "Answer.", "model": "openai/gpt-x", "max_calls": 2, "max_tokens": 50}
         pairs = {dspy_module.PROGRAM_NODE: client.priced_as(config)}
@@ -2073,13 +2090,13 @@ def _account_stores(
 
 def _running(admitted_at: str | None, reserve: SpendCeilings) -> Any:
     held = types.SimpleNamespace(job_id="job-b", hop=None, admitted_at=admitted_at, reserve=reserve)
-    return types.SimpleNamespace(list_running=lambda *, user_id: [held])
+    return types.SimpleNamespace(list_running=lambda *, user_id: [held], get=lambda _id: None)
 
 
 async def _paid_door(door: str, stores: Any) -> None:
     match door:
         case "turn":
-            async with paid_verb(stores=stores, bucket="turn", hop=None):
+            async with paid_call(stores=stores, bucket="turn"):
                 pass
         case "bench":
             await grade_line_bench(stores=stores, hop=_HELD_HOP)
@@ -2192,7 +2209,8 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
                     declared=SpendCeilings(declared, None),
                     user=user,
                     stores=stores,
-                    job_registry=running or types.SimpleNamespace(list_running=lambda **_: []),
+                    job_registry=running
+                    or types.SimpleNamespace(list_running=lambda **_: [], get=lambda _id: None),
                     job_id="job-a",
                     hop=None,
                 )[0]
@@ -2211,18 +2229,75 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
     hold_cycle(cycle_dir)
 
     async def bill_held() -> None:
-        async with paid_verb(stores=held_stores, bucket="bench", hop=_HELD_HOP):
+        stub = cast("Stores", held_stores)
+        async with paid_pass(stores=stub, verb="bench", hop=_HELD_HOP, declared=SpendCeilings()):
             pass
 
-    with pytest.raises(ConflictError):
+    with pytest.raises(CycleBusyError):
         asyncio.run(bill_held())
     CycleEventLog.open(CycleDir(cycle_dir)).append(
         RunPhaseRecord.stop(StopReason.PAUSED, cause=PauseCause.INTERRUPT)
     )
-    with pytest.raises(ConflictError):
+    with pytest.raises(CycleBusyError):
         asyncio.run(bill_held())
     release_cycle(cycle_dir)
     asyncio.run(bill_held())
+
+    # A scoring pass holds a slot and its reservation: a launch admitted beside it must not spend
+    # the headroom the pass is already spending.
+    passing = build_stores(
+        IdentityContext(
+            user_id=UserId("sub-8"),
+            tenant_id=TenantId("sub-8"),
+            issuer=Issuer(_WEB),
+            claims={},
+            capabilities=frozenset(),
+        ),
+        projects_root=built_stores.projects_root,
+        install_datasets_root=built_stores.install_datasets_root,
+    )
+    payer = account_of(passing).model_copy(update={"spend_budget_usd_total": 1.0})
+    passing.users.save(payer)
+    pass_jobs = tmp_path / "jobs-pass"
+    monkeypatch.setattr(
+        "promptpotter.application.jobs.registry.default_jobs_dir", lambda: pass_jobs
+    )
+    slots = JobRegistry.attach()
+
+    def launch_beside() -> SpendCeilings:
+        launch = slots.request_slot(
+            user_id="sub-8", principal_id="sub-8", holder=CampaignLaunch("ds1")
+        )
+        try:
+            return admit_launch(
+                declared=SpendCeilings(),
+                user=payer,
+                stores=passing,
+                job_registry=slots,
+                job_id=launch.job_id,
+                hop=None,
+            )[0]
+        finally:
+            slots.release(launch.job_id)
+
+    async def pass_beside() -> None:
+        async with paid_pass(
+            stores=passing, verb="verify", hop=None, declared=SpendCeilings()
+        ) as pass_book:
+            assert pass_book.declared.usd == pytest.approx(1.0), (
+                "a pass declared nothing and did not hold the account's headroom"
+            )
+            assert len(machine_status(slots, identity=passing.identity).running) == 1, (
+                "a paid pass ran beside the machine's slot count"
+            )
+            with pytest.raises(QuotaExceededError):
+                launch_beside()
+
+    asyncio.run(pass_beside())
+    assert not machine_status(slots, identity=passing.identity).running, (
+        "a pass kept its slot past its exit"
+    )
+    assert launch_beside().usd == pytest.approx(1.0), "the pass kept its reservation past its exit"
 
     # A budget change leaves the arm it did not touch alone.
     def web_account(sub: str) -> Stores:
@@ -2235,7 +2310,7 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
                 capabilities=frozenset(),
             ),
             projects_root=built_stores.projects_root,
-            benchmarks_root=built_stores.benchmarks_root,
+            install_datasets_root=built_stores.install_datasets_root,
         )
 
     metered = web_account("sub-9")
@@ -2245,7 +2320,9 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
     )
     metered.campaigns.create_campaign(campaign)
     registry = JobRegistry(tmp_path / "jobs-3", capacity=lambda _live: 1)
-    job = registry.request_slot(user_id="sub-9", principal_id="sub-9", dataset_name="ds1", hop=hop)
+    job = registry.request_slot(
+        user_id="sub-9", principal_id="sub-9", holder=CampaignLaunch("ds1"), hop=hop
+    )
     assert job.holds_slot, "an empty box must hand out a slot, not a place in line"
     registry.mark_admitted(job.job_id, SpendCeilings(0.30, 5_000_000))
     dispatcher = CommandDispatcher(metered, registry)
@@ -2309,16 +2386,20 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
         )
 
     bill(root, 0.1)
+    root_dir = forker.campaigns.cycle_dir(root)
     forker.campaigns.mint_fork_cycle(
-        root,
-        fork.cycle_id,
+        fork,
+        root_dir,
         ForkSpec(trigger=ForkTrigger.OPERATOR_REWIND, reason="", issued_by="", from_round=1),
+        cut=CycleEventLog.open(CycleDir(root_dir)).next_offset,
         from_round=1,
     )
     bill(root, 0.1)
     bill(fork, 0.3)
     registry = JobRegistry(tmp_path / "jobs-7", capacity=lambda _live: 1)
-    job = registry.request_slot(user_id="sub-7", principal_id="sub-7", dataset_name="ds1", hop=fork)
+    job = registry.request_slot(
+        user_id="sub-7", principal_id="sub-7", holder=CampaignLaunch("ds1"), hop=fork
+    )
     registry.mark_admitted(job.job_id, SpendCeilings(0.8, None))
     allowance = User(
         user_id="sub-7", tenant_id="sub-7", created_at="2026-01-01", spend_budget_usd_total=1.0
@@ -2384,9 +2465,7 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
 
     def cleanup(cycle_id: str) -> bool:
         return cleanup_stub_fork_if_empty(
-            campaign_store=stores.campaigns,
-            hop=CycleHop(campaign_id="camp-2", cycle_id=cycle_id),
-            parent_cycle_id=root,
+            campaign_store=stores.campaigns, hop=CycleHop(campaign_id="camp-2", cycle_id=cycle_id)
         )[0]
 
     def tombstones() -> list[SpendTombstoneRecord]:

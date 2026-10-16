@@ -524,6 +524,49 @@ def _variance_lines(ev: Evidence) -> list[str]:
     return lines
 
 
+def _environment_lines(ev: Evidence) -> list[str]:
+    if not ev.environments:
+        return []
+    spec = _UNIT_SPEC[ev.metric.spec.unit]
+    held = sum(1 for e in ev.environments if e.held_out)
+    lines = [
+        "",
+        f"{len(ev.environments)} environment(s), {held} of them held out — each cell as the block "
+        f"the subjects are compared within, on {ev.metric.spec.axis_label}. SNR is the subjects' "
+        "spread at that cell over the roster's residual SD: the cells that tell the subjects apart. "
+        "A held-out cell reads the subjects' bench passes, which only a round's selection has.",
+        f"  {'cell':<44}  {'held':>4}  {'n':>3}  {'spread':>8}  {'signal SD':>9}  {'SNR':>6}  best",
+    ]
+    for e in ev.environments:
+        lines.append(
+            f"  {_clip(e.cell, 44):<44}  {'yes' if e.held_out else '':>4}  {e.n_subjects:>3}  "
+            f"{'—' if e.spread is None else spec.format(e.spread):>8}  "
+            f"{'—' if e.signal_sd is None else spec.format(e.signal_sd):>9}  "
+            f"{'—' if e.snr is None else f'{e.snr:.2f}':>6}  "
+            f"{'—' if e.best_subject is None else e.best_subject[-28:]}"
+        )
+    if (ra := ev.rank_agreement) is not None:
+        ranked = sorted(ra.mean_rank.items(), key=lambda kv: kv[1])
+        lines += [
+            "",
+            f"Rank agreement over the {ra.n_cells} cell(s) all {ra.n_subjects} subjects scored: "
+            f"Friedman chi2 {ra.statistic:.2f} on {ra.df} df, p {fmt_pvalue(ra.p_value)}; "
+            f"Kendall's W {ra.kendall_w:.2f}.",
+            "  mean rank, 1 best: " + ", ".join(f"{k[-28:]} {v:.2f}" for k, v in ranked),
+        ]
+    if ev.lift_profiles:
+        lines += [
+            "",
+            "Breadth — of each subject's own cells, how many it lifted, left flat, dropped:",
+        ]
+        for p in ev.lift_profiles:
+            lines.append(
+                f"  {p.key[-44:]:<44}  {p.lifted:>3} lifted  {p.flat:>3} flat  "
+                f"{p.dropped:>3} dropped  of {p.n_cells}"
+            )
+    return lines
+
+
 def _ranking_lines(ev: Evidence, top: int) -> list[str]:
     m = ev.metric
     if not ev.ranking_computed:
@@ -604,6 +647,7 @@ async def cmd_evidence(args: argparse.Namespace) -> CommandResult:
         *_config_lines(ev),
         *_pairwise_lines(ev),
         *_variance_lines(ev),
+        *_environment_lines(ev),
         *_ranking_lines(ev, args.top),
     ]
     return CommandResult(data=ev.model_dump(), human="\n".join(lines))

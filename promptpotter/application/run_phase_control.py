@@ -5,7 +5,6 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
 
-from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.phases import (
     REFUSAL_STOPS,
     GateDecision,
@@ -34,7 +33,6 @@ class Flight:
     allowed: int = 0
     most: int = 0
     waiting: tuple[int, float] | None = None
-    backpressure: BackpressureReading | None = None
     # ``None`` where no book bounds them; against a reserve it is the WORST case.
     affordable: int | None = None
     cell_usd: float | None = None

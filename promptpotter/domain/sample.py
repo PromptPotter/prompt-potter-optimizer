@@ -29,6 +29,9 @@ class Sample(StrictModel):
     # Where the row sits, never what it is: out of `key`, so its cells replay under any membership.
     bench_only: bool = False
 
+    # The dataset this cell measures where it is not the one it is filed under: its δ scale's. Out of `key`.
+    measured_dataset: str | None = None
+
     @property
     def key(self) -> str:
         return sample_key(

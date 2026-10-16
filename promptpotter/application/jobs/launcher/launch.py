@@ -6,7 +6,7 @@ from collections.abc import Coroutine
 from dataclasses import dataclass
 from typing import Any, assert_never
 
-from promptpotter.application.jobs.launcher.admission import refuse_as_busy, request_launch
+from promptpotter.application.jobs.launcher.admission import refuse_as_busy, request_job
 from promptpotter.application.jobs.launcher.checkin import CheckinStart, hold_checkin_start
 from promptpotter.application.jobs.launcher.mint_and_start import (
     ExistingCycle,
@@ -15,7 +15,7 @@ from promptpotter.application.jobs.launcher.mint_and_start import (
     hold_fresh_mint,
 )
 from promptpotter.application.jobs.launcher.run_job import HeldRun
-from promptpotter.application.jobs.registry import Job, JobRegistry
+from promptpotter.application.jobs.registry import CampaignLaunch, Job, JobRegistry
 from promptpotter.domain.launch_limits import RunMode
 from promptpotter.infrastructure.store.stores import Stores
 
@@ -68,23 +68,23 @@ async def launch(
     inline: Inline | None,
 ) -> Launched:
     """Call AFTER everything a person types: a slot held across an interactive check-in is lost."""
-    job = request_launch(
+    job = request_job(
         stores=stores,
         job_registry=job_registry,
-        dataset_name=request.dataset_name,
+        holder=CampaignLaunch(request.dataset_name),
         hop=request.hop,
     )
     if inline is not None:
         if job.queued:
             if inline.no_wait:
                 refuse_as_busy(stores, job_registry, job)
-            holder = job_registry.holder()
+            oldest = next(iter(job_registry.list_running()), None)
             order = job_registry.queue_order()
             logger.warning(
                 "Machine full — queued at position %d (oldest run: %s). It starts by itself; "
                 "Ctrl+C to leave the queue.",
                 next((i for i, q in enumerate(order, 1) if q.job_id == job.job_id), 1),
-                holder.campaign_id if holder else "?",
+                "?" if oldest is None else oldest.what,
             )
         held = await _hold(request, stores=stores, job_registry=job_registry, job=job)
         return Launched(job=job, held=held)

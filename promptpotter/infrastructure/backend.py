@@ -14,6 +14,7 @@ import httpx
 from filelock import BaseFileLock, FileLock, Timeout
 
 from promptpotter.config.paths import default_jobs_dir
+from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.infrastructure.docker_host import claim_machine, machine_step
 from promptpotter.infrastructure.llm.pricing import inline_route
 from promptpotter.infrastructure.llm.send_failure import failed_send
@@ -43,6 +44,7 @@ from promptpotter.shared.errors import (
     CellThrottledError,
     CellUnscoreableError,
     ErrorCategory,
+    PayloadInvalidError,
 )
 
 _OUTAGE_POLL_S = 5.0
@@ -57,6 +59,7 @@ CELL = CallLabel("backend_cell", "backend")
 if TYPE_CHECKING:
     from promptpotter.connectors.protocol import Connector, InProcessRun, InProcessWorkload
     from promptpotter.domain.connector import ConnectorExecution, MeasuredUnit
+    from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.pipeline_schema import NodeSpendBound, PipelineNode
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.value_tree import Delivery
@@ -207,6 +210,10 @@ class BackendClient:
         envelope = self._connector.cell_envelope_s
         return None if envelope is None else envelope(sample, pipeline_params)
 
+    def cell_hop(self, sample: Sample, pipeline_params: dict[str, Any] | None) -> CycleHop | None:
+        hop = self._connector.cell_hop
+        return None if hop is None else hop(sample, pipeline_params)
+
     def prompt_delivery(self, pipeline_params: dict[str, Any] | None) -> Delivery:
         return self._connector.prompt_delivery(pipeline_params)
 
@@ -233,16 +240,6 @@ class BackendClient:
                 verify=tls_context(),
             )
         return self._http
-
-    async def _get_json(self, path: str, **params: Any) -> dict[str, Any]:
-        kwargs: dict[str, Any] = {"params": params} if params else {}
-        resp = await self.http.get(
-            f"{self.base_url}{path}",
-            **kwargs,
-        )
-        resp.raise_for_status()
-        data: dict[str, Any] = resp.json()
-        return data
 
     async def aclose(self) -> None:
         if self._http and not self._http.is_closed:
@@ -287,7 +284,26 @@ class BackendClient:
         return False
 
     async def fetch_pipeline(self) -> dict[str, Any]:
-        return await self._get_json("/pipeline")
+        """The declaration out of its ``data`` envelope. No answer or a 5xx (a tunnel up, its backend
+        booting) is an outage; any other answer naming no ``nodes`` is the backend's refusal."""
+        url = f"{self.base_url}/pipeline"
+        try:
+            resp = await self.http.get(url)
+        except httpx.TransportError as exc:
+            raise BackendUnreachableError(self._connector.name, self.base_url) from exc
+        if resp.is_server_error:
+            raise BackendUnreachableError(
+                self._connector.name, self.base_url, f"GET {url} answered {resp.status_code}."
+            )
+        declared = _reply_data(resp) if resp.is_success else None
+        if not declared or not isinstance(declared.get("nodes"), dict) or not declared["nodes"]:
+            raise PayloadInvalidError(
+                f"GET {url} answered {resp.status_code} with no pipeline declaration: the "
+                f"backend's schema is its reply's `data` object, naming its `nodes`.",
+                code="pipeline_config_invalid",
+                details={"url": url, "status": resp.status_code},
+            )
+        return declared
 
     async def init_session(self, terms: list[str]) -> dict[str, Any]:
         return await self._guard.set_terms(self.http, self.base_url, terms)

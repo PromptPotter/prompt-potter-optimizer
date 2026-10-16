@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 from promptpotter.application.views.render.heatmap import render_hard_sample_heatmap
+from promptpotter.application.views.render.phase import stop_lines
 from promptpotter.application.views.render.primitives import fmt_fitness, fmt_pct, overlap_series
 from promptpotter.application.views.view_models import (
     ForkSummaryView,
@@ -11,7 +12,7 @@ from promptpotter.application.views.view_models import (
     LogMdView,
     RoundDigestView,
 )
-from promptpotter.domain.phases import STOP_REASON_INFO, StopReason
+from promptpotter.domain.phases import StopReason
 from promptpotter.domain.results import DISPLAY_METRIC_INFO, RunStanding
 from promptpotter.domain.ruler import THETA_CAVEAT_INFO
 from promptpotter.domain.spend import RATE_PRICED_LABEL, CloseSpend, calls_rate_priced
@@ -21,11 +22,8 @@ from promptpotter.shared.composite import render_composite_fitness_block
 def _ending_lines(stop_reason: StopReason | None) -> list[str]:
     if stop_reason is None:
         return ["- ended: not yet"]
-    info = STOP_REASON_INFO[stop_reason]
-    return [
-        f"- ended: **{info.label}** (`{stop_reason.value}`)",
-        *([f"- next: {info.next_step}"] if info.next_step else []),
-    ]
+    head, *rest = stop_lines(stop_reason)
+    return [f"- ended: {head}", *(f"- {line}" for line in rest)]
 
 
 def _json_block(label: str, value: Any) -> list[str]:

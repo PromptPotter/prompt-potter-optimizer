@@ -28,10 +28,12 @@ MAX_INSTRUMENT_DEPTH = 2
 
 @dataclass(frozen=True)
 class InstrumentMode:
-    """``ruler`` is the δ scale the SPAWNER fixed; without it a cell fits one from the arms."""
+    """``ruler`` is the δ scale the SPAWNER fixed; without it a cell fits one from the arms.
+    ``root_round`` is the depth-0 run's round the cell spends under: its bills land on that ledger."""
 
     depth: int
     ruler: DeltaRuler | None
+    root_round: int | None
 
 
 # Never reset: `_MODE` must cover FINALIZE, or archive reads and the ruler de-hermeticize.
@@ -40,9 +42,15 @@ _MODE: Annotated[contextvars.ContextVar[InstrumentMode | None], shapes_optimizer
 )
 
 
-def enter_instrument_mode(*, ruler: DeltaRuler | None) -> InstrumentMode:
-    """Call INSIDE the inner cycle's own ``asyncio.Task``, or the mode leaks to the spawner."""
-    mode = InstrumentMode(depth=instrument_depth() + 1, ruler=ruler)
+def enter_instrument_mode(*, ruler: DeltaRuler | None, spawned_in: int | None) -> InstrumentMode:
+    """Call INSIDE the inner cycle's own ``asyncio.Task``, or the mode leaks to the spawner.
+    *spawned_in* is the spawner's round, which only a depth-1 cell takes as its root's."""
+    outer = _MODE.get()
+    mode = InstrumentMode(
+        depth=instrument_depth() + 1,
+        ruler=ruler,
+        root_round=spawned_in if outer is None else outer.root_round,
+    )
     _MODE.set(mode)
     return mode
 

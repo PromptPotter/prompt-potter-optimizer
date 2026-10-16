@@ -4,7 +4,7 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
-from promptpotter.config.paths import benchmark_datasets_root
+from promptpotter.config import paths
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath, WorkspaceDir
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
@@ -33,7 +33,7 @@ class Stores:
     base_dir: WorkspaceDir
     projects_root: Path
     shared_root: Path
-    benchmarks_root: Path
+    install_datasets_root: Path
     identity: IdentityContext
     tenant_datasets: TenantDatasetStore
     campaigns: CampaignStore
@@ -61,7 +61,7 @@ def build_stores(
     identity: IdentityContext,
     *,
     projects_root: Path,
-    benchmarks_root: Path | None = None,
+    install_datasets_root: Path | None = None,
     shared_root: Path | None = None,
 ) -> Stores:
     """``projects_root`` takes no default: one would address the real workspace from a sandbox."""
@@ -69,12 +69,11 @@ def build_stores(
     tenant_dir = tenant_workspace(root, identity.tenant_id)
     shared = shared_root if shared_root is not None else root
     shared_tenant = shared / identity.tenant_id
-    bench_root = benchmarks_root if benchmarks_root is not None else benchmark_datasets_root()
     stores = Stores(
         base_dir=tenant_dir,
         projects_root=root,
         shared_root=shared,
-        benchmarks_root=bench_root,
+        install_datasets_root=install_datasets_root or paths.install_datasets_root(),
         identity=identity,
         # Rooted with the caches: a sandbox isolates campaign STATE, and a dataset is not state.
         tenant_datasets=TenantDatasetStore(tenant_workspace(shared, identity.tenant_id)),

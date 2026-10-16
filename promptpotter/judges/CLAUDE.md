@@ -47,7 +47,7 @@ last, so the formula scores the judge under a name promising something else).
 **Nothing that sets the loop's LLMs may reach a judge.** A node's permitted model set,
 `nodes.{node}.config.model`, the optimizer's own `assets/optimizers/potter/pipeline.yaml`, and any global
 "set every model" steer are all not consulted. A judge's models are declared in
-`campaign.yaml::campaign_config.judges.{term}.stages` and inherited from nowhere — not from the
+`dataset.yaml::campaign.judges.{term}.stages` and inherited from nowhere — not from the
 loop, and not from a sibling term either; absent means absent, and never a borrow.
 
 Three things enforce it rather than describe it: `JudgeStage.model`/`provider` are **required**
@@ -84,7 +84,7 @@ and the second verdict would land on top of the first.
 
 **A schema belongs to a task SHAPE, and `retrieve → ground → answer` is one shape's** — the
 search-augmented one. An agent-harness task has a different shape and a different schema,
-`open → adhere` (`datasets/spreadsheetbench-s10/dataset.md` § Step schema). Adopt the shipped
+`open → adhere` (the `spreadsheetbench/s10` tenant definition's `README.md` § Step schema). Adopt the shipped
 schema where the shape matches; one coined on a task it does not fit is *wrong*, worse than merely
 new. A third shape earns a third schema and owes the same screen.
 
@@ -135,7 +135,7 @@ later fit re-derives its own thresholds from archived rows.
 
 **Their rubrics are OURS, and that is the difference from `simpleqa.py`.** Nothing published grades
 these two steps, so screen them (`seed-screen`, `noise-floor`) before funding a campaign on them
-and record the reading in the dataset's `dataset.md`, exactly as any other instrument decision is
+and record the reading in the dataset's `README.md`, exactly as any other instrument decision is
 recorded.
 
 ## Identity — a judge that changed must re-cut the key
@@ -173,7 +173,7 @@ The rule belongs to the seam, not to any one judge.
 The shipped SimpleQA judge **deliberately diverges from upstream here**: `simple-evals` defaults an
 unparseable grading reply to `"C"` / `NOT_ATTEMPTED`, a category that does not count against
 accuracy-given-attempted. Ours returns `None`. Record any such divergence in the dataset's
-`dataset.md`.
+`README.md`.
 
 ## Why this package hand-rolls its own protocol
 

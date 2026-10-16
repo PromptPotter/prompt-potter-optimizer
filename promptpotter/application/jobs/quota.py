@@ -12,7 +12,7 @@ from pydantic import Field
 
 from promptpotter.application.account import account_of
 from promptpotter.application.campaign_config import CampaignConfig
-from promptpotter.application.jobs.registry import UNRESOLVED_HOP, JobRegistry
+from promptpotter.application.jobs.registry import UNRESOLVED_HOP, Job, JobRegistry
 from promptpotter.config.settings import settings
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.launch_limits import HeldLimits, LaunchLimits, RoundsCap
@@ -30,7 +30,6 @@ from promptpotter.infrastructure.llm.spend_book import (
     spending_under,
     unbounded_spend_book,
 )
-from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.account_spend import (
     ZERO_SPEND,
     LifetimeSpend,
@@ -41,7 +40,7 @@ from promptpotter.infrastructure.store.account_spend import (
 )
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.infrastructure.store.user_store import User
-from promptpotter.shared.errors import ConflictError, PayloadInvalidError, PotterError
+from promptpotter.shared.errors import PayloadInvalidError, PotterError
 from promptpotter.shared.identity import (
     CAMPAIGN_BUDGET_CAP,
     has_capability,
@@ -94,9 +93,8 @@ def check_launch_quotas(
         )
 
     # A queued launch counts, or an account queues without bound and the drain order can starve.
-    in_flight = len(job_registry.list_running(user_id=user.user_id)) + len(
-        job_registry.list_queued(user_id=user.user_id)
-    )
+    # A scoring pass does not: the limit is on campaigns, and a pass that finds no slot is refused.
+    in_flight = len(job_registry.list_launches(user_id=user.user_id))
     if in_flight >= user.max_concurrent_cycles:
         raise QuotaExceededError(
             code="quota_exceeded",
@@ -108,7 +106,7 @@ def check_launch_quotas(
         )
 
     if rate_limited:
-        today = job_registry.list_created_today(user_id=user.user_id)
+        today = job_registry.list_launched_today(user_id=user.user_id)
         if len(today) >= user.max_campaigns_per_day:
             raise QuotaExceededError(
                 code="quota_exceeded",
@@ -261,6 +259,8 @@ def quota_status(*, stores: Stores, job_registry: JobRegistry) -> QuotaStatus:
     user = account_of(stores)
     wallet = read_account_wallet(user=user, stores=stores, job_registry=job_registry)
     spent, ceilings = wallet.spent, wallet.ceilings
+    # The launches `max_concurrent_cycles` binds: a scoring pass is not among them.
+    launches = job_registry.list_launches(user_id=user.user_id)
     return QuotaStatus(
         spend_lifetime=LifetimeSpend.of(spent),
         spend_budget_usd_total=ceilings.usd,
@@ -269,12 +269,12 @@ def quota_status(*, stores: Stores, job_registry: JobRegistry) -> QuotaStatus:
         tokens_used_total=spent.used_tokens,
         token_budget_total=ceilings.tokens,
         token_budget_used_share=_used_share(spent.used_tokens, ceilings.tokens),
-        concurrent_running=len(job_registry.list_running(user_id=user.user_id)),
-        concurrent_queued=len(job_registry.list_queued(user_id=user.user_id)),
+        concurrent_running=sum(j.holds_slot for j in launches),
+        concurrent_queued=sum(j.queued for j in launches),
         max_concurrent_cycles=user.max_concurrent_cycles,
         max_concurrent_cycles_writable=concurrent_cycles_writable(stores),
         machine_binds=_machine_binds(user.max_concurrent_cycles),
-        campaigns_today=len(job_registry.list_created_today(user_id=user.user_id)),
+        campaigns_today=len(job_registry.list_launched_today(user_id=user.user_id)),
         max_campaigns_per_day=user.max_campaigns_per_day,
     )
 
@@ -298,6 +298,10 @@ def admit_launch(
     )
     if wallet.contended:
         raise _contended("what this account has left")
+
+    def _refused(reason: str) -> QuotaExceededError:
+        return _refusal(wallet, reason, job_registry.get(job_id))
+
     if bill_is_floor(wallet.spent.unpriced_tokens) and wallet.headroom.usd is not None:
         logger.warning(
             "spend: account %s has %d unpriced tokens, so its USD total is a floor; admitting "
@@ -307,7 +311,7 @@ def admit_launch(
             settings.UNPRICED_GRACE_USD,
         )
     if wallet.exhausted:
-        raise _refused(wallet, "This account has nothing left to spend.")
+        raise _refused("This account has nothing left to spend.")
     delegated = _delegated_spend_ceiling(stores)
     step = _launch_step(user, wallet, delegated)
     room = wallet.headroom
@@ -319,13 +323,11 @@ def admit_launch(
         usd = _lowest(declared.usd, delegated)
         if step is not None and usd is not None and usd > step:
             raise _refused(
-                wallet,
                 f"A run on this account is admitted at ${step:.2f} and this one declares "
                 f"${usd:.2f}.",
             )
         if room.usd is not None and usd is not None and usd > room.usd:
             raise _refused(
-                wallet,
                 f"This account funds a ceiling of ${room.usd:.2f} for this cycle and the run "
                 f"declares ${usd:.2f}.",
             )
@@ -333,7 +335,6 @@ def admit_launch(
         tokens = room.tokens if tokens is None else tokens
         if tokens > room.tokens:
             raise _refused(
-                wallet,
                 f"This account funds a ceiling of {room.tokens:,} tokens for this cycle and the "
                 f"run declares {tokens:,}.",
             )
@@ -341,17 +342,20 @@ def admit_launch(
     return ceiling, _reserve(ceiling, room, delegated)
 
 
-def _admit_spend(*, stores: Stores, bucket: str) -> SpendBook:
-    """Nothing is reserved: the book itself refuses a call that would pass the headroom."""
-    user = account_of(stores)
-    spends_own_key = spends_the_hosts_own_key(stores)
+def refuse_verb_rate(stores: Stores, user: User, bucket: str) -> None:
     # The host is exempt in the RATE arm too: the meter bounds a stranger on the host's key.
-    if not spends_own_key and not _consume_rate_token(f"{bucket}:{user.user_id}"):
+    if not spends_the_hosts_own_key(stores) and not _consume_rate_token(f"{bucket}:{user.user_id}"):
         raise QuotaExceededError(
             code="rate_limited",
             message=f"Too many {bucket} requests; slow down and retry shortly.",
         )
-    ceilings = lifetime_ceilings(user=user, spends_own_key=spends_own_key)
+
+
+def _admit_call(*, stores: Stores, bucket: str) -> SpendBook:
+    """Nothing is reserved: the book itself refuses a call that would pass the headroom."""
+    user = account_of(stores)
+    refuse_verb_rate(stores, user, bucket)
+    ceilings = lifetime_ceilings(user=user, spends_own_key=spends_the_hosts_own_key(stores))
     if ceilings.usd is None and ceilings.tokens is None:
         return unbounded_spend_book()
     wallet = read_account_wallet(
@@ -381,17 +385,11 @@ def _admit_spend(*, stores: Stores, bucket: str) -> SpendBook:
 
 
 @asynccontextmanager
-async def paid_verb(
-    *, stores: Stores, bucket: str, hop: CycleHop | None
-) -> AsyncIterator[SpendBook]:
-    """A cycle a producer holds is refused: a second biller is money its ceiling never sees."""
-    if hop is not None and derive_run_state(stores.campaigns.cycle_dir(hop)).producer.attached:
-        raise ConflictError(
-            f"cycle {hop.cycle_id} has a run in flight. Pause it or let it end, then ask again.",
-            code="producer_live",
-        )
+async def paid_call(*, stores: Stores, bucket: str) -> AsyncIterator[SpendBook]:
+    """ONE LLM call outside a run, on no cycle: slotless, so a chat turn never queues behind
+    campaigns. A scoring pass is ``launcher/admission.py::paid_pass``."""
     # Offloaded: admission globs every cycle ledger.
-    book = await asyncio.to_thread(_admit_spend, stores=stores, bucket=bucket)
+    book = await asyncio.to_thread(_admit_call, stores=stores, bucket=bucket)
     set_rate_tenant(str(stores.identity.tenant_id))
     with spending_under(book):
         yield book
@@ -517,15 +515,17 @@ def _contended(subject: str) -> QuotaExceededError:
     )
 
 
-def _refused(wallet: AccountWallet, reason: str) -> QuotaExceededError:
+def _refusal(wallet: AccountWallet, reason: str, refusing: Job | None) -> QuotaExceededError:
+    """Names what it refuses off *refusing*'s holder — a campaign, or a paid verb's scoring pass."""
     over_usd, over_tokens = overrun(wallet.ceilings, wallet.spent)
     if over_usd or over_tokens:
         reason += f" It is already ${over_usd:.4f} / {over_tokens:,} tokens past its ceiling."
+    what = "this launch" if refusing is None else refusing.what
     return QuotaExceededError(
         code="spend_ceiling_reached",
         message=(
-            f"{reason} A campaign is admitted whole or not at all, so lower the run's budget or "
-            f"raise the account ceiling."
+            f"{reason} Refused whole, never clamped: {what}. Lower its ceiling or raise the "
+            f"account's."
         ),
     )
 
@@ -634,9 +634,10 @@ __all__ = [
     "lifetime_ceilings",
     "next_launch_ceiling",
     "overrun",
-    "paid_verb",
+    "paid_call",
     "quota_status",
     "read_account_wallet",
+    "refuse_verb_rate",
     "set_concurrent_cycles",
     "spends_the_hosts_own_key",
     "unadmitted_limits",

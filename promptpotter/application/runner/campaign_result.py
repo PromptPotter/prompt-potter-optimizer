@@ -41,10 +41,10 @@ __all__ = [
     "bench_line",
     "bench_origin",
     "bench_under",
+    "cycle_bench",
     "declare_line_bench",
     "line_passes",
     "line_run",
-    "read_campaign_bench",
     "read_cycle_bench",
     "read_line_spend",
 ]
@@ -166,7 +166,7 @@ def read_line_spend(stores: Stores, campaign: Campaign) -> SpendRollup:
 def line_run(stores: Stores, hop: CycleHop) -> LineRun:
     # A launch stopped before run init names no cycle.
     named = bool(hop.cycle_id)
-    index = stores.campaigns.load(hop) if named else None
+    index = stores.campaigns.load(hop, moment=None) if named else None
     standing = None if index is None else index.standing
     return LineRun(
         selecting=named and hop.cycle_id in stores.campaigns.attached_cycle_ids(hop.campaign_id),
@@ -177,6 +177,7 @@ def line_run(stores: Stores, hop: CycleHop) -> LineRun:
 
 
 def line_passes(stores: Stores, campaign_id: str) -> BenchPasses | None:
+    """The line's OWN ledgers: a root cut from another tree graded its prefix in another epoch."""
     campaign = stores.campaigns.load_campaign(campaign_id)
     if campaign is None:
         return None
@@ -186,12 +187,13 @@ def line_passes(stores: Stores, campaign_id: str) -> BenchPasses | None:
     )
 
 
-def read_campaign_bench(stores: Stores, campaign: Campaign) -> BenchScore:
-    return read_cycle_bench(stores, campaign, stores.campaigns.line_holder(campaign.root_hop))
-
-
 def read_cycle_bench(stores: Stores, campaign: Campaign, hop: CycleHop) -> BenchScore:
-    config = resolve_campaign_config(stores, campaign, hop)
+    return cycle_bench(stores, campaign, hop, resolve_campaign_config(stores, campaign, hop))
+
+
+def cycle_bench(
+    stores: Stores, campaign: Campaign, hop: CycleHop, config: CampaignConfig
+) -> BenchScore:
     return bench_under(
         stores,
         campaign,
@@ -221,7 +223,7 @@ def bench_line(
         trigger=config.bench_trigger,
         held_out=len(drawn.bench_ids) if drawn is not None else 0 if split is None else split.bench,
         instrument_id=cycle_instrument(
-            campaign.dataset_name, stores.campaigns.standing_rounds(hop).rounds
+            campaign.dataset_name, stores.campaigns.standing_rounds(hop, moment=None).rounds
         ),
         run=run,
         spend=read_line_spend(stores, campaign),

@@ -6,6 +6,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.bench.difficulty import session_ruler_scope
 from promptpotter.application.bench.task_context import campaign_framing
 from promptpotter.application.initialization.loop_start import (
     arm_diagnostic_scoring,
@@ -100,12 +101,12 @@ def pick_fresh(
     *,
     strategy: VerifyStrategy,
     rng: random.Random,
-    delta: Mapping[int, float],
+    delta: Mapping[str, float],
 ) -> list[Sample]:
     if strategy == "random":
         return rng.sample(unmeasured, n)
-    placed = sorted((s for s in unmeasured if s.id in delta), key=lambda s: (-delta[s.id], s.id))
-    unplaced = [s for s in unmeasured if s.id not in delta]
+    placed = sorted((s for s in unmeasured if s.key in delta), key=lambda s: (-delta[s.key], s.id))
+    unplaced = [s for s in unmeasured if s.key not in delta]
     return [*placed, *rng.sample(unplaced, len(unplaced))][:n]
 
 
@@ -190,7 +191,7 @@ def verify_reading(
 
 
 def read_verify(stores: Stores, hop: CycleHop, banked: VerifyPass, scorer: Scorer) -> VerifyReading:
-    chain = ledger_chain(CycleDir(stores.campaigns.cycle_dir(hop)))
+    chain = ledger_chain(CycleDir(stores.campaigns.cycle_dir(hop)), moment=None)
     # A pass is read before it is banked, so it joins the walks whether or not the ledger holds it.
     walks = [*scan_ledger_walks(chain), banked.walk()]
 
@@ -203,7 +204,7 @@ def read_verify(stores: Stores, hop: CycleHop, banked: VerifyPass, scorer: Score
     fresh = rows(list(banked.walk().cells))
     if not fresh:
         raise DiagnosticError(f"the verify pass of {banked.label} holds no answer in the archive.")
-    standing = stores.campaigns.standing_rounds(hop).rounds
+    standing = stores.campaigns.standing_rounds(hop, moment=None).rounds
     campaign = stores.campaigns.load_campaign(hop.campaign_id)
     if campaign is None:
         raise DiagnosticError(f"campaign {hop.campaign_id!r} has no manifest on disk.")
@@ -241,7 +242,9 @@ def _scored_candidate(
     stores: Stores, hop: CycleHop, candidate_id: str
 ) -> tuple[int, ScoredCandidate]:
     # Newest first: a repair re-measures a candidate in place without re-minting it.
-    for round_num, held in reversed(stores.campaigns.standing_rounds(hop).rounds.items()):
+    for round_num, held in reversed(
+        stores.campaigns.standing_rounds(hop, moment=None).rounds.items()
+    ):
         for entry in held.close.candidate_scores:
             if entry.candidate_id == candidate_id:
                 return round_num, entry
@@ -272,7 +275,7 @@ async def verify_candidate(
     # Before a cell is bought: fresh cells of another searchpoint would read as this one's.
     jsp = entry.searchpoint(
         schema=schema,
-        framing=campaign_framing(stores, campaign_config, session.dataset_name),
+        framing=campaign_framing(stores, campaign_config, session.dataset),
         demo=session.scoring.require_partition().demo,
     )
     sp_hash = jsp.sp_hash(schema)
@@ -304,7 +307,7 @@ async def verify_candidate(
             f"rounds run since the last verification, capped at {len(unmeasured)} unmeasured). "
             f"Pass {budget} or fewer, or verify again after more rounds."
         )
-    ruler = stores.campaigns.read_ruler(hop, dataset_name=campaign.dataset_name)
+    ruler = stores.campaigns.read_ruler(hop, scope=session_ruler_scope(session), moment=None)
     picked = pick_fresh(
         unmeasured,
         budget if samples is None else samples,

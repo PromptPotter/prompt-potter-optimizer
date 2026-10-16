@@ -577,6 +577,7 @@ async def _send_cell(
             node="backend_scoring",
             round_num=current_round(),
             start_monotonic=time.monotonic(),
+            inner_fn=lambda: client.cell_hop(sample, wire_params),
             on_suspend=envelope.on_suspend,
         )
     )

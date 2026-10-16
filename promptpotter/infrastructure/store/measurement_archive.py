@@ -7,7 +7,7 @@ import os
 import threading
 import uuid
 from collections import OrderedDict
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, ClassVar, NamedTuple
@@ -19,13 +19,15 @@ from promptpotter.domain.results_health import is_deprecated
 from promptpotter.domain.sample import ArchiveEntry, FiledAnswer
 from promptpotter.domain.scoring import UNREAD_PIPELINE_KEYS, MeasuredCell, PipelineData
 from promptpotter.infrastructure.store.io import (
+    PairWrite,
     read_bytes_optional,
     read_json_optional,
+    read_lines,
+    replace_lines,
+    rewrite_lines,
+    rewrite_pair,
     unlink_robust,
-    write_bytes,
     write_json,
-    write_jsonl,
-    write_text,
 )
 from promptpotter.infrastructure.store.layout import MEASUREMENTS_DIR
 from promptpotter.infrastructure.store.read_model import (
@@ -138,6 +140,38 @@ def rejoined(answer: FiledAnswer, moved: PipelineData) -> FiledAnswer:
     return replace(answer, cell=replace(answer.cell, pipeline=replace(hot, **back)))
 
 
+class CellRewrite(NamedTuple):
+    """A cell file's detail lines and its WHOLE cold payload after a rewrite; the last entry per answer wins."""
+
+    lines: list[str]
+    cold: list[MovedFields]
+
+
+def _by_answer(moved: Iterable[MovedFields]) -> list[MovedFields]:
+    return list({m.answer: m for m in moved}.values())
+
+
+def _encode_cold(moved: list[MovedFields]) -> bytes | None:
+    if not moved:
+        return None
+    blob = "\n".join(
+        json.dumps({"k": m.answer, "pd": m.pipeline.wire()}, separators=(",", ":")) for m in moved
+    )
+    return gzip.compress(blob.encode("utf-8"), 6)
+
+
+def _decode_cold(raw: bytes | None) -> list[MovedFields]:
+    if raw is None:
+        return []
+    text = gzip.decompress(raw).decode("utf-8")
+    held = [json.loads(line) for line in text.splitlines() if line.strip()]
+    return [MovedFields(e["k"], PipelineData.from_wire(e["pd"])) for e in held]
+
+
+def cold_size(moved: Iterable[MovedFields]) -> int:
+    return len(_encode_cold(_by_answer(moved)) or b"")
+
+
 class _CellFile:
     def __init__(self) -> None:
         self._cursor: tuple[int, int] | None = None
@@ -180,9 +214,14 @@ class _CellFile:
         held = 0 if self._cursor is None else self._cursor[1]
         whole = self._stat is None or self._stat[1] == held
         rows = [answer.wire() for answer in answers]
-        added = append_row(path, *rows)
+        landed = append_row(path, *rows)
         st = path.stat()
-        if not (whole and st.st_size == held + added and _tail_from(st, self._cursor) == held):
+        if not (
+            whole
+            and landed.start == held
+            and st.st_size == landed.stop
+            and _tail_from(st, self._cursor) == held
+        ):
             return
         # Through JSON, as a reader folds them: a tuple is a list on disk.
         fresh = [
@@ -340,7 +379,7 @@ class MeasurementArchive:
 
     def whole(self, answer: FiledAnswer) -> FiledAnswer:
         """*answer* with what a compaction moved off it; a purged answer comes back as it stands."""
-        cold = self.read_cold(answer.answer.partition(".")[0]) or []
+        cold = self.read_cold(answer.answer.partition(".")[0])
         moved = next((m.pipeline for m in cold if m.answer == answer.answer), None)
         return answer if moved is None else rejoined(answer, moved)
 
@@ -399,29 +438,37 @@ class MeasurementArchive:
     def file_keys(self) -> list[str]:
         return sorted(self.cell_signatures())
 
-    def detail_lines(self, file_key: str) -> list[str]:
-        # RAW lines: a rewrite hands every one back, unparseable ones included, in order.
+    def cold_file_keys(self) -> list[str]:
         try:
-            with self._cell_path(file_key).open(encoding="utf-8") as fh:
-                return fh.readlines()
-        except FileNotFoundError:
+            names = os.listdir(self._cold_dir())
+        except OSError:
             return []
+        return sorted(n[: -len(_COLD_SUFFIX)] for n in names if n.endswith(_COLD_SUFFIX))
 
-    def replace_detail(self, file_key: str, lines: Iterable[str]) -> int:
-        content = "".join(lines)
-        write_text(self._cell_path(file_key), content)
-        return len(content.encode("utf-8"))
+    def detail_lines(self, file_key: str) -> list[str]:
+        return read_lines(self._cell_path(file_key))
 
-    @staticmethod
-    def _encode_cold(moved: Iterable[MovedFields]) -> bytes:
-        blob = "\n".join(
-            json.dumps({"k": m.answer, "pd": m.pipeline.wire()}, separators=(",", ":"))
-            for m in moved
-        )
-        return gzip.compress(blob.encode("utf-8"), 6)
+    def rewrite_cell_file[T](
+        self,
+        file_key: str,
+        transform: Callable[[list[str], list[MovedFields]], tuple[CellRewrite | None, T]],
+    ) -> T:
+        """*transform* takes RAW detail lines and the cold payload and must hand back every line it keeps.
+        The cold file bridges through the union of both payloads: it grows before the lines swap and
+        shrinks after, so every moved field is in one file or the other at every instant."""
 
-    def cold_size(self, moved: Iterable[MovedFields]) -> int:
-        return len(self._encode_cold(moved))
+        def paired(lines: list[str], held: bytes | None) -> tuple[PairWrite | None, T]:
+            cold = _decode_cold(held)
+            rewrite, result = transform(lines, cold)
+            if rewrite is None:
+                return None, result
+            union = _by_answer([*cold, *rewrite.cold])
+            bridge = held if union == cold else _encode_cold(union)
+            after = _by_answer(rewrite.cold)
+            final = bridge if after == union else _encode_cold(after)
+            return PairWrite(rewrite.lines, bridge, final), result
+
+        return rewrite_pair(self._cell_path(file_key), self.cold_path(file_key), paired)
 
     def cold_bytes_on_disk(self, file_key: str) -> int:
         try:
@@ -429,30 +476,15 @@ class MeasurementArchive:
         except OSError:
             return 0
 
-    def write_cold(self, file_key: str, moved: Iterable[MovedFields]) -> int:
-        data = self._encode_cold(moved)
-        write_bytes(self.cold_path(file_key), data)
-        return len(data)
-
-    def read_cold(self, file_key: str) -> list[MovedFields] | None:
-        """``None`` = never compacted; ``[]`` = a compaction that moved nothing."""
-        raw = read_bytes_optional(self.cold_path(file_key))
-        if raw is None:
-            return None
-        text = gzip.decompress(raw).decode("utf-8")
-        held = [json.loads(line) for line in text.splitlines() if line.strip()]
-        return [MovedFields(e["k"], PipelineData.from_wire(e["pd"])) for e in held]
-
-    def drop_cold(self, file_key: str) -> int:
-        path = self.cold_path(file_key)
-        try:
-            size = path.stat().st_size
-        except OSError:
-            return 0
-        path.unlink(missing_ok=True)
-        return size
+    def read_cold(self, file_key: str) -> list[MovedFields]:
+        return _decode_cold(read_bytes_optional(self.cold_path(file_key)))
 
     def reindex(self) -> dict[str, int]:
+        counts = replace_lines(self._index_path(), self._built_index)
+        self._invalidate()
+        return counts
+
+    def _built_index(self) -> tuple[list[str], dict[str, int]]:
         first: dict[str, ArchiveEntry] = {}
         undescribed = 0
         for file_key in self.file_keys():
@@ -474,29 +506,32 @@ class MeasurementArchive:
                     }
                 )
         indexed = sorted(first.items(), key=lambda held: (held[1].created_at, held[0]))
-        write_jsonl(
-            self._index_path(),
-            ({_INDEX_FOLD_KEY: k, **entry.model_dump(mode="json")} for k, entry in indexed),
-        )
-        self._invalidate()
-        return {"indexed": len(indexed), "undescribed": undescribed}
+        lines = [
+            json.dumps({_INDEX_FOLD_KEY: k, **entry.model_dump(mode="json")}, ensure_ascii=False)
+            + "\n"
+            for k, entry in indexed
+        ]
+        return lines, {"indexed": len(indexed), "undescribed": undescribed}
 
     def restamp_dataset(self, old_name: str, new_name: str) -> int:
         touched = {e.config_key for e in self.list_all(dataset_name=old_name)}
         if not touched:
             return 0
+
+        def restamped(lines: list[str]) -> tuple[list[str] | None, None]:
+            out: list[str] = []
+            moved = False
+            for line in lines:
+                answer = answer_of(line)
+                if answer is not None and answer.dataset_name == old_name:
+                    line = answer_line(replace(answer, dataset_name=new_name))
+                    moved = True
+                out.append(line)
+            return (out if moved else None), None
+
         with self._lock:
             for file_key in self.file_keys():
-                out: list[str] = []
-                moved = False
-                for line in self.detail_lines(file_key):
-                    answer = answer_of(line)
-                    if answer is not None and answer.dataset_name == old_name:
-                        line = answer_line(replace(answer, dataset_name=new_name))
-                        moved = True
-                    out.append(line)
-                if moved:
-                    self.replace_detail(file_key, out)
+                rewrite_lines(self._cell_path(file_key), restamped)
             self._files.clear()
         self.reindex()
         return len(touched)
@@ -613,11 +648,13 @@ class ReplayFeed:
 __all__ = [
     "ANSWER_KEY",
     "CellClaim",
+    "CellRewrite",
     "MeasurementArchive",
     "MovedFields",
     "ReplayFeed",
     "answer_line",
     "answer_of",
+    "cold_size",
     "config_key",
     "rejoined",
     "standing",

@@ -130,7 +130,7 @@ async def build_candidate_library_from_column(
     return await dispatch_draft_patch(stores, _candidate_library_call(body.draft_id, terms, idemp))
 
 
-@datasets_router.post("/{name}/draft", response_model=DraftCampaignWire)
+@datasets_router.post("/{name:path}/draft", response_model=DraftCampaignWire)
 async def draft_from_existing_dataset(name: str, stores: StoresDep) -> DraftCampaignWire:
     """Open an authored dataset's files as a prefilled, durable check-in campaign.
 

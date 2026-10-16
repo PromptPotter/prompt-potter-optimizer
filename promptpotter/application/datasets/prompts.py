@@ -1,16 +1,18 @@
 from __future__ import annotations
 
-import functools
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 from promptpotter.domain.opt_search_point import PromptTemplate
-from promptpotter.infrastructure.store.dataset_access import dataset_pipeline_path
-from promptpotter.infrastructure.store.io import read_yaml, read_yaml_optional
+from promptpotter.infrastructure.store.dataset_access import (
+    read_dataset_origin,
+    read_dataset_pipeline,
+)
 
 
 def load_dataset_node_overlay(dataset_dir: Path) -> dict[str, dict[str, Any]]:
-    raw = read_yaml_optional(dataset_pipeline_path(dataset_dir))
+    raw = read_dataset_pipeline(dataset_dir)
     if not raw:
         return {}
     out: dict[str, dict[str, Any]] = {}
@@ -22,58 +24,29 @@ def load_dataset_node_overlay(dataset_dir: Path) -> dict[str, dict[str, Any]]:
 
 
 def dataset_declared_nodes(dataset_dir: Path) -> frozenset[str]:
-    """Empty where the dataset ships no ``pipeline.yaml``: "no opinion", never "no nodes"."""
-    raw = read_yaml_optional(dataset_pipeline_path(dataset_dir))
+    """Empty where the dataset declares no nodes: "no opinion", never "no nodes"."""
+    raw = read_dataset_pipeline(dataset_dir)
     if not raw:
         return frozenset()
     return frozenset(raw.get("nodes") or {})
 
 
-def dataset_prompt_dir(dataset_dir: Path) -> Path:
-    return dataset_dir / "prompts"
-
-
 def has_dataset_prompts(dataset_dir: Path) -> bool:
-    return dataset_prompt_dir(dataset_dir).is_dir()
+    return bool(read_dataset_origin(dataset_dir))
 
 
-@functools.lru_cache(maxsize=128)
-def load_node_prompt(
-    dataset_dir: Path,
-    node_name: str,
-    variant: str = "default",
-) -> PromptTemplate:
-    d = dataset_prompt_dir(dataset_dir)
-    node_path = d / f"{node_name}.yaml"
-    data = read_yaml_optional(node_path)
-    if data is not None:
-        return PromptTemplate(**data)
-
-    variant_path = d / f"{variant}.yaml"
-    data = read_yaml_optional(variant_path)
-    if data is not None:
-        return PromptTemplate(**data)
-
-    raise FileNotFoundError(
-        f"Canonical prompt template not found in {d} for node={node_name!r}. "
-        f"Expected either {node_path} (per-node) or {variant_path} (dataset default). "
-        f"Author one as a PromptTemplate YAML; see docs/concepts/the-loop.md."
-    )
-
-
-@functools.lru_cache(maxsize=64)
-def load_dataset_prompt(dataset_dir: Path, name: str = "default") -> PromptTemplate:
-    path = dataset_prompt_dir(dataset_dir) / f"{name}.yaml"
-    if not path.exists():
+def load_node_prompt(dataset_dir: Path, node_name: str) -> PromptTemplate:
+    origin = read_dataset_origin(dataset_dir)
+    if node_name not in origin:
         raise FileNotFoundError(
-            f"Dataset prompt not found: {path}. Create it under the dataset's prompts/ dir."
+            f"The definition at {dataset_dir} names no starting prompt for node {node_name!r}: "
+            f"`origin.yaml` keys {sorted(origin)}. Author one as a PromptTemplate under its node."
         )
-    data = read_yaml(path)
-    return PromptTemplate(**data)
+    return PromptTemplate(**origin[node_name])
 
 
-def list_dataset_prompts(dataset_dir: Path) -> list[str]:
-    d = dataset_prompt_dir(dataset_dir)
-    if not d.is_dir():
-        return []
-    return sorted(p.stem for p in d.glob("*.yaml"))
+def first_origin_prompt(dataset_dir: Path, steps: Sequence[str]) -> PromptTemplate | None:
+    """The one prompt a check-in edits: the first step's that holds one."""
+    origin = read_dataset_origin(dataset_dir)
+    node = next((n for n in steps if n in origin), next(iter(origin), None))
+    return None if node is None else PromptTemplate(**origin[node])

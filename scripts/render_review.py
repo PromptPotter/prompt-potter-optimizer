@@ -18,6 +18,7 @@ from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.projections.audit_trail import load_round_audits
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_spend
+from promptpotter.infrastructure.store.dataset_access import resolve_dataset
 from promptpotter.infrastructure.store.layout import CampaignLayout
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.shared.identity import default_identity
@@ -38,17 +39,17 @@ def main(argv: list[str]) -> int:
     # ``projects/{tenant}/campaigns/{id}/cycles/{cycle}``: the tenant is three levels up.
     tenant_dir = cycle_dir.parents[3]
     stores = build_stores(default_identity(tenant_dir.name), projects_root=tenant_dir.parent)
-    td = campaign_framing(stores, config, manifest["dataset_name"])
+    td = campaign_framing(stores, config, resolve_dataset(stores, manifest["dataset_name"]))
     context_object = [td.pipeline_purpose, td.optimization_goals, td.key_challenges]
     hop = CycleHop(campaign_id=cycle_dir.parent.parent.name, cycle_id=cycle_dir.name)
-    index = stores.campaigns.load(hop)
+    index = stores.campaigns.load(hop, moment=None)
     if index is None:
         print(f"no cycle was minted at {cycle_dir}", file=sys.stderr)
         return 2
     campaign = stores.campaigns.load_campaign(hop.campaign_id)
     assert campaign is not None
     own = scorer_of(resolve_campaign_config(stores, campaign, hop), verifier_graded=False)
-    rounds = closed_rounds(stores, hop, own)
+    rounds = closed_rounds(stores, hop, own, moment=None)
     audits = load_round_audits(cycle_dir, [r.round for r in rounds])
 
     content = render_review_md(
@@ -59,7 +60,7 @@ def main(argv: list[str]) -> int:
         accuracy_ceiling=config.accuracy_ceiling,
         optimizer=select_optimizer(config.optimization),
         bench=read_cycle_bench(stores, campaign, hop),
-        spend=scan_ledger_spend(ledger_chain(CycleDir(cycle_dir))).spend,
+        spend=scan_ledger_spend(ledger_chain(CycleDir(cycle_dir), moment=None)).spend,
     )
     out_path = cycle_dir / "review.md"
     out_path.write_text(content, encoding="utf-8")

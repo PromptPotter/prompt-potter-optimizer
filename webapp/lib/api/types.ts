@@ -145,7 +145,7 @@ export type {
   DatasetStorageEntry,
   DatasetStorageResponse,
   ForkPreviewResponse,
-  MachineHolder,
+  MachineSlot,
   MachineRefusal,
   MachineStatusResponse,
   KnobRow,

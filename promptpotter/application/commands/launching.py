@@ -18,7 +18,7 @@ from promptpotter.application.commands.dispatcher import (
 )
 from promptpotter.application.commands.draft_editing import reread_draft
 from promptpotter.application.datasets.origin_readiness import save_checkin_draft
-from promptpotter.application.datasets.startability import offered_dataset_dir
+from promptpotter.application.datasets.startability import offered_dataset
 from promptpotter.application.evidence.subjects import SubjectSpec
 from promptpotter.application.jobs.launcher.checkin import CheckinStart, load_checkin_for_start
 from promptpotter.application.jobs.launcher.launch import Inline, Launched, launch
@@ -113,7 +113,7 @@ def _declined(dispatcher: CommandDispatcher, hop: CycleHop) -> Applier[object] |
 def _diag_target(stores: Stores, hop: CycleHop, mode: RunMode) -> CycleHop:
     if not mode.diag or mode.from_round is not None:
         return hop
-    index = stores.campaigns.load(hop)
+    index = stores.campaigns.load(hop, moment=None)
     final = None if index is None else index.final
     if final is None or final.mode != "diag":
         return hop
@@ -217,7 +217,6 @@ def _cleanup_failed_fork(stores: Stores, parent_hop: CycleHop, new_cycle_id: str
         deleted, reason = cleanup_stub_fork_if_empty(
             campaign_store=stores.campaigns,
             hop=CycleHop(campaign_id=parent_hop.campaign_id, cycle_id=new_cycle_id),
-            parent_cycle_id=parent_hop.cycle_id,
         )
     except Exception:
         logger.exception("fork %s: launch failed and its stub could not be cleaned", new_cycle_id)
@@ -229,8 +228,7 @@ def _cleanup_failed_fork(stores: Stores, parent_hop: CycleHop, new_cycle_id: str
 def mint_campaign(dispatcher: CommandDispatcher, payload: MintCampaignPayload) -> Applier[object]:
     async def _apply_mint() -> Launched:
         request = FreshMint(
-            dataset_name=payload.dataset_name,
-            dataset_root=offered_dataset_dir(dispatcher.stores, payload.dataset_name),
+            dataset=offered_dataset(dispatcher.stores, payload.dataset_name),
             limits=payload.limits,
             optimization=payload.optimization_sent,
             arm=payload.arm,

@@ -44,9 +44,8 @@ jobs:
       - name: Gate
         run: uv run python scripts/gate.py --py
 
-  # The wheel is a shape we ship and never run. In a checkout every path function takes
-  # its checkout branch, so `assets/benchmarks/` and `assets/webapp/` — the trees the
-  # wheel actually serves — are read by no dev run and no test, and `pyproject.toml`'s
+  # The wheel is a shape we ship and never run. In a checkout `assets/webapp/` — a tree
+  # the wheel serves — is read by no dev run and no test, and `pyproject.toml`'s
   # package-data list (delete it in a clean room and the wheel drops to ONE non-.py file)
   # is load-bearing with nothing behind it. This job is the only place any of that is
   # exercised.

@@ -1,0 +1,23 @@
+pipeline:
+  description: >-
+    Pilot: classify an inbound email into one of four routing categories (financial, actionable, informational,
+    other). Single llm_only node against TermNorm /matches, exact-match scoring. Mirrors the
+    live n8n subject-classifier-LM tagging decision.
+  available_models:
+    - openai/gpt-oss-20b
+  nodes:
+    llm_only:
+      description: >-
+        Direct LLM generation: read the email, emit one category label.
+      config:
+        provider: openrouter
+        model: openai/gpt-oss-20b
+
+campaign:
+  optimization:
+    max_rounds: 5
+    # Potter's knobs — the overlay on its manifest's nodes (assets/optimizers/potter/).
+    nodes:
+      l1_generate:
+        config:
+          n_variants: 3

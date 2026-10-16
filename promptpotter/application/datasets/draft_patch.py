@@ -102,13 +102,10 @@ def plan_draft_patch(stores: Stores, draft: DraftCampaign, patch: EditDraftPatch
                 raise PayloadInvalidError(f"patch.node_narrowing.{node}: {exc}") from exc
             overlay[node] = {**_block(overlay.get(node)), "optimizer": narrowing.model_dump()}
     if overlay is not None:
-        try:
-            before = parse_pipeline_response(rendered_pipeline_json(draft))
-            after = parse_pipeline_response(
-                rendered_pipeline_json(draft.patch(pipeline_overlay=overlay))
-            )
-        except ValueError as exc:
-            raise PayloadInvalidError(f"patch.pipeline_overlay: {exc}") from exc
+        before = parse_pipeline_response(rendered_pipeline_json(draft))
+        after = parse_pipeline_response(
+            rendered_pipeline_json(draft.patch(pipeline_overlay=overlay))
+        )
         changes["pipeline_overlay"] = _narrowing_follows_schema(overlay, before, after)
 
     if patch.optimization_overrides is not None:

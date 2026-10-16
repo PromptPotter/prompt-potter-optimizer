@@ -13,7 +13,7 @@ from promptpotter.presentation.api.routers.campaigns._conditional import conditi
 from promptpotter.presentation.api.routers.datasets._router import datasets_router
 
 
-@datasets_router.get("/{name}/cells", response_model=CellsResponse)
+@datasets_router.get("/{name:path}/cells", response_model=CellsResponse)
 def get_dataset_cells(
     request: Request,
     name: str,
@@ -92,7 +92,7 @@ def get_dataset_cells(
     return conditional_json(request, log)
 
 
-@datasets_router.get("/{name}/cells/{answer}", response_model=Cell)
+@datasets_router.get("/{name:path}/cells/{answer}", response_model=Cell)
 def get_dataset_cell(name: str, answer: str, stores: StoresDep) -> Cell:
     """One answer opened: its row assembled into a trace."""
     return open_cell(stores, name, answer)

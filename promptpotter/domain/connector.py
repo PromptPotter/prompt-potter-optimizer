@@ -8,11 +8,13 @@ from promptpotter.shared.hashing import shapes_optimizer_prompt
 if TYPE_CHECKING:
     import httpx
 
+    from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.sample import Sample
 
 __all__ = [
     "BackendUnreachableError",
     "CellEnvelopeSeconds",
+    "CellHop",
     "ConnectorExecution",
     "MeasuredUnit",
     "SessionProtocol",
@@ -70,6 +72,16 @@ class CellEnvelopeSeconds(Protocol):
         sample: Sample,
         pipeline_params: dict[str, Any] | None,
     ) -> float: ...
+
+
+class CellHop(Protocol):
+    """The cycle one cell in flight runs, in the measuring cycle's own sandbox; ``None``: not yet one."""
+
+    def __call__(
+        self,
+        sample: Sample,
+        pipeline_params: dict[str, Any] | None,
+    ) -> CycleHop | None: ...
 
 
 class SessionProtocol(Protocol):

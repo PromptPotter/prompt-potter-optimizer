@@ -6,10 +6,10 @@ from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.pipeline_resolve import (
     CampaignRunsWith,
     campaign_runs_with,
+    line_config,
     resolve_campaign_config,
-    root_config_resolves,
 )
-from promptpotter.application.runner.campaign_result import read_campaign_bench, read_line_spend
+from promptpotter.application.runner.campaign_result import cycle_bench, read_line_spend
 from promptpotter.application.runner.inner.tasks import is_self_optimization
 from promptpotter.application.served_dashboard import binding_run_limits
 from promptpotter.domain.bench import BenchScore
@@ -26,7 +26,7 @@ from promptpotter.domain.cycle_listing import (
     rounds_cap_note,
     rounds_line,
 )
-from promptpotter.domain.cycle_paths import CyclePath
+from promptpotter.domain.cycle_paths import CycleHop, CyclePath
 from promptpotter.domain.spend import MeteredSpend
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.projections.cycle_index import read_cycle_index
@@ -164,14 +164,17 @@ class CampaignDetailResponse(CampaignSummary):
 
 
 def _line(
-    stores: Stores, campaign: Campaign, runs_with: CampaignRunsWith | None, *, resolves: bool
+    stores: Stores,
+    holder: CycleHop,
+    campaign: Campaign,
+    runs_with: CampaignRunsWith | None,
+    config: CampaignConfig | None,
 ) -> LineStanding | None:
-    holder = stores.campaigns.line_holder(campaign.root_hop)
-    index = stores.campaigns.load(holder)
+    index = stores.campaigns.load(holder, moment=None)
     if index is None:
         return None
     run = derive_run_state(stores.campaigns.cycle_dir(holder))
-    limits = binding_run_limits(stores, holder, campaign, run) if resolves else None
+    limits = None if config is None else binding_run_limits(stores, holder, config, run)
     max_rounds = (
         (None if runs_with is None else runs_with.max_rounds)
         if limits is None
@@ -196,14 +199,15 @@ def _updated_at(stores: Stores, campaign: Campaign) -> str:
     stamps = (
         index.updated_at
         for cycle_dir in stores.campaigns.campaign_cycle_dirs(campaign.campaign_id)
-        if (index := read_cycle_index(cycle_dir)) is not None
+        if (index := read_cycle_index(cycle_dir, moment=None)) is not None
     )
     return max(stamps, default=campaign.created_at) or campaign.created_at
 
 
 def _summary(campaign: Campaign, stores: Stores) -> CampaignSummary:
     runs_with = campaign_runs_with(stores, campaign)
-    resolves = root_config_resolves(stores, campaign)
+    holder = stores.campaigns.line_holder(campaign.root_hop)
+    config = line_config(stores, campaign, holder)
     tail = campaign.campaign_id.rpartition("__")[2] if "__" in campaign.campaign_id else ""
     return CampaignSummary(
         campaign_id=campaign.campaign_id,
@@ -211,7 +215,7 @@ def _summary(campaign: Campaign, stores: Stores) -> CampaignSummary:
         label=campaign.label,
         display_name=campaign.label or campaign.dataset_name or campaign.campaign_id,
         id_suffix=None if campaign.label or not tail else tail,
-        line=_line(stores, campaign, runs_with, resolves=resolves),
+        line=_line(stores, holder, campaign, runs_with, config),
         created_at=campaign.created_at,
         updated_at=_updated_at(stores, campaign),
         root_cycle_id=campaign.root_cycle_id,
@@ -224,7 +228,7 @@ def _summary(campaign: Campaign, stores: Stores) -> CampaignSummary:
         spend_metered=MeteredSpend.of(
             read_line_spend(stores, campaign), ceiling_meter(campaign.arm)
         ),
-        bench=read_campaign_bench(stores, campaign) if resolves else None,
+        bench=None if config is None else cycle_bench(stores, campaign, holder, config),
         runs_with=runs_with,
         comparison=comparison_line(campaign.arm),
     )

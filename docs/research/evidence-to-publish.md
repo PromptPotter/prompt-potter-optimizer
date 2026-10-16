@@ -9,13 +9,13 @@ that turns it into evidence. The rules it rests on are [`benchmarks.md`](benchma
 
 | # | Run | Who it convinces, and why |
 |---|---|---|
-| 1 | `justlogic-d234-held`, potter alone. First `noise-floor --k 3` on the origin, then one full campaign, then `bench`. | **The sceptic.** Synthetic, so no contamination. Balanced labels, so no shortcut. The score is read on rows the search never saw, and the noise floor is printed beside the gain. Cheapest model, so anyone can repeat it. |
+| 1 | `justlogic/d234-held`, potter alone. First `noise-floor --k 3` on the origin, then one full campaign, then `bench`. | **The sceptic.** Synthetic, so no contamination. Balanced labels, so no shortcut. The score is read on rows the search never saw, and the noise floor is printed beside the gain. Cheapest model, so anyone can repeat it. |
 | 2 | The same dataset as a head-to-head: `new --arm` for potter and capo, then gepa and levi. One model, one held-out set, one budget. | **The researcher comparing optimizers.** This is the first table where only the optimizer differs. CAPO first, as the roadmap already says. |
 | 3 | `gsm8k`: one measured origin pass at the pinned model, then a campaign scored on 200 or more test rows. | **The researcher and the buyer.** Everyone knows GSM8K, and CAPO's published 78.1 to 93.7 is the number people will hold ours against. It also closes the "verdict withdrawn" row. |
-| 4 | `sealqa-longseal-12`, all 254 tasks, skill opened, judge-graded. | **The practitioner building agents.** The paper gives a no-skill figure and a ceiling, so the result lands between two numbers we did not choose. |
-| 5 | `lca-termnorm`, one campaign on the multi-step pipeline. | **The practitioner with a real pipeline, and the buyer.** It is the only run where settings move beside wording, on a business task. Publish only if the rows may be shown; record the row count, which `dataset.md` does not. |
+| 4 | `sealqa/longseal-12`, all 254 tasks, skill opened, judge-graded. | **The practitioner building agents.** The paper gives a no-skill figure and a ceiling, so the result lands between two numbers we did not choose. |
+| 5 | `lca-termnorm`, one campaign on the multi-step pipeline. | **The practitioner with a real pipeline, and the buyer.** It is the only run where settings move beside wording, on a business task. Publish only if the rows may be shown; record the row count, which `README.md` does not. |
 
-Two cheap additions if time allows: re-measure the BBEH origin on the model `pipeline.yaml` now pins,
+Two cheap additions if time allows: re-measure the BBEH origin on the model `dataset.yaml::pipeline` now pins,
 so the 28% stops carrying a caveat; and the "L1 only" arm against the full ladder on run 1, which is
 config only and answers the first question a sceptic asks.
 
@@ -29,7 +29,7 @@ Commit one folder per run under `paper/evidence/<date>-<dataset>/`, so the site 
 - `index.json` (`final.rounds_to_separable`, `final.rounds_to_improved`)
 - `dashboard.json` (`spend.total_used_usd`, `spend.total_tokens_used`, `spend_by_round`, `rounds[]`)
 - `rounds/round_000N.json` and `hard_samples.json` (intervals per candidate, ability, per-sample rows)
-- `result.json` (calls and wall clock), the `campaign.yaml` and `pipeline.yaml` used, the exact
+- `result.json` (calls and wall clock), the `dataset.yaml` used, the exact
   commands, and the `noise-floor` output.
 
 The site then adds one entry to `src/data/results.ts` with `status: 'measured'` and the link to that
@@ -60,6 +60,6 @@ differences per row with an interval. Rows where we lose stay in the table.
 - Numbers from two cuts or two models in one row, or beside a figure from someone else's paper
   without saying so.
 - A gain smaller than the noise floor, as anything but "no measurable change".
-- Anything from `promptpotter-self-e2e`, which is a fixture.
+- Anything from `promptpotter-self/e2e`, which is a fixture.
 - The figures the site removed on 2026-10-11 (listed under REMOVED in the site's `results.ts`).
   None has a file behind it.

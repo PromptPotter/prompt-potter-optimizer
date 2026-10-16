@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.connector import (
     CellEnvelopeSeconds,
+    CellHop,
     ConnectorExecution,
     MeasuredUnit,
     SessionProtocol,
@@ -22,16 +23,19 @@ if TYPE_CHECKING:
 
     import httpx
 
+    from promptpotter.infrastructure.store.dataset_access import ResolvedDataset
     from promptpotter.infrastructure.store.stores import Stores
 
 
 @dataclass(frozen=True)
 class InProcessWorkload:
     experiment: Mapping[str, Any] | None
+    # Where `experiment` was read: a local path a panel names resolves against it.
+    experiment_dir: Path | None
     program: object | None
 
 
-PROBE_WORKLOAD = InProcessWorkload(experiment=None, program=None)
+PROBE_WORKLOAD = InProcessWorkload(experiment=None, experiment_dir=None, program=None)
 
 
 class NoopSession:
@@ -52,7 +56,7 @@ class NoopSession:
 # `(workload, sample, wire_adapter payload) -> {"data": {…}}`, the shape of a `/matches` body.
 InProcessRun = Callable[[InProcessWorkload, Sample, dict[str, Any]], Awaitable[dict[str, Any]]]
 
-ExperimentResolver = Callable[[Mapping[str, Any]], dict[str, Any]]
+ExperimentResolver = Callable[["Stores", Mapping[str, Any]], dict[str, Any]]
 
 # `(http, base_url) -> the backend's self-reported revision`, `None` where it is silent.
 VersionCheck = Callable[["httpx.AsyncClient", str], Awaitable[str | None]]
@@ -83,24 +87,22 @@ PACKAGE_CACHE_KEY = "package_cache"
 @dataclass(frozen=True)
 class Connector:
     name: str
-    """Lowercase; matches ``pipeline.yaml::backend_type``."""
+    """Lowercase; matches ``dataset.yaml::pipeline.backend_type``."""
 
     wire_adapter: WireAdapter
 
     session_factory: Callable[[], SessionProtocol] = NoopSession
     """Called per ``BackendClient``: a session holds per-client state."""
 
-    experiment_file: str = ""
-    """A panel file in the dataset's config dir that OWNS its rows; empty: the loader registry's."""
-
     serves_uploads: bool = False
     """A check-in may name it: it runs an uploaded table's rows, and nothing beside them."""
 
     extract_experiment: Callable[[dict[str, Any]], list[dict[str, Any]]] | None = None
-    """Rows in panel order: ``source_pin`` enters ``Sample.key``; a ``None`` ground truth IS the shape."""
+    """Set = the dataset's ``panel`` OWNS its rows, else the row ladder's. Rows in panel order:
+    ``source_pin`` enters ``Sample.key``; a ``None`` ground truth IS the shape."""
 
     resolve_experiment: ExperimentResolver | None = None
-    """Applied by ``dataset_access.py::dataset_experiment`` to every read of the file."""
+    """Applied by ``dataset_access.py::dataset_experiment`` to every read of the panel."""
 
     execution: ConnectorExecution = "remote_http"
     """``BackendClient.run_query`` dispatches on this, never on ``name``."""
@@ -131,6 +133,9 @@ class Connector:
 
     cell_envelope_s: CellEnvelopeSeconds | None = None
     """Bounds the SUM of one cell's awaits; reaching it is ``ErrorCategory.HALTED``, never a zero."""
+
+    cell_hop: CellHop | None = None
+    """Rides the cell's ONE heartbeat as an ADDRESS, so a cell that runs a whole campaign names it."""
 
     cell_attempts: int = SEND_ATTEMPTS
     """Sends in all, the first included: only the backend knows what a resend costs."""
@@ -173,11 +178,14 @@ class Connector:
     completion_check: Callable[[], None] | None = None
     """Run where the table completes, so a raise stops the server at boot and a run at init."""
 
-    pipeline_declaration: Callable[[Stores, Mapping[str, Any] | None], dict[str, Any]] | None = None
-    """An ``in_process`` backend's answer in place of ``GET /pipeline``; ``pipeline.yaml`` overlays it."""
+    pipeline_declaration: (
+        Callable[[Stores, ResolvedDataset, Mapping[str, Any] | None], dict[str, Any]] | None
+    ) = None
+    """An ``in_process`` backend's answer in place of ``GET /pipeline``; ``dataset.yaml::pipeline`` overlays it."""
 
     identity_config: (
-        Callable[[Stores, Path, Mapping[str, Any] | None], dict[str, dict[str, Any]]] | None
+        Callable[[Stores, ResolvedDataset, Mapping[str, Any] | None], dict[str, dict[str, Any]]]
+        | None
     ) = None
     """Identity-only, never on the wire: what a panel is measured WITH, never which cells it holds."""
 
@@ -191,10 +199,14 @@ class Connector:
     """Lets ingest detect a pipeline's required inputs BEFORE the backend is reached."""
 
     default_node_config: Mapping[str, Any] = field(default_factory=dict)
-    """Seeds a fresh ``pipeline.yaml``; its ``param_allowed_values`` is a DEFAULT, never a cost rail."""
+    """Seeds a fresh ``dataset.yaml::pipeline``; its ``param_allowed_values`` is a DEFAULT, never a cost rail."""
 
     available_models: tuple[str, ...] = ()
     """The MENU, never what a node permits; a model needing a ``max_tokens`` floor needs a registry profile."""
+
+    @property
+    def owns_panel(self) -> bool:
+        return self.extract_experiment is not None
 
     def base_url(self) -> str:
         return self.endpoint().rstrip("/") if self.endpoint is not None else ""

@@ -22,8 +22,7 @@ from typing import Any, cast
 
 import openpyxl
 import pytest
-import yaml
-from factories import pipeline_schema
+from factories import inner_cells, pipeline_schema
 from pydantic import ValidationError
 
 from promptpotter.application.bench import llm_call as call_mod
@@ -44,6 +43,7 @@ from promptpotter.application.datasets.draft_campaign import (
     new_draft,
 )
 from promptpotter.application.datasets.draft_patch import apply_draft_patch, plan_draft_patch
+from promptpotter.application.datasets.loaders import samples_from_dicts
 from promptpotter.application.datasets.origin_resolve import build_origin_consultation
 from promptpotter.application.datasets.tabular_ingest import IngestError, read_tabular
 from promptpotter.application.intelligence.indexes.sample import SampleFoldRow, SampleIndex
@@ -70,7 +70,6 @@ from promptpotter.application.optimizers.potter.dispatch.prompts import (
     base_optimizer_template,
     load_optimizer_prompt,
 )
-from promptpotter.application.optimizers.potter.l1.critique import spanning_clusters
 from promptpotter.application.optimizers.potter.l1.population import parse_population
 from promptpotter.application.optimizers.potter.records import L2L3Memory, Ladder
 from promptpotter.application.optimizers.potter.validators.l1_strict import L1_SHOTS_IN_DEMO_POOL
@@ -83,19 +82,27 @@ from promptpotter.application.pipeline_resolve import (
     resolved_output_schemas,
 )
 from promptpotter.application.runner.inner.connector import (
+    _extract_experiment,
     _identity_config,
+    _resolve_panel,
     promptpotter_wire_adapter,
 )
 from promptpotter.application.runner.inner.spawn import inner_campaign_id
 from promptpotter.application.runner.inner.tasks import InnerTaskSpec
+from promptpotter.config.paths import install_datasets_root
 from promptpotter.config.settings import settings
 from promptpotter.connectors import DEFAULT_CONNECTOR, get
 from promptpotter.connectors import harbor as harbor_connector
 from promptpotter.connectors.protocol import PROBE_WORKLOAD
-from promptpotter.domain.bench import DatasetSplit, partition_bank
+from promptpotter.domain.bench import DatasetSplit, partition_bank, restored_partition
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
-from promptpotter.domain.opt_search_point import PROMPT_STRING_FIELDS, OptSearchPoint, Variation
+from promptpotter.domain.opt_search_point import (
+    PROMPT_STRING_FIELDS,
+    TEMPLATE_TOKEN_RE,
+    OptSearchPoint,
+    Variation,
+)
 from promptpotter.domain.pipeline_overlay import fold_output_contract
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
@@ -118,7 +125,12 @@ from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.request import ChatRequest
 from promptpotter.infrastructure.llm.response import LLMResponse
-from promptpotter.infrastructure.store.dataset_access import readable_dataset_dir
+from promptpotter.infrastructure.store.dataset_access import (
+    DEFINITION_FILE,
+    ResolvedDataset,
+    read_dataset_pipeline,
+    resolve_dataset,
+)
 from promptpotter.infrastructure.store.dataset_replace import replace_dataset
 from promptpotter.infrastructure.store.io import read_yaml, write_yaml
 from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache
@@ -129,12 +141,19 @@ from promptpotter.shared.hashing import source_facts, stable_hash
 from promptpotter.shared.identity import default_identity
 
 _L1 = Variation(node="potter:l1_generate", mode="llm")
-_DATASETS = Path(__file__).resolve().parents[1] / "datasets"
+_DATASETS = install_datasets_root()
+
+
+def _install(name: str) -> ResolvedDataset:
+    return ResolvedDataset(name, _DATASETS / name, "install")
+
+
 _SPEC = InnerTaskSpec(
-    inner_dataset="justlogic-d234",
+    inner_dataset="justlogic/d234",
     optimizer_treatment="o",
     seed=3,
     n_samples=28,
+    n_samples_bench=8,
     n_rounds=4,
 )
 
@@ -249,15 +268,22 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     potter = resolve_optimizer("potter", {})
     try:
         set_optimizer_prompt_overrides(None)
-        sent, capo_hashes = ctx.fill(**values), capo.prompt_hashes()
+        sent, capo_hashes, treated = (
+            ctx.fill(**values),
+            capo.prompt_hashes(),
+            capo.treatment().digest,
+        )
         baseline = potter.prompt_hashes()
         assert potter.prompt_hashes() == baseline, "an unmoved preset re-hashed"
         set_optimizer_prompt_overrides(mutated)
         assert ctx.fill(**values) == "Rephrase [Sort it.] to sort the list." != sent, (
             "the mutated CAPO prompt never reached the request it sends"
         )
+        assert capo.treatment().digest != treated, (
+            "two inner cells under two arms stamp ONE treatment — a bank reads them as one arm"
+        )
         # A valid layout edit on one node: `diagnostics` stays placed.
-        layout = {"l1_critique": {"layout": {"axis_memory": "thinking_style"}}}
+        layout = {"l1_critique": {"layout": {"thinking_style": ["axis_memory"]}}}
         for optimizer, before, override, node in (
             (capo, capo_hashes, mutated, "capo_mutate"),
             (potter, baseline, layout, "l1_critique"),
@@ -335,62 +361,106 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     )
 
     # The unframed ablation renders no framing where one is committed, resumed or not.
+    write_yaml(built_stores.install_datasets_root / "gsm8k" / DEFINITION_FILE, {"pipeline": {}})
     built_stores.tenant_datasets.save_task_context(
         "gsm8k", TaskDecomposition(domain="grade-school arithmetic")
     )
+    gsm8k = resolve_dataset(built_stores, "gsm8k")
     framed = CampaignConfig(optimization=OptimizationConfig(degradation_threshold=0.05))
     unframed = framed.model_copy(update={"task_framing": "off"})
-    assert campaign_framing(built_stores, framed, "gsm8k").domain == "grade-school arithmetic", (
+    assert campaign_framing(built_stores, framed, gsm8k).domain == "grade-school arithmetic", (
         "the framed arm lost the framing committed for it"
     )
-    assert not campaign_framing(built_stores, unframed, "gsm8k"), (
+    assert not campaign_framing(built_stores, unframed, gsm8k), (
         "the ablation arm rendered the committed framing it declared off"
     )
     frozen = CampaignConfig.model_validate(unframed.frozen(arm=False))
-    assert not campaign_framing(built_stores, frozen, "gsm8k"), (
+    assert not campaign_framing(built_stores, frozen, gsm8k), (
         "the campaign manifest lost the declaration, so a resume of the ablation runs framed"
     )
 
-    # The inner benchmark is one directory to identity and to the run.
-    outer = _DATASETS / "promptpotter-self"
-    panel = {
+    # A cell is keyed by its own instrument and no other cell's: adding an inner dataset re-keys no
+    # banked cell, and an edit to a seat's dataset re-keys that seat alone, off the tier it runs.
+    outer = _install("promptpotter-self/panel")
+    panel: dict[str, Any] = {
         "inner_benchmark": "innerbench",
         "inner_benchmark_config": {
             "n_samples_per_inner_round": 4,
+            "n_samples_bench": 2,
             "max_inner_rounds": 2,
         },
-        "tasks": [{"id": "seed-0"}],
+        "tasks": [{"kind": "seat", "id": "seed-0"}],
     }
-    write_yaml(
-        built_stores.benchmarks_root / "innerbench" / "pipeline.yaml",
-        {"nodes": {"llm_only": {"config": {"model": "a"}}}},
+    campaign = {"optimization": {"max_rounds": 2, "degradation_threshold": 0.4}}
+    for name in ("innerbench", "otherbench"):
+        write_yaml(
+            built_stores.install_datasets_root / name / DEFINITION_FILE,
+            {"pipeline": {"nodes": {"llm_only": {"config": {"model": "a"}}}}, "campaign": campaign},
+        )
+
+    def keyed(declared: dict[str, Any]) -> tuple[dict[str, str], dict[str, Any]]:
+        resolved = _resolve_panel(built_stores, declared)
+        rows = samples_from_dicts(_extract_experiment(resolved))
+        return {s.query: s.key for s in rows}, _identity_config(built_stores, outer, resolved)
+
+    before, fingerprint = keyed(panel)
+    other = {"kind": "seat", "id": "other", "inner_dataset": "otherbench"}
+    grown = {**panel, "tasks": [*panel["tasks"], other]}
+    after, grown_fingerprint = keyed(grown)
+    assert after["seed-0"] == before["seed-0"] and grown_fingerprint == fingerprint, (
+        "adding an inner dataset re-keyed a banked cell"
     )
-    before = _identity_config(built_stores, outer, panel)
     tenant_copy = built_stores.tenant_datasets.dataset_dir("innerbench")
-    write_yaml(tenant_copy / "pipeline.yaml", {"nodes": {"llm_only": {"config": {"model": "b"}}}})
-    assert _identity_config(built_stores, outer, panel) != before, "identity hashed the wrong tier"
+    write_yaml(
+        tenant_copy / DEFINITION_FILE,
+        {"pipeline": {"nodes": {"llm_only": {"config": {"model": "b"}}}}, "campaign": campaign},
+    )
+    edited, _ = keyed(grown)
+    assert edited["seed-0"] != before["seed-0"], "identity hashed the wrong tier"
+    assert edited["other"] == after["other"], "one seat's edit re-keyed another seat"
     sandbox = build_stores(
         built_stores.identity,
         projects_root=built_stores.base_dir / ".inner" / "cell",
-        benchmarks_root=built_stores.benchmarks_root,
+        install_datasets_root=built_stores.install_datasets_root,
         shared_root=built_stores.shared_root,
     )
-    assert readable_dataset_dir(sandbox, "innerbench") == tenant_copy, "the cell ran another tier"
+    assert resolve_dataset(sandbox, "innerbench").directory == tenant_copy, (
+        "the cell ran another tier"
+    )
 
     # A Harbor panel reads its pinned roster and never dials out; upstream repinning re-cuts nothing.
     def no_fetch(*_a: object, **_k: object) -> None:
         raise AssertionError("a panel read fetched Harbor's registry")
 
     monkeypatch.setattr(harbor_connector.httpx, "get", no_fetch)
-    for name in ("spreadsheetbench-s10", "spreadsheetbench-s20", "harbor-tbench-regex-log"):
-        resolved = experiment_outside_run(_DATASETS / name)
-        include = read_yaml(_DATASETS / name / "harbor_tasks.yaml")["tasks_include"]
+    for harbor_dataset, version, include in (
+        ("spreadsheetbench-verified", "1.0", ["10452", "105-24"]),
+        ("terminal-bench-sample", "2.0", ["regex-log"]),
+    ):
+        write_yaml(
+            built_stores.tenant_datasets.dataset_dir(harbor_dataset) / DEFINITION_FILE,
+            {
+                "pipeline": {
+                    "backend_type": "harbor",
+                    "nodes": {"agent": {"type": "agent", "config": {"model": "m"}}},
+                },
+                "panel": {
+                    "harbor_dataset": harbor_dataset,
+                    "harbor_dataset_version": version,
+                    "tasks_include": include,
+                    "agent": {"name": "terminus-2", "environment": "docker"},
+                },
+            },
+        )
+        resolved = experiment_outside_run(
+            built_stores, resolve_dataset(built_stores, harbor_dataset)
+        )
         assert resolved is not None and [t["id"] for t in resolved["tasks"]] == include, (
-            f"{name} resolved another panel than its include list"
+            f"{harbor_dataset} resolved another panel than its include list"
         )
     with pytest.raises(ValueError):
         harbor_connector._resolve_experiment(
-            {"harbor_dataset": "unpinned", "harbor_dataset_version": "9"}
+            built_stores, {"harbor_dataset": "unpinned", "harbor_dataset_version": "9"}
         )
     roster = [{"id": "a", "git_url": "u", "git_commit_id": "c1", "path": "a"}]
     published = [roster]
@@ -439,17 +509,19 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     pinned = {"per_sample": "label_match(predicted, ground_truth)", "per_cell": "correct"}
     root = built_stores.tenant_datasets.dataset_dir("ds")
     optimization = dict(get(DEFAULT_CONNECTOR).default_optimization)
-    write_yaml(
-        root / "campaign.yaml",
-        {"campaign_config": {"optimization": optimization, "scoring": pinned}},
-    )
     schema = parse_pipeline_response(
         {
             "nodes": {n: {"type": "llm"} for n in ("llm_only", "web_search", "rerank")},
             "pipelines": {"default": ["web_search", "rerank", "llm_only"]},
         }
     )
-    write_yaml(root / "pipeline.yaml", {"pipelines": dict(schema.pipelines)})
+    write_yaml(
+        root / DEFINITION_FILE,
+        {
+            "pipeline": {"pipelines": dict(schema.pipelines)},
+            "campaign": {"optimization": optimization, "scoring": pinned},
+        },
+    )
     draft = new_draft(
         tenant_id=built_stores.identity.tenant_id,
         slug="ds",
@@ -480,8 +552,13 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     )
     campaign_id, _, _ = create_checkin_campaign(built_stores, draft=picked, bank_items=[])
     replace_dataset(stores=built_stores, slug="ds")
-    write_yaml(root / "campaign.yaml", {"campaign_config": {"optimization": optimization}})
-    write_yaml(root / "pipeline.yaml", {"pipelines": dict(schema.pipelines)})
+    write_yaml(
+        root / DEFINITION_FILE,
+        {
+            "pipeline": {"pipelines": dict(schema.pipelines)},
+            "campaign": {"optimization": optimization},
+        },
+    )
     carried = load_checkin_draft(built_stores, campaign_id)
     assert (
         carried is not None and checkin_campaign_config(built_stores, carried).scoring == pinned
@@ -490,8 +567,10 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     # A draft edit sent as rows freezes the search space the overlay spelled. A REUSED dataset:
     # its file is not the check-in's to write, so the overlay rides the config.
     reused = built_stores.tenant_datasets.dataset_dir("d")
-    write_yaml(reused / "campaign.yaml", {"campaign_config": _frozen_config()})
-    write_yaml(reused / "pipeline.yaml", {"backend_type": "termnorm"})
+    write_yaml(
+        reused / DEFINITION_FILE,
+        {"pipeline": {"backend_type": "termnorm"}, "campaign": _frozen_config()},
+    )
     declared_node = {
         "type": "llm",
         "config": {"model": "m", "reasoning_effort": "low", "temperature": 0.2},
@@ -571,8 +650,8 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     stores = built_stores
     dials = {"per_sample": "exact", "dials": "cost: 0.1"}
     write_yaml(
-        stores.tenant_datasets.dataset_dir("fz") / "campaign.yaml",
-        {"campaign_config": _frozen_config(optimization={"optimizer": "capo", "max_rounds": 3})},
+        stores.tenant_datasets.dataset_dir("fz") / DEFINITION_FILE,
+        {"campaign": _frozen_config(optimization={"optimizer": "capo", "max_rounds": 3})},
     )
     campaign = Campaign(
         campaign_id="fz__000001",
@@ -656,9 +735,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     }, "the fork left open a rung its operator closed"
 
     # Answering in TEXT sends no contract to answer INTO.
-    text_schema = parse_pipeline_response(
-        yaml.safe_load((_DATASETS / "justlogic-d234" / "pipeline.yaml").read_text("utf-8"))
-    )
+    text_schema = parse_pipeline_response(read_dataset_pipeline(_DATASETS / "justlogic" / "d234"))
     base = {n.name: dict(n.current_config) for n in text_schema.declared_nodes}
     assert {"output_schema", "answer_field"} <= base["llm_only"].keys(), (
         "the instrument declares no contract — the rest proves nothing"
@@ -709,11 +786,10 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     )
 
     # An invented param is rejected, and so is the individual a variation wrote it on.
-    outer = _DATASETS / "promptpotter-self"
+    outer = _install("promptpotter-self/panel")
+    outer_stores = build_stores(default_identity(), projects_root=tmp_path / "outer")
     declaration = dataset_pipeline_declaration(
-        build_stores(default_identity(), projects_root=tmp_path / "outer"),
-        outer,
-        experiment_outside_run(outer),
+        outer_stores, outer, experiment_outside_run(outer_stores, outer)
     )
     assert declaration is not None, "the outer dataset declared no pipeline"
     outer_schema = parse_pipeline_response(declaration)
@@ -917,7 +993,53 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
     ):
         with pytest.raises(ValueError):
             partition_bank(*refused)
-    contaminating = [Observation("bench_arm", sid, 0.0) for sid in held]
+    # An L4 pool seats a held-out ENVIRONMENT the same way: the seat is out of the pin, so the
+    # cell replays once searched, and a pool declaring no split cannot draw it by mistake.
+    task = {"kind": "seat", "id": "gsm_hard/8b", "inner_dataset": "gsm_hard", "inner_model": "m"}
+    other = {**task, "id": "hotpotqa/8b", "inner_dataset": "hotpotqa"}
+    seats = {
+        "inner_benchmark": "gsm_hard",
+        "inner_benchmark_config": {
+            "n_samples_per_inner_round": 1,
+            "n_samples_bench": 1,
+            "max_inner_rounds": 2,
+        },
+    }
+
+    def resolved(*tasks: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "panel": {**seats, "tasks": list(tasks)},
+            "instruments": {task["id"]: "i", other["id"]: "j"},
+            "datasets": {task["id"]: "gsm_hard", other["id"]: "hotpotqa"},
+        }
+
+    seated, drawn = samples_from_dicts(
+        _extract_experiment(resolved({**task, "held_out": True}, other))
+    )
+    searched, _ = samples_from_dicts(_extract_experiment(resolved(task, other)))
+    assert seated.bench_only and not searched.bench_only, "a held-out environment was searched"
+    assert seated.source_pin == {**task, "instrument": "i"} and seated.key == searched.key, (
+        "the seat entered the pin, so the held-out cell never replays once searched"
+    )
+    with pytest.raises(ValueError):
+        partition_bank([seated, drawn], None)
+    environments = partition_bank([seated, drawn], DatasetSplit(bench=0))
+    assert (environments.search, environments.bench) == ((drawn,), (seated,)), (
+        "a held-out environment was drawn for the search"
+    )
+    # A cycle's diagnostics read the partition its run init drew: an L4 cell's held-out rows ride
+    # its bank as bench-only copies, so re-drawing off its config alone searches them.
+    cell = [*bank[:30], *(s.model_copy(update={"bench_only": True}) for s in bank[30:50])]
+    record = partition_bank(cell, DatasetSplit(bench=0)).record(dataset_hash="d")
+    back = restored_partition(bank, record)
+    assert (back.search, back.bench) == (tuple(bank[:30]), tuple(bank[30:50])), (
+        "the restored partition is not the one the run drew"
+    )
+    assert partition_bank(bank, DatasetSplit(bench=0)).bench == (), "a re-draw held rows out"
+    moved = [*bank[:40], bank[40].model_copy(update={"query": "moved"}), *bank[41:]]
+    with pytest.raises(ValueError):
+        restored_partition(moved, record)
+    contaminating = [Observation("bench_arm", s.key, 0.0) for s in (*part.bench, *part.demo)]
     panel = select_round_subset(list(part.search), contaminating, 20, worth={})
     assert held.isdisjoint(s.id for s in panel), "a held-out row reached a round panel"
     index = SampleIndex(sample_ids=part.admitted_ids)
@@ -939,12 +1061,11 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
 
     # The check-in model reads no held-out row.
     checkin_bank = [Sample(id=i, query=f"claim {i}", ground_truth="TRUE") for i in range(40)]
-    built_stores.tenant_datasets.save_benchmark_rows("heldout", checkin_bank)
+    built_stores.tenant_datasets.save_materialized_rows("heldout", checkin_bank)
     dataset_dir = built_stores.tenant_datasets.dataset_dir("heldout")
     dataset_dir.mkdir(parents=True)
-    (dataset_dir / "pipeline.yaml").write_text("{}\n", encoding="utf-8")
-    (dataset_dir / "campaign.yaml").write_text(
-        "campaign_config:\n  scoring: label_match(predicted, ground_truth)\n"
+    (dataset_dir / DEFINITION_FILE).write_text(
+        "pipeline: {}\ncampaign:\n  scoring: label_match(predicted, ground_truth)\n"
         "  dataset_split:\n    bench: 30\n  optimization:\n    degradation_threshold: 0.4\n",
         encoding="utf-8",
     )
@@ -959,24 +1080,6 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
     bench_rows = partition_bank(checkin_bank, DatasetSplit(bench=30)).bench
     assert not [s.id for s in bench_rows if f'"{s.query}"' in content], (
         "a bench row reached the resolver"
-    )
-
-    # A failure cluster reaches the generator only on two MARKED rows: `minItems` is advisory on
-    # a `strict: False` wire, so the seam decides, and a repeated or unmarked id spans nothing.
-    cluster = {"mechanism": "m", "claim": "c"}
-    kept, dropped = spanning_clusters(
-        [
-            {**cluster, "sample_ids": [9, 3, 9]},
-            {**cluster, "sample_ids": [7, 7]},
-            {**cluster, "sample_ids": [3, 42]},
-        ],
-        [3, 7, 9],
-    )
-    assert [c["sample_ids"] for c in kept] == [[3, 9]], (
-        "a cluster spanning one marked row, or a row the prompt never showed, reached the generator"
-    )
-    assert [c["sample_ids"] for c in dropped] == [[7, 7], [3, 42]], (
-        "a dropped cluster was rewritten"
     )
 
     # Rewriting the prompt panel cannot accumulate the operator framing.
@@ -1050,7 +1153,7 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
         opt_sp=OptSearchPoint(),
         framing=TaskDecomposition(),
         pipeline_schema=outer_schema(tuple(NODE_LAYOUTS)),
-        inner_optimizer=resolve_optimizer("potter", {}),
+        inner_cells=inner_cells("potter"),
     )
     subject_chars = sum(len(i.text) for i in DispatchHub.render_items("rendered_prompt", inner))
     allowance = NODE_LAYOUTS["l1_generate"].discretionary_chars
@@ -1064,41 +1167,60 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
     )
     starved = set(filled.breakdown.dropped) & NODE_LAYOUTS["l1_generate"].mandatory
     assert not starved, f"mandatory panel(s) refused by the budget: {sorted(starved)}"
+    # A panel mixing two manifests: each outer node is shown, and checked, as its own manifest's.
     capo = resolve_optimizer("capo", {})
-    capo_schema = outer_schema(capo.llm_nodes)
-    capo_bundle = replace(inner, pipeline_schema=capo_schema, inner_optimizer=capo)
-    capo_shown = "".join(i.text for i in DispatchHub.render_items("rendered_prompt", capo_bundle))
+    potter = resolve_optimizer("potter", {})
+    mixed = inner_cells("potter", "capo")
+    mixed_schema = outer_schema((*NODE_LAYOUTS, *capo.llm_nodes))
+    mixed_bundle = replace(inner, pipeline_schema=mixed_schema, inner_cells=mixed)
+    mixed_shown = "".join(i.text for i in DispatchHub.render_items("rendered_prompt", mixed_bundle))
     base_text = base_optimizer_template(capo, "capo_mutate").instruction
-    assert f"[capo_mutate.instruction]\n{base_text}" in capo_shown, (
+    assert f"[capo_mutate.instruction]\n{base_text}" in mixed_shown, (
         "a CAPO inner's prompt was never shown"
+    )
+    potter_base = base_optimizer_template(potter, "l1_generate")
+    assert f"[l1_generate.instruction]\n{potter_base.instruction}" in mixed_shown, (
+        "the potter cell's prompt was never shown beside the CAPO cell's"
     )
     parent = OptSearchPoint()
     edit = {"capo_mutate": {"instruction": base_text + " Keep the rewrite under 80 words."}}
     severed = {"capo_mutate": {"instruction": "Rewrite the prompt."}}
-    proposing = types.SimpleNamespace(
-        cycle=types.SimpleNamespace(
-            optimizer=capo, session=types.SimpleNamespace(pipeline_schema=capo_schema)
+    severed_potter = {
+        "l1_generate": {
+            f: "Propose variants."
+            for f in fields
+            if TEMPLATE_TOKEN_RE.findall(str(getattr(potter_base, f) or ""))
+        }
+    }
+    assert severed_potter["l1_generate"], "vacuous — no potter field carries a placeholder"
+
+    def proposed(overlay: dict[str, Any]) -> Any:
+        node = next(iter(overlay))
+        proposing = types.SimpleNamespace(
+            cycle=types.SimpleNamespace(
+                optimizer=mixed.owners[node],
+                session=types.SimpleNamespace(pipeline_schema=mixed_schema),
+            )
         )
-    )
-    proposals = [
-        NodeContext(cast(Any, proposing), "capo_mutate").child([parent], overlay=overlay)
-        for overlay in (edit, severed)
-    ]
+        return NodeContext(cast(Any, proposing), node).child([parent], overlay=overlay)
+
+    proposals = [proposed(overlay) for overlay in (edit, severed, severed_potter)]
     parse_population(
         proposals,
         parent,
         None,
-        capo_schema,
+        mixed_schema,
         runtime_failures=[],
         demo_ids=frozenset(),
         shot_k_max=0,
-        inner_optimizer=capo,
+        inner_cells=mixed,
         prompt_block_catalogue="guidance",
     )
     assert proposals[0].validation_failures == [], "a valid edit of CAPO's prompt was refused"
-    assert [f.reason for f in proposals[1].validation_failures] == [
-        "dropped_mandatory_placeholder"
-    ], "an edit severing CAPO's {{instruction}} port was measured"
+    for severing in proposals[1:]:
+        assert "dropped_mandatory_placeholder" in [
+            f.reason for f in severing.validation_failures
+        ], "an edit severing a mixed panel cell's port was measured"
     assert proposals[0].opt_sp.lineage.variations[0].loci == ["capo_mutate.instruction"], (
         "the overlay's locus is missing from the variation that proposed it"
     )

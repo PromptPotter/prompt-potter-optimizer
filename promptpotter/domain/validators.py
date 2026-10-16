@@ -70,6 +70,14 @@ class StopRule(Protocol):
         ...
 
 
+@dataclass(frozen=True)
+class CaughtUp:
+    """What one settle took: the racing member, and each prior's catch-up cells."""
+
+    member: str
+    cells: Mapping[str, Sequence[GradedCell]]
+
+
 class CatchUps(Protocol):
     """A prior's configuration on the cell just taken: awaited before judged, then committed."""
 
@@ -81,9 +89,9 @@ class CatchUps(Protocol):
 
     def backfills_for(self, sample: Sample) -> list[asyncio.Future[Any]]: ...
 
-    def commit_backfills(self, sample: Sample) -> None: ...
+    def commit_backfills(self, sample: Sample) -> CaughtUp | None: ...
 
-    def bank_backfills(self, samples: Sequence[Sample]) -> None: ...
+    def bank_backfills(self, samples: Sequence[Sample]) -> CaughtUp | None: ...
 
     def discard_backfills(self) -> None: ...
 
@@ -91,6 +99,7 @@ class CatchUps(Protocol):
 __all__ = [
     "BrokenSignal",
     "CatchUps",
+    "CaughtUp",
     "LLMOutputValidator",
     "StopRule",
     "StopSignal",

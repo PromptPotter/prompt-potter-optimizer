@@ -99,6 +99,6 @@ In its audit twin `cycles/{cycle_id}/.runtime/cache/rounds/round_NNNN.json` — 
 
 - `nodes.l2_context.input.template_fields` + `.variables` / `.output.response` — what the L2 prompt was rendered from (incl. the field catalogue) / the parsed answer.
 
-The campaign's `task_context` (`Cycle.framing`, from the dataset's `task_context.yaml`) is operator-authored framing that L2 reads and cannot write — a change there came from the operator, not the loop. There is no `probe_round_commitment` decision: probe rounds are not wired.
+The campaign's `task_context` (`Cycle.framing`, from the front matter of the dataset's `task.md`) is operator-authored framing that L2 reads and cannot write — a change there came from the operator, not the loop. There is no `probe_round_commitment` decision: probe rounds are not wired.
 
 Deep dive: [`../developer/dispatch-hub.md`](../developer/dispatch-hub.md).
