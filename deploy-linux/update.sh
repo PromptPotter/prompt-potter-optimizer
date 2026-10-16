@@ -82,7 +82,9 @@ ensure_uv
 ( cd "$INSTALL_DIR" && "$UV" sync --frozen --extra all )
 # The datasets this box offers (DATASET_OFFER) name the extras their fetch needs; read off the
 # synced code, so a second sync adds exactly those. Unset offer, empty list, no second sync.
-offer_out="$(cd "$INSTALL_DIR" && .venv/bin/python -m promptpotter offer-extras)"
+# The offer is read from the file the UNIT loads and handed in, as PROMPTPOTTER_HOME is below: this
+# shell does not load $ENV_FILE, so the verb alone reads an empty offer and the sync drops the extras.
+offer_out="$(cd "$INSTALL_DIR" && DATASET_OFFER="$(read_env_kv "$ENV_FILE" DATASET_OFFER)" .venv/bin/python -m promptpotter offer-extras)"
 offer_extras=()
 for extra in $offer_out; do offer_extras+=(--extra "$extra"); done
 if (( ${#offer_extras[@]} )); then
