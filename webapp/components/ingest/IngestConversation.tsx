@@ -178,7 +178,11 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
   const [seededFor, setSeededFor] = useState<string | null>(null);
   if (served && served.draft_id !== seededFor) {
     setSeededFor(served.draft_id);
-    setLaunch(writeOnlyDefaults(served.setup_schema as FieldSchema) as StartCheckinOptions);
+    // Per step: a step's key is no patch path, so its fields commit from their own root.
+    const stepSchemas = Object.values((served.setup_schema as FieldSchema).properties ?? {});
+    setLaunch(
+      Object.assign({}, ...stepSchemas.map((s) => writeOnlyDefaults(s))) as StartCheckinOptions,
+    );
   }
   // Start sits right below the refusal, so scrolling to it shows both.
   const startRef = useRef<HTMLButtonElement>(null);
