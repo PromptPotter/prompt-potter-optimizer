@@ -37,7 +37,7 @@ from promptpotter.infrastructure.store.dataset_access import (
     resolve_dataset,
 )
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.shared.errors import PayloadInvalidError
+from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
 from promptpotter.shared.extras import Extra, install_hint, installed
 
 logger = logging.getLogger(__name__)
@@ -172,20 +172,32 @@ def checkin_items(stores: Stores, name: str) -> list[dict[str, Any]]:
     return fetched
 
 
-def offer_extras() -> set[Extra]:
-    """What the deployment must install so every dataset it offers can run."""
+def _offer() -> dict[str, Path | None]:
+    """Each offered name, with the install dataset it names; ``None`` where it names none."""
     root = install_datasets_root()
-    return {extra for name in settings.dataset_offer or () if (extra := dataset_extra(root / name))}
+    return {
+        name: root / name if is_dataset_dir(root / name) else None
+        for name in sorted(settings.dataset_offer or ())
+    }
+
+
+def offer_extras() -> set[Extra]:
+    """What the deployment must install so every dataset it offers can run, the offer whole or refused."""
+    offer = _offer()
+    found = [path for path in offer.values() if path is not None]
+    if len(found) < len(offer):
+        absent = ", ".join(name for name, path in offer.items() if path is None)
+        raise NotFoundError(f"DATASET_OFFER names no dataset in this install: {absent}")
+    return {extra for path in found if (extra := dataset_extra(path))}
 
 
 def offer_faults() -> list[str]:
     """Each offered name this install cannot honour, as a line for the boot banner."""
-    root = install_datasets_root()
     faults: list[str] = []
-    for name in sorted(settings.dataset_offer or ()):
-        if not is_dataset_dir(root / name):
+    for name, found in _offer().items():
+        if found is None:
             faults.append(f"{name}: no such dataset in this install")
-        elif (extra := missing_extra(root / name)) is not None:
+        elif (extra := missing_extra(found)) is not None:
             faults.append(f"{name}: needs the `{extra}` extra — {install_hint(extra)}")
     return faults
 

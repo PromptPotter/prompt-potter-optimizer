@@ -33,14 +33,6 @@ jobs:
       # what this repo checks, so the desk and CI cannot drift apart. It also runs
       # every check even after one fails — as named steps these masked each other,
       # and each hidden failure cost another push to discover.
-      # The gate admits checks on what each cost on this runner class; without it every check
-      # runs alone once to be measured. Keyed per commit with a prefix restore, as the eslint cache.
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: .gate_cache/weights.json
-          key: gate-weights-py-${{ github.sha }}
-          restore-keys: gate-weights-py-
-
       - name: Gate
         run: uv run python scripts/gate.py --py
 
@@ -139,11 +131,5 @@ jobs:
       # Same one list as the `check` job — the webapp half of it. Runs from the
       # repo root; the checks that drive node cannot be changed by which
       # interpreter launched them, and the one that drives Python finds `.venv`.
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: .gate_cache/weights.json
-          key: gate-weights-web-${{ github.sha }}
-          restore-keys: gate-weights-web-
-
       - name: Gate
         run: python3 scripts/gate.py --web

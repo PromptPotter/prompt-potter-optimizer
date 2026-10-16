@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import argparse
 import ast
-import contextlib
 import ctypes
 import dataclasses
 import hashlib
 import json
-import math
 import os
 import re
 import shutil
@@ -20,7 +18,7 @@ import tomllib
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, NamedTuple
+from typing import Literal
 
 import tests_owning
 from last_green import ENGINE_RUNTIME, OFFLINE_RUN, OFFLINE_RUN_READS, LastGreen, reads
@@ -31,38 +29,8 @@ _PINNED = _REPO / ".venv"
 _REEXEC = "PROMPTPOTTER_GATE_REEXEC"
 
 
-def _free_memory_mb() -> int:
-    if sys.platform == "win32":
-
-        class Status(ctypes.Structure):
-            _fields_ = (
-                ("length", ctypes.c_ulong),
-                ("load", ctypes.c_ulong),
-                ("total_physical", ctypes.c_ulonglong),
-                ("free_physical", ctypes.c_ulonglong),
-                ("total_page_file", ctypes.c_ulonglong),
-                ("free_page_file", ctypes.c_ulonglong),
-                ("total_virtual", ctypes.c_ulonglong),
-                ("free_virtual", ctypes.c_ulonglong),
-                ("free_extended_virtual", ctypes.c_ulonglong),
-            )
-
-        status = Status(length=ctypes.sizeof(Status))
-        ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status))
-        return int(status.free_physical) >> 20
-    else:
-        try:
-            meminfo = Path("/proc/meminfo").read_text(encoding="ascii")
-            return int(re.search(r"MemAvailable:\s+(\d+) kB", meminfo)[1]) >> 10  # type: ignore[index]
-        except (OSError, TypeError):  # no procfs (macOS): half of what is installed
-            return (os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")) >> 21
-
-
 _KILL_ON_JOB_CLOSE = 0x2000
 _EXTENDED_LIMIT_INFORMATION = 9
-_SYSTEM_PROCESS_INFORMATION = 5
-_INFO_LENGTH_MISMATCH = 0xC0000004
-_SAMPLE_SECS = 0.05
 
 
 class _Basic(ctypes.Structure):
@@ -90,36 +58,6 @@ class _Extended(ctypes.Structure):
     )
 
 
-class _SystemProcess(ctypes.Structure):
-    """The head of ntdll's SYSTEM_PROCESS_INFORMATION, through `working_set`."""
-
-    _fields_ = (
-        ("next", ctypes.c_ulong),
-        ("threads", ctypes.c_ulong),
-        ("private_working_set", ctypes.c_longlong),
-        ("hard_faults", ctypes.c_ulong),
-        ("threads_high_watermark", ctypes.c_ulong),
-        ("cycle_time", ctypes.c_ulonglong),
-        ("created", ctypes.c_longlong),
-        ("user_time", ctypes.c_longlong),
-        ("kernel_time", ctypes.c_longlong),
-        ("name_length", ctypes.c_ushort),
-        ("name_capacity", ctypes.c_ushort),
-        ("name", ctypes.c_void_p),
-        ("priority", ctypes.c_long),
-        ("pid", ctypes.c_void_p),
-        ("ppid", ctypes.c_void_p),
-        ("handles", ctypes.c_ulong),
-        ("session", ctypes.c_ulong),
-        ("key", ctypes.c_size_t),
-        ("peak_virtual", ctypes.c_size_t),
-        ("virtual", ctypes.c_size_t),
-        ("page_faults", ctypes.c_ulong),
-        ("peak_working_set", ctypes.c_size_t),
-        ("working_set", ctypes.c_size_t),
-    )
-
-
 if sys.platform == "win32":
     _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     _kernel32.CreateJobObjectW.restype = ctypes.c_void_p
@@ -131,14 +69,6 @@ if sys.platform == "win32":
         ctypes.c_ulong,
     )
     _kernel32.AssignProcessToJobObject.argtypes = (ctypes.c_void_p, ctypes.c_void_p)
-    _ntdll = ctypes.WinDLL("ntdll")
-    _ntdll.NtQuerySystemInformation.restype = ctypes.c_ulong
-    _ntdll.NtQuerySystemInformation.argtypes = (
-        ctypes.c_ulong,
-        ctypes.c_void_p,
-        ctypes.c_ulong,
-        ctypes.POINTER(ctypes.c_ulong),
-    )
 
 
 def end_children_with_this_process() -> None:
@@ -156,109 +86,6 @@ def end_children_with_this_process() -> None:
         ):
             raise ctypes.WinError(ctypes.get_last_error())
 
-
-class _Process(NamedTuple):
-    ppid: int
-    # Its creation time, which tells it apart from a later process given its pid.
-    born: int
-    resident_bytes: int
-    cpu_s: float
-
-
-class _ProcessTree:
-    def __init__(self, root: int) -> None:
-        self._root = root
-        self._born: dict[int, int] = {}
-        self._buffer = ctypes.create_string_buffer(1 << 20 if sys.platform == "win32" else 0)
-        self.peak_mb: int | None = None
-        # Per member as last seen, so a member that exits keeps the time it spent.
-        self._cpu_s: dict[tuple[int, int], float] = {}
-
-    @property
-    def cpu_s(self) -> float:
-        return sum(self._cpu_s.values())
-
-    def _list(self) -> dict[int, _Process]:
-        listed: dict[int, _Process] = {}
-        if sys.platform == "win32":
-            size = ctypes.c_ulong()
-            while True:
-                status = _ntdll.NtQuerySystemInformation(
-                    _SYSTEM_PROCESS_INFORMATION, self._buffer, len(self._buffer), ctypes.byref(size)
-                )
-                if status != _INFO_LENGTH_MISMATCH:
-                    break
-                # Slack for the processes born since the size was reported.
-                self._buffer = ctypes.create_string_buffer(size.value + (1 << 16))
-            offset = 0
-            while not status:
-                entry = _SystemProcess.from_buffer(self._buffer, offset)
-                cpu_s = (entry.user_time + entry.kernel_time) / 1e7  # 100 ns units
-                listed[entry.pid or 0] = _Process(
-                    entry.ppid or 0, entry.created, entry.working_set, cpu_s
-                )
-                if not entry.next:
-                    break
-                offset += entry.next
-            return listed
-        page = os.sysconf("SC_PAGE_SIZE")
-        ticks = os.sysconf("SC_CLK_TCK")
-        try:
-            pids = [int(name) for name in os.listdir("/proc") if name.isdigit()]
-        except OSError:  # no procfs (macOS): no listing, so no peak
-            return listed
-        for pid in pids:
-            try:
-                stat = Path(f"/proc/{pid}/stat").read_bytes()
-            except OSError:  # exited since the listing
-                continue
-            # From the state field on, past a command name that may hold spaces or parentheses.
-            fields = stat[stat.rindex(b")") + 2 :].split()
-            cpu_s = (int(fields[11]) + int(fields[12])) / ticks  # utime + stime
-            listed[pid] = _Process(int(fields[1]), int(fields[19]), int(fields[21]) * page, cpu_s)
-        return listed
-
-    def _descends(self, process: _Process, listed: dict[int, _Process]) -> bool:
-        # Windows keeps an exited parent's pid as the ppid: the parent is the latest born before it.
-        occupant = listed.get(process.ppid)
-        if occupant is not None and occupant.born <= process.born:
-            return self._born.get(process.ppid) == occupant.born
-        return process.ppid in self._born and self._born[process.ppid] <= process.born
-
-    def sample(self) -> None:
-        listed = self._list()
-        if not self._born:
-            if self._root not in listed:
-                return
-            self._born[self._root] = listed[self._root].born
-        joined = True
-        while joined:
-            joined = False
-            for pid, process in listed.items():
-                if self._born.get(pid) != process.born and self._descends(process, listed):
-                    self._born[pid] = process.born
-                    joined = True
-        members = [(pid, p) for pid, p in listed.items() if self._born.get(pid) == p.born]
-        for pid, p in members:
-            self._cpu_s[pid, p.born] = p.cpu_s
-        if members:
-            self.peak_mb = max(self.peak_mb or 0, sum(p.resident_bytes for _, p in members) >> 20)
-
-
-def memory_budget_mb() -> int:
-    return max(_free_memory_mb() - 1024, 512)
-
-
-_CORES = os.cpu_count() or 2
-_MEMORY_MB = memory_budget_mb()
-
-
-class _Measured(threading.local):
-    peak_mb: int | None = None
-    cpu_s: float = 0.0
-
-
-_measured = _Measured()
 
 Outcome = tuple[int, str]
 
@@ -298,39 +125,12 @@ class Selection:
         )
 
 
-class _Cost(NamedTuple):
-    peak_mb: int | None
-    cpu_s: float
-
-
-def _measured_run(argv: Sequence[str], cwd: Path, **extra_env: str) -> tuple[Outcome, _Cost]:
-    env = {**os.environ, "PYTHONIOENCODING": "utf-8", **extra_env}
-    # Files, not pipes: the waiting thread samples, so nothing drains a pipe while it runs.
-    with (
-        tempfile.TemporaryFile("w+", encoding="utf-8", errors="replace") as out,
-        tempfile.TemporaryFile("w+", encoding="utf-8", errors="replace") as err,
-    ):
-        proc = subprocess.Popen(list(argv), cwd=cwd, env=env, stdout=out, stderr=err)
-        tree = _ProcessTree(proc.pid)
-        while proc.returncode is None:
-            tree.sample()
-            with contextlib.suppress(subprocess.TimeoutExpired):
-                proc.wait(_SAMPLE_SECS)
-        out.seek(0)
-        err.seek(0)
-        return (proc.returncode, (out.read() + err.read()).strip()), _Cost(tree.peak_mb, tree.cpu_s)
-
-
-def _charge(cost: _Cost) -> None:
-    if cost.peak_mb is not None:
-        _measured.peak_mb = max(_measured.peak_mb or 0, cost.peak_mb)
-    _measured.cpu_s += cost.cpu_s
-
-
 def _run(argv: Sequence[str], cwd: Path, **extra_env: str) -> Outcome:
-    outcome, cost = _measured_run(argv, cwd, **extra_env)
-    _charge(cost)
-    return outcome
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8", **extra_env}
+    done = subprocess.run(
+        list(argv), cwd=cwd, env=env, capture_output=True, encoding="utf-8", errors="replace"
+    )
+    return done.returncode, (done.stdout + done.stderr).strip()
 
 
 def _py(*args: str) -> list[str]:
@@ -496,15 +296,14 @@ class _Probe:
         return _PROBES.answer(self)
 
 
-def _ask_together(probes: Sequence[_Probe]) -> tuple[dict[_Probe, Outcome], _Cost]:
+def _ask_together(probes: Sequence[_Probe]) -> dict[_Probe, Outcome]:
     ordered = sorted(probes, key=lambda probe: not probe.fresh)
     before = [_snapshot(probe.regenerates) for probe in ordered]
     sources = json.dumps([probe.source for probe in ordered])
-    host = [sys.executable, "-X", "utf8", "-c", _PROBE_HOST, sources]
-    (rc, out), cost = _measured_run(host, _REPO)
+    rc, out = _run([sys.executable, "-X", "utf8", "-c", _PROBE_HOST, sources], _REPO)
     marked = [line for line in out.splitlines() if line.startswith(_ANSWERS)]
     if not marked:
-        return dict.fromkeys(ordered, (rc or 1, out)), cost
+        return dict.fromkeys(ordered, (rc or 1, out))
     verdicts: dict[_Probe, Outcome] = {}
     answers = json.loads(marked[-1][len(_ANSWERS) :])
     for probe, prior, (code, text) in zip(ordered, before, answers, strict=True):
@@ -514,7 +313,7 @@ def _ask_together(probes: Sequence[_Probe]) -> tuple[dict[_Probe, Outcome], _Cos
             verdicts[probe] = probe.judge(text)
         else:
             verdicts[probe] = _stale(probe.regenerates, prior)
-    return verdicts, cost
+    return verdicts
 
 
 class _Probes:
@@ -529,11 +328,9 @@ class _Probes:
     def answer(self, probe: _Probe) -> Outcome:
         with self._turn:
             if probe not in self._answers:
-                asked = [p for p in dict.fromkeys((*self._due, probe)) if p not in self._answers]
-                verdicts, cost = _ask_together(asked)
-                self._answers.update(verdicts)
-                # The host's cost is the asking check's alone: the others only read its answers.
-                _charge(cost)
+                batch = self._due if probe in self._due else (probe,)
+                asked = [p for p in batch if p not in self._answers]
+                self._answers.update(_ask_together(asked))
             return self._answers[probe]
 
 
@@ -819,7 +616,7 @@ class Check:
     run: Callable[[Selection], Outcome]
     staged: bool = False  # in the pre-commit fast set
     landing: bool = False  # proves a landing rather than an edit, so `--changed` leaves it out
-    # Starts only once that check has ended — also how two checks sharing `webapp/.next` stay apart.
+    # The check that builds what it reads: earlier in its lane, and brought along by `--only`.
     after: str = ""
     # Empty is its kind's prefixes; `!prefix` is everything outside one.
     reads: tuple[str, ...] = ()
@@ -827,8 +624,6 @@ class Check:
     builds: str = ""
     # Directories it reads of what its `after` built; their content is in its key.
     product: tuple[str, ...] = ()
-    # Peak `rss` MB above which a run that passed is red.
-    ceiling_mb: int | None = None
     # Returns `None` where ownership cannot be told, and then the whole check runs.
     narrow: Callable[[Sequence[str]], tuple[str, ...] | None] | None = None
 
@@ -997,8 +792,6 @@ CHECKS: tuple[Check, ...] = (
         "py",
         _pytest,
         reads=(*_ENGINE_RUNTIME, "tests/", "scripts/tests_owning.py"),
-        # A fifth above its measured peak: drift passes, a growth of one fifth does not.
-        ceiling_mb=198,
         narrow=_owning_tests,
     ),
     # The script keeps its own green under this name and these inputs, so a run by hand answers for it.
@@ -1015,7 +808,14 @@ CHECKS: tuple[Check, ...] = (
     ),
     Check("lockfile", "web", _lockfile, staged=True),
     Check("eslint", "web", _eslint, staged=True, narrow=_web_modules),
-    # tsconfig includes `.next/types`, which `next build` rewrites: concurrent, tsc reads it mid-rewrite.
+    Check("vitest", "web", _vitest, narrow=_web_modules),
+    Check(
+        "next-build",
+        "web",
+        lambda _: _run(_node("npm", "run", "build"), _WEBAPP),
+        builds="webapp/out/index.html",
+    ),
+    # tsconfig includes `.next/types`, which `next build` rewrites.
     Check(
         "tsc",
         "web",
@@ -1023,13 +823,6 @@ CHECKS: tuple[Check, ...] = (
         staged=True,
         after="next-build",
         product=("webapp/.next/types",),
-    ),
-    Check("vitest", "web", _vitest, narrow=_web_modules),
-    Check(
-        "next-build",
-        "web",
-        lambda _: _run(_node("npm", "run", "build"), _WEBAPP),
-        builds="webapp/out/index.html",
     ),
     Check(
         "playwright",
@@ -1044,6 +837,8 @@ CHECKS: tuple[Check, ...] = (
     Check("pip-audit", "release", _pip_audit),
     Check("advisories", "release", _advisories),
 )
+# A lane runs in this order, so what a check reads is built before it.
+assert all(any(b.name == c.after for b in CHECKS[:i]) for i, c in enumerate(CHECKS) if c.after)
 
 
 @dataclass(frozen=True)
@@ -1054,150 +849,43 @@ class Result:
     secs: float
     key: str | None
     kept: bool = False  # green on these inputs already, so not run
-    at: float = 0.0  # seconds into the gate it started, so the table shows what overlapped
-    # The most `rss` any one `_run` of it measured; `None` where it spawned nothing.
-    peak_mb: int | None = None
-    # CPU seconds its process trees spent; work done inside the gate's own process is not counted.
-    cpu_s: float = 0.0
-    # False when narrowed to what changed: then it measured less than the check costs.
-    whole: bool = True
-
-    @property
-    def cores(self) -> float:
-        return self.cpu_s / self.secs if self.secs else 0.0
 
 
-class _Weight(NamedTuple):
-    secs: float
-    cores: float
-    rss_mb: int | None
-
-
-class _Weights:
-    """What each check costs on THIS machine, as measured; the scheduler admits on nothing else."""
-
-    _STORE = _REPO / ".gate_cache" / "weights.json"
-
-    def __init__(self) -> None:
-        try:
-            stored = json.loads(self._STORE.read_text(encoding="utf-8"))
-            self._held = {name: _Weight(**weight) for name, weight in stored.items()}
-        except (OSError, ValueError, TypeError):
-            self._held = {}
-
-    def get(self, name: str) -> _Weight | None:
-        return self._held.get(name)
-
-    def record(self, results: Sequence[Result]) -> None:
-        for r in results:
-            if r.kept or not r.whole:
-                continue
-            weight = _Weight(r.secs, r.cores, r.peak_mb)
-            held = self._held.get(r.check.name)
-            if r.rc and held is not None:
-                # A red run may stop short, so it can only raise what is held.
-                rss = max(held.rss_mb or 0, weight.rss_mb or 0) or None
-                weight = _Weight(held.secs, max(held.cores, weight.cores), rss)
-            self._held[r.check.name] = weight
-        self._STORE.parent.mkdir(exist_ok=True)
-        self._STORE.write_text(
-            json.dumps({n: w._asdict() for n, w in self._held.items()}, indent=1, sort_keys=True),
-            encoding="utf-8",
-        )
-
-
-def _execute(check: Check, sel: Selection, store: LastGreen | None, started: float) -> Result:
-    key = None if store is None else check.key(store)
-    if store is not None and check.kept(store, key):
-        return Result(check, 0, "", 0.0, key, kept=True)
-    if sel.changed is not None and check.narrow is not None:
-        mine = [path for path in sel.changed if reads(path, check.inputs() or ())]
-        sel = dataclasses.replace(sel, narrowed=check.narrow(mine))
+def _execute(check: Check, sel: Selection, store: LastGreen | None) -> Result:
     began = time.monotonic()
-    _measured.peak_mb = None
-    _measured.cpu_s = 0.0
     try:
+        key = None if store is None else check.key(store)
+        if store is not None and check.kept(store, key):
+            return Result(check, 0, "", 0.0, key, kept=True)
+        if sel.changed is not None and check.narrow is not None:
+            mine = [path for path in sel.changed if reads(path, check.inputs() or ())]
+            sel = dataclasses.replace(sel, narrowed=check.narrow(mine))
         rc, out = check.run(sel)
+        narrowed = sel.narrowed is not None or sel.staged
+        if narrowed or (store is not None and check.key(store) != key):
+            key = (
+                None  # narrowed, or edited while it ran: the verdict is for no tree anyone can name
+            )
     except Exception as exc:  # a broken check is a red check, never a silent skip
-        rc, out = 1, f"{type(exc).__name__}: {exc}"
-    peak_mb = _measured.peak_mb
-    ceiling = check.ceiling_mb
-    if not rc and ceiling is not None and peak_mb is not None and peak_mb > ceiling:
-        rc, out = 1, f"{out}\npeaked at {peak_mb} MB rss, over its {ceiling} MB ceiling."
-    whole = sel.narrowed is None and not sel.staged
-    if not whole or (store is not None and check.key(store) != key):
-        key = None  # narrowed, or edited while it ran: the verdict is for no tree anyone can name
-    return Result(
-        check,
-        rc,
-        out,
-        time.monotonic() - began,
-        key,
-        at=began - started,
-        peak_mb=peak_mb,
-        cpu_s=_measured.cpu_s,
-        whole=whole,
-    )
+        rc, out, key = 1, f"{type(exc).__name__}: {exc}", None
+    return Result(check, rc, out, time.monotonic() - began, key)
 
 
-def _demand(weight: _Weight | None) -> tuple[int, int]:
-    # Never measured here: it runs alone, and that run is its measurement.
-    if weight is None:
-        return _CORES, _MEMORY_MB
-    return min(_CORES, max(1, math.ceil(weight.cores))), weight.rss_mb or 0
+def _lanes(checks: Sequence[Check], sel: Selection, store: LastGreen | None) -> list[Result]:
+    """CI's jobs side by side, each serial: every tool owns its own parallelism."""
+    lanes = [[c for c in checks if c.kind == k] for k in dict.fromkeys(c.kind for c in checks)]
+    ran: list[list[Result]] = [[] for _ in lanes]
 
+    def lane(at: int) -> None:
+        ran[at] = [_execute(check, sel, store) for check in lanes[at]]
 
-def _schedule(
-    checks: Sequence[Check], sel: Selection, store: LastGreen | None, weights: _Weights
-) -> list[Result]:
-    names = {c.name for c in checks}
-    demand = {c.name: _demand(weights.get(c.name)) for c in checks}
-
-    def longest_first(check: Check) -> float:
-        weight = weights.get(check.name)
-        return -math.inf if weight is None else -weight.secs
-
-    waiting = sorted(checks, key=longest_first)
-    running: dict[str, Check] = {}
-    done: dict[str, Result] = {}
-    turn = threading.Condition()
-    started = time.monotonic()
-
-    def work(check: Check) -> None:
-        result = _execute(check, sel, store, started)
-        with turn:
-            del running[check.name]
-            done[check.name] = result
-            turn.notify()
-
-    with turn:
-        while waiting or running:
-            for check in [c for c in waiting if c.after not in names or c.after in done]:
-                cores = sum(demand[name][0] for name in running) + demand[check.name][0]
-                memory = sum(demand[name][1] for name in running) + demand[check.name][1]
-                # `running and`: a check heavier than the whole budget is still admitted, alone.
-                if running and (cores > _CORES or memory > _MEMORY_MB):
-                    continue
-                waiting.remove(check)
-                running[check.name] = check
-                threading.Thread(target=work, args=(check,), daemon=True).start()
-            if not running:
-                raise SystemExit(
-                    f"gate: {len(waiting)} check(s) wait on each other — `after` describes a cycle."
-                )
-            turn.wait()
-    return [done[c.name] for c in checks]
-
-
-def _widest(results: Sequence[Result]) -> tuple[float, int, list[str]]:
-    ran = [r for r in results if not r.kept]
-    widest: tuple[float, int, list[str]] = (0.0, 0, [])
-    for moment in ran:  # the peak begins where some check does
-        beside = [r for r in ran if r.at <= moment.at < r.at + r.secs]
-        memory = sum(r.peak_mb for r in beside if r.peak_mb is not None)
-        if memory > widest[1] or not widest[2]:
-            widest = (sum(r.cores for r in beside), memory, [r.check.name for r in beside])
-    return widest
+    # Daemons, so Ctrl+C ends the gate rather than waiting out each lane.
+    threads = [threading.Thread(target=lane, args=(at,), daemon=True) for at in range(len(lanes))]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    return sorted((r for results in ran for r in results), key=lambda r: checks.index(r.check))
 
 
 # `api`: mypy resolves fastapi. `harbor`, `dspy`: a test skipped for a missing extra never ran.
@@ -1294,57 +982,39 @@ def main() -> int:
             while check.after and named[check.after] not in checks:
                 check = named[check.after]
                 checks.append(check)
+    checks.sort(key=CHECKS.index)
     if any(c.kind == "py" for c in checks):
         _reexec_pinned()
 
     # `--staged` checks less than any key names, so it neither reads nor records a green.
     store = None if args.staged else LastGreen.open()
+    # The py lane's probes share one host; another lane's probe is asked alone.
     _PROBES.expect(
         [
             c.run
             for c in checks
-            if isinstance(c.run, _Probe) and not (store is not None and c.kept(store, c.key(store)))
+            if c.kind == "py"
+            and isinstance(c.run, _Probe)
+            and not (store is not None and c.kept(store, c.key(store)))
         ]
     )
-    weights = _Weights()
     started = time.monotonic()
     # CI's configuration, never the desk's: no `.env` and no workspace, or a verdict reads either.
     with tempfile.TemporaryDirectory(prefix="pp-gate-", ignore_cleanup_errors=True) as home:
         os.environ["PROMPTPOTTER_HOME"] = home
         os.environ["PROMPTPOTTER_ENV_FILE"] = str(Path(home) / ".env")
-        results = _schedule(checks, sel, store, weights)
+        results = _lanes(checks, sel, store)
     total = time.monotonic() - started
-    ran = [r for r in results if not r.kept]
-    weights.record(ran)
     if store is not None:
-        store.record({r.check.name: None if r.rc else r.key for r in ran})
+        store.record({r.check.name: None if r.rc else r.key for r in results if not r.kept})
     failed = [r for r in results if r.rc]
     kept = sum(r.kept for r in results)
     unchanged = f", {kept} unchanged since green" if kept else ""
-    cores, memory, together = _widest(results)
-    measured = [(r.peak_mb, r.check) for r in ran if r.peak_mb is not None]
-    rss = f"{memory if measured else '—'} MB rss"
-    width = (
-        f"; widest {'+'.join(together)} at {cores:.1f} of {_CORES} cores, "
-        f"{rss} of a {_MEMORY_MB / 1024:.1f} GB budget"
-        if together
-        else ""
-    )
-    heaviest_mb, heaviest = max(measured, key=lambda m: m[0], default=(0, None))
-    if heaviest and together != [heaviest.name]:
-        width += f", heaviest {heaviest.name} {heaviest_mb} MB"
-    width += "".join(
-        f"; {check.name} peaked {peak_mb} of its {check.ceiling_mb} MB ceiling"
-        for peak_mb, check in measured
-        if check.ceiling_mb is not None
-    )
 
     if failed or os.environ.get("GITHUB_ACTIONS"):
         for r in results:
             verdict = "FAIL" if r.rc else "kept" if r.kept else "ok"
-            peak = "—" if r.peak_mb is None else str(r.peak_mb)
-            span = "" if r.kept else f"{peak:>6} MB {r.cores:>5.1f} cores  from {r.at:>6.1f}s"
-            print(f"{r.check.name:<20}{verdict:>5}{r.secs:>8.1f}s{span}")
+            print(f"{r.check.name:<20}{r.check.kind:<8}{verdict:>5}{r.secs:>8.1f}s")
     for r in failed:
         print(f"\n--- {r.check.name} ---\n{r.out}")
     label = "staged" if args.staged else "+".join(sorted(kinds)) + ("/changed" * args.changed)
@@ -1355,15 +1025,19 @@ def main() -> int:
             "\nabout the gate or the desk, never a fix."
         )
         print(
-            f"\ngate[{label}]: {len(results)} checks, {len(failed)} failed{unchanged}, "
-            f"{total:.1f}s{width}"
+            f"\ngate[{label}]: {len(results)} checks, {len(failed)} failed{unchanged}, {total:.1f}s"
         )
         return 1
-    slowest = max(results, key=lambda r: r.secs, default=None)
-    wall = (
-        f" (slowest {slowest.check.name} {slowest.secs:.1f}s)" if slowest and slowest.secs else ""
+    lanes = {
+        kind: sum(r.secs for r in results if r.check.kind == kind)
+        for kind in {r.check.kind for r in results}
+    }
+    wall = ", ".join(f"{kind} {secs:.1f}s" for kind, secs in sorted(lanes.items()) if secs)
+    print(
+        f"gate[{label}]: {len(results)} checks green in {total:.1f}s"
+        + (f" ({wall})" if wall else "")
+        + unchanged
     )
-    print(f"gate[{label}]: {len(results)} checks green in {total:.1f}s{wall}{unchanged}{width}")
     return 0
 
 

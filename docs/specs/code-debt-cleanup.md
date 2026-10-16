@@ -56,22 +56,6 @@ A leading `NEXT` marks the one to take up cold when nothing else is in hand.
   beside a pinned one on the same model — a prefix-cache share well below the pinned one means the
   default route still scatters.
 
-- **The gate is a second scheduler over tools that each schedule themselves — delete it for two
-  fixed lanes.** `scripts/gate.py` spends ~300 lines (`_ProcessTree`, `_Weights`, `_demand`,
-  `_schedule`, `_widest`, `ceiling_mb`, the CI `weights.json` cache) learning per-check weights
-  under the very contention it should prevent: `cores = cpu_s / secs` falls as contention rises and
-  Windows working-set rss is trimmed under pressure, so a starved run teaches lighter weights and the
-  next packs tighter (positive feedback). `scripts/offline_run.py::main` is a third scheduler sizing
-  its pool off the whole box after the gate admitted others. 2026-10-16: vitest missed its 60 s
-  worker start (377/377 green). Action: two serial lanes, py and web, as `ci.yml` already runs
-  them, each tool owning its own parallelism; lane order replaces `after`; offline_run a fixed
-  width; pytest's ceiling read by `scripts/tests_owning.py --record` from its own peak (one process).
-  Deletes ~280 lines and every learned weight; keeps the job object and `--changed`. **Rides
-  with:** any change to the gate's scheduling, `offline_run.py` or `ci.yml`. **Re-test:** time
-  `scripts/gate.py --py` and `--web` each alone on a quiet desk; their max against today's full run
-  is the wall-clock price, and the full gate with under ~5 GB free must not fail a check whose tests
-  pass.
-
 - **The responsive walk records no Lighthouse score, and sizes the candidates card at no width.**
   The six-width sweep (`e2e/walk/responsive.spec.ts`) catches content DELETED by an
   `overflow:hidden` wrapper or a `viewBox`'d SVG that scaled instead of overflowing — the

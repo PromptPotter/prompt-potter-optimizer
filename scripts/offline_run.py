@@ -32,7 +32,7 @@ from urllib.parse import urlsplit
 
 import httpx
 import yaml
-from gate import end_children_with_this_process, memory_budget_mb
+from gate import end_children_with_this_process
 from last_green import OFFLINE_RUN, OFFLINE_RUN_READS, LastGreen
 
 from promptpotter.application import optimizers
@@ -100,8 +100,8 @@ INTERRUPTED = {1: "interrupted", 2: "interrupted-twice"}
 INTERRUPT_AT_CELL = 25
 # The Ctrl+C contract is the pause and the resume, not the search: one round ends the cycle soonest.
 TERMINAL_ROUNDS = 1
-# Peak commit of one campaign process `main` forks, rounded up.
-CHILD_MB = 120
+# Campaign processes at once: each holds about one core and peaks near 120 MB.
+WIDTH = min(8, os.cpu_count() or 2)
 RESUME_APPENDS = ("phases", "run_phases", "candidates_minted", "rulers")
 NOT_A_KEY = "offline-run-not-a-key"
 PROVIDER_KEYS = ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY")
@@ -1213,8 +1213,7 @@ def main() -> int:
         child_args += [f"--optimizer={name}" for name in arm_names]
     t0 = time.monotonic()
 
-    width = min(8, os.cpu_count() or 2, memory_budget_mb() // CHILD_MB)
-    pool = ThreadPoolExecutor(max(1, width))
+    pool = ThreadPoolExecutor(WIDTH)
 
     def run_child(name: str, workspace: Path, log: str, rounds: int, *extra: str) -> int:
         child = [sys.executable, __file__, "--child", name, f"--rounds={rounds}", *child_args]

@@ -77,20 +77,19 @@ if [[ -z "${UPDATE_REEXECED:-}" && -n "$self_before" && "$(self_sha)" != "$self_
   export UPDATE_REEXECED=1
   exec bash "$HERE/update.sh" "$@"
 fi
-# Install the exact pinned graph from uv.lock — same source of truth as CI.
+# Install the exact pinned graph from uv.lock — same source of truth as CI. Two syncs: the first
+# `--inexact`, removing nothing, only so the synced code can run; the second exact, once the datasets
+# this box offers (DATASET_OFFER) have named the extras their fetch needs.
 ensure_uv
-( cd "$INSTALL_DIR" && "$UV" sync --frozen --extra all )
-# The datasets this box offers (DATASET_OFFER) name the extras their fetch needs; read off the
-# synced code, so a second sync adds exactly those. Unset offer, empty list, no second sync.
+( cd "$INSTALL_DIR" && "$UV" sync --frozen --inexact --extra all )
 # The offer is read from the file the UNIT loads and handed in, as PROMPTPOTTER_HOME is below: this
-# shell does not load $ENV_FILE, so the verb alone reads an empty offer and the sync drops the extras.
+# shell does not load $ENV_FILE. The verb refuses a name naming no dataset, and `set -e` stops the
+# deploy there, before the exact sync drops what that name's extras were.
 offer_out="$(cd "$INSTALL_DIR" && DATASET_OFFER="$(read_env_kv "$ENV_FILE" DATASET_OFFER)" .venv/bin/python -m promptpotter offer-extras)"
 offer_extras=()
 for extra in $offer_out; do offer_extras+=(--extra "$extra"); done
-if (( ${#offer_extras[@]} )); then
-  ( cd "$INSTALL_DIR" && "$UV" sync --frozen --extra all "${offer_extras[@]}" )
-  ok "offered datasets' extras installed: ${offer_extras[*]}"
-fi
+( cd "$INSTALL_DIR" && "$UV" sync --frozen --extra all "${offer_extras[@]}" )
+ok "synced; offered datasets' extras: ${offer_extras[*]:-none}"
 # A dep rebuild relabels new .venv files user_home_t; re-apply the persisted
 # bin_t rule (set by install-service.sh) so systemd can still exec them under
 # SELinux enforcing — otherwise the service silently 203/EXEC crash-loops.

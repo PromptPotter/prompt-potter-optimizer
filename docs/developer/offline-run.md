@@ -60,9 +60,8 @@ them is the evidence read of all three.
 
 One workspace per optimizer, `<home>/<optimizer>/`, because the measurement archive and the δ ruler
 pool across the campaigns of one workspace — a shared one lets one optimizer's run move another's
-decisions. Each campaign is a child process, and as many run at once as the machine's free memory
-holds (`scripts/gate.py::memory_budget_mb`) — all of them on a box with room, one after another on
-a laptop with none. In each workspace:
+decisions. Each campaign is a child process, `scripts/offline_run.py::WIDTH` of them at once. In
+each workspace:
 
 | Path | What it is |
 |---|---|

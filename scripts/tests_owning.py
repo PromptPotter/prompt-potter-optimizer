@@ -17,6 +17,38 @@ PACKAGE = "promptpotter"
 TESTS = "tests"
 EVERY_TEST = f"{TESTS}/"
 RECORD = REPO / ".pytest_cache" / "tests_owning.json"
+# A fifth above the whole suite's measured peak: drift passes, a growth of one fifth does not.
+CEILING_MB = 197
+
+
+def _peak_mb() -> int:
+    """This process's peak resident memory."""
+    if sys.platform == "win32":
+        import ctypes
+
+        class Counters(ctypes.Structure):  # PROCESS_MEMORY_COUNTERS
+            _fields_ = (
+                ("cb", ctypes.c_ulong),
+                ("page_faults", ctypes.c_ulong),
+                ("peak_working_set", ctypes.c_size_t),
+                *((f"field{i}", ctypes.c_size_t) for i in range(7)),
+            )
+
+        counters = Counters(cb=ctypes.sizeof(Counters))
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.K32GetProcessMemoryInfo.argtypes = (
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.c_ulong,
+        )
+        current = ctypes.c_void_p(-1)  # GetCurrentProcess's pseudo-handle
+        if not kernel32.K32GetProcessMemoryInfo(current, ctypes.byref(counters), counters.cb):
+            raise ctypes.WinError(ctypes.get_last_error())
+        return int(counters.peak_working_set) >> 20
+    import resource
+
+    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss  # bytes on macOS, KiB elsewhere
+    return peak >> 20 if sys.platform == "darwin" else peak >> 10
 
 
 def _rel(path: str | Path) -> str | None:
@@ -297,6 +329,9 @@ def _record(pytest_args: list[str]) -> int:
         ),
         "utf-8",
     )
+    if (peak := _peak_mb()) > CEILING_MB:
+        print(f"tests_owning: the suite peaked at {peak} MB, over its {CEILING_MB} MB ceiling.")
+        return 1
     return code
 
 
