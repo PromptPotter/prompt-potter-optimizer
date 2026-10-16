@@ -14,6 +14,7 @@ export interface FieldSchema {
   maxLength?: number;
   pattern?: string;
   writeOnly?: boolean;
+  default?: unknown;
   required?: string[];
   properties?: Record<string, FieldSchema>;
 }
@@ -36,6 +37,19 @@ export function setIn<T extends object>(target: T, path: string[], value: unknow
   if (next === null || next === undefined) delete out[head];
   else out[head] = next;
   return out as T;
+}
+
+// A stored field shows the draft's value, so only a `writeOnly` one starts from the served `default`.
+export function writeOnlyDefaults(schema: FieldSchema, writeOnly = false): Json {
+  let out: Json = {};
+  for (const [key, field] of Object.entries(schema.properties ?? {})) {
+    const w = writeOnly || field.writeOnly === true;
+    if (field.type === "object") {
+      const inner = writeOnlyDefaults(field, w);
+      if (Object.keys(inner).length > 0) out = { ...out, [key]: inner };
+    } else if (w && field.default !== undefined) out = { ...out, [key]: field.default };
+  }
+  return out;
 }
 
 const INVALID = Symbol("invalid");

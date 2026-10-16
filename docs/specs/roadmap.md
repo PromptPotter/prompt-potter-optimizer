@@ -308,6 +308,8 @@ The lever was removed rather than guarded, because a guard leaves a no-op action
 ### Origin-resolution check-in
 Three invariants outlive the build: it reuses the `checkin/2` node (never a separate `origin_resolve` node or model); `reasoning_floor`/`ceiling` stay **off the operator surface**, backend-node-only; and model and provider are optimizer-locked. Concept: [`../architecture.md`](../architecture.md) § Origin, parent, and check-in. Post-flip the same node consults in RUN mode, raising `pause-cycle` / `change-run-limits` / `fork-cycle` instead of draft patches, over the `RaisedCommand` shape `application/datasets/origin_resolve.py` already carries. Lands with L4, not before.
 
+**Next: the check-in proposes the WHOLE setup from the operator's text**, not only columns and framing — every node's `model` and `reasoning_effort`, the rounds and the cap — each one a `PROPOSED` finding priced against the served menu (`model_capabilities`, the round's cell ceiling) and the account's launch bound (`quota.py::launch_usd_bound`). The host's bound outranks the operator's words, as a system prompt does a user's: "spend $2" on a $0.03 account is proposed AT the bound, with the bound as its evidence, while Start still admits only the number on screen. A proposal outside the menu is dropped at `_coerce` and the served default stands, so a bad proposal needs no second call.
+
 ### Ingest + chat-first web
 > **Chat-first front door** (thread model, served activity state, copilot decision buttons, campaign-scoped persistence) has its own contract: [`chat-foundation.md`](chat-foundation.md). This note keeps only the ingest / draft-campaign detail.
 

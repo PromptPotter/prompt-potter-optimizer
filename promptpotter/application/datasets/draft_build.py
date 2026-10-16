@@ -14,7 +14,11 @@ from promptpotter.application.datasets.draft_campaign import (
     default_campaign_config,
 )
 from promptpotter.application.datasets.origin_readiness import OriginReadiness, origin_readiness
-from promptpotter.application.pipeline_resolve import resolve_pipeline_for_draft
+from promptpotter.application.jobs.quota import launch_usd_bound
+from promptpotter.application.pipeline_resolve import (
+    checkin_campaign_config,
+    resolve_pipeline_for_draft,
+)
 from promptpotter.application.scoring.formula import SCORING_FUNCTIONS
 from promptpotter.domain.launch_limits import LaunchLimits
 from promptpotter.domain.origin_provenance import Provenance
@@ -234,7 +238,11 @@ def draft_wire(stores: Stores, draft: DraftCampaign) -> DraftCampaignWire:
         ],
         readiness=origin_readiness(draft),
         recap=_recap(draft),
-        setup_schema=setup_schema(draft),
+        setup_schema=setup_schema(
+            draft,
+            inherited_usd=checkin_campaign_config(stores, draft).optimization.ceiling.usd,
+            launch_usd=launch_usd_bound(stores),
+        ),
     )
 
 
@@ -262,7 +270,26 @@ def _column(draft: DraftCampaign, field_key: str, title: str) -> dict[str, Any]:
     }
 
 
-def setup_schema(draft: DraftCampaign) -> dict[str, Any]:
+def _usd_cap(
+    ceiling: dict[str, Any], inherited: float | None, launch: float | None
+) -> dict[str, Any]:
+    """Bounded at what admission takes; a dataset cap above it would be refused whole, so the
+    account's bound is offered in its place."""
+    field = _field(ceiling, "usd", "Spend cap in USD")
+    if launch is None:
+        return field
+    offered = {"default": launch} if inherited is None or inherited > launch else {}
+    return {
+        **field,
+        "maximum": launch,
+        "description": f"This account launches at up to ${launch:.2f}.",
+        **offered,
+    }
+
+
+def setup_schema(
+    draft: DraftCampaign, *, inherited_usd: float | None, launch_usd: float | None
+) -> dict[str, Any]:
     patch = EditDraftPatch.model_json_schema()
     rounds = OptimizationOverrides.model_json_schema()
     limits = LaunchLimits.model_json_schema()
@@ -301,7 +328,7 @@ def setup_schema(draft: DraftCampaign) -> dict[str, Any]:
                             "ceiling": {
                                 "type": "object",
                                 "properties": {
-                                    "usd": _field(ceiling, "usd", "Spend cap in USD"),
+                                    "usd": _usd_cap(ceiling, inherited_usd, launch_usd),
                                     "tokens": _field(ceiling, "tokens", "Token cap"),
                                 },
                             },

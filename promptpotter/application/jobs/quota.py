@@ -342,6 +342,16 @@ def admit_launch(
     return ceiling, _reserve(ceiling, room, delegated)
 
 
+def launch_usd_bound(stores: Stores) -> float | None:
+    """The most a launch may declare before ``admit_launch`` refuses it whole: what a check-in offers."""
+    user = account_of(stores)
+    if lifetime_ceilings(user=user, spends_own_key=spends_the_hosts_own_key(stores)).usd is None:
+        return None
+    wallet = read_account_wallet(user=user, stores=stores, job_registry=JobRegistry.attach())
+    step = _launch_step(user, wallet, _delegated_spend_ceiling(stores))
+    return _lowest(None if wallet.contended else wallet.headroom.usd, step)
+
+
 def refuse_verb_rate(stores: Stores, user: User, bucket: str) -> None:
     # The host is exempt in the RATE arm too: the meter bounds a stranger on the host's key.
     if not spends_the_hosts_own_key(stores) and not _consume_rate_token(f"{bucket}:{user.user_id}"):
@@ -631,6 +641,7 @@ __all__ = [
     "concurrent_cycles_writable",
     "declare_run_ceiling",
     "hold_run_limits",
+    "launch_usd_bound",
     "lifetime_ceilings",
     "next_launch_ceiling",
     "overrun",

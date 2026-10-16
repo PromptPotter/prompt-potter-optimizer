@@ -11,7 +11,13 @@ import { Criterion } from "@/components/shell/scoring/Criterion";
 import { dialsOf, dialsText } from "@/lib/scoring-mask";
 import { ORIGIN_KEY } from "@/lib/origin-readiness";
 import { DatasetPreview } from "./DatasetPreview";
-import { SchemaFields, setIn, type Commit, type FieldSchema } from "./SchemaFields";
+import {
+  SchemaFields,
+  setIn,
+  writeOnlyDefaults,
+  type Commit,
+  type FieldSchema,
+} from "./SchemaFields";
 import { ComposerTools } from "./ComposerTools";
 import { SetupStep } from "./SetupStep";
 import { PipelineSetupSection, pipelineLabel } from "./PipelineSetupSection";
@@ -168,6 +174,12 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
   const blockersId = useId();
   // The schema's `writeOnly` subtree, already in `StartCheckinOptions` shape.
   const [launch, setLaunch] = useState<StartCheckinOptions>({});
+  const served = flow.phase.stage === "ready" ? flow.phase.draft : null;
+  const [seededFor, setSeededFor] = useState<string | null>(null);
+  if (served && served.draft_id !== seededFor) {
+    setSeededFor(served.draft_id);
+    setLaunch(writeOnlyDefaults(served.setup_schema as FieldSchema) as StartCheckinOptions);
+  }
   // Start sits right below the refusal, so scrolling to it shows both.
   const startRef = useRef<HTMLButtonElement>(null);
   const problem = flow.phase.stage === "ready" ? flow.phase.problem : null;
