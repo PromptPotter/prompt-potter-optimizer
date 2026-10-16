@@ -14,15 +14,13 @@ import { useWorkspace } from "@/lib/workspace";
 export function CriticalAlertBanner() {
   const { dash, status, statusText, statusHint } = useCycleStream();
   const { viewedPath, cycleId, goneAddress, openView } = useWorkspace();
-  const { cycles, cyclesLoaded, failure: registryFailure } = useRegistry();
+  const { failure: registryFailure } = useRegistry();
   const { failure: pointerFailure } = useActivePointer();
   const pause = useCommand<"pause-cycle">("critical-alert");
 
   const noUnit = !cycleId;
   const netFailure = pointerFailure ?? registryFailure;
   const netDown = netFailure !== null;
-  // `!netDown`: a down server also reports zero cycles; a fresh account must not read as an outage.
-  const emptyWorkspace = noUnit && cyclesLoaded && !netDown && cycles.length === 0;
   let bannerStatus: StatusKind = status;
   let bannerText = statusText;
   let bannerHint = statusHint;
@@ -44,7 +42,6 @@ export function CriticalAlertBanner() {
     bannerStatus,
     bannerText,
     bannerHint,
-    emptyWorkspace,
     dash,
     connectorDown,
     connectorName: connector,

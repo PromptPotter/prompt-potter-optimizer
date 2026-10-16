@@ -20,7 +20,7 @@ import { invalidateReads, readThrough } from "./read-cache";
 import { useWorkspace } from "./workspace";
 
 // The CONNECTION's state, never the run's — that is the served `dash.producer`.
-export type StatusKind = "connected" | "offline" | "gone";
+export type StatusKind = "connected" | "loading" | "idle" | "offline" | "gone";
 
 export type DashboardSnapshot = ServedDashboard;
 
@@ -70,16 +70,9 @@ const GONE = {
   statusHint: "It was deleted, or its store was reset. Returning to the active run.",
 } as const;
 
-function opening(hasUnit: boolean): Omit<CycleStreamState, "isLive"> {
-  return {
-    dash: null,
-    status: "offline",
-    statusText: hasUnit ? "Switching to active campaign…" : "No active campaign",
-    statusHint: hasUnit
-      ? ""
-      : "Start a campaign: `python -m promptpotter new <dataset>` in another terminal.",
-  };
-}
+// Neither is a fault: no unit is a steady state, and a unit's first read is merely in flight.
+const IDLE = { dash: null, status: "idle", statusText: "", statusHint: "" } as const;
+const LOADING = { dash: null, status: "loading", statusText: "", statusHint: "" } as const;
 
 const RECONNECT_INTERVAL_MS = 5000;
 const LIVE_INTERVAL_MS = 2000;
@@ -156,7 +149,7 @@ function useDashboard(path: CyclePath | null, unit: string | null, intervalMs: n
       return { dash: landed ?? (shown.unit === unit ? shown.dash : null), ...OFFLINE };
     }
     const kept = shown.unit === unit ? shown.dash : null;
-    return kept ? { dash: kept, ...CONNECTED } : opening(unit !== null);
+    return kept ? { dash: kept, ...CONNECTED } : unit !== null ? LOADING : IDLE;
   }, [read, landed, shown, unit]);
 
   return { state, replaying: at !== null };

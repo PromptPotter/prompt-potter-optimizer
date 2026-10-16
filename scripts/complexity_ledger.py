@@ -71,7 +71,7 @@ BASELINE = {
     # moves it as one function does not.
     "test_reach": 356,
     # Every property of every schema the generated contract offers the browser.
-    "served_fields": 1666,
+    "served_fields": 1667,
 }
 
 _REPO = Path(__file__).resolve().parents[1]

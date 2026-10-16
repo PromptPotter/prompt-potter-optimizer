@@ -5,7 +5,7 @@ from typing import NamedTuple
 from pydantic import Field
 
 from promptpotter.domain.cycle_listing import CycleListEntry
-from promptpotter.domain.cycle_paths import CyclePath
+from promptpotter.domain.cycle_paths import CycleHop, CyclePath
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.session_pointer import read_active_pointer
 from promptpotter.infrastructure.store.stores import Stores, descend_store
@@ -21,9 +21,15 @@ class ActivePointer(NamedTuple):
 
 
 def active_pointer(stores: Stores) -> ActivePointer:
-    """Reported RAW: whether the pointed cycle is live is its entry's ``run_phase``."""
+    """Liveness is the entry's ``run_phase``; a pointer outliving its cycle dir names nothing."""
     campaign_id, cycle_id = read_active_pointer(stores.base_dir)
-    return ActivePointer(campaign_id or None, cycle_id or None)
+    if not campaign_id or not cycle_id:
+        return ActivePointer(None, None)
+    if not stores.campaigns.cycle_dir(
+        CycleHop(campaign_id=campaign_id, cycle_id=cycle_id)
+    ).is_dir():
+        return ActivePointer(None, None)
+    return ActivePointer(campaign_id, cycle_id)
 
 
 class CyclesResponse(StrictModel):

@@ -69,27 +69,9 @@ describe("criticalAlert", () => {
     });
   });
 
-  it("stays silent for an empty workspace, despite the poll's resting offline", () => {
-    // A first-run account never leaves INITIAL_STATE: without its own signal it paints as an outage.
-    expect(
-      criticalAlert({
-        ...base,
-        bannerStatus: "offline",
-        bannerText: "Connecting…",
-        emptyWorkspace: true,
-      }),
-    ).toBeNull();
-  });
-
-  it("a genuinely unreachable server still wins over an empty workspace", () => {
-    // The caller subtracts netDown first; this pins that a slip there cannot silence a real outage.
-    const out = criticalAlert({
-      ...base,
-      bannerStatus: "offline",
-      bannerText: "Server unreachable — retrying",
-      emptyWorkspace: false,
-    });
-    expect(out?.title).toBe("Server unreachable — retrying");
+  it("stays silent with no unit, and while a unit's first read is in flight", () => {
+    expect(criticalAlert({ ...base, bannerStatus: "idle" })).toBeNull();
+    expect(criticalAlert({ ...base, bannerStatus: "loading" })).toBeNull();
   });
 
   const PRODUCER_ALERT: Record<ProducerState, string | null> = {

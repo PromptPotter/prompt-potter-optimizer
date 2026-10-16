@@ -35,14 +35,15 @@
   /* Not position:fixed — `.connector` itself carries a transform. */
   .connector-pop{left:0;transform:none;min-width:0;max-width:calc(100vw - 48px)}
 
-  .chat-grid{padding:0 var(--space-12);gap:var(--space-14);grid-template-rows:minmax(240px,1fr)}
-  .chat-messages{padding:var(--space-14);gap:var(--space-10)}
+  /* `both-edges` centres a desktop column; on a phone it is 2× a scrollbar width of dead margin. */
+  .content{scrollbar-gutter:auto}
+  .chat-grid{padding:0;gap:var(--space-14);grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(240px,1fr)}
+  .chat-messages{padding:var(--space-8);gap:var(--space-10)}
   .chat-msg{max-width:88%;font-size:var(--text-base);padding:var(--space-8) var(--space-12)}
-  .chat-input-row{padding:var(--space-10) var(--space-8);gap:var(--space-6)}
-  .chat-attach{width:44px;height:44px;flex-shrink:0}
+  .chat-input-row{padding:var(--space-8);gap:var(--space-6)}
+  .chat-attach,.chat-send{width:44px;height:44px}
   /* 16px literal suppresses iOS focus-zoom; a token merely equal to 16 would take the suppressor with it. */
   .chat-input{font-size:16px;min-height:44px;padding-left:var(--space-8);padding-right:var(--space-8)}
-  .chat-send{padding:var(--space-10) var(--space-18);font-size:var(--text-md);min-height:44px}
   .toggle-row{padding:var(--space-6) 0;gap:var(--space-10)}
   .toggle-row .name{font-size:var(--text-base)}
   .toggle-row.wand-row{margin:0 -2px;padding:var(--space-10)}
@@ -63,8 +64,7 @@
   button:not(.btn-tight):not(.account-nav-item),
   a[role="button"],
   input[type="submit"],
-  input[type="button"],
-  select{
+  input[type="button"]{
     min-height:var(--touch-floor,var(--touch-target-min));
   }
   input:not([type]),
@@ -73,8 +73,8 @@
   input[type="password"],
   input[type="number"],
   input[type="search"],
+  select,
   textarea{
-    min-height:var(--touch-target-min);
     font-size:max(16px,1em);
   }
 }

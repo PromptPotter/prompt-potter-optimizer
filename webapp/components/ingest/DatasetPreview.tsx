@@ -1,7 +1,6 @@
 "use client";
 
 import type { DraftCampaignWire } from "@/lib/api";
-import { Toolbar, ToolbarSpacer } from "@/components/ui";
 
 // A check-in has no `datasets/{slug}/` until Start, so `/cells` cannot answer.
 export function DatasetPreview({ draft }: { draft: DraftCampaignWire }) {
@@ -10,55 +9,40 @@ export function DatasetPreview({ draft }: { draft: DraftCampaignWire }) {
 
   // `column_query` is `""` until confirmed, so an unnamed header must not match it.
   const roleOf = (h: string) =>
-    !h ? null : h === draft.column_query ? "input" : h === draft.column_ground_truth ? "target" : null;
+    !h ? "" : h === draft.column_query ? " (input)" : h === draft.column_ground_truth ? " (target)" : "";
 
   return (
-    <section className="setup-preview">
-      <Toolbar>
-        <span className="setup-preview-title">Your data</span>
-        <ToolbarSpacer />
-        <span className="setup-preview-sub">
-          {draft.n_samples.toLocaleString()} row{draft.n_samples === 1 ? "" : "s"} ·{" "}
-          {headers.length} column{headers.length === 1 ? "" : "s"} · first {rows.length} shown
-        </span>
-      </Toolbar>
-      <div className="ds-preview-scroll">
-        <table className="ds-preview-table">
-          <thead>
-            <tr>
+    <div className="ds-preview-scroll">
+      <table className="ds-preview-table">
+        <caption>
+          First {rows.length} of {draft.n_samples.toLocaleString()} rows
+        </caption>
+        <thead>
+          <tr>
+            {headers.map((h) => (
+              <th key={h} scope="col">
+                {h}
+                {roleOf(h)}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, i) => (
+            <tr key={i}>
               {headers.map((h) => {
-                const role = roleOf(h);
+                // NOT `?? ""`: a ragged row lacks trailing keys, and a missing cell is not an empty value.
+                const v = row[h];
                 return (
-                  <th key={h} className={role ? `is-${role}` : undefined} scope="col">
-                    {h}
-                    {role ? <span className="ds-preview-role">{role}</span> : null}
-                  </th>
+                  <td key={h} title={v ?? "This row carries no value for this column."}>
+                    {v ?? "—"}
+                  </td>
                 );
               })}
             </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, i) => (
-              <tr key={i}>
-                {headers.map((h) => {
-                  const role = roleOf(h);
-                  // NOT `?? ""`: a ragged row lacks trailing keys, and a missing cell is not an empty value.
-                  const v = row[h];
-                  return (
-                    <td
-                      key={h}
-                      className={role ? `is-${role}` : undefined}
-                      title={v ?? "This row carries no value for this column."}
-                    >
-                      {v ?? "—"}
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }

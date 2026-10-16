@@ -3599,7 +3599,7 @@ export interface EditDraftCampaignPayload {
 export interface FieldGap {
   /** Checklist field id, e.g. `column.query`. */
   field: string;
-  reason: 'unset' | 'proposed_unconfirmed';
+  reason: 'unset' | 'proposed_unconfirmed' | 'conflict';
   /** One operator-facing line on how to close it. */
   hint: string;
 }
@@ -3670,6 +3670,11 @@ export interface DraftCampaignWire {
   readiness: OriginReadiness;
   /** One plain sentence restating what this draft would run, for a surface to say. */
   recap: string;
+  /** JSON Schema (2020-12) of the check-in's settings: each top-level property is a
+   * step, each leaf keyed by its `EditDraftPatch` path and valued by this
+   * wire's own field of that path. A `writeOnly` subtree is
+   * `StartCheckinPayload`'s, sent with Start and stored nowhere. */
+  setup_schema: Record<string, unknown>;
 }
 
 export interface OriginQuestion {

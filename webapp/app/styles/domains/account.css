@@ -84,7 +84,7 @@
 .account-limit-control{display:flex;align-items:center;gap:var(--space-8) var(--space-14);flex-wrap:wrap}
 .account-limit-control > .account-kicker{flex:0 0 104px}
 .account-limit.readonly{padding:var(--space-10) var(--space-12);border-left:2px solid var(--color-border)}
-.account-limit-input{width:6em;padding:var(--space-6) var(--space-8);border:0.5px solid var(--color-border);border-radius:var(--border-radius-sm);background:var(--color-background-primary);color:var(--color-text-primary);font-size:var(--text-base);font-variant-numeric:tabular-nums}
+.account-limit-input{width:6em;font-variant-numeric:tabular-nums}
 
 @media (max-width:640px){
   .account-modal{flex-direction:column}
@@ -100,7 +100,7 @@
 
 .activity-window-row{display:flex;align-items:center;flex-wrap:wrap;gap:var(--space-10);padding:var(--space-14) 0;border-bottom:0.5px solid var(--color-border);margin-bottom:var(--space-12)}
 .activity-window-row label{font-size:var(--text-xs);text-transform:uppercase;letter-spacing:0.04em;color:var(--color-text-secondary)}
-.activity-window-row select{padding:var(--space-6) var(--space-10);border:0.5px solid var(--color-border);border-radius:5px;background:var(--color-background-secondary);color:var(--color-text-primary);font-size:var(--text-base);cursor:pointer}
+.activity-window-row select{cursor:pointer}
 .activity-legend{list-style:none;margin:0 0 var(--space-8) 0;padding:0;display:flex;flex-wrap:wrap;gap:var(--space-6) var(--space-14)}
 .activity-legend li{display:inline-flex;align-items:center;gap:var(--space-6);font-size:var(--text-xs);color:var(--color-text-secondary)}
 .activity-legend-swatch{display:inline-block;width:10px;height:10px;border-radius:2px}

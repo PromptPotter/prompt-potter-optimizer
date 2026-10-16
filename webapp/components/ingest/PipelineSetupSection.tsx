@@ -1,8 +1,8 @@
 "use client";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import type { DraftCampaignWire, DraftPatch } from "@/lib/api";
 import { StaticConnectorProvider, useConnector } from "@/lib/hooks/useConnector";
-import { CopyButton, SegmentedControl, Toolbar, ToolbarSpacer } from "@/components/ui";
+import { CopyButton } from "@/components/ui";
 import { useSelection } from "@/lib/SelectionContext";
 import { targetNodeIds } from "@/lib/terms";
 import { PipelineFlow } from "@/components/dashboard/pipeline/PipelineFlow";
@@ -12,16 +12,23 @@ import { interiorNodes, searchPoint } from "@/lib/derivations";
 
 const LLM_ONLY: string[] = ["llm_only"];
 
-function arraysEqual(a: readonly string[], b: readonly string[]): boolean {
-  return a.length === b.length && a.every((x, i) => x === b[i]);
+function isLlmOnly(steps: readonly string[]): boolean {
+  return steps.length === LLM_ONLY.length && steps.every((x, i) => x === LLM_ONLY[i]);
+}
+
+export function pipelineLabel(draft: DraftCampaignWire): string {
+  return isLlmOnly(draft.active_steps) ? "LLM only" : `Research + Match · ${draft.active_steps.length} steps`;
 }
 
 export function PipelineSetupSection({
   draft,
   onApply,
+  children,
 }: {
   draft: DraftCampaignWire;
   onApply: (patch: DraftPatch) => void;
+  // What the chosen mode needs, shown under its description and above the node editor.
+  children: ReactNode;
 }) {
   const fields = useMemo(
     () => ({
@@ -47,7 +54,9 @@ export function PipelineSetupSection({
   );
   return (
     <StaticConnectorProvider fields={fields}>
-      <PipelineSetupInner draft={draft} onApply={onApply} />
+      <PipelineSetupInner draft={draft} onApply={onApply}>
+        {children}
+      </PipelineSetupInner>
     </StaticConnectorProvider>
   );
 }
@@ -55,9 +64,11 @@ export function PipelineSetupSection({
 function PipelineSetupInner({
   draft,
   onApply,
+  children,
 }: {
   draft: DraftCampaignWire;
   onApply: (patch: DraftPatch) => void;
+  children: ReactNode;
 }) {
   const cv = useConnector();
   const { node: selected, setSelectionForNode } = useSelection();
@@ -67,9 +78,10 @@ function PipelineSetupInner({
   );
 
   const nodes = interiorNodes(cv.view);
-  const researchSteps = nodes.map((n) => n.id);
+  // The served view can hold `llm_only` itself, and picking only that is no switch at all.
+  const researchSteps = nodes.map((n) => n.id).filter((id) => !LLM_ONLY.includes(id));
   const hasResearch = researchSteps.length > 0;
-  const isLlmOnly = arraysEqual(draft.active_steps, LLM_ONLY);
+  const llmOnly = isLlmOnly(draft.active_steps);
   // The selection axis is app-global, so match it against THIS view's nodes.
   const showDetail =
     selected?.scope === "target" && targetNodeIds(cv.view).includes(selected.id);
@@ -78,17 +90,29 @@ function PipelineSetupInner({
   const llmNodeId = llmNode?.id ?? null;
   const autoOpened = useRef(false);
   useEffect(() => {
-    if (!autoOpened.current && !isLlmOnly && selected == null && llmNodeId) {
+    if (!autoOpened.current && !llmOnly && selected == null && llmNodeId) {
       autoOpened.current = true;
       setSelectionForNode({ id: llmNodeId, scope: "target" });
     }
-  }, [isLlmOnly, selected, llmNodeId, setSelectionForNode]);
+  }, [llmOnly, selected, llmNodeId, setSelectionForNode]);
 
   return (
-    <section className="setup-preview pipeline-setup">
-      <Toolbar>
-        <span className="setup-preview-title">Pipeline</span>
-        <ToolbarSpacer />
+    <>
+      <p>
+        <label>
+          Mode{" "}
+          <select
+            value={llmOnly ? "llm" : "research"}
+            onChange={(e) =>
+              onApply({ pipeline_steps: e.target.value === "llm" ? LLM_ONLY : researchSteps })
+            }
+          >
+            <option value="llm">LLM only — one call per query</option>
+            <option value="research" disabled={!hasResearch}>
+              Research + Match
+            </option>
+          </select>
+        </label>{" "}
         <CopyButton
           data={{
             pipeline_steps: draft.active_steps,
@@ -97,35 +121,19 @@ function PipelineSetupInner({
           }}
           title="Copy this origin as JSON"
         />
-      </Toolbar>
+      </p>
 
-      <SegmentedControl
-        options={[
-          { value: "llm", label: "LLM only" },
-          { value: "research", label: "Research + Match", disabled: !hasResearch },
-        ]}
-        value={isLlmOnly ? "llm" : "research"}
-        onChange={(mode) =>
-          onApply({ pipeline_steps: mode === "llm" ? LLM_ONLY : researchSteps })
-        }
-        ariaLabel="Pipeline mode"
-      />
+      {children}
 
       {/* An unread schema is NOT a locked one: only the backend declares which params may move. */}
       {draft.schema_source === "unreachable" ? (
-        <p className="bnode-role">
-          Backend unreachable at check-in, so which params the optimizer may tune is
-          unknown — only the backend declares that. Values below are still yours to set;
-          reopen this origin once the backend is up to see its real search axes.
+        <p>
+          <small>Backend unreachable — which params may be tuned is unknown until it is up.</small>
         </p>
       ) : null}
 
-      {isLlmOnly ? (
+      {llmOnly ? (
         <>
-          <p className="bnode-role">
-            Single LLM node — the model answers each query directly from the prompt; no
-            retrieval, web search, or matching.
-          </p>
           {llmNode ? (
             <NodeSurface
               node={llmNode}
@@ -165,7 +173,6 @@ function PipelineSetupInner({
           ) : null}
         </>
       )}
-
-    </section>
+    </>
   );
 }

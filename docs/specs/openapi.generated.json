@@ -5440,6 +5440,12 @@
             "title": "Scoring Matchers",
             "type": "array"
           },
+          "setup_schema": {
+            "additionalProperties": true,
+            "description": "JSON Schema (2020-12) of the check-in's settings: each top-level property is a step, each leaf keyed by its `EditDraftPatch` path and valued by this wire's own field of that path. A `writeOnly` subtree is `StartCheckinPayload`'s, sent with Start and stored nowhere.",
+            "title": "Setup Schema",
+            "type": "object"
+          },
           "slug": {
             "title": "Slug",
             "type": "string"
@@ -5479,7 +5485,8 @@
           "model_capabilities",
           "dependencies",
           "readiness",
-          "recap"
+          "recap",
+          "setup_schema"
         ],
         "title": "DraftCampaignWire",
         "type": "object"
@@ -6475,7 +6482,8 @@
           "reason": {
             "enum": [
               "unset",
-              "proposed_unconfirmed"
+              "proposed_unconfirmed",
+              "conflict"
             ],
             "title": "Reason",
             "type": "string"

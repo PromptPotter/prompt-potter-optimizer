@@ -113,7 +113,7 @@
 .run-limits-control-used{color:var(--color-text-secondary);font-weight:400}
 .run-limits-control-edit{display:flex;align-items:center;gap:var(--space-6)}
 .run-limits-control-prefix{color:var(--color-text-secondary);font-size:var(--text-sm)}
-.run-limits-control-edit input{flex:1;min-width:0;padding:var(--space-6) var(--space-8);border:0.5px solid var(--color-border);border-radius:5px;background:var(--color-background-secondary);color:var(--color-text-primary);font-size:var(--text-sm);font-family:var(--font-mono)}
+.run-limits-control-edit input{flex:1;min-width:0;font-size:var(--text-sm);font-family:var(--font-mono)}
 .run-limits-control-set{padding:var(--space-6) var(--space-12);border-radius:5px;border:0.5px solid var(--color-accent);background:var(--color-accent);color:var(--color-text-on-accent);font-size:var(--text-sm);font-weight:500;cursor:pointer;flex-shrink:0}
 .run-limits-control-set:disabled{opacity:0.5;cursor:not-allowed}
 .run-limits-control-lift{padding:var(--space-6) var(--space-12);border-radius:5px;font-size:var(--text-sm);flex-shrink:0}

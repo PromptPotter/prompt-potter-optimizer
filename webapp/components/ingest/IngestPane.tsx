@@ -33,7 +33,7 @@ export function IngestPane() {
       </div>
     ) : (
       <div className="new-campaign-body">
-        <em className="new-campaign-loading">Loading your collection…</em>
+        <em>Loading your collection…</em>
       </div>
     );
 

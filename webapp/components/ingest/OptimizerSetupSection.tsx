@@ -5,7 +5,7 @@ import { StaticConnectorProvider, useConnector } from "@/lib/hooks/useConnector"
 import { useOptimizerPipeline } from "@/lib/hooks/useOptimizerPipeline";
 import { readyData, useRead } from "@/lib/hooks/useRead";
 import { useSelection } from "@/lib/SelectionContext";
-import { SegmentedControl, Toolbar, ToolbarSpacer } from "@/components/ui";
+import { SegmentedControl } from "@/components/ui";
 import { PipelineFlow } from "@/components/dashboard/pipeline/PipelineFlow";
 import { NodeKnobsPanel } from "@/components/dashboard/pipeline/NodeKnobsPanel";
 import { NodeDetail } from "@/components/shell/node-surface/NodeDetail";
@@ -46,12 +46,7 @@ function OptimizerSetupInner({
   const entry = roster?.optimizers.find((o) => o.name === optimizer);
 
   return (
-    <section className="setup-preview">
-      <Toolbar>
-        <span className="setup-preview-title">Optimizer</span>
-        <ToolbarSpacer />
-        <span className="setup-preview-sub">the loop that searches</span>
-      </Toolbar>
+    <>
       <p className="bnode-role">
         Which optimizer searches this campaign. Every one is scored, stopped and billed by the
         same bench, so their results compare. Switching drops the knobs you changed on the
@@ -59,7 +54,7 @@ function OptimizerSetupInner({
       </p>
 
       {roster ? (
-        <div className="optimizer-pick">
+        <div>
           <SegmentedControl<string>
             options={roster.optimizers.map((o) => ({
               value: o.name,
@@ -73,7 +68,7 @@ function OptimizerSetupInner({
             }}
             ariaLabel="Optimizer"
           />
-          <p className="optimizer-pick-cite">
+          <p>
             {!entry
               ? null
               : entry.paper
@@ -107,16 +102,12 @@ function OptimizerSetupInner({
 
       {shown ? <NodeDetail node={shown} onClose={() => setSelectionForNode(null)} /> : null}
 
-      <details className="new-campaign-optional">
-        <summary>{optimizer} knobs</summary>
-        <div className="new-campaign-optional-body">
-          <NodeKnobsPanel
-            optimizer={optimizer}
-            nodes={nodes}
-            onChange={(patch) => onApply({ optimization_overrides: { nodes: patch } })}
-          />
-        </div>
-      </details>
-    </section>
+      <h4>{optimizer} knobs</h4>
+      <NodeKnobsPanel
+        optimizer={optimizer}
+        nodes={nodes}
+        onChange={(patch) => onApply({ optimization_overrides: { nodes: patch } })}
+      />
+    </>
   );
 }

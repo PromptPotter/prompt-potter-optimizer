@@ -3193,7 +3193,7 @@ components:
             * `origin_incomplete` (422 on `/commands/start-checkin`)
               — `gaps`: a list of `{field, reason, hint}` objects naming each
               origin field that still blocks mint. `reason` ∈ `unset` |
-              `proposed_unconfirmed`. The deterministic origin-readiness
+              `proposed_unconfirmed` | `conflict`. The deterministic origin-readiness
               checklist — not the operator — is the source of truth for
               completeness (see `docs/specs/roadmap.md`).
             * `stored_config_invalid` (500 on any read of a stored config the

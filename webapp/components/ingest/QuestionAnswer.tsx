@@ -24,14 +24,10 @@ export function QuestionAnswer({
   };
 
   return (
-    <div className="origin-question">
-      <span className="origin-question-prompt">{question.prompt}</span>
+    <>
+      {question.prompt}{" "}
       {!answerable ? null : options.length > 0 ? (
-        <select
-          className="origin-question-select"
-          defaultValue=""
-          onChange={(e) => submit(e.target.value)}
-        >
+        <select defaultValue="" onChange={(e) => submit(e.target.value)}>
           <option value="" disabled>
             — choose —
           </option>
@@ -42,18 +38,18 @@ export function QuestionAnswer({
           ))}
         </select>
       ) : (
-        <span className="origin-question-text">
+        <>
           <input
             type="text"
             value={text}
             onChange={(e) => setText(e.target.value)}
             placeholder="Your answer"
-          />
+          />{" "}
           <button type="button" disabled={!text.trim()} onClick={() => submit(text)}>
             Answer
           </button>
-        </span>
+        </>
       )}
-    </div>
+    </>
   );
 }

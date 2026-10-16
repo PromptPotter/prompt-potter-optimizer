@@ -26,7 +26,7 @@ class FieldGap(StrictModel):
     """One origin field that still blocks mint — also the ``422 origin_incomplete`` body's ``details.gaps``."""
 
     field: str = Field(description="Checklist field id, e.g. `column.query`.")
-    reason: Literal["unset", "proposed_unconfirmed"]
+    reason: Literal["unset", "proposed_unconfirmed", "conflict"]
     hint: str = Field(description="One operator-facing line on how to close it.")
 
 
@@ -90,6 +90,15 @@ def origin_readiness(draft: DraftCampaign) -> OriginReadiness:
         label="target",
         gaps=gaps,
     )
+    if draft.column_query and draft.column_query == draft.column_ground_truth:
+        gaps.append(
+            FieldGap(
+                field="column.ground_truth",
+                reason="conflict",
+                hint="Input and target are the same column, so every answer trivially matches. "
+                "Pick two different columns.",
+            )
+        )
     _check_confirmed(
         draft,
         field_key="task_description",
