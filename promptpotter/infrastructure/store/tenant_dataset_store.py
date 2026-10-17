@@ -8,6 +8,13 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.domain.pipeline_schema import CANDIDATE_LIBRARY_FILE
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
+from promptpotter.infrastructure.store.dataset_access import (
+    DEFINITION_FILE,
+    FRAMING_FILE,
+    ORIGIN_FILE,
+    ROWS_FILE,
+    render_framing_file,
+)
 from promptpotter.infrastructure.store.io import (
     read_json_optional,
     read_yaml_optional,
@@ -21,6 +28,9 @@ from promptpotter.shared.clock import utcnow_iso
 
 if TYPE_CHECKING:
     from promptpotter.domain.sample import Sample
+
+# What a definition's `source:` materialized for this tenant: fetched rows and built panels.
+MATERIALIZED_DIR = "materialized"
 
 
 class TenantDatasetStore:
@@ -39,18 +49,13 @@ class TenantDatasetStore:
         if not root.is_dir():
             return []
         out: list[str] = []
-        for entry in sorted(root.iterdir()):
-            if not entry.is_dir():
-                continue
-            if entry.name.startswith("."):
-                continue
-            if not (entry / "pipeline.yaml").is_file():
-                continue
+        for path in sorted(root.rglob(DEFINITION_FILE)):
+            name = path.parent.relative_to(root).as_posix()
             try:
-                validate_dataset_name(entry.name)
+                validate_dataset_name(name)
             except ValueError:
                 continue
-            out.append(entry.name)
+            out.append(name)
         return out
 
     def slug_exists(self, slug: str) -> bool:
@@ -79,18 +84,23 @@ class TenantDatasetStore:
         return self.committed_datasets_root() / ".migrations"
 
     def load_dataset(self, slug: str) -> dict[str, Any] | None:
-        return read_json_optional(self.dataset_dir(slug) / "cache.json")
+        return read_json_optional(self.dataset_dir(slug) / ROWS_FILE)
 
-    def benchmark_rows_path(self, name: str) -> Path:
+    def materialized_rows_path(self, name: str) -> Path:
         validate_dataset_name(name)
-        return self._base_dir / "benchmark-rows" / f"{name}.json"
+        return self._base_dir / MATERIALIZED_DIR / f"{name}.json"
 
-    def load_benchmark_rows(self, name: str) -> dict[str, Any] | None:
-        return read_json_optional(self.benchmark_rows_path(name))
+    def load_materialized_rows(self, name: str) -> dict[str, Any] | None:
+        return read_json_optional(self.materialized_rows_path(name))
 
-    def save_benchmark_rows(self, name: str, items: Sequence[Sample | dict[str, Any]]) -> Path:
+    def materialized_panel_dir(self, name: str) -> Path:
+        """Where a panel recipe materializes a connector panel and the task directories it names."""
+        validate_dataset_name(name)
+        return self._base_dir / MATERIALIZED_DIR / name
+
+    def save_materialized_rows(self, name: str, items: Sequence[Sample | dict[str, Any]]) -> Path:
         serialized = [item.model_dump() if isinstance(item, Sample) else item for item in items]
-        path = self.benchmark_rows_path(name)
+        path = self.materialized_rows_path(name)
         write_json(
             path,
             {
@@ -117,18 +127,12 @@ class TenantDatasetStore:
         return TaskDecomposition.from_dict(read_yaml_optional(self.task_context_path(name)))
 
     def save_task_context(self, name: str, framing: TaskDecomposition) -> Path | None:
-        """`None` on an empty record: this tier shadows the dataset's own `task_context.yaml`, and an empty file buries it."""
+        """`None` on an empty record: this tier shadows the definition's committed framing, and an empty file buries it."""
         if not framing:
             return None
         path = self.task_context_path(name)
         write_yaml(path, framing.to_dict())
         return path
-
-    def task_description(self, slug: str) -> str | None:
-        path = self.dataset_dir(slug) / "task_description.md"
-        if not path.is_file():
-            return None
-        return path.read_text(encoding="utf-8")
 
     def version_dataset(self, slug: str, versioned: str) -> Path:
         src = self.dataset_dir(slug)
@@ -140,19 +144,7 @@ class TenantDatasetStore:
         if dst.exists():
             raise FileExistsError(versioned)
         src.rename(dst)
-        self._rewrite_campaign_self_ref(dst, versioned)
         return dst
-
-    def _rewrite_campaign_self_ref(self, dataset_dir: Path, new_name: str) -> None:
-        """A later draft off the versioned copy must not resurrect the old slug."""
-        path = dataset_dir / "campaign.yaml"
-        data = read_yaml_optional(path)
-        if not isinstance(data, dict):
-            return
-        cc = data.get("campaign_config")
-        if isinstance(cc, dict) and cc.get("dataset_name"):
-            cc["dataset_name"] = new_name
-            write_yaml(path, data)
 
     def write_committed_dataset(
         self,
@@ -161,20 +153,15 @@ class TenantDatasetStore:
         samples: Sequence[Sample | dict[str, Any]],
         source_file: str,
         headers: Sequence[str],
-        pipeline_json: dict[str, Any],
-        campaign_json: dict[str, Any],
-        task_description: str,
-        prompt_default: dict[str, Any],
-        task_context: TaskDecomposition,
         sample_order_seed: str | None = None,
     ) -> Path:
+        """The rows alone: the directory is a dataset only once :meth:`write_definition` lands."""
         dst = self.dataset_dir(slug)
         if dst.exists():
             raise FileExistsError(slug)
-        dst.mkdir(parents=True, exist_ok=True)
         serialized = [s.model_dump() if isinstance(s, Sample) else s for s in samples]
         write_json(
-            dst / "cache.json",
+            dst / ROWS_FILE,
             {
                 "name": slug,
                 "created_at": utcnow_iso(),
@@ -186,13 +173,25 @@ class TenantDatasetStore:
                 "items": serialized,
             },
         )
-        write_yaml(dst / "pipeline.yaml", pipeline_json)
-        write_yaml(dst / "campaign.yaml", campaign_json)
-        write_text(dst / "task_description.md", task_description)
-        # As `save_task_context`: committing an empty record makes the emptiness permanent.
-        if task_context:
-            write_yaml(dst / "task_context.yaml", task_context.to_dict())
-        write_yaml(dst / "prompts" / "default.yaml", prompt_default)
+        return dst
+
+    def write_definition(
+        self,
+        slug: str,
+        *,
+        pipeline: dict[str, Any],
+        campaign: dict[str, Any],
+        description: str,
+        framing: TaskDecomposition,
+        origin: dict[str, dict[str, Any]],
+    ) -> Path:
+        """WHOLE files: the tenant tier lays no defaults or family under a definition."""
+        dst = self.dataset_dir(slug)
+        write_text(dst / FRAMING_FILE, render_framing_file(description, framing))
+        if origin:
+            write_yaml(dst / ORIGIN_FILE, origin)
+        # Last: the definition file is what makes the directory a dataset.
+        write_yaml(dst / DEFINITION_FILE, {"pipeline": pipeline, "campaign": campaign})
         return dst
 
     def write_candidate_library(self, slug: str, library: Sequence[str]) -> Path:
@@ -201,4 +200,4 @@ class TenantDatasetStore:
         return path
 
 
-__all__ = ["TenantDatasetStore"]
+__all__ = ["MATERIALIZED_DIR", "TenantDatasetStore"]

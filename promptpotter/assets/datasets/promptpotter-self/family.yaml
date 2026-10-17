@@ -1,0 +1,105 @@
+pipeline:
+  backend_name: PromptPotter
+  backend_type: promptpotter
+  # What an operator may steer the inner optimizer TO on a babysat fork. It must name the model
+  # `assets/optimizers/potter/pipeline.yaml` runs on every node (gpt-6-luna), or every run
+  # silently sits in the taints-the-branch case the gate exists to mark; the others stay because
+  # `pipeline.yaml::available_models` still offers them as sanctioned alternatives. Move this list
+  # in the SAME commit as the manifest — it and `_MODEL_PROFILES` are the two that do not fail
+  # loudly when they lag behind it.
+  available_models: &pp_self_models
+    - openai/gpt-6-luna
+    - deepseek/deepseek-v4-flash:nitro
+    - qwen/qwen3.8-27b:nitro
+    - openai/gpt-oss-120b
+  # No `nodes:` and no `pipelines:`: the graph is the inner optimizer's, which the connector serves
+  # (`runner/inner/tasks.py::InnerCells.pipeline`) — every llm node the manifest the cells run
+  # declares, on that manifest's walks. A dataset here overlays it as any dataset overlays its backend.
+
+campaign:
+  # The list above rides `optimizer_narrowing`, which is the ONE permitted set — what the optimizer
+  # may pick where an axis is open, and what a human may steer to un-tainted where it is not. A
+  # `param_allowed_values` entry REPLACES the node's own list rather than intersecting with it
+  # (`PipelineSchema.narrow`), so this file may name a model the manifest predates. It is a
+  # permission, not an instrument: no cell's pin (`runner/inner/connector.py::_instrument`) reads it.
+  optimizer_narrowing:
+    l1_generate: &pp_self_narrowing
+      param_allowed_values:
+        model: *pp_self_models
+    # `l1_score` is absent on purpose, and is the only node here that is: it is the measurement
+    # node, so it runs no model and a permitted model set on it names nothing.
+    l1_critique: *pp_self_narrowing
+    l2_context: *pp_self_narrowing
+    l3_plan: *pp_self_narrowing
+    checkin: *pp_self_narrowing
+  # ONE measurand: what the inner search DELIVERED on rows it never searched — `mean_bench_lift`, the
+  # ADOPTED prompt's accuracy on the cell's held-out bench minus the origin's, averaged over the
+  # round budget, so exploring costs nothing and a promotion that fits its own rows buys nothing.
+  # The four-factor composite this replaces is described in `domain/l4/proxies.py`; measured over a
+  # 39-cell panel, only a lift term discriminated between optimizer prompts, and the quality
+  # factors carried more seed variance than arm variance while holding authority over the
+  # ordering. The search pool's θ lift (`mean_round_delta`) is served beside it and scores
+  # nothing: read on the rows the search selected on, it is in-sample.
+  # The re-anchor is LINEAR and only exists because `compile_scorer` refuses an empty formula and
+  # `clamp_unit_score` clamps [0,1]. Being linear, the paired estimator's reported effect IS the
+  # mean held-out lift in accuracy points — a number you can read, not merely order by. The window
+  # is half a unit each side of zero: a 20-row bench moves in steps of 0.05, so a cell clips only
+  # past ten rows of lift or loss, and the floor (-1) lands at exactly 0.0. Re-check here, not by
+  # intuition, once a banked corpus exists under this measurand.
+  scoring:
+    per_sample: max(0.0, min(1.0, mean_bench_lift + 0.5))
+  display_metric: ability
+  optimization:
+    # Priced against `ceiling.usd`, not intuition: C0 costs ~$0.47 for the 6-cell calibration panel
+    # and a 3-variant round runs ~2.3 arms to completion (PoBB refunds the rest), so an optimizing
+    # round is ~$1.08. 4 lands at ~$3.7 of the $5.00 ceiling; 5 would halt mid-round on budget
+    # rather than on the cap.
+    #
+    # It must also be falsifiable: ONE optimizing round is a coin toss rather than a test of a
+    # challenger, whatever the outer SE reads under the held-out measurand.
+    max_rounds: 4
+    # `degradation_threshold` stays at the default, and that is calibrated, not inherited: it is
+    # on the fitness scale, so it moves with the re-anchor above. What it must NOT reject, from
+    # the inner cycles: a WINNING inner round buys 1-4 rows in 28 (+0.036 / +0.071 / +0.107 /
+    # +0.143 are the only positive values ever recorded) and 10 of 17 rounds bought exactly zero.
+    # Improvement here is granular and infrequent by nature; a bar that rejects a 1-row win
+    # rejects most real wins.
+    elimination_n_min: 4
+    ceiling: {usd: 5.0, tokens: null}
+    # Potter's knobs — the overlay on its manifest's nodes (assets/optimizers/potter/).
+    nodes:
+      l1_generate:
+        config:
+          prompt_family: l1_generate_self_optimizing
+          prompt_block_catalogue: 'off'
+          # Affordable rather than merely tolerable, and the inner cycles are why: PoBB cut an arm in
+          # 14 of 17 inner rounds, so a 3-variant round runs ~2 arms to completion and the third is
+          # mostly refunded. That is `elimination_n_min` earning its keep.
+          n_variants: 3
+      l1_critique:
+        config:
+          prompt_family: l1_critique_self_optimizing
+      l2_context:
+        config:
+          prompt_family: l2_context_self_optimizing
+      escalation:
+        config:
+          # No `optimization.lives`, and its absence is deliberate rather than an omission. It read
+          # `start: 2` against `max_rounds: 2`, so the bank could not reach zero before the
+          # calendar did: hearts NEVER bound, they only relabelled the stop. `af6252` stopped
+          # `lives_exhausted` on round 2, which is also exactly where `max_rounds` would have
+          # ended it, and nothing in the record says which fact stopped the run. Deleting the
+          # inert knob changes no round, only the reason it reports. Re-add it with real
+          # headroom (`start` well under `max_rounds`) when the outer loop runs long enough for
+          # a measurement-driven brake to mean something — the `lives_no_headroom` coupling
+          # warns if it goes back in without it.
+          l1_patience: 2
+      pobb:
+        config:
+          # Per-campaign, NOT the global default (0.15, whose false-cut curve was measured on the
+          # general round corpus). Here one candidate-cell is a whole inner campaign, so the two
+          # errors are priced very differently: a false cut loses one arm of a 3-variant round,
+          # while a false survival spends the rest of a 6-cell panel on an arm already losing.
+          # Racing at the global epsilon captured about a quarter of the headroom its own p_best
+          # stream offered on `promptpotter-self__af6252`.
+          epsilon: 0.30

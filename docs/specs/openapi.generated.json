@@ -1337,7 +1337,7 @@
             "type": "string"
           },
           "id": {
-            "description": "The connector's name, as `pipeline.yaml::backend_type` names it",
+            "description": "The connector's name, as `dataset.yaml::pipeline.backend_type` names it",
             "title": "Id",
             "type": "string"
           }
@@ -1625,6 +1625,70 @@
         "title": "BenchReading",
         "type": "object"
       },
+      "BenchScope": {
+        "additionalProperties": false,
+        "description": "One dataset's rows of a bench spanning several, read apart: a level is never averaged\nacross datasets.",
+        "properties": {
+          "dataset": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The dataset these rows measure; `None` is the one the cycle is filed under.",
+            "title": "Dataset"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OwnLevel"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`None` where the origin's pass read nothing."
+          },
+          "rows": {
+            "title": "Rows",
+            "type": "integer"
+          },
+          "selected": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OwnLevel"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`None` where the selection's read nothing."
+          },
+          "vs_origin": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PairedReading"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`selected` over `origin` on this dataset's rows alone; `None` where either read nothing."
+          }
+        },
+        "required": [
+          "dataset",
+          "rows",
+          "origin",
+          "selected",
+          "vs_origin"
+        ],
+        "title": "BenchScope",
+        "type": "object"
+      },
       "BenchScore": {
         "additionalProperties": false,
         "description": "The headline: the selection and the origin, scored on a bench set no optimizer node read.",
@@ -1660,6 +1724,14 @@
               }
             ],
             "description": "The origin's own level; `None` where its pass read nothing."
+          },
+          "scopes": {
+            "description": "Per dataset, where the bench rows measure several; empty on one. The two levels above then read no column, since two datasets' levels never average, while `vs_origin` still pairs every row.",
+            "items": {
+              "$ref": "#/components/schemas/BenchScope"
+            },
+            "title": "Scopes",
+            "type": "array"
           },
           "scorer_id": {
             "description": "The grader every number here was read under. A stored copy is a cache of that reading: a reader under another grader reads the passes again, never this.",
@@ -1943,7 +2015,7 @@
                 "type": "null"
               }
             ],
-            "description": "The accuracy a best-reachable prompt would score on this dataset at this campaign's model. `index.json::final.rounds_to_ceiling` counts rounds against `CEILING_FRACTION` of it, and the value is banked beside that count so a reader never has to guess the denominator. `None` (default) → the clock reports nothing, which is the honest reading: a ceiling is a joint claim about the dataset AND the model, so only the dataset owner can declare one (`datasets/{slug}/campaign.yaml::campaign_config`) and a guessed value makes every campaign on it publish a round count nobody can defend. DISPLAY config — it moves no gate, no selection and no stop.",
+            "description": "The accuracy a best-reachable prompt would score on this dataset at this campaign's model. `index.json::final.rounds_to_ceiling` counts rounds against `CEILING_FRACTION` of it, and the value is banked beside that count so a reader never has to guess the denominator. `None` (default) → the clock reports nothing, which is the honest reading: a ceiling is a joint claim about the dataset AND the model, so only the dataset owner can declare one (`dataset.yaml::campaign`) and a guessed value makes every campaign on it publish a round count nobody can defend. DISPLAY config — it moves no gate, no selection and no stop.",
             "title": "Accuracy Ceiling"
           },
           "bench_trigger": {
@@ -1955,11 +2027,6 @@
               "each_round"
             ],
             "title": "Bench Trigger",
-            "type": "string"
-          },
-          "dataset_name": {
-            "default": "",
-            "title": "Dataset Name",
             "type": "string"
           },
           "dataset_split": {
@@ -2016,7 +2083,7 @@
             "additionalProperties": {
               "$ref": "#/components/schemas/NodeSearchNarrowing"
             },
-            "description": "Per-node declaration over the dataset's optimizer search space — the per-campaign param-lock + value-space lever beside `exclude_nodes` (whole node). `provider`/`route_order` are always locked. **`param_keys` SUBSETS and `param_allowed_values` REPLACES** (`PipelineSchema.narrow`, applied at pipeline setup): a campaign may only close axes the dataset opened, but the value space is its own statement — which is what lets an operator ADD a model or a reasoning rung no `pipeline.yaml` on disk carries. `param_allowed_values['model']` is also the ONE permitted model set: what the optimizer may pick, and what a human fork may steer to without tainting the branch. A steer outside it is a `campaign.babysit` act — warned + graded C (`overlay_sets_model_outside_allowed`). Nothing declared for a node = nothing sanctioned there, the restrictive default.",
+            "description": "Per-node declaration over the dataset's optimizer search space — the per-campaign param-lock + value-space lever beside `exclude_nodes` (whole node). `provider`/`route_order` are always locked. **`param_keys` SUBSETS and `param_allowed_values` REPLACES** (`PipelineSchema.narrow`, applied at pipeline setup): a campaign may only close axes the dataset opened, but the value space is its own statement — which is what lets an operator ADD a model or a reasoning rung no `dataset.yaml::pipeline` on disk carries. `param_allowed_values['model']` is also the ONE permitted model set: what the optimizer may pick, and what a human fork may steer to without tainting the branch. A steer outside it is a `campaign.babysit` act — warned + graded C (`overlay_sets_model_outside_allowed`). Nothing declared for a node = nothing sanctioned there, the restrictive default.",
             "title": "Optimizer Narrowing",
             "type": "object"
           },
@@ -2051,7 +2118,7 @@
           },
           "task_framing": {
             "default": "committed",
-            "description": "Which task framing every target render splices in. `committed` (default) runs under the dataset's `task_context.yaml`, which the first mint decomposes from `task_description.md` when none is committed yet. `off` runs UNFRAMED on purpose — the ablation arm — even where framing exists, and the campaign manifest keeps the delta, so the result never reads as a framed one.",
+            "description": "Which task framing every target render splices in. `committed` (default) runs under the front matter of the dataset's `task.md`, which the first mint decomposes from its body when none is committed yet. `off` runs UNFRAMED on purpose — the ablation arm — even where framing exists, and the campaign manifest keeps the delta, so the result never reads as a framed one.",
             "enum": [
               "committed",
               "off"
@@ -2229,6 +2296,27 @@
         "title": "CampaignDetailResponse",
         "type": "object"
       },
+      "CampaignLaunch": {
+        "additionalProperties": false,
+        "description": "A campaign run: its hop is UNRESOLVED until a fresh mint names the cycle.",
+        "properties": {
+          "dataset_name": {
+            "title": "Dataset Name",
+            "type": "string"
+          },
+          "kind": {
+            "const": "campaign_launch",
+            "default": "campaign_launch",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "dataset_name"
+        ],
+        "title": "CampaignLaunch",
+        "type": "object"
+      },
       "CampaignListResponse": {
         "additionalProperties": false,
         "properties": {
@@ -2255,7 +2343,7 @@
       },
       "CampaignPipelineResponse": {
         "additionalProperties": false,
-        "description": "One campaign's pipeline at one searchpoint — the body of ``GET /campaigns/{id}/pipeline``.\nThe peer of ``readable_dataset_dir`` one question up: that seam answers which bytes are on disk,\nthis one which values a campaign runs (``architecture.md`` § Two resolution seams).",
+        "description": "One campaign's pipeline at one searchpoint — the body of ``GET /campaigns/{id}/pipeline``.\nThe peer of ``resolve_dataset`` one question up: that seam answers which bytes are on disk,\nthis one which values a campaign runs (``architecture.md`` § Two resolution seams).",
         "properties": {
           "backend_type": {
             "title": "Backend Type",
@@ -2293,15 +2381,12 @@
             "type": "object"
           },
           "nests": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/NestedPipelineRef"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The inner pipeline this chain nests, if any — the L4 drill-in, on this read"
+            "description": "The inner pipelines this chain nests, one per dataset its cells measure — the L4 drill-in, on this read",
+            "items": {
+              "$ref": "#/components/schemas/NestedPipelineRef"
+            },
+            "title": "Nests",
+            "type": "array"
           },
           "node_config_schema": {
             "additionalProperties": {
@@ -3797,7 +3882,7 @@
                 "type": "null"
               }
             ],
-            "description": "Which side of this cut the run CONTINUES on, derived from `trigger` (`FORK_DIRECTION`). `offshoot` = this branch hangs off a line that keeps running; `supersede` = this branch IS the line and the PARENT is what was left behind. Null for roots and inner runs, which were not cut from anything. Served, never derived in the client — the two read identically on disk and only this says them apart."
+            "description": "Which side of this cut the run CONTINUES on, derived from `trigger` (`FORK_TRAITS`). `offshoot` = this branch hangs off a line that keeps running; `supersede` = this branch IS the line and the PARENT is what was left behind. Null for roots and inner runs, which were not cut from anything. Served, never derived in the client — the two read identically on disk and only this says them apart."
           },
           "id": {
             "description": "Course: the cycle_id. Candidate: the searchpoint id minted at L1/origin.",
@@ -4477,7 +4562,7 @@
             "title": "N Samples"
           },
           "name": {
-            "description": "Slug used as the path segment under `datasets/`.",
+            "description": "The definition's path under its tier, `/`-separated.",
             "title": "Name",
             "type": "string"
           },
@@ -4501,11 +4586,11 @@
                 "type": "null"
               }
             ],
-            "description": "What the dataset is, in one plain sentence (the first under `dataset.md`'s title).",
+            "description": "What the dataset is, in one plain sentence (the first under `README.md`'s title).",
             "title": "Summary"
           },
           "tier": {
-            "description": "``yours`` = user-owned Origin under ``projects/{tenant}/datasets/{slug}/``. ``install`` = content that ships with the product at ``datasets/{slug}/`` (benchmarks, demos, ``promptpotter-self``) — tracked in git, so readable by anyone using the install. A ``yours`` slug shadows an ``install`` one.",
+            "description": "``yours`` = user-owned Origin under ``projects/{tenant}/datasets/{slug}/``. ``install`` = content that ships with the product at ``assets/datasets/{name}/`` (benchmarks, demos, ``promptpotter-self``) — tracked in git, so readable by anyone using the install. A ``yours`` slug shadows an ``install`` one.",
             "enum": [
               "yours",
               "install"
@@ -4522,7 +4607,7 @@
                 "type": "null"
               }
             ],
-            "description": "Display title (from `dataset.md`).",
+            "description": "Display title (from `README.md`).",
             "title": "Title"
           }
         },
@@ -4690,15 +4775,12 @@
             "type": "string"
           },
           "nests": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/NestedPipelineRef"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The pipeline this one nests in turn; the only wire naming it before a cell has spawned"
+            "description": "The pipelines this one nests in turn, one per dataset its cells measure; the only wire naming them before a cell has spawned",
+            "items": {
+              "$ref": "#/components/schemas/NestedPipelineRef"
+            },
+            "title": "Nests",
+            "type": "array"
           },
           "node_config_schema": {
             "additionalProperties": {
@@ -5358,6 +5440,12 @@
             "title": "Scoring Matchers",
             "type": "array"
           },
+          "setup_schema": {
+            "additionalProperties": true,
+            "description": "JSON Schema (2020-12) of the check-in's settings: each top-level property is a step, each leaf keyed by its `EditDraftPatch` path and valued by this wire's own field of that path. A `writeOnly` subtree is `StartCheckinPayload`'s, sent with Start and stored nowhere.",
+            "title": "Setup Schema",
+            "type": "object"
+          },
           "slug": {
             "title": "Slug",
             "type": "string"
@@ -5397,7 +5485,8 @@
           "model_capabilities",
           "dependencies",
           "readiness",
-          "recap"
+          "recap",
+          "setup_schema"
         ],
         "title": "DraftCampaignWire",
         "type": "object"
@@ -5700,6 +5789,82 @@
         "title": "EffectProvenance",
         "type": "object"
       },
+      "EnvironmentReading": {
+        "additionalProperties": false,
+        "description": "One cell as an ENVIRONMENT, the block the subjects are compared within. ``snr`` is the\nsubjects' spread at this cell over the roster's pooled residual — which environments tell the\nsubjects apart, read without a replicate, which the content-addressed instrument cannot give.\nA held-out cell reads the subjects' bench passes, which only a round's selection has.",
+        "properties": {
+          "best_subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The subject the metric's direction favours here; null where it has none.",
+            "title": "Best Subject"
+          },
+          "cell": {
+            "title": "Cell",
+            "type": "string"
+          },
+          "held_out": {
+            "title": "Held Out",
+            "type": "boolean"
+          },
+          "n_subjects": {
+            "title": "N Subjects",
+            "type": "integer"
+          },
+          "signal_sd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signal Sd"
+          },
+          "snr": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`signal_sd` over the roster's residual SD; null where no residual was read.",
+            "title": "Snr"
+          },
+          "spread": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Best subject minus worst at this cell; null below two.",
+            "title": "Spread"
+          }
+        },
+        "required": [
+          "cell",
+          "held_out",
+          "n_subjects",
+          "spread",
+          "signal_sd",
+          "snr",
+          "best_subject"
+        ],
+        "title": "EnvironmentReading",
+        "type": "object"
+      },
       "ErrorCategory": {
         "enum": [
           "CLIENT",
@@ -5781,6 +5946,13 @@
             "title": "Edits",
             "type": "array"
           },
+          "environments": {
+            "items": {
+              "$ref": "#/components/schemas/EnvironmentReading"
+            },
+            "title": "Environments",
+            "type": "array"
+          },
           "factors": {
             "items": {
               "$ref": "#/components/schemas/FactorReading"
@@ -5812,6 +5984,14 @@
               }
             ]
           },
+          "lift_profiles": {
+            "description": "Empty under a metric that is not a delta.",
+            "items": {
+              "$ref": "#/components/schemas/LiftProfile"
+            },
+            "title": "Lift Profiles",
+            "type": "array"
+          },
           "metric": {
             "$ref": "#/components/schemas/MetricReading"
           },
@@ -5829,6 +6009,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/EvidencePower"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rank_agreement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RankAgreement"
               },
               {
                 "type": "null"
@@ -6292,7 +6482,8 @@
           "reason": {
             "enum": [
               "unset",
-              "proposed_unconfirmed"
+              "proposed_unconfirmed",
+              "conflict"
             ],
             "title": "Reason",
             "type": "string"
@@ -6606,7 +6797,7 @@
                 "type": "null"
               }
             ],
-            "description": "Which side of the cut the run CONTINUES on (`FORK_DIRECTION`): `offshoot` hangs off a line that keeps running, `supersede` IS the line."
+            "description": "Which side of the cut the run CONTINUES on (`FORK_TRAITS`): `offshoot` hangs off a line that keeps running, `supersede` IS the line."
           },
           "kind": {
             "enum": [
@@ -7484,6 +7675,41 @@
         "title": "LiftEstimate",
         "type": "object"
       },
+      "LiftProfile": {
+        "additionalProperties": false,
+        "description": "How many of a subject's own cells moved, by sign — a lift's BREADTH beside its mean. Served\nonly under a delta metric: a level has no zero to sit on either side of.",
+        "properties": {
+          "dropped": {
+            "title": "Dropped",
+            "type": "integer"
+          },
+          "flat": {
+            "title": "Flat",
+            "type": "integer"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "lifted": {
+            "title": "Lifted",
+            "type": "integer"
+          },
+          "n_cells": {
+            "title": "N Cells",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key",
+          "n_cells",
+          "lifted",
+          "flat",
+          "dropped"
+        ],
+        "title": "LiftProfile",
+        "type": "object"
+      },
       "LineRate": {
         "additionalProperties": false,
         "description": "One member of the best-so-far line as an overlap reading holds it.",
@@ -7806,43 +8032,6 @@
         "title": "LoopWarning",
         "type": "object"
       },
-      "MachineHolder": {
-        "additionalProperties": false,
-        "properties": {
-          "campaign_id": {
-            "title": "Campaign Id",
-            "type": "string"
-          },
-          "cycle_id": {
-            "title": "Cycle Id",
-            "type": "string"
-          },
-          "started_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "ISO start time of the holding run; null if still pending",
-            "title": "Started At"
-          },
-          "user": {
-            "description": "user_id of the operator whose run owns the slot",
-            "title": "User",
-            "type": "string"
-          }
-        },
-        "required": [
-          "user",
-          "campaign_id",
-          "cycle_id"
-        ],
-        "title": "MachineHolder",
-        "type": "object"
-      },
       "MachineNotice": {
         "additionalProperties": false,
         "description": "What the machine's occupancy means for the CALLER, in words: their own launch waiting, or\na full machine a launch would wait on. Built by :meth:`of` alone.",
@@ -7865,13 +8054,10 @@
       },
       "MachineQueueEntry": {
         "additionalProperties": false,
+        "description": "Always a launch: a scoring pass finding no slot is refused, never queued.",
         "properties": {
           "created_at": {
             "title": "Created At",
-            "type": "string"
-          },
-          "dataset_name": {
-            "title": "Dataset Name",
             "type": "string"
           },
           "job_id": {
@@ -7882,11 +8068,16 @@
             "description": "1-based place in the machine-wide drain order at the moment of this read. Least-served-first, so it moves as other accounts start and finish — it is where this launch stands now, not a countdown.",
             "title": "Position",
             "type": "integer"
+          },
+          "what": {
+            "description": "The job in words (`Job.what`), worded once for every surface: a run's `campaign/cycle`, a mint's dataset, or a scoring pass's verb and the cycle or workspace it scores.",
+            "title": "What",
+            "type": "string"
           }
         },
         "required": [
           "job_id",
-          "dataset_name",
+          "what",
           "created_at",
           "position"
         ],
@@ -7896,19 +8087,6 @@
       "MachineRefusal": {
         "additionalProperties": false,
         "properties": {
-          "campaign_id": {
-            "description": "Empty where the launch was a mint refused before a campaign existed",
-            "title": "Campaign Id",
-            "type": "string"
-          },
-          "cycle_id": {
-            "title": "Cycle Id",
-            "type": "string"
-          },
-          "dataset_name": {
-            "title": "Dataset Name",
-            "type": "string"
-          },
           "job_id": {
             "title": "Job Id",
             "type": "string"
@@ -7922,24 +8100,93 @@
             "description": "When the launch was refused",
             "title": "Released At",
             "type": "string"
+          },
+          "what": {
+            "description": "The job in words (`Job.what`), worded once for every surface: a run's `campaign/cycle`, a mint's dataset, or a scoring pass's verb and the cycle or workspace it scores.",
+            "title": "What",
+            "type": "string"
           }
         },
         "required": [
           "job_id",
-          "dataset_name",
-          "campaign_id",
-          "cycle_id",
+          "what",
           "released_at",
           "reason"
         ],
         "title": "MachineRefusal",
         "type": "object"
       },
+      "MachineSlot": {
+        "additionalProperties": false,
+        "description": "One held slot, whoever holds it: a campaign run or a paid verb's scoring pass.",
+        "properties": {
+          "holder": {
+            "description": "WHAT holds the slot, by `kind`: a `campaign_launch` (its run is a cycle `/cycles` lists) or a `scoring_pass` (a paid verb with no cycle of its own).",
+            "discriminator": {
+              "mapping": {
+                "campaign_launch": "#/components/schemas/CampaignLaunch",
+                "scoring_pass": "#/components/schemas/ScoringPass"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CampaignLaunch"
+              },
+              {
+                "$ref": "#/components/schemas/ScoringPass"
+              }
+            ],
+            "title": "Holder"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "mine": {
+            "description": "The CALLER's account holds it — a delegate's job is its owner's. The test a surface listing the account's own jobs filters on.",
+            "title": "Mine",
+            "type": "boolean"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ISO time the holder started running; null while it is still starting",
+            "title": "Started At"
+          },
+          "user": {
+            "description": "user_id of the account whose job holds the slot",
+            "title": "User",
+            "type": "string"
+          },
+          "what": {
+            "description": "The job in words (`Job.what`), worded once for every surface: a run's `campaign/cycle`, a mint's dataset, or a scoring pass's verb and the cycle or workspace it scores.",
+            "title": "What",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "what",
+          "holder",
+          "user",
+          "mine",
+          "started_at"
+        ],
+        "title": "MachineSlot",
+        "type": "object"
+      },
       "MachineStatusResponse": {
         "additionalProperties": false,
         "properties": {
           "busy": {
-            "description": "True iff `running >= capacity` — no slot free for anyone, the caller included. A launch is then QUEUED rather than refused, so this reads as 'you will wait', not 'you cannot start'.",
+            "description": "True iff `occupied` reaches `capacity` — no slot free for anyone, the caller included. A launch is then QUEUED rather than refused, so this reads as 'you will wait', not 'you cannot start'.",
             "title": "Busy",
             "type": "boolean"
           },
@@ -7965,17 +8212,6 @@
             "description": "`capacity` below `ceiling`, worded once for the terminal and the usage tab; null where the machine admits its whole ceiling.",
             "title": "Held Back"
           },
-          "holder": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/MachineHolder"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The oldest live run where it is the caller's own tenant's, or the caller is the host; null otherwise — another tenant's run is counted in `running` and never named."
-          },
           "notice": {
             "anyOf": [
               {
@@ -7987,6 +8223,11 @@
             ],
             "description": "`busy` and the caller's place in `queue`, worded once for the terminal and the alert bar; null where a slot is free and nothing of theirs waits."
           },
+          "occupied": {
+            "description": "Slots held machine-wide, whoever holds them — the occupancy figure, which `running` may list fewer of.",
+            "title": "Occupied",
+            "type": "integer"
+          },
           "queue": {
             "description": "The CALLER's own waiting launches, oldest first — everything a client needs to say 'queued, position 3' and to offer a cancel. Own is the PRINCIPAL that launched them, the test `cancel-queued-run` applies. Other entries are counted in `queued` and never listed.",
             "items": {
@@ -7996,7 +8237,7 @@
             "type": "array"
           },
           "queued": {
-            "description": "Launches waiting for a slot, machine-wide — an occupancy figure like `running`, not a list. Who they belong to is deliberately not served; `queue` carries the caller's own.",
+            "description": "Launches waiting for a slot, machine-wide — a count, not a list. Who they belong to is deliberately not served; `queue` carries the caller's own.",
             "title": "Queued",
             "type": "integer"
           },
@@ -8009,15 +8250,19 @@
             "type": "array"
           },
           "running": {
-            "description": "Campaigns currently live on the machine.",
+            "description": "The held slots this caller may see, oldest first — live campaigns and paid scoring passes alike. Every slot under `MACHINE_STATUS_SCOPE=all` or to the host; otherwise the caller's own, another account's being counted in `occupied` alone.",
+            "items": {
+              "$ref": "#/components/schemas/MachineSlot"
+            },
             "title": "Running",
-            "type": "integer"
+            "type": "array"
           }
         },
         "required": [
           "capacity",
           "ceiling",
           "held_back",
+          "occupied",
           "running",
           "queued",
           "busy",
@@ -9662,7 +9907,7 @@
                 "type": "null"
               }
             ],
-            "description": "The node of `view` that runs the measurement — where a campaign's pipeline nests under this graph, as `nests.node` names it per campaign. Null where the manifest declares no measurement node.",
+            "description": "The node of `view` that runs the measurement — where a campaign's pipeline nests under this graph, as each `nests[].node` names it per campaign. Null where the manifest declares no measurement node.",
             "title": "Measurement Node"
           },
           "model_capabilities": {
@@ -10553,6 +10798,14 @@
             "title": "Error",
             "type": "string"
           },
+          "inner_bench_final_lift": {
+            "title": "Inner Bench Final Lift",
+            "type": "number"
+          },
+          "inner_bench_origin_level": {
+            "title": "Inner Bench Origin Level",
+            "type": "number"
+          },
           "inner_final_lift": {
             "title": "Inner Final Lift",
             "type": "number"
@@ -10595,6 +10848,10 @@
             },
             "title": "Judge Readings",
             "type": "object"
+          },
+          "mean_bench_lift": {
+            "title": "Mean Bench Lift",
+            "type": "number"
           },
           "mean_parent_level_se": {
             "title": "Mean Parent Level Se",
@@ -10951,7 +11208,7 @@
         "description": "An account's usage against the limits its next launch is gated on.\n\nThe spend and token pairs are LIFETIME, used-ever against the account's total ceilings; the\ncampaign pair is per-day, because one is an allowance and the other an abuse limit.",
         "properties": {
           "allowance_exhausted": {
-            "description": "Admission's own answer: the next launch is refused for want of allowance. Headroom in either unit, after what running launches hold, the unreported sends and the unpriced grace. False on an account no ceiling bounds.",
+            "description": "The allowance is SPENT in either unit, unreported sends counted. What a running launch holds is not spent: a run declaring no cap holds the whole headroom. False on an account no ceiling bounds.",
             "title": "Allowance Exhausted",
             "type": "boolean"
           },
@@ -11124,6 +11381,55 @@
           "evidence"
         ],
         "title": "RaisedCommand",
+        "type": "object"
+      },
+      "RankAgreement": {
+        "additionalProperties": false,
+        "description": "Friedman over the cells every subject scored — each cell ranks the subjects, ties at average\nrank — with Kendall's W beside it. Low W at high p: no environment orders the subjects alike.\nLow W at low p: a small ordering the environments agree on.",
+        "properties": {
+          "df": {
+            "title": "Df",
+            "type": "integer"
+          },
+          "kendall_w": {
+            "title": "Kendall W",
+            "type": "number"
+          },
+          "mean_rank": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "description": "Each subject's mean rank across the cells. 1 is the value the metric's direction favours, or the lowest value where it has no direction.",
+            "title": "Mean Rank",
+            "type": "object"
+          },
+          "n_cells": {
+            "title": "N Cells",
+            "type": "integer"
+          },
+          "n_subjects": {
+            "title": "N Subjects",
+            "type": "integer"
+          },
+          "p_value": {
+            "title": "P Value",
+            "type": "number"
+          },
+          "statistic": {
+            "title": "Statistic",
+            "type": "number"
+          }
+        },
+        "required": [
+          "n_cells",
+          "n_subjects",
+          "statistic",
+          "df",
+          "p_value",
+          "kendall_w",
+          "mean_rank"
+        ],
+        "title": "RankAgreement",
         "type": "object"
       },
       "RankedEdit": {
@@ -12672,6 +12978,34 @@
         "title": "ScoredCandidate",
         "type": "object"
       },
+      "ScoringPass": {
+        "additionalProperties": false,
+        "description": "A paid verb scoring outside any run: its hop is the cycle it scores, or none at all.",
+        "properties": {
+          "kind": {
+            "const": "scoring_pass",
+            "default": "scoring_pass",
+            "title": "Kind",
+            "type": "string"
+          },
+          "verb": {
+            "enum": [
+              "bench",
+              "noise-floor",
+              "probe-reasoning",
+              "seed-screen",
+              "verify"
+            ],
+            "title": "Verb",
+            "type": "string"
+          }
+        },
+        "required": [
+          "verb"
+        ],
+        "title": "ScoringPass",
+        "type": "object"
+      },
       "SelectionPair": {
         "additionalProperties": false,
         "description": "Two campaigns' selections paired on the bench rows both scored.",
@@ -13873,7 +14207,7 @@
             "title": "Round"
           },
           "task": {
-            "description": "The panel cell this run measured — the outer query, e.g. `justlogic-d234/seed-0` (`inner_tasks.yaml::tasks[].id`). The candidate fields do NOT identify a run: every task runs for every candidate, so one candidate's spawns are as many as the panel has cells and are told apart only by this.",
+            "description": "The panel cell this run measured — the outer query, e.g. `justlogic/d234/seed-0` (`dataset.yaml::panel.tasks[].id`). The candidate fields do NOT identify a run: every task runs for every candidate, so one candidate's spawns are as many as the panel has cells and are told apart only by this.",
             "title": "Task",
             "type": "string"
           }
@@ -14268,6 +14602,14 @@
             "title": "Authorship",
             "type": "string"
           },
+          "bench_values": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "description": "The subject's values on the cells it was graded on HELD OUT — its bench pass, which only a round's selection has — keyed like `values` and never pooled with them: two scopes never pair.",
+            "title": "Bench Values",
+            "type": "object"
+          },
           "cached_samples": {
             "anyOf": [
               {
@@ -14608,6 +14950,7 @@
       "ThetaCaveat": {
         "description": "A state in which θ is NOT ability; every number still renders, so WHICH fired is the fact.",
         "enum": [
+          "disjoint_scopes",
           "cold_ruler",
           "flat_ruler",
           "collapsed_band",
@@ -14769,7 +15112,7 @@
             "type": "string"
           },
           "reason": {
-            "description": "Reason code that steers L2's healing direction. One of: ``forbidden_axis`` (operator-locked param touched), ``type_mismatch`` (wrong declared type), ``not_in_available_models`` / ``not_in_param_allowed_values`` / ``not_accepted_by_model`` (value outside the axis's resolved space — the last where the node declared it and the chosen model refuses it, so the healing move is the model, not the value), ``reproposes_known_failing_config`` (matches a prior ``RuntimeFailure.observed_config`` row), ``l1_provider_empty_response`` / ``optimizer_prompt_parse_failure`` / ``optimizer_prompt_unexpected_type`` (generator-side failure), ``steers_inner_stopping`` (an L4 override telling the inner loop when to STOP rather than how to search — it edits the frame `mean_round_delta` averages over instead of the search it measures), ``steers_across_seeds`` (an L4 override making an inner node reason over the seed panel, which exists only one level up — the rule renders empty where it lands), ``guts_inherited_contract`` (an L4 override replacing a long prompt field with a fraction of its length, deleting contracts the parent carried in plain prose), ``no_op_variant`` / ``duplicate_variant`` (invariant-detect), ``hallucinated_node`` (named a node absent from the schema — NON-fatal: the phantom edit is stripped, the candidate still scores; routed as signal, not a synthetic-0).",
+            "description": "Reason code that steers L2's healing direction. One of: ``forbidden_axis`` (operator-locked param touched), ``type_mismatch`` (wrong declared type), ``not_in_available_models`` / ``not_in_param_allowed_values`` / ``not_accepted_by_model`` (value outside the axis's resolved space — the last where the node declared it and the chosen model refuses it, so the healing move is the model, not the value), ``reproposes_known_failing_config`` (matches a prior ``RuntimeFailure.observed_config`` row), ``l1_provider_empty_response`` / ``optimizer_prompt_parse_failure`` / ``optimizer_prompt_unexpected_type`` (generator-side failure), ``steers_inner_stopping`` (an L4 override telling the inner loop when to STOP rather than how to search — it edits the frame `mean_bench_lift` averages over instead of the search it measures), ``steers_across_seeds`` (an L4 override making an inner node reason over the seed panel, which exists only one level up — the rule renders empty where it lands), ``guts_inherited_contract`` (an L4 override replacing a long prompt field with a fraction of its length, deleting contracts the parent carried in plain prose), ``no_op_variant`` / ``duplicate_variant`` (invariant-detect), ``hallucinated_node`` (named a node absent from the schema — NON-fatal: the phantom edit is stripped, the candidate still scores; routed as signal, not a synthetic-0).",
             "title": "Reason",
             "type": "string"
           },
@@ -17894,7 +18237,7 @@
     },
     "/api/v1/machine-status": {
       "get": {
-        "description": "Machine occupancy: how many campaigns may run here and how many do; another tenant's runs only as counts.",
+        "description": "Machine occupancy: how many campaigns may run here and how many do, and the slots the caller may see.",
         "operationId": "get_machine_status_api_v1_machine_status_get",
         "responses": {
           "200": {

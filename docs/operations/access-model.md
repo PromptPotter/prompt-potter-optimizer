@@ -17,13 +17,13 @@ illegible; keeping them distinct, and never collapsing the hierarchy, is the who
 | **loop ↔ everything** | OS privilege | systemd-hardened unit (kernel-enforced) | process denied (EACCES / cgroup) |
 
 > **A dataset read is not an authorization decision — it belongs to no boundary.**
-> Repo `datasets/` is install content — **tracked in git**, hence already on the disk
+> `promptpotter/assets/datasets/` is install content — **tracked in git**, hence already on the disk
 > of anyone holding the install, so a capability over it would guard nothing while
 > blanking every panel bound to such a campaign. **Ownership, not permission, is the
 > split:** install content ships and is readable; private data belongs in the tenant,
 > where the tenancy boundary isolates it structurally. Putting a private cut in the repo dir and then
 > gating the dir is the anti-pattern — move the cut, and never add a `datasets.*` capability
-> to the host-privilege boundary. `infrastructure/store/dataset_access.py::readable_dataset_dir`
+> to the host-privilege boundary. `infrastructure/store/dataset_access.py::resolve_dataset`
 > is a resolver, not a gate: tenant content first, then install content, no capability consulted.
 
 ---
@@ -237,8 +237,8 @@ not backend-supplied.
 - **PP↔TermNorm** is authenticated with a shared bearer token (`Authorization: Bearer`,
   constant-time compared on the TermNorm side) plus TermNorm's IP allowlist
   (`connectors/termnorm.py`, `infrastructure/backend.py`); the deploy provisions the shared secret.
-- **Per-user quotas / spend caps** (`application/jobs/quota.py`) + run admission against a resolved
-  machine capacity (`application/jobs/capacity.py`), which every entry point shares.
+- **Per-user quotas / spend caps** (`application/jobs/quota.py`) + admission of runs and paid passes
+  against one resolved machine capacity (`application/jobs/capacity.py`), which every entry point shares.
 
 ---
 
@@ -273,6 +273,12 @@ withdraw it**, whatever capability the caller holds: the job is filed under
 and would otherwise own every launch there. A launch refused AFTER its wait — the backend down, the
 wallet short, the wait expired — writes its reason onto the job, and `machine-status` serves it
 back to that same principal (`refused`).
+
+**Occupancy is everyone's; who holds a slot is not, by default.** `machine-status` counts every held
+slot (`occupied`) but names only the caller's own (`running`) — on a box strangers sign up to, an
+account id and a campaign name are another tenant's data. `MACHINE_STATUS_SCOPE=all` names every
+slot to every account, for a self-hosted team that wants to see who holds the machine; the host
+sees every slot either way.
 
 **The one automatic signal is throttle stall, and it is gathered without configuration.** Every exit
 from the rate limiter reports how long that call sat blocked (`report_throttle_stall`) — as does a

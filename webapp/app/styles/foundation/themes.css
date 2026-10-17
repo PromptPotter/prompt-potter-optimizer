@@ -27,6 +27,11 @@
   --color-warn-rgb:85,37,29;
   --color-new:#1D4ED8;
   --color-new-rgb:29,78,216;
+  /* No orange on the light surface: cobalt, oxblood, olive and ink. */
+  --chart-series-1:#090C9B; --chart-series-2:#55251D;
+  --chart-series-3:#696047; --chart-series-4:#4f5bd5;
+  --chart-series-5:#8a3b2e; --chart-series-6:#8f8668;
+  --chart-series-7:#0a0a0a; --chart-series-8:#3f6a8a;
   --color-link:var(--color-accent);
   --color-link-hover:var(--color-accent-strong);
   --scrollbar-thumb:rgba(85,37,29,0.30);

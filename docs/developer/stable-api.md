@@ -6,7 +6,7 @@ What downstream forks build on without breaking on the next refactor. Anything n
 
 ## 1. Connector protocol
 
-The frozen dataclass `promptpotter/connectors/protocol.py::Connector`. **The dataclass is the roster and its field docstrings are the contract** — the signature, the default, and what each field costs to get wrong. Three fields are required (`name`, `wire_adapter`, `session_factory`); every other one defaults — `extract_experiment` is set exactly where `experiment_file` is — and `connectors/__init__.py::_validate` raises on a combination that cannot run.
+The frozen dataclass `promptpotter/connectors/protocol.py::Connector`. **The dataclass is the roster and its field docstrings are the contract** — the signature, the default, and what each field costs to get wrong. Three fields are required (`name`, `wire_adapter`, `session_factory`); every other one defaults — `extract_experiment` set means the dataset's `panel` owns its rows (`owns_panel`) — and `connectors/__init__.py::_validate` raises on a combination that cannot run.
 
 Four declarations are named on this page because omitting one produces WRONG NUMBERS rather than a missing feature, silently:
 
@@ -17,7 +17,7 @@ Four declarations are named on this page because omitting one produces WRONG NUM
 
 `SessionProtocol` (`promptpotter/domain/connector.py`): `async set_terms(http, base_url, terms)` (backend handshake; noop ok) · `async recover(http, base_url, reply)` (whether a 400 `reply` reported a lost session, now re-established) · `resend_refused(reply)` (the backend's reason where a 5xx `reply` says a resend ends the same way, else `None`).
 
-`in_process_run(workload, sample, payload)` is handed the measured `Sample` itself — its `source_pin` is the row `extract_experiment` yielded, so a connector searches no panel for it — and returns `{"data": {…}}` naming its `terminal_node`; core clocks the call and stamps `total_time` / `step_timings`. `InProcessWorkload` (`protocol.py`) rides every call: `experiment` (the resolved `experiment_file` the samples came from, `None` without one) · `program` (what an embedded host passed to `open_session`, §5b; `None` otherwise). **Per-run state rides it** — owned by [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md) § Execution mode — a plugin keeps none in a ContextVar or a module cache.
+`in_process_run(workload, sample, payload)` is handed the measured `Sample` itself — its `source_pin` is the row `extract_experiment` yielded, so a connector searches no panel for it — and returns `{"data": {…}}` naming its `terminal_node`; core clocks the call and stamps `total_time` / `step_timings`. `InProcessWorkload` (`protocol.py`) rides every call: `experiment` (the resolved panel the samples came from, `None` without one) · `program` (what an embedded host passed to `open_session`, §5b; `None` otherwise). **Per-run state rides it** — owned by [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md) § Execution mode — a plugin keeps none in a ContextVar or a module cache.
 
 **Registering one, from your own package — no fork.** `promptpotter.connectors` is a published entry-point group:
 
@@ -46,7 +46,7 @@ Adding one *to this repo* is one new file under `promptpotter/connectors/` defin
 
 ## 2. Scoring formula DSL
 
-Configured per dataset via `campaign.yaml::scoring`:
+Configured per dataset via `dataset.yaml::campaign.scoring`:
 
 ```jsonc
 {
@@ -73,9 +73,13 @@ One stable signal every measurement carries: **`fitness`** — continuous, formu
 
 ## 3. Dataset config schema
 
-Each dataset lives at `datasets/{name}/` with:
+Each dataset lives at `promptpotter/assets/datasets/{name}/` with one `dataset.yaml`; a `family.yaml` or `dataset.yaml` in an ancestor directory, then `defaults.yaml`, is laid under it (`infrastructure/store/dataset_access.py::definition_chain`). Its sections:
 
-### `pipeline.yaml`
+### `source`
+
+Where the rows come from — `hub:` or `github:` with its `rev` and `recipe`, or an inline `recipe`. Recipes are `application/datasets/loaders.py::BANK_RECIPES` / `PANEL_RECIPES`.
+
+### `pipeline`
 
 Connector-described pipeline (the shape `GET /pipeline` exposes, plus an operator overlay). Required top-level keys:
 
@@ -89,11 +93,11 @@ Connector-described pipeline (the shape `GET /pipeline` exposes, plus an operato
   sibling file, not a key: for `_optimizer` it is generated into
   `resolved_schemas.json` by `scripts/build_optimizer_schemas.py`.)
 
-### `campaign.yaml`
+### `campaign`
 
 Campaign knobs + scoring + optimizer LLM. Validated by `application/campaign_config.py::CampaignConfig` with `extra="forbid"` — unknown keys raise at boot. See `CampaignConfig` for the full field list.
 
-**Top-level keys.** `dataset_name`, `scoring`, `judges`, `sp_budget_origin`, `exclude_nodes` (drop pipeline nodes by name), `pipeline_overlay` (per-node config overlay), `optimization`. (The optimizer is `optimization.optimizer`, a manifest under `promptpotter/assets/optimizers/`; its nodes' knobs and models ride `optimization.nodes`.)
+**Top-level keys.** `scoring`, `judges`, `sp_budget_origin`, `exclude_nodes` (drop pipeline nodes by name), `pipeline_overlay` (per-node config overlay), `optimization`. (The optimizer is `optimization.optimizer`, a manifest under `promptpotter/assets/optimizers/`; its nodes' knobs and models ride `optimization.nodes`.)
 
 `judges` maps a scoring term to a registered LLM-as-judge and the models to run it on — `{term: {name, stages: [{role, model, provider, temperature}]}}` — for datasets whose answer no matcher can grade. Each verdict is banked as a per-sample observation the `scoring` formula reads by its term KEY (never a call: a judge is a measurement, not a formula term). **Its models are inherited from nothing** — not a node's permitted set, not node config, not the optimizer's. A third party ships a judge through the `promptpotter.judges` entry-point group, validated like §1's connectors; contract: [`../../promptpotter/judges/CLAUDE.md`](../../promptpotter/judges/CLAUDE.md).
 
@@ -108,16 +112,21 @@ off the fields and the manifest, never off a doc.
 
 **Optimizer LLM:** provider, model, temperature, `reasoning_effort`, and `max_tokens` are per-node config in the selected manifest (`promptpotter/assets/optimizers/{name}/pipeline.yaml::nodes.{node}.config`), resolved inside `llm_call` like any other node tunable; a campaign moves one through `optimization.nodes.{node}.config`. The check-in node is the bench's own, in `promptpotter/assets/checkin/pipeline.yaml`.
 
-Constants moved out of `campaign.yaml` (they live next to their consumer): L1 candidate-generation temperature (the `temperature` arg in `l1/generate.py`, driven by L2's `l1_overrides.temperature`, defaulting to the `l1_generate` node temperature), L2/L3 transition temperatures (the `l2_context`/`l3_plan` node temperatures), runaway-loop ceiling, in arms raced (`runner/loop.py::HARD_CAP_ARMS`), stale-data recovery ladder (`scoring/sample_measurement.py`). PoBB lock-in went the other way and stayed configurable — potter's `pobb` node `lock_in` / `lock_in_n_min` / `leader_lock_in`.
+Constants moved out of `campaign` (they live next to their consumer): L1 candidate-generation temperature (the `temperature` arg in `l1/generate.py`, driven by L2's `l1_overrides.temperature`, defaulting to the `l1_generate` node temperature), L2/L3 transition temperatures (the `l2_context`/`l3_plan` node temperatures), runaway-loop ceiling, in arms raced (`runner/loop.py::HARD_CAP_ARMS`), stale-data recovery ladder (`scoring/sample_measurement.py`). PoBB lock-in went the other way and stayed configurable — potter's `pobb` node `lock_in` / `lock_in_n_min` / `leader_lock_in`.
 
 The yield-drought escalation rule (`l2_axis_yield_drought`) is permanent — no opt-in flag. Which LAYERS potter may reach is its `escalation` node's `escalation_ladder` (`full` / `l1_l2` / `l1`), the ablation switch; the individual rules are not separately toggleable.
 
+### `panel`
+
+The dataset's own rows where a connector reads them (`Connector.owns_panel`).
+
 ### Other files
 
-- **`prompts/{node}.yaml`** — 8-field `PromptTemplate` per node. Schema: `domain/opt_search_point.py::PromptTemplate`. Loaded by `promptpotter/application/datasets/prompts.py::load_node_prompt`.
-- **`task_description.md`** — free-form markdown; decomposed into the campaign's `task_context` framing (`Cycle.framing`) by the first mint that finds none committed, or by a check-in (`new <name> --task-file`, the web check-in).
-- **`dataset.md`** — operator guide; free-form, not parsed.
-- **`task_context.yaml`** — the committed task framing; written once by the `checkin` decomposition (`application/bench/task_context.py::commit_task_framing`) or by web ingest at commit, and read free on every later run through `infrastructure/store/dataset_access.py::dataset_task_context_path` on the tenant-first ladder.
+Each resolves nearest-ancestor-or-self.
+
+- **`origin.yaml`** — 8-field `PromptTemplate` per node, keyed by node and merged root-first. Schema: `domain/opt_search_point.py::PromptTemplate`. Loaded by `promptpotter/application/datasets/prompts.py::load_node_prompt`.
+- **`task.md`** — the body is free-form markdown, decomposed into the campaign's `task_context` framing (`Cycle.framing`) by the first mint that finds none committed, or by a check-in (`new <name> --task-file`, the web check-in). Its optional YAML front matter is the committed framing — written once by the `checkin` decomposition (`application/bench/task_context.py::commit_task_framing`) or by web ingest at commit, and read free on every later run through `infrastructure/store/dataset_access.py::readable_task_context` on the tenant-first ladder.
+- **`README.md`** — operator guide; free-form, not parsed.
 
 ---
 
@@ -139,7 +148,7 @@ rules; the constants themselves are internal.
 | **Install content** | `promptpotter/assets/` inside the package | The optimizer's own `pipeline.yaml` + `resolved_schemas.json` + `sets/{name}.yaml`, and the exported dashboard. Ships in the wheel; ours, not the operator's. |
 | **User data** | `$PROMPTPOTTER_HOME` → the checkout's `.promptpotter/` when running from a source tree → the OS app-data dir | Campaigns, sessions, measurements, jobs, identity. |
 | **Configuration** | `$PROMPTPOTTER_ENV_FILE` → the checkout's `.env` when running from a source tree → the user-data root's `.env` | Keys and postures (`PROMPTPOTTER_AUTH`). A process variable outranks the file. The gate names an absent file, so no verdict reads the desk's configuration. |
-| **Benchmarks** | the checkout's `datasets/` → `promptpotter/assets/benchmarks/` | Sample dataset **definitions**, read-only on both shapes. Anything DERIVED from one lands in the user-data root, never beside the definition ([`infrastructure/store/CLAUDE.md`](../../promptpotter/infrastructure/store/CLAUDE.md) § Dataset content has two tiers). A tenant dataset of the same name shadows an installed one. |
+| **Templates** | `promptpotter/assets/datasets/` (`paths.py::install_datasets_root`) | Template dataset **definitions**, read-only in checkout and wheel alike. Anything DERIVED from one lands in the user-data root, never beside the definition ([`infrastructure/store/CLAUDE.md`](../../promptpotter/infrastructure/store/CLAUDE.md) § Dataset content has two tiers). A tenant dataset of the same name shadows an installed one. |
 
 **`PROMPTPOTTER_HOME` and `PROMPTPOTTER_ENV_FILE` are stable.** Set the first to relocate the
 whole user-data tree and the second to read another configuration file; each is read once at
@@ -151,9 +160,9 @@ packaged manifest of that name (provider / model / temperature per node); absent
 is read. The generated `resolved_schemas.json` beside each is deliberately not overridable, so the
 seam is a file, never a directory.
 
-Both derived asset trees (`assets/webapp/`, `assets/benchmarks/`) are staged by
+The derived `assets/webapp/` tree is staged by
 `scripts/build_release.py`, the supported way to build a wheel — a bare `uv build` produces
-one that quietly serves no dashboard and resolves no dataset. There is no `REPO_ROOT`, and
+one that quietly serves no dashboard. There is no `REPO_ROOT`, and
 nothing resolves to `site-packages/`: `pip` deletes there on upgrade.
 
 ## 5. CLI flags — `new` and `resume`
@@ -205,7 +214,7 @@ the dashboard.
 
 `with_optimization(load_dataset_campaign_config(path), {…})`
 (`application/datasets/authored.py`) is the
-supported way to shape a dataset's `campaign.yaml` for one launch without editing the shared file:
+supported way to shape a dataset's `dataset.yaml::campaign` for one launch without editing the shared file:
 a sparse `optimization` mapping merged depth-first **before** validation, so an unknown knob raises
 here instead of being silently dropped — the same call a web mint, a check-in and the terminal make.
 
@@ -269,7 +278,7 @@ Three consequences that a surface must not re-decide:
 
 - **A cut names a `CycleHop`, not a `CyclePath`.** Descent is spent before anything folds (`resolve_cycle_path` returns a sandbox-rooted store plus the leaf), so a path would be a lie at depth ≥ 1. `CyclePath` is the WIRE address and stays `RayItem`'s.
 - **`cycle` and `hop` ride together** because they must agree; every construction site derives one from the other through `cycle_dir_for`.
-- **Every artifact stamps the cut it is of**, so the ledger is the truth and each file is a cache: `?at=<offset>` on the dashboard route re-folds any past moment off disk, and `index.json::forked_at_offset` is a cut on the *parent*. The scans take the same offset as a `read_model.py::Moment` (`ledger_chain(cycle_dir, moment)`): its own ledger to that line, any other ledger of the family to its last record stamped no later — which is how the round, the cycle-scope cells and the tree replay to one instant.
+- **Every artifact stamps the cut it is of**, so the ledger is the truth and each file is a cache: `?at=<offset>` on the dashboard route re-folds any past moment off disk, and `index.json::forked_at_offset` is a cut on the *parent*. The scans take the same offset as a `read_model.py::Moment` (`ledger_chain(cycle_dir, moment=…)`): its own ledger to that line, any other ledger of the family to its last record stamped no later — which is how the round, the cycle-scope cells and the tree replay to one instant.
 
 Subscribers read via `Projection.on_record(record)` and MUST NOT write any campaign artifact beyond their declared allowlist (fails loud; see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)).
 

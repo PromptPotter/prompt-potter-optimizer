@@ -9,7 +9,9 @@
 ## A schemaless pipeline is a 422
 
 `init_services` raises `pipeline_config_invalid` — **422, typed rather than bare** — when the dataset's
-`pipeline.yaml` names no `backend_type` or yields no parseable schema. Every measurement is keyed on that
-schema, so there is no degraded run to fall through to, and a 500 here reads as `transient` to the webapp,
+`dataset.yaml::pipeline` names no `backend_type`, or the declaration (a backend's answer included) names no nodes
+or does not parse, and `backend_unreachable` when a remote backend does not answer `GET /pipeline` or
+answers a 5xx (`BackendClient.fetch_pipeline` classifies) — the local declaration overlays the backend's
+schema, never stands in for it. Every measurement is keyed on that schema, so there is no degraded run to fall through to, and a 500 here reads as `transient` to the webapp,
 which would retry a config only the operator can fix. The one SILENT arm is `init_cycle` returning
 `(None, 1)` on an empty `session.backend_id`: the run continues with no per-cycle persistence.

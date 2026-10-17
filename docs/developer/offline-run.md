@@ -30,7 +30,7 @@ engine change has every optimizer run end to end and its resume proven without a
 docs or webapp edit reruns nothing. `--changed` leaves it out: it proves a landing, not an edit.
 
 **A green run is not taken twice.** A home that already holds the green run of the same arguments
-over the same sources — the package, `datasets/`, `examples/`, the two lock files and this script,
+over the same sources — the package (its datasets included), `examples/`, the two lock files and this script,
 by content — is left standing, and the script says `unchanged since green` and exits 0. Name a
 different home, or pass `--against`, to run it regardless; a default-argument green by hand is
 the gate check's green too (`scripts/last_green.py`).
@@ -60,9 +60,8 @@ them is the evidence read of all three.
 
 One workspace per optimizer, `<home>/<optimizer>/`, because the measurement archive and the δ ruler
 pool across the campaigns of one workspace — a shared one lets one optimizer's run move another's
-decisions. Each campaign is a child process, and as many run at once as the machine's free memory
-holds (`scripts/gate.py::memory_budget_mb`) — all of them on a box with room, one after another on
-a laptop with none. In each workspace:
+decisions. Each campaign is a child process, all of them at once up to the core count. In each
+workspace:
 
 | Path | What it is |
 |---|---|
@@ -108,7 +107,7 @@ re-key an inner cell leaves equal.
 
 ## What is faked, and how
 
-- **The bank** is synthetic JustLogic-shaped rows for `justlogic-d234`, written to the workspace's
+- **The bank** is synthetic JustLogic-shaped rows for `justlogic/d234`, written to the workspace's
   benchmark rows before the session opens, so nothing is downloaded and nothing licensed is copied.
 - **The backend** is TermNorm's wire: one `llm_only` node, whose answer is correct with probability
   `k/10`, `k` read off the `Variant <tag>:` marker in the rendered prompt. Potter's markers follow
@@ -120,7 +119,7 @@ re-key an inner cell leaves equal.
   per potter node. A paper preset's text call is matched to the llm node whose manifest template
   it opens with, and answered in the form that template asks for — a `<prompt>` block, a fenced
   block, or an array.
-- **The knobs** are the dataset's `campaign.yaml` under the script's `BENCH` sizes. The template's
+- **The knobs** are the dataset's `dataset.yaml::campaign` under the script's `BENCH` sizes. The template's
   node overlay rides only the optimizer it selects; any other takes its `SCALED` entry, which
   sizes it to the bank, or runs its manifest as declared when it has none. A sampler that
   declares a size knob draws `ROUND_CELLS` whichever optimizer runs. Any optimizer but the

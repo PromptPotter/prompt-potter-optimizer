@@ -283,7 +283,7 @@ class L2ContextOutput(OptimizerResponseModel):
     )
     # A plain dict on purpose: typed, one off-enum panel fails the whole model before `validate_l1_layout` can report it.
     l1_layout: Annotated[
-        dict[str, str],
+        dict[str, list[str]],
         WithJsonSchema(
             layout_json_schema(NODE_LAYOUTS["l1_generate"], description=LAYOUT_SCHEMA_INSTRUCTION)
         ),
@@ -314,7 +314,10 @@ def build_l2_response_model(withheld: frozenset[str]) -> type[L2ContextOutput]:
     schema = layout_json_schema(
         NODE_LAYOUTS["l1_generate"], description=LAYOUT_SCHEMA_INSTRUCTION, withheld=withheld
     )
-    layout: Any = (Annotated[dict[str, str], WithJsonSchema(schema)], Field(default_factory=dict))
+    layout: Any = (
+        Annotated[dict[str, list[str]], WithJsonSchema(schema)],
+        Field(default_factory=dict),
+    )
     return create_model("L2ContextOutput", __base__=L2ContextOutput, l1_layout=layout)
 
 

@@ -2,16 +2,23 @@
 
 import { invalidateReads } from "@/lib/read-cache";
 import { AccountFailure, AccountLoading, AccountSection } from "./AccountSection";
-import { SegmentedControl, CommitInput, type Segment } from "@/components/ui";
+import {
+  SegmentedControl,
+  CommitInput,
+  DataTable,
+  type Column,
+  type Segment,
+} from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { billText, ratePricedText } from "@/lib/derivations";
-import { fmtTokens, fmtUsd } from "@/lib/format";
+import { fmtAgo, fmtTokens, fmtUsd } from "@/lib/format";
 import { readyData, shownData, useRead } from "@/lib/hooks/useRead";
 import { useMachineStatus } from "@/lib/hooks/useMachineStatus";
 import { useCommand, type CommandFailure } from "@/lib/hooks/useCommand";
 import {
   quotaRead,
   postSetConcurrentCycles,
+  type MachineSlot,
   type MachineStatusResponse,
   type QuotaStatus,
 } from "@/lib/api";
@@ -183,13 +190,14 @@ function RunsSection({
             <>
               <Slots
                 total={machine.ceiling}
-                running={machine.running}
+                running={machine.occupied}
                 queued={0}
                 open={machine.capacity}
-                label={`${machine.running} of ${machine.ceiling} slots running`}
+                label={`${machine.occupied} of ${machine.ceiling} slots running`}
               />
               <span className="account-runs-text">
-                <strong>{machine.running}</strong> running · <strong>{machine.queued}</strong>{" "}
+                <strong>{machine.occupied}</strong> running ·{" "}
+                <strong>{machine.queued}</strong>{" "}
                 waiting · <strong>{machine.ceiling}</strong> slots
                 {machine.held_back !== null ? (
                   <span className="account-warn"> — {machine.held_back}</span>
@@ -198,6 +206,14 @@ function RunsSection({
             </>
           )}
         </div>
+        {machine !== null && machine.running.length > 0 ? (
+          <DataTable
+            columns={SLOT_COLUMNS}
+            rows={machine.running}
+            getRowId={slotId}
+            ariaLabel="What holds each running slot on this machine"
+          />
+        ) : null}
         <div className="account-legend" aria-hidden="true">
           <span>
             <span className="account-slot running" /> running
@@ -216,6 +232,22 @@ function RunsSection({
       <LimitControl quota={quota} machine={machine} />
     </AccountSection>
   );
+}
+
+const SLOT_COLUMNS: readonly Column<MachineSlot>[] = [
+  { id: "what", label: "Running", width: "minmax(0,1fr)", cell: (s) => s.what },
+  { id: "user", label: "Account", width: "minmax(0,12rem)", cell: (s) => s.user },
+  {
+    id: "since",
+    label: "Since",
+    width: "8rem",
+    align: "end",
+    cell: (s) => (s.started_at === null ? "starting" : fmtAgo(s.started_at)),
+  },
+];
+
+function slotId(s: MachineSlot): string {
+  return s.job_id;
 }
 
 // Only a flat denial needs a sentence here: the server words its own refusals, and 403 and 404 are one answer.

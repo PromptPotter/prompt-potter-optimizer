@@ -5,6 +5,8 @@ import logging
 from collections.abc import Mapping, Sequence
 from typing import Any, NoReturn
 
+from pydantic import BaseModel, ValidationError
+
 from promptpotter.domain.pipeline_schema import (
     ANSWER_AS_JSON,
     ANSWER_AS_TEXT,
@@ -102,6 +104,48 @@ def strip_lone_surrogates(obj: Any) -> Any:
     if isinstance(obj, list):
         return [strip_lone_surrogates(v) for v in obj]
     return obj
+
+
+def _refuse(message: str, **details: Any) -> NoReturn:
+    raise PayloadInvalidError(message, code="pipeline_config_invalid", details=details)
+
+
+def _block(value: object, where: str) -> Mapping[str, Any]:
+    """An absent block is empty; a present one that is no mapping is refused where it stands."""
+    if value is None:
+        return {}
+    if isinstance(value, Mapping):
+        return value
+    _refuse(f"`{where}` is {type(value).__name__}, not a mapping.", at=where)
+
+
+def _items(value: object, where: str) -> list[object]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    _refuse(f"`{where}` is {type(value).__name__}, not a list.", at=where)
+
+
+def _names(value: object, where: str) -> list[str]:
+    items = _items(value, where)
+    if all(isinstance(item, str) for item in items):
+        return [str(item) for item in items]
+    _refuse(f"`{where}` must list names only.", at=where)
+
+
+def _text(config: Mapping[str, Any], key: str) -> str:
+    value = config.get(key)
+    if value is None or isinstance(value, str):
+        return value or ""
+    _refuse(f"`{key}` is {type(value).__name__}, not text.", at=key)
+
+
+def _built[M: BaseModel](model: type[M], where: str, **fields: Any) -> M:
+    try:
+        return model(**fields)
+    except ValidationError as exc:
+        _refuse(f"`{where}` does not parse as {model.__name__}: {exc}", at=where)
 
 
 def _node_kind(name: str, raw: object) -> NodeKind | None:
@@ -215,15 +259,17 @@ def derive_pipeline_view(
     return PipelineView(nodes=view_nodes, edges=edges)
 
 
-def parse_resolved_schema(resolved: dict[str, Any]) -> NodeOutputSchema:
+def parse_resolved_schema(resolved: Mapping[str, Any]) -> NodeOutputSchema:
     """``fields`` order is the generation order; an empty ``description`` is a searchpoint, not an absence."""
-    json_schema = resolved.get("json_schema", {})
-    props = json_schema.get("properties", {})
-    fields = resolved.get("fields") or list(props)
+    json_schema = dict(_block(resolved.get("json_schema"), "json_schema"))
+    props = _block(json_schema.get("properties"), "json_schema.properties")
+    fields = _names(resolved.get("fields"), "fields") or list(props)
     if props and set(fields) != set(props):
-        raise ValueError(
+        _refuse(
             f"output schema `fields` {fields} does not name exactly the schema's "
-            f"properties {list(props)} — the order declaration must cover the schema"
+            f"properties {list(props)} — the order declaration must cover the schema",
+            fields=fields,
+            properties=list(props),
         )
     if props and list(props) != fields:
         props = {f: props[f] for f in fields}
@@ -231,48 +277,22 @@ def parse_resolved_schema(resolved: dict[str, Any]) -> NodeOutputSchema:
     field_descriptions = {
         k: v["description"] for k, v in props.items() if isinstance(v, dict) and "description" in v
     }
-    return NodeOutputSchema(
+    return _built(
+        NodeOutputSchema,
+        "output_schema",
         fields=fields,
         field_descriptions=field_descriptions,
         json_schema=json_schema,
     )
 
 
-def _parse_resolved_prompt(resolved: dict[str, Any]) -> NodePromptInfo:
-    return NodePromptInfo(
-        template_variables=resolved.get("template_variables", []),
-    )
-
-
-def _extract_resolved_metadata(
-    config: dict[str, Any],
-) -> dict[str, dict[str, Any]]:
-    schemas_raw = config.get("resolved_schemas", {})
-    prompts_raw = config.get("resolved_prompts", {})
-
-    nodes = config.get("nodes", {})
-    metadata: dict[str, dict[str, Any]] = {}
-
-    for node_name, node_data in nodes.items():
-        nc = node_data.get("config", {})
-        entry: dict[str, Any] = {}
-
-        if sf := nc.get("schema_family"):
-            sv = nc.get("schema_version")
-            key = f"{sf}/{sv}" if sv is not None else sf
-            if key in schemas_raw:
-                entry["output_schema"] = parse_resolved_schema(schemas_raw[key])
-
-        if pf := nc.get("prompt_family"):
-            pv = nc.get("prompt_version")
-            key = f"{pf}/{pv}" if pv is not None else pf
-            if key in prompts_raw:
-                entry["prompt_info"] = _parse_resolved_prompt(prompts_raw[key])
-
-        if entry:
-            metadata[node_name] = entry
-
-    return metadata
+def _registered(
+    registry: Mapping[str, object], family: object, version: object, where: str
+) -> Mapping[str, Any] | None:
+    if not family:
+        return None
+    entry = registry.get(f"{family}/{version}" if version is not None else str(family))
+    return None if entry is None else _block(entry, f"{where}.{family}")
 
 
 # Order matters: `isinstance(True, int)` is True, so bool must be matched first.
@@ -286,10 +306,12 @@ _PY_TO_JSON_TYPE: dict[type, str] = {
 }
 
 
-def _infer_param_types(opt: dict[str, Any], node_config: dict[str, Any]) -> dict[str, str]:
+def _infer_param_types(
+    opt: Mapping[str, Any], node_config: Mapping[str, Any], where: str
+) -> dict[str, str]:
     """Covers config-only keys too: the steer panel renders them, so their widget kind must resolve."""
-    declared: dict[str, str] = dict(opt.get("param_types") or {})
-    param_keys = list(opt.get("param_keys") or [])
+    declared: dict[str, str] = dict(_block(opt.get("param_types"), f"{where}.param_types"))
+    param_keys = _names(opt.get("param_keys"), f"{where}.param_keys")
     config_only = [k for k in node_config if k not in param_keys]
     for param in (*param_keys, *config_only):
         if param in declared:
@@ -313,15 +335,12 @@ def _check_member_structure(
         node = parsed.get(name)
         return node.kind if node is not None else None
 
-    def refuse(message: str, **details: Any) -> NoReturn:
-        raise PayloadInvalidError(message, code="pipeline_config_invalid", details=details)
-
     if not any(node.kind in MEMBER_KINDS for node in parsed.values()):
         return
     default = list(pipelines.get("default") or [])
     measurements = [n for n in default if kind(n) is NodeKind.GATEWAY]
     if len(measurements) != 1:
-        refuse(
+        _refuse(
             "an optimizer manifest's `default` pipeline must name exactly one measurement node "
             f"(found {measurements}): with none the round has no rows, with two nothing says "
             "which set a selector reads.",
@@ -329,7 +348,7 @@ def _check_member_structure(
         )
     controllers = [n for n in default if kind(n) is NodeKind.CONTROLLER]
     if len(controllers) > 1:
-        refuse(
+        _refuse(
             f"`default` names {len(controllers)} controllers ({controllers}); a round has one.",
             controller_nodes=controllers,
         )
@@ -338,7 +357,7 @@ def _check_member_structure(
             if kind(step) is NodeKind.ELIMINATOR and not any(
                 kind(s) is NodeKind.SAMPLER for s in steps[:i]
             ):
-                refuse(
+                _refuse(
                     f"pipeline {pipeline!r}: eliminator {step!r} has no sampler before it — a cut "
                     "decides between blocks, and only a sampler cuts the panel into blocks.",
                     pipeline=pipeline,
@@ -347,28 +366,31 @@ def _check_member_structure(
 
 
 def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
-    if not data:
-        logger.warning("Empty pipeline response; returning empty schema")
-        return PipelineSchema()
-
-    data = strip_lone_surrogates(data)
-    config = data.get("data", data)
-    config = config.get("config", config)
-
-    nodes = config.get("nodes", {})
-    resolved_metadata = _extract_resolved_metadata(config)
-
-    pipelines = {"default": list(nodes), **(config.get("pipelines") or {})}
+    """The declaration UNWRAPPED; one naming no ``nodes`` is refused, since every measurement is keyed on them."""
+    if "nodes" not in data:
+        _refuse(
+            "The pipeline declaration names no `nodes`: every measurement is keyed on them.",
+            declared_keys=sorted(map(str, data)),
+        )
+    config = strip_lone_surrogates(data)
+    nodes = _block(config["nodes"], "nodes")
+    resolved_schemas = _block(config.get("resolved_schemas"), "resolved_schemas")
+    resolved_prompts = _block(config.get("resolved_prompts"), "resolved_prompts")
+    pipelines = {"default": list(nodes)} | {
+        name: _names(steps, f"pipelines.{name}")
+        for name, steps in _block(config.get("pipelines"), "pipelines").items()
+    }
 
     # The chain stays `pipelines["default"]` alone, which keeps `active_steps` and `sp_hash` facts about the round.
     parsed: dict[str, PipelineNode] = {}
-    for name in nodes:
-        node = nodes.get(name, {})
-        if not node:
+    for name, declared_node in nodes.items():
+        if not declared_node:
             continue
-        opt = node.get("optimizer", {})
-        nc = node.get("config", {})
-        pk = set(opt.get("param_keys", []))
+        where = f"nodes.{name}"
+        node = _block(declared_node, where)
+        opt = _block(node.get("optimizer"), f"{where}.optimizer")
+        nc = _block(node.get("config"), f"{where}.config")
+        pk = set(_names(opt.get("param_keys"), f"{where}.optimizer.param_keys"))
         kind = _node_kind(name, node.get("type"))
         # Refused, not filtered downstream: a key left in EITHER block becomes a row on every surface.
         if kind is NodeKind.GATEWAY and (declared := sorted(set(nc) | pk)):
@@ -385,9 +407,13 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
             "kind": kind,
             "role": node.get("node_role") or None,
             "param_keys": pk,
-            "param_descriptions": opt.get("param_descriptions", {}),
-            "param_allowed_values": opt.get("param_allowed_values", {}),
-            "param_types": _infer_param_types(opt, nc),
+            "param_descriptions": dict(
+                _block(opt.get("param_descriptions"), f"{where}.optimizer.param_descriptions")
+            ),
+            "param_allowed_values": dict(
+                _block(opt.get("param_allowed_values"), f"{where}.optimizer.param_allowed_values")
+            ),
+            "param_types": _infer_param_types(opt, nc, f"{where}.optimizer"),
             "current_config": dict(nc),
             "tunes_llm": kind in THINKING_KINDS and bool(pk),
             "spend_bound": node.get("spend_bound"),
@@ -396,18 +422,33 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
         obs_name = opt.get("observation_name")
         if obs_name:
             step_kwargs["observation_name"] = obs_name
-        mappings = [ObservationMapping(**m) for m in opt.get("observation_mappings") or ()]
+        mappings_at = f"{where}.optimizer.observation_mappings"
+        mappings = [
+            _built(ObservationMapping, mappings_at, **_block(m, mappings_at))
+            for m in _items(opt.get("observation_mappings"), mappings_at)
+        ]
         if mappings:
             step_kwargs["observation_mappings"] = mappings
 
-        rm = resolved_metadata.get(name, {})
-        if "output_schema" in rm:
-            step_kwargs["output_schema"] = rm["output_schema"]
-        if "prompt_info" in rm:
-            step_kwargs["prompt_info"] = rm["prompt_info"]
-
-        if "prompt_info" not in step_kwargs and "prompt_info" in node:
-            step_kwargs["prompt_info"] = NodePromptInfo(**node["prompt_info"])
+        resolved = _registered(
+            resolved_schemas, nc.get("schema_family"), nc.get("schema_version"), "resolved_schemas"
+        )
+        if resolved is not None:
+            step_kwargs["output_schema"] = parse_resolved_schema(resolved)
+        prompt = _registered(
+            resolved_prompts, nc.get("prompt_family"), nc.get("prompt_version"), "resolved_prompts"
+        )
+        prompt_at = f"{where}.prompt_info"
+        if prompt is not None:
+            step_kwargs["prompt_info"] = _built(
+                NodePromptInfo,
+                prompt_at,
+                template_variables=_names(prompt.get("template_variables"), prompt_at),
+            )
+        elif "prompt_info" in node:
+            step_kwargs["prompt_info"] = _built(
+                NodePromptInfo, prompt_at, **_block(node["prompt_info"], prompt_at)
+            )
 
         # Read from `config`, the declaration the connector forwards: never a display copy beside the wire copy.
         if "output_schema" not in step_kwargs and isinstance(nc.get("output_schema"), dict):
@@ -416,11 +457,13 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
             )
             # Checked at load: an undeclared field reads "" on every sample, and the run grades NO_RESULT.
             answer_field = nc.get("answer_field")
-            props = nc["output_schema"].get("properties") or {}
+            props = step_kwargs["output_schema"].json_schema.get("properties") or {}
             if answer_field is not None and answer_field not in props:
-                raise ValueError(
+                _refuse(
                     f"node {name!r}: answer_field {answer_field!r} is not a property of its "
-                    f"output_schema (have: {sorted(props)})"
+                    f"output_schema (have: {sorted(props)})",
+                    node=name,
+                    answer_field=answer_field,
                 )
 
         # Schema-driven, never a `param_keys` opt-in; the field NAME stays locked (`SCHEMA_OWNED_FIELDS`).
@@ -461,23 +504,22 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
                 **step_kwargs["param_descriptions"],
             }
 
-        parsed[name] = PipelineNode(**step_kwargs)
+        parsed[name] = _built(PipelineNode, where, **step_kwargs)
 
+    pipeline_name = _text(config, "name")
     # DEBUG: a parse on a read path fires per poll, and INFO would flood a supervised run's console.
-    logger.debug(
-        "Parsed pipeline '%s' with %d nodes",
-        config.get("name", "unknown"),
-        len(parsed),
-    )
+    logger.debug("Parsed pipeline '%s' with %d nodes", pipeline_name, len(parsed))
 
     _check_member_structure(parsed, pipelines)
-    schema = PipelineSchema(
-        name=config.get("name", "").lower(),
-        version=config.get("version", ""),
-        description=config.get("description", ""),
+    schema = _built(
+        PipelineSchema,
+        "pipeline",
+        name=pipeline_name.lower(),
+        version=_text(config, "version"),
+        description=_text(config, "description"),
         declared_nodes=list(parsed.values()),
-        pipelines={name: list(seq) for name, seq in pipelines.items()},
-        available_models=config.get("available_models", []),
+        pipelines=pipelines,
+        available_models=_names(config.get("available_models"), "available_models"),
     )
 
     # Derived, never read off the manifest: a declared ``view`` is a second roster beside `nodes`.

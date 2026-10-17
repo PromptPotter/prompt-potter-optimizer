@@ -48,15 +48,17 @@ from promptpotter.application.datasets.origin_readiness import (
     OriginResolution,
     RaisedCommand,
 )
-from promptpotter.application.datasets.startability import DatasetStartBlock
 from promptpotter.application.evidence.comparison import (
     ArmReplicate,
     Comparability,
+    EnvironmentReading,
     EvidencePower,
     EvidenceVariance,
+    LiftProfile,
     MetricReading,
     OrderConfound,
     PairwiseComparison,
+    RankAgreement,
 )
 from promptpotter.application.evidence.grid import (
     FactorCell,
@@ -85,15 +87,16 @@ from promptpotter.application.evidence.subjects import (
     WinnerChainPoint,
 )
 from promptpotter.application.jobs.account_activity import ActivityBucket, ActivityResponse
-from promptpotter.application.jobs.capacity import (
-    MachineHolder,
+from promptpotter.application.jobs.launcher.checkin import StartCheckinResponse
+from promptpotter.application.jobs.machine_status import (
     MachineNotice,
     MachineQueueEntry,
     MachineRefusal,
+    MachineSlot,
     MachineStatusResponse,
 )
-from promptpotter.application.jobs.launcher.checkin import StartCheckinResponse
 from promptpotter.application.jobs.quota import QuotaStatus
+from promptpotter.application.jobs.registry import CampaignLaunch, ScoringPass
 from promptpotter.application.maintenance.archive_maintenance import ArchiveReport
 from promptpotter.application.maintenance.storage_report import (
     CampaignStorageResponse,
@@ -135,6 +138,7 @@ from promptpotter.domain.backend import ServedBackpressure
 from promptpotter.domain.bench import (
     BandedValue,
     BenchReading,
+    BenchScope,
     BenchScore,
     BenchStatus,
     DatasetSplit,
@@ -162,6 +166,7 @@ from promptpotter.domain.dashboard_rows import (
     RunLimits,
     ServedRound,
 )
+from promptpotter.domain.dataset_start import DatasetStartBlock
 from promptpotter.domain.l4.proxies import PanelPrecision
 from promptpotter.domain.launch_limits import LaunchLimits, RunMode
 from promptpotter.domain.opt_search_point import (
@@ -399,6 +404,7 @@ EXPORTED_MODELS: list[type] = [
     PassStop,
     BenchStatus,
     LiftCost,
+    BenchScope,
     BenchScore,
     CycleListEntry,
     RunStatus,
@@ -437,6 +443,9 @@ EXPORTED_MODELS: list[type] = [
     SubjectReading,
     PairwiseComparison,
     MetricReading,
+    EnvironmentReading,
+    RankAgreement,
+    LiftProfile,
     DatasetSplit,
     BenchSet,
     ArmBudget,
@@ -472,7 +481,9 @@ EXPORTED_MODELS: list[type] = [
     HealthResponse,
     BackendResponse,
     BackendHealthResponse,
-    MachineHolder,
+    CampaignLaunch,
+    ScoringPass,
+    MachineSlot,
     MachineNotice,
     MachineQueueEntry,
     MachineRefusal,

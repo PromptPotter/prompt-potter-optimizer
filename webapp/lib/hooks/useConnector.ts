@@ -33,7 +33,7 @@ const EMPTY: ConnectorView = {
   health: null,
   modelCapabilities: {},
   reach: null,
-  nests: null,
+  nests: [],
 };
 
 const HEALTH_INTERVAL_MS = 5000;

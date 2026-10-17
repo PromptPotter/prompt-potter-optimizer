@@ -27,6 +27,7 @@ from promptpotter.application.runner.termination import (
 from promptpotter.domain.phases import StopLoop, StopReason
 from promptpotter.domain.run_records import ErrorRecord, RebaseRequest
 from promptpotter.domain.sample import Sample
+from promptpotter.infrastructure.llm.telemetry import at_round
 
 logger = logging.getLogger(__name__)
 
@@ -112,48 +113,49 @@ async def run_round_loop(
                 cycle.tracking.current_accuracy,
             )
 
-            cb.set_round(round_num)
-            open_round = round_num
-            cb.on_round_entered(round_num)
-            # BEFORE the round spawns its arms, so they share a scale that absorbed the last round's cells.
-            refresh_inner_rulers(session, config, round_num=round_num)
+            # Through the boundary checks: a --diag controller reads the round just closed.
+            with at_round(round_num):
+                open_round = round_num
+                cb.on_round_entered(round_num)
+                # BEFORE the round spawns its arms, so they share a scale that absorbed the last round's cells.
+                refresh_inner_rulers(session, config, round_num=round_num)
 
-            # The cap's half only; the controller's is known once the round is scored (`execute_round`).
-            is_final_round = cap is not None and clean_rounds + 1 >= cap
+                # The cap's half only; the controller's is known once the round is scored (`execute_round`).
+                is_final_round = cap is not None and clean_rounds + 1 >= cap
 
-            round_result, cut = await execute_round(
-                cycle, round_num, dataset, cb, is_final_round=is_final_round
-            )
-            open_round = None
-            await post_round(
-                cycle,
-                round_result,
-                round_num,
-                session,
-                cb,
-                is_final_round=is_final_round or cut is not None,
-            )
-            round_num += 1
-            clean_rounds += 1
-
-            target_stop = target_tripped(cycle, halt_at_accuracy)
-            if target_stop is not None:
-                return LoopEnd(target_stop)
-            # A hold refusal cuts a round while the ceiling still reads clear, so the cut speaks first.
-            budget_stop = cut or session.control.budget_tripped()
-            if budget_stop is not None:
-                return LoopEnd(budget_stop)
-
-            if diag and clean_rounds >= 1:
-                controller = round_plan(cycle.optimizer).controller
-                assert controller is not None, "a --diag launch with no controller is refused"
-                await controller.diagnose(
-                    NodeContext(
-                        RoundContext(cycle=cycle, round_num=round_num - 1, callbacks=cb),
-                        controller.name,
-                    )
+                round_result, cut = await execute_round(
+                    cycle, round_num, dataset, cb, is_final_round=is_final_round
                 )
-                return LoopEnd(StopReason.DIAG_COMPLETE)
+                open_round = None
+                await post_round(
+                    cycle,
+                    round_result,
+                    round_num,
+                    session,
+                    cb,
+                    is_final_round=is_final_round or cut is not None,
+                )
+                clean_rounds += 1
+
+                target_stop = target_tripped(cycle, halt_at_accuracy)
+                if target_stop is not None:
+                    return LoopEnd(target_stop)
+                # A hold refusal cuts a round while the ceiling still reads clear, so the cut speaks first.
+                budget_stop = cut or session.control.budget_tripped()
+                if budget_stop is not None:
+                    return LoopEnd(budget_stop)
+
+                if diag:
+                    controller = round_plan(cycle.optimizer).controller
+                    assert controller is not None, "a --diag launch with no controller is refused"
+                    await controller.diagnose(
+                        NodeContext(
+                            RoundContext(cycle=cycle, round_num=round_num, callbacks=cb),
+                            controller.name,
+                        )
+                    )
+                    return LoopEnd(StopReason.DIAG_COMPLETE)
+            round_num += 1
 
     except RUN_ENDS as exc:
         stop_reason, error = end_run_on(exc, session, where=f"at round {round_num}")

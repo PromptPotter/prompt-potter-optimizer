@@ -38,14 +38,64 @@ class SubjectSpec(NamedTuple):
     @property
     def key(self) -> str:
         addressed = [p for p in (self.campaign_id, self.cycle_id, self.candidate_id) if p]
-        parts = [f"{self.kind}:{'/'.join(addressed)}"]
-        if self.inside:
-            parts.append(f"in={encode_cycle_path(self.inside)}")
+        segments = _Segments(self.inside, self.lens, self.samples)
+        return ";".join([f"{self.kind}:{'/'.join(addressed)}", *segments.spelled()])
+
+
+class TreeAddress(NamedTuple):
+    """``<name>[;in=<c::y~…>]`` — a dataset or campaign name, in the sandbox chain it is read in."""
+
+    name: str
+    inside: CyclePath = ()
+
+    @property
+    def spelling(self) -> str:
+        return ";".join([self.name, *_Segments(self.inside, None, None).spelled()])
+
+
+class _Segments(NamedTuple):
+    inside: CyclePath
+    lens: Lens | None
+    samples: frozenset[int] | None
+
+    def spelled(self) -> list[str]:
+        """What `_parse_segments` reads back."""
+        parts = [f"in={encode_cycle_path(self.inside)}"] if self.inside else []
         if self.lens:
             parts.append(f"lens={self.lens.spelling}")
         if self.samples:
             parts.append("samples=" + ",".join(str(s) for s in sorted(self.samples)))
-        return ";".join(parts)
+        return parts
+
+
+_ADDRESS_SEGMENTS = frozenset({"in"})
+_SUBJECT_SEGMENTS = _ADDRESS_SEGMENTS | {"lens", "samples"}
+
+
+def _parse_segments(spec: str, segments: list[str], *, allowed: frozenset[str]) -> _Segments:
+    lens: Lens | None = None
+    samples, inside = None, CyclePath()
+    for segment in segments:
+        name, _, value = segment.partition("=")
+        if name not in allowed:
+            raise ValueError(
+                f"Unknown segment {segment!r} on {spec!r} "
+                f"(expected {', '.join(f'{a}=' for a in sorted(allowed))})."
+            )
+        if name == "in":
+            inside = decode_cycle_path(value)
+        elif name == "lens":
+            lens = parse_lens(value, allow_abort=False)
+        else:
+            samples = parse_sample_ids(value)
+    return _Segments(inside, lens, samples)
+
+
+def parse_tree_address(spec: str) -> TreeAddress:
+    name, *segments = spec.split(";")
+    if not name:
+        raise ValueError(f"Address {spec!r} names nothing before its segments.")
+    return TreeAddress(name, _parse_segments(spec, segments, allowed=_ADDRESS_SEGMENTS).inside)
 
 
 def parse_subject(spec: str) -> SubjectSpec:
@@ -65,21 +115,7 @@ def parse_subject(spec: str) -> SubjectSpec:
             f"Subject {spec!r} addresses {len([p for p in parts if p])} id(s); a "
             f"{kind!r} subject takes exactly {arity}."
         )
-    lens: Lens | None = None
-    samples, inside = None, CyclePath()
-    for segment in segments:
-        name, _, value = segment.partition("=")
-        if name == "in":
-            inside = decode_cycle_path(value)
-        elif name == "lens":
-            lens = parse_lens(value, allow_abort=False)
-        elif name == "samples":
-            samples = parse_sample_ids(value)
-        else:
-            raise ValueError(
-                f"Unknown subject segment {segment!r} on {spec!r} "
-                "(expected 'in=', 'lens=' or 'samples=')."
-            )
+    inside, lens, samples = _parse_segments(spec, segments, allowed=_SUBJECT_SEGMENTS)
     if lens and kind != "course":
         raise ValueError(
             f"A {kind!r} subject takes no lens: an alternative formula re-decides ELECTIONS, and "
@@ -203,6 +239,12 @@ class SubjectReading(StrictModel):
     # A channel none of its cells carries is absent, never 0.
     cell_means: dict[str, float]
     values: dict[str, float]
+    bench_values: dict[str, float] = Field(
+        default_factory=dict,
+        description="The subject's values on the cells it was graded on HELD OUT — its bench "
+        "pass, which only a round's selection has — keyed like `values` and never pooled with "
+        "them: two scopes never pair.",
+    )
     value: float | None
     ci_lo: float | None
     ci_hi: float | None
@@ -218,7 +260,9 @@ __all__ = [
     "SubjectMask",
     "SubjectReading",
     "SubjectSpec",
+    "TreeAddress",
     "WinnerChainPoint",
     "authorship_of",
     "parse_subject",
+    "parse_tree_address",
 ]

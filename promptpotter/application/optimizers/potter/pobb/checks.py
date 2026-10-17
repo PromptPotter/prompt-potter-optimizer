@@ -25,8 +25,8 @@ if TYPE_CHECKING:
     from promptpotter.domain.scoring import GradedCell
 
 
-def _graded(cells: Iterable[GradedCell]) -> dict[int, float]:
-    return {cell.ruler_key: graded_response(cell) for cell in cells if cell.scored}
+def _graded(cells: Iterable[GradedCell]) -> dict[str, float]:
+    return {cell.key: graded_response(cell) for cell in cells if cell.scored}
 
 
 class EliminationGate(StrEnum):
@@ -103,7 +103,7 @@ class PoBBCheck:
         self.leader_lock_in = knobs.leader_lock_in
         self.n_samples = n_samples
         # The GRADED response, never a binarized hit, which is degenerate on a graded backend.
-        self.priors_by_sample: dict[str, dict[int, float]] = {}
+        self.priors_by_sample: dict[str, dict[str, float]] = {}
         self._current_id: str = ""
         self._on_snapshot: Callable[[RaceSnapshot], None] | None = None
 
@@ -220,9 +220,9 @@ class PoBBCheck:
         priors.update(pending)
         for m, (sample, row) in enumerate(upcoming, start=len(results) + 1):
             if row is None or row.scored:
-                cells.append(sample.id)
+                cells.append(sample.key)
             if row is not None and row.scored:
-                grades[sample.id] = graded_response(row)
+                grades[sample.key] = graded_response(row)
                 said.add(row.facts.predicted)
             if m < self.n_min:
                 continue

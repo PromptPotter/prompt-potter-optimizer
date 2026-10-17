@@ -125,7 +125,7 @@ A campaign-scoped roster replacing the module constant:
 PromptFieldRoster = list[PromptField]   # {key, label, hint, required}
 ```
 
-- Declared where the dataset is declared (`datasets/{name}/`), defaulted to the six, resolved at
+- Declared where the dataset is declared (`dataset.yaml`), defaulted to the six, resolved at
   mint into `CampaignConfig`, and served beside `origin_prompt_fields`.
 - `PromptTemplate` loses its six attributes for one `fields: dict[str, str]`. Every `getattr`
   becomes a lookup. `PROMPT_STRING_FIELDS` survives only as the DEFAULT roster.
@@ -171,6 +171,6 @@ Whatever ships, the interaction is the same and it is small:
 
 1. A (order) alone, or A then B? — the recommendation above is A first.
 2. Layout as an operator setting, or an optimizer axis? — held, until measured.
-3. Where a roster is declared if B lands: `datasets/{name}/pipeline.yaml` beside the node config,
+3. Where a roster is declared if B lands: `dataset.yaml::pipeline` beside the node config,
    or its own file? The former rides an existing channel; the latter is a sidecar the pre-flight
    gate would reject.

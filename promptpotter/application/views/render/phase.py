@@ -15,6 +15,7 @@ from promptpotter.application.views.render.primitives import (
     overlap_series,
 )
 from promptpotter.domain.connector import MeasuredUnit, unit_count
+from promptpotter.domain.phases import STOP_REASON_INFO, StopReason
 from promptpotter.domain.results import (
     ROUND_ADVANCE_INFO,
     ArmOutcome,
@@ -30,6 +31,16 @@ if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.results import RoundOutcome
     from promptpotter.domain.run_records import RoundClosedRecord
+
+
+def stop_lines(stop_reason: StopReason, *, detail: str = "") -> list[str]:
+    """A stop at every surface that names one: its outcome, its label, what said so, the verb past it."""
+    info = STOP_REASON_INFO[stop_reason]
+    said = f" — {detail}" if detail else ""
+    return [
+        f"{info.outcome.value.upper()} · {info.label}{said}",
+        *([f"next: {info.next_step}"] if info.next_step else []),
+    ]
 
 
 def fmt_elapsed(seconds: float) -> str:
@@ -165,4 +176,5 @@ __all__ = [
     "render_progress_table",
     "render_round_stats",
     "round_verdict_basis",
+    "stop_lines",
 ]

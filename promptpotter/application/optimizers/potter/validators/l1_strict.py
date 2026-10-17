@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application import optimizers
@@ -11,7 +11,7 @@ from promptpotter.application.optimizers.potter.dispatch.layout import (
     NODE_LAYOUTS,
     resolve_layout_override,
 )
-from promptpotter.application.optimizers.potter.dispatch.prompts import base_optimizer_template
+from promptpotter.application.optimizers.potter.dispatch.prompts import inner_template
 from promptpotter.config.prompt_blocks import prompt_blocks
 from promptpotter.domain.opt_search_point import TEMPLATE_TOKEN_RE, PromptTemplate
 from promptpotter.domain.pipeline_overlay import node_config_items
@@ -21,8 +21,8 @@ from promptpotter.domain.validators import LLMOutputValidator, ValidatorOutcome
 from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure
 
 if TYPE_CHECKING:
-    from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.optimizers.potter.knobs import PromptBlockCatalogue
+    from promptpotter.application.runner.inner.tasks import InnerCells
 
 __all__ = [
     "L1_CONFIG_NOT_IN_RUNTIME_FAILURES",
@@ -198,7 +198,7 @@ L1_CONFIG_NOT_IN_RUNTIME_FAILURES: LLMOutputValidator = LLMOutputValidator(
 
 
 def _optimizer_template_failures(
-    pipeline_params: dict[str, Any], inner: SelectedOptimizer
+    pipeline_params: dict[str, Any], cells: InnerCells
 ) -> list[ValidationFailure]:
     """Checks the MERGED params: a child inherits token-less prose without re-proposing it."""
     failures: list[ValidationFailure] = []
@@ -206,9 +206,9 @@ def _optimizer_template_failures(
         prose = {
             k: v for k, v in cfg.items() if k in PromptTemplate.model_fields and isinstance(v, str)
         }
-        if not prose:
+        base = inner_template(cells, node_name) if prose else None
+        if base is None:
             continue
-        base = base_optimizer_template(inner, node_name)
         declared = sorted(set(TEMPLATE_TOKEN_RE.findall(base.render())))
         if not declared:
             continue
@@ -229,12 +229,12 @@ def _optimizer_template_failures(
 def _check_l1_inner_placeholders_intact(
     source_output: Mapping[str, Any],
     *,
-    inner_optimizer: SelectedOptimizer | None,
+    inner_cells: InnerCells | None,
     **_: Any,
 ) -> ValidatorOutcome | None:
-    if not isinstance(source_output, dict) or inner_optimizer is None:
+    if not isinstance(source_output, dict) or inner_cells is None:
         return None
-    failures = _optimizer_template_failures(source_output, inner_optimizer)
+    failures = _optimizer_template_failures(source_output, inner_cells)
     if not failures:
         return None
     return ValidatorOutcome(
@@ -296,15 +296,14 @@ _FORBIDDEN_INNER_STEERS: tuple[tuple[str, tuple[str, ...]], ...] = (
 def _check_l1_inner_steer_is_legal(
     source_output: Mapping[str, Any],
     *,
-    inner_optimizer: SelectedOptimizer | None,
+    inner_nodes: Collection[str],
     **_: Any,
 ) -> ValidatorOutcome | None:
-    """A prompt that stops the loop early drops the flat tail out of ``mean_round_delta``'s average."""
-    if not source_output or inner_optimizer is None:
-        return None
+    """A prompt that stops the loop early edits the frame the measurand averages over, not the search
+    it measures. Judged on the inner optimizer's nodes alone: elsewhere the phrase is target prose."""
     failures: list[ValidationFailure] = []
     for node_name, node_params in source_output.items():
-        if not isinstance(node_params, dict):
+        if node_name not in inner_nodes or not isinstance(node_params, dict):
             continue
         for field, value in node_params.items():
             if field not in PromptTemplate.model_fields or not isinstance(value, str):
@@ -340,27 +339,27 @@ _GUT_RATIO = 0.35
 
 
 def _parent_field_text(
-    inner: SelectedOptimizer, node: str, field: str, pipeline_params: Mapping[str, Any] | None
+    cells: InnerCells, node: str, field: str, pipeline_params: Mapping[str, Any] | None
 ) -> str:
     parent = (pipeline_params or {}).get(node)
     if isinstance(parent, Mapping):
         inherited = parent.get(field)
         if isinstance(inherited, str) and inherited:
             return inherited
-    template = base_optimizer_template(inner, node)
-    current = getattr(template, field, "")
+    template = inner_template(cells, node)
+    current = getattr(template, field, "") if template is not None else ""
     return current if isinstance(current, str) else ""
 
 
 def _check_l1_prompt_field_not_gutted(
     source_output: Mapping[str, Any],
     *,
-    inner_optimizer: SelectedOptimizer | None,
+    inner_cells: InnerCells | None,
     pipeline_params: Mapping[str, Any] | None = None,
     **_: Any,
 ) -> ValidatorOutcome | None:
     """An override REPLACES its field whole, so a short one deletes the contracts the parent's prose carried."""
-    if not source_output or inner_optimizer is None:
+    if not source_output or inner_cells is None:
         return None
     failures: list[ValidationFailure] = []
     for node_name, node_params in source_output.items():
@@ -369,7 +368,7 @@ def _check_l1_prompt_field_not_gutted(
         for field, value in node_params.items():
             if field not in PromptTemplate.model_fields or not isinstance(value, str):
                 continue
-            parent = _parent_field_text(inner_optimizer, node_name, field, pipeline_params)
+            parent = _parent_field_text(inner_cells, node_name, field, pipeline_params)
             if len(parent) < _GUTTABLE_MIN_CHARS:
                 continue
             if len(value) >= _GUT_RATIO * len(parent):

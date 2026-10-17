@@ -307,34 +307,40 @@ del _node, _spec, _floor_ph, _early
 def layout_json_schema(
     spec: NodeLayoutSpec, *, description: str, withheld: frozenset[str] = frozenset()
 ) -> dict[str, Any]:
-    """``propertyNames`` + ``additionalProperties`` state each enum once: this schema is prompt text."""
+    """Keyed by SLOT, the four stated as properties, so no reply can name one that does not exist; the provider enforces none of it (`strict: False`), so the panel menu is prompt text stated once."""
+    panels = ", ".join(sorted(spec.possible - withheld))
     return {
         "type": "object",
-        "description": description,
-        "propertyNames": {"enum": sorted(spec.possible - withheld)},
-        "additionalProperties": {"type": "string", "enum": list(L1_LAYOUT_SLOTS)},
+        "description": f"{description} Legal panels: {panels}.",
+        "properties": {
+            slot: {"type": "array", "items": {"type": "string"}} for slot in L1_LAYOUT_SLOTS
+        },
+        "additionalProperties": False,
     }
 
 
 def unplaceable_edit(raw_layout: object) -> ValidatorOutcome | None:
-    """ONE stray move refuses the whole edit: the rest would land as a layout nobody asked for."""
+    """ONE stray key refuses the whole edit: the rest would land as a layout nobody asked for."""
     if not raw_layout:
         return None
     asked = raw_layout if isinstance(raw_layout, dict) else {}
-    stray = {
-        str(name): str(slot)[:40]
-        for name, slot in asked.items()
-        if not (isinstance(name, str) and isinstance(slot, str) and slot in L1_LAYOUT_SLOTS)
-    }
-    if asked and not stray:
+    stray = sorted(
+        str(slot)[:40]
+        for slot, panels in asked.items()
+        if not (
+            isinstance(slot, str)
+            and slot in L1_LAYOUT_SLOTS
+            and isinstance(panels, list)
+            and all(isinstance(p, str) for p in panels)
+        )
+    )
+    listed = [p for panels in asked.values() if isinstance(panels, list) for p in panels]
+    twice = sorted({str(p)[:40] for p in listed if listed.count(p) > 1})
+    if asked and not stray and not twice:
         return None
     return ValidatorOutcome(
         validator_id="l1_layout_unparseable",
-        evidence={
-            "not_a_slot": sorted(set(stray.values())),
-            "asked_for_panel": sorted(stray),
-            "slots": list(L1_LAYOUT_SLOTS),
-        },
+        evidence={"not_a_slot": stray, "placed_twice": twice, "slots": list(L1_LAYOUT_SLOTS)},
     )
 
 
@@ -342,7 +348,9 @@ def coerce_l1_layout(raw_layout: Any, *, base: L1Layout) -> L1Layout | None:
     """``None`` is "no edit asked". An unknown PANEL is placed, not dropped, so ``l1_layout_unknown_placeholder`` rolls the edit back."""
     if not raw_layout:
         return None
-    moves: dict[str, str] = dict(raw_layout)
+    moves: dict[str, str] = {
+        panel: slot for slot, panels in dict(raw_layout).items() for panel in panels
+    }
     update: dict[str, list[str]] = {}
     for slot in L1_LAYOUT_SLOTS:
         kept = [n for n in base.slot(slot) if moves.get(n, slot) == slot]

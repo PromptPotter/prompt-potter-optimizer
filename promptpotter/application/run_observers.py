@@ -30,11 +30,7 @@ from promptpotter.infrastructure.llm.spend_book import (
     bind_spend_book,
     reset_spend_book,
 )
-from promptpotter.infrastructure.llm.telemetry import (
-    reset_current_round,
-    reset_cycle_ledger,
-    set_cycle_ledger,
-)
+from promptpotter.infrastructure.llm.telemetry import reset_cycle_ledger, set_cycle_ledger
 from promptpotter.infrastructure.producer_lock import hold_cycle, release_cycle
 from promptpotter.infrastructure.projections.audit_trail import AuditTrailProjection
 from promptpotter.infrastructure.projections.cycle_index import CycleIndexProjection
@@ -151,7 +147,6 @@ class RunObservers:
         # A nested run (an L4 inner cell) admits nothing here: its sends stay on the ROOT's ceiling.
         if instrument_depth() == 0:
             book.ledger = ledger
-            book.round_now = lambda: self.callbacks._current_round
             if self._book_tokens:
                 reset_spend_book(self._book_tokens.pop())
             self._book_tokens.append(bind_spend_book(book))
@@ -180,9 +175,6 @@ class RunObservers:
             reset_cycle_ledger(self._ledger_token)
         if self._book_tokens:
             reset_spend_book(self._book_tokens.pop())
-        if self.callbacks._round_token is not None:
-            reset_current_round(self.callbacks._round_token)
-            self.callbacks._round_token = None
 
 
 def build_run_observers(

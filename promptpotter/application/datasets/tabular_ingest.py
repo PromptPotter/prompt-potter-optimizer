@@ -505,8 +505,8 @@ def parse_candidate_library(blob: bytes, filename: str) -> tuple[str, ...]:
     return terms
 
 
-def read_candidate_library_file(dataset_config_dir: Path) -> tuple[str, ...]:
-    path = dataset_config_dir / CANDIDATE_LIBRARY_FILE
+def read_candidate_library_file(dataset_dir: Path) -> tuple[str, ...]:
+    path = dataset_dir / CANDIDATE_LIBRARY_FILE
     if not path.is_file():
         return ()
     return _dedup_terms(path.read_text(encoding="utf-8").splitlines())

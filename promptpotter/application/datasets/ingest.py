@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 from pathlib import Path
 from typing import Any
@@ -19,14 +18,11 @@ from promptpotter.application.datasets.draft_campaign import (
     scoring_choice,
 )
 from promptpotter.application.datasets.loaders import bank_samples
-from promptpotter.application.datasets.prompts import (
-    list_dataset_prompts,
-    load_dataset_prompt,
-)
+from promptpotter.application.datasets.prompts import first_origin_prompt
 from promptpotter.application.datasets.startability import (
     checkin_items,
     labelled_rows,
-    offered_dataset_dir,
+    offered_dataset,
 )
 from promptpotter.application.datasets.tabular_ingest import (
     IngestError,
@@ -41,6 +37,7 @@ from promptpotter.connectors import DEFAULT_CONNECTOR
 from promptpotter.connectors.protocol import PROBE_WORKLOAD
 from promptpotter.domain.bench import partition_bank
 from promptpotter.domain.campaign import Campaign
+from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.pipeline_parsing import merge_node_blocks
 from promptpotter.infrastructure.backend import BackendClient
@@ -64,16 +61,14 @@ async def fetch_backend_nodes(connector_name: str) -> dict[str, Any]:
         return {}
     client = BackendClient(connector, workload=PROBE_WORKLOAD)
     try:
-        resp = await client.fetch_pipeline()
-    except (KeyboardInterrupt, asyncio.CancelledError):
-        raise
-    except Exception as exc:
+        declared = await client.fetch_pipeline()
+    except BackendUnreachableError as exc:
+        # Served as `schema_source: unreachable`; a backend answering no schema raises past it.
         logger.info("check-in could not read %s pipeline schema: %s", connector_name, exc)
         return {}
     finally:
         await client.aclose()
-    nodes = (resp.get("data") or resp).get("nodes")
-    return dict(nodes) if isinstance(nodes, dict) else {}
+    return dict(declared["nodes"])
 
 
 async def refresh_capabilities(stores: Stores) -> None:
@@ -154,15 +149,14 @@ async def draft_from_dataset(
     origin_campaign: Campaign | None = None,
 ) -> DraftCampaign:
     await _open_checkin(stores)
-    dataset_dir = offered_dataset_dir(stores, dataset_name)
+    dataset_dir = offered_dataset(stores, dataset_name).directory
     items = checkin_items(stores, dataset_name)
     rows = labelled_rows(items)
 
+    declared = backend_type_of_dataset(stores, dataset_name)
     # An origin reuse reads the node declaration off ITS connector, not the shared file's.
     backend_nodes = await fetch_backend_nodes(
-        origin_campaign.backend_type
-        if origin_campaign is not None
-        else backend_type_of_dataset(stores, dataset_name)
+        origin_campaign.backend_type if origin_campaign is not None else declared
     )
 
     authored = read_authored_dataset(dataset_dir)
@@ -172,7 +166,7 @@ async def draft_from_dataset(
     # `is not None`, never `or`: 0 means "measure the origin and stop".
     authored_rounds = cc.optimization.max_rounds
     max_rounds = authored_rounds if authored_rounds is not None else DEFAULT_MAX_ROUNDS
-    connector = authored.backend_type or DEFAULT_CONNECTOR
+    connector = declared or DEFAULT_CONNECTOR
     pipeline_overlay = authored.pipeline_nodes
     if origin_campaign is not None:
         # A merge, not a replacement: the origin's frozen config is sparse.
@@ -181,14 +175,8 @@ async def draft_from_dataset(
             overlay_from_campaign_config(resolve_campaign_config(stores, origin_campaign, None)),
         )
 
-    origin_prompt_fields: dict[str, Any] = {}
-    prompt_names = list_dataset_prompts(dataset_dir)
-    if prompt_names:
-        name = "default" if "default" in prompt_names else prompt_names[0]
-        try:
-            origin_prompt_fields = load_dataset_prompt(dataset_dir, name).prompt_fields()
-        except FileNotFoundError:
-            origin_prompt_fields = {}
+    origin = first_origin_prompt(dataset_dir, authored.active_steps)
+    origin_prompt_fields: dict[str, Any] = {} if origin is None else origin.prompt_fields()
 
     slug = dataset_name.lower()
     # The check-in model reads the preview's labels, so no bench row may reach it.

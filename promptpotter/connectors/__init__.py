@@ -24,7 +24,7 @@ ENTRY_POINT_GROUP = "promptpotter.connectors"
 """Published: renaming it un-registers every third-party plugin at once."""
 
 DEFAULT_CONNECTOR = "termnorm"
-"""What a fresh upload drafts against when its ``pipeline.yaml`` names no connector."""
+"""What a fresh upload drafts against when its ``dataset.yaml::pipeline`` names no connector."""
 
 
 def _validate(c: object, origin: str) -> Connector:
@@ -38,11 +38,8 @@ def _validate(c: object, origin: str) -> Connector:
     for hook, fn in hooks.items():
         if not callable(fn):
             raise RuntimeError(f"{where}: {hook} is not callable.")
-    if bool(c.experiment_file) != callable(c.extract_experiment):
-        raise RuntimeError(
-            f"{where}: experiment_file {c.experiment_file!r} requires extract_experiment "
-            f"{'set' if c.experiment_file else 'unset'}."
-        )
+    if c.resolve_experiment is not None and not c.owns_panel:
+        raise RuntimeError(f"{where}: resolve_experiment needs extract_experiment.")
     valid_execution = set(typing.get_args(ConnectorExecution))
     if c.execution not in valid_execution:
         raise RuntimeError(f"{where}: execution {c.execution!r} not in {valid_execution}.")

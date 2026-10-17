@@ -58,7 +58,7 @@
 .unit-library-filter-btn.on{color:var(--color-accent);background:var(--color-background-tint-active)}
 .unit-library-filter-dot{position:absolute;top:1px;right:1px;width:5px;height:5px;border-radius:50%;background:var(--color-accent)}
 .sidebar-filter-panel{width:230px;padding:var(--space-6) var(--space-8) var(--space-8)}
-.sidebar-filter-search{width:100%;margin:var(--space-6) 0;padding:var(--space-4) var(--space-8);background:var(--color-background-primary);border:0.5px solid var(--color-border);border-radius:4px;font-family:inherit;font-size:var(--text-sm);color:var(--color-text-primary)}
+.sidebar-filter-search{width:100%;margin:var(--space-6) 0;font-size:var(--text-sm)}
 .sidebar-filter-search::placeholder{color:var(--color-text-secondary)}
 .sidebar-filter-search:focus-visible{outline:none;border-color:var(--color-accent)}
 .sidebar-filter-datasets{max-height:220px;overflow-y:auto;padding:0}

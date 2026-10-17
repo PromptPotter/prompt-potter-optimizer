@@ -47,18 +47,20 @@ def active_pointer_exists(workspace: WorkspaceDir) -> bool:
     return _active_pointer_path(workspace).exists()
 
 
-def cleanup_stub_fork_if_empty(
-    *,
-    campaign_store: CampaignStore,
-    hop: CycleHop,
-    parent_cycle_id: str,
-) -> tuple[bool, str]:
+def cleanup_stub_fork_if_empty(*, campaign_store: CampaignStore, hop: CycleHop) -> tuple[bool, str]:
+    """An active stub hands the pointer to the parent its mint names; one cut from another tree
+    names no cycle here, so the pointer is cleared."""
     workspace = campaign_store.workspace
     was_active = read_active_pointer(workspace) == (hop.campaign_id, hop.cycle_id)
+    index = campaign_store.load(hop, moment=None)
+    parent_cycle_id = None if index is None else index.parent_cycle_id
     if was_active:
-        save_active_pointer(
-            workspace, CycleHop(campaign_id=hop.campaign_id, cycle_id=parent_cycle_id)
-        )
+        if parent_cycle_id is None:
+            clear_active_pointer(workspace)
+        else:
+            save_active_pointer(
+                workspace, CycleHop(campaign_id=hop.campaign_id, cycle_id=parent_cycle_id)
+            )
     try:
         deleted, reason = campaign_store.try_delete_stub_cycle(hop)
     except Exception as exc:

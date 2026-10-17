@@ -1,18 +1,29 @@
 from __future__ import annotations
 
-import importlib
+import json
 import logging
 import random
 import re
-from collections.abc import Callable
+import urllib.request
+from collections import defaultdict
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from decimal import Decimal
+from enum import Enum
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.config.paths import benchmark_datasets_root
+from promptpotter.application.datasets.sealqa_panel import write_longseal_panel
 from promptpotter.domain.sample import ArchiveEntry, Sample
-from promptpotter.infrastructure.store.dataset_access import held_rows
+from promptpotter.infrastructure.store.dataset_access import (
+    MATERIALIZED_PANEL_FILE,
+    ResolvedDataset,
+    held_rows,
+    list_readable_datasets,
+    read_dataset_definition,
+)
+from promptpotter.infrastructure.store.io import write_bytes
 from promptpotter.infrastructure.store.measurement_archive import config_key
-from promptpotter.shared.answer_text import GSM8K_ANSWER_RE
 from promptpotter.shared.extras import Extra, require_extra
 from promptpotter.shared.hashing import ADDRESS_HEX, stable_hash
 
@@ -23,10 +34,85 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+Row = dict[str, Any]
+Drawn = tuple[str, str]
 
-def hf_load_dataset() -> Any:
-    require_extra(Extra.BENCHMARKS)
-    return importlib.import_module("datasets").load_dataset
+
+_HUB_EXTRA = Extra.BENCHMARKS
+
+
+class SourceKind(Enum):
+    HUB = "hub"
+    GITHUB = "github"
+    # The rows' inputs are the `source:` section itself.
+    INLINE = "inline"
+
+    @property
+    def extra(self) -> Extra | None:
+        return _HUB_EXTRA if self is SourceKind.HUB else None
+
+
+@dataclass(frozen=True, slots=True)
+class Source:
+    """A definition's ``source:`` section: where the rows come from, at which commit, cut how."""
+
+    recipe: str
+    kind: SourceKind
+    repo: str
+    rev: str
+    params: Mapping[str, Any]
+
+    @classmethod
+    def of(cls, section: Mapping[str, Any]) -> Source | None:
+        if not section:
+            return None
+        params = dict(section)
+        recipe = str(params.pop("recipe", ""))
+        if not recipe:
+            raise ValueError(f"`source:` names no recipe: {sorted(section)}")
+        kind = next((k for k in (SourceKind.HUB, SourceKind.GITHUB) if k.value in params), None)
+        if kind is None:
+            return cls(recipe, SourceKind.INLINE, "", "", params)
+        repo = str(params.pop(kind.value))
+        # A moving ref re-cuts the bank on the next machine that fetches it, under the name it has.
+        rev = str(params.pop("rev", ""))
+        if not rev:
+            raise ValueError(f"`source:` fetches {repo} at no pinned `rev`")
+        return cls(recipe, kind, repo, rev, params)
+
+    def __getitem__(self, key: str) -> Any:
+        try:
+            return self.params[key]
+        except KeyError:
+            raise ValueError(f"recipe {self.recipe!r} needs `source.{key}`") from None
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return self.params.get(key, default)
+
+
+def _load_dataset(*args: Any, **kwargs: Any) -> Any:
+    require_extra(_HUB_EXTRA)
+    from datasets import load_dataset
+
+    return load_dataset(*args, **kwargs)
+
+
+def from_hub(src: Source, *config: str, **kwargs: Any) -> Any:
+    return _load_dataset(src.repo, *config, revision=src.rev, **kwargs)
+
+
+def _github_raw(src: Source, path: str) -> str:
+    url = f"https://raw.githubusercontent.com/{src.repo}/{src.rev}/{path}"
+    with urllib.request.urlopen(url, timeout=60) as response:
+        return str(response.read().decode("utf-8"))
+
+
+def _configs(src: Source) -> tuple[str, ...]:
+    return (str(src["config"]),) if "config" in src.params else ()
+
+
+def _hub_split(src: Source) -> list[Row]:
+    return list(from_hub(src, *_configs(src), split=src["split"]))
 
 
 def samples_from_dicts(items: list[dict[str, Any]]) -> list[Sample]:
@@ -48,190 +134,350 @@ def sample_dataset(dataset: list[Sample], sample_size: int) -> list[Sample]:
     return dataset[:sample_size]
 
 
-def load_gsm8k(split: str = "train") -> list[Sample]:
-    load_dataset = hf_load_dataset()
-
-    ds = load_dataset("openai/gsm8k", "main", split=split)
-    samples: list[Sample] = []
-    for i, row in enumerate(ds):
-        m = GSM8K_ANSWER_RE.search(row["answer"])
-        gt = f"#### {m.group(1)}" if m else row["answer"].strip()
-        samples.append(Sample(id=i, query=row["question"], ground_truth=gt))
-
-    logger.info("Loaded GSM8K %s: %d items", split, len(samples))
-    return samples
+# The one seed every bank's shuffle and draw takes; changing it re-cuts each (dataset_name, id) history.
+_BANK_SEED: int = 42
 
 
-def load_aime_2025() -> list[Sample]:
-    load_dataset = hf_load_dataset()
-
-    ds = load_dataset("MathArena/aime_2025", split="train")
-    samples: list[Sample] = [
-        Sample(id=i, query=row["problem"], ground_truth=str(row["answer"]))
-        for i, row in enumerate(ds)
-    ]
-
-    logger.info("Loaded AIME 2025: %d items", len(samples))
-    return samples
-
-
-def load_bbeh() -> list[Sample]:
-    load_dataset = hf_load_dataset()
-
-    ds = load_dataset("BBEH/bbeh", split="train")
-    samples: list[Sample] = []
-    for row in ds:
-        if not row.get("mini"):
-            continue
-        samples.append(
-            Sample(
-                id=len(samples),
-                query=row["input"],
-                ground_truth=row["target"],
-            )
-        )
-
-    logger.info("Loaded BBEH mini: %d items", len(samples))
-    return samples
-
-
-# Changing any of these re-cuts a bank whose per-sample history is keyed by (dataset_name, id).
-_JUSTLOGIC_TRAIN_PER_DEPTH: int = 200
-_JUSTLOGIC_SEED: int = 42
-_JUSTLOGIC_HELD_PER_DEPTH: int = 300
-_JUSTLOGIC_HELD_SUFFIX = "-held"
-_JUSTLOGIC_CUT_RE = re.compile(rf"^justlogic-d(\d+)(?:{_JUSTLOGIC_HELD_SUFFIX})?$")
-
-
-def justlogic_depths(dataset_name: str) -> tuple[int, ...] | None:
-    m = _JUSTLOGIC_CUT_RE.match(dataset_name)
-    if m is None:
-        return None
-    depths = tuple(sorted({int(d) for d in m.group(1)}))
-    return depths or None
-
-
-def _load_justlogic(depths: tuple[int, ...], split: str = "train") -> list[Sample]:
-    if split not in ("train", "test", "held"):
-        raise ValueError(f"JustLogic split must be 'train', 'test' or 'held', got {split!r}")
-    load_dataset = hf_load_dataset()
-    from collections import defaultdict
-
-    ds = load_dataset("michaelchenkj/JustLogic", split="train")
-    by_depth: dict[int, list[Any]] = defaultdict(list)
-    for row in ds:
-        if row["depth"] in depths:
-            by_depth[row["depth"]].append(row)
-
-    picked_rows: list[Any] = []
-    for depth in sorted(by_depth):
-        rows = by_depth[depth]
-        indices = list(range(len(rows)))
-        random.Random(_JUSTLOGIC_SEED).shuffle(indices)
-        cut = _JUSTLOGIC_TRAIN_PER_DEPTH
-        stop = cut + _JUSTLOGIC_HELD_PER_DEPTH if split == "held" else None
-        picked = indices[:cut] if split == "train" else indices[cut:stop]
-        picked_rows.extend(rows[i] for i in picked)
-
-    # `sample_dataset` takes a PREFIX, so a depth-ordered bank hands out only the shallowest depth.
-    random.Random(_JUSTLOGIC_SEED).shuffle(picked_rows)
-
-    samples: list[Sample] = [
-        Sample(
-            id=i,
-            query=(
-                f"Premises:\n{row['paragraph']}\n\n"
-                f"Claim: {row['question']}\n\n"
-                f"Is the claim TRUE, FALSE, or Uncertain given the premises?"
-            ),
-            ground_truth=str(row["label"]),
-        )
-        for i, row in enumerate(picked_rows)
-    ]
-
-    logger.info(
-        "Loaded JustLogic %s: %d items (depths %s, %d/depth)",
-        split,
-        len(samples),
-        list(depths),
-        _JUSTLOGIC_TRAIN_PER_DEPTH,
-    )
-    return samples
-
-
-def _load_justlogic_held(depths: tuple[int, ...]) -> list[Sample]:
-    bank = _load_justlogic(depths)
-    held = _load_justlogic(depths, "held")
-    return bank + [
-        row.model_copy(update={"id": len(bank) + row.id, "bench_only": True}) for row in held
-    ]
+def _query_and_truth(row: Row) -> Drawn:
+    return row["query"], row["ground_truth"]
 
 
 @dataclass(frozen=True, slots=True)
 class BankLoader:
-    load: Callable[[], list[Sample]]
-    # What a FETCH imports; a bank already materialized needs nothing installed.
-    extra: Extra | None
+    source: SourceKind
+    rows: Callable[[], list[Row]]
+    draw: Callable[[Row], Drawn] = _query_and_truth
+    cap: int | None = None
+    # `sample_dataset` takes a PREFIX, so a source-ordered bank is shuffled once, here.
+    shuffled: bool = True
+    bench_tail: BankLoader | None = None
+
+    @property
+    def extra(self) -> Extra | None:
+        """What a FETCH imports; a bank already materialized needs nothing installed."""
+        return self.source.extra
+
+    def load(self) -> list[Sample]:
+        rows = self.rows()
+        if self.shuffled:
+            random.Random(_BANK_SEED).shuffle(rows)
+        samples = [
+            Sample(id=i, query=query, ground_truth=truth)
+            for i, (query, truth) in enumerate(map(self.draw, rows[: self.cap]))
+        ]
+        if self.bench_tail is None:
+            return samples
+        return samples + [
+            row.model_copy(update={"id": len(samples) + row.id, "bench_only": True})
+            for row in self.bench_tail.load()
+        ]
 
 
-def _hf(load: Callable[[], list[Sample]]) -> BankLoader:
-    return BankLoader(load, Extra.BENCHMARKS)
-
-
-DATASET_LOADERS: dict[str, BankLoader] = {
-    "gsm8k": _hf(load_gsm8k),
-    "aime_2025": _hf(load_aime_2025),
-    "bbeh": _hf(load_bbeh),
-}
-"""Map dataset name → loader, for the benchmarks whose cut is fixed.
-
-JustLogic is deliberately absent: its cut is a *family* derived from the name, resolved by
-:func:`dataset_loader`. Read that, never this dict, to answer "can this name be loaded?" —
-a bare membership test here reports False for every valid ``justlogic-dNNN``.
-"""
-
-
-def dataset_loader(dataset_name: str) -> BankLoader | None:
-    fixed = DATASET_LOADERS.get(dataset_name)
-    if fixed is not None:
-        return fixed
-    depths = justlogic_depths(dataset_name)
-    if depths is None:
-        return None
-    if dataset_name.endswith(_JUSTLOGIC_HELD_SUFFIX):
-        return _hf(lambda: _load_justlogic_held(depths))
-    return _hf(lambda: _load_justlogic(depths))
-
-
-def loadable_dataset_names() -> list[str]:
-    root = benchmark_datasets_root()
-    cuts = (
-        sorted(
-            p.name
-            for p in root.iterdir()
-            if p.is_dir() and p.name not in DATASET_LOADERS and dataset_loader(p.name) is not None
-        )
-        if root.is_dir()
-        else []
+def _bank(
+    src: Source, rows: Callable[[], list[Row]], draw: Callable[[Row], Drawn] = _query_and_truth
+) -> BankLoader:
+    return BankLoader(
+        src.kind, rows, draw, cap=src.get("cap"), shuffled=bool(src.get("shuffled", True))
     )
-    return [*sorted(DATASET_LOADERS), *cuts]
 
 
-def fetch_dataset_items(stores: Stores, dataset_name: str) -> list[dict[str, Any]]:
-    """The ladder's last rung: fetch through the registered loader and bank the rows."""
-    loader = dataset_loader(dataset_name)
+def _hotpotqa(row: Row) -> Drawn:
+    context = row["context"]
+    paragraphs = "\n\n".join(
+        f"{title}: {''.join(sentences)}"
+        for title, sentences in zip(context["title"], context["sentences"], strict=True)
+    )
+    return f"Question: {row['question']}\n\nContext:\n\n{paragraphs}", row["answer"]
+
+
+def _plain_number(value: float) -> str:
+    # `GSM8K_ANSWER_RE` reads no exponent, which is what `repr` makes of a large or tiny float.
+    return str(int(value)) if value.is_integer() else format(Decimal(repr(value)), "f")
+
+
+def _class_label_rows(
+    src: Source, column: str, query: Callable[[Row, Any], str]
+) -> Callable[[], list[Row]]:
+    def rows() -> list[Row]:
+        ds = from_hub(src, split=src["split"])
+        label = ds.features[column]
+        return [
+            {"query": query(row, label), "ground_truth": label.int2str(row[column])} for row in ds
+        ]
+
+    return rows
+
+
+def _naturalplan_rows(src: Source) -> list[Row]:
+    examples = json.loads(_github_raw(src, src["path"]))
+    # Tiered 100 per head count, so the take keeps the fewest-people tiers whole.
+    return sorted(examples.values(), key=lambda row: row["num_people"])[: int(src["take"])]
+
+
+def _naturalplan(row: Row) -> Drawn:
+    golden = {key: row[key] for key in ("constraints", "dist_matrix", "golden_plan")}
+    return row["prompt_0shot"], json.dumps(golden, separators=(",", ":"))
+
+
+_BLOCKSWORLD_FACT_RE = re.compile(r"the (\w+) block is (?:on top of the (\w+) block|on the table)")
+
+
+def _blocksworld_problem(query: str) -> str:
+    # The last [STATEMENT] is the instance to solve; the one before it is the prompt's worked example.
+    init, goal = query.rsplit("[STATEMENT]", 1)[1].split("My goal is to have that")
+    return json.dumps(
+        {
+            "below": {top: under or "table" for top, under in _BLOCKSWORLD_FACT_RE.findall(init)},
+            "goal": [[top, under or "table"] for top, under in _BLOCKSWORLD_FACT_RE.findall(goal)],
+        },
+        separators=(",", ":"),
+    )
+
+
+def _arc(row: Row) -> Drawn:
+    choices = row["choices"]
+    options = "\n".join(
+        f"{label}) {text}" for label, text in zip(choices["label"], choices["text"], strict=True)
+    )
+    return f"{row['question']}\n\nOptions:\n{options}", row["answerKey"]
+
+
+def _instruction_induction_task_rows(task: str, examples: dict[str, Row]) -> list[Row]:
+    rng = random.Random(_BANK_SEED)
+    rows: list[Row] = []
+    for example in examples.values():
+        if task == "cause_and_effect":
+            pair = [example["cause"], example["effect"]]
+            rng.shuffle(pair)
+            text, gold = f"Sentence 1: {pair[0]} Sentence 2: {pair[1]}", example["cause"]
+        elif task == "taxonomy_animal":
+            # The source lists the animals in an arbitrary order and grades a set; input order is exact.
+            animals = set(example["category_items"])
+            kept = [word for word in example["words"] if word in animals]
+            if len(kept) != len(animals):
+                raise ValueError(
+                    f"taxonomy_animal: {animals - set(kept)} not among the input words"
+                )
+            text, gold = example["input"], ", ".join(kept)
+        else:
+            text, gold = example["input"], example["output"]
+        rows.append({"query": f"Task: {task}\nInput: {text}", "ground_truth": gold})
+    return rows
+
+
+def _instruction_induction_rows(src: Source) -> list[Row]:
+    rows: list[Row] = []
+    for task in src["tasks"]:
+        doc = json.loads(_github_raw(src, f"data/raw/execute/{task}.json"))
+        rows.extend(_instruction_induction_task_rows(task, doc["examples"]))
+    return rows
+
+
+def _justlogic_rows(src: Source, *, held: bool) -> list[Row]:
+    depths = set(src["depths"])
+    by_depth: dict[int, list[Row]] = defaultdict(list)
+    for row in from_hub(src, split=src["split"]):
+        if row["depth"] in depths:
+            by_depth[row["depth"]].append(row)
+    train, held_n = int(src["train_per_depth"]), int(src["held_per_depth"])
+    picked: list[Row] = []
+    for depth in sorted(by_depth):
+        rows = by_depth[depth]
+        indices = list(range(len(rows)))
+        random.Random(_BANK_SEED).shuffle(indices)
+        drawn = indices[train : train + held_n] if held else indices[:train]
+        picked.extend(rows[i] for i in drawn)
+    return picked
+
+
+def _justlogic(row: Row) -> Drawn:
+    return (
+        f"Premises:\n{row['paragraph']}\n\n"
+        f"Claim: {row['question']}\n\n"
+        f"Is the claim TRUE, FALSE, or Uncertain given the premises?"
+    ), str(row["label"])
+
+
+def _justlogic_bank(src: Source) -> BankLoader:
+    tail = BankLoader(src.kind, lambda: _justlogic_rows(src, held=True), _justlogic)
+    return BankLoader(
+        src.kind,
+        lambda: _justlogic_rows(src, held=False),
+        _justlogic,
+        bench_tail=tail if src.get("held_tail") else None,
+    )
+
+
+_SCREEN_TASTE_QUERY = """Titles this person likes:
+{shown}
+
+Candidates:
+{slate}"""
+
+
+def _screen_taste_rows(src: Source) -> list[Row]:
+    """Each row is one DRAW: ``shown`` liked titles as context, and a slate of one more held out plus
+    distractors. A title on both lists is an unscoreable row, so the recipe refuses one."""
+    liked, other = list(src["titles"]), list(src["distractors"])
+    n_rows, n_shown, n_slate = int(src["rows"]), int(src["shown"]), int(src["slate"])
+    if both := sorted(set(liked) & set(other)):
+        raise ValueError(f"in titles AND distractors, so no row can score: {both}")
+    rng = random.Random(int(src["seed"]))
+    items: list[Row] = []
+    seen: set[str] = set()
+    while len(items) < n_rows:
+        draw = rng.sample(liked, n_shown + 1)
+        shown, held = draw[:n_shown], draw[n_shown]
+        # The ANSWER is what makes a row distinct; a second draw holding it out is wasted spend.
+        if held in seen:
+            continue
+        seen.add(held)
+        slate = [held, *rng.sample(other, n_slate - 1)]
+        # Shuffled, or the answer is always first and position alone scores 1.0.
+        rng.shuffle(slate)
+        query = _SCREEN_TASTE_QUERY.format(shown="\n".join(shown), slate="\n".join(slate))
+        items.append({"query": query, "ground_truth": held})
+    return items
+
+
+def _hub_rows(draw: Callable[[Row], Drawn]) -> Callable[[Source], BankLoader]:
+    return lambda src: _bank(src, lambda: _hub_split(src), draw)
+
+
+def _cell(value: object) -> str:
+    return _plain_number(value) if isinstance(value, float) else str(value)
+
+
+def _columns(src: Source) -> BankLoader:
+    """Two columns of a hub split: `query` and `truth` name them, `truth_prefix` leads the answer,
+    and `where` names a boolean column a row must hold."""
+    query, truth, prefix, where = (
+        src["query"],
+        src["truth"],
+        src.get("truth_prefix", ""),
+        src.get("where"),
+    )
+    return _bank(
+        src,
+        lambda: [row for row in _hub_split(src) if where is None or row[where]],
+        lambda row: (str(row[query]), f"{prefix}{_cell(row[truth])}"),
+    )
+
+
+BANK_RECIPES: dict[str, Callable[[Source], BankLoader]] = {
+    "columns": _columns,
+    "hotpotqa": _hub_rows(_hotpotqa),
+    "trec": lambda src: _bank(
+        src,
+        _class_label_rows(
+            src,
+            "coarse_label",
+            lambda row, _: (
+                f"Question: {row['text']}\n\nAnswer type: ABBR, ENTY, DESC, HUM, LOC or NUM?"
+            ),
+        ),
+    ),
+    "naturalplan_meeting": lambda src: _bank(src, lambda: _naturalplan_rows(src), _naturalplan),
+    "planbench_blocksworld": lambda src: _bank(
+        src,
+        lambda: [row for row in _hub_split(src) if row["domain"] == src["domain"]],
+        lambda row: (row["query"], _blocksworld_problem(row["query"])),
+    ),
+    "arc": _hub_rows(_arc),
+    "instruction_induction": lambda src: _bank(src, lambda: _instruction_induction_rows(src)),
+    "justlogic": _justlogic_bank,
+    "screen_taste": lambda src: _bank(src, lambda: _screen_taste_rows(src)),
+}
+"""A recipe is the code half of a cut; the ``source:`` section beside the definition is the data half
+— repo, commit and every cut parameter, so a new cut is a new definition and no edit here."""
+
+
+def _sealqa_longseal(src: Source, out_dir: Path) -> int:
+    rows = list(from_hub(src, *_configs(src), split=src["split"]))
+    provenance = f"{src.repo} config={src['config']} split={src['split']} revision={src.rev}"
+    return write_longseal_panel(
+        rows,
+        out_dir,
+        docs=int(src["docs"]),
+        two_step=bool(src.get("two_step")),
+        provenance=provenance,
+    )
+
+
+def _dbllmbench_questions(src: Source, out_dir: Path) -> int:
+    # Upstream's file verbatim: JSON is YAML, and a byte-for-byte copy is what "their panel" means.
+    text = _github_raw(src, src["path"])
+    write_bytes(out_dir / MATERIALIZED_PANEL_FILE, text.encode("utf-8"))
+    return len(json.loads(text)["questions"])
+
+
+PANEL_RECIPES: dict[str, Callable[[Source, Path], int]] = {
+    "sealqa_longseal": _sealqa_longseal,
+    "dbllmbench_questions": _dbllmbench_questions,
+}
+"""A recipe that BUILDS a connector-owned panel and the task directories it names, into the tenant tier."""
+
+
+def definition_source(dataset_dir: Path) -> Source | None:
+    definition = read_dataset_definition(dataset_dir)
+    return None if definition is None else Source.of(definition.source)
+
+
+def dataset_loader(dataset_dir: Path) -> BankLoader | None:
+    src = definition_source(dataset_dir)
+    if src is None or src.recipe not in BANK_RECIPES:
+        return None
+    return BANK_RECIPES[src.recipe](src)
+
+
+def source_extra(dataset_dir: Path) -> Extra | None:
+    """What a fetch from this definition's source imports: a panel build reads the hub too."""
+    src = definition_source(dataset_dir)
+    return None if src is None else src.kind.extra
+
+
+def has_source(dataset_dir: Path) -> bool:
+    src = definition_source(dataset_dir)
+    return src is not None and (src.recipe in BANK_RECIPES or src.recipe in PANEL_RECIPES)
+
+
+def loadable_dataset_names(stores: Stores) -> list[str]:
+    return sorted(
+        ref.dataset.name
+        for ref in list_readable_datasets(stores)
+        if has_source(ref.dataset.directory)
+    )
+
+
+def build_panel(stores: Stores, dataset: ResolvedDataset) -> bool:
+    """A panel recipe materializes into the tenant tier, never beside the definition — on demand,
+    per account, so no account depends on another having built it."""
+    src = definition_source(dataset.directory)
+    if src is None or src.recipe not in PANEL_RECIPES:
+        return False
+    out = stores.tenant_datasets.materialized_panel_dir(dataset.name)
+    n = PANEL_RECIPES[src.recipe](src, out)
+    logger.info("Built panel '%s' from its source: %d tasks -> %s", dataset.name, n, out)
+    return True
+
+
+def fetch_dataset_items(stores: Stores, dataset: ResolvedDataset) -> list[dict[str, Any]]:
+    """The ladder's last rung: fetch through the definition's source and bank the rows."""
+    if build_panel(stores, dataset):
+        return held_rows(stores, dataset) or []
+    loader = dataset_loader(dataset.directory)
     if loader is None:
         return []
-    logger.info("Loading dataset '%s' from registry ...", dataset_name)
     loader_items = loader.load()
-    stores.tenant_datasets.save_benchmark_rows(dataset_name, loader_items)
+    logger.info("Loaded dataset '%s' from its source: %d items", dataset.name, len(loader_items))
+    stores.tenant_datasets.save_materialized_rows(dataset.name, loader_items)
     return [s.model_dump() for s in loader_items]
 
 
-def resolve_dataset_items(stores: Stores, dataset_name: str) -> list[dict[str, Any]]:
+def resolve_dataset_items(stores: Stores, dataset: ResolvedDataset) -> list[dict[str, Any]]:
     """The one row ladder: what is held (`held_rows`), else a fetch."""
-    held = held_rows(stores, dataset_name)
-    return held if held is not None else fetch_dataset_items(stores, dataset_name)
+    held = held_rows(stores, dataset)
+    return held if held is not None else fetch_dataset_items(stores, dataset)
 
 
 def archive_entry(

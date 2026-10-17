@@ -14,7 +14,7 @@ import math
 import types
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from itertools import count, product
+from itertools import product
 from pathlib import Path
 from statistics import mean, stdev
 from typing import Any
@@ -42,11 +42,6 @@ from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.bench.resume_and_fork.repair import repair_cut
 from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
-from promptpotter.application.diagnostics.decision_bank import (
-    ArmLifts,
-    read_arm,
-    read_bank,
-)
 from promptpotter.application.diagnostics.verify import verify_member, verify_reading
 from promptpotter.application.evidence.read import subject_evidence
 from promptpotter.application.evidence.subjects import SubjectSpec
@@ -84,6 +79,7 @@ from promptpotter.application.runner import operator_hold
 from promptpotter.application.runner.bench import (
     BenchLine,
     bench_selection,
+    bench_series,
     read_bench,
     score_on_bench,
 )
@@ -111,8 +107,12 @@ from promptpotter.application.scoring.formula import (
 )
 from promptpotter.application.scoring.formula.matchers import (
     _aime_match,
+    _blocksworld_plan_match,
+    _em_match,
     _gsm8k_match,
     _label_match,
+    _math_match,
+    _meeting_plan_match,
 )
 from promptpotter.application.scoring.metrics import compute_composite_fitness, fold_cells
 from promptpotter.application.scoring.paired import (
@@ -217,9 +217,8 @@ from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.spend import SpendCeilings, StepUsage
 from promptpotter.infrastructure.ledger import CycleEventLog, ledger_chain
 from promptpotter.infrastructure.llm.telemetry import (
-    reset_current_round,
+    at_round,
     reset_cycle_ledger,
-    set_current_round,
     set_cycle_ledger,
 )
 from promptpotter.infrastructure.producer_lock import release_cycle
@@ -309,12 +308,7 @@ def _filed(
         pipeline_params={},
         dataset_name="ds",
     )
-    keyed = [
-        row.facts
-        if row.facts.sample_key
-        else dataclasses.replace(row.facts, sample_key=f"key:{row.facts.query}")
-        for row in rows
-    ]
+    keyed = [row.facts for row in rows]
     answers = stores.archive.file_answers(
         entry,
         [(facts, "A") for facts in keyed],
@@ -336,6 +330,20 @@ def _announced(cell: WalkedCell) -> dict[str, Any]:
 # 1. Scorer formulas
 
 _LLM_ONLY = pipeline_schema(name="test", nodes=[PipelineNode(name="llm_only", tunes_llm=False)])
+_BLOCKSWORLD_GOLD = (
+    '{"below":{"red":"blue","yellow":"orange","blue":"table","orange":"table"},'
+    '"goal":[["orange","red"]]}'
+)
+_MEETING_GOLD = (
+    '{"constraints":[["Marina District","9:00AM"],'
+    '["Stephanie","Mission District","10:30AM to 1:30PM",120]],'
+    '"dist_matrix":{"Marina District":{"Mission District":20},'
+    '"Mission District":{"Marina District":19}},'
+    '"golden_plan":["You start at Marina District at 9:00AM.",'
+    '"You travel to Mission District in 20 minutes and arrive at 9:20AM.",'
+    '"You wait until 10:30AM.",'
+    '"You meet Stephanie for 120 minutes from 10:30AM to 12:30PM."]}'
+)
 
 
 def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
@@ -343,6 +351,47 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
 ) -> None:
     # Each matcher grades an answer against its gold.
     for match, args, expected in (
+        (
+            _blocksworld_plan_match,
+            (
+                "Clear orange first.\n[PLAN]\nunstack the yellow block from on top of the orange "
+                "block\nput down the yellow block\npick up the orange block\nstack the orange block "
+                "on top of the red block\n[PLAN END]",
+                _BLOCKSWORLD_GOLD,
+            ),
+            1.0,
+        ),
+        # The final layout reads right, but the hand still held yellow when orange was picked up.
+        (
+            _blocksworld_plan_match,
+            (
+                "[PLAN]\nunstack the yellow block from on top of the orange block\npick up the "
+                "orange block\nstack the orange block on top of the red block\n[PLAN END]",
+                _BLOCKSWORLD_GOLD,
+            ),
+            0.0,
+        ),
+        (
+            _meeting_plan_match,
+            (
+                "Go early and wait. SOLUTION: You start at Marina District at 9:00AM. You travel to "
+                "Mission District in 20 minutes and arrive at 9:20AM. You wait until 10:30AM. You "
+                "meet Stephanie for 120 minutes from 10:30AM to 12:30PM.",
+                _MEETING_GOLD,
+            ),
+            1.0,
+        ),
+        # No wait: the replay reaches Stephanie at 9:20AM, before her window opens.
+        (
+            _meeting_plan_match,
+            (
+                "SOLUTION: You start at Marina District at 9:00AM. You travel to Mission District "
+                "in 20 minutes and arrive at 9:20AM. You meet Stephanie for 120 minutes from 9:20AM "
+                "to 11:20AM.",
+                _MEETING_GOLD,
+            ),
+            0.0,
+        ),
         (_aime_match, (r"First: \boxed{10}. Rechecking: \boxed{42}", "42"), 1.0),
         (_aime_match, (r"\boxed{undefined} The answer is 42", "42"), 1.0),
         (_aime_match, ("no numbers", "42"), 0.0),
@@ -357,6 +406,27 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
         (_label_match, ("so the answer is **D**", "(D)"), 1.0),
         (_label_match, ("**(b)**", "B"), 1.0),
         (_label_match, ("**C**", "(D)"), 0.0),
+        # Bolds nothing: the last non-empty line answers, the reasoning above it does not.
+        (
+            _label_match,
+            ("The story is about a merger, a business matter.\n\nBusiness\n", "Business"),
+            1.0,
+        ),
+        (_label_match, ("The story is about a merger.\n\nBusiness\n\nWorld", "Business"), 0.0),
+        # SQuAD's normalizer, articles and all, but a number keeps its own point and sign.
+        (_em_match, ("so it is **the Beatles**", "Beatles"), 1.0),
+        (_em_match, ("**A.**", "a"), 1.0),
+        (_em_match, ("", "a"), 0.0),
+        (_em_match, ("**the**", "a"), 1.0),
+        (_em_match, ("**13**", "1.3"), 0.0),
+        (_em_match, ("**.5**", "-.5"), 0.0),
+        (_em_match, ("**-5 points.**", "-5 points"), 1.0),
+        # The last box wins, braces nest, and the Hendrycks string rules equate spellings.
+        (_math_match, (r"\boxed{\dfrac{1}{2}} so \boxed{\left( 1, 2 \right)}", "(1,2)"), 1.0),
+        (_math_match, (r"\boxed{\dfrac{3}{4}}", r"\frac34"), 1.0),
+        (_math_match, (r"\boxed{10\text{ cm}}", "10"), 1.0),
+        (_math_match, ("**x = 5**", "5"), 1.0),
+        (_math_match, (r"\boxed{0.75}", r"\frac{3}{4}"), 0.0),
     ):
         assert match(*args) == expected, f"{match.__name__}{args!r} must grade {expected}"
 
@@ -739,14 +809,20 @@ def _ruler(
     sigma: float = 2.0,
     se: float | dict[int, float] = 0.5,
 ) -> DeltaRuler:
+    """Keyed by slot here, by the slot's `measurement` key on the ruler."""
+    keyed = {str(sid): d for sid, d in delta.items()}
     return DeltaRuler(
-        delta=dict(delta),
-        delta_se=dict(se) if isinstance(se, dict) else dict.fromkeys(delta, se),
+        delta=keyed,
+        delta_se=(
+            {str(sid): s for sid, s in se.items()}
+            if isinstance(se, dict)
+            else dict.fromkeys(keyed, se)
+        ),
         mu_delta=mu,
         sigma_delta=sigma,
         sigma_theta=1.5,
         calibration_model="1PL",
-        anchor_id=anchor_id_of(delta, mu, sigma, "1PL"),
+        anchor_id=anchor_id_of(keyed, mu, sigma, "1PL"),
     )
 
 
@@ -765,87 +841,86 @@ def _peer_cycle(
 ) -> Iterator[Cycle]:
     """Bound as a run seam binds it; the backend answers right where ``solves`` says, errs on None."""
     ledger = CycleEventLog.open(CycleDir(ledger_dir))
-    bound, slot = set_cycle_ledger(ledger), set_current_round(1)
-    bank = [Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(16)]
-    schema = pipeline_schema(
-        name=f"{optimizer}-e2e",
-        nodes=[PipelineNode(name="solve", tunes_llm=False, prompt_info=NodePromptInfo())],
-    )
-    config = CampaignConfig.model_validate(
-        {
-            "dataset_name": f"{optimizer}-e2e",
-            "dataset_split": {"bench": bench, "demo": 2},
-            "optimization": {
-                "optimizer": optimizer,
-                "degradation_threshold": 0.0,
-                "elimination_n_min": 2,
-                "nodes": nodes,
-                **optimization,
-            },
-        }
-    )
-    session = loop_session(stores, schema, bank)
-    session.state.ledger = ledger
-    # The campaign's composite REWARDS length, the opposite of CAPO's objective.
-    session.scoring.scorer = compile_scorer(
-        "label_match(predicted, ground_truth)",
-        "fitness * min(1.0, target_prompt_chars / 200.0)",
-        verifier_graded=False,
-    )
-    session.scoring.partition = partition_bank(bank, config.dataset_split)
+    bound = set_cycle_ledger(ledger)
+    with at_round(1):
+        bank = [Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(16)]
+        schema = pipeline_schema(
+            name=f"{optimizer}-e2e",
+            nodes=[PipelineNode(name="solve", tunes_llm=False, prompt_info=NodePromptInfo())],
+        )
+        config = CampaignConfig.model_validate(
+            {
+                "dataset_split": {"bench": bench, "demo": 2},
+                "optimization": {
+                    "optimizer": optimizer,
+                    "degradation_threshold": 0.0,
+                    "elimination_n_min": 2,
+                    "nodes": nodes,
+                    **optimization,
+                },
+            }
+        )
+        session = loop_session(stores, schema, bank)
+        session.state.ledger = ledger
+        # The campaign's composite REWARDS length, the opposite of CAPO's objective.
+        session.scoring.scorer = compile_scorer(
+            "label_match(predicted, ground_truth)",
+            "fitness * min(1.0, target_prompt_chars / 200.0)",
+            verifier_graded=False,
+        )
+        session.scoring.partition = partition_bank(bank, config.dataset_split)
 
-    async def _measure(sample: Sample, _session: Any, *, pipeline_params: Any) -> MeasuredCell:
-        prompt = pipeline_params["solve"]["prompt"]
-        solved = solves(prompt, sample)
-        row: dict[str, Any] = {
-            "sample_id": sample.id,
-            "sample_key": sample.key,
-            "query": sample.query,
-            "ground_truth": sample.ground_truth,
-            "predicted": sample.ground_truth if solved else "wrong",
-            "error": None,
-            "cached": False,
-            "pipeline_data": {"total_time": 0.1, "target_prompt_chars": len(prompt)},
-        }
-        if solved is None:
-            row["error_category"] = "SERVER"
-        return MeasuredCell.from_wire(row)
+        async def _measure(sample: Sample, _session: Any, *, pipeline_params: Any) -> MeasuredCell:
+            prompt = pipeline_params["solve"]["prompt"]
+            solved = solves(prompt, sample)
+            row: dict[str, Any] = {
+                "sample_id": sample.id,
+                "sample_key": sample.key,
+                "query": sample.query,
+                "ground_truth": sample.ground_truth,
+                "predicted": sample.ground_truth if solved else "wrong",
+                "error": None,
+                "cached": False,
+                "pipeline_data": {"total_time": 0.1, "target_prompt_chars": len(prompt)},
+            }
+            if solved is None:
+                row["error_category"] = "SERVER"
+            return MeasuredCell.from_wire(row)
 
-    monkeypatch.setattr(query_loop, "measure_sample", _measure)
-    origin = OptSearchPoint(
-        instruction="Answer.", answer_format="Reply with the letter."
-    ).configured(None, schema)
-    framing = TaskDecomposition(pipeline_purpose="Answer each query with its letter.")
-    origin_rows = [
-        asyncio.run(_measure(s, session, pipeline_params={"solve": {"prompt": "Answer."}}))
-        for s in list(session.scoring.partition.search)[:4]
-    ]
-    sp = origin.to_job_search_point(
-        schema=schema, framing=framing, demo=session.scoring.require_partition().demo
-    )
-    cycle = Cycle.start(
-        origin,
-        scored_candidate(
-            origin.id,
-            label="C0",
-            accuracy=0.0,
-            composite_fitness=origin_composite,
-            prompt_fields=origin.prompt_field_dict(),
-            resolved_pipeline_params=sp.config_params,
-            sp_hash=sp.sp_hash(schema),
-        ),
-        schema=schema,
-        framing=framing,
-        origin_results=session.scoring.require_scorer().sheet(origin_rows),
-        session=session,
-        config=config,
-    )
-    bind_optimizer(cycle.optimizer)
-    try:
-        yield cycle
-    finally:
-        reset_current_round(slot)
-        reset_cycle_ledger(bound)
+        monkeypatch.setattr(query_loop, "measure_sample", _measure)
+        origin = OptSearchPoint(
+            instruction="Answer.", answer_format="Reply with the letter."
+        ).configured(None, schema)
+        framing = TaskDecomposition(pipeline_purpose="Answer each query with its letter.")
+        origin_rows = [
+            asyncio.run(_measure(s, session, pipeline_params={"solve": {"prompt": "Answer."}}))
+            for s in list(session.scoring.partition.search)[:4]
+        ]
+        sp = origin.to_job_search_point(
+            schema=schema, framing=framing, demo=session.scoring.require_partition().demo
+        )
+        cycle = Cycle.start(
+            origin,
+            scored_candidate(
+                origin.id,
+                label="C0",
+                accuracy=0.0,
+                composite_fitness=origin_composite,
+                prompt_fields=origin.prompt_field_dict(),
+                resolved_pipeline_params=sp.config_params,
+                sp_hash=sp.sp_hash(schema),
+            ),
+            schema=schema,
+            framing=framing,
+            origin_results=session.scoring.require_scorer().sheet(origin_rows),
+            session=session,
+            config=config,
+        )
+        bind_optimizer(cycle.optimizer)
+        try:
+            yield cycle
+        finally:
+            reset_cycle_ledger(bound)
 
 
 _noop = lambda *_a, **_k: None  # noqa: E731
@@ -855,7 +930,6 @@ _QUIET_CALLBACKS = types.SimpleNamespace(
     announce_candidate=_noop,
     on_candidate_scored=_noop,
     on_race_standing=_noop,
-    on_race_catch_up=_noop,
     on_election=_noop,
 )
 
@@ -869,7 +943,13 @@ def _bench_pass(
 ) -> BenchPass:
     held_out = [Sample(id=i, query=f"b{i}", ground_truth="a") for i in range(4)]
     rows = [
-        measurement(s.id, None, query=s.query, pipeline_data={"env_reward": reward})
+        measurement(
+            s.id,
+            None,
+            query=s.query,
+            sample_key=f"key:{s.query}",
+            pipeline_data={"env_reward": reward},
+        )
         for s in held_out[:cells]
     ]
     return BenchPass(
@@ -1014,7 +1094,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         assert is_leader_eligible(arm) is eligible, f"{arm.outcome} decides leading wrongly"
 
     # A round the budget cuts elects only past the panel gate and stands only once closed.
-    # Round 1's parent is the origin: read on the cells run init banked, never bought a cell.
+    # Round 1 races the seeds with its offspring; its parent is the origin, never bought a cell.
     capo_nodes = {
         "blocks": {"config": {"block_size": 4, "max_blocks": 3}},
         "capo_init": {"config": {"size": 3, "k_max": 0}},
@@ -1141,6 +1221,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
                 "available_models": capo["available_models"],
                 "nodes": {n: (capo["nodes"] | potter["nodes"])[n] for n in (*seed, *walk)},
                 "pipelines": {"default": walk, "initial_population": seed},
+                "initial_population_walks": "before_default",
                 "resolved_prompts": {
                     key: capo["resolved_prompts"][key]
                     for key in ("capo_init/1", "capo_crossover/1")
@@ -1333,7 +1414,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
                 origin=origin_pass,
                 reserve_usd=0.0,
                 reserve_tokens=0,
-                selections={taken.round: taken for taken in held},
+                selections={taken.candidate_id: taken for taken in held},
             )
             return asyncio.run(
                 bench_selection(
@@ -1346,9 +1427,9 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         assert (taken.candidate_id, taken.round, taken.stop) == (picked.opt_sp.id, 1, None), (
             "the bench grades the pick the optimizer declared"
         )
-        assert graded(taken).selections[taken.round] is taken, "a held pass was sent again"
+        assert graded(taken).selections[taken.candidate_id] is taken, "a held pass was sent again"
         left = taken.model_copy(update={"sp_hash": "a pick the line left"})
-        resent = graded(left).selections[taken.round]
+        resent = graded(left).selections[taken.candidate_id]
         assert [c[:3] for c in resent.cells] == [c[:3] for c in taken.cells]
         assert all(replayed for *_, replayed in resent.cells), "a resent pass bought a cell again"
         earlier = taken.model_copy(update={"round": 7, "candidate_id": "an earlier pick"})
@@ -1361,11 +1442,11 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
                 bench_runner, "score_on_bench", lambda *_a, **_k: _stopped(StopReason.SPEND_BUDGET)
             )
             short = graded(left, earlier)
-            stop = short.selections[taken.round].stop
+            stop = short.selections[taken.candidate_id].stop
             assert stop is not None and stop.cause is StopReason.SPEND_BUDGET, (
                 "a spent budget stops the pass and names the bound"
             )
-            assert short.selections[earlier.round] is earlier, "a held pass was dropped"
+            assert short.selections[earlier.candidate_id] is earlier, "a held pass was dropped"
             patched.setattr(
                 bench_runner, "score_on_bench", lambda *_a, **_k: _stopped(StopReason.PAUSED)
             )
@@ -1414,14 +1495,15 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
     spent = PassStop(cause=StopReason.SPEND_BUDGET, warning=None)
     refused = PassStop(cause=WalkEnd.CLIENT_ERROR, warning="HTTP 403 :: model is not allowed")
     line_scorer = compile_scorer(_H2H_FORMULA, verifier_graded=False)
-    for banked, run, state, can_grade, lift, stopped in (
-        (None, {"trigger": "manual"}, ReadingState.NOT_ASKED, True, None, None),
+    for banked, run, state, can_grade, lift, series, stopped in (
+        (None, {"trigger": "manual"}, ReadingState.NOT_ASKED, True, None, (None, []), None),
         (
             None,
             {"selecting": True, "ending": None},
             ReadingState.PENDING,
             False,
             None,
+            (None, []),
             None,
         ),
         (
@@ -1430,28 +1512,32 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             ReadingState.RUN_FAILED,
             True,
             None,
+            (None, []),
             None,
         ),
-        (None, {}, ReadingState.NOT_ASKED, True, None, None),
+        (None, {}, ReadingState.NOT_ASKED, True, None, (None, []), None),
         (
             None,
             {"held_by": "cyc_beside"},
             ReadingState.HELD_ELSEWHERE,
             False,
             None,
+            (None, []),
             None,
         ),
-        ({}, {}, ReadingState.READ, False, 1.0, None),
-        ({"pick": "origin"}, {}, ReadingState.READ, False, None, None),
-        ({"cells": 3}, {}, ReadingState.PAST_TOLERANCE, True, None, None),
-        ({"cells": 3, "tolerance": 1}, {}, ReadingState.READ, False, 1.0, None),
-        ({"stop": spent}, {}, ReadingState.PASS_STOPPED, True, None, "selected"),
+        ({}, {}, ReadingState.READ, False, 1.0, (0.0, [1.0]), None),
+        ({"pick": "origin"}, {}, ReadingState.READ, False, None, (0.0, [None]), None),
+        ({"pick": "displaced"}, {}, ReadingState.NOT_ASKED, True, None, (0.0, [None]), None),
+        ({"cells": 3}, {}, ReadingState.PAST_TOLERANCE, True, None, (0.0, [None]), None),
+        ({"cells": 3, "tolerance": 1}, {}, ReadingState.READ, False, 1.0, (0.0, [1.0]), None),
+        ({"stop": spent}, {}, ReadingState.PASS_STOPPED, True, None, (0.0, [None]), "selected"),
         (
             {"origin_stop": refused},
             {},
             ReadingState.PASS_STOPPED,
             True,
             None,
+            (None, [1.0]),
             "origin",
         ),
     ):
@@ -1481,7 +1567,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
                 origin=line_origin,
                 reserve_usd=0.0,
                 reserve_tokens=0,
-                selections={taken.round: taken for taken in held},
+                selections={taken.candidate_id: taken for taken in held},
             )
         selection = "origin" if banked and banked.get("pick") == "origin" else pick.id
         line = BenchLine(
@@ -1506,6 +1592,8 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         assert line_bench.status.subject == stopped or not stopped, f"{case}: names who stopped"
         if stopped == "origin":
             assert "model is not allowed" in line_bench.status.sentence, f"{case}: says why"
+        on_line = round_result(1, selected_labels=["C1.1"], opt_sp=pick, all_candidate_results={})
+        assert bench_series(line_stores, passes, line_scorer, rounds=[on_line]) == series, case
 
 
 # 4. Elimination — who is cut, and when
@@ -1559,7 +1647,14 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails() -> None:
     def answered(fitness: list[float], **over: Any) -> list[GradedCell]:
         return [
             GradedCell.from_wire(
-                {"sample_id": i, "ground_truth": "", "predicted": "done", "fitness": f, **over}
+                {
+                    "sample_id": i,
+                    "sample_key": str(i),
+                    "ground_truth": "",
+                    "predicted": "done",
+                    "fitness": f,
+                    **over,
+                }
             )
             for i, f in enumerate(fitness)
         ]
@@ -1598,7 +1693,7 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails() -> None:
     )
 
     # On a graded backend p_best discriminates; concordant cells move θ and must not reach ε.
-    sids = list(range(12))
+    sids = [str(s) for s in range(12)]
     strong, weak = [0.66] * 12, [0.30] * 12
     p_strong, _ = elimination_p_best(strong, {"prior": weak}, sids, None)
     assert p_strong > 0.9, f"graded gate failed to discriminate: {p_strong}"
@@ -1606,10 +1701,10 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails() -> None:
     p_tie, _ = elimination_p_best(weak, {"prior": list(weak)}, sids, None)
     assert abs(p_tie - 0.5) < 1e-9, "a tie reads as a coin"
     epsilon = pobb_knobs().epsilon
-    prefix = list(range(6))
+    prefix = [str(s) for s in range(6)]
     # The probe is also the EASIEST cell in the prefix, which tempts a fit to read it as decisive.
     warm = DeltaRuler(
-        delta={0: 2.90, 1: 3.01, 2: 2.66, 3: 1.39, 4: 2.85, 5: 2.95},
+        delta={"0": 2.90, "1": 3.01, "2": 2.66, "3": 1.39, "4": 2.85, "5": 2.95},
         delta_se=dict.fromkeys(prefix, 0.4),
         mu_delta=2.6,
         sigma_delta=0.6,
@@ -2115,7 +2210,7 @@ def test_a_fire_after_the_round_closed_is_kept_on_resume_and_rewound_with_its_ro
         ledger.append(OptimizerStateRecord(round=1, optimizer_state=state))
 
     floor = NODE_LAYOUTS["l1_generate"].floor
-    moved = coerce_l1_layout({"critique": "persona"}, base=floor)
+    moved = coerce_l1_layout({"persona": ["critique"]}, base=floor)
     assert moved is not None and moved != floor
     handed = live.memory
     steer = {"layout": moved.model_dump(mode="json"), "n_variants": 5}
@@ -2132,7 +2227,7 @@ def test_a_fire_after_the_round_closed_is_kept_on_resume_and_rewound_with_its_ro
     restate()
 
     def resumed(last: int) -> PotterState:
-        standing = scan_standing_rounds(ledger_chain(cycle_dir)).rounds
+        standing = scan_standing_rounds(ledger_chain(cycle_dir, moment=None)).rounds
         state = PotterState(session=types.SimpleNamespace())  # type: ignore[arg-type]
         state.replay(round_result(last, optimizer_state=standing[last].close.optimizer_state))
         return state
@@ -2235,7 +2330,13 @@ def _h2h_campaign(
     )
     hop = CycleHop(campaign_id=cid, cycle_id=f"{root.cycle_id}_fork_r1") if rebased else root
     panel = [
-        measurement(s.id, None, query=s.query, pipeline_data={"env_reward": 0.5})
+        measurement(
+            s.id,
+            None,
+            query=s.query,
+            sample_key=f"key:{s.query}",
+            pipeline_data={"env_reward": 0.5},
+        )
         for s in partition.search[:4]
     ]
     walked = _filed(stores, f"panel_{cid}", panel, sp_hash="origin")
@@ -2299,6 +2400,7 @@ def _h2h_campaign(
                 s.id,
                 None,
                 query=s.query,
+                sample_key=f"key:{s.query}",
                 pipeline_data={"env_reward": level + 0.1 * (s.id % 2)},
             )
             for s in partition.bench
@@ -2494,8 +2596,9 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
         *(unanswered(2), measurement(2, 0.0)),  # and over an earlier one
         measurement(3, 1.0),
     ]
-    standing = {0: 1.0, 1: 1.0, 2: 0.0, 3: 1.0}
-    worth = {sid: measurement(sid, grade).grade.objective for sid, grade in standing.items()}
+    by_slot = {0: 1.0, 1: 1.0, 2: 0.0, 3: 1.0}
+    standing = {four[sid].key: grade for sid, grade in by_slot.items()}
+    worth = {four[sid].key: measurement(sid, g).grade.objective for sid, g in by_slot.items()}
     twice = _pair_member("twice", walked, four)
     cells = twice.sheet
     assert cells.column(ROW_GRADES["fitness"]) == standing, "a second reading is a second row"
@@ -2506,10 +2609,8 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
     assert (fold.total, fold.accuracy) == (4, 0.75)
     assert fold.composite_fitness == pytest.approx(sum(worth.values()) / 4)
     assert level_band(cells, ROW_GRADES["fitness"])[0] == fold.accuracy
-    assert {key: row.grade.fitness for key, row in twice.by_key().items()} == {
-        four[sid].key: grade for sid, grade in standing.items()
-    }
-    once = _pair_member("once", measurements(list(standing.values())), four)
+    assert {key: row.grade.fitness for key, row in twice.by_key().items()} == standing
+    once = _pair_member("once", measurements(list(by_slot.values())), four)
     unmoved = _read_pair(once, twice, four)
     lift, coverage = unmoved.headline, unmoved.coverage
     assert lift is not None and coverage is not None and lift.flips is not None
@@ -2521,7 +2622,9 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
     ungraded = _pair_member(
         "ungraded", [*walked[:-1], measurement(3, None, unscored="no latency recorded")], four
     )
-    assert ungraded.sheet.column(ROW_GRADES["fitness"]) == {0: 1.0, 1: 1.0, 2: 0.0}
+    assert ungraded.sheet.column(ROW_GRADES["fitness"]) == {
+        four[sid].key: grade for sid, grade in by_slot.items() if sid < 3
+    }
     assert level_band(ungraded.sheet, ROW_GRADES["fitness"])[0] == pytest.approx(2 / 3)
     short = _read_pair(once, ungraded, four).coverage
     assert short is not None and short.scored == 3, "an unscored cell left the pair"
@@ -2762,7 +2865,7 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
                 )
             )
         return scan_ledger_walks(
-            ledger_chain(CycleDir(built_stores.campaigns.cycle_dir(cycle_hop)))
+            ledger_chain(CycleDir(built_stores.campaigns.cycle_dir(cycle_hop)), moment=None)
         )
 
     first = filed_cycle("cycle_a", dict(enumerate(asks_one_thing)))
@@ -2998,53 +3101,3 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
         assert h2h.verdict is verdict, case
         if verdict is None:
             assert h2h.verdict_absent is ReadingState.PENDING, f"{case}: a waiting arm is pending"
-
-    # The decision bank pairs the decisions of two runs and holds the parent where nothing
-    # measured, read through the pairs a round reads.
-    bank_rows = [Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(4)]
-    proposals = count()
-
-    def reads(*fitness: float) -> MemberRows:
-        return _pair_member(f"proposal{next(proposals)}", measurements(fitness), bank_rows)
-
-    bank_parent = reads(0.4, 0.4, 0.4, 0.4)
-
-    def decision(members: list[MemberRows], proposed: int, **collapses: int) -> ArmLifts:
-        return read_arm(bank_parent, members, proposed=proposed, collapses=collapses)
-
-    run_a = [
-        decision([reads(0.5, 0.7, 0.6, 0.6), reads(0.3, 0.3, 0.5, 0.5)], 3, duplicate_variant=1),
-        decision([reads(0.4, 0.6, 0.5, 0.5)], 1),
-        decision([reads(0.4, 0.4, 0.6, 0.6)], 1),
-    ]
-    run_b = [
-        decision([reads(0.8, 1.0, 0.9, 0.9)], 1),
-        decision([], 2, no_op_variant=2),
-        decision([reads(0.2, 0.2, 0.3, 0.1)], 1),
-    ]
-    assert (run_a[0].rejected, run_a[0].best_lift, run_a[0].mean_lift) == (
-        1,
-        pytest.approx(0.2),
-        pytest.approx(0.1),
-    ), "a decision's best and mean lift are read over its measured proposals alone"
-    assert (run_b[1].best_lift, run_b[1].mean_lift) == (0.0, None), (
-        "a decision that measured nothing holds the parent: best 0, no mean"
-    )
-    assert (run_b[2].best_lift, run_b[2].mean_lift) == (0.0, pytest.approx(-0.2)), (
-        "a losing proposal moves the mean and never the best: the parent held"
-    )
-    # One shared cell has no spread to read a lift off: the proposal is unread, never a zero.
-    assert decision([reads(0.9)], 1).lifts == (), "a one-cell pair read as a lift"
-
-    bank_reading = read_bank(list(zip(run_a, run_b, strict=True)))
-    assert (bank_reading["best_lift"]["n"], bank_reading["best_lift"]["mean"]) == (
-        3,
-        pytest.approx((0.3 - 0.1 - 0.1) / 3),
-    ), "best lift is differenced over every decision"
-    assert (bank_reading["mean_lift"]["n"], bank_reading["mean_lift"]["mean"]) == (
-        2,
-        pytest.approx((0.4 - 0.3) / 2),
-    ), "the decision that measured nothing has no mean to pair"
-    assert (bank_reading["proposed"], bank_reading["rejected"]) == ([5, 4], [1, 2]), (
-        "proposed and rejected are summed per side"
-    )

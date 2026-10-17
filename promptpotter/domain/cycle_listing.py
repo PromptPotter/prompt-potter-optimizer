@@ -21,6 +21,7 @@ from promptpotter.domain.run_records import (
     ForkSpec,
     MintKind,
     SpawnedBy,
+    sibling_cycle_id,
 )
 from promptpotter.domain.strict_model import StrictModel
 
@@ -60,7 +61,8 @@ class CycleIndex(StrictModel):
     cycle_id: str
     created_at: str
     updated_at: str
-    parent_cycle_id: str | None = None
+    # The mint record's own address (`CycleMintedRecord.parent`).
+    parent: str | None = None
     forked_at_offset: int | None = None
     fork: ForkSpec | None = None
     spawned_by: SpawnedBy | None = None
@@ -75,6 +77,11 @@ class CycleIndex(StrictModel):
     superseded_by: str | None = None
     rounds: list[IndexRound] = Field(default_factory=list)
     standing: RunStanding | None = None
+
+    @property
+    def parent_cycle_id(self) -> str | None:
+        """The parent where it is a cycle of this campaign; a cut from another tree reads as a root."""
+        return sibling_cycle_id(self.parent)
 
     @property
     def human_intervened(self) -> bool:

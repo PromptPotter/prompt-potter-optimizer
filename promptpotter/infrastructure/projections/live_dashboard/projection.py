@@ -6,7 +6,6 @@ import time
 from pathlib import Path
 from typing import assert_never
 
-from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.bench import BenchReading
 from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.dashboard_rows import RoundSummary
@@ -38,6 +37,8 @@ from promptpotter.domain.run_records import (
     LLMCallRecord,
     LLMCallStartRecord,
     PhaseRecord,
+    ProviderEasedRecord,
+    ProviderHoldRecord,
     RaceCatchUpRecord,
     RaceStandingRecord,
     RoundClosedRecord,
@@ -119,7 +120,7 @@ class LiveDashboardProjection(Projection):
         self._affordable: int | None = None
         self._cell_reserve_usd: float | None = None
         self._waiting: tuple[int, float] | None = None
-        self._backpressure: BackpressureReading | None = None
+        self._holds: dict[str, ProviderHoldRecord] = {}
         self._sticky_llm_calls: dict[str, tuple[int, NodeBlock]] = {
             node: (seed.current_round.round, block)
             for node, block in seed.current_round.nodes.items()
@@ -205,6 +206,8 @@ class LiveDashboardProjection(Projection):
     def _handle_run_wiring(self, record: RunWiringRecord) -> None:
         for name, value in LiveDashboardState.wired(record).items():
             setattr(self.state, name, value)
+        # A launch hears a hold still on at its first send, so one the last launch saw open ends here.
+        self._holds.clear()
         self._flush_pending_persist()
 
     def _handle_run_phase(self, record: RunPhaseRecord) -> None:
@@ -232,6 +235,14 @@ class LiveDashboardProjection(Projection):
             detail=record.detail,
         )
         self.state.recent_backend_warnings = [*self.state.recent_backend_warnings, warning][-10:]
+        self._flush_pending_persist()
+
+    def _handle_provider_hold(self, record: ProviderHoldRecord) -> None:
+        self._holds[record.sender] = record
+        self._flush_pending_persist()
+
+    def _handle_provider_eased(self, record: ProviderEasedRecord) -> None:
+        self._holds.pop(record.sender, None)
         self._flush_pending_persist()
 
     def _handle_round_entered(self, record: RoundEnteredRecord) -> None:
@@ -444,7 +455,6 @@ class LiveDashboardProjection(Projection):
         self._cell_reserve_usd = record.cell_usd
         waiting = record.waiting
         self._waiting = None if waiting is None else (waiting.sample_id, waiting.since)
-        self._backpressure = record.backpressure
         self._schedule_persist()
 
     def _handle_race_catch_up(self, record: RaceCatchUpRecord) -> None:
@@ -625,7 +635,9 @@ class LiveDashboardProjection(Projection):
             owner = "reference" if ci == NO_ROUND_SLOT else candidate_label(s.round, ci)
             s.waiting_on = f"{owner} · sample {self._waiting[0]}"
             s.waiting_since = self._waiting[1]
-        s.backpressure = self._backpressure
+        # The field holds one sender: the episode that has held longest.
+        held = min(self._holds.values(), key=lambda r: r.gives_up_at, default=None)
+        s.backpressure = None if held is None else held.reading
         s.wallclock_serialized_at = utcnow_iso()
         return s
 
@@ -644,7 +656,7 @@ def resolve_resume_state(
     surviving = [
         r for r in prior.rounds if resumed_from_round is None or r.round < resumed_from_round
     ]
-    standing = scan_standing_rounds(ledger_chain(CycleDir(active_cycle_dir)))
+    standing = scan_standing_rounds(ledger_chain(CycleDir(active_cycle_dir), moment=None))
     return prior.model_copy(
         update={
             "rounds": surviving,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from functools import reduce
 from pathlib import Path
 from typing import Any
 
@@ -13,7 +14,13 @@ from promptpotter.application.datasets.tabular_ingest import read_candidate_libr
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.scoring.formula import compile_scorer, split_scoring_block
 from promptpotter.domain.scoring import Scorer
-from promptpotter.infrastructure.store.dataset_access import dataset_pipeline_path
+from promptpotter.infrastructure.store.dataset_access import (
+    DEFINITION_FILE,
+    DatasetDefinition,
+    declared_pipelines,
+    read_dataset_definition,
+    read_dataset_framing,
+)
 from promptpotter.infrastructure.store.io import read_yaml_optional
 from promptpotter.judges.registry import judge_instrument
 from promptpotter.shared.errors import PayloadInvalidError, StoredConfigInvalidError
@@ -22,29 +29,21 @@ from promptpotter.shared.errors import PayloadInvalidError, StoredConfigInvalidE
 @dataclass(frozen=True, slots=True)
 class AuthoredDataset:
     campaign_config: CampaignConfig
-    """Validated ``campaign.yaml`` config — the outer ``campaign_config`` key already unwrapped."""
+    """The definition's validated ``campaign`` section, every layer laid on."""
 
     task_description: str
-    """``task_description.md`` text, stripped; ``""`` when the file is absent."""
-
-    backend_type: str
-    """``pipeline.yaml::backend_type``, lowercased; ``""`` when the field is absent.
-
-    Intentionally non-raising so each consumer decides: the draft path defaults
-    to ``DEFAULT_CONNECTOR``, a launch refuses a blank (``declared_backend_type``)."""
+    """``task.md``'s body, stripped; ``""`` when the definition has none."""
 
     pipeline_nodes: dict[str, Any]
-    """The WHOLE ``pipeline.yaml::nodes.{name}`` dicts (config + optimizer + …),
+    """The WHOLE ``pipeline.nodes.{name}`` dicts (config + optimizer + …),
     not just ``nodes.*.config``. Every sub-block is carried, so dropping to
     ``nodes.*.config`` (as ``load_dataset_node_overlay`` does) would silently lose
     ``optimizer.param_allowed_values`` locks."""
 
     active_steps: list[str]
-    """``pipeline.yaml::pipelines.default`` — the dataset's chosen pipeline (e.g.
-    the full ``cache_lookup → … → token_matching`` vs a bare ``llm_only``). ``[]``
-    when absent, in which case the connector's ``default_pipeline`` applies. The
-    draft path carries this so reusing a dataset PRESERVES its pipeline instead of
-    resetting to the connector default."""
+    """``dataset_access.py::declared_pipelines``' default; ``[]`` only with no nodes, when the
+    connector's ``default_pipeline`` applies. The draft path carries this so reusing a dataset
+    PRESERVES its pipeline instead of resetting to the connector default."""
 
     candidate_library: tuple[str, ...]
     """``candidate_library.txt`` — the per-pipeline origin's target list, part of
@@ -54,31 +53,48 @@ class AuthoredDataset:
     reads the same file directly for the term-index union."""
 
 
-def dataset_campaign_path(dataset_dir: Path) -> Path:
-    """The dataset's TEMPLATE; the minted ``campaigns/{id}/campaign.json`` is another schema."""
-    return dataset_dir / "campaign.yaml"
-
-
-def read_campaign_config_file(path: Path) -> dict[str, Any]:
-    if not path.is_file():
-        return {}
-    raw = path.read_text(encoding="utf-8").strip()
-    if not raw:
-        return {}
+def _definition(dataset_dir: Path) -> DatasetDefinition | None:
     try:
-        parsed = yaml.safe_load(raw)
+        return read_dataset_definition(dataset_dir)
+    except (yaml.YAMLError, ValueError) as exc:
+        raise StoredConfigInvalidError(
+            path=str(dataset_dir / DEFINITION_FILE), reason=str(exc)
+        ) from exc
+
+
+def _campaign_block(definition: DatasetDefinition | None) -> dict[str, Any]:
+    return {} if definition is None else reduce(merge_config_layers, definition.campaign_layers, {})
+
+
+def dataset_campaign_block(dataset_dir: Path) -> dict[str, Any]:
+    """The ``campaign`` section with every layer laid on; the minted ``campaign.json`` is another schema."""
+    return _campaign_block(_definition(dataset_dir))
+
+
+def campaign_file_block(path: Path) -> dict[str, Any]:
+    """A definition FILE's own ``campaign`` section, laid over nothing."""
+    try:
+        parsed = read_yaml_optional(path)
     except yaml.YAMLError as exc:
         raise StoredConfigInvalidError(path=str(path), reason=f"not valid YAML — {exc}") from exc
-    result: dict[str, Any] = (parsed or {}).get("campaign_config") or {}
-    return result
+    block = (parsed or {}).get("campaign") or {}
+    if not isinstance(block, dict):
+        raise StoredConfigInvalidError(path=str(path), reason="`campaign` must be a mapping")
+    return block
 
 
-def load_dataset_campaign_config(path: Path) -> CampaignConfig:
+def validated_campaign_config(block: Mapping[str, Any], *, path: Path) -> CampaignConfig:
     try:
-        return CampaignConfig.model_validate(read_campaign_config_file(path))
+        return CampaignConfig.model_validate(block)
     except ValidationError as exc:
         reason = "; ".join(f"{'.'.join(map(str, e['loc']))}: {e['msg']}" for e in exc.errors())
         raise StoredConfigInvalidError(path=str(path), reason=reason) from exc
+
+
+def load_dataset_campaign_config(dataset_dir: Path) -> CampaignConfig:
+    return validated_campaign_config(
+        dataset_campaign_block(dataset_dir), path=dataset_dir / DEFINITION_FILE
+    )
 
 
 def with_optimization(config: CampaignConfig, overrides: Mapping[str, Any]) -> CampaignConfig:
@@ -94,9 +110,9 @@ def with_optimization(config: CampaignConfig, overrides: Mapping[str, Any]) -> C
 
 
 def dataset_campaign_config(
-    dataset_root: Path, *, optimization: Mapping[str, Any], declared: CampaignConfig | None = None
+    dataset_dir: Path, *, optimization: Mapping[str, Any], declared: CampaignConfig | None = None
 ) -> CampaignConfig:
-    config = declared or load_dataset_campaign_config(dataset_campaign_path(dataset_root))
+    config = declared or load_dataset_campaign_config(dataset_dir)
     return with_optimization(config, optimization) if optimization else config
 
 
@@ -112,39 +128,31 @@ def scorer_of(config: CampaignConfig, *, verifier_graded: bool) -> Scorer:
 
 
 def dataset_scorer(dataset_dir: Path) -> Scorer:
-    return scorer_of(
-        load_dataset_campaign_config(dataset_campaign_path(dataset_dir)), verifier_graded=False
-    )
+    return scorer_of(load_dataset_campaign_config(dataset_dir), verifier_graded=False)
 
 
 def read_authored_dataset(dataset_dir: Path) -> AuthoredDataset:
-    campaign_config = load_dataset_campaign_config(dataset_campaign_path(dataset_dir))
-
-    task_path = dataset_dir / "task_description.md"
-    task_description = task_path.read_text(encoding="utf-8").strip() if task_path.is_file() else ""
-
-    pipeline_path = dataset_pipeline_path(dataset_dir)
-    pipeline: dict[str, Any] = read_yaml_optional(pipeline_path) or {}
-    backend_type = str(pipeline.get("backend_type") or "").lower()
-    pipeline_nodes = dict(pipeline.get("nodes") or {})
-    active_steps = [str(s) for s in (pipeline.get("pipelines") or {}).get("default") or []]
-
+    definition = _definition(dataset_dir)
+    pipeline: dict[str, Any] = {} if definition is None else definition.pipeline
     return AuthoredDataset(
-        campaign_config=campaign_config,
-        task_description=task_description,
-        backend_type=backend_type,
-        pipeline_nodes=pipeline_nodes,
-        active_steps=active_steps,
+        campaign_config=validated_campaign_config(
+            _campaign_block(definition), path=dataset_dir / DEFINITION_FILE
+        ),
+        task_description=read_dataset_framing(dataset_dir).description,
+        pipeline_nodes=dict(pipeline.get("nodes") or {}),
+        active_steps=declared_pipelines(pipeline).get("default", []),
         candidate_library=read_candidate_library_file(dataset_dir),
     )
 
 
 __all__ = [
+    "campaign_file_block",
+    "dataset_campaign_block",
     "dataset_campaign_config",
     "dataset_scorer",
     "load_dataset_campaign_config",
     "read_authored_dataset",
-    "read_campaign_config_file",
     "scorer_of",
+    "validated_campaign_config",
     "with_optimization",
 ]

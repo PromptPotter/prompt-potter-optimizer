@@ -5,6 +5,7 @@ import json
 import textwrap
 from typing import TYPE_CHECKING, assert_never
 
+from promptpotter.application.views.render.phase import stop_lines
 from promptpotter.application.views.render.primitives import (
     BOLD,
     BOX_WIDTH,
@@ -56,14 +57,16 @@ def render_completion(
     headline = f"Rounds       {result.n_rounds_after_origin:<15d}"
     if result.result_accuracy is not None:
         headline += f"Selected     {result.result_accuracy:.1%} (round {result.result_round})"
-    fields: list[str] = []
-    fields += [f"Bench        {result.bench.line}", headline, f"Stop reason  {info.label}"]
+    # Repeated under a terminal's readout: a notebook cell has no readout, only this box.
+    fields: list[str] = [
+        *stop_lines(result.stop_reason),
+        f"Bench        {result.bench.line}",
+        headline,
+    ]
     if result.error is not None:
         fields.append(f"Error        {result.error.kind}: {result.error.message}")
     if result.spend is not None:
         fields.append(f"Spend        {result.spend.billed_beside_incurred()}")
-    if info.next_step:
-        fields.append(f"Next         {info.next_step}")
     if dataset_name:
         fields.append(f"Dataset      {dataset_name}")
     if campaign_dir is not None:

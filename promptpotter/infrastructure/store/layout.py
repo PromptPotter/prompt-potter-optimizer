@@ -20,17 +20,24 @@ logger = logging.getLogger(__name__)
 
 _SIBLING_SEP_RE = re.compile(r"_(fork|diag)_")
 _SIBLING_LAST_SEP_RE = re.compile(r"_(fork|diag)_(?!.*_(fork|diag)_)")
-_DATASET_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
+_DATASET_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*(/[a-z0-9][a-z0-9_-]*)*$")
 
 
 def validate_dataset_name(name: str) -> str:
-    """Lowercase-only: the name IS a directory name, and both shipped filesystems fold case."""
+    """The name IS the dataset's path under its tier, ``/``-separated; lowercase-only, since both
+    shipped filesystems fold case."""
     if not name or not _DATASET_NAME_RE.match(name):
         raise ValueError(
-            f"Invalid dataset name: {name!r}. Lowercase alphanumerics, hyphens and "
-            "underscores only, starting with a letter or digit."
+            f"Invalid dataset name: {name!r}. `/`-separated segments of lowercase alphanumerics, "
+            "hyphens and underscores, each starting with a letter or digit."
         )
     return name
+
+
+def dataset_id_prefix(name: str) -> str:
+    """The name where ONE path segment must hold it — a campaign id, which is a directory and a URL
+    segment. Joined on ``.``, which no name may hold, so two names never share a prefix."""
+    return validate_dataset_name(name).replace("/", ".")
 
 
 def root_cycle_id(cycle_id: str) -> str:

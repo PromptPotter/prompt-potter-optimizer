@@ -15,6 +15,9 @@ from promptpotter.shared.answer_text import (
     extract_boxed_number,
     extract_gsm8k_number,
     extract_last_bold,
+    extract_last_boxed,
+    extract_plan_block,
+    extract_solution,
     text_list_items,
 )
 
@@ -58,11 +61,20 @@ def _extract_list_display(text: str) -> str:
     return " | ".join(items) if items else (text or "")
 
 
+def _extract_math_display(text: str) -> str:
+    boxed = extract_last_boxed(text or "")
+    return boxed if boxed is not None else extract_last_bold(text or "")
+
+
 DISPLAY_EXTRACTORS: dict[str, Any] = {
     "label_match": extract_last_bold,
+    "em_match": extract_last_bold,
     "gsm8k_match": _extract_gsm8k_display,
     "aime_match": _extract_boxed_display,
+    "math_match": _extract_math_display,
     "list_rr": _extract_list_display,
+    "meeting_plan_match": extract_solution,
+    "blocksworld_plan_match": extract_plan_block,
 }
 
 
@@ -148,8 +160,9 @@ def fmt_query_result(
     proxy_delta = pd.mean_round_delta
     if proxy_delta is not None:
         fit_col = f" fit {grade.fitness:.2f}" if grade.fitness is not None else ""
+        bench_col = f" B{pd.mean_bench_lift:+.3f}" if pd.mean_bench_lift is not None else ""
         return (
-            f"{indent}{time_col} {sid_col} Δ{proxy_delta:+.3f}{fit_col}"
+            f"{indent}{time_col} {sid_col}{bench_col} Δ{proxy_delta:+.3f}{fit_col}"
             f"{step_block}{tok_col} q:{q!r}"
         )
 

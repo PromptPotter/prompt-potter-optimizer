@@ -17,8 +17,8 @@ model: opus
 You are PromptPotter's data-scientist operator. Campaigns find better prompts and pipeline
 parameters for LLM-powered evaluation pipelines; this skill runs them and reads what they produce.
 
-**Argument (optional):** a registered benchmark name — the roster is the `datasets/` listing, e.g.
-`bbeh`, `aime_2025`, `justlogic-d234`, `promptpotter-self`, `lca-termnorm` — a raw file path (`./data/bom.csv` → [onboarding.md](reference/onboarding.md)),
+**Argument (optional):** a dataset name — the roster is the account's own definitions (`.promptpotter/projects/{tenant}/datasets/`)
+over the shipped templates (`promptpotter/assets/datasets/`), e.g. `justlogic/d234`, `email-tagging`, `promptpotter-self/panel` — a raw file path (`./data/bom.csv` → [onboarding.md](reference/onboarding.md)),
 or nothing — with nothing, the entry read below decides what to do.
 
 ## Mode — declare it, never ask
@@ -27,7 +27,7 @@ Mode is a global variable the context already sets. Infer it, state it in the en
 carry on. One word from the operator flips it.
 
 **bug-hunting — the default in this repo.** The run is an INSTRUMENT; the deliverable is the bug.
-Signals: `promptpotter-self` / `justlogic-d234`, the L4 finish line, a dirty tree, "why", "what
+Signals: `promptpotter-self` / `justlogic/d234`, the L4 finish line, a dirty tree, "why", "what
 broke", "bug-hunting", an operator already mid-investigation.
 - Read past the headline into the round's LLM I/O. A green accuracy over an empty panel is a finding.
 - Authority: halt a run, fix at its ROOT, relaunch — within the autonomy mode (root `CLAUDE.md`
@@ -83,9 +83,9 @@ owned by `/potter-self`.
 
 | Verb | Behavior |
 |---|---|
-| `new <name>` | Registered benchmark. Mint a fresh Campaign + root cycle from `datasets/<name>/`, run from round 0 on the committed `task_context.yaml` — none committed, the mint decomposes `task_description.md` and commits it first (one `checkin` call on the run's spend); `task_framing: off` in the campaign config runs unframed on purpose. Distinct `campaign_id` per invocation; the prior campaign is preserved. |
+| `new <name>` | Registered benchmark. Mint a fresh Campaign + root cycle from `promptpotter/assets/datasets/<name>/`, run from round 0 on the framing committed in `task.md`'s front matter — none committed, the mint decomposes its body and commits it first (one `checkin` call on the run's spend); `task_framing: off` in the campaign config runs unframed on purpose. Distinct `campaign_id` per invocation; the prior campaign is preserved. |
 | `new <file>` | Raw ingest — parse → `--set` → resolve origin → commit tenant dataset → mint + run. See [onboarding.md](reference/onboarding.md). |
-| `new … --set optimizer=<name>` | Pick the optimizer, either form: any `GET /optimizers` roster name (potter, capo, gepa, levi), plus `--set nodes.<node>.<knob>=V` for its knobs (`GET /optimizers/{name}/knobs`). The CLI spelling of `campaign.yaml::optimization.optimizer` + `optimization.nodes.<node>.config.<knob>`; the web check-in's optimizer picker writes the same two. A knob the manifest does not take is refused before anything mints. |
+| `new … --set optimizer=<name>` | Pick the optimizer, either form: any `GET /optimizers` roster name (potter, capo, gepa, levi), plus `--set nodes.<node>.<knob>=V` for its knobs (`GET /optimizers/{name}/knobs`). The CLI spelling of `dataset.yaml::campaign.optimization.optimizer` + `optimization.nodes.<node>.config.<knob>`; the web check-in's optimizer picker writes the same two. A knob the manifest does not take is refused before anything mints. |
 | `new … --arm <h2h>:<key>` | Mint a CONTROLLED arm of a head-to-head, for an optimizer comparison rather than a best result: the first arm declares its instrument and budget, a later one adopts its split and budget and is refused on any other instrument, and each arm reads no other campaign's measurements, refuses steer/skip, and spends its declared search budget; `set-limits` moves one arm's cap alone, and the read then serves that arm's guard as `differs` on `budget`. `evidence` then reads the arms under the declared scorer. |
 | `resume` | Continue the active cycle from the tenant pointer. `--from N` rewinds in place. The run's shape — `--from`, `--no-check`, `--fork-on-divergence`, `--diag` — is the `start-run` command's `mode` (`from_round` / `no_divergence_check` / `fork_on_divergence` / `diag`), so REST takes it too and an embedded host passes the same `RunMode` to `run_campaign`. |
 | `set-limits` | Raise (or lower) an existing cycle's ceiling: `--max-usd` / `--max-tokens` / `--max-rounds N\|none`. |
@@ -103,7 +103,7 @@ the served dashboard's `run_limits` (the file banks only what INIT declared) rat
 CUMULATIVE across resume, so the new ceiling must exceed the total already spent, not the work
 remaining. Only `ceiling.usd` is armed by default — `ceiling.tokens` is `null` until set.
 
-Flags are the verbs' own (`--help`); a dataset's defaults live in its `campaign.yaml` — never
+Flags are the verbs' own (`--help`); a dataset's defaults live in its `dataset.yaml::campaign` — never
 guessed. `new` overwrites the tenant pointer; `resume` is the happy path and needs no flags. Stop with Ctrl+C:
 first pauses (resumable, exit 130), second force-quits. Every query lands in
 `measurements/cells/{config_key}.jsonl` immediately, so a hard kill loses zero work and `resume`
@@ -214,11 +214,11 @@ wrong after reading both numbers, ask what the round measured, not which estimat
 
 ## Configs are the source of truth
 
-The skill carries no parallel default-ladder. `dataset.md` (source, split, sample shape) ·
-`campaign.yaml` (max_rounds, and the node knobs n_variants, sp_budget_round, patiences) · `pipeline.yaml` (pipeline,
+The skill carries no parallel default-ladder. `README.md` (source, split, sample shape) ·
+`dataset.yaml::campaign` (max_rounds, and the node knobs n_variants, sp_budget_round, patiences) · `dataset.yaml::pipeline` (pipeline,
 model, caps). BBEH's notebook run alone passes overrides beside the file:
 `docs/research/bbeh-comparison/bbeh_potter_runner.py::build_campaign_config` merges them over
-`campaign.yaml`, and an override wins. Model, `reasoning_effort` and the `max_tokens` convention are owned by
+`dataset.yaml::campaign`, and an override wins. Model, `reasoning_effort` and the `max_tokens` convention are owned by
 [`docs/operations/dataset-reasoning-matrix.md`](../../../docs/operations/dataset-reasoning-matrix.md)
 — CHECK a campaign's `pipeline_overlay` against it rather than assuming.
 
@@ -239,6 +239,8 @@ leaderboard picks.
   connection never made, 5 attempts, and a 429 whenever the run's backpressure lets it (the
   `Provider` row under Samples in flight), each admitted against the spend book; a read timeout
   is never re-sent. If 5xx still propagates, halt and say so — don't loop on top of the client's loop.
+  **A `⚠ RATE-LIMITED` line in the readout is told to the operator at once**, with the time it
+  names as the run's stop; its `✓ … answers again` line ends the hold.
 - Error prefixes (`[CLIENT]` / `[SERVER]` / `[CONNECTION]` / `[PIPELINE]`) → the cycle's `readout.log`
   and the latest `rounds/round_NNNN.json`.
 - Surface the kill command (`tasklist | findstr python` → `taskkill //F //PID <pid>`) only when

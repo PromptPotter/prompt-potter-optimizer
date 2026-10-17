@@ -11,12 +11,13 @@ from promptpotter.application.initialization.loop_start import (
     diagnostic_trace,
 )
 from promptpotter.application.initialization.wiring import bind_cycle_session
-from promptpotter.application.jobs.quota import paid_verb
+from promptpotter.application.jobs.launcher.admission import paid_pass
 from promptpotter.application.runner.inner.spawn_context import publish_inner_spawn_context
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.results import DiagnosticRunRecord, RescoreCount
+from promptpotter.domain.spend import SpendCeilings
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import DiagnosticError
 from promptpotter.shared.statistics import mean_ci
@@ -41,7 +42,7 @@ async def measure_noise_floor(
     hop: CycleHop,
     k: RescoreCount,
 ) -> NoiseFloorOutcome:
-    async with paid_verb(stores=stores, bucket="noise-floor", hop=hop):
+    async with paid_pass(stores=stores, verb="noise-floor", hop=hop, declared=SpendCeilings()):
         return await _rescore_origin(stores, hop, k)
 
 
@@ -50,7 +51,7 @@ async def _rescore_origin(stores: Stores, hop: CycleHop, k: RescoreCount) -> Noi
     if campaign is None:
         raise DiagnosticError(f"campaign {hop.campaign_id!r} has no manifest on disk.")
 
-    standing = stores.campaigns.standing_rounds(hop).rounds.get(0)
+    standing = stores.campaigns.standing_rounds(hop, moment=None).rounds.get(0)
     if standing is None:
         raise DiagnosticError(
             f"round 0 never closed in {hop.campaign_id}/{hop.cycle_id} — the origin was never scored."
@@ -74,7 +75,7 @@ async def _rescore_origin(stores: Stores, hop: CycleHop, k: RescoreCount) -> Noi
     schema = session.pipeline_schema
     jsp = origin.searchpoint(
         schema=schema,
-        framing=campaign_framing(stores, campaign_config, campaign.dataset_name),
+        framing=campaign_framing(stores, campaign_config, session.dataset),
         demo=session.scoring.require_partition().demo,
     )
     scoring_set = [s for s in session.samples if s.id in sample_ids]

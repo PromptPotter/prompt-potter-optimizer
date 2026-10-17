@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, Any, NoReturn
 import yaml
 from pydantic import ValidationError
 
-from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.commands.draft_editing import dispatch_draft_patch
 from promptpotter.application.commands.launching import dispatch_start_checkin
@@ -20,7 +19,10 @@ from promptpotter.application.commands.payloads import (
     ResolveOriginPayload,
     StartCheckinPayload,
 )
-from promptpotter.application.datasets.authored import read_campaign_config_file
+from promptpotter.application.datasets.authored import (
+    campaign_file_block,
+    validated_campaign_config,
+)
 from promptpotter.application.datasets.draft_campaign import (
     SETTABLE_SCALARS,
     EditDraftPatch,
@@ -241,19 +243,16 @@ def _arm_request(raw: str | None) -> ArmRequest | None:
         raise SystemExit(f"ERROR: --arm {raw!r}: {exc}") from exc
 
 
-def _named_mint(args: argparse.Namespace) -> MintCampaignPayload:
+def _named_mint(args: argparse.Namespace, stores: Stores) -> MintCampaignPayload:
     declared = None
     if args.config:
-        file_config = read_campaign_config_file(Path(args.config))
-        declared = CampaignConfig.model_validate(file_config)
-    dataset_name = (
-        args.dataset or args.dataset_name or (declared.dataset_name if declared else None)
-    )
+        path = Path(args.config)
+        declared = validated_campaign_config(campaign_file_block(path), path=path)
+    dataset_name = args.dataset or args.dataset_name
     if not dataset_name:
         raise SystemExit(
             "ERROR: `new` requires a dataset name. Pass it as a positional "
-            "(`new aime`), via `--dataset-name <name>`, or via a `--config` "
-            "that names one.\n\n" + no_dataset_hint()
+            "(`new justlogic/d234`) or via `--dataset-name <name>`.\n\n" + no_dataset_hint(stores)
         )
     knobs = _set_knobs(args.sets)
     arm = _arm_request(args.arm)
@@ -284,7 +283,7 @@ async def _new(args: argparse.Namespace) -> CommandResult:
     setup_logging(style="full" if args.verbose else "cli")
     if not (args.dataset and Path(args.dataset).is_file()):
         stores = open_stores(args)
-        return await mint_and_run(stores, _named_mint(args), inline_launch(args))
+        return await mint_and_run(stores, _named_mint(args, stores), inline_launch(args))
     if args.arm is not None:
         raise SystemExit("ERROR: --arm mints a committed dataset's campaign, not a raw file")
     try:
@@ -303,7 +302,7 @@ async def mint_and_run(stores: Stores, mint: MintCampaignPayload, inline: Inline
         return backend_unreachable_result(exc)
     except DatasetAccessError:
         raise SystemExit(
-            f"ERROR: no dataset named {mint.dataset_name!r}.\n\n" + no_dataset_hint()
+            f"ERROR: no dataset named {mint.dataset_name!r}.\n\n" + no_dataset_hint(stores)
         ) from None
     except PotterError as exc:
         raise SystemExit(f"ERROR: {exc}") from None

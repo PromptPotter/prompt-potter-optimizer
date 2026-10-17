@@ -141,7 +141,7 @@ class DraftCampaign:
     pipeline_steps: list[str] = field(default_factory=list)
     optimization_overrides: dict[str, Any] = field(default_factory=_default_optimization_overrides)
     candidate_library: tuple[str, ...] = ()
-    # Empty = never fetched or unreachable: served as `schema_source: unreachable`, never "locked".
+    # Empty = in-process (served `local`) or unreachable (`unreachable`, never "locked").
     backend_nodes: dict[str, Any] = field(default_factory=dict)
     # Non-empty routes the check-in's Start through the ``origin_override`` seed.
     reused_origin_id: str = ""
@@ -282,6 +282,7 @@ def draft_pipeline_json(draft: DraftCampaign, nodes: dict[str, Any]) -> dict[str
         "name": draft.slug,
         "backend_type": draft.connector,
         "backend_name": draft.connector,
+        "nodes": nodes,
     }
     connector = connectors.get(draft.connector)
     steps = draft.pipeline_steps or list(connector.default_pipeline)
@@ -289,9 +290,6 @@ def draft_pipeline_json(draft: DraftCampaign, nodes: dict[str, Any]) -> dict[str
         pipeline["pipelines"] = {"default": list(steps)}
     if connector.available_models:
         pipeline["available_models"] = list(connector.available_models)
-
-    if nodes:
-        pipeline["nodes"] = nodes
     return pipeline
 
 
@@ -338,7 +336,6 @@ def default_campaign_config(draft: DraftCampaign) -> CampaignConfig:
     optimization["nodes"] = dict(overrides["nodes"])
     return CampaignConfig.model_validate(
         {
-            "dataset_name": draft.slug,
             "scoring": draft_scoring_block(draft),
             "optimization": optimization,
         }

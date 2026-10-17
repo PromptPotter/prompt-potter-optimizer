@@ -654,10 +654,24 @@ def pick_line(rounds: Sequence[RoundOutcome]) -> list[ArmPointer]:
 
 
 def origin_panel(
-    origin_cells: Collection[int], *, poolable: Collection[int], size: int
+    origin_cells: Collection[int],
+    *,
+    line_cells: Collection[int],
+    poolable: Collection[int],
+    scope_of: Mapping[int, str],
+    size: int,
 ) -> list[int]:
-    """*origin_cells* are the origin's own ROUND's, never every cell it was later read on."""
-    return sorted(set(origin_cells) & set(poolable))[:size]
+    """*origin_cells* are the origin's own ROUND's, never every cell it was later read on. A scope
+    the line drew and the origin never sat takes the line's cells there, and the top-up seats C0 on
+    them as on any member's gap; each scope is cut to *size* alone, so none crowds another out."""
+    by_scope: dict[str, list[int]] = {}
+    for sid in sorted(set(origin_cells) & set(poolable)):
+        by_scope.setdefault(scope_of[sid], []).append(sid)
+    sat = set(by_scope)
+    for sid in sorted(set(line_cells) & set(poolable)):
+        if scope_of[sid] not in sat:
+            by_scope.setdefault(scope_of[sid], []).append(sid)
+    return sorted(sid for cells in by_scope.values() for sid in cells[:size])
 
 
 CEILING_FRACTION = 0.95
@@ -1218,6 +1232,12 @@ class CycleResult(StrictModel):
     # Precision only. `origin_level_se` has no reader BY DESIGN: `test_ruler.py`'s negative control.
     origin_level_se: float | None = None
     round_level_ses: list[float] = Field(default_factory=list)
+    # The held-out bench: the origin's headline on its rows, then per L1 round the STANDING
+    # selection's on the same rows, held forward across rounds that held. ``None`` in the series
+    # is a round whose selection pass read nothing or was never sent; ``None`` origin, no bench
+    # pass read.
+    bench_origin_level: float | None = None
+    bench_round_levels: list[float | None] = Field(default_factory=list)
     # From config, never ``len(round_levels)``: `lives` stops a stalling cycle short. ``None`` = no cap.
     round_budget: int | None = None
     result_prompt_fields: dict[str, Any]

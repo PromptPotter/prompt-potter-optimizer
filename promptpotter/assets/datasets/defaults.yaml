@@ -1,0 +1,49 @@
+pipeline:
+  # The default every `{name}/dataset.yaml::pipeline` is laid over — what a dataset there leaves
+  # unsaid, it says this. The merge rule is `assets/datasets/CLAUDE.md` § A dataset file is a partial.
+  version: v0.1
+  backend_name: TermNorm
+  backend_type: termnorm
+  available_models:
+    - openai/gpt-oss-20b:nitro
+  # Templates, keyed by node name: a dataset's own node of that name is laid over its entry, and a
+  # dataset naming no such node receives none of it.
+  nodes:
+    llm_only:
+      type: llm
+      runtime: backend
+      node_role: ranker
+      description: >-
+        Direct LLM generation on the TermNorm backend. No dataset-side max_tokens cap — provider ceiling
+        applies.
+      config:
+        model: openai/gpt-oss-20b:nitro
+        temperature: 0.0
+      optimizer:
+        param_keys:
+          # `model` is deliberately NOT here: a benchmark's model is a measurement premise, so the
+          # axis stays closed even though the engine would search it — a dataset opens it by
+          # restating this list with `model`. `provider` cannot be opened by any dataset — it is a
+          # cost lever.
+          - temperature
+          - max_tokens
+          - reasoning_effort
+          - persona
+          - task_intent
+          - problem_description
+          - instruction
+          - thinking_style
+          - answer_format
+        observation_name: llm_only
+        observation_mappings:
+          - pipeline_key: final_ranking
+            output_field: generated_text
+            is_llm: true
+
+# The default every `{name}/dataset.yaml::campaign` is laid over — what a dataset there leaves
+# unsaid, it says this. The merge rule is `assets/datasets/CLAUDE.md` § A dataset file is a partial.
+campaign:
+  scoring: label_match(predicted, ground_truth)
+  optimization:
+    max_rounds: 8
+    degradation_threshold: 0.4

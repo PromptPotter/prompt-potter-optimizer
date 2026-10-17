@@ -13,15 +13,11 @@ from promptpotter.application.bench.task_context import (
 )
 from promptpotter.application.campaign_config import under_record
 from promptpotter.application.datasets.authored import scorer_of
-from promptpotter.application.jobs.quota import paid_verb
+from promptpotter.application.jobs.quota import paid_call
 from promptpotter.application.knobs import DiffScope, classify_config_diff
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.origin import resolve_origin_opt_search_point
-from promptpotter.application.pipeline_resolve import (
-    configure_and_apply_pipeline,
-    frozen_config,
-    resolved_dataset_name,
-)
+from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline, frozen_config
 from promptpotter.application.preflight import (
     check_search_pool_holds_round,
     refuse_below_reasoning_floor,
@@ -32,7 +28,7 @@ from promptpotter.application.runner.campaign_ids import (
     mint_campaign_id,
     mint_checkin_cycle_id,
 )
-from promptpotter.domain.bench import BankPartition, partition_bank
+from promptpotter.domain.bench import BankPartition, PartitionRecord, partition_bank
 from promptpotter.domain.campaign import (
     Arm,
     ArmRequest,
@@ -51,7 +47,10 @@ from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.projections.live_dashboard.projection import (
     LiveDashboardProjection,
 )
-from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
+from promptpotter.infrastructure.store.dataset_access import (
+    backend_type_of_dataset,
+    read_dataset_framing,
+)
 from promptpotter.infrastructure.store.io import validate_path_component
 from promptpotter.infrastructure.store.session_pointer import save_active_pointer
 from promptpotter.shared.clock import utcnow_iso
@@ -72,6 +71,7 @@ logger = logging.getLogger(__name__)
 class _Runnable(NamedTuple):
     treatment: Treatment
     partition: BankPartition
+    drawn: PartitionRecord
 
 
 def _runnable(campaign_config: CampaignConfig, dataset: list[Sample]) -> _Runnable:
@@ -80,7 +80,7 @@ def _runnable(campaign_config: CampaignConfig, dataset: list[Sample]) -> _Runnab
     refusal = check_search_pool_holds_round(campaign_config, len(partition.search))
     if refusal is not None:
         raise PayloadInvalidError(refusal, code="search_pool_below_round")
-    return _Runnable(treatment, partition)
+    return _Runnable(treatment, partition, partition.record(dataset_hash=dataset_hash(dataset)))
 
 
 @dataclass(frozen=True)
@@ -90,6 +90,8 @@ class CyclePlan:
     cycle_id: str
     treatment: Treatment
     partition: BankPartition
+    # The draw every later read of the cycle restores, written by the seam that mints it.
+    drawn: PartitionRecord
     seed: CycleSeed | None
 
 
@@ -117,7 +119,7 @@ def _plan(
     )
     origin = resolve_origin_opt_search_point(
         prompt_node_names=schema.prompt_node_names(),
-        dataset_dir=session.dataset_config_dir,
+        dataset_dir=None if session.dataset is None else session.dataset.directory,
         seed=seed,
         pipeline_params=pipeline_params,
         schema=schema,
@@ -131,11 +133,12 @@ def _plan(
             origin,
             schema,
             list(partition.search),
-            framing=campaign_framing(session.store, campaign_config, session.dataset_name),
+            framing=campaign_framing(session.store, campaign_config, session.dataset),
             demo=partition.demo,
         ),
         treatment=runnable.treatment,
         partition=partition,
+        drawn=runnable.drawn,
         seed=seed,
     )
 
@@ -217,25 +220,18 @@ def refuse_drifted_resume(
     raise ConfigDriftError(campaign, current_hash=current_hash, scope=scope, changed=changed)
 
 
-def write_plan_seed(stores: Stores, hop: CycleHop, plan: CyclePlan) -> None:
-    if plan.seed is not None:
-        stores.campaigns.write_cycle_seed(hop, plan.seed)
-
-
 def _join_head_to_head(
     session: Session,
     campaign_config: CampaignConfig,
-    dataset: list[Sample],
     plan: CyclePlan,
     request: ArmRequest,
 ) -> Arm:
     optimization = campaign_config.optimization
-    partition = plan.partition
     bench_set = bench_set_of(
-        dataset_name=resolved_dataset_name(session, campaign_config),
-        dataset_hash=dataset_hash(dataset),
+        dataset_name=session.measured_dataset,
+        dataset_hash=plan.drawn.dataset_hash,
         split=campaign_config.dataset_split,
-        bench_rows=partition.bench_rows,
+        bench_rows=plan.drawn.bench_rows,
         scorer_id=scorer_of(campaign_config, verifier_graded=False).id,
         origin_params=plan.pipeline_params,
         origin=plan.cycle_id.removeprefix("cycle_"),
@@ -326,8 +322,8 @@ def _under_declaration(
     return under_declared_record(session.store, narrowed, arm)
 
 
-def fresh_campaign_id(session: Session, campaign_config: CampaignConfig) -> str:
-    return mint_campaign_id(resolved_dataset_name(session, campaign_config))
+def fresh_campaign_id(session: Session) -> str:
+    return mint_campaign_id(session.measured_dataset)
 
 
 def _declare_frozen_wiring(
@@ -338,30 +334,37 @@ def _declare_frozen_wiring(
     declare_run_wiring(session, campaign_config, ledger, tracing=None)
 
 
+def _write_plan(
+    stores: Stores, hop: CycleHop, drawn: PartitionRecord, seed: CycleSeed | None
+) -> None:
+    """At the mint, so a cycle's draw is on disk before any launch, fork or read of it."""
+    stores.campaigns.write_bank_partition(hop, drawn)
+    if seed is not None:
+        stores.campaigns.write_cycle_seed(hop, seed)
+
+
 def _mint_campaign(
     session: Session,
     campaign_config: CampaignConfig,
     *,
     hop: CycleHop,
     treatment: Treatment,
+    drawn: PartitionRecord,
+    seed: CycleSeed | None,
     arm: Arm | None,
 ) -> None:
     """``hop.campaign_id`` is the CALLER's, so an L4 inner spawn lands back on a campaign it ran."""
-
     target_hash = hop.cycle_id.removeprefix("cycle_")
     validate_path_component(target_hash)
-    now = utcnow_iso()
-    dataset_name = resolved_dataset_name(session, campaign_config)
     validate_path_component(hop.campaign_id)
-    root_cycle = hop.cycle_id
-
-    campaigns = session.store.campaigns
-    campaigns.create_campaign(
+    now = utcnow_iso()
+    dataset_name = session.measured_dataset
+    session.store.campaigns.create_campaign(
         Campaign(
             campaign_id=hop.campaign_id,
             dataset_name=dataset_name,
             created_at=now,
-            root_cycle_id=root_cycle,
+            root_cycle_id=hop.cycle_id,
             root_content_hash=target_hash,
             treatment=treatment,
             arm=arm,
@@ -374,19 +377,14 @@ def _mint_campaign(
             config=campaign_config.frozen(arm=arm is not None),
         )
     )
-
     _declare_frozen_wiring(session, campaign_config, hop)
-    campaigns.mint_cycle(hop)
-
-    session.campaign_id = hop.campaign_id
-    session.state.cycle_id = root_cycle
-
+    session.store.campaigns.mint_cycle(hop)
+    _write_plan(session.store, hop, drawn, seed)
+    session.bind_campaign(hop, arm=arm)
     save_active_pointer(session.store.base_dir, hop)
-
     # So the mint → loop-start window serves `dashboard.json` off the campaign's own declarations.
     LiveDashboardProjection.for_session(session.hop, tenant_root=session.tenant_root)
-
-    logger.info("Minted fresh campaign %s — cycle %s", hop.campaign_id, root_cycle)
+    logger.info("Minted fresh campaign %s — cycle %s", hop.campaign_id, hop.cycle_id)
 
 
 def mint_checkin_skeleton(stores: Stores, *, slug: str, backend_type: str) -> CycleHop:
@@ -431,12 +429,12 @@ def finalize_checkin_to_active(
         treatment=cycle_plan.treatment.model_dump(mode="json"),
         backend_id=session.backend_id,
         backend_url=session.backend_client.base_url,
-        # Re-read, not trusted from the skeleton: the check-in writes `pipeline.yaml` in between.
-        backend_type=backend_type_of_dataset(session.store, session.dataset_name or ""),
+        # Re-read, not trusted from the skeleton: the check-in writes `dataset.yaml` in between.
+        backend_type=backend_type_of_dataset(session.store, session.measured_dataset),
         config=campaign_config.frozen(arm=False),
     )
-    session.campaign_id = hop.campaign_id
-    session.state.cycle_id = hop.cycle_id
+    _write_plan(session.store, hop, cycle_plan.drawn, cycle_plan.seed)
+    session.bind_campaign(hop, arm=None)
 
     # The store's OWN workspace: a sandboxed inner cycle (L4) never stamps the outer tenant's.
     save_active_pointer(session.store.base_dir, hop)
@@ -451,7 +449,6 @@ def finalize_checkin_to_active(
 def _mint_runnable(
     session: Session,
     campaign_config: CampaignConfig,
-    dataset: list[Sample],
     runnable: _Runnable,
     *,
     campaign_id: str,
@@ -459,13 +456,18 @@ def _mint_runnable(
     origin_override: dict[str, Any] | None,
 ) -> MintedCycle:
     plan = _plan(session, campaign_config, runnable, origin_override=origin_override)
-    arm_of = (
-        None if arm is None else _join_head_to_head(session, campaign_config, dataset, plan, arm)
-    )
+    arm_of = None if arm is None else _join_head_to_head(session, campaign_config, plan, arm)
     # Never sweep the inner sandbox here: its key carries the campaign id, so only ANOTHER's dies.
     hop = CycleHop(campaign_id=campaign_id, cycle_id=plan.cycle_id)
-    _mint_campaign(session, campaign_config, hop=hop, treatment=plan.treatment, arm=arm_of)
-    write_plan_seed(session.store, hop, plan)
+    _mint_campaign(
+        session,
+        campaign_config,
+        hop=hop,
+        treatment=plan.treatment,
+        drawn=plan.drawn,
+        seed=plan.seed,
+        arm=arm_of,
+    )
     return MintedCycle(
         cycle_id=hop.cycle_id,
         campaign_id=campaign_id,
@@ -487,7 +489,6 @@ def prepare_fresh_cycle(
     return _mint_runnable(
         session,
         campaign_config,
-        dataset,
         _runnable(campaign_config, dataset),
         campaign_id=campaign_id,
         arm=arm,
@@ -500,12 +501,11 @@ def _description_to_decompose(
 ) -> str | None:
     if task_text:
         return task_text
-    if campaign_config.task_framing == "off" or session.dataset_config_dir is None:
+    if campaign_config.task_framing == "off" or session.dataset is None:
         return None
-    if committed_task_context(session.store, session.dataset_name):
+    if committed_task_context(session.store, session.dataset):
         return None
-    path = Path(session.dataset_config_dir) / "task_description.md"
-    return (path.read_text(encoding="utf-8").strip() if path.is_file() else "") or None
+    return read_dataset_framing(session.dataset.directory).description or None
 
 
 async def mint_framed_cycle(
@@ -535,7 +535,7 @@ async def mint_framed_cycle(
         checkin_ledger = CycleEventLog.open(CycleDir(Path(scratch)))
         if description is not None:
             assert session.dataset_name, "a framing commits to the dataset the session opened"
-            async with paid_verb(stores=session.store, bucket="checkin", hop=None):
+            async with paid_call(stores=session.store, bucket="checkin"):
                 await commit_task_framing(
                     session.store,
                     session.dataset_name,
@@ -547,7 +547,6 @@ async def mint_framed_cycle(
         minted = _mint_runnable(
             session,
             campaign_config,
-            dataset,
             runnable,
             campaign_id=campaign_id,
             arm=arm,
@@ -576,5 +575,4 @@ __all__ = [
     "refuse_drifted_resume",
     "resolve_cycle_plan",
     "under_declared_record",
-    "write_plan_seed",
 ]

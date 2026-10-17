@@ -14,6 +14,11 @@ from promptpotter.application.optimizers.potter.records import (
     Ladder,
     PotterRoundState,
 )
+from promptpotter.application.runner.inner.tasks import (
+    InnerCell,
+    InnerCells,
+    InnerTaskSpec,
+)
 from promptpotter.connectors.protocol import PROBE_WORKLOAD, Connector
 from promptpotter.domain.bench import (
     BENCH_HEADLINE,
@@ -25,6 +30,7 @@ from promptpotter.domain.bench import (
     bench_status,
 )
 from promptpotter.domain.campaign import Campaign
+from promptpotter.domain.cells import Seat
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.optimizer_state import OptimizerState
@@ -71,7 +77,8 @@ def measurement(
     objective: float | None = None,
     **wire: Any,
 ) -> GradedCell:
-    """``wire`` bends any key of the cell's record; an ungraded cell is ``fitness=None``."""
+    """``wire`` bends any key of the cell's record; an ungraded cell is ``fitness=None``. Its
+    ``sample_key`` is the slot spelled as a string unless *wire* names one."""
     grade = (
         {}
         if fitness is None
@@ -80,7 +87,9 @@ def measurement(
             "objective": round(fitness * 0.6, 6) if objective is None else objective,
         }
     )
-    return GradedCell.from_wire({"sample_id": sample_id, **grade, **wire})
+    return GradedCell.from_wire(
+        {"sample_id": sample_id, "sample_key": str(sample_id), **grade, **wire}
+    )
 
 
 def measurements(
@@ -152,7 +161,7 @@ def backend_client(**declared: Any) -> BackendClient:
 
 def workspace(root: Path) -> Stores:
     return build_stores(
-        default_identity(), projects_root=root / "projects", benchmarks_root=root / "datasets"
+        default_identity(), projects_root=root / "projects", install_datasets_root=root / "datasets"
     )
 
 
@@ -211,6 +220,25 @@ def inner_sandbox(stores: Stores, owner_campaign_id: str, owner_cycle_id: str) -
     inner = CampaignStore(WorkspaceDir(sandbox / "tenant"))
     inner.mint_cycle(CycleHop(campaign_id="innerds__20260101-000000", cycle_id="inner-cycle-0"))
     return sandbox
+
+
+def inner_cells(*optimizers: str) -> InnerCells:
+    """One seat per named manifest, on a dataset of its own, so each cell runs its own optimizer."""
+    by_dataset: dict[str, InnerCell] = {}
+    specs: dict[str, InnerTaskSpec] = {}
+    for name in optimizers:
+        selected = resolve_optimizer(name, {})
+        by_dataset[f"{name}ds"] = InnerCell({}, None, selected, selected.treatment().digest)
+        specs[name] = InnerTaskSpec(
+            inner_dataset=f"{name}ds",
+            optimizer_treatment=selected.treatment().digest,
+            seed=0,
+            n_samples=1,
+            n_samples_bench=1,
+            n_rounds=1,
+        )
+    cells = tuple(Seat(kind="seat", id=name, inner_dataset=f"{name}ds") for name in optimizers)
+    return InnerCells(cells=cells, by_dataset=by_dataset, specs=specs)
 
 
 def pobb_knobs(**bend: Any) -> PoBBKnobs:
@@ -321,9 +349,17 @@ def cycle_result(
     stop_reason: StopReason = StopReason.MAX_ROUNDS,
     unpriced_tokens: int = 0,
     billed: float | None = None,
+    bench_origin: float | None = 0.5,
+    bench_levels: list[float | None] | None = None,
     **overrides: Any,
 ) -> CycleResult:
-    """L1 rounds only in `rounds`/`levels`; `cost` is INCURRED, `billed` diverges under replay."""
+    """L1 rounds only in `rounds`/`levels`; `cost` is INCURRED, `billed` diverges under replay.
+
+    The held-out series defaults FLAT at the bench origin, one entry per level, so a test bending
+    only the θ side still scores; `bench_origin=None` is an origin pass that read nothing.
+    """
+    if bench_levels is None:
+        bench_levels = [bench_origin if bench_origin is not None else 0.5] * len(levels)
     unheld = PairedReading.unread(ReadingState.NOT_HELD)
     bench = BenchScore.of(
         bench_size=0,
@@ -343,6 +379,7 @@ def cycle_result(
         selected=None,
         vs_origin=unheld,
         cost=LiftCost.of(unheld, None),
+        scopes=[],
     )
     return CycleResult(
         rounds=rounds,
@@ -357,6 +394,8 @@ def cycle_result(
         bench=bench,
         origin_level=origin,
         round_levels=levels,
+        bench_origin_level=bench_origin,
+        bench_round_levels=bench_levels,
         result_prompt_fields={},
         stop_reason=stop_reason,
         started_at="2026-01-01T00:00:00Z",

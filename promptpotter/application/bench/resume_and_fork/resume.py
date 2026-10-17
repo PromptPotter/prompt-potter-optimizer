@@ -107,7 +107,7 @@ async def resume_with_divergence_check(
 ) -> ForkResult | None:
     sc = session.scoring
     scorer = sc.require_scorer()
-    prior = closed_rounds(session.store, hop, scorer, before_round=resumed_from_round)
+    prior = closed_rounds(session.store, hop, scorer, before_round=resumed_from_round, moment=None)
 
     # For the CYCLE's own state, never as a comparison anchor.
     cycle.tracking.current_results = [
@@ -125,7 +125,7 @@ async def resume_with_divergence_check(
         return correction
 
     # Over the cycle's whole history: a fork's lifted rounds made theirs on its parent's ledger.
-    ledger_decisions = campaign_store.standing_rounds(hop).decisions
+    ledger_decisions = campaign_store.standing_rounds(hop, moment=None).decisions
 
     if not skip_divergence_check:
         # Both ABOVE the config short-circuit: neither is a knob, so a clean diff misses them.

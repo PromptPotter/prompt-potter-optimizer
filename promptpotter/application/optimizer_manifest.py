@@ -195,9 +195,7 @@ class SelectedOptimizer:
 
     def prompt_hashes(self) -> dict[str, str]:
         """Under the bound L4 edit; a resume diverges at the first round whose banked stamp differs."""
-        return {
-            node: self._node_digest(node, declared_node_override(node)) for node in self.llm_nodes
-        }
+        return {node: self._node_digest(node) for node in self.llm_nodes}
 
     @property
     def member_nodes(self) -> tuple[str, ...]:
@@ -216,27 +214,33 @@ class SelectedOptimizer:
     def model(self, node: str | None = None) -> str:
         return str(self.node_config(node or self.proposer)["model"])
 
-    def _node_digest(self, node: str, declared: Mapping[str, Any]) -> str:
+    def _node_digest(self, node: str) -> str:
         cfg = self.call_config(node)
+        override = resolve_node_override(node)
+        if override.model:
+            # Laid over as `bench/llm_call.py::_merged_config` sends it.
+            cfg = {**cfg, "model": override.model}
+            if override.provider:
+                cfg["provider"] = override.provider
         body = prompt_body(self.document, cfg)
-        fields, renames = _resolved_prompt_parts(dict(declared))
+        fields = override.prompt_fields
         schema_key = _resolved_key(cfg.get("schema_family"), cfg.get("schema_version"))
         return stable_hash(
             [
                 {**body, **fields} if body is not None and fields else body,
-                renames,
-                _resolved_levers(node, declared),
+                override.schema_field_names,
+                _resolved_levers(node, declared_node_override(node)),
                 self.resolved_schemas.get(schema_key) if schema_key else None,
                 cfg,
             ]
         )
 
     def treatment(self) -> Treatment:
-        """Never the L4 edit an inner cell runs under, which that cell's identity hashes beside it."""
+        """Under the bound L4 edit too: two inner cells under two arms are two treatments."""
         return Treatment(
             optimizer=self.name,
             version=self.version,
-            prompt_hashes={node: self._node_digest(node, {}) for node in self.llm_nodes},
+            prompt_hashes=self.prompt_hashes(),
             knobs={node: self.knobs(node).model_dump(mode="json") for node in self.member_nodes},
             source=self.runtime.source_digest(proxies),
         )

@@ -30,7 +30,9 @@ from factories import (
 )
 
 from promptpotter.application.bench.node_context import NodeContext
-from promptpotter.application.bench.resume_and_fork.fork_siblings import mint_operator_fork
+from promptpotter.application.bench.resume_and_fork.fork_siblings import (
+    mint_operator_fork,
+)
 from promptpotter.application.bench.resume_and_fork.replayers import replay_decisions
 from promptpotter.application.campaign_config import (
     CampaignConfig,
@@ -55,6 +57,7 @@ from promptpotter.application.scoring import query_loop, search_point_scorer
 from promptpotter.application.scoring.closed_rounds import closed_rounds
 from promptpotter.application.scoring.formula import compile_scorer
 from promptpotter.application.scoring.search_point_scorer import _replayable_on
+from promptpotter.domain.bench import DatasetSplit, partition_bank
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.opt_search_point import OptSearchPoint
@@ -63,6 +66,7 @@ from promptpotter.domain.paired_reading import ReadingState
 from promptpotter.domain.phase_views import ViewAnchors
 from promptpotter.domain.pipeline_schema import NodePromptInfo, PipelineNode, PipelineSchema
 from promptpotter.domain.results import OverlapReading, ReferenceReading, RoundResult, RunStanding
+from promptpotter.domain.ruler import DeltaRuler, RulerScope
 from promptpotter.domain.run_records import (
     CandidateMintedRecord,
     CandidateScoredRecord,
@@ -74,24 +78,31 @@ from promptpotter.domain.run_records import (
     ResumeCheckpointRecord,
     RoundClosedRecord,
     RoundEnteredRecord,
+    RoundProposedRecord,
     RoundStandingRecord,
+    SampleScoredRecord,
 )
 from promptpotter.domain.sample import ArchiveEntry, Sample, sample_key
 from promptpotter.domain.scoring import GRADE_KEYS, MeasuredCell
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.llm.telemetry import reset_cycle_ledger, set_cycle_ledger
+from promptpotter.infrastructure.llm.telemetry import (
+    reset_cycle_ledger,
+    set_cycle_ledger,
+)
 from promptpotter.infrastructure.store import archive_queries, measurement_archive
 from promptpotter.infrastructure.store.archive_queries import (
+    CampaignWalks,
+    FiledBy,
     SampleFoldRow,
+    fence_memory,
     list_populations,
     load_population,
-    note_walked,
     sample_fold_rows,
-    scope_memory_to_own_answers,
     write_sample_fold,
 )
-from promptpotter.infrastructure.store.io import write_text
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_standing_rounds
+from promptpotter.infrastructure.store.io import rewrite_lines
 from promptpotter.infrastructure.store.lineage_queries import build_lineage_tree
 from promptpotter.infrastructure.store.measurement_archive import (
     MeasurementArchive,
@@ -99,8 +110,10 @@ from promptpotter.infrastructure.store.measurement_archive import (
     config_key,
     standing,
 )
+from promptpotter.infrastructure.store.read_model import LedgerSpan, Moment
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import DatasetIdentityError
+from promptpotter.shared.measurement_context import MeasurementRole
 
 Configs = list[tuple[str, dict[str, Any]]]
 _LLM_ONLY: Configs = [("llm_only", {"model": "X"})]
@@ -161,12 +174,21 @@ def _file(
 # 1. Replay eligibility
 
 
-def _walk_panel(root: Path, panel: list[Sample], per_sample: str, per_cell: str | None) -> Any:
+def _walk_panel(
+    root: Path,
+    panel: list[Sample],
+    per_sample: str,
+    per_cell: str | None,
+    *,
+    ledger: Path | None = None,
+) -> Any:
+    """*ledger* given, the walk is an arm's and records what it took there."""
     schema = pipeline_schema(
         name="claims",
         nodes=[PipelineNode(name="solve", tunes_llm=False, prompt_info=NodePromptInfo())],
     )
     session = loop_session(workspace(root), schema, panel, backend_id="b")
+    session.source = RunSource.OPTIMIZATION_LOOP
     session.scoring.scorer = compile_scorer(per_sample, per_cell, verifier_graded=False)
     sp = OptSearchPoint(instruction="Answer.").to_job_search_point(
         schema=schema, framing=TaskDecomposition(), demo=[]
@@ -182,12 +204,13 @@ def _walk_panel(root: Path, panel: list[Sample], per_sample: str, per_cell: str 
             predicted=predicted,
         )
 
-    bound = set_cycle_ledger(CycleEventLog(root / "walk.jsonl"))
+    bound = set_cycle_ledger(CycleEventLog(root / "walk.jsonl" if ledger is None else ledger))
+    slot = None if ledger is None else query_loop.ArmSlot(0, 1, "arm")
     try:
         with mock.patch.object(query_loop, "measure_sample", _measure):
             walked = asyncio.run(
                 search_point_scorer.score_search_point(
-                    sp, panel, session, label="panel", measured=None
+                    sp, panel, session, label="panel", slot=slot, measured=None
                 )
             )
     finally:
@@ -275,24 +298,24 @@ def test_a_filed_cell_replays_by_its_content_and_reads_as_a_fresh_run_would(tmp_
     assert len(banked) == len(panel), "a walked answer was not banked"
     filed = shared.store.archive.cell_signatures()
     _, fresh = _walk_panel(tmp_path / "fresh", panel, *read_under)
-    worth = {c.sample_id: c.grade.objective for c in fresh.sheet}
+    worth = {c.key: c.grade.objective for c in fresh.sheet}
     assert len(set(worth.values())) == 2, "guard: hits and misses are worth different amounts"
 
-    def ruler_cells() -> dict[int, float]:
+    def ruler_cells() -> dict[str, float]:
         observed = build_archive_observations(
             shared.store,
             dataset_name="claims",
             scorer=compile_scorer(*read_under, verifier_graded=False),
-            sample_ids=None,
+            admitted=None,
         )
-        return {o.sample_id: o.response for o in observed}
+        return {o.key: o.response for o in observed}
 
     assert ruler_cells() == pytest.approx(worth), "the ruler read the banked formula's grades"
     _, replayed = _walk_panel(tmp_path / "shared", panel, *read_under)
     assert all(c.facts.cached for c in replayed.sheet), "guard: the second read bought nothing"
     assert [c[:3] for c in replayed.cells] == [c[:3] for c in banked_walk.cells]
     assert shared.store.archive.cell_signatures() == filed, "a replay filed a second answer"
-    assert {c.sample_id: c.grade.objective for c in replayed.sheet} == worth
+    assert {c.key: c.grade.objective for c in replayed.sheet} == worth
     assert replayed.scores.composite_fitness == pytest.approx(fresh.scores.composite_fitness)
     SampleIndex.ensure_for(
         shared.store,
@@ -304,9 +327,9 @@ def test_a_filed_cell_replays_by_its_content_and_reads_as_a_fresh_run_would(tmp_
     wider_panel = [*panel, *(Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(6, 10))]
     _walk_panel(tmp_path / "shared", wider_panel, *banked_under)
     _, fresh_wider = _walk_panel(tmp_path / "fresh", wider_panel, *read_under)
-    assert ruler_cells() == pytest.approx(
-        {c.sample_id: c.grade.objective for c in fresh_wider.sheet}
-    ), "a population that grew after it was folded read at its folded length"
+    assert ruler_cells() == pytest.approx({c.key: c.grade.objective for c in fresh_wider.sheet}), (
+        "a population that grew after it was folded read at its folded length"
+    )
 
 
 # 2. The archive on disk
@@ -378,7 +401,7 @@ def test_the_archive_on_disk_keeps_every_paid_answer(
     own.advance()
     append_row = measurement_archive.append_row
 
-    def raced(path: Path, *rows: dict[str, Any]) -> int:
+    def raced(path: Path, *rows: dict[str, Any]) -> range:
         monkeypatch.setattr(measurement_archive, "append_row", append_row)
         _bank(6, via=reader)
         return append_row(path, *rows)
@@ -465,6 +488,24 @@ def test_the_archive_on_disk_keeps_every_paid_answer(
             created_at=f"2026-09-28T00:00:{at:02d}Z",
         )
 
+    campaigns = built_stores.campaigns
+    arm_root = CycleHop(campaign_id="arm", cycle_id="cycle_root")
+    campaigns.mint_cycle(arm_root)
+
+    def walk(hop: CycleHop, answers: list[str]) -> None:
+        ledger = CycleEventLog.open(CycleDir(campaigns.cycle_dir(hop)))
+        for i, answer in enumerate(answers):
+            ledger.append(
+                SampleScoredRecord(
+                    round=0,
+                    candidate_idx=0,
+                    candidate_total=1,
+                    individual_id="c0",
+                    role=MeasurementRole.PANEL,
+                    result={"sample_key": f"k{i}", "sample_id": i, "answer": answer},
+                )
+            )
+
     def listed() -> set[str]:
         return {e.prompt_fields_id for e in list_populations(built_stores, dataset_name="ds")}
 
@@ -479,11 +520,14 @@ def test_the_archive_on_disk_keeps_every_paid_answer(
     write_sample_fold(built_stores, dataset_name="ds", rows=[fold_row("x")])
 
     def inside_arm() -> tuple[set[str], list[str], list[SampleFoldRow]]:
-        scope_memory_to_own_answers(set(bank("origin", ["yes", "no"], 3)))
+        walk(arm_root, bank("origin", ["yes", "no"], 3))
+        fence_memory(CampaignWalks(campaigns, "arm", None))
         assert listed() == {"origin"}, "the arm saw a population its campaign never walked"
-        # A replayed answer joins the arm's memory exactly as a filed one does.
-        for answer in bank("shared", ["yes", "yes"], 0):
-            note_walked(answer)
+        # A cycle the campaign mints after the fence (a rebase, a fork) is its own too, and a
+        # replayed answer joins the arm's memory once its walk lands there.
+        later = CycleHop(campaign_id="arm", cycle_id="cycle_rebased")
+        campaigns.mint_cycle(later)
+        walk(later, bank("shared", ["yes", "yes"], 0))
         write_sample_fold(built_stores, dataset_name="ds", rows=[fold_row("y")])
         return listed(), remembered("shared"), sample_fold_rows(built_stores, dataset_name="ds")
 
@@ -492,8 +536,8 @@ def test_the_archive_on_disk_keeps_every_paid_answer(
     assert arm_shared == ["yes", "yes"], (
         "another campaign's answer of a shared cell steered the arm"
     )
-    assert arm_fold == [], "the arm read a fold its scope never admitted"
-    assert listed() == {"foreign", "shared", "origin"}, "the scope leaked out of the arm"
+    assert arm_fold == [], "the arm read a fold its fence never admitted"
+    assert listed() == {"foreign", "shared", "origin"}, "the fence leaked out of the arm"
     assert remembered("shared") == ["no", "no"]
     assert sample_fold_rows(built_stores, dataset_name="ds") == [fold_row("x")]
 
@@ -525,6 +569,22 @@ def _minted(stores: Stores, cycle_id: str) -> tuple[CycleHop, CycleEventLog]:
     hop = CycleHop(campaign_id=_CAMPAIGN, cycle_id=cycle_id)
     stores.campaigns.mint_cycle(hop)
     return hop, CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(hop)))
+
+
+def _mint_sibling(
+    store: Any, parent: CycleHop, cycle_id: str, spec: ForkSpec, *, from_round: int
+) -> CycleHop:
+    """The mint record alone, cut at the parent's head: what `mint_fork` writes for a sibling."""
+    child = parent.model_copy(update={"cycle_id": cycle_id})
+    parent_dir = store.cycle_dir(parent)
+    store.mint_fork_cycle(
+        child,
+        parent_dir,
+        spec,
+        cut=CycleEventLog.open(CycleDir(parent_dir)).next_offset,
+        from_round=from_round,
+    )
+    return child
 
 
 def _stand_round(
@@ -610,7 +670,7 @@ def test_a_closed_round_replays_its_decisions_and_a_rewind_retracts_them(
     )
     assert reading is not None and reading.context["gate"] == EliminationGate.EPSILON
     [cut] = racing.pending_decisions
-    assert cut.data["candidate_sample_ids"] == [str(i) for i in range(8) if i != 2]
+    assert cut.data["candidate_cells"] == [str(i) for i in range(8) if i != 2]
     assert replay_decisions(_round(round=3, all_candidate_results={"c1": walked}), [cut]) is None, (
         "the cut the live rule made is not the cut its own record replays"
     )
@@ -682,7 +742,7 @@ def test_a_closed_round_replays_its_decisions_and_a_rewind_retracts_them(
             )
         )
     )
-    [closed_on_disk] = closed_rounds(stores, charged, scorer)
+    [closed_on_disk] = closed_rounds(stores, charged, scorer, moment=None)
     [election] = electing.pending_decisions
     assert replay_decisions(closed_on_disk, [election]) is None, (
         "the replay read the parent's charged error as a cell nobody scored"
@@ -694,15 +754,15 @@ def test_a_closed_round_replays_its_decisions_and_a_rewind_retracts_them(
     ids = [_stand_round(ledger, closed, name) for name in ("c0", "c1", "c2")]
 
     def served() -> list[tuple[str, bool, bool]]:
-        tree = build_lineage_tree(stores, (hop,))
+        tree = build_lineage_tree(stores, (hop,), moment=None)
         return [(k.id, k.reading.election.held, k.reading.election.selected) for k in tree.children]
 
     def selected() -> list[str]:
-        index = stores.campaigns.load(hop)
+        index = stores.campaigns.load(hop, moment=None)
         assert index is not None
         readers = (
-            stores.campaigns.standing_rounds(hop).standing,
-            build_lineage_tree(stores, (hop,)).run_standing,
+            stores.campaigns.standing_rounds(hop, moment=None).standing,
+            build_lineage_tree(stores, (hop,), moment=None).run_standing,
             index.standing,
         )
         return [reader.selection.label for reader in readers]  # type: ignore[union-attr]
@@ -713,29 +773,74 @@ def test_a_closed_round_replays_its_decisions_and_a_rewind_retracts_them(
         "the ledger, the tree and the index disagree on the selection"
     )
     stores.campaigns.rewind_to_round(hop, 0)
-    stood = stores.campaigns.standing_rounds(hop)
+    stood = stores.campaigns.standing_rounds(hop, moment=None)
     assert list(stood.rounds) == list(stood.elections) == [0] and stood.crowns == {0: "C0"}, (
         "an election, close or crown stood past the rewind"
     )
     assert served() == [(ids[0], True, True)]
     again = _stand_round(ledger, closed[:1], "c1_again", crowned=False)
     assert served() == [(ids[0], True, True), (again, True, False)]
-    origin, held = build_lineage_tree(stores, (hop,)).children
+    origin, held = build_lineage_tree(stores, (hop,), moment=None).children
     assert (origin.stands, held.stands) == (True, False), "an uncrowned re-run took the stand"
 
+    # Re-reading round 1 from the cut before it sees the cycle as it stood when
+    # its generation landed: not the δ scale, round 0's restamp or an answer filed after it.
+    warmed, ledger = _minted(stores, "cycle_warmed")
+    _stand_round(ledger, [], "c0")
+    ledger.append(RoundEnteredRecord(round=1))
+    ledger.append(RoundProposedRecord(round=1, consumed="", proposals=[]))
+    warm = DeltaRuler(
+        delta={"0": 0.5, "1": -0.5},
+        delta_se={"0": 0.4, "1": 0.4},
+        mu_delta=0.0,
+        sigma_delta=0.5,
+        sigma_theta=1.0,
+        calibration_model="1PL",
+        anchor_id="warm",
+    )
+    # Round 1's calibrate locks the scale, and round 0 closes again on it.
+    scope = RulerScope(scorer="exact", dataset="testds")
+    stores.campaigns.write_ruler(warmed, warm, scope=scope, round_num=0)
+    ledger.append(RoundClosedRecord.of(_round(round=0, label="C0")))
+    ledger.append(RoundClosedRecord.of(_round(round=1, label="C1.1")))
+    entered_at = scan_standing_rounds([LedgerSpan(ledger.path)]).proposals[1].entered_at
+    assert entered_at is not None
+    moment = Moment(ledger.path, entered_at - 1)
+    then = stores.campaigns.standing_rounds(warmed, moment=moment).rounds[0]
+    now = stores.campaigns.standing_rounds(warmed, moment=None).rounds[0]
+    assert then.at_offset <= moment.offset < now.at_offset, "the decision read round 0's restamp"
+    assert stores.campaigns.read_ruler(warmed, scope=scope, moment=moment) is None
+    assert stores.campaigns.read_ruler(warmed, scope=scope, moment=None) == warm
+    for sid, at in ((1, "2000-01-01T00:00:00Z"), (2, "2999-01-01T00:00:00Z")):
+        _file(stores.archive, [_row(sid, f"q{sid}")], dataset_name="testds", created_at=at)
+
+    def remembered() -> list[int]:
+        fence_memory(FiledBy(moment))
+        return [
+            answer.cell.sample_id
+            for entry in list_populations(stores, dataset_name="testds")
+            for answer in load_population(stores, entry)
+        ]
+
+    assert contextvars.copy_context().run(remembered) == [1], "a later answer reached the decision"
+
     # A ledger read SKIPS a line that fails validation; a close naming an unregistered payload
-    # stops the read instead. `write_text` swaps in a fresh file: a ledger index takes a
+    # stops the read instead. `rewrite_lines` writes a fresh file: a ledger index takes a
     # same-inode growth for an append, and no writer here grows a file in place.
     peer, ledger = _minted(stores, "cycle_of_a_peer")
     _stand_round(ledger, [], "c0")
-    records = [json.loads(line) for line in ledger.path.read_text(encoding="utf-8").splitlines()]
-    close = max(i for i, rec in enumerate(records) if "optimizer_state" in rec)
-    records[close]["optimizer_state"]["manifest"] = "uninstalled"
-    write_text(ledger.path, "".join(json.dumps(rec) + "\n" for rec in records))
+
+    def _uninstall(lines: list[str]) -> tuple[list[str], None]:
+        records = [json.loads(line) for line in lines]
+        close = max(i for i, rec in enumerate(records) if "optimizer_state" in rec)
+        records[close]["optimizer_state"]["manifest"] = "uninstalled"
+        return [json.dumps(rec) + "\n" for rec in records], None
+
+    rewrite_lines(ledger.path, _uninstall)
     with pytest.raises(UnregisteredPayloadError):
         list(CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(peer))).iter())
     with pytest.raises(UnregisteredPayloadError):
-        stores.campaigns.standing_rounds(peer)
+        stores.campaigns.standing_rounds(peer, moment=None)
 
 
 def test_a_fork_inherits_its_parents_decisions_and_displaces_them_once(
@@ -769,14 +874,14 @@ def test_a_fork_inherits_its_parents_decisions_and_displaces_them_once(
         from_round=1,
         from_candidate_id="c1",
     )
-    store.mint_fork_cycle(parent, fork, spec, from_round=0)
+    _mint_sibling(store, parent, fork, spec, from_round=0)
     session = SimpleNamespace(
         store=stores,
         campaign_id=_CAMPAIGN,
         state=SimpleNamespace(cycle_id=fork),
         hop=CycleHop(campaign_id=_CAMPAIGN, cycle_id=fork),
         experiment_extract={},
-        dataset_config_dir=None,
+        dataset=None,
         pipeline_schema=PipelineSchema(),
         # The branch-point round banked no row here, so no cell is ever graded.
         scoring=SimpleNamespace(
@@ -809,8 +914,11 @@ def test_a_fork_inherits_its_parents_decisions_and_displaces_them_once(
         "an edited fork origin inherited a measurement it never earned"
     )
 
-    # An applied scenario forks at its round and carries its criterion.
+    # An applied scenario forks at its round, keeps the parent's holdout and carries its criterion.
     scenario, _ = _minted(stores, "cycle_applyscenario")
+    bank = [Sample(id=n, query=f"q{n}", ground_truth="g") for n in range(4)]
+    drawn = partition_bank(bank, DatasetSplit(bench=0)).record(dataset_hash="bank")
+    store.write_bank_partition(scenario, drawn)
     criterion = "0.9 * accuracy + 0.1 * (1 - mean_latency_s)"
     fork_id = mint_operator_fork(
         stores=stores,
@@ -821,9 +929,12 @@ def test_a_fork_inherits_its_parents_decisions_and_displaces_them_once(
         keep_rounds=True,
     )
     applied = scenario.model_copy(update={"cycle_id": fork_id})
-    index = store.load(applied)
+    index = store.load(applied, moment=None)
     assert index is not None and index.fork is not None
     assert index.fork.issued_by == str(stores.identity.user_id), "the fork names no issuer"
+    assert store.read_bank_partition(applied) == drawn, (
+        "a redrawn holdout reads the fork's bench lift on rows its parent never held out"
+    )
     # OPERATOR_REWIND is the rebase branch, the one that lifts rounds 0..N-1.
     assert (index.fork.trigger, index.fork.from_round) == (ForkTrigger.OPERATOR_REWIND, 2)
     seed = store.read_cycle_seed(applied)
@@ -836,7 +947,8 @@ def test_a_fork_inherits_its_parents_decisions_and_displaces_them_once(
     displaced, ledger = _minted(stores, "cycle_displaced")
     closed: list[RoundResult] = []
     prefix = [_stand_round(ledger, closed, f"p{n}") for n in range(3)]
-    fork_hop = store.mint_fork_cycle(
+    fork_hop = _mint_sibling(
+        store,
         displaced,
         "cycle_displaced_fork_r1",
         ForkSpec(trigger=ForkTrigger.OPERATOR_REWIND, reason="", issued_by="", from_round=3),
@@ -844,13 +956,13 @@ def test_a_fork_inherits_its_parents_decisions_and_displaces_them_once(
     )
 
     def candidates(hop: CycleHop) -> list[str]:
-        return [c.candidate_id for c in store.standing_rounds(hop).candidates()]
+        return [c.candidate_id for c in store.standing_rounds(hop, moment=None).candidates()]
 
     assert candidates(fork_hop) == prefix, "the fork does not continue its parent's rounds"
     own = CycleEventLog.open(CycleDir(store.cycle_dir(fork_hop)))
     forked = closed[:1]
     mine = [_stand_round(own, forked, "f1"), _stand_round(own, forked, "f2", crowned=False)]
-    stood = store.standing_rounds(fork_hop)
+    stood = store.standing_rounds(fork_hop, moment=None)
     assert candidates(fork_hop) == [prefix[0], *mine], "a parent round stood beside the fork's own"
     assert [r.close.candidate_scores[0].candidate_id for r in stood.rounds.values()] == [
         prefix[0],

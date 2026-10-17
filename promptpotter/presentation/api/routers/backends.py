@@ -16,7 +16,9 @@ backends_router = APIRouter(prefix="/backends", tags=["Backends"])
 
 
 class BackendResponse(StrictModel):
-    id: str = Field(description="The connector's name, as `pipeline.yaml::backend_type` names it")
+    id: str = Field(
+        description="The connector's name, as `dataset.yaml::pipeline.backend_type` names it"
+    )
     base_url: str = Field(
         description="Where the operator configured it; empty for an in-process one"
     )

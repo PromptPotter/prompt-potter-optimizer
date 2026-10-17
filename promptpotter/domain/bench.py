@@ -50,6 +50,7 @@ __all__ = [
     "bench_split",
     "bench_status",
     "partition_bank",
+    "restored_partition",
 ]
 
 
@@ -98,8 +99,21 @@ class BankPartition:
         return None if self.split is None else frozenset(s.id for s in self.search)
 
     @property
+    def admitted_keys(self) -> frozenset[str] | None:
+        """:attr:`admitted_ids` as the δ scale names them."""
+        return None if self.split is None else frozenset(s.key for s in self.search)
+
+    @property
+    def bank(self) -> tuple[Sample, ...]:
+        return (*self.search, *self.bench, *self.demo)
+
+    @property
     def bench_rows(self) -> CellSet:
         return bench_split(s.key for s in self.bench)
+
+    @property
+    def search_demo_id(self) -> str:
+        return stable_hash([[s.key for s in self.search], [s.key for s in self.demo]])
 
     def record(self, *, dataset_hash: str) -> PartitionRecord:
         return PartitionRecord(
@@ -109,6 +123,7 @@ class BankPartition:
             bench_ids=[s.id for s in self.bench],
             bench_rows=self.bench_rows,
             demo_ids=[s.id for s in self.demo],
+            search_demo_id=self.search_demo_id,
         )
 
 
@@ -124,6 +139,8 @@ class PartitionRecord(StrictModel):
     # Row ids are slots; this is the held-out content two campaigns are compared on.
     bench_rows: CellSet
     demo_ids: list[int]
+    # The other two pools' content. `None` only on a record drawn before 2026-10-16.
+    search_demo_id: str | None = None
 
     @property
     def bank_ids(self) -> frozenset[int]:
@@ -171,6 +188,25 @@ def partition_bank(bank: Sequence[Sample], split: DatasetSplit | None) -> BankPa
     )
 
 
+def restored_partition(bank: Sequence[Sample], drawn: PartitionRecord) -> BankPartition:
+    """The partition a run init drew, back on *bank* by row id — refused where a row's content
+    moved, since an L4 cell's rows ride its bank and never its config."""
+    by_id = {s.id: s for s in bank}
+    if missing := sorted(drawn.bank_ids - by_id.keys()):
+        raise ValueError(f"rows {missing[:5]} the cycle drew are not in this bank")
+    partition = BankPartition(
+        split=drawn.split,
+        search=tuple(by_id[i] for i in drawn.search_ids),
+        bench=tuple(by_id[i] for i in drawn.bench_ids),
+        demo=tuple(by_id[i] for i in drawn.demo_ids),
+    )
+    if partition.bench_rows.id != drawn.bench_rows.id:
+        raise ValueError("its held-out rows hold other content than the cycle drew")
+    if drawn.search_demo_id not in (None, partition.search_demo_id):
+        raise ValueError("its search or demo rows hold other content than the cycle drew")
+    return partition
+
+
 BenchSubject = Literal["origin", "selected"]
 
 # `manual`: only when asked (`bench`, `grade-bench`); `each_round`: at the end AND every round that selected.
@@ -208,6 +244,15 @@ class BenchPass(StrictModel):
     scorer_id: str
     # Individuals already graded on these rows when it was sent: a high count reads the headline optimistic.
     reads_before: int
+    # By `Sample.key`, each row measuring another dataset than the one the cycle is filed under.
+    measured_datasets: dict[str, str] = Field(default_factory=dict)
+
+    def by_dataset(self) -> dict[str | None, list[str]]:
+        """``None`` is the dataset the cycle is filed under."""
+        out: dict[str | None, list[str]] = {}
+        for key in self.sample_keys:
+            out.setdefault(self.measured_datasets.get(key), []).append(key)
+        return out
 
 
 class BenchPasses(StrictModel):
@@ -220,20 +265,14 @@ class BenchPasses(StrictModel):
     # Set aside so the selection's pass fits under the search's ceiling (``runner/bench.py::reserve_selection_pass``).
     reserve_usd: float
     reserve_tokens: int
-    # By the round that selected; a pass a rewind displaced stays until that round is graded again.
-    selections: dict[int, BenchPass]
+    # The latest pass of each individual the line selected, by its id: a pass measures an
+    # individual, so a rewind displaces none.
+    selections: dict[str, BenchPass]
 
     def pass_of(self, individual_id: str) -> BenchPass | None:
         if individual_id == self.origin.candidate_id:
             return self.origin
-        return next(
-            (
-                self.selections[n]
-                for n in sorted(self.selections, reverse=True)
-                if self.selections[n].candidate_id == individual_id
-            ),
-            None,
-        )
+        return self.selections.get(individual_id)
 
 
 BenchColumn = Literal["accuracy", "composite"]
@@ -541,6 +580,24 @@ class LiftCost(StrictModel):
         return cls(lift_per_usd=vs_origin.headline.estimate.value / usd, absent=None)
 
 
+class BenchScope(StrictModel):
+    """One dataset's rows of a bench spanning several, read apart: a level is never averaged
+    across datasets."""
+
+    model_config = ConfigDict(frozen=True)
+
+    dataset: str | None = Field(
+        description="The dataset these rows measure; `None` is the one the cycle is filed under."
+    )
+    rows: int
+    origin: OwnLevel | None = Field(description="`None` where the origin's pass read nothing.")
+    selected: OwnLevel | None = Field(description="`None` where the selection's read nothing.")
+    vs_origin: PairedReading | None = Field(
+        description="`selected` over `origin` on this dataset's rows alone; `None` where either "
+        "read nothing."
+    )
+
+
 class GradedBench(NamedTuple):
     origin: BenchReading
     selected: BenchReading
@@ -598,6 +655,12 @@ class BenchScore(StrictModel):
         "`same_individual` where the origin is the selection: nothing was compared."
     )
     cost: LiftCost
+    scopes: list[BenchScope] = Field(
+        default_factory=list,
+        description="Per dataset, where the bench rows measure several; empty on one. The two "
+        "levels above then read no column, since two datasets' levels never average, while "
+        "`vs_origin` still pairs every row.",
+    )
     line: str = Field(
         description="The headline on one line — both levels, the lift in each column and the "
         "held-out row count, or `status.sentence` where the bench is not graded. The ONE wording "
@@ -617,6 +680,7 @@ class BenchScore(StrictModel):
         selected: BenchReading | None,
         vs_origin: PairedReading,
         cost: LiftCost,
+        scopes: list[BenchScope],
     ) -> Self:
         return cls(
             bench_size=bench_size,
@@ -627,6 +691,7 @@ class BenchScore(StrictModel):
             selected=selected,
             vs_origin=vs_origin,
             cost=cost,
+            scopes=scopes,
             line=_bench_line(bench_size, headline, status, origin, selected, vs_origin),
         )
 

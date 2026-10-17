@@ -237,7 +237,13 @@ async def measure_population(
         for cs in scores
     ]
     scores = [
-        cs.model_copy(update={"theta_caveat": arm_theta_caveat(rows[cs.candidate_id].cells, ruler)})
+        cs.model_copy(
+            update={
+                "theta_caveat": arm_theta_caveat(
+                    rows[cs.candidate_id].cells, ruler, cycle.difficulty.scopes
+                )
+            }
+        )
         if cs.candidate_id in rows
         else cs
         for cs in scores

@@ -359,7 +359,6 @@ class OptimizationConfig(StrictModel):
 
 
 class CampaignConfig(StrictModel):
-    dataset_name: Annotated[str, Knob(Scope.DATA, Estimand.SEARCH)] = Field("")
     sp_budget_origin: Annotated[int, Knob(Scope.POLICY, Estimand.SELECTION)] = Field(
         DEFAULT_ORIGIN_BUDGET,
         ge=1,
@@ -379,8 +378,8 @@ class CampaignConfig(StrictModel):
     task_framing: Annotated[Literal["committed", "off"], Knob(Scope.DATA, Estimand.SEARCH)] = Field(
         "committed",
         description="Which task framing every target render splices in. `committed` "
-        "(default) runs under the dataset's `task_context.yaml`, which the first mint "
-        "decomposes from `task_description.md` when none is committed yet. `off` runs "
+        "(default) runs under the front matter of the dataset's `task.md`, which the first mint "
+        "decomposes from its body when none is committed yet. `off` runs "
         "UNFRAMED on purpose — the ablation arm — even where framing exists, and the campaign "
         "manifest keeps the delta, so the result never reads as a framed one.",
     )
@@ -397,7 +396,7 @@ class CampaignConfig(StrictModel):
         "`param_allowed_values` REPLACES** (`PipelineSchema.narrow`, applied at pipeline "
         "setup): a campaign may only close axes the dataset opened, but the value space is "
         "its own statement — which is what lets an operator ADD a model or a reasoning rung "
-        "no `pipeline.yaml` on disk carries. `param_allowed_values['model']` is also the ONE "
+        "no `dataset.yaml::pipeline` on disk carries. `param_allowed_values['model']` is also the ONE "
         "permitted model set: what the optimizer may pick, and what a human fork may steer to "
         "without tainting the branch. A steer outside it is a `campaign.babysit` act — warned "
         "+ graded C (`overlay_sets_model_outside_allowed`). Nothing declared for a node = "
@@ -453,7 +452,7 @@ class CampaignConfig(StrictModel):
         "`CEILING_FRACTION` of it, and the value is banked beside that count so a reader never "
         "has to guess the denominator. `None` (default) → the clock reports nothing, which is the "
         "honest reading: a ceiling is a joint claim about the dataset AND the model, so only the "
-        "dataset owner can declare one (`datasets/{slug}/campaign.yaml::campaign_config`) and a "
+        "dataset owner can declare one (`dataset.yaml::campaign`) and a "
         "guessed value makes every campaign on it publish a round count nobody can defend. "
         "DISPLAY config — it moves no gate, no selection and no stop.",
     )
@@ -483,6 +482,12 @@ class CampaignConfig(StrictModel):
         run, so no later edit to its dataset's files reaches a resume, a fork or a served read of
         it — less, for an *arm*, what its head-to-head's record owns (:func:`under_record`)."""
         return self.model_dump(mode="json", exclude=_RECORD_OWNED if arm else None)
+
+    def identity(self) -> dict[str, Any]:
+        """What this config adds to a cell's identity beside its optimizer's ``Treatment``, which
+        resolves ``optimizer`` and ``nodes`` against the manifest: less those, and less every
+        default, so which file states a value — or whether one restates a default — moves no cell."""
+        return self.model_dump(mode="json", exclude_defaults=True, exclude=_TREATMENT_OWNED)
 
 
 def merge_config_layers(base: dict[str, Any], over: Mapping[str, Any]) -> dict[str, Any]:
@@ -528,6 +533,7 @@ _RECORD_OWNED: dict[str, Any] = {
         "convergence_patience": True,
     },
 }
+_TREATMENT_OWNED: dict[str, Any] = {"optimization": {"optimizer": True, "nodes": True}}
 
 
 def under_record(config: CampaignConfig, record: HeadToHeadRecord) -> CampaignConfig:

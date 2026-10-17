@@ -108,7 +108,7 @@ def readable_lifts(
         if cand_results is None or distinct_valid_cells(cand_results) < coverage_floor:
             continue
         # About the WALK, not a statistic: an errored row still shares the cell, where the θ fit drops it.
-        if not cand_results.on_ruler.keys() & parent_results.on_ruler.keys():
+        if not cand_results.by_key().keys() & parent_results.by_key().keys():
             continue
         read = lift_over_bar(abilities, cid, parent_bias)
         if read is not None:
@@ -166,19 +166,18 @@ def elect_round_winner(
 def elimination_p_best(
     candidate_grades: Sequence[float],
     paired_prior_grades: Mapping[str, Sequence[float]],
-    candidate_sample_ids: Sequence[int],
+    candidate_cells: Sequence[str],
     ruler: DeltaRuler | None,
 ) -> tuple[float, dict[str, float]]:
     """A stopping rule, not a verdict: ``P(θ_cand > θ_prior)`` CAPPED by what the discordant pairs support."""
     if not paired_prior_grades:
         return 1.0, {}
 
-    sids = [int(s) for s in candidate_sample_ids]
     # The one sanctioned provisional δ: cells the ruler has not absorbed stand at its centre for BOTH arms.
-    entries = ruler.entries_covering(sids) if ruler is not None else None
+    entries = ruler.entries_covering(candidate_cells) if ruler is not None else None
 
     def read(grades: Sequence[float]) -> tuple[float, float]:
-        on_cells = {sid: float(g) for sid, g in zip(sids, grades, strict=True)}
+        on_cells = {key: float(g) for key, g in zip(candidate_cells, grades, strict=True)}
         fitted = fit_theta(on_cells, entries)
         if fitted is None:
             raise ValueError("elimination_p_best: a reading needs at least one graded cell")
@@ -194,14 +193,14 @@ def elimination_p_best(
     return min(per_prior.values()), per_prior
 
 
-def priors_covering[P: Mapping[int, float]](
-    priors: Mapping[str, P], cells: Collection[int]
+def priors_covering[P: Mapping[str, float]](
+    priors: Mapping[str, P], cells: Collection[str]
 ) -> dict[str, P]:
     return {pid: grades for pid, grades in priors.items() if all(c in grades for c in cells)}
 
 
 class PairedPosterior(NamedTuple):
-    cells: list[int]
+    cells: list[str]
     grades: list[float]
     priors: dict[str, list[float]]
     p_best: float
@@ -210,12 +209,12 @@ class PairedPosterior(NamedTuple):
 
 def paired_p_best(
     rows: Sequence[GradedCell],
-    priors: Mapping[str, Mapping[int, float]],
+    priors: Mapping[str, Mapping[str, float]],
     ruler: DeltaRuler | None,
 ) -> PairedPosterior | None:
     """Over rows carrying a verdict only: a backend error is no evidence of inability."""
     graded = [cell for cell in rows if cell.scored]
-    cells = [cell.ruler_key for cell in graded]
+    cells = [cell.key for cell in graded]
     paired = {
         pid: [grades[c] for c in cells] for pid, grades in priors_covering(priors, cells).items()
     }
@@ -234,15 +233,15 @@ def _capped(p: float, bound: float) -> float:
 
 
 def elimination_p_best_bounds(
-    cells: Sequence[int],
-    candidate: Mapping[int, float],
-    priors: Mapping[str, Mapping[int, float]],
+    cells: Sequence[str],
+    candidate: Mapping[str, float],
+    priors: Mapping[str, Mapping[str, float]],
     ruler: DeltaRuler | None,
     *,
     settled: Collection[str],
 ) -> tuple[float, float]:
     """``high`` is over ``settled`` priors alone: any other may drop out, which can only RAISE the minimum."""
-    sids = [int(s) for s in cells]
+    sids = list(cells)
     entries = ruler.entries_covering(sids) if ruler is not None else None
     known = {s: candidate[s] for s in sids if s in candidate}
     c_low, c_high, c_floor = theta_bounds_given_delta(

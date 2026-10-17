@@ -39,7 +39,7 @@ This file is the **index for AI/agent readers** over `docs/`. The operator-facin
 
 ## L4 — the recursion case
 
-L4 has exactly **two owners, split doc-says-what-is-TRUE ([`specs/l4-outer-loop.md`](specs/l4-outer-loop.md)) / skill-says-what-to-DO (`.claude/skills/potter-self/`)**. Most files under `docs/` name L4 somewhere and that is correct — each says what the recursion does to ITS OWN subject. What no other file may hold is **L4's STATUS or its open list**, which is the half that re-goes-stale every slice. Read the spec before trusting any outer number. The dataset side is [`../datasets/CLAUDE.md`](../datasets/CLAUDE.md) § L4.
+L4 has exactly **two owners, split doc-says-what-is-TRUE ([`specs/l4-outer-loop.md`](specs/l4-outer-loop.md)) / skill-says-what-to-DO (`.claude/skills/potter-self/`)**. Most files under `docs/` name L4 somewhere and that is correct — each says what the recursion does to ITS OWN subject. What no other file may hold is **L4's STATUS or its open list**, which is the half that re-goes-stale every slice. Read the spec before trusting any outer number. The dataset side is [`../promptpotter/assets/datasets/CLAUDE.md`](../promptpotter/assets/datasets/CLAUDE.md) § L4.
 
 ## What may live in `specs/`
 

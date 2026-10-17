@@ -8,7 +8,7 @@ from promptpotter.application.optimizers.potter.l1.critique import ensure_prior_
 from promptpotter.application.optimizers.potter.l1.generate import L1Generation, l1_generate
 from promptpotter.application.optimizers.potter.l1.population import parse_population
 from promptpotter.application.optimizers.potter.validators.l1_invariants import detect_invariants
-from promptpotter.application.runner.inner.spawn_context import inner_optimizer
+from promptpotter.application.runner.inner.spawn_context import inner_cells
 from promptpotter.application.runner.round import proposal_summaries
 from promptpotter.domain.run_records import LLMCallRecord
 
@@ -40,7 +40,7 @@ async def propose_l1_population(ctx: NodeContext[L1GenerateKnobs], state: Potter
         runtime_failures=state.memory.wounds.runtime_failures,
         demo_ids=frozenset(s.id for s in ctx.demo_pool),
         shot_k_max=knobs.k_max,
-        inner_optimizer=inner_optimizer(),
+        inner_cells=inner_cells(),
         prompt_block_catalogue=knobs.prompt_block_catalogue,
     )
     state.in_flight = state.snapshot(ctx.sample_index, generation)
@@ -88,12 +88,7 @@ async def _generate_or_load(ctx: NodeContext[L1GenerateKnobs], state: PotterStat
     logger.debug("No persisted candidates for round %d — generating fresh", round_num)
 
     generation = await l1_generate(ctx, state, n_variants=_n_variants, temperature=_temperature)
-    candidates = generation.proposals
-    detect_invariants(candidates, ctx.parent, parent_pipeline_params, ctx.rounds)
-
-    # A banked EMPTY population replays as zero candidates on every resume: a permanent parse failure.
-    if candidates:
-        ctx.bank_proposals(candidates, submitted=False)
+    detect_invariants(generation.proposals, ctx.parent, parent_pipeline_params, ctx.rounds)
     return generation
 
 

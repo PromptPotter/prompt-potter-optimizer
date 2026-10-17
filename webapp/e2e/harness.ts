@@ -157,7 +157,7 @@ export async function richestCampaign(request: APIRequestContext): Promise<Campa
   return best;
 }
 
-export const E2E_DATASETS = ["email-tagging", "promptpotter-self-e2e"];
+export const E2E_DATASETS = ["email-tagging", "promptpotter-self/e2e"];
 
 /** Not "the world is empty": the spend specs share one workspace, so the second finds the first's campaign. */
 export async function assertThrowawayWorld(request: APIRequestContext) {

@@ -17,20 +17,13 @@ class RunSource(enum.StrEnum):
     AB = "ab"
     NOISE_FLOOR = "noise_floor"
     SEED_SCREEN = "seed_screen"
-    DECISION_BANK = "decision_bank"
 
     @property
     def deliberate(self) -> bool:
         match self:
             case RunSource.ORIGIN | RunSource.OPTIMIZATION_LOOP:
                 return True
-            case (
-                RunSource.VERIFY
-                | RunSource.AB
-                | RunSource.NOISE_FLOOR
-                | RunSource.SEED_SCREEN
-                | RunSource.DECISION_BANK
-            ):
+            case RunSource.VERIFY | RunSource.AB | RunSource.NOISE_FLOOR | RunSource.SEED_SCREEN:
                 return False
 
 

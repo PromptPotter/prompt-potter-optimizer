@@ -42,6 +42,8 @@ from promptpotter.domain.run_records import (
     OptimizerStateRecord,
     PhaseRecord,
     PricedKeyRecord,
+    ProviderEasedRecord,
+    ProviderHoldRecord,
     RaceCatchUpRecord,
     RaceStandingRecord,
     ResumeCheckpointRecord,
@@ -332,6 +334,8 @@ class ActivityFeed:
         self._gate: GateKind | None = None
         self._offered: list[DecisionFact] = []
         self._origin_health: DegradationHealth | None = None
+        # Each held sender's notice id.
+        self._held: dict[str, str] = {}
 
     def state(self, address: CyclePath) -> ActivityState:
         """*address* is passed in: a decision's commands need it, and a ledger does not name its own path."""
@@ -369,6 +373,9 @@ class ActivityFeed:
                 ]
                 if record.run_phase == RunPhase.RUNNING:
                     self._notices = [n for n in self._notices if LIFETIME[n.kind] != "run"]
+                # A declaration starts or stops the sends a hold notice describes.
+                self._notices = [n for n in self._notices if n.id not in self._held.values()]
+                self._held.clear()
             case RoundClosedRecord(round=0):
                 # The last close stands: a re-score at the gate closes round 0 again.
                 self._origin_health = record.health
@@ -444,6 +451,10 @@ class ActivityFeed:
                     tone="bad",
                     round=record.round,
                 )
+            case ProviderHoldRecord():
+                return self._hold(item_id, record)
+            case ProviderEasedRecord():
+                return self._eased(item_id, record)
             case CommandRecord():
                 return ActivityItem(id=item_id, kind="merge", icon="⚡", label=record.kind)
             case CommandAckRecord():
@@ -458,13 +469,16 @@ class ActivityFeed:
                     tone="warn",
                 )
             case LLMCallProgressRecord():
-                if not record.detail:
+                waiting = record.detail or (
+                    None if record.inner is None else f"inner campaign {record.inner.campaign_id}"
+                )
+                if not waiting:
                     return None
                 return ActivityItem(
                     id=item_id,
                     kind="progress",
                     icon="·",
-                    label=record.detail,
+                    label=waiting,
                     detail=duration_words(record.elapsed_s),
                     round=record.round,
                 )
@@ -514,6 +528,38 @@ class ActivityFeed:
             label=_node_label(record.node, record.round),
             detail=" · ".join(bits) or None,
             round=record.round,
+        )
+
+    def _eased(self, item_id: str, record: ProviderEasedRecord) -> ActivityItem | None:
+        notice = self._held.pop(record.sender, None)
+        if notice is None:
+            return None
+        self._notices = [n for n in self._notices if n.id != notice]
+        return ActivityItem(
+            id=item_id,
+            kind="done",
+            icon="✓",
+            label=f"{record.sender} answers again",
+            detail=f"after {duration_words(record.held_s)}",
+            tone="good",
+        )
+
+    def _hold(self, item_id: str, record: ProviderHoldRecord) -> ActivityItem | None:
+        if record.sender in self._held:
+            return None
+        self._held[record.sender] = item_id
+        held = record.reading
+        bits = [record.scope, held.detail] if held.detail else [record.scope]
+        if held.since is not None:
+            window = duration_words(record.gives_up_at - held.since)
+            bits.append(f"the run stops if throttled past {window}")
+        return ActivityItem(
+            id=item_id,
+            kind="warning",
+            icon="⚠",
+            label=f"rate-limited · {record.sender}",
+            detail=" · ".join(bits),
+            tone="warn",
         )
 
     def _candidate_scored(self, item_id: str, record: CandidateScoredRecord) -> ActivityItem:

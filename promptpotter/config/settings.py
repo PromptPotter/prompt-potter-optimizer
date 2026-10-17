@@ -24,7 +24,8 @@ APP_VERSION: str = _app_version()
 # Bumping it re-prompts every user for consent; keep in sync with the site's /terms + /privacy.
 TERMS_VERSION: str = "2026-10-11"
 
-LOCK_TIMEOUT: float = 5.0  # seconds before treating lock as stale
+# Seconds a writer waits on a held file lock before raising; an OS lock dies with its holder.
+LOCK_TIMEOUT: float = 5.0
 
 
 class Settings(BaseSettings):
@@ -78,6 +79,9 @@ class Settings(BaseSettings):
     def dataset_offer(self) -> frozenset[str] | None:
         names = frozenset(n.strip() for n in self.DATASET_OFFER.split(",") if n.strip())
         return names or None
+
+    # `own`: an account sees another's slots only as a count — a box anyone can sign up to. The host sees all.
+    MACHINE_STATUS_SCOPE: Literal["own", "all"] = "own"
 
     # Unset: no browser sign-in can claim the box, and it has no admin identity.
     HOST_ADMIN_EMAIL: str = ""

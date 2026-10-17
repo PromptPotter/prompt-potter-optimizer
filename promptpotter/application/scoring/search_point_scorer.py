@@ -20,8 +20,8 @@ from promptpotter.domain.scoring import CellSheet, GradedCell, MeasuredCell, Wal
 from promptpotter.domain.spend import ROLE_SPEND_KIND
 from promptpotter.domain.validators import BrokenSignal, StopRule, StopSignal
 from promptpotter.infrastructure.llm.heartbeat import heartbeat
+from promptpotter.infrastructure.llm.spend_book import bound_spend_book
 from promptpotter.infrastructure.llm.telemetry import current_round, filed_as
-from promptpotter.infrastructure.store import archive_queries
 from promptpotter.infrastructure.store.measurement_archive import ReplayFeed
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import DatasetIdentityError
@@ -166,8 +166,8 @@ async def _claim_cell(
             claim = feed.claim(sample.key)
             if claim is not None:
                 try:
-                    replayable = _replayable_on(dataset, feed.advance(), session.dataset_name)
-                    cached.update({sid: f for sid, f in replayable.items() if not is_deprecated(f)})
+                    held = _replayable_on(dataset, feed.advance(), session.dataset_name)
+                    cached.update({sid: f for sid, f in held.items() if not is_deprecated(f)})
                 except BaseException:
                     claim.release()
                     raise
@@ -232,8 +232,6 @@ class _ArchiveRecorder:
         # A replay with no address is a row a concurrent walk measured and may never take.
         if not cell.facts.cached or cell.facts.answer is None:
             cell = self._file([cell])[0]
-        if (answer := cell.facts.answer) is not None:
-            archive_queries.note_walked(answer)
         return cell
 
     def bank(self, cells: Sequence[GradedCell]) -> None:
@@ -321,8 +319,10 @@ def open_walk(
         dataset, session, feed=feed, label=label
     )
     cell_keys = {} if feed is None else {s.id: feed.cell_key(s.key) for s in dataset}
-    counted = session.state.priced_keys
-    rereads = frozenset(s for s in cached_sample_results if cell_keys.get(s) in counted)
+    book = bound_spend_book()
+    rereads = frozenset(
+        s for s in cached_sample_results if book is None or book.replays_free(cell_keys[s])
+    )
 
     ctx = QueryLoopState(
         search_point=search_point,
@@ -345,7 +345,6 @@ def open_walk(
             cached=cached_sample_results,
         ),
         cell_keys=cell_keys,
-        counted=counted,
         rereads=rereads,
     )
     return Walk(

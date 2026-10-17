@@ -113,7 +113,10 @@ def _rebank_on_branch(
     retirements: list[tuple[int, int]],
 ) -> list[RoundResult]:
     branch = CycleHop(campaign_id=parent.campaign_id, cycle_id=branch_cycle_id)
-    minted_at = {(c.round, c.idx): c for c in campaign_store.standing_rounds(parent).candidates()}
+    minted_at = {
+        (c.round, c.idx): c
+        for c in campaign_store.standing_rounds(parent, moment=None).candidates()
+    }
     ledger = CycleEventLog.open(CycleDir(campaign_store.cycle_dir(branch)))
     cb = RunCallbacks(ledger=ledger)
     # `lineage` reaches a reader ONLY through the mint record.

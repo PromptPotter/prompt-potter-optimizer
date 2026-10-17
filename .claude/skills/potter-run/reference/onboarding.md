@@ -48,8 +48,8 @@ Seam: `application/datasets/` (`ingest.py`, `origin_resolve.py`, `origin_readine
 When the operator says their data is ready ("just set it up", names a file) **and it loads
 cleanly**, author the origin yourself instead of spending the check-in LLM call.
 
-1. **Test the load first.** Registered name → confirm it's in `DATASET_LOADERS`
-   (`application/datasets/loaders.py`). Raw file → `POST /datasets/ingest`, or open a
+1. **Test the load first.** Registered name → confirm its `dataset.yaml::source` names a recipe in
+   `application/datasets/loaders.py::BANK_RECIPES`. Raw file → `POST /datasets/ingest`, or open a
    registered dataset as a draft via `POST /datasets/{name}/draft`. A clean parse + sample
    preview is green. **If the load fails, do NOT simulate** — fall back to the real flow.
 2. **Author the origin.** Read the sample rows + answer space and write what `checkin` would:
@@ -78,14 +78,14 @@ OpenAI/Anthropic/OpenRouter only if named. `.env.example` is the full template.
 - **Tenant/client dataset (common):** don't write a loader — ingest it (above). The parser
   (`application/datasets/tabular_ingest.py`) reads the format from the bytes: any-separator text in
   any common encoding, JSON/JSONL, XLSX/XLS/ODS.
-- **New bundled benchmark (rare):** register a loader returning `list[Sample]`
-  (`domain/sample.py`) in `DATASET_LOADERS`, and draft
-  `datasets/<name>/{campaign.yaml, pipeline.yaml, task_description.md, dataset.md, prompts/<node>.yaml}` against
-  `datasets/bbeh/`. Follow `docs/operations/dataset-selection-rationale.md` § Adding a
+- **New fetched benchmark (rare):** register a recipe returning `list[Sample]`
+  (`domain/sample.py`) in `BANK_RECIPES`, and draft the tenant definition
+  `.promptpotter/projects/{tenant}/datasets/<name>/{dataset.yaml, task.md, origin.yaml, README.md}` —
+  a WHOLE document, started from the merged `justlogic/d234`. The package ships templates only. Follow `docs/operations/dataset-selection-rationale.md` § Adding a
   dataset — canonical split first.
 
 ## First-run smoke
 
-If `datasets/{name}/` has never produced a measurement (`measurements/cells/{config_key}.jsonl`),
+If `{name}` has never produced a measurement (`measurements/cells/{config_key}.jsonl`),
 run `python scripts/smoke_campaign.py --dataset {name}` (~90 s; it mints a campaign, so it falls
 under the autonomy mode).

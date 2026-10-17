@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from contextvars import Token
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -18,7 +17,6 @@ from promptpotter.domain.run_records import (
     FlightWaiting,
     LedgerFit,
     PhaseRecord,
-    RaceCatchUpRecord,
     RaceStandingRecord,
     RoundClosedRecord,
     RoundEnteredRecord,
@@ -26,7 +24,7 @@ from promptpotter.domain.run_records import (
     SampleOrderRecord,
 )
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.llm.telemetry import set_current_round
+from promptpotter.infrastructure.llm.telemetry import bound_round
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
@@ -61,8 +59,6 @@ class RunCallbacks:
     ledger: CycleEventLog
     # What one phase view needs of an earlier one (`views/ingress.py`); a fork keeps its parent's.
     view_context: ViewContext = field(default_factory=ViewContext)
-    _current_round: int = 0
-    _round_token: Token[int | None] | None = field(default=None, init=False, repr=False)
 
     def _emit(self, record: CycleRecord) -> int | None:
         """``None`` where the append failed — ``next_offset`` then still names the previous record."""
@@ -127,7 +123,7 @@ class RunCallbacks:
     ) -> None:
         self._emit(
             CandidateStartedRecord(
-                round=self._current_round,
+                round=bound_round(),
                 candidate_idx=idx,
                 candidate_total=total,
                 changes_description=changes_description,
@@ -170,7 +166,7 @@ class RunCallbacks:
     def on_candidate_scored(self, idx: int, total: int, scores: ScoredCandidate) -> None:
         self._emit(
             CandidateScoredRecord(
-                round=self._current_round,
+                round=bound_round(),
                 candidate_idx=idx,
                 candidate_total=total,
                 scores=scores,
@@ -181,7 +177,7 @@ class RunCallbacks:
     def on_flight(self, flight: Flight) -> None:
         self._emit(
             FlightRecord(
-                round=self._current_round,
+                round=bound_round(),
                 out=int(flight.out),
                 allowed=int(flight.allowed),
                 most=int(flight.most),
@@ -192,7 +188,6 @@ class RunCallbacks:
                 else FlightWaiting(
                     sample_id=int(flight.waiting[0]), since=float(flight.waiting[1])
                 ),
-                backpressure=flight.backpressure,
             )
         )
 
@@ -232,33 +227,3 @@ class RunCallbacks:
                 sample_order=[int(sid) for sid in sample_order],
             )
         )
-
-    def on_race_catch_up(
-        self,
-        member: str,
-        round_num: int,
-        ci: int,
-        ct: int,
-        sample_id: int,
-        prior_ids: list[str],
-    ) -> None:
-        """No record where the cache already covered the priors."""
-        if not prior_ids:
-            return
-        self._emit(
-            RaceCatchUpRecord(
-                round=round_num,
-                candidate_idx=ci,
-                candidate_total=ct,
-                member=member,
-                sample_id=int(sample_id),
-                prior_ids=[str(p) for p in prior_ids],
-            )
-        )
-
-    def set_round(self, round_num: int) -> None:
-        """Only the first ``set`` carries a meaningful restore token; ``drain_all`` resets that one."""
-        self._current_round = round_num
-        token = set_current_round(round_num)
-        if self._round_token is None:
-            self._round_token = token

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Iterator
+from collections.abc import Awaitable, Iterator, Sequence
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
@@ -12,10 +12,7 @@ from promptpotter.application.bench.resume_and_fork.resume import (
 from promptpotter.application.datasets.authored import scorer_of
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
-from promptpotter.application.pipeline_resolve import (
-    configure_and_apply_pipeline,
-    resolved_dataset_name,
-)
+from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
 from promptpotter.application.preflight import (
     refuse_arm_below_round,
     refuse_below_reasoning_floor,
@@ -27,7 +24,7 @@ from promptpotter.application.scoring.classification import build_degradation_ch
 from promptpotter.application.scoring.formula import cell_channels_of
 from promptpotter.application.scoring.sample_measurement import cell_bound
 from promptpotter.application.views.ingress import init_enter, init_exit
-from promptpotter.domain.bench import partition_bank
+from promptpotter.domain.bench import BankPartition, partition_bank, restored_partition
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.l4.inner_origin import inner_origin_of
 from promptpotter.domain.measurement_provenance import RunSource
@@ -46,17 +43,23 @@ from promptpotter.infrastructure.llm.telemetry import (
     reset_cycle_ledger,
     set_cycle_ledger,
 )
+from promptpotter.infrastructure.store.archive_queries import (
+    CampaignWalks,
+    FiledBy,
+    fence_memory,
+)
 from promptpotter.judges.registry import build_evaluators
-from promptpotter.shared.errors import DiagnosticError
-from promptpotter.shared.hashing import dataset_hash
+from promptpotter.shared.errors import ConflictError, DiagnosticError
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.origin import CampaignOrigin
     from promptpotter.application.run_callbacks import RunCallbacks
     from promptpotter.application.scoring.search_point_scorer import ScoredWalk
+    from promptpotter.domain.bench import DatasetSplit, PartitionRecord
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint
+    from promptpotter.infrastructure.store.read_model import Moment
     from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
@@ -83,9 +86,6 @@ def init_cycle(
         store.write_resolved_pipeline(hop, session.pipeline_declaration)
     # Write-once, unlike the line above: a roster a connector only NAMES can move under its name.
     store.write_resolved_experiment(hop, session.backend_client.workload.experiment)
-    store.write_bank_partition(
-        hop, session.scoring.require_partition().record(dataset_hash=dataset_hash(session.samples))
-    )
     store.write_optimized_surface(
         hop,
         session.pipeline_schema.value_tree(
@@ -94,11 +94,11 @@ def init_cycle(
     )
     if resume_from_round_override is not None:
         store.rewind_to_round(hop, resume_from_round_override)
-    existing = store.load(hop)
+    existing = store.load(hop, moment=None)
     if existing is not None:
         session.human_intervened = existing.human_intervened
         # The round NUMBER after the highest one closed, never a count: the origin is round 0.
-        return resolved, max(store.standing_rounds(hop).rounds, default=0) + 1
+        return resolved, max(store.standing_rounds(hop, moment=None).rounds, default=0) + 1
     return resolved, 1
 
 
@@ -117,6 +117,15 @@ def populate_session_scoring(
     )
 
 
+def scope_memory(session: Session, *, moment: Moment | None) -> None:
+    """Inside the run's own task: an arm remembers only its campaign's walks (an instrument's cell is
+    fenced at its spawn); any other task re-read at a *moment* remembers nothing filed after it."""
+    if session.controlled:
+        fence_memory(CampaignWalks(session.store.campaigns, session.campaign_id, moment))
+    elif moment is not None:
+        fence_memory(FiledBy(moment))
+
+
 def arm_diagnostic_scoring(
     session: Session,
     campaign_config: CampaignConfig,
@@ -127,7 +136,25 @@ def arm_diagnostic_scoring(
         bind_spend_book(unbounded_spend_book())
     configure_and_apply_pipeline(session, campaign_config)
     populate_session_scoring(session, campaign_config, source=source)
-    session.scoring.partition = partition_bank(session.samples, campaign_config.dataset_split)
+    session.scoring.partition = cycle_partition(
+        session, session.samples, campaign_config.dataset_split
+    )
+
+
+def cycle_partition(
+    session: Session, bank: Sequence[Sample], split: DatasetSplit | None
+) -> BankPartition:
+    """What the cycle's mint drew, restored for every read of it; drawn only where no cycle holds one."""
+    cycle_id = session.state.cycle_id
+    recorded = session.store.campaigns.read_bank_partition(session.hop) if cycle_id else None
+    return partition_bank(bank, split) if recorded is None else _restored(cycle_id, recorded, bank)
+
+
+def _restored(cycle_id: str, recorded: PartitionRecord, bank: Sequence[Sample]) -> BankPartition:
+    try:
+        return restored_partition(bank, recorded)
+    except ValueError as exc:
+        raise ConflictError(f"cycle {cycle_id}: {exc}.") from exc
 
 
 async def diagnostic_pass(scoring: Awaitable[ScoredWalk]) -> ScoredWalk:
@@ -206,15 +233,15 @@ def _campaigns_on_origin(session: Session) -> list[str]:
     )
 
 
-def _banked_instruments(session: Session, config: CampaignConfig) -> list[str]:
+def _banked_instruments(session: Session) -> list[str]:
     campaigns = session.store.campaigns
-    dataset_name = resolved_dataset_name(session, config)
+    dataset_name = session.measured_dataset
     banked: list[str] = []
     for campaign_dir in campaigns.iter_campaign_dirs():
         campaign = campaigns.load_campaign(campaign_dir.name)
         if campaign is None or campaign.dataset_name != dataset_name:
             continue
-        origin = campaigns.standing_rounds(campaign.root_hop).rounds.get(0)
+        origin = campaigns.standing_rounds(campaign.root_hop, moment=None).rounds.get(0)
         instrument = None if origin is None else inner_origin_of(origin.close.pipeline_params)
         if instrument is not None:
             banked.append(instrument)
@@ -246,7 +273,7 @@ async def _emit_preflight_and_init_session(
         measured_cell_usd=measured_usd,
         origin_campaigns=_campaigns_on_origin(session),
         instrument=instrument,
-        banked_instruments=[] if instrument is None else _banked_instruments(session, config),
+        banked_instruments=[] if instrument is None else _banked_instruments(session),
     )
     for w in preflight_warnings:
         logger.warning("preflight[%s]: %s — %s", w.code, w.title, w.detail)
@@ -388,8 +415,6 @@ async def init_optimization_loop(
         resume_from_round_override,
     )
 
-    session.source = RunSource.OPTIMIZATION_LOOP
-
     resolved_cycle_id, resumed_from_round = await _apply_resume_fork(
         session,
         cycle,
@@ -415,8 +440,10 @@ async def init_optimization_loop(
 
 
 __all__ = [
+    "cycle_partition",
     "diagnostic_pass",
     "init_cycle",
     "init_optimization_loop",
     "populate_session_scoring",
+    "scope_memory",
 ]

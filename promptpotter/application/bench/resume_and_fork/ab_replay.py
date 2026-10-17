@@ -167,13 +167,15 @@ def ab_replay_cycle(
     origin_sheet = scorer.sheet(cell.facts for cell in round_0.results)
     origin_sp_hash = round_0.origin.searchpoint(
         schema=session.pipeline_schema,
-        framing=campaign_framing(session.store, campaign_config, session.dataset_name),
+        framing=campaign_framing(session.store, campaign_config, session.dataset),
         demo=sc.require_partition().demo,
     ).sp_hash(session.pipeline_schema)
     view = DifficultyView(
         session=session,
         n_min=campaign_config.optimization.elimination_n_min,
         enable_2pl=campaign_config.optimization.enable_2pl_graduation,
+        # Scorer B's grades anchor B's scale: the replay fits one whatever the cycle was handed.
+        derives=True,
         origin_sp_hash=origin_sp_hash,
     )
     ruler, _ = calibrate_delta_ruler(

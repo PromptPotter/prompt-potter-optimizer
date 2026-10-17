@@ -24,7 +24,8 @@ def render_hard_sample_heatmap(shown: HardSamplesView) -> str:
         return ""
 
     candidate_order, sample_order = view.candidate_order, view.sample_order
-    cells = {(c.candidate, c.sample_id): c.fitness for c in view.cells}
+    row = view.sample_ids
+    cells = {(c.candidate, c.sample_key): c.fitness for c in view.cells}
     fitted = view.ruler.state == "fitted"
 
     label_w = max(_HEATMAP_LABEL_W, min(24, max(len(c) for c in candidate_order)))
@@ -41,13 +42,13 @@ def render_hard_sample_heatmap(shown: HardSamplesView) -> str:
     axis = "hardest ──── sample_id ────→ easiest" if fitted else f"sample_id ({view.ruler.label})"
     lines.append("")
     lines.append(header_pad + axis)
-    lines.append(header_pad + "".join(f"{(sid // 10) % 10:>{cell_w}d}" for sid in sample_order))
-    lines.append(header_pad + "".join(f"{sid % 10:>{cell_w}d}" for sid in sample_order))
+    lines.append(header_pad + "".join(f"{(row[k] // 10) % 10:>{cell_w}d}" for k in sample_order))
+    lines.append(header_pad + "".join(f"{row[k] % 10:>{cell_w}d}" for k in sample_order))
 
     for cid in candidate_order:
         row_cells = []
-        for sid in sample_order:
-            fitness = cells.get((cid, sid))
+        for key in sample_order:
+            fitness = cells.get((cid, key))
             row_cells.append(_UNMEASURED * cell_w if fitness is None else _shade(fitness) * cell_w)
         theta_str = f"{view.theta[cid]:>+5.2f}" if cid in view.theta else " " * 5
         label = cid[: label_w - 1].ljust(label_w)
@@ -63,26 +64,26 @@ def render_hard_sample_heatmap(shown: HardSamplesView) -> str:
         ("Info-gain leaderboard", "info gain") if by_gain else ("Hardness leaderboard", "delta")
     )
     keyed = (
-        (sid, on.pick_score if by_gain else on.delta, on.delta_se)
-        for sid in shown.ranked
-        for on in (view.samples[sid],)
+        (key, on.pick_score if by_gain else on.delta, on.delta_se)
+        for key in shown.ranked
+        for on in (view.samples[key],)
     )
     top = [
-        (sid, key, delta_se)
-        for sid, key, delta_se in keyed
-        if key is not None and delta_se is not None
+        (key, value, delta_se)
+        for key, value, delta_se in keyed
+        if value is not None and delta_se is not None
     ][:10]
     if top:
         lines.append(f"  {title} (top {len(top)})")
         lines.append(f"    {'sample_id':>10s} {key_label:>10s} {'delta_se':>10s}  query")
         lines.append(f"    {'-' * 10} {'-' * 10} {'-' * 10}  {'-' * 40}")
-        for sid, key, delta_se in top:
-            query = shown.sample_query_lookup.get(sid, "")[:40]
-            lines.append(f"    {sid:>10d} {key:>+10.3f} {delta_se:>10.3f}  {query}")
+        for key, value, delta_se in top:
+            query = shown.sample_query_lookup.get(key, "")[:40]
+            lines.append(f"    {row[key]:>10d} {value:>+10.3f} {delta_se:>10.3f}  {query}")
 
-    off = [sid for sid in sample_order if view.samples[sid].delta is None]
+    off = [key for key in sample_order if view.samples[key].delta is None]
     if off:
-        lines.append(f"  {view.samples[off[0]].label}: {', '.join(str(sid) for sid in off)}")
+        lines.append(f"  {view.samples[off[0]].label}: {', '.join(str(row[k]) for k in off)}")
 
     return "\n".join(lines)
 

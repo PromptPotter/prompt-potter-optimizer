@@ -14,78 +14,72 @@ from promptpotter.application.runner.inner.spawn_context import (
     inner_spawn_context,
     set_inner_rulers,
 )
-from promptpotter.infrastructure.store.dataset_access import readable_dataset_dir
+from promptpotter.domain.ruler import RulerScope
+from promptpotter.infrastructure.store.dataset_access import resolve_dataset
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
+    from promptpotter.application.intelligence.rasch import Observation
     from promptpotter.domain.ruler import DeltaRuler
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["refresh_inner_rulers"]
+__all__ = ["anchor_or_extend", "refresh_inner_rulers"]
 
 
 def refresh_inner_rulers(
     session: Session, campaign_config: CampaignConfig, *, round_num: int
 ) -> None:
-    """Called where the prior round's cells are all banked: run init and each outer round boundary."""
+    """Called where the prior round's cells are all banked: run init and each outer round boundary.
+    ONE scale per seat dataset: a dataset joining later anchors its own, never another's."""
     ctx = inner_spawn_context()
     if ctx is None or ctx.cells is None or not session.state.cycle_id:
         return
-    rulers = {
-        name: ruler
-        for name in sorted(ctx.cells.by_dataset)
-        if (ruler := _fit_or_extend(session, campaign_config, name, round_num)) is not None
-    }
+    optimization = campaign_config.optimization
+    rulers: dict[str, DeltaRuler] = {}
+    for name in sorted(ctx.cells.by_dataset):
+        # The INNER dataset's own scorer: the outer formula names measurands these rows lack.
+        scorer = dataset_scorer(resolve_dataset(session.store, name).directory)
+        scope = RulerScope(scorer=scorer.id, dataset=name)
+        held = session.store.campaigns.read_ruler(session.hop, scope=scope, moment=None)
+        # An inner cell holds nothing out (`tasks.py::inner_instrument_config`).
+        obs = build_archive_observations(
+            session.store, dataset_name=name, scorer=scorer, admitted=None
+        )
+        ruler = anchor_or_extend(
+            held,
+            obs,
+            n_min=optimization.elimination_n_min,
+            enable_2pl=optimization.enable_2pl_graduation,
+        )
+        if ruler is None:
+            continue
+        if ruler != held:
+            # `RulerRecord` is written WHOLE, so an append carrying no new cell would copy the scale.
+            session.store.campaigns.write_ruler(
+                session.hop, ruler, scope=scope, round_num=round_num
+            )
+            logger.info(
+                "inner δ scale for %s %s at outer round %d: %d cells",
+                name,
+                "ANCHORED" if held is None else "EXTENDED",
+                round_num,
+                len(ruler.delta),
+            )
+        rulers[name] = ruler
     set_inner_rulers(replace(ctx, rulers=rulers))
 
 
-def _fit_or_extend(
-    session: Session, campaign_config: CampaignConfig, dataset_name: str, round_num: int
+def anchor_or_extend(
+    held: DeltaRuler | None, obs: Sequence[Observation], *, n_min: int, enable_2pl: bool
 ) -> DeltaRuler | None:
     """``None`` while the bank is too thin to identify a scale; the next boundary re-attempts."""
-
-    # The INNER dataset's own scorer: the outer formula names measurands these rows lack.
-    obs = build_archive_observations(
-        session.store,
-        dataset_name=dataset_name,
-        scorer=dataset_scorer(readable_dataset_dir(session.store, dataset_name)),
-        # An inner cell holds nothing out (`tasks.py::inner_instrument_config`).
-        sample_ids=None,
-    )
     if not obs:
-        return None
-    held = session.store.campaigns.read_ruler(session.hop, dataset_name=dataset_name)
+        return held
     if held is None:
-        ruler, _ = calibrate_delta_ruler(
-            None,
-            campaign_config.optimization.elimination_n_min,
-            enable_2pl=campaign_config.optimization.enable_2pl_graduation,
-            archive_obs=obs,
-        )
-        if ruler is None:
-            return None
-        logger.info(
-            "inner δ scale for %s ANCHORED at outer round %d over %d cells / %d arms",
-            dataset_name,
-            round_num,
-            len(ruler.delta),
-            len({o.candidate_id for o in obs}),
-        )
-    else:
-        ruler = extend_ruler(held, obs, history=[])
-        if ruler == held:
-            # `RulerRecord` is written WHOLE, so an append carrying no new cell would copy the scale.
-            return held
-        logger.info(
-            "inner δ scale for %s EXTENDED to %d cells (+%d) at outer round %d",
-            dataset_name,
-            len(ruler.delta),
-            len(ruler.delta) - len(held.delta),
-            round_num,
-        )
-    session.store.campaigns.write_ruler(
-        session.hop, ruler, dataset_name=dataset_name, round_num=round_num
-    )
-    return ruler
+        ruler, _ = calibrate_delta_ruler(None, n_min, enable_2pl=enable_2pl, archive_obs=list(obs))
+        return ruler
+    return extend_ruler(held, list(obs), history=[])

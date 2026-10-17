@@ -7,15 +7,17 @@ from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application import optimizers
 from promptpotter.application.bench.cycle import Cycle
-from promptpotter.application.bench.node_context import NodeContext
+from promptpotter.application.bench.node_context import NodeContext, bank_proposals
 from promptpotter.application.bench.resume_and_fork.decisions import record_decision
 from promptpotter.application.bench.round_analysis import compute_round_diagnostics
 from promptpotter.application.diagnostics.verify import verify_on_saturation
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizers.nodes import (
+    INITIAL_POPULATION,
     Proposals,
     RoundContext,
     RoundOpening,
+    RoundWalk,
     round_state,
 )
 from promptpotter.application.run_callbacks import RunCallbacks
@@ -102,6 +104,7 @@ __all__ = [
     "RoundPlan",
     "announce_opening",
     "announce_population",
+    "bank_walk",
     "close_round",
     "emit_origin_round",
     "execute_round",
@@ -114,7 +117,9 @@ __all__ = [
 ]
 
 
-INITIAL_POPULATION = "initial_population"
+# Top-level manifest key: whether `initial_population` is a round of its own or heads round 1.
+SEEDS_WALK = "initial_population_walks"
+_SEEDS_WALKS = ("alone", "before_default")
 
 
 @dataclass(frozen=True)
@@ -122,15 +127,25 @@ class RoundPlan:
     measurement: str
     sampler: Sampler
     seeders: tuple[Proposer, ...]
+    # Its own round, read against C0 (LEVI's calibration); else the seeds race round 1's offspring (CAPO).
+    seeds_alone: bool
     proposers: tuple[Proposer, ...]
     eliminator: Eliminator | None
     selector: Selector
     adapters: tuple[Adapter, ...]
     controller: Controller | None
 
-    @property
-    def llm_nodes(self) -> list[str]:
-        return [m.name for m in (*self.proposers, *self.adapters) if m.kind is NodeKind.LLM]
+    def walk(self, population: Sequence[OptSearchPoint]) -> RoundWalk:
+        """A round seeds only where no population stands: a resumed one restores its own."""
+        if not self.seeders or population:
+            return RoundWalk("default", (), self.proposers)
+        if self.seeds_alone:
+            return RoundWalk(INITIAL_POPULATION, (), self.seeders)
+        return RoundWalk("default", self.seeders, self.proposers)
+
+    def proposing_llm_nodes(self, population: Sequence[OptSearchPoint]) -> frozenset[str]:
+        """``propose_population`` calls no other llm node."""
+        return frozenset(m.name for m in self.walk(population).members if m.kind is NodeKind.LLM)
 
 
 def round_plan(selected: SelectedOptimizer) -> RoundPlan:
@@ -171,19 +186,29 @@ def round_plan(selected: SelectedOptimizer) -> RoundPlan:
             "proposer and at most one eliminator before its measurement, and one selector after "
             f"it — it walks {walk}."
         )
-    if misplaced := [p.name for at, p in enumerate(proposers) if p.opens is not (at == 0)]:
+    seeders = [
+        cast("Proposer", optimizers.member(name))
+        for name in selected.schema.pipelines.get(INITIAL_POPULATION, ())
+    ]
+    for pipeline, walked in (("default", proposers), (INITIAL_POPULATION, seeders)):
+        if misplaced := [p.name for at, p in enumerate(walked) if p.opens is not (at == 0)]:
+            raise ValueError(
+                f"optimizer {selected.name!r}: `{pipeline}` must walk a proposer that makes the "
+                f"round's arms first and only ones editing them after — {misplaced} of "
+                f"{[p.name for p in walked]} are out of place."
+            )
+    seeds_walk = selected.document.get(SEEDS_WALK)
+    if bool(seeders) != (seeds_walk is not None) or seeds_walk not in (None, *_SEEDS_WALKS):
         raise ValueError(
-            f"optimizer {selected.name!r}: `default` must walk a proposer that makes the round's "
-            f"population first and only ones editing it after — {misplaced} of "
-            f"{[p.name for p in proposers]} are out of place."
+            f"optimizer {selected.name!r}: a manifest walking `{INITIAL_POPULATION}` declares "
+            f"`{SEEDS_WALK}` as one of {list(_SEEDS_WALKS)}, and only such a manifest does — it "
+            f"walks {[p.name for p in seeders]} and declares {seeds_walk!r}."
         )
     return RoundPlan(
         measurement=walk[measured_at],
         sampler=samplers[0],
-        seeders=tuple(
-            cast("Proposer", optimizers.member(name))
-            for name in selected.schema.pipelines.get(INITIAL_POPULATION, ())
-        ),
+        seeders=tuple(seeders),
+        seeds_alone=seeds_walk == "alone",
         proposers=tuple(proposers),
         eliminator=eliminators[0] if eliminators else None,
         selector=selectors[0],
@@ -379,10 +404,11 @@ def proposal_summaries(proposals: list[CandidateProposal], round_num: int) -> li
     return summaries
 
 
-def announce_opening(ctx: RoundContext) -> RoundOpening:
+def announce_opening(ctx: RoundContext, walk: RoundWalk) -> RoundOpening:
     cycle = ctx.cycle
     assert cycle.tracking.current_sp is not None
-    opening = cycle.optimizer.runtime.opening(ctx)
+    opening = cycle.optimizer.runtime.opening(ctx, walk)
+    node = walk.proposer
     cb = ctx.callbacks
     cb.on_phase(
         CampaignPhase.PROPOSE,
@@ -391,12 +417,12 @@ def announce_opening(ctx: RoundContext) -> RoundOpening:
         view=propose_enter(
             cb.view_context,
             round=ctx.round_num,
-            node=cycle.optimizer.proposer,
+            node=node,
             opening=opening,
             max_rounds=cycle.config.optimization.max_rounds,
             parent_accuracy=cycle.tracking.current_accuracy,
             prompt_preview=cycle.opt_sp.render()[:120],
-            model=cycle.optimizer.model(),
+            model=cycle.optimizer.model(node),
             pipeline_params=cycle.tracking.current_sp.pipeline_params,
             parent_prompt_fields=cycle.opt_sp.prompt_field_dict(),
         ),
@@ -470,19 +496,32 @@ def _one_arm_each(ctx: RoundContext, proposals: list[CandidateProposal]) -> list
     return list(seen.values())
 
 
+def bank_walk(ctx: RoundContext, walk: RoundWalk, proposals: list[CandidateProposal]) -> None:
+    """Once per round: a resume re-walking a banked round reads its record and writes no second."""
+    session = ctx.cycle.session
+    # An EMPTY bank replays as zero arms on every resume: a permanent failure to propose.
+    if ctx.detached or not session.state.cycle_id or not proposals:
+        return
+    if session.store.campaigns.round_proposals(session.hop, ctx.round_num) is None:
+        bank_proposals(ctx, proposals, walk=walk.pipeline, submitted=False)
+
+
 async def propose_population(ctx: RoundContext, plan: RoundPlan, panel: Panel) -> Proposals:
     gate = arm_gate_mode(ctx)
     if gate == "author":
         population = Proposals([])
     else:
-        if plan.seeders and not ctx.cycle.population:
-            seeded = await _walk(ctx, plan.seeders, panel)
+        walk = plan.walk(ctx.cycle.population)
+        if walk.seeds:
+            seeded = await _walk(ctx, walk.seeds, panel)
+            # Even on a detached round: the walk after it mates from this population.
             ctx.cycle.population = [
                 p.opt_sp
                 for p in seeded.proposals
                 if not fatal_validation_failures(p.validation_failures)
             ]
-        population = await _walk(ctx, plan.proposers, panel)
+        population = await _walk(ctx, walk.proposers, panel)
+        bank_walk(ctx, walk, population.proposals)
     arms = _one_arm_each(ctx, population.proposals)
     if gate != "off":
         arms = _one_arm_each(ctx, await operator_arms(ctx, arms))
@@ -512,7 +551,7 @@ async def execute_round(
     )
 
     panel = plan.sampler.draw(NodeContext(ctx, plan.sampler.name), pool)
-    opening = announce_opening(ctx)
+    opening = announce_opening(ctx, plan.walk(cycle.population))
     population = await propose_population(ctx, plan, panel)
     assert cycle.tracking.current_sp is not None
     announce_population(ctx, opening, population.proposals)
@@ -647,7 +686,9 @@ async def close_round(
     standing = RunStanding.after(
         cycle.rounds,
         lives=None if lives is None else lives.bank,
-        spent=close_spend(ledger_chain(CycleDir(session.store.campaigns.cycle_dir(session.hop))))
+        spent=close_spend(
+            ledger_chain(CycleDir(session.store.campaigns.cycle_dir(session.hop)), moment=None)
+        )
         if session.state.cycle_id
         else None,
     )

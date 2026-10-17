@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import TYPE_CHECKING, NoReturn
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from typing import TYPE_CHECKING, NoReturn, assert_never
 
 from promptpotter import connectors
 from promptpotter.application.account import account_of
@@ -11,14 +13,18 @@ from promptpotter.application.jobs.quota import (
     admit_launch,
     check_launch_quotas,
     declare_run_ceiling,
+    refuse_verb_rate,
 )
 from promptpotter.application.jobs.registry import (
     UNRESOLVED_HOP,
+    CampaignLaunch,
     Job,
+    JobHolder,
     JobRegistry,
+    ScoringPass,
+    ScoringVerb,
 )
 from promptpotter.application.runner.termination import run_stop_reason
-from promptpotter.config.settings import settings
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.launch_limits import HeldLimits
@@ -30,9 +36,12 @@ from promptpotter.domain.phases import (
     stop_reason_outcome,
 )
 from promptpotter.domain.run_records import ErrorRecord, RunPhaseRecord
+from promptpotter.domain.spend import SpendCeilings
+from promptpotter.infrastructure.llm.send_pacing import set_rate_tenant
+from promptpotter.infrastructure.llm.spend_book import SpendBook, spending_under
 from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.shared.errors import ConflictError, CycleBusyError, MachineBusyError
+from promptpotter.shared.errors import CycleBusyError, MachineBusyError
 from promptpotter.shared.extras import MissingExtraError, missing
 from promptpotter.shared.identity import acting_principal_id
 
@@ -40,9 +49,6 @@ if TYPE_CHECKING:
     from promptpotter.application.jobs.launcher.launch import LaunchRequest
 
 logger = logging.getLogger(__name__)
-
-# Each ask takes the machine-wide admission lock.
-_QUEUE_POLL_S = 2.0
 
 
 def launch_interrupted(exc: BaseException) -> bool:
@@ -111,39 +117,53 @@ async def probe_backend(backend_type: str) -> BackendUnreachableError | MissingE
     return None
 
 
-def request_launch(
+def request_job(
     *,
     stores: Stores,
     job_registry: JobRegistry,
-    dataset_name: str,
+    holder: JobHolder,
     hop: CycleHop = UNRESOLVED_HOP,
 ) -> Job:
     user = account_of(stores)
     # ONE gate: the quota count and the slot count come off the same on-disk jobs.
     with job_registry.admission_gate():
-        check_launch_quotas(user=user, stores=stores, job_registry=job_registry, hop=hop)
+        match holder:
+            case CampaignLaunch():
+                check_launch_quotas(user=user, stores=stores, job_registry=job_registry, hop=hop)
+            case ScoringPass(verb=verb):
+                refuse_verb_rate(stores, user, verb)
+            case _:
+                assert_never(holder)
         if hop != UNRESOLVED_HOP:
             _refuse_taken_cycle(stores, job_registry, hop)
         job = job_registry.request_slot(
             user_id=str(stores.identity.user_id),
             principal_id=acting_principal_id(stores.identity),
-            dataset_name=dataset_name,
+            holder=holder,
             hop=hop,
         )
-        if hop != UNRESOLVED_HOP:
+        # A pass takes no claim: a claim reads as an attached producer, and scoring needs a still cycle.
+        if hop != UNRESOLVED_HOP and isinstance(holder, CampaignLaunch):
             claim_cycle(stores, job_registry, job, hop)
         return job
 
 
 def _refuse_taken_cycle(stores: Stores, job_registry: JobRegistry, hop: CycleHop) -> None:
+    """ONE check for launches and passes alike: a run attached, or a pass scoring it."""
     run = derive_run_state(stores.campaigns.cycle_dir(hop))
-    if not run.producer.attached:
+    if run.producer.attached:
+        claim = stores.campaigns.launch_claim(hop)
+        holder = (
+            job_registry.running_job_for(hop) if claim is None else job_registry.get(claim.job_id)
+        )
+        status = run.run_phase.value
+    elif (holder := job_registry.pass_on(hop)) is not None:
+        status = "scoring"
+    else:
         return
-    claim = stores.campaigns.launch_claim(hop)
-    holder = job_registry.running_job_for(hop) if claim is None else job_registry.get(claim.job_id)
     raise CycleBusyError(
         job_id="unregistered" if holder is None else holder.job_id,
-        status=run.run_phase.value,
+        status=status,
         holder_user="" if holder is None else holder.user_id,
         campaign_id=hop.campaign_id,
         cycle_id=hop.cycle_id,
@@ -165,12 +185,11 @@ def claim_cycle(stores: Stores, job_registry: JobRegistry, job: Job, hop: CycleH
 def refuse_as_busy(stores: Stores, job_registry: JobRegistry, job: Job) -> NoReturn:
     # A REFUSAL takes its queue entry with it: one left behind starts the run later.
     withdraw_queued(stores, job_registry, job.job_id, principal_id=job.principal_id)
-    holder = job_registry.holder()
+    oldest = next(iter(job_registry.list_running()), None)
     raise MachineBusyError(
-        holder_user="" if holder is None else holder.user_id,
-        campaign_id="" if holder is None else holder.campaign_id,
-        cycle_id="" if holder is None else holder.cycle_id,
-        started_at=None if holder is None else holder.started_at,
+        holding="" if oldest is None else oldest.what,
+        holder_user="" if oldest is None else oldest.user_id,
+        started_at=None if oldest is None else oldest.started_at,
     )
 
 
@@ -185,29 +204,14 @@ def withdraw_queued(
     return True
 
 
-async def await_slot(job_registry: JobRegistry, job: Job) -> None:
-    """A poll, not a signal: the slot frees in another process, and only the jobs dir is shared."""
-    deadline = time.monotonic() + settings.QUEUE_MAX_WAIT_S
-    while not await asyncio.to_thread(job_registry.claim_next, job.job_id):
-        if time.monotonic() >= deadline:
-            raise ConflictError(
-                f"This launch waited {settings.QUEUE_MAX_WAIT_S / 3600:.0f}h for a free slot and "
-                f"was withdrawn. Nothing ran and nothing was spent; start it again when the "
-                f"machine is quieter.",
-                code="queue_expired",
-            )
-        await asyncio.sleep(_QUEUE_POLL_S)
-
-
 async def admit_and_hold(
     request: LaunchRequest, *, stores: Stores, job_registry: JobRegistry, job: Job
 ) -> HeldLimits:
     """The request's config is resolved IN here, after the queue wait, so the ceiling admitted is the one the run starts under."""
-    user = account_of(stores)
     # A fresh mint has no cycle yet: nothing to claim, and no seed or standing ceiling to read.
     hop = None if request.hop == UNRESOLVED_HOP else request.hop
     if job.queued:
-        await await_slot(job_registry, job)
+        await job_registry.await_claim(job.job_id)
         promoted = job_registry.get(job.job_id)
         if hop is not None and promoted is not None:
             claim_cycle(stores, job_registry, promoted, hop)
@@ -219,19 +223,10 @@ async def admit_and_hold(
     declared, operator = declare_run_ceiling(
         request.campaign_config(stores), stores=stores, hop=hop, requested=request.limits.ceiling
     )
-    # Offloaded: the wallet read scans every cycle ledger and must not block the event loop.
-    ceiling, reserve = await asyncio.to_thread(
-        admit_launch,
-        declared=declared,
-        user=user,
-        stores=stores,
-        job_registry=job_registry,
-        job_id=job.job_id,
-        hop=hop,
+    ceiling, reserve = await _admit(
+        declared, stores=stores, job_registry=job_registry, job_id=job.job_id, hop=hop
     )
     held = HeldLimits.admitted(request.limits, ceiling, operator, reserve=reserve)
-    # Before the caller's first await: a concurrent launch on this account reads a stamped reservation.
-    job_registry.mark_admitted(job.job_id, reserve)
     t_caps = time.perf_counter()
 
     logger.info(
@@ -245,14 +240,72 @@ async def admit_and_hold(
     return held
 
 
+async def _admit(
+    declared: SpendCeilings,
+    *,
+    stores: Stores,
+    job_registry: JobRegistry,
+    job_id: str,
+    hop: CycleHop | None,
+) -> tuple[SpendCeilings, SpendCeilings]:
+    def admit() -> tuple[SpendCeilings, SpendCeilings]:
+        ceiling, reserve = admit_launch(
+            declared=declared,
+            user=account_of(stores),
+            stores=stores,
+            job_registry=job_registry,
+            job_id=job_id,
+            hop=hop,
+        )
+        # Before the caller's next await: a concurrent launch on this account reads a stamped reservation.
+        job_registry.mark_admitted(job_id, reserve)
+        return ceiling, reserve
+
+    # Offloaded: the wallet read scans every cycle ledger and must not block the event loop.
+    return await asyncio.to_thread(admit)
+
+
+@asynccontextmanager
+async def paid_pass(
+    *, stores: Stores, verb: ScoringVerb, hop: CycleHop | None, declared: SpendCeilings
+) -> AsyncIterator[SpendBook]:
+    """A scoring pass outside any run holds a slot and a reservation, and never queues: its
+    caller waits on the answer, and nothing could deliver a detached one."""
+    job_registry = JobRegistry.attach()
+    job = await asyncio.to_thread(
+        request_job,
+        stores=stores,
+        job_registry=job_registry,
+        holder=ScoringPass(verb),
+        hop=UNRESOLVED_HOP if hop is None else hop,
+    )
+    if job.queued:
+        refuse_as_busy(stores, job_registry, job)
+    admitted = False
+    try:
+        # Its own cycle's spend is no run's to exclude: the pass bills beside it.
+        ceiling, reserve = await _admit(
+            declared, stores=stores, job_registry=job_registry, job_id=job.job_id, hop=None
+        )
+        admitted = True
+        job_registry.mark_started(job.job_id)
+        set_rate_tenant(str(stores.identity.tenant_id))
+        with spending_under(SpendBook(declared=ceiling, reserved=reserve, meters="bill")) as book:
+            yield book
+    except BaseException as exc:
+        job_registry.release(job.job_id, refusal="" if admitted else str(exc))
+        raise
+    job_registry.release(job.job_id)
+
+
 __all__ = [
     "admit_and_hold",
-    "await_slot",
     "claim_cycle",
     "launch_interrupted",
+    "paid_pass",
     "probe_backend",
     "refuse_as_busy",
     "release_slot",
-    "request_launch",
+    "request_job",
     "withdraw_queued",
 ]

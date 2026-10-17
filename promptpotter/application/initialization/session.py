@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.run_phase_control import FlightGauge, RunControl
@@ -15,6 +14,7 @@ from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import Scorer
 from promptpotter.domain.spend import SpendCeilings
 from promptpotter.infrastructure.backend import BackendClient
+from promptpotter.infrastructure.store.dataset_access import ResolvedDataset
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.identity import IdentityContext, default_identity
 
@@ -59,8 +59,6 @@ class CycleSnapshot:
     resumed_from_round: int = 1
     audit_projection: AuditTrailProjection | None = None
     ledger: CycleEventLog | None = None
-    # Cells (`ReplayFeed.cell_key`) and calls (`call:{reuse key}`) the search already priced.
-    priced_keys: set[str] = field(default_factory=set)
 
 
 @dataclass
@@ -75,7 +73,8 @@ class Session:
     index_terms: list[str] = field(default_factory=list)
     identity: IdentityContext = field(default_factory=default_identity)
     dataset_name: str | None = None
-    dataset_config_dir: Path | None = None
+    # Where `dataset_name` resolved at init; `None` where a session measures no definition.
+    dataset: ResolvedDataset | None = None
     tenant_root: str = ""
     pipeline_params: dict[str, Any] = field(default_factory=dict)
     # Per node, the `pipeline_params` keys hashed into identity and never sent to a backend.
@@ -95,6 +94,12 @@ class Session:
     @property
     def controlled(self) -> bool:
         return self.arm is not None
+
+    def bind_campaign(self, hop: CycleHop, *, arm: Arm | None) -> None:
+        """One write: a campaign bound without its arm runs uncontrolled, its memory unfenced."""
+        self.campaign_id = hop.campaign_id
+        self.arm = arm
+        self.state.cycle_id = hop.cycle_id
 
     @property
     def hop(self) -> CycleHop:

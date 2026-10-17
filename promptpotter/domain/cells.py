@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 
-from pydantic import Field
+from pydantic import ConfigDict, Field, JsonValue
 
 from promptpotter.domain.results import HardSampleOrder
 from promptpotter.domain.ruler import DELTA_STATE_LABEL, DeltaState, RulerStanding
@@ -11,6 +11,7 @@ from promptpotter.domain.scoring import SampleStatus, is_hit
 from promptpotter.domain.strict_model import StrictModel
 
 __all__ = [
+    "DEPTH_FIELDS",
     "HARD_SAMPLES_VERSION",
     "Cell",
     "CellCandidate",
@@ -22,15 +23,72 @@ __all__ = [
     "HardSamples",
     "HeatmapScope",
     "HitSpread",
+    "PinnedCell",
     "SampleDifficulty",
+    "Seat",
     "hit_spread",
 ]
+
+
+# How much evidence a cell buys, never what it is: out of every key, so a deepened cell CONTINUES
+# its campaign. Named as `runner/inner/tasks.py::InnerTaskSpec` names them, which subtracts the same set.
+DEPTH_FIELDS: frozenset[str] = frozenset(
+    {"n_rounds", "depth_nodes", "lives", "n_samples", "n_samples_origin", "n_samples_bench"}
+)
+
+
+class Seat(StrictModel):
+    """One fresh inner campaign. ``id`` is the outer query; omitted overrides inherit the panel's
+    benchmark and model."""
+
+    model_config = ConfigDict(frozen=True)
+
+    # In every pin, so in every banked cell's `Sample.key`: dropping it re-keys them all.
+    kind: Literal["seat"]
+    id: str = Field(min_length=1)
+    # Graded, never elected on: where the cell sits this campaign, not what it measures.
+    held_out: bool = False
+    inner_dataset_seed: int = Field(default=0, ge=0)
+    n_rounds: int | None = Field(default=None, ge=1)
+    inner_dataset: str | None = None
+    inner_model: str | None = None
+    inner_provider: str | None = None
+    # A model whose price is one host's cache is another instrument on the next host.
+    inner_route_order: list[str] | None = None
+
+    def pin(self) -> dict[str, JsonValue]:
+        """What the cell IS, never its seat or its depth: a default is one key spelled or not."""
+        return self.model_dump(
+            mode="json", exclude_defaults=True, exclude={"held_out", *DEPTH_FIELDS}
+        )
+
+
+_INSTRUMENT = "instrument"
+
+
+class PinnedCell(StrictModel):
+    """A declared cell with what measures it, digested where its panel resolves
+    (`runner/inner/connector.py`): in the pin, so its key moves with its own instrument alone."""
+
+    model_config = ConfigDict(frozen=True)
+
+    cell: Seat
+    instrument: str = Field(min_length=1)
+
+    def pin(self) -> dict[str, JsonValue]:
+        return self.cell.pin() | {_INSTRUMENT: self.instrument}
+
+    @classmethod
+    def from_pin(cls, pin: Mapping[str, JsonValue]) -> PinnedCell:
+        declared = {k: v for k, v in pin.items() if k != _INSTRUMENT}
+        return cls.model_validate({"cell": declared, _INSTRUMENT: pin.get(_INSTRUMENT)})
+
 
 # The tier stops at dataset: samples differ per dataset, so a workspace scope would mean nothing.
 HeatmapScope = Literal["cycle", "campaign", "dataset"]
 
 # A reader takes a `hard_samples.json` of any other version as not written.
-HARD_SAMPLES_VERSION = 8
+HARD_SAMPLES_VERSION = 9
 
 
 class SampleDifficulty(StrictModel):
@@ -65,12 +123,13 @@ class SampleDifficulty(StrictModel):
 
 class HardSampleCell(StrictModel):
     candidate: str
-    sample_id: int
+    sample_key: str
     fitness: float
 
 
 class HardSamples(StrictModel):
-    """``hard_samples.json``, and the same view folded per request over an archive; it fits nothing."""
+    """``hard_samples.json``, and the same view folded per request over an archive; it fits nothing.
+    Every sample is its ``Sample.key``; ``sample_ids`` places each at its row in the dataset served."""
 
     schema_version: int
     cycle_id: str | None
@@ -79,14 +138,15 @@ class HardSamples(StrictModel):
     # Stamped θ descending; an individual no round stamped trails, by id.
     candidate_order: list[str]
     theta: dict[str, float]
-    # The samples this scope measured: δ descending, then the ones off the ruler; ties by id.
-    sample_order: list[int]
-    samples: dict[int, SampleDifficulty]
-    round_order: list[int]
+    sample_ids: dict[str, int]
+    # The samples this scope measured: δ descending, then the ones off the ruler; ties by row.
+    sample_order: list[str]
+    samples: dict[str, SampleDifficulty]
+    round_order: list[str]
     cells: list[HardSampleCell]
 
-    def difficulty(self, sample_id: int) -> SampleDifficulty:
-        held = self.samples.get(sample_id)
+    def difficulty(self, key: str) -> SampleDifficulty:
+        held = self.samples.get(key)
         if held is not None:
             return held
         return SampleDifficulty.on(self.ruler, None, pick_score=None)

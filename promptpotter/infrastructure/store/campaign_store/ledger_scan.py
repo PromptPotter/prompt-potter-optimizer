@@ -33,7 +33,7 @@ from promptpotter.domain.results import (
     VerifyPass,
     VerifyReading,
 )
-from promptpotter.domain.ruler import DeltaRuler
+from promptpotter.domain.ruler import DeltaRuler, RulerScope
 from promptpotter.domain.run_records import (
     CandidateMintedRecord,
     CandidateScoredRecord,
@@ -57,6 +57,8 @@ from promptpotter.domain.run_records import (
     LedgerCandidate,
     OptimizerStateRecord,
     PhaseRecord,
+    PricedKeyRecord,
+    RaceCatchUpRecord,
     ResumeCheckpointRecord,
     RoundClosedRecord,
     RoundEnteredRecord,
@@ -74,14 +76,13 @@ from promptpotter.domain.run_records import (
     WallClock,
 )
 from promptpotter.domain.scoring import WalkedCell
-from promptpotter.domain.spend import CloseSpend, SpendRollup, TokenUsageKind
+from promptpotter.domain.spend import CloseSpend, SpendRollup
 from promptpotter.infrastructure.store.read_model import (
     LedgerFold,
     LedgerIndex,
     LedgerSpan,
     LineIndex,
     RecordClasses,
-    iter_jsonl,
 )
 from promptpotter.shared.clock import epoch_seconds
 from promptpotter.shared.measurement_context import MeasurementRole
@@ -344,12 +345,12 @@ class _Rulers:
     records: ClassVar[RecordClasses] = (RulerRecord,)
 
     def __init__(self) -> None:
-        self._held: dict[str, DeltaRuler] = {}
+        self._held: dict[RulerScope, DeltaRuler] = {}
 
     def feed(self, offset: int, record: RulerRecord) -> None:
-        self._held[record.dataset_name] = record.ruler
+        self._held[record.scope] = record.ruler
 
-    def value(self) -> dict[str, DeltaRuler]:
+    def value(self) -> dict[RulerScope, DeltaRuler]:
         return dict(self._held)
 
 
@@ -416,6 +417,15 @@ class StandingRound(NamedTuple):
     standing: RunStanding | None = None
 
 
+class StandingProposal(NamedTuple):
+    record: RoundProposedRecord
+    # Where the generation landed, never where its phase opened: everything it read, a critique
+    # restated late included, was on the ledger by then.
+    at_offset: int
+    # Where its round was entered on the same ledger: the boundary a replay of the round is cut at.
+    entered_at: int | None = None
+
+
 _Pass = tuple[int, str, MeasurementRole]
 
 
@@ -427,7 +437,7 @@ def _before[V](held: Mapping[Any, V], rnd: int | None) -> dict[Any, V]:
 
 class StandingRounds(NamedTuple):
     rounds: dict[int, StandingRound]
-    proposals: dict[int, RoundProposedRecord]
+    proposals: dict[int, StandingProposal]
     # The operator's answer at the arm gate, beside the drafts it answered and never over them.
     submitted: dict[int, RoundProposedRecord]
     restated: dict[int, OptimizerState]
@@ -515,10 +525,7 @@ class StandingRounds(NamedTuple):
 
 
 def _walked_cell(scored: SampleScoredRecord) -> WalkedCell | None:
-    facts = scored.result.facts
-    if not facts.sample_key or facts.answer is None:
-        return None
-    return facts.sample_key, facts.sample_id, facts.answer, facts.cached
+    return scored.result.address if scored.result.facts.sample_key else None
 
 
 def _earliest(held: int | None, rnd: int | None) -> int | None:
@@ -553,6 +560,7 @@ class _Standing:
 
     def __init__(self) -> None:
         self._held = StandingRounds.none()
+        self._entered_at: dict[int, int] = {}
 
     def feed(self, offset: int, record: _RoundStep) -> None:
         rnd = record.round
@@ -561,6 +569,7 @@ class _Standing:
         held = self._held
         match record:
             case RoundEnteredRecord():
+                self._entered_at[rnd] = offset
                 rewound = rnd if record.rewound else None
                 self._held = held.displaced(rnd, rewound)._replace(
                     entered=_earliest(held.entered, rnd),
@@ -579,8 +588,10 @@ class _Standing:
             case RoundStandingRecord():
                 if (closed := held.rounds.get(rnd)) is not None:
                     held.rounds[rnd] = closed._replace(standing=record.run_standing)
+            case RoundProposedRecord() if record.submitted:
+                held.submitted[rnd] = record
             case RoundProposedRecord():
-                (held.submitted if record.submitted else held.proposals)[rnd] = record
+                held.proposals[rnd] = StandingProposal(record, offset, self._entered_at.get(rnd))
             case OptimizerStateRecord():
                 if (closed := held.rounds.get(rnd)) is None:
                     held.restated[rnd] = record.optimizer_state
@@ -633,18 +644,43 @@ class _Standing:
         )
 
 
+_Naming = SampleScoredRecord | RoundClosedRecord | RaceCatchUpRecord | PhaseRecord
+
+
 class _Answers:
-    records: ClassVar[RecordClasses] = (SampleScoredRecord,)
+    """Every answer a ledger names — a slotted walk's, a close's rows, a catch-up's, a verify
+    pass's — displaced rounds included: what a campaign has walked, read through the extractors
+    `scan_ledger_walks` reads what STANDS through, so memory holds all evidence."""
+
+    records: ClassVar[RecordClasses] = get_args(_Naming)
 
     def __init__(self) -> None:
         self._found: set[str] = set()
+        self._frozen: frozenset[str] | None = frozenset()
 
-    def feed(self, offset: int, record: SampleScoredRecord) -> None:
-        if (answer := record.result.facts.answer) is not None:
-            self._found.add(answer)
+    def feed(self, offset: int, record: _Naming) -> None:
+        match record:
+            case SampleScoredRecord():
+                walked = [] if (cell := _walked_cell(record)) is None else [cell]
+            case RoundClosedRecord():
+                walks = record.cells.walks(record.opt_sp)
+                walked = [cell for walk in walks for cell in walk.cells]
+            case RaceCatchUpRecord():
+                walked = list(record.cells.values())
+            case PhaseRecord(view=VerifyGradedView(verify_pass=banked)):
+                walked = list(banked.walk().cells)
+            case PhaseRecord():
+                return
+        named = [answer for _, _, answer, _ in walked]
+        if not self._found.issuperset(named):
+            self._found.update(named)
+            self._frozen = None
 
     def value(self) -> frozenset[str]:
-        return frozenset(self._found)
+        # A fenced task reads it once per population, so it is frozen once per change.
+        if self._frozen is None:
+            self._frozen = frozenset(self._found)
+        return self._frozen
 
 
 class DeclaredPhase(NamedTuple):
@@ -773,6 +809,67 @@ class _ScoringLock:
         return self._found
 
 
+class _PricedKeys:
+    records: ClassVar[RecordClasses] = (PricedKeyRecord,)
+
+    def __init__(self) -> None:
+        self._keys: set[str] = set()
+
+    def feed(self, offset: int, record: PricedKeyRecord) -> None:
+        self._keys.add(record.priced_key)
+
+    def value(self) -> frozenset[str]:
+        return frozenset(self._keys)
+
+
+class Timeline(NamedTuple):
+    """The timed facts the wall clock reads, each led by its record's stamp, in ledger order."""
+
+    phases: list[tuple[float, str, int | None, str]]
+    gates: list[tuple[float, bool]]
+    closes: list[tuple[float, int]]
+    calls: list[tuple[float, str, str, float]]
+    unworked: list[tuple[float, float]]
+
+
+_Clocked = PhaseRecord | RunPhaseRecord | RoundClosedRecord | TokenUsageRecord | SampleScoredRecord
+
+
+class _Timeline:
+    records: ClassVar[RecordClasses] = get_args(_Clocked)
+
+    def __init__(self) -> None:
+        self._held = Timeline([], [], [], [], [])
+
+    def feed(self, offset: int, record: _Clocked) -> None:
+        if (at := epoch_seconds(record.timestamp)) is None:
+            return
+        held = self._held
+        match record:
+            case PhaseRecord():
+                held.phases.append((at, record.phase, record.round, record.event))
+            case RunPhaseRecord():
+                held.gates.append((at, record.run_phase is RunPhase.GATE))
+            case RoundClosedRecord():
+                held.closes.append((at, record.round))
+            case TokenUsageRecord() if not record.cached:
+                held.calls.append((at, record.kind, record.node, record.duration_s))
+            case SampleScoredRecord():
+                facts = record.result.facts
+                if not facts.cached and (seconds := facts.pipeline.unworked_s) is not None:
+                    held.unworked.append((at, seconds))
+
+    def value(self) -> Timeline:
+        held = self._held
+        return Timeline(
+            list(held.phases),
+            list(held.gates),
+            list(held.closes),
+            list(held.calls),
+            list(held.unworked),
+        )
+
+
 LEDGER_FOLDS = (
     _CycleSeed,
     _RunLimits,
@@ -788,6 +885,8 @@ LEDGER_FOLDS = (
     _RunWiring,
     _Bench,
     _ScoringLock,
+    _PricedKeys,
+    _Timeline,
 )
 
 
@@ -823,7 +922,7 @@ def scan_bench_passes(spans: Iterable[LedgerSpan]) -> BenchPasses | None:
             if view.subject == "selected":
                 if held is not None:
                     held = held.model_copy(
-                        update={"selections": {**held.selections, taken.round: taken}}
+                        update={"selections": {**held.selections, taken.candidate_id: taken}}
                     )
             elif held is None or held.origin != taken:
                 # A different origin pass is a new reference: no earlier selection pairs on it.
@@ -837,9 +936,10 @@ def scan_bench_passes(spans: Iterable[LedgerSpan]) -> BenchPasses | None:
     return held
 
 
-def scan_bench_readings(span: LedgerSpan) -> dict[tuple[int, str], BenchReading]:
+def scan_bench_readings(spans: Iterable[LedgerSpan]) -> dict[tuple[int, str], BenchReading]:
     return {
         (view.reading.round, view.label): view.reading
+        for span in spans
         for view in LedgerIndex.of(span.path, LEDGER_FOLDS).view(_Bench, span.until)
         if view.reading is not None
     }
@@ -864,11 +964,11 @@ def scan_ledger_progress(ledger_path: Path) -> Progress:
     return LineIndex.of(ledger_path, PROGRESS_FOLDS).view(_Progress)
 
 
-def scan_ledger_ruler(spans: Iterable[LedgerSpan], dataset_name: str) -> DeltaRuler | None:
+def scan_ledger_ruler(spans: Iterable[LedgerSpan], scope: RulerScope) -> DeltaRuler | None:
     ruler: DeltaRuler | None = None
     for span in spans:
         held = LedgerIndex.of(span.path, LEDGER_FOLDS).view(_Rulers, span.until)
-        ruler = held.get(dataset_name, ruler)
+        ruler = held.get(scope, ruler)
     return ruler
 
 
@@ -916,37 +1016,29 @@ def scan_ledger_verify(ledger_path: Path) -> VerifyLedger:
 
 
 def _phase_spans(
-    rows: list[dict[str, Any]], optimizer_phases: frozenset[str]
+    phases: list[tuple[float, str, int | None, str]], optimizer_phases: frozenset[str]
 ) -> list[tuple[str, float, float]]:
     brackets = {p.value for p in CampaignPhase} | optimizer_phases
-    open_at: dict[tuple[str, object], float] = {}
+    open_at: dict[tuple[str, int | None], float] = {}
     out: list[tuple[str, float, float]] = []
-    for rec in rows:
-        phase = rec.get("phase")
-        if rec.get("record_type") != "phase" or phase not in brackets:
+    for at, phase, rnd, event in phases:
+        if phase not in brackets:
             continue
-        if (at := epoch_seconds(rec.get("timestamp"))) is None:
-            continue
-        key = (str(phase), rec.get("round"))
-        if rec.get("event") == "enter":
-            open_at[key] = at
-        elif rec.get("event") == "exit" and (entered := open_at.pop(key, None)) is not None:
-            out.append((str(phase), entered, max(entered, at)))
+        if event == "enter":
+            open_at[(phase, rnd)] = at
+        elif event == "exit" and (entered := open_at.pop((phase, rnd), None)) is not None:
+            out.append((phase, entered, max(entered, at)))
     return out
 
 
-def _gate_spans(rows: list[dict[str, Any]], *, until: float | None) -> list[_Span]:
+def _gate_spans(gates: list[tuple[float, bool]], *, until: float | None) -> list[_Span]:
     out: list[_Span] = []
     opened: float | None = None
-    for rec in rows:
-        if rec.get("record_type") != "run_phase":
-            continue
-        if (at := epoch_seconds(rec.get("timestamp"))) is None:
-            continue
+    for at, opens in gates:
         if opened is not None:
             out.append((opened, max(opened, at)))
             opened = None
-        if rec.get("run_phase") == RunPhase.GATE.value:
+        if opens:
             opened = at
     # An abandoned gate (abort, vanished producer) closes at *until*: it was held that long.
     if opened is not None and until is not None:
@@ -954,23 +1046,15 @@ def _gate_spans(rows: list[dict[str, Any]], *, until: float | None) -> list[_Spa
     return out
 
 
-def _call_spans(rows: list[dict[str, Any]], *, opened: float | None) -> list[_CallSpan]:
+def _call_spans(
+    calls: list[tuple[float, str, str, float]], *, opened: float | None
+) -> list[_CallSpan]:
     out: list[_CallSpan] = []
-    for rec in rows:
-        if rec.get("record_type") != "token_usage" or rec.get("cached"):
-            continue
-        kind = rec.get("kind")
-        seconds = rec.get("duration_s")
-        if kind not in get_args(TokenUsageKind):
-            continue
-        if not isinstance(seconds, (int, float)) or isinstance(seconds, bool):
-            continue
-        if (at := epoch_seconds(rec.get("timestamp"))) is None:
-            continue
+    for at, kind, node, seconds in calls:
         # A bill is stamped when it LANDS, so the span ends at its record.
-        start = at - float(seconds) if opened is None else max(at - float(seconds), opened)
+        start = at - seconds if opened is None else max(at - seconds, opened)
         if start < at:
-            out.append((str(kind), str(rec.get("node")), start, at))
+            out.append((kind, node, start, at))
     return out
 
 
@@ -1013,51 +1097,40 @@ def _unbracketed_call_seconds(
     return out
 
 
-def _round_ended_seconds(rows: list[dict[str, Any]], *, opened: float | None) -> dict[str, float]:
+def _round_ended_seconds(
+    closes: list[tuple[float, int]], *, opened: float | None
+) -> dict[str, float]:
     out: dict[str, float] = {}
     if opened is None:
         return out
-    for rec in rows:
-        rnd = rec.get("round")
-        if rec.get("record_type") != "round_closed" or not isinstance(rnd, int):
-            continue
-        if (at := epoch_seconds(rec.get("timestamp"))) is not None:
-            # FIRST close wins: round 0 closes again at ruler warm, and a rewind re-runs a round.
-            out.setdefault(str(rnd), max(0.0, at - opened))
+    for at, rnd in closes:
+        # FIRST close wins: round 0 closes again at ruler warm, and a rewind re-runs a round.
+        out.setdefault(str(rnd), max(0.0, at - opened))
     return out
 
 
-def _unworked_seconds(rows: list[dict[str, Any]]) -> float | None:
+def _unworked_seconds(unworked: list[tuple[float, float]]) -> float | None:
     # ``None``, never 0.0, where no cell carried an envelope: nothing watched for a suspend.
-    total: float | None = None
-    for rec in rows:
-        if rec.get("record_type") != "sample_scored":
-            continue
-        facts = SampleScoredRecord.model_validate(rec).result.facts
-        if facts.cached:
-            continue
-        seconds = facts.pipeline.unworked_s
-        if seconds is None:
-            continue
-        total = (total or 0.0) + max(0.0, seconds)
-    return total
+    return sum(max(0.0, seconds) for _, seconds in unworked) if unworked else None
 
 
-def scan_ledger_answers(ledger_paths: Iterable[Path]) -> set[str]:
-    found: set[str] = set()
-    for path in ledger_paths:
-        found |= _view(path, _Answers)
-    return found
+def _launched[F: tuple[Any, ...]](
+    held: list[Timeline], part: Callable[[Timeline], list[F]], opened: float | None
+) -> list[F]:
+    # A resumed ledger holds earlier launches; the endpoints are THIS launch's, so only its facts fold.
+    facts = (fact for timeline in held for fact in part(timeline))
+    return sorted(
+        (fact for fact in facts if opened is None or fact[0] >= opened), key=lambda f: f[0]
+    )
+
+
+def scan_ledger_answers(spans: Iterable[LedgerSpan]) -> frozenset[str]:
+    held = [LedgerIndex.of(span.path, LEDGER_FOLDS).view(_Answers, span.until) for span in spans]
+    return held[0] if len(held) == 1 else frozenset().union(*held)
 
 
 def scan_ledger_priced_keys(ledger_paths: Iterable[Path]) -> set[str]:
-    found: set[str] = set()
-    for path in ledger_paths:
-        for rec in iter_jsonl(path, record_types=frozenset({"priced_key"})):
-            value = rec.get("priced_key")
-            if isinstance(value, str):
-                found.add(value)
-    return found
+    return {key for path in ledger_paths for key in _view(path, _PricedKeys)}
 
 
 def scan_ledger_spend(spans: Iterable[LedgerSpan]) -> LedgerSpend:
@@ -1110,29 +1183,12 @@ def scan_ledger_wall_clock(
     optimizer_phases: frozenset[str],
 ) -> WallClock:
     """The endpoints are the RUNNER's: the ledger's first record is already past ``init_services``."""
-    rows = [
-        row
-        for ledger_path in ledger_paths
-        for row in iter_jsonl(
-            ledger_path,
-            record_types=frozenset(
-                {"phase", "run_phase", "round_closed", "token_usage", "sample_scored"}
-            ),
-        )
-    ]
+    timelines = [_view(ledger_path, _Timeline) for ledger_path in ledger_paths]
     opened, closed = epoch_seconds(started_at), epoch_seconds(finished_at)
-    # A resumed ledger holds earlier launches; the endpoints are THIS launch's, so only its rows fold.
-    if opened is not None:
-        dated = [
-            (at, r)
-            for r in rows
-            if (at := epoch_seconds(r.get("timestamp"))) is not None and at >= opened
-        ]
-        rows = [r for _, r in sorted(dated, key=lambda pair: pair[0])]
     elapsed = None if opened is None or closed is None else max(0.0, closed - opened)
-    phases = _phase_spans(rows, optimizer_phases)
-    gates = _gate_spans(rows, until=closed)
-    calls = _call_spans(rows, opened=opened)
+    phases = _phase_spans(_launched(timelines, lambda t: t.phases, opened), optimizer_phases)
+    gates = _gate_spans(_launched(timelines, lambda t: t.gates, opened), until=closed)
+    calls = _call_spans(_launched(timelines, lambda t: t.calls, opened), opened=opened)
     covered = _merged([(start, end) for _, start, end in phases] + gates)
     phase_s: dict[str, float] = {}
     for phase, start, end in phases:
@@ -1149,10 +1205,12 @@ def scan_ledger_wall_clock(
         phase_s=phase_s,
         worked_s=worked_s,
         unbracketed_call_s=unbracketed,
-        round_ended_s=_round_ended_seconds(rows, opened=opened),
+        round_ended_s=_round_ended_seconds(
+            _launched(timelines, lambda t: t.closes, opened), opened=opened
+        ),
         gate_s=sum(end - start for start, end in gates),
         unattributed_s=None if elapsed is None else max(0.0, elapsed - held),
-        unworked_s=_unworked_seconds(rows),
+        unworked_s=_unworked_seconds(_launched(timelines, lambda t: t.unworked, opened)),
     )
 
 
@@ -1165,6 +1223,7 @@ __all__ = [
     "LookaheadAsk",
     "PauseAsk",
     "Progress",
+    "StandingProposal",
     "StandingRound",
     "StandingRounds",
     "VerifyLedger",

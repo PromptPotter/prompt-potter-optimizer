@@ -50,13 +50,10 @@ def _audit_round_file(cycle_dir: Path, round_num: int) -> Path:
         layout = CycleLayout(cycle_dir)
         minted = scan_cycle_facts(layout.ledger).minted
         entered = scan_standing_rounds([LedgerSpan(layout.ledger)]).entered
-        if (
-            minted is None
-            or minted.parent_cycle_id is None
-            or (entered is not None and round_num >= entered)
-        ):
+        parent = None if minted is None else minted.parent_cycle_dir(cycle_dir)
+        if parent is None or (entered is not None and round_num >= entered):
             return layout.audit_round_file(round_num)
-        cycle_dir = cycle_dir.parent / minted.parent_cycle_id
+        cycle_dir = parent
 
 
 def _read_audit(path: Path) -> RoundAudit | None:

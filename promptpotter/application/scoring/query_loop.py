@@ -26,7 +26,7 @@ from promptpotter.domain.phases import (
     WalkEnd,
 )
 from promptpotter.domain.results_health import is_deprecated
-from promptpotter.domain.scoring import GradedCell, MeasuredCell, Scorer
+from promptpotter.domain.scoring import GradedCell, MeasuredCell, Scorer, WalkedCell
 from promptpotter.domain.validators import StopRule, StopSignal
 from promptpotter.infrastructure.backend import CELL
 from promptpotter.infrastructure.llm.send_pacing import HELD_POLL_S
@@ -36,7 +36,8 @@ from promptpotter.infrastructure.llm.spend_book import (
     filed,
 )
 from promptpotter.infrastructure.llm.telemetry import (
-    emit_priced_key,
+    claim_campaign_price,
+    emit_race_catch_up,
     emit_sample_scored,
     emit_sample_started,
 )
@@ -49,7 +50,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.results import ScoreSummary
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint
-    from promptpotter.domain.validators import CatchUps
+    from promptpotter.domain.validators import CatchUps, CaughtUp
     from promptpotter.infrastructure.store.measurement_archive import CellClaim
 
 logger = logging.getLogger(__name__)
@@ -162,9 +163,7 @@ class QueryLoopState:
     # ``None`` where nothing is archived or the walk re-measures on purpose.
     claim_cell: Callable[[Sample], Awaitable[tuple[MeasuredCell | None, CellClaim | None]]] | None
     cell_keys: Mapping[int, str]
-    # Shared by every walk, so a replay is metered the first time the campaign reads that cell only.
-    counted: set[str]
-    # Replays already priced when the walk opened: none waits on the ceiling or takes a spend stop.
+    # Replays the bound meter prices nothing for: none waits on the ceiling or takes a spend stop.
     rereads: frozenset[int]
 
     @property
@@ -186,11 +185,11 @@ class QueryLoopState:
                 running=running,
             )
 
-    def priced(self, sample: Sample) -> None:
+    def claim_price(self, sample: Sample) -> bool:
+        """True on its campaign's first reading of the cell, which this call claims: the one a
+        replay is metered on."""
         cell = self.cell_keys.get(sample.id)
-        if cell is not None and cell not in self.counted:
-            self.counted.add(cell)
-            emit_priced_key(cell)
+        return cell is None or claim_campaign_price(cell)
 
 
 def _armed_cells(session: Session) -> int:
@@ -378,14 +377,13 @@ class Walk:
         acq = cell.result()
         del self.finished[acq.idx]
         ctx, n = self.ctx, self.n
-        cell_key = ctx.cell_keys.get(acq.sample.id)
+        first = ctx.claim_price(acq.sample)
         if not acq.fresh:
             # Only if it STAYED a replay: the stale-data protocol may have re-measured for real.
-            if acq.result.facts.cached and (cell_key is None or cell_key not in ctx.counted):
+            if acq.result.facts.cached and first:
                 _emit_cached_step_tokens(acq.result.facts)
         elif acq.deprecated_display is not None:
             ctx.sample_scored(acq.deprecated_display, acq.idx, n, running=None)
-        ctx.priced(acq.sample)
 
         try:
             # Before the snapshot below, which names the cell by its answer's address.
@@ -494,7 +492,7 @@ class Walk:
         if rows:
             self.ctx.recorder.bank(rows)
             for sample in paid:
-                self.ctx.priced(sample)
+                self.ctx.claim_price(sample)
         return samples
 
     def end(
@@ -714,7 +712,7 @@ class _ScoringPhase:
             return self.honour_stop(walk, now)
         if now.settled and now.settle is not None and self.backfills is not None:
             walk.settling = None
-            self.backfills.commit_backfills(now.settle)
+            self.caught_up(walk, self.backfills.commit_backfills(now.settle))
             return self.judged(walk)
         if now.head is not None:
             return self.take_head(walk, now.head)
@@ -875,13 +873,36 @@ class _ScoringPhase:
             walking.collect()
         self.draining.clear()
 
+    def caught_up(self, walk: Walk, caught: CaughtUp | None) -> None:
+        """A catch-up walk is opened with no slot, so its cells reach the ledger here or nowhere."""
+        if caught is None:
+            return
+        slot = walk.ctx.slot
+        assert slot is not None, "a race settles arms, and every arm walks a slot"
+        by_cell: dict[str, dict[str, WalkedCell]] = {}
+        for prior, cells in caught.cells.items():
+            for cell in cells:
+                if (address := cell.address) is not None:
+                    by_cell.setdefault(cell.key, {})[prior] = address
+        for key, taken in by_cell.items():
+            emit_race_catch_up(
+                member=caught.member,
+                candidate_idx=slot.idx,
+                candidate_total=slot.total,
+                sample_key=key,
+                cells=taken,
+            )
+
     def bank(self) -> None:
         for walk in self.live():
             with graceful("Could not bank a stopped walk's returned cells"):
                 sure = walk.bank()
                 if self.backfills is not None:
-                    self.backfills.bank_backfills(
-                        [*sure, walk.settling] if walk.settling is not None else sure
+                    self.caught_up(
+                        walk,
+                        self.backfills.bank_backfills(
+                            [*sure, walk.settling] if walk.settling is not None else sure
+                        ),
                     )
 
     def keep_cut(self) -> None:
@@ -936,7 +957,6 @@ class _ScoringPhase:
             allowed,
             most,
             waiting,
-            self.session.backend_client.backpressure.reading(),
             affordable=(
                 None
                 if book is None or cell is None or self.unbounded

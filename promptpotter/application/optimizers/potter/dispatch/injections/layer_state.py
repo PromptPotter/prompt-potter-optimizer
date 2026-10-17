@@ -106,7 +106,7 @@ def _r_rendered_prompt(b: InjectionBundle) -> list[Item]:
             for field, text in fields
         )
     inner = effective_optimizer_prompts(
-        b.pipeline_schema, b.cycle_slice.pipeline_params, b.inner_optimizer
+        b.pipeline_schema, b.cycle_slice.pipeline_params, b.inner_cells
     )
     if inner:
         sections.append(_OPTIMIZER_PROMPT_HEADER)
@@ -137,24 +137,23 @@ def _r_l1_overrides(b: InjectionBundle) -> list[Item]:
     citable=False,
 )
 def _r_l1_layout(b: InjectionBundle) -> list[Item]:
-    """Listed panel → slot, as an edit is keyed: shown slot → panels, the answer comes back slot-keyed and is refused."""
+    """Listed slot → panels, the shape an edit takes, so each line is an edit ready to answer."""
     steered = b.memory.steered_layout("l1_generate")
     layout = resolve_node_layout("l1_generate") if steered is None else steered
     lines = [
-        f'  "{panel}": "{slot}"'
+        f'  "{slot}": {json.dumps([p for p in layout.slot(slot) if p not in b.silent_l1_panels])}'
         for slot in L1_LAYOUT_SLOTS
-        for panel in layout.slot(slot)
-        if panel not in b.silent_l1_panels
     ]
     offered = NODE_LAYOUTS["l1_generate"].possible - b.silent_l1_panels
     if unplaced := sorted(offered - set(layout.all_placeholders())):
-        # The whole edit, ready to copy: a slot left to choose comes back as the axis under repair.
-        lines.append("  in no slot; to place one, answer its line as written:")
-        lines += [f'  "{panel}": "{VOLATILE_SLOT}"' for panel in unplaced]
+        lines.append(
+            f"  in no slot; to place one, add it to a slot's list — {VOLATILE_SLOT!r} unless the "
+            f"failures need it read earlier: {json.dumps(unplaced)}"
+        )
     return [
         Item(
-            "CURRENT L1 LAYOUT — each panel l1_generate reads today, and the slot of ITS OWN "
-            "prompt it fills:\n" + "\n".join(lines)
+            "CURRENT L1 LAYOUT — each slot of l1_generate's OWN prompt, and the panels it reads "
+            "there today:\n" + "\n".join(lines)
         )
     ]
 

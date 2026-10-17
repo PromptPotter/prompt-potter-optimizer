@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "AdaptiveQueueKnobs",
+    "CellStrata",
     "EscalationKnobs",
     "EscalationLadder",
     "L1GenerateKnobs",
@@ -28,6 +29,7 @@ __all__ = [
 ]
 
 PromptBlockCatalogue = Literal["guidance", "restrict", "off"]
+CellStrata = Literal["none", "dataset"]
 
 
 class EscalationLadder(StrEnum):
@@ -69,6 +71,13 @@ class AdaptiveQueueKnobs(StrictModel):
                 "the whole campaign."
             ),
         )
+    )
+
+    strata: Annotated[CellStrata, Knob(Scope.POLICY, Estimand.SELECTION)] = Field(
+        description="What a round's draw is spread over. `none` draws the budget off the whole "
+        "pool; `dataset` gives each dataset its cells measure an equal share — so a mixed pool "
+        "never fills a round from one stratum. A stratum short of its share hands the rest to the "
+        "others."
     )
 
 

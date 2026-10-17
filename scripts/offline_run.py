@@ -1,4 +1,4 @@
-"""The one supported OFFLINE run: a real campaign per installed optimizer on ``justlogic-d234``,
+"""The one supported OFFLINE run: a real campaign per installed optimizer on ``justlogic/d234``,
 every network edge answered in-process, zero spend. What it is for, what it pins and how to read
 it: ``docs/developer/offline-run.md``.
 
@@ -32,7 +32,7 @@ from urllib.parse import urlsplit
 
 import httpx
 import yaml
-from gate import end_children_with_this_process, memory_budget_mb
+from gate import end_children_with_this_process
 from last_green import OFFLINE_RUN, OFFLINE_RUN_READS, LastGreen
 
 from promptpotter.application import optimizers
@@ -41,10 +41,7 @@ from promptpotter.application.campaign_config import (
     OptimizationConfig,
 )
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
-from promptpotter.application.datasets.authored import (
-    dataset_campaign_path,
-    read_campaign_config_file,
-)
+from promptpotter.application.datasets.authored import dataset_campaign_block
 from promptpotter.application.embedded_run import grade_line_bench, open_session, run_campaign
 from promptpotter.application.evidence.read import subject_evidence
 from promptpotter.application.evidence.subjects import SubjectSpec
@@ -59,7 +56,7 @@ from promptpotter.application.pipeline_resolve import (
     resolve_campaign_config,
 )
 from promptpotter.application.runner.inner.connector import measurement_modules
-from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, benchmark_datasets_root
+from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, install_datasets_root
 from promptpotter.config.settings import Settings
 from promptpotter.domain.bench import BenchScore, BenchTrigger
 from promptpotter.domain.campaign import ArmRequest
@@ -72,13 +69,14 @@ from promptpotter.domain.spend import SpendRollup
 from promptpotter.infrastructure.projections.cycle_index import read_cycle_index
 from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.archive_queries import (
+    CampaignWalks,
+    fence_memory,
     list_populations,
     load_population,
-    scope_memory_to_own_answers,
 )
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_answers
 from promptpotter.infrastructure.store.io import rmtree_robust
-from promptpotter.infrastructure.store.layout import CycleLayout
+from promptpotter.infrastructure.store.layout import CycleLayout, dataset_id_prefix
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.cli import campaign_runner
 from promptpotter.shared.errors import ConflictError
@@ -93,7 +91,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.paired_reading import PairedReading
     from promptpotter.infrastructure.store.stores import Stores
 
-DATASET = "justlogic-d234"
+DATASET = "justlogic/d234"
 STAMP = "offline-run.json"
 CONTROLLED = ("controlled", "controlled-bare")
 RESUMED = "resumed"
@@ -102,8 +100,6 @@ INTERRUPTED = {1: "interrupted", 2: "interrupted-twice"}
 INTERRUPT_AT_CELL = 25
 # The Ctrl+C contract is the pause and the resume, not the search: one round ends the cycle soonest.
 TERMINAL_ROUNDS = 1
-# Peak commit of one campaign process `main` forks, rounded up.
-CHILD_MB = 120
 RESUME_APPENDS = ("phases", "run_phases", "candidates_minted", "rulers")
 NOT_A_KEY = "offline-run-not-a-key"
 PROVIDER_KEYS = ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY")
@@ -128,7 +124,8 @@ SCALED: dict[str, dict[str, dict[str, Any]]] = {
     "gepa": {"minibatch": {"config": {"pareto_size": 20}}},
     "levi": {
         "proxy_css": {"config": {"discovery": 40, "size": 10}},
-        "levi_paradigm_shift": {"config": {"interval": 4, "n_diverse_seeds": 2}},
+        "levi_paradigm_shift": {"config": {"interval": 4}},
+        "levi_seed": {"config": {"n_diverse_seeds": 2}},
         "map_elites": {"config": {"centroids": 8, "cvt_samples": 400}},
     },
 }
@@ -575,9 +572,7 @@ def campaign_config(
     optimizer: str, rounds: int, *, bench_trigger: BenchTrigger, pinned: bool = False
 ) -> CampaignConfig:
     """*pinned* seeds every optimizer's draws alike, which arms of one head-to-head must share."""
-    raw = dict(
-        read_campaign_config_file(dataset_campaign_path(benchmark_datasets_root() / DATASET))
-    )
+    raw = dict(dataset_campaign_block(install_datasets_root() / DATASET))
     raw.update(BENCH, bench_trigger=bench_trigger)
     opt = raw["optimization"]
     # The template's node overlay is written for the optimizer it selects, and only that one.
@@ -610,8 +605,7 @@ async def rebound_session(stores: Stores, hop: CycleHop) -> tuple[Session, Campa
     session = await open_session(DATASET, stores=stores)
     config = resolve_campaign_config(stores, campaign, hop)
     configure_and_apply_pipeline(session, config)
-    session.campaign_id = hop.campaign_id
-    session.state.cycle_id = hop.cycle_id
+    session.bind_campaign(hop, arm=campaign.arm)
     return session, config
 
 
@@ -640,7 +634,7 @@ async def run_one(
     install_network(router)
 
     stores = build_stores(default_identity(), projects_root=DEFAULT_PROJECTS_ROOT)
-    stores.tenant_datasets.save_benchmark_rows(DATASET, samples)
+    stores.tenant_datasets.save_materialized_rows(DATASET, samples)
     session = await open_session(DATASET, stores=stores)
     configure_and_apply_pipeline(session, config)
     result = await run_campaign(
@@ -712,10 +706,10 @@ def run_terminal(
     llm = FakeLLM(requests, text_templates(config))
     install_network(Router(llm, FakeBackend(samples, interrupts=interrupts)))
     stores = build_stores(default_identity(), projects_root=DEFAULT_PROJECTS_ROOT)
-    stores.tenant_datasets.save_benchmark_rows(DATASET, samples)
+    stores.tenant_datasets.save_materialized_rows(DATASET, samples)
     declared = workspace / "campaign.yaml"
     declared.write_text(
-        yaml.safe_dump({"campaign_config": config.model_dump(mode="json", exclude_unset=True)}),
+        yaml.safe_dump({"campaign": config.model_dump(mode="json", exclude_unset=True)}),
         encoding="utf-8",
     )
     new = ["new", DATASET, f"--config={declared}"]
@@ -797,16 +791,14 @@ async def run_controlled(
     else:
         raise SystemExit("offline run: a skip on a controlled arm was applied")
 
-    def filed(campaign_id: str) -> set[str]:
-        campaign = stores.campaigns.load_campaign(campaign_id)
-        assert campaign is not None
-        return scan_ledger_answers(
-            CycleLayout(stores.campaigns.cycle_dir(hop)).ledger
-            for hop in stores.campaigns.line(campaign.root_hop)
-        )
+    def walks(campaign_id: str) -> CampaignWalks:
+        return CampaignWalks(stores.campaigns, campaign_id, None)
+
+    def filed(campaign_id: str) -> frozenset[str]:
+        return scan_ledger_answers(walks(campaign_id).spans())
 
     def memory(campaign_id: str) -> set[str]:
-        scope_memory_to_own_answers(filed(campaign_id))
+        fence_memory(walks(campaign_id))
         return {
             answer.answer
             for entry in list_populations(stores, dataset_name=DATASET)
@@ -859,7 +851,7 @@ _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 _EMBEDDED_HEX32 = re.compile(r"[0-9a-f]{32}")
 _SHORT_HEX = re.compile(r"\b[0-9a-f]{6,12}\b")
 _CYCLE_ID = re.compile(r"cycle_[0-9a-f]{8,}")
-_CAMPAIGN_ID = re.compile(re.escape(DATASET) + r"__[0-9a-f]{6}")
+_CAMPAIGN_ID = re.compile(re.escape(dataset_id_prefix(DATASET)) + r"__[0-9a-f]{6}")
 _SESSION_ID = re.compile(r"\bs_[0-9a-f]{8}\b")
 _WIN_PATH = re.compile(r"(?:\\\\\?\\)?[A-Za-z]:[\\/][^\s'\"<>|]*")
 
@@ -1028,7 +1020,7 @@ def extract(cycle: Path, bench: BenchScore | None) -> dict[str, Any]:
         json.loads(p.read_text(encoding="utf-8")) for p in sorted((cycle / "rounds").glob("*.json"))
     ]
     ledger = _jsonl(cycle / ".runtime" / "ledger.jsonl")
-    folded = read_cycle_index(cycle)
+    folded = read_cycle_index(cycle, moment=None)
     assert folded is not None, f"{cycle.name} ran without minting its cycle"
     index = folded.model_dump(mode="json")
     ids = _id_map(ledger, rounds)
@@ -1070,12 +1062,14 @@ def named_home() -> Path:
     return Path(named.removeprefix("\\\\?\\")).expanduser().resolve()
 
 
-def stands_green(home: Path, run: str, key: str | None) -> bool:
+def stands_green(home: Path, run: str, kept: LastGreen | None, key: str | None) -> bool:
+    """Green in the gate's store under these flags, and this home still holds that run."""
+    if kept is None or key is None or not kept.holds(run, key):
+        return False
     try:
-        stamp = json.loads((home / STAMP).read_text(encoding="utf-8"))
+        return bool(json.loads((home / STAMP).read_text(encoding="utf-8")).get("run") == run)
     except (OSError, ValueError):
         return False
-    return key is not None and (stamp.get("run"), stamp.get("green")) == (run, key)
 
 
 def claim_home(home: Path, stamp: dict[str, object]) -> Path:
@@ -1202,7 +1196,7 @@ def main() -> int:
     kept = LastGreen.open()
     key = None if kept is None else kept.key(OFFLINE_RUN_READS)
     home = named_home()
-    if args.against is None and stands_green(home, run, key):
+    if args.against is None and stands_green(home, run, kept, key):
         print(f"offline run: unchanged since green -- {home}")
         return 0
     stamp: dict[str, object] = {"offline": True, "note": LABEL, "run": run}
@@ -1219,8 +1213,9 @@ def main() -> int:
         child_args += [f"--optimizer={name}" for name in arm_names]
     t0 = time.monotonic()
 
-    width = min(8, os.cpu_count() or 2, memory_budget_mb() // CHILD_MB)
-    pool = ThreadPoolExecutor(max(1, width))
+    # Every campaign at once: from 8 to 12 at a time the wall clock measured flat on 12 cores.
+    tasks = len(names) if args.controlled else 2 * len(names) + len(INTERRUPTED)
+    pool = ThreadPoolExecutor(min(tasks, os.cpu_count() or 2))
 
     def run_child(name: str, workspace: Path, log: str, rounds: int, *extra: str) -> int:
         child = [sys.executable, __file__, "--child", name, f"--rounds={rounds}", *child_args]
@@ -1268,9 +1263,9 @@ def main() -> int:
             continue
         if args.controlled:
             continue
-        run = json.loads((workspace / "decisions.json").read_text(encoding="utf-8"))["run"]
+        ran = json.loads((workspace / "decisions.json").read_text(encoding="utf-8"))["run"]
         (cycle,) = (workspace / "projects").glob("*/campaigns/*/cycles/*")
-        bench = run["bench"]
+        bench = ran["bench"]
         failed += not _graded(bench)
         lift = None if bench is None else bench["vs_origin"]["headline"]
         headline = (
@@ -1280,7 +1275,7 @@ def main() -> int:
             if bench is None
             else f"none ({bench['vs_origin']['state']})"
         )
-        print(f"{name}: {run['stop_reason']}, bench lift {headline} -- {cycle}")
+        print(f"{name}: {ran['stop_reason']}, bench lift {headline} -- {cycle}")
         if args.against is not None:
             print(
                 f"{name}: against {args.against}: {moved_against(workspace, args.against / name)}"
@@ -1313,12 +1308,9 @@ def main() -> int:
         print("\n".join(line for line in lines if line.startswith(("skip on", "arm ", "head-to-"))))
     print(f"wall clock {time.monotonic() - t0:.0f}s")
     # Filed only where the sources read the same after the run as before it.
+    # Filed under the flags it ran with: bare, that is the gate's check of the same name.
     if not failed and kept is not None and key == kept.key(OFFLINE_RUN_READS):
-        (home / STAMP).write_text(
-            json.dumps({**stamp, "green": key}, indent=1) + "\n", encoding="utf-8"
-        )
-        if run == OFFLINE_RUN:  # the gate's check of the same name stands on this run too
-            kept.record({OFFLINE_RUN: key})
+        kept.record({run: key})
     return 1 if failed else 0
 
 

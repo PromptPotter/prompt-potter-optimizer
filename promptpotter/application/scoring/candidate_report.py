@@ -14,9 +14,8 @@ from promptpotter.domain.results import (
     ScoredCandidate,
     ScoreSummary,
     is_floor_pinned,
-    measured_cells,
 )
-from promptpotter.domain.ruler import DeltaRuler, ThetaCaveat
+from promptpotter.domain.ruler import CellScopes, DeltaRuler, ThetaCaveat
 from promptpotter.domain.spend import TokenAccount
 from promptpotter.domain.validators import BrokenSignal, StopSignal
 from promptpotter.domain.wounds import (
@@ -102,11 +101,17 @@ def read_breakage(
     )
 
 
-def arm_theta_caveat(rows: Sequence[GradedCell], ruler: DeltaRuler | None) -> ThetaCaveat | None:
-    """Order is severity: a floor-pinned arm has no θ on any scale, so it outranks an unlinked cell."""
+def arm_theta_caveat(
+    rows: Sequence[GradedCell], ruler: DeltaRuler | None, scopes: CellScopes | None
+) -> ThetaCaveat | None:
+    """Order is severity: a floor-pinned arm has no θ on any scale, so it outranks the rest.
+    ``scopes`` is ``None`` only where no scale is read yet (round 0's report)."""
     if is_floor_pinned(rows):
         return ThetaCaveat.FLOOR_PINNED
-    if ruler is not None and ruler.unlinked(measured_cells(rows)):
+    scored = [cell.key for cell in rows if cell.scored]
+    if scopes is not None and scopes.spanned(scored) > 1:
+        return ThetaCaveat.DISJOINT_SCOPES
+    if ruler is not None and ruler.unlinked(scored):
         return ThetaCaveat.UNMEASURED_DELTA
     return None
 
@@ -130,7 +135,7 @@ def build_score_report(
     return ScoredCandidate(
         **score_summary.model_dump(),
         # Read HERE, not at the election: round 0 holds no election fit.
-        theta_caveat=arm_theta_caveat(query_results, None),
+        theta_caveat=arm_theta_caveat(query_results, None, None),
         candidate_id=opt_sp.id,
         label=label,
         changes_description=opt_sp.lineage.changes_description or "",

@@ -1824,6 +1824,9 @@ paths:
         round that never elected reports **no winner** rather than promoting its lone
         candidate.
 
+        An inner course is ONE CELL of its outer candidate and drills by its own path.
+        The client joins nothing to drill.
+
         ONE tree per campaign, and every consumer reads it. There is no `depth` dial:
         two clients choosing different depths for the same served object is how they
         came to disagree. Course recursion is bounded by a server constant instead
@@ -2199,8 +2202,8 @@ paths:
         + its results are preserved,
         renamed out of the way. Server, in crash-safe order:
         1. Renames `projects/{tenant}/datasets/{slug}/` to the smallest free
-           `{slug}-v{n}/` (byte-identical data; self-reference fixed).
-        2. Repoints every dependent campaign — `campaign.yaml::dataset_name`
+           `{slug}-v{n}/` (byte-identical data: a dataset's files never name it).
+        2. Repoints every dependent campaign — `campaign.json::dataset_name`
            and each cycle `index.json::header.dataset_name` — onto `{slug}-vN`,
            and re-stamps that data's measurement-archive entries. After this,
            every prior campaign resolves the exact bytes it always ran on.
@@ -2409,9 +2412,10 @@ paths:
       description: |
         What a dataset DECLARES, under its own campaign template: the node
         graph, each node's params and the reach summed over them, and the
-        pipeline it nests in turn. A fact about a target, not about anyone
-        running it — what a campaign RUNS is `GET /campaigns/{id}/pipeline`.
-        Its one reader walks a `nests` chain below the campaign's own level.
+        pipelines it nests in turn, one per dataset its cells measure. A fact
+        about a target, not about anyone running it — what a campaign RUNS is
+        `GET /campaigns/{id}/pipeline`. Its one reader walks the `nests` tree
+        below the campaign's own level.
         Wire shape: `application/pipeline_resolve.py::DatasetPipelineResponse`.
       tags: [datasets]
       parameters:
@@ -2421,7 +2425,7 @@ paths:
           schema: { type: string, minLength: 1, maxLength: 128 }
       responses:
         '200':
-          description: The dataset's graph, param rows, reach and nested pipeline.
+          description: The dataset's graph, param rows, reach and nested pipelines.
           content:
             application/json:
               schema:
@@ -2721,16 +2725,20 @@ paths:
         operator's `MACHINE_RUN_CAPACITY` ceiling, lowered while the shared
         provider throttle is saturated and never raised above it.
 
-        Occupancy is not relative to who asks: every run counts in `running`
-        and every waiting launch in `queued`. What names a run is scoped to
-        the caller — `queue` and `refused` list only their own launches, and
-        `holder` is served only where the oldest live run is their tenant's
-        (the host reads it whoever owns it), so another tenant's job is a
-        count and never an id.
+        Occupancy is not relative to who asks: `occupied` counts EVERY held slot.
+        Which slots are NAMED is: `running` lists the caller's own, oldest first —
+        every slot to the host, or to anyone under `MACHINE_STATUS_SCOPE=all` —
+        and each slot's `holder` says by `kind` whether a campaign
+        run (`campaign_launch`) or a paid verb's scoring pass (`scoring_pass`,
+        with its `verb`) holds it. What IS relative to the caller is answered
+        here, never by a client comparing ids: a slot's `mine` (their account
+        holds it — the webapp's active-jobs dock lists their own passes off it),
+        `queue` (only their waiting launches; everyone else's are counted in
+        `queued`) and `refused`.
       tags: [Sessions]
       responses:
         '200':
-          description: Machine occupancy, and the oldest live run where the caller may see it.
+          description: Machine occupancy and every job holding a slot.
           content:
             application/json:
               schema:
@@ -3149,11 +3157,13 @@ components:
               carrying the smallest free `{slug}-{n}`, and `slug` (the colliding
               name) so the chat can offer "use existing / save as new".
             * `machine_busy` — **no launch command returns this.** A full box
-              QUEUES rather than refuses, so `mint-campaign`, `start-checkin`,
-              `start-run` and `fork-cycle` all accept and the launch waits its
-              turn. The code survives for the terminal's `--no-wait`, which asks
-              to be refused instead; it carries the holder presence record
-              `holder_user`, `campaign_id`, `cycle_id`, `started_at`. What the
+              QUEUES a launch rather than refusing it, so `mint-campaign`,
+              `start-checkin`, `start-run` and `fork-cycle` all accept and the
+              launch waits its turn. A scoring pass (`verify`, `bench`) never
+              queues — its caller waits on the answer — so a full box refuses
+              it with this code, as it does the terminal's `--no-wait`. It
+              carries the oldest slot: `holding` (what holds it, in words),
+              `holder_user`, `started_at`. What the
               webapp reads is `GET /machine-status` — occupancy, and the
               caller's own place in line.
             * `cycle_busy` (409 on `start-run`, `step-cycle` and
@@ -3183,7 +3193,7 @@ components:
             * `origin_incomplete` (422 on `/commands/start-checkin`)
               — `gaps`: a list of `{field, reason, hint}` objects naming each
               origin field that still blocks mint. `reason` ∈ `unset` |
-              `proposed_unconfirmed`. The deterministic origin-readiness
+              `proposed_unconfirmed` | `conflict`. The deterministic origin-readiness
               checklist — not the operator — is the source of truth for
               completeness (see `docs/specs/roadmap.md`).
             * `stored_config_invalid` (500 on any read of a stored config the

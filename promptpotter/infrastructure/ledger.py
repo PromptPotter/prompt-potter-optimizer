@@ -9,14 +9,13 @@ from pydantic import ValidationError
 
 from promptpotter.domain.cycle_paths import CycleDir, WorkspaceDir
 from promptpotter.domain.run_records import (
-    FORK_DIRECTION,
     RECORD_ADAPTER,
     CycleMintedRecord,
     CycleRecord,
-    ForkDirection,
 )
 from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_cycle_facts
+from promptpotter.infrastructure.store.io import append_line
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import LedgerSpan, Moment, appended_here
 
@@ -25,32 +24,35 @@ logger = logging.getLogger(__name__)
 __all__ = ["CycleEventLog", "continued_chain", "ledger_chain", "open_with_history"]
 
 
-def _fork_link(cycle_dir: Path) -> CycleMintedRecord | None:
+def _fork_link(cycle_dir: Path) -> tuple[CycleMintedRecord, Path] | None:
     minted = scan_cycle_facts(CycleLayout(cycle_dir).ledger).minted
-    return None if minted is None or minted.parent_cycle_id is None else minted
+    parent = None if minted is None else minted.parent_cycle_dir(cycle_dir)
+    return None if minted is None or parent is None else (minted, parent)
 
 
 def _fork_prefix(cycle_dir: CycleDir, *, continued: bool = False) -> list[tuple[Path, int]]:
     prefix: list[tuple[Path, int]] = []
     child_dir = Path(cycle_dir)
-    seen = {child_dir.name}
+    # By resolved dir: two trees can hold the same cycle id.
+    seen = {child_dir.resolve()}
     while (link := _fork_link(child_dir)) is not None:
-        parent_id, cut, spec = link.parent_cycle_id, link.forked_at_offset, link.fork
-        assert parent_id is not None and cut is not None and spec is not None
-        if continued and FORK_DIRECTION[spec.trigger] is ForkDirection.OFFSHOOT:
+        minted, parent_dir = link
+        cut, spec = minted.forked_at_offset, minted.fork
+        assert cut is not None and spec is not None
+        if continued and not spec.traits.continues_scale:
             break
-        if parent_id in seen:
+        if parent_dir.resolve() in seen:
             raise ValueError(
-                f"{child_dir}: parent_cycle_id {parent_id!r} is already on this fork chain — "
+                f"{child_dir}: parent {parent_dir} is already on this fork chain — "
                 "the mints describe a cycle, which no walk can resolve."
             )
-        seen.add(parent_id)
-        child_dir = child_dir.parent / parent_id
+        seen.add(parent_dir.resolve())
+        child_dir = parent_dir
         prefix.append((CycleLayout(child_dir).ledger, cut))
     return prefix[::-1]
 
 
-def ledger_chain(cycle_dir: CycleDir, moment: Moment | None = None) -> list[LedgerSpan]:
+def ledger_chain(cycle_dir: CycleDir, *, moment: Moment | None) -> list[LedgerSpan]:
     chain = [
         *(LedgerSpan(path, cut) for path, cut in _fork_prefix(cycle_dir)),
         LedgerSpan(CycleLayout(Path(cycle_dir)).ledger),
@@ -58,12 +60,13 @@ def ledger_chain(cycle_dir: CycleDir, moment: Moment | None = None) -> list[Ledg
     return chain if moment is None else moment.spans(chain)
 
 
-def continued_chain(cycle_dir: CycleDir) -> list[LedgerSpan]:
-    """Stops at an OFFSHOOT cut: what only a continuation inherits (the δ scale) is read over it."""
-    return [
+def continued_chain(cycle_dir: CycleDir, *, moment: Moment | None) -> list[LedgerSpan]:
+    """Stops at a cut that continues no scale: what only a continuation inherits (the δ scale) is read over it."""
+    chain = [
         *(LedgerSpan(path, cut) for path, cut in _fork_prefix(cycle_dir, continued=True)),
         LedgerSpan(CycleLayout(Path(cycle_dir)).ledger),
     ]
+    return chain if moment is None else moment.spans(chain)
 
 
 def open_with_history(cycle_dir: CycleDir) -> CycleEventLog:
@@ -114,22 +117,13 @@ class CycleEventLog:
         # A scored cell's five appends are five moments, never one record: the hold before its send
         # (ADR-0003), a bill per send, the start as the live marker, the priced key, the score.
         raw = RECORD_ADAPTER.dump_json(record, fallback=str)
-        line = raw + b"\n"
-        try:
-            fh = self._path.open("ab")
-        except FileNotFoundError:
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-            fh = self._path.open("ab")
-        with fh:
-            fh.write(line)
-            fh.flush()
-            end = fh.tell()
+        written = append_line(self._path, raw)
         # The offset is the record's LINE, so what another writer appended since is fanned out first.
-        self._catch_up(end - len(line))
+        self._catch_up(written.start)
         offset = self._next_offset
-        self._next_offset, self._end = offset + 1, end
+        self._next_offset, self._end = offset + 1, written.stop
         # The run's own controls poll this ledger per cell; its own appends must not cost them a read.
-        appended_here(self._path, raw, range(end - len(line), end))
+        appended_here(self._path, raw, written)
         self._fan_out(record, offset)
         return offset
 

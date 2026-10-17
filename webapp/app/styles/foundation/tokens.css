@@ -20,10 +20,11 @@
   --series-elected:var(--color-accent);
   --series-reading:rgba(var(--color-accent-rgb),0.45);
   --series-counterfactual:rgba(var(--color-accent-rgb),0.70);
-  --chart-series-1:#4f8ef7; --chart-series-2:#e8833a;
-  --chart-series-3:#3fb27f; --chart-series-4:#c9639e;
-  --chart-series-5:#d4b02c; --chart-series-6:#6f6bd8;
-  --chart-series-7:#4bb3c4; --chart-series-8:#b5603f;
+  /* Categorical inks in the theme's own register (BRAND.md: molten on dark, no rainbow, green is gain only); neighbours alternate lightness. */
+  --chart-series-1:#f59e0b; --chart-series-2:#ea580c;
+  --chart-series-3:#ede9e1; --chart-series-4:#b45309;
+  --chart-series-5:#fcd34d; --chart-series-6:#9a3412;
+  --chart-series-7:#b5afa5; --chart-series-8:#fb923c;
   --box-min:26rem;
   --box-gap:var(--space-14);
   --box-scroll-max:60dvh;

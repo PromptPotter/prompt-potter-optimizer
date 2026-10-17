@@ -19,7 +19,6 @@ from promptpotter.domain.pipeline_overlay import (
 )
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
 from promptpotter.domain.run_records import (
-    FORK_DIRECTION,
     BenchCheckpointKind,
     ForkDirection,
     ForkSpec,
@@ -57,49 +56,51 @@ class ForkResult(NamedTuple):
 def _fork_sibling_setup(
     campaign_store: CampaignStore,
     parent: CycleHop,
-    new_cycle_id: str,
+    child: CycleHop,
     *,
     from_round: int,
     payload: ForkSpec,
 ) -> None:
     parent_dir = campaign_store.cycle_dir(parent)
-    new_dir = campaign_store.cycle_dir(parent.model_copy(update={"cycle_id": new_cycle_id}))
+    new_dir = campaign_store.cycle_dir(child)
     if new_dir.exists():
         raise FileExistsError(f"forked cycle dir already exists: {new_dir}")
     new_dir.mkdir(parents=True, exist_ok=True)
-
-    record_data: dict[str, Any] = {
-        "forked_at": utcnow_iso(),
-        "fork": payload.model_dump(mode="json"),
-    }
 
     with graceful("FORK_CUT decision append failed"):
         record_decision(
             CycleEventLog.open(CycleDir(parent_dir)),
             BenchCheckpointKind.FORK_CUT,
             {"from_round": from_round},
-            new_cycle_id,
+            child.cycle_id,
             node=None,
-            data=record_data,
+            data={"forked_at": utcnow_iso(), "fork": payload.model_dump(mode="json")},
         )
 
-    save_active_pointer(
-        campaign_store.workspace, parent.model_copy(update={"cycle_id": new_cycle_id})
-    )
+    save_active_pointer(campaign_store.workspace, child)
     logger.info(
         "Forked %s → %s at round %d [trigger=%s] (active pointer retargeted)",
         parent.cycle_id,
-        new_cycle_id,
+        child.cycle_id,
         from_round,
         payload.trigger.value,
     )
-    # After the FORK_CUT, so the cut the mint reads off the parent's ledger includes it.
-    campaign_store.mint_fork_cycle(parent, new_cycle_id, payload, from_round=from_round)
+    # Read after the FORK_CUT, the only moment the offset is true of a parent still running.
+    campaign_store.mint_fork_cycle(
+        child,
+        parent_dir,
+        payload,
+        cut=CycleEventLog.open(CycleDir(parent_dir)).next_offset,
+        from_round=from_round,
+    )
+    # No override reaches `dataset_split`, so the parent's draw is the fork's.
+    drawn = campaign_store.read_bank_partition(parent)
+    if drawn is None:
+        raise FileNotFoundError(f"fork parent {parent.cycle_id} holds no bank partition")
+    campaign_store.write_bank_partition(child, drawn)
     if payload.seed is not None:
         # Without its own record a rebase's config unlock silently re-locks on the fork's first `resume`.
-        campaign_store.write_cycle_seed(
-            parent.model_copy(update={"cycle_id": new_cycle_id}), payload.seed
-        )
+        campaign_store.write_cycle_seed(child, payload.seed)
 
 
 def _next_diag_sibling_id(
@@ -127,14 +128,19 @@ _REBASE_TRIGGERS = frozenset(
     }
 )
 
-# A non-rebase branches from the origin and lifts no parent round, so its only cut is 0.
-_ZERO_ROUND_TRIGGERS = frozenset(ForkTrigger) - _REBASE_TRIGGERS
-
 
 def _fork_suffix(*parts: str) -> str:
     """The clock, at MICROSECOND resolution, is all that separates two forks of one parent: *parts* cannot."""
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
     return stable_hash([*parts, stamp], length=8)
+
+
+def _sibling_id(campaign_store: CampaignStore, parent: CycleHop, payload: ForkSpec) -> str:
+    if payload.trigger in _REBASE_TRIGGERS:
+        return f"{parent.cycle_id}_fork_{_fork_suffix(parent.cycle_id)}"
+    if payload.trigger is ForkTrigger.OPERATOR_DIAG:
+        return _next_diag_sibling_id(campaign_store, parent.campaign_id, parent.cycle_id)
+    return f"{root_cycle_id(parent.cycle_id)}_fork_{_fork_suffix(parent.cycle_id, 'operator')}"
 
 
 def mint_fork(
@@ -146,30 +152,24 @@ def mint_fork(
     """``fork_from_round`` is MECHANICAL (parent rounds lifted); ``ForkSpec.from_round`` is PROVENANCE."""
     if payload.from_round is None:
         payload = payload.model_copy(update={"from_round": fork_from_round})
-    if payload.trigger in _ZERO_ROUND_TRIGGERS and fork_from_round != 0:
+    # A cut continuing no scale branches from the origin and lifts no parent round.
+    if not payload.traits.continues_scale and fork_from_round != 0:
         raise ValueError(
             f"mint_fork({payload.trigger.value}) branches from the origin and lifts no parent "
             f"round, so fork_from_round must be 0; got {fork_from_round}"
         )
-    if payload.trigger in _REBASE_TRIGGERS:
-        new_cycle_id = f"{parent.cycle_id}_fork_{_fork_suffix(parent.cycle_id)}"
-    elif payload.trigger is ForkTrigger.OPERATOR_DIAG:
-        new_cycle_id = _next_diag_sibling_id(campaign_store, parent.campaign_id, parent.cycle_id)
-    else:
-        new_cycle_id = (
-            f"{root_cycle_id(parent.cycle_id)}_fork_{_fork_suffix(parent.cycle_id, 'operator')}"
-        )
+    child = parent.model_copy(update={"cycle_id": _sibling_id(campaign_store, parent, payload)})
     _fork_sibling_setup(
         campaign_store,
         parent,
-        new_cycle_id,
+        child,
         from_round=fork_from_round,
         payload=payload,
     )
     # An offshoot's parent keeps running, hence the DIRECTION.
-    if FORK_DIRECTION.get(payload.trigger) is ForkDirection.SUPERSEDE:
-        campaign_store.mark_superseded(parent, new_cycle_id)
-    return new_cycle_id
+    if payload.traits.direction is ForkDirection.SUPERSEDE:
+        campaign_store.mark_superseded(parent, child.cycle_id)
+    return child.cycle_id
 
 
 def declare_steered_values(seed: CycleSeed, narrowing: Mapping[str, Any] | None) -> CycleSeed:
@@ -230,7 +230,7 @@ def mint_operator_fork(
         caps = fork_remainder(stores, hop).under(seed.config_overrides)
         seed = seed.model_copy(update={"config_overrides": caps})
     if not from_candidate_id and not keep_rounds:
-        origin_round = stores.campaigns.standing_rounds(hop).rounds.get(0)
+        origin_round = stores.campaigns.standing_rounds(hop, moment=None).rounds.get(0)
         if origin_round is not None and origin_round.close.candidate_scores:
             from_candidate_id = origin_round.close.candidate_scores[0].candidate_id
     spec = ForkSpec(

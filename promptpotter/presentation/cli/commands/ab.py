@@ -34,7 +34,8 @@ def _target(args: argparse.Namespace, stores: Stores) -> CycleHop:
     pointer = active_pointer(stores)
     if pointer.campaign_id is None or pointer.cycle_id is None:
         raise SystemExit(
-            "ERROR: no active campaign — pass --campaign, or start one:\n\n" + no_dataset_hint()
+            "ERROR: no active campaign — pass --campaign, or start one:\n\n"
+            + no_dataset_hint(stores)
         )
     return CycleHop(
         campaign_id=pointer.campaign_id,

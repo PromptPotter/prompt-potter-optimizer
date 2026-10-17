@@ -95,7 +95,7 @@ test.describe("a campaign, end to end", () => {
     await open(page, made!.addr);
     await passConsent(page);
 
-    // Candidate WIDTH is not set here: it rides `datasets/{name}/campaign.yaml`.
+    // Candidate WIDTH is not set here: it rides the dataset definition's `campaign` section.
     const capped = await command(request, "edit-draft-campaign", {
       draft_id: made!.id,
       patch: { optimization_overrides: { max_rounds: WANT_ROUNDS - 1 } },

@@ -5,15 +5,12 @@ from collections import Counter
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from itertools import pairwise, zip_longest
-from typing import Any
+from typing import Any, NamedTuple
 
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     ANSWER_LABEL_STEM,
     ANSWER_TALLY_ROWS,
     INNER_NARRATIVE_CAP,
-    INNER_NARRATIVE_FULL_CELLS,
-    INNER_NARRATIVE_RENDER_CAP,
-    INNER_NARRATIVE_SUMMARY_CAP,
     LOST_CELL_MIN,
     MEMORY_FIELD_CAP,
     MEMORY_ROUND_CAP,
@@ -434,26 +431,46 @@ def _paired_cell(
     return (lift - base, bar)
 
 
-def _narrated_cells(b: InjectionBundle) -> list[tuple[float, float, float | None, GradedCell]]:
+def _paired_bench(r: GradedCell, origin: GradedCell | None) -> float | None:
+    """The scored term, paired the same way; it carries no SE, so the θ pair keeps the ranking."""
+    own = r.facts.pipeline.mean_bench_lift
+    base = origin.facts.pipeline.mean_bench_lift if origin is not None else None
+    if own is None or base is None:
+        return None
+    return own - base
+
+
+class _NarratedCell(NamedTuple):
+    upper: float
+    theta: float
+    bar: float | None
+    bench: float | None
+    paired: bool
+    cell: GradedCell
+
+
+def _narrated_cells(b: InjectionBundle) -> list[_NarratedCell]:
     """Ranked on the upper bound: a point-estimate rank leads with whichever cell noise put first."""
-    origin = {r.sample_id: r for r in b.origin_per_sample}
+    origin = {r.key: r for r in b.origin_per_sample}
     cells = []
     for lift, r in _inner_narrated(b):
-        # At the origin the paired difference is a cell against itself, a `+0.000` that is no null.
+        o = origin.get(r.key)
+        # The origin's own measurement pairs with nothing: differenced with itself it reads `+0.000`, no null.
+        paired = o is not None and o is not r and o.facts.answer != r.facts.answer
         d, bar = (
-            (lift, r.facts.pipeline.mean_parent_level_se)
-            if b.is_origin_round
-            else _paired_cell(lift, r, origin.get(r.sample_id))
+            _paired_cell(lift, r, o) if paired else (lift, r.facts.pipeline.mean_parent_level_se)
         )
-        cells.append((d + _CELL_SEPARATION_SIGMAS * (bar or 0.0), d, bar, r))
-    cells.sort(key=lambda c: c[0])
+        bench = _paired_bench(r, o) if paired else r.facts.pipeline.mean_bench_lift
+        upper = d + _CELL_SEPARATION_SIGMAS * (bar or 0.0)
+        cells.append(_NarratedCell(upper, d, bar, bench, paired, r))
+    cells.sort(key=lambda c: c.upper)
     return cells
 
 
 def clustered_sample_ids(b: InjectionBundle) -> list[int]:
     """The rows a critique cluster may span, and the only ones a panel marks ``[#id]``: the misses shown and the cells edits keep losing, or one level up the narrated cells."""
     if narrated := _narrated_cells(b):
-        return [r.sample_id for *_, r in narrated[:INNER_NARRATIVE_RENDER_CAP]]
+        return [c.cell.sample_id for c in narrated]
     return [
         *(r.sample_id for _, r in _shown_misses(b)),
         *(sid for sid, _ in _repeatedly_lost(_edits(b))),
@@ -470,51 +487,41 @@ def _r_inner_narratives(b: InjectionBundle) -> list[Item]:
     cells = _narrated_cells(b)
     if not cells:
         return []
-    n_worse = sum(1 for c in cells if c[0] < 0.0)
     unit = b.measured_unit
-    shown = cells[:INNER_NARRATIVE_RENDER_CAP]
-    held = (
-        f", the {len(shown)} weakest shown and {len(cells) - len(shown)} not rendered"
-        if len(shown) < len(cells)
-        else ""
+    edited = [c for c in cells if c.paired]
+    n_worse = sum(1 for c in edited if c.upper < 0.0)
+    header = (
+        f"INNER RUN NARRATIVES ({len(cells)} inner campaigns, one per outer {unit}, weakest first "
+        "— those are the ones with something to learn from, so ground every candidate in a "
+        "specific observation from one of them. `bench` is that seed's held-out lift under the "
+        "optimizer prompts that ran it (the scored term), `th` the search pool's with ± its error "
+        "bar. A line marked `vs origin` ran under an EDITED optimizer prompt and reads as the "
+        "DIFFERENCE from the same seed under the unedited prompts, so the seed's own difficulty "
+        "is already subtracted"
     )
-    if b.is_origin_round:
-        header = (
-            f"INNER RUN NARRATIVES ({len(cells)} inner campaigns, one per outer {unit}{held}. This is "
-            "the ORIGIN round: the optimizer prompts are UNEDITED, so each number is that seed's "
-            "own lift under them and ± is its error bar. There is no edit to compare against yet, "
-            "so do not read these as gains over anything. Weakest first — those are the ones with "
-            "something to learn from; ground every candidate in a specific observation from one "
-            "of them:"
+    if edited and n_worse:
+        header += f"; {n_worse} of those {len(edited)} are worse than the origin beyond their own error bar"
+    elif edited:
+        header += (
+            f"; none of those {len(edited)} separates from the origin beyond its own error bar, "
+            "so their ORDER carries no information"
         )
-        full_cells = INNER_NARRATIVE_FULL_CELLS
-    else:
-        header = (
-            f"INNER RUN NARRATIVES ({len(cells)} inner campaigns this round, one per outer "
-            f"{unit}{held}. "
-            "Each number is that seed's lift MINUS what the same seed scored under the unedited "
-            "optimizer prompts, so the seed's own difficulty is already subtracted; ± is the error "
-            "bar on that difference)"
-        ) + (
-            f". The first {n_worse} are worse than the origin by more than their own error bar — "
-            "those are the ones with something to learn from; ground every candidate in a specific "
-            "observation from one of them:"
-            if n_worse
-            else f". NOT ONE {unit} separates from the origin beyond its own error bar, so their "
-            f"ORDER here carries no information — do not ground an edit in a {unit}'s rank. Read "
-            "the narratives for what the inner loop actually did:"
-        )
-        full_cells = (
-            min(n_worse, INNER_NARRATIVE_FULL_CELLS) if n_worse else INNER_NARRATIVE_FULL_CELLS
-        )
-    sections = [Item(header)]
-    for i, (_upper, d, bar, r) in enumerate(shown):
+    sections = [Item(header + ":")]
+    for c in cells:
+        r = c.cell
         label = str(r.facts.query or "inner")[:80]
-        mark = f"{d:+.3f}" + (f" ±{bar:.3f}" if bar is not None else " (unpriced)")
+        bench = f"bench {c.bench:+.3f} · " if c.bench is not None else ""
+        mark = (
+            f"{bench}th {c.theta:+.3f}"
+            + (f" ±{c.bar:.3f}" if c.bar is not None else " (unpriced)")
+            + (" vs origin" if c.paired else "")
+        )
         trace = r.facts.pipeline.reasoning_trace or ""
-        cap = INNER_NARRATIVE_CAP if i < full_cells else INNER_NARRATIVE_SUMMARY_CAP
         sections.append(
-            Item(f"[#{r.sample_id}] {label} {mark}\n{_head_at_line(trace, cap)}", trusted=False)
+            Item(
+                f"[#{r.sample_id}] {label} {mark}\n{_head_at_line(trace, INNER_NARRATIVE_CAP)}",
+                trusted=False,
+            )
         )
     return sections
 
@@ -598,7 +605,7 @@ def _miss_difficulty(b: InjectionBundle, cell: GradedCell) -> float | None:
     ruler = b.ruler
     if ruler is None:
         return None
-    return ruler.delta.get(cell.ruler_key)
+    return ruler.delta.get(cell.key)
 
 
 def _verifier_outcome(cell: GradedCell) -> str:
@@ -1080,7 +1087,13 @@ def _r_confounds(b: InjectionBundle) -> list[Item]:
     rows: list[str] = []
     a = d.ability
     caveat = a.caveat if a is not None else None
-    if b.ruler is None:
+    if caveat is ThetaCaveat.DISJOINT_SCOPES:
+        rows.append(
+            f"DISJOINT DATASETS — this round's {unit_plural(b.measured_unit)} measure more than "
+            "one dataset, and a difficulty is fitted within one only, so θ averages scales that "
+            "never shared a cell. Read the lift paired on shared cells, never the level."
+        )
+    elif b.ruler is None:
         rows.append(
             "COLD RULER — θ is logit-accuracy on each arm's OWN subset, not a shared scale. Two θ "
             "here are comparable to each other and to nothing else."

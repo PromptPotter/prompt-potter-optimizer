@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection, Iterable, Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from typing import TYPE_CHECKING
 
 from promptpotter.application.intelligence.adaptive_queue_mechanism import (
@@ -60,31 +60,39 @@ def build_hard_samples(
     *,
     frontier: tuple[float, float] | None,
     arm_theta: Mapping[str, float],
-    parent_grades: Mapping[int, float],
+    parent_grades: Mapping[str, float],
+    slots: Mapping[str, int],
     cycle_id: str | None,
 ) -> HardSamples:
+    """*slots* places each ``Sample.key`` at its row in the dataset served: a cell no row holds is not drawn."""
     standing = RulerStanding.of(ruler)
-    carried = ruler.delta if ruler is not None else {}
-    measured = sorted({o.sample_id for o in observations})
+    carried = (
+        {key: (d, ruler.delta_se[key]) for key, d in ruler.delta.items() if key in slots}
+        if ruler is not None
+        else {}
+    )
+    measured = {o.key for o in observations if o.key in slots}
 
-    def difficulty(sid: int) -> SampleDifficulty:
+    def difficulty(key: str) -> SampleDifficulty:
         pick: float | None = None
-        if ruler is None or sid not in carried:
+        if ruler is None or key not in carried:
             return SampleDifficulty.on(standing, None, pick_score=pick)
-        delta, se = carried[sid], ruler.delta_se[sid]
+        delta, se = carried[key]
         if frontier is not None:
             mu, mu_se = frontier
             var = ruler.sigma_theta * ruler.sigma_theta
             pick = pick_value(mu, var, mu, mu_se * mu_se, delta, se)
         return SampleDifficulty.on(standing, (delta, se), pick_score=pick)
 
-    def sample_key(sid: int) -> tuple[int, float, int]:
-        return (0, -carried[sid], sid) if sid in carried else (1, 0.0, sid)
+    def rank(key: str) -> tuple[int, float, int]:
+        return (0, -carried[key][0], slots[key]) if key in carried else (1, 0.0, slots[key])
 
     def candidate_key(cid: str) -> tuple[int, float, str]:
         return (0, -arm_theta[cid], cid) if cid in arm_theta else (1, 0.0, cid)
 
     candidate_order = sorted({o.candidate_id for o in observations}, key=candidate_key)
+    held = sorted({*carried, *measured}, key=slots.__getitem__)
+    key_at = {slots[key]: key for key in measured}
     return HardSamples(
         schema_version=HARD_SAMPLES_VERSION,
         cycle_id=cycle_id,
@@ -92,35 +100,38 @@ def build_hard_samples(
         ruler=standing,
         candidate_order=candidate_order,
         theta={cid: arm_theta[cid] for cid in candidate_order if cid in arm_theta},
-        sample_order=sorted(measured, key=sample_key),
-        samples={sid: difficulty(sid) for sid in sorted({*carried, *measured})},
-        round_order=build_round_order(parent_grades, ruler, measured),
+        sample_ids={key: slots[key] for key in held},
+        sample_order=sorted(measured, key=rank),
+        samples={key: difficulty(key) for key in held},
+        round_order=[key_at[sid] for sid in build_round_order(parent_grades, ruler, key_at)],
         cells=[
-            HardSampleCell(candidate=o.candidate_id, sample_id=o.sample_id, fitness=o.response)
+            HardSampleCell(candidate=o.candidate_id, sample_key=o.key, fitness=o.response)
             for o in observations
+            if o.key in slots
         ],
     )
 
 
 def rank_hard_samples(
     view: HardSamples,
-    sample_ids: Iterable[int],
+    rows: Mapping[str, int],
     *,
-    measured: Collection[int],
+    measured: Collection[str],
     order: HardSampleOrder,
-) -> tuple[HardSampleOrder, list[int]]:
-    picks = {sid: on.pick_score for sid, on in view.samples.items() if on.pick_score is not None}
-    deltas = {sid: on.delta for sid, on in view.samples.items() if on.delta is not None}
+) -> tuple[HardSampleOrder, list[str]]:
+    """*rows* places each sample key to rank at its row, which breaks every tie."""
+    picks = {k: on.pick_score for k, on in view.samples.items() if on.pick_score is not None}
+    deltas = {k: on.delta for k, on in view.samples.items() if on.delta is not None}
     resolved: HardSampleOrder = order if picks else "difficulty"
     keys = picks if resolved == "info_gain" else deltas
 
-    # An unmeasured sample carries a δ it never earned in this scope, so it trails by id.
-    def rank(sid: int) -> tuple[int, float, int]:
-        if sid not in measured:
-            return (2, 0.0, sid)
-        return (0, -keys[sid], sid) if sid in keys else (1, 0.0, sid)
+    # An unmeasured sample carries a δ it never earned in this scope, so it trails by row.
+    def rank(key: str) -> tuple[int, float, int]:
+        if key not in measured:
+            return (2, 0.0, rows[key])
+        return (0, -keys[key], rows[key]) if key in keys else (1, 0.0, rows[key])
 
-    return resolved, sorted(sample_ids, key=rank)
+    return resolved, sorted(rows, key=rank)
 
 
 def read_hard_samples(path: Path) -> HardSamples | None:

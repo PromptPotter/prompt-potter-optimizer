@@ -76,6 +76,7 @@ def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> None:
         frontier=frontier,
         arm_theta=arm_theta,
         parent_grades=parent_grades(cycle.tracking.current_results),
+        slots={s.key: int(s.id) for s in session.samples},
         cycle_id=session.state.cycle_id,
     )
     with graceful("hard_samples.json write failed"):
@@ -103,11 +104,11 @@ def _load_p_best_trajectory(
     return trajectory, last_seen
 
 
-def _sample_queries(rounds: list[RoundResult]) -> dict[int, str]:
-    out: dict[int, str] = {}
+def _sample_queries(rounds: list[RoundResult]) -> dict[str, str]:
+    out: dict[str, str] = {}
     for rr in rounds:
         for cell in rr.results:
-            out.setdefault(cell.sample_id, cell.facts.query)
+            out.setdefault(cell.key, cell.facts.query)
     return out
 
 
@@ -176,7 +177,10 @@ def from_disk_log(
     if hard_samples is not None:
         measured = hard_samples.sample_order
         resolved, ranked = rank_hard_samples(
-            hard_samples, measured, measured=set(measured), order=hard_sample_order
+            hard_samples,
+            {key: hard_samples.sample_ids[key] for key in measured},
+            measured=set(measured),
+            order=hard_sample_order,
         )
         hard = HardSamplesView(
             artifact=hard_samples,
@@ -216,12 +220,12 @@ def write_log_md(session: Session, config: CampaignConfig) -> None:
 
 
 def _spend_by_round(layout: CycleLayout) -> dict[int, SpendRollup]:
-    return scan_ledger_spend_by_round(ledger_chain(CycleDir(layout.cycle_dir)))
+    return scan_ledger_spend_by_round(ledger_chain(CycleDir(layout.cycle_dir), moment=None))
 
 
 def _render_cycle_log_md(session: Session, config: CampaignConfig) -> None:
     store, hop = session.store.campaigns, session.hop
-    index = store.load(hop)
+    index = store.load(hop, moment=None)
     if not index:
         return
     rounds = _banked_rounds(session, hop)
@@ -245,7 +249,7 @@ def _render_campaign_log_md(session: Session) -> None:
     if campaign is None:
         return
     root = campaign.root_hop
-    index = store.load(root)
+    index = store.load(root, moment=None)
     if not index:
         return
     root_layout = CycleLayout(store.cycle_dir(root))
@@ -269,15 +273,15 @@ def _load_sibling_indices(
         for cycle_dir in store.campaign_cycle_dirs(campaign_id)
         if cycle_dir.name != exclude
     )
-    return [index for hop in hops if (index := store.load(hop)) is not None]
+    return [index for hop in hops if (index := store.load(hop, moment=None)) is not None]
 
 
 def _banked_rounds(session: Session, hop: CycleHop) -> list[RoundResult]:
     scoring = session.scoring
     # A run stopped before its origin closed has no round and may have no scorer either.
-    if not session.store.campaigns.standing_rounds(hop).rounds:
+    if not session.store.campaigns.standing_rounds(hop, moment=None).rounds:
         return []
-    return closed_rounds(session.store, hop, scoring.require_scorer())
+    return closed_rounds(session.store, hop, scoring.require_scorer(), moment=None)
 
 
 def publish_export(session: Session) -> None:
@@ -303,7 +307,7 @@ def write_review_md(
         return
     with graceful("review.md render failed"):
         store = session.store.campaigns
-        index = store.load(session.hop)
+        index = store.load(session.hop, moment=None)
         if not index:
             return
         rounds = _banked_rounds(session, session.hop)
@@ -326,6 +330,6 @@ def write_review_md(
             bench=read_cycle_bench(session.store, campaign, session.hop)
             if index.final is not None and campaign is not None
             else None,
-            spend=scan_ledger_spend(ledger_chain(CycleDir(cycle_dir))).spend,
+            spend=scan_ledger_spend(ledger_chain(CycleDir(cycle_dir), moment=None)).spend,
         )
         write_text(CycleLayout(cycle_dir).review_md, content)

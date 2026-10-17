@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from functools import partial
 from typing import TYPE_CHECKING, Any
@@ -13,6 +13,7 @@ from promptpotter.application.optimizers.potter.pobb.checks import (
     PoBBStop,
 )
 from promptpotter.application.optimizers.potter.records import PotterCheckpointKind
+from promptpotter.domain.validators import CaughtUp
 
 if TYPE_CHECKING:
     import asyncio
@@ -76,12 +77,12 @@ class _PriorsAhead:
 class CatchUpPool:
     """Every comparison the stop rule makes is on identical cells; one measurement per (prior, cell)."""
 
-    def __init__(self, check: PoBBCheck, measure: CatchUpFn) -> None:
+    def __init__(self, check: PoBBCheck, measure: CatchUpFn, member: str) -> None:
         self._check = check
         self._measure = measure
+        self._member = member
         self._sps: dict[str, JobSearchPoint] = {}
         self._pending: dict[tuple[str, int], CatchUp] = {}
-        self._on_catch_up: Callable[[int, list[str]], None] | None = None
 
     def admit(self, candidate_id: str, results: Sequence[GradedCell], sp: JobSearchPoint) -> None:
         self._check.register_completed(results, candidate_id=candidate_id)
@@ -91,7 +92,7 @@ class CatchUpPool:
         return [
             cid
             for cid, held in self._check.priors_by_sample.items()
-            if sample.id not in held and (cid, sample.id) not in self._pending
+            if sample.key not in held and (cid, sample.id) not in self._pending
         ]
 
     def start_backfill(self, sample: Sample, room: int) -> list[asyncio.Future[Any]]:
@@ -112,27 +113,26 @@ class CatchUpPool:
     def backfills_for(self, sample: Sample) -> list[asyncio.Future[Any]]:
         return [call for (_, sid), (call, *_) in self._pending.items() if sid == sample.id]
 
-    def commit_backfills(self, sample: Sample) -> None:
+    def commit_backfills(self, sample: Sample) -> CaughtUp | None:
         """In prior order, when a serial round would have measured them, so what reaches disk is the serial round's."""
-        fresh: list[str] = []
-        for cid, held in self._check.priors_by_sample.items():
+        taken: dict[str, Sequence[GradedCell]] = {}
+        for cid in self._check.priors_by_sample:
             backfill = self._pending.pop((cid, sample.id), None)
-            if backfill is None:
-                continue
-            self._check.extend_prior(cid, backfill[1]())
-            if sample.id in held:
-                fresh.append(cid)
-        if fresh and self._on_catch_up is not None:
-            self._on_catch_up(sample.id, fresh)
+            if backfill is not None:
+                taken[cid] = backfill[1]()
+                self._check.extend_prior(cid, taken[cid])
+        return CaughtUp(self._member, taken) if taken else None
 
-    def bank_backfills(self, samples: Sequence[Sample]) -> None:
+    def bank_backfills(self, samples: Sequence[Sample]) -> CaughtUp | None:
         """Written UNGRADED: cells a stopped round's walks were sure to take, so the resume replays them unpaid."""
         wanted = {s.id for s in samples}
+        taken: dict[str, list[GradedCell]] = {}
         for key, (call, commit, _) in list(self._pending.items()):
             landed = call.done() and not call.cancelled() and call.exception() is None
             if key[1] in wanted and landed:
                 del self._pending[key]
-                commit()
+                taken.setdefault(key[0], []).extend(commit())
+        return CaughtUp(self._member, taken) if taken else None
 
     def discard_backfills(self) -> None:
         """Paid and never written: a serial round would never have made these."""
@@ -160,6 +160,7 @@ class PoBBRace(CatchUpPool):
                 ruler=ctx.difficulty.ruler,
             ),
             catch_up,
+            ctx.node,
         )
         self._ctx = ctx
         self._measured_unit = measured_unit
@@ -192,7 +193,6 @@ class PoBBRace(CatchUpPool):
             candidate_id,
             on_snapshot=partial(callbacks.on_race_standing, node, round_num, idx, n),
         )
-        self._on_catch_up = partial(callbacks.on_race_catch_up, node, round_num, idx, n)
 
     def judge(
         self,
@@ -221,13 +221,13 @@ class PoBBRace(CatchUpPool):
                 "leader_label": {**self._parent_label, **labels}[context["leader_id"]],
             }
             inputs["recorded_p_best"] = context["p_best"]
-            # A cell is spelled as its ruler key, a string: a replay re-fits from this JSON record.
-            cells = [str(cell) for cell in fit.cells]
+            # Each cell by its `Sample.key`: a replay re-fits from this JSON record.
+            cells = fit.cells
             data = {
                 "p_best": context["p_best"],
                 "leader_id": context["leader_id"],
                 "paired_breakdown": signal.paired_breakdown,
-                "candidate_sample_ids": cells,
+                "candidate_cells": cells,
                 "prior_histories": {
                     pid: dict(zip(cells, grades, strict=True)) for pid, grades in fit.priors.items()
                 },

@@ -10,6 +10,7 @@ from promptpotter.application.pipeline_resolve import resolve_campaign_config
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.paired_reading import instrument_of
 from promptpotter.domain.results import RoundOutcome, RoundResult
+from promptpotter.domain.ruler import RulerScope
 from promptpotter.domain.scoring import CellSheet, MeasuredCell, WalkedCell
 from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.store.archive_queries import walked_answers
@@ -33,6 +34,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "RoundFileProjection",
+    "campaign_ruler_scope",
     "campaign_scorer",
     "closed_round",
     "closed_rounds",
@@ -48,6 +50,15 @@ def campaign_scorer(stores: Stores, campaign_id: str) -> Scorer | None:
     return scorer_of(
         resolve_campaign_config(stores, campaign, campaign.root_hop), verifier_graded=False
     )
+
+
+def campaign_ruler_scope(stores: Stores, campaign_id: str) -> RulerScope | None:
+    """The scale a campaign's own cells are read on: its scorer over its own dataset."""
+    campaign = stores.campaigns.load_campaign(campaign_id)
+    scorer = campaign_scorer(stores, campaign_id)
+    if campaign is None or scorer is None:
+        return None
+    return RulerScope(scorer=scorer.id, dataset=campaign.dataset_name)
 
 
 def walked_rows(stores: Stores, cells: Sequence[WalkedCell], scorer: Scorer) -> CellSheet:
@@ -85,11 +96,12 @@ def closed_rounds(
     scorer: Scorer,
     *,
     before_round: int | None = None,
+    moment: Moment | None,
 ) -> list[RoundResult]:
     """What a round IS to a resume, a fork and a served read; ``rounds/round_NNNN.json`` is a checkout of it."""
     return [
         _with_rows(stores, hop, held, scorer)
-        for n, held in stores.campaigns.standing_rounds(hop).rounds.items()
+        for n, held in stores.campaigns.standing_rounds(hop, moment=moment).rounds.items()
         if before_round is None or n < before_round
     ]
 
@@ -100,9 +112,9 @@ def closed_round(
     round_num: int,
     scorer: Scorer,
     *,
-    moment: Moment | None = None,
+    moment: Moment | None,
 ) -> RoundResult | None:
-    held = stores.campaigns.standing_rounds(hop, moment).rounds.get(round_num)
+    held = stores.campaigns.standing_rounds(hop, moment=moment).rounds.get(round_num)
     return None if held is None else _with_rows(stores, hop, held, scorer)
 
 
@@ -160,6 +172,6 @@ class RoundFileProjection(Projection):
                 self._synced = True
             scorer = self._session.scoring.require_scorer()
             for n in sorted(wanted):
-                closed = closed_round(self._session.store, self._hop, n, scorer)
+                closed = closed_round(self._session.store, self._hop, n, scorer, moment=None)
                 if closed is not None:
                     write_json(self._layout.round_file(n), closed.model_dump(mode="json"))

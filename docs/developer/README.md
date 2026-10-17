@@ -133,7 +133,7 @@ measurements/                       MeasurementArchive
 
 **Read paths:**
 
-- `load_population(stores, entry)` / `list_populations(stores, dataset_name=)` — the EVIDENCE read: a configuration's standing answers, memory-scoped for a controlled line.
+- `load_population(stores, entry)` / `list_populations(stores, dataset_name=)` — the EVIDENCE read: a configuration's standing answers, inside the memory fence its task was given (`archive_queries.py::fence_memory`).
 - `walked_answers(stores, {sample_id: answer})` — the rows one walk took, whatever its cells have been answered since.
 - `measurements_for_config(predicate)` — *"answers under configurations matching this subset"*, as `FiledAnswer`s, ungraded.
 

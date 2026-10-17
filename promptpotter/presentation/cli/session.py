@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
-from promptpotter.config.paths import benchmark_datasets_root
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.infrastructure.store.dataset_access import list_readable_datasets
 from promptpotter.infrastructure.store.stores import Stores
 
 if TYPE_CHECKING:
@@ -33,11 +33,11 @@ class SessionCtx:
         return resolve_campaign_config(self.store, self.campaign, self.hop)
 
 
-def no_dataset_hint() -> str:
-    root = benchmark_datasets_root()
-    datasets = sorted(p.parent.name for p in root.glob("*/campaign.yaml"))
-    lines = [f"  python -m promptpotter new {name}" for name in datasets]
-    body = "\n".join(lines) if lines else f"  (no datasets found under {root})"
+def no_dataset_hint(stores: Stores) -> str:
+    """Every dataset this account reads: its own definitions first, then the installed templates."""
+    names = [ref.dataset.name for ref in list_readable_datasets(stores)]
+    lines = [f"  python -m promptpotter new {name}" for name in names]
+    body = "\n".join(lines) if lines else "  (no datasets readable here)"
     return "Available datasets:\n\n" + body
 
 

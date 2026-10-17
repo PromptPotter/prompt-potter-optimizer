@@ -17,6 +17,7 @@ from promptpotter.domain.search_point import PROMPT_STRING_FIELDS, TaskDecomposi
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.telemetry import reset_cycle_ledger, set_cycle_ledger
 from promptpotter.infrastructure.store.dataset_access import (
+    ResolvedDataset,
     readable_task_context,
 )
 from promptpotter.infrastructure.store.stores import Stores
@@ -152,20 +153,20 @@ class CheckinOutput(OptimizerResponseModel):
 
 
 def campaign_framing(
-    stores: Stores, campaign_config: CampaignConfig, dataset_name: str | None
+    stores: Stores, campaign_config: CampaignConfig, dataset: ResolvedDataset | None
 ) -> TaskDecomposition:
     if campaign_config.task_framing == "off":
         return TaskDecomposition()
-    return committed_task_context(stores, dataset_name)
+    return committed_task_context(stores, dataset)
 
 
-def committed_task_context(stores: Stores, dataset_name: str | None) -> TaskDecomposition:
+def committed_task_context(stores: Stores, dataset: ResolvedDataset | None) -> TaskDecomposition:
     """A PURE read, so identity may use it: a decomposition needs the cycle a mint is still computing."""
-    if dataset_name is None:
+    if dataset is None:
         return TaskDecomposition()
-    task_context = readable_task_context(stores, dataset_name)
+    task_context = readable_task_context(stores, dataset)
     # Refused here too: whichever seam reads the framing first must reject an over-budget field.
-    task_context.check_budget(source=f"{dataset_name}/task_context.yaml")
+    task_context.check_budget(source=f"{dataset.name}'s committed framing")
     return task_context
 
 

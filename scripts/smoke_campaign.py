@@ -25,10 +25,7 @@ except ImportError:
     pass
 
 from promptpotter.application.campaign_config import CampaignConfig  # noqa: E402
-from promptpotter.application.datasets.authored import (  # noqa: E402
-    dataset_campaign_path,
-    read_campaign_config_file,
-)
+from promptpotter.application.datasets.authored import dataset_campaign_block  # noqa: E402
 from promptpotter.application.datasets.loaders import (  # noqa: E402
     dataset_loader,
     loadable_dataset_names,
@@ -37,12 +34,21 @@ from promptpotter.application.embedded_run import open_session, run_campaign  # 
 from promptpotter.application.pipeline_resolve import (  # noqa: E402
     configure_and_apply_pipeline,
 )
+from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT  # noqa: E402
 from promptpotter.domain.launch_limits import LaunchLimits, RunMode  # noqa: E402
+from promptpotter.infrastructure.identity.migration import (  # noqa: E402
+    registered_or_default_identity,
+)
+from promptpotter.infrastructure.store.dataset_access import (  # noqa: E402
+    DatasetAccessError,
+    resolve_dataset,
+)
+from promptpotter.infrastructure.store.stores import build_stores  # noqa: E402
 from promptpotter.presentation.terminal.completion import report_completion  # noqa: E402
 
 
 def _build_config(
-    dataset: str,
+    dataset_dir: Path,
     *,
     samples: int,
     variants: int,
@@ -50,10 +56,7 @@ def _build_config(
     patience: int,
 ) -> dict[str, Any]:
     return {
-        "dataset_name": dataset,
-        "scoring": _infer_scoring(dataset),
-        "exclude_nodes": [],
-        "pipeline_overlay": {},
+        "scoring": _infer_scoring(dataset_dir),
         "optimization": {
             "max_rounds": rounds,
             "degradation_threshold": 0.4,
@@ -68,19 +71,21 @@ def _build_config(
     }
 
 
-def _infer_scoring(dataset: str) -> str:
-    formula = read_campaign_config_file(
-        dataset_campaign_path(_REPO_ROOT / "datasets" / dataset)
-    ).get("scoring")
+def _infer_scoring(dataset_dir: Path) -> str:
+    formula = dataset_campaign_block(dataset_dir).get("scoring")
     return str(formula) if formula else "label_match(predicted, ground_truth)"
 
 
 async def _run(args: argparse.Namespace) -> int:
-    if dataset_loader(args.dataset) is None:
-        known = ", ".join(loadable_dataset_names()) or "(none)"
+    stores = build_stores(registered_or_default_identity(), projects_root=DEFAULT_PROJECTS_ROOT)
+    try:
+        dataset_dir = resolve_dataset(stores, args.dataset).directory
+    except DatasetAccessError:
+        dataset_dir = None
+    if dataset_dir is None or dataset_loader(dataset_dir) is None:
+        known = ", ".join(loadable_dataset_names(stores)) or "(none)"
         print(
-            f"[smoke] ERROR: no loader resolves dataset {args.dataset!r}. "
-            f"Known: {known} (plus any justlogic-d<depths>, e.g. justlogic-d34)",
+            f"[smoke] ERROR: no source resolves dataset {args.dataset!r}. Known: {known}",
             file=sys.stderr,
         )
         return 2
@@ -106,7 +111,7 @@ async def _run(args: argparse.Namespace) -> int:
         print(
             f"[smoke] ERROR: pipeline schema for {args.dataset!r} declares no "
             f"available_models. Add an `available_models: [...]` list to "
-            f"datasets/{args.dataset}/pipeline.yaml so the L1 validation rail "
+            f"the `pipeline` section of {args.dataset}'s dataset.yaml so the L1 validation rail "
             f"can reject candidates that propose unsupported models.",
             file=sys.stderr,
         )
@@ -114,7 +119,7 @@ async def _run(args: argparse.Namespace) -> int:
 
     campaign_config = CampaignConfig.model_validate(
         _build_config(
-            args.dataset,
+            dataset_dir,
             samples=args.samples,
             variants=args.variants,
             rounds=args.rounds,
@@ -183,7 +188,7 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument(
         "--dataset",
         required=True,
-        help="Dataset name any loader resolves (see loadable_dataset_names())",
+        help="Dataset name whose definition declares a source (see loadable_dataset_names())",
     )
     p.add_argument("--samples", type=int, default=5, help="Queries per candidate (sp_budget_round)")
     p.add_argument("--variants", type=int, default=3, help="L1 candidates per round")

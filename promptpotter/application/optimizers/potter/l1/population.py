@@ -22,8 +22,8 @@ from promptpotter.domain.results import CandidateProposal
 from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure
 
 if TYPE_CHECKING:
-    from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.optimizers.potter.knobs import PromptBlockCatalogue
+    from promptpotter.application.runner.inner.tasks import InnerCells
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ def parse_population(
     runtime_failures: Sequence[RuntimeFailure],
     demo_ids: frozenset[int],
     shot_k_max: int,
-    inner_optimizer: SelectedOptimizer | None,
+    inner_cells: InnerCells | None,
     prompt_block_catalogue: PromptBlockCatalogue,
 ) -> None:
     """L1's rejections only: search space, route keys and backend placeholders are the bench's (``NodeContext.child``)."""
@@ -78,12 +78,13 @@ def parse_population(
                 # The DELTA, unlike the placeholder check below: these convict what was PROPOSED.
                 for outcome in (
                     L1_INNER_STEER_IS_LEGAL.check(
-                        pipeline_overlay, inner_optimizer=inner_optimizer
+                        pipeline_overlay,
+                        inner_nodes=() if inner_cells is None else inner_cells.owners,
                     ),
                     L1_INNER_LAYOUT_APPLIES.check(pipeline_overlay),
                     L1_PROMPT_FIELD_NOT_GUTTED.check(
                         pipeline_overlay,
-                        inner_optimizer=inner_optimizer,
+                        inner_cells=inner_cells,
                         pipeline_params=pipeline_params,
                     ),
                 ):
@@ -91,10 +92,12 @@ def parse_population(
                         failures.extend(outcome.evidence["failures"])
             # The MERGED params: a child of a broken parent inherits a severed port without proposing it.
             ph_outcome = L1_INNER_PLACEHOLDERS_INTACT.check(
-                merged_pp or {}, inner_optimizer=inner_optimizer
+                merged_pp or {}, inner_cells=inner_cells
             )
             if ph_outcome is not None:
                 failures.extend(ph_outcome.evidence["failures"])
+        # A replayed proposal already carries them: the bench banks the walk's arms validated.
+        failures = [vf for vf in failures if vf not in cp.validation_failures]
         if failures:
             cp.validation_failures = [*cp.validation_failures, *failures]
             for vf in failures:

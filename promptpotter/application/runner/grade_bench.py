@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from promptpotter.application.bench.task_context import campaign_framing
 from promptpotter.application.initialization.loop_start import arm_diagnostic_scoring, verb_ledger
 from promptpotter.application.initialization.wiring import bind_cycle_session
-from promptpotter.application.jobs.quota import paid_verb
+from promptpotter.application.jobs.launcher.admission import paid_pass
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.runner.bench import bench_selection
@@ -24,6 +24,8 @@ from promptpotter.application.views.readout import ReadoutProjection
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.phases import STOP_REASON_INFO
+from promptpotter.domain.spend import SpendCeilings
+from promptpotter.infrastructure.llm.telemetry import at_round
 from promptpotter.infrastructure.projections.live_dashboard.projection import materializing_over
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ConflictError
@@ -43,7 +45,7 @@ class BenchTriggerError(ConflictError):
 
 async def grade_line_bench(*, stores: Stores, hop: CycleHop) -> BenchScore:
     """Admitted exactly where the served status says so (``BenchStatus.can_grade``)."""
-    async with paid_verb(stores=stores, bucket="bench", hop=hop):
+    async with paid_pass(stores=stores, verb="bench", hop=hop, declared=SpendCeilings()):
         campaign = stores.campaigns.load_campaign(hop.campaign_id)
         if campaign is None:
             raise BenchTriggerError(f"campaign {hop.campaign_id!r} has no manifest on disk.")
@@ -54,12 +56,12 @@ async def grade_line_bench(*, stores: Stores, hop: CycleHop) -> BenchScore:
 
 
 async def _grade(stores: Stores, campaign: Campaign, hop: CycleHop) -> BenchScore:
-    standing = stores.campaigns.standing_rounds(hop).rounds
+    standing = stores.campaigns.standing_rounds(hop, moment=None).rounds
     rounds = [standing[n].close for n in sorted(standing)]
     session, config = await bind_cycle_session(stores, campaign, hop)
     arm_diagnostic_scoring(session, config, source=RunSource.OPTIMIZATION_LOOP)
     partition = session.scoring.require_partition()
-    framing = campaign_framing(stores, config, session.dataset_name)
+    framing = campaign_framing(stores, config, session.dataset)
     origin_sp = rounds[0].origin.searchpoint(
         schema=session.pipeline_schema, framing=framing, demo=partition.demo
     )
@@ -70,13 +72,12 @@ async def _grade(stores: Stores, campaign: Campaign, hop: CycleHop) -> BenchScor
     assert dashboard is not None, "a cycle with standing rounds was launched, so it is declared"
     readout = ReadoutProjection.for_campaign(session, config, sink=None)
     banked: BenchPasses | None = None
-    with verb_ledger(stores, hop) as ledger:
+    # The round an `at_end` launch grades under: its last.
+    with verb_ledger(stores, hop) as ledger, at_round(rounds[-1].round):
         ledger.bind(dashboard)
         readout.open_readout(cycle_dir)
         ledger.bind(readout)
         cb = RunCallbacks(ledger)
-        # The round an `at_end` launch grades under: its last.
-        cb.set_round(rounds[-1].round)
         try:
             banked = await bench_origin(
                 session,

@@ -10,6 +10,9 @@ __all__ = [
     "extract_boxed_number",
     "extract_gsm8k_number",
     "extract_last_bold",
+    "extract_last_boxed",
+    "extract_plan_block",
+    "extract_solution",
     "text_list_items",
     "text_list_rank",
     "truncate",
@@ -52,13 +55,25 @@ def text_list_rank(text: str, item: str) -> int | None:
 
 
 def extract_last_bold(text: str) -> str:
+    """The last bold span; a response that bolds nothing answers on its last non-empty line."""
     if not text:
         return ""
     matches = _BOLD_RE.findall(text)
     if matches:
         last: str = matches[-1]
         return last.strip()
-    return text
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    return lines[-1] if lines else ""
+
+
+def extract_plan_block(text: str) -> str:
+    _head, marker, tail = text.rpartition("[PLAN]")
+    return tail.split("[PLAN END]", 1)[0].strip() if marker else ""
+
+
+def extract_solution(text: str) -> str:
+    _head, marker, tail = text.rpartition("SOLUTION:")
+    return tail.strip() if marker else ""
 
 
 def extract_gsm8k_number(text: str) -> float | None:
@@ -81,4 +96,20 @@ def extract_boxed_number(text: str) -> float | None:
     matches = NUMBER_RE.findall(text)
     if matches:
         return float(matches[-1].replace(",", ""))
+    return None
+
+
+def extract_last_boxed(text: str) -> str | None:
+    # The LAST opener decides: a truncated final box is a miss, never an earlier box's answer.
+    start = text.rfind("\\boxed{")
+    if start < 0:
+        return None
+    depth = 0
+    for i in range(start + len("\\boxed"), len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start + len("\\boxed{") : i]
     return None

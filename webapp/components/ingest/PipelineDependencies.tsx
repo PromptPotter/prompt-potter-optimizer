@@ -2,43 +2,24 @@
 
 import { useRef, useState } from "react";
 import type { DraftDependency } from "@/lib/api";
-import { cx } from "@/lib/cx";
 
-// Soft: the answers already in the data are a runnable pool, so it never gates Start.
-export function PipelineDependencies({
-  dependencies,
-  librarySize,
-  headers,
-  targetColumn,
-  onUpload,
-  onBuildFromColumn,
-  busy,
-}: {
-  dependencies: DraftDependency[];
+interface DependencyProps {
   librarySize: number;
   headers: string[];
   targetColumn: string;
   onUpload: (file: File) => void;
   onBuildFromColumn: (column: string) => void;
   busy: boolean;
-}) {
-  if (dependencies.length === 0) return null;
-  return (
-    <div className="ingest-dependencies" role="group" aria-label="Pipeline inputs">
-      {dependencies.map((dep) => (
-        <DependencyRow
-          key={`${dep.kind}:${dep.node}`}
-          dep={dep}
-          librarySize={librarySize}
-          headers={headers}
-          targetColumn={targetColumn}
-          onUpload={onUpload}
-          onBuildFromColumn={onBuildFromColumn}
-          busy={busy}
-        />
-      ))}
-    </div>
-  );
+}
+
+// Soft: the answers already in the data are a runnable pool, so it never gates Start.
+export function PipelineDependencies({
+  dependencies,
+  ...props
+}: DependencyProps & { dependencies: DraftDependency[] }) {
+  return dependencies.map((dep) => (
+    <DependencyRow key={`${dep.kind}:${dep.node}`} dep={dep} {...props} />
+  ));
 }
 
 function DependencyRow({
@@ -49,80 +30,50 @@ function DependencyRow({
   onUpload,
   onBuildFromColumn,
   busy,
-}: {
-  dep: DraftDependency;
-  librarySize: number;
-  headers: string[];
-  targetColumn: string;
-  onUpload: (file: File) => void;
-  onBuildFromColumn: (column: string) => void;
-  busy: boolean;
-}) {
+}: DependencyProps & { dep: DraftDependency }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [column, setColumn] = useState(
     headers.includes(targetColumn) ? targetColumn : (headers[0] ?? ""),
   );
   return (
-    <div className={cx("ingest-dependency", dep.fulfilled && "is-fulfilled")}>
-      <div className="ingest-dependency-head">
-        <span className="ingest-dependency-title">{dep.title}</span>
-        <span
-          className={cx("ingest-dependency-status", dep.fulfilled ? "ok" : "missing")}
-          aria-label={dep.fulfilled ? "Fulfilled" : "Missing"}
-        >
-          {dep.fulfilled ? `✓ ${librarySize} targets` : "Missing"}
-        </span>
-      </div>
-      <p className="ingest-dependency-hint">{dep.hint}</p>
-      <div className="ingest-dependency-actions">
-        {headers.length > 0 ? (
-          <div className="ingest-dependency-build">
-            <label className="ingest-dependency-build-label">
-              Build from column
-              <select
-                className="ingest-dependency-select"
-                value={column}
-                disabled={busy}
-                onChange={(e) => setColumn(e.target.value)}
-                aria-label="Dataset column to build the library from"
-              >
-                {headers.map((h) => (
-                  <option key={h} value={h}>
-                    {h}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button
-              type="button"
-              className="chat-cta-btn"
-              disabled={busy || !column}
-              onClick={() => onBuildFromColumn(column)}
-            >
-              Build from dataset
-            </button>
-          </div>
-        ) : null}
-        <input
-          ref={inputRef}
-          type="file"
-          hidden
-          accept=".txt,.csv,.tsv,.json,.jsonl,.ndjson,.xlsx"
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) onUpload(f);
-            e.target.value = "";
-          }}
-        />
-        <button
-          type="button"
-          className="chat-cta-btn secondary"
-          disabled={busy}
-          onClick={() => inputRef.current?.click()}
-        >
-          {dep.fulfilled ? "Replace with a file" : "or drop a file"}
-        </button>
-      </div>
-    </div>
+    <fieldset>
+      <legend>
+        {dep.title} — {dep.fulfilled ? `✓ ${librarySize} targets` : "missing"}
+      </legend>
+      <p>{dep.hint}</p>
+      {headers.length > 0 ? (
+        <p>
+          <select
+            value={column}
+            disabled={busy}
+            onChange={(e) => setColumn(e.target.value)}
+            aria-label="Dataset column to build the library from"
+          >
+            {headers.map((h) => (
+              <option key={h} value={h}>
+                {h}
+              </option>
+            ))}
+          </select>{" "}
+          <button type="button" disabled={busy || !column} onClick={() => onBuildFromColumn(column)}>
+            Build from this column
+          </button>
+        </p>
+      ) : null}
+      <input
+        ref={inputRef}
+        type="file"
+        hidden
+        accept=".txt,.csv,.tsv,.json,.jsonl,.ndjson,.xlsx"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) onUpload(f);
+          e.target.value = "";
+        }}
+      />
+      <button type="button" disabled={busy} onClick={() => inputRef.current?.click()}>
+        {dep.fulfilled ? "Replace with a file" : "or drop a file"}
+      </button>
+    </fieldset>
   );
 }

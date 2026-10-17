@@ -45,6 +45,8 @@ type IngestPhase =
       // Offered, never fired: only the operator's click sends `edit-draft-campaign`.
       raised: RaisedCommand[];
       degradedCause: string | null;
+      // A refused edit or Start, shown beside Start: the thread sits above the card, off a phone's screen.
+      problem: string | null;
     };
 
 export interface IngestFlow {
@@ -92,9 +94,13 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
   const echo = (text: string) =>
     thread.append({ kind: "message", role: "user", tone: "plain", text });
 
-  // Functional update, so overlapping patches cannot write a stale snapshot back.
+  // Functional updates, so overlapping patches cannot write a stale snapshot back.
   const commitDraftUpdate = (updated: DraftCampaignWire) =>
-    setPhase((p) => (p.stage === "ready" ? { ...p, draft: updated } : p));
+    setPhase((p) => (p.stage === "ready" ? { ...p, draft: updated, problem: null } : p));
+  const refuse = (e: unknown) =>
+    setPhase((p) =>
+      p.stage === "ready" ? { ...p, problem: operatorMessage(e, failureKind(e)) } : p,
+    );
 
   const runCheckin = async (draft: DraftCampaignWire) => {
     setPhase({ stage: "checkin", model: "the check-in model" });
@@ -117,7 +123,7 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
     if (degradedCause) say(degradedCause, "warning");
     say(recap);
     // Even a complete draft lands in review: a launch spends money, so no path here mints.
-    setPhase({ stage: "ready", draft: resolved, resolution, raised, degradedCause });
+    setPhase({ stage: "ready", draft: resolved, resolution, raised, degradedCause, problem: null });
   };
 
   const advance = (draft: DraftCampaignWire) => {
@@ -207,7 +213,14 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
       return;
     }
     say("Opened the origin — edit anything below, then Start.");
-    setPhase({ stage: "ready", draft, resolution: null, raised: [], degradedCause: null });
+    setPhase({
+      stage: "ready",
+      draft,
+      resolution: null,
+      raised: [],
+      degradedCause: null,
+      problem: null,
+    });
   };
 
   // Only an unauthored draft re-runs the resolver: it would re-propose over the operator's edits.
@@ -235,6 +248,7 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
       resolution: res.resolution,
       raised: res.raised,
       degradedCause: null,
+      problem: null,
     });
   };
 
@@ -268,7 +282,7 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
       commitDraftUpdate(updated);
       return updated;
     } catch (e) {
-      sayError(e);
+      refuse(e);
       return null;
     } finally {
       pendingDraftWrites.current.delete(write);
@@ -316,7 +330,7 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
       setPhase({ stage: "idle" });
       onMint({ campaignId: r.campaign_id, cycleId: r.cycle_id });
     } catch (e) {
-      sayError(e);
+      refuse(e);
     } finally {
       setMinting(false);
     }

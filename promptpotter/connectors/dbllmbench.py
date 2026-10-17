@@ -43,8 +43,6 @@ logger = logging.getLogger(__name__)
 
 WRITER_NODE = "query_writer"
 
-QUESTIONS_FILE = "questions.json"
-
 RETRY_LEVELS = (0, 2, 4)
 
 
@@ -115,7 +113,7 @@ def _upstream_question(workload: InProcessWorkload, sample: Sample) -> dict[str,
     if sample.id >= len(questions) or questions[sample.id].get("question") != sample.query:
         raise CellUnscoreableError(
             f"dbllmbench question {sample.query[:80]!r} is not row {sample.id} of the "
-            f"{QUESTIONS_FILE} this run opened with.",
+            "panel this run opened with.",
             spent={},
         )
     return dict(questions[sample.id])
@@ -474,7 +472,6 @@ CONNECTOR = Connector(
     cell_wait_s=_CELL_WAIT_S,
     required_observation_keys=(accuracy_key(0),),
     answer_key=ANSWER_KEY,
-    experiment_file=QUESTIONS_FILE,
     default_pipeline=(WRITER_NODE,),
 )
 
@@ -482,7 +479,6 @@ CONNECTOR = Connector(
 __all__ = [
     "ANSWER_KEY",
     "CONNECTOR",
-    "QUESTIONS_FILE",
     "RETRY_LEVELS",
     "WRITER_NODE",
     "accuracy_key",

@@ -4,7 +4,7 @@ import logging
 import sys
 import time
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
@@ -26,6 +26,8 @@ from promptpotter.domain.spend import (
 from promptpotter.infrastructure.llm.telemetry import (
     active_cycle_ledger,
     billing_ledger,
+    campaign_priced,
+    current_round,
     emit_spend_hold,
     emit_token_usage,
     filed_kind,
@@ -46,6 +48,7 @@ from promptpotter.shared.errors import (
     SendRefusedError,
     is_provider_credit_refusal,
 )
+from promptpotter.shared.measurement_context import instrument_mode
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -173,6 +176,13 @@ def _times(left: float, each: float | None) -> int:
     return int(left / each)
 
 
+def _admits(left: float, each: float | None, reserve: bool) -> int:
+    """The ceiling admits while any of it is left, so a run stops AT its cap; the reserve is what
+    bounds the calls out when it is reached."""
+    n = _times(left, each)
+    return n if reserve or each is None or left <= 0 else max(n, 1)
+
+
 class SpendBook(Projection):
     def __init__(
         self,
@@ -204,7 +214,6 @@ class SpendBook(Projection):
         self._seen: TokenUsageRecord | None = None
         # A nested run spends under its ROOT's book; `mirror` carries its bills onto this ledger.
         self.ledger: CycleEventLog | None = None
-        self.round_now: Callable[[], int | None] = lambda: None
 
     @property
     def ceiling(self) -> SpendCeilings:
@@ -225,12 +234,19 @@ class SpendBook(Projection):
     def binds(self, kind: TokenUsageKind) -> bool:
         return kind in METER_KINDS[self.meters]
 
+    @property
+    def prices_replays(self) -> bool:
+        return METER_PRICES_REPLAYS[self.meters]
+
+    def replays_free(self, cell_key: str) -> bool:
+        """A bill meter prices no replay; the other prices one the first time its campaign reads it."""
+        return not self.prices_replays or campaign_priced(cell_key)
+
     def count(self, record: TokenUsageRecord) -> None:
         # Elsewhere a replay spent no money: a price of nothing (0.0), not a missing one (None).
-        replay_usd = METER_PRICES_REPLAYS[self.meters]
         self._spend(
             record.kind,
-            record.bill_or_rate_usd if not record.cached or replay_usd else 0.0,
+            record.bill_or_rate_usd if not record.cached or self.prices_replays else 0.0,
             0 if record.cached else record.input_tokens + record.output_tokens,
         )
 
@@ -256,11 +272,13 @@ class SpendBook(Projection):
     def mirror(self, record: TokenUsageRecord, *, hold_id: str) -> bool:
         if self.ledger is None:
             return False
+        mode = instrument_mode()
         copy = record.model_copy(
             update={
                 "kind": "backend",
                 "node": f"{NESTED_NODE_PREFIX}{record.node}",
-                "round": self.round_now(),
+                # The ROOT's round, whose ledger this lands on; the nested run binds its own.
+                "round": current_round() if mode is None else mode.root_round,
                 "hold_id": hold_id,
                 "mirrored": False,
             }
@@ -293,7 +311,7 @@ class SpendBook(Projection):
         ):
             if limit is not None:
                 left = limit - used - sum(v for k, v in out.items() if k != beside)
-                yield ErrorCategory.SPEND_CEILING, reserve, _times(left, each)
+                yield ErrorCategory.SPEND_CEILING, reserve, _admits(left, each, reserve)
         used_t = self.tokens_spent + self.tokens_unreported + self.set_aside_tokens
         for reserve, limit_t, out_t, each_t in (
             (False, ceiling.tokens, self._held_tokens, held.tokens),
@@ -301,7 +319,7 @@ class SpendBook(Projection):
         ):
             if limit_t is not None:
                 left_t = limit_t - used_t - sum(v for k, v in out_t.items() if k != beside)
-                yield ErrorCategory.TOKEN_CEILING, reserve, _times(left_t, each_t)
+                yield ErrorCategory.TOKEN_CEILING, reserve, _admits(left_t, each_t, reserve)
 
     def held_at(self, label: CallLabel, bound: SendBound) -> SendBound:
         most = self._billed_most.get(label.node)
@@ -382,18 +400,21 @@ class SpendBook(Projection):
     def _refusal(self, category: ErrorCategory, reserve: bool, each: SendBound, what: str) -> str:
         limit = "account reserve" if reserve else "ceiling"
         if category is ErrorCategory.SPEND_CEILING:
-            unreported = (
-                f", ${self.usd_unreported:.4f} unreported (sends no bill priced)"
-                if self.usd_unreported
-                else ""
-            )
-            cap = (self.reserve if reserve else self.ceiling).usd
-            out = self._out_usd if reserve else self._held_usd
+            cap = (self.reserve if reserve else self.ceiling).usd or 0.0
+            out = sum((self._out_usd if reserve else self._held_usd).values())
+            owed = [
+                (self.usd_metered, CEILING_METER_LABELS[self.meters]),
+                (self.usd_unreported, "unreported"),
+                (out, "in calls still out"),
+                (self.set_aside_usd, "set aside for the bench"),
+            ]
+            left = cap - sum(usd for usd, _ in owed)
+            said = ", ".join(f"${usd:.4f} {name}" for usd, name in owed if usd)
+            if left <= 0:
+                return f"{what} was not sent: the ${cap:.2f} {limit} is used up ({said})"
             return (
-                f"{what} holds ${each.usd:.4f} while it is out, and the ${cap:.4f} {limit} "
-                f"holds ${self.usd_metered:.4f} {CEILING_METER_LABELS[self.meters]}{unreported}, "
-                f"${sum(out.values()):.4f} for calls out and "
-                f"${self.set_aside_usd:.4f} set aside for the bench"
+                f"{what} was not sent: it may cost up to ${each.usd or 0.0:.4f} and the "
+                f"${cap:.2f} {limit} has ${left:.4f} left ({said})"
             )
         if each.tokens is None:
             return f"{what}: nothing caps its reply, so it cannot run under a token ceiling"

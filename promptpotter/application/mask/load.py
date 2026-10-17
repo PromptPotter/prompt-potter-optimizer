@@ -85,7 +85,7 @@ def load_lineage_spine(stores: Stores, campaign_id: str) -> list[SpineCycle]:
         cid = entry.cycle_id
         hop = CycleHop(campaign_id=campaign_id, cycle_id=cid)
         cdir = cycle_dir_for(stores.base_dir, hop)
-        index = stores.campaigns.load(hop)
+        index = stores.campaigns.load(hop, moment=None)
         if index is None:
             continue
         parent, from_round = _cycle_edge(index)
@@ -186,12 +186,14 @@ def load_mask_record(
         cid = e.cycle_id
         hop = CycleHop(campaign_id=campaign_id, cycle_id=cid)
         cdir = cycle_dir_for(stores.base_dir, hop)
-        index = stores.campaigns.load(hop)
+        index = stores.campaigns.load(hop, moment=None)
         if index is None:
             continue
         edges[cid] = _cycle_edge(index)
         decisions[cid] = (
-            scan_standing_rounds(ledger_chain(CycleDir(cdir))).decisions if with_replay else {}
+            scan_standing_rounds(ledger_chain(CycleDir(cdir), moment=None)).decisions
+            if with_replay
+            else {}
         )
         # Off the cycle's OWN elections; a round a fork lifted is crowned where its parent ran it.
         crowns[cid] = {
@@ -201,7 +203,9 @@ def load_mask_record(
             ).elections.items()
         }
         own = scorer_of(resolve_campaign_config(stores, campaign, hop), verifier_graded=False)
-        files[cid] = {closed.round: closed for closed in closed_rounds(stores, hop, own)}
+        files[cid] = {
+            closed.round: closed for closed in closed_rounds(stores, hop, own, moment=None)
+        }
 
     # Parents before children, so a fork inherits its branch-point winner.
     order: list[str] = []

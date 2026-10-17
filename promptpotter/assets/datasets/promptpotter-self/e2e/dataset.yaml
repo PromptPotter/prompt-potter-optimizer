@@ -1,0 +1,87 @@
+pipeline:
+  description: >-
+    The browser walk's L4 fixture — the family's graph, run over the degenerate one-cell panel in
+    `panel:` below. It exists to prove the recursion still spawns and scores end to end, cheaply
+    enough to run often. It measures nothing.
+
+campaign:
+  # No `per_cell` term: the panel's prices fitness against a 500s/cell latency anchor measured on
+  # 4-round cells. A 1-round cell is nowhere near that anchor, so applying it would dress a
+  # geometry artefact up as a cost signal.
+  # Every number here is the smallest that still exercises the TRANSITION it belongs to, and
+  # none of them is calibrated. `family.yaml::campaign` above this directory carries the reasoning
+  # for the real values — the panel width that lets PoBB eliminate, the round count that makes a lift
+  # falsifiable, the epsilon fitted to its own p_best stream. None of that survives at this size,
+  # which is the point: this fixture exists to prove the L4 path RUNS — generate, score, elect,
+  # carry a winner into the next round — and it is deliberately unable to MEASURE anything.
+  optimizer_narrowing:
+    l1_generate: &e2e_models
+      param_allowed_values:
+        model:
+          - openai/gpt-6-luna
+    l1_critique: *e2e_models
+    l2_context: *e2e_models
+    l3_plan: *e2e_models
+    checkin: *e2e_models
+  optimization:
+    # Round 0 (the origin) plus ONE optimization round. The inner campaigns stay at
+    # `max_inner_rounds: 1` — depth is what costs money here, since every outer cell is a whole
+    # inner campaign, and one outer round is enough to exercise generate → score → elect.
+    max_rounds: 2
+    # The ceiling the browser walk runs under. It is a STOP, not a forecast: the fixture is
+    # built to come in far below it, and the run halting here means the geometry drifted.
+    ceiling: {usd: 0.05, tokens: null}
+    # Potter's knobs — the overlay on its manifest's nodes (assets/optimizers/potter/).
+    nodes:
+      # = the panel size in dataset.yaml::panel. One cell.
+      adaptive_queue:
+        config:
+          sp_budget_round: 1
+      l1_generate:
+        config:
+          # NOT 1, and this is a correctness bound rather than a coverage nicety. An inner cycle id is
+          # content-addressed on its optimizer prompt, so a single variant makes round 0's candidate
+          # byte-identical to the origin — the same inner cycle, spawned twice, and the second spawn
+          # hits `_open_inner_campaign`'s "another producer owns it" guard and errors the only cell on
+          # the panel. Two variants give the round a real candidate field and two distinct inner ids.
+          n_variants: 2
+      escalation:
+        config:
+          l1_patience: 1
+          l2_patience: 1
+
+panel:
+  # The DEGENERATE panel — a plumbing fixture for the browser walk, not an instrument.
+  #
+  # `promptpotter-self/panel`'s `dataset.yaml::panel` is the real one and this is not a cheaper version of it:
+  # every property that makes that panel MEASURE something has been removed here on purpose. One
+  # cell, so PoBB can never reach its elimination floor of 4 and nothing is ever eliminated. One
+  # inner round, so `mean_bench_lift` is a single difference with no series behind it. One inner
+  # variant, so there is no candidate field to select from. Two samples, so the inner θ is noise,
+  # and ONE held-out row, so the scored lift is a coin.
+  #
+  # READ NOTHING OFF A RUN OF THIS. It answers exactly one question — does the L4 spawn path still
+  # work end to end — and any number it emits is an artefact of the geometry above.
+  #
+  # What a cell costs, what the cost floor is, and why the benchmark below is not a shallower cut:
+  # `README.md` beside this file owns all three. Do not restate them here — they are one argument
+  # and it drifts the moment it has two homes.
+  inner_benchmark: justlogic/d234
+  inner_benchmark_config:
+    n_samples_per_inner_round: 2
+    n_samples_origin: 2
+    n_samples_bench: 1
+    max_inner_rounds: 1
+    inner_nodes:
+      l1_generate:
+        config:
+          n_variants: 1
+    # No `inner_lives`: with one round there is nothing for a life to stop early.
+    inner_optimizer_temperature: 0.0
+  tasks:
+    # Seed 0 only. The real panel's six seeds were each chosen against a measured
+    # constant-answer floor; one seed is not a sample of that work, it is a single cell that
+    # makes the machinery turn over.
+    - kind: seat
+      id: justlogic-d234/seed-0
+      inner_dataset_seed: 0

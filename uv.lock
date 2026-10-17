@@ -2497,7 +2497,7 @@ requires-dist = [
     { name = "dspy", marker = "extra == 'dspy'", specifier = ">=3.4.0" },
     { name = "fastapi", marker = "extra == 'all'", specifier = ">=0.119.0" },
     { name = "fastapi", marker = "extra == 'api'", specifier = ">=0.119.0" },
-    { name = "filelock", specifier = ">=3.12.0" },
+    { name = "filelock", specifier = ">=3.29.4" },
     { name = "harbor", marker = "extra == 'harbor'", specifier = ">=0.22.0,<0.23" },
     { name = "httpx", specifier = ">=0.26.0" },
     { name = "ipython", marker = "extra == 'jupyter'", specifier = ">=8.0" },

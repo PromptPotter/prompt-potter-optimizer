@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.bench.node_context import NodeContext
+from promptpotter.application.bench.node_context import NodeContext, bank_proposals
 from promptpotter.application.run_observers import declare_gate, declare_running
 from promptpotter.application.runner.operator_hold import hold_for_operator
 from promptpotter.domain.opt_search_point import OPERATOR_SOURCE, Variation
@@ -78,7 +78,7 @@ async def operator_arms(
         ]
         # Recorded and banked BEFORE the ack: a producer lost between them re-reads the answer.
         session.store.campaigns.record_intervention(session.hop, kind="submit-arms")
-        seat.bank_proposals(arms, submitted=True)
+        bank_proposals(ctx, arms, walk=_NODE, submitted=True)
         session.control.take_submission(command_id, arms=len(arms))
         return arms
 

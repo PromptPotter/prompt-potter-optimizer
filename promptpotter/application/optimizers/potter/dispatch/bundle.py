@@ -23,9 +23,9 @@ from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
     from promptpotter.application.intelligence.indexes.axis import AxisIndex
-    from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.optimizers.potter.knobs import PromptBlockCatalogue
     from promptpotter.application.optimizers.potter.pobb.checks import EliminationGate
+    from promptpotter.application.runner.inner.tasks import InnerCells
 
 # Every optimizer's source digest hashes this module: its constants decide what a prompt receives.
 shapes_optimizer_prompt(__name__)
@@ -60,9 +60,10 @@ SCHEMA_RENAME_INSTRUCTION = (
 LAYOUT_SCHEMA_INSTRUCTION = (
     "Where in the READING node's own prompt each evidence panel is rendered. A slot is a "
     "position in that prompt, never the target-prompt field the evidence is about: the "
-    "reader gets every placed panel whichever slot holds it. Name a panel to MOVE it to "
-    "that slot; one you omit stays where it is, and a panel is only ever in one place. "
-    "Keyed by PANEL, one slot string each."
+    "reader gets every placed panel whichever slot holds it. Keyed by SLOT — the four "
+    "properties are the only slots there are — each listing the panels to place there: a "
+    "listed panel MOVES to that slot, an omitted one stays where it is, and a panel is only "
+    "ever in one place."
 )
 
 
@@ -75,9 +76,6 @@ TRANSCRIPT_QUERY_CAP = 1200
 TRANSCRIPT_REASONING_CAP = 2200
 TRANSCRIPT_PREDICTED_CAP = 60
 INNER_NARRATIVE_CAP = 1150
-INNER_NARRATIVE_FULL_CELLS = 3
-INNER_NARRATIVE_SUMMARY_CAP = 160
-INNER_NARRATIVE_RENDER_CAP = 6
 MISS_QUERY_CAP = 100
 MISS_PREDICTED_CAP = 60
 MISS_GT_CAP = 40
@@ -199,13 +197,11 @@ class InjectionBundle:
     earned_blocks: dict[str, tuple[str, ...]] = field(default_factory=dict)
     # L1 panels rendering nothing for this bundle: L2's layout menu and wire enum leave them out.
     silent_l1_panels: frozenset[str] = frozenset()
-    # `origin_per_sample` and `trajectory_results` are then the same rows: difference them and a cell meets itself.
-    is_origin_round: bool = False
     measured_unit: MeasuredUnit = "sample"
     prompt_delivery: Delivery = "request"
     demo_pool: tuple[Sample, ...] = ()
-    # `None` off the L4 recursion.
-    inner_optimizer: SelectedOptimizer | None = None
+    # `None` off the L4 recursion; each outer node's manifest is `InnerCells.owners`'.
+    inner_cells: InnerCells | None = None
 
     @property
     def offers_shots(self) -> bool:
@@ -253,9 +249,6 @@ __all__ = [
     "DEMO_POOL_RENDER_CAP",
     "DEMO_QUERY_STEM",
     "INNER_NARRATIVE_CAP",
-    "INNER_NARRATIVE_FULL_CELLS",
-    "INNER_NARRATIVE_RENDER_CAP",
-    "INNER_NARRATIVE_SUMMARY_CAP",
     "L3_PLAN_MAX_CHARS",
     "LOST_CELL_MIN",
     "MEMORY_FIELD_CAP",

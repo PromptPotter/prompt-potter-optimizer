@@ -1,8 +1,8 @@
 # The recommender — demo #1
 
 > This page is the CASE — why this demo and not another. **There is no working dataset yet.**
-> [`datasets/screen-taste-v0/`](../../datasets/screen-taste-v0/dataset.md) ships as a STUB — the
-> title pools, the builder, the config entry — because its own origin read below its chance
+> `screen-taste-v0`, a tenant definition, is a STUB — the
+> title pools, the `source:` recipe, the config entry — because its own origin read below its chance
 > floor; the rows and the measurements are gone with it. Cutting the one the exhibit runs on is
 > its own work-scope, after the release, under a new name. Every number about a cut belongs with
 > that cut — restating them here is how two pages disagreed once already.
@@ -62,7 +62,7 @@ those rows cannot go inside a wheel of a paid product. Collect our own instead: 
 exhibit needs few enough rows that asking real people is an afternoon, and it
 carries no licence at all. Whatever the source, it is cut under a name nothing has
 run before — the naming obligation and why it bites is
-[`datasets/CLAUDE.md`](../../datasets/CLAUDE.md)'s.
+[`promptpotter/assets/datasets/CLAUDE.md`](../../promptpotter/assets/datasets/CLAUDE.md)'s.
 
 ## What the reference run is for
 

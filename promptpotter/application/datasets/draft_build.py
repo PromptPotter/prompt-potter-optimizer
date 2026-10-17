@@ -3,18 +3,24 @@ from __future__ import annotations
 import re
 from typing import Any, Literal
 
-from pydantic import Field
+from pydantic import Field, TypeAdapter
 
 from promptpotter import connectors
 from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.datasets.draft_campaign import (
     DraftCampaign,
+    EditDraftPatch,
     OptimizationOverrides,
     default_campaign_config,
 )
 from promptpotter.application.datasets.origin_readiness import OriginReadiness, origin_readiness
-from promptpotter.application.pipeline_resolve import resolve_pipeline_for_draft
+from promptpotter.application.jobs.quota import launch_usd_bound
+from promptpotter.application.pipeline_resolve import (
+    checkin_campaign_config,
+    resolve_pipeline_for_draft,
+)
 from promptpotter.application.scoring.formula import SCORING_FUNCTIONS
+from promptpotter.domain.launch_limits import LaunchLimits
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.pipeline_schema import (
     CANDIDATE_LIBRARY,
@@ -28,6 +34,7 @@ from promptpotter.domain.pipeline_schema import (
     dependencies_from_node_roles,
 )
 from promptpotter.domain.search_point import TaskDecomposition
+from promptpotter.domain.spend import SpendCeilings
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.stores import Stores
 
@@ -101,6 +108,12 @@ class DraftCampaignWire(StrictModel):
     )
     recap: str = Field(
         description="One plain sentence restating what this draft would run, for a surface to say."
+    )
+    setup_schema: dict[str, Any] = Field(
+        description="JSON Schema (2020-12) of the check-in's settings: each top-level property is a "
+        "step, each leaf keyed by its `EditDraftPatch` path and valued by this wire's own field of "
+        "that path. A `writeOnly` subtree is `StartCheckinPayload`'s, sent with Start and stored "
+        "nowhere."
     )
 
 
@@ -225,13 +238,114 @@ def draft_wire(stores: Stores, draft: DraftCampaign) -> DraftCampaignWire:
         ],
         readiness=origin_readiness(draft),
         recap=_recap(draft),
+        setup_schema=setup_schema(
+            draft,
+            inherited_usd=checkin_campaign_config(stores, draft).optimization.ceiling.usd,
+            launch_usd=launch_usd_bound(stores),
+        ),
     )
 
 
-def default_campaign_json(draft: DraftCampaign) -> dict[str, Any]:
+def _field(schema: dict[str, Any], name: str, title: str) -> dict[str, Any]:
+    """One property off a model's own schema, so its bounds have one source; the null arm drops,
+    since a blank field IS the absent value."""
+    prop = dict(schema["properties"][name])
+    arms = [arm for arm in prop.pop("anyOf", ()) if arm.get("type") != "null"]
+    prop = {**(arms[0] if arms else {}), **prop}
+    for loose, standard in (("ge", "minimum"), ("le", "maximum")):
+        if loose in prop:
+            prop[standard] = prop.pop(loose)
+    if prop.get("default") is None:
+        prop.pop("default", None)
+    return {**prop, "title": title}
+
+
+def _column(draft: DraftCampaign, field_key: str, title: str) -> dict[str, Any]:
+    said = draft.field_provenance.get(field_key, Provenance.UNSET)
+    return {
+        "type": "string",
+        "title": title,
+        "enum": list(draft.headers),
+        **({} if said is Provenance.CONFIRMED else {"description": said.value}),
+    }
+
+
+def _usd_cap(
+    ceiling: dict[str, Any], inherited: float | None, launch: float | None
+) -> dict[str, Any]:
+    """Bounded at what admission takes; a dataset cap above it would be refused whole, so the
+    account's bound is offered in its place."""
+    field = _field(ceiling, "usd", "Spend cap in USD")
+    if launch is None:
+        return field
+    offered = {"default": launch} if inherited is None or inherited > launch else {}
+    return {
+        **field,
+        "maximum": launch,
+        "description": f"This account launches at up to ${launch:.2f}.",
+        **offered,
+    }
+
+
+def setup_schema(
+    draft: DraftCampaign, *, inherited_usd: float | None, launch_usd: float | None
+) -> dict[str, Any]:
+    patch = EditDraftPatch.model_json_schema()
+    rounds = OptimizationOverrides.model_json_schema()
+    limits = LaunchLimits.model_json_schema()
+    ceiling = TypeAdapter(SpendCeilings).json_schema()
+    return {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+            "data": {
+                "type": "object",
+                "title": "Data",
+                "required": ["slug"],
+                "properties": {
+                    "slug": _field(patch, "slug", "Name"),
+                    "column_query": _column(draft, "column.query", "Input column"),
+                    "column_ground_truth": _column(draft, "column.ground_truth", "Target column"),
+                },
+            },
+            "run": {
+                "type": "object",
+                "title": "Run bounds",
+                "properties": {
+                    "optimization_overrides": {
+                        "type": "object",
+                        "title": "This campaign",
+                        "required": ["max_rounds"],
+                        "properties": {"max_rounds": _field(rounds, "max_rounds", "Max rounds")},
+                    },
+                    "limits": {
+                        "type": "object",
+                        "title": "This launch only",
+                        "description": "Blank inherits your account's allowance, which still "
+                        "binds underneath; whichever cap trips first stops the run.",
+                        "writeOnly": True,
+                        "properties": {
+                            "ceiling": {
+                                "type": "object",
+                                "properties": {
+                                    "usd": _usd_cap(ceiling, inherited_usd, launch_usd),
+                                    "tokens": _field(ceiling, "tokens", "Token cap"),
+                                },
+                            },
+                            "halt_at_accuracy": _field(
+                                limits, "halt_at_accuracy", "Halt at accuracy"
+                            ),
+                        },
+                    },
+                },
+            },
+        },
+    }
+
+
+def default_campaign_block(draft: DraftCampaign) -> dict[str, Any]:
     """Without the node overlay: the mint splits that onto the per-campaign snapshot."""
-    config = default_campaign_config(draft)
-    return {"campaign_config": config.model_dump(mode="json", exclude_defaults=True)}
+    return default_campaign_config(draft).model_dump(mode="json", exclude_defaults=True)
 
 
 def draft_task_context(draft: DraftCampaign) -> TaskDecomposition:

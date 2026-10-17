@@ -172,7 +172,9 @@ class PipelineData:
     diagnostics: Diagnostics = field(default_factory=Diagnostics)
     # Seconds BLOCKED, not working. ABSENT, never 0.0, where the backend declares no envelope.
     unworked_s: float | None = None
-    # L4: one outer sample IS a whole inner campaign, so its "answer" is a lift.
+    # L4: one outer sample IS a whole inner campaign, so its "answer" is a lift — on held-out rows
+    # (`mean_bench_lift`, the scored term) and on the search pool's θ (`mean_round_delta`).
+    mean_bench_lift: float | None = None
     mean_round_delta: float | None = None
     # The BACKEND reporting a fault on a row PromptPotter classified clean.
     error: str | None = None
@@ -199,6 +201,8 @@ class PipelineData:
     inner_round_budget: int | None = None
     inner_stop_reason: str | None = None
     inner_origin_headroom: float | None = None
+    inner_bench_origin_level: float | None = None
+    inner_bench_final_lift: float | None = None
     inner_sent_usd: float | None = None
     inner_tokens: int | None = None
     # What only the DATASET names: observation keys, turn scalars, banked evaluator and judge terms.
@@ -235,6 +239,7 @@ LEDGER_PIPELINE_KEYS: frozenset[str] = frozenset(
         "step_tokens",
         "diagnostics",
         "unworked_s",
+        "mean_bench_lift",
         "mean_round_delta",
         "error",
     }
@@ -462,9 +467,10 @@ class GradedCell:
         return self.facts.sample_id
 
     @property
-    def ruler_key(self) -> int:
-        """The key the δ ruler, θ and the round queue file a cell under."""
-        return self.facts.sample_id
+    def address(self) -> WalkedCell | None:
+        """Where the archive holds it; ``None`` for a cell never filed."""
+        answer = self.facts.answer
+        return None if answer is None else (self.key, self.sample_id, answer, self.facts.cached)
 
     @property
     def hit(self) -> bool:
@@ -529,17 +535,12 @@ class CellSheet:
         return self._standing(lambda cell: cell.key)
 
     @cached_property
-    def on_ruler(self) -> dict[int, GradedCell]:
-        """Each cell's standing row by :attr:`GradedCell.ruler_key`, in first-walked order."""
-        return self._standing(lambda cell: cell.ruler_key)
-
-    @cached_property
     def scoreable(self) -> tuple[GradedCell, ...]:
         """The EVIDENCE population: one standing row per cell that carries a verdict."""
-        return tuple(cell for cell in self.on_ruler.values() if cell.scored)
+        return tuple(cell for cell in self.by_key().values() if cell.scored)
 
-    def column(self, column: GradeColumn) -> dict[int, float]:
-        return {cell.ruler_key: column.read(cell) for cell in self.scoreable}
+    def column(self, column: GradeColumn) -> dict[str, float]:
+        return {cell.key: column.read(cell) for cell in self.scoreable}
 
     def where(self, keep: Callable[[GradedCell], bool]) -> CellSheet:
         return CellSheet(self.scorer_id, tuple(cell for cell in self.cells if keep(cell)))
@@ -558,11 +559,7 @@ class CellSheet:
         return CellSheet(self.scorer_id, (*self.cells, *later.cells))
 
     def addresses(self) -> list[WalkedCell]:
-        return [
-            (cell.key, cell.sample_id, answer, cell.facts.cached)
-            for cell in self.cells
-            if (answer := cell.facts.answer) is not None
-        ]
+        return [address for cell in self.cells if (address := cell.address) is not None]
 
     @classmethod
     def __get_pydantic_core_schema__(

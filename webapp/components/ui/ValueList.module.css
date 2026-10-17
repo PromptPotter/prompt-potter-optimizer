@@ -12,14 +12,15 @@
   gap: var(--space-8);
   width: 100%;
   min-width: 0;
+  /* Skinned and sized as the base field (`foundation/base.css`): it stands in a field's place. */
+  --touch-floor: 0px;
   font: inherit;
-  font-size: var(--text-xs);
   text-align: left;
-  padding: 2px var(--space-6);
-  border: 0.5px solid var(--color-border);
-  border-radius: 3px;
-  background: var(--color-background-primary);
-  color: var(--color-text-primary);
+  padding: 1px var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: Field;
+  color: FieldText;
   cursor: pointer;
 }
 
@@ -160,18 +161,6 @@ button.name:focus-visible {
 .addInput {
   flex: 1 1 auto;
   min-width: 0;
-  font: inherit;
-  font-size: var(--text-xs);
   font-family: var(--font-mono);
-  padding: 2px var(--space-6);
-  border-radius: 2px;
-  border: 0.5px solid var(--color-border);
-  background: var(--color-background-primary);
-  color: var(--color-text-primary);
-}
-
-.addInput:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 1px;
 }
 }

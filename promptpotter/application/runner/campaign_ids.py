@@ -5,6 +5,8 @@ from __future__ import annotations
 import secrets
 from typing import TYPE_CHECKING
 
+from promptpotter.infrastructure.store.layout import dataset_id_prefix
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -23,7 +25,8 @@ def cycle_config_identity(jsp: JobSearchPoint, dataset: list[Sample]) -> str:
 
 
 def mint_campaign_id(dataset_name: str) -> str:
-    return f"{dataset_name or 'campaign'}__{secrets.token_hex(3)}"
+    prefix = dataset_id_prefix(dataset_name) if dataset_name else "campaign"
+    return f"{prefix}__{secrets.token_hex(3)}"
 
 
 def mint_checkin_cycle_id() -> str:

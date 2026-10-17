@@ -6,7 +6,7 @@ Three reasons nodes-not-monoliths, mirroring prompt decomposition: measurable ax
 
 Built-in nodes cover fixed-config deterministic steps (lookup, fuzzy matching), LLM nodes, and multi-step agent nodes. PromptPotter ships a basic database-backed candidate-assignment pipe. In practice most pipelines reduce to one or more LLM nodes.
 
-This page is both the node model and the **strict wire shape** PromptPotter parses from `GET /pipeline` (or from a local `datasets/{name}/pipeline.yaml`). Every connector publishes this shape, and the **same parser** consumes `promptpotter/assets/optimizers/potter/pipeline.yaml` unchanged. Writing a connector or extending the optimizer manifest — this is the contract you implement against.
+This page is both the node model and the **strict wire shape** PromptPotter parses from `GET /pipeline` (or from a local `dataset.yaml::pipeline`). Every connector publishes this shape, and the **same parser** consumes `promptpotter/assets/optimizers/potter/pipeline.yaml` unchanged. Writing a connector or extending the optimizer manifest — this is the contract you implement against.
 
 The silent-harm part is tested — content-hash sensitivity, by [`tests/test_identity.py`](../../tests/test_identity.py) § 1. Flat-format rejection is a `JobSearchPoint` model validator, so Pydantic raises on a malformed authored config; that and the rest fail loud, so no standing test — see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md). Operator walk-through for wiring a new node into self-healing: [`../operations/backend-integration.md`](../operations/backend-integration.md) § Self-healing a node.
 
@@ -169,8 +169,9 @@ base whose every member but five has a default), which the bench hands the sessi
 An `llm` node's role is its position: before the measurement it PROPOSES, after the selector it
 ADAPTS (potter's critique). The round's phases follow the walk — PROPOSE, MEASURE, SELECT, ADAPT.
 An `algorithm` node before the measurement proposes too, and so do the nodes of a manifest's
-`initial_population` pipeline: the bench walks them where the run carries no population and keeps
-what they propose. An eliminator's `Race` stops a walk on its own rows (`rule`) or every live walk
+`initial_population` pipeline, walked in a round the run enters with no population: in place of
+`default` (`initial_population_walks: alone`) or ahead of it, into the population `default` reads
+(`before_default`). An eliminator's `Race` stops a walk on its own rows (`rule`) or every live walk
 together at each block's close (`blocks`); its catch-ups are the calls pairing a prior with the arm
 on turn.
 
@@ -205,9 +206,11 @@ The per-sample `predicted` value is the **head of the terminal ranker's output**
 
 ## Worked examples
 
-Read the real files rather than a copy: [`datasets/gsm8k/pipeline.yaml`](../../datasets/gsm8k/pipeline.yaml)
-is the minimal single-LLM-node case, [`datasets/lca-termnorm/pipeline.yaml`](../../datasets/lca-termnorm/pipeline.yaml)
-the full multi-node shape.
+Read the real files rather than a copy: the `pipeline` section of [`defaults.yaml`](../../promptpotter/assets/datasets/defaults.yaml)
+is the single-LLM-node case whole, which every shipped dataset's `pipeline` section is read laid
+over before it reaches the parser ([`promptpotter/assets/datasets/CLAUDE.md`](../../promptpotter/assets/datasets/CLAUDE.md)
+§ A dataset file is a partial), and [`justlogic/family.yaml`](../../promptpotter/assets/datasets/justlogic/family.yaml)
+is one family's delta on it.
 
 ## Optimizer-manifest parity
 

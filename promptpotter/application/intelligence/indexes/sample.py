@@ -248,7 +248,7 @@ class SampleIndex:
             fk=scorer.id,
             sig=sig,
             graded=[
-                (cell.sample_id, float(objective), answer.provenance)
+                (cell.key, float(objective), answer.provenance)
                 for answer, cell in zip(population, sheet, strict=True)
                 if cell.scored and (objective := cell.grade.objective) is not None
             ],
@@ -298,7 +298,7 @@ class SampleIndex:
         # Signatures BEFORE populations: one growing between the two keeps the OLDER and refolds.
         signatures = archive_queries.population_signatures(stores, dataset_name=dataset_name)
         entries = archive_queries.list_populations(stores, dataset_name=dataset_name)
-        # A controlled line's memory grows by the answers it REPLAYS, which move no file.
+        # A fenced task's memory grows by the answers it REPLAYS, which move no file.
         scoped = archive_queries.memory_scoped()
 
         rows: dict[str, SampleFoldRow] = {}

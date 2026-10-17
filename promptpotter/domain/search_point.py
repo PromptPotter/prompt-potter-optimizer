@@ -165,7 +165,7 @@ class TaskDecomposition:
             f"task_context framing exceeds the {budget}-char {scope} budget "
             f"in {source}: {detail}. These fields render verbatim into every optimizer "
             f"prompt — edit them down rather than letting a renderer choose which half the "
-            f"model sees. Put the detail in task_description.md, which has no budget."
+            f"model sees. Put the detail in task.md's body, which has no budget."
         )
 
     def items(self) -> list[tuple[str, str]]:

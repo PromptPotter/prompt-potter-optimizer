@@ -1,6 +1,6 @@
 ---
 name: potter-self
-description: PromptPotter L4 self-optimization — Claude + operator reading a round's artifacts, diagnosing why candidates underperformed, and deciding what evidence to buy next before spending another round. Use whenever the operator pauses at the round-1 gate, halts the loop to review, mentions L4, `promptpotter-self`, L1 stall, mode collapse, weak candidate stratification, identical / near-duplicate candidates, candidates ignoring the critique or task_context, parse failures on the l1_generate JSON, or wants to tune `l1_generate/1` in `promptpotter/assets/optimizers/potter/pipeline.yaml`. Also use when the operator opens a `round_NNNN.json`, asks "why did L1 do that?", says "let's improve the optimizer prompt", or is weighing what experiment to run next — panel width, seed count, how many cells, whether a result is real, or why past runs never accumulated — even if "L4" is not named explicitly. Each searchpoint costs real LLM spend, so this collaborative review is the substitute for an L4 LLM-driven layer; do not skip it just because the operator did not utter the letter L4.
+description: PromptPotter L4 self-optimization — Claude + operator reading a round's artifacts, diagnosing why candidates underperformed, and deciding what evidence to buy next before spending another round. Use whenever the operator pauses at the round-1 gate, halts the loop to review, mentions L4, `promptpotter-self`, L1 stall, mode collapse, weak candidate stratification, identical / near-duplicate candidates, candidates ignoring the critique or task_context, parse failures on the l1_generate JSON, or wants to tune `l1_generate/1` in `promptpotter/assets/optimizers/potter/pipeline.yaml`. Also use when the operator opens a `round_NNNN.json`, asks "why did L1 do that?", says "let's improve the optimizer prompt", or is weighing what experiment to run next — panel width, seed count, how many cells, whether a result is real, or why past runs never accumulated — even if "L4" is not named explicitly. Also the entry for AUTHORED MODE, where Claude or the operator writes each round's arms and the generator node does not run — said as "authored mode", "self-potter but you are the proposer", "you propose the candidates", "you write the arms", "hand-authored round" — and for the standing optimizer-tuning thread — "continue the tuning", "work the board", "next card", "get the price down", "find the optimizer's parameters". Each searchpoint costs real LLM spend, so this collaborative review is the substitute for an L4 LLM-driven layer; do not skip it just because the operator did not utter the letter L4.
 ---
 
 # L4: collaborative review of L1-generate
@@ -17,6 +17,12 @@ This skill walks the loop: **read → classify → edit → predict → re-run o
 2. **When the operator proposes something else, COMPARE — do not replace.** Put the new idea beside the relevant section, price both on the cost ladder, and say which wins and why. A proposal supersedes this plan on an argument, never on recency.
 3. **Prefer the answer already on disk.** Walking `.promptpotter/` takes seconds. Spending money to learn what the archive already knows is the failure this file exists to prevent.
 
+## The tuning thread — start here when the operator says "continue"
+
+**`.scratch/optimizer-tuning.md` is the board, the findings and the method of the standing effort to lower the price of optimizer progress while holding its velocity.** Read it whole before anything else, say which card is in `Doing`, and work that one; update the board and its Findings before the session ends. It is interactive: the operator steers the order, you carry the cards.
+
+**Thinking is free and a test is paid, so the order is fixed.** Before any spend, exhaust what is banked: walk `.promptpotter/` and `.promptpotter/.inner/`, re-read rounds already paid for, and state what the proposed test could show that they cannot. Then say what result would change the next decision and whether the instrument can resolve an effect of that size (`evidence --subject`); a test that cannot separate its arms is not bought, however cheap. Signal per dollar and per minute is the objective, and most of the work is raising the first before lowering the second.
+
 **Count, never recall.** Where a step below needs how many cells, rounds or campaigns are banked, count them on disk; the spec's figures carry their corpus and date, and the corpus grows.
 
 ## Mental model
@@ -29,7 +35,7 @@ The optimizer is three nested generation loops (`promptpotter/application/optimi
 
 **Never name a panel from memory.** The citable set is *derived* — `@signal(..., citable=True)` intersected with the node's live layout by `citable_fields` (`dispatch/injections/registry.py`). A panel that does not render invites a fabricated citation, and a name carried in a doc outlives the panel it named.
 
-L4 is the human-in-the-loop review that happens **between rounds**, especially at the round-1 gate. The L1 optimizer prompt template at `promptpotter/assets/optimizers/potter/pipeline.yaml → resolved_prompts["l1_generate/1"]` is what L4 edits — *not* L2's or L3's surfaces, *not* `pipeline_params`, *not* the `task_description.md`.
+L4 is the human-in-the-loop review that happens **between rounds**, especially at the round-1 gate. The L1 optimizer prompt template at `promptpotter/assets/optimizers/potter/pipeline.yaml → resolved_prompts["l1_generate/1"]` is what L4 edits — *not* L2's or L3's surfaces, *not* `pipeline_params`, *not* the `task.md`.
 
 ## Artifact map (what to read, in order)
 
@@ -74,7 +80,7 @@ A quiet outer round is normal — it is awaiting a multi-minute inner campaign, 
 
 Read this before proposing any new run: an edit inside the inner-origin fingerprint voids every banked outer cell.
 
-- **`application/runner/inner/connector.py::_identity_config` is the fingerprint's membership — read it, never recall it.** Inside it: an inner optimizer node's prompt body, resolved schema or config, `NODE_LAYOUTS`, dispatch and panel prose, the estimator's source, the inner benchmark's `pipeline.yaml` + `campaign.yaml`. An edit there is a corpus reset, so batch those and re-measure once, deliberately. An edited `inner_tasks.yaml` seat voids only itself (each seat is its own sample's `source_pin`).
+- **`application/runner/inner/connector.py::_identity_config` is the fingerprint's membership — read it, never recall it.** Inside it: an inner optimizer node's prompt body, resolved schema or config, `NODE_LAYOUTS`, dispatch and panel prose, the estimator's source, the inner benchmark's `dataset.yaml::pipeline` + `::campaign`. An edit there is a corpus reset, so batch those and re-measure once, deliberately. An edited `dataset.yaml::panel` seat voids only itself (each seat is its own sample's `source_pin`).
 - **Outside it, the `*_self_optimizing` prompt families in potter's manifest (`promptpotter/assets/optimizers/potter/pipeline.yaml`) are the whole L4 edit surface and cost nothing banked**, so refine them as often as you like. An edit there still trips the RESUME divergence gate, a different mechanism: it costs the cycle (`new`, never `resume`) and keeps the archive.
 - **Count the fingerprints before trusting any cross-campaign number.** Campaigns carrying different `inner_origin` values have never replayed each other's cells, so a spread between them is the instrument moving and not a noise measurement — the same reading applies to the run-order confound `evidence` reports. Run init's preflight says how many prior campaigns a novel instrument matches (`application/preflight.py::_check_instrument_replays`, an INIT warning in the cycle's `readout.log`); read that line.
 
@@ -85,10 +91,12 @@ Read this before proposing any new run: an edit inside the inner-origin fingerpr
 - **Pairing is what makes the comparison possible at all**, because seed variance runs several times arm variance. Read `power.cells_for_largest_gap` against the panel's cell count: where the panel runs fewer, adding paired cells is the cheapest move on the board.
 - **Read the SHAPE as well as the scalar — it is legible on a small panel where the scalar is not.** Every cell records a per-round `improved` verdict, a *within-round* paired comparison against the matched parent on the same samples, so it touches neither the θ anchor nor the re-drawn subset, and a panel carries one per cell per round against one scalar per cell (`application/runner/inner/spawn.py::_lift_shape`).
 - **Target shape:** most cells lift in round 1 (most headroom, cleanest evidence), about half again in round 2, stragglers in round 3, thinning as they saturate. A round 1 that lifts too rarely is an `l1_generate` problem — diagnose it from candidates already on disk, not from a new run.
-- **The scored term is `mean_round_delta`**, and what it rewards is lifting **early**: a cell that climbs in round 1 and holds scores above one reaching the same place in round 4. So edits that make L1 find its hypothesis sooner are worth more than edits that make it find a better one later. (Why that term and not another: [`docs/specs/l4-outer-loop.md`](../../../docs/specs/l4-outer-loop.md) § The measurand.)
+- **The scored term is `mean_bench_lift`** — the adopted prompt's accuracy on the cell's HELD-OUT rows minus the origin's, averaged over the round budget — and what it rewards is lifting **early and generally**: a cell that climbs in round 1 and holds scores above one reaching the same place in round 4, and a promotion that held only on the rows it was selected on scores zero. `mean_round_delta` (the search pool's θ) is served beside it and scores nothing. So edits that make L1 find a hypothesis that transfers sooner are worth more than edits that make it find a better in-sample one later. (Why that term and not another: [`docs/specs/l4-outer-loop.md`](../../../docs/specs/l4-outer-loop.md) § The measurand.)
 - **Validate any cheap proxy at the ARM level, never per-cell.** A proxy can pass the per-cell `proxy_lift_corr >= 0.6` bar and still order arms little better than a coin; round-1 truncation did. Put the bar where the decision is made.
 - **Widen candidates semantically — that is the lever with no measurement cost.** L1 emits incremental edits, so arms differ by less than the instrument can see. Different evidence framing, a different node targeted, a different edit vocabulary — not a reworded instruction — raises the arm SD for free. (A quieter instrument is *also* worth buying; see the plan below. The two are complements, not alternatives.)
-- **A panel cell whose constant-answer floor exceeds its origin accuracy is disqualified** (`application/diagnostics/seed_screen.py::rewards_collapse`) — a candidate that stops reasoning and hedges to one label then outscores the parent, every round. The raw floor is the wrong reading; the *gap* is. `inner_tasks.yaml` records the grounds per retired seat — cite those, because not every retirement was a collapse verdict.
+- **A panel cell whose constant-answer floor exceeds its origin accuracy is disqualified** (`application/diagnostics/seed_screen.py::rewards_collapse`) — a candidate that stops reasoning and hedges to one label then outscores the parent, every round. The raw floor is the wrong reading; the *gap* is. `dataset.yaml::panel` records the grounds per retired seat — cite those, because not every retirement was a collapse verdict.
+- **A cell's score moves in STEPS, and an unchanged prompt takes one by itself.** The scored term reads the promoted parent (`domain/l4/proxies.py::compute_outer_proxies`), and an inner promotion is a point estimate on a small panel — so a variant that restates its parent can be promoted on retest churn and move the cell a full step. Before reading a cell's gain as the arm's, open that cell's `review.md` and ask what the promoted variant CHANGED: a clone, or a parameter that does not bind, is the instrument's noise with the arm's name on it.
+- **Compare arms on the cells BOTH met.** A round's headline is a mean over the cells each arm reached, and an arm that skipped the parent's weakest cell reads above it for that reason alone.
 - **A win is a few rows.** Improvement is granular and infrequent; do not read the smallest positive matched-parent lift as noise, and do not expect an edit to produce more than a few rows.
 - **A flat round 2 is not evidence the search is done.** A campaign's best round can land anywhere in the budget, the last round included.
 - **A limit stated on one axis binds all of them** — owned by `docs/developer/reasoning-doctrine.md` `<one-budget>`; here it means pricing every panel proposal in wall-clock *and* dollars before proposing it.
@@ -119,7 +127,7 @@ Why it would accumulate: the frozen bank is the *ruler*, not the origin, so edit
 
 **Never propose rung 4 while rung 0 has content.** Read per-unit prices off the ledger, not off this table, which deliberately carries none.
 
-**Corollary, operator-stated: we are not optimizing the long campaign.** Push performance in the first few rounds — the budget already running — and collect longer horizons as an additional gain afterwards. `max_inner_rounds` stays where `inner_tasks.yaml` sets it, and the measurand already agrees.
+**Corollary, operator-stated: we are not optimizing the long campaign.** Push performance in the first few rounds — the budget already running — and collect longer horizons as an additional gain afterwards. `max_inner_rounds` stays where `dataset.yaml::panel` sets it, and the measurand already agrees.
 
 ### The seed question — open, and two traps
 
@@ -128,7 +136,7 @@ Whether to cut the panel to one seed turns entirely on the **arm×seed interacti
 - **"Best performing seed" is outcome selection.** The highest-mean bank is where *every* arm looks good — hence the least discriminating, not the most.
 - **Un-pairing is the expensive way to save money.** Letting arms draw their own banks stops the seed main effect cancelling, and the same resolving power then costs more than twice the cells.
 
-## The six-step playbook
+## The playbook
 
 ### 1. Read the current L1 optimizer prompt
 
@@ -178,7 +186,7 @@ Symptom: `param_scope_discipline` (`validators/l1_behavior.py`) scores a param-s
 
 #### Critique-score divergence (out of scope from L1)
 
-Critique says A is best, composite says B. **Not an L1 problem.** Route to `datasets/{name}/campaign.yaml::scoring` and stop reading L1 artifacts.
+Critique says A is best, composite says B. **Not an L1 problem.** Route to `dataset.yaml::campaign.scoring` and stop reading L1 artifacts.
 
 #### Footnote — generator mechanics, measured absent
 
@@ -233,6 +241,18 @@ L1 violations on round N (cycle <id>):
 
 Write the edit as a unified diff against `resolved_prompts["l1_generate/1"]`. State the prediction in one line. Then advance one round (`python -m promptpotter resume`; `new` only after a config/prompt change, which mints a fresh `cycle_id`), open `round_(N+1).json`, and compare. If the prediction held, lock it in. If not, classify again — the failure mode was different than thought.
 
+### 7. Authored mode — you are the proposer
+
+**Authored mode is self-optimization with `optimization.arm_gate: author`: every round holds, no generator node runs, and the arms it measures are the ones you or the operator submit.** However the operator words it — "you are the proposer", "you write the candidates", "self-potter, hand-authored" — this is the mode, and its name is the knob's value. Its sibling is **review mode** (`arm_gate: review`): the generator drafts, the round holds, and you keep drafts by index, add arms, or both. Scoring, critique and both escalation layers run unchanged in either.
+
+Launch with `--set arm_gate=author`, read the hold in the readout, and answer it with `submit-arms --file arms.yaml`. An arm is an edit of the round's parent — `pipeline_overlay: {l1_critique: {instruction: …}}` — so one arm per hypothesis, and a combined arm only beside its parts.
+
+**Three checks before an authored arm earns a cell, in this order — each has failed a hand-written arm:**
+
+1. **The lever must be in the node's sight.** A node told to use a lever its layout does not render names one that does not exist. Read the node's `possible` set in `dispatch/layout.py` and its rendered prompt in a banked round before writing an instruction that depends on a panel.
+2. **The lever must bind in the inner benchmark.** A budget axis moves nothing where the solver never reaches the cap; an axis the inner `dataset.yaml::pipeline` does not open cannot be searched. Settle headroom with `ab` on the inner dataset (the parent at two values of the axis) before asking an optimizer prompt to find it.
+3. **The edit must change what the node EMITS.** Diagnosis quality is not scored; behaviour is. Run the edited node on banked decision points (§ The plan) and compare its output with the parent's on the failure you named — cluster labels, the axes variants touch, prompt growth. An edit that changes no output cannot change a cell.
+
 ## Edit etiquette (the non-negotiables)
 
 - **One edit per pass.** Multiple simultaneous edits destroy the signal that lets you tell which one helped.
@@ -248,8 +268,8 @@ Write the edit as a unified diff against `resolved_prompts["l1_generate/1"]`. St
 
 - Does not generate new candidates itself. That is L1's job.
 - Does not refine `task_context` (operator-authored, frozen) or replan strategy (L3's). L3 firing means the plan-space was wrong, not that the L1 prompt needs tweaking.
-- Does not modify `task_description.md` or the per-dataset configs — those change cycle identity and the scoring contract.
-- Does not re-score past rounds. If the scoring formula changes, swap it in `campaign.yaml::scoring` and let the next round-end recompile.
+- Does not modify `task.md` or the per-dataset configs — those change cycle identity and the scoring contract.
+- Does not re-score past rounds. If the scoring formula changes, swap it in `dataset.yaml::campaign.scoring` and let the next round-end recompile.
 
 ## Useful pointers
 

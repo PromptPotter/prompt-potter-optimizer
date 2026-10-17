@@ -2,63 +2,101 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from contextvars import ContextVar
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from pydantic import ConfigDict, Field
 
 from promptpotter.domain.results import CellFold
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_answers
 from promptpotter.infrastructure.store.io import write_jsonl
 from promptpotter.infrastructure.store.measurement_archive import standing
-from promptpotter.infrastructure.store.read_model import iter_jsonl
+from promptpotter.infrastructure.store.read_model import LedgerSpan, iter_jsonl
+from promptpotter.shared.clock import epoch_seconds
 from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from promptpotter.domain.sample import ArchiveEntry, FiledAnswer
     from promptpotter.domain.scoring import MeasuredCell, WalkedCell
+    from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
+    from promptpotter.infrastructure.store.read_model import Moment
     from promptpotter.infrastructure.store.stores import Stores
 
 __all__ = [
+    "CampaignWalks",
+    "FiledBy",
     "SampleFoldRow",
+    "as_of_moment",
     "bench_reads",
+    "campaign_fenced",
+    "fence_memory",
     "list_populations",
     "load_population",
     "memory_scoped",
-    "note_walked",
     "population_signatures",
     "sample_fold_rows",
-    "scope_memory_to_own_answers",
     "walked_answers",
     "write_sample_fold",
 ]
 
 
-# CACHE (`ReplayFeed`) is NEVER filtered; MEMORY reads fence a controlled line to its own walks.
-_OWN_ANSWERS: ContextVar[set[str] | None] = ContextVar("own_answers", default=None)
+class FiledBy(NamedTuple):
+    """Every campaign's answers, as the archive held them at *moment*."""
+
+    moment: Moment
 
 
-def scope_memory_to_own_answers(answers: set[str]) -> None:
-    """Called once at the runner seam of a controlled line, INSIDE its own task."""
-    _OWN_ANSWERS.set(set(answers))
+class CampaignWalks(NamedTuple):
+    """One campaign's walks, read when memory is: a cycle it forks after the fence is its own too."""
+
+    campaigns: CampaignStore
+    campaign_id: str
+    moment: Moment | None
+
+    def spans(self) -> list[LedgerSpan]:
+        held = self.campaigns.campaign_walk_spans(self.campaign_id)
+        return held if self.moment is None else self.moment.spans(held)
+
+
+# MEMORY reads fence an arm, or an instrument's cell, to its campaign's walks, and any other task
+# re-read at a past moment to what was filed by then.
+_FENCE: ContextVar[CampaignWalks | FiledBy] = ContextVar("memory_fence")
+
+
+def fence_memory(fence: CampaignWalks | FiledBy) -> None:
+    """Inside the task it scopes."""
+    _FENCE.set(fence)
 
 
 def memory_scoped() -> bool:
-    return _OWN_ANSWERS.get() is not None
+    return _FENCE.get(None) is not None
 
 
-def note_walked(answer: str) -> None:
-    if (own := _OWN_ANSWERS.get()) is not None:
-        own.add(answer)
+def campaign_fenced() -> bool:
+    """An arm, or an instrument's cell: no other campaign is its memory."""
+    return isinstance(_FENCE.get(None), CampaignWalks)
 
 
-def _remembered(answers: list[FiledAnswer]) -> list[FiledAnswer]:
-    own = _OWN_ANSWERS.get()
-    return answers if own is None else [answer for answer in answers if answer.answer in own]
+def as_of_moment() -> Moment | None:
+    """The moment this task re-reads the world at — its ledgers as its archive; ``None`` is now."""
+    fence = _FENCE.get(None)
+    return None if fence is None else fence.moment
+
+
+def _remembered() -> Callable[[FiledAnswer], bool] | None:
+    """An open span grows with its ledger, so a walk is remembered once its record lands."""
+    fence = _FENCE.get(None)
+    if fence is None:
+        return None
+    if isinstance(fence, FiledBy):
+        instant = fence.moment.instant
+        return lambda answer: (at := epoch_seconds(answer.created_at)) is not None and at <= instant
+    own = scan_ledger_answers(fence.spans())
+    return lambda answer: answer.answer in own
 
 
 def walked_answers(stores: Stores, cells: Iterable[WalkedCell]) -> list[MeasuredCell]:
@@ -83,14 +121,17 @@ def bench_reads(stores: Stores, *, dataset_name: str, sample_ids: frozenset[int]
 
 
 def load_population(stores: Stores, entry: ArchiveEntry) -> list[FiledAnswer]:
-    return list(standing(_remembered(stores.archive.population(entry))).values())
+    answers = stores.archive.population(entry)
+    if (remembered := _remembered()) is not None:
+        answers = [answer for answer in answers if remembered(answer)]
+    return list(standing(answers).values())
 
 
 def list_populations(stores: Stores, *, dataset_name: str | None = None) -> list[ArchiveEntry]:
     entries = stores.archive.list_all(dataset_name=dataset_name)
-    if not memory_scoped():
+    if (remembered := _remembered()) is None:
         return entries
-    return [e for e in entries if _remembered(stores.archive.population(e))]
+    return [e for e in entries if any(remembered(a) for a in stores.archive.population(e))]
 
 
 def population_signatures(
@@ -115,8 +156,8 @@ class SampleFoldRow(StrictModel):
     sp: str
     fk: str
     sig: list[list[Any]]
-    # ``(sample_id, objective, provenance)`` per graded cell.
-    graded: list[tuple[int, float, str]]
+    # ``(Sample.key, objective, provenance)`` per graded cell.
+    graded: list[tuple[str, float, str]]
     unscoreable: bool = False
     # ``(sample_id, hit, degraded, failure_mode)`` per cell, in walk order.
     cells: list[tuple[int, bool, bool, str | None]] = Field(default_factory=list)
@@ -126,7 +167,7 @@ class SampleFoldRow(StrictModel):
 
 
 def sample_fold_rows(stores: Stores, *, dataset_name: str) -> list[SampleFoldRow]:
-    """A controlled line reads none: the fold is every campaign's."""
+    """A fenced task reads none: the fold is every campaign's, at every moment."""
     if memory_scoped():
         return []
     return [

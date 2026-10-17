@@ -25,10 +25,10 @@ Symptom-first reference. Each entry: what you see → why it happens → what to
 **Why:** Groq's free tier has a tight per-model daily limit and 120b exhausts it fast. The default optimizer provider is OpenRouter — this only bites if you switched the optimizer (or a target node) to Groq.
 
 **What to try:**
-- Swap the `model` field in the relevant `datasets/<name>/pipeline.yaml` to `openai/gpt-oss-20b` and keep iterating. Flip back to `120b` for benchmarks.
-- Each dataset's `reasoning_effort` default is tuned to keep both models clear of Groq's per-model output ceiling — `bbeh` ships `reasoning_effort: low` so `20b` doesn't burn its reasoning budget.
-- Where `max_tokens` is and is not pinned by a dataset — owned by the matrix below. Raise it per-cycle via `campaign.yaml::pipeline_overlay`.
-- Target-layer model lives in `datasets/<name>/pipeline.yaml::llm_only.config` (set `provider` explicitly — e.g. `openrouter`); the optimizer-layer model is declared apart from it ([Install § 3](02-install.md#3-create-env)). They're independent.
+- Swap the `model` field in your definition's `dataset.yaml::pipeline` (`.promptpotter/projects/{tenant}/datasets/<name>/`) to `openai/gpt-oss-20b` and keep iterating. Flip back to `120b` for benchmarks.
+- Each dataset's `reasoning_effort` default is tuned to keep both models clear of Groq's per-model output ceiling — `bbeh` pins `reasoning_effort: low` so `20b` doesn't burn its reasoning budget.
+- Where `max_tokens` is and is not pinned by a dataset — owned by the matrix below. Raise it per-cycle via `dataset.yaml::campaign.pipeline_overlay`.
+- Target-layer model lives in `dataset.yaml::pipeline.nodes.llm_only.config` (set `provider` explicitly — e.g. `openrouter`); the optimizer-layer model is declared apart from it ([Install § 3](02-install.md#3-create-env)). They're independent.
 - Full per-dataset matrix: [`docs/operations/dataset-reasoning-matrix.md`](../operations/dataset-reasoning-matrix.md).
 
 ---

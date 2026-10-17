@@ -10,23 +10,27 @@ from typing import TYPE_CHECKING, Annotated
 
 from promptpotter.application.runner.inner.tasks import (
     InnerCells,
-    InnerTasks,
-    inner_tasks_path,
-    resolve_inner_cells,
+    is_self_optimization,
+    parse_resolved,
 )
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.infrastructure.llm.telemetry import current_round
+from promptpotter.infrastructure.store.archive_queries import CampaignWalks, fence_memory
 from promptpotter.infrastructure.store.layout import inner_sandbox_dir
 from promptpotter.shared.hashing import shapes_optimizer_prompt
+from promptpotter.shared.measurement_context import enter_instrument_mode
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
-    from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.domain.ruler import DeltaRuler
+    from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
+    from promptpotter.infrastructure.store.read_model import Moment
     from promptpotter.shared.identity import IdentityContext
 
 __all__ = [
     "InnerSpawnContext",
-    "inner_optimizer",
+    "enter_inner_cell",
+    "inner_cells",
     "inner_spawn_context",
     "publish_inner_spawn_context",
     "retarget_inner_spawn",
@@ -39,7 +43,6 @@ class InnerSpawnContext:
     """``shared_root`` stays the REAL workspace root: sandboxing the shared caches re-scores every inner origin."""
 
     inner_sandbox_root: Path
-    dataset_config_dir: Path
     identity: IdentityContext
     shared_root: Path
     spawn_campaign_id: str
@@ -48,7 +51,7 @@ class InnerSpawnContext:
     enclosing: tuple[Path, ...]
     # Resolved ONCE at publish: a per-cell read lets an edit split one run's cells.
     cells: InnerCells | None = None
-    # Empty until a scale can be identified, the cold path where a cell self-fits.
+    # A dataset absent until a scale can be identified: its cells read cold, never fitting their own.
     rulers: Mapping[str, DeltaRuler] = field(default_factory=dict)
 
 
@@ -58,18 +61,19 @@ _INNER_SPAWN: Annotated[
 ] = contextvars.ContextVar("promptpotter_inner_spawn")
 
 
-def _resolve_outer_panel(session: Session, dataset_dir: Path) -> InnerTasks | None:
-    """``None`` where the dataset owns no panel: owning one IS what makes a dataset outer."""
-    if not inner_tasks_path(dataset_dir).is_file():
+def _outer_cells(session: Session) -> InnerCells | None:
+    """``None`` off the recursion. The workload's panel, never a second read of the file the
+    samples and fingerprint came from."""
+    if not is_self_optimization(session.backend_id):
         return None
-    # The workload's panel, never a second read of the file the samples and fingerprint came from.
-    return InnerTasks.model_validate(session.backend_client.workload.experiment)
+    return parse_resolved(session.backend_client.workload.experiment).panel.resolve_cells(
+        session.store
+    )
 
 
 def publish_inner_spawn_context(session: Session) -> None:
     cycle_id = session.state.cycle_id
-    dataset_dir = session.dataset_config_dir
-    if not cycle_id or dataset_dir is None or not session.campaign_id:
+    if not cycle_id or session.dataset is None or not session.campaign_id:
         _INNER_SPAWN.set(None)
         return
     # Never this store's ``projects_root``, which inside a sandbox already IS the sandbox.
@@ -79,12 +83,10 @@ def publish_inner_spawn_context(session: Session) -> None:
         session.store.tenant_id,
         CycleHop(campaign_id=session.campaign_id, cycle_id=cycle_id),
     )
-    panel = _resolve_outer_panel(session, Path(dataset_dir))
-    cells = None if panel is None else resolve_inner_cells(session.store, panel)
+    cells = _outer_cells(session)
     _INNER_SPAWN.set(
         InnerSpawnContext(
             inner_sandbox_root=inner_root,
-            dataset_config_dir=Path(dataset_dir),
             identity=session.store.identity,
             shared_root=shared_root,
             spawn_campaign_id=session.campaign_id,
@@ -107,14 +109,29 @@ def inner_spawn_context() -> InnerSpawnContext | None:
 
 
 @shapes_optimizer_prompt
-def inner_optimizer() -> SelectedOptimizer | None:
-    """The manifest an L4 outer's inner cells select, never the outer's own; ``None`` off the recursion."""
+def inner_cells() -> InnerCells | None:
+    """The cells an L4 outer's arms are measured on, each running its own manifest, never the
+    outer's own; ``None`` off the recursion."""
     ctx = inner_spawn_context()
-    return None if ctx is None or ctx.cells is None else ctx.cells.optimizer
+    return None if ctx is None else ctx.cells
 
 
 def set_inner_rulers(ctx: InnerSpawnContext) -> None:
     _INNER_SPAWN.set(ctx)
+
+
+def enter_inner_cell(
+    campaigns: CampaignStore,
+    campaign_id: str,
+    *,
+    ruler: DeltaRuler | None,
+    moment: Moment | None,
+) -> None:
+    """Inside the cell's own task. *ruler* is the spawner's, so every candidate reads the cell's
+    origin at one θ; the archive stays its CACHE, and is MEMORY only for its campaign's walks."""
+    # Before the cell's run binds its own round, so this still reads the spawner's.
+    enter_instrument_mode(ruler=ruler, spawned_in=current_round())
+    fence_memory(CampaignWalks(campaigns, campaign_id, moment))
 
 
 def retarget_inner_spawn(session: Session) -> None:

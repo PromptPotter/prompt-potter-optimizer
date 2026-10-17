@@ -10,7 +10,7 @@ from pydantic import ConfigDict, Field
 from promptpotter.domain.bench import BenchReading
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_listing import CycleIndex, CycleListEntry, RunStatus
-from promptpotter.domain.cycle_paths import CycleHop, CyclePath
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop, CyclePath
 from promptpotter.domain.opt_search_point import Variation
 from promptpotter.domain.paired_reading import ArmPointer, PairedReading
 from promptpotter.domain.phases import RunPhase
@@ -35,6 +35,7 @@ from promptpotter.domain.run_records import (
     LedgerFit,
 )
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.projections.cycle_index import read_cycle_index
 from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
@@ -93,7 +94,7 @@ class ForkStamp(StrictModel):
     kind: CourseKind
     trigger: str
     direction: ForkDirection | None = Field(
-        description="Which side of the cut the run CONTINUES on (`FORK_DIRECTION`): `offshoot` "
+        description="Which side of the cut the run CONTINUES on (`FORK_TRAITS`): `offshoot` "
         "hangs off a line that keeps running, `supersede` IS the line."
     )
     steered_by: str | None = Field(
@@ -318,7 +319,7 @@ class CourseNode(_Node):
     trigger: str = Field(description="Fork trigger; empty for roots and inner runs.")
     fork_direction: ForkDirection | None = Field(
         description="Which side of this cut the run CONTINUES on, derived from `trigger` "
-        "(`FORK_DIRECTION`). `offshoot` = this branch hangs off a line that keeps running; "
+        "(`FORK_TRAITS`). `offshoot` = this branch hangs off a line that keeps running; "
         "`supersede` = this branch IS the line and the PARENT is what was left behind. Null "
         "for roots and inner runs, which were not cut from anything. Served, never derived "
         "in the client — the two read identically on disk and only this says them apart.",
@@ -376,7 +377,7 @@ class FamilyCourse(NamedTuple):
 class _Reads:
     """Per-build and thrown away: a memo outliving the request serves a round that has closed."""
 
-    def __init__(self, moment: Moment | None = None) -> None:
+    def __init__(self, *, moment: Moment | None) -> None:
         self.moment = moment
         self._cycles: dict[Path, list[CycleListEntry]] = {}
         self._campaigns: dict[tuple[Path, str], Campaign | None] = {}
@@ -402,8 +403,8 @@ def _layout(stores: Stores, hop: CycleHop) -> CycleLayout:
     return CycleLayout(cycle_dir_for(stores.base_dir, hop))
 
 
-def _read_index(stores: Stores, hop: CycleHop, moment: Moment | None = None) -> CycleIndex | None:
-    return read_cycle_index(_layout(stores, hop).cycle_dir, moment)
+def _read_index(stores: Stores, hop: CycleHop, *, moment: Moment | None) -> CycleIndex | None:
+    return read_cycle_index(_layout(stores, hop).cycle_dir, moment=moment)
 
 
 def _course_edge(index: CycleIndex | None) -> tuple[str | None, str | None]:
@@ -531,7 +532,7 @@ def _child_courses(stores: Stores, path: CyclePath, reads: _Reads) -> list[Famil
             FamilyCourse(
                 store=stores,
                 path=(*path[:-1], hop),
-                manifest=_read_index(stores, hop, reads.moment),
+                manifest=_read_index(stores, hop, moment=reads.moment),
                 inner=False,
             )
         )
@@ -549,7 +550,7 @@ def _child_courses(stores: Stores, path: CyclePath, reads: _Reads) -> list[Famil
                 FamilyCourse(
                     store=sandbox,
                     path=(*path, hop),
-                    manifest=_read_index(sandbox, hop, reads.moment),
+                    manifest=_read_index(sandbox, hop, moment=reads.moment),
                     inner=True,
                 )
             )
@@ -557,12 +558,12 @@ def _child_courses(stores: Stores, path: CyclePath, reads: _Reads) -> list[Famil
 
 
 def iter_family_courses(stores: Stores, path: CyclePath) -> list[FamilyCourse]:
-    reads = _Reads()
+    reads = _Reads(moment=None)
     root_store, _ = resolve_cycle_path(stores, path)
     root = FamilyCourse(
         store=root_store,
         path=path,
-        manifest=_read_index(root_store, path[-1]),
+        manifest=_read_index(root_store, path[-1], moment=None),
         inner=False,
     )
     out = [root]
@@ -961,14 +962,14 @@ def _with_heads(root: CourseNode) -> CourseNode:
 
 
 def _readings(
-    layout: CycleLayout, span: LedgerSpan, standing: StandingRounds, *, replay: bool
+    layout: CycleLayout, spans: list[LedgerSpan], standing: StandingRounds, *, replay: bool
 ) -> _Readings:
     closes = [standing.rounds[r].close for r in sorted(standing.rounds, reverse=True)]
     return _Readings(
         verify={}
         if replay
         else {label: read for label, (_, read) in scan_ledger_verify(layout.ledger).graded.items()},
-        bench=scan_bench_readings(span),
+        bench=scan_bench_readings(spans),
         line=line_by_individual(
             next(
                 (c.overlap for c in closes if c.overlap is not None and overlap_line(c.overlap)),
@@ -980,12 +981,19 @@ def _readings(
 
 def _build(stores: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> CourseNode:
     leaf = path[-1]
-    index = _read_index(stores, leaf, reads.moment)
+    index = _read_index(stores, leaf, moment=reads.moment)
     layout = _layout(stores, leaf)
-    # The course's own ledger, never its chain: a fork's lifted rounds are its parent's nodes.
-    own = LedgerSpan(layout.ledger)
-    span = own if reads.moment is None else reads.moment.span(own.path)
-    standing = scan_standing_rounds([span])
+    # A sibling fork's lifted rounds are its parent's nodes, so it reads its own ledger; a cycle
+    # cut from ANOTHER tree has no parent node here, and its prefix is its own timeline.
+    foreign = index is not None and index.parent is not None and index.parent_cycle_id is None
+    spans = (
+        ledger_chain(CycleDir(layout.cycle_dir), moment=reads.moment)
+        if foreign
+        else [
+            LedgerSpan(layout.ledger) if reads.moment is None else reads.moment.span(layout.ledger)
+        ]
+    )
+    standing = scan_standing_rounds(spans)
     candidates = standing.candidates()
     elections = standing.elections
     children = _child_courses(stores, path, reads)
@@ -997,7 +1005,7 @@ def _build(stores: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Cou
     hops = list(path)
 
     decided = _round_facts(standing, candidates)
-    readings = _readings(layout, span, standing, replay=reads.moment is not None)
+    readings = _readings(layout, spans, standing, replay=reads.moment is not None)
 
     # Forks resolve first: a replayed origin grafts its runs onto the candidate it replays.
     by_id = {c.candidate_id: c for c in candidates}
@@ -1072,7 +1080,7 @@ def _build(stores: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Cou
     )
 
 
-def build_lineage_tree(stores: Stores, path: CyclePath, moment: Moment | None = None) -> CourseNode:
+def build_lineage_tree(stores: Stores, path: CyclePath, *, moment: Moment | None) -> CourseNode:
     """*moment* replays the ledgers only: run-state stays the live one, as on a replayed dashboard."""
     store_at, _ = resolve_cycle_path(stores, path)
-    return _with_heads(_build(store_at, path, depth=_MAX_COURSE_DEPTH, reads=_Reads(moment)))
+    return _with_heads(_build(store_at, path, depth=_MAX_COURSE_DEPTH, reads=_Reads(moment=moment)))

@@ -67,7 +67,8 @@ invariants:
                       phase or unmount run controls while the last-known server phase is running.
                       Every "running" surface — the sidebar-edge jobs dock (and its phone stand-in,
                       the app bar back-arrow dot), workspace runningCycles — reads this one set AND
-                      one shared ordering (what needs you first). A surface that RENDERS the
+                      one shared ordering (what needs you first); the dock adds the viewer's own
+                      scoring passes from the served machine-status (`mine`). A surface that RENDERS the
                       phase reads the served table TOTAL over RunPhase (`RUN_PHASE_INFO`, generated
                       from `domain/phases.py`), and the verb it offers is the served
                       `run_admission` the dispatcher refuses on:

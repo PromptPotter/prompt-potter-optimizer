@@ -21,7 +21,7 @@ import { isStopReason } from "@/lib/run-phase";
 // Minted through the control plane: browser ingest materializes 0 items for an outer dataset, and the CLI blocks on a TTY.
 
 const BUDGET_USD = Number(process.env.PP_E2E_BUDGET_USD || "0.05");
-const DATASET = "promptpotter-self-e2e";
+const DATASET = "promptpotter-self/e2e";
 // One outer search round: every outer cell is a whole inner campaign.
 const WANT_ROUNDS = 2;
 
@@ -66,7 +66,7 @@ test.describe("the recursion, end to end", () => {
   });
 
   test("the backend the inner benchmark needs is reachable", async ({ request }) => {
-    // The outer cells are inner campaigns on `justlogic-d234`, which routes to the backend too.
+    // The outer cells are inner campaigns on `justlogic/d234`, which routes to the backend too.
     await assertBackendUp(request);
   });
 
@@ -75,7 +75,7 @@ test.describe("the recursion, end to end", () => {
     expect(res.ok()).toBeTruthy();
     const names = ((await res.json()).datasets ?? []).map((d: { name: string }) => d.name);
     expect(names, `${DATASET} is not installed`).toContain(DATASET);
-    expect(DATASET, "this tier must never run the calibrated panel").not.toBe("promptpotter-self");
+    expect(DATASET, "this tier must never run the calibrated panel").not.toBe("promptpotter-self/panel");
   });
 
   test("minting carries the ceiling, so there is no unclamped window", async ({ request }) => {

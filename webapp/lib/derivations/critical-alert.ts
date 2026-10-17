@@ -12,8 +12,6 @@ interface Args {
   bannerStatus: StatusKind;
   bannerText: string;
   bannerHint?: string;
-  // Not a `StatusKind`: the poll rests at `offline`, so only the caller knows the list loaded empty.
-  emptyWorkspace?: boolean;
   dash: DashboardSnapshot | null;
   connectorDown?: boolean;
   connectorName?: string | null;
@@ -25,7 +23,6 @@ export function criticalAlert({
   bannerStatus,
   bannerText,
   bannerHint,
-  emptyWorkspace,
   dash,
   connectorDown,
   connectorName,
@@ -36,8 +33,6 @@ export function criticalAlert({
   if (bannerStatus === "gone") {
     return { severity: "info", title: bannerText, detail: bannerHint };
   }
-  // Arrives wearing the poll's resting `offline`, so it must precede that branch.
-  if (emptyWorkspace) return null;
   const err = dash?.error;
   if (err) {
     return {

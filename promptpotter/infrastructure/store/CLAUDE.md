@@ -2,15 +2,15 @@
 
 ## Stores
 
-`store/stores.py`: `Stores` frozen dataclass + `build_stores(identity, *, projects_root=…, benchmarks_root=…, shared_root=…)`. `shared_root` roots every CONTENT-ADDRESSED cache and equals `projects_root` everywhere except an L4 inner sandbox, which isolates campaign state but must NOT isolate a cache keyed by content hash, nor the dataset tier (`tenant_datasets`) its inner benchmark resolves through. **`store/layout.py::SHARED_CACHE_DIRS` is the sole enumeration of that set**, because three surfaces must agree on it — `build_stores` roots them, `application/maintenance/reset.py` preserves them, and the workspace storage report counts them as shared. A cache named in one list and not the others is destroyed by `reset` or double-counted, silently, and one of those costs money.
+`store/stores.py`: `Stores` frozen dataclass + `build_stores(identity, *, projects_root=…, install_datasets_root=…, shared_root=…)`. `shared_root` roots every CONTENT-ADDRESSED cache and equals `projects_root` everywhere except an L4 inner sandbox, which isolates campaign state but must NOT isolate a cache keyed by content hash, nor the dataset tier (`tenant_datasets`) its inner benchmark resolves through. **`store/layout.py::SHARED_CACHE_DIRS` is the sole enumeration of that set**, because three surfaces must agree on it — `build_stores` roots them, `application/maintenance/reset.py` preserves them, and the workspace storage report counts them as shared. A cache named in one list and not the others is destroyed by `reset` or double-counted, silently, and one of those costs money.
 
 `Stores.identity` is the sole source of tenant scope, with `Stores.tenant_id` a derived `@property` returning the `TenantId` newtype — never an independent field (identity-foundation no-drift gate #4). Composite over the leaf stores `Stores` declares as its own fields, one class per `store/*.py`, except `optimizer_reuse` and `judge_reuse` — two instances of the one `LLMReuseCache` (`store/llm_reuse_cache.py`, beside `hash_call`, its key) differing only in namespace directory. Separate attributes rather than a shared instance: a grader able to read the loop's cached answers would be a ruler fed by what it measures. **Cite one as attribute → class → file.**
 
 **`store/__init__.py` re-exports nothing** — import each leaf directly, so a leaf import never drags in `CampaignStore` and cycles back through `runtime_flags` / `ledger`.
 
-Shared I/O in `store/io.py`, and **format follows authorship**: `write_json`/`read_json*` for what code writes and only code reads, `write_yaml`/`read_yaml*` for the operator-authored config tier under `datasets/`. There is deliberately no `read_yaml_tolerant` — a corrupt config degrading to "not there" attributes a measurement to the wrong fingerprint.
+Shared I/O in `store/io.py`, and **format follows authorship**: `write_json`/`read_json*` for what code writes and only code reads, `write_yaml`/`read_yaml*` for the operator-authored definition tier (`dataset.yaml`, `origin.yaml`). There is deliberately no `read_yaml_tolerant` — a corrupt config degrading to "not there" attributes a measurement to the wrong fingerprint.
 
-Path helpers live in `store/layout.py`, the per-tenant active-session pointer in `store/session_pointer.py`, and derived reads are free functions in query modules (`store/archive_queries.py` is the template). **`store/read_model.py::append_row` / `fold_jsonl*` / `LedgerIndex` (typed records) / `LineIndex` (raw lines) are the only derived-index persistence primitives**; a second mechanism is the bug. `measurements/` is cross-cycle and cross-campaign **within one tenant** — `build_stores` roots it and every `SHARED_CACHE_DIRS` peer at `shared_root / identity.tenant_id`, so content-addressing makes a row shareable across campaigns and into an L4 sandbox, never across accounts. `MeasurementArchive` is the DB core — ONE instance per `base_dir` per process (`MeasurementArchive.at`), so readers share its index tail — and `store/archive_queries.py` the facade a run files through and where a controlled line's memory scope is applied — a MEMORY read past it is the bug; `application/maintenance/` rewrites the archive itself.
+Path helpers live in `store/layout.py`, the per-tenant active-session pointer in `store/session_pointer.py`, and derived reads are free functions in query modules (`store/archive_queries.py` is the template). **`store/read_model.py::append_row` / `fold_jsonl*` / `LedgerIndex` (typed records) / `LineIndex` (raw lines) are the only derived-index persistence primitives**; a second mechanism is the bug. `measurements/` is cross-cycle and cross-campaign **within one tenant** — `build_stores` roots it and every `SHARED_CACHE_DIRS` peer at `shared_root / identity.tenant_id`, so content-addressing makes a row shareable across campaigns and into an L4 sandbox, never across accounts. `MeasurementArchive` is the DB core — ONE instance per `base_dir` per process (`MeasurementArchive.at`), so readers share its index tail — and `store/archive_queries.py` the facade a run files through and where a task's memory fence (`fence_memory`) is applied — a MEMORY read past it is the bug; `application/maintenance/` rewrites the archive itself.
 
 The `CycleDir` / `WorkspaceDir` write-target newtypes live in `domain/cycle_paths.py` — projections and stores accept these, not raw `str`/`Path` — as does `CycleHop`, which every per-cycle `CampaignStore` method takes in place of a `(campaign_id, cycle_id)` pair (both `str`, so a swapped call read as "no data" rather than raising). Build it from the carrier that owns both, never by re-pairing.
 
@@ -18,7 +18,7 @@ The `CycleDir` / `WorkspaceDir` write-target newtypes live in `domain/cycle_path
 
 **Three read-once ledger records ride `CampaignStore`.** `write_cycle_seed`/`read_cycle_seed` append and scan the cycle seed as a `CycleSeedRecord`, read once at the runner seam. A fork inherits the parent's seed record virtually then appends its own, so a scan of the cycle's own ledger returns that cycle's seed.
 
-`write_ruler`/`read_ruler` ride the same shape for a δ ruler (`RulerRecord`, last-wins PER `dataset_name`) — **WHOLE each time rather than as a delta**, because `append` is not crash-atomic and a torn line must fall back to a smaller-but-valid scale, and appended BEFORE the round file naming it. **One ledger carries more than one** (δ keys name a sample only within one dataset, and an L4 outer cycle also carries the shared inner scale — `application/runner/inner/ruler.py`), and a fork copies none: `read_ruler` scans the chain the fork continues (`ledger.py::continued_chain`), so the parent's scales are the fork's until it appends its own.
+`write_ruler`/`read_ruler` ride the same shape for a δ ruler (`RulerRecord`, last-wins PER `scope`, its δ keyed by `Sample.key`) — **WHOLE each time rather than as a delta**, because `append` is not crash-atomic and a torn line must fall back to a smaller-but-valid scale, and appended BEFORE the round file naming it. **One ledger carries more than one** (an L4 outer cycle also carries one per seat dataset — `application/runner/inner/ruler.py`; a scope is a scorer on one dataset, `domain/ruler.py::RulerScope`), and a fork copies none: `read_ruler` scans the chain the fork continues (`ledger.py::continued_chain`), so the parent's scales are the fork's until it appends its own.
 
 `write_run_limits`/`read_run_limits` carry the operator's standing ceiling (`RunLimitsRecord`, last-wins), scanned physically so a fork never inherits it. The record is the ONE store of the ceiling and of the job's reservation beside it: a launch reads it and so does a run in flight (`runtime_flags.py::standing_run_limits`, an incremental fold), so there is no mirror file. **A command for a running loop is read the same way** — `runtime_flags.py::standing_controls`, the fold of the cycle's own `CommandRecord`s and acks (`ledger_scan.py::Controls`) — so a cycle's `.runtime` holds no control file and no lifecycle flag.
 
@@ -68,7 +68,7 @@ writes, and why — [`docs/operations/persistence-and-state.md`](../../../docs/o
 
 **`measurements/` is ONE content-addressed tree per workspace, and it outlives the campaigns that filled it.** Three consequences:
 
-- **A row is filed under the dataset it MEASURED, never under the campaign that paid for it.** On the recursion that is the *inner* benchmark (`datasets/{name}/inner_tasks.yaml::inner_benchmark`) — an inner sandbox isolates campaign state but deliberately shares `shared_root`, so **`promptpotter-self`'s bytes are almost all filed under the inner dataset's name.** Scoping anything by `--dataset promptpotter-self` reaches the outer cells and essentially nothing L4 actually cost. Count before concluding: `compact-archive inventory --dataset <name>` prints configurations, answers and bytes by dataset, role and age.
+- **A row is filed under the dataset it MEASURED, never under the campaign that paid for it.** On the recursion that is the *inner* benchmark (`dataset.yaml::panel.inner_benchmark`) — an inner sandbox isolates campaign state but deliberately shares `shared_root`, so **`promptpotter-self`'s bytes are almost all filed under the inner dataset's name.** Scoping anything by `--dataset promptpotter-self` reaches the outer cells and essentially nothing L4 actually cost. Count before concluding: `compact-archive inventory --dataset <name>` prints configurations, answers and bytes by dataset, role and age.
 - **Nothing on an answer names a campaign.** It carries its configuration, its dataset, its role and its grade — no `campaign_id`, no `cycle_id`, no run, because a cache hit is supposed to cross campaigns; which walk took which answer is the ledger's to say. So "what did this campaign cost on disk" is not a question the archive answers, and the join a surface needs is `ArmNode.reading.sp_hash` → the row's `prompt_fields_id` (`docs/developer/README.md` § Cross-run memory).
 - **Cycle state is disposable and the rows are not**, so the rows routinely outlive every campaign that could select them: an emptied `.promptpotter/.inner/` leaves its measurements addressable only by dataset. Selecting a family and acting on "what it produced" is therefore a claim about *surviving* state — say so, rather than reporting a smaller number as if it were the whole.
 
@@ -76,14 +76,17 @@ Reversibility is what makes the first two survivable: `compact` keeps every fiel
 
 ## Dataset content has two tiers, and only one is writable
 
-**A dataset DEFINITION is install content; everything DERIVED from it is the operator's.**
-The definition ships read-only in the wheel (`config/paths.py::benchmark_datasets_root`); the
-rows a benchmark materializes and the `task_context.yaml` an LLM decomposed are measurement
-inputs the operator paid for, so they land in the tenant tree as flat keyed files
-(`benchmark-rows/{name}.json`, `task-context/{name}.yaml`) — never as
-`datasets/{name}/cache.json`, which satisfies the resolver's tenant-first rule and shadows the
-definition it was fetched for. Both halves resolve on one ladder (`store/dataset_access.py::readable_dataset_rows`; `TenantDatasetStore.save_benchmark_rows` writes the rows);
-sharing a directory is the only thing that would make the install tier need to be writable.
+**A dataset DEFINITION is authored; everything DERIVED from it is the operator's.**
+A definition is the operator's own (`projects/{tenant}/datasets/{name}/`, a WHOLE document) or one of
+the templates that ship read-only in the wheel (`config/paths.py::install_datasets_root`); the
+rows a source materializes, the panel a recipe builds and the framing an LLM
+decomposed are measurement inputs the operator paid for, so they land in the tenant tree keyed by
+name (`materialized/{name}.json`, `materialized/{name}/`, `task-context/{name}.yaml`) — never
+under the definition's own directory, where a bank satisfies the resolver's tenant-first rule and shadows the
+definition it was fetched for. A name resolves ONCE (`store/dataset_access.py::resolve_dataset`), and every
+read takes the `ResolvedDataset` it returns (`readable_dataset_rows`, `dataset_experiment`; `TenantDatasetStore.save_materialized_rows` / `materialized_panel_dir`);
+sharing a directory is the only thing that would make the install tier need to be writable. **No verb writes the
+install tier** — `restamp` prunes the tenant's definitions only; install content is edited as source.
 
 ## Picking a JSON reader is a decision
 

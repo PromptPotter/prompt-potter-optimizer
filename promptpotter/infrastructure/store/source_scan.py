@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
-from promptpotter.config.paths import user_data_root
+from promptpotter.config.paths import install_cache_root
 from promptpotter.infrastructure.store.io import read_json_tolerant, write_json
 from promptpotter.shared import hashing
 from promptpotter.shared.hashing import (
@@ -58,7 +58,7 @@ def _module_path(module: str) -> Path | None:
 
 
 class _FactCache:
-    _FILE = Path(".cache") / "source_facts.json"
+    _FILE = Path("source_facts.json")
 
     def __init__(self) -> None:
         self._held: dict[str, SourceFacts] | None = None
@@ -73,7 +73,7 @@ class _FactCache:
 
     def of(self, text: str) -> SourceFacts:
         if self._held is None:
-            held = read_json_tolerant(user_data_root() / self._FILE, {})
+            held = read_json_tolerant(install_cache_root() / self._FILE, {})
             self._held = held if isinstance(held, dict) else {}
         key = self._key(text)
         self._used.add(key)
@@ -88,7 +88,7 @@ class _FactCache:
         wanted = self._used | {self._key(text) for text in live}
         self._held = {key: facts for key, facts in sorted(self._held.items()) if key in wanted}
         with contextlib.suppress(OSError):
-            write_json(user_data_root() / self._FILE, self._held)
+            write_json(install_cache_root() / self._FILE, self._held)
         self._grew = False
 
 

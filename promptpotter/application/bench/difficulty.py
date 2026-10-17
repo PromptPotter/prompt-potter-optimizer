@@ -3,7 +3,8 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal, NamedTuple
+from functools import cached_property
+from typing import TYPE_CHECKING, NamedTuple
 
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.intelligence.hard_sample_archive import build_archive_observations
@@ -17,27 +18,27 @@ from promptpotter.application.intelligence.rasch import (
     graduate_ruler_model,
     observations_from_results,
 )
-from promptpotter.domain.results import RoundResult, measured_cells, merge_known_outcomes
+from promptpotter.domain.results import RoundResult, merge_known_outcomes
 from promptpotter.domain.ruler import (
     AbilityReading,
+    CellScopes,
     DeltaRuler,
+    RulerScope,
     flat_ruler_id,
-    is_flat_ruler_id,
     theta_caveat,
 )
 from promptpotter.domain.scoring import NO_CELLS, CellSheet, GradedCell
-from promptpotter.infrastructure.store.archive_queries import memory_scoped
-from promptpotter.shared.errors import RulerUnpersistedError
+from promptpotter.infrastructure.store.archive_queries import as_of_moment, campaign_fenced
 from promptpotter.shared.measurement_context import instrument_mode
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
+    from promptpotter.infrastructure.store.read_model import Moment
+    from promptpotter.shared.measurement_context import InstrumentMode
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["DifficultyView", "RulerScope", "StampedReading", "calibrate_delta_ruler"]
-
-RulerScope = Literal["dataset", "campaign"]
+__all__ = ["DifficultyView", "StampedReading", "calibrate_delta_ruler", "session_ruler_scope"]
 
 
 class StampedReading(NamedTuple):
@@ -52,11 +53,12 @@ def _reading(
     *,
     objective_id: str,
     results: Iterable[GradedCell],
+    scopes: CellScopes,
 ) -> StampedReading:
     """The SOLE stamping site: θ, its scale and its caveat are minted together so none can disagree."""
     if theta is None:
         return StampedReading(None, 0, None)
-    cells = list(measured_cells(results))
+    cells = {cell.key for cell in results if cell.scored}
     band = ruler.band_span(cells) if ruler is not None else None
     round_span = band[0] if band is not None else None
     ruler_span = ruler.delta_span if ruler is not None else None
@@ -76,6 +78,7 @@ def _reading(
             round_span=round_span,
             ruler_span=ruler_span,
             unlinked=unlinked,
+            scopes=scopes.spanned(cells),
             pinned_share=pinned,
         ),
     )
@@ -100,7 +103,7 @@ def _with_origin(origin_results: CellSheet, archive_obs: list[Observation]) -> l
 
 def _origin_theta(obs: list[Observation], ruler: DeltaRuler | None) -> tuple[float, float] | None:
     """Never the JOINT fit's ``post.theta[ORIGIN_ABILITY_ID]``: ``fit_rasch`` re-anchors per call."""
-    origin = {o.sample_id: o.response for o in obs if o.candidate_id == ORIGIN_ABILITY_ID}
+    origin = {o.key: o.response for o in obs if o.candidate_id == ORIGIN_ABILITY_ID}
     return fit_theta(origin, ruler.entries() if ruler is not None else None)
 
 
@@ -118,7 +121,7 @@ def calibrate_delta_ruler(
         return None, None
     # ≥2 ARMS: with one, the anchor pins θ and δ collapses to that arm's own hit pattern.
     ruler: DeltaRuler | None = None
-    if len({o.sample_id for o in obs}) >= n_min and len({o.candidate_id for o in obs}) >= 2:
+    if len({o.key for o in obs}) >= n_min and len({o.candidate_id for o in obs}) >= 2:
         fitted, post = graduate_ruler_model(obs, enable=enable_2pl)
         if len(post.delta) >= n_min:
             ruler = post.anchored(fitted)
@@ -127,42 +130,45 @@ def calibrate_delta_ruler(
     return ruler, _origin_theta(obs, ruler)
 
 
-def _given_ruler(session: Session) -> DeltaRuler | None:
-    """A scale already fixed is never re-derived: the cycle's OWN ledger first, then the INSTRUMENT."""
-    if session.state.cycle_id:
-        # A δ key names a sample only within one dataset; an unnamed cycle still owes the refusal.
-        own = (
-            session.store.campaigns.read_ruler(session.hop, dataset_name=session.dataset_name)
-            if session.dataset_name
-            else None
+def session_ruler_scope(session: Session) -> RulerScope:
+    return RulerScope(scorer=session.scoring.require_scorer().id, dataset=session.measured_dataset)
+
+
+class _HeldScale(NamedTuple):
+    ruler: DeltaRuler | None
+    # Never beside closed rounds: anchored on an archive grown since, the fit is a second scale.
+    fits_now: bool
+
+
+def _held_scale(session: Session, moment: Moment | None, mode: InstrumentMode | None) -> _HeldScale:
+    """The cycle's OWN scale unless its spawner hands down another anchor; a round closed on any
+    other scale is re-read at the next ``calibrate``."""
+    own = (
+        session.store.campaigns.read_ruler(
+            session.hop, scope=session_ruler_scope(session), moment=moment
         )
-        if own is not None:
-            return own
-        _refuse_unreproducible_rounds(session)
-    mode = instrument_mode()
-    return mode.ruler if mode is not None else None
-
-
-def _refuse_unreproducible_rounds(session: Session) -> None:
-    """Falling through re-fits on an archive grown since the lock: a different scale, same cycle."""
-
-    rounds = session.store.campaigns.standing_rounds(session.hop).rounds
-    if not rounds:
-        return
-    # Warmth is monotone within a cycle, so the LAST standing round answers in one read.
-    ability = rounds[max(rounds)].close.ability
-    stamped = (ability.ruler_id or "") if ability is not None else ""
-    if not stamped or is_flat_ruler_id(stamped):
-        return
-    raise RulerUnpersistedError(
-        stamped, campaign_id=session.hop.campaign_id, cycle_id=session.hop.cycle_id
+        if session.state.cycle_id
+        else None
     )
+    given = mode.ruler if mode is not None else None
+    if given is not None and (own is None or own.anchor_id != given.anchor_id):
+        return _HeldScale(given, fits_now=False)
+    if own is not None or mode is not None:
+        return _HeldScale(own, fits_now=False)
+    closed = bool(session.state.cycle_id) and bool(
+        session.store.campaigns.standing_rounds(session.hop, moment=moment).rounds
+    )
+    return _HeldScale(None, fits_now=not closed)
+
+
+def _off_scale(rounds: Sequence[RoundResult], scale_id: str) -> bool:
+    return any(rr.ability is not None and rr.ability.ruler_id != scale_id for rr in rounds)
 
 
 def _cumulative_theta(
     results: Sequence[GradedCell], ruler: DeltaRuler | None
 ) -> tuple[float, float] | None:
-    responses = {cell.ruler_key: graded_response(cell) for cell in results if cell.scored}
+    responses = {cell.key: graded_response(cell) for cell in results if cell.scored}
     return fit_theta(responses, ruler.entries() if ruler is not None else None)
 
 
@@ -171,9 +177,10 @@ class DifficultyView:
     session: Session
     n_min: int
     enable_2pl: bool
-    scope: RulerScope = "dataset"
+    # An instrument's cell reads its spawner's scale: one it fit comes out of the arms under test.
+    derives: bool
     origin_sp_hash: str = ""
-    # The archive as it stood when the cycle OPENED, never re-read.
+    # The archive as its task's memory held it when this view opened, never re-read.
     observations: list[Observation] = field(default_factory=list)
     # ``None`` = still cold, where θ is logit-accuracy.
     ruler: DeltaRuler | None = None
@@ -186,36 +193,47 @@ class DifficultyView:
         *,
         origin_sp_hash: str,
         origin_results: CellSheet,
-        scope: RulerScope,
     ) -> tuple[DifficultyView, tuple[float, float] | None]:
+        """At its task's moment (``as_of_moment``) the view re-opens as the cycle held it then: its
+        ledger and its archive alike read up to that moment."""
+        mode = instrument_mode()
         view = cls(
             session=session,
             n_min=config.optimization.elimination_n_min,
             enable_2pl=config.optimization.enable_2pl_graduation,
-            scope=scope,
+            derives=mode is None,
             origin_sp_hash=origin_sp_hash,
         )
         view.observations = view.archive()
-        given = _given_ruler(session)
-        if given is not None:
-            view.ruler = given
-            return view, _origin_theta(_with_origin(origin_results, view.observations), given)
-        view.ruler, origin_theta = calibrate_delta_ruler(
-            origin_results, view.n_min, enable_2pl=view.enable_2pl, archive_obs=view.observations
-        )
-        return view, origin_theta
+        held = _held_scale(session, as_of_moment(), mode)
+        if held.fits_now:
+            view.ruler, origin_theta = calibrate_delta_ruler(
+                origin_results,
+                view.n_min,
+                enable_2pl=view.enable_2pl,
+                archive_obs=view.observations,
+            )
+            return view, origin_theta
+        view.ruler = held.ruler
+        return view, _origin_theta(_with_origin(origin_results, view.observations), held.ruler)
 
     def archive(self) -> list[Observation]:
         session = self.session
-        if self.scope == "campaign" and not memory_scoped():
-            raise RuntimeError("a campaign-scoped ruler read with no controlled arm's fence bound")
+        if (session.controlled or not self.derives) and not campaign_fenced():
+            raise RuntimeError(
+                "an arm's or an instrument cell's δ read with no campaign fence bound"
+            )
         return build_archive_observations(
             session.store,
             dataset_name=session.dataset_name,
             scorer=session.scoring.require_scorer(),
-            sample_ids=session.scoring.require_partition().admitted_ids,
+            admitted=session.scoring.require_partition().admitted_keys,
             origin_sp_hash=self.origin_sp_hash,
         )
+
+    @cached_property
+    def scopes(self) -> CellScopes:
+        return CellScopes.of(self.session.samples, self.session.measured_dataset)
 
     @property
     def scale_id(self) -> str:
@@ -223,9 +241,11 @@ class DifficultyView:
             return self.ruler.anchor_id
         return flat_ruler_id(self.session.scoring.require_scorer().id)
 
-    @property
-    def cells(self) -> set[int]:
-        return set(self.ruler.delta) if self.ruler is not None else set()
+    def on_scale(self, results: list[GradedCell]) -> list[GradedCell]:
+        """The flat scale carries every cell."""
+        if self.ruler is None:
+            return results
+        return [cell for cell in results if cell.key in self.ruler.delta]
 
     def reading(
         self, theta: tuple[float, float] | None, *, results: Iterable[GradedCell]
@@ -240,6 +260,7 @@ class DifficultyView:
             self.ruler,
             objective_id=self.session.scoring.require_scorer().id,
             results=results,
+            scopes=self.scopes,
         )
 
     def frontier(self, results: Sequence[GradedCell]) -> StampedReading:
@@ -248,33 +269,36 @@ class DifficultyView:
     def calibrate(
         self, measured: Mapping[str, CellSheet], rounds: list[RoundResult]
     ) -> list[RoundResult] | None:
-        """After every cell is graded and BEFORE the election; the re-read rounds only where a fit locked now."""
+        """After every cell is graded and BEFORE the election; the closed rounds re-read wherever
+        one stands on another scale than this round reads on."""
 
-        reread: list[RoundResult] | None = None
-        if self.ruler is None:
-            ruler, origin_theta = calibrate_delta_ruler(
-                rounds[0].results,
-                self.n_min,
-                enable_2pl=self.enable_2pl,
-                archive_obs=self.archive(),
+        archive: list[Observation] | None = None
+        if self.ruler is None and self.derives:
+            archive = self.archive()
+            self.ruler, _ = calibrate_delta_ruler(
+                rounds[0].results, self.n_min, enable_2pl=self.enable_2pl, archive_obs=archive
             )
-            if ruler is None:
-                return None
-            self.ruler = ruler
-            reread = self._reread(rounds, origin_theta)
-
-        self.ruler = extend_ruler(
-            self.ruler, observations_from_results(measured), history=_cycle_history(rounds)
+        reread = (
+            self._reread(rounds, self.archive() if archive is None else archive)
+            if _off_scale(rounds, self.scale_id)
+            else None
         )
-        self.persist(round_num=max(len(rounds) - 1, 0))
+        if self.ruler is not None:
+            self.ruler = extend_ruler(
+                self.ruler, observations_from_results(measured), history=_cycle_history(rounds)
+            )
+            self.persist(round_num=max(len(rounds) - 1, 0))
         return reread
 
     def _reread(
-        self, rounds: list[RoundResult], origin_theta: tuple[float, float] | None
+        self, rounds: list[RoundResult], archive_obs: list[Observation]
     ) -> list[RoundResult]:
-        # Round 0 carries θ twice — its frontier and C0's row — and a warm fit must move both.
+        # Round 0 carries θ twice — its frontier and C0's row — and a new scale must move both.
         origin = rounds[0]
-        reading = self.reading(origin_theta, results=origin.results)
+        reading = self.reading(
+            _origin_theta(_with_origin(origin.results, archive_obs), self.ruler),
+            results=origin.results,
+        )
         arms = [
             c.model_copy(
                 update={
@@ -285,21 +309,22 @@ class DifficultyView:
             for c in origin.candidate_scores
         ]
         reread = [origin.model_copy(update={"ability": reading, "candidate_scores": arms})]
-        # A round closed on a flat ruler had θ fit at δ≡0, a DIFFERENT scale the L4 law would average.
-        cells = self.cells
+        # A round closed on another scale had θ fit on other δ, a scale the L4 law would average in.
         frontier: list[GradedCell] = []
         for rr in rounds:
             frontier = merge_known_outcomes(frontier, rr.results)
             if rr.round > 0:
-                on_ruler = [cell for cell in frontier if cell.ruler_key in cells]
-                reread.append(rr.model_copy(update={"ability": self.frontier(on_ruler).ability}))
+                ability = self.frontier(self.on_scale(frontier)).ability
+                reread.append(rr.model_copy(update={"ability": ability}))
         return reread
 
     def persist(self, *, round_num: int) -> None:
         """Must land BEFORE the round file that names it: the reverse leaves a θ nothing can reproduce."""
-        dataset_name = self.session.dataset_name
-        if self.ruler is None or not self.session.state.cycle_id or not dataset_name:
+        if self.ruler is None or not self.session.state.cycle_id:
             return
         self.session.store.campaigns.write_ruler(
-            self.session.hop, self.ruler, dataset_name=dataset_name, round_num=round_num
+            self.session.hop,
+            self.ruler,
+            scope=session_ruler_scope(self.session),
+            round_num=round_num,
         )

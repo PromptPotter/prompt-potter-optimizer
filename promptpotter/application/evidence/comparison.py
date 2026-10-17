@@ -31,8 +31,10 @@ from promptpotter.domain.paired_reading import (
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.measurement_context import RoleScope
 from promptpotter.shared.statistics import (
+    friedman,
     min_detectable_effect,
     rank_correlation,
+    sample_sd,
     two_way_effect_sds,
 )
 
@@ -183,6 +185,55 @@ class OrderConfound(StrictModel):
     spend_vs_order: float | None
     n_subjects: int
     order_confounded: bool
+
+
+class EnvironmentReading(StrictModel):
+    """One cell as an ENVIRONMENT, the block the subjects are compared within. ``snr`` is the
+    subjects' spread at this cell over the roster's pooled residual — which environments tell the
+    subjects apart, read without a replicate, which the content-addressed instrument cannot give.
+    A held-out cell reads the subjects' bench passes, which only a round's selection has."""
+
+    cell: str
+    held_out: bool
+    n_subjects: int
+    spread: float | None = Field(
+        description="Best subject minus worst at this cell; null below two."
+    )
+    signal_sd: float | None
+    snr: float | None = Field(
+        description="`signal_sd` over the roster's residual SD; null where no residual was read."
+    )
+    best_subject: str | None = Field(
+        description="The subject the metric's direction favours here; null where it has none."
+    )
+
+
+class RankAgreement(StrictModel):
+    """Friedman over the cells every subject scored — each cell ranks the subjects, ties at average
+    rank — with Kendall's W beside it. Low W at high p: no environment orders the subjects alike.
+    Low W at low p: a small ordering the environments agree on."""
+
+    n_cells: int
+    n_subjects: int
+    statistic: float
+    df: int
+    p_value: float
+    kendall_w: float
+    mean_rank: dict[str, float] = Field(
+        description="Each subject's mean rank across the cells. 1 is the value the metric's "
+        "direction favours, or the lowest value where it has no direction."
+    )
+
+
+class LiftProfile(StrictModel):
+    """How many of a subject's own cells moved, by sign — a lift's BREADTH beside its mean. Served
+    only under a delta metric: a level has no zero to sit on either side of."""
+
+    key: str
+    n_cells: int
+    lifted: int
+    flat: int
+    dropped: int
 
 
 def metric_reading(
@@ -411,21 +462,97 @@ def order_confound(rows: list[SubjectReading]) -> OrderConfound | None:
     )
 
 
+def environments(
+    by_subject: Mapping[str, Mapping[str, float]],
+    held_out_by_subject: Mapping[str, Mapping[str, float]],
+    decomposition: EvidenceVariance | None,
+    *,
+    higher_is_better: bool | None,
+) -> list[EnvironmentReading]:
+    residual = None if decomposition is None else decomposition.residual_sd
+    out: list[EnvironmentReading] = []
+    for held_out, source in ((False, by_subject), (True, held_out_by_subject)):
+        for cell in sorted({c for values in source.values() for c in values}):
+            levels = {key: values[cell] for key, values in source.items() if cell in values}
+            signal = sample_sd(list(levels.values()))
+            best = None
+            if higher_is_better is not None and levels:
+                pick = max if higher_is_better else min
+                best = pick(levels, key=levels.__getitem__)
+            out.append(
+                EnvironmentReading(
+                    cell=cell,
+                    held_out=held_out,
+                    n_subjects=len(levels),
+                    spread=None if signal is None else max(levels.values()) - min(levels.values()),
+                    signal_sd=signal,
+                    snr=(
+                        None
+                        if signal is None or residual is None or residual <= 0.0
+                        else signal / residual
+                    ),
+                    best_subject=best,
+                )
+            )
+    return out
+
+
+def rank_agreement(
+    by_subject: Mapping[str, Mapping[str, float]], *, higher_is_better: bool | None
+) -> RankAgreement | None:
+    keys = list(by_subject)
+    if len(keys) < 2:
+        return None
+    shared = sorted(set.intersection(*(set(by_subject[k]) for k in keys)))
+    sign = -1.0 if higher_is_better else 1.0
+    read = friedman([[sign * by_subject[k][cell] for k in keys] for cell in shared])
+    if read is None:
+        return None
+    return RankAgreement(
+        n_cells=len(shared),
+        n_subjects=len(keys),
+        statistic=read.statistic,
+        df=read.df,
+        p_value=read.p_value,
+        kendall_w=read.kendall_w,
+        mean_rank=dict(zip(keys, read.mean_ranks, strict=True)),
+    )
+
+
+def lift_profiles(by_subject: Mapping[str, Mapping[str, float]]) -> list[LiftProfile]:
+    return [
+        LiftProfile(
+            key=key,
+            n_cells=len(values),
+            lifted=sum(1 for v in values.values() if v > 0.0),
+            flat=sum(1 for v in values.values() if v == 0.0),
+            dropped=sum(1 for v in values.values() if v < 0.0),
+        )
+        for key, values in by_subject.items()
+    ]
+
+
 __all__ = [
     "ArmReplicate",
     "Comparability",
+    "EnvironmentReading",
     "EvidencePower",
     "EvidenceVariance",
+    "LiftProfile",
     "MetricReading",
     "OrderConfound",
     "PairwiseComparison",
+    "RankAgreement",
     "SubjectMember",
     "comparability",
+    "environments",
+    "lift_profiles",
     "metric_measurand",
     "metric_reading",
     "order_confound",
     "pair_subjects",
     "power",
+    "rank_agreement",
     "replicates",
     "stamp_comparable",
     "variance",

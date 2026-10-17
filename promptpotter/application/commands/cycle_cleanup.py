@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING
 
 from promptpotter.application.commands.dispatcher import Applier, RejectedError
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.infrastructure.store.layout import root_cycle_id
 from promptpotter.infrastructure.store.session_pointer import cleanup_stub_fork_if_empty
 
 if TYPE_CHECKING:
@@ -24,13 +23,9 @@ def delete_cycle(
     dispatcher: CommandDispatcher, payload: DeleteCyclePayload, campaign: Campaign, hop: CycleHop
 ) -> Applier[object]:
     campaigns = dispatcher.stores.campaigns
-    index = campaigns.load(hop)
-    parent_cycle_id = (None if index is None else index.parent_cycle_id) or campaign.root_cycle_id
 
     def _apply() -> None:
-        deleted, reason = cleanup_stub_fork_if_empty(
-            campaign_store=campaigns, hop=hop, parent_cycle_id=parent_cycle_id
-        )
+        deleted, reason = cleanup_stub_fork_if_empty(campaign_store=campaigns, hop=hop)
         if not deleted:
             raise RejectedError(reason)
 
@@ -46,12 +41,9 @@ def cleanup_empty_cycles(
     campaigns = dispatcher.stores.campaigns
 
     def _apply() -> None:
-        root_id = root_cycle_id(hop.cycle_id)
         for _pass in range(2):
             deleted = [
-                cleanup_stub_fork_if_empty(
-                    campaign_store=campaigns, hop=stub, parent_cycle_id=root_id
-                )[0]
+                cleanup_stub_fork_if_empty(campaign_store=campaigns, hop=stub)[0]
                 for stub in campaigns.deletable_stubs(hop)
             ]
             if not any(deleted):

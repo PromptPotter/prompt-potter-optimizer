@@ -41,14 +41,14 @@ Two ways to misread the bar:
 
 | # | Dataset | Role |
 |---|---|---|
-| 1 | **BBEH** | Headline benchmark — carries the head-to-head against peer optimizers. Measured 28% **at the bar (`gpt-oss-20b @ low`), which is no longer what the dataset runs**: `datasets/bbeh/pipeline.yaml` admits only `mistralai/mistral-small-3.2-24b-instruct` and `campaign.yaml` overrides nothing. The 28% predates that repin — re-measure before quoting it against anything. |
-| 2 | **HotpotQA** | Queued. Most valuable head-to-head addition after BBEH (MIPROv2/GEPA/adv-CoT all use it), but **not wired** — no loader, no `hotpotqa_f1` scorer. Unmeasured, and deliberately unprojected. |
+| 1 | **BBEH** | Headline benchmark — carries the head-to-head against peer optimizers. Measured 28% **at the bar (`gpt-oss-20b @ low`), which is no longer what the dataset runs**: `bbeh/dataset.yaml::pipeline` admits only `mistralai/mistral-small-3.2-24b-instruct` and its `campaign` section overrides nothing. The 28% predates that repin — re-measure before quoting it against anything. |
+| 2 | **HotpotQA** | Wired 2026-10-14 (tenant definition `hotpotqa`, distractor validation, `em_match`), measured at the bar and seated in the L4 pool under both solvers (§ Every dataset we measured). Most valuable head-to-head addition after BBEH: MIPROv2 / GEPA / adv-CoT all use it. |
 | 3 | **AIME 2025** | In band at 30%, wired. Limited by size (30 problems, no split), not by headroom. |
 | 4 | **Chess puzzles (imec)** | Candidate, **not wired and unmeasured at the bar**. 1,118 Lichess puzzles in a published 559 / 559 development / test split, stratified by puzzle length (one to five moves) and rating (400–2,800), scored by exact match on the move — [arXiv 2610.00416](https://arxiv.org/abs/2610.00416), code and renewal scripts at [`imec-ailabs/Automatic-Prompt-Optimization-with-Chess`](https://github.com/imec-ailabs/Automatic-Prompt-Optimization-with-Chess) (Apache-2.0; the Lichess export is CC0). What earns it the slot: six DSPy optimizers (GEPA, MIPROv2, SIMBA, COPRO, BootstrapFewShot, BootstrapRandomSearch) are already published on that split across eight models, for about $800 in total, so one more arm lands beside existing rows. Two things to settle before wiring: `gpt-oss-20b` is not in their panel and their weakest models stay far behind, so the risk at the bar is the **floor**, which a rating cut can move; and a multi-move puzzle counts only when every move is right, which the scorer has to reproduce. Abstract, setup and section takeaways read 2026-10-11; the results tables not. |
-| — | **`justlogic-d234`** | Not a publication benchmark — the **focus instrument**, where the optimizer's own behaviour is measured round over round. By far the most-measured dataset here. |
-| — | **`justlogic-d234-held`** | The head-to-head's bench instrument: that dataset's search and demo pools under a wider bench (`datasets/justlogic-d234-held/dataset.md`). Unmeasured. |
-| — | **`reactome-typeql-42`** | TypeDB's query-writing benchmark, run by their own harness (`datasets/reactome-typeql-42/dataset.md`): the model writes TypeQL, the query is executed and its result graded. Outside the head-to-head — the comparison is against TypeDB's published rows, on the model the operator picks. Development screens only so far ([`model-screens.md`](../../datasets/reactome-typeql-42/model-screens.md)). |
-| — | **GSM8K** | **Verdict withdrawn — pilot candidate.** Was rejected as saturated on a ~78% *literature* number never measured at the bar; CAPO's published run moves the same task 78.1 → 93.7 from a near-identical origin, so 78% is an origin, not a ceiling. Needs one measured origin pass before it is admitted or re-rejected. It is also the opponent's home turf, which makes it the strongest form of the comparison rather than the weakest. |
+| — | **`justlogic/d234`** | Not a publication benchmark — the **focus instrument**, where the optimizer's own behaviour is measured round over round. By far the most-measured dataset here. |
+| — | **`justlogic/d234-held`** | The head-to-head's bench instrument: that dataset's search and demo pools under a wider bench (`justlogic/d234-held/README.md`). Unmeasured. |
+| — | **`reactome-typeql-42`** | TypeDB's query-writing benchmark, run by their own harness (`reactome-typeql-42/README.md`): the model writes TypeQL, the query is executed and its result graded. Outside the head-to-head — the comparison is against TypeDB's published rows, on the model the operator picks. Development screens only so far, recorded in that tenant definition's `README.md`. |
+| — | **GSM8K** | **Measured at the bar 2026-10-12 and saturated**: 90–100% at origin on 30 rows under both `gpt-oss-20b` and `gpt-oss-120b` (`promptpotter-self/pool/dataset.yaml::panel`), so the literature's 78% was a weaker solver's origin, not this one's. CAPO's published run moves it 78.1 → 93.7, which makes it the opponent's home turf and the strongest form of a head-to-head — on a solver that sits in band there (the literature's 7B class), never on ours. `gsm_hard`, its harder re-cut, is the seat instead. |
 
 BBEH is the headline but the wrong *iteration* target: at the bar every cycle ties at noise and PoBB
 cannot separate candidates. That is why the focus role exists separately, and why it collapses back
@@ -63,12 +63,43 @@ every sub-20B-class prior upward before trusting it. Reasoning benchmarks design
 Llama-3-8B era are ceiling-prone for this model; the one measured exception was language transfer
 (Swahili), where reasoning strength in English does not carry across the language barrier.
 
+**Rows dated 2026-10-14 are per ENVIRONMENT, not per dataset**: 30 rows, the dataset's shipped
+origin prompt (`origin.yaml`), graded under the last-line fallback (`extract_last_bold`),
+under `gpt-oss-20b @ low` AND `meta-llama/llama-3.1-8b-instruct`, both at `temperature 0.0`. A
+dataset above the bar on the first can be a seat on the second — the L4 pool's cheap tier — and
+the verdict names the solver. Floor = the best constant answer on the same 30 rows; a seat needs
+the origin inside 15–60% AND a settled gap over it. Sidecars:
+`.promptpotter/projects/default/diagnostics/seed-screen-<dataset>[-<solver>]-<date>.json`. Rows dated
+2026-10-15 follow the same protocol.
+
 | Dataset | Origin | Verdict |
 |---|---|---|
+| `gsm_hard` (2026-10-14) | **57%** at the bar · **37%** on the 8B (floor 3%) | ✅ pool seat under both solvers |
+| `hotpotqa` distractor (2026-10-14) | **60%** at the bar · **27%** on the 8B (floor 3%) | ✅ pool seat under both solvers; the bar reading sits on the band's top edge |
+| `bbh/word_sorting` (2026-10-14) | 73% at the bar · **40%** on the 8B (floor 3%) | ✅ pool seat on the 8B; above the bar |
+| `bbh/multistep_arithmetic_two` (2026-10-14) | 100% at the bar · **60%** on the 8B (floor 3%) | ✅ pool seat on the 8B, top edge; saturated at the bar |
+| `mgsm/te` (2026-10-14) | 83% at the bar · **57%** on the 8B (floor 3%) | ✅ pool seat on the 8B; `mgsm/sw` 80% / `/bn` 70% / `/th` 73% on the 8B are above band, and all four are above it at the bar (77–97%) |
+| `trec` (2026-10-14) | 77% at the bar · **60%** on the 8B (floor 27%) | ✅ held-out bench seat on the 8B — graded, never drawn |
+| `bbh/salient_translation_error_detection` (2026-10-14) | **63%** at the bar (floor 30%) | ✅ held-out bench seat at the bar, one SE above the band |
+| `bbh-geometric_shapes` (2026-10-14) | 70% at the bar · 30% on the 8B (floor 23%) | ❌ above the bar; on the 8B the gap over the floor is one SE — unsettled, not seated |
+| `bbh-logical_deduction_seven_objects` · `bbh-tracking_shuffled_objects_seven_objects` (2026-10-14) | 97% / 93% at the bar · 23% / 17% on the 8B (floors 27% / 23%) | ❌ above the bar; BELOW the constant-answer floor on the 8B |
+| `bbh-dyck_languages` · `bbh-temporal_sequences` (2026-10-14) | 80% / 100% at the bar · 0% / — on the 8B | ❌ above the bar; the 8B collapses on dyck (0/30) |
+| `ag_news` · `subj` · `aqua_rat` (2026-10-14) | 73% / 93% / 80% at the bar · 67% / 37% / — on the 8B | ❌ above the bar; `subj` on the 8B sits below its 63% floor, `ag_news` on the 8B is above band |
+| `sst5` (2026-10-14) | **37%** at the bar (floor 33%) | ❌ in band on accuracy, no settled gap over the constant answer — misses are one step on the scale |
+| `arc_challenge` · `instruction-induction` (2026-10-14) | **60%** / **57%** on the 8B (floors 33% / 7%, both settled) · 97% / 80% at the bar | ✅ pool seats on the 8B; above band at the bar |
+| `scone` · `counterfactual-arith` · `math-l5` (2026-10-14) | 70% / 7% / 7% on the 8B — `scone` ON its 70% floor (a majority-label read), `math-l5` at 7 s a row · 83% / 83% / 80% at the bar | ❌ no seat on either tier: on the floor or below band on the 8B, above band at the bar |
+| `planbench-bw-t1` · `naturalplan-meeting` (2026-10-14) | **33%** / **60%** at the bar (floors 3%, settled) · 0% / 0% on the 8B — invalid plans, not a format miss | ✅ `planbench-bw-t1` pool seat at the bar; `naturalplan-meeting` held-out bench seat at the bar, the band's top edge — the planning family |
+| `boardgameqa-d3` · `lichess-puzzles` (2026-10-14) | 77% at the bar under the framed origin (hedge 47%, floor 40%) · 43% on the 8B (floor 40%) / 10% at the bar (floor 3%, unsettled), 0% on the 8B | ❌ `boardgameqa-d3` above the bar and on its floor on the 8B — the recon's collapse did not reproduce under the framed origin; `lichess-puzzles` below band at the bar, the canary, no seat |
+| `bigbench/word_unscrambling` · `legalbench-function_of_decision_section` (2026-10-15) | **20%** / **47%** on the 8B (floors 3% / 27%) · **40%** / **47%** at the bar (same floors, settled) | ✅ pool seats under BOTH solvers — the only two of the batch; word_unscrambling costs the 8B 13 s a row |
+| `banking77` · `bigbench/operators` · `last-letters` · `wikitq` · `hi-tom` · `medmcqa` (2026-10-15) | **40%** / **57%** / **43%** / **50%** / **47%** / **53%** on the 8B (floors 10 / 13 / 3 / 13 / 13 / 33%) · 77% / 97% / 77% / 77% / 63% / 67% at the bar | ✅ pool seats on the 8B; above band at the bar |
+| `tempreason-l1` · `clutrr` (2026-10-15) | 0% / 0% on the 8B (floors 3% / 23%) · 83% / 27% at the bar (`clutrr` unsettled over 23%) | ❌ the 8B zero is a grading-shape miss to peek before any verdict, not a reasoning read; `tempreason-l1` above band at the bar |
+| `medqa-usmle4` · `2wikimultihopqa` · `bigbench-matrixshapes` · `knights-knaves-p78` · `knights-knaves-p23` · `stepgame` (2026-10-15) | 70% / 13% (unsettled) / 3% / 3% / 17% (on its floor) / 17% (floor 27%) on the 8B · 87% / 70% / 100% / 80% / 97% / 93% at the bar | ❌ the 8B is above band or at the floor, the bar above band — the bar-vs-8B gap is a capability cliff, not a prompt-shaped one |
+| `bigbench-logic_grid_puzzle` · `iris` · `bigbench-presuppositions_as_nli` · `folio` (2026-10-15) | 30% / 27% / 47% / — on the 8B, each under its constant floor (43 / 40 / 50%) · 67% / 93% / 60% (unsettled) / 83% at the bar (floors 43 / 40 / 50 / 53%) | ❌ the constant answer beats or ties the origin on the 8B |
+| BBEH on the 8B (2026-10-14) | **0%** (floor 7%) | ❌ floor: the 8B loops to the token cap on hard rows and bolds a wrong answer where it finishes; BBEH stays a `gpt-oss-20b` seat |
 | BBEH mini | **28%** | ✅ headline |
-| `justlogic-d234` | **0.500–0.625** (floor 0.350) — the recon slice, not the current wiring; re-read off `noise-floor --k 3` on a cold workspace before quoting it | ✅ focus instrument |
+| `justlogic/d234` | **0.500–0.625** (floor 0.350) — the recon slice, not the current wiring; re-read off `noise-floor --k 3` on a cold workspace before quoting it | ✅ focus instrument |
 | AIME 2025 | **30%** | ✅ wired; too small to split |
-| `sealqa-longseal-12` | published no-skill **26.3–33.0%**, ceiling 39.4–44.7% (literature — the bar cannot screen it, being a judge-graded agent episode) | ✅ wired; one harbor episode per cell, graded by the `sealqa` judge |
+| `sealqa/longseal-12` | published no-skill **26.3–33.0%**, ceiling 39.4–44.7% (literature — the bar cannot screen it, being a judge-graded agent episode) | ✅ wired; one harbor episode per cell, graded by the `sealqa` judge |
 | PlanBench `task_1` | **36%** | 🟡 next-priority; needs a PDDL plan validator |
 | NaturalPlan | **36%** macro | 🟡 next-priority; `meeting_planning`-only (43%) is the clean cut |
 | MuSiQue | **60%** macro, **38%** 3hop | 🟡 3hop held; overlaps BBEH's RC subtasks |
@@ -109,7 +140,7 @@ run at 50–100 samples to bound cost; a single 100-sample × 5-variant × 10-ro
 use 200+ samples. Tuning is high-iteration/low-fidelity, reporting is low-iteration/high-fidelity —
 **a small-sample tuning number must never appear in a main results table.**
 
-Per-dataset scorers are declared in each `datasets/{name}/campaign.yaml::scoring`; the answer-format
+Per-dataset scorers are declared in each `dataset.yaml::campaign.scoring`; the answer-format
 contract each one implies is the live string `matchers.py::EXTRACTION_NOTES`, not a doc.
 
 ## PEvol-Bench — the AC-grade bench definition (v1 draft)

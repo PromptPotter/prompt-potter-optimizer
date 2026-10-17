@@ -253,7 +253,7 @@ class MintCampaignPayload(CommandPayload):
     )
     campaign_config: CampaignConfig | None = Field(
         default=None,
-        description="A campaign declaration standing in for the dataset's own `campaign.yaml`; "
+        description="A campaign declaration standing in for the dataset's own `dataset.yaml::campaign`; "
         "`optimization` still lays over it",
     )
     task_text: str | None = Field(

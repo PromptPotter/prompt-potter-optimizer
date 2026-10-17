@@ -9,7 +9,7 @@ import re
 import tempfile
 import time
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import TYPE_CHECKING, Any, Literal, cast, get_args
 
 import httpx
@@ -68,6 +68,7 @@ if TYPE_CHECKING:
 
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.value_tree import Delivery
+    from promptpotter.infrastructure.store.dataset_access import ResolvedDataset
     from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
@@ -87,8 +88,6 @@ ANSWER_KEY = "agent_answer"
 ANSWER_FILENAME = "answer.txt"
 
 SKILL_KEY = "skill_opened"
-
-TASKS_FILE = "harbor_tasks.yaml"
 
 INSTRUMENT_KEY = "harbor_instrument"
 
@@ -263,19 +262,31 @@ def pin_roster(dataset: str, version: str) -> Path:
     return path
 
 
-def _resolve_experiment(panel: Mapping[str, Any]) -> dict[str, Any]:
+def _resolve_experiment(_stores: Stores, panel: Mapping[str, Any]) -> dict[str, Any]:
+    if owned := sorted(set((panel.get("agent") or {}).get("kwargs") or {}) & AGENT_KWARG_KEYS):
+        raise ValueError(
+            f"harbor connector: the panel sets {owned} under `agent.kwargs`, which "
+            f"`pipeline.nodes.{AGENT_NODE}.config` owns and lays over it. Delete them here."
+        )
+    resolved = _resolve_tasks(panel)
+    for task in resolved["tasks"]:
+        _task_pin(task)
+    return resolved
+
+
+def _resolve_tasks(panel: Mapping[str, Any]) -> dict[str, Any]:
     if inline := panel.get("tasks"):
         return {**panel, "tasks": list(inline)}
     dataset = panel.get("harbor_dataset")
     if not dataset:
         raise ValueError(
-            f"harbor connector: {TASKS_FILE} names neither `harbor_dataset` (a published "
-            f"dataset to resolve) nor an inline `tasks` list."
+            "harbor connector: the panel names neither `harbor_dataset` (a published "
+            "dataset to resolve) nor an inline `tasks` list."
         )
     version = panel.get("harbor_dataset_version")
     if not version:
         raise ValueError(
-            f"harbor connector: {TASKS_FILE} declares `harbor_dataset: {dataset}` with no "
+            f"harbor connector: the panel declares `harbor_dataset: {dataset}` with no "
             f"`harbor_dataset_version`. Resolving 'latest' would put a moving roster behind a "
             f"fixed dataset name, so the version is required."
         )
@@ -288,7 +299,7 @@ def _resolve_experiment(panel: Mapping[str, Any]) -> dict[str, Any]:
     by_id = {t["id"]: t for t in tasks}
     if missing := [i for i in wanted if i not in by_id]:
         raise ValueError(
-            f"harbor connector: {TASKS_FILE} includes {missing}, which {dataset}@{version} "
+            f"harbor connector: the panel includes {missing}, which {dataset}@{version} "
             f"does not publish (it has {sorted(by_id)})."
         )
     return {**panel, "tasks": [by_id[i] for i in wanted]}
@@ -300,7 +311,7 @@ def _extract_experiment(experiment_data: Mapping[str, Any]) -> list[dict[str, An
     if labelled and len(labelled) != len(tasks):
         unlabelled = [t["id"] for t in tasks if not str(t.get("answer") or "").strip()]
         raise ValueError(
-            f"harbor connector: {TASKS_FILE} declares an `answer` for {len(labelled)} of "
+            f"harbor connector: the panel declares an `answer` for {len(labelled)} of "
             f"{len(tasks)} tasks. A bank's answer shape is whole-bank — declare one for every "
             f"task or for none. Missing: {unlabelled[:5]}"
         )
@@ -386,6 +397,18 @@ def _sent_spend_bound(node: str, cfg: Mapping[str, Any]) -> LLMSpendBound | None
 
 
 def _task_pin(task: Mapping[str, Any]) -> dict[str, Any]:
+    """A local `path` enters `Sample.key` as the panel spells it, so it is relative to the panel's
+    directory (`InProcessWorkload.experiment_dir`): an absolute one keys a cell to one machine."""
+    path = str(task.get("path") or "")
+    if (
+        path
+        and not task.get("git_url")
+        and (PurePosixPath(path).is_absolute() or PureWindowsPath(path).is_absolute())
+    ):
+        raise ValueError(
+            f"harbor task {task.get('id')!r}: local path {path!r} is absolute; pin it relative "
+            "to the panel that names it."
+        )
     return {
         "id": task.get("id"),
         "git_url": task.get("git_url"),
@@ -400,10 +423,10 @@ def _task_pin(task: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _identity_config(
-    _stores: Stores, _dataset_dir: Path, experiment: Mapping[str, Any] | None
+    _stores: Stores, _dataset: ResolvedDataset, experiment: Mapping[str, Any] | None
 ) -> dict[str, dict[str, Any]]:
     if experiment is None:
-        raise ValueError(f"harbor connector: no {TASKS_FILE} on this machine to fingerprint.")
+        raise ValueError("harbor connector: no panel on this machine to fingerprint.")
     # Narrow on purpose: a task rides its own sample (`_task_pin`), so a wider panel re-keys none.
     fingerprint = stable_hash(
         [
@@ -898,17 +921,18 @@ def _sum_spend(parts: list[dict[str, StepUsage]]) -> dict[str, dict[str, object]
     return {AGENT_NODE: total.wire()}
 
 
-def _task_config(task: dict[str, Any], harbor_config: ModuleType) -> Any:
+def _task_config(task: dict[str, Any], task_root: Path, harbor_config: ModuleType) -> Any:
     if name := task.get("name"):
         return harbor_config.TaskConfig(name=name, ref=task.get("ref"))
     path = task.get("path")
     if not path:
         raise ValueError(
             f"harbor task {task.get('id')!r} declares neither 'name' (a registry package) "
-            f"nor 'path' (a task directory) in {TASKS_FILE}."
+            "nor 'path' (a task directory) in the panel."
         )
     return harbor_config.TaskConfig(
-        path=Path(path),
+        # A git task's path is inside its repository; a local one, inside the panel's directory.
+        path=Path(path) if task.get("git_url") else task_root / path,
         git_url=task.get("git_url"),
         git_commit_id=task.get("git_commit_id"),
     )
@@ -918,6 +942,7 @@ def _task_config(task: dict[str, Any], harbor_config: ModuleType) -> Any:
 class _Episode:
     query: str
     task: dict[str, Any]
+    task_root: Path
     reward_key: str
     agent_name: str
     agent_kwargs: dict[str, Any]
@@ -937,11 +962,17 @@ class _Episode:
         return self.model
 
 
+def _panel_dir(workload: InProcessWorkload) -> Path:
+    if workload.experiment_dir is None:
+        raise CellUnscoreableError("a harbor cell ran with no panel directory to resolve", spent={})
+    return workload.experiment_dir
+
+
 def _episode(workload: InProcessWorkload, sample: Sample, payload: dict[str, Any]) -> _Episode:
     task = sample.source_pin
     if task is None:
         raise CellUnscoreableError(
-            f"harbor task {sample.query!r} carries no pin, so it is no row of a {TASKS_FILE}.",
+            f"harbor task {sample.query!r} carries no pin, so it is no row of a panel.",
             spent={},
         )
     panel = workload.experiment or {}
@@ -952,6 +983,7 @@ def _episode(workload: InProcessWorkload, sample: Sample, payload: dict[str, Any
     return _Episode(
         query=sample.query,
         task=task,
+        task_root=_panel_dir(workload),
         reward_key=panel.get("reward_key") or DEFAULT_TASK_REWARD_KEY,
         agent_name=agent_name,
         agent_kwargs=agent_kwargs,
@@ -976,7 +1008,7 @@ def _trial_config(episode: _Episode, skills: list[str]) -> Any:
 
     os.environ[_PRODUCER_ENV] = CONTAINER_PRODUCER
     return harbor_config.TrialConfig(
-        task=_task_config(episode.task, harbor_config),
+        task=_task_config(episode.task, episode.task_root, harbor_config),
         trials_dir=_TRIALS_ROOT,
         agent=harbor_config.AgentConfig(
             name=episode.agent_name,
@@ -1221,7 +1253,6 @@ CONNECTOR = Connector(
     # Per-step rewards are not required: a single-step task emits none.
     required_observation_keys=(REWARD_KEY, SKILL_KEY),
     answer_key=ANSWER_KEY,
-    experiment_file=TASKS_FILE,
     default_pipeline=(AGENT_NODE,),
 )
 
@@ -1232,7 +1263,6 @@ __all__ = [
     "ANSWER_KEY",
     "CONNECTOR",
     "REWARD_KEY",
-    "TASKS_FILE",
     "harbor_wire_adapter",
     "pin_roster",
 ]

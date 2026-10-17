@@ -60,6 +60,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "BUILTIN_PACKAGES",
+    "INITIAL_POPULATION",
     "Adapter",
     "BankedState",
     "CheckResult",
@@ -82,6 +83,7 @@ __all__ = [
     "ReviewStat",
     "RoundContext",
     "RoundOpening",
+    "RoundWalk",
     "Sampler",
     "Selection",
     "Selector",
@@ -230,13 +232,39 @@ class RoundOpening:
     replayed: bool
 
 
-def standing_opening(ctx: RoundContext) -> RoundOpening:
+INITIAL_POPULATION = "initial_population"
+
+
+@dataclass(frozen=True)
+class RoundWalk:
+    """``pipeline`` makes the round's arms; ``seeds`` walk ahead of it into the population it reads."""
+
+    pipeline: str
+    seeds: tuple[Proposer, ...]
+    proposers: tuple[Proposer, ...]
+
+    @property
+    def members(self) -> tuple[Proposer, ...]:
+        return (*self.seeds, *self.proposers)
+
+    @property
+    def seeding(self) -> bool:
+        return bool(self.seeds) or self.pipeline == INITIAL_POPULATION
+
+    @property
+    def proposer(self) -> str:
+        """Its first llm node, whose model the round's opening names."""
+        return next(m.name for m in self.members if m.kind is NodeKind.LLM)
+
+
+def standing_opening(ctx: RoundContext, walk: RoundWalk) -> RoundOpening:
     selected = ctx.cycle.optimizer
+    alone = walk.pipeline == INITIAL_POPULATION
     return RoundOpening(
         standing=f"no advance {rounds_without_advance(ctx.cycle.rounds)}",
-        note="",
-        arms=selected.arms_per_round,
-        proposer=selected.proposer,
+        note=f"seeds the population ({INITIAL_POPULATION})" if walk.seeding else "",
+        arms=None if alone else selected.arms_per_round,
+        proposer=walk.proposer,
         replayed=False,
     )
 
@@ -286,8 +314,8 @@ class OptimizerRuntime(ABC):
     def limits(self, selected: SelectedOptimizer) -> tuple[OptimizerLimit, ...]:
         return ()
 
-    def opening(self, ctx: RoundContext) -> RoundOpening:
-        return standing_opening(ctx)
+    def opening(self, ctx: RoundContext, walk: RoundWalk) -> RoundOpening:
+        return standing_opening(ctx, walk)
 
     def complete(self) -> None:
         """Run where the bench completes every registry (``wiring.py::complete_registries``), never at import."""

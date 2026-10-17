@@ -19,6 +19,7 @@ from promptpotter.infrastructure.store.session_pointer import (
     active_pointer_exists,
     clear_active_pointer,
 )
+from promptpotter.infrastructure.store.tenant_dataset_store import MATERIALIZED_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,7 @@ _PRESERVE_NAMES = (
     "traces",
     "backends",
     "datasets",
-    "benchmark-rows",
+    MATERIALIZED_DIR,
     "task-context",
     ".workspace",
     ".cache",

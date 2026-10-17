@@ -33,21 +33,21 @@ from promptpotter.infrastructure.store.read_model import Moment
 __all__ = ["CycleIndexProjection", "read_cycle_index", "write_cycle_index"]
 
 
-def read_cycle_index(cycle_dir: Path, moment: Moment | None = None) -> CycleIndex | None:
+def read_cycle_index(cycle_dir: Path, *, moment: Moment | None) -> CycleIndex | None:
     """A cycle's own facts are its own ledger's; its rounds stand over its whole chain."""
     ledger = CycleLayout(cycle_dir).ledger
     facts = scan_cycle_facts(ledger, None if moment is None else moment.span(ledger).until)
     minted = facts.minted
     if minted is None:
         return None
-    chain = ledger_chain(CycleDir(cycle_dir), moment)
+    chain = ledger_chain(CycleDir(cycle_dir), moment=moment)
     standing = scan_standing_rounds(chain)
     ended, final = facts.ended, facts.final
     return CycleIndex(
         cycle_id=cycle_dir.name,
         created_at=minted.timestamp,
         updated_at=facts.updated_at,
-        parent_cycle_id=minted.parent_cycle_id,
+        parent=minted.parent,
         forked_at_offset=minted.forked_at_offset,
         fork=facts.fork,
         spawned_by=facts.spawned_by,
@@ -69,7 +69,7 @@ def read_cycle_index(cycle_dir: Path, moment: Moment | None = None) -> CycleInde
 
 
 def write_cycle_index(cycle_dir: Path) -> None:
-    index = read_cycle_index(cycle_dir)
+    index = read_cycle_index(cycle_dir, moment=None)
     if index is not None:
         write_json(CycleLayout(cycle_dir).manifest, index.model_dump(mode="json"))
 

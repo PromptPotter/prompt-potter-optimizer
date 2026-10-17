@@ -54,10 +54,10 @@ __all__ = [
 
 
 class Observation(NamedTuple):
-    """``response`` is the GRADED fitness in [0,1], never a binarized hit; ``sample_id`` is a CELL id."""
+    """``response`` is the GRADED fitness in [0,1], never a binarized hit; ``key`` is what the cell IS."""
 
     candidate_id: str
-    sample_id: int
+    key: str
     response: float
 
 
@@ -71,8 +71,8 @@ def graded_response(cell: GradedCell) -> float:
     return min(max(cell.grade.objective, 0.0), 1.0)
 
 
-def responses_of(sheet: CellSheet) -> dict[int, float]:
-    return {cell.ruler_key: graded_response(cell) for cell in sheet.scoreable}
+def responses_of(sheet: CellSheet) -> dict[str, float]:
+    return {cell.key: graded_response(cell) for cell in sheet.scoreable}
 
 
 def parent_level_trajectory(
@@ -127,23 +127,23 @@ class RaschPosterior:
 
     theta: dict[str, float]
     theta_se: dict[str, float]
-    delta: dict[int, float]
-    delta_se: dict[int, float]
+    delta: dict[str, float]
+    delta_se: dict[str, float]
     n_iterations: int = 0
     converged: bool = False
     sigma_theta: float = _INIT_SIGMA_THETA
     sigma_delta: float = _INIT_SIGMA_DELTA
     mu_delta: float = 0.0
     # Empty under 1PL (a ≡ 1).
-    discrimination: dict[int, float] = field(default_factory=dict)
-    discrimination_se: dict[int, float] = field(default_factory=dict)
+    discrimination: dict[str, float] = field(default_factory=dict)
+    discrimination_se: dict[str, float] = field(default_factory=dict)
 
     def anchored(self, calibration_model: CalibrationModel) -> DeltaRuler:
         """Carries the fit's priors, without which an extension bends the scale; the anchor id is stamped once, here."""
         return DeltaRuler(
             delta=dict(self.delta),
             delta_se=dict(self.delta_se),
-            discrimination={sid: a for sid, a in self.discrimination.items() if a != 1.0},
+            discrimination={key: a for key, a in self.discrimination.items() if a != 1.0},
             mu_delta=self.mu_delta,
             sigma_delta=self.sigma_delta,
             sigma_theta=self.sigma_theta,
@@ -236,15 +236,15 @@ def fit_rasch(
         return RaschPosterior(theta={}, theta_se={}, delta={}, delta_se={})
 
     candidate_ids = sorted({o.candidate_id for o in observations})
-    sample_ids = sorted({o.sample_id for o in observations})
+    keys = sorted({o.key for o in observations})
     c_idx = {cid: i for i, cid in enumerate(candidate_ids)}
-    s_idx = {sid: j for j, sid in enumerate(sample_ids)}
+    s_idx = {key: j for j, key in enumerate(keys)}
 
     n_c = len(candidate_ids)
-    n_s = len(sample_ids)
+    n_s = len(keys)
 
     rows = np.fromiter((c_idx[o.candidate_id] for o in observations), dtype=np.int64)
-    cols = np.fromiter((s_idx[o.sample_id] for o in observations), dtype=np.int64)
+    cols = np.fromiter((s_idx[o.key] for o in observations), dtype=np.int64)
     responses = np.fromiter((o.response for o in observations), dtype=np.float64)
 
     sigma_theta, sigma_delta, mu_delta = _INIT_SIGMA_THETA, _INIT_SIGMA_DELTA, 0.0
@@ -282,8 +282,8 @@ def fit_rasch(
     return RaschPosterior(
         theta=dict(zip(candidate_ids, theta.tolist(), strict=True)),
         theta_se=dict(zip(candidate_ids, se_theta.tolist(), strict=True)),
-        delta=dict(zip(sample_ids, delta.tolist(), strict=True)),
-        delta_se=dict(zip(sample_ids, se_delta.tolist(), strict=True)),
+        delta=dict(zip(keys, delta.tolist(), strict=True)),
+        delta_se=dict(zip(keys, se_delta.tolist(), strict=True)),
         n_iterations=iteration,
         converged=converged,
         sigma_theta=sigma_theta,
@@ -301,11 +301,11 @@ def fit_theta_given_delta(
     tol: float = 1e-4,
 ) -> dict[str, tuple[float, float]]:
     """``delta=None`` is the cold ruler (θ = logit-accuracy); a cell off a live ruler enters no fit, never at δ=0."""
-    graded = _cell_parameters({o.sample_id for o in observations}, delta)
+    graded = _cell_parameters({o.key for o in observations}, delta)
 
     by_c: dict[str, list[tuple[float, float, float]]] = {}
     for o in observations:
-        if (cell := graded.get(o.sample_id)) is None:
+        if (cell := graded.get(o.key)) is None:
             continue
         by_c.setdefault(o.candidate_id, []).append((*cell, o.response))
 
@@ -316,13 +316,13 @@ def fit_theta_given_delta(
 
 
 def fit_theta(
-    responses: Mapping[int, float],
+    responses: Mapping[str, float],
     delta: Ruler | None,
     *,
     sigma_theta: float = _INIT_SIGMA_THETA,
 ) -> tuple[float, float] | None:
     graded = _cell_parameters(responses.keys(), delta)
-    rows = [(*graded[sid], y) for sid, y in responses.items() if sid in graded]
+    rows = [(*graded[key], y) for key, y in responses.items() if key in graded]
     return _fit_one(rows, sigma_theta=sigma_theta, max_iter=50, tol=1e-4) if rows else None
 
 
@@ -352,12 +352,10 @@ def _fit_one(
     return theta, float(np.sqrt(phi) / np.sqrt(max(info, 1e-9)))
 
 
-def _cell_parameters(
-    sample_ids: Collection[int], delta: Ruler | None
-) -> dict[int, tuple[float, float]]:
+def _cell_parameters(keys: Collection[str], delta: Ruler | None) -> dict[str, tuple[float, float]]:
     if delta is None:
-        return dict.fromkeys(sample_ids, (0.0, 1.0))
-    return {sid: ruler_entry(delta[sid]) for sid in sample_ids if sid in delta}
+        return dict.fromkeys(keys, (0.0, 1.0))
+    return {key: ruler_entry(delta[key]) for key in keys if key in delta}
 
 
 # The Newton fit stops within `tol` of its root, so two fits are never compared tighter than this.
@@ -365,8 +363,8 @@ _FIT_SLACK = 1e-3
 
 
 def theta_bounds_given_delta(
-    measured: Mapping[int, float],
-    open_cells: Collection[int],
+    measured: Mapping[str, float],
+    open_cells: Collection[str],
     delta: Ruler | None,
 ) -> tuple[float, float, float]:
     """The MAP rises with every response, so the all-0 and all-1 fills bound θ; the SE is only FLOORED."""
@@ -413,18 +411,18 @@ def extend_ruler(
         # `_INIT_SIGMA_THETA`, not `ruler.sigma_theta`: regularized as the election's own θ read is.
         theta = fit_theta_given_delta(seen, ruler.entries())
 
-        by_s: dict[int, list[tuple[float, float]]] = {}
+        by_s: dict[str, list[tuple[float, float]]] = {}
         for o in seen:
             arm = theta.get(o.candidate_id)
-            if o.sample_id in ruler.delta or arm is None:
+            if o.key in ruler.delta or arm is None:
                 continue
-            by_s.setdefault(o.sample_id, []).append((arm[0], o.response))
+            by_s.setdefault(o.key, []).append((arm[0], o.response))
         if not by_s:
             return ruler
 
         delta = dict(ruler.delta)
         delta_se = dict(ruler.delta_se)
-        for sid, rows in by_s.items():
+        for key, rows in by_s.items():
             t_arr = np.fromiter((t for t, _ in rows), dtype=np.float64)
             y_arr = np.fromiter((y for _, y in rows), dtype=np.float64)
             d = ruler.mu_delta
@@ -438,8 +436,8 @@ def extend_ruler(
                     break
             p = 1.0 / (1.0 + np.exp(-np.clip(t_arr - d, -50, 50)))
             info = float(np.sum(p * (1.0 - p))) + inv_var
-            delta[sid] = d
-            delta_se[sid] = float(1.0 / np.sqrt(max(info, 1e-9)))
+            delta[key] = d
+            delta_se[key] = float(1.0 / np.sqrt(max(info, 1e-9)))
 
         # A new cell keeps a ≡ 1 even under 2PL: one round's arms cannot identify a discrimination.
         ruler = ruler.model_copy(update={"delta": delta, "delta_se": delta_se})
@@ -461,17 +459,17 @@ def fit_rasch_2pl(
 
     base = fit_rasch(observations)
     candidate_ids = sorted({o.candidate_id for o in observations})
-    sample_ids = sorted({o.sample_id for o in observations})
+    keys = sorted({o.key for o in observations})
     c_idx = {cid: i for i, cid in enumerate(candidate_ids)}
-    s_idx = {sid: j for j, sid in enumerate(sample_ids)}
-    n_c, n_s = len(candidate_ids), len(sample_ids)
+    s_idx = {key: j for j, key in enumerate(keys)}
+    n_c, n_s = len(candidate_ids), len(keys)
 
     rows = np.fromiter((c_idx[o.candidate_id] for o in observations), dtype=np.int64)
-    cols = np.fromiter((s_idx[o.sample_id] for o in observations), dtype=np.int64)
+    cols = np.fromiter((s_idx[o.key] for o in observations), dtype=np.int64)
     responses = np.fromiter((o.response for o in observations), dtype=np.float64)
 
     theta = np.array([base.theta[cid] for cid in candidate_ids], dtype=np.float64)
-    delta = np.array([base.delta[sid] for sid in sample_ids], dtype=np.float64)
+    delta = np.array([base.delta[key] for key in keys], dtype=np.float64)
     log_a = np.zeros(n_s)
     inv_var_theta = 1.0 / (base.sigma_theta * base.sigma_theta)
     inv_var_delta = 1.0 / (base.sigma_delta * base.sigma_delta)
@@ -542,15 +540,15 @@ def fit_rasch_2pl(
     return RaschPosterior(
         theta=dict(zip(candidate_ids, theta.tolist(), strict=True)),
         theta_se=dict(zip(candidate_ids, se_theta.tolist(), strict=True)),
-        delta=dict(zip(sample_ids, delta.tolist(), strict=True)),
-        delta_se=dict(zip(sample_ids, se_delta.tolist(), strict=True)),
+        delta=dict(zip(keys, delta.tolist(), strict=True)),
+        delta_se=dict(zip(keys, se_delta.tolist(), strict=True)),
         n_iterations=iteration,
         converged=converged,
         sigma_theta=base.sigma_theta,
         sigma_delta=base.sigma_delta,
         mu_delta=mu_delta,
-        discrimination=dict(zip(sample_ids, a.tolist(), strict=True)),
-        discrimination_se=dict(zip(sample_ids, se_a.tolist(), strict=True)),
+        discrimination=dict(zip(keys, a.tolist(), strict=True)),
+        discrimination_se=dict(zip(keys, se_a.tolist(), strict=True)),
     )
 
 
@@ -565,8 +563,8 @@ def _full_loglik(observations: list[Observation], post: RaschPosterior) -> float
         _logp(
             o.response,
             post.theta[o.candidate_id],
-            post.delta[o.sample_id],
-            post.discrimination.get(o.sample_id, 1.0),
+            post.delta[o.key],
+            post.discrimination.get(o.key, 1.0),
         )
         for o in observations
     )
@@ -574,7 +572,7 @@ def _full_loglik(observations: list[Observation], post: RaschPosterior) -> float
 
 def _fold_of(o: Observation, n_folds: int) -> int:
     """Hashed on the observation's identity, never its position: stride folds follow walk order."""
-    return int(stable_hash([o.candidate_id, o.sample_id]), 16) % n_folds
+    return int(stable_hash([o.candidate_id, o.key]), 16) % n_folds
 
 
 def _cv_loglik(observations: list[Observation], n_folds: int) -> tuple[float, float] | None:
@@ -593,14 +591,14 @@ def _cv_loglik(observations: list[Observation], n_folds: int) -> tuple[float, fl
         f1 = fit_rasch(train)
         f2 = fit_rasch_2pl(train)
         for o in test:
-            if o.candidate_id not in f1.theta or o.sample_id not in f1.delta:
+            if o.candidate_id not in f1.theta or o.key not in f1.delta:
                 continue
-            ll_1 += _logp(o.response, f1.theta[o.candidate_id], f1.delta[o.sample_id], 1.0)
+            ll_1 += _logp(o.response, f1.theta[o.candidate_id], f1.delta[o.key], 1.0)
             ll_2 += _logp(
                 o.response,
                 f2.theta[o.candidate_id],
-                f2.delta[o.sample_id],
-                f2.discrimination[o.sample_id],
+                f2.delta[o.key],
+                f2.discrimination[o.key],
             )
             n_eval += 1
     if n_eval == 0:
@@ -637,9 +635,9 @@ def graduate_ruler_model(
 
 def observations_from_results(sheets_by_id: Mapping[str, CellSheet]) -> list[Observation]:
     return [
-        Observation(candidate_id=cid, sample_id=sid, response=response)
+        Observation(candidate_id=cid, key=key, response=response)
         for cid, sheet in sheets_by_id.items()
-        for sid, response in responses_of(sheet).items()
+        for key, response in responses_of(sheet).items()
     ]
 
 
@@ -649,10 +647,10 @@ def build_observations(rounds: list[RoundResult]) -> list[Observation]:
 
 def dedup_observations(*groups: Sequence[Observation]) -> list[Observation]:
     """LAST wins, so callers pass groups oldest-first; every path into a fit passes through here."""
-    cells: dict[tuple[str, int], Observation] = {}
+    cells: dict[tuple[str, str], Observation] = {}
     for group in groups:
         for o in group:
-            cells[(o.candidate_id, o.sample_id)] = o
+            cells[(o.candidate_id, o.key)] = o
     return list(cells.values())
 
 
@@ -664,13 +662,13 @@ def candidate_abilities(
     """``parent_results`` is the parent RE-SCORED on this round's panel, never C0's banked rows."""
     entries = ruler.entries() if ruler is not None else None
     fit = fit_theta_given_delta(observations_from_results(results_by_id), entries)
-    split = {sid: ruler_entry(v) for sid, v in (entries or {}).items()}
+    split = {key: ruler_entry(v) for key, v in (entries or {}).items()}
     return RoundAbilities(
         theta={cid: t for cid, (t, _) in fit.items()},
         theta_se={cid: se for cid, (_, se) in fit.items()},
-        delta={sid: d for sid, (d, _) in split.items()},
+        delta={key: d for key, (d, _) in split.items()},
         delta_se={},
-        discrimination={sid: a for sid, (_, a) in split.items() if a != 1.0},
+        discrimination={key: a for key, (_, a) in split.items() if a != 1.0},
         parent=fit_theta(responses_of(parent_results), entries),
     )
 
@@ -707,8 +705,9 @@ def select_round_subset(
         return [by_id[sid] for sid in _with_stratum_cover(cold, budget, strata)[:budget]]
 
     # A cell the ruler has not absorbed stands at the ruler's own centre with the population SE.
-    delta_map = {sid: ruler.delta.get(sid, ruler.mu_delta) for sid in by_id}
-    delta_se_map = {sid: ruler.delta_se.get(sid, ruler.sigma_delta) for sid in by_id}
+    delta_map = {sid: ruler.delta.get(s.key, ruler.mu_delta) for sid, s in by_id.items()}
+    delta_se_map = {sid: ruler.delta_se.get(s.key, ruler.sigma_delta) for sid, s in by_id.items()}
+    anchored = {sid for sid, s in by_id.items() if s.key in ruler.delta}
     theta = fit_theta_given_delta(observations, ruler.entries())
     in_race = (
         [ts for cid, ts in theta.items() if cid in leader_ids]
@@ -732,7 +731,7 @@ def select_round_subset(
     )
     ranked = _with_ruler_learning(decided, budget, delta_se_map, worth)
     ranked = _with_stratum_cover(ranked, budget, strata)
-    return [by_id[sid] for sid in _with_anchor_block(ranked, budget, ruler, anchor_floor)]
+    return [by_id[sid] for sid in _with_anchor_block(ranked, budget, anchored, anchor_floor)]
 
 
 def _shared_strata(bank: Sequence[Sample]) -> dict[int, frozenset[str]]:
@@ -785,20 +784,20 @@ def _with_ruler_learning(
 
 
 def _with_anchor_block(
-    ranked: list[int], budget: int, ruler: DeltaRuler, anchor_floor: int
+    ranked: list[int], budget: int, anchored: set[int], anchor_floor: int
 ) -> list[int]:
     """Unmeasured cells outrank anchored ones by construction, so a locked ruler's subset walks off it."""
     picked = ranked[:budget]
-    floor = min(anchor_floor, len(ruler.delta.keys() & set(ranked)), budget)
-    have = sum(1 for sid in picked if sid in ruler.delta)
+    floor = min(anchor_floor, len(anchored & set(ranked)), budget)
+    have = sum(1 for sid in picked if sid in anchored)
     if have >= floor:
         return picked
-    spare = [sid for sid in ranked[budget:] if sid in ruler.delta]
+    spare = [sid for sid in ranked[budget:] if sid in anchored]
     out = list(picked)
     for i in range(len(out) - 1, -1, -1):
         if have >= floor or not spare:
             break
-        if out[i] not in ruler.delta:
+        if out[i] not in anchored:
             out[i] = spare.pop(0)
             have += 1
     return out

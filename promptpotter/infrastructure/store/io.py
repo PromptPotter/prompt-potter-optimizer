@@ -8,11 +8,14 @@ import tempfile
 import time
 from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
-from typing import IO, Any
+from typing import IO, Any, NamedTuple
 
 import yaml
+from filelock import FileLock
 
+from promptpotter.config.settings import LOCK_TIMEOUT
 from promptpotter.domain.cycle_paths import ALL_DOTS_RE, ID_COMPONENT_RE
+from promptpotter.shared.errors import ConflictError
 
 
 def validate_path_component(name: str) -> str:
@@ -34,10 +37,6 @@ def _long_path(p: str | Path) -> str:
     if s.startswith(("\\\\?\\", "\\\\.\\")):
         return s
     return "\\\\?\\" + os.path.abspath(s)
-
-
-def ensure_parent_dir(path: Path) -> None:
-    os.makedirs(_long_path(path.parent), exist_ok=True)
 
 
 def unlink_robust(path: Path) -> None:
@@ -127,11 +126,9 @@ def _atomic_replace(tmp: str, path: Path) -> None:
 
 def _tmp_beside(path: Path) -> tuple[int, str]:
     parent = _long_path(path.parent)
-    try:
-        return tempfile.mkstemp(dir=parent, suffix=".tmp")
-    except FileNotFoundError:
-        ensure_parent_dir(path)
-        return tempfile.mkstemp(dir=parent, suffix=".tmp")
+    os.makedirs(parent, exist_ok=True)
+    # Dot-named, which the cycle file listing skips.
+    return tempfile.mkstemp(dir=parent, prefix=".", suffix=".tmp")
 
 
 def _atomic_write(path: Path, write_fn: Callable[[IO[str]], object]) -> None:
@@ -268,21 +265,174 @@ def read_yaml_optional(path: Path) -> Any | None:
         return None
 
 
-def append_line(path: Path, line: str) -> None:
+def _write_lock(path: Path) -> FileLock:
+    """Windows runs `O_APPEND` as seek-then-write, so two unlocked appends overwrite one record."""
+    # Dot-named, which the cycle file listing skips; acquiring it makes the directory.
+    return FileLock(_long_path(path.with_name(f".{path.name}.lock")), timeout=LOCK_TIMEOUT)
+
+
+def append_line(path: Path, line: bytes) -> range:
     """Reopened per call, never held: a held handle blocks a stub fork's delete on Windows."""
-    target = _long_path(path)
-    try:
-        with open(target, "a", encoding="utf-8") as f:
-            f.write(line + "\n")
-    except FileNotFoundError:
-        ensure_parent_dir(path)
-        with open(target, "a", encoding="utf-8") as f:
-            f.write(line + "\n")
+    data = line + b"\n"
+    with _write_lock(path), open(_long_path(path), "ab") as f:
+        f.write(data)
+        f.flush()
+        end = f.tell()
+    return range(end - len(data), end)
 
 
 def append_jsonl(path: Path, item: dict[str, Any]) -> Path:
-    append_line(path, json.dumps(item, ensure_ascii=False))
+    append_line(path, json.dumps(item, ensure_ascii=False).encode("utf-8"))
     return path
+
+
+class _FileMark(NamedTuple):
+    end: int
+    # `None`: the file was absent, so whatever an append has put there since is all tail.
+    inode: int | None
+
+
+def _read_marked(path: Path) -> tuple[list[str], _FileMark]:
+    lines: list[str] = []
+    end, inode = 0, None
+    with contextlib.suppress(FileNotFoundError), open(_long_path(path), "rb") as f:
+        inode = os.fstat(f.fileno()).st_ino
+        for raw in f:
+            # An unterminated line is an append in flight: the swap carries it past `end`.
+            if not raw.endswith(b"\n"):
+                break
+            lines.append(raw.decode("utf-8"))
+            end += len(raw)
+    return lines, _FileMark(end, inode)
+
+
+def read_lines(path: Path) -> list[str]:
+    return _read_marked(path)[0]
+
+
+def _end_mark(path: Path) -> _FileMark:
+    # Locked, so no append is in flight and the whole file is whole lines.
+    with _write_lock(path):
+        try:
+            st = os.stat(_long_path(path))
+        except FileNotFoundError:
+            return _FileMark(0, None)
+    return _FileMark(st.st_size, st.st_ino)
+
+
+class PairWrite(NamedTuple):
+    """A line file and its companion rewritten together; ``None`` is an absent companion."""
+
+    lines: Iterable[str]
+    # What the companion holds while the lines swap, so it must carry every fact either line state leans on.
+    bridge: bytes | None
+    companion: bytes | None
+
+
+class _Companion(NamedTuple):
+    path: Path
+    held: bytes | None
+    write: PairWrite
+
+
+def _put(path: Path, data: bytes | None, *, held: bytes | None) -> None:
+    if data == held:
+        return
+    if data is None:
+        unlink_robust(path)
+    else:
+        write_bytes(path, data)
+
+
+def _swap(path: Path, mark: _FileMark, lines: Iterable[str], companion: _Companion | None) -> bool:
+    data = "".join(lines).encode("utf-8")
+    # Only the swap is locked: a big rewrite outlasts `LOCK_TIMEOUT`, where an appender gives up.
+    with _write_lock(path):
+        try:
+            with open(_long_path(path), "rb") as f:
+                st = os.fstat(f.fileno())
+                if mark.inode not in (None, st.st_ino) or st.st_size < mark.end:
+                    return False
+                f.seek(mark.end)
+                tail = f.read()
+        except FileNotFoundError:
+            if mark.inode is not None:
+                return False
+            tail = b""
+        if companion is None:
+            write_bytes(path, data + tail)
+            return True
+        if read_bytes_optional(companion.path) != companion.held:
+            return False
+        _put(companion.path, companion.write.bridge, held=companion.held)
+        write_bytes(path, data + tail)
+        _put(companion.path, companion.write.companion, held=companion.write.bridge)
+    return True
+
+
+_REWRITE_ATTEMPTS = 3
+
+
+class _Attempt[T](NamedTuple):
+    mark: _FileMark
+    lines: Iterable[str] | None
+    companion: _Companion | None
+    result: T
+
+
+def _retry_swap[T](path: Path, attempt: Callable[[], _Attempt[T]]) -> T:
+    for _ in range(_REWRITE_ATTEMPTS):
+        mark, lines, companion, result = attempt()
+        if lines is None or _swap(path, mark, lines, companion):
+            return result
+    raise ConflictError(
+        f"{path.name} was rewritten by another writer during each of {_REWRITE_ATTEMPTS} "
+        "attempts, so this rewrite was not applied. Try again."
+    )
+
+
+def rewrite_lines[T](
+    path: Path, transform: Callable[[list[str]], tuple[Iterable[str] | None, T]]
+) -> T:
+    """*transform* reruns on a lost race, so it returns its result and never accumulates one;
+    ``None`` lines write nothing."""
+
+    def attempt() -> _Attempt[T]:
+        held, mark = _read_marked(path)
+        lines, result = transform(held)
+        return _Attempt(mark, lines, None, result)
+
+    return _retry_swap(path, attempt)
+
+
+def rewrite_pair[T](
+    path: Path,
+    companion: Path,
+    transform: Callable[[list[str], bytes | None], tuple[PairWrite | None, T]],
+) -> T:
+    """`rewrite_lines` with a companion no appender touches, swapped under the same lock and refused if
+    it changed since read: bridge, then lines, then its final bytes, so no instant holds a fact in neither."""
+
+    def attempt() -> _Attempt[T]:
+        held, mark = _read_marked(path)
+        beside = read_bytes_optional(companion)
+        write, result = transform(held, beside)
+        if write is None:
+            return _Attempt(mark, None, None, result)
+        return _Attempt(mark, write.lines, _Companion(companion, beside, write), result)
+
+    return _retry_swap(path, attempt)
+
+
+def replace_lines[T](path: Path, build: Callable[[], tuple[Iterable[str], T]]) -> T:
+    """`rewrite_lines` for lines built elsewhere: only what lands past the end mark is read, and carried."""
+
+    def attempt() -> _Attempt[T]:
+        mark = _end_mark(path)
+        lines, result = build()
+        return _Attempt(mark, lines, None, result)
+
+    return _retry_swap(path, attempt)
 
 
 def write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> None:
@@ -306,8 +456,9 @@ def newest_mtime_ns(*paths: Path) -> int | None:
 
 
 __all__ = [
+    "PairWrite",
     "append_jsonl",
-    "ensure_parent_dir",
+    "append_line",
     "iter_files",
     "newest_mtime_ns",
     "open_text_robust",
@@ -315,8 +466,12 @@ __all__ = [
     "read_json",
     "read_json_optional",
     "read_json_tolerant",
+    "read_lines",
     "read_yaml",
     "read_yaml_optional",
+    "replace_lines",
+    "rewrite_lines",
+    "rewrite_pair",
     "rmtree_robust",
     "unlink_robust",
     "validate_path_component",

@@ -196,11 +196,12 @@ export function NodeConfigEditor(props: {
         </div>
       ) : null}
       {narrowChannel ? (
-        <small className="config-hint">
+        <details className="config-hint">
+          <summary>How axes work</summary>
           Click an axis to drop its list. The first value is where this point starts — click
           another to move it there; ☑ = what the optimizer may pick, and one value left pins the
           axis. 🔒 / 🔓 = held / tunable, for the params that carry no value list.
-        </small>
+        </details>
       ) : null}
     </div>
   );

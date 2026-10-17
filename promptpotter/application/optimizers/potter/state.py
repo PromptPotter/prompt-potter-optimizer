@@ -22,6 +22,7 @@ from promptpotter.application.scoring.candidate_report import fatal_validation_f
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.wounds import RuntimeFailure, rf_dedup_key
+from promptpotter.infrastructure.store.archive_queries import as_of_moment
 from promptpotter.infrastructure.store.layout import campaign_cycles_dir, root_cycle_id
 
 if TYPE_CHECKING:
@@ -65,17 +66,12 @@ class PotterState:
         cls, session: Session, config: CampaignConfig, origin_results: CellSheet
     ) -> PotterState:
         memory = _with_sibling_runtime_failures(L2L3Memory(), session)
-        # A controlled arm reads none: the mine walks every campaign of the workspace.
-        earned_blocks = (
-            {}
-            if session.controlled
-            else earned_library_for(
-                session.store,
-                answer_space_signature(
-                    (cell.facts.ground_truth for cell in origin_results),
-                    dataset=config.dataset_name,
-                ),
-            )
+        earned_blocks = earned_library_for(
+            session.store,
+            answer_space_signature(
+                (cell.facts.ground_truth for cell in origin_results),
+                dataset=session.measured_dataset,
+            ),
         )
         return cls(session=session, memory=memory, earned_blocks=earned_blocks)
 
@@ -144,20 +140,22 @@ def potter_state(state: WorkingState) -> PotterState:
 
 
 def _sibling_runtime_failures(session: Session) -> list[RuntimeFailure]:
-    """Only a sibling that reached a natural conclusion carries trustworthy failures."""
+    """Only a sibling that reached a natural conclusion carries trustworthy failures — by the
+    moment this task re-reads the world at."""
     campaigns = session.store.campaigns
     root = root_cycle_id(session.state.cycle_id)
+    moment = as_of_moment()
     out: dict[tuple[str, str, str], RuntimeFailure] = {}
     cycles_dir = campaign_cycles_dir(campaigns.campaign_root_dir(session.campaign_id))
     for sibling in sorted(d.name for d in cycles_dir.iterdir() if d.is_dir()):
         if sibling == session.state.cycle_id or root_cycle_id(sibling) != root:
             continue
         hop = CycleHop(campaign_id=session.campaign_id, cycle_id=sibling)
-        index = campaigns.load(hop)
+        index = campaigns.load(hop, moment=moment)
         reason = None if index is None else index.stop_reason
         if reason is None or stop_reason_outcome(reason) is not StopOutcome.SUCCESS:
             continue
-        rounds = campaigns.standing_rounds(hop).rounds
+        rounds = campaigns.standing_rounds(hop, moment=moment).rounds
         state = rounds[max(rounds)].close.optimizer_state if rounds else None
         if state is None or state.manifest != POTTER_MANIFEST:
             continue

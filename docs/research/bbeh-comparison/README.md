@@ -34,7 +34,7 @@ curve over budget is the stronger form of the same experiment.
 
 > ⚠️ **The model is not yet held constant, and no number may be published until it is.** The peers
 > call `gpt-oss-120b` via Groq (`shared_config.py::MODEL_ID`); PromptPotter calls whatever
-> `datasets/bbeh/pipeline.yaml` pins, and that file's `available_models` currently admits only
+> the tenant definition `bbeh/dataset.yaml::pipeline` pins, and that section's `available_models` currently admits only
 > `mistral-small-3.2-24b`. Reconcile the two before comparing. The runner now stamps the model it
 > actually reached into the results file rather than the constant, so a mismatch is visible in the
 > output instead of silent.

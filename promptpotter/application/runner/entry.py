@@ -13,8 +13,10 @@ from promptpotter.application.campaign_config import (
     apply_cycle_seed,
 )
 from promptpotter.application.initialization.loop_start import (
+    cycle_partition,
     init_optimization_loop,
     populate_session_scoring,
+    scope_memory,
 )
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.intelligence.rasch import parent_level_trajectory
@@ -34,7 +36,7 @@ from promptpotter.application.run_observers import (
     declare_run_wiring,
 )
 from promptpotter.application.run_phase_control import FlightGauge, RunControl
-from promptpotter.application.runner.bench import bench_selection, own_level
+from promptpotter.application.runner.bench import bench_selection, bench_series, own_level
 from promptpotter.application.runner.campaign_result import (
     bank_campaign_result,
     bench_origin,
@@ -60,7 +62,7 @@ from promptpotter.application.scoring.query_loop import NEXT_CELL
 from promptpotter.application.scoring.sample_measurement import cell_bound
 from promptpotter.application.views.ingress import run_spend_view
 from promptpotter.config.settings import APP_VERSION
-from promptpotter.domain.bench import BenchScore, partition_bank
+from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.campaign import ceiling_meter
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.export import PromptExport, build_prompt_export
@@ -91,15 +93,10 @@ from promptpotter.domain.spend import (
 from promptpotter.infrastructure.llm.pricing import refresh_rates_in_background
 from promptpotter.infrastructure.llm.send_pacing import set_abort_check
 from promptpotter.infrastructure.llm.spend_book import SpendBook, bound_spend_book
-from promptpotter.infrastructure.llm.telemetry import bind_priced
+from promptpotter.infrastructure.llm.telemetry import at_round, bind_priced
 from promptpotter.infrastructure.producer_lock import release_cycle
 from promptpotter.infrastructure.runtime_flags import armed_run_limits
-from promptpotter.infrastructure.store.archive_queries import (
-    memory_scoped,
-    scope_memory_to_own_answers,
-)
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
-    scan_ledger_answers,
     scan_ledger_priced_keys,
     scan_ledger_wall_clock,
 )
@@ -143,8 +140,6 @@ def _arm_run_controls(
     """Re-called per rebase/fork, which mints a different cycle dir; precedes origin scoring, which spends."""
     cycle_dir = session.store.campaigns.cycle_dir(session.hop) if session.state.cycle_id else None
     session.flight = FlightGauge(observers.callbacks.on_flight)
-    # A provider's pushback moves inside a cell, while the phase's loop may be blocked on the cells out.
-    session.backend_client.backpressure.on_change = session.flight.touch
     book = _arm_spend_book(
         observers,
         cycle_dir,
@@ -247,8 +242,6 @@ async def _prepare_run(
     ) is not None:
         # After the scorer, which the stop this raises is finalized with.
         book.refuse_unpriced(cell, NEXT_CELL)
-    # Before the origin pass: its sample records name round 0, and an unbound round raises.
-    cb.set_round(0)
     origin = await establish_campaign_origin(
         session,
         dataset,
@@ -308,14 +301,21 @@ def _build_cycle_result(
     picked_sp = cycle.selected_sp if cycle is not None else None
     # Round 0 is the reference the result is differenced against, never a search result.
     cycle_rounds = [rr for rr in cycle.rounds if rr.round > 0] if cycle is not None else []
-    ds = cycle.difficulty.ruler if cycle is not None else None
     origin_lv: tuple[float, float] | None = None
     levels: list[tuple[float, float]] = []
+    bench_origin: float | None = None
+    bench_levels: list[float | None] = []
     if cycle is not None:
         origin_lv, levels = parent_level_trajectory(
             _level_of(cycle.origin_round),
             [_level_of(rr) for rr in cycle_rounds],
-            ds,
+            cycle.difficulty.ruler,
+        )
+        bench_origin, bench_levels = bench_series(
+            session.store,
+            cycle.bench_passes,
+            session.scoring.require_scorer(),
+            rounds=cycle_rounds,
         )
     return CycleResult(
         rounds=cycle_rounds,
@@ -327,6 +327,8 @@ def _build_cycle_result(
         origin_level_se=origin_lv[1] if origin_lv is not None else None,
         round_levels=[t for t, _ in levels],
         round_level_ses=[se for _, se in levels],
+        bench_origin_level=bench_origin,
+        bench_round_levels=bench_levels,
         round_budget=cycle.config.optimization.max_rounds if cycle is not None else None,
         result_prompt_fields=picked_sp.prompt_fields if picked_sp else {},
         result_pipeline_params=picked_sp.pipeline_params if picked_sp else None,
@@ -359,7 +361,7 @@ def _export_artifact(
         tool_version=APP_VERSION,
         campaign_id=session.campaign_id,
         cycle_id=session.state.cycle_id,
-        dataset_name=campaign.dataset_name if campaign else (session.dataset_name or ""),
+        dataset_name=session.measured_dataset,
         dataset_hash=dataset_hash(session.samples),
         treatment=campaign.treatment if campaign else None,
         stop_reason=cycle_result.stop_reason,
@@ -502,6 +504,21 @@ async def _run_single_cycle(
             )
             if cycle.bench_passes is not None and book.binds("bench"):
                 book.set_aside(cycle.bench_passes.reserve_usd, cycle.bench_passes.reserve_tokens)
+            if (
+                cycle.bench_passes is not None
+                and campaign_config.bench_trigger == "each_round"
+                and len(cycle.rounds) > 1
+            ):
+                # The selection a resumed line stands on, graded where its line holds no pass:
+                # a re-enacting fork's floor, read today as the round it re-runs will be.
+                with at_round(cycle.rounds[-1].round):
+                    cycle.bench_passes = await bench_selection(
+                        session,
+                        cycle.rounds,
+                        framing=cycle.framing,
+                        banked=cycle.bench_passes,
+                        cb=cb,
+                    )
         declare_line_bench(
             session, campaign_config, cb, passes=cycle.bench_passes, selecting=True, ending=None
         )
@@ -531,9 +548,11 @@ async def _run_single_cycle(
     ):
         book.set_aside(0.0, 0)
         try:
-            cycle.bench_passes = await bench_selection(
-                session, cycle.rounds, framing=cycle.framing, banked=cycle.bench_passes, cb=cb
-            )
+            # Under the last round, as the `bench` verb grades it (`grade_bench.py`).
+            with at_round(cycle.rounds[-1].round):
+                cycle.bench_passes = await bench_selection(
+                    session, cycle.rounds, framing=cycle.framing, banked=cycle.bench_passes, cb=cb
+                )
         except (*RUN_STOPS, KeyboardInterrupt, asyncio.CancelledError) as exc:
             # Only a pause escapes the pass; the resume takes the pass again.
             stop_reason, cycle_error = run_stop_reason(exc), None
@@ -553,12 +572,8 @@ async def _run_single_cycle(
         pause_cause=PauseCause.CANCELLED if cancel_exc is not None else pause_cause,
     )
     # Ahead of the re-raise below: a cancellation is one of the interrupts that leaves an empty fork dir.
-    if (parent_cycle_id := forked_from()) and cycle_result.n_rounds_after_origin == 0:
-        cleanup_stub_fork_if_empty(
-            campaign_store=session.store.campaigns,
-            hop=session.hop,
-            parent_cycle_id=parent_cycle_id,
-        )
+    if forked_from() and cycle_result.n_rounds_after_origin == 0:
+        cleanup_stub_fork_if_empty(campaign_store=session.store.campaigns, hop=session.hop)
 
     if cancel_exc is not None:
         # The caught instance, not a fresh class — it carries the reason its raise site named.
@@ -626,20 +641,22 @@ async def run_optimization(
     limits: HeldLimits,
 ) -> CycleResult:
     """*observers* MUST be pre-built (ledger bound before origin); *dataset* is the whole bank."""
-    try:
-        return await _optimize(
-            dataset,
-            campaign_config,
-            session=session,
-            observers=observers,
-            langfuse_session_id=langfuse_session_id,
-            mode=mode,
-            limits=limits,
-        )
-    finally:
-        release_cycle(observers.cycle_dir)
-        if session.state.cycle_id:
-            release_cycle(session.store.campaigns.cycle_dir(session.hop))
+    # Round 0 outside every round the loop enters: the origin pass, its gate and the close.
+    with at_round(0):
+        try:
+            return await _optimize(
+                dataset,
+                campaign_config,
+                session=session,
+                observers=observers,
+                langfuse_session_id=langfuse_session_id,
+                mode=mode,
+                limits=limits,
+            )
+        finally:
+            release_cycle(observers.cycle_dir)
+            if session.state.cycle_id:
+                release_cycle(session.store.campaigns.cycle_dir(session.hop))
 
 
 async def _optimize(
@@ -653,23 +670,14 @@ async def _optimize(
     limits: HeldLimits,
 ) -> CycleResult:
     started_at = utcnow_iso()
-    campaign = session.store.campaigns.load_campaign(session.campaign_id)
-    session.arm = None if campaign is None else campaign.arm
-    if campaign is not None and (session.controlled or memory_scoped()):
-        scope_memory_to_own_answers(
-            scan_ledger_answers(
-                CycleLayout(session.store.campaigns.cycle_dir(hop)).ledger
-                for hop in session.store.campaigns.line(campaign.root_hop)
-            )
-        )
-    partition = partition_bank(dataset, campaign_config.dataset_split)
+    scope_memory(session, moment=None)
+    partition = cycle_partition(session, dataset, campaign_config.dataset_split)
     session.scoring.partition = partition
     dataset = list(partition.search)
     # Before this launch takes a cell: a re-read of a cell the campaign already priced prices nothing.
-    session.state.priced_keys = scan_ledger_priced_keys(
-        session.store.campaigns.campaign_cycle_ledgers(session.campaign_id)
+    bind_priced(
+        scan_ledger_priced_keys(session.store.campaigns.campaign_cycle_ledgers(session.campaign_id))
     )
-    bind_priced(session.state.priced_keys)
     refresh_rates_in_background()
     # Unconditional: the runner cannot know a child will recurse.
     publish_inner_spawn_context(session)

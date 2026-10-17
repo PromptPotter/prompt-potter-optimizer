@@ -24,38 +24,27 @@ export function OriginCheckinPanel({
   if (!lastResolution?.assessment && questions.length === 0 && raised.length === 0) return null;
 
   return (
-    <section className="origin-checkin">
+    <section>
       {lastResolution?.assessment ? (
-        <p className="origin-checkin-assessment">{lastResolution.assessment}</p>
+        <p>
+          <i>{lastResolution.assessment}</i>
+        </p>
       ) : null}
-      {raised.length > 0 ? (
-        <ul className="origin-raised">
-          {raised.map((cmd, i) => (
-            <li key={i} className="origin-raised-item">
-              <span className="origin-raised-text">
-                <span className="origin-raised-label">{proposalLabel(cmd)}</span>
-                <span className="origin-raised-evidence">{cmd.evidence}</span>
-              </span>
-              <button
-                type="button"
-                className="origin-raised-apply"
-                onClick={() => onApply(cmd.payload.patch)}
-              >
-                Apply
-              </button>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {questions.length > 0 ? (
-        <ul className="origin-checkin-questions">
-          {questions.map((q, i) => (
-            <li key={i}>
-              <QuestionAnswer question={q} draft={draft} onApply={onApply} />
-            </li>
-          ))}
-        </ul>
-      ) : null}
+      <ul>
+        {raised.map((cmd, i) => (
+          <li key={i}>
+            {proposalLabel(cmd)} <small>{cmd.evidence}</small>{" "}
+            <button type="button" onClick={() => onApply(cmd.payload.patch)}>
+              Apply
+            </button>
+          </li>
+        ))}
+        {questions.map((q, i) => (
+          <li key={`q${i}`}>
+            <QuestionAnswer question={q} draft={draft} onApply={onApply} />
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }
