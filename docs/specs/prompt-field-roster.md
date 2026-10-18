@@ -47,7 +47,7 @@ Seven readers, and they are not equally hard:
 | `opt_search_point.py::mutate`, `prompt_fields`, `prompt_field_dict` | `getattr(self, f)` per field | **structural** — the six are Pydantic *attributes*. A dynamic set means a dict field, and `StrictModel` forbids extras. |
 | `bench/cycle.py` (~L540) | `setattr(opt_sp, f, …)` per field on resume | structural, with `mutate` |
 | `dispatch/injections/panels.py` (~L252) | `prompt_axes` — which axes a panel may name | mechanical |
-| `webapp/lib/prompt-fields.ts` | the TS half of the seam: LABELS only | **already generated, so nearly free.** The SET is emitted by `build_ts_types.py::_emit_prompt_string_fields` and re-exported from `types.generated.ts`; this file keeps the on-screen labels, which have no Python counterpart. A roster reaches the browser by regeneration, and only the label table needs a home. |
+| `webapp/lib/prompt-fields.ts` | the TS half of the seam: LABELS only | **already generated, so nearly free.** The SET is emitted by `scripts/build_ts_types.py::_emit_prompt_string_fields` and re-exported from `types.generated.ts`; this file keeps the on-screen labels, which have no Python counterpart. A roster reaches the browser by regeneration, and only the label table needs a home. |
 
 The structural one is the real gate: `persona: str = ""` and friends are model fields, and every
 `getattr(sp, "persona")` in the tree assumes they exist. A roster turns them into

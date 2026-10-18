@@ -84,7 +84,7 @@ Smoke-test by hand at `http://localhost:8001/` for what the walk does not assert
 
 ## Build + run
 
-**One build mode (`next.config.ts`), and no env switch may add a second.** `npm run build` is what the gate, the release workflow and the deploy scripts all run: the React Compiler pass and full-bundle source maps are simply what a build is. Turbopack's persistent cache holds one configuration, so a same-mode rebuild is cheap and a second mode would evict it on every alternation. **The maps serve the deployed box only** — `build_release.py::stage_webapp` strips them. Type-check and lint run inside no build, being separate gate checks.
+**One build mode (`next.config.ts`), and no env switch may add a second.** `npm run build` is what the gate, the release workflow and the deploy scripts all run: the React Compiler pass and full-bundle source maps are simply what a build is. Turbopack's persistent cache holds one configuration, so a same-mode rebuild is cheap and a second mode would evict it on every alternation. **The maps serve the deployed box only** — `scripts/build_release.py::stage_webapp` strips them. Type-check and lint run inside no build, being separate gate checks.
 
 **For visual work run `npm run dev`, not a rebuild per change.** It serves :3000 with Turbopack HMR and proxies `/api/*` to :8001 via `next.config.ts::rewrites`, which exists for this and nothing else. **The port picks your harness:** :3000 covers the anon and `PROMPTPOTTER_AUTH=off` surfaces, while the OIDC redirect is bound to :8001, so a real login round-trip needs the built app.
 

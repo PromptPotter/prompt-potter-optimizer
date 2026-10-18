@@ -392,7 +392,7 @@ world is a strict containment hierarchy:
   The two tiers serve different purposes (operator
   benchmarking vs tenant work); both share the `dataset.yaml` /
   `task.md` / `origin.yaml` shape.
-  This tier holds **datasets only** — the optimizer's own pipeline is install content under the package (`config/paths.py::optimizer_assets_root`), never a target in this tier. Checkout and wheel resolve install definitions from the one package path (`config/paths.py::install_datasets_root`). Either way the tier is **read-only**, so a benchmark's materialized rows are not kept in it: they are the operator's, and `readable_dataset_rows` resolves them from the tenant tree (`store/dataset_access.py`).
+  This tier holds **datasets only** — the optimizer's own pipeline is install content under the package (`config/paths.py::optimizers_root`), never a target in this tier. Checkout and wheel resolve install definitions from the one package path (`config/paths.py::install_datasets_root`). Either way the tier is **read-only**, so a benchmark's materialized rows are not kept in it: they are the operator's, and `readable_dataset_rows` resolves them from the tenant tree (`store/dataset_access.py`).
 - **Campaign** — one declared optimization effort: a dataset, a
   pipeline origin, context text, **and the optimizer manifest it
   runs** (`optimizer:` plus its node overlay). A **first-class entity** and a **cycle tree** — root
@@ -465,7 +465,7 @@ wearing three names. What survives is *not* an entity:
   not the live set — several cycles can run at once, each saying so by its
   own `run_phase`.
 - **`mint_kind: "session"`** — the sidebar's label for a *root cycle*
-  (`campaign_store/store.py::_mint_kind`). A label, not a container.
+  (`domain/run_records.py::MINT_KIND_LABELS`). A label, not a container.
 
 `new` mints a fresh Campaign + root cycle; `resume` follows the pointer;
 `fork` mints a sibling cycle inside the same campaign. **A fork never switches the optimizer

@@ -152,7 +152,7 @@ campaign-config field and no second overlay.
 - **Standing size, parent rule, survivor rule** are ordinary knobs on the opening node and the
   selector.
 - **Served** on the response `GET /optimizers/{name}/knobs` already answers
-  (`application/optimizer_manifest.py::OptimizerKnobsResponse`), extended: per node its class and
+  (`application/pipeline_resolve.py::OptimizerKnobsResponse`), extended: per node its class and
   the pools it draws from and writes to; the manifest's pools (name, entry kind, fields, groups,
   size, origin, writers); an object knob's own rows, so nesting is drawn from data. Declared in
   [`api-openapi.yaml`](api-openapi.yaml) first; the TypeScript is generated.
