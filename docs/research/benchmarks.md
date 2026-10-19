@@ -41,7 +41,7 @@ Two ways to misread the bar:
 
 | # | Dataset | Role |
 |---|---|---|
-| 1 | **BBEH** | Headline benchmark — carries the head-to-head against peer optimizers. Measured 28% **at the bar (`gpt-oss-20b @ low`), which is no longer what the dataset runs**: `bbeh/dataset.yaml::pipeline` admits only `mistralai/mistral-small-3.2-24b-instruct` and its `campaign` section overrides nothing. The 28% predates that repin — re-measure before quoting it against anything. |
+| 1 | **BBEH** | Headline benchmark — carries the head-to-head against peer optimizers. Its 28% was measured at `gpt-oss-20b @ low`, **not the model the dataset runs** — that model is owned by [`bbeh-comparison/README.md`](bbeh-comparison/README.md) § The protocol; re-measure before quoting it. |
 | 2 | **HotpotQA** | Wired 2026-10-14 (tenant definition `hotpotqa`, distractor validation, `em_match`), measured at the bar and seated in the L4 pool under both solvers (§ Every dataset we measured). Most valuable head-to-head addition after BBEH: MIPROv2 / GEPA / adv-CoT all use it. |
 | 3 | **AIME 2025** | In band at 30%, wired. Limited by size (30 problems, no split), not by headroom. |
 | 4 | **Chess puzzles (imec)** | Candidate, **not wired and unmeasured at the bar**. 1,118 Lichess puzzles in a published 559 / 559 development / test split, stratified by puzzle length (one to five moves) and rating (400–2,800), scored by exact match on the move — [arXiv 2610.00416](https://arxiv.org/abs/2610.00416), code and renewal scripts at [`imec-ailabs/Automatic-Prompt-Optimization-with-Chess`](https://github.com/imec-ailabs/Automatic-Prompt-Optimization-with-Chess) (Apache-2.0; the Lichess export is CC0). What earns it the slot: six DSPy optimizers (GEPA, MIPROv2, SIMBA, COPRO, BootstrapFewShot, BootstrapRandomSearch) are already published on that split across eight models, for about $800 in total, so one more arm lands beside existing rows. Two things to settle before wiring: `gpt-oss-20b` is not in their panel and their weakest models stay far behind, so the risk at the bar is the **floor**, which a rating cut can move; and a multi-move puzzle counts only when every move is right, which the scorer has to reproduce. Abstract, setup and section takeaways read 2026-10-11; the results tables not. |
@@ -115,7 +115,7 @@ the origin inside 15–60% AND a settled gap over it. Sidecars:
 | FOLIO | **80%** | ❌ saturated; reproduced across two providers |
 | MuSR | **81%** | ❌ ceiling — B-skewed binary golds, frequency-bias coast |
 | SATBench | **100%** | ❌ saturated at every filter the schema exposes |
-| GSM8K | **~78%** (literature — never measured at the bar, and unlike `sealqa` it could be) | ⏳ verdict withdrawn, see § Order of use |
+| GSM8K (2026-10-12) | **90–100%** at the bar, 30 rows — the literature's ~78% was a weaker solver's origin | ❌ saturated for reporting; `gsm_hard` is the seat — § Order of use owns the reading. Kept as a candidate `promptpotter-self` environment, where a near-ceiling seat can still carry signal |
 | BBEH @ `high` | ~25% naïve | ❌ the *effort* is rejected, not the dataset — the reasoning trace exhausts the visible-token budget |
 | IFBench · CRUXEval-O · MuSR (2-subtask) | — | ❌ desk-rejected / not measurable |
 
@@ -187,7 +187,7 @@ Beside it, two of the round counts a cycle banks in `index.json::final`, which s
 than how *high*: **`rounds_to_separable`**, the first round whose pick separates from the origin on the shared panel,
 and **`rounds_to_improved`**, the first round that crowned a winner. Quote the first. The second is
 a promotion verdict on `lift > 0.0` with no interval and no multiplicity correction
-([`../methods/verdict-resolution.md`](../methods/verdict-resolution.md) § The crowning bar), so the
+([`../methods/verdict-resolution.md`](../methods/verdict-resolution.md) § ⚠️ The crowning bar), so the
 two are routinely far apart and a claim that does not name which one it rests on is not a result.
 
 A query denominator is deliberately absent from all of them. Nearly all of a campaign's wall clock

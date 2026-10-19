@@ -9,7 +9,8 @@ unravelling it. Each entry states:
 - its **source**;
 - whether that source was **read** or only seen through search summaries.
 
-An unverified entry must be read at its source before anything is built or cited on it.
+An entry that does not say *read* counts as unverified, and an unverified entry must be read at
+its source before anything is built or cited on it.
 
 **What it is not.** Tools and competitors go in [`landscape.md`](landscape.md), and the argument
 against the peers that matter goes in [`related-work.md`](related-work.md). This page records only
@@ -92,8 +93,9 @@ an entry before quoting it; standards on this page are still moving.
   loads `name` + `description` (about 100 tokens) at startup and the body only on activation. So
   **the `description` is the routing surface**, and optimizing a skill's body without its
   description optimizes the half that selection never reads.
-  - Today the harbor connector writes the frontmatter itself and holds `description` fixed,
-    deliberately: with one skill there is nothing to choose between. terminus-2 finds
+  - Today the harbor connector writes the frontmatter itself and holds `description` fixed
+    (`connectors/harbor.py::_write_skill`), deliberately: with one skill there is nothing to
+    choose between. terminus-2 finds
     `<skills_dir>/<name>/SKILL.md` with a depth-2 `find`, and silently skips a skill whose
     frontmatter lacks `name` / `description` or whose line endings are not LF.
   - That makes the candidate the body alone, so the spec's frontmatter rules cannot be broken by a
@@ -117,7 +119,8 @@ an entry before quoting it; standards on this page are still moving.
 - **A security floor that no candidate may cross.** Scanners have converged:
   [SkillSpector](https://github.com/nvidia/skillspector) (NVIDIA; 71 patterns, a risk score above
   50 means do not install) and [Cisco skill-scanner](https://github.com/cisco-ai-defense/skill-scanner).
-  Audits of public skills found 26–37% flawed and dozens confirmed malicious. The attacks seen
+  Audits of public skills found 26–37% flawed and dozens confirmed malicious (no audit linked;
+  unverified). The attacks seen
   include hidden instructions, invisible Unicode Tag characters, and agent-settings injection
   (CVE-2025-59536). A mutated skill body must never:
   - carry Unicode Tag characters;
@@ -131,8 +134,8 @@ an entry before quoting it; standards on this page are still moving.
   measurable objective. [SkillRouter](https://arxiv.org/abs/2603.22455) shows retrieval at library
   scale is embedding-based, and it also reads skill bodies.
 - **The format is cross-runtime now.** Microsoft Agent Framework (GA, July 2026), Google ADK and
-  Codex skills all load SKILL.md with progressive disclosure, so an optimized skill should assume
-  it will run on more than one runtime.
+  Codex skills all load SKILL.md with progressive disclosure (no source linked; unverified), so an
+  optimized skill should assume it will run on more than one runtime.
 - **Executable skills transfer; prose skills are unproven.** In
   [SkillWeaver](https://arxiv.org/abs/2504.07079), skills written as callable APIs transferred from
   a strong agent to a weak one (+54% on WebArena). Our skill target is prose today. That is
@@ -197,8 +200,8 @@ Beyond ranked items 1 and 2:
     OptimizationResult`.
   - Reuse the inherited `evaluate_prompt()` / `call_model()`.
 
-  This decides the shape of "PromptPotter reachable through Opik": a `BaseOptimizer` subclass
-  living in the `promptpotteropt` repo, never here (ADR-0006).
+  This decides the shape of "PromptPotter reachable through Opik": a `BaseOptimizer` subclass.
+  Which repo it lives in is [`../specs/roadmap.md`](../specs/roadmap.md) § Application radius's.
 - **DSPy's optimizer interface** was read in source (`dspy/teleprompt/teleprompt.py`,
   `gepa/gepa.py`):
   - The base class is `Teleprompter`, with `compile(self, student: Module, *, trainset,
@@ -234,7 +237,7 @@ Beyond ranked items 3 and 4:
   (common practice; no single canonical source verified).
 - **Venue and arXiv requirements.**
   - The NeurIPS Datasets & Benchmarks track requires Croissant metadata and non-gated public
-    hosting.
+    hosting (no source linked; unverified).
   - arXiv's moderation policy says each author takes "full responsibility for all its contents,
     irrespective of how the contents were generated"
     ([info.arxiv.org/help/moderation](https://info.arxiv.org/help/moderation)).
@@ -292,8 +295,8 @@ Beyond ranked items 3 and 4:
   to 35× fewer rollouts. Combined with Databricks' result that SFT and GEPA compound, the pitch is
   that the harness comes *before* weights, and the two work together.
 - **Buyers lack evidence and audit trails, not optimizer horsepower.** MIT's *GenAI Divide*
-  (2025, 300 deployments) found 95% of pilots show zero P&L impact. Vendor case studies are mostly
-  anecdotes without controls:
+  (2025, 300 deployments) found 95% of pilots show zero P&L impact (no source linked; unverified).
+  Vendor case studies are mostly anecdotes without controls (none linked; unverified):
   - Bedrock's +143% on a function-calling prompt;
   - Anthropic's prompt improver at +30% on a classification task;
   - no quantified results published by Vertex, OpenAI, Opik or Arize.

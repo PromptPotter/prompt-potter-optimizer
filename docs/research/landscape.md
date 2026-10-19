@@ -132,7 +132,7 @@ the harness side of [`related-work.md`](related-work.md) § Three layers — no 
 benchmark, no stopping rule, no budget meter beyond reporting cost. It optimizes agent source, not
 a prompt + pipeline configuration, and has no prompt-optimization baselines (no GEPA, DSPy, MIPRO).
 Its tree search overlaps ours in shape (visit-penalised selection over a lineage tree — compare
-`mask/backprop.py` UCB1 and [`../specs/roadmap.md`](../specs/roadmap.md) § Selector members), which
+`promptpotter/application/mask/backprop.py` UCB1 and [`../specs/roadmap.md`](../specs/roadmap.md) § Selector members), which
 is now common ground in the field, not a moat either side holds.
 
 **Worth taking.** (1) **A zero-sample pre-screen**: judge-ranked candidates before any sample is
@@ -142,6 +142,8 @@ the selector members' gate — whether a self-reported prediction carries signal
 acquisition mixing measured rank, predicted rank and a visit penalty — a worked instance of the
 single-acquisition direction the selector members argue for. (4) Their cost table (expansion vs
 judge vs evaluation per step) is the accounting our budget meter should be able to print.
+Their method as a PromptPotter preset is [`../specs/roadmap.md`](../specs/roadmap.md) § SIFT
+reproduction.
 
 **Checked** 2026-09-24 — v1 only, no repository linked in the paper.
 
@@ -210,6 +212,14 @@ meter or a grader with the others.
 **Worth taking.** Already taken where it matters — reach, by shipping as a DSPy optimizer.
 
 **Checked** 2026-09-24 — last push 2026-09-23, ~38k stars, not archived.
+
+**GEPA `optimize_anything`, checked 2026-10-19.** GEPA outside DSPy now optimizes any scored text
+artifact (whole agent files, code, rendered SVG and 3D scripts) in three modes, with rendered images
+as reflection feedback; presented on the AI Engineer World's Fair main stage. It narrows the scope
+line in [`related-work.md`](related-work.md) § Against GEPA and AlphaEvolve, and its ARC-AGI-1
+headline (32.5% → 89.5%, Gemini 3 Flash) is measured against its own seed only, below what the same
+model reaches with reasoning set to High. Reading, numbers and the experiments it asks for:
+[`../../paper/notes/gepa-optimize-anything-aie-2026.md`](../../paper/notes/gepa-optimize-anything-aie-2026.md).
 
 ## Promptolution (LMU / Freiburg / TUM)
 

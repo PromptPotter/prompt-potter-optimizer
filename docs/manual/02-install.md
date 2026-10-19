@@ -25,11 +25,11 @@ Create a file called `.env` in the repo root, containing exactly:
 OPENROUTER_API_KEY=your_key_here
 ```
 
-Installed from a wheel there is no repo root, so it goes in `$PROMPTPOTTER_HOME/.env` instead. `promptpotter new` offers to write it for you on first run if no key is set.
+Installed from a wheel there is no repo root, so it goes in the user-data root's `.env` instead — `$PROMPTPOTTER_HOME`, else the OS app-data dir. `promptpotter new` offers to write it for you on first run if no key is set.
 
-The optimizer model defaults to `openai/gpt-6-luna` on OpenRouter; `deepseek/deepseek-v4-flash:nitro` stays on each manifest's menu. It is declared in `promptpotter/assets/optimizers/potter/pipeline.yaml` (per optimizer node's `config.model` / `config.provider`); edit that file to change it for every campaign, or set one campaign's `optimization.nodes.{node}.config.model`. Set the corresponding `*_API_KEY` for Groq/Anthropic/OpenAI. There is no env-var override.
+The optimizer's model and provider are declared per optimizer node in `promptpotter/assets/optimizers/potter/pipeline.yaml` (`config.model` / `config.provider`; `available_models` is the menu a human picks from); edit that file to change it for every campaign, or set one campaign's `optimization.nodes.{node}.config.model`. Set the corresponding `*_API_KEY` for Groq/Anthropic/OpenAI. There is no env-var override.
 
-Installed from a wheel rather than a clone, that file sits under `site-packages` and an edit there dies at the next upgrade. Put your copy at `$PROMPTPOTTER_HOME/optimizer/pipeline.yaml` instead: present, it replaces the shipped manifest whole. Full resolution rules — **owned by** [`../developer/stable-api.md § 4b`](../developer/stable-api.md).
+Installed from a wheel rather than a clone, that file sits under `site-packages` and an edit there dies at the next upgrade. Put your copy at `optimizers/potter/pipeline.yaml` under the user-data root instead: present, it replaces the shipped manifest whole. Full resolution rules — **owned by** [`../developer/stable-api.md § 4b`](../developer/stable-api.md).
 
 Connecting to a remote / auth-gated backend? See [`operations/backend-integration.md § Connection security`](../operations/backend-integration.md#connection-security).
 
@@ -39,7 +39,7 @@ Connecting to a remote / auth-gated backend? See [`operations/backend-integratio
 pip install -e ".[all]"
 ```
 
-Not developing on it? `pip install "promptpotter[all]"` instead, and skip step 2. `[all]` bundles the operator extras but not every one — which stay out, and why, is [ADR-0006](../adr/0006-embeddable-core-and-extras.md) § Decision. Add `,benchmarks` when you fetch a public bank. For a minimal install or a specific extra, see [§ Optional dependency bundles](#optional-dependency-bundles) below.
+Not developing on it? `pip install "promptpotter[all]"` instead, and skip step 2. `[all]` bundles the operator extras but not every one — which stay out, and why, is [ADR-0006 § Decision](../adr/0006-embeddable-core-and-extras.md#decision). Add `,benchmarks` when you fetch a public bank. For a minimal install or a specific extra, see [§ Optional dependency bundles](#optional-dependency-bundles) below.
 
 ## 5. Reload Claude Code
 
@@ -53,7 +53,7 @@ Next: [Your first campaign](03-first-campaign.md).
 
 ## Environment variables
 
-The `.env` file (see `.env.example`) carries API keys and nothing else: where the optimizer's provider + model are declared is [step 3](#3-create-env) above. (Target/scoring model is per-dataset in the pipeline overlay.)
+The `.env` file carries keys and deployment postures, never a model: where the optimizer's provider + model are declared is [step 3](#3-create-env) above. (Target/scoring model is per-dataset in the pipeline overlay.) Every key it may hold, with what it does, is `.env.example`; the ones a first install meets:
 
 | Variable | When required | Purpose |
 |----------|---------------|---------|
@@ -61,6 +61,8 @@ The `.env` file (see `.env.example`) carries API keys and nothing else: where th
 | `GROQ_API_KEY` | using Groq | Groq API key |
 | `OPENAI_API_KEY` | using OpenAI | OpenAI API key |
 | `ANTHROPIC_API_KEY` | using Anthropic | Anthropic API key |
+| `TERMNORM_URL` | TermNorm backend elsewhere than `http://127.0.0.1:8000` | Where the `termnorm` connector sends |
+| `TERMNORM_TOKEN` | TermNorm backend requires auth | Bearer the `termnorm` connector sends |
 | `LANGFUSE_PUBLIC_KEY` | optional | Langfuse cloud tracing |
 | `LANGFUSE_SECRET_KEY` | optional | Langfuse cloud tracing |
 | `LANGFUSE_HOST` | optional | Langfuse host URL |
@@ -81,6 +83,8 @@ pip install -e ".[jupyter]"        # JupyterLab + IPython display
 pip install -e ".[benchmarks]"     # GSM8K, AIME 2025, BBEH (HuggingFace datasets)
 pip install -e ".[observability]"  # Langfuse cloud tracing
 pip install -e ".[anthropic]"      # Anthropic Claude as optimizer LLM
+pip install -e ".[dspy]"           # PromptPotter as a DSPy optimizer + the dspy connector
+pip install -e ".[harbor]"         # the harbor connector — needs a running container runtime
 pip install -e ".[dev]"            # pytest, ruff, mypy, deptry
 pip install -e ".[all]"            # The operator extras (what it leaves out: ADR-0006)
 pip install -e ".[all,dev]"        # Recommended for contributors

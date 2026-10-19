@@ -1,10 +1,10 @@
 # Observability
 
-Every optimizer LLM call, backend match, and escalation check emits a structured trace — to local files always (under the cycle dir), and to Langfuse cloud when configured.
+Every optimizer LLM call, backend match, and escalation check emits a structured trace — to local files under the cycle dir unless `OBS_ENABLED` is off, and to Langfuse cloud or MLflow when configured. The sinks are fanned out from the ledger (`infrastructure/tracing/bridge.py::TracingProjection`).
 
 ## What's traced, and where
 
-Phase events (the bench's `CampaignPhase` in `domain/phases.py` — `init`, `origin`, `propose`, `measure`, `select`, `adapt` — and each optimizer's own, declared on the llm-node member that runs in it (`LlmNode.phase`), potter's being `refine_strategy` and `modify_plan`) emit `enter`/`exit` pairs into the per-cycle ledger. `langfuse/events.jsonl` is a pure mirror — nothing reads it for state reconstruction.
+Phase events (the bench's `domain/phases.py::CampaignPhase`, and each optimizer's own, declared on the llm-node member that runs in it (`LlmNode.phase`) — potter's are `escalation/state.py::PotterPhase`) emit `enter`/`exit` pairs into the per-cycle ledger. `langfuse/events.jsonl` is a pure mirror — nothing reads it for state reconstruction.
 
 | Source | Event | Payload |
 |--------|-------|---------|
@@ -12,8 +12,7 @@ Phase events (the bench's `CampaignPhase` in `domain/phases.py` — `init`, `ori
 | L1 Critique | LLM call | critique optimizer prompt, structured output |
 | L2 Refine | LLM call | refinement optimizer prompt (incl. the L1 field catalogue), parsed transition |
 | L3 Plan | LLM call | plan template (axes_digest + L2 history + pipeline + runtime failures), new plan |
-| Backend match | Span | query, params, result, `diagnostics.warnings` |
-| Stale-data protocol | Event | ladder step taken, resolution |
+| Backend match | Span | query, params, result, `diagnostics.warnings` — declared (`TracingProjection.emit`, `tracing/events.py::QueryScoreStart` / `QueryNodeSpan` / `QueryScoreEnd`); nothing in the loop calls it |
 
 ## The wall clock, and where the claim stops
 
@@ -42,7 +41,7 @@ The JSONL stream is canonical replay; the dashboard fields and the sparkline are
 
 ## Langfuse cloud
 
-Set `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_HOST` in `.env`, then `pip install -e ".[observability]"`. Trace shape: cycle = trace, round = span, each L1/L2/L3/critique call = LLM observation, backend match = span. A local shadow under `cycles/{cycle_id}/langfuse/` mirrors what's sent (with an id-map for cross-reference); a backfill helper replays historical traces uploaded later.
+Set `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_HOST` in `.env`, then `pip install -e ".[observability]"`. Trace shape: cycle = trace, round = span, each L1/L2/L3/critique call = LLM observation, backend match = span. A local shadow under `cycles/{cycle_id}/langfuse/` mirrors what's sent (`events.jsonl`), with an id-map for cross-reference (`state.json`).
 
 ## MLflow
 
@@ -59,7 +58,7 @@ Set `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_HOST` in `.env`, t
 
 What is still to build between the two tools, in order, is [`../specs/mlflow-interop.md`](../specs/mlflow-interop.md).
 
-**Both sinks sit downstream of two competing span conventions, and one must be chosen as primary before a third sink is added** ([`../research/external-constraints.md`](../research/external-constraints.md) § TOOL): OpenTelemetry GenAI, whose `gen_ai.*` attributes are all still *Development* (v1.42.0), so a version is pinned rather than head tracked; and Arize's OpenInference, which requires `openinference.span.kind` on every span.
+**A primary span convention is chosen before a third sink is added** — owned by [`../research/external-constraints.md`](../research/external-constraints.md) § TOOL; both sinks here sit downstream of the two it names.
 
 ## Display convention — `⚠ … ↳`
 
@@ -79,13 +78,13 @@ Line 1 names the observation, line 2 the repair or consequence. A finding withou
 
 The structured finding is written to the round audit file (`AuditTrailProjection`) and read back via `useRoundNodes` when an operator drills in.
 
-**Per-sample annotation order** — one `⚠ {step}: {message}` per diagnostic warning (always), then exactly one status annotation from this exclusive set:
+**Per-sample annotation order** (`application/views/render/sample.py::fmt_query_result`) — one `⚠ {step}: {message}` per diagnostic warning (always), then at most one status annotation from this exclusive set, first match wins:
 
 - `🔄 cache had pipeline warnings → reran`
-- `🔀 query degrades ≥50% historically → using cached answer`
+- `🔀 query degrades ≥50% of the time historically → using cached answer`
 - `⚠ cached failure was token-budget exhaustion + rerun max_tokens ≤ cached output → skipped LLM rerun; marked fatal`
-- `⚠ stale-data ladder exhausted → still degraded`
-- `↩ pipeline warning observed; X/Y toward rerun trigger` — only when no fatal warning fired
+- `⚠ entire stale-data ladder exhausted → still degraded`
+- `↩ pipeline warning observed; X/Y occurrences toward rerun trigger` — only when the sample is not deprecated by a fatal warning
 
 Suppressing `↩` under a fatal warning is load-bearing: a fatal warning means the candidate is dead, so "1/3 toward rerun" would falsely promise more data.
 

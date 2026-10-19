@@ -56,9 +56,10 @@ CONNECTOR's declaration; how far past a possible cut the walk may reach — and 
 ([`candidate-elimination.md`](../methods/candidate-elimination.md)); the boundary answers only
 who may press.
 
-**It is reachable from the browser only** — no CLI verb, no config key, no dataset knob. It is
-also the one command whose address may DESCEND (`payload.descend`), because the arming is not
-inherited into a nested run and each layer is therefore armed by naming it. That
+**It is reachable from the browser only** — no CLI verb, no config key, no dataset knob. Its
+address DESCENDS into a nested run (`payload.descend`, which most cycle-scoped kinds refuse —
+`domain/command_kinds.py::CyclePayload.inner_refusal`), because the arming is not inherited into
+a nested run and each layer is therefore armed by naming it. That
 inverts `<entry-point-parity>` on purpose: the surfaces a capability is *absent* from are part
 of its gate, since the CLI is where automation and AI assistants operate. Adding a verb "for
 parity" removes the boundary (root `CLAUDE.md` § Conventions).
@@ -108,7 +109,7 @@ field. Today `tenant_id == user_id` (one tenant per operator).
 **The guarantee is "no constructed `Stores` crosses a tenant", not "no read crosses a tenant"** —
 and the difference is the whole of it. A second `build_stores` under a different identity crosses
 freely, which is how the two deliberate cross-tenant readers work at all
-(`user_store.py::count_accounts`, `quota.py::is_host_tenant_dir`); so does `--tenant <any>` from a
+(`user_store.py::count_accounts`, `jobs/install_spend.py::read_install_spend`); so does `--tenant <any>` from a
 shell, which resolves to `default_identity` carrying `OWNER_COMMAND_CAPABILITIES`. **Through the
 served API the isolation holds absolutely** — `deps.py::resolve_identity` builds only from the
 session — and the local shell is the separate boundary § loop ↔ everything already concedes.
@@ -132,11 +133,12 @@ The read API is otherwise read-only.
 
 This is the genuinely-partial boundary; the honest state:
 
-- **CLI-launched runs** (`python -m promptpotter`) are already a **separate OS process** from the
-  API.
-- **Web-launched runs** (`/commands/start-run`) run **in-process** in the API worker by deliberate
-  design (orphan-reaping assumes the runs it judges live in the process that judges them). So a
-  web-launched loop shares the API's process, `.env`, and every provider key.
+- **CLI-launched runs** (`python -m promptpotter`) are a **separate OS process** from the API.
+- **Web-launched runs** (`/commands/start-run`) execute in **their own process** too
+  (`jobs/launcher/run_job.py::spawn_job`): the server admits and mints, then hands the admitting
+  identity and the held ceiling over the child's stdin. The child is spawned under the API's own
+  service unit, so it shares the API's OS user, `.env`, every provider key and the unit's hardening
+  — a separate process, not a separate principal.
 - **Both hold the same machine slot** (`jobs/launcher/admission.py::admit_and_hold`), so occupancy
   is one number whichever door a run came through. Only the JOBS DIR is shared, not the process, so
   no process may sweep what it did not start: admitting takes a machine-wide OS lock, and a slot is
@@ -147,21 +149,22 @@ This is the genuinely-partial boundary; the honest state:
 **Shipped wall (3a) — the hardened service unit** (`deploy-linux/install-service.sh`): the
 systemd unit drops all capabilities, `ProtectSystem=strict`, a `@system-service` syscall filter,
 the kernel-protection set, and an optional `MemoryMax`. This is kernel-enforced and bounds
-**both** the API and the in-process loop it hosts. The writable surface is `DATA_DIR` when set,
+**both** the API and the run processes it spawns, which stay in its unit (`KillMode=process`, so
+an API restart leaves a run in flight). The writable surface is `DATA_DIR` when set,
 else `$INSTALL_DIR` — and only the first takes away the service's ability to rewrite its own
 source, its venv and its `.env`, which is persistence rather than disclosure. Unset warns.
 
 **Partly applied (3b) — the dedicated loop principal.** The `.env` **secret split** is available
 now (`BOT_ENV_FILE`), the admin bot being its own unit already; which key moves and which stay in
 both files is § Running it securely's placement rules. Still absent: a `promptpotter-loop` service
-user and `ReadWritePaths` scoped to the cycle tree alone — that half only bites CLI-launched runs
-until 3c, so it stays gated on 3c.
+user and `ReadWritePaths` scoped to the cycle tree alone — that half bites a run only once its
+process runs under its own principal, so it stays gated on 3c.
 
-**Deferred (3c), named honestly — the web-launch split:** making the web-launched loop a separate
-sandboxed process. It fights the current single-process design (a few hundred LOC + delicate
-JobRegistry coordination) and guards a low-probability threat (our own optimizer code) in the
-current single-operator / small-team model. **Until 3c lands, web-launched loops are bounded by 3a
-only, not the full 3b wall.**
+**Deferred (3c), named honestly — the loop principal split:** running a launched run's process as
+its own sandboxed principal (user, unit, secret set) rather than as a child of the API's unit. The
+process split already exists (`run_job.py`); the principal split guards a low-probability threat
+(our own optimizer code) in the current single-operator / small-team model. **Until 3c lands,
+web-launched loops are bounded by 3a only, not the full 3b wall.**
 
 **The TRIGGER is the first time a tenant can supply anything EXECUTABLE** — a custom node, a plugin
 connector, arbitrary Python. Until then the requirement is undefined, and that was audited rather
@@ -170,9 +173,9 @@ AST-allowlisted, YAML is `safe_load`ed, slugs are regex-validated, and the provi
 closed and never tenant-set. Nobody can supply code, so a boundary built now is built against a
 guess — and the guess decides the shape (subprocess vs trust model vs container). It also fights
 L4, whose recursion spawns each inner campaign as an in-process `asyncio` task. Waiting costs
-nothing **while the launch seam stays single** (`application/embedded_run.py`,
-`jobs/launcher/mint_and_start.py`); let run-launch logic spread across call sites and it stops
-being cheap.
+nothing **while the launch seam stays single** (`jobs/launcher/launch.py::launch`, and
+`application/embedded_run.py` for a host program); let run-launch logic spread across call sites
+and it stops being cheap.
 
 The one place the loop `eval()`s an external string — the scoring formula — is fenced by an AST
 allowlist (`application/scoring/formula/compiler.py`); the formula source is operator/tenant config,
@@ -210,8 +213,8 @@ not backend-supplied.
   capability set, so the authorization boundary's dispatcher gate refuses its every command with the same 404 a stranger
   gets. Nothing else re-checks.
 - **Who is exempt from free-tier metering is one definition with two readings** —
-  `quota.py::_is_host`: the terminal, or the identity that claimed the box.
-  `spends_the_hosts_own_key` reads it off a LIVE identity (no issuer); `is_host_tenant_dir` off a
+  `identity/migration.py::_is_host`: the terminal, or the identity that claimed the box.
+  `quota.py::spends_the_hosts_own_key` reads it off a LIVE identity (no issuer); `migration.py::is_host_tenant_dir` off a
   DIRECTORY walk (the un-renamed `projects/default/`), which has no session to ask. Only the
   terminal DETECTOR differs, and merging the two is what would let an identity that merely omits an
   issuer resolve as the operator — the anonymous-tier trap.
@@ -307,13 +310,13 @@ Each is idempotent.
 1. **Apply the hardened unit** — `./install-service.sh`, then `systemctl status $APP_NAME` and the health curl. If it fails to start, the first suspects are `ProtectSystem=strict` (add the offending write path to `ReadWritePaths`) and `SystemCallFilter`. `MemoryDenyWriteExecute` is deliberately **omitted** — add it only after a clean smoke test.
 2. **(Optional) cgroup bound** — `MEMORY_MAX="2G"` in `deploy.config`, re-run `install-service.sh`. Turns the pp-self memory-starvation OS-kill into a clean cgroup OOM.
 3. **Provision the PP↔TermNorm token.** A **first** install has `bootstrap.sh` generate the shared `TERMNORM_TOKEN`; on an already-installed box **it will not re-run** — its `REPO_URL` guard exits first — so set the same token by hand in both `.env` files, with `TERMNORM_REQUIRE_AUTH=true` on TermNorm's side. The token goes only to `TERMNORM_URL` (default `http://127.0.0.1:8000`), PP's own `.env` — no request or CLI flag names a backend host.
-4. **Restart BOTH services.** TermNorm to start requiring the token, and PromptPotter because it reads `TERMNORM_TOKEN` once at boot rather than per call. Verify against `127.0.0.1:8000/status`: no `Authorization` → **401**, bearer → **200**. PP's reachability probe uses a separate unauthenticated client that only checks TCP connect, so enabling auth does not break it.
+4. **Restart BOTH services.** TermNorm to start requiring the token, and PromptPotter because it reads `TERMNORM_TOKEN` once at boot rather than per call. Verify against `127.0.0.1:8000/status`: no `Authorization` → **401**, bearer → **200**. PP's reachability probe (`connectors/termnorm.py::_termnorm_preflight`) uses a separate unauthenticated client that only fails on a refused connect, so enabling auth does not break it.
 5. **Confirm TermNorm's IP allowlist** (`backend-api/config/users.json`) lists PP's source IP. Co-located loopback is already there; a *remote* PP needs its IP added, or `/matches` removed from `protected_paths` to rely on the bearer token alone.
 6. **Never run TermNorm's dev launcher in prod** — `start-server-py-LLMs.sh` binds `0.0.0.0:8000` where the systemd unit binds loopback.
 7. **Verify no surprise listener** — `ss -tlnp` shows only loopback `:8000` / `:8001` and cloudflared's outbound; the admin bot adds **no port**.
 8. **Firewall is an operator decision, deliberately not scripted.** Everything binds loopback and ingress is outbound-tunnel-only, so a host firewall is defense-in-depth with real SSH-lockout risk on a remote box. Add a default-deny-inbound rule that **preserves SSH** by hand; do not wire it into `bootstrap.sh`.
 
-**Still open (design, not a box step):** OS-privilege **3b** (dedicated loop user + secret split) and **3c** (web-launch out-of-process) — see § loop ↔ everything for the gating.
+**Still open (design, not a box step):** OS-privilege **3b** (dedicated loop user, cycle-scoped write paths) and **3c** (a launched run under its own principal) — see § loop ↔ everything for the gating.
 
 ---
 

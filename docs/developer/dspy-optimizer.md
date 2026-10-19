@@ -15,7 +15,7 @@ everything keyed to it come along — PoBB pruning, Rasch scoring, the block lib
 measurement cache, the spend ceiling, and the campaign tree the CLI verbs operate on. It is
 the same distribution, so those verbs are already on your PATH:
 
-| | With `promptpotteropt` | Full install |
+| | With `promptpotter[dspy]` | Full install |
 |---|---|---|
 | **Live view of a run** — phase, round, candidate, in-flight query | the terminal readout · `dashboard.json` on disk · an MLflow child run per trial | the same, plus the operator webapp |
 | **Pause and resume** · **rewind and fork** | `promptpotter pause` · `resume --from N` · `--fork-on-divergence`, against the campaign `compile()` minted | the same |

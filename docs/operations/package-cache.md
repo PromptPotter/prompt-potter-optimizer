@@ -35,7 +35,7 @@ Three mechanisms close this, and none of them changes measurement identity:
 - **One container per machine:** `promptpotter-package-cache` (same name for its image and
   volume), running `apt-cacher-ng` from Debian's own archive, published on port 3142 with
   `--restart unless-stopped`. The cell path starts it, once per process, before the first cell of an
-  opted-in dataset. Doing it there rather than in `Connector.preflight` means every entry point
+  opted-in dataset (`infrastructure/docker_host.py::ensure_package_cache`). Doing it there rather than in `Connector.preflight` means every entry point
   that measures a cell gets it, including the diagnostics and the embedded launch, which never run
   preflight.
 - **Reached at `host.docker.internal:3142`.** Docker Desktop resolves that name natively; on Linux
