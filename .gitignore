@@ -98,6 +98,7 @@ logs/
 !.claude/skills/potter-run/
 !.claude/skills/potter-self/
 !.claude/skills/potter-box/
+!.claude/skills/potter-release/
 !.claude/skills/digest/
 !.claude/skills/serve/
 !.claude/hooks/
