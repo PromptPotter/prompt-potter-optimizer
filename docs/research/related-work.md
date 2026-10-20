@@ -79,6 +79,16 @@ is the property that makes two of those algorithms' numbers mean the same thing:
 - **A stopping rule.** Sequential elimination with a posterior (PoBB) rather than a fixed trial
   count — [`../methods/candidate-elimination.md`](../methods/candidate-elimination.md).
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/verdict-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/verdict-light.png">
+    <img src="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/verdict-dark.png" alt="The compare view's verdict: what was held equal across the compared campaigns, and what stays confounded" width="100%">
+  </picture>
+</p>
+
+Put campaigns side by side and the first thing served is that list — what was held equal, and what stays confounded. The numbers come after.
+
 **The underrated one is the archive.** Measurements are content-addressed by configuration and
 sample, so two methods that converge on overlapping candidates pay for those cells once. That is
 what makes an N-way comparison affordable at all; a stack that re-runs every method end-to-end
@@ -88,7 +98,9 @@ prices itself out of the experiment it exists to enable.
 
 An optimizer pointed at its own optimizer prompts is the same mechanism one level up, and that is a
 live research axis rather than a curiosity: Sakana's [Darwin Gödel Machine](https://arxiv.org/abs/2505.22954)
-rewrites a coding agent's own source under evolutionary search, Sakana has since stood up a dedicated [RSI
+rewrites a coding agent's own source under evolutionary search. NVIDIA's
+[SoL-Pi](https://nvlabs.github.io/SoL-Pi/) does the same to a coding-agent harness, under a held-out
+acceptance gate ([`landscape.md`](landscape.md) § SoL-Pi). Sakana has since stood up a dedicated [RSI
 Lab](https://sakana.ai/rsi-lab/), and the harness-engineering literature now has [its own reading
 list](https://github.com/leezythu/Awesome-Harness-Self-Improvement). PromptPotter already recurses —
 an outer cycle whose backend is an inner cycle

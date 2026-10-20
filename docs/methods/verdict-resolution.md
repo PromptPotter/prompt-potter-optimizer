@@ -81,6 +81,16 @@ more power. It graduates **per-dataset**, behind the same θ interface, only whe
 
 ## Reading a round — which column is the verdict
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/warnings-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/warnings-light.png">
+    <img src="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/warnings-dark.png" alt="Optimizer warnings: rounds 3 to 6 each resolved nothing, because every arm's lift interval spans zero" width="100%">
+  </picture>
+</p>
+
+**It does not grade its own homework.** An optimizer that picks its own winner is the easiest thing in this field to fake: with three arms and no real difference between them, *some* arm scores above its parent most of the time. PromptPotter still promotes the best of what it saw — and says, per round, on screen and on disk, that the lift interval spans zero; the terminal prints the pick with `(ns)` beside its `p`. Beside θ below, two more guards: **degenerate candidates** — a constant answer, a shape that games the scorer — are caught before they count, and the layer that **validates** a fix is never the layer that proposed it.
+
 **θ is the verdict; accuracy is not.** Two things move raw accuracy without any change in ability,
 so it is not comparable across rounds or across arms within a round:
 

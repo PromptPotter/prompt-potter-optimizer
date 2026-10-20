@@ -2,7 +2,23 @@
 
 > **Audience:** Developer reference. Operators see [`../manual/`](../manual/) for usage docs.
 
-Three layers, repeating every round. L1 fires every round. L2 fires only when L1 stalls. L3 fires when L2's strategy stops moving the needle.
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/loop-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/loop-light.svg">
+    <img src="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/loop-light.svg" alt="The loop: a task and a labeled dataset enter an optimizer setup, then generate, score and critique repeat until a stopping rule fires. L2 and L3 escalate lazily on a stall; a measurement archive replays instead of re-measuring." width="760">
+  </picture>
+</p>
+
+[One round](../methods/candidate-elimination.md) is the unit; a campaign is rounds under three layers:
+
+| Layer | Fires | What it does |
+|---|---|---|
+| 🧬&nbsp;**L1&nbsp;·&nbsp;generate, evaluate, critique** | every&nbsp;round | Mutates a generation of individuals, measures each one's fitness on your dataset, and reads the raw per-sample misses to steer the next generation. |
+| 🔭&nbsp;**L2&nbsp;·&nbsp;refine&nbsp;context** | when&nbsp;L1&nbsp;stalls | Rewrites *how* L1 searches: which evidence it sees and how hard it explores. |
+| 🧭&nbsp;**L3&nbsp;·&nbsp;modify&nbsp;plan** | when&nbsp;L2&nbsp;stalls | Rewrites the strategic plan L1 works within. |
+
+The loop exits on a **stopping rule** — goal reached, budget spent, or a plateau — not on a fixed trial count.
 
 ```
 ┌─ ONE ROUND ────────────────────────────────────────────────────────────┐
@@ -25,6 +41,16 @@ The critique step is the only place in the loop that reads raw per-sample result
 Post-round transitions are decided by escalation rules over `EscalationInputs` (`application/optimizers/potter/escalation/`), not a hard-coded patience FSM — predicates are pure functions over a frozen snapshot; adding a rule is one row in `escalation/rules.py`. Several preemptor rules fire L2 *before* patience runs out — **which ones is owned by [`../developer/dispatch-hub.md`](../developer/dispatch-hub.md) § Trigger**.
 
 Five LLM call sites: `checkin` (runs around the loop and skips the dispatch hub; it decomposes a dataset's framing once — on the first mint that finds none committed, `new --task-file` / `--task-text`, `new <raw file>`, or the web check-in), `l1_generate`, `l1_critique`, `l2_context`, `l3_plan`. Critique-and-refine pattern inspired by [PromptWizard](https://arxiv.org/abs/2405.18369).
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/tree-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/tree-light.svg">
+    <img src="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/tree-light.svg" alt="A search tree: origin, rounds 1 and 2, then a branch through rounds 3 and 4 that is spent. The search rewinds to round 2 and a second branch reaches the winner." width="880">
+  </picture>
+</p>
+
+**It searches a tree, not a trail.** Each round's result flows back to every ancestor it descends from, and when a branch is spent a UCB rule picks the ancestor to re-expand — so the search climbs a different hill instead of stalling. An ancestor's score reflects what re-expanding from it actually yielded, including in branches it never ran itself. This is AlphaZero-shaped MCTS over the lineage, with deterministic evaluation on your dataset in place of rollouts: [the four-phase mapping](../methods/candidate-elimination.md#comparison-to-mcts).
 
 ## The state record — what one round carries forward
 

@@ -3,7 +3,7 @@
   <img src="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/wordmark.png" alt="PromptPotter" width="300">
 </p>
 
-<h1 align="center">LLM-driven evolution of prompts and pipelines</h1>
+<h1 align="center">An LLM-driven prompt optimizer for the whole pipeline</h1>
 
 <p align="center">
   Hand it a labeled dataset and a pipeline. It evolves the prompt <b>and</b> the pipeline's parameters together,<br>
@@ -11,32 +11,34 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/PromptPotter/prompt-potter-optimizer/actions/workflows/ci.yml"><img src="https://github.com/PromptPotter/prompt-potter-optimizer/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://pypi.org/project/promptpotter/"><img src="https://img.shields.io/pypi/v/promptpotter" alt="PyPI"></a>
+  <a href="https://pypi.org/project/promptpotter/"><img src="https://img.shields.io/pypi/dm/promptpotter" alt="Downloads"></a>
   <a href="https://pypi.org/project/promptpotter/"><img src="https://img.shields.io/pypi/pyversions/promptpotter" alt="Python"></a>
   <a href="https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT--RG-blue" alt="License: MIT-RG"></a>
 </p>
 
 <p align="center">
-  <b>Try it without installing:</b> <a href="https://promptpotter.com"><b>promptpotter.com</b></a> — <b>10 free optimization runs</b> on your own data, up to 10 rounds each, in the browser and on my key. Offer stands until <b>3 Dec 2026</b>; bring-your-own-key is in the works.
+  <a href="https://app.promptpotter.com"><b>Open the app →</b></a> &nbsp;·&nbsp; nothing to install, sign in and bring your examples<br>
+  <sub><b>10 free optimization runs</b>, up to 10 rounds each, on our key, until <b>3 Dec 2026</b>. Or <code>pip install promptpotter</code> and run it on your machine; or self-host it for your team.</sub>
 </p>
 
 <p align="center">
-  <i>What it does differently:</i> &nbsp;
-  <a href="#one-round-replayed">Losers cut early</a> ·
-  <a href="#it-moves-the-pipeline-not-just-the-words">Pipeline, not just prompt</a> ·
-  <a href="#the-budget-goes-where-candidates-separate">Budget</a> ·
-  <a href="#it-does-not-grade-its-own-homework">No self-grading</a> ·
-  <a href="#a-campaign-is-an-object-on-disk">Campaign on disk</a>
-  <br>
-  <i>Try it, then read on:</i> &nbsp;
+  <b>It sits behind your stack, never in place of it.</b> Your models, your framework, your agent harness and your tracing stay exactly as they are.<br>
+  PromptPotter calls your pipeline the way your users do, measures it on your examples, and hands back a better configuration as a file.<br>
+  Your code is never edited, forked or redeployed.
+</p>
+
+<p align="center">
+  <a href="#works-with-what-you-already-run">Works with your stack</a> ·
+  <a href="#what-you-get-back">What you get back</a> ·
+  <a href="#what-it-does-differently">What it does differently</a> ·
   <a href="#quickstart">Quickstart</a> ·
-  <a href="#the-whole-app-in-one-walk">App tour</a> ·
+  <a href="#five-entry-points">Entry points</a> ·
   <a href="#how-the-search-works">How the search works</a> ·
-  <a href="#where-it-sits">vs GEPA / AlphaEvolve</a> ·
-  <a href="#the-bench">The bench</a> ·
-  <a href="#five-ways-in">Five ways in</a> ·
-  <a href="#hack-on-it">Hack on it</a> ·
-  <a href="#going-deeper">Going deeper</a> ·
+  <a href="#how-it-compares-to-gepa-and-alphaevolve">vs GEPA / AlphaEvolve</a> ·
+  <a href="https://promptpotter.com/benchmarks">Benchmarks</a> ·
+  <a href="#extending-the-engine">Extending the engine</a> ·
   <a href="#documentation">Docs</a>
 </p>
 
@@ -53,7 +55,33 @@
   Every figure on this page is an in-campaign reading from a small run, not a benchmark result.
 </sub></p>
 
-## One round, replayed
+## Works with what you already run
+
+Whatever you built it with, PromptPotter meets it where it already runs:
+
+| You built it with | How PromptPotter meets it |
+|---|---|
+| **An agent framework** — LangGraph, LlamaIndex, CrewAI, Microsoft Agent Framework / Semantic Kernel, Google ADK, AWS Strands Agents, the OpenAI Agents SDK, Haystack, Spring AI, or plain FastAPI | Put it behind three endpoints — `POST /matches`, `GET /pipeline`, `GET /status` — and the knobs your `/pipeline` declares become what is tuned ([backend integration](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/operations/backend-integration.md)) |
+| **A managed agent service** — AWS Bedrock Agents, Google Vertex AI Agent Engine, Azure AI Foundry | Your deployed agent already has an endpoint; a thin adapter in front of it answers the same three |
+| **A workflow builder** — n8n, Dify, Langflow, Flowise | The same three endpoints in front of the workflow's API; the prompts and node settings it exposes become the knobs |
+| **DSPy** | `PromptPotterOpt`, where you would reach for GEPA ([dspy-optimizer](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/dspy-optimizer.md)) |
+| **An agent that works in a sandbox** | Each candidate runs as a [Harbor](https://github.com/laude-institute/harbor) trial, graded by the task's own checker; the agent's trajectory is the evidence for the next mutation |
+| **Langfuse / MLflow** | Every round fans out as traces; the winner lands in MLflow's Prompt Registry ([observability](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/operations/observability.md)) |
+| **OpenRouter, OpenAI, Anthropic, Groq** | Any of them, for your pipeline and for the optimizer; OpenRouter is the default |
+
+## What you get back
+
+`export.json` — the winning prompt and settings by field name, with the evidence behind them. We write that file and provide a reader; we never load, host, route or hot-swap anything in your production path.
+
+<p align="center">
+  <img src="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/compare-dark.png" alt="The compare view: the origin C0 beside two later candidates on ARC-Challenge, each with its fitness and interval, what it cost, its model settings, and the prompt it ran field by field" width="100%">
+</p>
+
+<p align="center"><sub>
+  The starting prompt C0 beside two candidates the search found. Each column has its fitness with an interval, so you can see how far apart they really are, plus what it cost per call, the model settings it ran on (🔒 means the optimizer may not touch it) and the prompt itself, field by field. Tick any campaigns, from any dataset, to put them on one board.
+</sub></p>
+
+## What it does differently
 
 **Prompt optimization that stops paying for losers.** Every measurement costs money, so the whole design is *most fitness per dollar*.
 
@@ -62,7 +90,7 @@
 </p>
 
 <p align="center"><sub>
-  One round of a real campaign, replayed line for line from its <code>readout.log</code> — the gutter is the source line number. Candidate 3 is cut after <b>7 of 34</b> samples; the other 27 are never bought.
+  One round of a real campaign, replayed line for line from its <code>readout.log</code>. Candidate 3 is cut after <b>7 of 34</b> samples; the other 27 are never bought — <a href="https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/methods/candidate-elimination.md">Posterior-of-Being-Best</a>.
 </sub></p>
 
 <p align="center">
@@ -73,11 +101,7 @@
   </picture>
 </p>
 
-Each generation, an LLM mutates the parent into a small population. Every individual walks the same samples, and after each one a posterior asks a single question: *what is the probability this candidate ends up the round's best?* Below the threshold, measurement stops — [Posterior-of-Being-Best](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/methods/candidate-elimination.md). The survivor is elected and breeds the next generation. The drawing is the replay above, read out of the same log.
-
-Four more claims follow, each with the screen that backs it.
-
-<p align="right"><sub><a href="#llm-driven-evolution-of-prompts-and-pipelines">↑ map</a></sub></p>
+Four more claims follow, with the screens that back them.
 
 ### It moves the pipeline, not just the words
 
@@ -89,19 +113,11 @@ Four more claims follow, each with the screen that backs it.
   </picture>
 </p>
 
-Model, temperature, node thresholds, the output schema — whatever your `pipeline.yaml` declares tunable — are part of the individual, so they mutate and are selected jointly with the prompt fields. In the round replayed above, two of the three mutations were to a schema field description, not to the prompt. The run card says which prompt fields **and which node parameters** the best candidate changed, what it cost, and — on the cells both were measured on — how many samples it now gets right, and wrong, against the origin.
+Model, temperature, node thresholds, the output schema — whatever your `pipeline.yaml` declares tunable — mutate and are selected jointly with the prompt. In the round replayed above, two of the three mutations were to a schema field description, not to the prompt. [Reading the run card →](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/manual/04-reading-the-output.md)
 
 ### The budget goes where candidates separate
 
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/leaderboard-dark.png">
-    <source media="(prefers-color-scheme: light)" srcset="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/leaderboard-light.png">
-    <img src="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/leaderboard-dark.png" alt="The hard-sample leaderboard: samples ranked by information gain, each with its fitted difficulty and how often it has been graded" width="100%">
-  </picture>
-</p>
-
-Samples everyone aces or everyone fails are noise, and paying for them buys nothing. The hard-sample leaderboard orders the dataset by how much each sample tells you about which candidate is better, with a fitted difficulty δ beside it, and scoring goes preferentially to those. Measurements are content-addressed: a configuration already scored on a sample is replayed, never re-bought — and the replay still shows its full cost on the ledger.
+Scoring goes to the samples that tell candidates apart; anything already measured is replayed, never re-bought.
 
 <table>
 <tr>
@@ -126,19 +142,9 @@ Samples everyone aces or everyone fails are noise, and paying for them buys noth
 </tr>
 </table>
 
-### It does not grade its own homework
+### It does not certify its own winner
 
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/warnings-dark.png">
-    <source media="(prefers-color-scheme: light)" srcset="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/warnings-light.png">
-    <img src="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/warnings-dark.png" alt="Optimizer warnings: rounds 3 to 6 each resolved nothing, because every arm's lift interval spans zero" width="100%">
-  </picture>
-</p>
-
-An optimizer that picks its own winner is the easiest thing in this field to fake: with three arms and no real difference between them, *some* arm scores above its parent most of the time. PromptPotter still promotes the best of what it saw — and tells you, per round, on screen and on disk, that the lift interval spans zero. The terminal replay does the same in its own words: its pick is printed with `p=0.42 (ns)` beside it.
-
-Three guards sit behind that. Scores are a **subset-invariant ability** (Rasch θ), so a candidate that drifted onto easier samples cannot out-rank an honest one. **Degenerate candidates** — a constant answer, a shape that games the scorer — are caught before they count. And the layer that **validates** a fix is never the layer that proposed it. [What a winner's number may claim.](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/methods/verdict-resolution.md)
+Scores are a subset-invariant ability (Rasch θ), and each round says when its lift is noise. [What a winner's number may claim →](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/methods/verdict-resolution.md)
 
 ### A campaign is an object on disk
 
@@ -150,26 +156,20 @@ Three guards sit behind that. Scores are a **subset-invariant ability** (Rasch �
   </picture>
 </p>
 
-Not a script that has to finish. The file tree is the dashboard: each round is a JSON file you can open in an editor, and the app renders the same file as a scoreboard. Pause a campaign, resume it, rewind to any round, or fork a sibling and compare:
+Not a script that has to finish. Each round is a JSON file the app renders as a scoreboard; pause, resume, rewind to any round, or fork a sibling and compare. [Persistence and recovery →](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/operations/persistence-and-state.md)
 
-```bash
-python -m promptpotter resume --from 3              # rewind in place
-python -m promptpotter resume --fork-on-divergence  # sibling cycle at the divergence point
-```
+<details>
+<summary><b>The whole app in one walk</b> (GIF)</summary>
 
-Changing the scoring formula loses no results — traces are facts, scores are policy — and every artifact stamps the ledger position it was written at, so any past moment is reconstructible ([how](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/stable-api.md#the-cut)).
-
-### The whole app in one walk
+<br>
 
 <p align="center">
   <img src="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/tour-dark.gif" alt="A walk through the app: the chat thread, the run card, the dashboard, the sample leaderboard, one opened cell" width="100%">
 </p>
 
-<p align="center"><sub>
-  The thread, the run card, the optimizer's own loop, the sample leaderboard, one measured cell opened. 📺 Longer: <a href="https://www.youtube.com/watch?v=DLhb26ppX_s">Live #2 — a Swiss-invoice campaign, run raw</a>.
-</sub></p>
+The thread, the run card, the optimizer's own loop, the sample leaderboard, one measured cell opened. 📺 Longer: [Live #2 — a Swiss-invoice campaign, run raw](https://www.youtube.com/watch?v=DLhb26ppX_s).
 
-<p align="right"><sub><a href="#llm-driven-evolution-of-prompts-and-pipelines">↑ map</a></sub></p>
+</details>
 
 ## Quickstart
 
@@ -198,7 +198,10 @@ To watch it in the app shown above:
 python -X utf8 -m uvicorn promptpotter.main:app --port 8001    # then open http://localhost:8001/
 ```
 
-Already in DSPy? It installs where you would reach for GEPA — what you keep and what you trade away that way is [`dspy-optimizer.md`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/dspy-optimizer.md):
+<details>
+<summary><b>Already in DSPy?</b> It installs where you would reach for GEPA</summary>
+
+<br>
 
 ```python
 from promptpotter.presentation.teleprompter import PromptPotterOpt
@@ -207,9 +210,25 @@ optimizer = PromptPotterOpt(metric=my_metric, dataset_name="my-task")
 compiled = optimizer.compile(my_program, trainset=trainset)
 ```
 
+What you keep and what you trade away that way: [`dspy-optimizer.md`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/dspy-optimizer.md).
+
+</details>
+
 Six chapters from install to troubleshooting: [the manual](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/manual/README.md).
 
-<p align="right"><sub><a href="#llm-driven-evolution-of-prompts-and-pipelines">↑ map</a></sub></p>
+## Five entry points
+
+One campaign, driven from wherever the work already happens:
+
+| | |
+|---|---|
+| **Webapp** | The browser control plane on this page, at the domain root — [app.promptpotter.com](https://app.promptpotter.com) hosted, `http://localhost:8001/` local. Chat-first: talk to the Potter and watch it work inline, with a button whenever a decision is yours. Ships as a reusable chat-app template ([spec](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/specs/chat-foundation.md)). |
+| **`/potter-run`** | Claude Code skill — an agent launches, supervises and diagnoses a full campaign from your editor. |
+| **CLI** | `python -m promptpotter new <name>` / `resume`. |
+| **REST API** | Every control verb the webapp issues, for when another system drives the campaign. |
+| **Embedded in Python** | A host program drives one campaign inside its own event loop; the [DSPy optimizer](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/dspy-optimizer.md) is the simple-case entry. |
+
+A sixth — PromptPotter as a tool another agent calls (MCP) — is open for discussion in [#27](https://github.com/PromptPotter/prompt-potter-optimizer/issues/27).
 
 ## How the search works
 
@@ -221,15 +240,7 @@ Six chapters from install to troubleshooting: [the manual](https://github.com/Pr
   </picture>
 </p>
 
-[One round](#one-round-replayed) is the unit; a campaign is rounds under three layers, and a higher layer constrains the lower one rather than replacing it:
-
-| Layer | Fires | What it does |
-|---|---|---|
-| 🧬&nbsp;**L1&nbsp;·&nbsp;generate, evaluate, critique** | every&nbsp;round | Mutates a generation of individuals, measures each one's fitness on your dataset, and reads the raw per-sample misses to steer the next generation. |
-| 🔭&nbsp;**L2&nbsp;·&nbsp;refine&nbsp;context** | when&nbsp;L1&nbsp;stalls | Rewrites *how* L1 searches: which evidence it sees and how hard it explores. |
-| 🧭&nbsp;**L3&nbsp;·&nbsp;modify&nbsp;plan** | when&nbsp;L2&nbsp;stalls | Rewrites the strategic plan L1 works within. |
-
-The loop exits on a **stopping rule** — goal reached, budget spent, or a plateau — not on a fixed trial count. The critique-and-refine pattern is inspired by [PromptWizard](https://arxiv.org/abs/2405.18369). Full mechanics: [`the-loop.md`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/concepts/the-loop.md).
+Every round generates, scores and critiques (L1). When L1 stalls, L2 rewrites *how* it searches; when L2 stalls, L3 rewrites the plan. The loop exits on a **stopping rule** — goal, budget or plateau — not a fixed trial count. [The loop →](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/concepts/the-loop.md)
 
 <p align="center">
   <picture>
@@ -239,11 +250,9 @@ The loop exits on a **stopping rule** — goal reached, budget spent, or a plate
   </picture>
 </p>
 
-**It searches a tree, not a trail.** Each round's result flows back to every ancestor it descends from, and when a branch is spent a UCB rule picks the ancestor to re-expand — so the search climbs a different hill instead of stalling. An ancestor's score reflects what re-expanding from it actually yielded, including in branches it never ran itself. This is AlphaZero-shaped MCTS over the lineage, with deterministic evaluation on your dataset in place of rollouts: [the four-phase mapping](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/methods/candidate-elimination.md#comparison-to-mcts).
+**It searches a tree, not a trail.** When a branch is spent, a UCB rule picks the ancestor to re-expand, so the search climbs a different hill instead of stalling — AlphaZero-shaped MCTS over the lineage, with deterministic evaluation in place of rollouts ([the mapping](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/methods/candidate-elimination.md#comparison-to-mcts)).
 
-<p align="right"><sub><a href="#llm-driven-evolution-of-prompts-and-pipelines">↑ map</a></sub></p>
-
-## Where it sits
+## How it compares to GEPA and AlphaEvolve
 
 PromptPotter belongs to the **LLM-driven evolution** family — an LLM proposes variants, a scorer ranks them, the winners breed. On the prompt side that family is [GEPA](https://arxiv.org/abs/2507.19457), [MIPROv2](https://arxiv.org/abs/2406.11695), [PromptWizard](https://arxiv.org/abs/2405.18369) and [CAPO](https://arxiv.org/abs/2504.16005); on the code side AlphaEvolve and OpenEvolve. GEPA evolves the instruction text of a DSPy program, AlphaEvolve evolves source code, **PromptPotter evolves a whole declared pipeline jointly with the prompt** — a different target, not a missing feature.
 
@@ -261,60 +270,15 @@ The table is capability, not a benchmark result:
 
 <sub>🟡 is a partial version of the same capability; AlphaEvolve's are that capability at the code level; `—` is a closed service whose behaviour is not documented. GEPA keeps a candidate pool <i>within</i> a run — its 🟡 on knowledge is about what survives it. One documented exception to the pricing row: a DSPy call replayed from DSPy's own cache is not counted.</sub>
 
-**Where the others are ahead.** GEPA has reach — it lives inside DSPy, with that ecosystem's adapters, tracing and audience, which is why PromptPotter also installs as a DSPy optimizer. AlphaEvolve optimizes code, which PromptPotter is not pointed at. Opik, the closest *product* rival, ships six optimizers behind one API today and tunes sampling parameters too. Langfuse has production telemetry.
-
-> [!TIP]
-> **The full argument is one page: [Related work — the landscape, and where the bench sits](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/related-work.md).** Telemetry vs. optimizer menus vs. single algorithms, the line from APE and OPRO to GEPA, and every row of the table above with its footnotes.
+**Where the others are ahead.** GEPA has reach — DSPy's adapters, tracing and audience, which is why PromptPotter also installs as a DSPy optimizer. Opik ships six optimizers behind one API; Langfuse has production telemetry. The full argument: [related work](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/related-work.md).
 
 ### The bench
 
-Peers ship an algorithm. PromptPotter ships an algorithm *and* the interface around it — measurement, the content-addressed archive, one spend ledger, persistence, the control plane — and the direction of travel is to run **other people's optimizers inside that interface**, as manifests. A menu of optimizers makes them reachable; it does not make their numbers comparable. What has to be held equal before two methods' numbers may sit in one table:
+Peers ship an algorithm; PromptPotter ships an algorithm *and* the interface around it, and is built to run **other people's optimizers inside that interface** — one grader, one budget meter, one exam, one stopping rule, so their numbers may sit in one table ([what is held equal](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/related-work.md#a-menu-is-not-a-bench--the-honest-version)). Manifests for `potter`, `capo`, `levi` and `gepa` are in the tree; no comparison number is published until one peer — CAPO first — has run end to end in a head-to-head whose only difference is the optimizer.
 
-| Held equal | What it rules out |
-|---|---|
-| **One grader** | each method carrying its own metric function, which drifts |
-| **One budget meter** | a method's internal rollouts going unbilled, so cost-per-fitness is a claim rather than a quantity |
-| **One exam, chosen before anybody proposes** | a method picking the questions it is graded on |
-| **Ability, not accuracy** (Rasch θ) | a method out-ranking an honest one by drifting onto easier samples |
-| **A stopping rule** (PoBB) | a fixed trial count standing in for evidence |
+What we measure on, each dataset's starting score and the protocol a published number must pass: [promptpotter.com/benchmarks](https://promptpotter.com/benchmarks).
 
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/verdict-dark.png">
-    <source media="(prefers-color-scheme: light)" srcset="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/verdict-light.png">
-    <img src="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/verdict-dark.png" alt="The compare view's verdict: what was held equal across the compared campaigns, and what stays confounded" width="100%">
-  </picture>
-</p>
-
-Put campaigns side by side and the first thing served is that list — what was held equal, and what stays confounded. The numbers come after.
-
-**Status, exactly:** manifests for `potter`, `capo`, `levi` and `gepa` are in the tree ([`promptpotter/assets/optimizers/`](https://github.com/PromptPotter/prompt-potter-optimizer/tree/main/promptpotter/assets/optimizers)). The milestone closes when one peer — CAPO first — has run end to end in a real campaign, in a head-to-head whose only difference is the optimizer. That has not happened yet, and no comparison number is published before it does. Design and status: [`roadmap.md`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/specs/roadmap.md) § The optimizer plug point · the argument: [a menu is not a bench](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/related-work.md#a-menu-is-not-a-bench--the-honest-version).
-
-<p align="right"><sub><a href="#llm-driven-evolution-of-prompts-and-pipelines">↑ map</a></sub></p>
-
-## Five ways in
-
-| | |
-|---|---|
-| **Webapp** | The browser control plane on this page, at the domain root — [promptpotter.com](https://promptpotter.com) hosted, `http://localhost:8001/` local. Chat-first: talk to the Potter and watch it work inline, with a button whenever a decision is yours. Ships as a reusable chat-app template ([spec](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/specs/chat-foundation.md)). |
-| **`/potter-run`** | Claude Code skill — an agent launches, supervises and diagnoses a full campaign from your editor. |
-| **CLI** | `python -m promptpotter new <name>` / `resume`. |
-| **REST API** | Every control verb the webapp issues, for when another system drives the campaign. |
-| **Embedded in Python** | A host program drives one campaign inside its own event loop; the [DSPy optimizer](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/dspy-optimizer.md) is the simple-case entry. |
-
-A sixth — PromptPotter as a tool another agent calls (MCP) — is open for discussion in [#27](https://github.com/PromptPotter/prompt-potter-optimizer/issues/27). Opinions welcome.
-
-## Hack on it
-
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/optimizer-pipeline-dark.png">
-    <source media="(prefers-color-scheme: light)" srcset="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/optimizer-pipeline-light.png">
-    <img src="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/optimizer-pipeline-dark.png" alt="The optimizer's own pipeline as the dashboard draws it: adaptive_queue, l1_generate, pobb, l1_score, with l2_context, l3_plan and escalation beneath" width="640">
-  </picture>
-</p>
-
-The optimizer is itself a pipeline of nodes — the same graph the dashboard draws — so it can be pointed at its own optimizer prompts ([self-optimization, L4](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/specs/l4-outer-loop.md)).
+## Extending the engine
 
 ```bash
 git clone https://github.com/PromptPotter/prompt-potter-optimizer && cd prompt-potter-optimizer
@@ -322,11 +286,9 @@ pip install -e ".[all,dev]"
 python scripts/gate.py          # every check CI runs
 ```
 
-The engine is four seams — prompt structure, dispatch, the scoring node, cross-run memory — and **[the developer guide](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/README.md)** draws them on one page. Every optimizer runs end to end at zero spend ([`offline-run.md`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/offline-run.md)), so a change can be proven before it costs anything. The shape every PR is measured against: [`architecture.md`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/architecture.md) §0. A recipe per expansion point: [`adding-a-surface.md`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/adding-a-surface.md). House rules: [`conventions.md`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/conventions.md).
+The optimizer is itself a pipeline of nodes, so it can be pointed at its own optimizer prompts — an outer campaign whose individuals are configurations of the inner optimizer ([self-optimization, L4](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/specs/l4-outer-loop.md)). Every optimizer runs end to end at zero spend ([`offline-run.md`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/offline-run.md)). Start at **[the developer guide](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/README.md)** — the engine's four seams on one page — then [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
-<p align="right"><sub><a href="#llm-driven-evolution-of-prompts-and-pipelines">↑ map</a></sub></p>
-
-## Going deeper
+## In depth
 
 <details>
 <summary><b>Reading a run</b> — what lands on disk, and what a number may claim</summary>
@@ -335,7 +297,7 @@ The engine is four seams — prompt structure, dispatch, the scoring node, cross
 
 While a campaign runs, keep **`cycles/{cycle_id}/dashboard.json`** open in an auto-reloading editor beside the terminal: the file is live scalar state (phase, round, candidate, accuracy, in-flight query), the terminal prints HIT/MISS and per-round banners. Drill-down peers sit beside it — `rounds/`, `log.md`, `index.json`, and `readout.log`, the terminal mirrored to a file. Full guide: [reading the output](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/manual/04-reading-the-output.md).
 
-Every cycle writes a per-round digest to `log.md`. Verbatim, from the round replayed at the top — what the artifact looks like, not a result to read a number off:
+Every cycle writes a per-round digest to `log.md`. Verbatim, from the round replayed above — what the artifact looks like, not a result to read a number off:
 
 ```
 - improved: **yes**
@@ -357,37 +319,18 @@ A percentage in a round banner is an **in-campaign reading, computed on the rows
 </details>
 
 <details>
-<summary><b>More that ships</b> — self-optimization, block library, memory across runs</summary>
-
-<br>
-
-- **Optimizes itself** — an outer campaign whose individuals are configurations of the inner optimizer. [L4](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/specs/l4-outer-loop.md)
-- **Pick your block library mode** — proven personas, thinking styles and answer formats (from PromptWizard and the *Self-Discover* modules it draws on, plus what our own runs turned up). Suggest from the library, restrict to it, or switch it off.
-- **Memory across runs** — parameter impact, sample difficulty and failure patterns survive the campaign that found them. [scoring and memory](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/concepts/scoring-and-memory.md)
-
-</details>
-
-<details>
 <summary><b>Common questions</b></summary>
 
 <br>
 
-- **What does L1 actually mutate?** The prompt template's fields (persona, task instruction, …) plus whatever your `pipeline.yaml` declares as tunable. See [`the-loop.md`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/concepts/the-loop.md#the-state-record--what-one-round-carries-forward).
+- **What does L1 actually mutate?** The prompt template's fields (persona, task instruction, …) plus whatever your `pipeline.yaml` declares as tunable. See [`the-loop.md`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/concepts/the-loop.md#the-state-record--what-one-round-carries-forward). It can draw suggestions from a block library of proven personas, thinking styles and answer formats (from PromptWizard and the *Self-Discover* modules it draws on, plus what our own runs turned up), be restricted to that library, or run without it.
 - **My scoring formula was wrong — did I lose results?** No. The optimizer rescores on load and replays decisions; on divergence, fork. See [`scoring-and-memory.md`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/concepts/scoring-and-memory.md).
 - **What if it stalls?** Stall and failure are different triggers. Failures route back to the proposing layer ([self-healing](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/self-healing-internals.md)); stalls escalate L1 → L2 → L3 ([the-loop](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/concepts/the-loop.md)). Stuck for other reasons: [troubleshooting](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/manual/05-troubleshooting.md).
 - **Why not search at request time instead?** PromptPotter finds a configuration once; from then on it is an ordinary call with no search in the path. [Test-time compute, moved out of the request.](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/related-work.md#test-time-compute-moved-out-of-the-request)
 - **Is this a model router?** No. Live model selection per question is a gateway ([OpenRouter](https://openrouter.ai), [OmniRoute](https://github.com/diegosouzapw/OmniRoute)). PromptPotter tunes the thing a gateway ends up calling, so the two compose.
+- **Where are the benchmark numbers?** Not published yet, on purpose: DSPy's optimizers and CAPO on BBEH, every method on the same held-out rows, target model and budget held constant. [`benchmarks.md`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/benchmarks.md) · [harness](https://github.com/PromptPotter/prompt-potter-optimizer/tree/main/docs/research/bbeh-comparison/)
 
 </details>
-
-## Benchmarks
-
-[![PromptWizard](https://img.shields.io/badge/inspired_by-PromptWizard-blue)](https://arxiv.org/abs/2405.18369)
-[![BBEH](https://img.shields.io/badge/benchmark-BBEH-purple)](https://github.com/google-deepmind/bbeh)
-[![DSPy](https://img.shields.io/badge/compared_against-DSPy-green)](https://github.com/stanfordnlp/dspy)
-[![CAPO](https://img.shields.io/badge/compared_against-CAPO-orange)](https://arxiv.org/abs/2504.16005)
-
-**No head-to-head number is published yet, on purpose.** The comparison is against DSPy's optimizers (**GEPA**, MIPROv2, BootstrapFewShot) and CAPO on *BIG-Bench Extra Hard (BBEH)*, held to a standard this literature mostly does not hold itself to: every method scored on the same held-out rows, one published split seed, one export schema, no cross-paper number mixing. **Numbers publish once** the target model and the optimization budget are held constant across every method too — the budget in calls, reported beside tokens, dollars (priced at run date) and wall clock. Harness: [`bbeh-comparison/`](https://github.com/PromptPotter/prompt-potter-optimizer/tree/main/docs/research/bbeh-comparison/) · what we measure on, what we refuse to, and why: [`benchmarks.md`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/benchmarks.md).
 
 ## Limitations
 

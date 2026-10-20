@@ -1,7 +1,7 @@
 # Contributing
 
 PromptPotter is built and maintained by one person, and outside changes are welcome.
-This page only routes: the rules live in the documents it links.
+This page only routes: the rules live in the documents it links. Everyone here follows the [code of conduct](CODE_OF_CONDUCT.md).
 
 ## Before you write code
 

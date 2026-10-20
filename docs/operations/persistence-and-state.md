@@ -2,6 +2,16 @@
 
 Your work lives in `.promptpotter/`: `campaigns/{campaign_id}/` is one campaign per directory, and every cycle (root + forks + diags) sits flat under its `cycles/`.
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/files-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/files-light.png">
+    <img src="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/files-dark.png" alt="The files view: the cycle's round files on disk, with round 6 open as a scoreboard and its verdict" width="100%">
+  </picture>
+</p>
+
+**A campaign is an object on disk, not a script that has to finish.** The file tree is the dashboard: each round is a JSON file you can open in an editor, and the app renders the same file as a scoreboard. Pause a campaign, resume it, rewind to any round, or fork a sibling and compare — [§ Recovery](#recovery-resume-rewind-fork).
+
 ## Four entities — where each one lands on disk
 
 **Workspace → Dataset → Campaign → Cycle** — owned by [`../architecture.md`](../architecture.md) § Four entities (outermost → innermost). This page adds only the on-disk shape.

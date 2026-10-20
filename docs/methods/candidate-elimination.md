@@ -2,6 +2,16 @@
 
 **Method:** stop a candidate when its posterior probability of being the round's best drops below ε.
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/round-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/round-light.svg">
+    <img src="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/round-light.svg" alt="One round: a parent is mutated into three candidates, each is measured sample by sample, the third is cut after 7 of 34 samples, and the winner becomes the next parent." width="880">
+  </picture>
+</p>
+
+Each generation, an LLM mutates the parent into a small population. Every individual walks the same samples, and after each one a posterior asks a single question: *what is the probability this candidate ends up the round's best?* Below the threshold, measurement stops. The survivor is elected and breeds the next generation. The drawing is one real round, read out of its `readout.log`.
+
 ## Setting
 
 Each round evolves *N* individuals (default *N* = 5) via an LLM optimizer prompt. Each is measured on a shared query set **Q** of size *K* (potter's `adaptive_queue.sp_budget_round`, 20 in its manifest), producing a per-sample score in `[0, 1]` aggregated as a mean composite. The scoring budget per round is *N* × *K* backend calls, dominating wall-clock. Population is pre-enumerated — there's no parameter space to search, only a fixed set to compare.

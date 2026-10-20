@@ -127,6 +127,53 @@ The optimizer has already handled it — these exist for audit, not to ask for i
 
 Full on-disk shape — the exact `dashboard.json` / `active_session.json` paths, fork-directory layout: [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md).
 
+### It moves the pipeline, not just the words
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/runcard-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/runcard-light.png">
+    <img src="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/runcard-dark.png" alt="The run card in the chat thread: trend per round, spend, which prompt fields and node parameters the best candidate changed, and how many samples flipped against the origin" width="100%">
+  </picture>
+</p>
+
+Model, temperature, node thresholds, the output schema — whatever your `pipeline.yaml` declares tunable — are part of the individual, so they mutate and are selected jointly with the prompt fields. The run card says which prompt fields **and which node parameters** the best candidate changed, what it cost, and — on the cells both were measured on — how many samples it now gets right, and wrong, against the origin.
+
+### The budget goes where candidates separate
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/leaderboard-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/leaderboard-light.png">
+    <img src="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/leaderboard-dark.png" alt="The hard-sample leaderboard: samples ranked by information gain, each with its fitted difficulty and how often it has been graded" width="100%">
+  </picture>
+</p>
+
+Samples everyone aces or everyone fails are noise, and paying for them buys nothing. The hard-sample leaderboard orders the dataset by how much each sample tells you about which candidate is better, with a fitted difficulty δ beside it, and scoring goes preferentially to those. Measurements are content-addressed: a configuration already scored on a sample is replayed (`📖`), never re-bought — and the replay still shows its full cost on the ledger.
+
+<table>
+<tr>
+<td width="50%" valign="top">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/cell-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/cell-light.png">
+    <img src="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/cell-dark.png" alt="One measured cell opened: prediction, ground truth, the exact prompt sent to the node, and whether it was replayed from the archive" width="100%">
+  </picture>
+  <br>
+  <b>Every number opens down to the call.</b> One cell = one candidate on one sample: prediction, ground truth, the exact input each node received, tokens, seconds — and whether it was paid for or replayed from the archive.
+</td>
+<td width="50%" valign="top">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/candidates-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/candidates-light.png">
+    <img src="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/candidates-dark.png" alt="The candidates chart: every candidate of the campaign with accuracy, ability and overlap, intervals drawn, and a served caveat above it" width="100%">
+  </picture>
+  <br>
+  <b>Every candidate, with its interval.</b> Accuracy, ability θ and the shared-cell overlap for each individual across all generations, with the lineage beneath. The caveat above the chart is served by the backend, not decided in the browser.
+</td>
+</tr>
+</table>
+
 ## Where results land
 
 Best config, provenance, and per-round digest all live under the campaign's directory. Full file-by-file reference: [`../operations/persistence-and-state.md § File reference`](../operations/persistence-and-state.md#file-reference).
