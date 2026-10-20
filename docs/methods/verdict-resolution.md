@@ -348,7 +348,7 @@ observations under Laplace.
 
 **The between-round pick spends the two terms separately, not summed** — no swap thresholds.
 `select_round_subset` (`intelligence/rasch.py`) ranks the whole bank on term 1 alone
-(`adaptive_queue_mechanism.py::decision_order`) against the best θ among the arms in this race, so
+(`promptpotter/application/intelligence/adaptive_queue_mechanism.py::decision_order`) against the best θ among the arms in this race, so
 *exploit* falls out of the ranking (samples on the contested band `δ_s ≈ leader θ` sort to the
 top). Where cells differ in price, term 1 is weighted by `information_per_price`, read off the
 ORIGIN's rows so no arm under test moves a cell's rank. *Explore* is a reserved tail rather than a
