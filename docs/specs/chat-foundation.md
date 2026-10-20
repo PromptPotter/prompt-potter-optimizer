@@ -22,6 +22,10 @@ The user ↔ assistant round-trip does not exist; chat input is disabled outside
 
 **No new I/O kind.** Assistant reply + buttons + activity items are **Display**, a click is **Control-remote** inbound, and the endpoint is a sanctioned non-command conversation surface, peer to `POST /datasets/ingest`. Build order: declare the endpoint, then the endpoint on the `checkin` node, then persistence.
 
+## Open — the empty thread is a generic chat
+
+A new chat shows what every agent chat shows before anything is defined: the wordmark, the composer and a row of starter chips. HuggingChat's new-chat screen is the reference (2026-10-20). The pipeline hero (`ChatPane.tsx` `.wf-hero` → `PipelineStack`) mounts only once a dataset is bound, and then compact. Today it renders on every thread, even when it can only say "No dataset bound to this campaign."
+
 ## Deferred — assistant tool-use
 
 The "Soon" toggles are Extended thinking · Web search · Code execution, with MCP a planned fourth. Each renders as a generic **step**; only a *richer per-tool field set* needs a new `ProjectionKind`, declared in [`events-asyncapi.yaml`](events-asyncapi.yaml) first. Backend (TermNorm) tool activity surfaces today only at the granularity the existing `snapshot` / `token_usage` records carry.

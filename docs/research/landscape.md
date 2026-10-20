@@ -425,3 +425,34 @@ form of our tier-1 security floor.
 
 **Checked** 2026-09-24 — README only; the four buckets and the exact Skill Lift statistic were not
 read at the source.
+
+## SoL-Pi (NVIDIA Labs)
+
+**What.** [SoL-Pi](https://nvlabs.github.io/SoL-Pi/) is a coding-agent harness: four opt-in
+mechanisms on top of [Pi](https://github.com/NVlabs/SoL-Pi) (Action Fusion, ObservationPack,
+Evidence-Preserving Reducer, Online Context Compact), each switched on in `sol-pi.json`. An
+auto-research loop found them, framed as "an open-ended RSI problem". The loop has a batched
+proposer, with *Oracle Analysis* that estimates opportunity from existing trajectories before it
+spends rollouts. Map-reduce analyzers read each trajectory, and an implementer and a reviewer work
+inside a Ralph Loop. Candidates pass two evaluation stages, in-trajectory and then held-out, and
+"no agent inside the auto-research loop sees the held-out results." The acceptance gate is
+predeclared: every capability metric stays within tolerance, at least one efficiency metric
+improves, and the nondominated survivors are kept. 152 directions went in and 4 survived.
+EdgeBench: about 94% of Pi's score at 45–49% fewer tokens. Terminal-Bench: 15 solved against Pi's
+18, at about 26% less cost. MIT.
+
+**Verdict — reference, on the recursive self-improvement axis.** It is the same family as Sakana's
+Darwin Gödel Machine. An agent loop rewrites a coding agent's own harness code, which is the one
+axis PromptPotter has not designed. It is not a peer optimizer and not a bench arm. It accepts on a
+tolerance gate rather than a lift. The page states no global stopping rule, no budget allocation
+across lineages and no measurement archive.
+
+**Worth taking.**
+- The acceptance gate as a selector shape: capability held within a declared tolerance, cost as
+  the objective.
+- Oracle Analysis, which prices an idea against trajectories already paid for before it buys
+  rollouts.
+- The rule that the proposer never sees held-out results.
+
+**Checked** 2026-10-20: project page and README. The paper, the loop's code and the plug points
+were not read.

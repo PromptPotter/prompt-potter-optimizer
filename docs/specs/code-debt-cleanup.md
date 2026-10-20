@@ -50,7 +50,11 @@ A leading `NEXT` marks the one to take up cold when nothing else is in hand.
   against $0.026 pinned to `xiaomi`. So any design that counts on the cache — a cost term in
   fitness, a spend estimate, a search front on cached price — holds only under a pin. Action: a
   default host pin per model that no node has to author, or a refusal to price on the cache
-  without one. **Rides with:** any change to the request builder in `openai_compat.py`, a
+  without one. **Decided: the pin is a trial, never an assumption** — a model is pinned by
+  default to try the cache, its realized cache share and effective $/M are read off the spend
+  ledger, and the pin and any cache-shaped prompting stay only where that reading is cheaper than
+  running uncached; otherwise the model drops caching. Per model, decided by data, not yet decided
+  for any. **Rides with:** any change to the request builder in `openai_compat.py`, a
   connector's route handling, or the caching arc (`.scratch/caching-arc-state.md`). **Re-test:**
   the per-node table in an unpinned campaign's `review.md` (`domain/spend.py::SpendRollup.by_node`)
   beside a pinned one on the same model — a prefix-cache share well below the pinned one means the
@@ -68,6 +72,14 @@ A leading `NEXT` marks the one to take up cold when nothing else is in hand.
   a campaign of the right shape to hand (the spend tier mints one). **Re-test:** `grep -n candidate
   webapp/e2e/walk/responsive.spec.ts` — empty means the card is still unswept; the Lighthouse half
   has nothing on disk to grep for a number that was never taken.
+
+- **The compare view's candidate cards are laid out for a few wide columns, not many narrow ones.**
+  Each `components/compare/ChannelCard.tsx` card stretches across the page. Its config rows put the
+  label and the value side by side, and its prompt rows do the same for field and text. The layout
+  should suit thin vertical stripes instead: five cards side by side on a 16:9 display, each one
+  readable at that width. Operator-raised 2026-10-20, for later. **Rides with:** the next pass on
+  the compare pane, through `/design`. **Re-test:** open compare with five candidates at 1920×1080
+  and see whether all five fit without horizontal scroll.
 
 - **Optimizer model repair-rate on heavy L2/L3 structured output — unmeasured.** What is owed is the
   measurement: a live cycle reaching L3, read under the model
