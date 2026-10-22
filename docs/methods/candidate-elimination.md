@@ -199,9 +199,9 @@ value cited there) has no eliminator, and its selector is an archive. Round 1 is
 | f restricted to the proxy (Alg. 1 line 11) | `proxy_css` draws the proxy, in one order, every round after calibration |
 | Welford z-score + sigmoid, CVT with 50 centroids, TRYINSERT (§3, Alg. 1-2) | `map_elites`: `centroids: 50`; the statistics ride `LeviCalibration.stats` |
 | Behavioural descriptors, input- and output-side (§3.1) | `map_elites.descriptors`, read by `optimizers/descriptors.py` |
-| Refinement route: small model, ~90% of calls (§3.2) | `levi_refine`, Qwen3-8B (§4.2), `interval - 1` calls a round, `max_tokens` 16,384 |
+| Refinement route: small model, ~90% of calls (§3.2) | `levi_refine`, `interval - 1` calls a round, `max_tokens` 16,384; the bench's one model, not the paper's Qwen3-8B (§4.2) |
 | Parent ∝ exp(f / T), T ∈ {0.3, 0.7, 1.0, 1.2}; one inspiration, dropped 20% (App. B) | `levi_refine`: `sampler_temperatures`, `n_inspirations`, `inspiration_drop` |
-| Paradigm shift every 10 evaluations, k = 3 clusters, `max_tokens` 4,096 (App. F) | `levi_paradigm_shift`: `interval`, `n_clusters`; Gemini 3 Flash (App. A) |
+| Paradigm shift every 10 evaluations, k = 3 clusters, `max_tokens` 4,096 (App. F) | `levi_paradigm_shift`: `interval`, `n_clusters`; the bench's one model, not the paper's Gemini 3 Flash (App. A) |
 | Templates E.6 and E.7 | `resolved_prompts`, verbatim |
 | Budget B; the best elite returned | the campaign's budget; the round selects the best elite unless it is the incumbent |
 
@@ -255,7 +255,7 @@ Alg. 1 per round, and its eliminator is Alg. 1's acceptance test.
 | σ′ improved on σ (lines 13-14) | `minibatch_gate`: a child not strictly above its parent's mean objective on the minibatch is cut — a `minibatch_gate` decision, REPLAYED off the parent's recorded scores |
 | Φ′ added to P, scored on D_pareto (lines 15-18) | an accepted child walks the rest of the panel, the Pareto set; `pareto` admits it with its per-cell scores |
 | Return the best average on D_pareto (line 21) | the round selects the best aggregate unless it is the incumbent; a tie holds |
-| The reflection on the system's own model: Qwen3 8B at 0.6, top-p 0.95, a 16,384-token window (App. E.2) | `gepa_reflect` on `qwen/qwen3-8b`, `temperature` 0.6, `top_p` 0.95, `max_tokens` 16,384 |
+| The reflection on the system's own model: Qwen3 8B at 0.6, top-p 0.95, a 16,384-token window (App. E.2) | `gepa_reflect`, `temperature` 0.6, `top_p` 0.95, `max_tokens` 16,384, on the bench's one model — Qwen3 8B is retired on OpenRouter |
 | Budget B in rollouts (Eq. 2), matched to MIPROv2's per benchmark (App. E.4) | the campaign's round, spend and token ceilings |
 
 Where the bench runs GEPA differently from the paper:

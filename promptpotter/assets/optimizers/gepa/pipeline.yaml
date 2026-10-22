@@ -17,8 +17,7 @@ version: v1.0
 # Served to the optimizer picker: every knob value below is this paper's configuration.
 paper: 'Agrawal et al., "GEPA: Reflective Prompt Evolution Can Outperform Reinforcement Learning", arXiv 2507.19457'
 available_models:
-  - qwen/qwen3-8b
-  - openai/gpt-4.1-mini
+  - qwen/qwen3.7-flash
   - openai/gpt-6-luna
   - deepseek/deepseek-v4-flash:nitro
   - openai/gpt-oss-20b:nitro
@@ -32,9 +31,10 @@ nodes:
     config:
       size: 3
       pareto_size: 50
-  # The reflection runs on the model under optimization (App. E.2, "GEPA-Qwen-Opt", Table 2):
-  # Qwen3 8B at its recommended temperature 0.6 and top-p 0.95, in a 16,384-token context window
-  # (App. E.2). NOT the paper's: its top-k 20, which an llm node's call config does not carry.
+  # The reflection's decoding is the paper's: temperature 0.6, top-p 0.95, a 16,384-token window
+  # (App. E.2). NOT the paper's: the model — Qwen3 8B ("GEPA-Qwen-Opt", Table 2) is retired on
+  # OpenRouter, and the bench runs every optimizer on one model — and its top-k 20, which an llm
+  # node's call config does not carry.
   gepa_reflect:
     type: llm
     config:
@@ -43,8 +43,9 @@ nodes:
       temperature: 0.6
       top_p: 0.95
       max_tokens: 16384
+      reasoning_effort: none
       provider: openrouter
-      model: qwen/qwen3-8b
+      model: qwen/qwen3.7-flash
       # The paper's prompt is one text: the reply replaces the whole prompt.
       rewrites: prompt
       field: instruction

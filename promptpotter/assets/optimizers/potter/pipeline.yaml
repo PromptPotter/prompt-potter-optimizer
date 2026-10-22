@@ -9,6 +9,7 @@ version: v1.0
 # fingerprint, so widening it voids no banked panel. `$PROMPTPOTTER_HOME/optimizers/potter/
 # pipeline.yaml` shadows this file per install.
 available_models:
+  - qwen/qwen3.7-flash
   - openai/gpt-6-luna
   - deepseek/deepseek-v4-flash:nitro
   - openai/gpt-oss-20b:nitro
@@ -48,11 +49,11 @@ nodes:
       prompt_version: 1
       schema_family: l1_generate
       schema_version: 1
-      reasoning_effort: medium
+      reasoning_effort: none
       # A truncated answer is a zero-candidate round, and 12000 was measured truncating.
       max_tokens: 20000
       provider: openrouter
-      model: openai/gpt-6-luna
+      model: qwen/qwen3.7-flash
       n_variants: 5
       k_max: 5
       block_access: open
@@ -92,11 +93,11 @@ nodes:
       schema_version: 1
       prompt_family: l1_critique
       prompt_version: 1
-      reasoning_effort: medium
+      reasoning_effort: none
       # A truncated critique never lands; the measured tail at `low` was 11,370 tokens.
       max_tokens: 16000
       provider: openrouter
-      model: openai/gpt-6-luna
+      model: qwen/qwen3.7-flash
     description: >-
       L1 Critique: reads round results, writes the critique L1 Generate reads next round.
   l2_context:
@@ -106,10 +107,10 @@ nodes:
       temperature: 0.3
       prompt_family: l2_context
       prompt_version: 1
-      reasoning_effort: medium
+      reasoning_effort: none
       max_tokens: 8000
       provider: openrouter
-      model: openai/gpt-6-luna
+      model: qwen/qwen3.7-flash
     description: >-
       L2 Context: moves which panels L1 generation reads and how widely it explores. Fires on L1
       stall.
@@ -120,10 +121,10 @@ nodes:
       temperature: 0.5
       prompt_family: l3_plan
       prompt_version: 1
-      reasoning_effort: medium
+      reasoning_effort: none
       max_tokens: 8000
       provider: openrouter
-      model: openai/gpt-6-luna
+      model: qwen/qwen3.7-flash
     description: >-
       L3 Plan: rewrites the strategy. Fires on L2 stall.
   # The stall ladder: fires `l2_context` / `l3_plan` at the boundary after a round, and decides

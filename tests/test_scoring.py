@@ -3311,7 +3311,7 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
             (potter_a, capo_b),
             {"cid": "gepa_c", "n": 3, "seed": 1},
             False,
-            ["bench_rows", "optimizer_models"],
+            ["bench_rows"],
             1,
         ),
         (
@@ -3392,7 +3392,7 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
     }
     for h2h_id, arms, verdict, guards in (
         ("real4", ("potter", "capo"), True, ["controlled"] * 2),
-        ("real4", ("potter", "capo", "gepa", "levi"), False, ["controlled"] * 3 + ["uncontrolled"]),
+        ("real4", ("potter", "capo", "gepa", "levi"), True, ["controlled"] * 3 + ["uncontrolled"]),
         (
             "real6",
             ("potter", "capped", "gepa", "levi"),
