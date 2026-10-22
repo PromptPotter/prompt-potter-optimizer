@@ -410,9 +410,8 @@ async def rebound_session(stores: Stores, hop: CycleHop) -> Session:
     campaign = stores.campaigns.load_campaign(hop.campaign_id)
     assert campaign is not None
     session = await open_session(DATASET, stores=stores)
-    configure_and_apply_pipeline(session, resolve_campaign_config(stores, campaign, hop))
-    session.bind_campaign(hop, purpose=campaign.declaration.purpose)
-    return session
+    session = configure_and_apply_pipeline(session, resolve_campaign_config(stores, campaign, hop))
+    return session.bound(hop, purpose=campaign.declaration.purpose)
 
 
 async def run_one(
@@ -443,8 +442,8 @@ async def run_one(
     stores = build_stores(default_identity(), projects_root=DEFAULT_PROJECTS_ROOT)
     stand_in_fetch(stores, samples)
     session = await open_session(DATASET, stores=stores)
-    configure_and_apply_pipeline(session, config)
-    result = await run_campaign(
+    session = configure_and_apply_pipeline(session, config)
+    session, result = await run_campaign(
         session,
         config,
         readout_sink=print,
@@ -460,7 +459,7 @@ async def run_one(
         # The resume reads its rounds off the ledger and the archive: their checkouts are gone.
         shutil.rmtree(CycleLayout(stores.campaigns.cycle_dir(session.hop)).rounds)
         session = await rebound_session(stores, session.hop)
-        result = await run_campaign(
+        session, result = await run_campaign(
             session,
             readout_sink=print,
             budget=Budget(),

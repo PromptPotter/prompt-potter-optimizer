@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from functools import partial
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.bench.node_context import Bounds, Frontier, Lineage, Ruler
 from promptpotter.application.optimizers.potter.pobb.checks import (
     EliminationContext,
     EliminationGate,
@@ -154,9 +154,9 @@ class PoBBRace(CatchUpPool):
         super().__init__(
             PoBBCheck(
                 ctx.knobs,
-                n_min=ctx.elimination_n_min,
+                n_min=ctx.read(Bounds).elimination_n_min,
                 n_samples=len(panel.cells),
-                ruler=ctx.difficulty.ruler,
+                ruler=ctx.read(Ruler).difficulty.ruler,
             ),
             catch_up,
             ctx.node,
@@ -164,12 +164,11 @@ class PoBBRace(CatchUpPool):
         self._ctx = ctx
         self._measured_unit = measured_unit
         # The one prior no arm of this round labels; a cell it never answered is caught up, never borrowed.
-        self._parent = ArmKey(ctx.parent.id)
-        parent_results = ctx.parent_own_rows
-        parent_sp = ctx.parent_point
-        if parent_results and parent_sp is not None:
+        self._parent = ArmKey(ctx.read(Lineage).parent.id)
+        frontier = ctx.read(Frontier)
+        if parent_results := frontier.parent_own_rows:
             self._check.register_completed(parent_results, key=self._parent)
-            self._sps[self._parent] = parent_sp
+            self._sps[self._parent] = frontier.parent_point
 
     @property
     def n_priors(self) -> int:
@@ -183,10 +182,7 @@ class PoBBRace(CatchUpPool):
         return _PriorsAhead(self._check, ahead)
 
     def open_turn(self, key: ArmKey) -> None:
-        callbacks, node, round_num = self._ctx.callbacks, self._ctx.node, self._ctx.round_num
-        self._check.set_current(
-            key, on_snapshot=partial(callbacks.on_race_standing, node, round_num)
-        )
+        self._check.set_current(key, on_snapshot=self._ctx.race_standing)
 
     def judge(
         self,

@@ -62,7 +62,7 @@ Configured per dataset via `dataset.yaml::campaign.scoring`:
 **Addressable namespace** (`application/scoring/formula/compiler.py`):
 
 - **Builtins:** the `SAFE_BUILTINS` map in that module — arithmetic and `math` only. Nothing else from `__builtins__`.
-- **Terms:** every per-sample evaluator in `all_evaluators()` (`application/scoring/evaluators.py`, the PACKAGE registry), banked into the row; and, in a `per_cell` formula, the per-cell terms `CELL_TERMS` names (`compiler.py`). `cell_terms_meta()` is their served projection — the criterion's vocabulary, with which terms a dial can weigh (`dial`) and which show by default (`primary`). A per-round evaluator is a reading of a round, never addressable. A campaign's own `judges` (§3) are addressable by their term keys too, and are deliberately not in that registry — a grader belongs to one campaign, not to the process. Names are stable and implementations may change — read the registry, not a list here.
+- **Terms:** every per-sample evaluator in `_REGISTRY` (`application/scoring/evaluators.py`, the PACKAGE registry), banked into the row; and, in a `per_cell` formula, the per-cell terms `CELL_TERMS` names (`compiler.py`). `cell_terms_meta()` is their served projection — the criterion's vocabulary, with which terms a dial can weigh (`dial`) and which show by default (`primary`). A per-round evaluator is a reading of a round, never addressable. A campaign's own `judges` (§3) are addressable by their term keys too, and are deliberately not in that registry — a grader belongs to one campaign, not to the process. Names are stable and implementations may change — read the registry, not a list here.
 - **Matchers:** `SCORING_FUNCTIONS` (`application/scoring/formula/matchers.py`), splatted into the same namespace, so a formula calls one exactly like an evaluator. This is the LABEL arm — it reads answer prose and decides HIT/MISS (`label_match`, `gsm8k_match`, …), which is why a `per_sample` formula almost always names one. Read the map; it holds what a campaign can actually reach, and nothing is kept in it for a caller that does not exist.
 
 Constants, name lookups, arithmetic operators (`+ - * / % **`) addressable. **Calls outside the registry are rejected at compile time** (enforced, not convention).
@@ -184,9 +184,12 @@ one campaign inside its own event loop:
 ```python
 session = await open_session(dataset_name, *, stores=None,
                              program=None, rows=None)
-result = await run_campaign(session, campaign_config=None, *, readout_sink=None,
-                            langfuse_session_id=None, budget, step_rounds, mode, arm=None)
+session, result = await run_campaign(session, campaign_config=None, *, readout_sink=None,
+                                     langfuse_session_id=None, budget, step_rounds, mode,
+                                     purpose=Optimize())
 ```
+
+The session `run_campaign` answers is bound to the cycle it ran; the one handed in never changes.
 
 A run measures the session's bank, and nothing else: `rows` hands the host's own samples in as
 that bank, which the mint labels `dataset_name` exactly as it labels every other.

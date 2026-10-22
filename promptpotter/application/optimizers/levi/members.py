@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Annotated, Any, ClassVar
 import numpy as np
 from pydantic import Field, model_validator
 
+from promptpotter.application.bench.node_context import Lineage, Target
 from promptpotter.application.campaign_config import Estimand, Knob, Scope
 from promptpotter.application.optimizers import nodes, paper_templates
 from promptpotter.application.optimizers.descriptors import (
@@ -26,7 +27,8 @@ from promptpotter.application.optimizers.levi.state import (
     LeviCalibration,
     LeviElite,
 )
-from promptpotter.application.optimizers.paper_templates import RewriteKnobs, child
+from promptpotter.application.optimizers.nodes import RewriteKnobs
+from promptpotter.application.optimizers.paper_templates import child
 from promptpotter.config.paths import optimizers_root
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_schema import NodeKind
@@ -47,7 +49,7 @@ if TYPE_CHECKING:
     )
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.optimizers.nodes import (
-        Draw,
+        CycleRead,
         MeasuredRound,
         Panel,
         PromptArity,
@@ -56,7 +58,6 @@ if TYPE_CHECKING:
     )
     from promptpotter.domain.opt_search_point import OptSearchPoint, VariationMode
     from promptpotter.domain.optimizer_state import StatePart
-    from promptpotter.domain.pool import Pool
     from promptpotter.domain.results import DisplayMetric, Proposal, RoundResult
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import CellSheet
@@ -120,17 +121,13 @@ def choose_proxy(
     return [cells[j] for j in sorted(picked)]
 
 
-class ProxyCss:
+class ProxyCss(nodes.Member):
     """The same cells in the same order every round, resume and fork."""
 
     name: ClassVar[str] = "proxy_css"
     kind: ClassVar[NodeKind] = NodeKind.SAMPLER
-    prompt_arity: ClassVar[PromptArity] = "none"
     knobs: ClassVar[type[StrictModel]] = ProxyCssKnobs
     reads: ClassVar[frozenset[type[StatePart]]] = frozenset({DescriptorCalibration})
-    writes: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
-    draws: ClassVar[Mapping[type[Pool], Draw]] = nodes.NO_DRAWS
-    consults: ClassVar[frozenset[type]] = nodes.NO_CONSULTS
     size_knob: ClassVar[str | None] = None
 
     def round_cells(self, knobs: ProxyCssKnobs, search: int) -> int:
@@ -265,14 +262,13 @@ def _calibrate(
     return LeviCalibration(proxy=proxy, centroids=centres.tolist(), stats=stats)
 
 
-class MapElites:
+class MapElites(nodes.Member):
     name: ClassVar[str] = "map_elites"
     kind: ClassVar[NodeKind] = NodeKind.SELECTOR
-    prompt_arity: ClassVar[PromptArity] = "none"
     knobs: ClassVar[type[StrictModel]] = MapElitesKnobs
     reads: ClassVar[frozenset[type[StatePart]]] = frozenset({DescriptorCalibration, EliteArchive})
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset({DescriptorCalibration, EliteArchive})
-    draws: ClassVar[Mapping[type[Pool], Draw]] = nodes.NO_DRAWS
+    sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Lineage})
     consults: ClassVar[frozenset[type]] = frozenset({ProxyCss})
     elects_on: ClassVar[DisplayMetric] = "composite"
     elects_partial: ClassVar[bool] = False
@@ -297,7 +293,7 @@ class MapElites:
             # The origin is the fifth calibration prompt (App. A).
             parent = measured.parent
             offered.insert(0, (parent.key, parent.individual, parent.rows))
-            order = [cell.key for cell in measured.parent_rows]
+            order = [cell.key for cell in measured.parent.rows]
             calibration = _calibrate(ctx, offered, order)
         stats = calibration.stats
         elites = {e.cell: e for e in ctx.slice(EliteArchive).elites}
@@ -323,15 +319,17 @@ class MapElites:
                 )
         calibration = calibration.model_copy(update={"stats": stats})
         archive = sorted(elites.values(), key=lambda e: e.cell)
-        held = {ind.id: ind for ind in (*ctx.population, *(ind for _, ind, _ in offered))}
+        lineage = ctx.read(Lineage)
+        held = {ind.id: ind for ind in (*lineage.population, *(ind for _, ind, _ in offered))}
         ctx.keep([held[cid] for cid in dict.fromkeys(e.individual_id for e in archive)])
         top = max((e.score for e in archive), default=None)
         leaders = {e.individual_id for e in archive if e.score == top}
         # A tie never advances: the incumbent holds, then the first arm walked.
         walked = [key for key, ind, _ in offered if ind.id in leaders]
-        if leaders and not walked and ctx.parent.id not in leaders:
+        incumbent_leads = lineage.parent.id in leaders
+        if leaders and not walked and not incumbent_leads:
             raise ValueError("map_elites: the best elite is neither the incumbent nor this round's")
-        selected = walked[0] if walked and ctx.parent.id not in leaders else None
+        selected = walked[0] if walked and not incumbent_leads else None
         verdict = (
             f"placed {placed} of {len(offered)} arms, {kept} into an empty or outscored cell; the "
             f"archive holds {len(archive)} of {len(calibration.centroids)} cells"
@@ -366,7 +364,7 @@ class LeviSeedKnobs(RewriteKnobs):
     )
 
 
-class LeviSeed:
+class LeviSeed(nodes.Member):
     """The seed pass `M_l.DIVERSESEED` (Alg. 1): the calibration round's arms."""
 
     name: ClassVar[str] = "levi_seed"
@@ -375,15 +373,12 @@ class LeviSeed:
     opens: ClassVar[bool] = True
     variation_mode: ClassVar[VariationMode] = "llm"
     knobs: ClassVar[type[StrictModel]] = LeviSeedKnobs
-    reads: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
-    writes: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
-    draws: ClassVar[Mapping[type[Pool], Draw]] = nodes.NO_DRAWS
-    consults: ClassVar[frozenset[type]] = nodes.NO_CONSULTS
+    sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Lineage, Target})
 
     async def propose(
         self, ctx: NodeContext[LeviSeedKnobs], panel: Panel, proposals: Proposals
     ) -> Proposals:
-        origin = ctx.origin
+        origin = ctx.read(Lineage).origin
         shown: list[tuple[OptSearchPoint, float | None]] = [(origin, None)]
         seeds: list[Proposal] = []
         for i in range(ctx.knobs.n_diverse_seeds):
@@ -395,7 +390,7 @@ class LeviSeed:
         return nodes.Proposals(seeds)
 
 
-class LeviParadigmShift:
+class LeviParadigmShift(nodes.Member):
     """The large model's route (§3.2, App. F)."""
 
     name: ClassVar[str] = "levi_paradigm_shift"
@@ -405,9 +400,7 @@ class LeviParadigmShift:
     variation_mode: ClassVar[VariationMode] = "llm"
     knobs: ClassVar[type[StrictModel]] = LeviParadigmShiftKnobs
     reads: ClassVar[frozenset[type[StatePart]]] = frozenset({DescriptorCalibration, EliteArchive})
-    writes: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
-    draws: ClassVar[Mapping[type[Pool], Draw]] = nodes.NO_DRAWS
-    consults: ClassVar[frozenset[type]] = nodes.NO_CONSULTS
+    sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Lineage, Target})
 
     async def propose(
         self, ctx: NodeContext[LeviParadigmShiftKnobs], panel: Panel, proposals: Proposals
@@ -435,7 +428,7 @@ class LeviParadigmShift:
             (max(members, key=lambda e: e.score) for members in clusters.values()),
             key=lambda e: -e.score,
         )
-        held = {ind.id: ind for ind in ctx.population}
+        held = {ind.id: ind for ind in ctx.read(Lineage).population}
         regions = [held[e.individual_id] for e in representatives]
         prompt = prompts.paradigm_shift_prompt(
             ctx, [(ind, e.score) for ind, e in zip(regions, representatives, strict=True)]
@@ -473,7 +466,7 @@ def _softmax_pick(elites: Sequence[LeviElite], temperature: float, rng: random.R
     return rng.choices(list(elites), weights=weights)[0]
 
 
-class LeviRefine:
+class LeviRefine(nodes.Member):
     """The small model's route (§3.2, Alg. 2 lines 9-10)."""
 
     name: ClassVar[str] = "levi_refine"
@@ -483,8 +476,7 @@ class LeviRefine:
     variation_mode: ClassVar[VariationMode] = "llm"
     knobs: ClassVar[type[StrictModel]] = LeviRefineKnobs
     reads: ClassVar[frozenset[type[StatePart]]] = frozenset({DescriptorCalibration, EliteArchive})
-    writes: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
-    draws: ClassVar[Mapping[type[Pool], Draw]] = nodes.NO_DRAWS
+    sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Lineage, Target})
     consults: ClassVar[frozenset[type]] = frozenset({LeviParadigmShift})
 
     async def propose(
@@ -520,9 +512,10 @@ class LeviRefine:
             else rng.sample(others, min(knobs.n_inspirations, len(others)))
         )
         proxy = set(calibration.proxy)
-        measured_in = next(rr for rr in ctx.rounds if rr.round == parent.round)
+        lineage = ctx.read(Lineage)
+        measured_in = next(rr for rr in lineage.rounds if rr.round == parent.round)
         rows = measured_in.sheet_of(parent.individual_id)
-        held = {ind.id: ind for ind in ctx.population}
+        held = {ind.id: ind for ind in lineage.population}
         prompt = prompts.refine_prompt(
             ctx,
             parent=(held[parent.individual_id], parent.score),

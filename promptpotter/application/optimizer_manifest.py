@@ -16,11 +16,11 @@ from promptpotter.application.campaign_config import OptimizationConfig
 from promptpotter.application.optimizers.nodes import (
     INITIAL_POPULATION,
     RUN_INIT,
+    Initializer,
     OperatorSeat,
     RoundWalk,
     member_package,
 )
-from promptpotter.application.optimizers.pools.members import PoolInitializer
 from promptpotter.config.paths import (
     checkin_assets_root,
     checkin_manifest_path,
@@ -124,14 +124,19 @@ def _read_schemas(path: Path) -> dict[str, Any]:
 
 def _parse(manifest: PipelineManifest, schemas: Mapping[str, Any]) -> PipelineSchema:
     authored = manifest.model_dump(mode="json", exclude_unset=True)
-    return parse_pipeline_response({**authored, "resolved_schemas": dict(schemas)})
+    # Every prompt a manifest resolves is an `OptimizerPromptTemplate`, so its loci are that class's.
+    fields = list(OptimizerPromptTemplate.RENDER_ORDER)
+    prompts = {key: {"fields": fields} for key in manifest.resolved_prompts}
+    return parse_pipeline_response(
+        {**authored, "resolved_prompts": prompts, "resolved_schemas": dict(schemas)}
+    )
 
 
 @dataclass(frozen=True)
 class RoundPlan:
     """What the bench walks, by role: built once, at load, so a walk the bench cannot run is refused before a mint."""
 
-    initializers: tuple[PoolInitializer, ...]
+    initializers: tuple[Initializer, ...]
     # Walked in the proposers' place by an `author` gate, and beside them by `review`.
     seat: OperatorSeat
     measurement: str
@@ -152,10 +157,6 @@ class RoundPlan:
         if self.seeds_alone:
             return RoundWalk(INITIAL_POPULATION, (), self.initial_population)
         return RoundWalk("default", self.initial_population, self.proposers)
-
-    def proposing_llm_nodes(self, population: Sequence[OptSearchPoint]) -> frozenset[str]:
-        """``propose_population`` calls no other llm node."""
-        return frozenset(m.name for m in self.walk(population).members if m.kind is NodeKind.LLM)
 
 
 def _walk_refused(name: str, why: str) -> PayloadInvalidError:
@@ -227,13 +228,13 @@ def _round_plan(
             f"{seeds_walk!r}.",
         )
     initializers = [optimizers.member(n) for n in schema.pipelines.get(RUN_INIT, ())]
-    if strays := [m.name for m in initializers if not isinstance(m, PoolInitializer)]:
+    if strays := [m.name for m in initializers if not isinstance(m, Initializer)]:
         raise _walk_refused(
             name,
             f"`{RUN_INIT}` walks {strays}, which are no pool initializer: it seeds pools alone.",
         )
     return RoundPlan(
-        initializers=tuple(cast("PoolInitializer", m) for m in initializers),
+        initializers=tuple(cast("Initializer", m) for m in initializers),
         seat=OperatorSeat((*initial, *proposers)),
         measurement=walk[measured_at],
         sampler=samplers[0],
@@ -295,12 +296,8 @@ class SelectedOptimizer:
         return node
 
     @property
-    def selector(self) -> Selector:
-        return self.plan.selector
-
-    @property
     def elects_on(self) -> DisplayMetric:
-        return self.selector.elects_on
+        return self.plan.selector.elects_on
 
     @property
     def sampler(self) -> Sampler:
@@ -594,7 +591,12 @@ def _select(
         plan=_round_plan(name, schema, manifest.initial_population_walks),
         member_nodes=_roster(schema),
     )
-    _refuse_open_roster(selected, gate)
+    # At load, never mid-round: an edge no roster member closes would raise inside round 1.
+    if open_ := _open_edges(selected, gate):
+        raise PayloadInvalidError(
+            f"optimizer {name!r} names a roster whose edges do not close: " + "; ".join(open_),
+            code="optimizer_roster_open",
+        )
     # Every member's knobs validate NOW, so a bad overlay stops the run before it spends.
     for declared_node in selected.schema.declared_nodes:
         if declared_node.kind in MEMBER_KINDS or declared_node.name in optimizers.registered():
@@ -688,16 +690,6 @@ def _open_edges(selected: SelectedOptimizer, gate: ArmGateMode) -> list[str]:
     return open_
 
 
-def _refuse_open_roster(selected: SelectedOptimizer, gate: ArmGateMode) -> None:
-    """At load, never mid-round: an edge no roster member closes would raise inside round 1."""
-    if open_ := _open_edges(selected, gate):
-        raise PayloadInvalidError(
-            f"optimizer {selected.name!r} names a roster whose edges do not close: "
-            + "; ".join(open_),
-            code="optimizer_roster_open",
-        )
-
-
 def resolve_optimizer(
     name: str, nodes: Mapping[str, ManifestNodeOverlay], *, gate: ArmGateMode
 ) -> SelectedOptimizer:
@@ -747,10 +739,9 @@ _DETERMINISM: contextvars.ContextVar[DeterminismClamp | None] = contextvars.Cont
 
 
 @contextlib.contextmanager
-def binding_optimizer(
-    selected: SelectedOptimizer, *, determinism: DeterminismClamp | None
-) -> Iterator[None]:
-    token, clamp = _BOUND.set(selected), _DETERMINISM.set(determinism)
+def binding_optimizer(optimization: OptimizationConfig) -> Iterator[None]:
+    token = _BOUND.set(select_optimizer(optimization))
+    clamp = _DETERMINISM.set(optimization.determinism)
     try:
         yield
     finally:
@@ -774,10 +765,6 @@ def llm_node_manifest(node: str) -> tuple[PipelineNode, Mapping[str, Any], Pipel
         return held, held.current_config, checkin.manifest
     selected = bound_optimizer()
     return selected.node(node), selected.node_config(node), selected.manifest
-
-
-def llm_node_config(node: str) -> dict[str, Any]:
-    return dict(llm_node_manifest(node)[1])
 
 
 # The OUTER's per-node mutations, bound inside the inner task so each recursion level carries its own.

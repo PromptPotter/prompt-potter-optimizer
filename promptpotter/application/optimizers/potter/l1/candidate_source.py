@@ -5,6 +5,7 @@ from collections import Counter
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.bench.node_context import Frontier, Lineage, Ruler, Target
 from promptpotter.application.optimizers.nodes import Proposals
 from promptpotter.application.optimizers.potter.l1.generate import L1Generation, l1_generate
 from promptpotter.application.optimizers.potter.l1.population import parse_population
@@ -47,7 +48,7 @@ def variants_this_round(n_variants: int, l2: L2Memory) -> int:
 
 def l1_readout(ctx: NodeContext[L1GenerateKnobs], generation: L1Generation) -> L1Readout:
     """Called once every reject posture has read *generation*: the yield is counted here alone."""
-    axes = ctx.axes
+    axes = ctx.read(Ruler).axes
     rejected = Counter(
         fatal[0].reason
         for cp in generation.proposals
@@ -66,16 +67,19 @@ def l1_readout(ctx: NodeContext[L1GenerateKnobs], generation: L1Generation) -> L
 
 
 async def propose_l1_population(ctx: NodeContext[L1GenerateKnobs]) -> Proposals:
-    parent_point = ctx.parent_point
-    assert parent_point is not None
+    parent_point = ctx.read(Frontier).parent_point
+    lineage, target = ctx.read(Lineage), ctx.read(Target)
     generation = await _generate_or_load(ctx)
+    checked = detect_invariants(
+        generation.proposals, lineage.parent, parent_point.pipeline_params, lineage.rounds
+    )
     parsed = parse_population(
-        generation.proposals,
-        ctx.parent,
+        checked,
+        lineage.parent,
         parent_point.pipeline_params,
         ctx.schema,
-        runtime_failures=ctx.runtime_failures(),
-        inner_cells=ctx.inner_cells,
+        runtime_failures=target.runtime_failures(),
+        inner_cells=target.inner_cells,
     )
     generation = replace(generation, proposals=parsed)
     ctx.emit(l1_readout(ctx, generation))
@@ -84,19 +88,10 @@ async def propose_l1_population(ctx: NodeContext[L1GenerateKnobs]) -> Proposals:
 
 async def _generate_or_load(ctx: NodeContext[L1GenerateKnobs]) -> L1Generation:
     round_num = ctx.round_num
-    l2 = ctx.slice(L2Memory)
-    _n_variants = variants_this_round(ctx.knobs.n_variants, l2)
-    _temperature = float({**ctx.node_config, **l2.steered("l1_generate")}["temperature"])
-
-    assert ctx.parent_point is not None
-    # Bound once: the narrowing does not survive the await.
-    parent_pipeline_params = ctx.parent_point.pipeline_params
-
     # A round that replays its candidates makes no LLM call.
     persisted = ctx.banked_proposals()
     if persisted is not None:
         logger.debug("Loaded %d persisted candidates for round %d", len(persisted), round_num)
-        persisted = detect_invariants(persisted, ctx.parent, parent_pipeline_params, ctx.rounds)
         ctx.note_synthesized_call(
             {
                 "type": "l1_generate",
@@ -107,8 +102,9 @@ async def _generate_or_load(ctx: NodeContext[L1GenerateKnobs]) -> L1Generation:
         return L1Generation(persisted)
 
     logger.debug("No persisted candidates for round %d — generating fresh", round_num)
-    generation = await l1_generate(ctx, n_variants=_n_variants, temperature=_temperature)
-    checked = detect_invariants(
-        generation.proposals, ctx.parent, parent_pipeline_params, ctx.rounds
+    l2 = ctx.slice(L2Memory)
+    return await l1_generate(
+        ctx,
+        n_variants=variants_this_round(ctx.knobs.n_variants, l2),
+        temperature=float({**ctx.node_config, **l2.steered("l1_generate")}["temperature"]),
     )
-    return replace(generation, proposals=checked)

@@ -5,6 +5,7 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from promptpotter.application.bench.children import DROPPED_MANDATORY_PLACEHOLDER
+from promptpotter.application.bench.node_context import Bounds, Frontier, Lineage, Ruler, Target
 from promptpotter.application.intelligence.adaptive_queue_mechanism import (
     CellReading,
     build_round_order,
@@ -24,6 +25,7 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import injection
 from promptpotter.application.optimizers.potter.dispatch.facade import (
     BUNDLE_DRAWS,
     BUNDLE_READS,
+    BUNDLE_SEES,
     fingerprinted_modules,
 )
 from promptpotter.application.optimizers.potter.dispatch.injections.registry import injection_table
@@ -47,7 +49,6 @@ from promptpotter.application.optimizers.potter.escalation.firing import (
     FORCED_BY_DIAG,
     Fire,
     LayerCall,
-    LayerKnobs,
     TransitionResult,
     escalate_l2,
 )
@@ -70,7 +71,6 @@ from promptpotter.application.optimizers.potter.knobs import (
     EscalationKnobs,
     L1GenerateKnobs,
     PoBBKnobs,
-    ThetaElectionKnobs,
 )
 from promptpotter.application.optimizers.potter.l1.candidate_source import (
     propose_l1_population,
@@ -94,7 +94,7 @@ from promptpotter.application.optimizers.potter.resume import (
     rederive_critiques,
     round_packages,
 )
-from promptpotter.application.optimizers.potter.validators.l3_output import run_l3_output_validators
+from promptpotter.application.optimizers.potter.validators.l3_output import l3_plan_breaches
 from promptpotter.application.scoring.formula.compiler import cell_channels_of
 from promptpotter.application.views.render.primitives import fmt_fitness, fmt_pct
 from promptpotter.config.paths import optimizers_root
@@ -121,6 +121,7 @@ if TYPE_CHECKING:
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.optimizers.nodes import (
         CatchUpFn,
+        CycleRead,
         Draw,
         MeasuredRound,
         Panel,
@@ -144,10 +145,6 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
-
-
-class L1CritiqueKnobs(StrictModel):
-    """The critique's call config is all it has; it takes no knob of its own."""
 
 
 def _origin_readings(
@@ -186,17 +183,13 @@ def _strata(pool: list[Sample], by: CellStrata) -> list[list[Sample]]:
     return list(out.values())
 
 
-class AdaptiveQueue:
+class AdaptiveQueue(nodes.Member):
     """ONE order every arm walks: shared prefixes keep paired stats comparable."""
 
     name: ClassVar[str] = "adaptive_queue"
     kind: ClassVar[NodeKind] = NodeKind.SAMPLER
-    prompt_arity: ClassVar[PromptArity] = "none"
     knobs: ClassVar[type[StrictModel]] = AdaptiveQueueKnobs
-    reads: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
-    writes: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
-    draws: ClassVar[Mapping[type[Pool], Draw]] = nodes.NO_DRAWS
-    consults: ClassVar[frozenset[type]] = nodes.NO_CONSULTS
+    sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Lineage, Frontier, Ruler, Bounds})
     size_knob: ClassVar[str | None] = "sp_budget_round"
 
     def round_cells(self, knobs: AdaptiveQueueKnobs, search: int) -> int:
@@ -204,11 +197,14 @@ class AdaptiveQueue:
         return knobs.sp_budget_round
 
     def draw(self, ctx: NodeContext[AdaptiveQueueKnobs], pool: list[Sample]) -> Panel:
-        view = ctx.difficulty
+        ruler = ctx.read(Ruler)
+        view = ruler.difficulty
         knobs = ctx.knobs
-        readings = _origin_readings(ctx.rounds, ctx.slot_of)
+        rounds = ctx.read(Lineage).rounds
+        readings = _origin_readings(rounds, ruler.slot_of)
         worth = information_per_price(readings)
-        own = build_observations(list(ctx.rounds))
+        own = build_observations(list(rounds))
+        anchor_floor = ctx.read(Bounds).elimination_n_min
 
         def pick(stratum: list[Sample], budget: int) -> list[Sample]:
             # Purpose reaches the draw through the ruler alone: every arm of a head-to-head reads
@@ -222,7 +218,7 @@ class AdaptiveQueue:
                 budget,
                 ruler=view.ruler,
                 # Enough cells the ruler carries that θ is read on δ, not on the prior.
-                anchor_floor=ctx.elimination_n_min,
+                anchor_floor=anchor_floor,
                 worth=worth,
             )
 
@@ -249,7 +245,9 @@ class AdaptiveQueue:
                 [int(s.id) for s in cells],
             )
         order = build_round_order(
-            parent_grades(ctx.parent_own_rows), view.ruler, {int(s.id): s.key for s in cells}
+            parent_grades(ctx.read(Frontier).parent_own_rows),
+            view.ruler,
+            {int(s.id): s.key for s in cells},
         )
         by_id = {int(s.id): s for s in cells}
         # Every cell closes a block: PoBB decides after each one.
@@ -264,6 +262,7 @@ class L1Generate(LayoutNode):
     knobs: ClassVar[type[StrictModel]] = L1GenerateKnobs
     reads: ClassVar[frozenset[type[StatePart]]] = BUNDLE_READS
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset({L1Readout})
+    sees: ClassVar[frozenset[type[CycleRead]]] = BUNDLE_SEES
     draws: ClassVar[Mapping[type[Pool], Draw]] = BUNDLE_DRAWS
     response_model: ClassVar[type[BaseModel] | None] = L1GenerateOutput
     # L2 moves this node's panels, so the outer's only lever here is its output schema's names.
@@ -279,15 +278,13 @@ class L1Generate(LayoutNode):
         return await propose_l1_population(ctx)
 
 
-class PoBB:
+class PoBB(nodes.Member):
     name: ClassVar[str] = "pobb"
     kind: ClassVar[NodeKind] = NodeKind.ELIMINATOR
-    prompt_arity: ClassVar[PromptArity] = "none"
     knobs: ClassVar[type[StrictModel]] = PoBBKnobs
-    reads: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
-    writes: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
-    draws: ClassVar[Mapping[type[Pool], Draw]] = nodes.NO_DRAWS
-    consults: ClassVar[frozenset[type]] = nodes.NO_CONSULTS
+    sees: ClassVar[frozenset[type[CycleRead]]] = frozenset(
+        {Lineage, Frontier, Ruler, Bounds, Target}
+    )
     abort_lenses: ClassVar[Mapping[str, frozenset[str]]] = ABORT_LENS_SUPPRESS
     # A PoBB stop ends the buying of an arm; θ still reads what it measured.
     stop_disqualifies: ClassVar[bool] = False
@@ -299,31 +296,26 @@ class PoBB:
         proposals: Proposals,
         catch_up: CatchUpFn,
     ) -> PoBBRace:
-        return PoBBRace(ctx, panel, catch_up, measured_unit=ctx.measured_unit)
+        return PoBBRace(ctx, panel, catch_up, measured_unit=ctx.read(Target).measured_unit)
 
 
-class ThetaElection:
+class ThetaElection(nodes.Member):
     name: ClassVar[str] = "theta_election"
     kind: ClassVar[NodeKind] = NodeKind.SELECTOR
-    prompt_arity: ClassVar[PromptArity] = "none"
-    knobs: ClassVar[type[StrictModel]] = ThetaElectionKnobs
-    reads: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
-    writes: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
-    draws: ClassVar[Mapping[type[Pool], Draw]] = nodes.NO_DRAWS
-    consults: ClassVar[frozenset[type]] = nodes.NO_CONSULTS
+    sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Lineage, Ruler})
     elects_on: ClassVar[DisplayMetric] = "ability"
     elects_partial: ClassVar[bool] = True
 
     def parent_cells(
         self,
-        ctx: NodeContext[ThetaElectionKnobs],
+        ctx: NodeContext[StrictModel],
         panel: Panel,
         rows: Mapping[ArmKey, CellSheet],
     ) -> list[Sample]:
         return panel.cells
 
     def select(
-        self, ctx: NodeContext[ThetaElectionKnobs], measured: MeasuredRound, proposals: Proposals
+        self, ctx: NodeContext[StrictModel], measured: MeasuredRound, proposals: Proposals
     ) -> Selection:
         return elect_on_theta(ctx, measured, proposals)
 
@@ -332,10 +324,9 @@ class L1Critique(LayoutNode):
     """A malformed response is survived: the next walk re-runs it (`round.py::settle_owed_outputs`)."""
 
     name: ClassVar[str] = "l1_critique"
-    prompt_arity: ClassVar[PromptArity] = "none"
-    knobs: ClassVar[type[StrictModel]] = L1CritiqueKnobs
     reads: ClassVar[frozenset[type[StatePart]]] = BUNDLE_READS
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset({Critique})
+    sees: ClassVar[frozenset[type[CycleRead]]] = BUNDLE_SEES
     draws: ClassVar[Mapping[type[Pool], Draw]] = BUNDLE_DRAWS
     response_model: ClassVar[type[BaseModel] | None] = L1CritiqueOutput
 
@@ -343,17 +334,16 @@ class L1Critique(LayoutNode):
     def consults(self) -> frozenset[type]:
         return frozenset({AdaptiveQueue, Escalation, L1Generate})
 
-    async def adapt(self, ctx: NodeContext[L1CritiqueKnobs], round_result: RoundResult) -> None:
+    async def adapt(self, ctx: NodeContext[StrictModel], round_result: RoundResult) -> None:
         ctx.emit(await distil_critique(ctx))
 
 
 class L2Context(LayoutNode):
     name: ClassVar[str] = "l2_context"
-    prompt_arity: ClassVar[PromptArity] = "none"
-    knobs: ClassVar[type[StrictModel]] = LayerKnobs
     layer_id: ClassVar[Literal["L2", "L3"]] = "L2"
     reads: ClassVar[frozenset[type[StatePart]]] = BUNDLE_READS
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset({L2Memory})
+    sees: ClassVar[frozenset[type[CycleRead]]] = BUNDLE_SEES
     draws: ClassVar[Mapping[type[Pool], Draw]] = BUNDLE_DRAWS
     response_model: ClassVar[type[BaseModel] | None] = L2ContextOutput
     phase: ClassVar[OptimizerPhase] = OptimizerPhase(
@@ -371,7 +361,7 @@ class L2Context(LayoutNode):
     def reply_model(self, bundle: InjectionBundle) -> type[BaseModel]:
         return build_l2_response_model(bundle.silent_l1_panels)
 
-    def parse(self, ctx: NodeContext[LayerKnobs], raw: L2ContextOutput) -> TransitionResult:
+    def parse(self, ctx: NodeContext[StrictModel], raw: L2ContextOutput) -> TransitionResult:
         # An absent reason is REPORTED, never replaced by a sentence that reads as L2's own.
         rationale = truncate(raw.rationale, 80) if raw.rationale else "(no rationale given)"
         # Filtered here: a landed steer is carried forward on every later fire and never pruned.
@@ -421,7 +411,7 @@ class L2Context(LayoutNode):
             terminate_proposal=raw.terminate_proposal,
         )
 
-    def land(self, ctx: NodeContext[LayerKnobs], result: TransitionResult) -> None:
+    def land(self, ctx: NodeContext[StrictModel], result: TransitionResult) -> None:
         memory = ctx.slice(L2Memory)
         steered = memory.steered_onto("l1_generate", result.steer) if result.steer else memory
         ctx.put(steered.model_copy(update={"guard_breaches": list(result.l2_guard_breaches)}))
@@ -431,7 +421,7 @@ class L2Context(LayoutNode):
         assert fire.ask is not None, "only L3 heals"
         return l2_fired(ladder, fire.ask.l2)
 
-    def enter_view(self, ctx: NodeContext[LayerKnobs], fire: Fire) -> OptimizerStepEnterView:
+    def enter_view(self, ctx: NodeContext[StrictModel], fire: Fire) -> OptimizerStepEnterView:
         items = [(k, str(v)) for k, v in ctx.slice(L2Memory).steered("l1_generate").items()]
         if items:
             shown = [f"{k}={s if len(s) <= 30 else s[:27] + '...'}" for k, s in items[:5]]
@@ -446,8 +436,8 @@ class L2Context(LayoutNode):
             tag=f"L2 fire {ctx.slice(Ladder).l2.fires + 1}",
             lines=(
                 f"rule={fire.cause}  |  "
-                f"L1 stalled {rounds_without_advance(ctx.rounds)} rounds  |  "
-                f"acc={fmt_pct(ctx.parent_accuracy)}  "
+                f"L1 stalled {rounds_without_advance(ctx.read(Lineage).rounds)} rounds  |  "
+                f"acc={fmt_pct(ctx.read(Frontier).parent_accuracy)}  "
                 f"peak fitness={fmt_fitness(fire.best.composite_fitness)}",
                 overrides,
                 "LLM analyzing failure patterns...",
@@ -455,7 +445,7 @@ class L2Context(LayoutNode):
         )
 
     def exit_view(
-        self, ctx: NodeContext[LayerKnobs], result: TransitionResult
+        self, ctx: NodeContext[StrictModel], result: TransitionResult
     ) -> OptimizerStepExitView:
         layout = ", l1_layout edited" if result.l1_layout is not None else ""
         axis = f", axis={result.axis_targeted}" if result.axis_targeted else ""
@@ -469,11 +459,10 @@ class L2Context(LayoutNode):
 
 class L3Plan(LayoutNode):
     name: ClassVar[str] = "l3_plan"
-    prompt_arity: ClassVar[PromptArity] = "none"
-    knobs: ClassVar[type[StrictModel]] = LayerKnobs
     layer_id: ClassVar[Literal["L2", "L3"]] = "L3"
     reads: ClassVar[frozenset[type[StatePart]]] = BUNDLE_READS
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset({L3Memory})
+    sees: ClassVar[frozenset[type[CycleRead]]] = BUNDLE_SEES
     draws: ClassVar[Mapping[type[Pool], Draw]] = BUNDLE_DRAWS
     response_model: ClassVar[type[BaseModel] | None] = L3PlanOutput
     phase: ClassVar[OptimizerPhase] = OptimizerPhase(
@@ -487,9 +476,9 @@ class L3Plan(LayoutNode):
     def reply_model(self, bundle: InjectionBundle) -> type[BaseModel]:
         return L3PlanOutput
 
-    def parse(self, ctx: NodeContext[LayerKnobs], raw: L3PlanOutput) -> TransitionResult:
+    def parse(self, ctx: NodeContext[StrictModel], raw: L3PlanOutput) -> TransitionResult:
         rationale = truncate(raw.rationale, 80) if raw.rationale else "(no rationale given)"
-        failures = run_l3_output_validators({"plan": raw.plan}, prior_plan=ctx.slice(L3Memory).plan)
+        failures = l3_plan_breaches(raw.plan, prior_plan=ctx.slice(L3Memory).plan)
         if failures:
             logger.warning(
                 "L3 output failed %d validator(s): %s",
@@ -505,7 +494,7 @@ class L3Plan(LayoutNode):
             terminate_proposal=raw.terminate_proposal,
         )
 
-    def land(self, ctx: NodeContext[LayerKnobs], result: TransitionResult) -> None:
+    def land(self, ctx: NodeContext[StrictModel], result: TransitionResult) -> None:
         ctx.put(
             L3Memory(
                 plan=result.plan,
@@ -518,7 +507,7 @@ class L3Plan(LayoutNode):
     def record(self, ladder: Ladder, fire: Fire) -> Ladder:
         return l3_fired(ladder, None if fire.ask is None else fire.ask.l3)
 
-    def enter_view(self, ctx: NodeContext[LayerKnobs], fire: Fire) -> OptimizerStepEnterView:
+    def enter_view(self, ctx: NodeContext[StrictModel], fire: Fire) -> OptimizerStepEnterView:
         return OptimizerStepEnterView(
             node=self.name,
             activity=self.phase.activity,
@@ -534,7 +523,7 @@ class L3Plan(LayoutNode):
         )
 
     def exit_view(
-        self, ctx: NodeContext[LayerKnobs], result: TransitionResult
+        self, ctx: NodeContext[StrictModel], result: TransitionResult
     ) -> OptimizerStepExitView:
         return OptimizerStepExitView(
             headline=f"New plan: {truncate(result.plan[:120], 55, '...')}",
@@ -543,20 +532,18 @@ class L3Plan(LayoutNode):
         )
 
 
-class Escalation:
+class Escalation(nodes.Member):
     name: ClassVar[str] = "escalation"
     kind: ClassVar[NodeKind] = NodeKind.CONTROLLER
-    prompt_arity: ClassVar[PromptArity] = "none"
     knobs: ClassVar[type[StrictModel]] = EscalationKnobs
     reads: ClassVar[frozenset[type[StatePart]]] = frozenset({L1Readout, Ladder})
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset({Ladder})
-    draws: ClassVar[Mapping[type[Pool], Draw]] = nodes.NO_DRAWS
-    consults: ClassVar[frozenset[type]] = nodes.NO_CONSULTS
+    sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Lineage, Ruler})
     fires: ClassVar[frozenset[type]] = frozenset({L2Context, L3Plan})
 
     def observe(self, ctx: NodeContext[EscalationKnobs], round_result: RoundResult) -> str | None:
         knobs = ctx.knobs
-        axes = ctx.axes
+        axes = ctx.read(Ruler).axes
         axes_with_positive_yield = (
             None
             if axes is None
@@ -589,9 +576,6 @@ class Escalation:
         return event.rule if event.next_action == NextAction.FIRE_L2 else None
 
     async def act(self, ctx: NodeContext[EscalationKnobs], cause: str) -> None:
-        await self._fire(ctx, cause=cause)
-
-    async def _fire(self, ctx: NodeContext[EscalationKnobs], *, cause: str) -> None:
         if stop := await escalate_l2(
             ctx,
             cause=cause,
@@ -601,7 +585,7 @@ class Escalation:
             raise StopLoop(stop)
 
     async def diagnose(self, ctx: NodeContext[EscalationKnobs]) -> None:
-        await self._fire(ctx, cause=FORCED_BY_DIAG)
+        await self.act(ctx, FORCED_BY_DIAG)
         await ctx.show_next_round()
 
 

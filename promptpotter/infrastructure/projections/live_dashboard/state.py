@@ -18,7 +18,6 @@ from promptpotter.domain.run_records import DefaultsDrift, RunWiringRecord
 from promptpotter.domain.scoring import fitness_bands
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.shared.clock import utcnow_iso
 
 
 class CatchUpLogEntry(StrictModel):
@@ -161,7 +160,8 @@ class DashboardFacts(StrictModel):
 
     # ``None`` = no time recorded; a cached replay's 0.0 is a real reading.
     last_query_elapsed_s: float | None = None
-    wallclock_serialized_at: str | None = None
+    # The timestamp of the record at `at_offset`.
+    at_time: str
 
     arms_per_round: int | None
     sp_budget_round: int
@@ -207,12 +207,13 @@ class LiveDashboardState(DashboardFacts):
         return cls(
             campaign_id=hop.campaign_id,
             cycle_id=hop.cycle_id,
-            state_since=utcnow_iso(),
-            **cls.wired(wiring),
+            at_time=wiring.timestamp,
+            **cls.launched(wiring),
         )
 
     @staticmethod
-    def wired(wiring: RunWiringRecord) -> dict[str, Any]:
+    def launched(wiring: RunWiringRecord) -> dict[str, Any]:
+        """What each launch's wiring declares, and clears of what the last launch left."""
         return {
             "arms_per_round": wiring.arms_per_round,
             "sp_budget_round": wiring.sp_budget_round,
@@ -223,25 +224,14 @@ class LiveDashboardState(DashboardFacts):
             "langfuse_trace_url": wiring.langfuse_trace_url,
             "run_limits": wiring.run_limits,
             "defaults_drift": wiring.defaults_drift,
-        }
-
-    @classmethod
-    def for_run(cls, prior: LiveDashboardState, *, hop: CycleHop) -> LiveDashboardState:
-        """``prior`` carried WHOLESALE: a hand-picked subset resets every field it omits."""
-        mine: dict[str, Any] = {
-            "campaign_id": hop.campaign_id,
-            "cycle_id": hop.cycle_id,
-            "state_since": utcnow_iso(),
-            "declared_phase": RunPhase.RUNNING,
+            "state_since": wiring.timestamp,
             "stop_reason": None,
             "error": None,
             # A resumed run grades its selection again; the prior pass graded a stale one.
             "bench_score": None,
             "bench_pass": None,
-            "current_round": CurrentRound.unentered(),
             "current_query_payload": None,
             "current_position": None,
             "open_positions": [],
             "declared_sample_order": [],
         }
-        return prior.model_copy(update=mine)

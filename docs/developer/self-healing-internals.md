@@ -61,7 +61,7 @@ A REFUSED L2 layout edit makes `escalate_l2` run `_run_transition(L3, …)` *imm
 
 ## Validators are Evaluator-shaped
 
-`LLMOutputValidator` is `{id, check}` and its `check` returns `ValidatorOutcome{validator_id, evidence}` or `None`. An outcome exists only for a failure, so there is no `passed` flag; the self-healers count **events** rather than graded scores, so there is no `score` field; and a guard-breach outcome routes to L3 structurally, so there is no owner to store.
+A gen-time check is a plain function returning the `ValidationFailure`s it convicts; a post-parse check returns `ValidatorOutcome{validator_id, evidence}`s. An outcome exists only for a failure, so there is no `passed` flag; the self-healers count **events** rather than graded scores, so there is no `score` field; and a guard-breach outcome routes to L3 structurally, so there is no owner to store.
 
 ## Optimizer-memory state
 
@@ -94,9 +94,9 @@ This is a load-boundary filter, not a score-time fallback: trace records are sti
 
 Pick the storage stream by detector + score-effect; the owner falls out of the record type, so you never wire a nurse by hand.
 
-- New gen-time check on L1's output → **Wound 1**. Add a validator to `validators/l1_strict.py` — or to `bench/children.py` when every optimizer's child owes it.
+- New gen-time check on L1's output → **Wound 1**. Add a function to `validators/l1_strict.py` and call it from `parse_population` — or to `bench/children.py` when every optimizer's child owes it.
 - New runtime measurement pointing at a candidate config region → **Wound 2**. Add a check that emits `RuntimeFailure` from `application/scoring/arm_states.py::read_breakage`; stamp `owner=NurseOwner.L1` when L1 can retune it, `owner=NurseOwner.OPERATOR` when only the operator can.
 - New strategic-stall trigger → **Wound 3** isn't a registry; it's the patience timer.
-- New post-parse check on L2/L3's output → **Wound 4**. L3's side has a registry (`L3_OUTPUT_VALIDATORS`, `validators/l3_output.py`); L2's is the layout check itself (`dispatch/layout.py::validate_l1_layout`) — there is no `L2_OUTPUT_VALIDATORS` to append to, so a new L2 check means extending that validator or standing a registry up.
+- New post-parse check on L2/L3's output → **Wound 4**. L3's is `validators/l3_output.py::l3_plan_breaches`; L2's is the layout check itself (`dispatch/layout.py::validate_l1_layout`). Extend the one that owns the output.
 
-For each: declare `LLMOutputValidator` with a stable id, write the `check` callable, append to the appropriate registry. Prompt-section render and persistence path are already wired — they iterate the registry, not a hard-coded list. Only add a `NurseOwner` member when a producer actually stamps it (today only `RuntimeFailure` does).
+For each: a stable `validator_id` (Wound 4) or `reason` (Wound 1). Prompt-section render and persistence path are already wired — they iterate the outcomes, not a hard-coded list. Only add a `NurseOwner` member when a producer actually stamps it (today only `RuntimeFailure` does).

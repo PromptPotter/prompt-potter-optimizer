@@ -91,7 +91,7 @@ it, or at import for a table built there (`application/initialization/CLAUDE.md`
 fails loud before a run spends, costs nothing to maintain, and needs no
 test to update. They exist across the package, e.g.
 one replayer per decision kind (`application/bench/resume_and_fork/replayers.py::replayers`),
-`L1_POSSIBLE ⊆ injection_table()` (`dispatch/injections/registry.py`), the `L1_MANDATORY`/origin-layout
+every layout's `possible ⊆ injection_table()` (`dispatch/injections/registry.py`), the `L1_MANDATORY`/origin-layout
 subset checks (`optimizers/potter/dispatch/layout.py`), the unread row-key check (`domain/scoring.py`),
 the divergence-hint exhaustiveness (`cli/commands/launch.py`). Add new ones the same way — beside
 the thing they validate, never as a repo-wide structure scan.

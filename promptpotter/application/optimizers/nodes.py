@@ -11,9 +11,20 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, Protocol, cast
+from typing import (
+    TYPE_CHECKING,
+    Annotated,
+    Any,
+    ClassVar,
+    Literal,
+    Protocol,
+    cast,
+    runtime_checkable,
+)
 
-from promptpotter.application.campaign_config import CampaignConfig, Estimand
+from pydantic import Field
+
+from promptpotter.application.campaign_config import CampaignConfig, Estimand, Knob, Scope
 from promptpotter.domain.optimizer_state import OptimizerState, StatePart, StateSlice
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.results import ArmSlot, Proposed, rounds_without_advance
@@ -82,8 +93,22 @@ class MemberCoupling:
 # How many of the pipeline's prompt nodes a member writes: a `one` refuses any other roster before the mint.
 PromptArity = Literal["none", "one", "each"]
 
-NO_STATE: frozenset[type[StatePart]] = frozenset()
-NO_CONSULTS: frozenset[type] = frozenset()
+Rewrites = Literal["prompt", "field"]
+
+
+class RewriteKnobs(StrictModel):
+    rewrites: Annotated[Rewrites, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+        description="Which loci of a prompt node the reply replaces. `prompt`: the whole prompt "
+        "as one text — the model is shown every field rendered together, its reply rides `field` "
+        "and the node's other fields empty, as the papers' one-text prompts do. `field`: that "
+        "field alone — the model is shown it alone, and the child inherits every other locus "
+        "from its first parent."
+    )
+    field: Annotated[str, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+        min_length=1,
+        description="The prompt field the reply is written into; every prompt node the member "
+        "rewrites declares it, or the campaign is refused before it mints.",
+    )
 
 
 @dataclass(frozen=True)
@@ -109,11 +134,18 @@ class CountKnob:
 
 
 Draw = AccessKnob | CountKnob
-NO_DRAWS: Mapping[type[Pool], Draw] = MappingProxyType({})
+
+
+class CycleRead:
+    """A typed read of the cycle a member names in ``sees``; ``NodeContext.read`` hands it over."""
+
+    def __init__(self, round_: RoundContext) -> None:
+        self._round = round_
+        self._cycle = round_.cycle
 
 
 class NodeMember(Protocol):
-    """Every edge to another member is declared here, and ``optimizer_manifest.py::_refuse_open_roster`` closes them before a mint."""
+    """Every edge to another member is declared here, and ``optimizer_manifest.py::_open_edges`` closes them before a mint."""
 
     @property
     def name(self) -> str: ...
@@ -127,12 +159,32 @@ class NodeMember(Protocol):
     def reads(self) -> frozenset[type[StatePart]]: ...
     @property
     def writes(self) -> frozenset[type[StatePart]]: ...
+    # The cycle reads beyond its own state it is handed (`NodeContext.read`).
+    @property
+    def sees(self) -> frozenset[type[CycleRead]]: ...
     # The pools it draws from, each under the knob that sets its access; read only through `NodeContext.drawn`.
     @property
     def draws(self) -> Mapping[type[Pool], Draw]: ...
     # The members whose knobs it reads (`NodeContext.knobs_of`), and nothing else of theirs.
     @property
     def consults(self) -> frozenset[type]: ...
+
+
+class Member:
+    """What a member declares where it states nothing: no prompt, no state, no cycle read, no pool, no other member."""
+
+    name: ClassVar[str]
+    kind: ClassVar[NodeKind]
+    knobs: ClassVar[type[StrictModel]] = StrictModel
+    prompt_arity: ClassVar[PromptArity] = "none"
+    reads: ClassVar[frozenset[type[StatePart]]] = frozenset()
+    writes: ClassVar[frozenset[type[StatePart]]] = frozenset()
+    sees: ClassVar[frozenset[type[CycleRead]]] = frozenset()
+    draws: ClassVar[Mapping[type[Pool], Draw]] = MappingProxyType({})
+
+    @property
+    def consults(self) -> frozenset[type]:
+        return frozenset()
 
 
 @dataclass(frozen=True)
@@ -210,7 +262,7 @@ class OptimizerPhase:
     activity: str
 
 
-class LlmNode:
+class LlmNode(Member):
     kind: ClassVar[NodeKind] = NodeKind.LLM
     # ``None`` where the node answers in free text; else ``build_optimizer_schemas.py`` writes its schema.
     response_model: ClassVar[type[BaseModel] | None] = None
@@ -259,18 +311,6 @@ class RoundWalk:
     def proposer(self) -> str:
         """Its first llm node, whose model the round's opening names."""
         return next(m.name for m in self.members if m.kind is NodeKind.LLM)
-
-
-def standing_opening(ctx: RoundContext, walk: RoundWalk) -> RoundOpening:
-    selected = ctx.cycle.optimizer
-    alone = walk.pipeline == INITIAL_POPULATION
-    return RoundOpening(
-        standing=f"no advance {rounds_without_advance(ctx.cycle.rounds)}",
-        note=f"seeds the population ({INITIAL_POPULATION})" if walk.seeding else "",
-        arms=None if alone else selected.arms_per_round,
-        proposer=walk.proposer,
-        replayed=False,
-    )
 
 
 _PACKAGE = __name__.rpartition(".")[0]
@@ -325,7 +365,15 @@ class OptimizerRuntime(ABC):
         return ()
 
     def opening(self, ctx: RoundContext, walk: RoundWalk) -> RoundOpening:
-        return standing_opening(ctx, walk)
+        return RoundOpening(
+            standing=f"no advance {rounds_without_advance(ctx.cycle.rounds)}",
+            note=f"seeds the population ({INITIAL_POPULATION})" if walk.seeding else "",
+            arms=None
+            if walk.pipeline == INITIAL_POPULATION
+            else ctx.cycle.optimizer.arms_per_round,
+            proposer=walk.proposer,
+            replayed=False,
+        )
 
     def complete(self) -> None:
         """Run where the bench completes every registry (``wiring.py::complete_registries``), never at import."""
@@ -505,10 +553,6 @@ class MeasuredRound:
     cut: StopReason | None
 
     @property
-    def parent_rows(self) -> CellSheet:
-        return self.parent.rows
-
-    @property
     def labels(self) -> dict[ArmKey, str]:
         return {key: arm.label for key, arm in self.arms.items()}
 
@@ -660,8 +704,9 @@ class OperatorSeat:
     kind: ClassVar[NodeKind] = NodeKind.ALGORITHM
     prompt_arity: ClassVar[PromptArity] = "none"
     knobs: ClassVar[type[StrictModel]] = StrictModel
-    reads: ClassVar[frozenset[type[StatePart]]] = NO_STATE
-    writes: ClassVar[frozenset[type[StatePart]]] = NO_STATE
+    reads: ClassVar[frozenset[type[StatePart]]] = frozenset()
+    writes: ClassVar[frozenset[type[StatePart]]] = frozenset()
+    sees: ClassVar[frozenset[type[CycleRead]]] = frozenset()
     variation_mode: ClassVar[VariationMode] = "operator"
 
     def __init__(self, proposers: Sequence[Proposer]) -> None:
@@ -670,6 +715,28 @@ class OperatorSeat:
             {pool: draw for p in reversed(proposers) for pool, draw in p.draws.items()}
         )
         self.consults: frozenset[type] = frozenset(type(p) for p in proposers)
+
+
+@runtime_checkable
+class Initializer(NodeMember, Protocol):
+    """A manifest's `run_init` walk: each writes its pool once, before round 0's adapters read it."""
+
+    @property
+    def pool(self) -> type[Pool]: ...
+
+    def starting_content(self) -> object:
+        """What it seeds from beside the run's own data, which ``Treatment.source`` hashes."""
+        ...
+
+    def active(self, selected: SelectedOptimizer) -> list[str]: ...
+
+    def refusal(
+        self, selected: SelectedOptimizer, *, closed: bool, demo: Sequence[Sample] | None
+    ) -> str | None:
+        """At load with ``demo`` ``None``, again before the mint with the partition."""
+        ...
+
+    def initialize(self, ctx: NodeContext[Any]) -> None: ...
 
 
 class Adapter(NodeMember, Protocol):

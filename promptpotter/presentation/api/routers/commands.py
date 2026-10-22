@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import inspect
-from typing import Annotated
 
-from fastapi import APIRouter, Header
+from fastapi import APIRouter
 from fastapi.routing import APIRoute
 
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
@@ -14,7 +13,6 @@ from promptpotter.application.commands.origin_resolving import (
     dispatch_origin_resolution,
 )
 from promptpotter.application.commands.payloads import (
-    PAYLOAD_MODEL_FOR_KIND,
     CommandAcceptedBody,
     CompactArchivePayload,
     EditDraftCampaignPayload,
@@ -24,7 +22,7 @@ from promptpotter.application.commands.payloads import (
 from promptpotter.application.datasets.draft_build import DraftCampaignWire
 from promptpotter.application.jobs.launcher.checkin import StartCheckinResponse
 from promptpotter.application.maintenance.archive_maintenance import ArchiveReport
-from promptpotter.domain.command_kinds import CommandKind, CommandPayload, CyclePayload
+from promptpotter.domain.command_kinds import PAYLOAD_MODEL_FOR_KIND, CommandKind, CommandPayload
 from promptpotter.presentation.api.deps import IdempotencyKeyDep, JobRegistryDep, StoresDep
 
 commands_router = APIRouter(prefix="/commands", tags=["Commands"])
@@ -73,9 +71,6 @@ async def compact_archive(
     return report
 
 
-ExpectedVersion = Annotated[int | None, Header(alias="Expected-Version")]
-
-
 class _Accepting:
     """A kind whose applied form answers nothing: its route's body is the kind's payload model."""
 
@@ -87,12 +82,6 @@ class _Accepting:
             inspect.Parameter("payload", keyword, annotation=model),
             inspect.Parameter("key", keyword, annotation=IdempotencyKeyDep),
         ]
-        if issubclass(model, CyclePayload):
-            params.append(
-                inspect.Parameter(
-                    "expected_version", keyword, annotation=ExpectedVersion, default=None
-                )
-            )
         self.__signature__ = inspect.Signature(params, return_annotation=CommandAcceptedBody)
 
     async def __call__(
@@ -102,12 +91,9 @@ class _Accepting:
         stores: StoresDep,
         payload: CommandPayload,
         key: IdempotencyKeyDep,
-        expected_version: int | None = None,
     ) -> CommandAcceptedBody:
         dispatcher = CommandDispatcher(stores, job_registry=job_registry)
-        outcome = await dispatcher.dispatch(
-            CommandCall(payload, key), expected_version=expected_version
-        )
+        outcome = await dispatcher.dispatch(CommandCall(payload, key))
         return outcome.accepted
 
 

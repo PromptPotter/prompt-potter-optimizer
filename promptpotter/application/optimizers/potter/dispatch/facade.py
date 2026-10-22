@@ -9,6 +9,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from promptpotter.application.bench.llm_call import InjectionBreakdown
+from promptpotter.application.bench.node_context import Bounds, Frontier, Lineage, Ruler, Target
 from promptpotter.application.optimizers.nodes import AccessKnob, CountKnob
 from promptpotter.application.optimizers.potter.dispatch import compose
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
@@ -65,7 +66,7 @@ if TYPE_CHECKING:
     from types import ModuleType
 
     from promptpotter.application.bench.node_context import NodeContext
-    from promptpotter.application.optimizers.nodes import Draw
+    from promptpotter.application.optimizers.nodes import CycleRead, Draw
     from promptpotter.domain.optimizer_state import StatePart
     from promptpotter.domain.pool import Pool, PoolEntry
     from promptpotter.domain.results import RoundResult
@@ -266,7 +267,7 @@ def _sample_keys(round_result: RoundResult) -> frozenset[str]:
     return frozenset(cell.key for cell in round_result.results)
 
 
-# What `build_bundle` reads and draws, so every node composing a bundle declares both.
+# What `build_bundle` reads, sees and draws, so every node composing a bundle declares each.
 BUNDLE_READS: frozenset[type[StatePart]] = frozenset(
     {L2Memory, L3Memory, Ladder, L1Readout, Critique}
 )
@@ -277,6 +278,7 @@ BUNDLE_DRAWS: Mapping[type[Pool], Draw] = MappingProxyType(
         DemoPool: CountKnob(L1GenerateKnobs, "k_max"),
     }
 )
+BUNDLE_SEES: frozenset[type[CycleRead]] = frozenset({Lineage, Frontier, Ruler, Bounds, Target})
 
 
 def _by_field(entries: tuple[PoolEntry, ...]) -> dict[str, tuple[PoolEntry, ...]]:
@@ -288,14 +290,20 @@ def _by_field(entries: tuple[PoolEntry, ...]) -> dict[str, tuple[PoolEntry, ...]
 
 def build_bundle(ctx: NodeContext[Any], ladder: Ladder) -> InjectionBundle:
     """The round under render is the cycle's last on every node: the bench folds a round in before any node reads it."""
-    rounds = ctx.rounds
+    lineage, frontier, ruler_read, bounds, target = (
+        ctx.read(Lineage),
+        ctx.read(Frontier),
+        ctx.read(Ruler),
+        ctx.read(Bounds),
+        ctx.read(Target),
+    )
+    difficulty = ruler_read.difficulty
+    rounds = lineage.rounds
     origin_round = rounds[0]
     *prior, latest_round = rounds
     readout = ctx.recall(L1Readout, latest_round.round)
     health, latest_fold = latest_round.health, latest_round.fold
 
-    current_sp = ctx.parent_point
-    current_pp = current_sp.pipeline_params if current_sp is not None else None
     queue = ctx.knobs_of(AdaptiveQueueKnobs)
     escalation = ctx.knobs_of(EscalationKnobs)
     generate = ctx.knobs_of(L1GenerateKnobs)
@@ -305,29 +313,27 @@ def build_bundle(ctx: NodeContext[Any], ladder: Ladder) -> InjectionBundle:
         l1_stall_depth=stall_depth,
         ladder=ladder,
         exploration_budget=exploration_budget(stall_depth, escalation.l1_patience).value,
-        pipeline_params=dict(current_pp) if current_pp else {},
-        composite_formula=ctx.cell_formula,
+        pipeline_params=dict(frontier.parent_point.pipeline_params),
+        composite_formula=target.cell_formula,
         # A cold ruler forces the frozen prefix however the knob is set, so the knob alone misreports round 0.
         subset_mode=(
-            "adaptive"
-            if queue.per_round_resubset and ctx.difficulty.ruler is not None
-            else "frozen"
+            "adaptive" if queue.per_round_resubset and difficulty.ruler is not None else "frozen"
         ),
         sp_budget_round=queue.sp_budget_round,
-        budget_rounds=ctx.budget_rounds,
+        budget_rounds=bounds.budget_rounds,
         # Both this cycle's: its share of the campaign's ceiling, and what it has metered of it.
-        spend_budget_usd=ctx.spend_cap_usd(),
-        spend_used_usd=ctx.spend_used_usd(),
+        spend_budget_usd=bounds.spend_cap_usd(),
+        spend_used_usd=bounds.spend_used_usd(),
     )
 
     origin_per_sample = origin_round.results
-    trajectory_results = tuple(ctx.frontier_rows)
+    trajectory_results = tuple(frontier.frontier_rows)
 
     bundle = InjectionBundle(
-        opt_sp=ctx.parent,
+        opt_sp=lineage.parent,
         l2=ctx.slice(L2Memory),
         l3=ctx.slice(L3Memory),
-        framing=ctx.framing,
+        framing=target.framing,
         pipeline_schema=ctx.schema,
         cycle_slice=cs,
         digest=RoundDigest(
@@ -340,27 +346,27 @@ def build_bundle(ctx: NodeContext[Any], ladder: Ladder) -> InjectionBundle:
             prev_sample_keys=_sample_keys(prior[-1]) if prior else frozenset(),
             composite_fitness=None if latest_fold is None else latest_fold.composite_fitness,
             evaluators={} if latest_fold is None else dict(latest_fold.evaluators),
-            ability=ctx.difficulty.scale.frontier(trajectory_results),
+            ability=difficulty.scale.frontier(trajectory_results),
             arms=_arm_digests(latest_round),
         ),
-        axes=ctx.axes,
+        axes=ruler_read.axes,
         origin_per_sample=origin_per_sample,
         trajectory_results=trajectory_results,
-        ruler=ctx.difficulty.ruler,
+        ruler=difficulty.ruler,
         measured_rounds=list(rounds),
         block_access=ctx.access(BlockPool),
         blocks=_by_field(ctx.drawn(BlockPool)),
-        runtime_failures=tuple(ctx.runtime_failures()),
+        runtime_failures=tuple(target.runtime_failures()),
         rebase_capability=escalation.rebase_capability,
         terminate_capability=escalation.terminate_capability,
         schema_field_rename=generate.schema_field_rename,
-        measured_unit=ctx.measured_unit,
-        prompt_delivery=ctx.prompt_delivery,
+        measured_unit=target.measured_unit,
+        prompt_delivery=target.prompt_delivery,
         demo_pool=ctx.drawn(DemoPool),
-        demo_split=ctx.demo_split,
+        demo_split=target.demo_split,
         shot_k_max=generate.k_max,
-        slot_of=ctx.slot_of,
-        inner_cells=ctx.inner_cells,
+        slot_of=ruler_read.slot_of,
+        inner_cells=target.inner_cells,
     )
     return replace(bundle, silent_l1_panels=_silent_l1_panels(bundle))
 

@@ -114,12 +114,14 @@ async def _run_single_cycle(
                 CycleHop(campaign_id=session.campaign_id, cycle_id=parent_cycle_id),
                 observers,
                 campaign_config=campaign_config,
-                resumed_from_round=session.state.resumed_from_round,
             )
             cb = observers.callbacks
 
-        book = session.control.book
-        if campaign_config.bench_trigger != "manual" and session.scoring.require_partition().bench:
+        book = session.state.control.book
+        if (
+            campaign_config.bench_trigger != "manual"
+            and session.state.scoring.require_partition().bench
+        ):
             # Its price is set aside so the selection's pass still fits under the search's ceiling.
             cycle.bench_passes = await bench_origin(
                 session,
@@ -213,13 +215,11 @@ def _onto_fork(
     observers: RunObservers,
     *,
     campaign_config: CampaignConfig,
-    resumed_from_round: int,
 ) -> RunObservers:
     rebase_held(session, parent)
     observers = build_run_observers(
         session=session,
         campaign_config=campaign_config,
-        resumed_from_round=resumed_from_round,
         forked_from=observers,
     )
     arm_run_controls(session, observers)
@@ -260,7 +260,6 @@ def _mint_and_rebase_fork(
         parent,
         observers,
         campaign_config=prep.campaign_config,
-        resumed_from_round=rebase_req.fork_from_round,
     )
     logger.info(
         "Auto-rebase #%d/%d: %s → %s at round %d [trigger=%s, reason=%s]",
@@ -294,12 +293,10 @@ async def run_optimization(
                 f"--diag shows what an optimizer's controller does at a round boundary, and "
                 f"{selected.name} declares no controller node"
             )
-        determinism = campaign_config.optimization.determinism
         # Round 0 outside every round the loop enters: the origin pass, its gate and the close.
-        with at_round(0), binding_optimizer(selected, determinism=determinism):
+        with at_round(0), binding_optimizer(campaign_config.optimization):
             scope_memory(session)
             partition = cycle_partition(session, dataset, campaign_config)
-            session.scoring.partition = partition
             dataset = list(partition.search)
             # Before this launch takes a cell: a re-read of a cell the campaign priced prices nothing.
             campaigns = session.store.campaigns
@@ -310,12 +307,13 @@ async def run_optimization(
             # Unconditional: the runner cannot know a child will recurse.
             publish_inner_spawn_context(session)
             # Fresh per launch, keeping only the cycles this run measures FOR.
-            session.control = RunControl(enclosing=session.control.enclosing)
+            session.state.control = RunControl(enclosing=session.state.control.enclosing)
             try:
                 prep = await prepare_run(
                     dataset,
                     campaign_config,
                     session=session,
+                    partition=partition,
                     observers=observers,
                     budget=budget,
                     langfuse_session_id=langfuse_session_id,
@@ -347,6 +345,7 @@ async def run_optimization(
                 )
                 observers.drain_all()
                 raise
+            session = prep.session
             rebase_count = 0
             while True:
                 outcome = await _run_single_cycle(

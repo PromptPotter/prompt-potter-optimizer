@@ -339,7 +339,7 @@ export interface Measurand {
   /** DECLARED, never inferred from the values: every cell is 0 or 1, so a cell can
    * flip. */
   binary: boolean;
-  unit: 'rate' | 'score';
+  unit: 'rate' | 'score' | 'theta';
 }
 
 /** A mean paired difference with its interval and test. */
@@ -1501,13 +1501,6 @@ export interface CycleListEntry {
   /** Why the cycle ended; null while it has not. Label, outcome and next step
    * derive from the one STOP_REASON_INFO table — never re-mapped per surface. */
   stop_reason: 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
-  /** The cycle_id that took this cycle's line, set on the LEFT-BEHIND side of a
-   * supersede cut. This is the successor pointer — follow it to find which
-   * cycle answers for the campaign; it is a fact of its own precisely so it
-   * survives on a parent that had already stopped for its own reason, which
-   * `stop_reason` cannot express. Null on a root, an offshoot, and any cycle
-   * still holding the line. */
-  superseded_by: string | null;
   /** The single run-state value (RunPhase). Computed once by derive_run_state from
    * lifecycle + control flags + freshness; every picker dot and badge reads
    * this, none re-derive it. 'terminal' pairs with `stop_reason` for the
@@ -1881,6 +1874,17 @@ export interface NodeOutputEdit {
   node: string;
   output_schema: Record<string, unknown>;
   answer_field: string | null;
+}
+
+/** What every refusal and failure answers, whatever raised it. */
+export interface ErrorEnvelope {
+  /** The code a client branches on. */
+  error: string;
+  /** The sentence an operator reads, naming its remedy. */
+  message: string;
+  /** Names the server log line that holds this failure. */
+  error_id: string;
+  details: Record<string, unknown> | null;
 }
 
 /** The whole read for one selection of subjects — recomputed on every fetch. */
@@ -3201,7 +3205,7 @@ export interface ServedDashboard {
   max_cells_in_flight: number;
   measured_unit: 'sample' | 'cell';
   last_query_elapsed_s: number | null;
-  wallclock_serialized_at: string | null;
+  at_time: string;
   arms_per_round: number | null;
   sp_budget_round: number;
   run_limits: RunLimits;
@@ -3812,11 +3816,12 @@ export interface ForkCyclePayload {
   campaign_id: string;
   cycle_id: string;
   descend: string | null;
+  /** Recorded with the command. */
+  reason: string;
   mode: RunMode;
   round: number;
   candidate_id: string;
   seed: Record<string, unknown>;
-  reason: string;
   /** False (the default) is `operator_steered`: a clean offshoot from the origin,
    * re-scoring the edited searchpoint. True is `operator_rewind` — rounds
    * 0..round-1 are lifted and the fork continues at `round` under the seed's
@@ -4274,7 +4279,7 @@ export type CommandSent<T, K extends keyof T> = { [P in K]: DeepPartial<T[P]> } 
   [P in Exclude<keyof T, K>]?: DeepPartial<T[P]>;
 };
 
-// Each kind's body IS its payload model (application/commands/payloads.py::PAYLOAD_MODEL_FOR_KIND).
+// Each kind's body IS its payload model (domain/command_kinds.py::PAYLOAD_MODEL_FOR_KIND).
 export interface CommandPayloads {
   "archive-campaign": CommandSent<ArchiveCampaignPayload, "campaign_id">;
   "cancel-queued-run": CommandSent<CancelQueuedRunPayload, "job_id">;
@@ -4647,6 +4652,12 @@ export const DISPLAY_METRIC_LABELS: Record<DisplayMetric, string> = {
   'accuracy': 'accuracy',
   'ability': 'ability θ',
   'composite': 'composite',
+};
+
+export const DISPLAY_METRIC_UNITS: Record<DisplayMetric, Measurand["unit"]> = {
+  'accuracy': 'rate',
+  'ability': 'theta',
+  'composite': 'score',
 };
 
 // How a verify pass's pick of fresh cells reads, by strategy. Mirror of

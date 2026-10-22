@@ -5,7 +5,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from promptpotter.application.datasets.authored import scorer_of
-from promptpotter.application.initialization.session import Session
+from promptpotter.application.initialization.session import LaunchState
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.paired_reading import instrument_of
@@ -150,9 +150,9 @@ def _with_rows(stores: Stores, hop: CycleHop, held: StandingRound, scorer: Score
 class RoundFileProjection(Projection):
     """The ONE writer of ``rounds/round_NNNN.json``; a failed checkout is logged, the ledger holding the round."""
 
-    def __init__(self, session: Session, hop: CycleHop) -> None:
-        self._session, self._hop = session, hop
-        self._layout = CycleLayout(session.store.campaigns.cycle_dir(hop))
+    def __init__(self, stores: Stores, hop: CycleHop, state: LaunchState) -> None:
+        self._stores, self._hop, self._state = stores, hop, state
+        self._layout = CycleLayout(stores.campaigns.cycle_dir(hop))
         self._synced = False
 
     def _handle_round_entered(self, record: RoundEnteredRecord) -> None:
@@ -175,8 +175,8 @@ class RoundFileProjection(Projection):
                 own = scan_standing_rounds([LedgerSpan(self._layout.ledger)]).rounds
                 wanted |= {n for n in own if not self._layout.round_file(n).exists()}
                 self._synced = True
-            scorer = self._session.scoring.require_scorer()
+            scorer = self._state.scoring.require_scorer()
             for n in sorted(wanted):
-                closed = closed_round(self._session.store, self._hop, n, scorer, moment=None)
+                closed = closed_round(self._stores, self._hop, n, scorer, moment=None)
                 if closed is not None:
                     write_json(self._layout.round_file(n), closed.model_dump(mode="json"))

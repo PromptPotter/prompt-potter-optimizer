@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from promptpotter.application.bench.node_context import Lineage, Ruler
 from promptpotter.application.optimizers.nodes import Selection
 from promptpotter.application.optimizers.potter.records import PotterCheckpointKind
 from promptpotter.application.scoring.selection import (
@@ -17,9 +18,9 @@ if TYPE_CHECKING:
     from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.intelligence.rasch import RoundAbilities
     from promptpotter.application.optimizers.nodes import MeasuredRound, Proposals
-    from promptpotter.application.optimizers.potter.knobs import ThetaElectionKnobs
     from promptpotter.domain.paired_reading import ArmKey
     from promptpotter.domain.scoring import CellSheet
+    from promptpotter.domain.strict_model import StrictModel
 
 
 def _theta(value: float | None, *, signed: bool = True) -> str:
@@ -83,17 +84,18 @@ def _verdict_reason(
 
 
 def elect_on_theta(
-    ctx: NodeContext[ThetaElectionKnobs], measured: MeasuredRound, proposals: Proposals
+    ctx: NodeContext[StrictModel], measured: MeasuredRound, proposals: Proposals
 ) -> Selection:
-    ruler = ctx.difficulty.ruler
+    ruler = ctx.read(Ruler).difficulty.ruler
+    lineage = ctx.read(Lineage)
     electable = measured.electable
     rows: dict[ArmKey, CellSheet] = {key: measured.rows[key] for key in electable}
     # Persisted with the decision: it derives from the ROUND HISTORY, which a replay may not hold.
-    parent_bias = parent_selection_bias(ctx.rounds)
+    parent_bias = parent_selection_bias(lineage.rounds)
     selected, abilities = elect_round_winner(
         electable,
         rows,
-        measured.parent_rows,
+        measured.parent.rows,
         measured.coverage_floor,
         ruler,
         parent_bias=parent_bias,
@@ -101,7 +103,7 @@ def elect_on_theta(
     reads = readable_lifts(
         electable,
         rows,
-        measured.parent_rows,
+        measured.parent.rows,
         measured.coverage_floor,
         abilities,
         parent_bias,
@@ -119,7 +121,7 @@ def elect_on_theta(
         },
         selected,
     )
-    ctx.keep([ctx.parent if selected is None else measured.arms[selected].individual])
+    ctx.keep([lineage.parent if selected is None else measured.arms[selected].individual])
     return Selection(
         selected=selected,
         leading=leading,

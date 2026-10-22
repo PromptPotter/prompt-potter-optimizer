@@ -4,11 +4,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
-from promptpotter.domain.search_point import (
-    DEFAULT_PROMPT_FIELDS,
-    PARAM_FORBIDDEN_KEYS,
-    SHOTS_KEY,
-)
+from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS, SHOTS_KEY
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.value_tree import Delivery, ValueLeaf, visibility_of
 from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
@@ -221,7 +217,7 @@ class NodePromptInfo(FrozenModel):
 
     template_variables: list[str] = Field(default_factory=list)
     # The node's prompt loci, IN RENDER ORDER: the order sits inside every cell key it renders.
-    fields: Annotated[tuple[str, ...], shapes_optimizer_prompt] = DEFAULT_PROMPT_FIELDS
+    fields: Annotated[tuple[str, ...], shapes_optimizer_prompt]
 
     @field_validator("fields")
     @classmethod

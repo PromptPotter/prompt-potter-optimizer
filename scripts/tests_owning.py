@@ -23,7 +23,7 @@ RECORD = REPO / ".pytest_cache" / "tests_owning.json"
 CEILING_MB = {"win32": 206, "linux": 197}
 # Package modules the widest journey RAN: one that wires the whole engine to reach one decision
 # is the churn every reshape pays. Equality, like the ledger: a move is re-pinned with its reason.
-WIDEST_JOURNEY_MODULES = 137
+WIDEST_JOURNEY_MODULES = 136
 
 
 def _rel(path: str | Path) -> str | None:

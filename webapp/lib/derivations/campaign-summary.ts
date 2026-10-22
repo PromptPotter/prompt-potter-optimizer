@@ -9,12 +9,11 @@ import type {
   RunsWithParam,
   VendorModels,
 } from "@/lib/api";
-import { CEILING_METER_LABELS } from "@/lib/api/types.generated";
+import { CEILING_METER_LABELS, DISPLAY_METRIC_UNITS } from "@/lib/api/types.generated";
 import {
   fmtAgo,
   fmtDateTime,
-  fmtFitness,
-  fmtPct0,
+  fmtLevel,
   fmtTokens,
   fmtUsd,
   fmtValue,
@@ -85,15 +84,10 @@ function spendRow(metered: MeteredSpend, counted: string): RowStat {
 
 const BENCH_STAT_LABEL = "Bench";
 
-// Accuracy is a rate and the composite a 0–1 score: a score printed as a percent reads as a rate.
-function fmtBenchColumn(column: BenchScore["headline"], v: number | null | undefined): string {
-  return column === "accuracy" ? fmtPct0(v) : fmtFitness(v ?? null);
-}
-
 export function benchStat(bench: BenchScore): RowStat {
   return {
     label: BENCH_STAT_LABEL,
-    value: fmtBenchColumn(bench.headline, bench.selected?.level?.value),
+    value: fmtLevel(DISPLAY_METRIC_UNITS[bench.headline], bench.selected?.level?.value),
     sub: bench.line,
   };
 }

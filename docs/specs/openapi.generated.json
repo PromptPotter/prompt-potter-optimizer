@@ -4337,18 +4337,6 @@
             ],
             "description": "Why the cycle ended; null while it has not. Label, outcome and next step derive from the one STOP_REASON_INFO table — never re-mapped per surface."
           },
-          "superseded_by": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The cycle_id that took this cycle's line, set on the LEFT-BEHIND side of a supersede cut. This is the successor pointer — follow it to find which cycle answers for the campaign; it is a fact of its own precisely so it survives on a parent that had already stopped for its own reason, which `stop_reason` cannot express. Null on a root, an offshoot, and any cycle still holding the line.",
-            "title": "Superseded By"
-          },
           "updated_at": {
             "default": "",
             "title": "Updated At",
@@ -6200,6 +6188,47 @@
         "title": "EnvironmentReading",
         "type": "object"
       },
+      "ErrorEnvelope": {
+        "additionalProperties": false,
+        "description": "What every refusal and failure answers, whatever raised it.",
+        "properties": {
+          "details": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Details"
+          },
+          "error": {
+            "description": "The code a client branches on.",
+            "title": "Error",
+            "type": "string"
+          },
+          "error_id": {
+            "description": "Names the server log line that holds this failure.",
+            "title": "Error Id",
+            "type": "string"
+          },
+          "message": {
+            "description": "The sentence an operator reads, naming its remedy.",
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error",
+          "message",
+          "error_id",
+          "details"
+        ],
+        "title": "ErrorEnvelope",
+        "type": "object"
+      },
       "EstimatorSpec": {
         "additionalProperties": false,
         "description": "How a lift's two-sided interval and test were taken; the estimate is the mean paired difference.",
@@ -6972,6 +7001,7 @@
           },
           "reason": {
             "default": "",
+            "description": "Recorded with the command.",
             "maxLength": 512,
             "title": "Reason",
             "type": "string"
@@ -7225,19 +7255,6 @@
         ],
         "title": "GuardState",
         "type": "string"
-      },
-      "HTTPValidationError": {
-        "properties": {
-          "detail": {
-            "items": {
-              "$ref": "#/components/schemas/ValidationError"
-            },
-            "title": "Detail",
-            "type": "array"
-          }
-        },
-        "title": "HTTPValidationError",
-        "type": "object"
       },
       "HeadToHead": {
         "additionalProperties": false,
@@ -8864,7 +8881,8 @@
       "MeasurandUnit": {
         "enum": [
           "rate",
-          "score"
+          "score",
+          "theta"
         ],
         "title": "MeasurandUnit",
         "type": "string"
@@ -13387,6 +13405,10 @@
             "title": "At Offset",
             "type": "integer"
           },
+          "at_time": {
+            "title": "At Time",
+            "type": "string"
+          },
           "backend_retry_count": {
             "default": 0,
             "title": "Backend Retry Count",
@@ -13912,17 +13934,6 @@
               }
             ],
             "description": "The scoring walk in flight; null where no producer is appending, and on a replay."
-          },
-          "wallclock_serialized_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Wallclock Serialized At"
           }
         },
         "required": [
@@ -13935,6 +13946,7 @@
           "backpressure",
           "max_cells_in_flight",
           "measured_unit",
+          "at_time",
           "arms_per_round",
           "sp_budget_round",
           "run_limits",
@@ -15509,46 +15521,6 @@
         "title": "UserSettings",
         "type": "object"
       },
-      "ValidationError": {
-        "properties": {
-          "ctx": {
-            "title": "Context",
-            "type": "object"
-          },
-          "input": {
-            "title": "Input"
-          },
-          "loc": {
-            "items": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "integer"
-                }
-              ]
-            },
-            "title": "Location",
-            "type": "array"
-          },
-          "msg": {
-            "title": "Message",
-            "type": "string"
-          },
-          "type": {
-            "title": "Error Type",
-            "type": "string"
-          }
-        },
-        "required": [
-          "loc",
-          "msg",
-          "type"
-        ],
-        "title": "ValidationError",
-        "type": "object"
-      },
       "ValidationFailure": {
         "additionalProperties": false,
         "description": "An L1 output that broke a parse-time invariant, scoring its candidate a synthetic zero.",
@@ -16151,15 +16123,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Accept Terms",
@@ -16220,15 +16192,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Activity",
@@ -16262,15 +16234,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Callback",
@@ -16304,15 +16276,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Login",
@@ -16332,6 +16304,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
           }
         },
         "summary": "Logout",
@@ -16354,6 +16336,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
           }
         },
         "summary": "Me",
@@ -16376,6 +16368,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
           }
         },
         "summary": "Get Quota Status",
@@ -16398,6 +16400,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
           }
         },
         "summary": "Get User Settings",
@@ -16429,15 +16441,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Patch User Settings",
@@ -16464,6 +16476,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
           }
         },
         "summary": "List Backends",
@@ -16498,15 +16520,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Get Backend Health",
@@ -16577,15 +16599,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "List Campaigns",
@@ -16620,15 +16642,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Get Campaign Config Map",
@@ -16713,15 +16735,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Get Cycle Dashboard",
@@ -16774,15 +16796,15 @@
           "200": {
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Stream Cycle Events",
@@ -16869,15 +16891,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Get Cycle File",
@@ -16937,15 +16959,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "List Cycle Files",
@@ -17033,15 +17055,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Get Family Ray",
@@ -17127,15 +17149,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Get Cycle Round",
@@ -17212,15 +17234,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Get Cycle Round Audit",
@@ -17345,15 +17367,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Get Lineage Tree",
@@ -17398,15 +17420,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Preview Fork Steer",
@@ -17453,15 +17475,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Get Campaign Pipeline",
@@ -17496,15 +17518,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Get Campaign Storage",
@@ -17556,15 +17578,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Archive Campaign",
@@ -17616,15 +17638,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Cancel Queued Run",
@@ -17638,22 +17660,6 @@
         "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
         "operationId": "change_run_limits_api_v1_commands_change_run_limits_post",
         "parameters": [
-          {
-            "in": "header",
-            "name": "Expected-Version",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Expected-Version"
-            }
-          },
           {
             "in": "header",
             "name": "Idempotency-Key",
@@ -17692,15 +17698,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Change Run Limits",
@@ -17714,22 +17720,6 @@
         "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
         "operationId": "cleanup_empty_cycles_api_v1_commands_cleanup_empty_cycles_post",
         "parameters": [
-          {
-            "in": "header",
-            "name": "Expected-Version",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Expected-Version"
-            }
-          },
           {
             "in": "header",
             "name": "Idempotency-Key",
@@ -17768,15 +17758,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Cleanup Empty Cycles",
@@ -17828,15 +17818,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Compact Archive",
@@ -17888,15 +17878,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Delete Campaign",
@@ -17910,22 +17900,6 @@
         "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
         "operationId": "delete_cycle_api_v1_commands_delete_cycle_post",
         "parameters": [
-          {
-            "in": "header",
-            "name": "Expected-Version",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Expected-Version"
-            }
-          },
           {
             "in": "header",
             "name": "Idempotency-Key",
@@ -17964,15 +17938,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Delete Cycle",
@@ -18024,15 +17998,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Discard Draft",
@@ -18084,15 +18058,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Edit Draft Campaign",
@@ -18106,22 +18080,6 @@
         "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
         "operationId": "fork_cycle_api_v1_commands_fork_cycle_post",
         "parameters": [
-          {
-            "in": "header",
-            "name": "Expected-Version",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Expected-Version"
-            }
-          },
           {
             "in": "header",
             "name": "Idempotency-Key",
@@ -18160,15 +18118,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Fork Cycle",
@@ -18182,22 +18140,6 @@
         "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
         "operationId": "grade_bench_api_v1_commands_grade_bench_post",
         "parameters": [
-          {
-            "in": "header",
-            "name": "Expected-Version",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Expected-Version"
-            }
-          },
           {
             "in": "header",
             "name": "Idempotency-Key",
@@ -18236,15 +18178,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Grade Bench",
@@ -18296,15 +18238,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Mint Campaign",
@@ -18318,22 +18260,6 @@
         "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
         "operationId": "origin_gate_decision_api_v1_commands_origin_gate_decision_post",
         "parameters": [
-          {
-            "in": "header",
-            "name": "Expected-Version",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Expected-Version"
-            }
-          },
           {
             "in": "header",
             "name": "Idempotency-Key",
@@ -18372,15 +18298,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Origin Gate Decision",
@@ -18394,22 +18320,6 @@
         "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
         "operationId": "pause_cycle_api_v1_commands_pause_cycle_post",
         "parameters": [
-          {
-            "in": "header",
-            "name": "Expected-Version",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Expected-Version"
-            }
-          },
           {
             "in": "header",
             "name": "Idempotency-Key",
@@ -18448,15 +18358,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Pause Cycle",
@@ -18508,15 +18418,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Resolve Origin",
@@ -18568,15 +18478,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Set Campaign Label",
@@ -18628,15 +18538,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Set Concurrent Cycles",
@@ -18650,22 +18560,6 @@
         "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
         "operationId": "set_sample_lookahead_api_v1_commands_set_sample_lookahead_post",
         "parameters": [
-          {
-            "in": "header",
-            "name": "Expected-Version",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Expected-Version"
-            }
-          },
           {
             "in": "header",
             "name": "Idempotency-Key",
@@ -18704,15 +18598,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Set Sample Lookahead",
@@ -18726,22 +18620,6 @@
         "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
         "operationId": "skip_searchpoint_api_v1_commands_skip_searchpoint_post",
         "parameters": [
-          {
-            "in": "header",
-            "name": "Expected-Version",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Expected-Version"
-            }
-          },
           {
             "in": "header",
             "name": "Idempotency-Key",
@@ -18780,15 +18658,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Skip Searchpoint",
@@ -18840,15 +18718,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Start Checkin",
@@ -18862,22 +18740,6 @@
         "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
         "operationId": "start_run_api_v1_commands_start_run_post",
         "parameters": [
-          {
-            "in": "header",
-            "name": "Expected-Version",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Expected-Version"
-            }
-          },
           {
             "in": "header",
             "name": "Idempotency-Key",
@@ -18916,15 +18778,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Start Run",
@@ -18938,22 +18800,6 @@
         "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
         "operationId": "step_cycle_api_v1_commands_step_cycle_post",
         "parameters": [
-          {
-            "in": "header",
-            "name": "Expected-Version",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Expected-Version"
-            }
-          },
           {
             "in": "header",
             "name": "Idempotency-Key",
@@ -18992,15 +18838,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Step Cycle",
@@ -19014,22 +18860,6 @@
         "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
         "operationId": "submit_arms_api_v1_commands_submit_arms_post",
         "parameters": [
-          {
-            "in": "header",
-            "name": "Expected-Version",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Expected-Version"
-            }
-          },
           {
             "in": "header",
             "name": "Idempotency-Key",
@@ -19068,15 +18898,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Submit Arms",
@@ -19128,15 +18958,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Unarchive Campaign",
@@ -19150,22 +18980,6 @@
         "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
         "operationId": "verify_candidate_api_v1_commands_verify_candidate_post",
         "parameters": [
-          {
-            "in": "header",
-            "name": "Expected-Version",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Expected-Version"
-            }
-          },
           {
             "in": "header",
             "name": "Idempotency-Key",
@@ -19204,15 +19018,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Verify Candidate",
@@ -19280,15 +19094,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Get Cycles",
@@ -19311,6 +19125,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
           }
         },
         "summary": "List Datasets",
@@ -19362,15 +19186,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Upload Candidate Library",
@@ -19422,15 +19246,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Build Candidate Library From Column",
@@ -19464,15 +19288,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Ingest Dataset",
@@ -19713,15 +19537,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Get Dataset Cells",
@@ -19765,15 +19589,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Get Dataset Cell",
@@ -19808,15 +19632,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Draft From Existing Dataset",
@@ -19851,15 +19675,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Get Dataset Pipeline",
@@ -19882,6 +19706,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
           }
         },
         "summary": "List Drafts",
@@ -19916,15 +19750,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Get Draft",
@@ -20037,15 +19871,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Get Evidence",
@@ -20067,6 +19901,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
           }
         },
         "summary": "Health Check",
@@ -20089,6 +19933,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
           }
         },
         "summary": "Get Machine Status",
@@ -20126,15 +19980,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Get Optimizer Pipeline",
@@ -20157,6 +20011,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
           }
         },
         "summary": "Get Optimizers",
@@ -20191,15 +20055,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Get Optimizer Knobs",
@@ -20222,6 +20086,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
           }
         },
         "summary": "Get Origins",
@@ -20256,15 +20130,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Post Origin Draft",
@@ -20287,6 +20161,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
           }
         },
         "summary": "Get Active Session",
@@ -20330,15 +20214,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Delete Site Records",
@@ -20381,15 +20265,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Get Site Records",
@@ -20432,15 +20316,15 @@
             },
             "description": "Successful Response"
           },
-          "422": {
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Default Response"
           }
         },
         "summary": "Post Site Record",
@@ -20463,6 +20347,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
           }
         },
         "summary": "Get Workspace Storage",
@@ -20485,6 +20379,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
           }
         },
         "summary": "Get Storage By Dataset",

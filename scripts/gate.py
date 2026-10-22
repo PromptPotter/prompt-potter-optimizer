@@ -127,6 +127,7 @@ class Selection:
     py_files: tuple[str, ...]
     web_files: tuple[str, ...]
     changed: tuple[str, ...] | None = None
+    staged_paths: tuple[str, ...] = ()
     # ``None`` is the whole check.
     narrowed: tuple[str, ...] | None = None
     # The py lane's probes not kept green, asked in one host process.
@@ -151,6 +152,7 @@ class Selection:
                 for n in names
                 if n.startswith("webapp/") and n.endswith(_LINTED)
             ),
+            staged_paths=tuple(names),
         )
 
 
@@ -520,9 +522,6 @@ _TRACKER = "docs/specs/code-debt-cleanup.md"
 _KNOWN_FALSE = {
     'git grep -cE "def _head_state" -- promptpotter/application/served_dashboard.py == 0': (
         "dashboard.json served as the head state"
-    ),
-    r'git grep -cE "^\s*session\.[a-z_]+ = " -- promptpotter/application/runner == 0': (
-        "the runner writes Session"
     ),
 }
 
@@ -1316,9 +1315,16 @@ def main() -> int:
 
     sel = Selection.build(args.staged, args.changed)
     if args.staged:
-        empty = {"py"} if not sel.py_files else set()
-        empty |= {"web"} if not sel.web_files else set()
-        checks = [c for c in checks if c.kind not in empty]
+        # A check naming what it reads runs on a staged path among them, any other on its kind's files.
+        checks = [
+            c
+            for c in checks
+            if (
+                any(reads(path, c.inputs() or ()) for path in sel.staged_paths)
+                if c.reads
+                else (sel.py_files if c.kind == "py" else sel.web_files)
+            )
+        ]
     if sel.changed is not None and not args.only:
         checks = [
             c

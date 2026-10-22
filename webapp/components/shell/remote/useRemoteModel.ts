@@ -83,7 +83,7 @@ export function useRemoteModel() {
   return {
     cycleId,
     datasetName: leafEntry?.dataset_name,
-    updatedAt: dash.wallclock_serialized_at,
+    updatedAt: dash.at_time,
     babysat: Boolean(leafEntry?.human_intervened),
     offline: status === "offline",
     inner: !isOuterView,

@@ -80,7 +80,7 @@ def declare_run_stop(
     if stop_reason_outcome(stop_reason) is not StopOutcome.PAUSED:
         ledger.append(RunPhaseRecord.stop(stop_reason, spend=spend))
         return
-    cause, detail = session.control.take_pause() or (interrupted_by, "")
+    cause, detail = session.state.control.take_pause() or (interrupted_by, "")
     ledger.append(RunPhaseRecord.stop(stop_reason, cause=cause, detail=detail, spend=spend))
 
 
@@ -174,7 +174,6 @@ def build_run_observers(
     session: Session,
     campaign_config: CampaignConfig,
     readout_sink: StatusFn | None = None,
-    resumed_from_round: int | None = None,
     forked_from: RunObservers | None = None,
 ) -> RunObservers:
     if session.state.cycle_id is None:
@@ -192,7 +191,6 @@ def build_run_observers(
             session=session,
             campaign_config=campaign_config,
             readout_sink=readout_sink,
-            resumed_from_round=resumed_from_round,
             forked_from=forked_from,
         )
     except BaseException:
@@ -214,7 +212,6 @@ def _bind_observers(
     session: Session,
     campaign_config: CampaignConfig,
     readout_sink: StatusFn | None,
-    resumed_from_round: int | None,
     forked_from: RunObservers | None,
 ) -> RunObservers:
     audit = AuditTrailProjection.from_cycle_dir(cycle_dir)
@@ -227,14 +224,13 @@ def _bind_observers(
         if forked_from is None
         else forked_from.readout
     )
-    dashboard = LiveDashboardProjection.for_session(
-        session.hop, tenant_root=session.tenant_root, resumed_from_round=resumed_from_round
-    )
+    dashboard = LiveDashboardProjection.for_session(session.hop, tenant_root=session.tenant_root)
 
     if dashboard is None:
         raise RuntimeError(
             "build_run_observers: LiveDashboardProjection.for_session returned None — the session "
-            f"address is incomplete (tenant_root={session.tenant_root!r}, hop={session.hop})"
+            f"address is incomplete (tenant_root={session.tenant_root!r}, hop={session.hop}) or "
+            "its ledger holds no RunWiringRecord"
         )
 
     ledger.bind(dashboard)
@@ -243,7 +239,7 @@ def _bind_observers(
     ledger.bind(readout)
     ledger.bind(racing)
     ledger.bind(CycleIndexProjection(cycle_dir))
-    ledger.bind(RoundFileProjection(session, session.hop))
+    ledger.bind(RoundFileProjection(session.store, session.hop, session.state))
     tracing = (
         TracingProjection.for_cycle(session.tenant_root, session.hop, langfuse=session.langfuse)
         if forked_from is None

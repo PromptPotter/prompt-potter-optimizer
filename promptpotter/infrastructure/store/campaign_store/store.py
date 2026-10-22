@@ -625,7 +625,6 @@ class CampaignStore:
             mint_kind=index.mint_kind,
             is_root=kind == "root",
             stop_reason=index.stop_reason,
-            superseded_by=index.superseded_by,
             run_phase=run.run_phase,
             status=RunStatus.of(run.run_phase, index.stop_reason),
             producer_attached=run.producer.attached,

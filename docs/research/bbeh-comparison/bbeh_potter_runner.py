@@ -103,7 +103,8 @@ async def run_bbeh_campaign(
             n_variants=n_variants,
             sp_budget_round=sp_budget_round,
         )
-        pipeline_params = configure_and_apply_pipeline(session, campaign_config)
+        session = configure_and_apply_pipeline(session, campaign_config)
+        pipeline_params = session.pipeline_params
         # The model this run actually reaches, resolved from `bbeh/dataset.yaml::pipeline` — never
         # shared_config's MODEL_ID, which describes the route the Colab peers take. Raise rather
         # than default: a results file naming the wrong model is worse than no results file.
@@ -118,7 +119,7 @@ async def run_bbeh_campaign(
             )
         target_model = models.pop()
 
-        cycle_result = await run_campaign(
+        session, cycle_result = await run_campaign(
             session,
             campaign_config,
             readout_sink=print,

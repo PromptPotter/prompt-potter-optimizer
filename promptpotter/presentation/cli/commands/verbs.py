@@ -11,7 +11,7 @@ from pydantic.fields import FieldInfo
 
 from promptpotter.config.paths import SHARED_CACHE_DIRS
 from promptpotter.domain.command_kinds import (
-    PAYLOAD_IN_DOMAIN,
+    PAYLOAD_MODEL_FOR_KIND,
     CampaignPayload,
     CommandKind,
     CyclePayload,
@@ -668,15 +668,15 @@ def _field_args(name: str, field: FieldInfo) -> tuple[Arg, ...]:
         raise TypeError(f"`{name}` has no terminal spelling: {annotation}")
     if not field.is_required():
         return (Arg(flag, dest=name, default=argparse.SUPPRESS, **spec),)
-    if annotation is str:
-        # Optional, so `''` reaches the payload: PowerShell drops an empty argument before argparse sees it.
+    if annotation is str and not any(getattr(m, "min_length", 0) for m in field.metadata):
+        # `''` is a value here, and PowerShell drops an empty argument before argparse sees it.
         return (Arg(name, nargs="?", default="", **spec),)
     return (Arg(name, **spec),)
 
 
 def command_verb(kind: CommandKind) -> Verb:
     """The kind's payload model IS the verb: its docstring the help, its fields the arguments."""
-    model = PAYLOAD_IN_DOMAIN[kind]
+    model = PAYLOAD_MODEL_FOR_KIND[kind]
     address: tuple[Arg, ...] = ()
     if issubclass(model, CyclePayload):
         cycle = ACTIVE_CYCLE if model.implied_target else Arg("--cycle", required=True)

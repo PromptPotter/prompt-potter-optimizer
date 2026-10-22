@@ -105,7 +105,7 @@ async def resume_with_divergence_check(
     skip_divergence_check: bool,
     fork_on_divergence: bool = False,
 ) -> ForkResult | None:
-    sc = session.scoring
+    sc = session.state.scoring
     scorer = sc.require_scorer()
     prior = closed_rounds(session.store, hop, scorer, before_round=resumed_from_round, moment=None)
 

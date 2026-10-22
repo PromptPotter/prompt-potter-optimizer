@@ -10,7 +10,7 @@ from promptpotter.application.commands.dispatcher import CommandCall, CommandDis
 from promptpotter.application.commands.loop_commands import read_payload_file
 from promptpotter.application.cycle_listing import resolve_campaign_id_hint
 from promptpotter.domain.command_kinds import (
-    PAYLOAD_IN_DOMAIN,
+    PAYLOAD_MODEL_FOR_KIND,
     CampaignPayload,
     CommandKind,
     CyclePayload,
@@ -24,9 +24,9 @@ _ADDRESS = ("campaign_id", "cycle_id")
 
 
 async def cmd_command(args: argparse.Namespace) -> CommandResult:
-    """Every verb `verbs.py::command_verbs` derives from a payload model runs here."""
+    """Every verb `verbs.py::command_verb` derives from a payload model runs here."""
     kind = next(kind for kind in CommandKind if kind.cli_verb == args.command)
-    model = PAYLOAD_IN_DOMAIN[kind]
+    model = PAYLOAD_MODEL_FOR_KIND[kind]
     stores = open_stores(args)
     fields: dict[str, Any] = {
         name: read_payload_file(value) if isinstance(value, Path) else value
@@ -45,8 +45,7 @@ async def cmd_command(args: argparse.Namespace) -> CommandResult:
     try:
         payload = model.model_validate(fields)
     except ValidationError as exc:
-        reason = "; ".join(f"{'.'.join(map(str, e['loc']))}: {e['msg']}" for e in exc.errors())
-        raise PayloadInvalidError(reason) from exc
+        raise PayloadInvalidError.refusing(exc.errors()) from exc
     # The address, else the one field a workspace command names its subject by.
     named = [name for name in _ADDRESS if name in model.model_fields] or [next(iter(fields))]
     ids = {name: str(fields[name]) for name in named}
@@ -59,5 +58,7 @@ async def cmd_command(args: argparse.Namespace) -> CommandResult:
             "command_id": sent.accepted.command_id,
             "ack": sent.ack,
         },
-        human=f"{'/'.join(ids.values())} -> {kind} {sent.ack}.",
+        human=" ".join(
+            filter(None, (f"{'/'.join(ids.values())} -> {kind} {sent.ack}.", model.follow_up))
+        ),
     )

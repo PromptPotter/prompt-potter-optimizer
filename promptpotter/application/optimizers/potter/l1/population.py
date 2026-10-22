@@ -5,12 +5,12 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.optimizers.potter.validators.l1_strict import (
-    L1_CONFIG_NOT_IN_RUNTIME_FAILURES,
-    L1_INNER_LAYOUT_APPLIES,
-    L1_INNER_PLACEHOLDERS_INTACT,
-    L1_INNER_STEER_IS_LEGAL,
-    L1_PROMPT_FIELD_NOT_GUTTED,
-    L1_PROMPT_FIELDS_OPEN,
+    l1_config_not_in_runtime_failures,
+    l1_inner_layout_applies,
+    l1_inner_placeholders_intact,
+    l1_inner_steer_is_legal,
+    l1_prompt_field_not_gutted,
+    l1_prompt_fields_open,
 )
 from promptpotter.domain.candidate_diff import candidate_delta
 from promptpotter.domain.opt_search_point import OptSearchPoint
@@ -44,38 +44,28 @@ def parse_population(
         if schema:
             # The DELTA, never the child's whole prompt: an inherited field was not proposed.
             prompt_edit = candidate_delta(opt_sp.prompts, parent.prompts, None, None).prompt
-            held_outcome = L1_PROMPT_FIELDS_OPEN.check(prompt_edit, pipeline_schema=schema)
-            if held_outcome is not None:
-                failures.extend(held_outcome.evidence["failures"])
+            failures += l1_prompt_fields_open(prompt_edit, pipeline_schema=schema)
             if pipeline_overlay:
-                rf_outcome = L1_CONFIG_NOT_IN_RUNTIME_FAILURES.check(
-                    pipeline_overlay,
-                    runtime_failures=runtime_failures,
-                    pipeline_params=merged_pp,
-                )
-                if rf_outcome is not None:
-                    failures.extend(rf_outcome.evidence["failures"])
                 # The DELTA, unlike the placeholder check below: these convict what was PROPOSED.
-                for outcome in (
-                    L1_INNER_STEER_IS_LEGAL.check(
+                failures += [
+                    *l1_config_not_in_runtime_failures(
+                        pipeline_overlay,
+                        runtime_failures=runtime_failures,
+                        pipeline_params=merged_pp,
+                    ),
+                    *l1_inner_steer_is_legal(
                         pipeline_overlay,
                         inner_nodes=() if inner_cells is None else inner_cells.owners,
                     ),
-                    L1_INNER_LAYOUT_APPLIES.check(pipeline_overlay),
-                    L1_PROMPT_FIELD_NOT_GUTTED.check(
+                    *l1_inner_layout_applies(pipeline_overlay),
+                    *l1_prompt_field_not_gutted(
                         pipeline_overlay,
                         inner_cells=inner_cells,
                         pipeline_params=pipeline_params,
                     ),
-                ):
-                    if outcome is not None:
-                        failures.extend(outcome.evidence["failures"])
+                ]
             # The MERGED params: a child of a broken parent inherits a severed port without proposing it.
-            ph_outcome = L1_INNER_PLACEHOLDERS_INTACT.check(
-                merged_pp or {}, inner_cells=inner_cells
-            )
-            if ph_outcome is not None:
-                failures.extend(ph_outcome.evidence["failures"])
+            failures += l1_inner_placeholders_intact(merged_pp or {}, inner_cells=inner_cells)
         # A replayed proposal already carries them: the bench banks the walk's arms validated.
         failures = [vf for vf in failures if vf not in cp.validation_failures]
         if failures:

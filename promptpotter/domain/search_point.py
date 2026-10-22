@@ -13,17 +13,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
 
 
-# The fields, in render order, of a prompt node whose `prompt_info` declares none of its own.
-DEFAULT_PROMPT_FIELDS: Annotated[tuple[str, ...], shapes_optimizer_prompt] = (
-    "persona",
-    "task_intent",
-    "problem_description",
-    "instruction",
-    "thinking_style",
-    "answer_format",
-)
-
-
 # A prompt node's shots locus; no field may take its name, nor the render's (`prompt`).
 SHOTS_KEY: Annotated[str, shapes_optimizer_prompt] = "shots"
 

@@ -134,7 +134,7 @@ async def measure_population(
             raise StopLoop(cut)
     parent = await rescore_parent(ctx, cells, role=MeasurementRole.PARENT)
     # Never in a `finally`: an unwound round did not score. Round 0's is `round.py::emit_origin_round`.
-    cycle.session.control.spend_sample_lookahead()
+    cycle.session.state.control.spend_sample_lookahead()
     # The shared anchor's single-draw noise is correlated across arms, so it favours none.
     pair = ReferencePairs.of_round(
         ctx,
@@ -298,7 +298,7 @@ class ReferencePairs:
         return cls(
             path=(session.hop,),
             instrument_id=session.instrument_id,
-            scorer_id=session.scoring.require_scorer().id,
+            scorer_id=session.state.scoring.require_scorer().id,
             dataset_hash=session.bank.dataset_hash,
             declared=declared,
             names=names,
@@ -381,7 +381,7 @@ async def _walk_population(
     skips = skips_on_record(cycle.session.state.ledger, round_num)
     walks: dict[ArmKey, Walk | None] = {}
     for key, arm in proposed.items():
-        checks: list[StopRule] = list(cycle.session.scoring.degradation_checks)
+        checks: list[StopRule] = list(cycle.session.state.scoring.degradation_checks)
         # The arms before this one still being walked may yet become priors.
         rule = race.rule(list(walks.items())) if race is not None else None
         if rule is not None:

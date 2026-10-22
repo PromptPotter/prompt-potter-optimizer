@@ -340,7 +340,7 @@ def _reads_before(session: Session) -> int:
     return bench_reads(
         session.store,
         bank=session.bank,
-        sample_keys=frozenset(s.key for s in session.scoring.require_partition().bench),
+        sample_keys=frozenset(s.key for s in session.state.scoring.require_partition().bench),
     )
 
 
@@ -364,7 +364,7 @@ async def score_on_bench(
             label=label,
             sp_hash=search_point.sp_hash(session.pipeline_schema),
             round=round_num,
-            rows=len(session.scoring.require_partition().bench),
+            rows=len(session.state.scoring.require_partition().bench),
         ),
     )
     try:
@@ -387,7 +387,7 @@ async def member_on_bench(
     taken = await _pass_on_bench(
         session, search_point, individual_id=individual_id, round_num=round_num
     )
-    scorer = session.scoring.require_scorer()
+    scorer = session.state.scoring.require_scorer()
     read = _read_pass(session.store, taken, scorer, tolerance=_tolerance(session))
     return _bench_member(path, read, instrument_id=session.instrument_id)
 
@@ -395,7 +395,7 @@ async def member_on_bench(
 async def _pass_on_bench(
     session: Session, search_point: JobSearchPoint, *, individual_id: str, round_num: int
 ) -> BenchPass:
-    bench = list(session.scoring.require_partition().bench)
+    bench = list(session.state.scoring.require_partition().bench)
     # Counted before the send, so the pass is never one of its own readers.
     reads_before = _reads_before(session)
     scored = await score_search_point(
@@ -421,7 +421,7 @@ async def _pass_on_bench(
         cells=scored.cells,
         sample_keys=[s.key for s in bench],
         stop=stop,
-        scorer_id=session.scoring.require_scorer().id,
+        scorer_id=session.state.scoring.require_scorer().id,
         reads_before=reads_before,
         measured_datasets={s.key: s.measured_dataset for s in bench if s.measured_dataset},
     )
@@ -433,7 +433,7 @@ def declare_bench(cb: RunCallbacks, score: BenchScore) -> BenchScore:
 
 
 def _tolerance(session: Session) -> int:
-    split = session.scoring.require_partition().split
+    split = session.state.scoring.require_partition().split
     return split.tolerance if split is not None else 0
 
 
@@ -449,7 +449,7 @@ def graded(
     """The one write a line's passes are folded from: a pass no call here follows is lost with the process."""
     tolerance = _tolerance(session)
     read = _read_pass(
-        session.store, bench_pass, session.scoring.require_scorer(), tolerance=tolerance
+        session.store, bench_pass, session.state.scoring.require_scorer(), tolerance=tolerance
     )
     cb.on_phase(
         CampaignPhase.BENCH,
@@ -501,7 +501,7 @@ def _with_selection(passes: BenchPasses, taken: BenchPass) -> BenchPasses:
 
 def reserve_selection_pass(cycle: Cycle, session: Session) -> None:
     """The set-aside opens at the ORIGIN's price; a selection that writes more would end its pass short."""
-    book = session.control.book
+    book = session.state.control.book
     if not book.set_aside_usd:
         return
     costs = [
@@ -512,7 +512,7 @@ def reserve_selection_pass(cycle: Cycle, session: Session) -> None:
     if not costs:
         return
     # One cell on top of the mean: the last row is admitted at the dearest bill, never the average.
-    usd = len(session.scoring.require_partition().bench) * fmean(costs) + max(costs)
+    usd = len(session.state.scoring.require_partition().bench) * fmean(costs) + max(costs)
     if usd > book.set_aside_usd:
         book.set_aside(usd, round(book.set_aside_tokens * usd / book.set_aside_usd))
 
@@ -537,12 +537,12 @@ async def bench_selection(
         head.individual.id,
         schema=session.pipeline_schema,
         framing=framing,
-        demo=session.scoring.require_partition().demo,
+        demo=session.state.scoring.require_partition().demo,
     )
     selected_hash = selected_sp.sp_hash(session.pipeline_schema)
     held = banked.pass_of(head.individual.id)
     if held is not None and held.answers(
-        selected_hash, origin.sample_keys, session.scoring.require_scorer().id
+        selected_hash, origin.sample_keys, session.state.scoring.require_scorer().id
     ):
         return banked
     try:
@@ -566,7 +566,7 @@ async def bench_selection(
             cells=[],
             sample_keys=origin.sample_keys,
             stop=PassStop(cause=reason, warning=None),
-            scorer_id=session.scoring.require_scorer().id,
+            scorer_id=session.state.scoring.require_scorer().id,
             reads_before=_reads_before(session),
             measured_datasets=origin.measured_datasets,
         )

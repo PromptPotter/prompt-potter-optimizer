@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Self
+from typing import Annotated, Any, ClassVar, Self
 
 from pydantic import Field, model_validator
 
@@ -15,9 +15,10 @@ from promptpotter.domain.phases import (
     INNER_SKIP_REFUSAL,
     GateDecision,
 )
+from promptpotter.domain.results import VerifyStrategy
+from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import StrictModel, WireInt
-from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.identity import (
     CAMPAIGN_BUDGET_CAP,
     CAMPAIGN_CREATE_CAP,
@@ -26,9 +27,6 @@ from promptpotter.shared.identity import (
     CAMPAIGN_RUN_CAP,
     CAMPAIGN_STEP_CAP,
 )
-
-if TYPE_CHECKING:
-    from collections.abc import Iterator
 
 
 class CommandKind(StrEnum):
@@ -45,11 +43,6 @@ class CommandKind(StrEnum):
         member.capability = capability
         member.cli_verb = cli_verb
         return member
-
-    @property
-    def payload_name(self) -> str:
-        """The kind's payload model IS named for it, so no table pairs them and no two kinds share one."""
-        return "".join(part.capitalize() for part in self.value.split("-")) + "Payload"
 
     PAUSE_CYCLE = "pause-cycle", "loop_commands:pause_cycle", CAMPAIGN_STEP_CAP, "pause"
     ORIGIN_GATE_DECISION = (
@@ -165,11 +158,35 @@ class CommandKind(StrEnum):
     )
 
 
+# Filled as each model declares the kind it carries: the ONE kind → payload table. Keyed `str`,
+# so a `CommandRecord.kind` read back off the ledger finds its row.
+PAYLOAD_MODEL_FOR_KIND: dict[str, type[CommandPayload]] = {}
+
+
 class CommandPayload(StrictModel):
     """Base of every payload on the generic ``POST /commands/{kind}`` route. ``StrictModel`` forbids
     extras, so THE MODEL IS the accepted-key set — there is no list to fall out of step with it.
     A payload's address base is its target ledger: ``CyclePayload`` the cycle's, ``CampaignPayload``
-    and a bare one the workspace's, a draft edit's (``payloads.py::DraftPayload``) its draft's."""
+    and a bare one the workspace's, a ``DraftPayload`` its draft's."""
+
+    kind: ClassVar[CommandKind]
+    # What the terminal prints after the ack, where the ack alone leaves the next step unsaid.
+    follow_up: ClassVar[str] = ""
+
+    def __init_subclass__(cls, kind: CommandKind | None = None, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        if kind is None:
+            return
+        if kind in PAYLOAD_MODEL_FOR_KIND:
+            raise TypeError(f"{kind} already carries {PAYLOAD_MODEL_FOR_KIND[kind].__name__}")
+        if issubclass(cls, CyclePayload) and not hasattr(cls, "inner_refusal"):
+            raise TypeError(f"{cls.__name__} is cycle-scoped and declares no `inner_refusal`")
+        cls.kind = kind
+        PAYLOAD_MODEL_FOR_KIND[kind] = cls
+
+
+class ReasonedPayload(CommandPayload):
+    reason: str = Field(default="", max_length=512, description="Recorded with the command.")
 
 
 class CampaignPayload(CommandPayload):
@@ -187,7 +204,7 @@ class CyclePayload(CampaignPayload):
     # Excluded: the dispatcher spends it resolving the leaf, so a recorded tail addresses it twice.
     descend: str | None = Field(default=None, max_length=512, exclude=True)
 
-    # ``None`` = acts on an inner run. Undeclared here, so a new kind fails at import until it answers.
+    # ``None`` = acts on an inner run. Undeclared here, so a new kind fails at declaration until it answers.
     inner_refusal: ClassVar[str | None]
     # False: a terminal names the cycle, never defaulting to the active one.
     implied_target: ClassVar[bool] = True
@@ -197,21 +214,21 @@ class LoopPayload(CyclePayload):
     """Only a RUNNING loop takes it, off its own ledger (`ledger_scan.py::Controls`) — which is why these sit below `application/`."""
 
 
-class SkipSearchpointPayload(LoopPayload):
+class SkipSearchpointPayload(LoopPayload, kind=CommandKind.SKIP_SEARCHPOINT):
     """Cut the candidate being scored at its next sample boundary; the round carries on with the rest."""
 
     inner_refusal: ClassVar[str | None] = INNER_SKIP_REFUSAL
+    follow_up: ClassVar[str] = "The round goes on with the rest."
 
 
-class PauseCyclePayload(LoopPayload):
+class PauseCyclePayload(ReasonedPayload, LoopPayload, kind=CommandKind.PAUSE_CYCLE):
     """Ask a running cycle to stop at its next checkpoint; it resumes from there."""
 
     inner_refusal: ClassVar[str | None] = INNER_PAUSE_REFUSAL
+    follow_up: ClassVar[str] = "The loop exits at its next checkpoint; `resume` picks it up."
 
-    reason: str = Field(default="", max_length=512, description="Recorded with the command.")
 
-
-class SetSampleLookaheadPayload(LoopPayload):
+class SetSampleLookaheadPayload(LoopPayload, kind=CommandKind.SET_SAMPLE_LOOKAHEAD):
     # Throughput is what an inner run answers for itself: the outer's depth is never inherited.
     inner_refusal: ClassVar[str | None] = None
 
@@ -222,10 +239,11 @@ class SetSampleLookaheadPayload(LoopPayload):
     )
 
 
-class OriginGateDecisionPayload(LoopPayload):
+class OriginGateDecisionPayload(LoopPayload, kind=CommandKind.ORIGIN_GATE_DECISION):
     """Answer a cycle holding at the round-0 origin gate; one not holding clears it on arrival."""
 
     inner_refusal: ClassVar[str | None] = INNER_GATE_REFUSAL
+    follow_up: ClassVar[str] = "A cycle holding at the gate acts on it within a second."
 
     decision: GateDecision = Field(
         description="`proceed` into L1 anyway, `rescore` the origin force-fresh, or `abort` the cycle."
@@ -258,11 +276,12 @@ class SubmittedArm(StrictModel):
         return self
 
 
-class SubmitArmsPayload(LoopPayload):
+class SubmitArmsPayload(LoopPayload, kind=CommandKind.SUBMIT_ARMS):
     """Answer a cycle holding for a round's arms (`optimization.arm_gate`) with arms of its own,
     drafts kept, or both."""
 
     inner_refusal: ClassVar[str | None] = INNER_ARMS_REFUSAL
+    follow_up: ClassVar[str] = "A cycle holding for them measures them within a second."
 
     arms: list[SubmittedArm] = Field(
         default_factory=list,
@@ -288,7 +307,7 @@ class SubmitArmsPayload(LoopPayload):
 _OUTER_OWNS_TREE = "An inner run's cycles live and die with the outer campaign."
 
 
-class DeleteCyclePayload(CyclePayload):
+class DeleteCyclePayload(CyclePayload, kind=CommandKind.DELETE_CYCLE):
     """Remove ONE stub cycle, the singular of `cleanup-empty-cycles`; refused for a cycle holding
     rounds or a live producer (pause it first)."""
 
@@ -297,13 +316,13 @@ class DeleteCyclePayload(CyclePayload):
     implied_target: ClassVar[bool] = False
 
 
-class CleanupEmptyCyclesPayload(CyclePayload):
+class CleanupEmptyCyclesPayload(CyclePayload, kind=CommandKind.CLEANUP_EMPTY_CYCLES):
     """Remove the stub cycles a mint left behind when it never reached round 0."""
 
     inner_refusal: ClassVar[str | None] = _OUTER_OWNS_TREE
 
 
-class ChangeRunLimitsPayload(CyclePayload):
+class ChangeRunLimitsPayload(CyclePayload, kind=CommandKind.CHANGE_RUN_LIMITS):
     """Raise or lower an existing cycle's spend, token, round or wall-clock bound; a budget- or
     round-halted cycle continues by a higher ceiling, then `resume`. Spend is clamped against the
     account allowance, so read the armed value off the dashboard."""
@@ -311,22 +330,24 @@ class ChangeRunLimitsPayload(CyclePayload):
     inner_refusal: ClassVar[str | None] = (
         "An inner run spends under the outer run's ceiling. Change the outer run's limits instead."
     )
+    follow_up: ClassVar[str] = (
+        "It is clamped against your account allowance, so read the armed value back from the "
+        "dashboard; `resume` picks it up."
+    )
 
     # An axis it does not name stays as it stands; a named null lifts it.
     budget: Budget
 
     @model_validator(mode="after")
     def _names_an_axis(self) -> ChangeRunLimitsPayload:
-        """The domain error, not ``ValueError``: Pydantic wraps that one, and the CLI builds this model too."""
         if not self.budget.named:
-            raise PayloadInvalidError(
-                "change-run-limits requires a budget naming at least one of usd / tokens / "
-                "rounds / wall_clock_s."
+            raise ValueError(
+                "a budget naming at least one of usd / tokens / rounds / wall_clock_s is required"
             )
         return self
 
 
-class StepCyclePayload(CyclePayload):
+class StepCyclePayload(CyclePayload, kind=CommandKind.STEP_CYCLE):
     """Let a paused cycle run a bounded number of rounds, then stop again."""
 
     inner_refusal: ClassVar[str | None] = INNER_LAUNCH_REFUSAL
@@ -334,20 +355,79 @@ class StepCyclePayload(CyclePayload):
     step_rounds: WireInt = Field(default=1, ge=1, le=100, description="Rounds to run.")
 
 
-class _LifecyclePayload(CampaignPayload):
-    reason: str = Field(default="", max_length=512, description="Recorded with the command.")
+class StartRunPayload(CyclePayload, kind=CommandKind.START_RUN):
+    """A run of an existing cycle: what bounds it (``budget``, ``step_rounds``) and the shape it
+    takes (``mode``)."""
+
+    inner_refusal: ClassVar[str | None] = INNER_LAUNCH_REFUSAL
+
+    budget: Budget = Budget()
+    step_rounds: WireInt | None = Field(default=None, ge=1, le=100)
+    mode: RunMode = RunMode()
 
 
-class ArchiveCampaignPayload(_LifecyclePayload):
+class ForkCyclePayload(ReasonedPayload, CyclePayload, kind=CommandKind.FORK_CYCLE):
+    """The cut, and the shape of the fork's first run (``mode``) — one act, so one command.
+    A parent a producer still holds is paused by the applier once the fork's run is admitted."""
+
+    inner_refusal: ClassVar[str | None] = INNER_LAUNCH_REFUSAL
+
+    mode: RunMode = RunMode()
+    round: int = Field(default=0, ge=0)
+    candidate_id: str = Field(default="", max_length=128)
+    # Validated into a typed `CycleSeed` at the applier, which stamps the provenance the wire omits.
+    seed: dict[str, Any]
+    keep_rounds: bool = Field(
+        default=False,
+        description=(
+            "False (the default) is `operator_steered`: a clean offshoot from the origin, "
+            "re-scoring the edited searchpoint. True is `operator_rewind` — rounds 0..round-1 "
+            "are lifted and the fork continues at `round` under the seed's overrides, which is "
+            "what an 'apply this from here' press means and what the terminal spells "
+            "`resume --rewind N`."
+        ),
+    )
+
+
+class VerifyCandidatePayload(CyclePayload, kind=CommandKind.VERIFY_CANDIDATE):
+    """``samples`` omitted is the ANSWER, not an absence: the count is derived from the
+    per-candidate round budget and the rounds run since this cycle's last verification
+    (``application/diagnostics/verify.py::derive_verify_samples``). A larger explicit count is
+    refused, naming the budget — which is what keeps one click on a million-row dataset from being
+    a million-cell bill.
+
+    Addressed as the ``evidence`` read addresses a searchpoint — cycle, descent, ``candidate_id``
+    — so an L4 inner candidate is as reachable as a top-level one."""
+
+    inner_refusal: ClassVar[str | None] = None
+
+    candidate_id: str = Field(min_length=1, max_length=128)
+    samples: WireInt | None = Field(default=None, ge=1, le=10_000)
+    strategy: VerifyStrategy = "random"
+    seed: WireInt | None = None
+
+
+class GradeBenchPayload(CyclePayload, kind=CommandKind.GRADE_BENCH):
+    """The cycle holding its campaign's line: the pass grades the campaign's result, so any other
+    cycle is refused."""
+
+    inner_refusal: ClassVar[str | None] = (
+        "The bench grades a campaign's line, and an inner run is a cell of its outer campaign's."
+    )
+
+
+class ArchiveCampaignPayload(ReasonedPayload, CampaignPayload, kind=CommandKind.ARCHIVE_CAMPAIGN):
     """Flag a campaign archived: hidden from the default listing, restorable by unarchive; the tree
     does not move."""
 
 
-class UnarchiveCampaignPayload(_LifecyclePayload):
+class UnarchiveCampaignPayload(
+    ReasonedPayload, CampaignPayload, kind=CommandKind.UNARCHIVE_CAMPAIGN
+):
     """Restore an archived campaign to active."""
 
 
-class DeleteCampaignPayload(_LifecyclePayload):
+class DeleteCampaignPayload(ReasonedPayload, CampaignPayload, kind=CommandKind.DELETE_CAMPAIGN):
     """Remove a campaign for good; its measurements still cache-hit for siblings."""
 
     keep_results: bool = Field(
@@ -360,7 +440,7 @@ class DeleteCampaignPayload(_LifecyclePayload):
 LifecyclePayload = ArchiveCampaignPayload | UnarchiveCampaignPayload | DeleteCampaignPayload
 
 
-class SetCampaignLabelPayload(CampaignPayload):
+class SetCampaignLabelPayload(CampaignPayload, kind=CommandKind.SET_CAMPAIGN_LABEL):
     """Name a campaign wherever it is named to a human; its id still addresses it."""
 
     # Required, and `""` is the CLEAR: a default would give "clear" two spellings.
@@ -371,11 +451,15 @@ class DraftAddressedPayload(CommandPayload):
     draft_id: str = Field(min_length=8, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
 
 
-class DiscardDraftPayload(DraftAddressedPayload):
+class DraftPayload(DraftAddressedPayload):
+    """Recorded on the draft's own ledger, which its Start moves into the root cycle."""
+
+
+class DiscardDraftPayload(DraftAddressedPayload, kind=CommandKind.DISCARD_DRAFT):
     """Close an open check-in without minting; its check-in calls stay billed to the workspace."""
 
 
-class CancelQueuedRunPayload(CommandPayload):
+class CancelQueuedRunPayload(CommandPayload, kind=CommandKind.CANCEL_QUEUED_RUN):
     """Withdraw a launch waiting for a machine slot; nothing ran and nothing was spent."""
 
     job_id: str = Field(
@@ -386,27 +470,8 @@ class CancelQueuedRunPayload(CommandPayload):
     )
 
 
-class SetConcurrentCyclesPayload(CommandPayload):
+class SetConcurrentCyclesPayload(CommandPayload, kind=CommandKind.SET_CONCURRENT_CYCLES):
     """How many campaigns this account may hold at once, queued launches included; at most the
     machine's capacity, and an account on the host's key cannot move its own."""
 
     max_concurrent_cycles: WireInt = Field(ge=1, description="The new limit.")
-
-
-def _payload_models(base: type[CommandPayload]) -> Iterator[type[CommandPayload]]:
-    for model in base.__subclasses__():
-        yield model
-        yield from _payload_models(model)
-
-
-_KIND_NAMED = {kind.payload_name: kind for kind in CommandKind}
-# Every kind whose payload is declared here: a terminal verb derived from one loads no use case.
-PAYLOAD_IN_DOMAIN: dict[CommandKind, type[CommandPayload]] = {
-    _KIND_NAMED[model.__name__]: model
-    for model in _payload_models(CommandPayload)
-    if model.__name__ in _KIND_NAMED
-}
-# Keyed `str`: a `CommandRecord.kind` read back off the ledger finds its member's row.
-LOOP_TAKEN: dict[str, type[LoopPayload]] = {
-    _KIND_NAMED[model.__name__]: model for model in LoopPayload.__subclasses__()
-}

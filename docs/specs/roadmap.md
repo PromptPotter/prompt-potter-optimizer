@@ -251,7 +251,7 @@ execute as written.
 Each stage closes on a verification, never a date.
 
 1. **Members off their runtime.** Built: a member declares the state parts it reads and writes,
-   and a roster leaving one open is refused at load (`application/optimizer_manifest.py::_refuse_open_roster`).
+   and a roster leaving one open is refused at load (`application/optimizer_manifest.py::_open_edges`).
 2. **Pools.** Built for the block library and the demo pool (`domain/pool.py`). Owed: the
    campaign's measured individuals as a pool. *Closes when* a manifest declares it and a resumed run
    hands its reader the pool its banked round names.

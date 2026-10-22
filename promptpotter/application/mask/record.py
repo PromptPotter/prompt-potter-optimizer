@@ -7,6 +7,7 @@ from pydantic import Field
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_records import ResumeCheckpointRecord
 from promptpotter.domain.strict_model import FrozenModel
+from promptpotter.shared.errors import BadRequestError
 
 LensKind = Literal["score", "dials", "abort"]
 _LENS_KINDS: dict[str, LensKind] = {kind: kind for kind in get_args(LensKind)}
@@ -35,7 +36,7 @@ def parse_lens(value: str, *, allow_abort: bool) -> Lens:
             else "'score:<formula>' or 'dials:<term=weight,…>'; an abort lens is a lineage-tree "
             "question, not a comparable level"
         )
-        raise ValueError(f"Unknown lens: {value!r} (expected {expected})")
+        raise BadRequestError(f"Unknown lens: {value!r} (expected {expected})")
     return Lens(kind, body)
 
 
@@ -45,7 +46,7 @@ def parse_sample_ids(text: str | None) -> frozenset[int] | None:
     try:
         ids = frozenset(int(tok) for tok in text.split(",") if tok.strip())
     except ValueError as exc:
-        raise ValueError(f"Invalid samples list: {text!r} ({exc})") from exc
+        raise BadRequestError(f"Invalid samples list: {text!r} ({exc})") from exc
     return ids or None
 
 

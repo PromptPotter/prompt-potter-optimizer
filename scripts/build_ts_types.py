@@ -17,7 +17,6 @@ from pydantic.fields import ComputedFieldInfo, FieldInfo
 sys.path.insert(0, str(REPO))
 
 from promptpotter.application.campaign_listing import CampaignListResponse
-from promptpotter.application.commands.payloads import PAYLOAD_MODEL_FOR_KIND
 from promptpotter.application.config_map import ConfigMapResponse
 from promptpotter.application.cycle_files import FileContentResponse, FilesResponse
 from promptpotter.application.cycle_listing import CyclesResponse
@@ -41,14 +40,14 @@ from promptpotter.application.pipeline_resolve import (
     OptimizerRoster,
 )
 from promptpotter.application.served_dashboard import ServedDashboard, WarmingDashboard
+from promptpotter.domain.activity import RayResponse
 from promptpotter.domain.cells import Cell, CellsResponse
-from promptpotter.domain.command_kinds import CommandKind
+from promptpotter.domain.command_kinds import PAYLOAD_MODEL_FOR_KIND, CommandKind
+from promptpotter.domain.lineage_tree import CourseNode
 from promptpotter.domain.projection_envelope import ProjectionEnvelope
 from promptpotter.domain.round_audit import RoundAudit
 from promptpotter.domain.run_records import CycleSeed
-from promptpotter.infrastructure.store.family_ray_queries import RayResponse
-from promptpotter.infrastructure.store.lineage_queries import CourseNode
-from promptpotter.main import HealthResponse
+from promptpotter.main import ErrorEnvelope, HealthResponse
 from promptpotter.presentation.api.routers.active import ActiveSessionResponse
 from promptpotter.presentation.api.routers.auth import MeResponse, UserSettings
 from promptpotter.presentation.api.routers.backends import (
@@ -81,6 +80,7 @@ SERVED_ROOTS: tuple[type, ...] = (
     DatasetStorageResponse,
     DraftListResponse,
     DraftReopenResponse,
+    ErrorEnvelope,
     Evidence,
     FileContentResponse,
     FilesResponse,
@@ -259,7 +259,7 @@ def _emit_command_contract() -> str:
         "  [P in Exclude<keyof T, K>]?: DeepPartial<T[P]>;\n"
         "};\n\n"
         "// Each kind's body IS its payload model "
-        "(application/commands/payloads.py::PAYLOAD_MODEL_FOR_KIND).\n"
+        "(domain/command_kinds.py::PAYLOAD_MODEL_FOR_KIND).\n"
         "export interface CommandPayloads {\n" + "\n".join(sent) + "\n}\n\n"
         "// What each kind answers: its route's `response_model` "
         "(presentation/api/routers/commands.py).\n"
@@ -504,6 +504,9 @@ def _emit_display_metrics() -> str:
     labels = "\n".join(
         f"  {metric!r}: {info.label!r}," for metric, info in DISPLAY_METRIC_INFO.items()
     )
+    units = "\n".join(
+        f"  {metric!r}: {info.unit.value!r}," for metric, info in DISPLAY_METRIC_INFO.items()
+    )
     return (
         "// A column every arm carries (domain/results.py::DisplayMetric).\n"
         f"export type DisplayMetric = {members};\n\n"
@@ -514,6 +517,9 @@ def _emit_display_metrics() -> str:
         "];\n\n"
         "export const DISPLAY_METRIC_LABELS: Record<DisplayMetric, string> = {\n"
         f"{labels}\n"
+        "};\n\n"
+        'export const DISPLAY_METRIC_UNITS: Record<DisplayMetric, Measurand["unit"]> = {\n'
+        f"{units}\n"
         "};"
     )
 

@@ -4,8 +4,8 @@ import {
   READING_STATE_SENTENCES,
   type ReadingStateKind,
 } from "@/lib/api/types.generated";
-import type { LiftEstimate, MeasuredLift, Measurand, PairedReading } from "@/lib/api/types";
-import { fmtFitness, fmtPct0, fmtSigned } from "@/lib/format";
+import type { LiftEstimate, MeasuredLift, PairedReading } from "@/lib/api/types";
+import { fmtLevel, fmtSigned } from "@/lib/format";
 
 export type PairRead =
   | { read: true; lift: MeasuredLift; cells: number }
@@ -28,16 +28,6 @@ export function liftOf(reading: PairedReading | null): LiftEstimate | null {
   if (reading === null) return null;
   const pair = readPaired(reading);
   return pair.read ? pair.lift.estimate : null;
-}
-
-// A member's level in its measurand's own unit: a score printed as a percent reads as a rate.
-function fmtLevel(unit: Measurand["unit"], v: number): string {
-  switch (unit) {
-    case "rate":
-      return fmtPct0(v);
-    case "score":
-      return fmtFitness(v);
-  }
 }
 
 export type PairFacet = "rates" | "lift";

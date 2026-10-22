@@ -12,7 +12,7 @@ from promptpotter.application.bench.resume_and_fork.resume import (
 )
 from promptpotter.application.bench.task_context import campaign_framing
 from promptpotter.application.datasets.authored import scorer_of
-from promptpotter.application.initialization.session import Session
+from promptpotter.application.initialization.session import ScorerSetup, Session
 from promptpotter.application.initialization.wiring import bind_cycle_session
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
@@ -28,7 +28,7 @@ from promptpotter.application.scoring.classification import build_degradation_ch
 from promptpotter.application.scoring.formula.compiler import cell_channels_of
 from promptpotter.application.scoring.sample_measurement import cell_bound
 from promptpotter.application.views.ingress import init_enter, init_exit
-from promptpotter.domain.bench import BankPartition, partition_bank, restored_partition
+from promptpotter.domain.bench import BankPartition, partition_bank
 from promptpotter.domain.campaign import Compare, Optimize
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.l4.inner_origin import inner_origin_of
@@ -57,14 +57,13 @@ from promptpotter.infrastructure.store.archive_queries import (
     memory_scope,
 )
 from promptpotter.judges.registry import build_evaluators
-from promptpotter.shared.errors import ConflictError, DiagnosticError
+from promptpotter.shared.errors import DiagnosticError
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.origin import CampaignOrigin
     from promptpotter.application.run_callbacks import RunCallbacks
     from promptpotter.application.scoring.search_point_scorer import ScoredWalk
-    from promptpotter.domain.bench import PartitionRecord
     from promptpotter.domain.campaign import Campaign
     from promptpotter.domain.results import Concluded
     from promptpotter.domain.sample import Sample
@@ -103,24 +102,30 @@ def init_cycle(
         store.rewind_to_round(hop, resume_from_round_override)
     existing = store.load(hop, moment=None)
     if existing is not None:
-        session.human_intervened = existing.human_intervened
+        session.state.human_intervened = existing.human_intervened
         # The round NUMBER after the highest one closed, never a count: the origin is round 0.
         return resolved, max(store.standing_rounds(hop, moment=None).rounds, default=0) + 1
     return resolved, 1
 
 
 def populate_session_scoring(
-    session: Session, campaign_config: CampaignConfig, *, source: RunSource
+    session: Session,
+    campaign_config: CampaignConfig,
+    *,
+    source: RunSource,
+    partition: BankPartition,
 ) -> None:
-    session.source = source
-    session.scoring.scorer = scorer_of(
-        campaign_config,
-        verifier_graded=all_verifier_graded(s.ground_truth for s in session.bank.samples),
-    )
-    session.scoring.display_metric = campaign_config.display_metric
-    # Assigned unconditionally: `{}` declares no judges, and never means "keep what is armed".
-    session.scoring.judges = build_evaluators(
-        campaign_config.judges, cache=session.store.judge_reuse
+    """The one writer of ``state.scoring``, built whole: `{}` judges declares none, never "keep"."""
+    session.state.source = source
+    session.state.scoring = ScorerSetup(
+        scorer=scorer_of(
+            campaign_config,
+            verifier_graded=all_verifier_graded(s.ground_truth for s in session.bank.samples),
+        ),
+        display_metric=campaign_config.display_metric,
+        partition=partition,
+        degradation_checks=tuple(build_degradation_checks(campaign_config)),
+        judges=tuple(build_evaluators(campaign_config.judges, cache=session.store.judge_reuse)),
     )
 
 
@@ -149,9 +154,12 @@ def arm_diagnostic_scoring(
     scope_memory(session)
     if bound_spend_book() is None:
         bind_spend_book(unbounded_spend_book())
-    configure_and_apply_pipeline(session, campaign_config)
-    populate_session_scoring(session, campaign_config, source=source)
-    session.scoring.partition = cycle_partition(session, session.bank.samples, campaign_config)
+    populate_session_scoring(
+        session,
+        campaign_config,
+        source=source,
+        partition=cycle_partition(session, session.bank.samples, campaign_config),
+    )
 
 
 @dataclass(frozen=True)
@@ -165,7 +173,7 @@ class OpenedDiagnostic:
         return concluded.searchpoint(
             schema=self.session.pipeline_schema,
             framing=self.framing,
-            demo=self.session.scoring.require_partition().demo,
+            demo=self.session.state.scoring.require_partition().demo,
         )
 
 
@@ -174,7 +182,8 @@ async def open_diagnostic(stores: Stores, hop: CycleHop, *, source: RunSource) -
     campaign = stores.campaigns.load_campaign(hop.campaign_id)
     if campaign is None:
         raise DiagnosticError(f"campaign {hop.campaign_id!r} has no manifest on disk.")
-    session, config = await bind_cycle_session(stores, campaign, hop)
+    bound, config = await bind_cycle_session(stores, campaign, hop)
+    session = configure_and_apply_pipeline(bound, config)
     # As `run_optimization` does: a pp-self point's connector dispatches no inner run without it.
     publish_inner_spawn_context(session)
     arm_diagnostic_scoring(session, config, source=source)
@@ -186,26 +195,10 @@ async def open_diagnostic(stores: Stores, hop: CycleHop, *, source: RunSource) -
 def cycle_partition(
     session: Session, rows: Sequence[Sample], campaign_config: CampaignConfig
 ) -> BankPartition:
-    """What the cycle's mint drew, restored off the bank it drew; *rows* are drawn only outside a cycle."""
-    cycle_id = session.state.cycle_id
-    if not cycle_id:
-        return partition_bank(rows, campaign_config.dataset_split, seed=campaign_config.run_seed)
-    recorded = session.store.campaigns.read_bank_partition(session.hop)
-    if recorded is None:
-        raise ConflictError(
-            f"cycle {cycle_id} holds no drawn partition over its chain; a mint draws one, so "
-            "this cycle was not minted through it."
-        )
-    return _restored(session, recorded)
-
-
-def _restored(session: Session, recorded: PartitionRecord) -> BankPartition:
-    if session.bank.dataset_hash != recorded.dataset_hash:
-        raise ConflictError(
-            f"cycle {session.state.cycle_id} drew bank {recorded.dataset_hash}; this session "
-            f"holds {session.bank.dataset_hash}, so it is not bound to the cycle."
-        )
-    return restored_partition(session.bank.samples, recorded)
+    """What the bound cycle drew (`Session.bound`); *rows* are drawn only outside a cycle."""
+    if session.drawn is not None:
+        return session.drawn
+    return partition_bank(rows, campaign_config.dataset_split, seed=campaign_config.run_seed)
 
 
 async def diagnostic_pass(scoring: Awaitable[ScoredWalk]) -> ScoredWalk:
@@ -402,8 +395,6 @@ async def _apply_resume_fork(
 def _finalize_loop_state(
     cycle: Cycle,
     session: Session,
-    config: CampaignConfig,
-    dataset: list[Sample],
     cb: RunCallbacks,
     *,
     resolved_cycle_id: str | None,
@@ -412,9 +403,9 @@ def _finalize_loop_state(
 
     cycle.sample_index = SampleIndex.ensure_for(
         session.store,
-        scorer=session.scoring.require_scorer(),
+        scorer=session.state.scoring.require_scorer(),
         bank=session.bank,
-        sample_ids=session.scoring.require_partition().admitted_ids,
+        sample_ids=session.state.scoring.require_partition().admitted_ids,
     )
 
     if resolved_cycle_id:
@@ -424,7 +415,6 @@ def _finalize_loop_state(
             session.state.ledger = CycleEventLog.open(
                 CycleDir(session.store.campaigns.cycle_dir(session.hop))
             )
-    session.scoring.degradation_checks = build_degradation_checks(config)
     session.state.resumed_from_round = resumed_from_round
 
     # A RUNNING cycle's `log.md` reads its formula off this bracket (`scorer_cell_formula`).
@@ -467,16 +457,13 @@ async def init_optimization_loop(
         no_divergence_check=no_divergence_check,
         fork_on_divergence=fork_on_divergence,
     )
-    # The cycle id is FINAL only here; the spawn context was published before a fork could move it.
-    retarget_inner_spawn(session)
-
     _finalize_loop_state(
         cycle,
         session,
-        config,
-        dataset,
         cb,
         resolved_cycle_id=resolved_cycle_id,
         resumed_from_round=resumed_from_round,
     )
+    # The cycle id is FINAL only here; the spawn context was published before a fork could move it.
+    retarget_inner_spawn(session)
     return cycle

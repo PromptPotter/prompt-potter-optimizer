@@ -1,4 +1,4 @@
-import type { MeasuredUnit, MetricSpec } from "@/lib/api/types";
+import type { Measurand, MeasuredUnit, MetricSpec } from "@/lib/api/types";
 import { RECENT_STEP_S } from "@/lib/api/types.generated";
 import type { LiftSide } from "@/lib/fitness";
 
@@ -150,6 +150,18 @@ export function fmtNum(v: unknown, digits = 3): string {
 export function fmtFitness(v: number | null): string {
   if (v == null || !Number.isFinite(v)) return "—";
   return v.toFixed(2);
+}
+
+// A score printed as a percent reads as a rate.
+export function fmtLevel(unit: Measurand["unit"], v: number | null | undefined): string {
+  switch (unit) {
+    case "rate":
+      return fmtPct0(v);
+    case "score":
+      return fmtFitness(v ?? null);
+    case "theta":
+      return typeof v === "number" && Number.isFinite(v) ? `θ ${fmtTheta(v)}` : "—";
+  }
 }
 
 export function fmtClock(s: unknown): string {

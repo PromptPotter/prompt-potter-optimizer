@@ -16,7 +16,7 @@ from promptpotter.application.datasets.draft_campaign import (
 from promptpotter.application.datasets.startability import checkin_rows
 from promptpotter.application.datasets.tabular_ingest import candidate_library_from_rows
 from promptpotter.application.optimizer_manifest import resolve_optimizer
-from promptpotter.application.pipeline_resolve import draft_config_rows
+from promptpotter.application.pipeline_resolve import draft_pipeline
 from promptpotter.application.scoring.formula.compiler import parse_dials, spell_dials
 from promptpotter.application.scoring.formula.matchers import SCORING_FUNCTIONS
 from promptpotter.domain.origin_provenance import Provenance
@@ -88,7 +88,7 @@ def plan_draft_patch(stores: Stores, draft: DraftCampaign, patch: EditDraftPatch
             draft.pipeline_overlay if overlay is None else overlay, patch.node_output
         )
     if patch.node_narrowing is not None:
-        rows = draft_config_rows(stores, draft)
+        _params, rows, _schema = draft_pipeline(stores, draft)
         overlay = dict(draft.pipeline_overlay if overlay is None else overlay)
         for node, intents in patch.node_narrowing.items():
             try:

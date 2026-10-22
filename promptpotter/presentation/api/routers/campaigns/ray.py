@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from fastapi import Query, Request, Response
 
-from promptpotter.application.cycle_reads import RayResponse, open_family_ray
-from promptpotter.domain.activity import DEFAULT_RAY_LIMIT, MAX_RAY_LIMIT
+from promptpotter.application.cycle_reads import open_family_ray
+from promptpotter.domain.activity import DEFAULT_RAY_LIMIT, MAX_RAY_LIMIT, RayResponse
 from promptpotter.domain.cycle_paths import CycleHop, decode_cycle_path
 from promptpotter.presentation.api.deps import StoresDep
 from promptpotter.presentation.api.routers.campaigns._conditional import (

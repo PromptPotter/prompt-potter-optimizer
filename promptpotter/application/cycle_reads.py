@@ -13,6 +13,7 @@ from promptpotter.application.scoring.closed_rounds import (
     cycle_bank,
 )
 from promptpotter.application.served_dashboard import served_dashboard
+from promptpotter.domain.activity import RayResponse
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath
 from promptpotter.domain.dashboard_rows import sample_status
 from promptpotter.domain.paired_reading import ArmKey
@@ -30,7 +31,6 @@ from promptpotter.infrastructure.projections.event_stream import CycleLedgerTail
 from promptpotter.infrastructure.runtime_flags import run_phase_validator_epoch
 from promptpotter.infrastructure.store.family_ray_queries import (
     RayCursor,
-    RayResponse,
     build_family_ray,
     decode_ray_cursor,
     ray_validator_parts,
@@ -44,10 +44,6 @@ from promptpotter.infrastructure.store.lineage_queries import FamilyCourse, iter
 from promptpotter.infrastructure.store.read_model import Moment
 from promptpotter.infrastructure.store.stores import Stores, resolve_cycle_path
 from promptpotter.shared.errors import BadRequestError, NotFoundError
-
-# A router imports no infrastructure, so it reaches these through here; strict mypy re-exports
-# an import only by this list.
-__all__ = ["RayResponse"]
 
 _TAIL_POLL_INTERVAL_S = 0.5
 

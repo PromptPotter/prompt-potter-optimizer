@@ -19,7 +19,7 @@ from promptpotter.application.campaign_config import (
     OptimizationConfig,
     declare_run,
 )
-from promptpotter.application.initialization.session import CycleSnapshot, ScorerSetup, Session
+from promptpotter.application.initialization.session import LaunchState, ScorerSetup, Session
 from promptpotter.application.knobs import bench_defaults_pin
 from promptpotter.application.optimizer_manifest import resolve_optimizer, select_optimizer
 from promptpotter.application.optimizers.nodes import ReadArm, RoundContext, SliceMap
@@ -336,12 +336,27 @@ def loop_session(
         dataset_name=schema.name if dataset_name is None else dataset_name,
         dataset=dataset,
         campaign_id="" if hop is None else hop.campaign_id,
-        state=CycleSnapshot(cycle_id="" if hop is None else hop.cycle_id, ledger=ledger),
-        scoring=ScorerSetup(scorer=scorer, partition=partition),
-        source=RunSource.OPTIMIZATION_LOOP,
-        control=RunControl() if control is None else control,
+        drawn=None if hop is None else partition,
+        state=LaunchState(
+            cycle_id="" if hop is None else hop.cycle_id,
+            ledger=ledger,
+            scoring=ScorerSetup(scorer=scorer, partition=partition),
+            source=RunSource.OPTIMIZATION_LOOP,
+            control=RunControl() if control is None else control,
+        ),
     )
 
+
+PROMPT_INFO = NodePromptInfo(
+    fields=(
+        "persona",
+        "task_intent",
+        "problem_description",
+        "instruction",
+        "thinking_style",
+        "answer_format",
+    )
+)
 
 _SEAT_BANK = (Sample(id=0, query="q0", ground_truth="a"),)
 _SEATS = count()
@@ -368,7 +383,7 @@ def seat(
     whose origin was never measured; *cycle* bends its fields. Its one ledger is *hop*'s cycle's,
     else a dir of its own."""
     schema = schema or pipeline_schema(
-        [PipelineNode(name="solve", tunes_llm=False, prompt_info=NodePromptInfo())]
+        [PipelineNode(name="solve", tunes_llm=False, prompt_info=PROMPT_INFO)]
     )
     config = CampaignConfig.model_validate(
         {

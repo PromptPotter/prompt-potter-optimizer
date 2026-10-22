@@ -282,7 +282,7 @@ def _load_sibling_indices(
 
 
 def _banked_rounds(session: Session, hop: CycleHop) -> list[RoundResult]:
-    scoring = session.scoring
+    scoring = session.state.scoring
     # A run stopped before its origin closed has no round and may have no scorer either.
     if not session.store.campaigns.standing_rounds(hop, moment=None).rounds:
         return []

@@ -10,7 +10,7 @@ import { TrendChart } from "@/components/dashboard/scoring/TrendChart";
 import { CostStrip } from "@/components/dashboard/scoring/CostStrip";
 
 const SHOWN_ELSEWHERE = new Set([
-  "cycle_id", "wallclock_serialized_at",
+  "cycle_id", "at_time",
   "best", "total_queries_scored", "last_query_elapsed_s",
   "composite_fitness_formula",
   "composite_fitness_weights",

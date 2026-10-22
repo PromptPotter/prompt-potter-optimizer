@@ -395,7 +395,17 @@ def dataset_pipeline(
         "runtime": "in_process",
         "node_role": "ranker",
         "description": "The caller's dspy.Module, scored by the caller's metric.",
-        "prompt_info": {"template_variables": []},
+        "prompt_info": {
+            "template_variables": [],
+            "fields": [
+                "persona",
+                "task_intent",
+                "problem_description",
+                "instruction",
+                "thinking_style",
+                "answer_format",
+            ],
+        },
         "config": {"model": model, "temperature": temperature, **extra},
         "optimizer": {
             "param_keys": list(tune),

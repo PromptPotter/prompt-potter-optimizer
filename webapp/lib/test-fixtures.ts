@@ -423,7 +423,7 @@ export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
     max_cells_in_flight: 1,
     measured_unit: "sample",
     last_query_elapsed_s: 0,
-    wallclock_serialized_at: null,
+    at_time: "",
     arms_per_round: 0,
     sp_budget_round: 0,
     run_limits: { budget: {}, optimizer: [] },

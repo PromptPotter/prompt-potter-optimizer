@@ -11,14 +11,17 @@ from itertools import pairwise
 from pathlib import Path
 from typing import Any, NamedTuple
 
-from pydantic import Field
-
 from promptpotter.domain import activity
-from promptpotter.domain.activity import MAX_RAY_LIMIT, ActivityFeed, ActivityItem
-from promptpotter.domain.cycle_paths import CycleHop, CyclePath, encode_cycle_path
+from promptpotter.domain.activity import (
+    MAX_RAY_LIMIT,
+    ActivityFeed,
+    ActivityItem,
+    RayItem,
+    RayResponse,
+)
+from promptpotter.domain.cycle_paths import CyclePath, encode_cycle_path
 from promptpotter.domain.projection_envelope import RECORD_KINDS, bearing_record
 from promptpotter.domain.run_records import LLMCallProgressRecord
-from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.layout import (
     CycleLayout,
     course_validator_ns,
@@ -42,50 +45,6 @@ _CURATION_TAG = (
     sorted(_INNER_KINDS),
     hashlib.sha256(Path(activity.__file__).read_bytes()).hexdigest(),
 )
-
-
-class RayItem(FrozenModel):
-    """One ray event, addressed by ``path``: a bare ``cycle_id`` is ambiguous in an L4 family."""
-
-    path: list[CycleHop] = Field(
-        description="The cycle this record belongs to, root → leaf — THE address.",
-    )
-    offset: int = Field(
-        ge=0,
-        description="Physical 0-based line index in this cycle's own ledger — the same space "
-        "as ProjectionEnvelope.sequence, so a live SSE frame de-duplicates against a ray "
-        "item on (path, offset). SPARSE: a record no line is made of rides nowhere, so "
-        "consecutive items skip offsets; a gap between ray offsets is not a missing record.",
-    )
-    ts: str = Field(
-        description="Effective timestamp: the record's own, raised to its file predecessor's "
-        "when the two invert (records are stamped at construction but appended later).",
-    )
-    gap_before_s: float = Field(
-        ge=0,
-        description="Seconds since the item before it in this window; 0 on the window's first.",
-    )
-    activity: ActivityItem | None = Field(
-        description="The record's reading — its line, and the round and candidate it is about. "
-        "Null on a bare heartbeat alone: the process proved alive and there is nothing to read, "
-        "so it ends a silence without becoming a step. A `running` item with no later reading "
-        "on its path is a call still open.",
-    )
-
-
-class RayResponse(FrozenModel):
-    """One ordered window of a family's chronology, oldest-first."""
-
-    items: list[RayItem] = Field(
-        default_factory=list,
-        description="The window, oldest-first: every record a line was read off, and each bare "
-        "heartbeat between them.",
-    )
-    cursor_prev: str | None = Field(
-        default=None,
-        description="Opaque cursor for the window immediately older than this one; null when "
-        "this window already reaches the family's beginning.",
-    )
 
 
 class _Raw(NamedTuple):

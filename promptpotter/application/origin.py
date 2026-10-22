@@ -108,7 +108,7 @@ def try_inherit_fork_origin(
         session.store,
         session.hop,
         from_round,
-        session.scoring.require_scorer(),
+        session.state.scoring.require_scorer(),
         # The fork's chain at its mint, its first record: the parent as cut, before any own close.
         moment=Moment(store.ledger(session.hop), 0),
     )
@@ -205,7 +205,7 @@ async def establish_campaign_origin(
     framing = campaign_framing(session.store, campaign_config, session.dataset)
     pipeline_schema = session.pipeline_schema
     sp = resolved_origin.to_job_search_point(
-        schema=pipeline_schema, framing=framing, demo=session.scoring.require_partition().demo
+        schema=pipeline_schema, framing=framing, demo=session.state.scoring.require_partition().demo
     )
     inherited = try_inherit_fork_origin(
         session, seed, resolved_origin=resolved_origin, sp=sp, framing=framing
@@ -279,8 +279,9 @@ async def establish_campaign_origin(
                 session,
                 campaign_config.model_copy(update={"scoring": locked_scoring}),
                 source=RunSource.ORIGIN,
+                partition=session.state.scoring.require_partition(),
             )
-            sheet = session.scoring.require_scorer().sheet(cell.facts for cell in sheet)
+            sheet = session.state.scoring.require_scorer().sheet(cell.facts for cell in sheet)
             scores = compute_composite_fitness(sheet, pipeline_schema)
         # Both what the ledger receives and round 0's arm — never re-derive either from these rows.
         state = conclude(arm, replace(scored, sheet=sheet, scores=scores))

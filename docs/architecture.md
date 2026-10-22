@@ -108,7 +108,7 @@ run by its own members: an alternative its controller picks at a round boundary 
 § Escalation — potter's controller); the bench never chooses.
 
 **One population, every optimizer's.** The individuals a run carries between rounds are
-`Cycle.population`, read as `ctx.population` and replaced through `ctx.keep` alone; every
+`Cycle.population`, read as `ctx.read(Lineage).population` and replaced through `ctx.keep` alone; every
 round's close banks it on `optimizer_state.population`. Potter's is the one individual it
 crowned, CAPO's its μ survivors, GEPA's its candidate pool, LEVI's the elites of its archive —
 what each keeps ABOUT them (a score matrix, a cell) rides its own state slices, keyed by individual id.
@@ -1070,8 +1070,8 @@ the PR description.
   setting needs a default, it goes in the dataset's config file. A definition names its rows by
   its `source:` recipe; the rows live once, in the tenant's bank store, under their hash.
 
-- **`Evaluator` class + `evaluators` field + `all_evaluators()`
-  registry + `materialize_*_values`** — the **only** sanctioned use
+- **`Evaluator` class + `evaluators` field + the `_REGISTRY`
+  of them + `materialize_*_values`** — the **only** sanctioned use
   of "eval" vocabulary in the codebase. A future "rename eval to
   score" cleanup PR must not touch these — they're domain language,
   not a coincidence.

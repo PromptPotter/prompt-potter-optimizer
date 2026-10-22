@@ -139,7 +139,19 @@ LLM_ONLY_NODE: dict[str, Any] = {
     "runtime": "backend",
     "node_role": "ranker",
     "description": "Generic LLM call (offline TermNorm).",
-    "prompt_info": {"family": "llm_only", "template_variables": [], "description": "offline"},
+    "prompt_info": {
+        "family": "llm_only",
+        "template_variables": [],
+        "fields": [
+            "persona",
+            "task_intent",
+            "problem_description",
+            "instruction",
+            "thinking_style",
+            "answer_format",
+        ],
+        "description": "offline",
+    },
     "config": {
         "provider": "groq",
         "model": "openai/gpt-oss-120b",

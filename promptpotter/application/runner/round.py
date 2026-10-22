@@ -189,7 +189,7 @@ def _round_result(
     cycle = ctx.cycle
     arms: dict[ArmKey, ArmState] = {key: read.state for key, read in measured.filed.items()}
     cells = {key: read.rows for key, read in measured.filed.items()}
-    # A held round headlines the parent RE-SCORED on this panel, never `tracking.current_*`, a union.
+    # A held round headlines the parent RE-SCORED on this panel.
     ended_on = winner or measured.parent.key
     head, head_rows = arms[ended_on], cells[ended_on]
     assert isinstance(head, Concluded)
@@ -499,7 +499,7 @@ async def emit_origin_round(cycle: Cycle, session: Session, cb: RunCallbacks) ->
     cb.on_election(0, round_result.election)
     cycle.difficulty.fold(round_result)
     # Unspent here, a look-ahead press during the origin's scoring widens round 1 too.
-    session.control.spend_sample_lookahead()
+    session.state.control.spend_sample_lookahead()
     await close_round(cycle, round_result, 0, session, cb)
 
 
@@ -550,7 +550,7 @@ async def close_round(
     if cycle.sample_index is not None:
         cycle.sample_index.refresh(
             session.store,
-            scorer=session.scoring.require_scorer(),
+            scorer=session.state.scoring.require_scorer(),
         )
     return round_result, standing
 
@@ -585,7 +585,7 @@ async def post_round(
         round_num=round_num,
         accuracy=None if fold is None else fold.accuracy,
         winner_id=None if election is None else next(iter(election.selected), None),
-        control=session.control,
+        control=session.state.control,
     )
     await grade_round_selection(cycle, session, round_result, cb=cb)
     reserve_selection_pass(cycle, session)

@@ -275,10 +275,6 @@ def _validate_registry() -> None:
 _validate_registry()
 
 
-def all_evaluators() -> list[Evaluator]:
-    return list(_REGISTRY)
-
-
 def cell_terms_meta() -> list[dict[str, Any]]:
     terms: list[dict[str, Any]] = [
         {

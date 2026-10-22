@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict
 
 from promptpotter.application.optimizer_manifest import (
     get_optimizer_config_overrides,
-    llm_node_config,
+    llm_node_manifest,
     resolve_node_override,
 )
 from promptpotter.domain.opt_search_point import OptimizerPromptTemplate
@@ -153,7 +153,7 @@ def _merged_config(
     node: str | None, config: dict[str, Any] | None, overrides: dict[str, Any]
 ) -> dict[str, Any]:
     if config is None:
-        config = llm_node_config(node) if node else {}
+        config = dict(llm_node_manifest(node)[1]) if node else {}
     merged = {**_LLM_DEFAULTS, **config, **overrides}
     if node and (specimen := resolve_node_override(node)).model:
         merged["model"] = specimen.model

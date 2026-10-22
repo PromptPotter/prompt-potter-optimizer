@@ -14,6 +14,7 @@ from typing import Any
 import numpy as np
 import pytest
 from factories import (
+    PROMPT_INFO,
     arm_state,
     cycle_result,
     election,
@@ -59,7 +60,7 @@ from promptpotter.domain.optimizer_state import PARSE_FAILURE_MALFORMED, PARSE_F
 from promptpotter.domain.paired_reading import ArmKey, MemberAddress
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
-from promptpotter.domain.pipeline_schema import NodePromptInfo, PipelineNode
+from promptpotter.domain.pipeline_schema import PipelineNode
 from promptpotter.domain.results import ArmSlot, CycleResult, RoundResult, origin_panel
 from promptpotter.domain.ruler import (
     CellScopes,
@@ -562,7 +563,7 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it(tmp_pa
     for task in panel.tasks:
         task_spec = cells.spec(task)
         # The INNER backend's prompt nodes: what the recursion's cell pins and narrows.
-        solver = [PipelineNode(name="llm_only", tunes_llm=True, prompt_info=NodePromptInfo())]
+        solver = [PipelineNode(name="llm_only", tunes_llm=True, prompt_info=PROMPT_INFO)]
         derived = inner_instrument_config(task_spec, base, solver=solver, n_search=40)
         assert derived.optimization.enable_2pl_graduation is False, (
             f"cell {task.id} may graduate its ruler to 2PL — its theta would then be in units of "

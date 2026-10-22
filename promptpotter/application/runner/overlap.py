@@ -126,7 +126,7 @@ class _OriginPanelPairs:
         session = cycle.session
         self._path = (session.hop,)
         self._instrument = session.instrument_id
-        self._scorer = session.scoring.require_scorer().id
+        self._scorer = session.state.scoring.require_scorer().id
         self._dataset = session.bank.dataset_hash
         self._key_of = {int(s.id): s.key for s in scoring_pool}
         self._slot_of = session.bank.slot_of

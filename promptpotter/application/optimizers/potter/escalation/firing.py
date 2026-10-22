@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, Protocol
 
 from promptpotter.application.bench.llm_call import run_optimizer_node
+from promptpotter.application.bench.node_context import Lineage, Ruler
 from promptpotter.application.optimizers.nodes import OptimizerPhase
 from promptpotter.application.optimizers.potter.dispatch.facade import (
     DispatchHub,
@@ -77,13 +78,13 @@ class TransitionResult:
 
 
 def _high_water(ctx: NodeContext[EscalationKnobs]) -> HighWater:
-    rounds = ctx.rounds
+    rounds = ctx.read(Lineage).rounds
     # `max` keeps the first of equals, so a later round takes the peak only by beating it.
     best = max(
         (rr.fold for rr in rounds),
         key=lambda fold: order_floor(None if fold is None else fold.composite_fitness),
     )
-    series = ctx.level_series
+    series = ctx.read(Ruler).level_series
     peak: int | None = None
     top: float | None = None
     for rnd in series.rounds:
@@ -108,12 +109,8 @@ class Fire:
     best: HighWater
 
 
-class LayerKnobs(StrictModel):
-    """A layer's call config is all it has; its patience is the controller's knob."""
-
-
 class Layer(Protocol):
-    """Fired by the `escalation` controller, under its own node context: it writes its own memory, never the ladder."""
+    """Fired by the `escalation` controller, under its own node context: it writes its own memory, never the ladder; its patience is the controller's knob."""
 
     name: ClassVar[str]
     layer_id: ClassVar[Literal["L2", "L3"]]
@@ -121,17 +118,17 @@ class Layer(Protocol):
 
     def reply_model(self, bundle: InjectionBundle) -> type[BaseModel]: ...
 
-    def parse(self, ctx: NodeContext[LayerKnobs], raw: Any) -> TransitionResult: ...
+    def parse(self, ctx: NodeContext[StrictModel], raw: Any) -> TransitionResult: ...
 
-    def land(self, ctx: NodeContext[LayerKnobs], result: TransitionResult) -> None:
+    def land(self, ctx: NodeContext[StrictModel], result: TransitionResult) -> None:
         """Puts its memory and restates it onto the closed round, since a resume or fork starts from there."""
 
     def record(self, ladder: Ladder, fire: Fire) -> Ladder: ...
 
-    def enter_view(self, ctx: NodeContext[LayerKnobs], fire: Fire) -> OptimizerStepEnterView: ...
+    def enter_view(self, ctx: NodeContext[StrictModel], fire: Fire) -> OptimizerStepEnterView: ...
 
     def exit_view(
-        self, ctx: NodeContext[LayerKnobs], result: TransitionResult
+        self, ctx: NodeContext[StrictModel], result: TransitionResult
     ) -> OptimizerStepExitView: ...
 
 
@@ -139,20 +136,13 @@ class LayerCall(NamedTuple):
     """A layer the controller fires, with the context it runs under (`NodeContext.fire`)."""
 
     layer: Layer
-    ctx: NodeContext[LayerKnobs]
+    ctx: NodeContext[StrictModel]
 
 
 async def _run_transition(fired: LayerCall, fire: Fire) -> TransitionResult | None:
     """``None`` when the layer's output never parsed."""
     layer, ctx = fired
-    round_num = ctx.round_num
-    callbacks = ctx.callbacks
-    callbacks.on_phase(
-        layer.phase.phase,
-        "enter",
-        round=round_num,
-        view=layer.enter_view(ctx, fire),
-    )
+    ctx.phase(layer.phase.phase, "enter", layer.enter_view(ctx, fire))
     ladder = ctx.slice(Ladder)
     # The prompt reports the verdict that asked for it, which lands only if this fire does.
     bundle = build_bundle(ctx, ladder if fire.ask is None else as_read_by(ladder, fire.ask))
@@ -187,21 +177,13 @@ async def _run_transition(fired: LayerCall, fire: Fire) -> TransitionResult | No
                 **parse_err.warning_detail(),
             },
         )
-        callbacks.on_phase(
-            layer.phase.phase,
-            "exit",
-            round=round_num,
-            view=OptimizerStepExitView(headline="", details=(), audit=None),
+        ctx.phase(
+            layer.phase.phase, "exit", OptimizerStepExitView(headline="", details=(), audit=None)
         )
         return None
 
     layer.land(ctx, result)
-    callbacks.on_phase(
-        layer.phase.phase,
-        "exit",
-        round=round_num,
-        view=layer.exit_view(ctx, result),
-    )
+    ctx.phase(layer.phase.phase, "exit", layer.exit_view(ctx, result))
     return result
 
 
@@ -263,13 +245,13 @@ def _layer_control(fired: LayerCall, result: TransitionResult) -> None:
 
 
 def _rebase_request(
-    ctx: NodeContext[LayerKnobs], layer_id: str, proposal: ForkProposal
+    ctx: NodeContext[StrictModel], layer_id: str, proposal: ForkProposal
 ) -> RebaseRequest | None:
     round_num = ctx.round_num
-    target_round = ctx.rewind_round()
+    target_round = ctx.read(Lineage).rewind_round()
     if target_round is None:
         # A rewind to nowhere mints a duplicate of this cycle.
-        series = ctx.level_series
+        series = ctx.read(Ruler).level_series
         withheld = sorted(
             {
                 read.caveat

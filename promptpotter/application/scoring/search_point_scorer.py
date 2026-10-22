@@ -163,7 +163,7 @@ async def _claim_cell(
                         detail_fn=lambda: "another run is measuring this cell",
                     )
                 )
-            if session.control.pause_requested():
+            if session.state.control.pause_requested():
                 raise asyncio.CancelledError("claim wait aborted by a pause")
             await asyncio.sleep(_CLAIM_POLL_S)
     finally:
@@ -188,7 +188,7 @@ class _ArchiveRecorder:
     entry: ArchiveEntry
 
     def sheet(self, results: Sequence[GradedCell]) -> CellSheet:
-        return CellSheet(self.session.scoring.require_scorer().id, tuple(results))
+        return CellSheet(self.session.state.scoring.require_scorer().id, tuple(results))
 
     def scores(self, results: Sequence[GradedCell]) -> ScoreSummary:
         return compute_composite_fitness(
@@ -200,7 +200,7 @@ class _ArchiveRecorder:
             self.source,
             facts,
             self.session.pipeline_schema,
-            human_intervened=self.session.human_intervened,
+            human_intervened=self.session.state.human_intervened,
         )
 
     def take(self, cell: GradedCell) -> GradedCell:
@@ -280,7 +280,7 @@ def open_walk(
 
     Its sample records are written iff ``measured`` names a role a round records; a walk continuing
     one that holds *held* folds those rows into each record's running fold."""
-    source = session.source
+    source = session.state.source
     assert source is not None, "populate_session_scoring arms the run source before any scoring"
     store = session.store
     backend_id = session.backend_id

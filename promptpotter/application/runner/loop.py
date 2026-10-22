@@ -98,7 +98,7 @@ async def run_round_loop(
             # Off the rounds on record, so a resume counts the arms its priors raced.
             if sum(len(rr.panel) for rr in cycle.rounds) >= HARD_CAP_ARMS:
                 return LoopEnd(StopReason.HARD_CAP)
-            if session.control.pause_requested():
+            if session.state.control.pause_requested():
                 return LoopEnd(StopReason.PAUSED)
 
             if pause_at is not None and clean_rounds >= pause_at:
@@ -134,7 +134,7 @@ async def run_round_loop(
                 if target_stop is not None:
                     return LoopEnd(target_stop)
                 # A hold refusal cuts a round while the ceiling still reads clear, so the cut speaks first.
-                budget_stop = cut or session.control.budget_tripped()
+                budget_stop = cut or session.state.control.budget_tripped()
                 if budget_stop is not None:
                     return LoopEnd(budget_stop)
 

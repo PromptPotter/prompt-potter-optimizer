@@ -437,6 +437,7 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
                 NodePromptInfo,
                 prompt_at,
                 template_variables=_names(prompt.get("template_variables"), prompt_at),
+                fields=_names(prompt.get("fields"), prompt_at),
             )
         elif "prompt_info" in node:
             step_kwargs["prompt_info"] = _built(

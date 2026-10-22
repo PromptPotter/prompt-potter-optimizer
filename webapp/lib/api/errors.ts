@@ -1,5 +1,6 @@
 import { ApiError, type FailureKind } from "./client";
 import type { FieldGap } from "./types";
+import type { ErrorEnvelope } from "./types.generated";
 
 export function mintIdempotencyKey(): string {
   return crypto.randomUUID();
@@ -61,16 +62,12 @@ export async function throwApiError(r: Response): Promise<never> {
   let errorId: string | undefined;
   let detail: IngestErrorDetail | undefined;
   try {
-    const body = (await r.json()) as {
-      error?: string;
-      error_id?: unknown;
-      message?: string;
-      details?: IngestErrorDetail;
-    };
+    // A body that is no envelope came from something in front of the server.
+    const body = (await r.json()) as Partial<ErrorEnvelope> | null;
     if (body?.message) {
       message = body.message;
       code = body.error;
-      detail = body.details;
+      detail = (body.details ?? undefined) as IngestErrorDetail | undefined;
     }
     if (typeof body?.error_id === "string") errorId = body.error_id;
   } catch {

@@ -9,12 +9,13 @@ from promptpotter.application.optimizers.nodes import (
     BUILTIN_PACKAGES,
     AccessKnob,
     CountKnob,
+    CycleRead,
     LlmNode,
     NodeMember,
     OptimizerRuntime,
     PromptArity,
+    RewriteKnobs,
 )
-from promptpotter.application.optimizers.paper_templates import RewriteKnobs
 from promptpotter.domain.optimizer_state import StatePart
 from promptpotter.domain.pipeline_schema import MEMBER_KINDS, NodeKind
 from promptpotter.domain.pool import Pool
@@ -66,6 +67,11 @@ def _validate(obj: object, origin: str) -> NodeMember:
             raise RuntimeError(
                 f"{where}: `{declared}` must be a frozenset of registered StatePart kinds."
             )
+    sees = getattr(obj, "sees", None)
+    if not isinstance(sees, frozenset) or not all(
+        isinstance(s, type) and issubclass(s, CycleRead) for s in sees
+    ):
+        raise RuntimeError(f"{where}: `sees` must be a frozenset of CycleRead kinds.")
     consults = getattr(obj, "consults", None)
     if not isinstance(consults, frozenset) or not all(isinstance(c, type) for c in consults):
         raise RuntimeError(f"{where}: `consults` must be a frozenset of member classes.")

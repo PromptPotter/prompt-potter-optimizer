@@ -57,7 +57,7 @@ async def run_origin_gate(
         declare_gate(session, "origin")
 
         outcome = await hold_for_operator(
-            session, session.control.take_gate_decision, node="origin_gate", round_num=0
+            session, session.state.control.take_gate_decision, node="origin_gate", round_num=0
         )
         if outcome is None:
             return StopReason.PAUSED

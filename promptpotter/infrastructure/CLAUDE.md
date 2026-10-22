@@ -86,7 +86,9 @@ with a write, so it is expressed once (`_beat_stale_after`) and the conditional-
 reads it from there — a 304 computed off a second copy outlives the answer it stands for.
 
 **Seeding from that file may not be able to fail the run, so nothing seeds from it.**
-`resolve_resume_state` folds the seed cycle's LEDGER — a projection is never an input to itself,
+A launch's projection IS the fold of the cycle's LEDGER chain (`materializing_over`), each
+`RunWiringRecord` clearing what the launch before it left and every stamp a record's own
+timestamp, so a refold reproduces the file at every offset — a projection is never an input to itself,
 and no field on this model is on-disk shape anyone must migrate. The one reader that DOES parse the
 file (`application/served_dashboard.py::_head_state`; the model is `extra="forbid"`) drops a state that does
 not read as this build's WHOLE and loudly and refolds the ledger (`infrastructure/projections/live_dashboard/projection.py::fold_at`) —

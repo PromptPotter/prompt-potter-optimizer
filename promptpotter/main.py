@@ -4,6 +4,8 @@ import logging
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from http import HTTPStatus
+from typing import Any
 
 from fastapi import APIRouter, FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
@@ -12,6 +14,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import Field
 from scalar_fastapi import get_scalar_api_reference
+from starlette.exceptions import HTTPException
 from starlette.middleware.gzip import GZipMiddleware
 
 from promptpotter.application.account import record_refusal
@@ -26,6 +29,7 @@ from promptpotter.config.paths import (
     webapp_static_root,
 )
 from promptpotter.config.settings import APP_VERSION, non_utf8_encoding, settings
+from promptpotter.domain.command_kinds import CommandKind
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.identity.bundle import build_identity_bundle
 from promptpotter.infrastructure.identity.paths import default_identity_paths
@@ -47,7 +51,12 @@ from promptpotter.presentation.api.routers.origins import origins_router
 from promptpotter.presentation.api.routers.site_records import site_records_router
 from promptpotter.presentation.terminal.server_banner import render_server_banner
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import PotterError, UnauthorizedError, graceful
+from promptpotter.shared.errors import (
+    PayloadInvalidError,
+    PotterError,
+    UnauthorizedError,
+    graceful,
+)
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -98,6 +107,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("Shutting down %s", settings.BRAND_SERVICE_NAME)
 
 
+class ErrorEnvelope(StrictModel):
+    """What every refusal and failure answers, whatever raised it."""
+
+    error: str = Field(description="The code a client branches on.")
+    message: str = Field(description="The sentence an operator reads, naming its remedy.")
+    error_id: str = Field(description="Names the server log line that holds this failure.")
+    details: dict[str, Any] | None
+
+
 app = FastAPI(
     title=settings.BRAND_SERVICE_NAME,
     description="API-first prompt optimization service",
@@ -105,6 +123,7 @@ app = FastAPI(
     docs_url=None,
     redoc_url=None,
     lifespan=lifespan,
+    responses={"default": {"model": ErrorEnvelope}},
 )
 
 
@@ -130,7 +149,7 @@ def _bank_refusal(request: Request, subject: str, status: int) -> None:
         record_refusal(build_stores_from_identity(identity), subject=subject)
 
 
-# The ONE flat envelope; no route raises HTTPException.
+# The ONE flat envelope; no route raises HTTPException, so routing alone does.
 def _error_response(
     request: Request,
     *,
@@ -163,10 +182,8 @@ def _error_response(
         f"{request.method} {request.url.path} -> {status} {code}{reason} [{error_id}]{facts}: {message}",
         status,
     )
-    body: dict[str, object] = {"error": code, "message": message, "error_id": error_id}
-    if details:
-        body["details"] = details
-    return JSONResponse(status_code=status, content=body)
+    body = ErrorEnvelope(error=code, message=message, error_id=error_id, details=details or None)
+    return JSONResponse(status_code=status, content=body.model_dump(mode="json"))
 
 
 @app.exception_handler(PotterError)
@@ -182,12 +199,32 @@ async def potter_error_handler(request: Request, exc: PotterError) -> JSONRespon
 
 @app.exception_handler(RequestValidationError)
 async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    # Located in the payload, as every other entry point's refusal of the same model is.
+    located = (
+        {**error, "loc": error["loc"][1:]} if error["loc"][:1] == ("body",) else error
+        for error in exc.errors()
+    )
+    return await potter_error_handler(request, PayloadInvalidError.refusing(located))
+
+
+_COMMANDS = f"/api/v1{commands_router.prefix}/"
+
+
+@app.exception_handler(HTTPException)
+async def routing_error_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    asked = request.url.path.removeprefix(_COMMANDS)
+    if request.url.path.startswith(_COMMANDS) and asked not in CommandKind:
+        return _error_response(
+            request,
+            status=404,
+            code="command_kind_unknown",
+            message=f"No command kind {asked!r}; the kinds are {', '.join(CommandKind)}.",
+        )
     return _error_response(
         request,
-        status=422,
-        code="request_invalid",
-        message="Request failed validation.",
-        details={"errors": exc.errors()},
+        status=exc.status_code,
+        code=HTTPStatus(exc.status_code).name.lower(),
+        message=exc.detail,
     )
 
 

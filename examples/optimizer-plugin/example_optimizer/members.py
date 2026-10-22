@@ -10,9 +10,11 @@ from typing import TYPE_CHECKING, Annotated, ClassVar
 from pydantic import Field
 
 from example_optimizer import prompts
+from promptpotter.application.bench.node_context import Lineage
 from promptpotter.application.campaign_config import Estimand, Knob, Scope
 from promptpotter.application.optimizers import nodes, paper_templates
-from promptpotter.application.optimizers.paper_templates import RewriteKnobs, child, shown
+from promptpotter.application.optimizers.nodes import RewriteKnobs
+from promptpotter.application.optimizers.paper_templates import child, shown
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.strict_model import StrictModel
 
@@ -22,7 +24,6 @@ if TYPE_CHECKING:
     from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.optimizers.nodes import (
-        Draw,
         MeasuredRound,
         Panel,
         PromptArity,
@@ -30,8 +31,6 @@ if TYPE_CHECKING:
         Selection,
     )
     from promptpotter.domain.opt_search_point import VariationMode
-    from promptpotter.domain.optimizer_state import StatePart
-    from promptpotter.domain.pool import Pool
     from promptpotter.domain.results import DisplayMetric
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import CellSheet
@@ -45,15 +44,10 @@ class DrawKnobs(StrictModel):
     )
 
 
-class RandomDraw:
+class RandomDraw(nodes.Member):
     name: ClassVar[str] = "example_draw"
     kind: ClassVar[NodeKind] = NodeKind.SAMPLER
-    prompt_arity: ClassVar[PromptArity] = "none"
     knobs: ClassVar[type[StrictModel]] = DrawKnobs
-    reads: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
-    writes: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
-    draws: ClassVar[Mapping[type[Pool], Draw]] = nodes.NO_DRAWS
-    consults: ClassVar[frozenset[type]] = nodes.NO_CONSULTS
     size_knob: ClassVar[str | None] = "size"
 
     def round_cells(self, knobs: DrawKnobs, search: int) -> int:
@@ -70,22 +64,19 @@ class ProposeKnobs(RewriteKnobs):
     )
 
 
-class Propose:
+class Propose(nodes.Member):
     name: ClassVar[str] = "propose"
     kind: ClassVar[NodeKind] = NodeKind.LLM
     prompt_arity: ClassVar[PromptArity] = "one"
     opens: ClassVar[bool] = True
     variation_mode: ClassVar[VariationMode] = "llm"
     knobs: ClassVar[type[StrictModel]] = ProposeKnobs
-    reads: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
-    writes: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
-    draws: ClassVar[Mapping[type[Pool], Draw]] = nodes.NO_DRAWS
-    consults: ClassVar[frozenset[type]] = nodes.NO_CONSULTS
+    sees = frozenset({Lineage})
 
     async def propose(
         self, ctx: NodeContext[ProposeKnobs], panel: Panel, proposals: Proposals
     ) -> Proposals:
-        parent, node = ctx.parent, ctx.prompt_node
+        parent, node = ctx.read(Lineage).parent, ctx.prompt_node
         prompt = prompts.rephrase_prompt(ctx, instruction=shown(ctx, parent, node))
         answers = await ctx.ask_each(dict.fromkeys(range(ctx.knobs.variants), prompt))
         return nodes.Proposals(
@@ -93,32 +84,22 @@ class Propose:
         )
 
 
-class KeepKnobs(StrictModel):
-    pass
-
-
-class Keep:
+class Keep(nodes.Member):
     name: ClassVar[str] = "example_keep"
     kind: ClassVar[NodeKind] = NodeKind.SELECTOR
-    prompt_arity: ClassVar[PromptArity] = "none"
-    knobs: ClassVar[type[StrictModel]] = KeepKnobs
-    reads: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
-    writes: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
-    draws: ClassVar[Mapping[type[Pool], Draw]] = nodes.NO_DRAWS
-    consults: ClassVar[frozenset[type]] = nodes.NO_CONSULTS
     elects_on: ClassVar[DisplayMetric] = "composite"
     elects_partial: ClassVar[bool] = False
 
     def parent_cells(
         self,
-        ctx: NodeContext[KeepKnobs],
+        ctx: NodeContext[StrictModel],
         panel: Panel,
         rows: Mapping[str, CellSheet],
     ) -> list[Sample]:
         return panel.cells
 
     def select(
-        self, ctx: NodeContext[KeepKnobs], measured: MeasuredRound, proposals: Proposals
+        self, ctx: NodeContext[StrictModel], measured: MeasuredRound, proposals: Proposals
     ) -> Selection:
         folds = measured.folds
         fitness = {key: folds[key].composite_fitness or 0.0 for key in measured.electable}

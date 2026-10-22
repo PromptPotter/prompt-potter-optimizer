@@ -24,6 +24,7 @@ import pytest
 import yaml
 from factories import (
     PARENT,
+    PROMPT_INFO,
     arm_state,
     arm_walk,
     close_round,
@@ -180,7 +181,7 @@ from promptpotter.domain.paired_reading import (
 )
 from promptpotter.domain.phase_views import BenchGradedView
 from promptpotter.domain.phases import CampaignPhase, StopLoop, StopReason, WalkEnd
-from promptpotter.domain.pipeline_schema import ManifestNodeOverlay, NodePromptInfo, PipelineNode
+from promptpotter.domain.pipeline_schema import ManifestNodeOverlay, PipelineNode
 from promptpotter.domain.pool import BlockPool
 from promptpotter.domain.results import (
     ArmFit,
@@ -891,7 +892,7 @@ def _peer_cycle(
     monkeypatch.setattr(query_loop, "measure_sample", _measure)
     schema = pipeline_schema(
         name=f"{optimizer}-e2e",
-        nodes=[PipelineNode(name="solve", tunes_llm=False, prompt_info=NodePromptInfo())],
+        nodes=[PipelineNode(name="solve", tunes_llm=False, prompt_info=PROMPT_INFO)],
     )
     framing = TaskDecomposition(pipeline_purpose="Answer each query with its letter.")
 
@@ -903,7 +904,7 @@ def _peer_cycle(
                 )
             }
         ).configured(None, schema)
-        partition = session.scoring.require_partition()
+        partition = session.state.scoring.require_partition()
         rows = [
             asyncio.run(_measure(s, session, pipeline_params={"solve": {"prompt": "Answer."}}))
             for s in list(partition.search)[:4]
@@ -918,7 +919,7 @@ def _peer_cycle(
                 resolved_params=sp.config_params or {},
                 sp_hash=sp.sp_hash(schema),
             ),
-            session.scoring.require_scorer().sheet(rows),
+            session.state.scoring.require_scorer().sheet(rows),
         )
 
     with at_round(1):
@@ -951,9 +952,9 @@ def _peer_cycle(
         bound = set_cycle_ledger(callbacks.ledger)
         try:
             publish_inner_spawn_context(cycle.session)
-            with binding_optimizer(cycle.optimizer, determinism=None):
+            with binding_optimizer(cycle.config.optimization):
                 run_init(cycle, callbacks)
-                with spending_under(cycle.session.control.book):
+                with spending_under(cycle.session.state.control.book):
                     yield cycle, callbacks
         finally:
             reset_cycle_ledger(bound)
@@ -1164,7 +1165,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             offline.llm.says = capo_says
             session = cycle.session
             running.append(True)
-            search = list(session.scoring.require_partition().search)
+            search = list(session.state.scoring.require_partition().search)
             if cut_round == 1:
                 # Run init scores the origin through the gateway — here on half of CAPO's first block.
                 asyncio.run(
@@ -1348,7 +1349,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         offline.llm.says = crossover_says
         session = cycle.session
         assert not cycle.population
-        search = list(session.scoring.require_partition().search)
+        search = list(session.state.scoring.require_partition().search)
         closed, cut = asyncio.run(execute_round(cycle, 1, search, callbacks))
     assert cut is None
     assert crossed and all("Solve it, A." in a and "Solve it, B." in a for a in crossed), (
@@ -1399,7 +1400,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
     ) as (cycle, callbacks):
         offline.llm.says = bench_says
         session = cycle.session
-        search = list(session.scoring.require_partition().search)
+        search = list(session.state.scoring.require_partition().search)
         picked = asyncio.run(execute_round(cycle, 1, search, callbacks))[0]
         head, fold = picked.head, picked.fold
         assert head is not None and fold is not None and fold.accuracy is not None
@@ -1473,7 +1474,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         bench = read_bench(
             session.store,
             passes,
-            session.scoring.require_scorer(),
+            session.state.scoring.require_scorer(),
             line=BenchLine(
                 hop=session.hop,
                 on_line=True,
@@ -1682,7 +1683,7 @@ def test_an_authored_round_measures_the_operators_arm_and_asks_no_proposer(
         ) as (cycle, callbacks):
             offline.llm.says = lambda _body: "ok"
             session = cycle.session
-            search = list(session.scoring.require_partition().search)
+            search = list(session.state.scoring.require_partition().search)
             at_origin = RoundContext(cycle=cycle, round_num=0, callbacks=callbacks)
             origin_read = build_bundle(
                 NodeContext(at_origin, optimizers.member("l1_critique")), Ladder()

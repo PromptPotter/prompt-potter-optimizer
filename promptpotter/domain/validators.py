@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
@@ -21,25 +21,6 @@ class ValidatorOutcome:
 
     validator_id: str
     evidence: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class LLMOutputValidator:
-    id: str
-    check: Callable[..., ValidatorOutcome | None]
-
-
-def run_validators(
-    validators: tuple[LLMOutputValidator, ...],
-    source_output: Mapping[str, Any],
-    **context: Any,
-) -> list[ValidatorOutcome]:
-    outcomes: list[ValidatorOutcome] = []
-    for validator in validators:
-        outcome = validator.check(source_output, **context)
-        if outcome is not None:
-            outcomes.append(outcome)
-    return outcomes
 
 
 #: How a stop ends the walk: cut against the arm, or locked in for it.

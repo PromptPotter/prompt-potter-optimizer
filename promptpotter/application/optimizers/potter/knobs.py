@@ -164,10 +164,6 @@ class PoBBKnobs(StrictModel):
     )
 
 
-class ThetaElectionKnobs(StrictModel):
-    """The selector takes none: it crowns the strictly positive θ lift over the parent."""
-
-
 class EscalationKnobs(StrictModel):
     l1_patience: Annotated[int, Knob(Scope.POLICY, Estimand.CONTROLLER)] = Field(
         ge=0, description="Consecutive non-improving L1 rounds before L2 fires."

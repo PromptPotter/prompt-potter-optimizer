@@ -9,6 +9,7 @@ from promptpotter.application.optimizers.nodes import CheckResult
 from promptpotter.application.optimizers.potter.validators.behavior_base import (
     CheckFn,
     ValidatorContext,
+    judged,
 )
 from promptpotter.domain.round_audit import RoundAudit
 
@@ -24,43 +25,38 @@ def extract_l2_output(audit: RoundAudit) -> dict[str, Any]:
     return response if isinstance(response, dict) else {}
 
 
-def _check_rationale_substantive(audit: RoundAudit, ctx: ValidatorContext) -> CheckResult:
-    rationale = str(extract_l2_output(audit).get("rationale") or "").strip()
+L2Output = dict[str, Any]
+
+
+def _check_rationale_substantive(
+    out: L2Output, audit: RoundAudit, ctx: ValidatorContext
+) -> tuple[bool, str]:
+    rationale = str(out.get("rationale") or "").strip()
     if len(rationale) >= L2_RATIONALE_FLOOR_CHARS:
-        return CheckResult("l2_rationale_substantive", True, f"rationale {len(rationale)} chars")
-    return CheckResult(
-        "l2_rationale_substantive",
-        False,
-        f"rationale {len(rationale)} chars < floor {L2_RATIONALE_FLOOR_CHARS}",
-    )
+        return True, f"rationale {len(rationale)} chars"
+    return False, f"rationale {len(rationale)} chars < floor {L2_RATIONALE_FLOOR_CHARS}"
 
 
-def _check_evidence_anchored(audit: RoundAudit, ctx: ValidatorContext) -> CheckResult:
-    out = extract_l2_output(audit)
-    axis = str(out.get("axis_targeted") or "").strip()
-    if axis:
-        return CheckResult("l2_evidence_anchored", True, f"axis_targeted={axis!r}")
+def _check_evidence_anchored(
+    out: L2Output, audit: RoundAudit, ctx: ValidatorContext
+) -> tuple[bool, str]:
+    if axis := str(out.get("axis_targeted") or "").strip():
+        return True, f"axis_targeted={axis!r}"
     if _EVIDENCE_RE.search(str(out.get("rationale") or "")):
-        return CheckResult("l2_evidence_anchored", True, "rationale cites a sample/number")
-    return CheckResult(
-        "l2_evidence_anchored",
-        False,
-        "no axis_targeted and rationale cites no sample/axis/number",
-    )
+        return True, "rationale cites a sample/number"
+    return False, "no axis_targeted and rationale cites no sample/axis/number"
 
 
-def _check_targets_l1_surface(audit: RoundAudit, ctx: ValidatorContext) -> CheckResult:
+def _check_targets_l1_surface(
+    out: L2Output, audit: RoundAudit, ctx: ValidatorContext
+) -> tuple[bool, str]:
     """``axis_targeted`` is not a surface: it is prose, and L1 reads its axes from measurement."""
-    out = extract_l2_output(audit)
-    if not out:
-        return CheckResult("l2_targets_l1_surface", True, "L2 did not fire")
-    touched = [name for name in ("l1_layout", "l1_overrides") if out.get(name)]
-    if touched:
-        return CheckResult("l2_targets_l1_surface", True, f"L2 touched: {touched}")
-    return CheckResult("l2_targets_l1_surface", False, "L2 fired but changed nothing L1 reads")
+    if touched := [name for name in ("l1_layout", "l1_overrides") if out.get(name)]:
+        return True, f"L2 touched: {touched}"
+    return False, "L2 fired but changed nothing L1 reads"
 
 
-L2_CHECK_REGISTRY: dict[str, CheckFn] = {
+L2_CHECK_REGISTRY: dict[str, CheckFn[L2Output]] = {
     "l2_rationale_substantive": _check_rationale_substantive,
     "l2_evidence_anchored": _check_evidence_anchored,
     "l2_targets_l1_surface": _check_targets_l1_surface,
@@ -69,6 +65,5 @@ L2_CHECK_REGISTRY: dict[str, CheckFn] = {
 
 def run_all_l2_checks(audit: RoundAudit, ctx: ValidatorContext) -> list[CheckResult]:
     """EMPTY when L2 did not fire: an absent fire is not a conformance failure."""
-    if not extract_l2_output(audit):
-        return []
-    return [fn(audit, ctx) for fn in L2_CHECK_REGISTRY.values()]
+    out = extract_l2_output(audit)
+    return judged(L2_CHECK_REGISTRY, out, audit, ctx) if out else []

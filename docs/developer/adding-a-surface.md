@@ -87,9 +87,9 @@ is a pure `(InjectionBundle) -> list[Item]`.
 2. Decorate it with `@signal("<name>", kind=…, char_cap=…, citable=…)` — registration
    happens at the definition site; key and body are co-located, no separate
    registry edit.
-3. To make it reachable, add it to the node's `NODE_LAYOUTS[node].possible`
-   (and `.floor` to put it on by default — for `l1_generate`, `.possible` and `.mandatory`
-   alias `L1_POSSIBLE` / `L1_MANDATORY`).
+3. To make it reachable, add it to the node's `NODE_LAYOUTS[node].floor` to put it on by
+   default, or to `.extras` to offer it off the floor; `.possible` is the two together (for
+   `l1_generate`, `.mandatory` is `L1_MANDATORY`).
 
 **Guard (at registry completion, no standing test):** `injection_table()` fails loud if a
 `possible` name has no registered renderer, and
@@ -338,7 +338,7 @@ fold reads which kinds a running loop takes.
 
 | The row's column | What it is | What refuses a wrong one |
 |---|---|---|
-| the kind | the wire name; its payload model is the class NAMED for it (`CommandKind.payload_name`), beside the row — or in `application/commands/payloads.py` where it holds an application type | `payloads.py` fails at import on a kind with no model |
+| the kind | the wire name; its payload model declares it (`class …(CyclePayload, kind=CommandKind.…)`), which files the model in `PAYLOAD_MODEL_FOR_KIND` — beside the row, or in `application/commands/payloads.py` where it holds an application type | `payloads.py` fails at import on a kind with no model, the declaration on a second one |
 | `handler` | `module:handler`, in the `application/commands/` module named for what the kind does; the dispatcher imports it when the kind is dispatched, never at its own import | `gate.py --only handler-tables` |
 | `capability` | the rung the dispatcher's `require_capability` asks | the row cannot be written without one |
 | **`cli_verb`** | the terminal verb that reaches it, derived from the payload model unless `verbs.py` writes it | the row cannot be written without one |

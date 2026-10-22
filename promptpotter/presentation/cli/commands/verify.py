@@ -5,19 +5,18 @@ import argparse
 from pydantic import ValidationError
 
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
-from promptpotter.application.commands.payloads import VerifyCandidatePayload
 from promptpotter.application.cycle_listing import resolve_campaign_id_hint
 from promptpotter.application.diagnostics.verify import VerifyOutcome
 from promptpotter.application.evidence.subjects import parse_subject
 from promptpotter.application.views.render.primitives import fmt_ci
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.bench import BandedValue
+from promptpotter.domain.command_kinds import VerifyCandidatePayload
 from promptpotter.domain.cycle_paths import CycleHop, command_address
 from promptpotter.domain.paired_reading import READING_STATE_INFO
-from promptpotter.domain.results import BankedSearchPointError
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.workspace import open_stores
-from promptpotter.shared.errors import DiagnosticError
+from promptpotter.shared.errors import BadRequestError, PayloadInvalidError
 
 
 def _level(level: BandedValue | None) -> str:
@@ -28,13 +27,10 @@ def _level(level: BandedValue | None) -> str:
 
 async def cmd_verify(args: argparse.Namespace) -> CommandResult:
     setup_logging(style="full" if args.verbose else "cli")
-    try:
-        spec = parse_subject(args.subject)
-    except ValueError as exc:
-        raise SystemExit(f"ERROR: {exc}") from None
+    spec = parse_subject(args.subject)
     if spec.kind != "candidate" or spec.lens or spec.samples:
-        raise SystemExit(
-            "ERROR: verify takes one searchpoint and no mask: "
+        raise BadRequestError(
+            "verify takes one searchpoint and no mask: "
             "`candidate:<campaign>/<cycle>/<candidate_id>[;in=<c::y~…>]`."
         )
     stores = open_stores(args)
@@ -42,23 +38,18 @@ async def cmd_verify(args: argparse.Namespace) -> CommandResult:
         campaign_id=resolve_campaign_id_hint(stores, spec.campaign_id, inside=spec.inside),
         cycle_id=spec.cycle_id,
     )
-
+    fields = {
+        **command_address((*spec.inside, leaf)),
+        "candidate_id": spec.candidate_id,
+        "samples": args.samples,
+        "strategy": args.strategy,
+        "seed": args.seed,
+    }
     try:
-        dispatched = await CommandDispatcher(stores).dispatch(
-            CommandCall(
-                VerifyCandidatePayload.model_validate(
-                    {
-                        **command_address((*spec.inside, leaf)),
-                        "candidate_id": spec.candidate_id,
-                        "samples": args.samples,
-                        "strategy": args.strategy,
-                        "seed": args.seed,
-                    }
-                )
-            )
-        )
-    except (DiagnosticError, BankedSearchPointError, ValidationError) as exc:
-        raise SystemExit(f"ERROR: {exc}") from exc
+        payload = VerifyCandidatePayload.model_validate(fields)
+    except ValidationError as exc:
+        raise PayloadInvalidError.refusing(exc.errors()) from exc
+    dispatched = await CommandDispatcher(stores).dispatch(CommandCall(payload))
 
     outcome = dispatched.result
     assert isinstance(outcome, VerifyOutcome), "a fresh key applies, and the applier answers one"

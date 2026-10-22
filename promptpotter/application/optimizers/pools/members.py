@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated, ClassVar, Protocol, assert_never
+from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING, Annotated, ClassVar
 
 from pydantic import Field
 
+from promptpotter.application.bench.node_context import Target
 from promptpotter.application.campaign_config import Estimand, Knob, Scope
 from promptpotter.application.optimizers import nodes
 from promptpotter.config.prompt_blocks import library_entries, library_identity
@@ -16,7 +18,6 @@ from promptpotter.domain.pool import (
     DemoPool,
     Pool,
     PoolEntry,
-    PoolSource,
     entry_id,
     kept,
     unnamed,
@@ -28,7 +29,7 @@ if TYPE_CHECKING:
 
     from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
-    from promptpotter.application.optimizers.nodes import Draw, PromptArity
+    from promptpotter.application.optimizers.nodes import CycleRead
     from promptpotter.domain.optimizer_state import StatePart
     from promptpotter.domain.sample import Sample
 
@@ -43,23 +44,34 @@ class PoolKnobs(StrictModel):
     )
 
 
-class _Source(Protocol):
-    def identity(self) -> object: ...
+class _PoolInitializer(nodes.Member, ABC):
+    kind: ClassVar[NodeKind] = NodeKind.ALGORITHM
+    knobs: ClassVar[type[StrictModel]] = PoolKnobs
+    sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Target})
+    pool: ClassVar[type[Pool]]
 
-    def refusal(
-        self, name: str, paths: Sequence[str], *, closed: bool, demo: Sequence[Sample] | None
-    ) -> str | None: ...
+    def active(self, selected: SelectedOptimizer) -> list[str]:
+        return selected.knobs_of(self.name, PoolKnobs).active
 
+    def initialize(self, ctx: NodeContext[PoolKnobs]) -> None:
+        ctx.put(self.seed(ctx, ctx.knobs.active))
+
+    @abstractmethod
     def seed(self, ctx: NodeContext[PoolKnobs], paths: Sequence[str]) -> Pool: ...
 
 
-class _Library:
-    def identity(self) -> object:
+class BlockPoolInitializer(_PoolInitializer):
+    name: ClassVar[str] = BlockPool.kind
+    pool: ClassVar[type[Pool]] = BlockPool
+    writes: ClassVar[frozenset[type[StatePart]]] = frozenset({BlockPool})
+
+    def starting_content(self) -> object:
         return library_identity()
 
     def refusal(
-        self, name: str, paths: Sequence[str], *, closed: bool, demo: Sequence[Sample] | None
+        self, selected: SelectedOptimizer, *, closed: bool, demo: Sequence[Sample] | None
     ) -> str | None:
+        paths = self.active(selected)
         library = [(e.id, e.group) for e in library_entries().values()]
         fields = dict.fromkeys(group[0] for _, group in library)
         # Earned entries exist only once run init mines them, so their group is all a path can name now.
@@ -67,18 +79,18 @@ class _Library:
             ("", (field, EARNED_SOURCE)) for field in fields
         ]
         if bad := unnamed(paths, library + earned):
-            return f"{name}.active names {bad}, which match no prompt block library entry"
+            return f"{self.name}.active names {bad}, which match no prompt block library entry"
         if closed and not kept(paths, library):
             return (
-                f"{name}.active keeps no library entry, and a `closed` reader may write only an "
-                "entry's id — earned blocks are mined at run init and may be none"
+                f"{self.name}.active keeps no library entry, and a `closed` reader may write only "
+                "an entry's id — earned blocks are mined at run init and may be none"
             )
         return None
 
     def seed(self, ctx: NodeContext[PoolKnobs], paths: Sequence[str]) -> BlockPool:
         earned = (
             PoolEntry(id=entry_id(field, text), group=(field, EARNED_SOURCE), text=text)
-            for field, texts in ctx.earned_blocks().items()
+            for field, texts in ctx.read(Target).earned_blocks().items()
             for text in texts
         )
         entries: Mapping[str, PoolEntry] = {
@@ -89,63 +101,25 @@ class _Library:
         return BlockPool(entries=tuple(entries[i] for i in active))
 
 
-class _Partition:
-    def identity(self) -> object:
-        return None
-
-    def refusal(
-        self, name: str, paths: Sequence[str], *, closed: bool, demo: Sequence[Sample] | None
-    ) -> str | None:
-        # A partition's size is its split's declaration, so only its names are refused.
-        if demo is not None and (bad := unnamed(paths, [(s.key, ()) for s in demo])):
-            return f"{name}.active names {bad}, which the demo partition lacks"
-        return None
-
-    def seed(self, ctx: NodeContext[PoolKnobs], paths: Sequence[str]) -> DemoPool:
-        return DemoPool(keys=kept(paths, ((s.key, ()) for s in ctx.demo_split)))
-
-
-def _source(source: PoolSource) -> _Source:
-    match source:
-        case PoolSource.LIBRARY:
-            return _Library()
-        case PoolSource.PARTITION:
-            return _Partition()
-        case unreachable:
-            assert_never(unreachable)
-
-
-class PoolInitializer:
-    """One member per pool kind, seeding it from the kind's source."""
-
-    kind: ClassVar[NodeKind] = NodeKind.ALGORITHM
-    prompt_arity: ClassVar[PromptArity] = "none"
-    knobs: ClassVar[type[StrictModel]] = PoolKnobs
-    reads: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
-    draws: ClassVar[Mapping[type[Pool], Draw]] = nodes.NO_DRAWS
-    consults: ClassVar[frozenset[type]] = nodes.NO_CONSULTS
-
-    def __init__(self, pool: type[Pool]) -> None:
-        self.pool = pool
-        self.name = pool.kind
-        self.writes = frozenset({pool})
-        self._source = _source(pool.source)
+class DemoPoolInitializer(_PoolInitializer):
+    name: ClassVar[str] = DemoPool.kind
+    pool: ClassVar[type[Pool]] = DemoPool
+    writes: ClassVar[frozenset[type[StatePart]]] = frozenset({DemoPool})
 
     def starting_content(self) -> object:
-        """What it seeds from beside the run's own data, which ``Treatment.source`` hashes."""
-        return self._source.identity()
-
-    def active(self, selected: SelectedOptimizer) -> list[str]:
-        return selected.knobs_of(self.name, PoolKnobs).active
+        return None
 
     def refusal(
         self, selected: SelectedOptimizer, *, closed: bool, demo: Sequence[Sample] | None
     ) -> str | None:
-        """At load with ``demo`` ``None``, again before the mint with the partition."""
-        return self._source.refusal(self.name, self.active(selected), closed=closed, demo=demo)
+        # A partition's size is its split's declaration, so only its names are refused.
+        paths = self.active(selected)
+        if demo is not None and (bad := unnamed(paths, [(s.key, ()) for s in demo])):
+            return f"{self.name}.active names {bad}, which the demo partition lacks"
+        return None
 
-    def initialize(self, ctx: NodeContext[PoolKnobs]) -> None:
-        ctx.put(self._source.seed(ctx, ctx.knobs.active))
+    def seed(self, ctx: NodeContext[PoolKnobs], paths: Sequence[str]) -> DemoPool:
+        return DemoPool(keys=kept(paths, ((s.key, ()) for s in ctx.read(Target).demo_split)))
 
 
-MEMBERS = (PoolInitializer(BlockPool), PoolInitializer(DemoPool))
+MEMBERS = (BlockPoolInitializer(), DemoPoolInitializer())

@@ -27,9 +27,10 @@ from promptpotter.domain.phases import (
     ErrorRecord,
     RunPhase,
 )
-from promptpotter.domain.results import Concluded, Measuring
+from promptpotter.domain.results import Concluded, Measuring, RunStanding
 from promptpotter.domain.results_health import is_degraded
 from promptpotter.domain.round_audit import LoopWarning, NodeBlock
+from promptpotter.domain.ruler import LevelSeries
 from promptpotter.domain.run_records import (
     ArmRecord,
     BackendWarningRecord,
@@ -55,7 +56,7 @@ from promptpotter.domain.run_records import (
 )
 from promptpotter.domain.scoring import GradedCell, MeasuredCell, fitness_bands
 from promptpotter.domain.spend import CeilingMeter, MeteredSpend, SpendRollup
-from promptpotter.infrastructure.ledger import ledger_chain, open_with_history
+from promptpotter.infrastructure.ledger import open_with_history
 from promptpotter.infrastructure.projections.audit_trail import build_node_block
 from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.projections.live_dashboard.blocks import (
@@ -71,10 +72,8 @@ from promptpotter.infrastructure.projections.live_dashboard.state import (
     DashboardError,
     LiveDashboardState,
 )
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_standing_rounds
 from promptpotter.infrastructure.store.io import write_json
 from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
-from promptpotter.shared.clock import utcnow_iso
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +107,18 @@ class LiveDashboardProjection(Projection):
         self.cycle_dir = cycle_path
         # None: a replay answering for a past moment, which must not overwrite the head's file.
         self.state_path = state_path
-        self.state = LiveDashboardState.for_run(seed, hop=hop)
+        self.state = seed
+        self._at = seed.at_time
+        self._closes: dict[int, tuple[LevelSeries | None, RunStanding | None]] = {}
+        self._sticky_llm_calls: dict[str, tuple[int, NodeBlock]] = {}
+        self._launch()
+        # RLock: a boundary flush runs inside a handler that already holds it via `on_record`.
+        self._persist_lock: threading.RLock = threading.RLock()
+        self._persist_timer: threading.Timer | None = None
+        self._persist_dirty: bool = False
+        self._persist_cost_s: float = 0.0
+
+    def _launch(self) -> None:
         self.short_formula_template: str | None = None
         self._buffer = RoundBuffer()
         self._open_samples: dict[int, tuple[str, ArmKey | None, int]] = {}
@@ -118,51 +128,33 @@ class LiveDashboardProjection(Projection):
         self._affordable: int | None = None
         self._cell_reserve_usd: float | None = None
         self._waiting: tuple[int, float] | None = None
+        # A launch hears a hold still on at its first send: one the last launch saw open ends here.
         self._holds: dict[str, ProviderHoldRecord] = {}
-        self._sticky_llm_calls: dict[str, tuple[int, NodeBlock]] = {
-            node: (seed.current_round.round, block)
-            for node, block in seed.current_round.nodes.items()
-        }
         self._in_flight: tuple[str, str] | None = None
         self._proposer_node: str | None = None
         self._measurement_node: str | None = None
         self._step_node: str | None = None
-        # RLock: a boundary flush runs inside a handler that already holds it via `on_record`.
-        self._persist_lock: threading.RLock = threading.RLock()
-        self._persist_timer: threading.Timer | None = None
-        self._persist_dirty: bool = False
-        self._persist_cost_s: float = 0.0
-
-        self._persist()
 
     @classmethod
-    def for_session(
-        cls,
-        hop: CycleHop,
-        *,
-        tenant_root: str,
-        resumed_from_round: int | None = None,
-    ) -> LiveDashboardProjection | None:
+    def for_session(cls, hop: CycleHop, *, tenant_root: str) -> LiveDashboardProjection | None:
+        """``None`` where the address is incomplete or the cycle has declared no wiring."""
         if not (tenant_root and hop.campaign_id and hop.cycle_id):
             return None
-
-        cycle_dir = CycleDir(cycle_dir_for(WorkspaceDir(Path(tenant_root)), hop))
-        return cls(
-            cycle_dir,
-            state_path=CycleLayout(Path(cycle_dir)).dashboard,
-            hop=hop,
-            seed=resolve_resume_state(
-                Cut(cycle=cycle_dir, hop=hop), Path(cycle_dir), resumed_from_round
-            ),
+        view = materializing_over(
+            CycleDir(cycle_dir_for(WorkspaceDir(Path(tenant_root)), hop)), hop
         )
+        if view is not None:
+            view._flush_pending_persist()
+        return view
 
     def _set_state(self, name: DashboardState, *, step: str | None = None) -> None:
         self.state.state = name
         self.state.optimizer_step = step
-        self.state.state_since = utcnow_iso()
+        self.state.state_since = self._at
 
     def on_record(self, record: CycleRecord, offset: int) -> None:
         with self._persist_lock:
+            self._at = record.timestamp
             super().on_record(record, offset)
 
     def _schedule_persist(self) -> None:
@@ -202,10 +194,9 @@ class LiveDashboardProjection(Projection):
         self._flush_pending_persist()
 
     def _handle_run_wiring(self, record: RunWiringRecord) -> None:
-        for name, value in LiveDashboardState.wired(record).items():
+        for name, value in LiveDashboardState.launched(record).items():
             setattr(self.state, name, value)
-        # A launch hears a hold still on at its first send, so one the last launch saw open ends here.
-        self._holds.clear()
+        self._launch()
         self._flush_pending_persist()
 
     def _handle_run_phase(self, record: RunPhaseRecord) -> None:
@@ -244,7 +235,13 @@ class LiveDashboardProjection(Projection):
         self._flush_pending_persist()
 
     def _handle_round_entered(self, record: RoundEnteredRecord) -> None:
-        self.state.round = record.round
+        s = self.state
+        s.round = record.round
+        s.rounds = [r for r in s.rounds if r.round < record.round]
+        self._closes = {n: close for n, close in self._closes.items() if n < record.round}
+        s.level_series, s.run_standing = (
+            self._closes[max(self._closes)] if self._closes else (None, None)
+        )
         self._buffer.enter(record)
         self._flush_pending_persist()
 
@@ -255,6 +252,7 @@ class LiveDashboardProjection(Projection):
             self._buffer.reset(self.state.round)
 
     def _handle_round_closed(self, record: RoundClosedRecord) -> None:
+        self._closes[record.round] = (record.level_series, record.run_standing)
         self.state.level_series = record.level_series
         self.state.run_standing = record.run_standing
         prior = [r for r in self.state.rounds if r.round != record.round]
@@ -284,7 +282,6 @@ class LiveDashboardProjection(Projection):
                     self.short_formula_template = view.composite_fitness_formula_short
             case RoundStartView():
                 self._proposer_node = view.node
-                s.rounds = [r for r in s.rounds if r.round < s.round]
             case MeasureEnterView():
                 self._measurement_node = view.node
             case OptimizerStepEnterView():
@@ -463,7 +460,7 @@ class LiveDashboardProjection(Projection):
         self._schedule_persist()
 
     def _handle_llm_call_progress(self, record: LLMCallProgressRecord) -> None:
-        """A heartbeat: re-persists so `wallclock_serialized_at` stays fresh while no other record fires."""
+        """A heartbeat: re-persists so `at_time` moves while no other record fires."""
         del record
         self._schedule_persist()
 
@@ -576,33 +573,8 @@ class LiveDashboardProjection(Projection):
         # The field holds one sender: the episode that has held longest.
         held = min(self._holds.values(), key=lambda r: r.gives_up_at, default=None)
         s.backpressure = None if held is None else held.reading
-        s.wallclock_serialized_at = utcnow_iso()
+        s.at_time = self._at
         return s
-
-
-def resolve_resume_state(
-    seed: Cut,
-    active_cycle_dir: Path,
-    resumed_from_round: int | None,
-) -> LiveDashboardState:
-    prior = fold_at(seed)
-    if prior is None:
-        raise RuntimeError(
-            f"{seed.hop.campaign_id}/{seed.hop.cycle_id} holds no RunWiringRecord — a run's "
-            "dashboard is written only once its cycle has declared what it runs under"
-        )
-    surviving = [
-        r for r in prior.rounds if resumed_from_round is None or r.round < resumed_from_round
-    ]
-    standing = scan_standing_rounds(ledger_chain(CycleDir(active_cycle_dir), moment=None))
-    return prior.model_copy(
-        update={
-            "rounds": surviving,
-            "round": max(prior.round, max(standing.rounds, default=0)),
-            "run_standing": standing.standing,
-            "level_series": standing.level_series,
-        }
-    )
 
 
 def fold_at(cut: Cut) -> LiveDashboardState | None:

@@ -12,25 +12,16 @@ from promptpotter.application.mask.divergence import (
 from promptpotter.application.mask.load import load_mask_record
 from promptpotter.application.mask.record import Lens, MaskReading, MaskRecord
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath
+from promptpotter.domain.lineage_tree import ArmNode, CourseNode, LineageDivergence
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.scoring import ScoringFormulaError
-from promptpotter.infrastructure.store.lineage_queries import (
-    ArmNode,
-    CourseNode,
-    LineageDivergence,
-    build_lineage_tree,
-    rank_moves,
-)
+from promptpotter.infrastructure.store.lineage_queries import build_lineage_tree, rank_moves
 from promptpotter.infrastructure.store.stores import Stores, resolve_cycle_path
 from promptpotter.shared.errors import BadRequestError
 
 if TYPE_CHECKING:
     from promptpotter.application.optimizers.nodes import Eliminator
     from promptpotter.infrastructure.store.read_model import Moment
-
-# A router imports no infrastructure, so it reaches these through here; strict mypy re-exports
-# an import only by this list.
-__all__ = ["CourseNode"]
 
 
 def _abort_suppress(variant: str) -> frozenset[str]:

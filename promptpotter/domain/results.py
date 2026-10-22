@@ -24,6 +24,7 @@ from promptpotter.domain.paired_reading import (
     READING_STATE_INFO,
     ArmKey,
     ArmName,
+    MeasurandUnit,
     PairedReading,
     ReadingState,
     ReadingStateKind,
@@ -824,6 +825,7 @@ class DisplayMetricInfo(NamedTuple):
     label: str
     glyph: str
     title: str
+    unit: MeasurandUnit
 
 
 #: IN PICK ORDER — the tiebreak where the elected column is not among those shown.
@@ -832,6 +834,7 @@ DISPLAY_METRIC_INFO: dict[DisplayMetric, DisplayMetricInfo] = {
         "accuracy",
         "%",
         "Raw accuracy — correctness rate over the candidate's measured subset (subset-relative).",
+        MeasurandUnit.RATE,
     ),
     "ability": DisplayMetricInfo(
         "ability θ",
@@ -839,12 +842,14 @@ DISPLAY_METRIC_INFO: dict[DisplayMetric, DisplayMetricInfo] = {
         "Difficulty-adjusted ability θ — what a selector declaring ability (potter's) elects on. "
         "A logit (not a %): comparable within a round; cross-round comparison waits on the stable "
         "δ bank.",
+        MeasurandUnit.THETA,
     ),
     "composite": DisplayMetricInfo(
         "composite",
         "∑",
         "Composite fitness under the active scoring formula (equals accuracy when no formula is "
         "set).",
+        MeasurandUnit.SCORE,
     ),
 }
 if set(DISPLAY_METRIC_INFO) != set(get_args(DisplayMetric)):

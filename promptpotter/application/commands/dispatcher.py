@@ -7,14 +7,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, assert_never
 
-from promptpotter.application.commands.payloads import (
-    KIND_OF_PAYLOAD,
-    CommandAcceptedBody,
-    DraftPayload,
-    EditDraftCampaignPayload,
-    ResolveOriginPayload,
-    StartCheckinPayload,
-)
+from promptpotter.application.commands.payloads import CommandAcceptedBody
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.domain.campaign import Compare, Optimize
 from promptpotter.domain.command_kinds import (
@@ -23,6 +16,7 @@ from promptpotter.domain.command_kinds import (
     CommandPayload,
     CyclePayload,
     DeleteCyclePayload,
+    DraftPayload,
     PauseCyclePayload,
 )
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, decode_cycle_path
@@ -95,7 +89,7 @@ class CommandCall[P: CommandPayload]:
 
     @property
     def kind(self) -> CommandKind:
-        return KIND_OF_PAYLOAD[type(self.payload)]
+        return self.payload.kind
 
 
 def _no_body() -> None:
@@ -185,16 +179,14 @@ class CommandDispatcher:
         )
         return handler(self, call.payload, *target)
 
-    async def dispatch(
-        self, call: CommandCall[Any], *, expected_version: int | None = None
-    ) -> CommandOutcome[Any]:
-        """The payload's address base IS its target ledger; ``expected_version`` binds a cycle's."""
+    async def dispatch(self, call: CommandCall[Any]) -> CommandOutcome[Any]:
+        """The payload's address base IS its target ledger."""
         match call.payload:
             case CyclePayload():
-                return await self._on_cycle(call, expected_version=expected_version)
+                return await self._on_cycle(call)
             case CampaignPayload():
                 return await self._on_campaign(call)
-            case EditDraftCampaignPayload() | ResolveOriginPayload() | StartCheckinPayload():
+            case DraftPayload():
                 return await self._on_draft(call)
             case _:
                 ledger = CycleEventLog.open_workspace(self.stores.base_dir)
@@ -206,12 +198,7 @@ class CommandDispatcher:
         ledger = CycleEventLog.open_workspace(self.stores.base_dir)
         return await self._record_and_apply(ledger, call, self._applier(call))
 
-    async def _on_cycle(
-        self,
-        call: CommandCall[CyclePayload],
-        *,
-        expected_version: int | None,
-    ) -> CommandOutcome[object]:
+    async def _on_cycle(self, call: CommandCall[CyclePayload]) -> CommandOutcome[object]:
         payload = call.payload
         hop = CycleHop(campaign_id=payload.campaign_id, cycle_id=payload.cycle_id)
         tail = decode_cycle_path(payload.descend)
@@ -224,32 +211,16 @@ class CommandDispatcher:
             )
             return await CommandDispatcher(
                 leaf_stores, job_registry=self._attached, inline=self.inline
-            )._on_cycle(CommandCall(inner, call.idempotency_key), expected_version=expected_version)
+            )._on_cycle(CommandCall(inner, call.idempotency_key))
         campaign_id, cycle_id = hop.campaign_id, hop.cycle_id
         campaign = owned_campaign(self.stores, campaign_id)
-        cycle_dir = self.stores.campaigns.cycle_dir(hop)
         if self.stores.campaigns.load(hop, moment=None) is None:
             raise NotFoundError(
                 f"cycle not found: {campaign_id}/{cycle_id}", code="command_target_not_found"
             )
-
-        ledger = CycleEventLog.open(CycleDir(cycle_dir))
-        # Checked only when the header is present: the v0 relaxation of ADR-0001, which mandates it.
-        if expected_version is not None and ledger.next_offset != expected_version:
-            raise ConflictError(
-                f"cycle {cycle_id} is at offset {ledger.next_offset}, "
-                f"client expected {expected_version}",
-                details={
-                    "expected_version": expected_version,
-                    "actual_version": ledger.next_offset,
-                },
-            )
-
-        if isinstance(payload, DeleteCyclePayload):
-            # Its apply removes the dir AND its ledger, so the record and ack go on the campaign root's.
-            ledger = CycleEventLog.open(
-                CycleDir(self.stores.campaigns.cycle_dir(campaign.root_hop))
-            )
+        # Its apply removes the dir AND its ledger, so the record and ack go on the campaign root's.
+        recorded_on = campaign.root_hop if isinstance(payload, DeleteCyclePayload) else hop
+        ledger = CycleEventLog.open(CycleDir(self.stores.campaigns.cycle_dir(recorded_on)))
         return await self._record_and_apply(ledger, call, self._applier(call, campaign, hop))
 
     async def _on_draft(self, call: CommandCall[DraftPayload]) -> CommandOutcome[Any]:

@@ -54,14 +54,16 @@ from promptpotter.shared.identity import (
 
 if TYPE_CHECKING:
     from promptpotter.application.commands.payloads import (
-        ForkCyclePayload,
         MintCampaignPayload,
         StartCheckinPayload,
-        StartRunPayload,
     )
     from promptpotter.application.jobs.registry import JobRegistry
     from promptpotter.domain.campaign import Campaign
-    from promptpotter.domain.command_kinds import StepCyclePayload
+    from promptpotter.domain.command_kinds import (
+        ForkCyclePayload,
+        StartRunPayload,
+        StepCyclePayload,
+    )
     from promptpotter.infrastructure.store.draft_store import DraftClaim
     from promptpotter.infrastructure.store.stores import Stores
 

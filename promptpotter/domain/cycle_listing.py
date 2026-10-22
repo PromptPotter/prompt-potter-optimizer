@@ -137,10 +137,6 @@ class CycleListEntry(StrictModel):
         description="Why the cycle ended; null while it has not. Label, outcome and next step "
         "derive from the one STOP_REASON_INFO table — never re-mapped per surface.",
     )
-    superseded_by: str | None = Field(
-        default=None,
-        description="The cycle_id that took this cycle's line, set on the LEFT-BEHIND side of a supersede cut. This is the successor pointer — follow it to find which cycle answers for the campaign; it is a fact of its own precisely so it survives on a parent that had already stopped for its own reason, which `stop_reason` cannot express. Null on a root, an offshoot, and any cycle still holding the line.",
-    )
     run_phase: RunPhase = Field(
         default=RunPhase.DETACHED,
         description="The single run-state value (RunPhase). Computed once by derive_run_state from lifecycle + control flags + freshness; every picker dot and badge reads this, none re-derive it. 'terminal' pairs with `stop_reason` for the reason label.",

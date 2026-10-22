@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Annotated, Any, ClassVar
 
 from pydantic import Field
 
+from promptpotter.application.bench.node_context import Lineage, Target
 from promptpotter.application.campaign_config import Estimand, Knob, Scope
 from promptpotter.application.optimizers import nodes, paper_templates
 from promptpotter.application.optimizers.descriptors import cell_objectives
@@ -20,7 +21,8 @@ from promptpotter.application.optimizers.gepa.state import (
     ParetoSet,
     ReflectionModules,
 )
-from promptpotter.application.optimizers.paper_templates import RewriteKnobs, child, shown
+from promptpotter.application.optimizers.nodes import RewriteKnobs
+from promptpotter.application.optimizers.paper_templates import child, shown
 from promptpotter.config.paths import optimizers_root
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_schema import NodeKind
@@ -42,7 +44,7 @@ if TYPE_CHECKING:
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.optimizers.nodes import (
         CatchUpFn,
-        Draw,
+        CycleRead,
         MeasuredRound,
         Panel,
         PromptArity,
@@ -52,7 +54,6 @@ if TYPE_CHECKING:
     from promptpotter.application.scoring.query_loop import Walk
     from promptpotter.domain.opt_search_point import VariationMode
     from promptpotter.domain.optimizer_state import StatePart
-    from promptpotter.domain.pool import Pool
     from promptpotter.domain.results import DisplayMetric, RoundResult
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import CellSheet, GradedCell
@@ -78,15 +79,12 @@ class MinibatchKnobs(StrictModel):
     )
 
 
-class Minibatch:
+class Minibatch(nodes.Member):
     name: ClassVar[str] = "minibatch"
     kind: ClassVar[NodeKind] = NodeKind.SAMPLER
-    prompt_arity: ClassVar[PromptArity] = "none"
     knobs: ClassVar[type[StrictModel]] = MinibatchKnobs
     reads: ClassVar[frozenset[type[StatePart]]] = frozenset({ParetoSet})
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset({ParetoSet})
-    draws: ClassVar[Mapping[type[Pool], Draw]] = nodes.NO_DRAWS
-    consults: ClassVar[frozenset[type]] = nodes.NO_CONSULTS
     size_knob: ClassVar[str | None] = None
 
     def round_cells(self, knobs: MinibatchKnobs, search: int) -> int:
@@ -115,11 +113,7 @@ class Minibatch:
         return nodes.Panel(cells=cells, order=list(cells), block_size=knobs.size)
 
 
-class GepaReflectKnobs(RewriteKnobs):
-    """Beside the reflection's call config, which loci it rewrites."""
-
-
-class GepaReflect:
+class GepaReflect(nodes.Member):
     """Alg. 1 lines 7-12; its module is the parent's next prompt node, round-robin per lineage (the reference's default selector)."""
 
     name: ClassVar[str] = "gepa_reflect"
@@ -127,14 +121,13 @@ class GepaReflect:
     prompt_arity: ClassVar[PromptArity] = "each"
     opens: ClassVar[bool] = True
     variation_mode: ClassVar[VariationMode] = "llm"
-    knobs: ClassVar[type[StrictModel]] = GepaReflectKnobs
+    knobs: ClassVar[type[StrictModel]] = RewriteKnobs
     reads: ClassVar[frozenset[type[StatePart]]] = frozenset({ParetoScores, ReflectionModules})
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset({ReflectionModules, MinibatchBars})
-    draws: ClassVar[Mapping[type[Pool], Draw]] = nodes.NO_DRAWS
-    consults: ClassVar[frozenset[type]] = nodes.NO_CONSULTS
+    sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Lineage, Target})
 
     async def propose(
-        self, ctx: NodeContext[GepaReflectKnobs], panel: Panel, proposals: Proposals
+        self, ctx: NodeContext[RewriteKnobs], panel: Panel, proposals: Proposals
     ) -> Proposals:
         candidates = ctx.slice(ParetoScores)
         parent_id = candidates.parent_id
@@ -144,10 +137,11 @@ class GepaReflect:
             for cid, at in ctx.slice(ReflectionModules).modules.items()
             if cid in candidates.scores
         }
+        lineage = ctx.read(Lineage)
         parent = (
-            ctx.parent
+            lineage.parent
             if parent_id is None
-            else next(ind for ind in ctx.population if ind.id == parent_id)
+            else next(ind for ind in lineage.population if ind.id == parent_id)
         )
         modules = ctx.schema.prompt_nodes()
         at = held.get(parent.id, 0) % len(modules)
@@ -185,16 +179,12 @@ def minibatch_improves(
     return sigma_prime > sigma, sigma, sigma_prime
 
 
-class MinibatchGateKnobs(StrictModel):
-    """The test takes no parameter: a child must beat its parent on the minibatch."""
-
-
 class _GateRace(nodes.NoCatchUps):
     gate = "not_improved"
 
     def __init__(
         self,
-        ctx: NodeContext[MinibatchGateKnobs],
+        ctx: NodeContext[StrictModel],
         *,
         bars: MinibatchBars,
         block_size: int,
@@ -297,21 +287,16 @@ class _GateRace(nodes.NoCatchUps):
         return None
 
 
-class MinibatchGate:
+class MinibatchGate(nodes.Member):
     name: ClassVar[str] = "minibatch_gate"
     kind: ClassVar[NodeKind] = NodeKind.ELIMINATOR
-    prompt_arity: ClassVar[PromptArity] = "none"
-    knobs: ClassVar[type[StrictModel]] = MinibatchGateKnobs
     reads: ClassVar[frozenset[type[StatePart]]] = frozenset({MinibatchBars})
-    writes: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
-    draws: ClassVar[Mapping[type[Pool], Draw]] = nodes.NO_DRAWS
-    consults: ClassVar[frozenset[type]] = nodes.NO_CONSULTS
     abort_lenses: ClassVar[Mapping[str, frozenset[str]]] = {}
     stop_disqualifies: ClassVar[bool] = True
 
     def race(
         self,
-        ctx: NodeContext[MinibatchGateKnobs],
+        ctx: NodeContext[StrictModel],
         panel: Panel,
         proposals: Proposals,
         catch_up: CatchUpFn,
@@ -364,41 +349,35 @@ def draw_parent(
     return rng.choices(ids, weights=[frequency[cid] for cid in ids])[0]
 
 
-class ParetoKnobs(StrictModel):
-    """Pareto-based selection takes no parameter."""
-
-
-class Pareto:
+class Pareto(nodes.Member):
     name: ClassVar[str] = "pareto"
     kind: ClassVar[NodeKind] = NodeKind.SELECTOR
-    prompt_arity: ClassVar[PromptArity] = "none"
-    knobs: ClassVar[type[StrictModel]] = ParetoKnobs
     reads: ClassVar[frozenset[type[StatePart]]] = frozenset({ParetoSet, ParetoScores})
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset({ParetoScores})
-    draws: ClassVar[Mapping[type[Pool], Draw]] = nodes.NO_DRAWS
-    consults: ClassVar[frozenset[type]] = nodes.NO_CONSULTS
+    sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Lineage})
     elects_on: ClassVar[DisplayMetric] = "composite"
     elects_partial: ClassVar[bool] = False
 
     def parent_cells(
         self,
-        ctx: NodeContext[ParetoKnobs],
+        ctx: NodeContext[StrictModel],
         panel: Panel,
         rows: Mapping[ArmKey, CellSheet],
     ) -> list[Sample]:
         return panel.cells[panel.block_size :]
 
     def select(
-        self, ctx: NodeContext[ParetoKnobs], measured: MeasuredRound, proposals: Proposals
+        self, ctx: NodeContext[StrictModel], measured: MeasuredRound, proposals: Proposals
     ) -> Selection:
         pareto_set = ctx.slice(ParetoSet).keys
         candidates = dict(ctx.slice(ParetoScores).scores)
-        kept = [ind for ind in ctx.population if ind.id in candidates]
+        lineage = ctx.read(Lineage)
+        kept = [ind for ind in lineage.population if ind.id in candidates]
         offered = [
             (measured.arms[key].individual, measured.rows[key]) for key in measured.electable
         ]
         if not candidates:
-            offered.insert(0, (measured.parent.individual, measured.parent_rows))
+            offered.insert(0, (measured.parent.individual, measured.parent.rows))
         admitted: list[str] = []
         for ind, sheet in offered:
             graded = cell_objectives(sheet)
@@ -428,7 +407,7 @@ class Pareto:
         aggregates = {cid: _aggregate(scores) for cid, scores in candidates.items()}
         top = max(aggregates.values())
         leaders = [cid for cid, aggregate in aggregates.items() if aggregate == top]
-        incumbent = ctx.parent.id
+        incumbent = lineage.parent.id
         # A tie never advances: the incumbent holds against an equal aggregate.
         selected_id = "" if incumbent in leaders else leaders[0]
         if selected_id and selected_id not in admitted:

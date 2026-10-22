@@ -84,7 +84,7 @@ def _cycle_edge(index: CycleIndex) -> tuple[str | None, int | None]:
 def load_lineage_spine(difficulty: DifficultyView) -> list[SpineCycle]:
     """Every cycle of the run's campaign read on ONE scale, so θ sum up a lineage that forks."""
     session = difficulty.session
-    stores, scorer = session.store, session.scoring.require_scorer()
+    stores, scorer = session.store, session.state.scoring.require_scorer()
     edges: list[tuple[str, CycleIndex, frozenset[int]]] = []
     lines: list[list[RoundResult]] = []
     for entry in stores.campaigns.enumerate_cycles():

@@ -6,7 +6,7 @@ from typing import Any, ClassVar, NamedTuple, get_args
 
 from promptpotter.domain.bench import BenchPasses, BenchReading, PartitionRecord
 from promptpotter.domain.command_kinds import (
-    LOOP_TAKEN,
+    PAYLOAD_MODEL_FOR_KIND,
     LoopPayload,
     OriginGateDecisionPayload,
     PauseCyclePayload,
@@ -276,6 +276,9 @@ class Controls(NamedTuple):
     submissions: tuple[tuple[str, SubmitArmsPayload], ...] = ()
 
 
+_LOOP_TAKEN = frozenset(model.kind for model in LoopPayload.__subclasses__())
+
+
 class _Controls:
     records: ClassVar[RecordClasses] = (CommandRecord, CommandAckRecord, RunPhaseRecord)
 
@@ -288,7 +291,7 @@ class _Controls:
     def feed(self, offset: int, record: CommandRecord | CommandAckRecord | RunPhaseRecord) -> None:
         match record:
             case CommandRecord():
-                if record.kind in LOOP_TAKEN:
+                if record.kind in _LOOP_TAKEN:
                     self._asked[record.command_id] = record
             case CommandAckRecord(command_id=command_id, status="accepted"):
                 if asked := self._asked.pop(command_id, None):
@@ -315,7 +318,8 @@ class _Controls:
 
     def _arm(self, asked: CommandRecord) -> None:
         command_id, held = asked.command_id, self._held
-        kind = LOOP_TAKEN[asked.kind]
+        kind = PAYLOAD_MODEL_FOR_KIND[asked.kind]
+        assert issubclass(kind, LoopPayload), "only a kind in `_LOOP_TAKEN` is asked"
         match kind.model_validate(asked.payload):
             case PauseCyclePayload():
                 if held.pause is not None:

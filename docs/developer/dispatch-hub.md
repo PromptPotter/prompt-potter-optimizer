@@ -226,7 +226,7 @@ Substituted directly by `compile_prompt`; not a signal.
 
 - **Entry points** — two, both stateless: `render(name, bundle)` (internal, one injection's text) and `fill(template, bundle, *, node)` (**every** optimizer node; the layout is resolved inside from `node` via `node_layout`, never passed in). `InjectionBundle` is the per-call frozen state `(opt_sp, pipeline_schema, cycle_slice, digest)`, built once via `build_bundle(cycle)`; `digest` is a `RoundDigest` over the cycle's LAST round. The bench folds a round in (`Cycle.absorb_round`) before its adapters run, so `l1_critique` reads the round it distils there like every other node — on the winner's params, that round's runtime failures already in `l1_wounds`.
 - **Fill** — one path for every node: `fill(template, bundle, *, node)` walks the node's layout (per-slot injection-name lists, resolved by `node_layout`), selects items under the node's discretionary allowance, appends the placed text to each addressable slot, then scans the filled body for any `{{name}}` left in non-layout prose and renders the registered ones into a kwargs dict → `FilledPrompt(template, injection_vars, rendered, coverage)`. **No optimizer prose token names an injection** — every surviving `{{token}}` in the shipped prompts is a caller extra (`n_variants`, `consultation_instruction`), and `validate_template()` errors at template load on any `{{slot}}` outside the registry. All four `problem_description` bodies are empty strings, so the template carries no per-ROUND value to void the stable prefix behind it.
-- **L1_GENERATE visibility** — `L1_POSSIBLE` (`dispatch/layout.py`) is the whole menu 🧩; the rest (`l3_to_l2_note`, `l1_overrides`, `l1_signal_catalogue`, `guard_breaches`, the capability directives) are L1_CRITIQUE / L2_CONTEXT / L3_PLAN-internal, so L1 cannot see L2's own state.
+- **L1_GENERATE visibility** — `NODE_LAYOUTS["l1_generate"].possible` (`dispatch/layout.py`, its floor plus its `extras`) is the whole menu 🧩; the rest (`l3_to_l2_note`, `l1_overrides`, `l1_signal_catalogue`, `guard_breaches`, the capability directives) are L1_CRITIQUE / L2_CONTEXT / L3_PLAN-internal, so L1 cannot see L2's own state.
 - **L1_GENERATE guard** — every name in `L1_MANDATORY` 🧩 must sit across the 4 addressable slots once an edit is merged; missing fires `l1_layout_missing_mandatory`, a guard breach routing to L3_PLAN rather than letting L2_CONTEXT starve L1_GENERATE. Membership is two kinds, and the second gets forgotten: a field L1 cannot OPERATE without (parent prompt, plan, task framing, mutation surface, failure digest), and the sole carrier of a state L1 must not enter BLIND — `answer_distribution`, without which a collapse onto one label is invisible to the very run collapsing, and `measurand` + `confounds`, without which the generator optimises a column it cannot name and reads a cold ruler as ability.
 
 ## L1 layout — L2's structural edit surface
@@ -261,7 +261,7 @@ L2's parser (`L2Context.parse`) coerces `{name: slot}` onto the current layout, 
 
 **Adding an injection** → the golden-path recipe lives in [`adding-a-surface.md`](adding-a-surface.md).
 
-**File-line anchors** — `injection_table()`: `dispatch/injections/registry.py` · `InjectionBundle`: `dispatch/bundle.py` · `DispatchHub` + `build_bundle`: `dispatch/facade.py` · `L1_POSSIBLE`, `L1_MANDATORY`, `L1_LAYOUT_SLOTS`, `validate_l1_layout`: `application/optimizers/potter/dispatch/layout.py` · L1 compose path: `application/optimizers/potter/l1/generate.py::l1_generate` · the layout state: `L2Memory.steer["l1_generate"].config["layout"]` (`optimizers/potter/records.py`, `L2Memory`, `L1Layout`).
+**File-line anchors** — `injection_table()`: `dispatch/injections/registry.py` · `InjectionBundle`: `dispatch/bundle.py` · `DispatchHub` + `build_bundle`: `dispatch/facade.py` · `NODE_LAYOUTS`, `L1_MANDATORY`, `L1_LAYOUT_SLOTS`, `validate_l1_layout`: `application/optimizers/potter/dispatch/layout.py` · L1 compose path: `application/optimizers/potter/l1/generate.py::l1_generate` · the layout state: `L2Memory.steer["l1_generate"].config["layout"]` (`optimizers/potter/records.py`, `L2Memory`, `L1Layout`).
 
 ## Trigger — when L2 fires
 
@@ -275,7 +275,7 @@ Trigger gate: `escalation.escalate_l2`; the decision is recorded as `PotterCheck
 
 L2's injection set **is** `NODE_LAYOUTS["l2_context"].floor` (`dispatch/layout.py`) — read the membership there, never from a copy on this page. It lives in that layout rather than as `{{tokens}}` in the template — its `l2_context/1` `problem_description` body is empty. No L2-only surface object exists. L2 reads its own refusals through `guard_breaches` on that floor — and when its layout edit is refused, Wound 4 fires L3 immediately, so by L2's next fire L3 has also replanned and L2 reads the new `plan`.
 
-One injection is L2-only: `l1_signal_catalogue` — the cross-slot mandatory rule, which `l1_layout`'s schema cannot express. The vocabulary itself (legal slots, signal enum) is on that schema, not here. Absent from `L1_POSSIBLE` so L2 cannot accidentally inject its own catalogue into L1.
+One injection is L2-only: `l1_signal_catalogue` — the cross-slot mandatory rule, which `l1_layout`'s schema cannot express. The vocabulary itself (legal slots, signal enum) is on that schema, not here. Absent from `l1_generate`'s `possible` so L2 cannot accidentally inject its own catalogue into L1.
 
 ## Outputs — what L2 writes
 
@@ -310,7 +310,7 @@ Two channels, ONE carrier — a node overlay on `l1_generate` (`L2Memory.steer`)
 | Attention | `layout` (whole, validated) | `DispatchHub.fill` walks the layout and appends each named injection's rendering to its slot. Mutating the layout reshapes which injections L1 sees and where. |
 | Exploration | `n_variants`, `temperature` | L1's next call — `n_variants` (in-prompt directive via the `{{n_variants}}` caller extra) and `temperature` (the LLM call's, out-of-prompt). |
 
-`task_context` is **not** a channel: it is operator-authored framing that L2 cannot write, and it is off L2's floor. L2 also cannot edit L1's static template text and cannot toggle `answer_format` — those are code contracts. Anything L2 wants L1 to see must already be a registered injection (from `L1_POSSIBLE`).
+`task_context` is **not** a channel: it is operator-authored framing that L2 cannot write, and it is off L2's floor. L2 also cannot edit L1's static template text and cannot toggle `answer_format` — those are code contracts. Anything L2 wants L1 to see must already be a registered injection (from `l1_generate`'s `possible`).
 
 ### Side effects — `L2Context.land`
 

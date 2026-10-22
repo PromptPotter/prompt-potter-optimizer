@@ -4424,7 +4424,8 @@
       "MeasurandUnit": {
         "enum": [
           "rate",
-          "score"
+          "score",
+          "theta"
         ],
         "title": "MeasurandUnit",
         "type": "string"

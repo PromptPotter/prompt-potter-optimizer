@@ -5,16 +5,11 @@ from promptpotter.application.bench.node_context import NodeContext
 from promptpotter.application.optimizers.nodes import RoundContext
 from promptpotter.application.optimizers.potter.knobs import L1GenerateKnobs
 from promptpotter.application.optimizers.potter.l1.candidate_source import propose_l1_population
-from promptpotter.application.optimizers.potter.l1.stats import round_facts
-from promptpotter.application.runner.output import (
-    write_hard_samples_artifacts,
-    write_log_md,
-    write_review_md,
-)
 from promptpotter.application.runner.round import (
     announce_opening,
     announce_population,
     bank_walk,
+    close_round,
     settle_owed_outputs,
 )
 from promptpotter.domain.paired_reading import ReadingState
@@ -23,7 +18,6 @@ from promptpotter.domain.results import OverlapReading, RoundResult
 
 async def run_generation_only_round(ctx: RoundContext) -> None:
     cycle, cb, round_num = ctx.cycle, ctx.callbacks, ctx.round_num
-    session = cycle.session
     cb.on_round_entered(round_num)
 
     await settle_owed_outputs(ctx)
@@ -42,21 +36,6 @@ async def run_generation_only_round(ctx: RoundContext) -> None:
         folds={},
         election=None,
         overlap=OverlapReading.unpaired(ReadingState.NOT_ASKED, round_num, False),
-        optimizer_state=cycle.close_state(round_num),
     )
-    cb.on_round_close(
-        generated.model_copy(update={"optimizer_facts": round_facts(generated)}),
-        cycle.rounds,
-        session.bank.slot_of,
-        cycle.difficulty,
-        lives=cycle.config.optimization.lives,
-    )
-    if session.state.cycle_id:
-        write_hard_samples_artifacts(session, cycle)
-        write_log_md(session, cycle.config)
-        write_review_md(
-            session,
-            accuracy_ceiling=cycle.config.accuracy_ceiling,
-            optimizer=cycle.optimizer,
-            framing=cycle.framing,
-        )
+    cycle.absorb_round(generated)
+    await close_round(cycle, generated, round_num, cycle.session, cb)

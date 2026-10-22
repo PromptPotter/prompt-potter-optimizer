@@ -101,7 +101,7 @@ def _make_replay_verdict(
     sink: list[ReplayMismatch],
 ) -> Verdict:
     """Rescored HERE, each round on the scale its election read: the fold asks only of carried-over rounds."""
-    scorer = session.scoring.require_scorer()
+    scorer = session.state.scoring.require_scorer()
     scope = session_ruler_scope(session)
     opt = campaign_config.optimization
 
@@ -144,7 +144,7 @@ def ab_replay_cycle(
     campaign_config: CampaignConfig,
 ) -> AbReport:
     """The walk is the CAMPAIGN's: a fork shares its parent's measurements."""
-    scorer = session.scoring.require_scorer()
+    scorer = session.state.scoring.require_scorer()
 
     record = load_mask_record(session.store, hop.campaign_id, lens=None, with_replay=True)
     round_0 = next(

@@ -158,7 +158,9 @@ class AbilityScale(NamedTuple):
 
 
 def session_ruler_scope(session: Session) -> RulerScope:
-    return RulerScope(scorer=session.scoring.require_scorer().id, dataset=session.measured_dataset)
+    return RulerScope(
+        scorer=session.state.scoring.require_scorer().id, dataset=session.measured_dataset
+    )
 
 
 def ruler_rows(
@@ -255,7 +257,9 @@ class DifficultyView:
         ]
         session.store.ruler.fold(
             session_ruler_scope(session),
-            ruler_rows(session.store, sheets, session.scoring.require_partition().admitted_keys),
+            ruler_rows(
+                session.store, sheets, session.state.scoring.require_partition().admitted_keys
+            ),
         )
 
     @cached_property
@@ -314,7 +318,7 @@ def _session_ruler(
         session_ruler_scope(session),
         version,
         judged,
-        objective_id=session.scoring.require_scorer().id,
+        objective_id=session.state.scoring.require_scorer().id,
         n_min=n_min,
         enable_2pl=enable_2pl,
     )

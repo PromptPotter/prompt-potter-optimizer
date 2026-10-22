@@ -35,11 +35,10 @@ Filed at the operator's ask, ahead of everything below: each entry is a shape th
 from being SEEN, so leaving it blinds the next plan the same way (`<next-change>`). Solve as soon
 as possible. **Rides with:** the shrink arc's stage named in each entry, or any pass in that file.
 
-- **Most doc invariants are still prose no gate checks, and three that carry a probe are false.**
+- **Most doc invariants are still prose no gate checks, and one that carries a probe is false.**
   `gate.py --only doc-claims` resolves every cited `file::symbol` and runs every probe; each false
   one is filed in `scripts/gate.py::_KNOWN_FALSE` under its phrase here:
-  *dashboard.json served as the head state* · *the
-  runner writes Session* · *no schema-first gate*. Action: each goes true and its sentence states the
+  *dashboard.json served as the head state*. Action: each goes true and its sentence states the
   invariant again; every other one-X / no-second-Y / nothing-reads-Z claim gains a probe or is
   deleted. **Re-test:** `gate.py --only doc-claims`.
 - **Three "the one reader" mechanisms, each owned by a different layer file** —
@@ -55,16 +54,9 @@ as possible. **Rides with:** the shrink arc's stage named in each entry, or any 
 - **`application/bench/node_context.py::NodeContext` grows a method per member need** (52 → 88
   public in one arc). Action: declared typed reads refused at load, ~11 methods left, a member base
   in `optimizers/nodes.py`. **Re-test:** `p_member` ≤ 12.
-- **Derived state cached by hand on `Cycle.tracking` and a mutable `Session`, mirrored by test
-  namespaces**, so a reshape looks costly and stays off the brief. Action: `Cycle` properties,
-  frozen `Session` built once in `application/initialization/wiring.py::bind_cycle_session`, a `seat` in `tests/factories.py` the
-  one seat. **Re-test:** `rg -c "tracking\." promptpotter` → 0; renaming a `Cycle` attribute
+- **Run state mirrored by test namespaces**, so a reshape looks costly and stays off the brief.
+  Action: a `seat` in `tests/factories.py` the one seat. **Re-test:** renaming a `Cycle` attribute
   changes one file under `tests/`.
-- **One model is disk, ledger and wire shape at once** —
-  `presentation/api/routers/campaigns/cycles.py` serves `RoundResult` whole, so every field added to
-  a round is served unasked. Action: a route serves a view under `application/views/`; no
-  `CycleRecord` arm or `RoundResult` is a `response_model`. **Re-test:** `rg -n
-  "response_model=RoundResult" promptpotter/presentation` → 0.
 
 ## Open — multi-arc, no blocker
 
@@ -182,7 +174,7 @@ and delete the entry if the answer is no.
   resumes with every decision equal. The re-close itself is declared (`application/runner/loop.py::run_round_loop`:
   until an L1 round closes, every launch re-closes round 0, since a stopped run's file passed no
   gate); open is whether the critique re-send should read the banked `optimizer_state` instead. **Rides with:** any change to
-  `infrastructure/projections/live_dashboard/projection.py::resolve_resume_state` or the origin round in `runner/run_prep.py`. **Re-test:**
+  `infrastructure/projections/live_dashboard/projection.py::materializing_over` or the origin round in `runner/run_prep.py`. **Re-test:**
   `scripts/offline_run.py --rounds 1 --rows 60` — `decisions MOVED` on the resume line means it
   still does.
 - **INVESTIGATE — two items filed with their re-tests in `.scratch/debug-arc-seed.md`**: errored

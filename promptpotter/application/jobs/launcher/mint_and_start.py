@@ -35,6 +35,7 @@ from promptpotter.application.jobs.mint import (
 )
 from promptpotter.application.jobs.registry import UNRESOLVED_HOP, Job, JobRegistry
 from promptpotter.application.pipeline_resolve import (
+    configure_and_apply_pipeline,
     resolve_campaign_config,
 )
 from promptpotter.domain.campaign import Campaign, Purpose
@@ -165,7 +166,7 @@ async def hold_fresh_mint(
         stores.identity.user_id,
         job.job_id,
     )
-    return HeldRun.of(job_registry, job.job_id, session, held)
+    return HeldRun.of(job_registry, job.job_id, minted.session, held)
 
 
 def upload_source(draft: DraftCampaign, upload: str) -> dict[str, Any]:
@@ -207,8 +208,9 @@ async def hold_existing_cycle(
     campaign, hop = request.campaign, request.hop
     try:
         held = await admit_and_hold(request, stores=stores, job_registry=job_registry, job=job)
-        session, campaign_config = await bind_cycle_session(stores, campaign, hop)
-        refuse_drifted_resume(session, campaign, hop, session.bank.samples)
+        bound, campaign_config = await bind_cycle_session(stores, campaign, hop)
+        refuse_drifted_resume(bound, campaign, hop, bound.bank.samples)
+        session = configure_and_apply_pipeline(bound, campaign_config)
     except BaseException as exc:
         # `hop=None`: a refusal stamps nothing on the cycle, so it stays as resumable as it was.
         release_slot(job_registry, job.job_id, exc, stores=stores, hop=None)

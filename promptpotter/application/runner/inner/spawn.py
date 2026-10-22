@@ -22,6 +22,7 @@ from promptpotter.application.optimizer_manifest import (
     binding_prompt_overrides,
     resolved_overrides,
 )
+from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
 from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.entry import run_optimization
@@ -340,7 +341,7 @@ def inner_cell_hop(sample: Sample, payload: dict[str, Any]) -> CycleHop | None:
 
 def _continue_inner_campaign(
     session: Session, campaign: Campaign, train_data: Sequence[Sample]
-) -> None:
+) -> Session:
     """``stop_reason_outcome`` governs scoring, never resumption."""
     store = session.store.campaigns
     # A rebase retires the root under `superseded_by`; the banked trajectory is its successor's.
@@ -363,7 +364,7 @@ def _continue_inner_campaign(
     except ConfigDriftError as drift:
         raise CellUnscoreableError(str(drift), spent={}) from drift
 
-    session.bind_campaign(hop, purpose=campaign.declaration.purpose)
+    bound = session.bound(hop, purpose=campaign.declaration.purpose)
     save_active_pointer(session.store.base_dir, hop)
     logger.info(
         "inner campaign %s/%s CONTINUES from %d banked round record(s) (was %s)",
@@ -372,6 +373,7 @@ def _continue_inner_campaign(
         _banked_inner_rounds(store, campaign.root_hop),
         run.run_phase,
     )
+    return configure_and_apply_pipeline(bound, effective_config(campaign.declaration))
 
 
 def _cells(ctx: InnerSpawnContext) -> InnerCells:
@@ -397,7 +399,7 @@ async def _open_seat(cell: _InnerCell, store: Stores) -> _Opened:
         stores=store,
         enable_tracing=False,
     )
-    session.control = RunControl(enclosing=ctx.enclosing)
+    session.state.control = RunControl(enclosing=ctx.enclosing)
     all_samples = session.bank.samples
     if not all_samples:
         raise ValueError(f"inner dataset {spec.inner_dataset!r} loaded zero samples")
@@ -428,9 +430,9 @@ async def _open_seat(cell: _InnerCell, store: Stores) -> _Opened:
     campaign = session.store.campaigns.load_campaign(cell.campaign_id)
     if campaign is None:
         plan = resolve_cycle_plan(session, declaration, train_data, hop=None)
-        mint(session, plan, campaign_id=cell.campaign_id, billed=None)
+        session = mint(plan, campaign_id=cell.campaign_id, billed=None).session
     else:
-        _continue_inner_campaign(session, campaign, train_data)
+        session = _continue_inner_campaign(session, campaign, train_data)
     return _Opened(session, effective_config(declaration), train_data, class_floor(search))
 
 

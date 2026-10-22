@@ -10,11 +10,8 @@ from promptpotter.domain.spend import Budget
 
 if TYPE_CHECKING:
     from promptpotter.application.commands.dispatcher import CommandDispatcher
-    from promptpotter.application.commands.payloads import (
-        GradeBenchPayload,
-        VerifyCandidatePayload,
-    )
     from promptpotter.domain.campaign import Campaign
+    from promptpotter.domain.command_kinds import GradeBenchPayload, VerifyCandidatePayload
     from promptpotter.domain.cycle_paths import CycleHop
 
 

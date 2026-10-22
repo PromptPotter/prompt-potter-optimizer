@@ -61,7 +61,7 @@ def build_cycle_result(
         bench_origin, bench_levels = bench_series(
             session.store,
             cycle.bench_passes,
-            session.scoring.require_scorer(),
+            session.state.scoring.require_scorer(),
             rounds=cycle_rounds,
         )
     return CycleResult(
@@ -119,7 +119,7 @@ def _export_artifact(
         level=series.reading(winner.round),
         schema=session.pipeline_schema,
         framing=cycle.framing,
-        demo=session.scoring.require_partition().demo,
+        demo=session.state.scoring.require_partition().demo,
         bench=cycle_result.bench,
     )
 
@@ -212,7 +212,7 @@ def _finalize_run(
         ),
         usd_cap=budget.usd,
         token_cap=budget.tokens,
-        share=session.control.book.allotment,
+        share=session.state.control.book.allotment,
     )
     if is_paused:
         # Declared where every paused exit converges, rather than trusting each raise site.
@@ -246,7 +246,7 @@ def _finalize_run(
                     if (origin := cycle_result.origin) is None or origin.composite is None
                     else origin.composite.value
                 ),
-                scorer_id=session.scoring.require_scorer().id,
+                scorer_id=session.state.scoring.require_scorer().id,
                 mode="diag" if diag else "full",
                 result_round=cycle_result.result_round,
                 result_prompt_fields=cycle_result.result_prompt_fields,
@@ -257,7 +257,7 @@ def _finalize_run(
                 cycle_result,
                 cycle,
                 formula=resolve_cell_formula(
-                    session.scoring.require_scorer().per_cell, session.pipeline_schema
+                    session.state.scoring.require_scorer().per_cell, session.pipeline_schema
                 )[0],
             ),
         )

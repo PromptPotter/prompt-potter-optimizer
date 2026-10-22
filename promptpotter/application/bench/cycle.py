@@ -179,7 +179,7 @@ class Cycle:
         selected.runtime.refuse_origin(origin_sheet)
         slices = SliceMap(selected.slices)
         sp = opt_sp.to_job_search_point(
-            schema=schema, framing=framing, demo=session.scoring.require_partition().demo
+            schema=schema, framing=framing, demo=session.state.scoring.require_partition().demo
         )
         _assert_overlay_preserved(sp, session.pipeline_params)
         # Hashed here because ``opt_sp`` advances on ``adopt``.
@@ -236,7 +236,7 @@ class Cycle:
             individual_id,
             schema=self.session.pipeline_schema,
             framing=self.framing,
-            demo=self.session.scoring.require_partition().demo,
+            demo=self.session.state.scoring.require_partition().demo,
         )
 
     def measured(self, individual_id: str) -> Concluded:
@@ -298,7 +298,7 @@ class Cycle:
         return individual.to_job_search_point(
             schema=self.session.pipeline_schema,
             framing=self.framing,
-            demo=self.session.scoring.require_partition().demo,
+            demo=self.session.state.scoring.require_partition().demo,
         )
 
     @property

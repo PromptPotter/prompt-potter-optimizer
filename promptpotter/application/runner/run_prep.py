@@ -16,6 +16,7 @@ from promptpotter.application.run_observers import RunObservers, declare_run_wir
 from promptpotter.application.run_phase_control import FlightGauge
 from promptpotter.application.scoring.query_loop import NEXT_CELL
 from promptpotter.application.scoring.sample_measurement import cell_bound
+from promptpotter.domain.bench import BankPartition
 from promptpotter.domain.campaign import ceiling_meter
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.measurement_provenance import RunSource
@@ -35,6 +36,8 @@ from promptpotter.infrastructure.store.stores import Stores
 class PreparedRun:
     """No ceiling of its own: the held one is SET INTO ``campaign_config``, so the value that halts is served."""
 
+    # The session every later step holds: the cycle seed's overlay laid on what the caller bound.
+    session: Session
     origin: CampaignOrigin
     campaign_config: CampaignConfig
 
@@ -44,6 +47,7 @@ async def prepare_run(
     campaign_config: CampaignConfig,
     *,
     session: Session,
+    partition: BankPartition,
     observers: RunObservers,
     budget: HeldBudget,
     langfuse_session_id: str | None,
@@ -53,8 +57,11 @@ async def prepare_run(
     seed = session.store.campaigns.read_cycle_seed(session.hop) if session.state.cycle_id else None
     if seed is not None:
         if seed.pipeline_overlay:
-            session.pipeline_params = apply_node_overlay(
-                session.pipeline_params or {}, seed.pipeline_overlay, session.pipeline_schema
+            session = replace(
+                session,
+                pipeline_params=apply_node_overlay(
+                    session.pipeline_params, seed.pipeline_overlay, session.pipeline_schema
+                ),
             )
         campaign_config = apply_cycle_seed(campaign_config, seed)
         if overlay_sets_model_outside_allowed(
@@ -72,7 +79,7 @@ async def prepare_run(
             )
         }
     )
-    session.held = budget
+    session.state.held = budget
     # Declared before origin scoring; the record is the readout, the arming below the enforcement.
     observers.tracing.start(
         config_snapshot=campaign_config.model_dump(mode="json"),
@@ -93,9 +100,9 @@ async def prepare_run(
     # After the declaration, and before the origin pass, which spends.
     arm_run_controls(session, observers)
 
-    populate_session_scoring(session, campaign_config, source=RunSource.ORIGIN)
+    populate_session_scoring(session, campaign_config, source=RunSource.ORIGIN, partition=partition)
     if (book := bound_spend_book()) is not None and (
-        cell := await cell_bound(session, session.pipeline_params or {})
+        cell := await cell_bound(session, session.pipeline_params)
     ) is not None:
         # After the scorer, which the stop this raises is finalized with.
         book.refuse_unpriced(cell, NEXT_CELL)
@@ -109,16 +116,16 @@ async def prepare_run(
     if origin.locked_scoring is not None:
         campaign_config = campaign_config.model_copy(update={"scoring": origin.locked_scoring})
 
-    return PreparedRun(origin=origin, campaign_config=campaign_config)
+    return PreparedRun(session=session, origin=origin, campaign_config=campaign_config)
 
 
 def arm_run_controls(session: Session, observers: RunObservers) -> None:
     """Always armed, caps or none, before origin scoring spends; a fork arms its own cycle dir."""
-    if session.held is None:
+    if session.state.held is None:
         raise RuntimeError("a run's book is armed only over what admission held for it")
-    session.flight = FlightGauge(observers.callbacks.on_flight)
+    session.state.flight = FlightGauge(observers.callbacks.on_flight)
     book = open_spend_book(
-        session.held,
+        session.state.held,
         stores=session.store,
         job_registry=JobRegistry.attach(),
         hop=session.hop if session.state.cycle_id else None,
@@ -127,9 +134,9 @@ def arm_run_controls(session: Session, observers: RunObservers) -> None:
         live=True,
     )
     observers.arm_spend_book(book)
-    session.control = replace(session.control, cycle_dir=book.cycle_dir, book=book)
+    session.state.control = replace(session.state.control, cycle_dir=book.cycle_dir, book=book)
     # The rate-limit countdown polls it too — the one blocking seam that otherwise ignores a pause.
-    set_abort_check(session.control.pause_requested)
+    set_abort_check(session.state.control.pause_requested)
 
 
 def stand_held_budget(stores: Stores, hop: CycleHop, held: HeldBudget) -> None:
@@ -141,7 +148,7 @@ def stand_held_budget(stores: Stores, hop: CycleHop, held: HeldBudget) -> None:
 
 def rebase_held(session: Session, parent: CycleHop) -> None:
     """The job follows the fork, and its share stops counting *parent*'s metered spend, which the campaign's holds."""
-    book, held = session.control.book, session.held
+    book, held = session.state.control.book, session.state.held
     if book is None or held is None:
         raise RuntimeError("a run rebases only once its book is armed")
     spent = session.store.campaigns.cycle_metered(parent, book.meters)

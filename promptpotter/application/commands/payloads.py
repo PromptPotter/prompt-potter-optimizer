@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, ClassVar, Literal
+from typing import Any, Literal
 
 from pydantic import Field, SerializerFunctionWrapHandler, model_serializer, model_validator
 
@@ -8,83 +8,17 @@ from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.datasets.draft_campaign import EditDraftPatch, OptimizationOverrides
 from promptpotter.domain.campaign import Optimize, Purpose
 from promptpotter.domain.command_kinds import (
-    PAYLOAD_IN_DOMAIN,
+    PAYLOAD_MODEL_FOR_KIND,
     CommandKind,
     CommandPayload,
-    CyclePayload,
-    DraftAddressedPayload,
+    DraftPayload,
 )
-from promptpotter.domain.phases import INNER_LAUNCH_REFUSAL
-from promptpotter.domain.results import VerifyStrategy
-from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.spend import Budget
-from promptpotter.domain.strict_model import StrictModel, WireInt
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.layout import validate_dataset_name
 
 
-class ForkCyclePayload(CyclePayload):
-    """The cut, and the shape of the fork's first run (``mode``) — one act, so one command.
-    A parent a producer still holds is paused by the applier once the fork's run is admitted."""
-
-    inner_refusal: ClassVar[str | None] = INNER_LAUNCH_REFUSAL
-
-    mode: RunMode = RunMode()
-    round: int = Field(default=0, ge=0)
-    candidate_id: str = Field(default="", max_length=128)
-    # Validated into a typed `CycleSeed` at the applier, which stamps the provenance the wire omits.
-    seed: dict[str, Any]
-    reason: str = Field(default="", max_length=512)
-    keep_rounds: bool = Field(
-        default=False,
-        description=(
-            "False (the default) is `operator_steered`: a clean offshoot from the origin, "
-            "re-scoring the edited searchpoint. True is `operator_rewind` — rounds 0..round-1 "
-            "are lifted and the fork continues at `round` under the seed's overrides, which is "
-            "what an 'apply this from here' press means and what the terminal spells "
-            "`resume --rewind N`."
-        ),
-    )
-
-
-class StartRunPayload(CyclePayload):
-    """A run of an existing cycle: what bounds it (``budget``, ``step_rounds``) and the shape it
-    takes (``mode``)."""
-
-    inner_refusal: ClassVar[str | None] = INNER_LAUNCH_REFUSAL
-
-    budget: Budget = Budget()
-    step_rounds: WireInt | None = Field(default=None, ge=1, le=100)
-    mode: RunMode = RunMode()
-
-
-class VerifyCandidatePayload(CyclePayload):
-    """``samples`` omitted is the ANSWER, not an absence: the count is derived from the
-    per-candidate round budget and the rounds run since this cycle's last verification
-    (``application/diagnostics/verify.py::derive_verify_samples``). A larger explicit count is
-    refused, naming the budget — which is what keeps one click on a million-row dataset from being
-    a million-cell bill.
-
-    Addressed as the ``evidence`` read addresses a searchpoint — cycle, descent, ``candidate_id``
-    — so an L4 inner candidate is as reachable as a top-level one."""
-
-    inner_refusal: ClassVar[str | None] = None
-
-    candidate_id: str = Field(min_length=1, max_length=128)
-    samples: WireInt | None = Field(default=None, ge=1, le=10_000)
-    strategy: VerifyStrategy = "random"
-    seed: WireInt | None = None
-
-
-class GradeBenchPayload(CyclePayload):
-    """The cycle holding its campaign's line: the pass grades the campaign's result, so any other
-    cycle is refused."""
-
-    inner_refusal: ClassVar[str | None] = (
-        "The bench grades a campaign's line, and an inner run is a cell of its outer campaign's."
-    )
-
-
-class CompactArchivePayload(CommandPayload):
+class CompactArchivePayload(CommandPayload, kind=CommandKind.COMPACT_ARCHIVE):
     """``apply`` defaults to False on every mode, including the destructive one: a preview is what
     the operator consents on, so the write has to be asked for rather than defaulted into."""
 
@@ -100,16 +34,16 @@ class CompactArchivePayload(CommandPayload):
         return self
 
 
-class EditDraftCampaignPayload(DraftAddressedPayload):
+class EditDraftCampaignPayload(DraftPayload, kind=CommandKind.EDIT_DRAFT_CAMPAIGN):
     # Typed: a dict defers validation past the capability gate. Required: no patch records a no-op.
     patch: EditDraftPatch
 
 
-class ResolveOriginPayload(DraftAddressedPayload):
+class ResolveOriginPayload(DraftPayload, kind=CommandKind.RESOLVE_ORIGIN):
     message: str = Field(default="", max_length=4000)
 
 
-class StartCheckinPayload(DraftAddressedPayload):
+class StartCheckinPayload(DraftPayload, kind=CommandKind.START_CHECKIN):
     """The draft says what the campaign IS; ``budget`` bounds what THIS launch spends, and no
     draft field holds it. Acked at admission, so it rides the draft's ledger into the root cycle."""
 
@@ -117,11 +51,7 @@ class StartCheckinPayload(DraftAddressedPayload):
     diag: bool = Field(default=False, description="Run the diagnostic shape.")
 
 
-# Recorded on the draft's own ledger, which its Start moves into the root cycle.
-DraftPayload = EditDraftCampaignPayload | ResolveOriginPayload | StartCheckinPayload
-
-
-class MintCampaignPayload(CommandPayload):
+class MintCampaignPayload(CommandPayload, kind=CommandKind.MINT_CAMPAIGN):
     dataset_name: str = Field(min_length=1, max_length=64)
     budget: Budget = Budget()
     optimization: OptimizationOverrides | None = Field(
@@ -173,20 +103,9 @@ class MintCampaignPayload(CommandPayload):
         return self
 
 
-# Resolved by NAME (`CommandKind.payload_name`): a kind whose model is missing fails right here.
-KIND_OF_PAYLOAD: dict[type[CommandPayload], CommandKind] = {
-    PAYLOAD_IN_DOMAIN.get(kind) or globals()[kind.payload_name]: kind for kind in CommandKind
-}
-PAYLOAD_MODEL_FOR_KIND: dict[str, type[CommandPayload]] = {
-    kind: model for model, kind in KIND_OF_PAYLOAD.items()
-}
-_unanswered = sorted(
-    kind
-    for kind, model in PAYLOAD_MODEL_FOR_KIND.items()
-    if issubclass(model, CyclePayload) and not hasattr(model, "inner_refusal")
-)
-if _unanswered:
-    raise RuntimeError(f"cycle-scoped kinds declaring no `inner_refusal`: {_unanswered}")
+# The last payload model is declared above, so a kind carrying none fails right here.
+if _unpaired := sorted(set(CommandKind) - PAYLOAD_MODEL_FOR_KIND.keys()):
+    raise RuntimeError(f"command kinds carried by no payload model: {_unpaired}")
 
 
 class CommandAcceptedBody(StrictModel):

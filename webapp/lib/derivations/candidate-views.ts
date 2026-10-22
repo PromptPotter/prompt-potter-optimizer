@@ -1,6 +1,8 @@
 import type { ArmReading, BenchPassProgress, LineageNode } from "@/lib/api/types";
+import { DISPLAY_METRIC_UNITS } from "@/lib/api/types.generated";
 import type { CandidateBar } from "@/lib/types";
-import { fmtDisplayValue, metricLevel, type DisplayMetric } from "./headline-stats";
+import { fmtLevel } from "@/lib/format";
+import { metricLevel, type DisplayMetric } from "./headline-stats";
 import { panelCellLabel } from "./inner-panel";
 import { readPaired } from "./paired-reading";
 import { nodeKeyOf, splitRetired } from "./lineage-candidates";
@@ -12,7 +14,7 @@ export function barLevel(metric: DisplayMetric, bar: CandidateBar): number | nul
 }
 
 export function barValueLabel(metric: DisplayMetric, bar: CandidateBar): string {
-  return fmtDisplayValue(metric, barLevel(metric, bar));
+  return fmtLevel(DISPLAY_METRIC_UNITS[metric], barLevel(metric, bar));
 }
 
 export function barsAreCourses(viewedNode: LineageNode | undefined): boolean {

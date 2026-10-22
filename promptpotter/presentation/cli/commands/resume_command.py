@@ -8,16 +8,13 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
-from promptpotter.application.commands.payloads import (
-    ForkCyclePayload,
-    MintCampaignPayload,
-    StartRunPayload,
-)
+from promptpotter.application.commands.payloads import MintCampaignPayload
 from promptpotter.application.datasets.loaders import no_dataset_hint
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.mint import ConfigDriftError
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
 from promptpotter.config.logging import setup_logging
+from promptpotter.domain.command_kinds import ForkCyclePayload, StartRunPayload
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.pipeline_overlay import (

@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from promptpotter.application.bench.task_context import (
+    DECOMPOSED_PROMPT_FIELDS,
     CheckinOutput,
     draft_call_context,
     run_checkin,
@@ -26,7 +27,6 @@ from promptpotter.application.datasets.origin_readiness import (
 from promptpotter.application.jobs.quota import paid_call
 from promptpotter.application.scoring.formula.matchers import extraction_note_for_scoring
 from promptpotter.domain.origin_provenance import Provenance
-from promptpotter.domain.search_point import DEFAULT_PROMPT_FIELDS
 from promptpotter.infrastructure.llm.telemetry import reset_cycle_ledger, set_cycle_ledger
 from promptpotter.infrastructure.store.stores import Stores
 
@@ -222,10 +222,9 @@ def _apply_findings(
             Provenance.CONFIRMED if proposal.confidence == "high" else Provenance.PROPOSED
         )
     prompt_fields = {
-        name: text for name in DEFAULT_PROMPT_FIELDS if (text := getattr(output, name)).strip()
+        name: text for name in DECOMPOSED_PROMPT_FIELDS if (text := getattr(output, name)).strip()
     }
     if prompt_fields:
-        # The decomposition is the default field set, so it seeds every active step alike.
         values["origin_prompts"] = {
             step: {**draft.origin_prompts.get(step, {}), **prompt_fields}
             for step in draft.active_steps()

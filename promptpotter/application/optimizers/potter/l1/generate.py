@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.bench.llm_call import run_optimizer_node
+from promptpotter.application.bench.node_context import Frontier, Lineage
 from promptpotter.application.optimizers.potter.dispatch.facade import (
     DispatchHub,
     build_bundle,
@@ -24,8 +25,8 @@ from promptpotter.application.optimizers.potter.dispatch.schemas import (
 )
 from promptpotter.application.optimizers.potter.records import Ladder
 from promptpotter.application.optimizers.potter.validators.l1_strict import (
-    L1_BLOCKS_IN_POOL,
-    L1_SHOTS_IN_DEMO_POOL,
+    l1_blocks_in_pool,
+    l1_shots_in_demo_pool,
 )
 from promptpotter.domain.opt_search_point import EvidenceGrounding, Locus, loci_of
 from promptpotter.domain.optimizer_state import (
@@ -80,7 +81,7 @@ async def l1_generate(
 
     round_num = ctx.round_num
     model = ctx.model
-    opt_sp = ctx.parent
+    opt_sp = ctx.read(Lineage).parent
     pipeline_schema = ctx.schema
 
     bundle = build_bundle(ctx, ctx.slice(Ladder))
@@ -114,8 +115,7 @@ async def l1_generate(
         if pipeline_schema
         else None
     )
-    parent_point = ctx.parent_point
-    assert parent_point is not None
+    parent_point = ctx.read(Frontier).parent_point
     # The wire speaks the DEMO POOL panel's ids; an individual holds sample keys.
     key_of = {s.id: s.key for s in bundle.demo_pool}
     response_model = build_l1_response_model(
@@ -201,8 +201,7 @@ async def l1_generate(
         updates = v.prompt_fields_updates
         failures: list[ValidationFailure] = []
         if pooled is not None:
-            if (blocks_outcome := L1_BLOCKS_IN_POOL.check(updates, offered=pooled)) is not None:
-                failures += blocks_outcome.evidence["failures"]
+            failures += l1_blocks_in_pool(updates, offered=pooled)
             updates = {
                 node: {f: pooled[f][i] for f, i in fields.items() if i in pooled.get(f, {})}
                 for node, fields in updates.items()
@@ -215,11 +214,7 @@ async def l1_generate(
                 for node, ids in v.shots.items()
             }
         )
-        shots_outcome = L1_SHOTS_IN_DEMO_POOL.check(
-            v.shots, demo_ids=key_of.keys(), k_max=ctx.knobs.k_max
-        )
-        if shots_outcome is not None:
-            failures += shots_outcome.evidence["failures"]
+        failures += l1_shots_in_demo_pool(v.shots, demo_ids=key_of.keys(), k_max=ctx.knobs.k_max)
         population.append(
             ctx.child(
                 [opt_sp],

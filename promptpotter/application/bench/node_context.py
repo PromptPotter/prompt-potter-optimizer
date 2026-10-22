@@ -4,7 +4,7 @@ import asyncio
 import logging
 import random
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any, cast, overload
+from typing import TYPE_CHECKING, Any, Literal, cast, overload
 
 from promptpotter.application import optimizers
 from promptpotter.application.bench.children import (
@@ -22,7 +22,7 @@ from promptpotter.application.intelligence.earned_blocks import (
 from promptpotter.application.mask.backprop import select_rewind_round
 from promptpotter.application.mask.load import load_lineage_spine
 from promptpotter.application.optimizer_manifest import running_prompt
-from promptpotter.application.optimizers.nodes import ReadArm
+from promptpotter.application.optimizers.nodes import CycleRead, ReadArm
 from promptpotter.application.runner.inner.spawn_context import inner_cells
 from promptpotter.application.scoring.arm_states import conclude, measuring
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
@@ -64,13 +64,14 @@ if TYPE_CHECKING:
         Controller,
         NodeMember,
         Proposer,
+        RaceSnapshot,
         RoundContext,
     )
-    from promptpotter.application.run_callbacks import RunCallbacks
     from promptpotter.application.runner.inner.tasks import InnerCells
     from promptpotter.domain.connector import MeasuredUnit
     from promptpotter.domain.opt_search_point import EvidenceGrounding
     from promptpotter.domain.optimizer_state import RoundOutput, StatePart, StateSlice
+    from promptpotter.domain.phase_views import PhaseView
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.pool import Access
     from promptpotter.domain.results import RoundResult
@@ -152,6 +153,151 @@ async def measure_as_parent(
     return read
 
 
+class Lineage(CycleRead):
+    @property
+    def parent(self) -> OptSearchPoint:
+        return self._cycle.opt_sp
+
+    @property
+    def origin(self) -> OptSearchPoint:
+        return self._cycle.origin_round.origin.individual
+
+    @property
+    def population(self) -> Sequence[OptSearchPoint]:
+        return self._cycle.population
+
+    @property
+    def rounds(self) -> Sequence[RoundResult]:
+        """Sealed: a round's optimizer state opens only through ``recall`` / ``slice``, which check what the node declares."""
+        return [rr.model_copy(update={"optimizer_state": None}) for rr in self._cycle.rounds]
+
+    def rewind_round(self) -> int | None:
+        """Where a rewind of this cycle lands (UCB over the campaign's lineage); ``None`` where no ancestor stands."""
+        return select_rewind_round(
+            load_lineage_spine(self._cycle.difficulty),
+            cycle_id=self._cycle.session.state.cycle_id or "",
+            current_round=self._round.round_num,
+        )
+
+
+class Frontier(CycleRead):
+    @property
+    def parent_point(self) -> JobSearchPoint:
+        return self._cycle.parent_point
+
+    @property
+    def frontier_rows(self) -> list[GradedCell]:
+        return self._cycle.frontier
+
+    @property
+    def parent_own_rows(self) -> list[GradedCell]:
+        """Each sample's latest cell of the parent ITSELF, never one another individual answered."""
+        key = ArmKey(self._cycle.opt_sp.id)
+        rows: list[GradedCell] = []
+        for rr in self._cycle.rounds:
+            rows = merge_known_outcomes(rows, rr.rows(key))
+        return rows
+
+    @property
+    def parent_accuracy(self) -> float | None:
+        """On the panel it was LAST scored on; ``None`` is unmeasured."""
+        fold = self._cycle.parent_fold
+        return None if fold is None else fold.accuracy
+
+
+class Ruler(CycleRead):
+    @property
+    def difficulty(self) -> DifficultyView:
+        return self._cycle.difficulty
+
+    @property
+    def level_series(self) -> LevelSeries:
+        """Every θ a member reads across rounds is the last close's, off the ledger, never its own fit."""
+        session = self._cycle.session
+        series = session.store.campaigns.standing_rounds(session.hop, moment=None).level_series
+        if series is None:
+            raise LookupError(
+                f"round {self._round.round_num} reads a level series no close has banked"
+            )
+        return series
+
+    @property
+    def sample_index(self) -> SampleIndex | None:
+        """As of the last CLOSED round; ``None`` before a run opens one."""
+        return self._cycle.sample_index
+
+    @property
+    def axes(self) -> AxisIndex | None:
+        return self._cycle.axes()
+
+    @property
+    def slot_of(self) -> Mapping[str, int]:
+        return self._cycle.session.bank.slot_of
+
+
+class Bounds(CycleRead):
+    @property
+    def elimination_n_min(self) -> int:
+        return self._cycle.config.optimization.elimination_n_min
+
+    @property
+    def budget_rounds(self) -> int | None:
+        return self._cycle.config.optimization.budget.rounds
+
+    def spend_cap_usd(self) -> float | None:
+        return self._cycle.session.state.control.spend_cap_usd()
+
+    def spend_used_usd(self) -> float:
+        return self._cycle.session.state.control.spend_used_usd()
+
+
+class Target(CycleRead):
+    """The pipeline the run measures, as the bench resolved it."""
+
+    @property
+    def framing(self) -> Any:
+        return self._cycle.framing
+
+    @property
+    def demo_split(self) -> tuple[Sample, ...]:
+        """The demo partition whole, which resolves the shots an individual already holds; a reader draws through ``drawn``."""
+        return self._cycle.session.state.scoring.require_partition().demo
+
+    @property
+    def measured_unit(self) -> MeasuredUnit:
+        return self._cycle.session.backend_client.measured_unit
+
+    @property
+    def prompt_delivery(self) -> Delivery:
+        session = self._cycle.session
+        return session.backend_client.prompt_delivery(session.pipeline_params)
+
+    @property
+    def cell_formula(self) -> str | None:
+        session = self._cycle.session
+        formula, _ = resolve_cell_formula(
+            session.state.scoring.require_scorer().per_cell, session.pipeline_schema
+        )
+        return formula
+
+    @property
+    def inner_cells(self) -> InnerCells | None:
+        """The cells an L4 outer's arms are measured on; ``None`` off the recursion."""
+        return inner_cells()
+
+    def runtime_failures(self) -> list[RuntimeFailure]:
+        return self._cycle.runtime_failures()
+
+    def earned_blocks(self) -> Mapping[str, tuple[str, ...]]:
+        """By prompt field, the blocks runs sharing the origin's answer space measured as a lift."""
+        session = self._cycle.session
+        signature = answer_space_signature(
+            (cell.facts.ground_truth for cell in self._cycle.origin_round.results),
+            dataset=session.measured_dataset,
+        )
+        return earned_blocks_for(session.store, signature)
+
+
 class NodeContext[K: StrictModel]:
     """Nothing here hands out the cycle, its session, a store, the manifest or the config: only what this node declares, and its own."""
 
@@ -159,6 +305,11 @@ class NodeContext[K: StrictModel]:
         self._round = round_
         self._member = member
         self.node = member.name
+
+    def read[R: CycleRead](self, kind: type[R]) -> R:
+        if kind not in self._member.sees:
+            raise KeyError(f"{self.node!r} reads the cycle's {kind.__name__} and does not see it")
+        return kind(self._round)
 
     @property
     def round_num(self) -> int:
@@ -217,15 +368,6 @@ class NodeContext[K: StrictModel]:
         state = closed.closed_state.holding(*(cycle.slices.get(kind) for kind in kinds))
         self._bank(cycle.seat(closed.model_copy(update={"optimizer_state": state})))
 
-    def earned_blocks(self) -> Mapping[str, tuple[str, ...]]:
-        """By prompt field, the blocks runs sharing the origin's answer space measured as a lift."""
-        session = self._round.cycle.session
-        signature = answer_space_signature(
-            (cell.facts.ground_truth for cell in self._round.cycle.origin_round.results),
-            dataset=session.measured_dataset,
-        )
-        return earned_blocks_for(session.store, signature)
-
     def access(self, kind: type[Pool]) -> Access:
         return self._selected.access(self._member, kind)
 
@@ -237,7 +379,8 @@ class NodeContext[K: StrictModel]:
         """The one reading of a pool, by its reader's declared draw: its entries in draw order, none under ``off``."""
         if self.access(kind) == "off":
             return ()
-        return self._round.cycle.slices.get(kind).drawn({s.key: s for s in self.demo_split})
+        demo = self._round.cycle.session.state.scoring.require_partition().demo
+        return self._round.cycle.slices.get(kind).drawn({s.key: s for s in demo})
 
     def _bank(self, restated: RoundResult) -> None:
         session = self._round.cycle.session
@@ -279,7 +422,7 @@ class NodeContext[K: StrictModel]:
         individual = OptSearchPoint.derive(
             parents,
             schema=schema,
-            variation=self.variation,
+            variation=self._variation,
             take=take,
             changes={**loci_of(config), **prompts},
             changes_description=changes_description,
@@ -304,7 +447,7 @@ class NodeContext[K: StrictModel]:
             schema, prompt_loci=prompt_loci, overlay={}, demo=self._demo_keys(prompt_loci)
         )
         individual = proposal.individual.edited(
-            self.variation, schema=schema, changes=prompts, changes_description=changes_description
+            self._variation, schema=schema, changes=prompts, changes_description=changes_description
         )
         failures = [*proposal.validation_failures, *carried]
         if individual.prompts != proposal.individual.prompts:
@@ -341,26 +484,6 @@ class NodeContext[K: StrictModel]:
     def model(self) -> str:
         return self._selected.model(self.node)
 
-    @property
-    def elimination_n_min(self) -> int:
-        return self._round.cycle.config.optimization.elimination_n_min
-
-    @property
-    def budget_rounds(self) -> int | None:
-        return self._round.cycle.config.optimization.budget.rounds
-
-    @property
-    def inner_cells(self) -> InnerCells | None:
-        """The cells an L4 outer's arms are measured on; ``None`` off the recursion."""
-        return inner_cells()
-
-    @property
-    def axes(self) -> AxisIndex | None:
-        return self._round.cycle.axes()
-
-    def runtime_failures(self) -> list[RuntimeFailure]:
-        return self._round.cycle.runtime_failures()
-
     def call_context(
         self, *, round_num: int | None = None, injections: InjectionBreakdown | None = None
     ) -> LLMCallContext:
@@ -384,124 +507,22 @@ class NodeContext[K: StrictModel]:
                 )
             )
 
-    @property
-    def cell_formula(self) -> str | None:
-        session = self._round.cycle.session
-        formula, _ = resolve_cell_formula(
-            session.scoring.require_scorer().per_cell, session.pipeline_schema
-        )
-        return formula
+    def race_standing(self, snapshot: RaceSnapshot) -> None:
+        self._round.callbacks.on_race_standing(self.node, self.round_num, snapshot)
 
-    def spend_cap_usd(self) -> float | None:
-        return self._round.cycle.session.control.spend_cap_usd()
-
-    def spend_used_usd(self) -> float:
-        return self._round.cycle.session.control.spend_used_usd()
-
-    @property
-    def prompt_delivery(self) -> Delivery:
-        session = self._round.cycle.session
-        return session.backend_client.prompt_delivery(session.pipeline_params)
-
-    def rewind_round(self) -> int | None:
-        """Where a rewind of this cycle lands (UCB over the campaign's lineage); ``None`` where no ancestor stands."""
-        cycle = self._round.cycle
-        return select_rewind_round(
-            load_lineage_spine(cycle.difficulty),
-            cycle_id=cycle.session.state.cycle_id or "",
-            current_round=self.round_num,
-        )
-
-    @property
-    def callbacks(self) -> RunCallbacks:
-        return self._round.callbacks
-
-    @property
-    def parent(self) -> OptSearchPoint:
-        return self._round.cycle.opt_sp
-
-    @property
-    def population(self) -> Sequence[OptSearchPoint]:
-        return self._round.cycle.population
+    def phase(self, phase: str, step: Literal["enter", "exit"], view: PhaseView) -> None:
+        self._round.callbacks.on_phase(phase, step, round=self.round_num, view=view)
 
     def keep(self, individuals: Sequence[OptSearchPoint]) -> None:
         self._round.cycle.population = list(individuals)
 
     @property
-    def variation(self) -> Variation:
+    def _variation(self) -> Variation:
         mode = cast("Proposer", self._member).variation_mode
         node = (
             OPERATOR_SOURCE if mode == "operator" else node_source(self._selected.name, self.node)
         )
         return Variation(node=node, mode=mode)
-
-    @property
-    def measured_unit(self) -> MeasuredUnit:
-        return self._round.cycle.session.backend_client.measured_unit
-
-    @property
-    def parent_point(self) -> JobSearchPoint:
-        return self._round.cycle.parent_point
-
-    @property
-    def frontier_rows(self) -> list[GradedCell]:
-        return self._round.cycle.frontier
-
-    @property
-    def parent_own_rows(self) -> list[GradedCell]:
-        """Each sample's latest cell of the parent ITSELF, never one another individual answered."""
-        cycle = self._round.cycle
-        key = ArmKey(cycle.opt_sp.id)
-        rows: list[GradedCell] = []
-        for rr in cycle.rounds:
-            rows = merge_known_outcomes(rows, rr.rows(key))
-        return rows
-
-    @property
-    def parent_accuracy(self) -> float | None:
-        """On the panel it was LAST scored on; ``None`` is unmeasured."""
-        fold = self._round.cycle.parent_fold
-        return None if fold is None else fold.accuracy
-
-    @property
-    def origin(self) -> OptSearchPoint:
-        return self._round.cycle.origin_round.origin.individual
-
-    @property
-    def rounds(self) -> Sequence[RoundResult]:
-        """Sealed: a round's optimizer state opens only through ``recall`` / ``slice``, which check what this node declares."""
-        return [rr.model_copy(update={"optimizer_state": None}) for rr in self._round.cycle.rounds]
-
-    @property
-    def framing(self) -> Any:
-        return self._round.cycle.framing
-
-    @property
-    def demo_split(self) -> tuple[Sample, ...]:
-        """The demo partition whole, which resolves the shots an individual already holds; a reader draws through ``drawn``."""
-        return self._round.cycle.session.scoring.require_partition().demo
-
-    @property
-    def slot_of(self) -> Mapping[str, int]:
-        return self._round.cycle.session.bank.slot_of
-
-    @property
-    def difficulty(self) -> DifficultyView:
-        return self._round.cycle.difficulty
-
-    @property
-    def level_series(self) -> LevelSeries:
-        """Every θ a member reads across rounds is the last close's, off the ledger, never its own fit."""
-        session = self._round.cycle.session
-        series = session.store.campaigns.standing_rounds(session.hop, moment=None).level_series
-        if series is None:
-            raise LookupError(f"round {self.round_num} reads a level series no close has banked")
-        return series
-
-    @property
-    def sample_index(self) -> SampleIndex | None:
-        """As of the last CLOSED round; ``None`` before a run opens one."""
-        return self._round.cycle.sample_index
 
     def rng(self, tag: str = "") -> random.Random:
         """A function of the run's seed, the round, this node and *tag* alone, so a resume redraws the same."""

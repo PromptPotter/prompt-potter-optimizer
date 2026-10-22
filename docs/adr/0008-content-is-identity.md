@@ -42,9 +42,8 @@ The re-shapes land as ONE breaking arc with one workspace wipe.
    holds a row's position or a dataset's name. A rename moves a label and rewrites no row.
 2. **An individual is `{locus: value}` over the roster its pipeline declares.** A locus is
    `Locus(node, key)`: a prompt node's fields, its shots, a node's config params. Each prompt node
-   declares its own fields in render order; a node declaring none gets
-   `search_point.py::DEFAULT_PROMPT_FIELDS`, which is a node's default declaration, never a field
-   set every individual has. Shots are sample keys. The id is the content.
+   declares its own fields in render order, and a prompt node declaring none is refused at parse:
+   no field set is one every individual has. Shots are sample keys. The id is the content.
 3. **Optimizer state is a map of typed parts.** `optimizer_state` is
    `{manifest, population, prompt_hashes, slices, outputs}`; each part is a registered `StatePart`,
    carried across rounds (`StateSlice`) or produced by one (`RoundOutput`). A member declares what

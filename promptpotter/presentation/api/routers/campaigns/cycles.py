@@ -4,13 +4,14 @@ from fastapi import Query, Request, Response
 
 from promptpotter.application.cycle_reads import RoundView, round_audit, served_round, view_cycle
 from promptpotter.application.mask.record import parse_lens, parse_sample_ids
-from promptpotter.application.mask.tree_lens import CourseNode, lensed_tree
+from promptpotter.application.mask.tree_lens import lensed_tree
 from promptpotter.application.served_dashboard import (
     ServedDashboard,
     WarmingDashboard,
     served_dashboard,
 )
 from promptpotter.domain.cycle_paths import CycleHop, decode_cycle_path
+from promptpotter.domain.lineage_tree import CourseNode
 from promptpotter.domain.round_audit import RoundAudit
 from promptpotter.presentation.api.deps import StoresDep
 from promptpotter.presentation.api.routers.campaigns._conditional import (
@@ -21,7 +22,7 @@ from promptpotter.presentation.api.routers.campaigns._conditional import (
     weak_etag,
 )
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
-from promptpotter.shared.errors import BadRequestError, NotFoundError
+from promptpotter.shared.errors import NotFoundError
 
 
 @campaigns_router.get(
@@ -132,11 +133,8 @@ def get_lineage_tree(
     if mtime_ns is not None and client_has_etag(request.headers.get("if-none-match"), etag):
         return Response(status_code=304, headers=headers)
 
-    try:
-        selected = parse_lens(lens, allow_abort=True) if lens else None
-        sample_ids = parse_sample_ids(samples)
-    except ValueError as exc:
-        raise BadRequestError(str(exc)) from exc
+    selected = parse_lens(lens, allow_abort=True) if lens else None
+    sample_ids = parse_sample_ids(samples)
     replayed = view_cycle(stores, decode_cycle_path(at_cycle)) if at_cycle else root
     return model_json(
         lensed_tree(stores, path, selected, sample_ids, moment=replayed.moment(at)),

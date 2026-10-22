@@ -1,6 +1,5 @@
 import type { ArmReading, ServedDashboard, ServedRound } from "@/lib/api/types";
 import { DISPLAY_METRICS } from "@/lib/api/types.generated";
-import { fmtPct0, fmtTheta } from "@/lib/format";
 
 // DISPLAY only: the selector decides on its own objective (the served `elects_on`), whatever is read.
 export type DisplayMetric = ServedDashboard["display_metric"];
@@ -22,13 +21,6 @@ export function metricLevel(
   return metric === "ability"
     ? (reading.ability?.theta ?? null)
     : (reading.own?.[metric]?.value ?? null);
-}
-
-export function fmtDisplayValue(metric: DisplayMetric, level: number | null): string {
-  if (metric === "ability") {
-    return typeof level === "number" && Number.isFinite(level) ? `θ ${fmtTheta(level)}` : "—";
-  }
-  return fmtPct0(level);
 }
 
 export interface FitnessTrend {

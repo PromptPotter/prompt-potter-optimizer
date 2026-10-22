@@ -17,6 +17,7 @@ from unittest import mock
 
 import pytest
 from factories import (
+    PROMPT_INFO,
     arm_state,
     arm_walk,
     close_round,
@@ -76,7 +77,7 @@ from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.optimizer_state import UnregisteredStatePartError
 from promptpotter.domain.paired_reading import ArmKey, ReadingState
-from promptpotter.domain.pipeline_schema import NodePromptInfo, PipelineNode
+from promptpotter.domain.pipeline_schema import PipelineNode
 from promptpotter.domain.results import (
     ArmSlot,
     OverlapReading,
@@ -195,7 +196,7 @@ def _walk_panel(
     panel is a part of that bank."""
     schema = pipeline_schema(
         name="claims",
-        nodes=[PipelineNode(name="solve", tunes_llm=False, prompt_info=NodePromptInfo())],
+        nodes=[PipelineNode(name="solve", tunes_llm=False, prompt_info=PROMPT_INFO)],
     )
     session = loop_session(
         workspace(root),
@@ -876,7 +877,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     store = stores.campaigns
     prompt = {"instruction": "do the thing", "persona": "you are precise"}
     solving = pipeline_schema(
-        [PipelineNode(name="solve", tunes_llm=False, prompt_info=NodePromptInfo())]
+        [PipelineNode(name="solve", tunes_llm=False, prompt_info=PROMPT_INFO)]
     )
     inheriting, ledger = _minted(stores, "cycle_inherit_parent")
     close_round(

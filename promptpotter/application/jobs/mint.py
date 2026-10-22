@@ -114,6 +114,8 @@ class CyclePlan:
     drawn: PartitionRecord
     # What the cycle runs under: a mint writes it, a minted cycle's ledger holds it.
     seed: CycleSeed | None
+    # Configured as the declaration runs; a mint binds it to the cycle.
+    session: Session
 
     @functools.cached_property
     def origin_hash(self) -> str:
@@ -136,6 +138,7 @@ class MintedCycle:
     cycle_id: str
     campaign_id: str
     campaign_config: CampaignConfig
+    session: Session
 
 
 def declare(
@@ -174,7 +177,8 @@ def resolve_cycle_plan(
     """Given *hop*, what that cycle RUNS: its root's origin with its own seed laid over the declaration."""
     campaign_config = effective_config(declaration)
     schema = session.pipeline_schema
-    pipeline_params = configure_and_apply_pipeline(session, campaign_config)
+    configured = configure_and_apply_pipeline(session, campaign_config)
+    pipeline_params = configured.pipeline_params
     runs_under: CycleSeed | None = None
     if hop is not None:
         assert origin_override is None, "a minted cycle's origin is its campaign root's seed"
@@ -213,6 +217,7 @@ def resolve_cycle_plan(
         # Slots in the session's bank, whichever rows of it the caller hands in.
         drawn=partition.record(dataset_hash=session.bank.dataset_hash),
         seed=seed if hop is None else runs_under,
+        session=configured,
     )
 
 
@@ -330,15 +335,14 @@ def _write_plan(
         stores.campaigns.write_cycle_seed(hop, seed)
 
 
-def _mint_campaign(
-    session: Session, plan: CyclePlan, *, hop: CycleHop, billed: Path | None
-) -> None:
+def _mint_campaign(plan: CyclePlan, *, hop: CycleHop, billed: Path | None) -> Session:
     """``hop.campaign_id`` is the CALLER's, so an L4 inner spawn lands back on a campaign it ran."""
     validate_path_component(hop.cycle_id)
     validate_path_component(hop.campaign_id)
     declaration = plan.declaration
     campaign_config = effective_config(declaration)
     now = utcnow_iso()
+    session = plan.session
     campaigns = session.store.campaigns
     if billed is not None:
         campaigns.adopt_ledger(hop, billed)
@@ -358,39 +362,35 @@ def _mint_campaign(
             lifecycle_changed_at=now,
         )
     )
-    session.bind_campaign(hop, purpose=declaration.purpose)
+    _write_plan(session.store, hop, plan.drawn, plan.seed)
+    session = session.bound(hop, purpose=declaration.purpose)
     ledger = CycleEventLog.open(CycleDir(campaigns.cycle_dir(hop)))
     declare_run_wiring(session, campaign_config, ledger, tracing=None)
     campaigns.mint_cycle(hop)
-    _write_plan(session.store, hop, plan.drawn, plan.seed)
     save_active_pointer(session.store.base_dir, hop)
     # So the mint → loop-start window serves `dashboard.json` off the campaign's own declarations.
     LiveDashboardProjection.for_session(session.hop, tenant_root=session.tenant_root)
     logger.info("Minted fresh campaign %s — cycle %s", hop.campaign_id, hop.cycle_id)
+    return session
 
 
-def mint(
-    session: Session, plan: CyclePlan, *, campaign_id: str, billed: Path | None
-) -> MintedCycle:
+def mint(plan: CyclePlan, *, campaign_id: str, billed: Path | None) -> MintedCycle:
     """``billed`` is a ledger that paid toward this cycle before it existed, moved in as its first lines."""
-    declaration = plan.declaration
     # Never sweep the inner sandbox here: its key carries the campaign id, so only ANOTHER's dies.
     hop = CycleHop(campaign_id=campaign_id, cycle_id=plan.cycle_id)
-    _mint_campaign(session, plan, hop=hop, billed=billed)
     return MintedCycle(
         cycle_id=hop.cycle_id,
         campaign_id=campaign_id,
-        campaign_config=effective_config(declaration),
+        campaign_config=effective_config(plan.declaration),
+        session=_mint_campaign(plan, hop=hop, billed=billed),
     )
 
 
-def _mint_door(
-    session: Session, plan: CyclePlan, *, campaign_id: str, billed: Path | None
-) -> MintedCycle:
+def _mint_door(plan: CyclePlan, *, campaign_id: str, billed: Path | None) -> MintedCycle:
     """On the plan it mints, framing committed: the origin it joins on is that plan's."""
     if isinstance(purpose := plan.declaration.purpose, Compare):
-        _join_head_to_head(session, plan, purpose.arm)
-    return mint(session, plan, campaign_id=campaign_id, billed=billed)
+        _join_head_to_head(plan.session, plan, purpose.arm)
+    return mint(plan, campaign_id=campaign_id, billed=billed)
 
 
 def _description_to_decompose(
@@ -432,10 +432,10 @@ async def mint_framed_cycle(
     )
     description = _description_to_decompose(session, campaign_config, task_text)
     if description is None:
-        minted = _mint_door(session, plan, campaign_id=campaign_id, billed=None)
+        minted = _mint_door(plan, campaign_id=campaign_id, billed=None)
     else:
         minted = await _mint_after_framing(session, plan, description, campaign_id=campaign_id)
-    relabel_minted(session)
+    relabel_minted(minted.session)
     return minted
 
 
@@ -463,7 +463,7 @@ async def _mint_after_framing(
                 session.store, effective_config(plan.declaration), session.dataset
             ),
         )
-        minted = _mint_door(session, framed, campaign_id=campaign_id, billed=checkin_ledger.path)
+        minted = _mint_door(framed, campaign_id=campaign_id, billed=checkin_ledger.path)
     except BaseException:
         drafts.discard(draft_id)
         raise

@@ -4,7 +4,7 @@ import asyncio
 import enum
 import logging
 import re
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from typing import Annotated, Any
 
@@ -207,6 +207,18 @@ class ContentTooLargeError(PotterError):
 class PayloadInvalidError(PotterError):
     http_status = 422
     code = "payload_invalid"
+
+    @classmethod
+    def refusing(cls, errors: Iterable[Mapping[str, Any]]) -> PayloadInvalidError:
+        """A model's refusal in its own words, its validator's sentence where one raised."""
+        found: list[dict[str, Any]] = []
+        for error in errors:
+            said = error["ctx"]["error"] if error["type"] == "value_error" else error["msg"]
+            found.append({"loc": [str(part) for part in error["loc"]], "msg": str(said)})
+        reason = "; ".join(
+            f"{'.'.join(e['loc'])}: {e['msg']}" if e["loc"] else e["msg"] for e in found
+        )
+        return cls(reason, details={"errors": found})
 
 
 class ServiceUnavailableError(PotterError):

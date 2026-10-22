@@ -133,9 +133,8 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
         try:
             # No overrides: the file this compile just wrote IS the projection of `loop` and `node`.
             config = load_dataset_campaign_config(dataset_dir)
-            configure_and_apply_pipeline(session, config)
-            result = await run_campaign(
-                session,
+            session, result = await run_campaign(
+                configure_and_apply_pipeline(session, config),
                 config,
                 budget=Budget(),
                 mode=RunMode(),

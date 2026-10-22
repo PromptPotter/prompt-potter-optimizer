@@ -13,7 +13,7 @@ from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.optimizer_manifest import llm_node_manifest, running_prompt
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.opt_search_point import TEMPLATE_TOKEN_RE, OptimizerPromptTemplate
-from promptpotter.domain.search_point import DEFAULT_PROMPT_FIELDS, TaskDecomposition
+from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.telemetry import reset_cycle_ledger, set_cycle_ledger
 from promptpotter.infrastructure.store.dataset_access import (
@@ -23,6 +23,16 @@ from promptpotter.infrastructure.store.dataset_access import (
 from promptpotter.infrastructure.store.stores import Stores
 
 ORIGIN_FIELD_MAX = 600
+
+# The starting prompt a decomposition writes, which seeds every active step's fields alike.
+DECOMPOSED_PROMPT_FIELDS = (
+    "persona",
+    "task_intent",
+    "problem_description",
+    "instruction",
+    "thinking_style",
+    "answer_format",
+)
 
 
 class CheckinTaskContext(OptimizerResponseModel):
@@ -129,7 +139,7 @@ class CheckinOutput(OptimizerResponseModel):
             if not getattr(self, name).strip()
         ] + [
             f"{name} is {len(value)} chars (at most {ORIGIN_FIELD_MAX})"
-            for name in DEFAULT_PROMPT_FIELDS
+            for name in DECOMPOSED_PROMPT_FIELDS
             if len(value := getattr(self, name)) > ORIGIN_FIELD_MAX
         ]
         if problems:
@@ -138,6 +148,9 @@ class CheckinOutput(OptimizerResponseModel):
                 "move domain detail into task_context."
             )
         return self
+
+
+assert set(DECOMPOSED_PROMPT_FIELDS) <= set(CheckinOutput.model_fields)
 
 
 def campaign_framing(

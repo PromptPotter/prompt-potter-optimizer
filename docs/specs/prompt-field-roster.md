@@ -6,8 +6,7 @@
 ## What is true today
 
 A target prompt has no class. Each prompt node declares its fields IN RENDER ORDER
-(`domain/pipeline_schema.py::NodePromptInfo.fields`, defaulting to
-`domain/search_point.py::DEFAULT_PROMPT_FIELDS`), and the individual holds per prompt node a
+(`domain/pipeline_schema.py::NodePromptInfo.fields`, required), and the individual holds per prompt node a
 `NodePrompt` — its fields by declared name plus its shots. The shape is owned by
 [`../../promptpotter/domain/CLAUDE.md`](../../promptpotter/domain/CLAUDE.md) (the
 `OptimizerPromptTemplate` and `OptSearchPoint` rows). So the SET is the node's, and so is the

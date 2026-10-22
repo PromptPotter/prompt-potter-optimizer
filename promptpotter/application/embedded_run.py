@@ -25,7 +25,10 @@ from promptpotter.application.maintenance.archive_maintenance import (
     reindex_measurement_archive,
     restore_measurement_archive,
 )
-from promptpotter.application.pipeline_resolve import resolve_campaign_config
+from promptpotter.application.pipeline_resolve import (
+    configure_and_apply_pipeline,
+    resolve_campaign_config,
+)
 from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.runner.entry import run_optimization
 from promptpotter.application.runner.grade_bench import grade_line_bench
@@ -135,8 +138,9 @@ async def run_campaign(
     step_rounds: int | None = None,
     mode: RunMode,
     purpose: Purpose = Optimize(),  # noqa: B008 — frozen
-) -> CycleResult:
-    """Blocks under ``origin_gate: strict`` until ``submit_gate_decision`` answers, and under an ``arm_gate`` until ``submit_arms`` does."""
+) -> tuple[Session, CycleResult]:
+    """Answers the session bound to the cycle it ran. Blocks under ``origin_gate: strict`` until
+    ``submit_gate_decision`` answers, and under an ``arm_gate`` until ``submit_arms`` does."""
     declaration = None
     if session.campaign_id:
         if campaign_config is not None or isinstance(purpose, Compare):
@@ -150,6 +154,7 @@ async def run_campaign(
             raise NotFoundError(f"campaign not found: {session.campaign_id}")
         refuse_drifted_resume(session, campaign, session.hop, session.bank.samples)
         campaign_config = resolve_campaign_config(session.store, campaign, session.hop)
+        session = configure_and_apply_pipeline(session, campaign_config)
     else:
         if campaign_config is None:
             raise PayloadInvalidError(
@@ -167,15 +172,16 @@ async def run_campaign(
         step_rounds=step_rounds,
     ) as (job_id, held):
         if declaration is not None:
-            await mint_framed_cycle(
+            minted = await mint_framed_cycle(
                 session,
                 declaration,
                 session.bank.samples,
                 campaign_id=fresh_campaign_id(session),
                 task_text=None,
             )
+            session = minted.session
             JobRegistry.attach().update_target(job_id, hop=session.hop)
-        return await run_optimization(
+        return session, await run_optimization(
             list(session.bank.samples),
             campaign_config,
             session=session,

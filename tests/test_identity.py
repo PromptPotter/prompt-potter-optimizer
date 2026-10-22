@@ -22,6 +22,7 @@ from typing import Any, cast
 import openpyxl
 import pytest
 from factories import (
+    PROMPT_INFO,
     inner_cells,
     loop_session,
     minted_campaign,
@@ -71,7 +72,6 @@ from promptpotter.application.knobs import bench_defaults_pin
 from promptpotter.application.optimizer_manifest import (
     binding_optimizer,
     binding_prompt_overrides,
-    bound_optimizer,
     resolve_optimizer,
 )
 from promptpotter.application.optimizers.capo.members import cross_shots, mutate_shots
@@ -94,7 +94,7 @@ from promptpotter.application.optimizers.potter.dispatch.prompts import (
 )
 from promptpotter.application.optimizers.potter.l1.population import parse_population
 from promptpotter.application.optimizers.potter.records import L2Memory, L3Memory, Ladder
-from promptpotter.application.optimizers.potter.validators.l1_strict import L1_SHOTS_IN_DEMO_POOL
+from promptpotter.application.optimizers.potter.validators.l1_strict import l1_shots_in_demo_pool
 from promptpotter.application.pipeline_resolve import (
     dataset_pipeline_declaration,
     defaults_drift,
@@ -381,7 +381,7 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         async def entered() -> None:
             set_cycle_ledger(CycleEventLog(tmp_path / "asked.jsonl"))
             with (
-                binding_optimizer(bound_optimizer(), determinism=clamp),
+                binding_optimizer(OptimizationConfig(degradation_threshold=0.0, determinism=clamp)),
                 spending_under(unbounded_spend_book()),
             ):
                 await call_mod.llm_call(
@@ -424,7 +424,7 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
                     "llm_only": {
                         "type": "llm",
                         "config": {"model": cfg["model"]},
-                        "prompt_info": {},
+                        "prompt_info": PROMPT_INFO.model_dump(),
                     }
                 },
                 "pipelines": {"default": ["llm_only"]},
@@ -904,7 +904,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         },
     )
     rows_30 = [Sample(id=i, query=f"claim {i}", ground_truth="TRUE") for i in range(30)]
-    solve = PipelineNode(name="solve", tunes_llm=False, prompt_info=NodePromptInfo())
+    solve = PipelineNode(name="solve", tunes_llm=False, prompt_info=PROMPT_INFO)
     opened = loop_session(
         stores,
         pipeline_schema([solve], name="decl"),
@@ -1016,8 +1016,14 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         "a drifted origin re-minted over the campaign its banked rounds stand on"
     )
     stores.campaigns.mint_cycle(held_campaign.root_hop)
+    stores.campaigns.write_bank_partition(
+        held_campaign.root_hop,
+        partition_bank(rows_30, door.dataset_split, seed=0).record(
+            dataset_hash=opened.bank.dataset_hash
+        ),
+    )
     refuse_drifted_resume(opened, held_campaign, held_campaign.root_hop, rows_30)
-    opened.bind_campaign(held_campaign.root_hop, purpose=Optimize())
+    opened = opened.bound(held_campaign.root_hop, purpose=Optimize())
     wired_ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(held_campaign.root_hop)))
     root_cut = Cut(
         cycle=CycleDir(stores.campaigns.cycle_dir(held_campaign.root_hop)),
@@ -1168,7 +1174,11 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
             **declaration,
             "nodes": {
                 **declaration["nodes"],
-                "grade": {"type": "llm", "config": {"model": "m"}, "prompt_info": {}},
+                "grade": {
+                    "type": "llm",
+                    "config": {"model": "m"},
+                    "prompt_info": PROMPT_INFO.model_dump(),
+                },
             },
             "pipelines": {"default": [*declaration["pipelines"]["default"], "grade"]},
         }
@@ -1206,9 +1216,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     # an operator's arm — and a member knowing one prompt is refused pre-spend.
     two = pipeline_schema(
         [
-            PipelineNode(
-                name="draft", kind=NodeKind.LLM, prompt_info=NodePromptInfo(), tunes_llm=True
-            ),
+            PipelineNode(name="draft", kind=NodeKind.LLM, prompt_info=PROMPT_INFO, tunes_llm=True),
             PipelineNode(
                 name="review",
                 kind=NodeKind.LLM,
@@ -1243,7 +1251,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         changes_description="tighten the review",
     )
     operator: NodeContext[Any] = NodeContext(reflected_on, gepa.plan.seat)
-    authored = authored_arm(operator, arm)
+    authored = authored_arm(operator, origin, arm)
     assert authored.validation_failures == [], "an operator arm on the second node was refused"
     assert authored.individual.prompts["review"].fields["rubric"] == "Cite the clause.", (
         "the arm's second-node write did not land"
@@ -1253,7 +1261,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         prompt_fields={"review": {"persona": "x"}, "ghost": {"rubric": "x"}},
         changes_description="off roster",
     )
-    refused = authored_arm(operator, stray)
+    refused = authored_arm(operator, origin, stray)
     assert len(refused.validation_failures) == 2, "an arm writing off the roster was measured"
     capo = resolve_optimizer("capo", {}, gate="off")
     assert optimizers.unfit_pipeline(capo, two) is not None, (
@@ -1442,10 +1450,12 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
     )
     demo_ids = frozenset(s.id for s in part.demo)
     for leak in (part.search[0].id, part.bench[0].id):
-        outcome = L1_SHOTS_IN_DEMO_POOL.check(
-            {"classify": [part.demo[0].id, leak]}, demo_ids=demo_ids, k_max=len(demo_ids)
-        )
-        rejected = [f.value for f in outcome.evidence["failures"]] if outcome else []
+        rejected = [
+            f.value
+            for f in l1_shots_in_demo_pool(
+                {"classify": [part.demo[0].id, leak]}, demo_ids=demo_ids, k_max=len(demo_ids)
+            )
+        ]
         assert rejected == [str(leak)], f"a shot naming scored row {leak} was accepted"
     # Asserts the SUPPORT, never the stream: add, drop and keep each occur over the seeds.
     demo_keys = frozenset(s.key for s in part.demo)
@@ -1553,7 +1563,7 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
     relabelled = built_stores.tenant_datasets.labelled("recut")
     assert relabelled is not None
     resumed = loop_session(built_stores, pipeline_schema([]), list(relabelled.samples))
-    resumed.bind_campaign(hop, purpose=Optimize())
+    resumed = resumed.bound(hop, purpose=Optimize())
     assert resumed.bank == drawn_bank, (
         "a resume after a re-cut switched its cycle onto the new bank"
     )
@@ -1639,11 +1649,7 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
         problem_description="Assign the four-digit account code for the invoice.",
     )
     booking = pipeline_schema(
-        [
-            PipelineNode(
-                name="classify", kind=NodeKind.LLM, prompt_info=NodePromptInfo(), tunes_llm=True
-            )
-        ]
+        [PipelineNode(name="classify", kind=NodeKind.LLM, prompt_info=PROMPT_INFO, tunes_llm=True)]
     )
     classify = booking.prompt_nodes()[0]
     bundle = InjectionBundle(

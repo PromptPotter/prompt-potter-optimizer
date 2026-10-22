@@ -30,6 +30,7 @@ import httpx
 import openai
 import pytest
 from factories import (
+    PROMPT_INFO,
     SANDBOX_CAMPAIGN,
     arm_state,
     arm_walk,
@@ -127,7 +128,6 @@ from promptpotter.domain.phases import (
     WalkEnd,
 )
 from promptpotter.domain.pipeline_schema import (
-    NodePromptInfo,
     PipelineNode,
     WebSpendBound,
 )
@@ -1819,7 +1819,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
         f"the cell ran {waited:.0f}s: its envelope, not the run's clock, bounded it"
     )
     clock.opened -= 31.0
-    assert cut_session.control.budget_tripped() == StopReason.WALL_CLOCK, (
+    assert cut_session.state.control.budget_tripped() == StopReason.WALL_CLOCK, (
         "a run past its wall clock was not stopped on it"
     )
 
@@ -3059,7 +3059,7 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
         {"pipeline": {"backend_type": "termnorm"}, "campaign": unframed},
     )
     rows = [Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(30)]
-    solve = PipelineNode(name="solve", tunes_llm=False, prompt_info=NodePromptInfo())
+    solve = PipelineNode(name="solve", tunes_llm=False, prompt_info=PROMPT_INFO)
     framing = loop_session(
         stores,
         pipeline_schema([solve], name="drafted"),

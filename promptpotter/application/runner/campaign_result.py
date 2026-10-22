@@ -95,8 +95,8 @@ async def bench_origin(
     held = line_passes(stores, hop.campaign_id)
     if held is not None and held.origin.answers(
         origin_sp.sp_hash(session.pipeline_schema),
-        [s.key for s in session.scoring.require_partition().bench],
-        session.scoring.require_scorer().id,
+        [s.key for s in session.state.scoring.require_partition().bench],
+        session.state.scoring.require_scorer().id,
     ):
         passes = held
     else:
@@ -111,7 +111,7 @@ async def bench_origin(
             round_num=0,
             cb=cb,
         )
-        split = session.scoring.require_partition().split
+        split = session.state.scoring.require_partition().split
         after = _bench_counted(spend)
         passes = BenchPasses(
             tolerance=split.tolerance if split is not None else 0,

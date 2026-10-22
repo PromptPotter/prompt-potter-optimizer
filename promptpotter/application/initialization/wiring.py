@@ -296,11 +296,11 @@ async def bind_cycle_session(
     campaign: Campaign,
     hop: CycleHop,
 ) -> tuple[Session, CampaignConfig]:
-    """Unbound, the runner mints a fresh campaign and steals the active pointer from this cycle."""
+    """Bound, never configured: a resume's drift refusal reads the schema before the config lands."""
     session = await init_services(
         dataset_name=campaign.dataset_name,
         identity=stores.identity,
         stores=stores,
     )
-    session.bind_campaign(hop, purpose=campaign.declaration.purpose)
-    return session, resolve_campaign_config(stores, campaign, hop)
+    bound = session.bound(hop, purpose=campaign.declaration.purpose)
+    return bound, resolve_campaign_config(stores, campaign, hop)

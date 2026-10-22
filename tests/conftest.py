@@ -8,8 +8,9 @@ from factories import workspace
 from offline_world import NOT_A_KEY, PROVIDER_KEYS, FakeBackend, FakeLLM, Router, install_network
 from pydantic import SecretStr
 
+from promptpotter.application.campaign_config import OptimizationConfig
 from promptpotter.application.initialization.wiring import complete_registries
-from promptpotter.application.optimizer_manifest import binding_optimizer, resolve_optimizer
+from promptpotter.application.optimizer_manifest import binding_optimizer
 from promptpotter.config.settings import settings
 from promptpotter.infrastructure.llm.registry import get_llm_client
 from promptpotter.infrastructure.llm.send_pacing import set_rate_tenant
@@ -25,7 +26,7 @@ def completed_registries() -> None:
 @pytest.fixture(autouse=True)
 def bound_potter() -> Iterator[None]:
     """What every run seam binds (`runner/entry.py`), for a test driving a node without one."""
-    with binding_optimizer(resolve_optimizer("potter", {}, gate="off"), determinism=None):
+    with binding_optimizer(OptimizationConfig(degradation_threshold=0.0)):
         yield
 
 

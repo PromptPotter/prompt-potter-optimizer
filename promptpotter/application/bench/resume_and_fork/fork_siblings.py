@@ -28,7 +28,7 @@ from promptpotter.infrastructure.store.layout import campaign_cycles_dir, root_c
 from promptpotter.infrastructure.store.session_pointer import save_active_pointer
 from promptpotter.infrastructure.store.stores import owned_campaign
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import PayloadInvalidError, graceful
+from promptpotter.shared.errors import ConflictError, PayloadInvalidError, graceful
 from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.identity import acting_principal
 
@@ -144,6 +144,11 @@ def mint_fork(
         raise ValueError(
             f"mint_fork({payload.trigger.value}) branches from the origin and lifts no parent "
             f"round, so fork_from_round must be 0; got {fork_from_round}"
+        )
+    if campaign_store.read_bank_partition(parent) is None:
+        raise ConflictError(
+            f"cycle {parent.cycle_id} holds no drawn partition over its chain, "
+            "so no fork can stand on it"
         )
     child = parent.model_copy(update={"cycle_id": _sibling_id(campaign_store, parent, payload)})
     _fork_sibling_setup(

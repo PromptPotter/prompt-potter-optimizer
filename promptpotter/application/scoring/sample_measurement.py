@@ -522,7 +522,7 @@ async def measure_sample(
 
         # Banked HERE and top-level: a replay never re-enters this function, and a formula names no nested value.
         terms = await materialize_sample_values(
-            pipeline_schema, result, extra=session.scoring.judges
+            pipeline_schema, result, extra=session.state.scoring.judges
         )
         if declared := PIPELINE_KEYS & terms.values.keys():
             raise ValueError(
@@ -555,7 +555,7 @@ async def _send_cell(
     bound = await cell_bound(session, wire_params)
     # The run's wall clock bounds every cell, so one still open at its edge is cut.
     budget_s = client.cell_envelope_s(sample, wire_params)
-    if (left := session.control.book.clock_left()) is not None:
+    if (left := session.state.control.book.clock_left()) is not None:
         if left <= 0.0:
             raise SendRefusedError(
                 f"cell {sample.id}: the launch's wall clock is spent, so nothing was sent",
@@ -742,7 +742,7 @@ async def execute_stale_data_protocol(
     result = cached_result
 
     for step in STALE_DATA_LOAD_PROTOCOL:
-        if session.control.pause_requested():
+        if session.state.control.pause_requested():
             return result, "paused"
         if step == "rerun":
             historical = sample_index.degradation_count(sample.id) if sample_index else 0
@@ -765,7 +765,7 @@ async def execute_stale_data_protocol(
                 rerun,
                 retry_of_degraded=True,
                 rerun_comparison=compare_rerun(
-                    cached_result, rerun, session.scoring.require_scorer()
+                    cached_result, rerun, session.state.scoring.require_scorer()
                 ),
             )
             if not is_deprecated(result):

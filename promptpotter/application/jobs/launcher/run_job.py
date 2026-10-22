@@ -220,9 +220,8 @@ async def _bound_session(spec: JobSpec, stores: Stores) -> tuple[Session, Campai
     campaign = stores.campaigns.load_campaign(spec.hop.campaign_id)
     if campaign is None:
         raise NotFoundError(f"campaign not found: {spec.hop.campaign_id}")
-    session, campaign_config = await bind_cycle_session(stores, campaign, spec.hop)
-    configure_and_apply_pipeline(session, campaign_config)
-    return session, campaign_config
+    bound, campaign_config = await bind_cycle_session(stores, campaign, spec.hop)
+    return configure_and_apply_pipeline(bound, campaign_config), campaign_config
 
 
 async def run_job(spec: JobSpec) -> StopOutcome | None:

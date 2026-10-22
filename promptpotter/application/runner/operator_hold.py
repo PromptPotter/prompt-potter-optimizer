@@ -33,7 +33,7 @@ async def hold_for_operator[T](
     )
     try:
         while True:
-            if session.control.pause_requested():
+            if session.state.control.pause_requested():
                 return None
             answered = take()
             if answered is not None:

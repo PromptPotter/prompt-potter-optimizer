@@ -20,6 +20,7 @@ from promptpotter.application.initialization.loop_start import (
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.launcher.admission import paid_pass
 from promptpotter.application.origin import resolve_origin_opt_search_point
+from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.scoring import (
@@ -257,10 +258,11 @@ async def _screen(
                 **({"provider": provider} if provider else {}),
             }
         campaign_config = campaign_config.model_copy(update={"pipeline_overlay": po})
+    session = configure_and_apply_pipeline(session, campaign_config)
     arm_diagnostic_scoring(session, campaign_config, source=RunSource.SEED_SCREEN)
     pipeline_params = session.pipeline_params
     # `run_walks` re-reads this at every launch boundary and clamps it to the backend's ceiling.
-    session.control = replace(session.control, held_lookahead=parallel)
+    session.state.control = replace(session.state.control, held_lookahead=parallel)
     ceiling = session.backend_client.max_cells_in_flight
     if parallel > ceiling:
         # A warning: a terminal shows this layer's info only under `--verbose`.
@@ -287,7 +289,7 @@ async def _screen(
     origin_sp = origin.to_job_search_point(
         schema=session.pipeline_schema,
         framing=campaign_framing(stores, campaign_config, session.dataset),
-        demo=session.scoring.require_partition().demo,
+        demo=session.state.scoring.require_partition().demo,
     )
 
     readings: list[SeedReading] = []

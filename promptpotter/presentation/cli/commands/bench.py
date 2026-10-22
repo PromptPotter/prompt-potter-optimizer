@@ -4,8 +4,8 @@ import argparse
 import logging
 
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
-from promptpotter.application.commands.payloads import GradeBenchPayload
 from promptpotter.application.runner.campaign_result import read_cycle_bench
+from promptpotter.domain.command_kinds import GradeBenchPayload
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.workspace import (

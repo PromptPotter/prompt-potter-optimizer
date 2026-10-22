@@ -38,7 +38,7 @@ from pydantic import BaseModel
 
 BASELINE = {
     # Every `.py` under the package.
-    "modules": 445,
+    "modules": 446,
     # Every `__init__.py` among them.
     "init_files": 56,
     # The `__init__.py` files that re-export names instead of staying empty.
@@ -56,11 +56,9 @@ BASELINE = {
     # Parameters annotated `Any`.
     "any_params": 46,
     # `dict[str, Any]` maps declared in `domain/`.
-    "domain_any_maps": 66,
+    "domain_any_maps": 65,
     # Models that opt out of `StrictModel`'s `extra="forbid"`.
     "models_lax": 3,
-    # The fields a prompt node bears when its backend declares none (`DEFAULT_PROMPT_FIELDS`).
-    "default_prompt_fields": 6,
     # Injections the optimizers' runtimes price — each a block an optimizer prompt can carry.
     "injections": 34,
     # Escalation rules, priced the same way: the round, climb and heal tables together, since a
@@ -79,10 +77,10 @@ BASELINE = {
     # Modules a test run imports: our own, followed through their module-level imports, plus
     # each outside distribution's top name. A test that reaches the server app or an extra
     # moves it as one function does not.
-    "test_reach": 360,
+    "test_reach": 357,
     # Every property of every schema the generated contract offers the browser. A command body IS
     # its payload model, so every payload's fields are declared here.
-    "served_fields": 1648,
+    "served_fields": 1645,
     # The rows below price a CHANGE in the sites it touches, read off code.
     # Files naming three or more `CycleRecord` arms, each a site the next arm must reach.
     "p_record": 19,
@@ -91,12 +89,12 @@ BASELINE = {
     # Served properties no surface reads by name; a payload field only the terminal sends is one.
     "p_served": 193,
     # Files naming three or more `CommandKind` rows, each a site the next row must reach.
-    "p_command": 11,
+    "p_command": 10,
     # The rows each of those files leaves out.
-    "p_command_drift": 203,
+    "p_command_drift": 187,
     # What an optimizer member is handed: `NodeContext`'s public members, inherited ones included,
-    # and the public members of each object one of its properties exposes.
-    "p_member": 321,
+    # and the public members of each object one of its properties exposes; each `CycleRead` alike.
+    "p_member": 309,
     # Places a test reaches a private name of the package: an import, an attribute, a patch target.
     "test_private_reach": 6,
 }
@@ -608,13 +606,13 @@ def compute_ledger() -> dict[str, int]:
     from promptpotter.application import optimizers
     from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.knobs import KNOBS, member_knob_count
+    from promptpotter.application.optimizers.nodes import CycleRead
     from promptpotter.config import settings as settings_mod
     from promptpotter.config.settings import Settings
-    from promptpotter.domain.command_kinds import CommandKind
+    from promptpotter.domain.command_kinds import PAYLOAD_MODEL_FOR_KIND, CommandKind
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.results import CycleResult
     from promptpotter.domain.run_records import CycleRecord
-    from promptpotter.domain.search_point import DEFAULT_PROMPT_FIELDS
 
     py_files = _package_files("*.py")
     init_files = [p for p in py_files if p.name == "__init__.py"]
@@ -626,9 +624,14 @@ def compute_ledger() -> dict[str, int]:
     records, records_left_out = _enumerations(
         sites, [_spelled(a.model_fields["record_type"].default, a.__name__) for a in arms]
     )
+    # The kinds whose payload holds an application type are declared there.
+    importlib.import_module("promptpotter.application.commands.payloads")
     commands, commands_left_out = _enumerations(
         sites,
-        [_spelled(k.value, f"CommandKind.{k.name}", k.payload_name) for k in CommandKind],
+        [
+            _spelled(k.value, f"CommandKind.{k.name}", PAYLOAD_MODEL_FOR_KIND[k].__name__)
+            for k in CommandKind
+        ],
     )
     priced: collections.Counter[str] = collections.Counter()
     for runtime in optimizers.runtimes().values():
@@ -649,7 +652,6 @@ def compute_ledger() -> dict[str, int]:
         "any_params": source["any_params"],
         "domain_any_maps": source["domain_any_maps"],
         "models_lax": source["models_lax"],
-        "default_prompt_fields": len(DEFAULT_PROMPT_FIELDS),
         **priced,
         "deferred_imports": source["deferred_imports"],
         "claude_md": len(_package_files("CLAUDE.md")),
@@ -662,7 +664,7 @@ def compute_ledger() -> dict[str, int]:
         "p_served": _count_unread_served(sites),
         "p_command": commands,
         "p_command_drift": commands_left_out,
-        "p_member": _count_handed(NodeContext),
+        "p_member": sum(map(_count_handed, (NodeContext, *CycleRead.__subclasses__()))),
         "test_private_reach": _count_test_private_reach(private),
     }
 

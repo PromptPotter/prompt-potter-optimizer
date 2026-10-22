@@ -4,7 +4,7 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.judges.call import absent, graded, judge_answer, judge_question
-from promptpotter.judges.protocol import Judge, JudgeSpec, JudgeVerdict
+from promptpotter.judges.protocol import GradeFn, Judge, JudgeSpec, JudgeVerdict
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -55,7 +55,7 @@ def _build_grade_fn(
     letters: dict[str, str],
     to_score: dict[str, float],
     reads_answer: bool,
-) -> object:
+) -> GradeFn:
     async def grade(spec: JudgeSpec, result: MeasuredCell) -> JudgeVerdict:
 
         trace = _trace(result)
@@ -152,7 +152,7 @@ EVIDENCE_RETRIEVAL = Judge(
         "question? Graded independently of whether the system then answered, or answered right."
     ),
     rubric=_RETRIEVAL_RUBRIC,
-    grade=_build_grade_fn(  # type: ignore[arg-type]
+    grade=_build_grade_fn(
         _RETRIEVAL_RUBRIC,
         "evidence_retrieval",
         letters=_RETRIEVAL_LETTERS,
@@ -173,7 +173,7 @@ ANSWER_GROUNDING = Judge(
         "Needs no gold — a grounded answer can be wrong, and that separation is the measurement."
     ),
     rubric=_GROUNDING_RUBRIC,
-    grade=_build_grade_fn(  # type: ignore[arg-type]
+    grade=_build_grade_fn(
         _GROUNDING_RUBRIC,
         "answer_grounding",
         letters=_GROUNDING_LETTERS,

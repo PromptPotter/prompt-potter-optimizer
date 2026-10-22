@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Mapping, MutableMapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Mapping, MutableMapping, Sequence
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Literal, get_args
 
 from pydantic import Field, ValidationError
@@ -78,11 +78,7 @@ from promptpotter.domain.pipeline_schema import (
 from promptpotter.domain.pool import Access, PoolSource
 from promptpotter.domain.results import Concluded
 from promptpotter.domain.run_records import DefaultsDrift, DefaultsPin
-from promptpotter.domain.search_point import (
-    DEFAULT_PROMPT_FIELDS,
-    missing_template_vars,
-    strip_rendered_prompt,
-)
+from promptpotter.domain.search_point import missing_template_vars, strip_rendered_prompt
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.llm.capabilities import resolve_menu, resolve_schema_menu
 from promptpotter.infrastructure.llm.registry import default_routes
@@ -444,22 +440,6 @@ def _validate_prompt_reach(
 ) -> None:
     if any(n.name in active for n in filtered.prompt_nodes()):
         return
-    # A node with no `prompt_info` declares no fields of its own, so the default set is the tell.
-    names_prompt_fields = [
-        name
-        for name in active
-        if (node := filtered.get_node(name)) is not None
-        and node.param_keys & set(DEFAULT_PROMPT_FIELDS)
-    ]
-    if names_prompt_fields and not prompt_fields_as_node_params:
-        raise PayloadInvalidError(
-            f"dataset {dataset_name!r}: {names_prompt_fields} name prompt fields in "
-            f"`optimizer.param_keys` but declare no `prompt_info`, and this backend sends a node "
-            f"only the rendered prompt — the fields would be searched every round and reach no "
-            f"model, so every candidate scores as the same no-skill call. Declare `prompt_info` "
-            f"on the node the prompt is meant for.",
-            code="pipeline_config_invalid",
-        )
     if has_starting_prompts:
         raise PayloadInvalidError(
             f"dataset {dataset_name!r} ships starting prompts but no active node in {active} "
@@ -468,12 +448,12 @@ def _validate_prompt_reach(
             f"GET /pipeline or in the dataset's `dataset.yaml::pipeline`.",
             code="pipeline_config_invalid",
         )
-    if not names_prompt_fields:
+    if not prompt_fields_as_node_params:
         raise PayloadInvalidError(
-            f"dataset {dataset_name!r}: no active node in {active} can receive a prompt — none "
-            f"declares `prompt_info` and none names a prompt field in `optimizer.param_keys`, so "
-            f"every candidate scores as the same no-skill call and the round reports a tie it "
-            f"never measured. Declare one of the two on the node the prompt is meant for.",
+            f"dataset {dataset_name!r}: no active node in {active} declares `prompt_info`, and "
+            f"this backend sends a node only the rendered prompt, so every candidate scores as "
+            f"the same no-skill call and the round reports a tie it never measured. Declare "
+            f"`prompt_info` with its `fields` on the node the prompt is meant for.",
             code="pipeline_config_invalid",
         )
 
@@ -485,8 +465,6 @@ def _validate_model_ownership(
     active: list[str],
     dataset_name: str,
 ) -> None:
-    if filtered is None:
-        return
     for name in active:
         node_obj = filtered.get_node(name)
         if node_obj and node_obj.is_llm and not pipeline_params.get(name, {}).get("model"):
@@ -862,43 +840,76 @@ def optimizer_setup(cfg: CampaignConfig) -> OptimizerSetup:
     )
 
 
-def resolve_pipeline_for_draft(stores: Stores, draft: DraftCampaign) -> CampaignPipelineResponse:
-    m = _draft_merge(stores, draft)
-    params, rows = _draft_rows(m)
+def _rows(m: _Merge, params: dict[str, Any]) -> dict[str, list[NodeConfigParam]]:
+    return m.filtered.node_config_schema(
+        values={n: c for n, c in params.items() if isinstance(c, dict)},
+        sources=m.provenance,
+        model_menu=m.filtered.selectable_models(),
+        declared=m.declared,
+    )
+
+
+def _response(
+    m: _Merge,
+    params: dict[str, Any],
+    workspace: Path,
+    *,
+    campaign_id: str,
+    cycle_id: str,
+    dataset_name: str,
+    connector: str,
+    backend_type: str,
+    nests: list[NestedPipelineRef],
+) -> CampaignPipelineResponse:
+    rows = _rows(m, params)
     return CampaignPipelineResponse(
-        # A draft is no campaign and runs no cycle until its Start mints both.
-        campaign_id=draft.draft_id,
-        cycle_id="",
-        dataset_name=draft.slug,
-        connector=draft.connector,
-        backend_type=draft.connector,
-        self_optimization=is_self_optimization(draft.connector),
+        campaign_id=campaign_id,
+        cycle_id=cycle_id,
+        dataset_name=dataset_name,
+        connector=connector,
+        backend_type=backend_type,
+        self_optimization=is_self_optimization(backend_type),
         optimizer=m.cfg.optimization.optimizer,
         optimizer_setup=optimizer_setup(m.cfg),
         params=params,
         node_config_schema=rows,
         view=m.filtered.view,
         node_output_schema=resolved_output_schemas(m.filtered, params),
-        model_capabilities=_served_menu(m, params, stores.base_dir),
+        model_capabilities=_served_menu(m, params, workspace),
         reach=reach_map(rows),
-        # A dataset dir is what declares inner cells, and a check-in has none yet.
-        nests=[],
+        nests=nests,
         is_single_node=m.filtered.is_single_node,
     )
 
 
-def draft_config_rows(stores: Stores, draft: DraftCampaign) -> dict[str, list[NodeConfigParam]]:
-    return _draft_rows(_draft_merge(stores, draft))[1]
-
-
-def draft_pipeline(stores: Stores, draft: DraftCampaign) -> tuple[dict[str, Any], PipelineSchema]:
-    """What the draft's nodes run with, and the chain they run in, before Start commits any of it."""
+def resolve_pipeline_for_draft(stores: Stores, draft: DraftCampaign) -> CampaignPipelineResponse:
     m = _draft_merge(stores, draft)
-    return _draft_rows(m)[0], m.filtered
+    return _response(
+        m,
+        _draft_params(m),
+        stores.base_dir,
+        # A draft is no campaign and runs no cycle until its Start mints both.
+        campaign_id=draft.draft_id,
+        cycle_id="",
+        dataset_name=draft.slug,
+        connector=draft.connector,
+        backend_type=draft.connector,
+        # A dataset dir is what declares inner cells, and a check-in has none yet.
+        nests=[],
+    )
 
 
-def _draft_rows(m: _Merge) -> tuple[dict[str, Any], dict[str, list[NodeConfigParam]]]:
-    params = apply_identity_layer(
+def draft_pipeline(
+    stores: Stores, draft: DraftCampaign
+) -> tuple[dict[str, Any], dict[str, list[NodeConfigParam]], PipelineSchema]:
+    """What the draft's nodes run with, their rows, and the chain they run in, before Start commits any of it."""
+    m = _draft_merge(stores, draft)
+    params = _draft_params(m)
+    return params, _rows(m, params), m.filtered
+
+
+def _draft_params(m: _Merge) -> dict[str, Any]:
+    return apply_identity_layer(
         m.params,
         m.active,
         None,
@@ -908,13 +919,6 @@ def _draft_rows(m: _Merge) -> tuple[dict[str, Any], dict[str, list[NodeConfigPar
         experiment=None,
         provenance=m.provenance,
     )
-    rows = m.filtered.node_config_schema(
-        values={n: c for n, c in params.items() if isinstance(c, dict)},
-        sources=m.provenance,
-        model_menu=m.filtered.selectable_models(),
-        declared=m.declared,
-    )
-    return params, rows
 
 
 def resolve_pipeline_for_campaign(
@@ -948,43 +952,26 @@ def resolve_pipeline_for_campaign(
     # LAST: a measured point's identity is a fact of the measurement, not of today's files.
     if measured:
         params = _recorded_identity(params, measured, m.provenance)
-
-    rows = m.filtered.node_config_schema(
-        values={n: c for n, c in params.items() if isinstance(c, dict)},
-        sources=m.provenance,
-        model_menu=m.filtered.selectable_models(),
-        declared=m.declared,
-    )
-    return CampaignPipelineResponse(
+    return _response(
+        m,
+        params,
+        stores.base_dir,
         campaign_id=campaign.campaign_id,
         cycle_id=m.hop.cycle_id,
         dataset_name=campaign.dataset_name,
         connector=str((m.raw or {}).get("backend_name", "")),
         # The campaign's DECLARED kind — one definition serves every campaign on the slug.
         backend_type=campaign.connector,
-        self_optimization=is_self_optimization(campaign.connector),
-        optimizer=m.cfg.optimization.optimizer,
-        optimizer_setup=optimizer_setup(m.cfg),
-        params=params,
-        node_config_schema=rows,
-        view=m.filtered.view,
-        node_output_schema=resolved_output_schemas(m.filtered, params),
-        model_capabilities=_served_menu(m, params, stores.base_dir),
-        reach=reach_map(rows),
         nests=[]
         if m.dataset is None
         else nested_pipeline_refs(m.dataset, experiment, m.filtered.view),
-        is_single_node=m.filtered.is_single_node,
     )
 
 
 def _pipeline_subject(at: str, campaign_id: str) -> SubjectSpec:
     if not at:
         return SubjectSpec("campaign", campaign_id)
-    try:
-        spec = parse_subject(at)
-    except ValueError as exc:
-        raise BadRequestError(str(exc)) from exc
+    spec = parse_subject(at)
     if spec.lens or spec.samples:
         raise BadRequestError(
             f"Subject {at!r} carries a scoring mask, and a mask cannot change what config a "
@@ -1333,7 +1320,22 @@ _ROOT_UNRESOLVED = (
 
 def campaign_runs_with(stores: Stores, campaign: Campaign) -> CampaignRunsWith | None:
     """``None`` is a root whose pipeline did not resolve: a broken dataset drops its own row only."""
-    return _root_read(stores, campaign, "runs_with", lambda: _runs_with(stores, campaign))
+    try:
+        key = _root_key(stores, campaign)
+    except _ROOT_UNRESOLVED:
+        logger.exception("runs_with: root of %s did not resolve", campaign.campaign_id)
+        return None
+
+    def resolved() -> CampaignRunsWith | None:
+        try:
+            return _runs_with(stores, campaign)
+        except _ROOT_UNRESOLVED:
+            logger.exception("runs_with: root of %s did not resolve", campaign.campaign_id)
+            return None
+
+    return derived(
+        ("runs_with", stores.campaigns.cycle_dir(campaign.root_hop)), sig=key, compute=resolved
+    )
 
 
 def line_config(stores: Stores, campaign: Campaign, holder: CycleHop) -> CampaignConfig | None:
@@ -1346,24 +1348,6 @@ def line_config(stores: Stores, campaign: Campaign, holder: CycleHop) -> Campaig
         # Silent: `campaign_runs_with` logs the same root's cause, once per change.
         return None
     return config
-
-
-def _root_read[T](stores: Stores, campaign: Campaign, what: str, read: Callable[[], T]) -> T | None:
-    root = stores.campaigns.cycle_dir(campaign.root_hop)
-
-    def resolve() -> T | None:
-        try:
-            return read()
-        except _ROOT_UNRESOLVED:
-            logger.exception("%s: root of %s did not resolve", what, campaign.campaign_id)
-            return None
-
-    try:
-        key = _root_key(stores, campaign)
-    except _ROOT_UNRESOLVED:
-        logger.exception("%s: root of %s did not resolve", what, campaign.campaign_id)
-        return None
-    return derived((what, root), sig=key, compute=resolve)
 
 
 def _root_key(stores: Stores, campaign: Campaign) -> tuple[Any, ...]:
@@ -1386,9 +1370,8 @@ def _root_key(stores: Stores, campaign: Campaign) -> tuple[Any, ...]:
 
 
 def _runs_with(stores: Stores, campaign: Campaign) -> CampaignRunsWith:
-    read = _campaign_merge(stores, campaign, SubjectSpec("campaign", campaign.campaign_id))
-    m, params = read, read.with_seed(read.params)
-    stripped = strip_rendered_prompt(params)
+    m = _campaign_merge(stores, campaign, SubjectSpec("campaign", campaign.campaign_id))
+    stripped = strip_rendered_prompt(m.with_seed(m.params))
     nodes = {n.name: n for n in m.filtered.declared_nodes}
     out: list[RunsWithParam] = []
     by_vendor: dict[str, list[str]] = {}
@@ -1419,9 +1402,7 @@ def _vendor_of(model: str) -> str:
     return normalize_model_id(model).partition("/")[0]
 
 
-def configure_and_apply_pipeline(
-    session: Session, campaign_config: CampaignConfig
-) -> dict[str, Any]:
+def configure_and_apply_pipeline(session: Session, campaign_config: CampaignConfig) -> Session:
 
     exclude = list(campaign_config.exclude_nodes)
     dataset_name = session.measured_dataset
@@ -1473,13 +1454,12 @@ def configure_and_apply_pipeline(
     # Asked here so a channel the connector cannot run stops init, not every cell of the origin.
     session.backend_client.prompt_delivery(pipeline_params)
 
-    session.pipeline_schema = schema_as_run(
-        filtered, pipeline_params, active, session.store.base_dir
-    )
-    session.pipeline_params = pipeline_params
-    session.identity_keys = _identity_keys(provenance)
-
     excl_str = f"  Excluded: {', '.join(exclude)}" if exclude else ""
     logger.info("Active nodes: %s%s", ", ".join(active), excl_str)
 
-    return pipeline_params
+    return replace(
+        session,
+        pipeline_schema=schema_as_run(filtered, pipeline_params, active, session.store.base_dir),
+        pipeline_params=pipeline_params,
+        identity_keys=_identity_keys(provenance),
+    )

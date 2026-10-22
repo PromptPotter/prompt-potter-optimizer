@@ -2,18 +2,16 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Sequence
-from typing import TYPE_CHECKING, Annotated, Any, Literal
+from typing import TYPE_CHECKING, Any
 
-from pydantic import Field
-
-from promptpotter.application.campaign_config import Estimand, Knob, Scope
+from promptpotter.application.bench.node_context import Lineage, Target
 from promptpotter.domain.opt_search_point import Locus
 from promptpotter.domain.optimizer_state import PARSE_FAILURE_MALFORMED, PARSE_FAILURE_TOOLING
-from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.wounds import ValidationFailure
 
 if TYPE_CHECKING:
     from promptpotter.application.bench.node_context import NodeContext
+    from promptpotter.application.optimizers.nodes import RewriteKnobs
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.pipeline_schema import PipelineNode
     from promptpotter.domain.results import Proposal
@@ -24,8 +22,8 @@ _PROMPT = re.compile(r"<prompt>(.*?)</prompt>", re.DOTALL)
 
 def task_description(ctx: NodeContext[Any], node: PipelineNode) -> str:
     """Ends on *node*'s origin answer format: the extraction contract a paper's task descriptions state (CAPO App. D.1)."""
-    parts = [v for v in ctx.framing.to_dict().values() if v]
-    if answer_format := ctx.origin.prompt(node.name).fields.get("answer_format"):
+    parts = [v for v in ctx.read(Target).framing.to_dict().values() if v]
+    if answer_format := ctx.read(Lineage).origin.prompt(node.name).fields.get("answer_format"):
         parts.append(answer_format)
     if not parts:
         raise ValueError(
@@ -33,24 +31,6 @@ def task_description(ctx: NodeContext[Any], node: PipelineNode) -> str:
             "campaign declares no framing (task_context) and its origin no answer_format"
         )
     return "\n".join(parts)
-
-
-Rewrites = Literal["prompt", "field"]
-
-
-class RewriteKnobs(StrictModel):
-    rewrites: Annotated[Rewrites, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
-        description="Which loci of a prompt node the reply replaces. `prompt`: the whole prompt "
-        "as one text — the model is shown every field rendered together, its reply rides `field` "
-        "and the node's other fields empty, as the papers' one-text prompts do. `field`: that "
-        "field alone — the model is shown it alone, and the child inherits every other locus "
-        "from its first parent."
-    )
-    field: Annotated[str, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
-        min_length=1,
-        description="The prompt field the reply is written into; every prompt node the member "
-        "rewrites declares it, or the campaign is refused before it mints.",
-    )
 
 
 def shown(ctx: NodeContext[Any], individual: OptSearchPoint, node: PipelineNode) -> str:

@@ -86,7 +86,10 @@ def publish_inner_spawn_context(session: Session) -> None:
             shared_root=shared_root,
             spawn_campaign_id=session.campaign_id,
             spawn_cycle_id=cycle_id,
-            enclosing=(*session.control.enclosing, session.store.campaigns.cycle_dir(session.hop)),
+            enclosing=(
+                *session.state.control.enclosing,
+                session.store.campaigns.cycle_dir(session.hop),
+            ),
             purpose=session.purpose,
             ruler_version=ruler_clock(session),
             cells=cells,

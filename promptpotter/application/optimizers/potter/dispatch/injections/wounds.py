@@ -11,16 +11,16 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
     Item,
     signal,
 )
-from promptpotter.application.optimizers.potter.dispatch.layout import (
-    L1_LAYOUT_SLOTS,
-    L1_POSSIBLE,
-)
-from promptpotter.domain.search_point import DEFAULT_PROMPT_FIELDS, WHO_ANSWERS_KEYS
+from promptpotter.application.optimizers.potter.dispatch.layout import NODE_LAYOUTS
+from promptpotter.domain.opt_search_point import OptimizerPromptTemplate
+from promptpotter.domain.search_point import WHO_ANSWERS_KEYS
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.domain.wounds import RuntimeFailure
 
 # Closed vocabularies, safe in an UNFENCED panel; any other LLM-authored value reports its size.
-_PLAIN_EVIDENCE_VALUES = L1_POSSIBLE | frozenset(L1_LAYOUT_SLOTS) | frozenset(DEFAULT_PROMPT_FIELDS)
+_PLAIN_EVIDENCE_VALUES = NODE_LAYOUTS["l1_generate"].possible | frozenset(
+    OptimizerPromptTemplate.RENDER_ORDER
+)
 
 
 def _rf_matches_current_config(

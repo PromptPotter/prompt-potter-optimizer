@@ -154,7 +154,7 @@ class QueryLoopState:
 
     @property
     def scorer(self) -> Scorer:
-        return self.session.scoring.require_scorer()
+        return self.session.state.scoring.require_scorer()
 
     def running(self, results: Sequence[GradedCell]) -> ScoreSummary:
         held = frozenset(cell.key for cell in self.held)
@@ -192,7 +192,7 @@ class QueryLoopState:
 def _armed_cells(session: Session) -> int:
     """Sample look-ahead is LIVE though it defaults off: any dataset, the moment the operator arms it."""
     return effective_lookahead(
-        session.control.sample_lookahead(), session.backend_client.max_cells_in_flight
+        session.state.control.sample_lookahead(), session.backend_client.max_cells_in_flight
     )
 
 
@@ -607,7 +607,7 @@ class _ScoringPhase[K: Hashable]:
     decided: set[int] = field(default_factory=set)
 
     def __post_init__(self) -> None:
-        self.gauge = self.session.flight
+        self.gauge = self.session.state.flight
         self.cancels = self.session.backend_client.cancel_stops_billing
         self.book = bound_spend_book()
         self.label = filed(CELL)
@@ -738,9 +738,9 @@ class _ScoringPhase[K: Hashable]:
             unstarted = backfills.owed_backfills(settle)
         cut = (head is not None and head.cancelled()) or any(c.cancelled() for c in started)
         # A cancelled call is the pause's own doing: the throttle wait polls the same flag.
-        skip = session.control.skip_requested()
-        pause = cut or session.control.pause_requested()
-        tripped = session.control.budget_tripped()
+        skip = session.state.control.skip_requested()
+        pause = cut or session.state.control.pause_requested()
+        tripped = session.state.control.budget_tripped()
         if self.unbounded or walk.rereads_ahead(len(walk.results)):
             tripped = None
         return _TurnState(
@@ -758,7 +758,7 @@ class _ScoringPhase[K: Hashable]:
     def honour_stop(self, walk: Walk, now: _TurnState) -> bool:
         if now.skip:
             session = self.session
-            if session.control.spend_skip() and session.state.cycle_id:
+            if session.state.control.spend_skip() and session.state.cycle_id:
                 # Stamped where a searchpoint is actually cut, never at the press.
                 session.record_intervention("skip")
             logger.info(

@@ -269,7 +269,7 @@ async def verify_candidate(
     prior = stores.archive.measurements_for_config(predicate)
     measured_keys = {m.cell.sample_key for m in prior} & session.bank.slot_of.keys()
     # Search split only: `verify_on_saturation` runs inside the loop, which must decide on no bench row.
-    search = session.scoring.require_partition().search
+    search = session.state.scoring.require_partition().search
     unmeasured = [s for s in search if s.key not in measured_keys]
     round_cells = select_optimizer(campaign_config.optimization).round_cells(len(search))
     if not unmeasured:
@@ -299,7 +299,7 @@ async def verify_candidate(
         session_ruler_scope(session),
         ruler_clock(session),
         {sp_hash},
-        objective_id=session.scoring.require_scorer().id,
+        objective_id=session.state.scoring.require_scorer().id,
         n_min=campaign_config.optimization.elimination_n_min,
         enable_2pl=campaign_config.optimization.enable_2pl_graduation,
     ).ruler
@@ -345,9 +345,9 @@ async def verify_candidate(
                 positions=[s.id for s in picked],
                 strategy=strategy,
                 seed=seed,
-                scorer_id=session.scoring.require_scorer().id,
+                scorer_id=session.state.scoring.require_scorer().id,
             )
-            reading = read_verify(stores, hop, banked, session.scoring.require_scorer())
+            reading = read_verify(stores, hop, banked, session.state.scoring.require_scorer())
             if reading.fresh.accuracy is None:
                 raise DiagnosticError(
                     f"the fresh cells of {label!r} produced no scoreable sample — there is "

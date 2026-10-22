@@ -15,6 +15,7 @@ from promptpotter.domain.results import ArmStateKind
 from promptpotter.domain.ruler import AbilityReading
 from promptpotter.domain.run_records import OPERATOR_ORIGIN_SOURCES
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.shared.errors import BadRequestError
 from promptpotter.shared.identity import Principal
 
 SubjectKind = Literal["campaign", "course", "candidate"]
@@ -80,7 +81,7 @@ def _parse_segments(spec: str, segments: list[str], *, allowed: frozenset[str]) 
     for segment in segments:
         name, _, value = segment.partition("=")
         if name not in allowed:
-            raise ValueError(
+            raise BadRequestError(
                 f"Unknown segment {segment!r} on {spec!r} "
                 f"(expected {', '.join(f'{a}=' for a in sorted(allowed))})."
             )
@@ -96,7 +97,7 @@ def _parse_segments(spec: str, segments: list[str], *, allowed: frozenset[str]) 
 def parse_tree_address(spec: str) -> TreeAddress:
     name, *segments = spec.split(";")
     if not name:
-        raise ValueError(f"Address {spec!r} names nothing before its segments.")
+        raise BadRequestError(f"Address {spec!r} names nothing before its segments.")
     return TreeAddress(name, _parse_segments(spec, segments, allowed=_ADDRESS_SEGMENTS).inside)
 
 
@@ -106,20 +107,20 @@ def parse_subject(spec: str) -> SubjectSpec:
     address, *segments = spec.split(";")
     kind, sep, rest = address.partition(":")
     if not sep or kind not in _SUBJECT_ARITY:
-        raise ValueError(
+        raise BadRequestError(
             f"Unknown subject kind in {spec!r} (expected one of {sorted(_SUBJECT_ARITY)}, "
             "as `kind:<campaign>[/<cycle>[/<candidate>]]`)."
         )
     parts = rest.split("/")
     arity = _SUBJECT_ARITY[kind]
     if len(parts) != arity or not all(parts):
-        raise ValueError(
+        raise BadRequestError(
             f"Subject {spec!r} addresses {len([p for p in parts if p])} id(s); a "
             f"{kind!r} subject takes exactly {arity}."
         )
     inside, lens, samples = _parse_segments(spec, segments, allowed=_SUBJECT_SEGMENTS)
     if lens and kind != "course":
-        raise ValueError(
+        raise BadRequestError(
             f"A {kind!r} subject takes no lens: an alternative formula re-decides ELECTIONS, and "
             "only a course has any. Address the branch instead."
         )
