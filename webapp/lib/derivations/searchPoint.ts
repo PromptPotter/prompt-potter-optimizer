@@ -1,6 +1,6 @@
 import { liveCandidate, liveCandidates, roundOf, type DashboardSnapshot } from "@/lib/poll";
 import type { ArmName, ArmNode, ArmReading, NodePrompt } from "@/lib/api/types";
-import type { ArmRow, RoundResult, SampleRow, SelectedCandidate } from "@/lib/types";
+import type { ArmRow, RoundView, SampleRow, SelectedCandidate } from "@/lib/types";
 import { armSearchpoint, type ArmSearchpoint } from "./candidateSearchPoint";
 import { rowAt } from "./round-candidates";
 import { roundReading, type RoundReading } from "./round-reading";
@@ -119,7 +119,7 @@ export function liveCandidateObserveConfig(
 }
 
 export function candidateObserveConfig(
-  doc: RoundResult | null,
+  doc: RoundView | null,
   key: string | null,
   display: string,
   nodeId?: string | null,

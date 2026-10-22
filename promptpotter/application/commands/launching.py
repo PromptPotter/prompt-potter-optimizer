@@ -58,10 +58,10 @@ if TYPE_CHECKING:
         MintCampaignPayload,
         StartCheckinPayload,
         StartRunPayload,
-        StepCyclePayload,
     )
     from promptpotter.application.jobs.registry import JobRegistry
     from promptpotter.domain.campaign import Campaign
+    from promptpotter.domain.command_kinds import StepCyclePayload
     from promptpotter.infrastructure.store.draft_store import DraftClaim
     from promptpotter.infrastructure.store.stores import Stores
 
@@ -275,13 +275,12 @@ def start_checkin(
 
 async def dispatch_start_checkin(
     stores: Stores,
-    start: StartCheckinPayload,
-    idempotency_key: str,
+    call: CommandCall[StartCheckinPayload],
     *,
     job_registry: JobRegistry | None = None,
     inline: Inline | None = None,
 ) -> Launched:
     """Acked at admission, before the mint moves the draft's ledger into the root cycle."""
     dispatcher = CommandDispatcher(stores, job_registry=job_registry, inline=inline)
-    outcome = await dispatcher.dispatch_draft_command(CommandCall(start, idempotency_key))
+    outcome = await dispatcher.dispatch(call)
     return await cast(Admitted, outcome.result).launched()

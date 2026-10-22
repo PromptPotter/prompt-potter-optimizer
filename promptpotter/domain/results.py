@@ -390,7 +390,7 @@ def scoreboard_rank_key(
     is_leading: bool = False,
     is_partial: bool = False,
 ) -> ScoreboardRankKey:
-    """A mask lens (``mask/verdicts.py``) passes no `is_leading`: pinned to rank 1 it cannot disagree."""
+    """A mask lens (``mask/divergence.py``) passes no `is_leading`: pinned to rank 1 it cannot disagree."""
     return (
         is_leading,
         # The round order is stratified, so a walk cut short kept a biased slice, not a smaller sample.

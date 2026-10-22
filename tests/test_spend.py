@@ -55,12 +55,7 @@ from promptpotter.application.bench import llm_call as call_mod
 from promptpotter.application.campaign_config import CampaignConfig, OptimizationConfig
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.commands.limits_and_queue import change_run_limits
-from promptpotter.application.commands.payloads import (
-    ChangeRunLimitsPayload,
-    DiscardDraftPayload,
-    EditDraftCampaignPayload,
-    StartCheckinPayload,
-)
+from promptpotter.application.commands.payloads import EditDraftCampaignPayload, StartCheckinPayload
 from promptpotter.application.datasets.draft_campaign import EditDraftPatch, new_draft
 from promptpotter.application.datasets.loaders import archive_entry
 from promptpotter.application.diagnostics.noise_floor import measure_noise_floor
@@ -118,6 +113,7 @@ from promptpotter.config.settings import settings
 from promptpotter.connectors.protocol import InProcessWorkload, cell_envelope_of
 from promptpotter.connectors.termnorm import TermNormSession
 from promptpotter.domain.campaign import Optimize
+from promptpotter.domain.command_kinds import ChangeRunLimitsPayload, DiscardDraftPayload
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.l4.proxies import inner_cell_facts
 from promptpotter.domain.measurement_provenance import REUSABLE_MIN_GRADE, RunSource
@@ -2996,11 +2992,7 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
     def command(
         payload: DiscardDraftPayload | StartCheckinPayload | EditDraftCampaignPayload,
     ) -> object:
-        dispatcher = CommandDispatcher(stores)
-        key = uuid.uuid4().hex
-        if isinstance(payload, EditDraftCampaignPayload | StartCheckinPayload):
-            return asyncio.run(dispatcher.dispatch_draft_command(CommandCall(payload, key)))
-        return asyncio.run(dispatcher.dispatch_workspace_command(CommandCall(payload, key)))
+        return asyncio.run(CommandDispatcher(stores).dispatch(CommandCall(payload)))
 
     # An edit racing a Start's mint is refused while the claim holds, and finds nothing once the
     # draft closed: it never lands inside the mint nor writes the closed draft's dir back.
@@ -3027,9 +3019,7 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
         stores, identity=dataclasses.replace(stores.identity, user_id=UserId("intruder"))
     )
     with pytest.raises(NotFoundError):
-        asyncio.run(
-            CommandDispatcher(intruder).dispatch_draft_command(CommandCall(edit, uuid.uuid4().hex))
-        )
+        asyncio.run(CommandDispatcher(intruder).dispatch(CommandCall(edit)))
     claim.release()
     command(DiscardDraftPayload(draft_id=draft.draft_id))
     assert not draft_dir.exists(), "a discard left the draft's dir, or wrote it back"

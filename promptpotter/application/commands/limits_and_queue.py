@@ -13,12 +13,12 @@ from promptpotter.shared.identity import acting_principal
 
 if TYPE_CHECKING:
     from promptpotter.application.commands.dispatcher import CommandDispatcher
-    from promptpotter.application.commands.payloads import (
+    from promptpotter.domain.campaign import Campaign
+    from promptpotter.domain.command_kinds import (
         CancelQueuedRunPayload,
         ChangeRunLimitsPayload,
         SetConcurrentCyclesPayload,
     )
-    from promptpotter.domain.campaign import Campaign
     from promptpotter.domain.cycle_paths import CycleHop
 
 

@@ -15,7 +15,7 @@ import type {
   OverlapReading,
   PairedReading,
   ProducerReading,
-  RoundResult,
+  RoundView,
   RunStanding,
   ServedDashboard,
   ServedRound,
@@ -335,29 +335,13 @@ export function measuredArm({
   };
 }
 
-export function roundDoc(over: Partial<RoundResult> = {}): RoundResult {
+export function roundDoc(over: Partial<RoundView> = {}): RoundView {
   return {
     round: 0,
-    // `null` as a diagnostic replay writes, never 0, which is a real record.
-    at_offset: null,
     arms: {},
-    folds: {},
     election: null,
     cells: {},
     fitness_bands: NO_FITNESS_BANDS,
-    diagnostics: null,
-    health: null,
-    optimizer_state: {
-      manifest: "potter",
-      population: [],
-      prompt_hashes: {},
-      slices: {},
-      outputs: {},
-    },
-    optimizer_facts: [],
-    overlap: unreadOverlap({ advance: "origin" }),
-    overlap_results: {},
-    round_id: "round_0",
     scoreboard: [],
     headline: null,
     ...over,
@@ -368,7 +352,7 @@ export function roundDoc(over: Partial<RoundResult> = {}): RoundResult {
 export function roundOfArms(
   round: number,
   arms: { key: string; label: string; arm: Measured }[],
-): RoundResult {
+): RoundView {
   return roundDoc({
     round,
     arms: Object.fromEntries(arms.map(({ key, arm }) => [key, arm])),

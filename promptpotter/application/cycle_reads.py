@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
+
+from pydantic import Field
 
 from promptpotter.application.scoring.closed_rounds import (
     campaign_scorer,
@@ -13,9 +15,16 @@ from promptpotter.application.scoring.closed_rounds import (
 from promptpotter.application.served_dashboard import served_dashboard
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath
 from promptpotter.domain.dashboard_rows import sample_status
-from promptpotter.domain.results import RoundResult
+from promptpotter.domain.paired_reading import ArmKey
+from promptpotter.domain.results import (
+    ArmReading,
+    ArmState,
+    Election,
+    ScoreboardRow,
+)
 from promptpotter.domain.round_audit import RoundAudit
-from promptpotter.domain.scoring import CellSheet, ground_truth_text
+from promptpotter.domain.scoring import GradedCell, SampleStatus, ground_truth_text
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.projections.audit_trail import load_round_audits
 from promptpotter.infrastructure.projections.event_stream import CycleLedgerTail
 from promptpotter.infrastructure.runtime_flags import run_phase_validator_epoch
@@ -88,26 +97,59 @@ def round_audit(cycle: ViewedCycle, round_num: int) -> RoundAudit | None:
     return audit
 
 
-@dataclass(frozen=True)
-class _MarkedSheet(CellSheet):
-    slot_of: Mapping[str, int] = field(default_factory=dict)
+class RoundCell(StrictModel):
+    """One measured row of a served round, with the mark it reads as."""
 
-    def wire(self) -> list[dict[str, object]]:
-        return [
-            {
-                **cell.wire(),
-                "position": self.slot_of[cell.key],
-                "status": sample_status(cell.facts, cell.grade),
-                "ground_truth_text": ground_truth_text(cell.facts.ground_truth),
-            }
-            for cell in self.cells
-        ]
+    position: int = Field(description="The sample's slot in the bank the cycle drew.")
+    sample_key: str
+    status: SampleStatus
+    cached: bool
+    query: str
+    predicted: str
+    ground_truth_text: str = Field(description="The sample's label as shown.")
+    fitness: float | None
+
+
+class RoundView(StrictModel):
+    """One closed round as a surface reads it: its arms, their rows and its verdict. What the
+    engine banks beside them — folds, diagnostics, optimizer state — stays on the ledger."""
+
+    round: int
+    arms: dict[ArmKey, ArmState]
+    cells: dict[ArmKey, list[RoundCell]] = Field(
+        description="Each arm's rows, a reference re-read on the round's cells included."
+    )
+    election: Election | None
+    scoreboard: list[ScoreboardRow]
+    headline: ArmReading | None = Field(
+        description="The arm the round ENDED on (`election.ended_on`), read: the headline's "
+        "numbers are its own. Null on a diag round, which elects nothing."
+    )
+    fitness_bands: list[int] = Field(
+        description="How many scored rows of the `headline` arm's cells graded into each tenth of "
+        "[0, 1], lowest first: a band is closed above, so a 0.5 counts in the fifth and a 1.0 in "
+        "the tenth. A row carrying no verdict is in none — an uncharged error's 0.0 is a floor, "
+        "not a low score."
+    )
+
+
+def _round_cell(cell: GradedCell, slot_of: Mapping[str, int]) -> RoundCell:
+    facts = cell.facts
+    return RoundCell(
+        position=slot_of[cell.key],
+        sample_key=cell.key,
+        status=sample_status(facts, cell.grade),
+        cached=facts.cached,
+        query=facts.query,
+        predicted=facts.predicted,
+        ground_truth_text=ground_truth_text(facts.ground_truth),
+        fitness=cell.grade.fitness,
+    )
 
 
 def served_round(
     stores: Stores, hop: CycleHop, round_num: int, *, moment: Moment | None
-) -> RoundResult | None:
-    """A served projection: the round a resume, a fork and the round file read carries no ``status``."""
+) -> RoundView | None:
     graded_under = campaign_scorer(stores, hop.campaign_id)
     closed = (
         None
@@ -117,15 +159,17 @@ def served_round(
     if closed is None:
         return None
     slot_of = cycle_bank(stores, hop).slot_of
-
-    def marked(sheet: CellSheet) -> CellSheet:
-        return _MarkedSheet(sheet.scorer_id, sheet.cells, slot_of)
-
-    def each[K: str](sheets: dict[K, CellSheet]) -> dict[K, CellSheet]:
-        return {k: marked(v) for k, v in sheets.items()}
-
-    return closed.model_copy(
-        update={"cells": each(closed.cells), "overlap_results": each(closed.overlap_results)}
+    return RoundView(
+        round=closed.round,
+        arms=closed.arms,
+        cells={
+            key: [_round_cell(cell, slot_of) for cell in sheet]
+            for key, sheet in closed.cells.items()
+        },
+        election=closed.election,
+        scoreboard=closed.scoreboard,
+        headline=closed.headline,
+        fitness_bands=closed.fitness_bands,
     )
 
 

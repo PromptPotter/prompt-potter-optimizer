@@ -1,5 +1,5 @@
 "use client";
-import { postPauseCycle } from "@/lib/api/commands";
+import { cycleAddress, postCommand } from "@/lib/api/commands";
 import { cx } from "@/lib/cx";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { pathRoot } from "@/lib/ids";
@@ -72,7 +72,9 @@ export function CriticalAlertBanner() {
           className="critical-alert-jump critical-alert-stop"
           // The CAMPAIGN is the root hop: an inner run stops with the outer run that spawned it.
           onClick={() =>
-            void pause.run("pause-cycle", () => postPauseCycle([pathRoot(viewedPath)]))
+            void pause.run("pause-cycle", () =>
+              postCommand("pause-cycle", cycleAddress([pathRoot(viewedPath)])),
+            )
           }
           aria-label="Pause the campaign"
         >

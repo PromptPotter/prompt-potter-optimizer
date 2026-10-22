@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { samplesForRow } from "../round-samples";
-import type { ArmRow, RoundResult } from "@/lib/types";
+import type { ArmRow, RoundView } from "@/lib/types";
 import {
   armReading,
   currentRound,
@@ -35,7 +35,7 @@ const historicalDoc = {
       { position: 4, unscored: true, status: "UNSC" },
     ],
   },
-} as unknown as RoundResult;
+} as unknown as RoundView;
 
 describe("samplesForRow — source routing", () => {
   it("an in-flight row reads dash and ignores the round file", () => {

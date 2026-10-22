@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { candidateSearchPoint } from "../candidateSearchPoint";
-import type { RoundResult } from "@/lib/types";
+import type { RoundView } from "@/lib/types";
 import { measuredArm, roundDoc, roundOfArms } from "@/lib/test-fixtures";
 
-const doc: RoundResult = roundOfArms(2, [
+const doc: RoundView = roundOfArms(2, [
   {
     key: "cand-a",
     label: "C2.1",

@@ -524,13 +524,6 @@ _KNOWN_FALSE = {
     r'git grep -cE "^\s*session\.[a-z_]+ = " -- promptpotter/application/runner == 0': (
         "the runner writes Session"
     ),
-    'git grep -cE "superseded_by" -- webapp/lib/derivations/campaign-forest.ts >= 1': (
-        "the sidebar ignores the successor pointer"
-    ),
-    'git grep -cE "<table" -- webapp/components/files/RoundFileView.tsx == 0': (
-        "a second table in RoundFileView"
-    ),
-    r'git grep -cE "api-openapi\.yaml" -- scripts/gate.py >= 1': "no schema-first gate",
 }
 
 
@@ -1054,9 +1047,12 @@ CHECKS: tuple[Check, ...] = (
         staged=True,
     ),
     Check(
-        "openapi",
+        "specs",
         "py",
-        _Probe("scripts/build_openapi.py", ("docs/specs/openapi.generated.json",)),
+        _Probe(
+            "scripts/build_specs.py",
+            ("docs/specs/openapi.generated.json", "docs/specs/events-asyncapi.generated.json"),
+        ),
         staged=True,
     ),
     # Last in the host: it imports every module, which no regenerator before it may see.

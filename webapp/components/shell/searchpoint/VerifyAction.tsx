@@ -3,7 +3,7 @@
 import { useState } from "react";
 import type { SelectedCandidate } from "@/lib/types";
 import type { CyclePath } from "@/lib/ids";
-import { postVerifyCandidate, type VerifyStrategy } from "@/lib/api/commands";
+import { cycleAddress, postCommand, type VerifyStrategy } from "@/lib/api/commands";
 import { VERIFY_STRATEGY_LABELS } from "@/lib/api/types.generated";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { useVerify } from "@/lib/hooks/useVerify";
@@ -40,9 +40,12 @@ export function VerifyAction({
   function run() {
     if (!path) return;
     void cmd.run("verify-candidate", () =>
-      postVerifyCandidate(path, candidate.arm, {
+      // `samples` omitted is the server's count (`verify.py::derive_verify_samples`).
+      postCommand("verify-candidate", {
+        ...cycleAddress(path),
+        candidate_id: candidate.arm,
         strategy,
-        samples: samples === "" ? null : Number(samples),
+        ...(samples === "" ? {} : { samples: Number(samples) }),
       }),
     );
   }

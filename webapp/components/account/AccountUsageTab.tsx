@@ -17,7 +17,7 @@ import { useMachineStatus } from "@/lib/hooks/useMachineStatus";
 import { useCommand, type CommandFailure } from "@/lib/hooks/useCommand";
 import {
   quotaRead,
-  postSetConcurrentCycles,
+  postCommand,
   type MachineSlot,
   type MachineStatusResponse,
   type QuotaStatus,
@@ -280,7 +280,10 @@ function LimitControl({
 
   const save = async (next: number) => {
     if (next === limit || !Number.isInteger(next) || next < 1) return;
-    await cmd.run("set-concurrent-cycles", () => postSetConcurrentCycles(next), () =>
+    await cmd.run(
+      "set-concurrent-cycles",
+      () => postCommand("set-concurrent-cycles", { max_concurrent_cycles: next }),
+      () =>
       invalidateReads("quota"),
     );
   };

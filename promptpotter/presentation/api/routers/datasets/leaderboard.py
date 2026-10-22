@@ -6,9 +6,10 @@ from fastapi import Query, Request, Response
 
 from promptpotter.application.scoring.measurement_log import measurement_log, open_cell
 from promptpotter.domain.cells import Cell, CellsResponse, HeatmapScope
+from promptpotter.domain.cycle_paths import decode_cycle_path
 from promptpotter.domain.results import HardSampleOrder
 from promptpotter.domain.scoring import SampleStatus
-from promptpotter.presentation.api.deps import StoresDep, decode_descend
+from promptpotter.presentation.api.deps import StoresDep
 from promptpotter.presentation.api.routers.campaigns._conditional import conditional_json
 from promptpotter.presentation.api.routers.datasets._router import datasets_router
 
@@ -80,7 +81,7 @@ def get_dataset_cells(
         scope=scope,
         campaign_id=campaign_id,
         cycle_id=cycle_id,
-        descend=decode_descend(descend),
+        descend=decode_cycle_path(descend),
         limit=limit,
         max_unmeasured=max_unmeasured,
         order=order,

@@ -61,8 +61,8 @@ from promptpotter.application.evidence.subjects import (
     authorship_of,
     parse_tree_address,
 )
+from promptpotter.application.mask.divergence import scenario_spine
 from promptpotter.application.mask.load import load_mask_record
-from promptpotter.application.mask.scenario import scenario_spine
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
 from promptpotter.application.scoring.closed_rounds import (
     campaign_scorer,

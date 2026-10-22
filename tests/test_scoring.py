@@ -1652,9 +1652,7 @@ def test_an_authored_round_measures_the_operators_arm_and_asks_no_proposer(
                 )
             ],
         )
-        return CommandDispatcher(authored).dispatch_cycle_command(
-            CommandCall(payload, key), expected_version=None
-        )
+        return CommandDispatcher(authored).dispatch(CommandCall(payload, key))
 
     # Only a roster whose every read has a walked writer runs authored: the seat writes no state.
     for optimizer, closes in (("potter", True), ("capo", False), ("gepa", False), ("levi", True)):

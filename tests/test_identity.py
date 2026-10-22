@@ -47,6 +47,7 @@ from promptpotter.application.campaign_config import (
     declare_run,
     effective_config,
 )
+from promptpotter.application.commands.dispatcher import CommandCall
 from promptpotter.application.commands.launching import dispatch_start_checkin, parse_cycle_seed
 from promptpotter.application.commands.payloads import MintCampaignPayload, StartCheckinPayload
 from promptpotter.application.datasets import ingest
@@ -1615,8 +1616,7 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
             asyncio.run(
                 dispatch_start_checkin(
                     built_stores,
-                    StartCheckinPayload(draft_id=uploaded.draft_id),
-                    attempt,
+                    CommandCall(StartCheckinPayload(draft_id=uploaded.draft_id), attempt),
                     inline=Inline(),
                 )
             )

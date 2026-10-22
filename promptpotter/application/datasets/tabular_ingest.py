@@ -61,7 +61,7 @@ IngestReason = Literal[
 
 
 class IngestError(PayloadInvalidError):
-    """``reason`` is declared in ``api-openapi.yaml::ErrorEnvelope``."""
+    """``reason`` rides the error envelope's ``details`` (``main.py::_error_response``)."""
 
     code = "ingest_failed"
 

@@ -74,5 +74,5 @@ async def dispatch_origin_resolution(
     stores: Stores, call: CommandCall[ResolveOriginPayload]
 ) -> ResolveOriginResponse:
     """Calling ``resolve_origin_turn`` bare records no turn AND re-spends the call a replay serves."""
-    outcome = await CommandDispatcher(stores).dispatch_draft_command(call)
+    outcome = await CommandDispatcher(stores).dispatch(call)
     return cast(ResolveOriginResponse, outcome.result)

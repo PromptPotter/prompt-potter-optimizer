@@ -1,11 +1,15 @@
+"""``replay`` lives in ``resume_and_fork/ab_replay.py`` with the replayers: the FOLD is what is shared."""
+
 from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Callable
+from typing import NamedTuple
 
 from pydantic import Field
 
-from promptpotter.application.mask.record import MaskCycle, MaskRecord, MaskRound
+from promptpotter.application.mask.record import MaskCycle, MaskReading, MaskRecord, MaskRound
+from promptpotter.domain.results import ScoreboardRankKey, scoreboard_rank_key
 from promptpotter.domain.strict_model import FrozenModel
 
 
@@ -30,6 +34,91 @@ class DivergenceResult(FrozenModel):
 
     divergences: list[Divergence] = Field(default_factory=list)
     divergent: list[tuple[str, int]] = Field(default_factory=list)
+
+
+class MaskedElection(NamedTuple):
+    """``winner_id`` ``None`` is "the parent held", a real outcome; no parent reading is ``decidable`` False."""
+
+    decidable: bool
+    winner_id: str | None
+
+
+class ScenarioStep(NamedTuple):
+    round: int
+    candidate_id: str
+    recorded_id: str
+
+
+def _key(reading: MaskReading) -> ScoreboardRankKey:
+    return scoreboard_rank_key(reading.composite_fitness, reading.accuracy)
+
+
+def masked_election(rnd: MaskRound, parent: MaskReading | None) -> MaskedElection:
+    if parent is None:
+        return MaskedElection(decidable=False, winner_id=None)
+    best_key = _key(parent)
+    leader_id: str | None = None
+    for c in rnd.candidates:
+        if not c.is_eligible or c.reading is None:
+            continue
+        k = _key(c.reading)
+        if k > best_key:
+            best_key = k
+            leader_id = c.candidate_id
+    return MaskedElection(decidable=True, winner_id=leader_id)
+
+
+def make_scoring_verdict() -> Verdict:
+    """Re-ranks the RECORD, never re-runs the election: whether the RUN moves under the formula is ``ab``'s."""
+
+    def verdict(rnd: MaskRound) -> VerdictOutcome:
+        if rnd.round == 0:
+            return VerdictOutcome(diverged=False)
+        recorded_winner = next((c.candidate_id for c in rnd.candidates if c.is_selected), None)
+        election = masked_election(rnd, rnd.parent)
+        if not election.decidable:
+            return VerdictOutcome(diverged=False)
+        diverged = election.winner_id != recorded_winner
+        alternative = election.winner_id if (diverged and election.winner_id) else None
+        return VerdictOutcome(diverged=diverged, alternative_candidate_id=alternative)
+
+    return verdict
+
+
+def make_abort_verdict(suppress: frozenset[str]) -> Verdict:
+    """Suppressing a contributor that DID fire is record-computable; ADDING one needs the ``p_best`` stream."""
+
+    def verdict(rnd: MaskRound) -> VerdictOutcome:
+        if rnd.round == 0:
+            return VerdictOutcome(diverged=False)
+        fired = any(c.abort in suppress for c in rnd.candidates)
+        return VerdictOutcome(diverged=fired)
+
+    return verdict
+
+
+def scenario_spine(cycle: MaskCycle) -> list[ScenarioStep]:
+    """ENDS on the round the two readings part: past it the run stands on a parent nothing measured."""
+    rounds = sorted(cycle.rounds, key=lambda r: r.round)
+    first = rounds[0] if rounds else None
+    origin = next((c for c in first.candidates if c.reading), None) if first else None
+    if origin is None or first is None:
+        return []
+    standing = origin
+    steps = [ScenarioStep(first.round, origin.candidate_id, origin.candidate_id)]
+    for rnd in rounds[1:]:
+        by_id = {c.candidate_id: c for c in rnd.candidates}
+        election = masked_election(rnd, standing.reading)
+        elected = by_id.get(election.winner_id) if election.winner_id else None
+        # An undecidable round and one that HELD both carry the parent forward: neither is a parting.
+        scenario_winner = elected if elected is not None else standing
+        crowned = next((c for c in rnd.candidates if c.is_selected), None)
+        recorded = crowned if crowned is not None else standing
+        steps.append(ScenarioStep(rnd.round, scenario_winner.candidate_id, recorded.candidate_id))
+        if scenario_winner.candidate_id != recorded.candidate_id:
+            break
+        standing = scenario_winner
+    return steps
 
 
 def find_divergences(record: MaskRecord, verdict: Verdict) -> DivergenceResult:

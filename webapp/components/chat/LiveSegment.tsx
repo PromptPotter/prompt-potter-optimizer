@@ -9,6 +9,7 @@ import type {
   DecisionAction,
   LivesReading,
 } from "@/lib/api/types";
+import type { CommandPayloads } from "@/lib/api/types.generated";
 
 export function LiveSegment({
   notices,
@@ -29,7 +30,11 @@ export function LiveSegment({
   const now = listening ? (status ?? { icon: "·", label: "Listening for activity…", detail: null }) : null;
   if (notices.length === 0 && !now && !decision) return null;
 
-  const decide = (a: DecisionAction) => void cmd.run(a.label, () => postCommand(a.kind, a.payload));
+  // The served payload is the whole body, built server-side for its kind; the browser forwards it.
+  const decide = (a: DecisionAction) =>
+    void cmd.run(a.label, () =>
+      postCommand(a.kind, a.payload as CommandPayloads[DecisionAction["kind"]]),
+    );
   const busy = cmd.pending !== null;
 
   return (

@@ -3,7 +3,6 @@ of its ceiling and no machine slot."""
 
 from __future__ import annotations
 
-import uuid
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
@@ -101,14 +100,12 @@ async def submit_gate_decision(stores: Stores, hop: CycleHop, decision: GateDeci
 
     Raises ``ConflictError`` where it is not holding: an early decision is refused, never kept.
     """
-    await CommandDispatcher(stores).dispatch_cycle_command(
+    await CommandDispatcher(stores).dispatch(
         CommandCall(
             OriginGateDecisionPayload(
                 campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, decision=decision
-            ),
-            uuid.uuid4().hex,
-        ),
-        expected_version=None,
+            )
+        )
     )
 
 
@@ -119,14 +116,12 @@ async def submit_arms(
 
     Raises ``ConflictError`` where it is not holding, or where *keep* names no draft of the hold.
     """
-    await CommandDispatcher(stores).dispatch_cycle_command(
+    await CommandDispatcher(stores).dispatch(
         CommandCall(
             SubmitArmsPayload(
                 campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, arms=list(arms), keep=list(keep)
-            ),
-            uuid.uuid4().hex,
-        ),
-        expected_version=None,
+            )
+        )
     )
 
 

@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { postChangeRunLimits, type Budget, type MeteredSpend } from "@/lib/api";
+import { cycleAddress, postCommand, type Budget, type MeteredSpend } from "@/lib/api";
 import { CEILING_METER_LABELS } from "@/lib/api/types.generated";
 import { budgetAxis } from "@/lib/derivations";
 import { useCommand } from "@/lib/hooks/useCommand";
@@ -97,7 +97,9 @@ export function RunLimitsControl({ budget, share, metered }: Props) {
     if (!viewedPath) return;
     setConfirmingHalt(false);
     setNote(null);
-    const r = await cmd.run("change-run-limits", () => postChangeRunLimits(viewedPath, change));
+    const r = await cmd.run("change-run-limits", () =>
+      postCommand("change-run-limits", { ...cycleAddress(viewedPath), budget: change }),
+    );
     if (r.ok) setNote(applied);
   };
 

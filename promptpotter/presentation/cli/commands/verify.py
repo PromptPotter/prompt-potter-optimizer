@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import uuid
 
 from pydantic import ValidationError
 
@@ -45,7 +44,7 @@ async def cmd_verify(args: argparse.Namespace) -> CommandResult:
     )
 
     try:
-        dispatched = await CommandDispatcher(stores).dispatch_cycle_command(
+        dispatched = await CommandDispatcher(stores).dispatch(
             CommandCall(
                 VerifyCandidatePayload.model_validate(
                     {
@@ -55,10 +54,8 @@ async def cmd_verify(args: argparse.Namespace) -> CommandResult:
                         "strategy": args.strategy,
                         "seed": args.seed,
                     }
-                ),
-                uuid.uuid4().hex,
-            ),
-            expected_version=None,
+                )
+            )
         )
     except (DiagnosticError, BankedSearchPointError, ValidationError) as exc:
         raise SystemExit(f"ERROR: {exc}") from exc

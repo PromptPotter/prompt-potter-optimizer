@@ -8,11 +8,11 @@ from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.datasets.draft_campaign import EditDraftPatch, OptimizationOverrides
 from promptpotter.domain.campaign import Optimize, Purpose
 from promptpotter.domain.command_kinds import (
-    LOOP_TAKEN,
-    CampaignPayload,
+    PAYLOAD_IN_DOMAIN,
     CommandKind,
     CommandPayload,
     CyclePayload,
+    DraftAddressedPayload,
 )
 from promptpotter.domain.phases import INNER_LAUNCH_REFUSAL
 from promptpotter.domain.results import VerifyStrategy
@@ -20,9 +20,6 @@ from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import StrictModel, WireInt
 from promptpotter.infrastructure.store.layout import validate_dataset_name
-from promptpotter.shared.errors import PayloadInvalidError
-
-_OUTER_OWNS_TREE = "An inner run's cycles live and die with the outer campaign."
 
 
 class ForkCyclePayload(CyclePayload):
@@ -49,33 +46,6 @@ class ForkCyclePayload(CyclePayload):
     )
 
 
-class DeleteCyclePayload(CyclePayload):
-    inner_refusal: ClassVar[str | None] = _OUTER_OWNS_TREE
-
-
-class CleanupEmptyCyclesPayload(CyclePayload):
-    inner_refusal: ClassVar[str | None] = _OUTER_OWNS_TREE
-
-
-class ChangeRunLimitsPayload(CyclePayload):
-    inner_refusal: ClassVar[str | None] = (
-        "An inner run spends under the outer run's ceiling. Change the outer run's limits instead."
-    )
-
-    # An axis it does not name stays as it stands; a named null lifts it.
-    budget: Budget
-
-    @model_validator(mode="after")
-    def _names_an_axis(self) -> ChangeRunLimitsPayload:
-        """The domain error, not ``ValueError``: Pydantic wraps that one, and the CLI builds this model too."""
-        if not self.budget.named:
-            raise PayloadInvalidError(
-                "change-run-limits requires a budget naming at least one of usd / tokens / "
-                "rounds / wall_clock_s."
-            )
-        return self
-
-
 class StartRunPayload(CyclePayload):
     """A run of an existing cycle: what bounds it (``budget``, ``step_rounds``) and the shape it
     takes (``mode``)."""
@@ -85,12 +55,6 @@ class StartRunPayload(CyclePayload):
     budget: Budget = Budget()
     step_rounds: WireInt | None = Field(default=None, ge=1, le=100)
     mode: RunMode = RunMode()
-
-
-class StepCyclePayload(CyclePayload):
-    inner_refusal: ClassVar[str | None] = INNER_LAUNCH_REFUSAL
-
-    step_rounds: WireInt = Field(default=1, ge=1, le=100)
 
 
 class VerifyCandidatePayload(CyclePayload):
@@ -120,30 +84,6 @@ class GradeBenchPayload(CyclePayload):
     )
 
 
-class _LifecyclePayload(CampaignPayload):
-    reason: str = Field(default="", max_length=512)
-
-
-class ArchiveCampaignPayload(_LifecyclePayload):
-    pass
-
-
-class UnarchiveCampaignPayload(_LifecyclePayload):
-    pass
-
-
-class DeleteCampaignPayload(_LifecyclePayload):
-    keep_results: bool = False
-
-
-LifecyclePayload = ArchiveCampaignPayload | UnarchiveCampaignPayload | DeleteCampaignPayload
-
-
-class SetCampaignLabelPayload(CampaignPayload):
-    # Required, and `""` is the CLEAR: a default would give "clear" two spellings.
-    label: str = Field(max_length=200)
-
-
 class CompactArchivePayload(CommandPayload):
     """``apply`` defaults to False on every mode, including the destructive one: a preview is what
     the operator consents on, so the write has to be asked for rather than defaulted into."""
@@ -160,20 +100,16 @@ class CompactArchivePayload(CommandPayload):
         return self
 
 
-class _OnDraft(CommandPayload):
-    draft_id: str = Field(min_length=8, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
-
-
-class EditDraftCampaignPayload(_OnDraft):
+class EditDraftCampaignPayload(DraftAddressedPayload):
     # Typed: a dict defers validation past the capability gate. Required: no patch records a no-op.
     patch: EditDraftPatch
 
 
-class ResolveOriginPayload(_OnDraft):
+class ResolveOriginPayload(DraftAddressedPayload):
     message: str = Field(default="", max_length=4000)
 
 
-class StartCheckinPayload(_OnDraft):
+class StartCheckinPayload(DraftAddressedPayload):
     """The draft says what the campaign IS; ``budget`` bounds what THIS launch spends, and no
     draft field holds it. Acked at admission, so it rides the draft's ledger into the root cycle."""
 
@@ -183,18 +119,6 @@ class StartCheckinPayload(_OnDraft):
 
 # Recorded on the draft's own ledger, which its Start moves into the root cycle.
 DraftPayload = EditDraftCampaignPayload | ResolveOriginPayload | StartCheckinPayload
-
-
-class DiscardDraftPayload(_OnDraft):
-    """What its check-in calls cost is banked to the workspace, as a deleted campaign's is."""
-
-
-class CancelQueuedRunPayload(CommandPayload):
-    job_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
-
-
-class SetConcurrentCyclesPayload(CommandPayload):
-    max_concurrent_cycles: WireInt = Field(ge=1)
 
 
 class MintCampaignPayload(CommandPayload):
@@ -249,14 +173,9 @@ class MintCampaignPayload(CommandPayload):
         return self
 
 
-# `compact-archive` stays OUTSIDE: the generic door then refuses it by type.
-WorkspacePayload = (
-    CancelQueuedRunPayload | SetConcurrentCyclesPayload | MintCampaignPayload | DiscardDraftPayload
-)
-
 # Resolved by NAME (`CommandKind.payload_name`): a kind whose model is missing fails right here.
 KIND_OF_PAYLOAD: dict[type[CommandPayload], CommandKind] = {
-    LOOP_TAKEN.get(kind) or globals()[kind.payload_name]: kind for kind in CommandKind
+    PAYLOAD_IN_DOMAIN.get(kind) or globals()[kind.payload_name]: kind for kind in CommandKind
 }
 PAYLOAD_MODEL_FOR_KIND: dict[str, type[CommandPayload]] = {
     kind: model for model, kind in KIND_OF_PAYLOAD.items()
@@ -271,6 +190,6 @@ if _unanswered:
 
 
 class CommandAcceptedBody(StrictModel):
-    """The 202 response shape declared in ``api-openapi.yaml``."""
+    """What a command whose applied form answers nothing returns: the record it appended."""
 
     command_id: str = Field(description="Stable id of the appended `CommandRecord`.")

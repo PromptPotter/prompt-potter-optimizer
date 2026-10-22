@@ -23,7 +23,8 @@ if TYPE_CHECKING:
     from promptpotter.domain.cycle_paths import CycleHop
 
 
-def read_arms_file(path: Path) -> Any:
+def read_payload_file(path: Path) -> Any:
+    """A structured payload field the terminal names by a YAML file."""
     try:
         return read_yaml(path)
     except (OSError, ValueError) as exc:

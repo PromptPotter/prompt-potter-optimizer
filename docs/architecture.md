@@ -626,20 +626,18 @@ it (`application/run_phase_control.py::RunControl`), which is what spends it. On
 `rejected` at dispatch, never accepted and dropped.
 
 Outbound, no projection writes SSE frames at all: `CycleLedgerTail` tails the on-disk ledger
-directly, cross-process. The closed inbound set is declared in
-[`specs/api-openapi.yaml`](specs/api-openapi.yaml), the closed outbound set in
-[`specs/events-asyncapi.yaml`](specs/events-asyncapi.yaml); **adding a kind updates the
-YAML first, in its own PR**. Permanent contract: [`adr/0001-m12-control-plane.md`](adr/0001-m12-control-plane.md).
+directly, cross-process. The closed inbound set is `domain/command_kinds.py::CommandKind`, one
+payload model per kind, the closed outbound set `domain/run_records.py::CycleRecord`;
+`scripts/build_specs.py` generates both wire specs from them, so **adding a kind declares its
+model first**. Permanent contract: [`adr/0001-m12-control-plane.md`](adr/0001-m12-control-plane.md).
 
 **A served GET is not a sixth kind, and this sentence exists so that is never re-litigated.**
 This kind is defined by MUTATION — a `CommandRecord`, an ack, a ledger append. A read that
 mutates nothing adds no ingress and no writer, so it needs no §0 amendment; it is Display's
 half that happens to answer on request rather than by projection. What a read still owes is
-the same declare-first discipline the commands owe: its path and response schema land in
-[`specs/api-openapi.yaml`](specs/api-openapi.yaml) before the handler, and its resolution
-lives in `application/` rather than in the router. That reads have never had a bucket is
-why several shipped undeclared — `specs/api-openapi.yaml` says so at its own head — and the
-recipe closing it is [`developer/adding-a-surface.md`](developer/adding-a-surface.md)
+the same declare-first discipline the commands owe: its response model is declared before the
+handler, so the generated spec carries it, and its resolution lives in `application/` rather
+than in the router. The recipe is [`developer/adding-a-surface.md`](developer/adding-a-surface.md)
 § A served read.
 
 #### Identity

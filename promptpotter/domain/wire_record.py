@@ -344,7 +344,3 @@ def _rest_claims(where: str, claimed: set[str]) -> ValueError:
         f"{where} holds {sorted(claimed)}, which its owner declares as fields: written there, "
         "each would be read back as the field"
     )
-
-
-def record_of(owner: type) -> type:
-    return _RECORDS[owner].typed

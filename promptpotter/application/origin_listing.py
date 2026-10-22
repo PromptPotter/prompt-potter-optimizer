@@ -94,10 +94,7 @@ def prospective_origin_id(stores: Stores, dataset: ResolvedDataset) -> str | Non
 
 
 class DatasetIndexEntry(StrictModel):
-    """One row in the dataset registry — backs the Dashboard ``New campaign`` view.
-
-    Wire shape pinned in ``docs/specs/api-openapi.yaml::DatasetIndexEntry``.
-    """
+    """One row in the dataset registry — backs the Dashboard ``New campaign`` view."""
 
     name: str = Field(description="The definition's path under its tier, `/`-separated.")
     title: str | None = Field(default=None, description="Display title (from `README.md`).")

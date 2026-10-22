@@ -13,10 +13,8 @@ from promptpotter.application.datasets.origin_readiness import (
 )
 
 if TYPE_CHECKING:
-    from promptpotter.application.commands.payloads import (
-        DiscardDraftPayload,
-        EditDraftCampaignPayload,
-    )
+    from promptpotter.application.commands.payloads import EditDraftCampaignPayload
+    from promptpotter.domain.command_kinds import DiscardDraftPayload
     from promptpotter.infrastructure.store.draft_store import DraftClaim
     from promptpotter.infrastructure.store.stores import Stores
 
@@ -61,5 +59,5 @@ def discard_draft(dispatcher: CommandDispatcher, payload: DiscardDraftPayload) -
 async def dispatch_draft_patch(
     stores: Stores, call: CommandCall[EditDraftCampaignPayload]
 ) -> DraftCampaignWire:
-    outcome = await CommandDispatcher(stores).dispatch_draft_command(call)
+    outcome = await CommandDispatcher(stores).dispatch(call)
     return cast(DraftCampaignWire, outcome.result)

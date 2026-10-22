@@ -104,7 +104,7 @@ existing display and self-healing keep working. Backend rationale:
 |----------|-------------|
 | `GET /api/v1/backends` | List registered backends |
 | `GET …/backends/{id}/health` | Backend health |
-| `GET …/campaigns` · `…/campaigns/{id}` | List / detail |
+| `GET …/campaigns` | List |
 | `GET …/health` | Service health |
 | `POST …/commands/{kind}` | Mutations — pause / step / fork a run, and the rest of the closed set `domain/command_kinds.py::CommandKind` (ADR-0001 command highway) |
 

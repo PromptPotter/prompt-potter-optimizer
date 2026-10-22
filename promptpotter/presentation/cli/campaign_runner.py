@@ -15,7 +15,6 @@ if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
 
 from promptpotter.config.settings import settings
-from promptpotter.domain.command_kinds import CommandKind
 from promptpotter.domain.phases import StopOutcome
 from promptpotter.presentation.cli.commands.verbs import VERBS
 from promptpotter.presentation.cli.parsers import build_parser
@@ -44,15 +43,6 @@ def _handler(verb: str) -> Callable[[argparse.Namespace], Coroutine[Any, Any, Co
         importlib.import_module(f"{_COMMANDS_PACKAGE}.{module}"), name
     )
     return handler
-
-
-# TOTAL by construction: the verb is a column of the kind's own row, so none lands browser-only in silence.
-CLI_VERB_FOR_KIND: dict[CommandKind, str | None] = {kind: kind.cli_verb for kind in CommandKind}
-_named_verbs = {v for v in CLI_VERB_FOR_KIND.values() if v is not None}
-if not _named_verbs <= COMMANDS.keys():
-    raise RuntimeError(
-        f"CommandKind names verbs that do not exist: {sorted(_named_verbs - COMMANDS.keys())}"
-    )
 
 
 def main() -> None:

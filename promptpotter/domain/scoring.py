@@ -11,20 +11,15 @@ from typing import (
     Any,
     Literal,
     NamedTuple,
-    Required,
     TypedDict,
     get_args,
-    get_type_hints,
 )
 
 from pydantic import (
-    GetJsonSchemaHandler,
     PlainSerializer,
     PlainValidator,
-    TypeAdapter,
     WithJsonSchema,
 )
-from pydantic.json_schema import JsonSchemaValue
 from pydantic_core import core_schema
 
 from promptpotter.domain.l4.inner_facts import InnerCellFacts
@@ -37,9 +32,7 @@ from promptpotter.domain.wire_record import (
     WireRecord,
     always_as,
     real,
-    record_of,
     text,
-    typed_record,
     whole,
 )
 from promptpotter.shared.errors import (
@@ -404,26 +397,6 @@ assert not (GRADE_KEYS & _CELL.keys), "a grade is a formula's reading, never a f
 SampleStatus = Literal["HIT", "MISS", "ERR", "UNSC"]
 
 
-SHEET_ROW: type = typed_record(
-    "SheetRow",
-    "One row of a :class:`CellSheet` on the wire, as :meth:`GradedCell.wire` writes it.\n\n"
-    "The cell's facts beside its grade — ``unscored``, or ``fitness`` and ``objective``, never\n"
-    "both. ``position`` is the sample's slot in the bank the cycle drew, ``status`` the served\n"
-    "round's mark and ``ground_truth_text`` its label as shown\n"
-    "(``application/cycle_reads.py::served_round``), on every row it serves; a round file\n"
-    "carries none of the three.",
-    {
-        **get_type_hints(record_of(MeasuredCell), include_extras=True),
-        **get_type_hints(Grade),
-        "position": Required[int],
-        "status": Required[SampleStatus],
-        "ground_truth_text": Required[str],
-    },
-    module=__name__,
-    open=False,
-)
-
-
 @dataclass(frozen=True, slots=True)
 class GradedCell:
     facts: MeasuredCell
@@ -557,12 +530,6 @@ class CellSheet:
                 ),
             ),
         )
-
-    @classmethod
-    def __get_pydantic_json_schema__(
-        cls, _schema: object, handler: GetJsonSchemaHandler
-    ) -> JsonSchemaValue:
-        return handler(core_schema.list_schema(TypeAdapter(SHEET_ROW).core_schema))
 
 
 NO_CELLS = CellSheet("")

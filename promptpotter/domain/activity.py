@@ -279,7 +279,7 @@ def _arms_gate(round_num: int | None, drafts: list[DecisionFact]) -> ActivityDec
     return ActivityDecision(
         title=f"{held} holds for your arms",
         lead=f"{held} measures nothing until you answer with "
-        f"`python -m promptpotter submit-arms --file <arms.yaml>`. {drafted}",
+        f"`python -m promptpotter submit-arms --arms <arms.yaml>`. {drafted}",
         facts=drafts,
         reasons=[],
         actions=[],

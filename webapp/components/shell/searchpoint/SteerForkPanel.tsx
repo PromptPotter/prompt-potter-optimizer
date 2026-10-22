@@ -2,8 +2,9 @@
 
 import { useRef, useState } from "react";
 import {
+  cycleAddress,
   forkPreviewRead,
-  postSteerFork,
+  postCommand,
   type RunLimitOverrides,
   type ForkSeed,
 } from "@/lib/api";
@@ -85,7 +86,12 @@ export function SteerForkPanel({
     void cmd.run(
       "steer-fork",
       () =>
-        postSteerFork(path, candidate.round, candidate.arm, { seed: forkSeed }),
+        postCommand("fork-cycle", {
+          ...cycleAddress(path),
+          round: candidate.round,
+          candidate_id: candidate.arm,
+          seed: forkSeed,
+        }),
       onDone,
     );
   };

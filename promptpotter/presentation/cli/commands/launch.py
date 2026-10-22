@@ -7,7 +7,6 @@ import logging
 import signal
 import sys
 import threading
-import uuid
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, get_args
 
@@ -113,9 +112,7 @@ def _terminal_inputs(session: Session) -> Iterator[None]:
 
     async def send(payload: CyclePayload, *, then_cancel: bool) -> None:
         try:
-            await CommandDispatcher(stores).dispatch_cycle_command(
-                CommandCall(payload, uuid.uuid4().hex), expected_version=None
-            )
+            await CommandDispatcher(stores).dispatch(CommandCall(payload))
         except PotterError as exc:
             if not then_cancel:
                 print(f"  {exc}", flush=True)

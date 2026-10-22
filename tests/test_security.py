@@ -32,7 +32,6 @@ from pydantic import SecretStr
 
 from promptpotter.application import account, site_records
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
-from promptpotter.application.commands.payloads import CancelQueuedRunPayload
 from promptpotter.application.datasets.ingest import ingest_draft
 from promptpotter.application.jobs.launcher.admission import (
     paid_pass,
@@ -60,6 +59,7 @@ from promptpotter.config import settings as settings_mod
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.settings import TERMS_VERSION
 from promptpotter.domain.command_kinds import (
+    CancelQueuedRunPayload,
     CommandKind,
     OriginGateDecisionPayload,
     PauseCyclePayload,
@@ -515,7 +515,7 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
     assert owners.user_id == delegates.user_id, "one account: the quota key cannot tell them apart"
 
     async def withdraw(stores: Stores, job_id: str) -> None:
-        await CommandDispatcher(stores, job_registry=registry).dispatch_workspace_command(
+        await CommandDispatcher(stores, job_registry=registry).dispatch(
             CommandCall(CancelQueuedRunPayload(job_id=job_id), f"cancel-{job_id}")
         )
 
@@ -541,9 +541,7 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
     address = {"campaign_id": hop.campaign_id, "cycle_id": hop.cycle_id}
 
     async def press(payload: Any, key: str) -> str:
-        outcome = await dispatcher.dispatch_cycle_command(
-            CommandCall(payload, key), expected_version=None
-        )
+        outcome = await dispatcher.dispatch(CommandCall(payload, key))
         return outcome.accepted.command_id
 
     def acks(command_id: str) -> list[str]:

@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import logging
-from typing import Annotated, Any, cast
+import inspect
+from typing import Annotated
 
-from fastapi import APIRouter, Header, Path, Request
+from fastapi import APIRouter, Header
 from fastapi.routing import APIRoute
-from pydantic import Field, ValidationError
 
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.commands.draft_editing import dispatch_draft_patch
@@ -19,175 +18,108 @@ from promptpotter.application.commands.payloads import (
     CommandAcceptedBody,
     CompactArchivePayload,
     EditDraftCampaignPayload,
-    LifecyclePayload,
     ResolveOriginPayload,
-    SetCampaignLabelPayload,
     StartCheckinPayload,
-    WorkspacePayload,
 )
 from promptpotter.application.datasets.draft_build import DraftCampaignWire
 from promptpotter.application.jobs.launcher.checkin import StartCheckinResponse
 from promptpotter.application.maintenance.archive_maintenance import ArchiveReport
-from promptpotter.domain.command_kinds import (
-    CampaignPayload,
-    CommandKind,
-    CommandPayload,
-    CyclePayload,
-)
-from promptpotter.domain.strict_model import StrictModel
-from promptpotter.presentation.api.deps import JobRegistryDep, StoresDep
-from promptpotter.shared.errors import (
-    BadRequestError,
-    NotFoundError,
-    PayloadInvalidError,
-)
-
-logger = logging.getLogger(__name__)
+from promptpotter.domain.command_kinds import CommandKind, CommandPayload, CyclePayload
+from promptpotter.presentation.api.deps import IdempotencyKeyDep, JobRegistryDep, StoresDep
 
 commands_router = APIRouter(prefix="/commands", tags=["Commands"])
 
 
-class CommandEnvelope(StrictModel):
-    """The inbound envelope every command is posted in."""
-
-    kind: str = Field(min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9-]*$")
-    payload: dict[str, Any] = Field(default_factory=dict)
-
-
-def ensure_idempotency_key(header_value: str | None) -> str:
-    if not header_value or not header_value.strip():
-        raise BadRequestError(
-            "Idempotency-Key header is required on every command.",
-            code="idempotency_key_missing",
-        )
-    return header_value.strip()
-
-
-def _validated_payload(kind: str, raw: dict[str, Any]) -> CommandPayload:
-    try:
-        return PAYLOAD_MODEL_FOR_KIND[kind].model_validate(raw)
-    except ValidationError as exc:
-        raise PayloadInvalidError(f"payload invalid for '{kind}': {exc}") from exc
-
-
-def _require_kind(envelope: CommandEnvelope, expected: CommandKind) -> None:
-    if envelope.kind != expected:
-        raise PayloadInvalidError(f"envelope.kind must be '{expected}', got {envelope.kind!r}.")
-
-
 @commands_router.post(f"/{CommandKind.EDIT_DRAFT_CAMPAIGN}", response_model=DraftCampaignWire)
 async def edit_draft_campaign(
-    stores: StoresDep,
-    envelope: CommandEnvelope,
-    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+    stores: StoresDep, payload: EditDraftCampaignPayload, key: IdempotencyKeyDep
 ) -> DraftCampaignWire:
     """Sparse-patch a `DraftCampaign` and return its full post-mutation shape."""
-    _require_kind(envelope, CommandKind.EDIT_DRAFT_CAMPAIGN)
-    idemp = ensure_idempotency_key(idempotency_key)
-    payload = cast(
-        EditDraftCampaignPayload,
-        _validated_payload(CommandKind.EDIT_DRAFT_CAMPAIGN, envelope.payload),
-    )
-    return await dispatch_draft_patch(stores, CommandCall(payload, idemp))
+    return await dispatch_draft_patch(stores, CommandCall(payload, key))
 
 
 @commands_router.post(f"/{CommandKind.RESOLVE_ORIGIN}", response_model=ResolveOriginResponse)
 async def resolve_origin(
-    stores: StoresDep,
-    envelope: CommandEnvelope,
-    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+    stores: StoresDep, payload: ResolveOriginPayload, key: IdempotencyKeyDep
 ) -> ResolveOriginResponse:
     """Run one origin-resolver turn against a draft, synchronously, and return ``{resolution, draft}``."""
-    _require_kind(envelope, CommandKind.RESOLVE_ORIGIN)
-    payload = cast(
-        ResolveOriginPayload, _validated_payload(CommandKind.RESOLVE_ORIGIN, envelope.payload)
-    )
-    return await dispatch_origin_resolution(
-        stores, CommandCall(payload, ensure_idempotency_key(idempotency_key))
-    )
+    return await dispatch_origin_resolution(stores, CommandCall(payload, key))
 
 
 @commands_router.post(f"/{CommandKind.START_CHECKIN}", response_model=StartCheckinResponse)
 async def start_checkin(
     job_registry: JobRegistryDep,
     stores: StoresDep,
-    envelope: CommandEnvelope,
-    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+    payload: StartCheckinPayload,
+    key: IdempotencyKeyDep,
 ) -> StartCheckinResponse:
     """Mint the draft's campaign and root cycle, close the draft and detach the loop.
 
     An incomplete origin answers 422 and the draft stays open.
     """
-    _require_kind(envelope, CommandKind.START_CHECKIN)
-    idemp = ensure_idempotency_key(idempotency_key)
-    payload = cast(
-        StartCheckinPayload, _validated_payload(CommandKind.START_CHECKIN, envelope.payload)
+    launched = await dispatch_start_checkin(
+        stores, CommandCall(payload, key), job_registry=job_registry
     )
-    launched = await dispatch_start_checkin(stores, payload, idemp, job_registry=job_registry)
     return StartCheckinResponse(job_id=launched.job.job_id, hop=launched.hop)
 
 
-@commands_router.post(f"/{CommandKind.COMPACT_ARCHIVE}")
+@commands_router.post(f"/{CommandKind.COMPACT_ARCHIVE}", response_model=ArchiveReport)
 async def compact_archive(
-    request: Request,
-    stores: StoresDep,
-    envelope: CommandEnvelope,
-    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+    stores: StoresDep, payload: CompactArchivePayload, key: IdempotencyKeyDep
 ) -> ArchiveReport:
     """Compact, restore or purge the measurement archive's cold store; a preview and its apply answer in one shape."""
-    _require_kind(envelope, CommandKind.COMPACT_ARCHIVE)
-    idemp = ensure_idempotency_key(idempotency_key)
-    payload = cast(
-        CompactArchivePayload, _validated_payload(CommandKind.COMPACT_ARCHIVE, envelope.payload)
-    )
-    outcome = await CommandDispatcher(stores).dispatch_compact_archive(CommandCall(payload, idemp))
-    return outcome.result
+    outcome = await CommandDispatcher(stores).dispatch(CommandCall(payload, key))
+    report: ArchiveReport = outcome.result
+    return report
 
 
-@commands_router.post("/{kind}", response_model=CommandAcceptedBody, status_code=202)
-async def post_command(
-    job_registry: JobRegistryDep,
-    stores: StoresDep,
-    envelope: CommandEnvelope,
-    kind: Annotated[str, Path(pattern=r"^[a-z][a-z0-9-]*$", max_length=64)],
-    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
-    expected_version: Annotated[int | None, Header(alias="Expected-Version")] = None,
-) -> CommandAcceptedBody:
-    """The closed-set command surface: every wired kind validates against its declared schema, then dispatches."""
-    idemp = ensure_idempotency_key(idempotency_key)
-    if kind != envelope.kind:
-        raise PayloadInvalidError(
-            f"path kind {kind!r} does not match envelope.kind {envelope.kind!r}"
+ExpectedVersion = Annotated[int | None, Header(alias="Expected-Version")]
+
+
+class _Accepting:
+    """A kind whose applied form answers nothing: its route's body is the kind's payload model."""
+
+    def __init__(self, model: type[CommandPayload]) -> None:
+        keyword = inspect.Parameter.KEYWORD_ONLY
+        params = [
+            inspect.Parameter("job_registry", keyword, annotation=JobRegistryDep),
+            inspect.Parameter("stores", keyword, annotation=StoresDep),
+            inspect.Parameter("payload", keyword, annotation=model),
+            inspect.Parameter("key", keyword, annotation=IdempotencyKeyDep),
+        ]
+        if issubclass(model, CyclePayload):
+            params.append(
+                inspect.Parameter(
+                    "expected_version", keyword, annotation=ExpectedVersion, default=None
+                )
+            )
+        self.__signature__ = inspect.Signature(params, return_annotation=CommandAcceptedBody)
+
+    async def __call__(
+        self,
+        *,
+        job_registry: JobRegistryDep,
+        stores: StoresDep,
+        payload: CommandPayload,
+        key: IdempotencyKeyDep,
+        expected_version: int | None = None,
+    ) -> CommandAcceptedBody:
+        dispatcher = CommandDispatcher(stores, job_registry=job_registry)
+        outcome = await dispatcher.dispatch(
+            CommandCall(payload, key), expected_version=expected_version
         )
-    if kind not in _WIRED_KINDS:
-        raise NotFoundError(
-            f"Command kind {kind!r} not wired. See "
-            f"docs/specs/api-openapi.yaml for the declared set.",
-            code="command_kind_unknown",
+        return outcome.accepted
+
+
+# Each kind is PATHED by its `CommandKind`, so no route names a kind no capability gates and no ledger records.
+_TYPED = {route.path for route in commands_router.routes if isinstance(route, APIRoute)}
+for _kind in CommandKind:
+    if f"/commands/{_kind}" not in _TYPED:
+        commands_router.add_api_route(
+            f"/{_kind}",
+            _Accepting(PAYLOAD_MODEL_FOR_KIND[_kind]),
+            methods=["POST"],
+            name=_kind.name.lower(),
+            response_model=CommandAcceptedBody,
+            status_code=202,
         )
-
-    dispatcher = CommandDispatcher(stores, job_registry=job_registry)
-    # The payload's address base IS its target ledger; `_WIRED_KINDS` turned the typed routes away.
-    match _validated_payload(kind, envelope.payload):
-        case CyclePayload() as payload:
-            outcome = await dispatcher.dispatch_cycle_command(
-                CommandCall(payload, idemp), expected_version=expected_version
-            )
-        case CampaignPayload() as payload:
-            outcome = await dispatcher.dispatch_campaign_command(
-                CommandCall(cast(LifecyclePayload | SetCampaignLabelPayload, payload), idemp)
-            )
-        case payload:
-            outcome = await dispatcher.dispatch_workspace_command(
-                CommandCall(cast(WorkspacePayload, payload), idemp)
-            )
-    return outcome.accepted
-
-
-# A kind answering a domain object, not a 202, keeps its own typed route and stays off the generic.
-# Each is PATHED by its `CommandKind`, so no route names a kind no capability gates and no ledger records.
-_WIRED_KINDS: frozenset[str] = frozenset[str](CommandKind) - {
-    route.path.removeprefix("/commands/")
-    for route in commands_router.routes
-    if isinstance(route, APIRoute)
-}

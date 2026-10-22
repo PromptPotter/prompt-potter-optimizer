@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn
 
@@ -180,8 +179,6 @@ async def _ingest_checkin(args: argparse.Namespace, stores: Stores) -> str:
         )
     except IngestError as exc:
         raise SystemExit(f"ERROR: could not parse {file_path.name}: {exc.message}") from None
-    except ValueError as exc:
-        raise SystemExit(f"ERROR: bad slug — {exc}") from None
     except SlugTakenError as exc:
         raise SystemExit(
             f"ERROR: slug '{exc.slug}' already exists. Try --slug {exc.suggested}."
@@ -198,7 +195,7 @@ async def _hold_checkin(
     if patch is not None:
         await dispatch_draft_patch(
             stores,
-            CommandCall(EditDraftCampaignPayload(draft_id=draft_id, patch=patch), uuid.uuid4().hex),
+            CommandCall(EditDraftCampaignPayload(draft_id=draft_id, patch=patch)),
         )
     draft = owned_draft(stores, draft_id)
 
@@ -207,8 +204,7 @@ async def _hold_checkin(
         _checkin_line("origin resolver", "running AI check-in")
         # One turn: a residual gap surfaces below with --set instructions, not more LLM turns.
         turn = await dispatch_origin_resolution(
-            stores,
-            CommandCall(ResolveOriginPayload(draft_id=draft_id), uuid.uuid4().hex),
+            stores, CommandCall(ResolveOriginPayload(draft_id=draft_id))
         )
         last_turn = turn.resolution.last_resolution
         draft = owned_draft(stores, draft_id)
@@ -220,8 +216,9 @@ async def _hold_checkin(
     _checkin_line("origin", f"complete — check-in '{draft.slug}' ready")
     launched = await dispatch_start_checkin(
         stores,
-        StartCheckinPayload(draft_id=draft_id, diag=args.diag, budget=budget_from_args(args)),
-        uuid.uuid4().hex,
+        CommandCall(
+            StartCheckinPayload(draft_id=draft_id, diag=args.diag, budget=budget_from_args(args))
+        ),
         inline=inline_launch(args),
     )
     held = held_run(launched)
@@ -300,9 +297,7 @@ async def _new(args: argparse.Namespace) -> CommandResult:
 
 async def mint_and_run(stores: Stores, mint: MintCampaignPayload, inline: Inline) -> CommandResult:
     try:
-        outcome = await CommandDispatcher(stores, inline=inline).dispatch_workspace_command(
-            CommandCall(mint, uuid.uuid4().hex)
-        )
+        outcome = await CommandDispatcher(stores, inline=inline).dispatch(CommandCall(mint))
     except BackendUnreachableError as exc:
         return backend_unreachable_result(exc)
     except DatasetAccessError:

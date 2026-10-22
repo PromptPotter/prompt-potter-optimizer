@@ -2,7 +2,7 @@
 
 import { READING_STATE_KINDS } from "@/lib/api/types.generated";
 import { useDashboardAt } from "@/lib/poll";
-import { postGradeBench } from "@/lib/api/commands";
+import { cycleAddress, postCommand } from "@/lib/api/commands";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { encodeCyclePath, type CyclePath } from "@/lib/ids";
 
@@ -21,7 +21,9 @@ export function BenchAction({ path }: { path: CyclePath }) {
         type="button"
         className="chip chip-btn"
         disabled={busy || !status.can_grade}
-        onClick={() => void cmd.run("grade-bench", () => postGradeBench(path))}
+        onClick={() =>
+          void cmd.run("grade-bench", () => postCommand("grade-bench", cycleAddress(path)))
+        }
         title={status.refusal ?? "Grade the origin and the selection on the held-out rows."}
       >
         {busy ? "Grading…" : "Grade bench"}

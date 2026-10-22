@@ -5,6 +5,8 @@ import { test as base, expect, type Page, type APIRequestContext } from "@playwr
 import {
   STOP_REASON_OUTCOMES,
   type CampaignListResponse,
+  type CommandKind,
+  type CommandPayloads,
   type DraftListResponse,
   type ServedRound,
 } from "@/lib/api/types.generated";
@@ -207,14 +209,14 @@ export async function passConsent(page: Page) {
   await expect(gate).toBeHidden();
 }
 
-/** The body is the ENVELOPE `{kind, payload}` (`lib/api/commands.ts`). Never retry a 4xx — a refusal is permanent. */
-export async function command(
+/** The body IS the kind's payload model (`lib/api/commands.ts`). Never retry a 4xx — a refusal is permanent. */
+export async function command<K extends CommandKind>(
   request: APIRequestContext,
-  kind: string,
-  payload: Record<string, unknown>,
+  kind: K,
+  payload: CommandPayloads[K],
 ): Promise<{ status: number; body: string }> {
   const res = await request.post(`${API}/commands/${kind}`, {
-    data: { kind, payload },
+    data: payload,
     headers: {
       "Idempotency-Key": `e2e-${kind}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     },

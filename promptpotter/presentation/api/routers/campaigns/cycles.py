@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import Query, Request, Response
 
-from promptpotter.application.cycle_reads import round_audit, served_round, view_cycle
+from promptpotter.application.cycle_reads import RoundView, round_audit, served_round, view_cycle
 from promptpotter.application.mask.record import parse_lens, parse_sample_ids
 from promptpotter.application.mask.tree_lens import CourseNode, lensed_tree
 from promptpotter.application.served_dashboard import (
@@ -10,10 +10,9 @@ from promptpotter.application.served_dashboard import (
     WarmingDashboard,
     served_dashboard,
 )
-from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.results import RoundResult
+from promptpotter.domain.cycle_paths import CycleHop, decode_cycle_path
 from promptpotter.domain.round_audit import RoundAudit
-from promptpotter.presentation.api.deps import StoresDep, decode_descend
+from promptpotter.presentation.api.deps import StoresDep
 from promptpotter.presentation.api.routers.campaigns._conditional import (
     client_has_etag,
     client_seen_at_or_after,
@@ -44,7 +43,7 @@ def get_cycle_dashboard(
     ``at`` is an offset in the LEAF cycle's own ledger, the address a ray item carries: the state as of that line.
     """
     cycle = view_cycle(
-        stores, (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), *decode_descend(descend))
+        stores, (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), *decode_cycle_path(descend))
     )
     headers: dict[str, str] = {}
     mtime_epoch = cycle.dashboard_changed_at
@@ -57,7 +56,7 @@ def get_cycle_dashboard(
 
 @campaigns_router.get(
     "/campaigns/{campaign_id}/cycles/{cycle_id}/rounds/{round_num}",
-    response_model=RoundResult,
+    response_model=RoundView,
 )
 def get_cycle_round(
     stores: StoresDep,
@@ -66,14 +65,14 @@ def get_cycle_round(
     round_num: int,
     descend: str | None = Query(None),
     at: int | None = Query(None, ge=0),
-) -> RoundResult:
-    """One closed round, whole: its last close and the rows it names, each carrying its mark as ``status``.
+) -> RoundView:
+    """One closed round: its last close's arms and verdict, and the rows it names, each carrying its mark as ``status``.
 
     A fork answers for the rounds it inherited; a round that does not stand closed answers 404.
     ``at`` is the dashboard route's: the round as it stood at that line of the cycle's own ledger.
     """
     cycle = view_cycle(
-        stores, (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), *decode_descend(descend))
+        stores, (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), *decode_cycle_path(descend))
     )
     closed = served_round(cycle.stores, cycle.hop, round_num, moment=cycle.moment(at))
     if closed is None:
@@ -99,7 +98,7 @@ def get_cycle_round_audit(
     A fork answers for the rounds it inherited; ``null`` where no twin is on disk.
     """
     cycle = view_cycle(
-        stores, (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), *decode_descend(descend))
+        stores, (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), *decode_cycle_path(descend))
     )
     return round_audit(cycle, round_num)
 
@@ -125,7 +124,7 @@ def get_lineage_tree(
     ``lens`` is ``score:<formula>`` (rows re-graded under another ``per_cell`` composite), ``dials:<term=weight,…>`` (the same as weights) or ``abort:<variant>`` (``<gate>_off`` or ``all_off``).
     ``samples`` is a comma-separated sample-id mask; with neither, the tree is the raw read.
     """
-    path = (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), *decode_descend(descend))
+    path = (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), *decode_cycle_path(descend))
     root = view_cycle(stores, path)
     mtime_ns = root.tree_changed_ns
     etag = weak_etag(mtime_ns, lens, samples, at, at_cycle)
@@ -138,7 +137,7 @@ def get_lineage_tree(
         sample_ids = parse_sample_ids(samples)
     except ValueError as exc:
         raise BadRequestError(str(exc)) from exc
-    replayed = view_cycle(stores, decode_descend(at_cycle)) if at_cycle else root
+    replayed = view_cycle(stores, decode_cycle_path(at_cycle)) if at_cycle else root
     return model_json(
         lensed_tree(stores, path, selected, sample_ids, moment=replayed.moment(at)),
         headers=headers,

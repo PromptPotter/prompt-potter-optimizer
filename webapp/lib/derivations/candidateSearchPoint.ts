@@ -2,7 +2,7 @@
 
 import type { NodePrompt } from "@/lib/api/types";
 import { liveCandidate, type DashboardSnapshot } from "@/lib/poll";
-import type { RoundResult } from "@/lib/types";
+import type { RoundView } from "@/lib/types";
 
 export interface CandidateSearchPoint {
   origin_prompts: Record<string, NodePrompt>;
@@ -36,7 +36,7 @@ export interface ArmSearchpoint {
 }
 
 // A proposal has resolved no config yet; every later state carries it.
-export function armSearchpoint(doc: RoundResult, key: string): ArmSearchpoint | null {
+export function armSearchpoint(doc: RoundView, key: string): ArmSearchpoint | null {
   const arm = doc.arms[key];
   if (!arm) return null;
   return {
@@ -46,7 +46,7 @@ export function armSearchpoint(doc: RoundResult, key: string): ArmSearchpoint | 
 }
 
 export function candidateSearchPoint(
-  doc: RoundResult | null,
+  doc: RoundView | null,
   key: string,
 ): CandidateSearchPoint | null {
   if (!doc || !key) return null;

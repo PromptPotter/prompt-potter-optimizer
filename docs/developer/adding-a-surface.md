@@ -26,7 +26,7 @@ tests. Add new ones the same way — never as a `test_structure` scan.
 | An optimizer node | [§6](#6-an-optimizer-node) | `validate_template()` at prompt load |
 | A CLI verb | [§7](#7-a-cli-verb) | `gate.py --only handler-tables` over `commands/verbs.py::VERBS` |
 | A control-plane command kind | [§8](#8-a-control-plane-command-kind) | None to satisfy: cap, handler **and the CLI verb** are columns of the kind's one row, its payload model the class named for it |
-| A served READ (a GET) | [§9](#9-a-served-read) | `gate.py --only openapi` / `--only ts-types`, but **only once the route carries a `response_model`** — a read without one is invisible to both |
+| A served READ (a GET) | [§9](#9-a-served-read) | `gate.py --only specs` / `--only ts-types`, but **only once the route carries a `response_model`** — a read without one is invisible to both |
 | A measurement field | [developer README §4](README.md#4-cross-run-memory) | **Arm-time where a connector declares the key** (`Connector.required_observation_keys`), otherwise nothing — it is dropped at `sample_measurement.py::measure_sample` in silence. Declare it on `domain/scoring.py::QueryMeasurement` / `PipelineData`; a `pipeline_data` key also needs `_INFRA_KEYS` or a dataset `observation_mapping`, plus the compaction asserts beside those types |
 
 ---
@@ -300,10 +300,10 @@ A new `python -m promptpotter <verb>`. The CLI is a **thin shell**: parse, call 
 
 One module under `presentation/cli/commands/` and one `Verb` in `commands/verbs.py::VERBS` — its
 name, help, arguments and handler together, the handler NAMED (`module:function`) so `--help`
-imports no verb. The parser and the `COMMANDS` dispatch are both derived from that roster. Prefer a module over a
-subpackage: `lifecycle.py` holds the thin `CommandDispatcher` shells in one file, because a
-directory per verb bought a reader a hop to learn there was nothing to choose. A shell that
-needs an import the others do not is its own module (`bench.py`), so the rest do not pay for it.
+imports no verb. The parser and the `COMMANDS` dispatch are both derived from that roster. **A
+verb answering a `/commands/{kind}` is not written**: `VERBS` derives it from the kind's payload
+model, one argument per field, and `command.py::cmd_command` dispatches it. A shell the
+derivation cannot express is its own module (`bench.py`).
 
 **Two decisions the wiring does not make for you.** Honor the verb's class — **write**
 (`new` / `resume`, which mint or extend a cycle), **lifecycle** (`archive` / `delete` /
@@ -320,7 +320,7 @@ rebuilds a derived index from the cell files and deletes nothing, so it owes nei
 pointer; a read verb prints the application reading its REST peer serves. **An L4 inner run is
 addressed on the reads, never on a run-control verb** (`cycles --inside`, an `evidence` / `verify`
 subject's `;in=`): every other cycle-scoped kind declares an `inner_refusal`
-(`application/commands/payloads.py`), so its verb takes no such flag. Raw-file ingest is
+(`domain/command_kinds.py`), so its verb takes no such flag. Raw-file ingest is
 `new <file.csv>`, not an `ingest` verb.
 
 **Guard:** `gate.py --only handler-tables` resolves every named handler, and `--only help-imports`
@@ -338,10 +338,10 @@ fold reads which kinds a running loop takes.
 
 | The row's column | What it is | What refuses a wrong one |
 |---|---|---|
-| the kind | the wire name; its payload model is the class NAMED for it (`CommandKind.payload_name`), in `application/commands/payloads.py` — or beside the row, under `LoopPayload`, where only a running loop takes it | `payloads.py` fails at import on a kind with no model |
+| the kind | the wire name; its payload model is the class NAMED for it (`CommandKind.payload_name`), beside the row — or in `application/commands/payloads.py` where it holds an application type | `payloads.py` fails at import on a kind with no model |
 | `handler` | `module:handler`, in the `application/commands/` module named for what the kind does; the dispatcher imports it when the kind is dispatched, never at its own import | `gate.py --only handler-tables` |
 | `capability` | the rung the dispatcher's `require_capability` asks | the row cannot be written without one |
-| **`cli_verb`** | the terminal verb that reaches it | `cli/campaign_runner.py` fails at import on a verb that is no `COMMANDS` key |
+| **`cli_verb`** | the terminal verb that reaches it, derived from the payload model unless `verbs.py` writes it | the row cannot be written without one |
 
 The payload's address base is its target ledger (`CyclePayload`, `CampaignPayload`, a check-in's,
 or a bare `CommandPayload` for the workspace), and `routers/commands.py` routes on it.
@@ -351,10 +351,9 @@ a CLI verb or `None` — and `None` is a **declaration**, not an escape hatch. E
 (`set-sample-lookahead`, whose absence from the terminal is the contract; root `CLAUDE.md`
 § Conventions). Writing a second one is a design decision with a reason, not a wiring shortcut.
 
-Then declare it on the wire: `docs/specs/api-openapi.yaml`, *before* the handler lands
-(root `CLAUDE.md` § Pre-flight gate). The router needs nothing — `_WIRED_KINDS` is
-every kind minus the typed routes, so a new kind is wired by default and staying
-*unwired* is what has to be written down.
+Nothing else is written: `routers/commands.py` routes every kind on its payload model,
+`scripts/build_specs.py` generates its spec entry and `scripts/build_ts_types.py` its
+`CommandPayloads` entry, which `postCommand` types its body on.
 
 ---
 
@@ -369,9 +368,9 @@ machine-checked at all; skip them and every gate stays green over a surface nobo
 | Step | Do | Why it is not optional |
 |---|---|---|
 | 1 | **Name the scope the read is a fact ABOUT**, and address it by that entity's id | A read keyed on the wrong entity is not a bug you find later — it answers *plausibly and wrongly* |
-| 2 | **Declare path + response schema in `docs/specs/api-openapi.yaml`, before the handler** | Root `CLAUDE.md` § Pre-flight gate. That file has **no enforcer** for reads, so this one is a review act — the only step on the page nothing can catch |
+| 2 | **Declare the response model before the handler** | Root `CLAUDE.md` § Pre-flight gate. The generated spec is built from it, and a route without one is undeclared with every gate green — the only step on the page nothing can catch |
 | 3 | **Resolve in `application/`, never in the router** | ADR-0006 (`cli/` + `embedded_run.py` must reach it) and `presentation/CLAUDE.md` § Out-of-bounds |
-| 4 | **Give the route a `response_model` and add it to `scripts/build_ts_types.py::SERVED_ROOTS`** | Now `--only openapi` and `--only ts-types` cover it, and `webapp/lib/CLAUDE.md` § A wire shape is GENERATED keeps its hand-write escape closed |
+| 4 | **Give the route a `response_model` and add it to `scripts/build_ts_types.py::SERVED_ROOTS`** | Now `--only specs` and `--only ts-types` cover it, and `webapp/lib/CLAUDE.md` § A wire shape is GENERATED keeps its hand-write escape closed |
 | 5 | **Serve provenance for anything the client could otherwise infer** | A closed set belongs on the server (`webapp/lib/CLAUDE.md`). Every value the browser has to *diff* to explain becomes a client twin that drifts |
 | 6 | **Add the row to `webapp/lib/CLAUDE.md` § Display-data sources** | A data class with no row is a data class with no owner, and the gap fills itself with stores |
 | 7 | **Run it and look at the panel** | §3's rule, and it binds hardest here: a served field that is declared, typed and never *written* renders as nothing, and no check that could exist would see it |

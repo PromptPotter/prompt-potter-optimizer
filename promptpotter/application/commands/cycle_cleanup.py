@@ -10,11 +10,8 @@ from promptpotter.infrastructure.store.session_pointer import cleanup_stub_fork_
 
 if TYPE_CHECKING:
     from promptpotter.application.commands.dispatcher import CommandDispatcher
-    from promptpotter.application.commands.payloads import (
-        CleanupEmptyCyclesPayload,
-        DeleteCyclePayload,
-    )
     from promptpotter.domain.campaign import Campaign
+    from promptpotter.domain.command_kinds import CleanupEmptyCyclesPayload, DeleteCyclePayload
 
 
 def delete_cycle(

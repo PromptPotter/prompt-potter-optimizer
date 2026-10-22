@@ -213,7 +213,7 @@ Each is the operator's; the recommendation is not a decision.
 4. **DECIDED 2026-10-16 — the `Decision` cell kind is deleted** with the bank; a seat is the one cell
    kind.
 5. **DECIDED 2026-10-16, as recommended — an operator twin for the escalation's way in:** a `survey-next-round`
-   command kind with a CLI verb, declared in [`api-openapi.yaml`](api-openapi.yaml) first, writing the
+   command kind with a CLI verb, its payload model declared first, writing the
    same pending survey the layer writes, so the operator and L2/L3 share one channel
    (`<entry-point-parity>`).
 6. **DECIDED 2026-10-16, as recommended — signal as a quantity that moves with the stage of the run.** The operator's framing: each

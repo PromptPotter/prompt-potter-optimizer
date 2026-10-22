@@ -1,6 +1,6 @@
 import { liveCandidate, liveCandidates, type DashboardSnapshot } from "@/lib/poll";
 import type { ArmName, ValidationFailure } from "@/lib/api/types";
-import type { ArmRow, RoundResult, SampleRow } from "@/lib/types";
+import type { ArmRow, RoundView, SampleRow } from "@/lib/types";
 
 function liveSamplesFor(dash: DashboardSnapshot | null, arm: ArmName): SampleRow[] {
   const out: SampleRow[] = [];
@@ -26,7 +26,7 @@ function liveSamplesFor(dash: DashboardSnapshot | null, arm: ArmName): SampleRow
 
 // Served graded (`cycle_reads.py::served_round`): "UNSC" is not a MISS, and nothing here re-decides it.
 export function historicalSamplesFor(
-  roundDoc: RoundResult | null,
+  roundDoc: RoundView | null,
   round: number,
   candidate_id: string,
 ): SampleRow[] {
@@ -49,7 +49,7 @@ export function historicalSamplesFor(
 export function samplesForRow(
   row: ArmRow,
   dash: DashboardSnapshot | null,
-  doc: RoundResult | null,
+  doc: RoundView | null,
 ): SampleRow[] {
   const arm = row.reading.arm;
   return row.source === "inflight"
@@ -63,7 +63,7 @@ export interface CandidateVerdict {
   failures: ValidationFailure[];
 }
 
-export function candidateVerdicts(doc: RoundResult | null): Map<string, CandidateVerdict> {
+export function candidateVerdicts(doc: RoundView | null): Map<string, CandidateVerdict> {
   const out = new Map<string, CandidateVerdict>();
   if (!doc) return out;
   for (const { reading } of doc.scoreboard) {

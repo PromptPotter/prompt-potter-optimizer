@@ -117,8 +117,8 @@ this section holds only what is still to build.
   where one of them draws it.
 - **A write during a run is a record, taken at a round boundary.** A node's own write is its
   decision record. A write from outside the loop is a Control-remote command — owned by
-  [`../architecture.md`](../architecture.md) § Control-remote; declared in
-  [`api-openapi.yaml`](api-openapi.yaml) before its handler. Editing `prompt_variants.json` or a
+  [`../architecture.md`](../architecture.md) § Control-remote; its payload model is declared
+  before its handler. Editing `prompt_variants.json` or a
   manifest is not a write to a running campaign: it is a treatment change for the next mint.
 
 ## Knobs and the served shape

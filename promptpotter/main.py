@@ -130,7 +130,7 @@ def _bank_refusal(request: Request, subject: str, status: int) -> None:
         record_refusal(build_stores_from_identity(identity), subject=subject)
 
 
-# The ONE flat envelope (`api-openapi.yaml::ErrorEnvelope`); no route raises HTTPException.
+# The ONE flat envelope; no route raises HTTPException.
 def _error_response(
     request: Request,
     *,

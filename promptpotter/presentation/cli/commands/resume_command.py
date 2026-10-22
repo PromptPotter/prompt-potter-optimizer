@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import uuid
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
@@ -79,8 +78,8 @@ async def _dispatch_held(
     args: argparse.Namespace, ctx: SessionCtx, payload: StartRunPayload | ForkCyclePayload
 ) -> HeldRun:
     """*ctx* follows the cycle the command answers (a fork, a diag sibling) and stays put when the hold is refused."""
-    outcome = await CommandDispatcher(ctx.store, inline=inline_launch(args)).dispatch_cycle_command(
-        CommandCall(payload, uuid.uuid4().hex), expected_version=None
+    outcome = await CommandDispatcher(ctx.store, inline=inline_launch(args)).dispatch(
+        CommandCall(payload)
     )
     held = held_run(outcome.result)
     ctx.cycle_id = held.session.hop.cycle_id

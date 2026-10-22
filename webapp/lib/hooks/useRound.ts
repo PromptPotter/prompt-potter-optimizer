@@ -5,13 +5,13 @@ import { roundRead } from "../api";
 import { groupByRound, roundCandidates, samplesForRow } from "../derivations";
 import type { CyclePath } from "../ids";
 import { roundOf, useDashboardAt, type DashboardSnapshot } from "../poll";
-import type { ArmRow, RoundResult, SampleRow } from "../types";
+import type { ArmRow, RoundView, SampleRow } from "../types";
 import { useMomentAt } from "../workspace";
 import { readyData, useRead, type ReadFailure } from "./useRead";
 
 export interface RoundState {
   unfiled: boolean;
-  doc: RoundResult | null;
+  doc: RoundView | null;
   loading: boolean;
   failure: ReadFailure | null;
   rows: ArmRow[];

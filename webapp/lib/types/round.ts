@@ -1,7 +1,7 @@
 import type { ArmRow } from "./candidate";
 
 export type {
-  RoundResult,
+  RoundView,
   ScoreboardRow,
   ServedRound,
 } from "@/lib/api/types";

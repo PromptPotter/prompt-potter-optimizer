@@ -35,12 +35,11 @@ Filed at the operator's ask, ahead of everything below: each entry is a shape th
 from being SEEN, so leaving it blinds the next plan the same way (`<next-change>`). Solve as soon
 as possible. **Rides with:** the shrink arc's stage named in each entry, or any pass in that file.
 
-- **Most doc invariants are still prose no gate checks, and five that carry a probe are false.**
+- **Most doc invariants are still prose no gate checks, and three that carry a probe are false.**
   `gate.py --only doc-claims` resolves every cited `file::symbol` and runs every probe; each false
   one is filed in `scripts/gate.py::_KNOWN_FALSE` under its phrase here:
   *dashboard.json served as the head state* · *the
-  runner writes Session* · *the sidebar ignores the successor pointer* · *a second table in
-  RoundFileView* · *no schema-first gate*. Action: each goes true and its sentence states the
+  runner writes Session* · *no schema-first gate*. Action: each goes true and its sentence states the
   invariant again; every other one-X / no-second-Y / nothing-reads-Z claim gains a probe or is
   deleted. **Re-test:** `gate.py --only doc-claims`.
 - **Three "the one reader" mechanisms, each owned by a different layer file** —
@@ -50,10 +49,9 @@ as possible. **Rides with:** the shrink arc's stage named in each entry, or any 
   `promptpotter/CLAUDE.md`; every reader a `LedgerFold`, projections checkouts of folds;
   `CampaignStore.ledger(hop)` the one ledger-path derivation. **Re-test:** `rg -c
   "CycleLayout\(stores.campaigns.cycle_dir" promptpotter` → 0; computed `p_record` ≤ 4.
-- **Hand mirrors blessed as contracts** — `docs/specs/api-openapi.yaml`, `events-asyncapi.yaml`,
-  `scripts/build_ts_types.py::SERVED_ROOTS`, `presentation/cli/commands/verbs.py::VERBS`,
-  `webapp/lib/api/commands.ts`. Action: generated or deleted (operator decided the yaml deletion
-  2026-10-22). **Re-test:** one new `CommandKind` row touches ≤ 3 files.
+- **`scripts/build_ts_types.py::SERVED_ROOTS` is a hand roster of the read routes' response
+  models.** Action: derived from the routes, as `CommandResponses` already is. **Re-test:** a new
+  served read touches no script.
 - **`application/bench/node_context.py::NodeContext` grows a method per member need** (52 → 88
   public in one arc). Action: declared typed reads refused at load, ~11 methods left, a member base
   in `optimizers/nodes.py`. **Re-test:** `p_member` ≤ 12.
@@ -198,7 +196,7 @@ found, sized and deliberately not taken; none is the root of a patch that shippe
 
 **The browser still derives**
 
-Each needs a served field declared in `api-openapi.yaml` first, then the browser code deleted.
+Each needs a served field declared on its response model first, then the browser code deleted.
 **Rides with:** any change to the served model named, or to the component. **Re-test:** the
 `file::symbol` still holding the arithmetic.
 

@@ -4,8 +4,8 @@ from fastapi import Query, Request, Response
 
 from promptpotter.application.cycle_reads import RayResponse, open_family_ray
 from promptpotter.domain.activity import DEFAULT_RAY_LIMIT, MAX_RAY_LIMIT
-from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.presentation.api.deps import StoresDep, decode_descend
+from promptpotter.domain.cycle_paths import CycleHop, decode_cycle_path
+from promptpotter.presentation.api.deps import StoresDep
 from promptpotter.presentation.api.routers.campaigns._conditional import (
     client_has_etag,
     model_json,
@@ -33,7 +33,7 @@ def get_family_ray(
     Windowed newest-first, delivered oldest-first; ``before`` is the opaque ``cursor_prev`` of a prior response (absent = the head window, malformed = 400, never a 304).
     Consecutive windows page back without overlap or hole; revalidate any window with ``If-None-Match``.
     """
-    path = (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), *decode_descend(descend))
+    path = (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), *decode_cycle_path(descend))
     ray = open_family_ray(stores, path, limit=limit, before=before)
     etag = weak_etag(*ray.validator)
     headers = {"ETag": etag}

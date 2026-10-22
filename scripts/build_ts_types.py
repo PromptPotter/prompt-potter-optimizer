@@ -9,6 +9,7 @@ import types
 import typing
 from collections.abc import Mapping
 
+from fastapi.routing import APIRoute
 from processes import REPO
 from pydantic import BaseModel
 from pydantic.fields import ComputedFieldInfo, FieldInfo
@@ -16,22 +17,16 @@ from pydantic.fields import ComputedFieldInfo, FieldInfo
 sys.path.insert(0, str(REPO))
 
 from promptpotter.application.campaign_listing import CampaignListResponse
-from promptpotter.application.commands.origin_resolving import ResolveOriginResponse
-from promptpotter.application.commands.payloads import (
-    CommandAcceptedBody,
-    StartCheckinPayload,
-    StartRunPayload,
-)
+from promptpotter.application.commands.payloads import PAYLOAD_MODEL_FOR_KIND
 from promptpotter.application.config_map import ConfigMapResponse
 from promptpotter.application.cycle_files import FileContentResponse, FilesResponse
 from promptpotter.application.cycle_listing import CyclesResponse
+from promptpotter.application.cycle_reads import RoundView
 from promptpotter.application.datasets.draft_build import DraftListResponse
 from promptpotter.application.evidence.read import Evidence
 from promptpotter.application.jobs.account_activity import ActivityResponse
-from promptpotter.application.jobs.launcher.checkin import StartCheckinResponse
 from promptpotter.application.jobs.machine_status import MachineStatusResponse
 from promptpotter.application.jobs.quota import QuotaStatus
-from promptpotter.application.maintenance.archive_maintenance import ArchiveReport
 from promptpotter.application.maintenance.storage_report import (
     CampaignStorageResponse,
     DatasetStorageResponse,
@@ -40,15 +35,15 @@ from promptpotter.application.maintenance.storage_report import (
 from promptpotter.application.pipeline_resolve import (
     CampaignPipelineResponse,
     DatasetPipelineResponse,
+    ForkPreviewResponse,
     OptimizerKnobsResponse,
     OptimizerPipelineResponse,
     OptimizerRoster,
 )
 from promptpotter.application.served_dashboard import ServedDashboard, WarmingDashboard
 from promptpotter.domain.cells import Cell, CellsResponse
-from promptpotter.domain.command_kinds import CommandKind, OriginGateDecisionPayload
+from promptpotter.domain.command_kinds import CommandKind
 from promptpotter.domain.projection_envelope import ProjectionEnvelope
-from promptpotter.domain.results import RoundResult
 from promptpotter.domain.round_audit import RoundAudit
 from promptpotter.domain.run_records import CycleSeed
 from promptpotter.infrastructure.store.family_ray_queries import RayResponse
@@ -60,18 +55,16 @@ from promptpotter.presentation.api.routers.backends import (
     BackendHealthResponse,
     BackendResponse,
 )
-from promptpotter.presentation.api.routers.campaigns.manifests import (
-    DraftReopenResponse,
-    ForkPreviewResponse,
-)
+from promptpotter.presentation.api.routers.campaigns.manifests import DraftReopenResponse
+from promptpotter.presentation.api.routers.commands import commands_router
 from promptpotter.presentation.api.routers.datasets.index import DatasetIndexResponse
 from promptpotter.presentation.api.routers.origins import OriginListResponse
 
-# Every model, record and dataclass these reach is exported with them.
+# Every model, record and dataclass these reach is exported with them; the command bodies and
+# answers ride `_emit_command_contract`.
 SERVED_ROOTS: tuple[type, ...] = (
     ActiveSessionResponse,
     ActivityResponse,
-    ArchiveReport,
     BackendHealthResponse,
     BackendResponse,
     CampaignListResponse,
@@ -79,7 +72,6 @@ SERVED_ROOTS: tuple[type, ...] = (
     CampaignStorageResponse,
     Cell,
     CellsResponse,
-    CommandAcceptedBody,
     ConfigMapResponse,
     CourseNode,
     CycleSeed,
@@ -99,18 +91,13 @@ SERVED_ROOTS: tuple[type, ...] = (
     OptimizerKnobsResponse,
     OptimizerPipelineResponse,
     OptimizerRoster,
-    OriginGateDecisionPayload,
     OriginListResponse,
     ProjectionEnvelope,
     QuotaStatus,
     RayResponse,
-    ResolveOriginResponse,
     RoundAudit,
-    RoundResult,
+    RoundView,
     ServedDashboard,
-    StartCheckinPayload,
-    StartCheckinResponse,
-    StartRunPayload,
     UserSettings,
     WarmingDashboard,
     WorkspaceStorageResponse,
@@ -246,10 +233,38 @@ def _emit_lifecycle_filter() -> str:
     return f"// {note}\nexport type LifecycleFilter = {members};"
 
 
-def _emit_command_kinds() -> str:
-    members = " | ".join(repr(k.value) for k in sorted(CommandKind))
-    note = "Every kind `POST /commands/{kind}` dispatches (domain/command_kinds.py)."
-    return f"// {note}\nexport type CommandKind = {members};"
+def _emit_command_contract() -> str:
+    """Exports what it names, so it runs before the exported blocks are collected."""
+    # FastAPI sets `response_model` on the instance outside `APIRoute`'s declared attributes.
+    answers = {
+        route.path.removeprefix("/commands/"): vars(route)["response_model"]
+        for route in commands_router.routes
+        if isinstance(route, APIRoute)
+    }
+    kinds = sorted(CommandKind)
+    sent, answered = [], []
+    for kind in kinds:
+        model = PAYLOAD_MODEL_FOR_KIND[kind]
+        required = [name for name, info in model.model_fields.items() if info.is_required()]
+        keys = " | ".join(json.dumps(name) for name in required) or "never"
+        sent.append(f"  {json.dumps(kind.value)}: CommandSent<{_export(model)}, {keys}>;")
+        answered.append(f"  {json.dumps(kind.value)}: {_emit_type(answers[kind.value])};")
+    members = " | ".join(json.dumps(k.value) for k in kinds)
+    return (
+        "// Every kind `POST /commands/{kind}` dispatches (domain/command_kinds.py).\n"
+        f"export type CommandKind = {members};\n\n"
+        "type DeepPartial<T> = T extends object ? { [P in keyof T]?: DeepPartial<T[P]> } : T;\n"
+        "// A body as sent: its required keys, every other one omittable at any depth.\n"
+        "export type CommandSent<T, K extends keyof T> = { [P in K]: DeepPartial<T[P]> } & {\n"
+        "  [P in Exclude<keyof T, K>]?: DeepPartial<T[P]>;\n"
+        "};\n\n"
+        "// Each kind's body IS its payload model "
+        "(application/commands/payloads.py::PAYLOAD_MODEL_FOR_KIND).\n"
+        "export interface CommandPayloads {\n" + "\n".join(sent) + "\n}\n\n"
+        "// What each kind answers: its route's `response_model` "
+        "(presentation/api/routers/commands.py).\n"
+        "export interface CommandResponses {\n" + "\n".join(answered) + "\n}"
+    )
 
 
 def _emit_stop_reason_tables() -> str:
@@ -691,6 +706,7 @@ def main() -> int:
 
     for root in SERVED_ROOTS:
         _export(root)
+    command_contract = _emit_command_contract()
     # Two types of one name would MERGE into one TypeScript interface, silently.
     if clashes := len(_EXPORTED) - len({owner.__name__ for owner in _EXPORTED}):
         raise SystemExit(f"{clashes} exported type name(s) are shared by two types")
@@ -712,7 +728,7 @@ def main() -> int:
         )
     )
     blocks.append(_emit_lifecycle_filter())
-    blocks.append(_emit_command_kinds())
+    blocks.append(command_contract)
     blocks.append(_emit_stop_reason_tables())
     blocks.append(_emit_run_phase_tables())
     blocks.append(_emit_reading_state_tables())

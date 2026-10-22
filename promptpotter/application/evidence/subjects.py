@@ -145,7 +145,7 @@ class SubjectMask(StrictModel):
 class ScenarioReading(StrictModel):
     """What the mask did to this branch: how far it agrees with the record, and the round it stops.
 
-    The chain ENDS where the two readings part (`mask/scenario.py`), so the pair of winners below is
+    The chain ENDS where the two readings part (`mask/divergence.py`), so the pair of winners below is
     one round's disagreement — both read at ``first_divergent_round``, or at the branch's last round
     where there is none. Reading a mid-chain counterfactual against the branch's final crown instead
     would compare two different rounds and report the gap between them as a change.

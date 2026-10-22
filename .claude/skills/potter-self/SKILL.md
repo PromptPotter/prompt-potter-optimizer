@@ -245,7 +245,7 @@ Write the edit as a unified diff against `resolved_prompts["l1_generate/1"]`. St
 
 **Authored mode is self-optimization with `optimization.arm_gate: author`: every round holds, no generator node runs, and the arms it measures are the ones you or the operator submit.** However the operator words it — "you are the proposer", "you write the candidates", "self-potter, hand-authored" — this is the mode, and its name is the knob's value. Its sibling is **review mode** (`arm_gate: review`): the generator drafts, the round holds, and you keep drafts by index, add arms, or both. Scoring, critique and both escalation layers run unchanged in either.
 
-Launch with `--set arm_gate=author`, read the hold in the readout, and answer it with `submit-arms --file arms.yaml`. An arm is an edit of the round's parent — `pipeline_overlay: {l1_critique: {instruction: …}}` — so one arm per hypothesis, and a combined arm only beside its parts.
+Launch with `--set arm_gate=author`, read the hold in the readout, and answer it with `submit-arms --arms arms.yaml`. An arm is an edit of the round's parent — `pipeline_overlay: {l1_critique: {instruction: …}}` — so one arm per hypothesis, and a combined arm only beside its parts.
 
 **Three checks before an authored arm earns a cell, in this order — each has failed a hand-written arm:**
 

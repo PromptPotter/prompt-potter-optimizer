@@ -134,7 +134,7 @@ def build_parser(verbs: Iterable[Verb]) -> argparse.ArgumentParser:
     _declare(parser, GLOBAL_ARGS)
     sub = parser.add_subparsers(dest="command", required=False)
     for verb in verbs:
-        _declare(sub.add_parser(verb.name, help=verb.help), verb.args)
+        _declare(sub.add_parser(verb.name, help=verb.help, description=verb.help), verb.args)
     return parser
 
 

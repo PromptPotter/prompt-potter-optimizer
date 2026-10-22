@@ -592,9 +592,8 @@ async def run_controlled(
     stores = build_stores(default_identity(), projects_root=DEFAULT_PROJECTS_ROOT)
     cycle, cid = arms[arm_names[0]]
     try:
-        await CommandDispatcher(stores).dispatch_cycle_command(
-            CommandCall(SkipSearchpointPayload(campaign_id=cid, cycle_id=cycle.name), "skip-arm"),
-            expected_version=None,
+        await CommandDispatcher(stores).dispatch(
+            CommandCall(SkipSearchpointPayload(campaign_id=cid, cycle_id=cycle.name), "skip-arm")
         )
     except ConflictError as exc:
         print(f"skip on an arm: {exc.http_status} {exc}")

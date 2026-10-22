@@ -34,7 +34,7 @@ import type {
   QuotaStatus,
   RayResponse,
   RoundAudit,
-  RoundResult,
+  RoundView,
   ServedDashboard,
   SubjectReading,
   UserSettings,
@@ -160,7 +160,7 @@ export function roundRead(
   path: CyclePath,
   round: number,
   at: number | null = null,
-): ReadDescriptor<RoundResult> {
+): ReadDescriptor<RoundView> {
   return once("round", cyclePathUrl(path, `/rounds/${round}${at == null ? "" : `?at=${at}`}`));
 }
 

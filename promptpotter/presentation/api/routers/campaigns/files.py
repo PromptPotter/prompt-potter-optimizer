@@ -6,8 +6,8 @@ from fastapi import Query
 
 from promptpotter.application import cycle_files
 from promptpotter.application.cycle_files import FileContentResponse, FilesResponse
-from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.presentation.api.deps import StoresDep, decode_descend
+from promptpotter.domain.cycle_paths import CycleHop, decode_cycle_path
+from promptpotter.presentation.api.deps import StoresDep
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 
 
@@ -23,7 +23,7 @@ def list_cycle_files(
 ) -> FilesResponse:
     """The recursive file tree of the cycle directory plus the campaign-level artifacts, at any depth through ``descend``."""
     return cycle_files.list_cycle_files(
-        stores, (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), *decode_descend(descend))
+        stores, (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), *decode_cycle_path(descend))
     )
 
 
@@ -42,7 +42,7 @@ def get_cycle_file(
     """The contents of one file under the cycle or campaign scope; with ``descend``, the inner cycle's, never the outer root's."""
     return cycle_files.read_cycle_file(
         stores,
-        (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), *decode_descend(descend)),
+        (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), *decode_cycle_path(descend)),
         scope=scope,
         file=path,
     )

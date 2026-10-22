@@ -7,7 +7,6 @@ from promptpotter.application.pipeline_resolve import (
     CampaignRunsWith,
     campaign_runs_with,
     line_config,
-    resolve_campaign_config,
 )
 from promptpotter.application.runner.campaign_result import cycle_bench, read_line_spend
 from promptpotter.application.runner.inner.tasks import is_self_optimization
@@ -32,11 +31,7 @@ from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.projections.cycle_index import read_cycle_index
 from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.account_spend import LifetimeSpend, campaign_spend
-from promptpotter.infrastructure.store.stores import Stores, descend_store, owned_campaign
-
-# A router imports no infrastructure, so it reaches these through here; strict mypy re-exports
-# an import only by this list.
-__all__ = ["owned_campaign"]
+from promptpotter.infrastructure.store.stores import Stores, descend_store
 
 
 class CampaignSummary(StrictModel):
@@ -76,24 +71,12 @@ class CampaignSummary(StrictModel):
             "forest by this key."
         )
     )
-    backend_id: str = Field(default="", description="Backend this campaign optimizes against")
-    backend_type: str = Field(
-        default="",
-        description=(
-            "Connector KIND this campaign runs against ('termnorm' / 'promptpotter' / …), FROZEN "
-            "in its declaration's environment at mint. Re-pointing or deleting the dataset dir never changes it: a "
-            "campaign outlives its dataset dir, and what it RAN is a fact about the campaign."
-        ),
-    )
     self_optimization: bool = Field(
         description=(
-            "This campaign optimizes the optimizer itself (L4), answered off `backend_type` by "
-            "the connector registry. The one test a surface draws the 'inner loops' disclosure "
-            "and the self-optimization panel variants on — never a comparison of `backend_type`."
+            "This campaign optimizes the optimizer itself (L4), answered off the connector its "
+            "declaration froze at mint by the connector registry. The one test a surface draws the "
+            "'inner loops' disclosure and the self-optimization panel variants on."
         ),
-    )
-    owner_user_id: str = Field(
-        default="default", description="UserId of the operator who minted the campaign"
     )
     lifecycle_status: LifecycleStatus = Field(
         default="active",
@@ -119,9 +102,6 @@ class CampaignSummary(StrictModel):
             "once, siblings and deleted cycles included. The number a surface sets beside the "
             "campaign's cap."
         )
-    )
-    campaign_metered_tokens: int = Field(
-        description="`campaign_metered_usd` in billed tokens, the figure the token ceiling binds."
     )
     bench: BenchScore | None = Field(
         description=(
@@ -153,13 +133,6 @@ class CampaignSummary(StrictModel):
 class CampaignListResponse(StrictModel):
     campaigns: list[CampaignSummary] = Field(description="List of campaign summaries")
     total: int = Field(description="Total number of campaigns")
-
-
-class CampaignDetailResponse(CampaignSummary):
-    root_content_hash: str = Field(description="Content hash of the origin search point")
-    config: CampaignConfig = Field(
-        description="The config the campaign's root runs under: its declaration, made effective."
-    )
 
 
 def _line(
@@ -220,15 +193,11 @@ def _summary(campaign: Campaign, stores: Stores) -> CampaignSummary:
         created_at=campaign.created_at,
         updated_at=_updated_at(stores, campaign),
         root_cycle_id=campaign.root_cycle_id,
-        backend_id=campaign.backend_id,
-        backend_type=campaign.connector,
         self_optimization=is_self_optimization(campaign.connector),
-        owner_user_id=campaign.owner_user_id,
         lifecycle_status=campaign.lifecycle_status,
         spend_lifetime=LifetimeSpend.of(campaign_spend(stores.campaigns, campaign.campaign_id)),
         spend_metered=MeteredSpend.of(read_line_spend(stores, campaign).spend, meter),
         campaign_metered_usd=counted.usd_amount,
-        campaign_metered_tokens=counted.token_amount,
         bench=None if config is None else cycle_bench(stores, campaign, holder, config),
         runs_with=runs_with,
         comparison=comparison_line(campaign.declaration.purpose),
@@ -245,12 +214,3 @@ def list_campaigns(
     summaries = [_summary(c, leaf) for c in campaigns]
     summaries.sort(key=lambda s: s.updated_at, reverse=True)
     return CampaignListResponse(campaigns=summaries, total=len(summaries))
-
-
-def campaign_detail(stores: Stores, campaign_id: str) -> CampaignDetailResponse:
-    campaign = owned_campaign(stores, campaign_id)
-    return CampaignDetailResponse(
-        **_summary(campaign, stores).model_dump(),
-        root_content_hash=campaign.root_content_hash,
-        config=resolve_campaign_config(stores, campaign, campaign.root_hop),
-    )

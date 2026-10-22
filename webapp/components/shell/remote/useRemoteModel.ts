@@ -1,6 +1,6 @@
 "use client";
 import { useMemo } from "react";
-import { postSkipSearchpoint, postSetSampleLookahead } from "@/lib/api";
+import { cycleAddress, postCommand } from "@/lib/api";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { phaseIs } from "@/lib/run-phase";
 import { pathOf, readSpend, runningInnerRun } from "@/lib/derivations";
@@ -59,7 +59,8 @@ export function useRemoteModel() {
   const armDisabled = concurrencyUnavailable || armRefusal !== "" || cmd.pending !== null;
   const arm = (cells: number, auto: boolean) =>
     void cmd.run("sample-lookahead", () =>
-      postSetSampleLookahead(viewedPath, cells, auto),
+      // `cells: 1` disarms; sent unclamped, the walk clamps it to `max_cells_in_flight`.
+      postCommand("set-sample-lookahead", { ...cycleAddress(viewedPath), cells, auto }),
     );
   const armCells = (raw: string) => {
     const cells = Number(raw);
@@ -114,7 +115,8 @@ export function useRemoteModel() {
     depthSegments,
     arm,
     armCells,
-    skip: () => void cmd.run("skip", () => postSkipSearchpoint(viewedPath)),
+    skip: () =>
+      void cmd.run("skip", () => postCommand("skip-searchpoint", cycleAddress(viewedPath))),
     pending: cmd.pending,
     failure: cmd.failure,
   };

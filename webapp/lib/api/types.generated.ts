@@ -18,74 +18,40 @@ export interface ActivityResponse {
   /** The colour axis: `model` is the exact model id, `api_key` is who billed the
    * call (`TokenUsageRecord.provider`). */
   group_by: 'model' | 'api_key';
-  since: number;
-  until: number;
   buckets: ActivityBucket[];
   /** Every series in the window, in first-seen order — one colour per label, stable
    * across the buckets. A call outside the optimizer's own carries its kind. */
   series_labels: string[];
   /** What providers reported they billed. */
   total_spend_usd: number;
-  /** A bucket's `rate_priced_usd`, over the window. Never spent. */
+  /** What our rate table prices the window's calls no provider billed. Never spent,
+   * and in no series. */
   total_rate_priced_usd: number;
   /** Some call in the window was priced at our rate, so there is a
    * `total_rate_priced_usd` to show beside the bill. */
   calls_rate_priced: boolean;
-  /** The two totals understate: a bucket's `bill_is_floor`, over the window. */
+  /** The two totals understate: a call in the window carries neither a bill nor a
+   * rate's price. */
   bill_is_floor: boolean;
   total_tokens: number;
   total_requests: number;
-  /** The tallest bucket's `spend_usd` — the scale the spend bars are drawn against.
+  /** The tallest bucket's billed USD — the scale the spend bars are drawn against.
    * Null where no bucket was billed anything, so there is no bar to scale. */
   peak_spend_usd: number | null;
-  /** `peak_spend_usd`'s twin over a bucket's `tokens`. */
+  /** `peak_spend_usd`'s twin over a bucket's tokens. */
   peak_tokens: number | null;
-  /** `peak_spend_usd`'s twin over a bucket's `requests`. */
+  /** `peak_spend_usd`'s twin over a bucket's requests. */
   peak_requests: number | null;
 }
 
 /** One time bucket of the Activity pane's three stacked bar charts. */
 export interface ActivityBucket {
-  /** Epoch seconds at the bucket's leading edge */
-  ts: number;
-  /** What providers reported they billed. */
-  spend_usd: number;
-  /** What our rate table prices the bucket's calls no provider billed. Never spent,
-   * and in no series. */
-  rate_priced_usd: number;
-  /** A call in this bucket carries neither a bill nor a rate's price, so
-   * `spend_usd` and `rate_priced_usd` understate. */
-  bill_is_floor: boolean;
-  tokens: number;
-  requests: number;
   /** Billed USD per `series_labels` entry. A call no provider billed adds nothing
    * here and still counts in the other two; one no rate prices either sets
-   * `bill_is_floor`. */
+   * the response's `bill_is_floor`. */
   series_spend: Record<string, number>;
   series_tokens: Record<string, number>;
   series_requests: Record<string, number>;
-}
-
-/** What a pass did, or would do. */
-export interface ArchiveReport {
-  files_touched: number;
-  rows_moved: number;
-  bytes_before: number;
-  bytes_after: number;
-  cold_bytes: number;
-  archive_writers: number;
-  conflicts: number;
-  purged: number;
-  rows_skipped_by_role: unknown;
-  applied: boolean;
-  /** What the counts mean where they are not a plain success — the refusal while a
-   * cycle can still append, files refused, answers already purged — worded
-   * once for the terminal and the browser. */
-  notes: string[];
-  /** Net, and net is the honest number: the payload does not vanish, it moves to
-   * the cold store, so the hot-side saving is reported against what the cold
-   * side cost. */
-  bytes_freed: number;
 }
 
 export interface BackendHealthResponse {
@@ -144,20 +110,11 @@ export interface CampaignSummary {
    * makes them separate RUNS of it; two arms of a head-to-head never share
    * one. The sidebar groups the forest by this key. */
   root_cycle_id: string;
-  /** Backend this campaign optimizes against */
-  backend_id: string;
-  /** Connector KIND this campaign runs against ('termnorm' / 'promptpotter' / …),
-   * FROZEN in its declaration's environment at mint. Re-pointing or deleting
-   * the dataset dir never changes it: a campaign outlives its dataset dir,
-   * and what it RAN is a fact about the campaign. */
-  backend_type: string;
-  /** This campaign optimizes the optimizer itself (L4), answered off `backend_type`
-   * by the connector registry. The one test a surface draws the 'inner loops'
-   * disclosure and the self-optimization panel variants on — never a
-   * comparison of `backend_type`. */
+  /** This campaign optimizes the optimizer itself (L4), answered off the connector
+   * its declaration froze at mint by the connector registry. The one test a
+   * surface draws the 'inner loops' disclosure and the self-optimization
+   * panel variants on. */
   self_optimization: boolean;
-  /** UserId of the operator who minted the campaign */
-  owner_user_id: string;
   /** Operator visibility intent: 'active' (default sidebar), 'archived' (hidden),
    * 'deleted' (soft-marked, data retained) */
   lifecycle_status: 'active' | 'archived' | 'deleted';
@@ -175,8 +132,6 @@ export interface CampaignSummary {
    * spend once, siblings and deleted cycles included. The number a surface
    * sets beside the campaign's cap. */
   campaign_metered_usd: number;
-  /** `campaign_metered_usd` in billed tokens, the figure the token ceiling binds. */
-  campaign_metered_tokens: number;
   /** The headline (`architecture.md` § The bench score is not an optimizer's
    * selection), read off the passes its line's ledgers banked, under the
    * formula the line runs — whichever cycle rebases handed the line to.
@@ -1006,12 +961,6 @@ export interface CellRow {
   seconds: number | null;
   input_tokens: number | null;
   output_tokens: number | null;
-}
-
-/** The 202 response shape declared in ``api-openapi.yaml``. */
-export interface CommandAcceptedBody {
-  /** Stable id of the appended `CommandRecord`. */
-  command_id: string;
 }
 
 /** Built off the couplings the pre-run preflight warning reads, so no surface disagrees with */
@@ -2716,13 +2665,6 @@ export interface OptimizerEntry {
   origin: string | null;
 }
 
-export interface OriginGateDecisionPayload {
-  campaign_id: string;
-  cycle_id: string;
-  descend: string | null;
-  decision: 'rescore' | 'proceed' | 'abort';
-}
-
 export interface OriginListResponse {
   /** Runnable origins, newest first */
   origins: OriginEntry[];
@@ -2889,27 +2831,6 @@ export interface RayItem {
   activity: ActivityItem | null;
 }
 
-/** One resolver turn's outcome: the checklist state it left and the post-apply draft. */
-export interface ResolveOriginResponse {
-  resolution: OriginResolution;
-  draft: DraftCampaignWire;
-}
-
-/** The checklist state ``checkin.json::resolution`` holds, and the last resolver turn beside it. */
-export interface OriginResolution {
-  complete: boolean;
-  provenance: Record<string, 'unset' | 'proposed' | 'confirmed'>;
-  /** Each gated field's current value, by field id. */
-  values: Record<string, unknown>;
-  gaps: FieldGap[];
-  /** Null until a resolver turn ran, and again after a later edit. */
-  last_resolution: OriginLastResolution | null;
-  /** Proposals the last turn left unclicked. */
-  raised: RaisedCommand[];
-  /** Why the last turn came back thin (a paid repair retry); null where it did not. */
-  degraded_cause: string | null;
-}
-
 /** One round's audit twin: each optimizer node's call in firing order, and the warnings the round raised. */
 export interface RoundAudit {
   round: number;
@@ -2974,22 +2895,13 @@ export interface LoopWarning {
   detail: Record<string, unknown>;
 }
 
-/** A round with its rows, which is the round file itself. */
-export interface RoundResult {
+/** One closed round as a surface reads it: its arms, their rows and its verdict. What the */
+export interface RoundView {
   round: number;
   arms: Record<string, Proposed | Measuring | Cut | Measured>;
-  folds: Record<string, ScoreSummary>;
+  /** Each arm's rows, a reference re-read on the round's cells included. */
+  cells: Record<string, RoundCell[]>;
   election: Election | null;
-  overlap: OverlapReading;
-  diagnostics: RoundDiagnostics | null;
-  health: DegradationHealth | null;
-  optimizer_state: OptimizerState | null;
-  optimizer_facts: OptimizerFact[];
-  at_offset: number | null;
-  cells: Record<string, SheetRow[]>;
-  overlap_results: Record<string, SheetRow[]>;
-  round_id: string;
-  /** `ranked`, served: the ledger's `RoundOutcome` cannot carry a computed field. */
   scoreboard: ScoreboardRow[];
   /** The arm the round ENDED on (`election.ended_on`), read: the headline's numbers
    * are its own. Null on a diag round, which elects nothing. */
@@ -3203,20 +3115,18 @@ export interface Measured {
   locked_in: Elimination | null;
 }
 
-/** An arm's fold of its cells: what it walked, and its level on them. */
-export interface ScoreSummary {
-  total: number;
-  accuracy: number | null;
-  composite_fitness: number | null;
-  deprecated: number;
-  degraded: number;
-  recall_at: Record<string, number>;
-  walked: number;
-  cached: number;
-  evaluators: Record<string, number>;
-  mean_fitness_ci_lo: number | null;
-  mean_fitness_ci_hi: number | null;
-  tokens: TokenAccount | null;
+/** One measured row of a served round, with the mark it reads as. */
+export interface RoundCell {
+  /** The sample's slot in the bank the cycle drew. */
+  position: number;
+  sample_key: string;
+  status: 'HIT' | 'MISS' | 'ERR' | 'UNSC';
+  cached: boolean;
+  query: string;
+  predicted: string;
+  /** The sample's label as shown. */
+  ground_truth_text: string;
+  fitness: number | null;
 }
 
 /** What a round's selector decided over its arms, by key; empty ``selected`` = the round HELD. */
@@ -3245,250 +3155,6 @@ export interface ArmFit {
   theta_se: number | null;
   theta_caveat: 'floor_pinned' | 'disjoint_scopes' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | null;
   vs_reference: PairedReading | null;
-}
-
-/** The best-so-far line on the ORIGIN PANEL: each pick paired with C0 on one set of cells. */
-export interface OverlapReading {
-  positions: number[];
-  /** The standing pick (`b`) over C0 (`a`) on the origin panel, in report scope.
-   * `bought` on each member is what this round paid to put it back on the
-   * whole panel. */
-  lead: PairedReading;
-  /** Each earlier pick on the line over C0 on the same panel, oldest first. */
-  earlier: PairedReading[];
-  advance: 'origin' | 'advanced' | 'advanced_unpaired' | 'not_separated' | 'held' | 'unread';
-}
-
-/** One round's post-scoring diagnostics, computed once and read by every renderer. */
-export interface RoundDiagnostics {
-  rank_buckets: Record<string, number>;
-  top_k_accuracy: Record<string, number>;
-  near_misses: NearMiss[];
-  n_valid: number;
-  error_rate: number;
-  warning_rate: number;
-  evolution_rows: EvolutionRow[];
-  trend: 'healthy' | 'plateau' | 'ceiling';
-  trend_description: string;
-  anomalies: string[];
-  cross_candidate_diff: string[];
-  samples: SampleDiag[];
-}
-
-/** A query whose ground truth landed in candidates rank 2-10. */
-export interface NearMiss {
-  query: string;
-  ground_truth: string;
-  rank: number;
-  predicted: string;
-}
-
-/** Only ``elected`` compares across rows; ``accuracy`` is relative to its round's subset. */
-export interface EvolutionRow {
-  round: number;
-  accuracy: number | null;
-  delta: number | null;
-  degraded: number;
-  n_candidates: number;
-  elected: boolean;
-}
-
-export interface SampleDiag {
-  query: string;
-  ground_truth: string;
-  predicted: string;
-  rank: number | null;
-  terminal_node: string;
-  gt_in_source: boolean | null;
-  gt_in_ranked: boolean | null;
-  warnings: string[];
-  fitness: number;
-}
-
-/** A round's degradation verdict from the backend's warning stamps; it never stops the run. */
-export interface DegradationHealth {
-  grade: 'healthy' | 'degraded' | 'critical';
-  cause: 'origin_unmeasured' | 'origin_incomplete' | 'structural' | 'unscoreable' | 'holed' | 'evidence_starved' | 'structural_untested' | 'persistent' | 'degraded' | null;
-  samples: number;
-  structural_count: number;
-  transient_count: number;
-  hole_count: number;
-  not_attempted: number;
-  unscored: number;
-  answer_modal_share: number | null;
-  degraded_rate: number;
-  consecutive_degraded_rounds: number;
-  prior_clean_rounds: number;
-  dominant_node: string | null;
-  node_failure_rates: Record<string, number>;
-  node_warnings: Record<string, string[]>;
-  suggested_action: string | null;
-  last_error: string | null;
-}
-
-/** The one envelope every optimizer's state rides: its parts by kind beside the bench's population. */
-export interface OptimizerState {
-  manifest: string;
-  population: OptSearchPoint[];
-  prompt_hashes: Record<string, string>;
-  slices: Record<string, Record<string, unknown>>;
-  outputs: Record<string, Record<string, unknown>>;
-}
-
-/** One labelled reading an optimizer reports about a round, worded by its own runtime. */
-export interface OptimizerFact {
-  key: string;
-  label: string;
-  text: string;
-  value: number | null;
-  kind: 'stat' | 'note';
-}
-
-/** One row of a :class:`CellSheet` on the wire, as :meth:`GradedCell.wire` writes it. */
-export interface SheetRow {
-  sample_key: string;
-  query: string;
-  ground_truth: string;
-  predicted: string;
-  error: string | null;
-  pipeline_data: PipelineRecord | null;
-  cached: boolean;
-  position: number;
-  status: 'HIT' | 'MISS' | 'ERR' | 'UNSC';
-  ground_truth_text: string;
-  error_category?: 'CLIENT' | 'SERVER' | 'CONNECTION' | 'PROVIDER_CREDIT' | 'PROVIDER_THROTTLED' | 'SPEND_CEILING' | 'TOKEN_CEILING' | 'WALL_CLOCK' | 'PRICE_LIST_UNREACHABLE' | 'NO_RATE' | 'PIPELINE' | 'HALTED' | 'UNSCOREABLE' | 'UNKNOWN' | null;
-  ground_truth_rank?: number | null;
-  n_candidates?: number;
-  answer?: string;
-  retry_of_deprecated_cache?: boolean;
-  retry_of_degraded?: boolean;
-  rerun_comparison?: RerunComparison;
-  switched_out?: boolean;
-  config_fundamental_skip?: boolean;
-  persistently_degraded?: boolean;
-  degraded_observed?: boolean;
-  degraded_obs_count?: number;
-  degraded_obs_threshold?: number;
-  fitness?: number | null;
-  objective?: number | null;
-  unscored?: string | null;
-}
-
-/** The flat ``pipeline_data`` record, as :meth:`PipelineData.wire` writes it. */
-export interface PipelineRecord {
-  total_time?: number;
-  terminal_node?: string;
-  step_timings?: Record<string, number>;
-  step_tokens?: Record<string, StepTokenUsage>;
-  diagnostics?: DiagnosticsRecord;
-  unworked_s?: number;
-  mean_bench_lift?: number;
-  inner?: InnerCellFacts;
-  error?: string;
-  result_ranking?: unknown[];
-  reasoning_trace?: string;
-  turns?: TurnRecord[];
-  outcome_note?: string;
-  step_phases?: Record<string, number>;
-  judge_readings?: Record<string, JudgeReadingRecord>;
-  target_prompt_chars?: number;
-  question?: string;
-  [key: string]: unknown;
-}
-
-/** Per-LLM-node ``step_tokens`` entry — the WIRE spelling of :class:`TokenAccount`, which */
-export interface StepTokenUsage {
-  input: number;
-  output: number;
-  estimated: boolean;
-  cost_usd?: number;
-  rate_priced_usd?: number;
-  model?: string;
-  provider?: string;
-  served_by?: string;
-  finish_reason?: string;
-  reasoning?: number;
-  cache_read?: number;
-  attempts?: number;
-}
-
-/** A :class:`Diagnostics` on the wire; a key is absent where it would be empty. */
-export interface DiagnosticsRecord {
-  step_statuses?: Record<string, string>;
-  warnings?: NodeWarningRecord[];
-}
-
-/** A :class:`NodeWarning` on the wire. */
-export interface NodeWarningRecord {
-  step: string;
-  code: string;
-  message: string;
-  kind: string;
-  details?: unknown[];
-  stats?: Record<string, unknown>;
-}
-
-/** Carried BESIDE the measurement, never as ``OuterSampleProxies`` fields the formula could score. */
-export interface InnerCellFacts {
-  /** The origin's θ on the search split's level series; null where `series_reason`
-   * names why */
-  origin_level: number | null;
-  /** The last round's level less the origin's; null where `series_reason` names why */
-  final_lift: number | null;
-  /** The best round's level less the origin's; null where `series_reason` names why */
-  peak_lift: number | null;
-  /** The mean level less the origin's, the last level held forward to the round
-   * budget; bounded for plausibility only, logit abilities differing without
-   * bound; null where `series_reason` names why */
-  mean_round_delta: number | null;
-  /** Why the level series differences nothing; null where it does */
-  series_reason: string | null;
-  /** The mean SE of the levels past the origin: this arm's own half of a paired
-   * difference, the shared origin level cancelling; a precision, never a
-   * penalty */
-  mean_parent_level_se: number | null;
-  /** The rounds the inner cycle closed past its origin */
-  rounds_ran: number;
-  /** The round budget, never below the rounds it ran */
-  round_budget: number;
-  /** Why the inner cycle stopped */
-  stop_reason: 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted';
-  /** The share of origin rows still missed: 0 is a cell no arm can lift, however
-   * sharply it reads */
-  origin_headroom: number | null;
-  /** The origin's headline on the held-out rows */
-  bench_origin_level: number | null;
-  /** The last standing selection's held-out headline less the origin's */
-  bench_final_lift: number | null;
-  /** Dollars sent, cumulative across attempts; reporting only, billed per call and
-   * entering no ledger */
-  sent_usd: number | null;
-  /** Tokens used, cumulative across attempts; reporting only, as `sent_usd` */
-  tokens: number | null;
-}
-
-/** ONE turn of a multi-turn cell, a narrowed projection of an ATIF trajectory ``Step``. */
-export interface TurnRecord {
-  index?: number;
-  source?: string;
-  step?: string;
-  message?: string;
-  reasoning?: string;
-  tools?: string[];
-  observation?: string;
-}
-
-/** A :class:`JudgeReading` on the wire; a key is absent where the judge said nothing. */
-export interface JudgeReadingRecord {
-  label?: string;
-  why?: string;
-}
-
-/** What re-measuring a degraded cached cell changed, in the words the tape prints. */
-export interface RerunComparison {
-  hit_change: string;
-  rank_change: string | null;
-  improved: boolean;
 }
 
 /** One rank-ordered row of a round's scoreboard: an arm's reading at its rank. */
@@ -3675,11 +3341,53 @@ export interface DashboardCandidate {
   reading: ArmReading;
 }
 
+/** A round's degradation verdict from the backend's warning stamps; it never stops the run. */
+export interface DegradationHealth {
+  grade: 'healthy' | 'degraded' | 'critical';
+  cause: 'origin_unmeasured' | 'origin_incomplete' | 'structural' | 'unscoreable' | 'holed' | 'evidence_starved' | 'structural_untested' | 'persistent' | 'degraded' | null;
+  samples: number;
+  structural_count: number;
+  transient_count: number;
+  hole_count: number;
+  not_attempted: number;
+  unscored: number;
+  answer_modal_share: number | null;
+  degraded_rate: number;
+  consecutive_degraded_rounds: number;
+  prior_clean_rounds: number;
+  dominant_node: string | null;
+  node_failure_rates: Record<string, number>;
+  node_warnings: Record<string, string[]>;
+  suggested_action: string | null;
+  last_error: string | null;
+}
+
+/** The best-so-far line on the ORIGIN PANEL: each pick paired with C0 on one set of cells. */
+export interface OverlapReading {
+  positions: number[];
+  /** The standing pick (`b`) over C0 (`a`) on the origin panel, in report scope.
+   * `bought` on each member is what this round paid to put it back on the
+   * whole panel. */
+  lead: PairedReading;
+  /** Each earlier pick on the line over C0 on the same panel, oldest first. */
+  earlier: PairedReading[];
+  advance: 'origin' | 'advanced' | 'advanced_unpaired' | 'not_separated' | 'held' | 'unread';
+}
+
 /** How sharply each cell was measured, against how far apart the cells landed. */
 export interface PanelPrecision {
   estimation_sd: number;
   observed_sd: number;
   n_cells: number;
+}
+
+/** One labelled reading an optimizer reports about a round, worded by its own runtime. */
+export interface OptimizerFact {
+  key: string;
+  label: string;
+  text: string;
+  value: number | null;
+  kind: 'stat' | 'note';
 }
 
 /** A round's level as its series read it, under the one caveat that withholds it. */
@@ -3963,44 +3671,6 @@ export interface RoundAxis {
   position: number | null;
 }
 
-/** The draft says what the campaign IS; ``budget`` bounds what THIS launch spends, and no */
-export interface StartCheckinPayload {
-  draft_id: string;
-  budget: Budget;
-  /** Run the diagnostic shape. */
-  diag: boolean;
-}
-
-/** What a Start answers: the job holding its slot, and the cycle it minted. */
-export interface StartCheckinResponse {
-  job_id: string;
-  /** Null while the job is queued: the campaign is minted once it holds a slot. */
-  hop: CycleHop | null;
-}
-
-/** A run of an existing cycle: what bounds it (``budget``, ``step_rounds``) and the shape it */
-export interface StartRunPayload {
-  campaign_id: string;
-  cycle_id: string;
-  descend: string | null;
-  budget: Budget;
-  step_rounds: number | null;
-  mode: RunMode;
-}
-
-/** The SHAPE a run takes, on the wire and in the runner alike. How far it goes is its ``Budget``. */
-export interface RunMode {
-  /** Rewind in place to this round before running; unset continues the ledger. */
-  from_round: number | null;
-  /** Accept a replay that diverges from the record. */
-  no_divergence_check: boolean;
-  /** Branch a sibling cycle where the replay diverges, and run it. */
-  fork_on_divergence: boolean;
-  /** The diagnostic shape; a `start-run` of a cycle that finished one runs a
-   * counted sibling. */
-  diag: boolean;
-}
-
 /** The caller's per-user preferences. */
 export interface UserSettings {
   demo_mode_enabled: boolean;
@@ -4052,6 +3722,537 @@ export interface WorkspaceStorageEntry {
   reports_bytes: number;
 }
 
+/** Flag a campaign archived: hidden from the default listing, restorable by unarchive; the tree */
+export interface ArchiveCampaignPayload {
+  campaign_id: string;
+  /** Recorded with the command. */
+  reason: string;
+}
+
+/** What a command whose applied form answers nothing returns: the record it appended. */
+export interface CommandAcceptedBody {
+  /** Stable id of the appended `CommandRecord`. */
+  command_id: string;
+}
+
+/** Withdraw a launch waiting for a machine slot; nothing ran and nothing was spent. */
+export interface CancelQueuedRunPayload {
+  /** The queued job id, as `machine-status` lists it. */
+  job_id: string;
+}
+
+/** Raise or lower an existing cycle's spend, token, round or wall-clock bound; a budget- or */
+export interface ChangeRunLimitsPayload {
+  campaign_id: string;
+  cycle_id: string;
+  descend: string | null;
+  budget: Budget;
+}
+
+/** Remove the stub cycles a mint left behind when it never reached round 0. */
+export interface CleanupEmptyCyclesPayload {
+  campaign_id: string;
+  cycle_id: string;
+  descend: string | null;
+}
+
+/** ``apply`` defaults to False on every mode, including the destructive one: a preview is what */
+export interface CompactArchivePayload {
+  mode: 'compact' | 'restore' | 'purge-cold';
+  dataset: string | null;
+  apply: boolean;
+}
+
+/** What a pass did, or would do. */
+export interface ArchiveReport {
+  files_touched: number;
+  rows_moved: number;
+  bytes_before: number;
+  bytes_after: number;
+  cold_bytes: number;
+  archive_writers: number;
+  conflicts: number;
+  purged: number;
+  rows_skipped_by_role: unknown;
+  applied: boolean;
+  /** What the counts mean where they are not a plain success — the refusal while a
+   * cycle can still append, files refused, answers already purged — worded
+   * once for the terminal and the browser. */
+  notes: string[];
+  /** Net, and net is the honest number: the payload does not vanish, it moves to
+   * the cold store, so the hot-side saving is reported against what the cold
+   * side cost. */
+  bytes_freed: number;
+}
+
+/** Remove a campaign for good; its measurements still cache-hit for siblings. */
+export interface DeleteCampaignPayload {
+  campaign_id: string;
+  /** Recorded with the command. */
+  reason: string;
+  /** Spare the keepsake tier (manifest, reports, the shallow loop trace); drop only
+   * the resume, audit and mirror tiers. */
+  keep_results: boolean;
+}
+
+/** Remove ONE stub cycle, the singular of `cleanup-empty-cycles`; refused for a cycle holding */
+export interface DeleteCyclePayload {
+  campaign_id: string;
+  cycle_id: string;
+  descend: string | null;
+}
+
+/** Close an open check-in without minting; its check-in calls stay billed to the workspace. */
+export interface DiscardDraftPayload {
+  draft_id: string;
+}
+
+/** The cut, and the shape of the fork's first run (``mode``) — one act, so one command. */
+export interface ForkCyclePayload {
+  campaign_id: string;
+  cycle_id: string;
+  descend: string | null;
+  mode: RunMode;
+  round: number;
+  candidate_id: string;
+  seed: Record<string, unknown>;
+  reason: string;
+  /** False (the default) is `operator_steered`: a clean offshoot from the origin,
+   * re-scoring the edited searchpoint. True is `operator_rewind` — rounds
+   * 0..round-1 are lifted and the fork continues at `round` under the seed's
+   * overrides, which is what an 'apply this from here' press means and what
+   * the terminal spells `resume --rewind N`. */
+  keep_rounds: boolean;
+}
+
+/** The SHAPE a run takes, on the wire and in the runner alike. How far it goes is its ``Budget``. */
+export interface RunMode {
+  /** Rewind in place to this round before running; unset continues the ledger. */
+  from_round: number | null;
+  /** Accept a replay that diverges from the record. */
+  no_divergence_check: boolean;
+  /** Branch a sibling cycle where the replay diverges, and run it. */
+  fork_on_divergence: boolean;
+  /** The diagnostic shape; a `start-run` of a cycle that finished one runs a
+   * counted sibling. */
+  diag: boolean;
+}
+
+/** The cycle holding its campaign's line: the pass grades the campaign's result, so any other */
+export interface GradeBenchPayload {
+  campaign_id: string;
+  cycle_id: string;
+  descend: string | null;
+}
+
+export interface MintCampaignPayload {
+  dataset_name: string;
+  budget: Budget;
+  /** Laid over the dataset's own `optimization` before the mint freezes it; only
+   * the fields sent move anything */
+  optimization: OptimizationOverrides | null;
+  /** `compare` mints a controlled arm of its head-to-head, declared by its first
+   * arm; an arm off the declared instrument or budget is refused 409 */
+  purpose: Optimize | Compare;
+  /** Run the diagnostic shape. A fresh mint has no ledger to rewind or replay, so
+   * the other run-mode fields are `start-run`'s alone. */
+  diag: boolean;
+  /** A campaign declaration standing in for the dataset's own
+   * `dataset.yaml::campaign`; `optimization` still lays over it */
+  campaign_config: CampaignConfig | null;
+  /** The task description to frame from, in place of the dataset's own */
+  task_text: string | null;
+}
+
+export interface CampaignConfig {
+  /** Origin eval budget — how many bank samples the origin (C0) is scored on at
+   * check-in. The bench's, whatever the optimizer: a round's own panel is its
+   * sampler's knob. Wide because origin breadth is the one breadth that is
+   * nearly free: θ_origin is the term EVERY delta subtracts, and its rows are
+   * content-addressed cache replayed into every candidate arm, fork and
+   * resume — paid once per config. Candidate breadth is paid per candidate,
+   * per round. Every comparison downstream is matched by sample key or
+   * θ-space, so an origin scored on a superset stays like-for-like. A bank
+   * smaller than this scores on the whole bank (`sample_dataset` is a prefix
+   * slice) — not an error. */
+  sp_budget_origin: number;
+  exclude_nodes: string[];
+  /** Which task framing every target render splices in. `committed` (default) runs
+   * under the front matter of the dataset's `task.md`, which the first mint
+   * decomposes from its body when none is committed yet. `off` runs UNFRAMED
+   * on purpose — the ablation arm — even where framing exists, and the
+   * campaign manifest keeps the delta, so the result never reads as a framed
+   * one. */
+  task_framing: 'committed' | 'off';
+  pipeline_overlay: Record<string, unknown>;
+  /** Per-node declaration over the dataset's optimizer search space — the per-
+   * campaign param-lock + value-space lever beside `exclude_nodes` (whole
+   * node). `provider`/`route_order` are always locked. **`param_keys` SUBSETS
+   * and `param_allowed_values` REPLACES** (`PipelineSchema.narrow`, applied
+   * at pipeline setup): a campaign may only close axes the dataset opened,
+   * but the value space is its own statement — which is what lets an operator
+   * ADD a model or a reasoning rung no `dataset.yaml::pipeline` on disk
+   * carries. `param_allowed_values['model']` is also the ONE permitted model
+   * set: what the optimizer may pick, and what a human fork may steer to
+   * without tainting the branch. A steer outside it is a `campaign.babysit`
+   * act — warned + graded C (`overlay_sets_model_outside_allowed`). Nothing
+   * declared for a node = nothing sanctioned there, the restrictive default. */
+  optimizer_narrowing: Record<string, NodeSearchNarrowing>;
+  scoring: string | Record<string, string> | null;
+  /** LLM-as-judge graders for datasets whose answer is free text, where no
+   * deterministic matcher can grade a cell. Each value names a registered
+   * judge (`promptpotter.judges`) and the models to run it on; its verdict is
+   * banked as a per-sample observation the `scoring` formula reads. **The KEY
+   * is the term that formula reads, not the judge's name** — so one cell can
+   * carry several graded terms, which is what a multi-step schema (retrieve
+   * -> ground -> answer) is, and two terms may run the same rubric on
+   * different models without one verdict landing on top of the other.
+   * Declaration order is the step order. `Scope.DATA` because swapping a
+   * judge invalidates every verdict taken under the old one, so a resume must
+   * run divergence detection rather than carry them forward. **Their models
+   * are declared here and inherited from nowhere** — not from the permitted
+   * model set, not from the pipeline's node config, not from the optimizer's
+   * own LLMs. A judge is a ruler, and a ruler that moved with whatever the
+   * search was last steered to would not be one. */
+  judges: Record<string, JudgeSpec>;
+  /** Which fitness number the operator's round and candidate views display first
+   * (lineage node value, Best tile, sidebar). DISPLAY config, not search
+   * state — the optimizer's selector decides on its own objective, and the
+   * campaign's headline is the bench score; this only picks the number the
+   * human READS, client-overridable per session. `ability` shows θ (a logit,
+   * jargon) where the selector stamps one — defaults to `accuracy` so θ is
+   * never forced on an operator who didn't ask for it. Rides the
+   * `composite_fitness_formula` serve path to
+   * `dashboard.json::display_metric`; never on `OptSearchPoint`. */
+  display_metric: 'accuracy' | 'composite' | 'ability';
+  /** Which key ranks the hard-sample leaderboard — the heatmap, the table and the
+   * `log.md` heatmap, which all read ONE served rank. `info_gain` sorts by
+   * the queue mechanism's acquisition score (`pick_value`: decision-
+   * information gain + δ learning gain) read on the cycle's ruler at the
+   * frontier's stamped ability, contested-at-the-frontier samples first;
+   * `difficulty` sorts by the ruler's δ_s alone, hardest first, and is what a
+   * scope with no stamped ability (dataset scope) is served whatever this
+   * says. DISPLAY config: it picks the order the human READS and never what
+   * the engine scores, which is `build_round_order` and reaches no knob.
+   * Client-overridable per session, like `display_metric`. */
+  hard_sample_order: 'info_gain' | 'difficulty';
+  /** The accuracy a best-reachable prompt would score on this dataset at this
+   * campaign's model. `index.json::final.rounds_to_ceiling` counts rounds
+   * against `CEILING_FRACTION` of it, and the value is banked beside that
+   * count so a reader never has to guess the denominator. `None` (default) →
+   * the clock reports nothing, which is the honest reading: a ceiling is a
+   * joint claim about the dataset AND the model, so only the dataset owner
+   * can declare one (`dataset.yaml::campaign`) and a guessed value makes
+   * every campaign on it publish a round count nobody can defend. DISPLAY
+   * config — it moves no gate, no selection and no stop. */
+  accuracy_ceiling: number | null;
+  /** How run init partitions the bank into the search split every optimizer draw
+   * reads, the held-out bench set the headline is scored on, and a demo pool.
+   * `None` holds nothing out: the whole bank is the search split and there is
+   * no bench score. */
+  dataset_split: DatasetSplit | null;
+  /** The run's one seed. It seeds which rows fall where and the order the search
+   * pool reads in: each row ranks by this and its content (`Sample.key`),
+   * never its slot, so a reordered bank holds out the same rows and reads
+   * them in the same order. An L4 seat seeds its determinism clamp and its
+   * solver node from it too. */
+  run_seed: number;
+  /** When the line's bench passes are sent — each a cell per bench row, the ranked
+   * `dataset_split.bench` and every bench-only row the bank declares.
+   * `manual` (default): a launch sends none and sets nothing aside for one;
+   * the operator asks for the headline (CLI `bench`, command `grade-bench`),
+   * which grades the origin and the selection as they then stand. `at_end`:
+   * the origin's pass at launch, its price set aside under the ceiling, and
+   * the selection's once the run ends. `each_round`: that, and every round
+   * that selects a new individual is graded too, so the trend carries a held-
+   * out series beside the round composite. An arm of a head-to-head is minted
+   * `at_end` where this says `manual`: its comparison is the bench score. */
+  bench_trigger: 'manual' | 'at_end' | 'each_round';
+  optimization: OptimizationConfig;
+}
+
+/** What a campaign declares to put a judge in its scoring: which judge, on which models. */
+export interface JudgeSpec {
+  name: string;
+  stages: JudgeStage[];
+}
+
+/** One model call in a judge's composition, on a model declared here and never inherited. */
+export interface JudgeStage {
+  role: string;
+  model: string;
+  provider: string;
+  temperature: number;
+  max_tokens: number | null;
+}
+
+/** The bench's own loop config, plus which optimizer runs and its overlay. An optimizer's knobs */
+export interface OptimizationConfig {
+  /** The optimizer manifest this campaign runs — a directory under
+   * ``promptpotter/assets/optimizers/``. Every entry point selects it here;
+   * nothing selects it install-wide. */
+  optimizer: string;
+  /** This campaign's overlay on the selected manifest, keyed by node name —
+   * ``{node: {config: {...}}}``, the shape a target pipeline's overlay takes.
+   * An optimizer's knobs, a paper's configuration and each llm node's
+   * ``config.model`` all ride here; each node validates its own knobs when
+   * the optimizer is selected. */
+  nodes: Record<string, ManifestNodeOverlay>;
+  /** The campaign's own layer of the run's budget. ``usd`` / ``tokens`` bound the
+   * CAMPAIGN's cumulative spend (optimizer + backend), shared by its live
+   * cycles and checked at the next boundary; ``rounds`` caps one cycle's
+   * closed rounds after the origin (0 measures the origin and stops; null
+   * leaves only ``HARD_CAP_ARMS``); ``wall_clock_s`` bounds one launch,
+   * cutting a remote cell still open at its edge. A fork seed, a standing
+   * ``set-limits`` and a launch flag each lay over it axis by axis, and the
+   * account admits the result whole or refuses the launch. A null axis is
+   * unbounded. ``tokens`` is unset by default: a token is worth a different
+   * amount on every route, so set it only where a backend bills but reports
+   * no cost (``unpriced_tokens`` on the dashboard is the tell). */
+  budget: Budget;
+  /** Opt-in improvement-banked round budget ('hearts'), under any optimizer: +1
+   * life per round that promotes an arm, -1 per round that does not, banked
+   * up to ``cap``, and the run stops ``lives_exhausted`` at 0. A round no arm
+   * of which reached the election banks nothing. ``None`` → ``budget.rounds``
+   * governs. It still caps from above, so a lives run wanting the full bank
+   * sets ``budget: {rounds: null}``. */
+  lives: LivesConfig | null;
+  /** Stop ``target_hit`` once the declared pick's own accuracy reaches this.
+   * ``None`` → no such stop. Refused on an arm of a head-to-head, which stops
+   * only on its record's rule. */
+  halt_at_accuracy: number | null;
+  /** Consecutive closed rounds without an advance of the best-so-far line on the
+   * origin panel (``RunStanding.rounds_without_advance``) after which the run
+   * stops ``converged``, under any optimizer. A promotion that has not
+   * separated from the origin counts toward it; a round whose origin-panel
+   * reading was not taken counts neither way. ``None`` → no such stop. */
+  convergence_patience: number | null;
+  degradation_threshold: number;
+  /** End a candidate at the first FATAL sample (empty response, content-filtered,
+   * structurally broken) without spending the rest of its budget. Active
+   * while the degradation check runs (`degradation_threshold` > 0); the rate-
+   * based check stays governed by that threshold. The bench's, run on every
+   * optimizer's arms. */
+  degradation_fatal_fastpath: boolean;
+  /** Minimum distinct samples before θ is read as ability: the δ ruler stays flat
+   * below it, and no eliminator cuts an arm (nor a selector crowns one) on
+   * fewer — the floor on n for a posterior to be meaningful. */
+  elimination_n_min: number;
+  /** Halt at the end of a round whose electable candidates carry HOLES — cells the
+   * loop attempted and got no measurement back from, or a spend or token
+   * ceiling left unbought — instead of electing a winner from a comparison
+   * whose arms ran different cell sets. ``strict`` (default) halts on any
+   * hole; ``off`` disarms, and a selector that can elect on a cut panel then
+   * does. The halt is resumable and the round is not persisted, so a
+   * ``resume`` re-runs it once the bound that cut the cells has room: the
+   * cached candidates replay, the missing cells are re-measured, and the
+   * round decides on a complete panel. A PoBB elimination is NOT a hole (a
+   * rule stopped that arm on evidence) and neither is a classifier-deprecated
+   * sample. */
+  panel_gate: 'strict' | 'off';
+  /** What each arm's lift is read against — member `a` of its `vs_reference`
+   * reading. ``best_so_far`` (default): the round's selected best-so-far
+   * individual, re-scored on the round's panel and paired with the arm on the
+   * cells both measured. ``parents``: the arm's own `parent_ids`, each re-
+   * measured on exactly the cells the arm measured; a crossover child is read
+   * against the better of its parents there, the bar it must clear to have
+   * added anything over what it recombined. An arm with no parent has no
+   * reference. */
+  lift_reference: 'best_so_far' | 'parents';
+  /** Halt after round 0 when the origin's degradation verdict is non-healthy,
+   * instead of optimizing against a broken floor — the common failure while
+   * bringing up a new connector. ``strict`` (default) halts on ``critical``
+   * or ``degraded``; ``critical_only`` halts only on a structurally-broken
+   * origin; ``off`` disarms the gate. The operator overrides knowingly with a
+   * plain ``resume`` — round 0 is already on disk, so the loop skips the gate
+   * and goes straight to L1. */
+  origin_gate: 'strict' | 'critical_only' | 'off';
+  /** Hold every round, before any arm is measured, until the operator answers with
+   * the arms it measures (`submit-arms`). ``off`` (default) never holds.
+   * ``review``: the proposers run, their proposals are drafts, and the
+   * operator keeps any of them by index, adds arms of their own, or both.
+   * ``author``: no proposer runs and every arm is the operator's. An arm of
+   * theirs is an edit of the round's parent — prompt fields, a pipeline
+   * overlay — and is measured and elected like any other. The hold has no
+   * deadline; a pause ends it resumably, and a resume holds again unless an
+   * answer was already banked. */
+  arm_gate: 'off' | 'review' | 'author';
+  /** Allow the per-cycle difficulty ruler to graduate from 1PL (difficulty δ only)
+   * to 2PL (per-sample discrimination aₛ too) when a data-rich, genuinely-
+   * discriminating dataset wins held-out cross-validation. The switch is
+   * gated — cold/non-discriminating datasets stay 1PL — so this only ever
+   * changes the ruler where 2PL provably fits better out-of-sample; it can
+   * never regress a dataset. Off → always 1PL (the slice-2 behaviour). */
+  enable_2pl_graduation: boolean;
+  /** Pin the optimizer's decoding and its route so a re-run reproduces this
+   * campaign's trajectory and can name the host that produced each number.
+   * `None` (default) → every node runs at its own file settings and the
+   * gateway routes per call. An L4 inner cell is one caller among the rest:
+   * its panel's `inner_optimizer_temperature` and its cell seed arrive here. */
+  determinism: DeterminismClamp | null;
+}
+
+/** Improvement-banked round budget: banks a life each round that promotes an arm, loses one */
+export interface LivesConfig {
+  /** Lives a run starts with (a fully-stalling run does exactly this many rounds). */
+  start: number;
+  /** Bank ceiling — lives never exceed this no matter how long the improving streak
+   * runs. */
+  cap: number;
+}
+
+/** Answer a cycle holding at the round-0 origin gate; one not holding clears it on arrival. */
+export interface OriginGateDecisionPayload {
+  campaign_id: string;
+  cycle_id: string;
+  descend: string | null;
+  /** `proceed` into L1 anyway, `rescore` the origin force-fresh, or `abort` the
+   * cycle. */
+  decision: 'rescore' | 'proceed' | 'abort';
+}
+
+/** Ask a running cycle to stop at its next checkpoint; it resumes from there. */
+export interface PauseCyclePayload {
+  campaign_id: string;
+  cycle_id: string;
+  descend: string | null;
+  /** Recorded with the command. */
+  reason: string;
+}
+
+export interface ResolveOriginPayload {
+  draft_id: string;
+  message: string;
+}
+
+/** One resolver turn's outcome: the checklist state it left and the post-apply draft. */
+export interface ResolveOriginResponse {
+  resolution: OriginResolution;
+  draft: DraftCampaignWire;
+}
+
+/** The checklist state ``checkin.json::resolution`` holds, and the last resolver turn beside it. */
+export interface OriginResolution {
+  complete: boolean;
+  provenance: Record<string, 'unset' | 'proposed' | 'confirmed'>;
+  /** Each gated field's current value, by field id. */
+  values: Record<string, unknown>;
+  gaps: FieldGap[];
+  /** Null until a resolver turn ran, and again after a later edit. */
+  last_resolution: OriginLastResolution | null;
+  /** Proposals the last turn left unclicked. */
+  raised: RaisedCommand[];
+  /** Why the last turn came back thin (a paid repair retry); null where it did not. */
+  degraded_cause: string | null;
+}
+
+/** Name a campaign wherever it is named to a human; its id still addresses it. */
+export interface SetCampaignLabelPayload {
+  campaign_id: string;
+  /** `""` restores the dataset-name fallback. */
+  label: string;
+}
+
+/** How many campaigns this account may hold at once, queued launches included; at most the */
+export interface SetConcurrentCyclesPayload {
+  /** The new limit. */
+  max_concurrent_cycles: number;
+}
+
+export interface SetSampleLookaheadPayload {
+  campaign_id: string;
+  cycle_id: string;
+  descend: string | null;
+  /** 1 disarms. */
+  cells: number;
+  /** As deep as the stop rules allow, every round, until pressed off. */
+  auto: boolean;
+}
+
+/** Cut the candidate being scored at its next sample boundary; the round carries on with the rest. */
+export interface SkipSearchpointPayload {
+  campaign_id: string;
+  cycle_id: string;
+  descend: string | null;
+}
+
+/** The draft says what the campaign IS; ``budget`` bounds what THIS launch spends, and no */
+export interface StartCheckinPayload {
+  draft_id: string;
+  budget: Budget;
+  /** Run the diagnostic shape. */
+  diag: boolean;
+}
+
+/** What a Start answers: the job holding its slot, and the cycle it minted. */
+export interface StartCheckinResponse {
+  job_id: string;
+  /** Null while the job is queued: the campaign is minted once it holds a slot. */
+  hop: CycleHop | null;
+}
+
+/** A run of an existing cycle: what bounds it (``budget``, ``step_rounds``) and the shape it */
+export interface StartRunPayload {
+  campaign_id: string;
+  cycle_id: string;
+  descend: string | null;
+  budget: Budget;
+  step_rounds: number | null;
+  mode: RunMode;
+}
+
+/** Let a paused cycle run a bounded number of rounds, then stop again. */
+export interface StepCyclePayload {
+  campaign_id: string;
+  cycle_id: string;
+  descend: string | null;
+  /** Rounds to run. */
+  step_rounds: number;
+}
+
+/** Answer a cycle holding for a round's arms (`optimization.arm_gate`) with arms of its own, */
+export interface SubmitArmsPayload {
+  campaign_id: string;
+  cycle_id: string;
+  descend: string | null;
+  /** Each an edit of the round's parent: `changes_description` and at least one of
+   * `prompt_fields`, `shots`, `pipeline_overlay`. */
+  arms: SubmittedArm[];
+  /** The drafts to measure as proposed, by their index at the hold. */
+  keep: number[];
+}
+
+/** One arm an operator wrote: an EDIT of the round's parent, never a whole individual. */
+export interface SubmittedArm {
+  /** `{node: {field: text}}`: the prompt fields this arm rewrites, each under the
+   * prompt node that declares it; every other one is the parent's. */
+  prompt_fields: Record<string, Record<string, string>>;
+  /** `{node: [sample key]}`: the demo-pool shots this arm sets on each prompt node,
+   * in render order; `[]` clears them, and a node absent keeps the parent's. */
+  shots: Record<string, string[]>;
+  /** `{node: {param: value}}` laid over the parent's pipeline params. */
+  pipeline_overlay: Record<string, Record<string, unknown>>;
+  changes_description: string;
+}
+
+/** Restore an archived campaign to active. */
+export interface UnarchiveCampaignPayload {
+  campaign_id: string;
+  /** Recorded with the command. */
+  reason: string;
+}
+
+/** ``samples`` omitted is the ANSWER, not an absence: the count is derived from the */
+export interface VerifyCandidatePayload {
+  campaign_id: string;
+  cycle_id: string;
+  descend: string | null;
+  candidate_id: string;
+  samples: number | null;
+  strategy: 'random' | 'hard';
+  seed: number | null;
+}
+
 // The coarse run-state axis (domain/phases.py::RunPhase).
 export type RunPhase = 'queued' | 'starting' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal';
 
@@ -4065,7 +4266,71 @@ export type DashboardState = 'init' | 'origin' | 'proposing' | 'scoring' | 'betw
 export type LifecycleFilter = 'active' | 'archived' | 'deleted' | 'all';
 
 // Every kind `POST /commands/{kind}` dispatches (domain/command_kinds.py).
-export type CommandKind = 'archive-campaign' | 'cancel-queued-run' | 'change-run-limits' | 'cleanup-empty-cycles' | 'compact-archive' | 'delete-campaign' | 'delete-cycle' | 'discard-draft' | 'edit-draft-campaign' | 'fork-cycle' | 'grade-bench' | 'mint-campaign' | 'origin-gate-decision' | 'pause-cycle' | 'resolve-origin' | 'set-campaign-label' | 'set-concurrent-cycles' | 'set-sample-lookahead' | 'skip-searchpoint' | 'start-checkin' | 'start-run' | 'step-cycle' | 'submit-arms' | 'unarchive-campaign' | 'verify-candidate';
+export type CommandKind = "archive-campaign" | "cancel-queued-run" | "change-run-limits" | "cleanup-empty-cycles" | "compact-archive" | "delete-campaign" | "delete-cycle" | "discard-draft" | "edit-draft-campaign" | "fork-cycle" | "grade-bench" | "mint-campaign" | "origin-gate-decision" | "pause-cycle" | "resolve-origin" | "set-campaign-label" | "set-concurrent-cycles" | "set-sample-lookahead" | "skip-searchpoint" | "start-checkin" | "start-run" | "step-cycle" | "submit-arms" | "unarchive-campaign" | "verify-candidate";
+
+type DeepPartial<T> = T extends object ? { [P in keyof T]?: DeepPartial<T[P]> } : T;
+// A body as sent: its required keys, every other one omittable at any depth.
+export type CommandSent<T, K extends keyof T> = { [P in K]: DeepPartial<T[P]> } & {
+  [P in Exclude<keyof T, K>]?: DeepPartial<T[P]>;
+};
+
+// Each kind's body IS its payload model (application/commands/payloads.py::PAYLOAD_MODEL_FOR_KIND).
+export interface CommandPayloads {
+  "archive-campaign": CommandSent<ArchiveCampaignPayload, "campaign_id">;
+  "cancel-queued-run": CommandSent<CancelQueuedRunPayload, "job_id">;
+  "change-run-limits": CommandSent<ChangeRunLimitsPayload, "campaign_id" | "cycle_id" | "budget">;
+  "cleanup-empty-cycles": CommandSent<CleanupEmptyCyclesPayload, "campaign_id" | "cycle_id">;
+  "compact-archive": CommandSent<CompactArchivePayload, "mode">;
+  "delete-campaign": CommandSent<DeleteCampaignPayload, "campaign_id">;
+  "delete-cycle": CommandSent<DeleteCyclePayload, "campaign_id" | "cycle_id">;
+  "discard-draft": CommandSent<DiscardDraftPayload, "draft_id">;
+  "edit-draft-campaign": CommandSent<EditDraftCampaignPayload, "draft_id" | "patch">;
+  "fork-cycle": CommandSent<ForkCyclePayload, "campaign_id" | "cycle_id" | "seed">;
+  "grade-bench": CommandSent<GradeBenchPayload, "campaign_id" | "cycle_id">;
+  "mint-campaign": CommandSent<MintCampaignPayload, "dataset_name">;
+  "origin-gate-decision": CommandSent<OriginGateDecisionPayload, "campaign_id" | "cycle_id" | "decision">;
+  "pause-cycle": CommandSent<PauseCyclePayload, "campaign_id" | "cycle_id">;
+  "resolve-origin": CommandSent<ResolveOriginPayload, "draft_id">;
+  "set-campaign-label": CommandSent<SetCampaignLabelPayload, "campaign_id" | "label">;
+  "set-concurrent-cycles": CommandSent<SetConcurrentCyclesPayload, "max_concurrent_cycles">;
+  "set-sample-lookahead": CommandSent<SetSampleLookaheadPayload, "campaign_id" | "cycle_id" | "cells">;
+  "skip-searchpoint": CommandSent<SkipSearchpointPayload, "campaign_id" | "cycle_id">;
+  "start-checkin": CommandSent<StartCheckinPayload, "draft_id">;
+  "start-run": CommandSent<StartRunPayload, "campaign_id" | "cycle_id">;
+  "step-cycle": CommandSent<StepCyclePayload, "campaign_id" | "cycle_id">;
+  "submit-arms": CommandSent<SubmitArmsPayload, "campaign_id" | "cycle_id">;
+  "unarchive-campaign": CommandSent<UnarchiveCampaignPayload, "campaign_id">;
+  "verify-candidate": CommandSent<VerifyCandidatePayload, "campaign_id" | "cycle_id" | "candidate_id">;
+}
+
+// What each kind answers: its route's `response_model` (presentation/api/routers/commands.py).
+export interface CommandResponses {
+  "archive-campaign": CommandAcceptedBody;
+  "cancel-queued-run": CommandAcceptedBody;
+  "change-run-limits": CommandAcceptedBody;
+  "cleanup-empty-cycles": CommandAcceptedBody;
+  "compact-archive": ArchiveReport;
+  "delete-campaign": CommandAcceptedBody;
+  "delete-cycle": CommandAcceptedBody;
+  "discard-draft": CommandAcceptedBody;
+  "edit-draft-campaign": DraftCampaignWire;
+  "fork-cycle": CommandAcceptedBody;
+  "grade-bench": CommandAcceptedBody;
+  "mint-campaign": CommandAcceptedBody;
+  "origin-gate-decision": CommandAcceptedBody;
+  "pause-cycle": CommandAcceptedBody;
+  "resolve-origin": ResolveOriginResponse;
+  "set-campaign-label": CommandAcceptedBody;
+  "set-concurrent-cycles": CommandAcceptedBody;
+  "set-sample-lookahead": CommandAcceptedBody;
+  "skip-searchpoint": CommandAcceptedBody;
+  "start-checkin": StartCheckinResponse;
+  "start-run": CommandAcceptedBody;
+  "step-cycle": CommandAcceptedBody;
+  "submit-arms": CommandAcceptedBody;
+  "unarchive-campaign": CommandAcceptedBody;
+  "verify-candidate": CommandAcceptedBody;
+}
 
 // Why a cycle ended (domain/phases.py::StopReason).
 export type StopReason = 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted';

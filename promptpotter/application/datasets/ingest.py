@@ -44,7 +44,7 @@ from promptpotter.infrastructure.llm.capabilities import refresh_model_capabilit
 from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
 from promptpotter.infrastructure.store.layout import validate_dataset_name
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.shared.errors import NotFoundError
+from promptpotter.shared.errors import ConflictError, NotFoundError
 from promptpotter.shared.identity import CAMPAIGN_CREATE_CAP, require_capability
 
 # Enforced by the web boundary only; the CLI relies on the per-row cap in ``read_tabular``.
@@ -90,11 +90,15 @@ def _column_label_sets(
     }
 
 
-class SlugTakenError(Exception):
+class SlugTakenError(ConflictError):
     def __init__(self, slug: str, suggested: str) -> None:
         self.slug = slug
         self.suggested = suggested
-        super().__init__(f"slug {slug!r} already exists in this tenant's collection")
+        super().__init__(
+            f"A dataset named '{slug}' already exists.",
+            code="slug_collision",
+            details={"slug": slug, "suggested_slug": suggested},
+        )
 
 
 async def ingest_draft(

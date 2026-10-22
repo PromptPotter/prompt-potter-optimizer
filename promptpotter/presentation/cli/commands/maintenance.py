@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import uuid
 
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.commands.payloads import CompactArchivePayload
@@ -83,10 +82,8 @@ async def cmd_compact_archive(args: argparse.Namespace) -> CommandResult:
     payload = CompactArchivePayload.model_validate(
         {"mode": mode, "dataset": dataset, "apply": apply}
     )
-    outcome = await CommandDispatcher(stores).dispatch_compact_archive(
-        CommandCall(payload, uuid.uuid4().hex)
-    )
-    report = outcome.result
+    outcome = await CommandDispatcher(stores).dispatch(CommandCall(payload))
+    report: ArchiveReport = outcome.result
     return CommandResult(
         data=report.model_dump(mode="json"), human=_render(mode, report, dataset=dataset)
     )

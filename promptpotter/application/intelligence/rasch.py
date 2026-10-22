@@ -66,6 +66,10 @@ def _newton_step(
     return np.clip(grad / np.maximum(info, 1e-9), -_MAX_NEWTON_STEP, _MAX_NEWTON_STEP)
 
 
+def _logistic(eta: NDArray[np.float64]) -> NDArray[np.float64]:
+    return 1.0 / (1.0 + np.exp(-np.clip(eta, -50, 50)))
+
+
 @dataclass
 class RaschPosterior:
     """MAP + Laplace-SE for a hierarchical Rasch fit. ``mean(theta) == 0``; ``sigma_*`` / ``mu_delta`` are EB-estimated."""
@@ -130,16 +134,14 @@ def _map_fit(
         old_theta = theta.copy()
         old_delta = delta.copy()
 
-        eta = theta[rows] - delta[cols]
-        p = 1.0 / (1.0 + np.exp(-np.clip(eta, -50, 50)))
+        p = _logistic(theta[rows] - delta[cols])
         w = p * (1.0 - p)
 
         grad_theta = np.bincount(rows, weights=responses - p, minlength=n_c) - inv_var_theta * theta
         info_theta = np.bincount(rows, weights=w, minlength=n_c) + inv_var_theta
         theta = theta + _newton_step(grad_theta, info_theta)
 
-        eta = theta[rows] - delta[cols]
-        p = 1.0 / (1.0 + np.exp(-np.clip(eta, -50, 50)))
+        p = _logistic(theta[rows] - delta[cols])
         w = p * (1.0 - p)
 
         grad_delta = -np.bincount(cols, weights=responses - p, minlength=n_s) - inv_var_delta * (
@@ -160,8 +162,7 @@ def _map_fit(
             converged = True
             break
 
-    eta = theta[rows] - delta[cols]
-    p = 1.0 / (1.0 + np.exp(-np.clip(eta, -50, 50)))
+    p = _logistic(theta[rows] - delta[cols])
     w = p * (1.0 - p)
     info_theta = np.bincount(rows, weights=w, minlength=n_c) + inv_var_theta
     info_delta = np.bincount(cols, weights=w, minlength=n_s) + inv_var_delta
@@ -281,14 +282,14 @@ def _fit_one(
     h_arr = np.fromiter((y for _, _, y in rows), dtype=np.float64)
     theta = 0.0
     for _ in range(max_iter):
-        p = 1.0 / (1.0 + np.exp(-np.clip(a_arr * (theta - d_arr), -50, 50)))
+        p = _logistic(a_arr * (theta - d_arr))
         grad = float(np.sum(a_arr * (h_arr - p))) - inv_var * theta
         info = float(np.sum(a_arr * a_arr * p * (1.0 - p))) + inv_var
         step = float(_newton_step(grad, info))
         theta += step
         if abs(step) < tol:
             break
-    p = 1.0 / (1.0 + np.exp(-np.clip(a_arr * (theta - d_arr), -50, 50)))
+    p = _logistic(a_arr * (theta - d_arr))
     info = float(np.sum(a_arr * a_arr * p * (1.0 - p))) + inv_var
     # Never a pooled φ̄: that makes an arm's SE depend on which arms shared its round.
     var = np.clip(p * (1.0 - p), 1e-6, None)
@@ -325,16 +326,13 @@ def theta_bounds_given_delta(
 
     low, high = fit(0.0) - _FIT_SLACK, fit(1.0) + _FIT_SLACK
 
-    def p_at(theta: NDArray[np.float64], d: NDArray[np.float64], a: NDArray[np.float64]) -> Any:
-        return 1.0 / (1.0 + np.exp(-np.clip(a * (theta - d), -50, 50)))
-
     d, a = (np.array([params[s][k] for s in params], dtype=np.float64) for k in (0, 1))
-    p = p_at(np.clip(d, low, high), d, a)
+    p = _logistic(a * (np.clip(d, low, high) - d))
     info = 1.0 / (_INIT_SIGMA_THETA * _INIT_SIGMA_THETA) + float(np.sum(a * a * p * (1.0 - p)))
     on = [s for s in measured if s in params]
     y = np.fromiter((measured[s] for s in on), dtype=np.float64, count=len(on))
     dm, am = (np.array([params[s][k] for s in on], dtype=np.float64) for k in (0, 1))
-    ends = p_at(np.array([low, high]), dm[:, None], am[:, None])
+    ends = _logistic(am[:, None] * (np.array([low, high]) - dm[:, None]))
     pm = np.clip(y, ends.min(axis=1), ends.max(axis=1))
     misfit = float(np.sum((y - pm) ** 2 / np.clip(pm * (1.0 - pm), 1e-6, None)))
     dof = max(len(params) - 1, 1)
@@ -382,7 +380,7 @@ def fit_rasch_2pl(
         old_theta, old_delta, old_log_a = theta.copy(), delta.copy(), log_a.copy()
         a = np.exp(log_a)
 
-        p = 1.0 / (1.0 + np.exp(-np.clip(a[cols] * (theta[rows] - delta[cols]), -50, 50)))
+        p = _logistic(a[cols] * (theta[rows] - delta[cols]))
         grad_t = (
             np.bincount(rows, weights=a[cols] * (responses - p), minlength=n_c)
             - inv_var_theta * theta
@@ -392,7 +390,7 @@ def fit_rasch_2pl(
         )
         theta = theta + _newton_step(grad_t, info_t)
 
-        p = 1.0 / (1.0 + np.exp(-np.clip(a[cols] * (theta[rows] - delta[cols]), -50, 50)))
+        p = _logistic(a[cols] * (theta[rows] - delta[cols]))
         grad_d = -np.bincount(
             cols, weights=a[cols] * (responses - p), minlength=n_s
         ) - inv_var_delta * (delta - mu_delta)
@@ -402,7 +400,7 @@ def fit_rasch_2pl(
         delta = delta + _newton_step(grad_d, info_d)
 
         eta = a[cols] * (theta[rows] - delta[cols])
-        p = 1.0 / (1.0 + np.exp(-np.clip(eta, -50, 50)))
+        p = _logistic(eta)
         grad_la = (
             np.bincount(cols, weights=(responses - p) * eta, minlength=n_s) - inv_var_a * log_a
         )
@@ -426,7 +424,7 @@ def fit_rasch_2pl(
 
     a = np.exp(log_a)
     eta = a[cols] * (theta[rows] - delta[cols])
-    p = 1.0 / (1.0 + np.exp(-np.clip(eta, -50, 50)))
+    p = _logistic(eta)
     w = p * (1.0 - p)
     info_t = np.bincount(rows, weights=a[cols] ** 2 * w, minlength=n_c) + inv_var_theta
     info_d = np.bincount(cols, weights=a[cols] ** 2 * w, minlength=n_s) + inv_var_delta
@@ -452,8 +450,7 @@ def fit_rasch_2pl(
 
 
 def _logp(y: float, theta: float, delta: float, a: float) -> float:
-    p = 1.0 / (1.0 + np.exp(-float(np.clip(a * (theta - delta), -50, 50))))
-    p = min(max(p, 1e-9), 1.0 - 1e-9)
+    p = min(max(float(_logistic(np.asarray(a * (theta - delta)))), 1e-9), 1.0 - 1e-9)
     return float(y * np.log(p) + (1.0 - y) * np.log(1.0 - p))
 
 

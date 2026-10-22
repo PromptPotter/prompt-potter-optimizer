@@ -247,7 +247,7 @@ class ReadoutProjection(Projection):
                 self._write(f"    draft {idx} ({lineage.source or 'unsourced'}): {said or '-'}")
             if not record.drafts:
                 self._write("    no proposer ran: every arm this round measures is the operator's")
-            self._write("    answer: python -m promptpotter submit-arms --file <arms.yaml>")
+            self._write("    answer: python -m promptpotter submit-arms --arms <arms.yaml>")
 
     def _handle_run_wiring(self, record: RunWiringRecord) -> None:
         if (drift := record.defaults_drift) is not None:

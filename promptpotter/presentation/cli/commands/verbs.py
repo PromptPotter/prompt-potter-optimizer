@@ -3,12 +3,22 @@
 from __future__ import annotations
 
 import argparse
-from typing import get_args
+from pathlib import Path
+from typing import Any, Literal, get_args, get_origin
+
+from pydantic import BaseModel
+from pydantic.fields import FieldInfo
 
 from promptpotter.config.paths import SHARED_CACHE_DIRS
+from promptpotter.domain.command_kinds import (
+    PAYLOAD_IN_DOMAIN,
+    CampaignPayload,
+    CommandKind,
+    CyclePayload,
+)
 from promptpotter.domain.cycle_paths import CyclePath, decode_cycle_path
-from promptpotter.domain.phases import GateDecision
 from promptpotter.domain.results import RescoreCount, VerifyStrategy, rescore_count
+from promptpotter.domain.spend import Budget
 from promptpotter.presentation.cli.parsers import (
     ACTIVE_CAMPAIGN,
     ACTIVE_CYCLE,
@@ -18,6 +28,7 @@ from promptpotter.presentation.cli.parsers import (
     Arg,
     Verb,
 )
+from promptpotter.shared.errors import BadRequestError
 
 
 def _rescore_count_arg(raw: str) -> RescoreCount:
@@ -30,22 +41,18 @@ def _rescore_count_arg(raw: str) -> RescoreCount:
 def _inside_arg(raw: str) -> CyclePath:
     try:
         return decode_cycle_path(raw)
-    except ValueError as exc:
+    except BadRequestError as exc:
         raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
-def _draft_indices_arg(raw: str) -> list[int]:
+def _int_list_arg(raw: str) -> list[int]:
     try:
         return [int(part) for part in raw.split(",") if part.strip()]
     except ValueError as exc:
-        raise argparse.ArgumentTypeError(f"expected draft indices like `0,2`, got {raw!r}") from exc
+        raise argparse.ArgumentTypeError(f"expected indices like `0,2`, got {raw!r}") from exc
 
 
-_TRANSITION_REASON = Arg(
-    "--reason", default="", help="Optional operator-supplied reason for the transition."
-)
-
-VERBS: tuple[Verb, ...] = (
+_WRITTEN_VERBS: tuple[Verb, ...] = (
     Verb(
         "new",
         "new:cmd_new",
@@ -566,141 +573,6 @@ VERBS: tuple[Verb, ...] = (
         ),
     ),
     Verb(
-        "pause",
-        "lifecycle:cmd_pause",
-        help="Ask a running cycle to stop at its next checkpoint (resumable by `resume`). "
-        "Fires the same pause-cycle command the webapp's pause control does, so the "
-        "interrupt is recorded on the cycle's ledger. Defaults to the active cycle.",
-        args=(
-            ACTIVE_CAMPAIGN,
-            ACTIVE_CYCLE,
-            Arg(
-                "--reason",
-                default="",
-                help="Optional operator-supplied reason, recorded with the command.",
-            ),
-        ),
-    ),
-    Verb(
-        "set-limits",
-        "lifecycle:cmd_set_limits",
-        help="Raise or lower an EXISTING cycle's spend / token / round / wall-clock bound — the same "
-        "change-run-limits command the webapp fires. This is how a budget- or round-halted "
-        "cycle is continued: set a higher ceiling, then `resume`. The same flags on `new` / "
-        "`resume` set it as that launch starts. Spend is clamped against your account allowance; read the armed value off the "
-        "dashboard.",
-        args=(ACTIVE_CAMPAIGN, ACTIVE_CYCLE, *BUDGET_AXES),
-    ),
-    Verb(
-        "archive",
-        "lifecycle:cmd_archive",
-        help="Flag a campaign archived — hides from the default sidebar, restorable by "
-        "unarchive. The tree does not move.",
-        args=(CAMPAIGN_ID, _TRANSITION_REASON),
-    ),
-    Verb(
-        "delete",
-        "lifecycle:cmd_delete",
-        help="Destructively remove a campaign (no recovery); --keep-results spares the keepsake. "
-        "Measurements still cache-hit for siblings.",
-        args=(
-            CAMPAIGN_ID,
-            _TRANSITION_REASON,
-            Arg(
-                "--keep-results",
-                dest="keep_results",
-                action="store_true",
-                help="Spare the keepsake tier (manifest + reports + the shallow langfuse loop "
-                "trace); drop only the heavy resume/audit/mirror tiers.",
-            ),
-        ),
-    ),
-    Verb(
-        "unarchive",
-        "lifecycle:cmd_unarchive",
-        help="Restore an archived campaign to 'active'.",
-        args=(CAMPAIGN_ID,),
-    ),
-    Verb(
-        "rename",
-        "lifecycle:cmd_rename",
-        help="Give a campaign an operator name, shown wherever it is named to a human. "
-        "Display only — the campaign id still addresses it. An empty name restores the "
-        "dataset-name fallback.",
-        args=(
-            CAMPAIGN_ID,
-            # Optional, not a positional `''`: PowerShell drops an empty argument before argparse sees it.
-            Arg("label", nargs="?", default="", help="The new name; omit it to clear the name."),
-        ),
-    ),
-    Verb(
-        "skip-searchpoint",
-        "lifecycle:cmd_cycle_verb",
-        help="Cut the candidate currently being scored, at its next sample boundary. The round "
-        "carries on with the rest. Defaults to the active cycle.",
-        args=(ACTIVE_CAMPAIGN, ACTIVE_CYCLE),
-    ),
-    Verb(
-        "submit-arms",
-        "lifecycle:cmd_submit_arms",
-        help="Answer a cycle holding for a round's arms (`optimization.arm_gate`): the arms it "
-        "measures are the ones in --file, the drafts --keep names, or both. Refused where the "
-        "cycle is not holding for arms. Defaults to the active cycle.",
-        args=(
-            Arg(
-                "--file",
-                default=None,
-                metavar="ARMS.YAML",
-                help="A YAML list of arms, each an edit of the round's parent: "
-                "`changes_description` (required), `prompt_fields` ({node: {field: text}}), "
-                "`shots` ({node: [sample key]}; [] clears them), "
-                "`pipeline_overlay` ({node: {param: value}}).",
-            ),
-            Arg(
-                "--keep",
-                type=_draft_indices_arg,
-                default=[],
-                metavar="0,2",
-                help="Drafts to measure as proposed, by the 0-based index the hold lists them "
-                "under. Refused under `arm_gate: author`, where there are none.",
-            ),
-            ACTIVE_CAMPAIGN,
-            ACTIVE_CYCLE,
-        ),
-    ),
-    Verb(
-        "origin-gate",
-        "lifecycle:cmd_origin_gate",
-        help="Answer a cycle holding at the round-0 origin gate — the same origin-gate-decision "
-        "command the webapp modal fires. A run launched without a TTY has no prompt to type "
-        "into, so this is its terminal answer. Defaults to the active cycle.",
-        args=(
-            Arg(
-                "decision",
-                choices=get_args(GateDecision),
-                help="proceed into L1 anyway, rescore the origin force-fresh, or abort the cycle.",
-            ),
-            ACTIVE_CAMPAIGN,
-            ACTIVE_CYCLE,
-        ),
-    ),
-    Verb(
-        "step-cycle",
-        "lifecycle:cmd_step_cycle",
-        help="Let a paused cycle run a bounded number of rounds, then stop again.",
-        args=(
-            ACTIVE_CAMPAIGN,
-            ACTIVE_CYCLE,
-            Arg(
-                "--rounds",
-                dest="rounds",
-                type=int,
-                default=1,
-                help="How many rounds to run (default 1).",
-            ),
-        ),
-    ),
-    Verb(
         "bench",
         "bench:cmd_bench",
         help="Grade the campaign's origin and its selection on the held-out bench rows and bank "
@@ -717,38 +589,6 @@ VERBS: tuple[Verb, ...] = (
                 help="Cycle id (default: the cycle holding the campaign's line).",
             ),
         ),
-    ),
-    Verb(
-        "cleanup-empty-cycles",
-        "lifecycle:cmd_cycle_verb",
-        help="Remove the stub cycles a mint left behind when it never reached round 0.",
-        args=(ACTIVE_CAMPAIGN, ACTIVE_CYCLE),
-    ),
-    Verb(
-        "delete-cycle",
-        "lifecycle:cmd_cycle_verb",
-        help="Remove ONE named stub cycle — the singular of `cleanup-empty-cycles`. Refuses a "
-        "cycle that holds rounds, and refuses one with a live producer (pause it first).",
-        args=(
-            ACTIVE_CAMPAIGN,
-            # REQUIRED here alone: an active-pointer fallback would make the likeliest typo the delete.
-            Arg("--cycle", required=True, help="Cycle id to remove."),
-        ),
-    ),
-    Verb(
-        "cancel-queued",
-        "lifecycle:cmd_cancel_queued",
-        help="Withdraw a launch waiting for a machine slot. A terminal run leaves the queue by "
-        "Ctrl+C; this reaches the ones that cannot, such as a browser launch behind a full box.",
-        args=(Arg("job_id", help="The queued job id, as `machine-status` lists it."),),
-    ),
-    Verb(
-        "discard-draft",
-        "lifecycle:cmd_discard_draft",
-        help="Close an open check-in without minting — the one a `new <file>` that stopped short "
-        "of a complete origin names, or any under the workspace's `drafts/`. Its check-in calls "
-        "stay billed to the workspace.",
-        args=(Arg("draft_id", help="The check-in's id: its directory under `drafts/`."),),
     ),
     Verb(
         "cycles",
@@ -803,11 +643,63 @@ VERBS: tuple[Verb, ...] = (
             Arg("version", help="Its published version — a pin names one, never 'latest'."),
         ),
     ),
-    Verb(
-        "set-concurrent-cycles",
-        "lifecycle:cmd_set_concurrent_cycles",
-        help="How many campaigns this account may hold at once, queued launches included. At most "
-        "the machine's MACHINE_RUN_CAPACITY; an account on the host's key cannot move its own.",
-        args=(Arg("limit", type=int, help="The new limit (1 or more)."),),
-    ),
+)
+
+
+def _field_args(name: str, field: FieldInfo) -> tuple[Arg, ...]:
+    annotation = field.annotation
+    if annotation is Budget:
+        return BUDGET_AXES
+    flag = f"--{name.replace('_', '-')}"
+    spec: dict[str, Any] = {"help": field.description}
+    if annotation is bool:
+        return (Arg(flag, dest=name, action="store_true", **spec),)
+    if get_origin(annotation) is Literal:
+        spec["choices"] = get_args(annotation)
+    elif annotation is int:
+        spec["type"] = int
+    elif get_origin(annotation) is list:
+        (item,) = get_args(annotation)
+        if isinstance(item, type) and issubclass(item, BaseModel):
+            spec |= {"type": Path, "metavar": "FILE.YAML"}
+        else:
+            spec |= {"type": _int_list_arg, "metavar": "0,2"}
+    elif annotation is not str:
+        raise TypeError(f"`{name}` has no terminal spelling: {annotation}")
+    if not field.is_required():
+        return (Arg(flag, dest=name, default=argparse.SUPPRESS, **spec),)
+    if annotation is str:
+        # Optional, so `''` reaches the payload: PowerShell drops an empty argument before argparse sees it.
+        return (Arg(name, nargs="?", default="", **spec),)
+    return (Arg(name, **spec),)
+
+
+def command_verb(kind: CommandKind) -> Verb:
+    """The kind's payload model IS the verb: its docstring the help, its fields the arguments."""
+    model = PAYLOAD_IN_DOMAIN[kind]
+    address: tuple[Arg, ...] = ()
+    if issubclass(model, CyclePayload):
+        cycle = ACTIVE_CYCLE if model.implied_target else Arg("--cycle", required=True)
+        address = (ACTIVE_CAMPAIGN, cycle)
+    elif issubclass(model, CampaignPayload):
+        address = (CAMPAIGN_ID,)
+    fields = (
+        arg
+        for name, field in model.model_fields.items()
+        if name not in CyclePayload.model_fields
+        for arg in _field_args(name, field)
+    )
+    assert kind.cli_verb is not None
+    return Verb(
+        kind.cli_verb,
+        "command:cmd_command",
+        help=" ".join((model.__doc__ or "").split()),
+        args=(*address, *fields),
+    )
+
+
+_WRITTEN = {verb.name for verb in _WRITTEN_VERBS}
+VERBS: tuple[Verb, ...] = (
+    *_WRITTEN_VERBS,
+    *(command_verb(k) for k in CommandKind if k.cli_verb and k.cli_verb not in _WRITTEN),
 )

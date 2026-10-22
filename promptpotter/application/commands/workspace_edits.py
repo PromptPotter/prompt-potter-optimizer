@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, assert_never
 
 from promptpotter.application.commands.dispatcher import Applier
-from promptpotter.application.commands.payloads import (
+from promptpotter.domain.command_kinds import (
     ArchiveCampaignPayload,
     DeleteCampaignPayload,
     UnarchiveCampaignPayload,
@@ -13,10 +13,7 @@ from promptpotter.shared.clock import utcnow_iso
 
 if TYPE_CHECKING:
     from promptpotter.application.commands.dispatcher import CommandDispatcher
-    from promptpotter.application.commands.payloads import (
-        LifecyclePayload,
-        SetCampaignLabelPayload,
-    )
+    from promptpotter.domain.command_kinds import LifecyclePayload, SetCampaignLabelPayload
 
 
 def campaign_lifecycle(dispatcher: CommandDispatcher, payload: LifecyclePayload) -> Applier[object]:

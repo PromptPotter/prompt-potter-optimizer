@@ -53,6 +53,8 @@ from promptpotter.domain.pipeline_overlay import (
     fold_output_contract,
     node_config_items,
     normalize_model_id,
+    permitted_models_from_narrowing,
+    steers_disallowed_model,
 )
 from promptpotter.domain.pipeline_parsing import (
     merge_node_blocks,
@@ -1001,6 +1003,44 @@ def resolve_pipeline_at(stores: Stores, campaign_id: str, at: str) -> CampaignPi
     # An inner searchpoint lives in the sandbox `;in=` names; the tenant tree answers for the OUTER.
     leaf = descend_store(stores, spec.inside)
     return resolve_pipeline_for_campaign(leaf, owned_campaign(leaf, campaign_id), at=spec)
+
+
+class ForkPreviewRequest(StrictModel):
+    pipeline_overlay: dict[str, Any] = Field(
+        description="The `nodes.*.config` overlay the fork would carry, as its `CycleSeed` sends it"
+    )
+
+
+class ForkPreviewResponse(StrictModel):
+    """What `POST /commands/fork-cycle` would decide about this steer, asked without forking."""
+
+    steers_disallowed_model: bool = Field(
+        description=(
+            "The overlay picks a responder the campaign's declared `optimizer_narrowing` never "
+            "sanctioned, or touches a cost lever, which no permitted set can sanction. True means "
+            "the fork is the ADR-0005 babysit act: it needs `campaign.babysit` (404 without it) "
+            "and stamps the branch grade C."
+        )
+    )
+    permitted_models: dict[str, list[str]] = Field(
+        description=(
+            "What the verdict above was compared AGAINST, per node — this campaign's declared "
+            "`optimizer_narrowing[node].param_allowed_values.model`. Served beside the verdict so "
+            "a surface naming the permitted models cannot name a different set than the one that "
+            "decided. A node absent from it sanctions nothing, which is why any model steer there "
+            "counts."
+        )
+    )
+
+
+def fork_preview(stores: Stores, campaign_id: str, overlay: dict[str, Any]) -> ForkPreviewResponse:
+    narrowing = resolve_campaign_config(
+        stores, owned_campaign(stores, campaign_id), None
+    ).optimizer_narrowing
+    return ForkPreviewResponse(
+        steers_disallowed_model=steers_disallowed_model(narrowing, overlay),
+        permitted_models=permitted_models_from_narrowing(narrowing),
+    )
 
 
 class DatasetPipelineResponse(StrictModel):

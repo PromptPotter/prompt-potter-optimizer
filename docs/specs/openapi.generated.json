@@ -167,20 +167,6 @@
         "additionalProperties": false,
         "description": "One time bucket of the Activity pane's three stacked bar charts.",
         "properties": {
-          "bill_is_floor": {
-            "description": "A call in this bucket carries neither a bill nor a rate's price, so `spend_usd` and `rate_priced_usd` understate.",
-            "title": "Bill Is Floor",
-            "type": "boolean"
-          },
-          "rate_priced_usd": {
-            "description": "What our rate table prices the bucket's calls no provider billed. Never spent, and in no series.",
-            "title": "Rate Priced Usd",
-            "type": "number"
-          },
-          "requests": {
-            "title": "Requests",
-            "type": "integer"
-          },
           "series_requests": {
             "additionalProperties": {
               "type": "integer"
@@ -192,7 +178,7 @@
             "additionalProperties": {
               "type": "number"
             },
-            "description": "Billed USD per `series_labels` entry. A call no provider billed adds nothing here and still counts in the other two; one no rate prices either sets `bill_is_floor`.",
+            "description": "Billed USD per `series_labels` entry. A call no provider billed adds nothing here and still counts in the other two; one no rate prices either sets the response's `bill_is_floor`.",
             "title": "Series Spend",
             "type": "object"
           },
@@ -202,29 +188,9 @@
             },
             "title": "Series Tokens",
             "type": "object"
-          },
-          "spend_usd": {
-            "description": "What providers reported they billed.",
-            "title": "Spend Usd",
-            "type": "number"
-          },
-          "tokens": {
-            "title": "Tokens",
-            "type": "integer"
-          },
-          "ts": {
-            "description": "Epoch seconds at the bucket's leading edge",
-            "title": "Ts",
-            "type": "number"
           }
         },
         "required": [
-          "ts",
-          "spend_usd",
-          "rate_priced_usd",
-          "bill_is_floor",
-          "tokens",
-          "requests",
           "series_spend",
           "series_tokens",
           "series_requests"
@@ -325,7 +291,7 @@
         "description": "Time-bucketed spend / requests / tokens over the requested window.",
         "properties": {
           "bill_is_floor": {
-            "description": "The two totals understate: a bucket's `bill_is_floor`, over the window.",
+            "description": "The two totals understate: a call in the window carries neither a bill nor a rate's price.",
             "title": "Bill Is Floor",
             "type": "boolean"
           },
@@ -359,7 +325,7 @@
                 "type": "null"
               }
             ],
-            "description": "`peak_spend_usd`'s twin over a bucket's `requests`.",
+            "description": "`peak_spend_usd`'s twin over a bucket's requests.",
             "title": "Peak Requests"
           },
           "peak_spend_usd": {
@@ -371,7 +337,7 @@
                 "type": "null"
               }
             ],
-            "description": "The tallest bucket's `spend_usd` — the scale the spend bars are drawn against. Null where no bucket was billed anything, so there is no bar to scale.",
+            "description": "The tallest bucket's billed USD — the scale the spend bars are drawn against. Null where no bucket was billed anything, so there is no bar to scale.",
             "title": "Peak Spend Usd"
           },
           "peak_tokens": {
@@ -383,7 +349,7 @@
                 "type": "null"
               }
             ],
-            "description": "`peak_spend_usd`'s twin over a bucket's `tokens`.",
+            "description": "`peak_spend_usd`'s twin over a bucket's tokens.",
             "title": "Peak Tokens"
           },
           "series_labels": {
@@ -394,12 +360,8 @@
             "title": "Series Labels",
             "type": "array"
           },
-          "since": {
-            "title": "Since",
-            "type": "number"
-          },
           "total_rate_priced_usd": {
-            "description": "A bucket's `rate_priced_usd`, over the window. Never spent.",
+            "description": "What our rate table prices the window's calls no provider billed. Never spent, and in no series.",
             "title": "Total Rate Priced Usd",
             "type": "number"
           },
@@ -415,10 +377,6 @@
           "total_tokens": {
             "title": "Total Tokens",
             "type": "integer"
-          },
-          "until": {
-            "title": "Until",
-            "type": "number"
           },
           "window": {
             "enum": [
@@ -439,8 +397,6 @@
         "required": [
           "window",
           "group_by",
-          "since",
-          "until",
           "buckets",
           "series_labels",
           "total_spend_usd",
@@ -454,6 +410,30 @@
           "peak_requests"
         ],
         "title": "ActivityResponse",
+        "type": "object"
+      },
+      "ArchiveCampaignPayload": {
+        "additionalProperties": false,
+        "description": "Flag a campaign archived: hidden from the default listing, restorable by unarchive; the tree\ndoes not move.",
+        "properties": {
+          "campaign_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Campaign Id",
+            "type": "string"
+          },
+          "reason": {
+            "default": "",
+            "description": "Recorded with the command.",
+            "maxLength": 512,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "campaign_id"
+        ],
+        "title": "ArchiveCampaignPayload",
         "type": "object"
       },
       "ArchiveReport": {
@@ -2252,174 +2232,6 @@
         "title": "CampaignConfig",
         "type": "object"
       },
-      "CampaignDetailResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "backend_id": {
-            "default": "",
-            "description": "Backend this campaign optimizes against",
-            "title": "Backend Id",
-            "type": "string"
-          },
-          "backend_type": {
-            "default": "",
-            "description": "Connector KIND this campaign runs against ('termnorm' / 'promptpotter' / …), FROZEN in its declaration's environment at mint. Re-pointing or deleting the dataset dir never changes it: a campaign outlives its dataset dir, and what it RAN is a fact about the campaign.",
-            "title": "Backend Type",
-            "type": "string"
-          },
-          "bench": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/BenchScore"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The headline (`architecture.md` § The bench score is not an optimizer's selection), read off the passes its line's ledgers banked, under the formula the line runs — whichever cycle rebases handed the line to. `status` says where it stands and whether its pass may be asked for; `selected` is null until the line grades its pick. Null where the root config did not resolve — a manifest this build cannot read."
-          },
-          "campaign_id": {
-            "description": "Campaign id ({dataset}__{rand6}) — one RUN of an origin",
-            "title": "Campaign Id",
-            "type": "string"
-          },
-          "campaign_metered_tokens": {
-            "description": "`campaign_metered_usd` in billed tokens, the figure the token ceiling binds.",
-            "title": "Campaign Metered Tokens",
-            "type": "integer"
-          },
-          "campaign_metered_usd": {
-            "description": "What the campaign's money ceiling counts, in its meter: every cycle's own spend once, siblings and deleted cycles included. The number a surface sets beside the campaign's cap.",
-            "title": "Campaign Metered Usd",
-            "type": "number"
-          },
-          "comparison": {
-            "description": "Whether the campaign is a CONTROLLED arm of a head-to-head (its declaration's `compare` purpose, frozen at mint), as one sentence (`domain/campaign.py::comparison_line`): an arm reads no other campaign's measurements, refuses a steer and spends its declared budget; an ordinary campaign optimizes with everything that helps.",
-            "title": "Comparison",
-            "type": "string"
-          },
-          "config": {
-            "$ref": "#/components/schemas/CampaignConfig",
-            "description": "The config the campaign's root runs under: its declaration, made effective."
-          },
-          "created_at": {
-            "description": "ISO 8601 creation timestamp",
-            "title": "Created At",
-            "type": "string"
-          },
-          "dataset_name": {
-            "description": "Dataset this campaign optimizes",
-            "title": "Dataset Name",
-            "type": "string"
-          },
-          "display_name": {
-            "description": "What every surface calls the campaign: its label, else its dataset.",
-            "title": "Display Name",
-            "type": "string"
-          },
-          "id_suffix": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The id's `__xxxxxx` tail while it is all that tells one dataset's campaigns apart; null once the campaign carries a label, or where the id has no tail.",
-            "title": "Id Suffix"
-          },
-          "label": {
-            "default": "",
-            "description": "Operator-supplied campaign label",
-            "title": "Label",
-            "type": "string"
-          },
-          "lifecycle_status": {
-            "$ref": "#/components/schemas/LifecycleStatus",
-            "default": "active",
-            "description": "Operator visibility intent: 'active' (default sidebar), 'archived' (hidden), 'deleted' (soft-marked, data retained)"
-          },
-          "line": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/LineStanding"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The campaign's line: the cycle answering for it now and how that cycle stands — its run state, its standing, its rounds and the budget binding them. Null while the root cycle is not on disk yet. Its `budget_rounds` is null where the root config did not resolve."
-          },
-          "owner_user_id": {
-            "default": "default",
-            "description": "UserId of the operator who minted the campaign",
-            "title": "Owner User Id",
-            "type": "string"
-          },
-          "root_content_hash": {
-            "description": "Content hash of the origin search point",
-            "title": "Root Content Hash",
-            "type": "string"
-          },
-          "root_cycle_id": {
-            "description": "The campaign's root cycle id — the content address of its origin and its run declaration together. Campaigns on one origin under one declaration share it and differ only in the random `campaign_id` suffix, which is what makes them separate RUNS of it; two arms of a head-to-head never share one. The sidebar groups the forest by this key.",
-            "title": "Root Cycle Id",
-            "type": "string"
-          },
-          "runs_with": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/CampaignRunsWith"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "What the ROOT course runs with — a second transport of the answer `GET /campaigns/{id}/pipeline` gives at the root, never a second source. Null when the root pipeline did not resolve. `budget_rounds` is the DECLARED `budget.rounds`; 0 means origin only."
-          },
-          "self_optimization": {
-            "description": "This campaign optimizes the optimizer itself (L4), answered off `backend_type` by the connector registry. The one test a surface draws the 'inner loops' disclosure and the self-optimization panel variants on — never a comparison of `backend_type`.",
-            "title": "Self Optimization",
-            "type": "boolean"
-          },
-          "spend_lifetime": {
-            "$ref": "#/components/schemas/LifetimeSpend",
-            "description": "This campaign's share of `QuotaStatus.spend_lifetime`: every cycle's ledger, forks and forwarded L4 inner spend included, plus spend banked when one of its cycles was deleted. A wider scope than `spend_metered`, which reads the campaign's line alone."
-          },
-          "spend_metered": {
-            "$ref": "#/components/schemas/MeteredSpend",
-            "description": "The campaign's LINE — the root and every cycle a rebase handed it to — in the ceiling's meter, by bucket: the bill, or the search's incurred USD for a controlled arm. Part of `campaign_metered_usd`, which also counts every other cycle."
-          },
-          "updated_at": {
-            "description": "The newest activity on any of the campaign's cycles, `created_at` where none has any. The list is served in this order, newest first.",
-            "title": "Updated At",
-            "type": "string"
-          }
-        },
-        "required": [
-          "campaign_id",
-          "dataset_name",
-          "display_name",
-          "id_suffix",
-          "line",
-          "created_at",
-          "updated_at",
-          "root_cycle_id",
-          "self_optimization",
-          "spend_lifetime",
-          "spend_metered",
-          "campaign_metered_usd",
-          "campaign_metered_tokens",
-          "bench",
-          "runs_with",
-          "comparison",
-          "root_content_hash",
-          "config"
-        ],
-        "title": "CampaignDetailResponse",
-        "type": "object"
-      },
       "CampaignLaunch": {
         "additionalProperties": false,
         "description": "A campaign run: its hop is UNRESOLVED until a fresh mint names the cycle.",
@@ -2708,18 +2520,6 @@
       "CampaignSummary": {
         "additionalProperties": false,
         "properties": {
-          "backend_id": {
-            "default": "",
-            "description": "Backend this campaign optimizes against",
-            "title": "Backend Id",
-            "type": "string"
-          },
-          "backend_type": {
-            "default": "",
-            "description": "Connector KIND this campaign runs against ('termnorm' / 'promptpotter' / …), FROZEN in its declaration's environment at mint. Re-pointing or deleting the dataset dir never changes it: a campaign outlives its dataset dir, and what it RAN is a fact about the campaign.",
-            "title": "Backend Type",
-            "type": "string"
-          },
           "bench": {
             "anyOf": [
               {
@@ -2735,11 +2535,6 @@
             "description": "Campaign id ({dataset}__{rand6}) — one RUN of an origin",
             "title": "Campaign Id",
             "type": "string"
-          },
-          "campaign_metered_tokens": {
-            "description": "`campaign_metered_usd` in billed tokens, the figure the token ceiling binds.",
-            "title": "Campaign Metered Tokens",
-            "type": "integer"
           },
           "campaign_metered_usd": {
             "description": "What the campaign's money ceiling counts, in its meter: every cycle's own spend once, siblings and deleted cycles included. The number a surface sets beside the campaign's cap.",
@@ -2800,12 +2595,6 @@
             ],
             "description": "The campaign's line: the cycle answering for it now and how that cycle stands — its run state, its standing, its rounds and the budget binding them. Null while the root cycle is not on disk yet. Its `budget_rounds` is null where the root config did not resolve."
           },
-          "owner_user_id": {
-            "default": "default",
-            "description": "UserId of the operator who minted the campaign",
-            "title": "Owner User Id",
-            "type": "string"
-          },
           "root_cycle_id": {
             "description": "The campaign's root cycle id — the content address of its origin and its run declaration together. Campaigns on one origin under one declaration share it and differ only in the random `campaign_id` suffix, which is what makes them separate RUNS of it; two arms of a head-to-head never share one. The sidebar groups the forest by this key.",
             "title": "Root Cycle Id",
@@ -2823,7 +2612,7 @@
             "description": "What the ROOT course runs with — a second transport of the answer `GET /campaigns/{id}/pipeline` gives at the root, never a second source. Null when the root pipeline did not resolve. `budget_rounds` is the DECLARED `budget.rounds`; 0 means origin only."
           },
           "self_optimization": {
-            "description": "This campaign optimizes the optimizer itself (L4), answered off `backend_type` by the connector registry. The one test a surface draws the 'inner loops' disclosure and the self-optimization panel variants on — never a comparison of `backend_type`.",
+            "description": "This campaign optimizes the optimizer itself (L4), answered off the connector its declaration froze at mint by the connector registry. The one test a surface draws the 'inner loops' disclosure and the self-optimization panel variants on.",
             "title": "Self Optimization",
             "type": "boolean"
           },
@@ -2854,12 +2643,30 @@
           "spend_lifetime",
           "spend_metered",
           "campaign_metered_usd",
-          "campaign_metered_tokens",
           "bench",
           "runs_with",
           "comparison"
         ],
         "title": "CampaignSummary",
+        "type": "object"
+      },
+      "CancelQueuedRunPayload": {
+        "additionalProperties": false,
+        "description": "Withdraw a launch waiting for a machine slot; nothing ran and nothing was spent.",
+        "properties": {
+          "job_id": {
+            "description": "The queued job id, as `machine-status` lists it.",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "title": "Job Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id"
+        ],
+        "title": "CancelQueuedRunPayload",
         "type": "object"
       },
       "CatchUpLogEntry": {
@@ -3544,9 +3351,85 @@
         "title": "CellsResponse",
         "type": "object"
       },
+      "ChangeRunLimitsPayload": {
+        "additionalProperties": false,
+        "description": "Raise or lower an existing cycle's spend, token, round or wall-clock bound; a budget- or\nround-halted cycle continues by a higher ceiling, then `resume`. Spend is clamped against the\naccount allowance, so read the armed value off the dashboard.",
+        "properties": {
+          "budget": {
+            "$ref": "#/components/schemas/Budget"
+          },
+          "campaign_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Campaign Id",
+            "type": "string"
+          },
+          "cycle_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Cycle Id",
+            "type": "string"
+          },
+          "descend": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Descend"
+          }
+        },
+        "required": [
+          "campaign_id",
+          "cycle_id",
+          "budget"
+        ],
+        "title": "ChangeRunLimitsPayload",
+        "type": "object"
+      },
+      "CleanupEmptyCyclesPayload": {
+        "additionalProperties": false,
+        "description": "Remove the stub cycles a mint left behind when it never reached round 0.",
+        "properties": {
+          "campaign_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Campaign Id",
+            "type": "string"
+          },
+          "cycle_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Cycle Id",
+            "type": "string"
+          },
+          "descend": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Descend"
+          }
+        },
+        "required": [
+          "campaign_id",
+          "cycle_id"
+        ],
+        "title": "CleanupEmptyCyclesPayload",
+        "type": "object"
+      },
       "CommandAcceptedBody": {
         "additionalProperties": false,
-        "description": "The 202 response shape declared in ``api-openapi.yaml``.",
+        "description": "What a command whose applied form answers nothing returns: the record it appended.",
         "properties": {
           "command_id": {
             "description": "Stable id of the appended `CommandRecord`.",
@@ -3560,27 +3443,42 @@
         "title": "CommandAcceptedBody",
         "type": "object"
       },
-      "CommandEnvelope": {
+      "CompactArchivePayload": {
         "additionalProperties": false,
-        "description": "The inbound envelope every command is posted in.",
+        "description": "``apply`` defaults to False on every mode, including the destructive one: a preview is what\nthe operator consents on, so the write has to be asked for rather than defaulted into.",
         "properties": {
-          "kind": {
-            "maxLength": 64,
-            "minLength": 1,
-            "pattern": "^[a-z][a-z0-9-]*$",
-            "title": "Kind",
-            "type": "string"
+          "apply": {
+            "default": false,
+            "title": "Apply",
+            "type": "boolean"
           },
-          "payload": {
-            "additionalProperties": true,
-            "title": "Payload",
-            "type": "object"
+          "dataset": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataset"
+          },
+          "mode": {
+            "enum": [
+              "compact",
+              "restore",
+              "purge-cold"
+            ],
+            "title": "Mode",
+            "type": "string"
           }
         },
         "required": [
-          "kind"
+          "mode"
         ],
-        "title": "CommandEnvelope",
+        "title": "CompactArchivePayload",
         "type": "object"
       },
       "Comparability": {
@@ -4704,7 +4602,7 @@
       },
       "DatasetIndexEntry": {
         "additionalProperties": false,
-        "description": "One row in the dataset registry — backs the Dashboard ``New campaign`` view.\n\nWire shape pinned in ``docs/specs/api-openapi.yaml::DatasetIndexEntry``.",
+        "description": "One row in the dataset registry — backs the Dashboard ``New campaign`` view.",
         "properties": {
           "n_samples": {
             "anyOf": [
@@ -5347,6 +5245,72 @@
         "title": "DegradationHealth",
         "type": "object"
       },
+      "DeleteCampaignPayload": {
+        "additionalProperties": false,
+        "description": "Remove a campaign for good; its measurements still cache-hit for siblings.",
+        "properties": {
+          "campaign_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Campaign Id",
+            "type": "string"
+          },
+          "keep_results": {
+            "default": false,
+            "description": "Spare the keepsake tier (manifest, reports, the shallow loop trace); drop only the resume, audit and mirror tiers.",
+            "title": "Keep Results",
+            "type": "boolean"
+          },
+          "reason": {
+            "default": "",
+            "description": "Recorded with the command.",
+            "maxLength": 512,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "campaign_id"
+        ],
+        "title": "DeleteCampaignPayload",
+        "type": "object"
+      },
+      "DeleteCyclePayload": {
+        "additionalProperties": false,
+        "description": "Remove ONE stub cycle, the singular of `cleanup-empty-cycles`; refused for a cycle holding\nrounds or a live producer (pause it first).",
+        "properties": {
+          "campaign_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Campaign Id",
+            "type": "string"
+          },
+          "cycle_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Cycle Id",
+            "type": "string"
+          },
+          "descend": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Descend"
+          }
+        },
+        "required": [
+          "campaign_id",
+          "cycle_id"
+        ],
+        "title": "DeleteCyclePayload",
+        "type": "object"
+      },
       "DeterminismClamp": {
         "additionalProperties": false,
         "description": "What a campaign PINS on every optimizer call — how the draw is made and which host makes\nit. Applied last, so it beats the node's file config and any per-call override alike.",
@@ -5396,25 +5360,22 @@
         "title": "DeterminismClamp",
         "type": "object"
       },
-      "DiagnosticsRecord": {
-        "description": "A :class:`Diagnostics` on the wire; a key is absent where it would be empty.",
+      "DiscardDraftPayload": {
+        "additionalProperties": false,
+        "description": "Close an open check-in without minting; its check-in calls stay billed to the workspace.",
         "properties": {
-          "step_statuses": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "title": "Step Statuses",
-            "type": "object"
-          },
-          "warnings": {
-            "items": {
-              "$ref": "#/components/schemas/NodeWarningRecord"
-            },
-            "title": "Warnings",
-            "type": "array"
+          "draft_id": {
+            "maxLength": 128,
+            "minLength": 8,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "title": "Draft Id",
+            "type": "string"
           }
         },
-        "title": "DiagnosticsRecord",
+        "required": [
+          "draft_id"
+        ],
+        "title": "DiscardDraftPayload",
         "type": "object"
       },
       "DraftCampaignWire": {
@@ -6239,26 +6200,6 @@
         "title": "EnvironmentReading",
         "type": "object"
       },
-      "ErrorCategory": {
-        "enum": [
-          "CLIENT",
-          "SERVER",
-          "CONNECTION",
-          "PROVIDER_CREDIT",
-          "PROVIDER_THROTTLED",
-          "SPEND_CEILING",
-          "TOKEN_CEILING",
-          "WALL_CLOCK",
-          "PRICE_LIST_UNREACHABLE",
-          "NO_RATE",
-          "PIPELINE",
-          "HALTED",
-          "UNSCOREABLE",
-          "UNKNOWN"
-        ],
-        "title": "ErrorCategory",
-        "type": "string"
-      },
       "EstimatorSpec": {
         "additionalProperties": false,
         "description": "How a lift's two-sided interval and test were taken; the estimate is the mean paired difference.",
@@ -6569,55 +6510,6 @@
           "n_subjects"
         ],
         "title": "EvidenceVariance",
-        "type": "object"
-      },
-      "EvolutionRow": {
-        "description": "Only ``elected`` compares across rows; ``accuracy`` is relative to its round's subset.",
-        "properties": {
-          "accuracy": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Accuracy"
-          },
-          "degraded": {
-            "default": 0,
-            "title": "Degraded",
-            "type": "integer"
-          },
-          "delta": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Delta"
-          },
-          "elected": {
-            "default": false,
-            "title": "Elected",
-            "type": "boolean"
-          },
-          "n_candidates": {
-            "default": 0,
-            "title": "N Candidates",
-            "type": "integer"
-          },
-          "round": {
-            "default": 0,
-            "title": "Round",
-            "type": "integer"
-          }
-        },
-        "title": "EvolutionRow",
         "type": "object"
       },
       "FactorCell": {
@@ -7030,6 +6922,80 @@
         "title": "FlipCounts",
         "type": "object"
       },
+      "ForkCyclePayload": {
+        "additionalProperties": false,
+        "description": "The cut, and the shape of the fork's first run (``mode``) — one act, so one command.\nA parent a producer still holds is paused by the applier once the fork's run is admitted.",
+        "properties": {
+          "campaign_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Campaign Id",
+            "type": "string"
+          },
+          "candidate_id": {
+            "default": "",
+            "maxLength": 128,
+            "title": "Candidate Id",
+            "type": "string"
+          },
+          "cycle_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Cycle Id",
+            "type": "string"
+          },
+          "descend": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Descend"
+          },
+          "keep_rounds": {
+            "default": false,
+            "description": "False (the default) is `operator_steered`: a clean offshoot from the origin, re-scoring the edited searchpoint. True is `operator_rewind` — rounds 0..round-1 are lifted and the fork continues at `round` under the seed's overrides, which is what an 'apply this from here' press means and what the terminal spells `resume --rewind N`.",
+            "title": "Keep Rounds",
+            "type": "boolean"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/RunMode",
+            "default": {
+              "diag": false,
+              "fork_on_divergence": false,
+              "no_divergence_check": false
+            }
+          },
+          "reason": {
+            "default": "",
+            "maxLength": 512,
+            "title": "Reason",
+            "type": "string"
+          },
+          "round": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Round",
+            "type": "integer"
+          },
+          "seed": {
+            "additionalProperties": true,
+            "title": "Seed",
+            "type": "object"
+          }
+        },
+        "required": [
+          "campaign_id",
+          "cycle_id",
+          "seed"
+        ],
+        "title": "ForkCyclePayload",
+        "type": "object"
+      },
       "ForkDirection": {
         "description": "Which side of a cut the run CONTINUES on, the half a cut alone cannot say.",
         "enum": [
@@ -7193,6 +7159,42 @@
           "cut_from"
         ],
         "title": "ForkStamp",
+        "type": "object"
+      },
+      "GradeBenchPayload": {
+        "additionalProperties": false,
+        "description": "The cycle holding its campaign's line: the pass grades the campaign's result, so any other\ncycle is refused.",
+        "properties": {
+          "campaign_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Campaign Id",
+            "type": "string"
+          },
+          "cycle_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Cycle Id",
+            "type": "string"
+          },
+          "descend": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Descend"
+          }
+        },
+        "required": [
+          "campaign_id",
+          "cycle_id"
+        ],
+        "title": "GradeBenchPayload",
         "type": "object"
       },
       "GuardDifference": {
@@ -7599,178 +7601,6 @@
         "title": "IndividualLineage",
         "type": "object"
       },
-      "InnerCellFacts": {
-        "additionalProperties": false,
-        "description": "Carried BESIDE the measurement, never as ``OuterSampleProxies`` fields the formula could score.",
-        "properties": {
-          "bench_final_lift": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The last standing selection's held-out headline less the origin's",
-            "title": "Bench Final Lift"
-          },
-          "bench_origin_level": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The origin's headline on the held-out rows",
-            "title": "Bench Origin Level"
-          },
-          "final_lift": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The last round's level less the origin's; null where `series_reason` names why",
-            "title": "Final Lift"
-          },
-          "mean_parent_level_se": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The mean SE of the levels past the origin: this arm's own half of a paired difference, the shared origin level cancelling; a precision, never a penalty",
-            "title": "Mean Parent Level Se"
-          },
-          "mean_round_delta": {
-            "anyOf": [
-              {
-                "maximum": 4.0,
-                "minimum": -4.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The mean level less the origin's, the last level held forward to the round budget; bounded for plausibility only, logit abilities differing without bound; null where `series_reason` names why",
-            "title": "Mean Round Delta"
-          },
-          "origin_headroom": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The share of origin rows still missed: 0 is a cell no arm can lift, however sharply it reads",
-            "title": "Origin Headroom"
-          },
-          "origin_level": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The origin's θ on the search split's level series; null where `series_reason` names why",
-            "title": "Origin Level"
-          },
-          "peak_lift": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The best round's level less the origin's; null where `series_reason` names why",
-            "title": "Peak Lift"
-          },
-          "round_budget": {
-            "description": "The round budget, never below the rounds it ran",
-            "title": "Round Budget",
-            "type": "integer"
-          },
-          "rounds_ran": {
-            "description": "The rounds the inner cycle closed past its origin",
-            "title": "Rounds Ran",
-            "type": "integer"
-          },
-          "sent_usd": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Dollars sent, cumulative across attempts; reporting only, billed per call and entering no ledger",
-            "title": "Sent Usd"
-          },
-          "series_reason": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Why the level series differences nothing; null where it does",
-            "title": "Series Reason"
-          },
-          "stop_reason": {
-            "$ref": "#/components/schemas/StopReason",
-            "description": "Why the inner cycle stopped"
-          },
-          "tokens": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Tokens used, cumulative across attempts; reporting only, as `sent_usd`",
-            "title": "Tokens"
-          }
-        },
-        "required": [
-          "origin_level",
-          "final_lift",
-          "peak_lift",
-          "mean_round_delta",
-          "series_reason",
-          "mean_parent_level_se",
-          "rounds_ran",
-          "round_budget",
-          "stop_reason",
-          "origin_headroom",
-          "bench_origin_level",
-          "bench_final_lift",
-          "sent_usd",
-          "tokens"
-        ],
-        "title": "InnerCellFacts",
-        "type": "object"
-      },
       "Invalid": {
         "additionalProperties": false,
         "description": "Refused before a cell: the reasons are the arm's own fatal ``validation_failures``.",
@@ -7786,21 +7616,6 @@
         "type": "object"
       },
       "JsonValue": {},
-      "JudgeReadingRecord": {
-        "description": "A :class:`JudgeReading` on the wire; a key is absent where the judge said nothing.",
-        "properties": {
-          "label": {
-            "title": "Label",
-            "type": "string"
-          },
-          "why": {
-            "title": "Why",
-            "type": "string"
-          }
-        },
-        "title": "JudgeReadingRecord",
-        "type": "object"
-      },
       "JudgeSpec": {
         "additionalProperties": false,
         "description": "What a campaign declares to put a judge in its scoring: which judge, on which models.",
@@ -9576,6 +9391,90 @@
         "title": "MetricSpec",
         "type": "object"
       },
+      "MintCampaignPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "budget": {
+            "$ref": "#/components/schemas/Budget",
+            "default": {}
+          },
+          "campaign_config": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CampaignConfig"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A campaign declaration standing in for the dataset's own `dataset.yaml::campaign`; `optimization` still lays over it"
+          },
+          "dataset_name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Dataset Name",
+            "type": "string"
+          },
+          "diag": {
+            "default": false,
+            "description": "Run the diagnostic shape. A fresh mint has no ledger to rewind or replay, so the other run-mode fields are `start-run`'s alone.",
+            "title": "Diag",
+            "type": "boolean"
+          },
+          "optimization": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OptimizationOverrides"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Laid over the dataset's own `optimization` before the mint freezes it; only the fields sent move anything"
+          },
+          "purpose": {
+            "default": {
+              "kind": "optimize"
+            },
+            "description": "`compare` mints a controlled arm of its head-to-head, declared by its first arm; an arm off the declared instrument or budget is refused 409",
+            "discriminator": {
+              "mapping": {
+                "compare": "#/components/schemas/Compare",
+                "optimize": "#/components/schemas/Optimize"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Optimize"
+              },
+              {
+                "$ref": "#/components/schemas/Compare"
+              }
+            ],
+            "title": "Purpose"
+          },
+          "task_text": {
+            "anyOf": [
+              {
+                "maxLength": 16384,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The task description to frame from, in place of the dataset's own",
+            "title": "Task Text"
+          }
+        },
+        "required": [
+          "dataset_name"
+        ],
+        "title": "MintCampaignPayload",
+        "type": "object"
+      },
       "ModelCapability": {
         "additionalProperties": false,
         "description": "What one model accepts and what it costs on one provider, resolved server-side.\n\n`reasoning_efforts` `None` is UNKNOWN, never \"unsupported\": keep the node's declared ladder.\n`reasoning_note` is populated in every arm. Card fields are optional and a third party's claim,\nexcept the two prices, which are the rate table's for `provider`.",
@@ -9714,33 +9613,6 @@
           "optimizer"
         ],
         "type": "string"
-      },
-      "NearMiss": {
-        "description": "A query whose ground truth landed in candidates rank 2-10.",
-        "properties": {
-          "ground_truth": {
-            "default": "",
-            "title": "Ground Truth",
-            "type": "string"
-          },
-          "predicted": {
-            "default": "",
-            "title": "Predicted",
-            "type": "string"
-          },
-          "query": {
-            "default": "",
-            "title": "Query",
-            "type": "string"
-          },
-          "rank": {
-            "default": 0,
-            "title": "Rank",
-            "type": "integer"
-          }
-        },
-        "title": "NearMiss",
-        "type": "object"
       },
       "NestedPipelineRef": {
         "additionalProperties": false,
@@ -10214,45 +10086,6 @@
           }
         },
         "title": "NodeSearchNarrowing",
-        "type": "object"
-      },
-      "NodeWarningRecord": {
-        "description": "A :class:`NodeWarning` on the wire.",
-        "properties": {
-          "code": {
-            "title": "Code",
-            "type": "string"
-          },
-          "details": {
-            "items": {},
-            "title": "Details",
-            "type": "array"
-          },
-          "kind": {
-            "title": "Kind",
-            "type": "string"
-          },
-          "message": {
-            "title": "Message",
-            "type": "string"
-          },
-          "stats": {
-            "additionalProperties": true,
-            "title": "Stats",
-            "type": "object"
-          },
-          "step": {
-            "title": "Step",
-            "type": "string"
-          }
-        },
-        "required": [
-          "step",
-          "code",
-          "message",
-          "kind"
-        ],
-        "title": "NodeWarningRecord",
         "type": "object"
       },
       "NurseOwner": {
@@ -10833,52 +10666,6 @@
         "title": "OptimizerSetup",
         "type": "object"
       },
-      "OptimizerState": {
-        "additionalProperties": false,
-        "description": "The one envelope every optimizer's state rides: its parts by kind beside the bench's population.",
-        "properties": {
-          "manifest": {
-            "title": "Manifest",
-            "type": "string"
-          },
-          "outputs": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/RoundOutput"
-            },
-            "title": "Outputs",
-            "type": "object"
-          },
-          "population": {
-            "items": {
-              "$ref": "#/components/schemas/OptSearchPoint"
-            },
-            "title": "Population",
-            "type": "array"
-          },
-          "prompt_hashes": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "title": "Prompt Hashes",
-            "type": "object"
-          },
-          "slices": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/StateSlice"
-            },
-            "title": "Slices",
-            "type": "object"
-          }
-        },
-        "required": [
-          "manifest",
-          "prompt_hashes",
-          "slices",
-          "outputs"
-        ],
-        "title": "OptimizerState",
-        "type": "object"
-      },
       "OrderConfound": {
         "additionalProperties": false,
         "description": "Run order against outcome. A one-at-a-time comparison confounds the subject with WHEN it\nran — the archive grows between runs, so the ruler and the caches both move with the calendar.",
@@ -10990,6 +10777,53 @@
           "dataset_name"
         ],
         "title": "OriginEntry",
+        "type": "object"
+      },
+      "OriginGateDecisionPayload": {
+        "additionalProperties": false,
+        "description": "Answer a cycle holding at the round-0 origin gate; one not holding clears it on arrival.",
+        "properties": {
+          "campaign_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Campaign Id",
+            "type": "string"
+          },
+          "cycle_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Cycle Id",
+            "type": "string"
+          },
+          "decision": {
+            "description": "`proceed` into L1 anyway, `rescore` the origin force-fresh, or `abort` the cycle.",
+            "enum": [
+              "rescore",
+              "proceed",
+              "abort"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "descend": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Descend"
+          }
+        },
+        "required": [
+          "campaign_id",
+          "cycle_id",
+          "decision"
+        ],
+        "title": "OriginGateDecisionPayload",
         "type": "object"
       },
       "OriginLastResolution": {
@@ -11580,6 +11414,49 @@
         "title": "PauseCause",
         "type": "string"
       },
+      "PauseCyclePayload": {
+        "additionalProperties": false,
+        "description": "Ask a running cycle to stop at its next checkpoint; it resumes from there.",
+        "properties": {
+          "campaign_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Campaign Id",
+            "type": "string"
+          },
+          "cycle_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Cycle Id",
+            "type": "string"
+          },
+          "descend": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Descend"
+          },
+          "reason": {
+            "default": "",
+            "description": "Recorded with the command.",
+            "maxLength": 512,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "campaign_id",
+          "cycle_id"
+        ],
+        "title": "PauseCyclePayload",
+        "type": "object"
+      },
       "PauseReading": {
         "additionalProperties": false,
         "description": "Why a cycle reads paused: its declaration, or an accepted pause the loop has yet to reach.",
@@ -11619,96 +11496,6 @@
           "at"
         ],
         "title": "PauseReading",
-        "type": "object"
-      },
-      "PipelineRecord": {
-        "additionalProperties": true,
-        "description": "The flat ``pipeline_data`` record, as :meth:`PipelineData.wire` writes it.\n\nEach declared key is present only where its field says something; every other key is one of\nthe dataset's own observations.",
-        "properties": {
-          "diagnostics": {
-            "$ref": "#/components/schemas/DiagnosticsRecord"
-          },
-          "error": {
-            "title": "Error",
-            "type": "string"
-          },
-          "inner": {
-            "$ref": "#/components/schemas/InnerCellFacts"
-          },
-          "judge_readings": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/JudgeReadingRecord"
-            },
-            "title": "Judge Readings",
-            "type": "object"
-          },
-          "mean_bench_lift": {
-            "title": "Mean Bench Lift",
-            "type": "number"
-          },
-          "outcome_note": {
-            "title": "Outcome Note",
-            "type": "string"
-          },
-          "question": {
-            "title": "Question",
-            "type": "string"
-          },
-          "reasoning_trace": {
-            "title": "Reasoning Trace",
-            "type": "string"
-          },
-          "result_ranking": {
-            "items": {},
-            "title": "Result Ranking",
-            "type": "array"
-          },
-          "step_phases": {
-            "additionalProperties": {
-              "type": "number"
-            },
-            "title": "Step Phases",
-            "type": "object"
-          },
-          "step_timings": {
-            "additionalProperties": {
-              "type": "number"
-            },
-            "title": "Step Timings",
-            "type": "object"
-          },
-          "step_tokens": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/StepTokenUsage"
-            },
-            "title": "Step Tokens",
-            "type": "object"
-          },
-          "target_prompt_chars": {
-            "title": "Target Prompt Chars",
-            "type": "integer"
-          },
-          "terminal_node": {
-            "title": "Terminal Node",
-            "type": "string"
-          },
-          "total_time": {
-            "title": "Total Time",
-            "type": "number"
-          },
-          "turns": {
-            "items": {
-              "$ref": "#/components/schemas/TurnRecord"
-            },
-            "title": "Turns",
-            "type": "array"
-          },
-          "unworked_s": {
-            "title": "Unworked S",
-            "type": "number"
-          }
-        },
-        "title": "PipelineRecord",
         "type": "object"
       },
       "PipelineView": {
@@ -12495,35 +12282,27 @@
         "title": "ReadingState",
         "type": "string"
       },
-      "RerunComparison": {
-        "description": "What re-measuring a degraded cached cell changed, in the words the tape prints.",
+      "ResolveOriginPayload": {
+        "additionalProperties": false,
         "properties": {
-          "hit_change": {
-            "title": "Hit Change",
+          "draft_id": {
+            "maxLength": 128,
+            "minLength": 8,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "title": "Draft Id",
             "type": "string"
           },
-          "improved": {
-            "title": "Improved",
-            "type": "boolean"
-          },
-          "rank_change": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rank Change"
+          "message": {
+            "default": "",
+            "maxLength": 4000,
+            "title": "Message",
+            "type": "string"
           }
         },
         "required": [
-          "hit_change",
-          "rank_change",
-          "improved"
+          "draft_id"
         ],
-        "title": "RerunComparison",
+        "title": "ResolveOriginPayload",
         "type": "object"
       },
       "ResolveOriginResponse": {
@@ -12675,101 +12454,74 @@
         "title": "RoundAxis",
         "type": "object"
       },
-      "RoundDiagnostics": {
-        "description": "One round's post-scoring diagnostics, computed once and read by every renderer.",
+      "RoundCell": {
+        "additionalProperties": false,
+        "description": "One measured row of a served round, with the mark it reads as.",
         "properties": {
-          "anomalies": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Anomalies",
-            "type": "array"
+          "cached": {
+            "title": "Cached",
+            "type": "boolean"
           },
-          "cross_candidate_diff": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Cross Candidate Diff",
-            "type": "array"
+          "fitness": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fitness"
           },
-          "error_rate": {
-            "default": 0.0,
-            "title": "Error Rate",
-            "type": "number"
+          "ground_truth_text": {
+            "description": "The sample's label as shown.",
+            "title": "Ground Truth Text",
+            "type": "string"
           },
-          "evolution_rows": {
-            "items": {
-              "$ref": "#/components/schemas/EvolutionRow"
-            },
-            "title": "Evolution Rows",
-            "type": "array"
-          },
-          "n_valid": {
-            "default": 0,
-            "title": "N Valid",
+          "position": {
+            "description": "The sample's slot in the bank the cycle drew.",
+            "title": "Position",
             "type": "integer"
           },
-          "near_misses": {
-            "items": {
-              "$ref": "#/components/schemas/NearMiss"
-            },
-            "title": "Near Misses",
-            "type": "array"
+          "predicted": {
+            "title": "Predicted",
+            "type": "string"
           },
-          "rank_buckets": {
-            "additionalProperties": {
-              "type": "integer"
-            },
-            "title": "Rank Buckets",
-            "type": "object"
+          "query": {
+            "title": "Query",
+            "type": "string"
           },
-          "samples": {
-            "items": {
-              "$ref": "#/components/schemas/SampleDiag"
-            },
-            "title": "Samples",
-            "type": "array"
+          "sample_key": {
+            "title": "Sample Key",
+            "type": "string"
           },
-          "top_k_accuracy": {
-            "additionalProperties": {
-              "type": "number"
-            },
-            "title": "Top K Accuracy",
-            "type": "object"
-          },
-          "trend": {
-            "default": "healthy",
+          "status": {
             "enum": [
-              "healthy",
-              "plateau",
-              "ceiling"
+              "HIT",
+              "MISS",
+              "ERR",
+              "UNSC"
             ],
-            "title": "Trend",
+            "title": "Status",
             "type": "string"
-          },
-          "trend_description": {
-            "default": "",
-            "title": "Trend Description",
-            "type": "string"
-          },
-          "warning_rate": {
-            "default": 0.0,
-            "title": "Warning Rate",
-            "type": "number"
           }
         },
-        "title": "RoundDiagnostics",
+        "required": [
+          "position",
+          "sample_key",
+          "status",
+          "cached",
+          "query",
+          "predicted",
+          "ground_truth_text",
+          "fitness"
+        ],
+        "title": "RoundCell",
         "type": "object"
       },
-      "RoundOutput": {
+      "RoundView": {
         "additionalProperties": false,
-        "description": "What ONE round produced, banked on that round; a round whose writer did not run holds ``cls()``, or nothing where it is written first.",
-        "properties": {},
-        "title": "RoundOutput",
-        "type": "object"
-      },
-      "RoundResult": {
-        "description": "A round with its rows, which is the round file itself.",
+        "description": "One closed round as a surface reads it: its arms, their rows and its verdict. What the\nengine banks beside them — folds, diagnostics, optimizer state — stays on the ledger.",
         "properties": {
           "arms": {
             "additionalProperties": {
@@ -12800,36 +12552,16 @@
             "title": "Arms",
             "type": "object"
           },
-          "at_offset": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "At Offset"
-          },
           "cells": {
             "additionalProperties": {
               "items": {
-                "$ref": "#/components/schemas/SheetRow"
+                "$ref": "#/components/schemas/RoundCell"
               },
               "type": "array"
             },
+            "description": "Each arm's rows, a reference re-read on the round's cells included.",
             "title": "Cells",
             "type": "object"
-          },
-          "diagnostics": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RoundDiagnostics"
-              },
-              {
-                "type": "null"
-              }
-            ]
           },
           "election": {
             "anyOf": [
@@ -12846,16 +12578,8 @@
             "items": {
               "type": "integer"
             },
-            "readOnly": true,
             "title": "Fitness Bands",
             "type": "array"
-          },
-          "folds": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/ScoreSummary"
-            },
-            "title": "Folds",
-            "type": "object"
           },
           "headline": {
             "anyOf": [
@@ -12866,79 +12590,30 @@
                 "type": "null"
               }
             ],
-            "description": "The arm the round ENDED on (`election.ended_on`), read: the headline's numbers are its own. Null on a diag round, which elects nothing.",
-            "readOnly": true
-          },
-          "health": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/DegradationHealth"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "optimizer_facts": {
-            "items": {
-              "$ref": "#/components/schemas/OptimizerFact"
-            },
-            "title": "Optimizer Facts",
-            "type": "array"
-          },
-          "optimizer_state": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/OptimizerState"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "overlap": {
-            "$ref": "#/components/schemas/OverlapReading"
-          },
-          "overlap_results": {
-            "additionalProperties": {
-              "items": {
-                "$ref": "#/components/schemas/SheetRow"
-              },
-              "type": "array"
-            },
-            "title": "Overlap Results",
-            "type": "object"
+            "description": "The arm the round ENDED on (`election.ended_on`), read: the headline's numbers are its own. Null on a diag round, which elects nothing."
           },
           "round": {
             "title": "Round",
             "type": "integer"
           },
-          "round_id": {
-            "readOnly": true,
-            "title": "Round Id",
-            "type": "string"
-          },
           "scoreboard": {
-            "description": "`ranked`, served: the ledger's `RoundOutcome` cannot carry a computed field.",
             "items": {
               "$ref": "#/components/schemas/ScoreboardRow"
             },
-            "readOnly": true,
             "title": "Scoreboard",
             "type": "array"
           }
         },
         "required": [
           "round",
-          "folds",
+          "arms",
+          "cells",
           "election",
-          "overlap",
-          "round_id",
           "scoreboard",
           "headline",
           "fitness_bands"
         ],
-        "title": "RoundResult",
+        "title": "RoundView",
         "type": "object"
       },
       "RulerScope": {
@@ -13106,6 +12781,45 @@
           }
         },
         "title": "RunLimits",
+        "type": "object"
+      },
+      "RunMode": {
+        "additionalProperties": false,
+        "description": "The SHAPE a run takes, on the wire and in the runner alike. How far it goes is its ``Budget``.",
+        "properties": {
+          "diag": {
+            "default": false,
+            "description": "The diagnostic shape; a `start-run` of a cycle that finished one runs a counted sibling.",
+            "title": "Diag",
+            "type": "boolean"
+          },
+          "fork_on_divergence": {
+            "default": false,
+            "description": "Branch a sibling cycle where the replay diverges, and run it.",
+            "title": "Fork On Divergence",
+            "type": "boolean"
+          },
+          "from_round": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Rewind in place to this round before running; unset continues the ledger.",
+            "title": "From Round"
+          },
+          "no_divergence_check": {
+            "default": false,
+            "description": "Accept a replay that diverges from the record.",
+            "title": "No Divergence Check",
+            "type": "boolean"
+          }
+        },
+        "title": "RunMode",
         "type": "object"
       },
       "RunPhase": {
@@ -13362,77 +13076,6 @@
         "title": "RuntimeFailure",
         "type": "object"
       },
-      "SampleDiag": {
-        "properties": {
-          "fitness": {
-            "default": 0.0,
-            "title": "Fitness",
-            "type": "number"
-          },
-          "ground_truth": {
-            "default": "",
-            "title": "Ground Truth",
-            "type": "string"
-          },
-          "gt_in_ranked": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Gt In Ranked"
-          },
-          "gt_in_source": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Gt In Source"
-          },
-          "predicted": {
-            "default": "",
-            "title": "Predicted",
-            "type": "string"
-          },
-          "query": {
-            "default": "",
-            "title": "Query",
-            "type": "string"
-          },
-          "rank": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rank"
-          },
-          "terminal_node": {
-            "default": "",
-            "title": "Terminal Node",
-            "type": "string"
-          },
-          "warnings": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Warnings",
-            "type": "array"
-          }
-        },
-        "title": "SampleDiag",
-        "type": "object"
-      },
       "SampleWalk": {
         "additionalProperties": false,
         "description": "The scoring walk of the arm being measured: the axis it DECLARED plus a cursor. Past the\ncursor is declared, never promised — an eliminator can stop the arm before its tail.",
@@ -13466,7 +13109,7 @@
       },
       "ScenarioReading": {
         "additionalProperties": false,
-        "description": "What the mask did to this branch: how far it agrees with the record, and the round it stops.\n\nThe chain ENDS where the two readings part (`mask/scenario.py`), so the pair of winners below is\none round's disagreement — both read at ``first_divergent_round``, or at the branch's last round\nwhere there is none. Reading a mid-chain counterfactual against the branch's final crown instead\nwould compare two different rounds and report the gap between them as a change.\n\n``note`` carries the caveat as a SERVED FACT, the way ``Comparability.note`` does — because the\nhonest limit of a lens is not something a surface can be trusted to remember.",
+        "description": "What the mask did to this branch: how far it agrees with the record, and the round it stops.\n\nThe chain ENDS where the two readings part (`mask/divergence.py`), so the pair of winners below is\none round's disagreement — both read at ``first_divergent_round``, or at the branch's last round\nwhere there is none. Reading a mid-chain counterfactual against the branch's final crown instead\nwould compare two different rounds and report the gap between them as a change.\n\n``note`` carries the caveat as a SERVED FACT, the way ``Comparability.note`` does — because the\nhonest limit of a lens is not something a surface can be trusted to remember.",
         "properties": {
           "first_divergent_round": {
             "anyOf": [
@@ -13533,116 +13176,6 @@
           "note"
         ],
         "title": "ScenarioReading",
-        "type": "object"
-      },
-      "ScoreSummary": {
-        "additionalProperties": false,
-        "description": "An arm's fold of its cells: what it walked, and its level on them.",
-        "properties": {
-          "accuracy": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Accuracy"
-          },
-          "cached": {
-            "title": "Cached",
-            "type": "integer"
-          },
-          "composite_fitness": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Composite Fitness"
-          },
-          "degraded": {
-            "title": "Degraded",
-            "type": "integer"
-          },
-          "deprecated": {
-            "title": "Deprecated",
-            "type": "integer"
-          },
-          "evaluators": {
-            "additionalProperties": {
-              "type": "number"
-            },
-            "title": "Evaluators",
-            "type": "object"
-          },
-          "mean_fitness_ci_hi": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Mean Fitness Ci Hi"
-          },
-          "mean_fitness_ci_lo": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Mean Fitness Ci Lo"
-          },
-          "recall_at": {
-            "additionalProperties": {
-              "type": "number"
-            },
-            "title": "Recall At",
-            "type": "object"
-          },
-          "tokens": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/TokenAccount"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "total": {
-            "title": "Total",
-            "type": "integer"
-          },
-          "walked": {
-            "title": "Walked",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "total",
-          "accuracy",
-          "composite_fitness",
-          "deprecated",
-          "degraded",
-          "recall_at",
-          "walked",
-          "cached",
-          "evaluators",
-          "mean_fitness_ci_lo",
-          "mean_fitness_ci_hi",
-          "tokens"
-        ],
-        "title": "ScoreSummary",
         "type": "object"
       },
       "ScoreboardRow": {
@@ -14655,179 +14188,93 @@
         "title": "ServedRound",
         "type": "object"
       },
-      "SheetRow": {
-        "description": "One row of a :class:`CellSheet` on the wire, as :meth:`GradedCell.wire` writes it.\n\nThe cell's facts beside its grade — ``unscored``, or ``fitness`` and ``objective``, never\nboth. ``position`` is the sample's slot in the bank the cycle drew, ``status`` the served\nround's mark and ``ground_truth_text`` its label as shown\n(``application/cycle_reads.py::served_round``), on every row it serves; a round file\ncarries none of the three.",
+      "SetCampaignLabelPayload": {
+        "additionalProperties": false,
+        "description": "Name a campaign wherever it is named to a human; its id still addresses it.",
         "properties": {
-          "answer": {
-            "title": "Answer",
+          "campaign_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Campaign Id",
             "type": "string"
           },
-          "cached": {
-            "title": "Cached",
-            "type": "boolean"
-          },
-          "config_fundamental_skip": {
-            "title": "Config Fundamental Skip",
-            "type": "boolean"
-          },
-          "degraded_obs_count": {
-            "title": "Degraded Obs Count",
-            "type": "integer"
-          },
-          "degraded_obs_threshold": {
-            "title": "Degraded Obs Threshold",
-            "type": "integer"
-          },
-          "degraded_observed": {
-            "title": "Degraded Observed",
-            "type": "boolean"
-          },
-          "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error"
-          },
-          "error_category": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ErrorCategory"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "fitness": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Fitness"
-          },
-          "ground_truth": {
-            "title": "Ground Truth",
+          "label": {
+            "description": "`\"\"` restores the dataset-name fallback.",
+            "maxLength": 200,
+            "title": "Label",
             "type": "string"
-          },
-          "ground_truth_rank": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ground Truth Rank"
-          },
-          "ground_truth_text": {
-            "title": "Ground Truth Text",
-            "type": "string"
-          },
-          "n_candidates": {
-            "title": "N Candidates",
-            "type": "integer"
-          },
-          "objective": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Objective"
-          },
-          "persistently_degraded": {
-            "title": "Persistently Degraded",
-            "type": "boolean"
-          },
-          "pipeline_data": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/PipelineRecord"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "position": {
-            "title": "Position",
-            "type": "integer"
-          },
-          "predicted": {
-            "title": "Predicted",
-            "type": "string"
-          },
-          "query": {
-            "title": "Query",
-            "type": "string"
-          },
-          "rerun_comparison": {
-            "$ref": "#/components/schemas/RerunComparison"
-          },
-          "retry_of_degraded": {
-            "title": "Retry Of Degraded",
-            "type": "boolean"
-          },
-          "retry_of_deprecated_cache": {
-            "title": "Retry Of Deprecated Cache",
-            "type": "boolean"
-          },
-          "sample_key": {
-            "title": "Sample Key",
-            "type": "string"
-          },
-          "status": {
-            "enum": [
-              "HIT",
-              "MISS",
-              "ERR",
-              "UNSC"
-            ],
-            "title": "Status",
-            "type": "string"
-          },
-          "switched_out": {
-            "title": "Switched Out",
-            "type": "boolean"
-          },
-          "unscored": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Unscored"
           }
         },
         "required": [
-          "sample_key",
-          "query",
-          "ground_truth",
-          "predicted",
-          "error",
-          "pipeline_data",
-          "cached",
-          "position",
-          "status",
-          "ground_truth_text"
+          "campaign_id",
+          "label"
         ],
-        "title": "SheetRow",
+        "title": "SetCampaignLabelPayload",
+        "type": "object"
+      },
+      "SetConcurrentCyclesPayload": {
+        "additionalProperties": false,
+        "description": "How many campaigns this account may hold at once, queued launches included; at most the\nmachine's capacity, and an account on the host's key cannot move its own.",
+        "properties": {
+          "max_concurrent_cycles": {
+            "description": "The new limit.",
+            "minimum": 1.0,
+            "title": "Max Concurrent Cycles",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "max_concurrent_cycles"
+        ],
+        "title": "SetConcurrentCyclesPayload",
+        "type": "object"
+      },
+      "SetSampleLookaheadPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "auto": {
+            "default": false,
+            "description": "As deep as the stop rules allow, every round, until pressed off.",
+            "title": "Auto",
+            "type": "boolean"
+          },
+          "campaign_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Campaign Id",
+            "type": "string"
+          },
+          "cells": {
+            "description": "1 disarms.",
+            "minimum": 1.0,
+            "title": "Cells",
+            "type": "integer"
+          },
+          "cycle_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Cycle Id",
+            "type": "string"
+          },
+          "descend": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Descend"
+          }
+        },
+        "required": [
+          "campaign_id",
+          "cycle_id",
+          "cells"
+        ],
+        "title": "SetSampleLookaheadPayload",
         "type": "object"
       },
       "SiteRecordBody": {
@@ -14915,6 +14362,42 @@
           "records"
         ],
         "title": "SiteRecordsResponse",
+        "type": "object"
+      },
+      "SkipSearchpointPayload": {
+        "additionalProperties": false,
+        "description": "Cut the candidate being scored at its next sample boundary; the round carries on with the rest.",
+        "properties": {
+          "campaign_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Campaign Id",
+            "type": "string"
+          },
+          "cycle_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Cycle Id",
+            "type": "string"
+          },
+          "descend": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Descend"
+          }
+        },
+        "required": [
+          "campaign_id",
+          "cycle_id"
+        ],
+        "title": "SkipSearchpointPayload",
         "type": "object"
       },
       "Skipped": {
@@ -15105,6 +14588,34 @@
         "title": "StartBlock",
         "type": "string"
       },
+      "StartCheckinPayload": {
+        "additionalProperties": false,
+        "description": "The draft says what the campaign IS; ``budget`` bounds what THIS launch spends, and no\ndraft field holds it. Acked at admission, so it rides the draft's ledger into the root cycle.",
+        "properties": {
+          "budget": {
+            "$ref": "#/components/schemas/Budget",
+            "default": {}
+          },
+          "diag": {
+            "default": false,
+            "description": "Run the diagnostic shape.",
+            "title": "Diag",
+            "type": "boolean"
+          },
+          "draft_id": {
+            "maxLength": 128,
+            "minLength": 8,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "title": "Draft Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "draft_id"
+        ],
+        "title": "StartCheckinPayload",
+        "type": "object"
+      },
       "StartCheckinResponse": {
         "additionalProperties": false,
         "description": "What a Start answers: the job holding its slot, and the cycle it minted.",
@@ -15160,11 +14671,65 @@
         "title": "StartPrompt",
         "type": "object"
       },
-      "StateSlice": {
+      "StartRunPayload": {
         "additionalProperties": false,
-        "description": "State a member carries ACROSS rounds; a round's close banks it.",
-        "properties": {},
-        "title": "StateSlice",
+        "description": "A run of an existing cycle: what bounds it (``budget``, ``step_rounds``) and the shape it\ntakes (``mode``).",
+        "properties": {
+          "budget": {
+            "$ref": "#/components/schemas/Budget",
+            "default": {}
+          },
+          "campaign_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Campaign Id",
+            "type": "string"
+          },
+          "cycle_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Cycle Id",
+            "type": "string"
+          },
+          "descend": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Descend"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/RunMode",
+            "default": {
+              "diag": false,
+              "fork_on_divergence": false,
+              "no_divergence_check": false
+            }
+          },
+          "step_rounds": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step Rounds"
+          }
+        },
+        "required": [
+          "campaign_id",
+          "cycle_id"
+        ],
+        "title": "StartRunPayload",
         "type": "object"
       },
       "StatusMark": {
@@ -15183,64 +14748,48 @@
         ],
         "type": "string"
       },
-      "StepTokenUsage": {
-        "description": "Per-LLM-node ``step_tokens`` entry — the WIRE spelling of :class:`TokenAccount`, which\ndeserializes one. A ``NotRequired`` key is absent where the provider surfaced nothing.",
+      "StepCyclePayload": {
+        "additionalProperties": false,
+        "description": "Let a paused cycle run a bounded number of rounds, then stop again.",
         "properties": {
-          "attempts": {
-            "title": "Attempts",
-            "type": "integer"
-          },
-          "cache_read": {
-            "title": "Cache Read",
-            "type": "integer"
-          },
-          "cost_usd": {
-            "title": "Cost Usd",
-            "type": "number"
-          },
-          "estimated": {
-            "title": "Estimated",
-            "type": "boolean"
-          },
-          "finish_reason": {
-            "title": "Finish Reason",
+          "campaign_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Campaign Id",
             "type": "string"
           },
-          "input": {
-            "title": "Input",
-            "type": "integer"
-          },
-          "model": {
-            "title": "Model",
+          "cycle_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Cycle Id",
             "type": "string"
           },
-          "output": {
-            "title": "Output",
+          "descend": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Descend"
+          },
+          "step_rounds": {
+            "default": 1,
+            "description": "Rounds to run.",
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Step Rounds",
             "type": "integer"
-          },
-          "provider": {
-            "title": "Provider",
-            "type": "string"
-          },
-          "rate_priced_usd": {
-            "title": "Rate Priced Usd",
-            "type": "number"
-          },
-          "reasoning": {
-            "title": "Reasoning",
-            "type": "integer"
-          },
-          "served_by": {
-            "title": "Served By",
-            "type": "string"
           }
         },
         "required": [
-          "input",
-          "output",
-          "estimated"
+          "campaign_id",
+          "cycle_id"
         ],
-        "title": "StepTokenUsage",
+        "title": "StepCyclePayload",
         "type": "object"
       },
       "StopReason": {
@@ -15669,6 +15218,109 @@
         "title": "SubjectReading",
         "type": "object"
       },
+      "SubmitArmsPayload": {
+        "additionalProperties": false,
+        "description": "Answer a cycle holding for a round's arms (`optimization.arm_gate`) with arms of its own,\ndrafts kept, or both.",
+        "properties": {
+          "arms": {
+            "description": "Each an edit of the round's parent: `changes_description` and at least one of `prompt_fields`, `shots`, `pipeline_overlay`.",
+            "items": {
+              "$ref": "#/components/schemas/SubmittedArm"
+            },
+            "maxItems": 32,
+            "title": "Arms",
+            "type": "array"
+          },
+          "campaign_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Campaign Id",
+            "type": "string"
+          },
+          "cycle_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Cycle Id",
+            "type": "string"
+          },
+          "descend": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Descend"
+          },
+          "keep": {
+            "description": "The drafts to measure as proposed, by their index at the hold.",
+            "items": {
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "maxItems": 64,
+            "title": "Keep",
+            "type": "array"
+          }
+        },
+        "required": [
+          "campaign_id",
+          "cycle_id"
+        ],
+        "title": "SubmitArmsPayload",
+        "type": "object"
+      },
+      "SubmittedArm": {
+        "additionalProperties": false,
+        "description": "One arm an operator wrote: an EDIT of the round's parent, never a whole individual.",
+        "properties": {
+          "changes_description": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Changes Description",
+            "type": "string"
+          },
+          "pipeline_overlay": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "description": "`{node: {param: value}}` laid over the parent's pipeline params.",
+            "title": "Pipeline Overlay",
+            "type": "object"
+          },
+          "prompt_fields": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "description": "`{node: {field: text}}`: the prompt fields this arm rewrites, each under the prompt node that declares it; every other one is the parent's.",
+            "title": "Prompt Fields",
+            "type": "object"
+          },
+          "shots": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "description": "`{node: [sample key]}`: the demo-pool shots this arm sets on each prompt node, in render order; `[]` clears them, and a node absent keeps the parent's.",
+            "title": "Shots",
+            "type": "object"
+          }
+        },
+        "required": [
+          "changes_description"
+        ],
+        "title": "SubmittedArm",
+        "type": "object"
+      },
       "TermsConsent": {
         "additionalProperties": false,
         "description": "The consent state after an accept, in the fields ``/me`` reports it.",
@@ -15818,43 +15470,28 @@
         "title": "Treatment",
         "type": "object"
       },
-      "TurnRecord": {
-        "additionalProperties": true,
-        "description": "ONE turn of a multi-turn cell, a narrowed projection of an ATIF trajectory ``Step``.",
+      "UnarchiveCampaignPayload": {
+        "additionalProperties": false,
+        "description": "Restore an archived campaign to active.",
         "properties": {
-          "index": {
-            "title": "Index",
-            "type": "integer"
-          },
-          "message": {
-            "title": "Message",
+          "campaign_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Campaign Id",
             "type": "string"
           },
-          "observation": {
-            "title": "Observation",
+          "reason": {
+            "default": "",
+            "description": "Recorded with the command.",
+            "maxLength": 512,
+            "title": "Reason",
             "type": "string"
-          },
-          "reasoning": {
-            "title": "Reasoning",
-            "type": "string"
-          },
-          "source": {
-            "title": "Source",
-            "type": "string"
-          },
-          "step": {
-            "title": "Step",
-            "type": "string"
-          },
-          "tools": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Tools",
-            "type": "array"
           }
         },
-        "title": "TurnRecord",
+        "required": [
+          "campaign_id"
+        ],
+        "title": "UnarchiveCampaignPayload",
         "type": "object"
       },
       "UserSettings": {
@@ -16007,6 +15644,82 @@
           "models"
         ],
         "title": "VendorModels",
+        "type": "object"
+      },
+      "VerifyCandidatePayload": {
+        "additionalProperties": false,
+        "description": "``samples`` omitted is the ANSWER, not an absence: the count is derived from the\nper-candidate round budget and the rounds run since this cycle's last verification\n(``application/diagnostics/verify.py::derive_verify_samples``). A larger explicit count is\nrefused, naming the budget — which is what keeps one click on a million-row dataset from being\na million-cell bill.\n\nAddressed as the ``evidence`` read addresses a searchpoint — cycle, descent, ``candidate_id``\n— so an L4 inner candidate is as reachable as a top-level one.",
+        "properties": {
+          "campaign_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Campaign Id",
+            "type": "string"
+          },
+          "candidate_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Candidate Id",
+            "type": "string"
+          },
+          "cycle_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Cycle Id",
+            "type": "string"
+          },
+          "descend": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Descend"
+          },
+          "samples": {
+            "anyOf": [
+              {
+                "maximum": 10000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Samples"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed"
+          },
+          "strategy": {
+            "default": "random",
+            "enum": [
+              "random",
+              "hard"
+            ],
+            "title": "Strategy",
+            "type": "string"
+          }
+        },
+        "required": [
+          "campaign_id",
+          "cycle_id",
+          "candidate_id"
+        ],
+        "title": "VerifyCandidatePayload",
         "type": "object"
       },
       "VerifyPassProgress": {
@@ -16407,7 +16120,7 @@
     }
   },
   "info": {
-    "description": "GENERATED — do not edit. Regenerate with `python scripts/build_openapi.py`.\n\nEvery operation the running app serves, derived from the FastAPI routers. The\nhand-written command contract is `api-openapi.yaml`; it is schema-first and\nmay declare operations that are not wired yet, so the two documents are expected\nto differ. This one describes reality.\n",
+    "description": "GENERATED — do not edit. Regenerate with `python scripts/build_specs.py`.\n\nEvery operation the running app serves, derived from the FastAPI routers and the\npayload and response models they declare: a command kind is its payload model, so\nthis document IS the command contract.\n",
     "title": "PromptPotter Optimizer",
     "version": "generated"
   },
@@ -16881,49 +16594,6 @@
         ]
       }
     },
-    "/api/v1/campaigns/{campaign_id}": {
-      "get": {
-        "description": "Campaign manifest detail. 404 on cross-user reads.",
-        "operationId": "get_campaign_api_v1_campaigns__campaign_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "campaign_id",
-            "required": true,
-            "schema": {
-              "title": "Campaign Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CampaignDetailResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Campaign",
-        "tags": [
-          "Campaigns"
-        ]
-      }
-    },
     "/api/v1/campaigns/{campaign_id}/config-map": {
       "get": {
         "description": "One campaign's knob coupling and provenance map: what moves which estimand, what overwrites what, which knobs collide.\n\nRead over the config its root runs under; 404 on cross-user reads.",
@@ -17382,7 +17052,7 @@
     },
     "/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/rounds/{round_num}": {
       "get": {
-        "description": "One closed round, whole: its last close and the rows it names, each carrying its mark as ``status``.\n\nA fork answers for the rounds it inherited; a round that does not stand closed answers 404.\n``at`` is the dashboard route's: the round as it stood at that line of the cycle's own ledger.",
+        "description": "One closed round: its last close's arms and verdict, and the rows it names, each carrying its mark as ``status``.\n\nA fork answers for the rounds it inherited; a round that does not stand closed answers 404.\n``at`` is the dashboard route's: the round as it stood at that line of the cycle's own ledger.",
         "operationId": "get_cycle_round_api_v1_campaigns__campaign_id__cycles__cycle_id__rounds__round_num__get",
         "parameters": [
           {
@@ -17451,7 +17121,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RoundResult"
+                  "$ref": "#/components/schemas/RoundView"
                 }
               }
             },
@@ -17843,6 +17513,278 @@
         ]
       }
     },
+    "/api/v1/commands/archive-campaign": {
+      "post": {
+        "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
+        "operationId": "archive_campaign_api_v1_commands_archive_campaign_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArchiveCampaignPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Archive Campaign",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
+    "/api/v1/commands/cancel-queued-run": {
+      "post": {
+        "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
+        "operationId": "cancel_queued_run_api_v1_commands_cancel_queued_run_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CancelQueuedRunPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Queued Run",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
+    "/api/v1/commands/change-run-limits": {
+      "post": {
+        "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
+        "operationId": "change_run_limits_api_v1_commands_change_run_limits_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Expected-Version",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Expected-Version"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeRunLimitsPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Change Run Limits",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
+    "/api/v1/commands/cleanup-empty-cycles": {
+      "post": {
+        "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
+        "operationId": "cleanup_empty_cycles_api_v1_commands_cleanup_empty_cycles_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Expected-Version",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Expected-Version"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CleanupEmptyCyclesPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cleanup Empty Cycles",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
     "/api/v1/commands/compact-archive": {
       "post": {
         "description": "Compact, restore or purge the measurement archive's cold store; a preview and its apply answer in one shape.",
@@ -17869,7 +17811,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CommandEnvelope"
+                "$ref": "#/components/schemas/CompactArchivePayload"
               }
             }
           },
@@ -17903,6 +17845,202 @@
         ]
       }
     },
+    "/api/v1/commands/delete-campaign": {
+      "post": {
+        "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
+        "operationId": "delete_campaign_api_v1_commands_delete_campaign_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteCampaignPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Campaign",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
+    "/api/v1/commands/delete-cycle": {
+      "post": {
+        "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
+        "operationId": "delete_cycle_api_v1_commands_delete_cycle_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Expected-Version",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Expected-Version"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteCyclePayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Cycle",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
+    "/api/v1/commands/discard-draft": {
+      "post": {
+        "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
+        "operationId": "discard_draft_api_v1_commands_discard_draft_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiscardDraftPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Discard Draft",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
     "/api/v1/commands/edit-draft-campaign": {
       "post": {
         "description": "Sparse-patch a `DraftCampaign` and return its full post-mutation shape.",
@@ -17929,7 +18067,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CommandEnvelope"
+                "$ref": "#/components/schemas/EditDraftCampaignPayload"
               }
             }
           },
@@ -17963,6 +18101,370 @@
         ]
       }
     },
+    "/api/v1/commands/fork-cycle": {
+      "post": {
+        "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
+        "operationId": "fork_cycle_api_v1_commands_fork_cycle_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Expected-Version",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Expected-Version"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForkCyclePayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Fork Cycle",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
+    "/api/v1/commands/grade-bench": {
+      "post": {
+        "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
+        "operationId": "grade_bench_api_v1_commands_grade_bench_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Expected-Version",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Expected-Version"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GradeBenchPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Grade Bench",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
+    "/api/v1/commands/mint-campaign": {
+      "post": {
+        "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
+        "operationId": "mint_campaign_api_v1_commands_mint_campaign_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MintCampaignPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mint Campaign",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
+    "/api/v1/commands/origin-gate-decision": {
+      "post": {
+        "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
+        "operationId": "origin_gate_decision_api_v1_commands_origin_gate_decision_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Expected-Version",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Expected-Version"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OriginGateDecisionPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Origin Gate Decision",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
+    "/api/v1/commands/pause-cycle": {
+      "post": {
+        "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
+        "operationId": "pause_cycle_api_v1_commands_pause_cycle_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Expected-Version",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Expected-Version"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PauseCyclePayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Pause Cycle",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
     "/api/v1/commands/resolve-origin": {
       "post": {
         "description": "Run one origin-resolver turn against a draft, synchronously, and return ``{resolution, draft}``.",
@@ -17989,7 +18491,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CommandEnvelope"
+                "$ref": "#/components/schemas/ResolveOriginPayload"
               }
             }
           },
@@ -18023,6 +18525,278 @@
         ]
       }
     },
+    "/api/v1/commands/set-campaign-label": {
+      "post": {
+        "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
+        "operationId": "set_campaign_label_api_v1_commands_set_campaign_label_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetCampaignLabelPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Campaign Label",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
+    "/api/v1/commands/set-concurrent-cycles": {
+      "post": {
+        "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
+        "operationId": "set_concurrent_cycles_api_v1_commands_set_concurrent_cycles_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetConcurrentCyclesPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Concurrent Cycles",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
+    "/api/v1/commands/set-sample-lookahead": {
+      "post": {
+        "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
+        "operationId": "set_sample_lookahead_api_v1_commands_set_sample_lookahead_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Expected-Version",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Expected-Version"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetSampleLookaheadPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Sample Lookahead",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
+    "/api/v1/commands/skip-searchpoint": {
+      "post": {
+        "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
+        "operationId": "skip_searchpoint_api_v1_commands_skip_searchpoint_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Expected-Version",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Expected-Version"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkipSearchpointPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Skip Searchpoint",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
     "/api/v1/commands/start-checkin": {
       "post": {
         "description": "Mint the draft's campaign and root cycle, close the draft and detach the loop.\n\nAn incomplete origin answers 422 and the draft stays open.",
@@ -18049,7 +18823,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CommandEnvelope"
+                "$ref": "#/components/schemas/StartCheckinPayload"
               }
             }
           },
@@ -18083,20 +18857,25 @@
         ]
       }
     },
-    "/api/v1/commands/{kind}": {
+    "/api/v1/commands/start-run": {
       "post": {
-        "description": "The closed-set command surface: every wired kind validates against its declared schema, then dispatches.",
-        "operationId": "post_command_api_v1_commands__kind__post",
+        "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
+        "operationId": "start_run_api_v1_commands_start_run_post",
         "parameters": [
           {
-            "in": "path",
-            "name": "kind",
-            "required": true,
+            "in": "header",
+            "name": "Expected-Version",
+            "required": false,
             "schema": {
-              "maxLength": 64,
-              "pattern": "^[a-z][a-z0-9-]*$",
-              "title": "Kind",
-              "type": "string"
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Expected-Version"
             }
           },
           {
@@ -18114,29 +18893,13 @@
               ],
               "title": "Idempotency-Key"
             }
-          },
-          {
-            "in": "header",
-            "name": "Expected-Version",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Expected-Version"
-            }
           }
         ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CommandEnvelope"
+                "$ref": "#/components/schemas/StartRunPayload"
               }
             }
           },
@@ -18164,7 +18927,295 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Post Command",
+        "summary": "Start Run",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
+    "/api/v1/commands/step-cycle": {
+      "post": {
+        "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
+        "operationId": "step_cycle_api_v1_commands_step_cycle_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Expected-Version",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Expected-Version"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StepCyclePayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Step Cycle",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
+    "/api/v1/commands/submit-arms": {
+      "post": {
+        "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
+        "operationId": "submit_arms_api_v1_commands_submit_arms_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Expected-Version",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Expected-Version"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitArmsPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Submit Arms",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
+    "/api/v1/commands/unarchive-campaign": {
+      "post": {
+        "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
+        "operationId": "unarchive_campaign_api_v1_commands_unarchive_campaign_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnarchiveCampaignPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Unarchive Campaign",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
+    "/api/v1/commands/verify-candidate": {
+      "post": {
+        "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
+        "operationId": "verify_candidate_api_v1_commands_verify_candidate_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Expected-Version",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Expected-Version"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyCandidatePayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Verify Candidate",
         "tags": [
           "Commands"
         ]

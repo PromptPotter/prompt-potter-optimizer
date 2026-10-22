@@ -4,25 +4,25 @@ import importlib
 import inspect
 import uuid
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, assert_never, cast
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, assert_never
 
 from promptpotter.application.commands.payloads import (
     KIND_OF_PAYLOAD,
     CommandAcceptedBody,
-    CompactArchivePayload,
-    DeleteCyclePayload,
     DraftPayload,
-    LifecyclePayload,
-    SetCampaignLabelPayload,
-    WorkspacePayload,
+    EditDraftCampaignPayload,
+    ResolveOriginPayload,
+    StartCheckinPayload,
 )
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.domain.campaign import Compare, Optimize
 from promptpotter.domain.command_kinds import (
+    CampaignPayload,
     CommandKind,
     CommandPayload,
     CyclePayload,
+    DeleteCyclePayload,
     PauseCyclePayload,
 )
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, decode_cycle_path
@@ -43,17 +43,11 @@ from promptpotter.infrastructure.store.stores import (
     owned_draft_data,
     resolve_cycle_path,
 )
-from promptpotter.shared.errors import (
-    BadRequestError,
-    ConflictError,
-    NotFoundError,
-    PayloadInvalidError,
-)
+from promptpotter.shared.errors import ConflictError, NotFoundError, PayloadInvalidError
 from promptpotter.shared.identity import acting_principal, require_capability
 
 if TYPE_CHECKING:
     from promptpotter.application.jobs.launcher.launch import Inline
-    from promptpotter.application.maintenance.archive_maintenance import ArchiveReport
     from promptpotter.domain.campaign import Campaign
     from promptpotter.domain.phases import RunState
 
@@ -67,6 +61,7 @@ class RejectedError(Exception):
 class _IdempotentMatch(FrozenModel):
     command_id: str
     offset: int
+    ack: CommandAckStatus
 
 
 def _find_idempotent_command(
@@ -82,7 +77,9 @@ def _find_idempotent_command(
         elif isinstance(record, CommandAckRecord) and record.status != "rejected":
             at = keyed.get(record.command_id)
             if at is not None:
-                applied = _IdempotentMatch(command_id=record.command_id, offset=at)
+                applied = _IdempotentMatch(
+                    command_id=record.command_id, offset=at, ack=record.status
+                )
     return applied
 
 
@@ -91,8 +88,10 @@ _HANDLER_PACKAGE = "promptpotter.application.commands"
 
 @dataclass(frozen=True, slots=True)
 class CommandCall[P: CommandPayload]:
+    """A remote caller passes the key it retries under; every other caller sends once."""
+
     payload: P
-    idempotency_key: str
+    idempotency_key: str = field(default_factory=lambda: uuid.uuid4().hex)
 
     @property
     def kind(self) -> CommandKind:
@@ -153,6 +152,7 @@ def refused_on_an_arm(campaign: Campaign) -> Applier[object] | None:
 class CommandOutcome[R]:
     accepted: CommandAcceptedBody
     result: R
+    ack: CommandAckStatus
 
 
 class CommandDispatcher:
@@ -185,15 +185,28 @@ class CommandDispatcher:
         )
         return handler(self, call.payload, *target)
 
-    async def dispatch_campaign_command(
-        self, call: CommandCall[LifecyclePayload | SetCampaignLabelPayload]
-    ) -> CommandOutcome[object]:
+    async def dispatch(
+        self, call: CommandCall[Any], *, expected_version: int | None = None
+    ) -> CommandOutcome[Any]:
+        """The payload's address base IS its target ledger; ``expected_version`` binds a cycle's."""
+        match call.payload:
+            case CyclePayload():
+                return await self._on_cycle(call, expected_version=expected_version)
+            case CampaignPayload():
+                return await self._on_campaign(call)
+            case EditDraftCampaignPayload() | ResolveOriginPayload() | StartCheckinPayload():
+                return await self._on_draft(call)
+            case _:
+                ledger = CycleEventLog.open_workspace(self.stores.base_dir)
+                return await self._record_and_apply(ledger, call, self._applier(call))
+
+    async def _on_campaign(self, call: CommandCall[CampaignPayload]) -> CommandOutcome[object]:
         owned_campaign(self.stores, call.payload.campaign_id)
         # The WORKSPACE ledger: `archive` MOVES the campaign tree and `delete` REMOVES it.
         ledger = CycleEventLog.open_workspace(self.stores.base_dir)
         return await self._record_and_apply(ledger, call, self._applier(call))
 
-    async def dispatch_cycle_command(
+    async def _on_cycle(
         self,
         call: CommandCall[CyclePayload],
         *,
@@ -201,10 +214,7 @@ class CommandDispatcher:
     ) -> CommandOutcome[object]:
         payload = call.payload
         hop = CycleHop(campaign_id=payload.campaign_id, cycle_id=payload.cycle_id)
-        try:
-            tail = decode_cycle_path(payload.descend or "")
-        except ValueError as exc:
-            raise BadRequestError(str(exc)) from exc
+        tail = decode_cycle_path(payload.descend)
         if tail and payload.inner_refusal is not None:
             raise PayloadInvalidError(payload.inner_refusal, code="inner_cycle_unaddressed")
         leaf_stores, leaf = resolve_cycle_path(self.stores, (hop, *tail))
@@ -214,9 +224,7 @@ class CommandDispatcher:
             )
             return await CommandDispatcher(
                 leaf_stores, job_registry=self._attached, inline=self.inline
-            ).dispatch_cycle_command(
-                CommandCall(inner, call.idempotency_key), expected_version=expected_version
-            )
+            )._on_cycle(CommandCall(inner, call.idempotency_key), expected_version=expected_version)
         campaign_id, cycle_id = hop.campaign_id, hop.cycle_id
         campaign = owned_campaign(self.stores, campaign_id)
         cycle_dir = self.stores.campaigns.cycle_dir(hop)
@@ -244,23 +252,7 @@ class CommandDispatcher:
             )
         return await self._record_and_apply(ledger, call, self._applier(call, campaign, hop))
 
-    async def dispatch_compact_archive(
-        self, call: CommandCall[CompactArchivePayload]
-    ) -> CommandOutcome[ArchiveReport]:
-        return cast("CommandOutcome[ArchiveReport]", await self._dispatch_on_workspace(call))
-
-    async def dispatch_workspace_command(
-        self, call: CommandCall[WorkspacePayload]
-    ) -> CommandOutcome[object]:
-        return await self._dispatch_on_workspace(call)
-
-    async def _dispatch_on_workspace(self, call: CommandCall[Any]) -> CommandOutcome[Any]:
-        ledger = CycleEventLog.open_workspace(self.stores.base_dir)
-        return await self._record_and_apply(ledger, call, self._applier(call))
-
-    async def dispatch_draft_command[P: DraftPayload](
-        self, call: CommandCall[P]
-    ) -> CommandOutcome[Any]:
+    async def _on_draft(self, call: CommandCall[DraftPayload]) -> CommandOutcome[Any]:
         # Under the draft's claim, which a Start holds until its mint closed: no command lands inside
         # a mint or writes a minted draft back. Owned first, so another user's held claim says nothing.
         owned_draft_data(self.stores, call.payload.draft_id)
@@ -289,6 +281,7 @@ class CommandDispatcher:
                 return CommandOutcome(
                     accepted=CommandAcceptedBody(command_id=existing.command_id),
                     result=applier.replay(),
+                    ack=existing.ack,
                 )
 
         command_id = str(uuid.uuid4())
@@ -331,8 +324,7 @@ class CommandDispatcher:
             )
 
         return CommandOutcome(
-            accepted=CommandAcceptedBody(command_id=command_id),
-            result=applied[0],
+            accepted=CommandAcceptedBody(command_id=command_id), result=applied[0], ack=ack_status
         )
 
     def pause_superseded(self, parent: CycleHop, by: CycleHop) -> None:

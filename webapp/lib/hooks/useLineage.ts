@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import { postCleanupEmpty } from "@/lib/api";
+import { postCommand } from "@/lib/api";
 import type { CourseNode } from "@/lib/api";
 import {
   primaryMetric,
@@ -157,7 +157,7 @@ export function useLineage({
     confirm: async () => {
       const rootId = tree?.id;
       if (!campaignId || !rootId) return;
-      await cmd.run("cleanup-empty-cycles", () => postCleanupEmpty([{ campaignId, cycleId: rootId }]), () => {
+      await cmd.run("cleanup-empty-cycles", () => postCommand("cleanup-empty-cycles", { campaign_id: campaignId, cycle_id: rootId }), () => {
         setCleanupAcked(true);
         setCleanupOpen(false);
       });

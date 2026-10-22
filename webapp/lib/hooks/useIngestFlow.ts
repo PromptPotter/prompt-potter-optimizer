@@ -8,12 +8,9 @@ import {
   postDraftFromDataset,
   postDraftFromOrigin,
   getDraft,
-  postDiscardDraft,
-  postEditDraftCampaign,
+  postCommand,
   postIngestDataset,
-  postStartCheckin,
   postBuildCandidateLibraryFromColumn,
-  postResolveOrigin,
   postUploadCandidateLibrary,
   type DatasetIndexEntry,
   type DraftCampaignWire,
@@ -111,7 +108,7 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
     let degradedCause: string | null = null;
     let recap = "";
     try {
-      const r = await postResolveOrigin(draft.draft_id);
+      const r = await postCommand("resolve-origin", { draft_id: draft.draft_id });
       resolved = r.draft;
       resolution = r.resolution.last_resolution;
       raised = r.resolution.raised;
@@ -263,7 +260,10 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
     echo(text);
     let updated = draft;
     try {
-      updated = await postEditDraftCampaign(draft.draft_id, { raw_task_description: text });
+      updated = await postCommand("edit-draft-campaign", {
+        draft_id: draft.draft_id,
+        patch: { raw_task_description: text },
+      });
     } catch (e) {
       sayError(e);
       setPhase({ stage: "awaiting-context", draft });
@@ -294,7 +294,9 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
 
   const applyPatch = (patch: DraftPatch) => {
     if (phase.stage !== "ready") return;
-    void mutateDraft(() => postEditDraftCampaign(phase.draft.draft_id, patch));
+    void mutateDraft(() =>
+      postCommand("edit-draft-campaign", { draft_id: phase.draft.draft_id, patch }),
+    );
   };
 
   const uploadCandidateLibrary = async (file: File) => {
@@ -327,7 +329,8 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
       while (pendingDraftWrites.current.size > 0) {
         await Promise.allSettled([...pendingDraftWrites.current]);
       }
-      const r = await postStartCheckin(phase.draft.draft_id, limits);
+      // Sparse, so the `CommandRecord` shows what the operator declared.
+      const r = await postCommand("start-checkin", { draft_id: phase.draft.draft_id, ...limits });
       invalidateReads("drafts");
       setPhase({ stage: "idle" });
       // No hop while queued: the campaign is minted when a machine slot frees.
@@ -348,7 +351,7 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
   const discardDraft = async (draftId: string) => {
     if (busy) return;
     try {
-      await postDiscardDraft(draftId);
+      await postCommand("discard-draft", { draft_id: draftId });
     } catch (e) {
       sayError(e);
       return;
