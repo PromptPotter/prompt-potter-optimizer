@@ -380,10 +380,10 @@ an entry point, in-process, so it never touches the inbound credential.
   `provider: groq` in any `datasets/*/pipeline.yaml`; while none pins one the path cannot fire.
 
 **Needs a live run, not a decision:**
-- **`_rebank_on_branch`'s re-bank has never been observed** — fixed to take each corrected round
-  through the whole ingress, but the cycle it was measured on went with a store wipe, so the fix is
+- **`_rebank_on_branch`'s re-bank has never been observed** — each corrected round is restated
+  as one record, but the cycle it was measured on went with a store wipe, so the fix is
   reasoned, not seen. **Re-test:** repair a fork, then confirm each corrected round carries its own
-  `round_closed` record on the branch; nothing under `tests/` asserts it.
+  `round_restated` record on the branch; nothing under `tests/` asserts it.
 - **The `seed` provenance layer has never been stamped by real data.** `pipeline_resolve.py`
   reads the CYCLE SEED's `pipeline_overlay` for it — one field name, three carriers, distinguished
   by the `source` each layer stamps (`campaign` / `seed` / `evolved`). Candidates move node

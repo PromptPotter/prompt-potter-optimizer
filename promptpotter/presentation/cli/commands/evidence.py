@@ -4,8 +4,14 @@ import argparse
 import logging
 from typing import get_args
 
+from pydantic import BaseModel
+
 from promptpotter.application.cycle_listing import resolve_campaign_id_hint
-from promptpotter.application.evidence.head_to_head import GuardState, HeadToHeadRow
+from promptpotter.application.evidence.head_to_head import (
+    GuardDifference,
+    GuardState,
+    HeadToHeadRow,
+)
 from promptpotter.application.evidence.metric_catalogue import MEASURAND, MetricUnit
 from promptpotter.application.evidence.read import Evidence, select_evidence
 from promptpotter.application.evidence.subjects import parse_subject
@@ -19,10 +25,9 @@ from promptpotter.domain.paired_reading import (
     LiftEstimate,
     PairedReading,
 )
-from promptpotter.domain.spend import RATE_PRICED_LABEL, SPEND_KIND_LABELS, Budget
+from promptpotter.domain.spend import RATE_PRICED_LABEL, SPEND_KIND_LABELS
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.workspace import open_stores
-from promptpotter.shared.errors import BadRequestError, NotFoundError
 
 logger = logging.getLogger("promptpotter.presentation.cli")
 
@@ -132,18 +137,30 @@ def _bench_set_text(bench_set: BenchSet | None, field: str) -> str:
     return "—" if value is None else str(value)
 
 
-def _differing_text(row: HeadToHeadRow, field: str) -> str:
-    if field in BenchSet.model_fields:
-        return _bench_set_text(row.bench_set, field)
-    if field == "origin_reading":
-        return _origin_text(row.bench)
-    value = getattr(row, field)
-    if isinstance(value, Budget):
-        # Named axes only, and a named null is a lift: printed, never dropped.
-        return ", ".join(f"{k}={v}" for k, v in value.model_dump().items()) or "—"
-    if isinstance(value, list):
-        return ", ".join(value) or "—"
-    return str(value)
+def _axes_text(model: BaseModel | None) -> str:
+    # Named axes only, and a named null is a lift: printed, never dropped.
+    if model is None:
+        return "—"
+    return ", ".join(f"{k}={v}" for k, v in model.model_dump().items()) or "—"
+
+
+def _differing_text(row: HeadToHeadRow, field: GuardDifference) -> str:
+    match field:
+        case GuardDifference.ORIGIN_READING:
+            return _origin_text(row.bench)
+        case GuardDifference.BUDGET:
+            return (
+                f"{_axes_text(row.budget)} · stopping {_axes_text(row.stopping)} · "
+                f"clamp {_axes_text(row.determinism)}"
+            )
+        case GuardDifference.DEFAULTS:
+            return row.bench_defaults_pin
+        case GuardDifference.OPTIMIZER_MODELS:
+            return ", ".join(row.optimizer_models) or "—"
+        case GuardDifference.HUMAN_INTERVENED:
+            return str(row.human_intervened)
+        case _:
+            return _bench_set_text(row.bench_set, field.value)
 
 
 def _head_to_head_lines(ev: Evidence) -> list[str]:
@@ -160,7 +177,7 @@ def _head_to_head_lines(ev: Evidence) -> list[str]:
             "  Not every subject asked for carries a bench headline: the roster below reads the "
             "selection subject by subject."
         )
-    differs_on = [d.value for d in h2h.guard.differs_on]
+    differs_on = h2h.guard.differs_on
     shared = next(
         (
             r.bench_set
@@ -169,17 +186,17 @@ def _head_to_head_lines(ev: Evidence) -> list[str]:
         ),
         None,
     )
-    if shared is not None and not set(differs_on) & set(BenchSet.model_fields):
+    if shared is not None and not {d.value for d in differs_on} & set(BenchSet.model_fields):
         lines.append(
             "  bench set: "
             + " · ".join(
                 f"{field} {_bench_set_text(shared, field)}" for field in BenchSet.model_fields
             )
         )
-    for field in differs_on:
+    for differing in differs_on:
         lines.append(
-            f"  {field} DIFFERS: "
-            + "; ".join(f"{r.campaign_id[:22]}={_differing_text(r, field)}" for r in h2h.rows)
+            f"  {differing.value} DIFFERS: "
+            + "; ".join(f"{r.campaign_id[:22]}={_differing_text(r, differing)}" for r in h2h.rows)
         )
     lines += [
         "",
@@ -630,25 +647,22 @@ async def cmd_evidence(args: argparse.Namespace) -> CommandResult:
 
     setup_logging(style="full" if args.verbose else "cli")
     stores = open_stores(args)
-    try:
-        subjects = [
-            spec._replace(
-                campaign_id=resolve_campaign_id_hint(stores, spec.campaign_id, inside=spec.inside)
-            )
-            for spec in map(parse_subject, args.subject)
-        ]
-        ev = select_evidence(
-            stores,
-            subjects=subjects,
-            dataset=args.dataset or "",
-            grid=args.grid or "",
-            include_ranking=args.ranking,
-            include_winner_chain=args.winner_chain,
-            include_config=args.config,
-            metric=args.metric or MEASURAND,
+    subjects = [
+        spec._replace(
+            campaign_id=resolve_campaign_id_hint(stores, spec.campaign_id, inside=spec.inside)
         )
-    except (ValueError, SyntaxError, BadRequestError, NotFoundError) as exc:
-        return CommandResult(data={"error": str(exc)}, human=str(exc))
+        for spec in map(parse_subject, args.subject)
+    ]
+    ev = select_evidence(
+        stores,
+        subjects=subjects,
+        dataset=args.dataset or "",
+        grid=args.grid or "",
+        include_ranking=args.ranking,
+        include_winner_chain=args.winner_chain,
+        include_config=args.config,
+        metric=args.metric or MEASURAND,
+    )
     lines = [
         *_head_to_head_lines(ev),
         *_roster_lines(ev),

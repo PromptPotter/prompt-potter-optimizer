@@ -316,7 +316,7 @@ Two channels, ONE carrier — a node overlay on `l1_generate` (`L2Memory.steer`)
 
 `members.py::L2Context.land` puts the next memory — the fire's steer onto `l1_generate` where it set one, `guard_breaches` always — and `L2Context.record` answers the next ladder, which `escalation` puts. That is the whole of it. Memory and ladder are potter's state slices (`l2_memory`, `ladder`) — held on `Cycle.slices`, never a field of the individual — so they carry across every adoption (an L1 win and an L2/L3 transition alike) by not moving, and every round banks them whole as its `optimizer_state`. The campaign's `task_context` is not memory at all: it rides `Cycle.framing`.
 
-**A fire lands after its round closed, so it restates that round's state** (`NodeContext.restate` holds the fire's parts onto the closed round's state → one `OptimizerStateRecord`): the last standing state is the one restore a resume or a fork has, and the fire's exit view displays the fire and carries nothing. The fire itself is on the ledger as `L2_ESCALATION_TRIGGER`; layout and exploration content are not separate decisions.
+**A fire lands after its round closed, so it restates that round's state** (`NodeContext.restate` holds the fire's parts onto the closed round's state → one `RoundRestatedRecord`): the last standing state is the one restore a resume or a fork has, and the fire's exit view displays the fire and carries nothing. The fire itself is on the ledger as `L2_ESCALATION_TRIGGER`; layout and exploration content are not separate decisions.
 
 ## Wound 4 — L2 self-healing via L3
 

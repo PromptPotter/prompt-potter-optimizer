@@ -46,7 +46,6 @@ from promptpotter.domain.run_records import (
     LLMCallProgressRecord,
     LLMCallRecord,
     LLMCallStartRecord,
-    OptimizerStateRecord,
     PhaseRecord,
     PricedKeyRecord,
     ProviderEasedRecord,
@@ -58,6 +57,7 @@ from promptpotter.domain.run_records import (
     RoundClosedRecord,
     RoundEnteredRecord,
     RoundProposedRecord,
+    RoundRestatedRecord,
     RoundWarningRecord,
     RunPhaseRecord,
     RunWiringRecord,
@@ -89,7 +89,6 @@ SilentRecord = (
     | LaunchClaimRecord
     | LaunchClockRecord
     | LaunchReleasedRecord
-    | OptimizerStateRecord
     | PartitionRecord
     | PricedKeyRecord
     | RaceCatchUpRecord
@@ -97,6 +96,7 @@ SilentRecord = (
     | ResolvedRunRecord
     | ResumeCheckpointRecord
     | RoundProposedRecord
+    | RoundRestatedRecord
     | RunWiringRecord
     | SampleStartedRecord
     | ScoringLockedRecord
@@ -424,9 +424,6 @@ class ActivityFeed:
                 return self._phase(item_id, record)
             case RunPhaseRecord() | RoundEnteredRecord():
                 # Read by `_declared` alone, so a feed still takes them.
-                return None
-            case RoundClosedRecord() if self._round is not None and record.round < self._round:
-                # A close below the round entered restates it (a repair's re-bank): no news.
                 return None
             case RoundClosedRecord():
                 return ActivityItem(

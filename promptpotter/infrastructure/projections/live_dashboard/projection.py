@@ -39,7 +39,6 @@ from promptpotter.domain.run_records import (
     FlightRecord,
     LLMCallRecord,
     LLMCallStartRecord,
-    OptimizerStateRecord,
     PhaseRecord,
     ProviderEasedRecord,
     ProviderHoldRecord,
@@ -49,6 +48,8 @@ from promptpotter.domain.run_records import (
     RoundClosedRecord,
     RoundEnteredRecord,
     RoundProposedRecord,
+    RoundRestatedRecord,
+    RoundStatement,
     RoundWarningRecord,
     RunPhaseRecord,
     RunWiringRecord,
@@ -76,7 +77,12 @@ from promptpotter.infrastructure.projections.live_dashboard.state import (
 )
 from promptpotter.infrastructure.store.io import write_json
 from promptpotter.infrastructure.store.layout import CycleLayout
-from promptpotter.infrastructure.store.read_model import LedgerIndex, LedgerSpan, RecordClasses
+from promptpotter.infrastructure.store.read_model import (
+    LedgerIndex,
+    LedgerSpan,
+    RecordClasses,
+    folded,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +101,7 @@ _AT_ONCE: frozenset[type[CycleRecord]] = frozenset(
         ProviderEasedRecord,
         RoundEnteredRecord,
         RoundClosedRecord,
+        RoundRestatedRecord,
         PhaseRecord,
         ElectionRecord,
         RoundWarningRecord,
@@ -122,7 +129,6 @@ class LiveDashboardProjection(Projection):
         return super()._route_table() | {
             ResumeCheckpointRecord: None,
             RoundProposedRecord: None,
-            OptimizerStateRecord: None,
         }
 
     def __init__(self) -> None:
@@ -130,7 +136,7 @@ class LiveDashboardProjection(Projection):
         self._unwired: list[tuple[CycleRecord, int]] | None = []
         self.state: LiveDashboardState
         self._at = ""
-        self._closes: dict[int, tuple[LevelSeries | None, RunStanding | None]] = {}
+        self._standings: dict[int, tuple[LevelSeries | None, RunStanding | None]] = {}
         self._sticky_llm_calls: dict[str, tuple[int, NodeBlock]] = {}
         self._launch()
 
@@ -151,14 +157,12 @@ class LiveDashboardProjection(Projection):
         self._measurement_node: str | None = None
         self._step_node: str | None = None
 
-    def feed(self, offset: int, record: CycleRecord) -> None:
-        self.on_record(record, offset)
-
     def value(self) -> LiveDashboardState | None:
         """`None`: no `RunWiringRecord` yet (a check-in still authoring its origin)."""
         return None if self._unwired is not None else self.composed().model_copy(deep=True)
 
     def on_record(self, record: CycleRecord, offset: int) -> None:
+        self.at_offset = offset
         if self._routes[type(record)] is None:
             return
         if self._unwired is not None:
@@ -221,11 +225,16 @@ class LiveDashboardProjection(Projection):
         s = self.state
         s.round = record.round
         s.rounds = [r for r in s.rounds if r.round < record.round]
-        self._closes = {n: close for n, close in self._closes.items() if n < record.round}
-        s.level_series, s.run_standing = (
-            self._closes[max(self._closes)] if self._closes else (None, None)
-        )
+        self._standings = {n: held for n, held in self._standings.items() if n < record.round}
+        self._stand()
         self._buffer.enter(record)
+
+    def _stand(self) -> None:
+        """The run stands where its LATEST round's last statement says, whichever round was stated last."""
+        s = self.state
+        s.level_series, s.run_standing = (
+            self._standings[max(self._standings)] if self._standings else (None, None)
+        )
 
     def _move_to_round(self, round_num: int | None) -> None:
         if round_num is not None:
@@ -234,9 +243,14 @@ class LiveDashboardProjection(Projection):
             self._buffer.reset(self.state.round)
 
     def _handle_round_closed(self, record: RoundClosedRecord) -> None:
-        self._closes[record.round] = (record.level_series, record.run_standing)
-        self.state.level_series = record.level_series
-        self.state.run_standing = record.run_standing
+        self._stated(record)
+
+    def _handle_round_restated(self, record: RoundRestatedRecord) -> None:
+        self._stated(record)
+
+    def _stated(self, record: RoundStatement) -> None:
+        self._standings[record.round] = (record.level_series, record.run_standing)
+        self._stand()
         prior = [r for r in self.state.rounds if r.round != record.round]
         summary = self._with_bench(RoundSummary.of(record))
         self.state.rounds = sorted([*prior, summary], key=lambda r: r.round)
@@ -540,7 +554,7 @@ class DashboardCheckout(LiveDashboardProjection):
     """`dashboard.json`: the fold its run goes on folding, written out at a boundary or settled."""
 
     def __init__(self, folded: LiveDashboardProjection, path: Path) -> None:
-        # Adopts the private copy `LedgerIndex.head` hands out; the lock and the timer are its own.
+        # Adopts the one-shot fold `folded` hands out; the lock and the timer are its own.
         vars(self).update(vars(folded))
         self._path = path
         self._lock = threading.Lock()
@@ -552,10 +566,10 @@ class DashboardCheckout(LiveDashboardProjection):
     def over(cls, cycle_dir: CycleDir) -> DashboardCheckout | None:
         """``None`` where the cycle has declared no wiring."""
         *prefix, own = ledger_chain(cycle_dir, moment=None)
-        folded = LedgerIndex.of(own.path, ()).head(LiveDashboardProjection, seed=_seed(prefix))
-        if folded._unwired is not None:
+        head = folded(own.path, LiveDashboardProjection, seed=_seed(prefix), until=None)
+        if head._unwired is not None:
             return None
-        checkout = cls(folded, CycleLayout(Path(cycle_dir)).dashboard)
+        checkout = cls(head, CycleLayout(Path(cycle_dir)).dashboard)
         checkout.drain()
         return checkout
 
@@ -564,7 +578,7 @@ class DashboardCheckout(LiveDashboardProjection):
             super().on_record(record, offset)
             if type(record) in _AT_ONCE:
                 self._write()
-            elif self._routes[type(record)] is not None:
+            else:
                 self._settle()
 
     def _settle(self) -> None:

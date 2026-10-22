@@ -220,6 +220,12 @@ class CyclePayload(CampaignPayload):
 class LoopPayload(CyclePayload):
     """Only a RUNNING loop takes it, off its own ledger (`ledger_scan.py::Controls`) — which is why these sit below `application/`."""
 
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        # `ledger_scan.py::_LOOP_TAKEN` reads the kind table having imported this module alone.
+        if cls.__module__ != __name__:
+            raise TypeError(f"{cls.__name__} is a loop payload declared outside {__name__}")
+
 
 class SkipSearchpointPayload(LoopPayload, kind=CommandKind.SKIP_SEARCHPOINT):
     """Cut the candidate being scored at its next sample boundary; the round carries on with the rest."""

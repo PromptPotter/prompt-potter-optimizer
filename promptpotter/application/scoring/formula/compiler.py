@@ -123,12 +123,12 @@ def validate_ast(tree: ast.AST, *, source: str) -> None:
             or isinstance(node.value, int | float)
             or (isinstance(node.value, str) and id(node) in helper_arguments)
         ):
-            raise ValueError(
+            raise ScoringFormulaError(
                 f"Scoring formula rejected — the constant {node.value!r} in {source}. A formula "
                 "is numeric; a string is only an argument to a scoring helper."
             )
         if kind not in _ALLOWED_AST_NODES:
-            raise ValueError(
+            raise ScoringFormulaError(
                 f"Scoring formula rejected — disallowed syntax {kind.__name__!r} "
                 f"in {source}. Allowed: arithmetic, comparisons, calls to the "
                 "registered scoring helpers, namespace name lookups."
@@ -138,7 +138,7 @@ def validate_ast(tree: ast.AST, *, source: str) -> None:
             not isinstance(node.func, ast.Name) or node.func.id not in _CALLABLE_NAMES
         ):
             called = ast.unparse(node.func)
-            raise ValueError(
+            raise ScoringFormulaError(
                 f"Scoring formula rejected — {called!r} is not a scoring helper, in {source}. "
                 f"Callable: {sorted(_CALLABLE_NAMES)}."
             )
@@ -169,7 +169,12 @@ class CompiledExpression(NamedTuple):
 
 def compile_expression(formula: str, *, source: str) -> CompiledExpression:
     """A term the record lacks raises ``ScoringTermMissingError``, which a read side reports as *unscorable*."""
-    tree = ast.parse(formula, f"<{source}>", "eval")
+    try:
+        tree = ast.parse(formula, f"<{source}>", "eval")
+    except (SyntaxError, ValueError) as exc:  # ValueError: a null byte
+        raise ScoringFormulaError(
+            f"Scoring formula rejected — {formula!r} in {source} does not parse: {exc}."
+        ) from exc
     validate_ast(tree, source=source)
     names = frozenset(node.id for node in ast.walk(tree) if isinstance(node, ast.Name))
     code = compile(ast.fix_missing_locations(_NumericOperands().visit(tree)), f"<{source}>", "eval")

@@ -95,7 +95,7 @@ class SlugTakenError(ConflictError):
         self.slug = slug
         self.suggested = suggested
         super().__init__(
-            f"A dataset named '{slug}' already exists.",
+            f"A dataset named '{slug}' already exists. Suggested slug: {suggested}.",
             code="slug_collision",
             details={"slug": slug, "suggested_slug": suggested},
         )

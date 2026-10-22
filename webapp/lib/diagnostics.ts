@@ -65,11 +65,13 @@ function write(ring: Ring): void {
   for (const l of listeners) l();
 }
 
+// An empty URL (a synthetic `Response`) names no path; resolved, it would read as `/`.
 function pathOf(url: string): string | null {
+  if (!url) return null;
   try {
     return new URL(url, "http://x").pathname;
   } catch {
-    return url || null;
+    return url;
   }
 }
 

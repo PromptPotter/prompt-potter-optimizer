@@ -141,8 +141,10 @@ class Selection:
             return cls(False, (), (), tuple(filter(None, (tracked + "\n" + untracked).split("\n"))))
         if not staged:
             return cls(False, (), ())
-        _, out = git("diff", "--cached", "--name-only", "--diff-filter=ACM")
-        names = [n for n in out.splitlines() if n]
+        _, out = git("diff", "--cached", "--name-status", "--diff-filter=ACMRD")
+        rows = [line.split("\t") for line in out.splitlines() if line]
+        # A delete or a rename's old side selects checks; only a path on disk is handed to a tool.
+        names = [row[-1] for row in rows if row[0] != "D"]
         return cls(
             True,
             tuple(n for n in names if n.endswith((".py", ".ipynb"))),
@@ -152,7 +154,7 @@ class Selection:
                 for n in names
                 if n.startswith("webapp/") and n.endswith(_LINTED)
             ),
-            staged_paths=tuple(names),
+            staged_paths=tuple(path for row in rows for path in row[1:]),
         )
 
 
@@ -676,7 +678,11 @@ _RUFF_TARGETS = ("promptpotter/", "scripts/", "tests/", "examples/", "notebooks/
 
 def _ruff(*argv: str) -> Callable[[Selection], Outcome]:
     def check(sel: Selection) -> Outcome:
-        paths = sel.py_files if sel.staged else _RUFF_TARGETS
+        # Staged, only its config or the gate moving lints the whole tree: others' files stay theirs.
+        whole = not sel.staged or any(p in ("pyproject.toml", *_GATE) for p in sel.staged_paths)
+        paths = _RUFF_TARGETS if whole else sel.py_files
+        if not paths:
+            return 0, ""
         return run(_py("ruff", *argv, "--force-exclude", *paths), REPO)
 
     return check
@@ -819,6 +825,7 @@ _ENGINE = ("!webapp/",)
 _GATE = ("scripts/gate.py", "scripts/last_green.py", "scripts/processes.py")
 _WEBAPP_READS = ("webapp/", "tests/fixtures/", *_GATE)
 _ENGINE_RUNTIME = (*ENGINE_RUNTIME, *_GATE)
+_RUFF_READS = (*_RUFF_TARGETS, "pyproject.toml", *_GATE)
 
 
 @dataclass(frozen=True)
@@ -974,12 +981,24 @@ def _extras(_: Selection) -> Outcome:
 
 
 CHECKS: tuple[Check, ...] = (
-    Check("ruff-format", "py", _ruff("format", "--check"), staged=True),
-    Check("ruff-check", "py", _ruff("check"), staged=True),
+    Check("ruff-format", "py", _ruff("format", "--check"), staged=True, reads=_RUFF_READS),
+    Check("ruff-check", "py", _ruff("check"), staged=True, reads=_RUFF_READS),
     Check("deptry", "py", lambda _: run(_py("deptry", "."), REPO)),
     Check("mypy", "py", _mypy),
-    Check("extras", "py", _extras, staged=True),
-    Check("layering", "py", _layering, staged=True),
+    Check(
+        "extras",
+        "py",
+        _extras,
+        staged=True,
+        reads=("pyproject.toml", ".github/workflows/", "deploy-linux/", *_GATE),
+    ),
+    Check(
+        "layering",
+        "py",
+        _layering,
+        staged=True,
+        reads=("promptpotter/", "scripts/tests_owning.py", *_GATE),
+    ),
     Check(
         "help-imports",
         "py",
@@ -1027,7 +1046,13 @@ CHECKS: tuple[Check, ...] = (
             "scripts/build_vendor_marks.py", ("webapp/components/ui/vendor-marks.generated.ts",)
         ),
         staged=True,
-        reads=(*_WEBAPP_READS, "scripts/"),
+        reads=(
+            "scripts/build_vendor_marks.py",
+            "webapp/assets/vendor-marks/",
+            "webapp/components/ui/vendor-marks.generated.ts",
+            "webapp/package-lock.json",
+            *_GATE,
+        ),
     ),
     Check(
         "optimizer-schemas",
@@ -1311,15 +1336,8 @@ def main() -> int:
 
     sel = Selection.build(args.staged, args.changed)
     if args.staged:
-        # A check naming what it reads runs on a staged path among them, any other on its kind's files.
         checks = [
-            c
-            for c in checks
-            if (
-                any(reads(path, c.inputs() or ()) for path in sel.staged_paths)
-                if c.reads
-                else (sel.py_files if c.kind == "py" else sel.web_files)
-            )
+            c for c in checks if any(reads(path, c.inputs() or ()) for path in sel.staged_paths)
         ]
     if sel.changed is not None and not args.only:
         checks = [

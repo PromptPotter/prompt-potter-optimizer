@@ -121,7 +121,7 @@ must stay lax says so on itself and states why; the ledger's `models_lax` counts
 
 ## Tolerance is scoped by what a payload is FOR
 
-A round is read back off its `RoundClosedRecord`, whose `extra="forbid"` reaches every model
+A round is read back off its last `RoundStatement`, whose `extra="forbid"` reaches every model
 nested inside it. A renamed field is therefore fatal in one direction or the other, and which
 outcome is CORRECT depends on what the payload carries:
 
@@ -131,7 +131,7 @@ outcome is CORRECT depends on what the payload carries:
   stay required. A missing field means the record cannot be vouched for, and a tolerant read
   hands back a winner prompt with a silently defaulted field — a wrong answer beats an
   unreadable one only until someone believes it.
-- **Ledger** — the `CycleRecord` arms. Tolerant by SKIP, not by default: `infrastructure/ledger.py::iter` logs
+- **Ledger** — the `CycleRecord` arms. Tolerant by SKIP, not by default: every ledger reader (`infrastructure/store/read_model.py::ledger_record`) logs
   a key no arm declares and drops the WHOLE line, so a field DELETE erases every record carrying
   it and nothing raises. Here pruning IS the repair — `application/maintenance/restamp.py::_prune_record`, derived from
   the union and, inside `optimizer_state`, from each part's registered kind, so no field delete

@@ -14,7 +14,6 @@ from promptpotter.application.mask.record import Lens, MaskReading, MaskRecord
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath
 from promptpotter.domain.lineage_tree import ArmNode, CourseNode, LineageDivergence
 from promptpotter.domain.pipeline_schema import NodeKind
-from promptpotter.domain.scoring import ScoringFormulaError
 from promptpotter.infrastructure.store.lineage_queries import build_lineage_tree, rank_moves
 from promptpotter.infrastructure.store.stores import Stores, resolve_cycle_path
 from promptpotter.shared.errors import BadRequestError
@@ -49,10 +48,7 @@ def _mask_records(
         path = tuple(node.path)
         if path not in out:
             leaf_store, leaf = resolve_cycle_path(stores, path)
-            try:
-                out[path] = load_mask_record(leaf_store, leaf.campaign_id, samples, lens=lens)
-            except (ValueError, SyntaxError, ScoringFormulaError) as exc:
-                raise BadRequestError(f"Invalid mask scoring formula: {exc}") from exc
+            out[path] = load_mask_record(leaf_store, leaf.campaign_id, samples, lens=lens)
         for arm in node.children:
             for run in arm.children:
                 visit(run)

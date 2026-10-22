@@ -21,7 +21,12 @@ from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.optimizer_state import StatePart
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.results import DiagnosticRunRecord
-from promptpotter.domain.run_records import CycleRecord, RoundClosedRecord
+from promptpotter.domain.run_records import (
+    CycleRecord,
+    RoundClosedRecord,
+    RoundRestatedRecord,
+    RoundStatement,
+)
 from promptpotter.domain.scoring import GradedCell
 from promptpotter.infrastructure.projections.cycle_index import (
     read_cycle_index,
@@ -386,17 +391,23 @@ def _drift_cause(exc: ValidationError) -> str:
     return f"{loc or '<document>'}: {err['type']}"
 
 
+_STATEMENTS: dict[str, type[RoundStatement]] = {
+    "round_closed": RoundClosedRecord,
+    "round_restated": RoundRestatedRecord,
+}
+
+
 def check_round_closes() -> dict[str, int]:
     causes: Counter[str] = Counter()
     first: dict[str, pathlib.Path] = {}
     checked = 0
     for ledger in iter_cycle_ledgers(DEFAULT_PROJECTS_ROOT):
-        for record in iter_jsonl(ledger, record_types=frozenset({"round_closed"})):
-            if record.get("record_type") != "round_closed":
+        for record in iter_jsonl(ledger, record_types=frozenset(_STATEMENTS)):
+            if (statement := _STATEMENTS.get(str(record.get("record_type")))) is None:
                 continue
             checked += 1
             try:
-                RoundClosedRecord.model_validate(record)
+                statement.model_validate(record)
             except ValidationError as exc:
                 cause = _drift_cause(exc)
                 causes[cause] += 1

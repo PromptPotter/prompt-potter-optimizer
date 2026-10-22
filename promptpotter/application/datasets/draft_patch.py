@@ -50,9 +50,9 @@ def plan_draft_patch(stores: Stores, draft: DraftCampaign, patch: EditDraftPatch
     if patch.slug is not None and patch.slug != draft.slug:
         if stores.tenant_datasets.slug_exists(patch.slug):
             raise ConflictError(
-                f"Slug '{patch.slug}' already exists in your collection.",
+                f"Slug '{patch.slug}' already exists in your collection. Suggested slug: "
+                f"{stores.tenant_datasets.suggest_free_slug(patch.slug)}.",
                 code="slug_collision",
-                details={"suggested_slug": stores.tenant_datasets.suggest_free_slug(patch.slug)},
             )
         changes["slug"] = patch.slug
 

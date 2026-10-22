@@ -58,7 +58,7 @@ from promptpotter.application.commands.dispatcher import CommandCall, CommandDis
 from promptpotter.application.diagnostics.verify import verify_member, verify_reading
 from promptpotter.application.evidence.head_to_head import GuardDifference
 from promptpotter.application.evidence.read import subject_evidence
-from promptpotter.application.evidence.subjects import SubjectSpec
+from promptpotter.application.evidence.subjects import SubjectSpec, parse_subject
 from promptpotter.application.initialization.session import LaunchClock
 from promptpotter.application.intelligence.rasch import (
     candidate_abilities,
@@ -212,7 +212,6 @@ from promptpotter.domain.results import (
 from promptpotter.domain.results_health import is_deprecated
 from promptpotter.domain.ruler import DeltaRuler, anchor_id_of
 from promptpotter.domain.run_records import (
-    OptimizerStateRecord,
     PhaseRecord,
     TokenUsageRecord,
 )
@@ -254,7 +253,12 @@ from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.judges.grounding import ANSWER_GROUNDING
 from promptpotter.judges.protocol import JudgeSpec, JudgeStage, JudgeVerdict
 from promptpotter.shared.answer_text import extract_gsm8k_number
-from promptpotter.shared.errors import ConflictError, ErrorCategory, PayloadInvalidError
+from promptpotter.shared.errors import (
+    BadRequestError,
+    ConflictError,
+    ErrorCategory,
+    PayloadInvalidError,
+)
 from promptpotter.shared.measurement_context import RoleScope
 from promptpotter.shared.statistics import p_exceeds, paired_mean_t
 
@@ -462,13 +466,14 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
         "[x for x in range(10)][0]",
         "predicted.__class__",
         "label_match(predicted, ground_truth) := 1",
+        "(",
     ):
-        with pytest.raises((ValueError, SyntaxError)):
+        with pytest.raises(ScoringFormulaError):
             compile_scorer(formula, verifier_graded=False)
     # `turns` is compacted out of cold rows, so a formula reaching it is refused at COMPILE: a
     # bare Call reaches `eval()` as a NameError, which reads as a missing TERM.
     for formula in ("turns[0]", "turns.index", "len(turns)"):
-        with pytest.raises(ValueError):
+        with pytest.raises(ScoringFormulaError):
             compile_scorer(formula, None, verifier_graded=True)
 
     # A cell read off the wire keeps its facts and drops any grade it arrived with.
@@ -595,7 +600,7 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
     )
     # Arithmetic is on floats, so a tenant's formula cannot buy unbounded CPU or memory.
     for formula in ("'x' * 10**10", "abs('x')", "label_match(predicted, 'x' * 10**10)"):
-        with pytest.raises(ValueError):
+        with pytest.raises(ScoringFormulaError):
             compile_scorer(formula, verifier_graded=False)
     for formula in ("9**9**9", "pow(9, pow(9, 9))", "predicted * 10**10", "-predicted"):
         with pytest.raises(ScoringFormulaError):
@@ -2436,7 +2441,8 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
         state = closed.closed_state.holding(
             live.get(L2Memory), live.get(L3Memory), live.get(Ladder)
         )
-        fired_ledger.append(OptimizerStateRecord(round=1, optimizer_state=state))
+        standing = scan_standing_rounds(ledger_chain(cycle_dir, moment=None)).rounds
+        fired_ledger.append(standing[1].close.restated(state))
 
     def fired(record: Callable[[Ladder], Ladder]) -> None:
         live.put(record(live.get(Ladder)))
@@ -2677,6 +2683,7 @@ def _evidence_campaign(
     bank_campaign_result(
         stores,
         hop,
+        ledger=ledgers[hop],
         clock=LaunchClock(started_at=started, monotonic=0.0),
         finished_at=f"2026-09-26T{hour:02d}:{wall // 60:02d}:{wall % 60:02d}Z",
         optimizer_phases=frozenset(),
@@ -3182,6 +3189,11 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
     _evidence_campaign(h2h_stores, "capo_b", 2, selected=0.7, incurred=0.3, loop=0.15, wall=50)
     shared = subject_evidence(h2h_stores, [potter_a, capo_b]).head_to_head
     assert shared is not None and shared.rows[0].bench_set is not None
+    for lens in ("score:(", "score:'x'"):
+        masked = parse_subject(f"course:potter_a/cycle_potter_a_fork_r1;lens={lens}")
+        with pytest.raises(ScoringFormulaError) as refused:
+            subject_evidence(h2h_stores, [masked, capo_b])
+        assert refused.value.http_status == 400, f"the lens {lens!r} is the caller's input"
     declared = minted_campaign(
         CycleHop(campaign_id="arm", cycle_id="cycle_arm"),
         config=_h2h_config("potter", 0, _H2H_FORMULA, None),
@@ -3245,7 +3257,7 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
         if third is not None:
             roster.append(_evidence_campaign(h2h_stores, **{"selected": 0.7, **third}))
         if not family:
-            with pytest.raises(ValueError):
+            with pytest.raises(BadRequestError):
                 subject_evidence(h2h_stores, roster)
             continue
         evidence = subject_evidence(h2h_stores, roster)

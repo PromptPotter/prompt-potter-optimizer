@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import enum
 import os
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from pathlib import Path, PurePosixPath
-from typing import Annotated, Any, Literal, NamedTuple, get_args
+from typing import Annotated, Any, Literal, NamedTuple, Self, get_args
 
 from pydantic import ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
@@ -188,10 +188,9 @@ class RoundEnteredRecord(FrozenModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class RoundClosedRecord(RoundOutcome):
-    """The last close per round stands and IS the round."""
+class RoundStatement(RoundOutcome):
+    """A closed round as a ledger states it: the last statement per round stands and IS the round."""
 
-    record_type: Literal["round_closed"] = "round_closed"
     optimizer_state: OptimizerState
     cells: RoundCells
     # Each walked cell's position in the bank the cycle drew: a cell carries its key alone.
@@ -212,7 +211,8 @@ class RoundClosedRecord(RoundOutcome):
         level_series: LevelSeries,
         run_standing: RunStanding,
         anchors: ViewAnchors,
-    ) -> RoundClosedRecord:
+        **own: Any,
+    ) -> Self:
         rr = line[-1]
         cells = rr.addresses()
         leading = None if rr.election is None or not rr.round else rr.election.leading
@@ -226,16 +226,28 @@ class RoundClosedRecord(RoundOutcome):
             if leading is None
             else panel_precision(rr.rows(leading).cells, line[0].results.cells),
             anchors=anchors,
+            **own,
         )
 
+    def restated(self, optimizer_state: OptimizerState) -> RoundRestatedRecord:
+        """This round holding *optimizer_state*: what a member banks once the round has closed."""
+        body = {name: getattr(self, name) for name in RoundStatement.model_fields}
+        del body["timestamp"]
+        return RoundRestatedRecord(**body | {"optimizer_state": optimizer_state}, remeasured=[])
 
-class OptimizerStateRecord(FrozenModel):
-    """A CLOSED round's state restated, never a close: the last after its standing close stands."""
 
-    record_type: Literal["optimizer_state"] = "optimizer_state"
-    round: int
-    optimizer_state: OptimizerState
-    timestamp: str = Field(default_factory=utcnow_iso)
+class RoundClosedRecord(RoundStatement):
+    """The run's clock: a close is its line's latest round, so its standing is the run's."""
+
+    record_type: Literal["round_closed"] = "round_closed"
+
+
+class RoundRestatedRecord(RoundStatement):
+    """A closed round stated again, never a close: it moves no clock and announces nothing."""
+
+    record_type: Literal["round_restated"] = "round_restated"
+    # The arms a repair re-measured onto this ledger, which names them itself from here on.
+    remeasured: list[ArmKey]
 
 
 class RoundProposedRecord(FrozenModel):
@@ -332,10 +344,10 @@ class AnnouncedArms:
             self._arms[record.round, arm] = held._replace(running=record.running)
         return arm
 
-    def close(self, record: RoundClosedRecord) -> None:
-        """The close is each arm's last record: its fold covers the reference reads too."""
-        for key, state in record.arms.items():
-            self._arms[record.round, key] = _Announced(state, record.folds.get(key))
+    def close(self, record: RoundStatement, keys: Iterable[ArmKey]) -> None:
+        """The statement is each arm's last record: its fold covers the reference reads too."""
+        for key in keys:
+            self._arms[record.round, key] = _Announced(record.arms[key], record.folds.get(key))
 
     def enter(self, record: RoundEnteredRecord) -> None:
         self._arms = {at: held for at, held in self._arms.items() if at[0] < record.round}
@@ -1135,7 +1147,6 @@ CycleRecord = Annotated[
     | LLMCallProgressRecord
     | LLMCallRecord
     | LLMCallStartRecord
-    | OptimizerStateRecord
     | PartitionRecord
     | PhaseRecord
     | ProviderEasedRecord
@@ -1146,6 +1157,7 @@ CycleRecord = Annotated[
     | RoundClosedRecord
     | RoundEnteredRecord
     | RoundProposedRecord
+    | RoundRestatedRecord
     | RoundWarningRecord
     | StandingBudgetRecord
     | RunPhaseRecord

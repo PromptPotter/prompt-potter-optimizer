@@ -40,6 +40,7 @@ from promptpotter.domain.spend import Budget, MeteredSpend, SpendRollup
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.shared.clock import epoch_seconds
+from promptpotter.shared.errors import BadRequestError, NotFoundError
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
@@ -315,6 +316,7 @@ class Grader(NamedTuple):
 
 class _Graded(NamedTuple):
     row: HeadToHeadRow
+    member: GuardMember
     origin: MemberRows | None
     selected: MemberRows | None
     sample_keys: list[str]
@@ -345,7 +347,7 @@ def comparison_grader(campaigns: list[tuple[Stores, Campaign]]) -> Grader:
         )
     }
     if len(graders) > 1:
-        raise ValueError(
+        raise BadRequestError(
             f"These subjects are graded under {len(graders)} scorers ({', '.join(sorted(graders))}) "
             "and share none, so no column reads them as one quantity. Compare subjects one "
             "formula grades."
@@ -426,23 +428,9 @@ def head_to_head(
     )
 
 
-def _member(g: _Graded) -> GuardMember:
-    row = g.row
-    return GuardMember(
-        purpose=row.purpose,
-        bench_set=row.bench_set,
-        budget=row.budget,
-        stopping=row.stopping,
-        determinism=row.determinism,
-        bench_defaults_pin=row.bench_defaults_pin,
-        optimizer_models=tuple(row.optimizer_models),
-        human_intervened=row.human_intervened,
-    )
-
-
 def _guard(graded: Sequence[_Graded], record: HeadToHeadRecord | None) -> PairGuard:
     return pair_guard(
-        [_member(g) for g in graded],
+        [g.member for g in graded],
         record,
         origin_read_apart=any(
             a.row.bench_set == b.row.bench_set and not _read_alike(a, b)
@@ -490,7 +478,7 @@ def _across(a: MemberRows, b: MemberRows, sample_keys: list[str]) -> PairedReadi
 def _campaign(entry: HeadToHeadEntry) -> Campaign:
     campaign = entry.stores.campaigns.load_campaign(entry.reading.campaign_id)
     if campaign is None:
-        raise ValueError(
+        raise NotFoundError(
             f"campaign {entry.reading.campaign_id} has no manifest to read its bench from"
         )
     return campaign
@@ -549,6 +537,16 @@ def _read(
         if (start := epoch_seconds(run.started_at)) is not None
         and (end := epoch_seconds(run.finished_at)) is not None
     ]
+    member = GuardMember(
+        purpose=campaign.declaration.purpose,
+        bench_set=bench_set,
+        budget=budget,
+        stopping=optimization.stopping,
+        determinism=optimization.determinism,
+        bench_defaults_pin=campaign.declaration.bench_defaults_pin,
+        optimizer_models=tuple(optimizer_models),
+        human_intervened=reading.human_intervened,
+    )
     return _Graded(
         row=HeadToHeadRow(
             subject=reading.key,
@@ -556,22 +554,7 @@ def _read(
             optimizer=config.optimization.optimizer,
             optimizer_models=optimizer_models,
             purpose=campaign.declaration.purpose,
-            guard=pair_guard(
-                [
-                    GuardMember(
-                        purpose=campaign.declaration.purpose,
-                        bench_set=bench_set,
-                        budget=budget,
-                        stopping=optimization.stopping,
-                        determinism=optimization.determinism,
-                        bench_defaults_pin=campaign.declaration.bench_defaults_pin,
-                        optimizer_models=tuple(optimizer_models),
-                        human_intervened=reading.human_intervened,
-                    )
-                ],
-                record,
-                origin_read_apart=False,
-            ),
+            guard=pair_guard([member], record, origin_read_apart=False),
             treatment_digest=campaign.treatment.digest,
             budget=budget,
             stopping=optimization.stopping,
@@ -592,6 +575,7 @@ def _read(
             optimizer_incurred_usd_ratio=None,
             worked_ratio=None,
         ),
+        member=member,
         origin=origin_pass,
         selected=selected_pass,
         sample_keys=[] if passes is None else passes.origin.sample_keys,

@@ -279,10 +279,7 @@ def select_evidence(
     specs = list(subjects)
     if dataset:
         pool = parse_tree_address(dataset)
-        try:
-            leaf = descend_store(stores, pool.inside)
-        except (BadRequestError, NotFoundError) as exc:
-            raise ValueError(str(exc)) from exc
+        leaf = descend_store(stores, pool.inside)
         named = {s.key for s in specs}
         specs += [
             spec
@@ -291,7 +288,7 @@ def select_evidence(
         ]
     axes = [a.strip() for a in grid.split(",") if a.strip()]
     if grid and len(axes) != 2:
-        raise ValueError(
+        raise BadRequestError(
             f"A grid takes exactly two factor names separated by a comma, got {grid!r}. It has two "
             "axes at any number of factors — the rest are marginalised into the cells."
         )
@@ -447,7 +444,7 @@ def subject_evidence(
     channels_by_subject = {key: found.channels for key, found in reads.items()}
 
     if grader is None or not heads:
-        raise ValueError(
+        raise BadRequestError(
             f"None of {', '.join(sorted(wanted)) or 'the subjects named'} has scored rows to read. "
             "A campaign answers here once its origin has run, a course once its branch has, a "
             "candidate once it has been measured; one that does not exist answers never."
@@ -697,10 +694,7 @@ def _masked(point: _ChainPoint, keys: frozenset[str] | None) -> _ChainPoint:
 def _scenario(
     stores: Stores, spec: SubjectSpec, cycle: _Cycle
 ) -> tuple[ScenarioReading, list[_ChainPoint]] | None:
-    try:
-        record = load_mask_record(stores, spec.campaign_id, spec.samples, lens=spec.lens)
-    except ScoringFormulaError as exc:
-        raise ValueError(f"The lens on {spec.key!r} cannot grade this branch: {exc}") from exc
+    record = load_mask_record(stores, spec.campaign_id, spec.samples, lens=spec.lens)
     recorded = next((c for c in record.cycles if c.cycle_id == spec.cycle_id), None)
     if recorded is None:
         return None

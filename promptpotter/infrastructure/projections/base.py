@@ -26,7 +26,6 @@ from promptpotter.domain.run_records import (
     LLMCallProgressRecord,
     LLMCallRecord,
     LLMCallStartRecord,
-    OptimizerStateRecord,
     PhaseRecord,
     PricedKeyRecord,
     ProviderEasedRecord,
@@ -38,6 +37,7 @@ from promptpotter.domain.run_records import (
     RoundClosedRecord,
     RoundEnteredRecord,
     RoundProposedRecord,
+    RoundRestatedRecord,
     RoundWarningRecord,
     RunPhaseRecord,
     RunWiringRecord,
@@ -85,6 +85,7 @@ class Projection:
             ProviderEasedRecord: cls._handle_provider_eased,
             RoundEnteredRecord: cls._handle_round_entered,
             RoundClosedRecord: cls._handle_round_closed,
+            RoundRestatedRecord: cls._handle_round_restated,
             ArmRecord: cls._handle_arm,
             SampleStartedRecord: cls._handle_sample_started,
             SampleScoredRecord: cls._handle_sample_scored,
@@ -100,7 +101,6 @@ class Projection:
             RoundWarningRecord: cls._handle_round_warning,
             ElectionRecord: cls._handle_election,
             RoundProposedRecord: cls._handle_round_proposed,
-            OptimizerStateRecord: cls._handle_optimizer_state,
             # Applied where written (`application/commands/dispatcher.py`); the pair is audit trail only.
             CommandRecord: None,
             CommandAckRecord: None,
@@ -128,6 +128,9 @@ class Projection:
             SpendHoldRecord: None,
         }
 
+    def feed(self, offset: int, record: CycleRecord) -> None:
+        self.on_record(record, offset)
+
     def on_record(self, record: CycleRecord, offset: int) -> None:
         self.at_offset = offset
         handler = self._routes[type(record)]
@@ -143,6 +146,7 @@ class Projection:
     def _handle_round_entered(self, record: RoundEnteredRecord) -> None: ...
     def _handle_round_proposed(self, record: RoundProposedRecord) -> None: ...
     def _handle_round_closed(self, record: RoundClosedRecord) -> None: ...
+    def _handle_round_restated(self, record: RoundRestatedRecord) -> None: ...
     def _handle_election(self, record: ElectionRecord) -> None: ...
     def _handle_arm(self, record: ArmRecord) -> None: ...
     def _handle_sample_started(self, record: SampleStartedRecord) -> None: ...
@@ -157,7 +161,6 @@ class Projection:
     def _handle_llm_call(self, record: LLMCallRecord) -> None: ...
     def _handle_error(self, record: ErrorRecord) -> None: ...
     def _handle_round_warning(self, record: RoundWarningRecord) -> None: ...
-    def _handle_optimizer_state(self, record: OptimizerStateRecord) -> None: ...
 
     def drain(self) -> None:
         """Settle buffered state on teardown; a no-op where every event already flushes."""

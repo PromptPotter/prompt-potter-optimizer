@@ -2,8 +2,8 @@
 
 import { useRef, useState } from "react";
 import {
+  ApiError,
   failureKind,
-  IngestApiError,
   operatorMessage,
   postDraftFromDataset,
   postDraftFromOrigin,
@@ -155,18 +155,14 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
     try {
       draft = await postIngestDataset(file, slug);
     } catch (e) {
-      if (
-        e instanceof IngestApiError &&
-        e.status === 409 &&
-        e.existingSlug &&
-        e.suggestedSlug
-      ) {
+      const taken = e instanceof ApiError && e.code === "slug_collision" ? e.details : null;
+      if (typeof taken?.slug === "string" && typeof taken.suggested_slug === "string") {
         setPhase({
           stage: "collision",
           file,
           chipId: id,
-          existingSlug: e.existingSlug,
-          suggestedSlug: e.suggestedSlug,
+          existingSlug: taken.slug,
+          suggestedSlug: taken.suggested_slug,
         });
         return;
       }

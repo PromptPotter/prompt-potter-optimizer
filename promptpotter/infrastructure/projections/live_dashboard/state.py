@@ -156,7 +156,7 @@ class DashboardFacts(StrictModel):
 
     # ``None`` = no time recorded; a cached replay's 0.0 is a real reading.
     last_query_elapsed_s: float | None = None
-    # The timestamp of the record at `at_offset`.
+    # The timestamp of the last record the state took, which `at_offset` may stand past.
     at_time: str
 
     arms_per_round: int | None
@@ -215,6 +215,9 @@ class LiveDashboardState(DashboardFacts):
             "langfuse_trace_url": wiring.langfuse_trace_url,
             "run_limits": wiring.run_limits,
             "defaults_drift": wiring.defaults_drift,
+            "state": DashboardState.INIT,
+            "optimizer_step": None,
+            "measuring_arm": None,
             "state_since": wiring.timestamp,
             "stop_reason": None,
             "error": None,

@@ -9,17 +9,16 @@ from promptpotter.application.bench.resume_and_fork.fork_siblings import (
 )
 from promptpotter.application.bench.resume_and_fork.replayers import ReplayMismatch
 from promptpotter.application.bench.round_analysis import compute_round_diagnostics
-from promptpotter.application.run_callbacks import RunCallbacks
+from promptpotter.application.run_callbacks import stated_line
 from promptpotter.application.scoring.search_point_scorer import score_search_point
-from promptpotter.application.views.view_models import ViewContext
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.paired_reading import ArmKey
-from promptpotter.domain.results import ArmState, Concluded, Proposed, is_leader_eligible
+from promptpotter.domain.results import ArmState, Concluded, is_leader_eligible
 from promptpotter.domain.run_records import (
     ForkDirection,
     ForkSpec,
     ForkTrigger,
-    SampleScoredRecord,
+    RoundRestatedRecord,
 )
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.shared.errors import ErrorCategory
@@ -101,32 +100,21 @@ def _rebank_on_branch(
     keys: dict[int, list[ArmKey]] = {}
     for round_num, key in retirements:
         keys.setdefault(round_num, []).append(key)
-    reclosed: dict[int, RoundResult] = {}
+    restated: dict[int, RoundResult] = {}
     for t in rounds:
-        if t.round not in keys or t.election is None:
+        if t.round not in keys:
             continue
-        # A restatement renders under its round's own anchors, never the resuming launch's.
-        anchors = dict(closes[t.round].close.anchors)
-        cb = RunCallbacks(ledger=ledger, view_context=ViewContext(**anchors))
-        for key in keys[t.round]:
-            arm = t.arms[key]
-            cb.on_arm(t.round, key, arm)
-            for walked in t.rows(key):
-                ledger.append(
-                    SampleScoredRecord(
-                        round=t.round,
-                        individual_id=arm.individual.id,
-                        role=MeasurementRole.PANEL,
-                        sample_total=None if isinstance(arm, Proposed) else arm.expected_samples,
-                        position=slot_of[walked.key],
-                        result=walked,
-                    )
-                )
-        cb.on_election(t.round, t.election)
-        offset, _ = cb.on_round_close(t, rounds, slot_of, difficulty, lives=lives)
-        # The re-close MOVES the document's address; the retired one re-folds to the holed round.
-        reclosed[t.round] = t.model_copy(update={"at_offset": offset})
-    return [reclosed.get(t.round, t) for t in rounds]
+        line, series, standing = stated_line(t, rounds, difficulty, lives=lives)
+        # Under its round's own anchors, never the resuming launch's.
+        anchors = closes[t.round].close.anchors
+        offset = ledger.append(
+            RoundRestatedRecord.of(
+                line, slot_of, series, standing, anchors, remeasured=keys[t.round]
+            )
+        )
+        # The restatement MOVES the document's address; the retired one re-folds to the holed round.
+        restated[t.round] = t.model_copy(update={"at_offset": offset})
+    return [restated.get(t.round, t) for t in rounds]
 
 
 async def repair_incomplete_rounds(

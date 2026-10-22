@@ -36,6 +36,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.phases import StopReason
     from promptpotter.domain.scoring import Scorer
     from promptpotter.domain.search_point import JobSearchPoint
+    from promptpotter.infrastructure.ledger import CycleEventLog
     from promptpotter.infrastructure.store.stores import Stores
 
 
@@ -51,6 +52,7 @@ def bank_campaign_result(
     stores: Stores,
     hop: CycleHop,
     *,
+    ledger: CycleEventLog,
     clock: LaunchClock,
     finished_at: str,
     optimizer_phases: frozenset[str],
@@ -65,9 +67,8 @@ def bank_campaign_result(
         finished_at=finished_at,
         optimizer_phases=optimizer_phases,
     )
-    stores.campaigns.bank_launch_clock(
-        hop,
-        LaunchClockRecord(started_at=clock.started_at, finished_at=finished_at, clock=wall_clock),
+    ledger.append(
+        LaunchClockRecord(started_at=clock.started_at, finished_at=finished_at, clock=wall_clock)
     )
 
 

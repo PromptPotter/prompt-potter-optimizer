@@ -12,7 +12,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **The ceiling is the campaign's**: one book its live cycles share, seeded off every cycle's ledger; admission refuses `campaign_ceiling_held` / `campaign_ceiling_unshared`.
 - **Wall clock is a budget axis** (`--max-wall-clock`): a remote cell is bounded by its connector's `cell_envelope_s` and the launch's clock left, cut `HALTED`, the run stopping `wall_clock`. `Connector.cell_wait_s` is gone.
 - `ArmSpend`, `ArmCost`, `CloseSpend` and `RunStanding.spent` are gone, each a fold of the spend facts read at its scope.
-- **BREAKING — removed on-disk shapes**, each now a ledger record or a fold of one: `campaigns/{id}/result.json` (the line's `launch_clock` records, bench passes and spend), `pipeline.resolved.yaml` and `experiment.resolved.yaml` (`resolved_run`), `bank_partition.json` (`bank_partition`), and the `round_standing` record (carried by `round_closed`).
+- **BREAKING — removed on-disk shapes**, each now a ledger record or a fold of one: `campaigns/{id}/result.json` (the line's `launch_clock` records, bench passes and spend), `pipeline.resolved.yaml` and `experiment.resolved.yaml` (`resolved_run`), `bank_partition.json` (`bank_partition`), the `round_standing` record (carried by `round_closed`), and the `optimizer_state` record (a `round_restated` statement, which a repair's re-bank writes too).
 
 ## [0.8.17] — 2026-10-15
 

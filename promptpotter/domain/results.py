@@ -1033,7 +1033,7 @@ class RoundResult(RoundOutcome):
     # `extra="ignore"`: the computed `round_id`/`scoreboard` are dumped and must read back.
     model_config = ConfigDict(extra="ignore")
 
-    # Offset of its own ``RoundClosedRecord``. ``None`` where no ledger was bound: 0 is a real offset.
+    # Offset of the statement it stands on. ``None`` where no ledger was bound: 0 is a real offset.
     at_offset: int | None = None
     # By arm: a reference re-read on the round's cells is an arm, so a held round's head is here.
     cells: dict[ArmKey, CellSheet] = Field(default_factory=dict)

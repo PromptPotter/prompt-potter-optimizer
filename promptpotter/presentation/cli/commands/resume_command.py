@@ -39,7 +39,7 @@ from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.workspace import open_stores, resolve_target
 from promptpotter.presentation.cli.parsers import budget_from_args
 from promptpotter.presentation.cli.session import load_session
-from promptpotter.shared.errors import PotterError, ResumeDivergenceError
+from promptpotter.shared.errors import ResumeDivergenceError
 
 if TYPE_CHECKING:
     from collections.abc import Coroutine
@@ -97,24 +97,19 @@ async def _dispatch_fork(
     budget = budget_from_args(args)
     if budget.named:
         seed = seed.model_copy(update={"config_overrides": ConfigOverrides(budget=budget)})
-    try:
-        return await _dispatch_held(
-            args,
-            ctx,
-            ForkCyclePayload(
-                campaign_id=ctx.campaign_id,
-                cycle_id=ctx.cycle_id,
-                round=from_round,
-                seed=seed,
-                keep_rounds=keep_rounds,
-                reason=reason,
-                mode=_run_mode(args, fork_on_divergence=args.fork_on_divergence),
-            ),
-        )
-    except (ConfigDriftError, BackendUnreachableError):
-        raise
-    except PotterError as exc:
-        raise SystemExit(f"ERROR: fork refused — {exc}") from exc
+    return await _dispatch_held(
+        args,
+        ctx,
+        ForkCyclePayload(
+            campaign_id=ctx.campaign_id,
+            cycle_id=ctx.cycle_id,
+            round=from_round,
+            seed=seed,
+            keep_rounds=keep_rounds,
+            reason=reason,
+            mode=_run_mode(args, fork_on_divergence=args.fork_on_divergence),
+        ),
+    )
 
 
 async def _fork_operator_rewind(args: argparse.Namespace, ctx: SessionCtx) -> HeldRun:

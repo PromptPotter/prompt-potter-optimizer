@@ -2398,7 +2398,6 @@
             "llm_call": "#/components/schemas/LLMCallRecord",
             "llm_call_progress": "#/components/schemas/LLMCallProgressRecord",
             "llm_call_start": "#/components/schemas/LLMCallStartRecord",
-            "optimizer_state": "#/components/schemas/OptimizerStateRecord",
             "phase": "#/components/schemas/PhaseRecord",
             "priced_key": "#/components/schemas/PricedKeyRecord",
             "provider_eased": "#/components/schemas/ProviderEasedRecord",
@@ -2409,6 +2408,7 @@
             "round_closed": "#/components/schemas/RoundClosedRecord",
             "round_entered": "#/components/schemas/RoundEnteredRecord",
             "round_proposed": "#/components/schemas/RoundProposedRecord",
+            "round_restated": "#/components/schemas/RoundRestatedRecord",
             "round_warning": "#/components/schemas/RoundWarningRecord",
             "run_phase": "#/components/schemas/RunPhaseRecord",
             "run_wiring": "#/components/schemas/RunWiringRecord",
@@ -2492,9 +2492,6 @@
             "$ref": "#/components/schemas/LLMCallStartRecord"
           },
           {
-            "$ref": "#/components/schemas/OptimizerStateRecord"
-          },
-          {
             "$ref": "#/components/schemas/PartitionRecord"
           },
           {
@@ -2523,6 +2520,9 @@
           },
           {
             "$ref": "#/components/schemas/RoundProposedRecord"
+          },
+          {
+            "$ref": "#/components/schemas/RoundRestatedRecord"
           },
           {
             "$ref": "#/components/schemas/RoundWarningRecord"
@@ -4981,35 +4981,6 @@
         "title": "OptimizerState",
         "type": "object"
       },
-      "OptimizerStateRecord": {
-        "additionalProperties": false,
-        "description": "A CLOSED round's state restated, never a close: the last after its standing close stands.",
-        "properties": {
-          "optimizer_state": {
-            "$ref": "#/components/schemas/OptimizerState"
-          },
-          "record_type": {
-            "const": "optimizer_state",
-            "default": "optimizer_state",
-            "title": "Record Type",
-            "type": "string"
-          },
-          "round": {
-            "title": "Round",
-            "type": "integer"
-          },
-          "timestamp": {
-            "title": "Timestamp",
-            "type": "string"
-          }
-        },
-        "required": [
-          "round",
-          "optimizer_state"
-        ],
-        "title": "OptimizerStateRecord",
-        "type": "object"
-      },
       "OptimizerStepEnterView": {
         "additionalProperties": false,
         "properties": {
@@ -5685,7 +5656,6 @@
               "llm_call_progress",
               "llm_call",
               "llm_call_start",
-              "optimizer_state",
               "phase",
               "priced_key",
               "provider_eased",
@@ -5696,6 +5666,7 @@
               "round_closed",
               "round_entered",
               "round_proposed",
+              "round_restated",
               "round_warning",
               "run_phase",
               "run_wiring",
@@ -6226,7 +6197,7 @@
       },
       "RoundClosedRecord": {
         "additionalProperties": false,
-        "description": "The last close per round stands and IS the round.",
+        "description": "The run's clock: a close is its line's latest round, so its standing is the run's.",
         "properties": {
           "anchors": {
             "$ref": "#/components/schemas/ViewAnchors"
@@ -6629,6 +6600,159 @@
           "proposals"
         ],
         "title": "RoundProposedRecord",
+        "type": "object"
+      },
+      "RoundRestatedRecord": {
+        "additionalProperties": false,
+        "description": "A closed round stated again, never a close: it moves no clock and announces nothing.",
+        "properties": {
+          "anchors": {
+            "$ref": "#/components/schemas/ViewAnchors"
+          },
+          "arms": {
+            "additionalProperties": {
+              "discriminator": {
+                "mapping": {
+                  "cut": "#/components/schemas/Cut",
+                  "measured": "#/components/schemas/Measured",
+                  "measuring": "#/components/schemas/Measuring",
+                  "proposed": "#/components/schemas/Proposed"
+                },
+                "propertyName": "state"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/Proposed"
+                },
+                {
+                  "$ref": "#/components/schemas/Measuring"
+                },
+                {
+                  "$ref": "#/components/schemas/Cut"
+                },
+                {
+                  "$ref": "#/components/schemas/Measured"
+                }
+              ]
+            },
+            "title": "Arms",
+            "type": "object"
+          },
+          "cells": {
+            "$ref": "#/components/schemas/RoundCells"
+          },
+          "diagnostics": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RoundDiagnostics"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "election": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Election"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "folds": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ScoreSummary"
+            },
+            "title": "Folds",
+            "type": "object"
+          },
+          "health": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DegradationHealth"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "level_series": {
+            "$ref": "#/components/schemas/LevelSeries"
+          },
+          "optimizer_facts": {
+            "items": {
+              "$ref": "#/components/schemas/OptimizerFact"
+            },
+            "title": "Optimizer Facts",
+            "type": "array"
+          },
+          "optimizer_state": {
+            "$ref": "#/components/schemas/OptimizerState"
+          },
+          "overlap": {
+            "$ref": "#/components/schemas/OverlapReading"
+          },
+          "panel_precision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PanelPrecision"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "positions": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Positions",
+            "type": "object"
+          },
+          "record_type": {
+            "const": "round_restated",
+            "default": "round_restated",
+            "title": "Record Type",
+            "type": "string"
+          },
+          "remeasured": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Remeasured",
+            "type": "array"
+          },
+          "round": {
+            "title": "Round",
+            "type": "integer"
+          },
+          "run_standing": {
+            "$ref": "#/components/schemas/RunStanding"
+          },
+          "timestamp": {
+            "title": "Timestamp",
+            "type": "string"
+          }
+        },
+        "required": [
+          "round",
+          "folds",
+          "election",
+          "overlap",
+          "optimizer_state",
+          "cells",
+          "positions",
+          "level_series",
+          "run_standing",
+          "panel_precision",
+          "anchors",
+          "remeasured"
+        ],
+        "title": "RoundRestatedRecord",
         "type": "object"
       },
       "RoundStartView": {

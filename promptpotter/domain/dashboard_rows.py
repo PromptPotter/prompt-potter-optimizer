@@ -29,7 +29,7 @@ from promptpotter.domain.wounds import ValidationFailure
 from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
-    from promptpotter.domain.run_records import RoundClosedRecord
+    from promptpotter.domain.run_records import RoundStatement
 
 
 #: `noise`: the cells were measured no more sharply than they landed apart; `spread`: they differ.
@@ -211,7 +211,7 @@ class RoundSummary(FrozenModel):
     optimizer_facts: list[OptimizerFact] = Field(default_factory=list)
 
     @classmethod
-    def of(cls, closed: RoundClosedRecord) -> RoundSummary:
+    def of(cls, closed: RoundStatement) -> RoundSummary:
         arms = closed.cells.arms
         longest = arms[max(arms, key=lambda k: (len(arms[k]), k))] if arms else []
         election, fold, health = closed.election, closed.fold, closed.health

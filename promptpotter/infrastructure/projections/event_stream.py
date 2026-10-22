@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-import logging
 from pathlib import Path
 from typing import Any, cast
 
@@ -13,9 +11,12 @@ from promptpotter.domain.projection_envelope import (
     bearing_record,
 )
 from promptpotter.infrastructure.store.layout import CycleLayout
-from promptpotter.infrastructure.store.read_model import LedgerIndex
-
-logger = logging.getLogger(__name__)
+from promptpotter.infrastructure.store.read_model import (
+    LedgerIndex,
+    feed_fold,
+    ledger_record,
+    line_dict,
+)
 
 
 class CycleLedgerTail:
@@ -81,18 +82,15 @@ class CycleLedgerTail:
         return self._line_index
 
     def _read(self, raw: bytes) -> tuple[ProjectionKind, dict[str, Any]] | None:
-        try:
-            rec = json.loads(raw)
-        except json.JSONDecodeError:
-            logger.warning("skipping malformed ledger line at offset %d", self._line_index)
-            return None
-        if not isinstance(rec, dict):
+        offset = self._line_index
+        rec = ledger_record(line_dict, raw, ledger=self._ledger_path, offset=offset)
+        if rec is None:
             return None
         kind = rec.get("record_type")
         if not isinstance(kind, str) or kind not in RECORD_KINDS:
             return None
         if (record := bearing_record(kind, rec)) is not None:
-            self._feed.read(self._line_index, record)
+            feed_fold(self._feed, offset, record, ledger=self._ledger_path)
         return cast(ProjectionKind, kind), rec
 
     def _to_envelope(self, raw: bytes) -> ProjectionEnvelope | None:

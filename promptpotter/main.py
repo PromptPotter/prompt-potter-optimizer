@@ -2,7 +2,7 @@ import asyncio
 import contextlib
 import logging
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from http import HTTPStatus
 from typing import Any
@@ -157,6 +157,7 @@ def _error_response(
     code: str,
     message: str,
     details: dict[str, object] | None = None,
+    headers: Mapping[str, str] | None = None,
     exc_info: bool = False,
 ) -> JSONResponse:
     error_id = uuid.uuid4().hex[:12]
@@ -183,7 +184,7 @@ def _error_response(
         status,
     )
     body = ErrorEnvelope(error=code, message=message, error_id=error_id, details=details or None)
-    return JSONResponse(status_code=status, content=body.model_dump(mode="json"))
+    return JSONResponse(status_code=status, content=body.model_dump(mode="json"), headers=headers)
 
 
 @app.exception_handler(PotterError)
@@ -225,6 +226,7 @@ async def routing_error_handler(request: Request, exc: HTTPException) -> JSONRes
         status=exc.status_code,
         code=HTTPStatus(exc.status_code).name.lower(),
         message=exc.detail,
+        headers=exc.headers,
     )
 
 

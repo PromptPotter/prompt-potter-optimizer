@@ -85,9 +85,9 @@ BASELINE = {
     # Files naming three or more `CycleRecord` arms, each a site the next arm must reach.
     "p_record": 19,
     # The arms each of those files leaves out: a mirror rotting raises it.
-    "p_record_drift": 560,
+    "p_record_drift": 561,
     # Served properties no surface reads by name; a payload field only the terminal sends is one.
-    "p_served": 182,
+    "p_served": 177,
     # Files naming three or more `CommandKind` rows, each a site the next row must reach.
     "p_command": 11,
     # The rows each of those files leaves out.
@@ -624,8 +624,10 @@ def compute_ledger() -> dict[str, int]:
     records, records_left_out = _enumerations(
         sites, [_spelled(a.model_fields["record_type"].default, a.__name__) for a in arms]
     )
-    # The kinds whose payload holds an application type are declared there.
-    importlib.import_module("promptpotter.application.commands.payloads")
+    # Imported for the table it completes: the kinds whose payload holds an application type.
+    from promptpotter.application.commands import payloads
+
+    del payloads
     commands, commands_left_out = _enumerations(
         sites,
         [

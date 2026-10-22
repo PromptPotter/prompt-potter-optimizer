@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 import re
 import threading
 from abc import ABC, abstractmethod
@@ -10,12 +11,14 @@ from collections import OrderedDict
 from collections.abc import Callable, Hashable, Iterable, Iterator, Sequence
 from itertools import islice
 from pathlib import Path
-from typing import Any, ClassVar, NamedTuple, Protocol, cast, get_args
+from typing import Any, ClassVar, NamedTuple, Protocol, cast, get_args, runtime_checkable
 
 from promptpotter.domain.run_records import SpendHoldRecord, TokenUsageRecord
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.io import append_line, open_text_robust
 from promptpotter.shared.clock import epoch_seconds
+
+logger = logging.getLogger(__name__)
 
 
 def iter_jsonl(path: Path, *, record_types: frozenset[str] | None = None) -> list[dict[str, Any]]:
@@ -123,6 +126,46 @@ class LineFold[V](Protocol):
     def value(self) -> V: ...
 
 
+@runtime_checkable
+class Positioned(Protocol):
+    """A fold whose value names the line it stands at, its own or not: its feeder stamps every line."""
+
+    at_offset: int
+
+
+class _Feeds[T](Protocol):
+    def feed(self, offset: int, record: T, /) -> None: ...
+
+
+def line_dict(raw: bytes) -> dict[str, Any]:
+    rec = json.loads(raw)
+    if not isinstance(rec, dict):
+        raise ValueError(f"a ledger line holds a record, not a {type(rec).__name__}")
+    return rec
+
+
+def ledger_record[R](
+    validate: Callable[[bytes], R], raw: bytes, *, ledger: Path, offset: int
+) -> R | None:
+    """The feed policy every ledger reader applies, with `feed_fold`: a line no reader can take is
+    logged and skipped, never a stop."""
+    if not raw.strip():
+        return None
+    try:
+        return validate(raw)
+    except ValueError:
+        logger.warning("skipping unparseable ledger line at offset %d in %s", offset, ledger)
+        return None
+
+
+def feed_fold[T](fold: _Feeds[T], offset: int, record: T, *, ledger: Path) -> None:
+    """A fold that raises on a line folds on past it, so a writer's checkout and a refold stay one value."""
+    try:
+        fold.feed(offset, record)
+    except Exception:
+        logger.exception("fold %s skipped offset %d of %s", type(fold).__name__, offset, ledger)
+
+
 def _by_record_type(folds: Iterable[LedgerFold[Any, Any]]) -> dict[str, type[StrictModel]]:
     return {
         model.model_fields["record_type"].default: model for fold in folds for model in fold.records
@@ -166,7 +209,6 @@ class _LedgerTail(ABC):
         self._reset()
 
     def _reset(self) -> None:
-        self._stopped: dict[type[Any], Exception] = {}
         self._sig: Signature | None = None
         self._bytes = 0
         self._lines = 0
@@ -224,6 +266,59 @@ def appended_here(path: Path, raw: bytes, at: range) -> None:
 
 type _Make = Callable[[], LedgerFold[Any, Any]]
 
+_SCREENS_NOTHING = re.compile(b"(?!)")
+
+
+class _Feeder:
+    def __init__(self, ledger: Path, folds: dict[_Make, LedgerFold[Any, Any]]) -> None:
+        self.folds = folds
+        self._ledger = ledger
+        self._models = _by_record_type(folds.values())
+        probes = b"|".join(sorted(re.escape(p.encode()) for p in self._models))
+        self._screen = re.compile(b'"(' + probes + b')"') if probes else _SCREENS_NOTHING
+        self._placed = [fold for fold in folds.values() if isinstance(fold, Positioned)]
+
+    def line(self, offset: int, raw: bytes) -> None:
+        for placed in self._placed:
+            placed.at_offset = offset
+        if self._screen.search(raw) is None:
+            return
+        record = ledger_record(self._typed, raw, ledger=self._ledger, offset=offset)
+        if record is None:
+            return
+        for fold in self.folds.values():
+            if type(record) in fold.records:
+                feed_fold(fold, offset, record, ledger=self._ledger)
+
+    def _typed(self, raw: bytes) -> StrictModel | None:
+        rec = line_dict(raw)
+        model = _model_of(self._models, rec)
+        return None if model is None else model.model_validate(rec)
+
+
+def _fresh[F](make: Callable[[], F], seed: F | None) -> F:
+    made = make() if seed is None else copy.deepcopy(seed)
+    if isinstance(made, Positioned):
+        made.at_offset = -1
+    return made
+
+
+def _fold_lines(ledger: Path, feeder: _Feeder, until: int | None) -> None:
+    try:
+        for offset, raw in enumerate(islice(_complete_lines(ledger, 0), until)):
+            feeder.line(offset, raw)
+    except FileNotFoundError:
+        return
+
+
+def folded[F: LedgerFold[Any, Any]](
+    ledger: Path, fold: Callable[[], F], *, seed: F | None, until: int | None
+) -> F:
+    """No index holds it, so nothing feeds it after: its caller alone owns what it folds on to."""
+    made = _fresh(fold, seed)
+    _fold_lines(ledger, _Feeder(ledger, {fold: made}), until)
+    return made
+
 
 class LedgerIndex(_LedgerTail):
     """ONE per ledger, holding every typed fold any roster named: a line is screened and validated once.
@@ -235,6 +330,7 @@ class LedgerIndex(_LedgerTail):
 
     def __init__(self, path: Path) -> None:
         self._seeds: dict[_Make, LedgerFold[Any, Any] | None] = {}
+        self._feeder = _Feeder(path, {})
         super().__init__(path)
 
     @classmethod
@@ -245,18 +341,12 @@ class LedgerIndex(_LedgerTail):
 
     def _reset(self) -> None:
         super()._reset()
-        self._folds = [self._fresh(make) for make in (*self._screened, *self._seeds)]
-        self._by_type: dict[type[Any], LedgerFold[Any, Any]] = {
-            type(fold): fold for fold in self._folds
-        }
-        self._models = _by_record_type(self._folds)
-        probes = sorted(p.encode() for p in self._models)
-        self._screen = re.compile(b'"(' + b"|".join(re.escape(p) for p in probes) + b')"')
+        held = {make: _fresh(make, self._seeds.get(make)) for make in self._feeder.folds}
+        self._feeder = _Feeder(self._path, held)
         self._prefixes: OrderedDict[tuple[_Make, int], LedgerFold[Any, Any]] = OrderedDict()
-
-    def _fresh(self, make: _Make) -> LedgerFold[Any, Any]:
-        seed = self._seeds.get(make)
-        return make() if seed is None else copy.deepcopy(seed)
+        self._cuts: dict[
+            tuple[_Make, int], tuple[LedgerFold[Any, Any] | None, LedgerFold[Any, Any]]
+        ] = {}
 
     def view[V](
         self,
@@ -268,78 +358,51 @@ class LedgerIndex(_LedgerTail):
         with self._lock:
             self._open(fold, seed)
             if until is None or until >= self._lines:
-                return cast("LedgerFold[Any, V]", self._by_type[cast("type[Any]", fold)]).value()
+                return cast("LedgerFold[Any, V]", self._feeder.folds[fold]).value()
             return cast("LedgerFold[Any, V]", self._prefix(fold, until)).value()
 
     def prefix[F: LedgerFold[Any, Any]](
         self, fold: Callable[[], F], until: int, *, seed: F | None = None
     ) -> F:
-        """Built once and never fed again, so it may seed another ledger's slot outside this lock."""
+        """Held until this ledger is rewritten, so a fork's slot seeded off it reads a rewrite by identity;
+        never fed again, so it may seed another ledger's slot outside this lock."""
         with self._lock:
-            self._open(fold, seed)
-            return cast("F", self._prefix(fold, until))
-
-    def head[F: LedgerFold[Any, Any]](self, fold: Callable[[], F], *, seed: F | None = None) -> F:
-        """A private copy as the file stands, for a writer that folds on from there."""
-        with self._lock:
-            self._open(fold, seed)
-            return cast("F", copy.deepcopy(self._by_type[cast("type[Any]", fold)]))
+            self._refresh()
+            held = self._cuts.get((fold, until))
+            if held is None or held[0] is not seed:
+                cut = folded(self._path, fold, seed=seed, until=until)
+                held = self._cuts[(fold, until)] = (seed, cut)
+            return cast("F", held[1])
 
     def _open(self, fold: _Make, seed: LedgerFold[Any, Any] | None) -> None:
-        if fold in self._screened:
-            if fold not in self._by_type:
-                self._reset()
-        # By identity: a parent's prefix is a new object exactly when its ledger was rewritten.
-        elif fold not in self._seeds or self._seeds[fold] is not seed:
-            self._seeds[fold] = seed
-            self._reset()
         self._refresh()
-        if (stopped := self._stopped.get(cast("type[Any]", fold))) is not None:
-            raise stopped
+        held = self._feeder.folds
+        if fold in self._screened:
+            joining = {make: make() for make in self._screened if make not in held}
+        elif fold not in held or self._seeds[fold] is not seed:
+            self._seeds[fold] = seed
+            joining = {fold: _fresh(fold, seed)}
+        else:
+            return
+        if not joining:
+            return
+        # A fold joins at the line the others stand at, so none of them refolds for it.
+        _fold_lines(self._path, _Feeder(self._path, joining), self._lines)
+        self._feeder = _Feeder(self._path, held | joining)
+        for stale in [key for key in self._prefixes if key[0] in joining]:
+            del self._prefixes[stale]
 
     def _prefix(self, fold: _Make, until: int) -> LedgerFold[Any, Any]:
         held = self._prefixes.pop((fold, until), None)
         if held is None:
-            held = (
-                copy.deepcopy(self._by_type[cast("type[Any]", fold)])
-                if until >= self._lines
-                else self._fold_prefix(fold, until)
-            )
+            held = folded(self._path, fold, seed=self._seeds.get(fold), until=until)
         self._prefixes[(fold, until)] = held
         while len(self._prefixes) > PREFIXES_MAX:
             self._prefixes.popitem(last=False)
         return held
 
-    def _fold_prefix(self, fold: _Make, until: int) -> LedgerFold[Any, Any]:
-        made = self._fresh(fold)
-        models = _by_record_type([made])
-        probes = tuple(f'"{p}"'.encode() for p in models)
-        for line, raw in enumerate(islice(_complete_lines(self._path, 0), until)):
-            if not any(p in raw for p in probes):
-                continue
-            if (rec := _record_of(raw)) is None:
-                continue
-            if (model := _model_of(models, rec)) is not None:
-                made.feed(line, model.model_validate(rec))
-        return made
-
     def _feed(self, raw: bytes) -> None:
-        if self._screen.search(raw) is None:
-            return
-        rec = _record_of(raw)
-        model = None if rec is None else _model_of(self._models, rec)
-        if model is None:
-            return
-        record: StrictModel | None = None
-        for fold in self._folds:
-            if type(fold) in self._stopped or model not in fold.records:
-                continue
-            try:
-                if record is None:
-                    record = model.model_validate(rec)
-                fold.feed(self._lines, record)
-            except Exception as exc:
-                self._stopped[type(fold)] = exc
+        self._feeder.line(self._lines, raw)
 
 
 class LineIndex(_LedgerTail):
@@ -368,21 +431,14 @@ class LineIndex(_LedgerTail):
     def view[V](self, fold: Callable[[], LineFold[V]]) -> V:
         with self._lock:
             self._refresh()
-            if (stopped := self._stopped.get(cast("type[Any]", fold))) is not None:
-                raise stopped
             return cast("LineFold[V]", self._folds[cast("type[Any]", fold)]).value()
 
     def _feed(self, raw: bytes) -> None:
-        rec = _record_of(raw)
-        if rec is None:
+        line = ledger_record(line_dict, raw, ledger=self._path, offset=self._lines)
+        if line is None:
             return
-        for kind, fold in self._folds.items():
-            if kind in self._stopped:
-                continue
-            try:
-                fold.feed(self._lines, rec)
-            except Exception as exc:
-                self._stopped[kind] = exc
+        for fold in self._folds.values():
+            feed_fold(fold, self._lines, line, ledger=self._path)
 
 
 class _Clock:

@@ -46,10 +46,12 @@ coalesces bursts). And it is written **immediately, with no debounce, at round b
 Do not relax the swap, remove those flushes, or add a path that lets the file lag past a completed
 round. The public round file carries the same atomicity, with
 `application/scoring/closed_rounds.py::RoundFileProjection` the tree's sole writer — a ledger subscriber,
-so a close, a restated state and a rewind each move it from the record. The model **is** the
+so a close, a restatement and a rewind each move it from the record. The model **is** the
 round file, and it has no reader in this package or above it: the file is the operator's.
 
-**A round IS its last `RoundClosedRecord`, and the round file is a checkout of it.** The close
+**A round IS its last `RoundStatement`, and the round file is a checkout of it.** Only a
+`RoundClosedRecord` moves the run's clock or announces a round; a `RoundRestatedRecord` (a repair's
+re-bank, a state banked after the close) restates the round and nothing else. A statement
 carries the whole outcome and the archive address of every row; a resume, a fork, the index and
 every served or rendered read take the rounds that STAND off the ledger chain (`infrastructure/store/campaign_store/ledger_scan.py::scan_standing_rounds`, rows
 through `application/scoring/closed_rounds.py::closed_rounds`), never off the round files. A second writer of round truth — a file a
@@ -85,9 +87,12 @@ with a write, so it is expressed once (`_beat_stale_after`) and the conditional-
 reads it from there — a 304 computed off a second copy outlives the answer it stands for.
 
 **Nothing reads that file back.** The fold is ONE `LedgerFold` in the ledger's index, a fork's
-slot seeded with its parent's fold at the cut (`store/read_model.py::LedgerIndex`); the served read
-(`infrastructure/projections/live_dashboard/projection.py::fold_at`) and a launch's checkout
-(`DashboardCheckout.over`) both start from it. Each `RunWiringRecord` clears what the launch before
+slot seeded with its parent's fold at the cut (`store/read_model.py::LedgerIndex`), which the served
+read (`infrastructure/projections/live_dashboard/projection.py::fold_at`) views; a launch's checkout
+(`DashboardCheckout.over`) folds the same file once into a fold it alone owns (`store/read_model.py::folded`).
+**Every ledger reader — index, fan-out, `iter`, the SSE tail — takes a line through ONE policy**
+(`store/read_model.py::ledger_record` + `feed_fold`): a line no model accepts, or a fold raising on
+it, is logged and skipped, never a stop, so a writer's checkout and every refold hold one value. Each `RunWiringRecord` clears what the launch before
 it left and every stamp is a record's own timestamp, so a refold reproduces the file at every
 offset, and no field on this model is on-disk shape anyone must migrate. **What a cycle runs under is a ledger record too** (`RunWiringRecord`, declared at the
 mint and again by each launch — `application/run_observers.py::declare_run_wiring`), so the

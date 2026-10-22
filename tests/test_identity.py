@@ -174,6 +174,7 @@ from promptpotter.infrastructure.store.dataset_access import (
 )
 from promptpotter.infrastructure.store.io import read_yaml, write_yaml
 from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache
+from promptpotter.infrastructure.store.read_model import append_row
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.judges.protocol import JudgeSpec, JudgeStage
 from promptpotter.shared.errors import (
@@ -1083,6 +1084,10 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     served = fold_at(root_cut)
     assert served is not None and served.defaults_drift is None, (
         "a launch on the defaults its declaration was made over served a drift"
+    )
+    append_row(wired_ledger.path, {"record_type": "run_wiring", "retired_field": True})
+    assert fold_at(root_cut) == served.model_copy(update={"at_offset": served.at_offset + 1}), (
+        "a ledger line from an older shape stopped the dashboard, or moved what it serves"
     )
     # The optimizer's defaults are its whole treatment: a part moved under one declaration is named.
     reshipped = held_campaign.treatment.model_copy(update={"manifest": "older"})

@@ -37,6 +37,7 @@ from promptpotter.domain.wire_record import (
 )
 from promptpotter.shared.errors import (
     ERROR_IS_CHARGED,
+    BadRequestError,
     ErrorCategory,
     error_category,
     is_error_result,
@@ -356,7 +357,7 @@ assert UNREAD_PIPELINE_KEYS <= PIPELINE_KEYS, "an unread key must be one Pipelin
 WalkedCell = tuple[str, str, bool]
 
 
-class ScoringFormulaError(Exception):
+class ScoringFormulaError(BadRequestError):
     """A formula↔trace contract bug every cell fails: it halts loud, never swallowed to ``0.0``."""
 
 

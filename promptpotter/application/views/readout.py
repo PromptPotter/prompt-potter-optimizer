@@ -78,6 +78,8 @@ from promptpotter.domain.run_records import (
     RoundClosedRecord,
     RoundEnteredRecord,
     RoundProposedRecord,
+    RoundRestatedRecord,
+    RoundStatement,
     RoundWarningRecord,
     RunPhaseRecord,
     RunWiringRecord,
@@ -132,7 +134,7 @@ class ReadoutProjection(Projection):
         self.scoring_formula = scoring_formula
         self.measured_unit = measured_unit
         # Each round's LAST close, so a round re-closed on a warmed ruler shows the θ that stands.
-        self._closed: dict[int, RoundClosedRecord] = {}
+        self._closed: dict[int, RoundStatement] = {}
         self.sample_counter = 0
         self._anchors = ViewAnchors()
         self._sample_lookahead_depth: int | None = None
@@ -262,6 +264,9 @@ class ReadoutProjection(Projection):
                 f"  [ARM GATE] round {record.round}: the operator answered with "
                 f"{len(record.proposals)} arm(s); each is a round_proposed record on the ledger"
             )
+
+    def _handle_round_restated(self, record: RoundRestatedRecord) -> None:
+        self._closed[record.round] = record
 
     def _handle_round_closed(self, record: RoundClosedRecord) -> None:
         self._closed[record.round] = record

@@ -211,6 +211,7 @@ def _finalize_run(
         bank_campaign_result(
             session.store,
             session.hop,
+            ledger=observers.callbacks.ledger,
             clock=session.state.launch_clock(),
             finished_at=cycle_result.finished_at,
             optimizer_phases=selected.phases,

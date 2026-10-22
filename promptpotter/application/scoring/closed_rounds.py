@@ -27,9 +27,9 @@ from promptpotter.shared.errors import NotFoundError, graceful
 if TYPE_CHECKING:
     from promptpotter.domain.bench import PartitionRecord
     from promptpotter.domain.run_records import (
-        OptimizerStateRecord,
         RoundClosedRecord,
         RoundEnteredRecord,
+        RoundRestatedRecord,
     )
     from promptpotter.domain.sample import Bank
     from promptpotter.domain.scoring import Scorer
@@ -166,7 +166,7 @@ class RoundFileProjection(Projection):
     def _handle_round_closed(self, record: RoundClosedRecord) -> None:
         self._check_out(record.round)
 
-    def _handle_optimizer_state(self, record: OptimizerStateRecord) -> None:
+    def _handle_round_restated(self, record: RoundRestatedRecord) -> None:
         self._check_out(record.round)
 
     def _check_out(self, round_num: int) -> None:

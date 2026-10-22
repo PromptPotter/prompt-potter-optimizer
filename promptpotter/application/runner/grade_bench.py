@@ -94,16 +94,17 @@ async def _grade(stores: Stores, hop: CycleHop) -> BenchScore:
             info = STOP_REASON_INFO[run_stop_reason(stop)]
             raise BenchTriggerError(f"{info.label}. {info.next_step}".strip()) from None
         finally:
-            dashboard.drain()
             # The verb's own clock and cost; each pass it sent banked itself as it was graded.
             if banked is not None:
                 bank_campaign_result(
                     stores,
                     hop,
+                    ledger=ledger,
                     clock=clock,
                     finished_at=utcnow_iso(),
                     optimizer_phases=optimizer.phases,
                 )
+            dashboard.drain()
     stores.campaigns.restate_export_bench(hop, score)
     publish_export(session)
     write_review_md(

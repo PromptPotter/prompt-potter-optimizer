@@ -21,7 +21,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_st
 if TYPE_CHECKING:
     from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
     from promptpotter.domain.paired_reading import MemberAddress, PairedReading
-    from promptpotter.domain.run_records import RoundClosedRecord
+    from promptpotter.domain.run_records import RoundStatement
     from promptpotter.infrastructure.store.stores import Stores
 
 
@@ -52,7 +52,7 @@ def answer_space_signature(labels: Iterable[Any], *, dataset: str) -> str:
     return "|".join(sorted(distinct))
 
 
-def _answer_space_signature(stores: Stores, closed: RoundClosedRecord, dataset: str) -> str:
+def _answer_space_signature(stores: Stores, closed: RoundStatement, dataset: str) -> str:
     walked = {cell[0]: cell for cells in closed.cells.arms.values() for cell in cells}
     return answer_space_signature(
         (cell.ground_truth for cell in walked_answers(stores, walked.values())),
@@ -70,7 +70,7 @@ def _credible_lift(reading: PairedReading | None) -> float | None:
 
 def _accumulate(
     stores: Stores,
-    closed: RoundClosedRecord,
+    closed: RoundStatement,
     dataset: str,
     acc: dict[tuple[str, str, str], list[float]],
     fields_of: Mapping[str, Mapping[str, NodePrompt]],

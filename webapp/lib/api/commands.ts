@@ -1,6 +1,6 @@
 import { encodeDescend, pathRoot, type CyclePath } from "../ids";
-import { API, send } from "./client";
-import { mintIdempotencyKey, throwApiError } from "./errors";
+import { API, send, toApiError } from "./client";
+import { mintIdempotencyKey } from "./errors";
 import type {
   CommandKind,
   CommandPayloads,
@@ -25,7 +25,7 @@ export async function postCommand<K extends CommandKind>(
     },
     body: JSON.stringify(payload),
   });
-  if (!r.ok) await throwApiError(r);
+  if (!r.ok) throw await toApiError(r);
   return (await r.json()) as CommandResponses[K];
 }
 // A command is addressed like a read: the root hop, plus the `descend` tail below it.

@@ -38,9 +38,7 @@ from promptpotter.domain.run_records import (
     ForkSpec,
     InterventionRecord,
     LaunchClaimRecord,
-    LaunchClockRecord,
     LaunchReleasedRecord,
-    OptimizerStateRecord,
     ResolvedRunRecord,
     RoundEnteredRecord,
     RoundProposedRecord,
@@ -491,9 +489,8 @@ class CampaignStore:
         return self.standing_rounds(hop, moment=None).submitted.get(round_num)
 
     def restate_optimizer_state(self, hop: CycleHop, rr: RoundResult) -> None:
-        CycleEventLog.open(CycleDir(self.cycle_dir(hop))).append(
-            OptimizerStateRecord(round=rr.round, optimizer_state=rr.closed_state)
-        )
+        close = self.standing_rounds(hop, moment=None).rounds[rr.round].close
+        CycleEventLog.open(CycleDir(self.cycle_dir(hop))).append(close.restated(rr.closed_state))
 
     def rewind_to_round(
         self,
@@ -522,9 +519,6 @@ class CampaignStore:
         if export is not None:
             with graceful("Export artifact write failed"):
                 self._write_export(hop, export)
-
-    def bank_launch_clock(self, hop: CycleHop, record: LaunchClockRecord) -> None:
-        self._append(hop, record)
 
     def _write_export(self, hop: CycleHop, export: PromptExport) -> None:
         write_text(self._layout(hop).export, export.model_dump_json(indent=2) + "\n")

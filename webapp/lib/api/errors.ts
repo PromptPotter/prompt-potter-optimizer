@@ -1,40 +1,7 @@
 import { ApiError, type FailureKind } from "./client";
-import type { FieldGap } from "./types";
-import type { ErrorEnvelope } from "./types.generated";
 
 export function mintIdempotencyKey(): string {
   return crypto.randomUUID();
-}
-// A type alias, not an interface: an interface has no implicit index signature for `ApiError.details`.
-export type IngestErrorDetail = {
-  reason?: string;
-  slug?: string;
-  suggested_slug?: string;
-  draft_id?: string;
-  gaps?: FieldGap[];
-};
-export class IngestApiError extends ApiError {
-  readonly reason?: string;
-  readonly existingSlug?: string;
-  readonly suggestedSlug?: string;
-  readonly draftId?: string;
-  readonly gaps?: FieldGap[];
-  constructor(
-    status: number,
-    url: string,
-    serverMessage: string | null,
-    code?: string,
-    errorId?: string,
-    detail?: IngestErrorDetail,
-  ) {
-    super(status, url, code ?? null, errorId ?? null, detail ?? null, serverMessage);
-    this.name = "IngestApiError";
-    this.reason = detail?.reason;
-    this.existingSlug = detail?.slug;
-    this.suggestedSlug = detail?.suggested_slug;
-    this.draftId = detail?.draft_id;
-    this.gaps = detail?.gaps;
-  }
 }
 
 // A transient write may have landed before the connection dropped: never claim nothing changed.
@@ -50,28 +17,5 @@ const KIND_SENTENCE: Record<FailureKind, string> = {
 // Never rebuild a sentence from the envelope's details: only the server knows a refusal's remedy.
 export function operatorMessage(e: unknown, kind: FailureKind): string {
   if (!(e instanceof ApiError) || e.serverMessage === null) return KIND_SENTENCE[kind];
-  if (e instanceof IngestApiError && e.suggestedSlug) {
-    return `${e.serverMessage} Suggested slug: ${e.suggestedSlug}.`;
-  }
   return e.serverMessage;
-}
-
-export async function throwApiError(r: Response): Promise<never> {
-  let message: string | null = null;
-  let code: string | undefined;
-  let errorId: string | undefined;
-  let detail: IngestErrorDetail | undefined;
-  try {
-    // A body that is no envelope came from something in front of the server.
-    const body = (await r.json()) as Partial<ErrorEnvelope> | null;
-    if (body?.message) {
-      message = body.message;
-      code = body.error;
-      detail = (body.details ?? undefined) as IngestErrorDetail | undefined;
-    }
-    if (typeof body?.error_id === "string") errorId = body.error_id;
-  } catch {
-    /* status-only message */
-  }
-  throw new IngestApiError(r.status, r.url, message, code, errorId, detail);
 }

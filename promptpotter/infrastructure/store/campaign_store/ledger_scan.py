@@ -14,7 +14,6 @@ from promptpotter.domain.command_kinds import (
     SkipSearchpointPayload,
     SubmitArmsPayload,
 )
-from promptpotter.domain.optimizer_state import OptimizerState
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phase_views import (
     BenchGradedView,
@@ -52,7 +51,6 @@ from promptpotter.domain.run_records import (
     LaunchClaimRecord,
     LaunchClockRecord,
     LaunchReleasedRecord,
-    OptimizerStateRecord,
     PhaseRecord,
     PricedKeyRecord,
     RaceCatchUpRecord,
@@ -61,6 +59,8 @@ from promptpotter.domain.run_records import (
     RoundClosedRecord,
     RoundEnteredRecord,
     RoundProposedRecord,
+    RoundRestatedRecord,
+    RoundStatement,
     RunPhaseRecord,
     RunWiringRecord,
     SampleScoredRecord,
@@ -276,7 +276,9 @@ class Controls(NamedTuple):
     submissions: tuple[tuple[str, SubmitArmsPayload], ...] = ()
 
 
-_LOOP_TAKEN = frozenset(model.kind for model in LoopPayload.__subclasses__())
+_LOOP_TAKEN = frozenset(
+    kind for kind, model in PAYLOAD_MODEL_FOR_KIND.items() if issubclass(model, LoopPayload)
+)
 
 
 class _Controls:
@@ -431,7 +433,7 @@ class StandingArm(NamedTuple):
 
 
 class StandingRound(NamedTuple):
-    close: RoundClosedRecord
+    close: RoundStatement
     at_offset: int
 
 
@@ -458,7 +460,6 @@ class StandingRounds(NamedTuple):
     proposals: dict[int, StandingProposal]
     # The operator's answer at the arm gate, beside the drafts it answered and never over them.
     submitted: dict[int, RoundProposedRecord]
-    restated: dict[int, OptimizerState]
     # An individual is an arm of every round that walked it: ``(round, key)`` is the join.
     arms: dict[tuple[int, ArmKey], StandingArm]
     # Every pass no arm walks: a bench pass, an overlap top-up.
@@ -472,14 +473,13 @@ class StandingRounds(NamedTuple):
 
     @classmethod
     def none(cls) -> StandingRounds:
-        return cls({}, {}, {}, {}, {}, {}, {}, {})
+        return cls({}, {}, {}, {}, {}, {}, {})
 
     def displaced(self, entered: int | None, rewound: int | None) -> StandingRounds:
         return self._replace(
             rounds=_before(self.rounds, entered),
             proposals=_before(self.proposals, rewound),
             submitted=_before(self.submitted, rewound),
-            restated=_before(self.restated, entered),
             arms=_before(self.arms, entered),
             passes=_before(self.passes, entered),
             elections=_before(self.elections, entered),
@@ -488,18 +488,12 @@ class StandingRounds(NamedTuple):
 
     def then(self, later: StandingRounds) -> StandingRounds:
         prefix = self.displaced(later.entered, later.rewound)
-        for n, state in later.restated.items():
-            if (held := prefix.rounds.get(n)) is not None:
-                prefix.rounds[n] = held._replace(
-                    close=held.close.model_copy(update={"optimizer_state": state})
-                )
         for n, made in later.decisions.items():
             prefix.decisions[n] = [*prefix.decisions.get(n, []), *made]
         return StandingRounds(
             rounds=dict(sorted({**prefix.rounds, **later.rounds}.items())),
             proposals={**prefix.proposals, **later.proposals},
             submitted={**prefix.submitted, **later.submitted},
-            restated={},
             arms={**prefix.arms, **later.arms},
             passes={**prefix.passes, **later.passes},
             elections={**prefix.elections, **later.elections},
@@ -510,6 +504,7 @@ class StandingRounds(NamedTuple):
 
     @property
     def standing(self) -> RunStanding | None:
+        """The LATEST round's last statement, never the last statement's: the live dashboard's rule."""
         return self.rounds[max(self.rounds)].close.run_standing if self.rounds else None
 
     @property
@@ -545,7 +540,7 @@ _RoundStep = (
     | ResumeCheckpointRecord
     | RoundClosedRecord
     | RoundProposedRecord
-    | OptimizerStateRecord
+    | RoundRestatedRecord
     | ArmRecord
     | SampleScoredRecord
 )
@@ -580,24 +575,19 @@ class _Standing:
             case ResumeCheckpointRecord():
                 held.decisions.setdefault(rnd, []).append(record)
             case RoundClosedRecord():
-                self._arms.close(record)
+                self._arms.close(record, record.arms)
                 for arm_key in record.arms:
                     self._cells.setdefault((rnd, arm_key), {})
                 held.rounds[rnd] = StandingRound(record, offset)
-                held.restated.pop(rnd, None)
+            case RoundRestatedRecord():
+                self._arms.close(record, record.remeasured)
+                for arm_key in record.remeasured:
+                    self._cells[rnd, arm_key] = {c[0]: c for c in record.cells.arms[arm_key]}
+                held.rounds[rnd] = StandingRound(record, offset)
             case RoundProposedRecord() if record.submitted:
                 held.submitted[rnd] = record
             case RoundProposedRecord():
                 held.proposals[rnd] = StandingProposal(record, offset, self._entered_at.get(rnd))
-            case OptimizerStateRecord():
-                if (closed := held.rounds.get(rnd)) is None:
-                    held.restated[rnd] = record.optimizer_state
-                else:
-                    held.rounds[rnd] = closed._replace(
-                        close=closed.close.model_copy(
-                            update={"optimizer_state": record.optimizer_state}
-                        )
-                    )
             case ArmRecord():
                 self._arms.announce(record)
                 self._cells.setdefault((rnd, record.arm), {})
@@ -619,7 +609,6 @@ class _Standing:
             rounds=dict(held.rounds),
             proposals=dict(held.proposals),
             submitted=dict(held.submitted),
-            restated=dict(held.restated),
             arms={
                 (rnd, key): StandingArm(
                     arms.state(rnd, key), dict(self._cells[rnd, key]), arms.fold(rnd, key)
@@ -632,7 +621,9 @@ class _Standing:
         )
 
 
-_Naming = SampleScoredRecord | RoundClosedRecord | RaceCatchUpRecord | PhaseRecord
+_Naming = (
+    SampleScoredRecord | RoundClosedRecord | RoundRestatedRecord | RaceCatchUpRecord | PhaseRecord
+)
 
 
 class _Answers:
@@ -650,7 +641,7 @@ class _Answers:
         match record:
             case SampleScoredRecord():
                 walked = [] if (cell := _walked_cell(record)) is None else [cell]
-            case RoundClosedRecord():
+            case RoundClosedRecord() | RoundRestatedRecord():
                 walks = record.cells.walks()
                 walked = [cell for walk in walks for cell in walk.cells]
             case RaceCatchUpRecord():
