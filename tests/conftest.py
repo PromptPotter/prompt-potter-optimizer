@@ -25,7 +25,7 @@ def completed_registries() -> None:
 @pytest.fixture(autouse=True)
 def bound_potter() -> Iterator[None]:
     """What every run seam binds (`runner/entry.py`), for a test driving a node without one."""
-    with binding_optimizer(resolve_optimizer("potter", {}, gate="off")):
+    with binding_optimizer(resolve_optimizer("potter", {}, gate="off"), determinism=None):
         yield
 
 

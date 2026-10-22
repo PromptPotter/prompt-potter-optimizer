@@ -440,13 +440,12 @@ class NodeContext[K: StrictModel]:
         return self._round.cycle.session.backend_client.measured_unit
 
     @property
-    def parent_point(self) -> JobSearchPoint | None:
-        return self._round.cycle.tracking.current_sp
+    def parent_point(self) -> JobSearchPoint:
+        return self._round.cycle.parent_point
 
     @property
     def frontier_rows(self) -> list[GradedCell]:
-        """Each sample's latest cell, of WHICHEVER individual measured it."""
-        return self._round.cycle.tracking.current_results
+        return self._round.cycle.frontier
 
     @property
     def parent_own_rows(self) -> list[GradedCell]:
@@ -461,7 +460,8 @@ class NodeContext[K: StrictModel]:
     @property
     def parent_accuracy(self) -> float | None:
         """On the panel it was LAST scored on; ``None`` is unmeasured."""
-        return self._round.cycle.tracking.current_accuracy
+        fold = self._round.cycle.parent_fold
+        return None if fold is None else fold.accuracy
 
     @property
     def origin(self) -> OptSearchPoint:

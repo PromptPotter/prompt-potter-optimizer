@@ -518,13 +518,6 @@ _TRACKER = "docs/specs/code-debt-cleanup.md"
 # An invariant a doc states as the target while its sentence says what holds today, keyed to the
 # phrase the tracker's URGENT section files it under; once true, the sentence is the invariant.
 _KNOWN_FALSE = {
-    r'git grep -cE "bank_partition\.json|pipeline\.resolved\.yaml|experiment\.resolved\.yaml|'
-    r'result\.json" -- promptpotter/infrastructure/store/layout.py == 0': (
-        "side files beside the ledger"
-    ),
-    'git grep -cE "class RoundStandingRecord" -- promptpotter/domain/run_records.py == 0': (
-        "the standing record split from its close"
-    ),
     'git grep -cE "def _head_state" -- promptpotter/application/served_dashboard.py == 0': (
         "dashboard.json served as the head state"
     ),
@@ -906,7 +899,7 @@ def _pytest(sel: Selection) -> Outcome:
         return run([sys.executable, "scripts/tests_owning.py", "--record"], REPO)
     if not sel.narrowed:
         return 0, "no test owns what moved"
-    return run(_py("pytest", "-p", "no:xdist", *sel.narrowed), REPO)
+    return run(_py("pytest", *sel.narrowed), REPO)
 
 
 @cache

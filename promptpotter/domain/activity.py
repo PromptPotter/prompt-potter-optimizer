@@ -4,6 +4,7 @@ from typing import Any, Literal, NamedTuple, assert_never, get_args
 
 from pydantic import Field
 
+from promptpotter.domain.bench import PartitionRecord
 from promptpotter.domain.command_kinds import CommandKind
 from promptpotter.domain.cycle_paths import CyclePath, command_address
 from promptpotter.domain.paired_reading import ArmKey
@@ -40,6 +41,7 @@ from promptpotter.domain.run_records import (
     ForkGradedRecord,
     InterventionRecord,
     LaunchClaimRecord,
+    LaunchClockRecord,
     LaunchReleasedRecord,
     LLMCallProgressRecord,
     LLMCallRecord,
@@ -51,11 +53,11 @@ from promptpotter.domain.run_records import (
     ProviderHoldRecord,
     RaceCatchUpRecord,
     RaceStandingRecord,
+    ResolvedRunRecord,
     ResumeCheckpointRecord,
     RoundClosedRecord,
     RoundEnteredRecord,
     RoundProposedRecord,
-    RoundStandingRecord,
     RoundWarningRecord,
     RunPhaseRecord,
     RunWiringRecord,
@@ -85,11 +87,14 @@ SILENT_RECORDS = (
     ForkGradedRecord,
     InterventionRecord,
     LaunchClaimRecord,
+    LaunchClockRecord,
     LaunchReleasedRecord,
     OptimizerStateRecord,
+    PartitionRecord,
     PricedKeyRecord,
     RaceCatchUpRecord,
     RaceStandingRecord,
+    ResolvedRunRecord,
     ResumeCheckpointRecord,
     RoundProposedRecord,
     RunWiringRecord,
@@ -393,10 +398,10 @@ class ActivityFeed:
                 return self._sample_scored(item_id, record)
             case PhaseRecord():
                 return self._phase(item_id, record)
-            case RunPhaseRecord() | RoundEnteredRecord() | RoundClosedRecord():
+            case RunPhaseRecord() | RoundEnteredRecord():
                 # Read by `_declared`; not SILENT, since a silent record is never handed to this feed.
                 return None
-            case RoundStandingRecord():
+            case RoundClosedRecord():
                 return ActivityItem(
                     id=item_id,
                     kind="round",

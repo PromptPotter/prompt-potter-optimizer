@@ -32,7 +32,6 @@ from promptpotter.application.runner.termination import panel_gate_tripped, stan
 from promptpotter.application.views.ingress import propose_enter, propose_exit, select_exit
 from promptpotter.application.views.render.primitives import overlap_series
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.l4.proxies import panel_precision
 from promptpotter.domain.optimizer_state import RoundOutput
 from promptpotter.domain.paired_reading import READING_STATE_INFO, ArmKey, ReadingState
 from promptpotter.domain.phase_views import MeasureEnterView
@@ -58,7 +57,7 @@ from promptpotter.domain.results import (
     unscoreable_cells,
 )
 from promptpotter.domain.results_health import assemble_prior_healths, compute_round_health
-from promptpotter.domain.run_records import BenchCheckpointKind, ResumeCheckpointRecord
+from promptpotter.domain.run_records import BenchCheckpointKind
 from promptpotter.domain.scoring import CellSheet
 from promptpotter.domain.wounds import collapse_counts
 from promptpotter.infrastructure.llm.telemetry import emit_round_warning
@@ -246,7 +245,7 @@ def _panel_gate(ctx: RoundContext, round_result: RoundResult, cut: StopReason | 
     holes = {key: unscoreable_cells(round_result.rows(key)) + unbought[key] for key in panel}
     # A broken arm also carries error rows, but its own outcome already charges it.
     holed = sorted(key for key, arm in panel.items() if is_leader_eligible(arm) and holes[key])
-    # Sink is the LEDGER: the halt below unwinds before `persist_round`.
+    # Sink is the LEDGER: the halt below unwinds before `close_round`.
     ledger = session.state.ledger
     assert ledger is not None, "build_run_observers must bind state.ledger before a round runs"
     record_decision(
@@ -300,8 +299,8 @@ def _panel_gate(ctx: RoundContext, round_result: RoundResult, cut: StopReason | 
 
 def announce_opening(ctx: RoundContext, walk: RoundWalk) -> RoundOpening:
     cycle = ctx.cycle
-    assert cycle.tracking.current_sp is not None
     opening = cycle.optimizer.runtime.opening(ctx, walk)
+    fold = cycle.parent_fold
     node = walk.proposer
     cb = ctx.callbacks
     cb.on_phase(
@@ -314,13 +313,13 @@ def announce_opening(ctx: RoundContext, walk: RoundWalk) -> RoundOpening:
             node=node,
             opening=opening,
             budget_rounds=cycle.config.optimization.budget.rounds,
-            parent_accuracy=cycle.tracking.current_accuracy,
+            parent_accuracy=None if fold is None else fold.accuracy,
             prompt_preview="\n\n".join(
                 cycle.opt_sp.render(prompt_node)
                 for prompt_node in cycle.session.pipeline_schema.prompt_nodes()
             )[:120],
             model=cycle.optimizer.model(node),
-            pipeline_params=cycle.tracking.current_sp.pipeline_params,
+            pipeline_params=cycle.parent_point.pipeline_params,
             parent_prompts=cycle.opt_sp.prompts,
         ),
     )
@@ -433,7 +432,6 @@ async def execute_round(
     panel = plan.sampler.draw(NodeContext(ctx, plan.sampler), pool)
     opening = announce_opening(ctx, plan.walk(cycle.population))
     population = await propose_population(ctx, plan, panel)
-    assert cycle.tracking.current_sp is not None
     announce_population(ctx, opening, population)
 
     callbacks.on_phase(
@@ -505,40 +503,6 @@ async def emit_origin_round(cycle: Cycle, session: Session, cb: RunCallbacks) ->
     await close_round(cycle, round_result, 0, session, cb)
 
 
-def persist_round(
-    cycle: Cycle,
-    round_result: RoundResult,
-    session: Session,
-    cb: RunCallbacks,
-) -> RoundResult:
-    flushed: list[ResumeCheckpointRecord] = []
-    if cycle.pending_decisions:
-        flushed = list(cycle.pending_decisions)
-        cycle.pending_decisions.clear()
-
-    if (ledger := session.state.ledger) is not None:
-        for d in flushed:
-            ledger.append(d)
-        offset = cb.on_round_close(
-            round_result, cycle.rounds, session.bank.slot_of, cycle.difficulty
-        )
-        round_result = cycle.seat(round_result.model_copy(update={"at_offset": offset}))
-
-    if session.state.cycle_id:
-        write_hard_samples_artifacts(session, cycle)
-        write_log_md(session, cycle.config)
-        write_review_md(
-            session,
-            accuracy_ceiling=cycle.config.accuracy_ceiling,
-            optimizer=cycle.optimizer,
-            framing=cycle.framing,
-        )
-
-    if _rr := session.state.audit_projection:
-        _rr.flush()
-    return round_result
-
-
 def flush_pending_decisions(cycle: Cycle, session: Session) -> int:
     """The controller acts after its round persisted; unflushed at a stop, a resume re-spends the act."""
     if not cycle.pending_decisions or (ledger := session.state.ledger) is None:
@@ -560,21 +524,29 @@ async def close_round(
 ) -> tuple[RoundResult, RunStanding]:
     stood = round_result.model_copy(update={"optimizer_state": cycle.close_state(round_num)})
     facts = cycle.optimizer.runtime.round_facts(cycle.optimizer, stood)
-    round_result = cycle.seat(stood.model_copy(update={"optimizer_facts": facts}))
-    lives = cycle.config.optimization.lives
-    standing = RunStanding.after(cycle.rounds, lives=None if lives is None else lives.bank)
-    # The close first: a subscriber of the standing reads the round it names off that record.
-    round_result = persist_round(cycle, round_result, session, cb)
-    election = round_result.election
-    leading = None if election is None or not round_result.round else election.leading
-    origin = cycle.origin_round
-    cb.on_round_complete(
-        round_result,
-        standing,
-        None
-        if leading is None
-        else panel_precision(round_result.rows(leading).cells, origin.results.cells),
+    closing = cycle.seat(stood.model_copy(update={"optimizer_facts": facts}))
+    for d in cycle.pending_decisions:
+        cb.ledger.append(d)
+    cycle.pending_decisions.clear()
+    offset, standing = cb.on_round_close(
+        closing,
+        cycle.rounds,
+        session.bank.slot_of,
+        cycle.difficulty,
+        lives=cycle.config.optimization.lives,
     )
+    round_result = cycle.seat(closing.model_copy(update={"at_offset": offset}))
+    if session.state.cycle_id:
+        write_hard_samples_artifacts(session, cycle)
+        write_log_md(session, cycle.config)
+        write_review_md(
+            session,
+            accuracy_ceiling=cycle.config.accuracy_ceiling,
+            optimizer=cycle.optimizer,
+            framing=cycle.framing,
+        )
+    if _rr := session.state.audit_projection:
+        _rr.flush()
     if cycle.sample_index is not None:
         cycle.sample_index.refresh(
             session.store,

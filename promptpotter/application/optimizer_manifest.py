@@ -741,14 +741,20 @@ def checkin_manifest() -> CheckinManifest:
 _BOUND: contextvars.ContextVar[SelectedOptimizer | None] = contextvars.ContextVar(
     "selected_optimizer", default=None
 )
+_DETERMINISM: contextvars.ContextVar[DeterminismClamp | None] = contextvars.ContextVar(
+    "determinism_clamp", default=None
+)
 
 
 @contextlib.contextmanager
-def binding_optimizer(selected: SelectedOptimizer) -> Iterator[None]:
-    token = _BOUND.set(selected)
+def binding_optimizer(
+    selected: SelectedOptimizer, *, determinism: DeterminismClamp | None
+) -> Iterator[None]:
+    token, clamp = _BOUND.set(selected), _DETERMINISM.set(determinism)
     try:
         yield
     finally:
+        _DETERMINISM.reset(clamp)
         _BOUND.reset(token)
 
 
@@ -780,17 +786,13 @@ _OPTIMIZER_PROMPT_OVERRIDES: contextvars.ContextVar[dict[str, dict[str, Any]] | 
 )
 
 
-def set_optimizer_prompt_overrides(overrides: dict[str, dict[str, Any]] | None) -> None:
-    _OPTIMIZER_PROMPT_OVERRIDES.set(overrides or None)
-
-
-_DETERMINISM: contextvars.ContextVar[DeterminismClamp | None] = contextvars.ContextVar(
-    "determinism_clamp", default=None
-)
-
-
-def set_determinism_clamp(clamp: DeterminismClamp | None) -> None:
-    _DETERMINISM.set(clamp)
+@contextlib.contextmanager
+def binding_prompt_overrides(overrides: dict[str, dict[str, Any]] | None) -> Iterator[None]:
+    token = _OPTIMIZER_PROMPT_OVERRIDES.set(overrides or None)
+    try:
+        yield
+    finally:
+        _OPTIMIZER_PROMPT_OVERRIDES.reset(token)
 
 
 def get_optimizer_config_overrides() -> dict[str, Any] | None:

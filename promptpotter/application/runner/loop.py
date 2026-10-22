@@ -105,11 +105,7 @@ async def run_round_loop(
                 return LoopEnd(StopReason.PAUSED, stepped=True)
 
             logger.debug(
-                "Round %d (clean=%d/%s, acc=%s)",
-                round_num,
-                clean_rounds,
-                cap,
-                cycle.tracking.current_accuracy,
+                "Round %d (clean=%d/%s, parent=%s)", round_num, clean_rounds, cap, cycle.parent_fold
             )
 
             # Through the boundary checks: a --diag controller reads the round just closed.

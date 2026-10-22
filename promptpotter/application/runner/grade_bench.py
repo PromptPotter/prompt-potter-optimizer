@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from promptpotter.application.bench.task_context import campaign_framing
-from promptpotter.application.initialization.loop_start import arm_diagnostic_scoring, verb_ledger
-from promptpotter.application.initialization.wiring import bind_cycle_session
+from promptpotter.application.initialization.loop_start import open_diagnostic, verb_ledger
 from promptpotter.application.jobs.launcher.admission import paid_pass
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.run_callbacks import RunCallbacks
@@ -32,7 +30,6 @@ from promptpotter.shared.errors import ConflictError
 
 if TYPE_CHECKING:
     from promptpotter.domain.bench import BenchPasses, BenchScore
-    from promptpotter.domain.campaign import Campaign
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.infrastructure.store.stores import Stores
 
@@ -50,19 +47,15 @@ async def grade_line_bench(*, stores: Stores, hop: CycleHop) -> BenchScore:
         refusal = read_cycle_bench(stores, campaign, hop).status.refusal
         if refusal is not None:
             raise BenchTriggerError(refusal)
-        return await _grade(stores, campaign, hop)
+        return await _grade(stores, hop)
 
 
-async def _grade(stores: Stores, campaign: Campaign, hop: CycleHop) -> BenchScore:
+async def _grade(stores: Stores, hop: CycleHop) -> BenchScore:
     standing = stores.campaigns.standing_rounds(hop, moment=None).rounds
     rounds = [standing[n].close for n in sorted(standing)]
-    session, config = await bind_cycle_session(stores, campaign, hop)
-    arm_diagnostic_scoring(session, config, source=RunSource.OPTIMIZATION_LOOP)
-    partition = session.scoring.require_partition()
-    framing = campaign_framing(stores, config, session.dataset)
-    origin_sp = rounds[0].origin.searchpoint(
-        schema=session.pipeline_schema, framing=framing, demo=partition.demo
-    )
+    opened = await open_diagnostic(stores, hop, source=RunSource.OPTIMIZATION_LOOP)
+    session, config, framing = opened.session, opened.config, opened.framing
+    origin_sp = opened.point(rounds[0].origin)
     started_at = utcnow_iso()
     optimizer = select_optimizer(config.optimization)
     cycle_dir = CycleDir(stores.campaigns.cycle_dir(hop))

@@ -46,7 +46,6 @@ from promptpotter.domain.run_records import (
     RaceStandingRecord,
     RoundClosedRecord,
     RoundEnteredRecord,
-    RoundStandingRecord,
     RoundWarningRecord,
     RunPhaseRecord,
     RunWiringRecord,
@@ -112,7 +111,6 @@ class LiveDashboardProjection(Projection):
         self.state = LiveDashboardState.for_run(seed, hop=hop)
         self.short_formula_template: str | None = None
         self._buffer = RoundBuffer()
-        self._closed: dict[int, RoundClosedRecord] = {}
         self._open_samples: dict[int, tuple[str, ArmKey | None, int]] = {}
         self._bench_readings: dict[int, BenchReading] = {}
         self._around_bench: tuple[DashboardState, str | None, ArmName | None] | None = None
@@ -257,17 +255,11 @@ class LiveDashboardProjection(Projection):
             self._buffer.reset(self.state.round)
 
     def _handle_round_closed(self, record: RoundClosedRecord) -> None:
-        self._closed[record.round] = record
         self.state.level_series = record.level_series
-        self._flush_pending_persist()
-
-    def _handle_round_standing(self, record: RoundStandingRecord) -> None:
         self.state.run_standing = record.run_standing
-        closed = self._closed.get(record.round)
-        if closed is not None:
-            prior = [r for r in self.state.rounds if r.round != closed.round]
-            summary = RoundSummary.of(closed, record.panel_precision)
-            self.state.rounds = sorted([*prior, self._with_bench(summary)], key=lambda r: r.round)
+        prior = [r for r in self.state.rounds if r.round != record.round]
+        summary = self._with_bench(RoundSummary.of(record))
+        self.state.rounds = sorted([*prior, summary], key=lambda r: r.round)
         self._flush_pending_persist()
 
     def _handle_phase(self, record: PhaseRecord) -> None:

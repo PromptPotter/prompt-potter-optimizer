@@ -36,7 +36,6 @@ from promptpotter.domain.run_records import CycleFinal
 from promptpotter.domain.spend import NOTHING_METERED, SpendRollup
 from promptpotter.infrastructure.runtime_flags import armed_run_limits
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_wall_clock
-from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.shared.clock import utcnow_iso
 
 
@@ -140,7 +139,7 @@ def close_cycle(
 ) -> CycleResult:
     finished_at = utcnow_iso()
     selected = bound_optimizer()
-    # Before the result is built: a decision made after the last round has no next `persist_round`.
+    # Before the result is built: a decision made after the last round has no next `close_round`.
     if cycle is not None:
         flush_pending_decisions(cycle, session)
     banked = None if cycle is None else cycle.bench_passes
@@ -233,7 +232,7 @@ def _finalize_run(
             final=CycleFinal(
                 started_at=cycle_result.started_at,
                 wall_clock=scan_ledger_wall_clock(
-                    [CycleLayout(session.store.campaigns.cycle_dir(session.hop)).ledger],
+                    [session.store.campaigns.ledger(session.hop)],
                     started_at=cycle_result.started_at,
                     finished_at=cycle_result.finished_at,
                     optimizer_phases=selected.phases,

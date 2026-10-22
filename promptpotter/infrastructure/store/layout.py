@@ -216,18 +216,6 @@ class CycleLayout:
         return self.cycle_dir / "export.json"
 
     @property
-    def resolved_pipeline(self) -> Path:
-        return self.cycle_dir / "pipeline.resolved.yaml"
-
-    @property
-    def resolved_experiment(self) -> Path:
-        return self.cycle_dir / "experiment.resolved.yaml"
-
-    @property
-    def bank_partition(self) -> Path:
-        return self.cycle_dir / "bank_partition.json"
-
-    @property
     def optimized_surface(self) -> Path:
         return self.cycle_dir / "optimized.md"
 
@@ -278,10 +266,6 @@ class CampaignLayout:
     @property
     def manifest(self) -> Path:
         return self.campaign_dir / "campaign.json"
-
-    @property
-    def result(self) -> Path:
-        return self.campaign_dir / "result.json"
 
     @property
     def log_md(self) -> Path:

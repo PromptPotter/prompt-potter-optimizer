@@ -35,10 +35,10 @@ Filed at the operator's ask, ahead of everything below: each entry is a shape th
 from being SEEN, so leaving it blinds the next plan the same way (`<next-change>`). Solve as soon
 as possible. **Rides with:** the shrink arc's stage named in each entry, or any pass in that file.
 
-- **Most doc invariants are still prose no gate checks, and seven that carry a probe are false.**
+- **Most doc invariants are still prose no gate checks, and five that carry a probe are false.**
   `gate.py --only doc-claims` resolves every cited `file::symbol` and runs every probe; each false
-  one is filed in `scripts/gate.py::_KNOWN_FALSE` under its phrase here: *side files beside the ledger* ·
-  *the standing record split from its close* · *dashboard.json served as the head state* · *the
+  one is filed in `scripts/gate.py::_KNOWN_FALSE` under its phrase here:
+  *dashboard.json served as the head state* · *the
   runner writes Session* · *the sidebar ignores the successor pointer* · *a second table in
   RoundFileView* · *no schema-first gate*. Action: each goes true and its sentence states the
   invariant again; every other one-X / no-second-Y / nothing-reads-Z claim gains a probe or is

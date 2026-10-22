@@ -183,8 +183,8 @@ RULES = (
     (
         "py-stdin",
         stdin_script,
-        "feeds {} its script on stdin, which hangs on this box — write the script to a file "
-        "and run it",
+        "feeds {} its script on stdin — write the script to a file and run it, so the hook "
+        "can attribute the script",
     ),
     ("author", authored, "writes literal text into {} through the shell — use Write or Edit"),
     (

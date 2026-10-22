@@ -79,7 +79,6 @@ from promptpotter.domain.results import (
     OverlapReading,
     Proposed,
     RoundResult,
-    RunStanding,
     ScoreSummary,
     Skipped,
     arm_end,
@@ -488,10 +487,9 @@ def close_round(
     line: Sequence[RoundResult],
     *,
     cycle: Cycle,
-    standing: RunStanding | None = None,
 ) -> None:
     """What the runner appends as the last round of *line* runs and closes over *cycle*'s bank:
-    entered, each panel arm proposed then concluded, the election, the close, the standing."""
+    entered, each panel arm proposed then concluded, the election, the close."""
     rr = line[-1]
     n = rr.round
     callbacks = RunCallbacks(ledger)
@@ -503,9 +501,13 @@ def close_round(
             callbacks.on_arm(n, key, arm)
     assert rr.election is not None, "a closed round elects"
     callbacks.on_election(n, rr.election)
-    callbacks.on_round_close(rr, line, cycle.session.bank.slot_of, cycle.difficulty)
-    stood = RunStanding.after(line, lives=None) if standing is None else standing
-    callbacks.on_round_complete(rr, stood, None)
+    callbacks.on_round_close(
+        rr,
+        line,
+        cycle.session.bank.slot_of,
+        cycle.difficulty,
+        lives=cycle.config.optimization.lives,
+    )
 
 
 SANDBOX_CAMPAIGN = "testds__20260101-000000"

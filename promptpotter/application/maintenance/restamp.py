@@ -17,7 +17,7 @@ from promptpotter.application.maintenance.archive_maintenance import (
     iter_cycle_ledgers,
 )
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
-from promptpotter.domain.campaign import Campaign, CampaignResult
+from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.optimizer_state import StatePart
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.results import DiagnosticRunRecord
@@ -66,12 +66,6 @@ _SURFACES: tuple[_Surface, ...] = (
         workspace_globs=("*/campaigns/*/campaign.json",),
         key_path=(),
         model_cls=Campaign,
-    ),
-    _Surface(
-        title="Campaign results (campaigns/*/result.json)",
-        workspace_globs=("*/campaigns/*/result.json",),
-        key_path=(),
-        model_cls=CampaignResult,
     ),
     _Surface(
         # The tenant tier only: install content is source, edited as source and never by a verb.

@@ -132,11 +132,12 @@ def target_tripped(cycle: Cycle, target: float | None) -> StopReason | None:
 
 def standing_tripped(cycle: Cycle, standing: RunStanding) -> StopReason | None:
     # The OBJECTIVE, not accuracy: where it prices tokens, 100% correct at 3x the tokens is no ceiling.
-    objective = cycle.tracking.current_composite_fitness
+    fold = cycle.parent_fold
     if (
         cycle.rounds[-1].overlap.advance is RoundAdvance.ADVANCED
-        and objective is not None
-        and objective >= 1.0
+        and fold is not None
+        and fold.composite_fitness is not None
+        and fold.composite_fitness >= 1.0
     ):
         return StopReason.PERFECT
     if standing.stalls_left == 0:

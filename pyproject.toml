@@ -97,18 +97,14 @@ dspy = [
 ]
 harbor = [
     # why kept: the `harbor` connector, which runs one containerized agent episode per measured
-    # cell through Harbor's own trial runner. Deliberately absent from `all`, for a reason
-    # stronger than `benchmarks`': it needs a running container runtime, so
-    # folding it in would break `pip install -e ".[all,dev]"` — the developer default this
-    # repo's own Commands block names. The connector's import is function-local, so
+    # cell through Harbor's own trial runner. Deliberately absent from `all`. The connector's
+    # import is function-local, so
     # `promptpotter.connectors` still loads without it and `preflight` fails naming this extra.
     #
-    # Installing it into the dev venv PULLS WEBSOCKETS DOWN, and that is expected rather than a
-    # conflict to fight: harbor -> supabase -> realtime pins `websockets>=11,<16`, while
-    # `uvicorn[standard]` leaves it unpinned and had resolved to 16.x. Nothing here requires >=16
-    # (uvicorn wants >=10.4, and openai's realtime extra wants <16), so the downgrade is safe —
-    # but it is a real change to the env `scripts/gate.py` re-execs into, so re-run the gate after
-    # installing rather than assuming it.
+    # The gate's env always carries it (`scripts/gate.py::_PINNED_EXTRAS`), and it HOLDS WEBSOCKETS
+    # BELOW 16 there, which is expected rather than a conflict to fight: harbor -> supabase ->
+    # realtime pins `websockets>=11,<16`, while `uvicorn[standard]` leaves it unpinned. Nothing
+    # here requires >=16 (uvicorn wants >=10.4, and openai's realtime extra wants <16).
     # UPPER-BOUNDED, unlike every other pin here, because `connectors/harbor.py::_digest` reads
     # Harbor's PRIVATE on-disk trial layout (`<trial>/agent/*.pane`, `verifier/test-stdout.txt`)
     # — there is no public accessor for those artifacts. A minor release that renames a directory
@@ -156,7 +152,7 @@ all = [
     # `benchmarks` is NOT folded in here, and that is the point of it being separate: `all` is
     # what a developer installs by default, so anything listed becomes attack surface nobody
     # opted into. Reach for `.[all,dev,benchmarks]` when you actually fetch a public bank.
-    # `harbor` is out for the same reason plus a harder one — it requires a container runtime, so folding it in would make this very install fail on a working box.
+    # `harbor` is out for the same reason.
     # `jupyter` is out because an installed IPython is imported by every `import dspy` and drags
     # jsonschema's format checkers with it: 38 MB and ~4 s on each test run that reaches DSPy.
     "fastapi>=0.119.0",
@@ -253,7 +249,6 @@ filterwarnings = ["ignore::RuntimeWarning"]
 python_version = "3.13"
 strict = true
 plugins = ["pydantic.mypy"]
-exclude = ["^datasets/"]
 namespace_packages = false
 # One SQLite DB instead of ~12.5k tiny JSON files — kills the Windows small-file
 # stat() tax that dominated every warm run.
@@ -286,10 +281,7 @@ module = [
     "rich.*",
     "markdown_it.*",
     "mdurl.*",
-    "werkzeug.*",
     "google.*",
-    "rsa.*",
-    "itsdangerous.*",
 ]
 follow_imports = "skip"
 ignore_missing_imports = true
@@ -317,17 +309,9 @@ select = [
 ]
 ignore = [
     "E501",   # line length (handled by formatter)
-    "N802",   # function name lowercase (allows test_GET_style names)
-    "N803",   # argument name lowercase (allows API-matching names)
-    "N806",   # variable name lowercase (allows DataFrame, etc.)
-    "UP007",  # X | None already used everywhere via PEP 604
     "RUF003", # ambiguous unicode in comments (multiplication sign × is intentional)
     "RUF002", # ambiguous unicode in docstrings
-    "UP040",  # type keyword aliases — TypeAlias is clearer for callback signatures
 ]
-
-[tool.ruff.lint.per-file-ignores]
-"notebooks/*.ipynb" = ["F403", "F405"]  # star imports are intentional in notebooks
 
 [tool.deptry]
 extend_exclude = [
@@ -354,16 +338,14 @@ DEP002 = [
     "python-multipart",  # imported by FastAPI at runtime for multipart/form-data, never directly by promptpotter/
     "python-dotenv",     # a CVE floor for pydantic-settings' `env_file` read; see [project] dependencies
     "jupyterlab",
-    "pytest",
     "pytest-asyncio",
     "ruff",
     "mypy",
     "deptry",
     "types-PyYAML",      # stub-only package: consumed by mypy, never imported
 ]
-# Optional features — imported lazily with install-message guards.
-# Declared in extras ([excel], [benchmarks], [observability], [anthropic], [jupyter]).
-DEP001 = ["openpyxl", "xlrd", "datasets", "langfuse", "anthropic", "IPython"]
+# `ipython` ([jupyter]) is in no gate env, so deptry cannot map it to the module it installs.
+DEP001 = ["IPython"]
 # Imported directly and deliberately left transitive: `infrastructure/llm/litellm_sends.py` wraps
 # the entry point HARBOR calls, so it must be the litellm Harbor resolved — a pin of our own could
 # split the two, and the meter would wrap a copy the agent never sends through.

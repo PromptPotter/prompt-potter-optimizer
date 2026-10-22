@@ -11,13 +11,11 @@ from promptpotter.application.bench.difficulty import (
     ruler_clock,
     session_ruler_scope,
 )
-from promptpotter.application.bench.task_context import campaign_framing
 from promptpotter.application.initialization.loop_start import (
-    arm_diagnostic_scoring,
     diagnostic_pass,
     diagnostic_trace,
+    open_diagnostic,
 )
-from promptpotter.application.initialization.wiring import bind_cycle_session
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.run_phase_control import RunControl
@@ -53,7 +51,6 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_verify,
     scan_ledger_walks,
 )
-from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.shared.errors import DiagnosticError
 from promptpotter.shared.measurement_context import MeasurementRole, RoleScope
 
@@ -255,23 +252,15 @@ async def verify_candidate(
     strategy: VerifyStrategy,
     seed: int | None,
 ) -> VerifyOutcome:
-    campaign = stores.campaigns.load_campaign(hop.campaign_id)
-    if campaign is None:
-        raise DiagnosticError(f"campaign {hop.campaign_id!r} has no manifest on disk.")
     round_num, entry = _scored_candidate(stores, hop, candidate_id)
     arm = arm_name(ArmKey(candidate_id), entry, round_num)
     label = arm.label
 
-    session, campaign_config = await bind_cycle_session(stores, campaign, hop)
-    arm_diagnostic_scoring(session, campaign_config, source=RunSource.VERIFY)
-
+    opened = await open_diagnostic(stores, hop, source=RunSource.VERIFY)
+    session, campaign_config, campaign = opened.session, opened.config, opened.campaign
     schema = session.pipeline_schema
     # Before a cell is bought: fresh cells of another searchpoint would read as this one's.
-    jsp = entry.searchpoint(
-        schema=schema,
-        framing=campaign_framing(stores, campaign_config, session.dataset),
-        demo=session.scoring.require_partition().demo,
-    )
+    jsp = opened.point(entry)
     sp_hash = jsp.sp_hash(schema)
     # Carries the prompt: keyed on config alone, candidates sharing a model read as one.
     predicate: dict[str, dict[str, Any]] = dict(schema.node_configs(jsp.pipeline_params))
@@ -288,7 +277,7 @@ async def verify_candidate(
             dataset_name=campaign.dataset_name, already_measured=len(measured_keys)
         )
 
-    ledger_path = CycleLayout(stores.campaigns.cycle_dir(hop)).ledger
+    ledger_path = stores.campaigns.ledger(hop)
     budget = derive_verify_samples(
         round_cell_budget=round_cells,
         rounds_unverified=rounds_since_verified(
@@ -309,7 +298,7 @@ async def verify_candidate(
         stores.ruler,
         session_ruler_scope(session),
         ruler_clock(session),
-        {jsp.sp_hash(schema)},
+        {sp_hash},
         objective_id=session.scoring.require_scorer().id,
         n_min=campaign_config.optimization.elimination_n_min,
         enable_2pl=campaign_config.optimization.enable_2pl_graduation,
@@ -394,7 +383,7 @@ async def verify_on_saturation(
     # Asked here: the loop consults its own ceiling only at the next round boundary, after this.
     if control.budget_tripped() is not None:
         return None
-    ledger_path = CycleLayout(stores.campaigns.cycle_dir(hop)).ledger
+    ledger_path = stores.campaigns.ledger(hop)
     mine = [banked.arm.round for banked, _ in scan_ledger_verify(ledger_path).graded.values()]
     if mine and rounds_since_verified(mine, round_num=round_num) < _VERIFY_LIFT_CAP:
         return None

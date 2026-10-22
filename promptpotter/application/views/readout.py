@@ -78,7 +78,6 @@ from promptpotter.domain.run_records import (
     RoundClosedRecord,
     RoundEnteredRecord,
     RoundProposedRecord,
-    RoundStandingRecord,
     RoundWarningRecord,
     RunPhaseRecord,
     RunWiringRecord,
@@ -100,7 +99,6 @@ if TYPE_CHECKING:
 
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.domain.ruler import LevelSeries
     from promptpotter.domain.scoring import Grade, MeasuredCell
 
 
@@ -265,15 +263,10 @@ class ReadoutProjection(Projection):
                 f"{len(record.proposals)} arm(s); each is a round_proposed record on the ledger"
             )
 
-    def _handle_round_standing(self, record: RoundStandingRecord) -> None:
-        self._anchors = record.anchors
-        closed = self._closed[record.round]
-        self.on_round_complete(
-            closed, record.run_standing.rounds_without_advance, closed.level_series
-        )
-
     def _handle_round_closed(self, record: RoundClosedRecord) -> None:
         self._closed[record.round] = record
+        self._anchors = record.anchors
+        self.on_round_complete(record)
 
     def _handle_llm_call_start(self, record: LLMCallStartRecord) -> None:
         self._pending_calls[record.call_id] = record.started_at_ms
@@ -572,10 +565,9 @@ class ReadoutProjection(Projection):
         prior = self._round_best_label or "leader"
         return f"  {DIM}→ {label} {acc:.1%}  ({gap:.1%} from {prior}){RESET}"
 
-    def on_round_complete(
-        self, round_result: RoundClosedRecord, stall: int, series: LevelSeries
-    ) -> None:
+    def on_round_complete(self, round_result: RoundClosedRecord) -> None:
         self.sample_counter = 0
+        series = round_result.level_series
 
         # Never `self._round_num`: the block race advances it before this round's summary prints.
         rn = round_result.round
@@ -632,7 +624,9 @@ class ReadoutProjection(Projection):
         for fact in (f for f in round_result.optimizer_facts if f.kind == "stat"):
             self._write(_node_line(f"{fact.label}: {fact.text}"))
         for line in render_patience_status(
-            round_result.overlap.advance, stall, self.patience
+            round_result.overlap.advance,
+            round_result.run_standing.rounds_without_advance,
+            self.patience,
         ).split("\n"):
             self._write(line)
         self._write(_node_bottom())

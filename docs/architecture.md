@@ -158,10 +158,11 @@ winner's own number is biased upward.
 **The graded result is the CAMPAIGN's, never a cycle's.** Each bench pass is a `bench:graded`
 record on the ledger of the cycle that sent it, written as it is graded, and the campaign's passes
 are the fold of its LINE's ledgers (`infrastructure/store/campaign_store/ledger_scan.py::scan_bench_passes`) — so a killed launch
-keeps every pass it graded. `domain/campaign.py::CampaignResult` (`campaigns/{id}/result.json`)
-holds the cycle holding the line and one clock per launch on it; the line's calls and spend are
-folds of its ledgers, read where they are asked for. Only the cycle holding the line writes
-either: the root, or where supersede cuts handed it on. An offshoot runs beside the line, so it grades nothing. A
+keeps every pass it graded. Each launch on the line banks its clock the same way, a
+`domain/run_records.py::LaunchClockRecord`, folded over the line by
+`application/runner/campaign_result.py::line_launches`; the line's calls and spend are folds of its
+ledgers too, read where they are asked for. Only the cycle holding the line writes either: the
+root, or where supersede cuts handed it on. An offshoot runs beside the line, so it grades nothing. A
 resume or a rebase reuses the origin's pass the line banked rather than sending it again.
 
 **When the passes are sent is the campaign's `bench_trigger`, and the default sends none.** Under
@@ -1001,8 +1002,8 @@ the PR description.
 
 
 - **Per-cycle `CycleEventLog` + `Projection` dispatch** — the
-  persistence backbone. No second ingress — and side files still stand beside it
-  (`infrastructure/store/layout.py`), a breach code-debt tracks. <!-- probe: git grep -cE "bank_partition\.json|pipeline\.resolved\.yaml|experiment\.resolved\.yaml|result\.json" -- promptpotter/infrastructure/store/layout.py == 0 -->
+  persistence backbone. No second ingress, and no campaign fact on a side file beside it: a
+  campaign's result is a fold of its line's ledgers. <!-- probe: git grep -cE "result\.json" -- promptpotter/infrastructure/store/layout.py == 0 -->
 
 - **Control-remote highway** (§ Control-remote) — the `CommandRecord` / `CommandAckRecord`
   / `ProjectionEnvelope` triple riding the canonical `.runtime/ledger.jsonl`. Cleanup PRs
@@ -1129,7 +1130,7 @@ the PR description.
     round's own `composite_fitness`) and the bench's headline on the bench set. **Which pick
     that is, and how it reads against the origin, is ONE value**: `RunStanding`
     (`domain/results.py`), derived once as a round closes, banked on its
-    `RoundStandingRecord` and displaced with its round — the index, the tree, the dashboard,
+    `RoundClosedRecord` and displaced with its round — the index, the tree, the dashboard,
     `log.md` and the cross-subject read all name the selection off it, and none keeps a
     high-water mark of its own. Forcing the two bases to
     agree would either make the deployed result stop optimizing the configured composite or

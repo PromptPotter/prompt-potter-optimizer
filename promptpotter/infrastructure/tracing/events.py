@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, Union
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.shared.hashing import stable_hash
 
@@ -80,11 +80,7 @@ class QueryScoreEnd:
     node_outputs: dict[str, Any]
 
 
-MeasurementEvent = Union[
-    QueryScoreStart,
-    QueryNodeSpan,
-    QueryScoreEnd,
-]
+MeasurementEvent = QueryScoreStart | QueryNodeSpan | QueryScoreEnd
 
 
 class TraceSink:

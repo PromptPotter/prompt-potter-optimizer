@@ -4,6 +4,7 @@ of its ceiling and no machine slot."""
 from __future__ import annotations
 
 import uuid
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from promptpotter.application.account import local_stores
@@ -88,10 +89,11 @@ async def open_session(
         stores=stores,
         program=program,
     )
-    if rows is not None:
-        session.bank = Bank.of(rows)
-        stores.tenant_datasets.put_bank(session.bank)
-    return session
+    if rows is None:
+        return session
+    bank = Bank.of(rows)
+    stores.tenant_datasets.put_bank(bank)
+    return replace(session, bank=bank)
 
 
 async def submit_gate_decision(stores: Stores, hop: CycleHop, decision: GateDecision) -> None:

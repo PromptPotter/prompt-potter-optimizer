@@ -42,7 +42,6 @@ from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import NO_CELLS
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 from promptpotter.infrastructure.store.dataset_access import ORIGIN_FILE
-from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import Moment
 from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole
@@ -111,7 +110,7 @@ def try_inherit_fork_origin(
         from_round,
         session.scoring.require_scorer(),
         # The fork's chain at its mint, its first record: the parent as cut, before any own close.
-        moment=Moment(CycleLayout(store.cycle_dir(session.hop)).ledger, 0),
+        moment=Moment(store.ledger(session.hop), 0),
     )
     if parent_round is None:
         return None

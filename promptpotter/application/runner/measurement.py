@@ -93,11 +93,10 @@ async def rescore_parent(
     force_fresh: bool = False,
 ) -> ReadArm:
     cycle = round_.cycle
-    assert cycle.tracking.current_sp is not None
     return await measure_as_parent(
         round_,
         cycle.opt_sp,
-        cycle.tracking.current_sp,
+        cycle.parent_point,
         scoring_set,
         role=role,
         force_fresh=force_fresh,
@@ -112,8 +111,6 @@ async def measure_population(
     selector: Selector,
 ) -> MeasuredRound:
     cycle = ctx.cycle
-    schema = cycle.session.pipeline_schema
-    assert schema is not None, "the measurement requires pipeline_schema"
     # Before a cell is bought, so PoBB cuts on the scale the election reads.
     cycle.difficulty.judge(_judged(cycle, population))
     arms, rows, cut = await _walk_population(
@@ -132,10 +129,7 @@ async def measure_population(
     cells = selector.parent_cells(NodeContext(ctx, selector), panel, rows)
     if cut is not None:
         # The spent budget buys the parent no cell: it is read where the archive already holds it.
-        assert cycle.tracking.current_sp is not None
-        cells = reread_cells(
-            cycle.tracking.current_sp, cells, cycle.session, label=MeasurementRole.PARENT
-        )
+        cells = reread_cells(cycle.parent_point, cells, cycle.session, label=MeasurementRole.PARENT)
         if not cells:
             raise StopLoop(cut)
     parent = await rescore_parent(ctx, cells, role=MeasurementRole.PARENT)
@@ -188,7 +182,7 @@ async def measure_population(
         folds=arm_folds(
             {key: read.state for key, read in filed.items()},
             {key: read.rows for key, read in filed.items()},
-            schema,
+            cycle.session.pipeline_schema,
         ),
         fit=fit,
         electable=electable,
@@ -199,20 +193,14 @@ async def measure_population(
 
 def _judged(cycle: Cycle, population: Proposals) -> set[str]:
     """The round's arms and every parent they name, by archive address."""
-    session = cycle.session
-    demo = session.scoring.require_partition().demo
+    schema = cycle.session.pipeline_schema
     known = {
         arm.individual.id: arm.sp_hash
         for rr in cycle.rounds
         for arm in rr.arms.values()
         if isinstance(arm, Concluded)
     }
-    held = {
-        ind.id: ind.to_job_search_point(
-            schema=session.pipeline_schema, framing=cycle.framing, demo=demo
-        ).sp_hash(session.pipeline_schema)
-        for ind in population.individuals
-    }
+    held = {ind.id: cycle.job_point(ind).sp_hash(schema) for ind in population.individuals}
     parents = {
         known.get(pid) or held.get(pid)
         for ind in population.individuals
@@ -243,18 +231,14 @@ async def _reference_readings(
             needed.setdefault(pid, set()).update(cells_of[key])
     # This round's individuals are not banked yet; every earlier one is, in a closed round.
     populated = {arm.individual.id: arm.individual for arm in arms.values()}
-    demo = cycle.session.scoring.require_partition().demo
     for pid, keys in needed.items():
         if ArmKey(pid) == parent.key:
             continue
         individual = populated.get(pid) or cycle.measured(pid).individual
-        sp = individual.to_job_search_point(
-            schema=cycle.session.pipeline_schema, framing=cycle.framing, demo=demo
-        )
         await measure_as_parent(
             ctx,
             individual,
-            sp,
+            cycle.job_point(individual),
             [s for s in panel.cells if s.key in keys],
             role=MeasurementRole.PARENT,
         )
@@ -388,11 +372,7 @@ async def _walk_population(
     )
     labels = {key: arm.label for key, arm in proposed.items()}
     order = [int(s.id) for s in panel.order]
-    demo = cycle.session.scoring.require_partition().demo
-    sps = {
-        key: arm.individual.to_job_search_point(schema=schema, framing=cycle.framing, demo=demo)
-        for key, arm in proposed.items()
-    }
+    sps = {key: cycle.job_point(arm.individual) for key, arm in proposed.items()}
     asked = {key: ctx.asked(key, panel.order) for key in proposed}
     states = {
         key: measuring(arm, sps[key], schema, expected=len(asked[key]), sample_order=order)

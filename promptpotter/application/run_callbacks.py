@@ -5,7 +5,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from promptpotter.application.views.view_models import ViewContext
-from promptpotter.domain.l4.proxies import PanelPrecision
 from promptpotter.domain.phases import CampaignPhase
 from promptpotter.domain.results import ArmState, Election, RoundResult, RunStanding
 from promptpotter.domain.run_records import (
@@ -18,7 +17,6 @@ from promptpotter.domain.run_records import (
     RaceStandingRecord,
     RoundClosedRecord,
     RoundEnteredRecord,
-    RoundStandingRecord,
 )
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.telemetry import bound_round
@@ -26,6 +24,7 @@ from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
     from promptpotter.application.bench.difficulty import DifficultyView
+    from promptpotter.application.campaign_config import LivesConfig
     from promptpotter.application.optimizers.nodes import RaceSnapshot
     from promptpotter.application.run_phase_control import Flight
     from promptpotter.domain.paired_reading import ArmKey
@@ -64,30 +63,18 @@ class RunCallbacks:
     def on_round_close(
         self,
         closing: RoundResult,
-        standing: Sequence[RoundResult],
+        prior: Sequence[RoundResult],
         slot_of: Mapping[str, int],
         difficulty: DifficultyView,
-    ) -> int | None:
-        """The close re-reads *closing* behind every round of *standing* before it."""
-        line = [*(rr for rr in standing if rr.round < closing.round), closing]
+        *,
+        lives: LivesConfig | None,
+    ) -> tuple[int | None, RunStanding]:
+        line = [*(rr for rr in prior if rr.round < closing.round), closing]
+        standing = RunStanding.after(line, lives=None if lives is None else lives.bank)
         [series] = difficulty.level_series([line])
-        return self._emit(RoundClosedRecord.of(closing, slot_of, series))
-
-    def on_round_complete(
-        self,
-        round_result: RoundResult,
-        standing: RunStanding,
-        panel_precision: PanelPrecision | None,
-    ) -> None:
         self.view_context.run_standing = standing
-        self._emit(
-            RoundStandingRecord(
-                round=round_result.round,
-                run_standing=standing,
-                panel_precision=panel_precision,
-                anchors=self.view_context.anchors(),
-            )
-        )
+        anchors = self.view_context.anchors()
+        return self._emit(RoundClosedRecord.of(line, slot_of, series, standing, anchors)), standing
 
     def on_arm(self, round_num: int, key: ArmKey, state: ArmState) -> None:
         self._emit(

@@ -49,6 +49,7 @@ async def run_generation_only_round(ctx: RoundContext) -> None:
         cycle.rounds,
         session.bank.slot_of,
         cycle.difficulty,
+        lives=cycle.config.optimization.lives,
     )
     if session.state.cycle_id:
         write_hard_samples_artifacts(session, cycle)

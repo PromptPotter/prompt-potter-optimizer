@@ -126,7 +126,7 @@ class CampaignSummary(StrictModel):
     bench: BenchScore | None = Field(
         description=(
             "The headline (`architecture.md` § The bench score is not an optimizer's selection), "
-            "read off the campaign's result (`result.json`) under the formula its line runs — "
+            "read off the passes its line's ledgers banked, under the formula the line runs — "
             "whichever cycle rebases handed the line to. `status` says where it stands and "
             "whether its pass may be asked for; `selected` is null until the line grades its pick. "
             "Null where the root config did not resolve — a manifest this build cannot read."

@@ -3,21 +3,27 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Iterator, Sequence
 from contextlib import contextmanager
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, assert_never
 
 from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.bench.resume_and_fork.resume import (
     resume_with_divergence_check,
 )
+from promptpotter.application.bench.task_context import campaign_framing
 from promptpotter.application.datasets.authored import scorer_of
 from promptpotter.application.initialization.session import Session
+from promptpotter.application.initialization.wiring import bind_cycle_session
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
 from promptpotter.application.preflight import (
     refuse_arm_below_round,
     run_preflight_checks,
 )
-from promptpotter.application.runner.inner.spawn_context import retarget_inner_spawn
+from promptpotter.application.runner.inner.spawn_context import (
+    publish_inner_spawn_context,
+    retarget_inner_spawn,
+)
 from promptpotter.application.scoring.classification import build_degradation_checks
 from promptpotter.application.scoring.formula.compiler import cell_channels_of
 from promptpotter.application.scoring.sample_measurement import cell_bound
@@ -59,7 +65,10 @@ if TYPE_CHECKING:
     from promptpotter.application.run_callbacks import RunCallbacks
     from promptpotter.application.scoring.search_point_scorer import ScoredWalk
     from promptpotter.domain.bench import PartitionRecord
+    from promptpotter.domain.campaign import Campaign
+    from promptpotter.domain.results import Concluded
     from promptpotter.domain.sample import Sample
+    from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
     from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
@@ -78,11 +87,12 @@ def init_cycle(
     store = session.store.campaigns
     resolved = cycle_id
     hop = CycleHop(campaign_id=session.campaign_id, cycle_id=resolved)
-    # Re-written on a resume on purpose: the backend may have changed its axes since.
-    if session.pipeline_declaration:
-        store.write_resolved_pipeline(hop, session.pipeline_declaration)
-    # Write-once, unlike the line above: a roster a connector only NAMES can move under its name.
-    store.write_resolved_experiment(hop, session.backend_client.workload.experiment)
+    # Restated on every launch: the backend may have moved its axes since.
+    store.write_resolved_run(
+        hop,
+        declaration=session.pipeline_declaration,
+        experiment=session.backend_client.workload.experiment,
+    )
     store.write_optimized_surface(
         hop,
         session.pipeline_schema.value_tree(
@@ -144,15 +154,49 @@ def arm_diagnostic_scoring(
     session.scoring.partition = cycle_partition(session, session.bank.samples, campaign_config)
 
 
+@dataclass(frozen=True)
+class OpenedDiagnostic:
+    campaign: Campaign
+    session: Session
+    config: CampaignConfig
+    framing: TaskDecomposition
+
+    def point(self, concluded: Concluded) -> JobSearchPoint:
+        return concluded.searchpoint(
+            schema=self.session.pipeline_schema,
+            framing=self.framing,
+            demo=self.session.scoring.require_partition().demo,
+        )
+
+
+async def open_diagnostic(stores: Stores, hop: CycleHop, *, source: RunSource) -> OpenedDiagnostic:
+    """The one opener of every verb that scores a cycle's points outside its loop."""
+    campaign = stores.campaigns.load_campaign(hop.campaign_id)
+    if campaign is None:
+        raise DiagnosticError(f"campaign {hop.campaign_id!r} has no manifest on disk.")
+    session, config = await bind_cycle_session(stores, campaign, hop)
+    # As `run_optimization` does: a pp-self point's connector dispatches no inner run without it.
+    publish_inner_spawn_context(session)
+    arm_diagnostic_scoring(session, config, source=source)
+    return OpenedDiagnostic(
+        campaign, session, config, campaign_framing(stores, config, session.dataset)
+    )
+
+
 def cycle_partition(
     session: Session, rows: Sequence[Sample], campaign_config: CampaignConfig
 ) -> BankPartition:
-    """What the cycle's mint drew, restored off the bank it drew; *rows* are drawn only where no cycle holds one."""
+    """What the cycle's mint drew, restored off the bank it drew; *rows* are drawn only outside a cycle."""
     cycle_id = session.state.cycle_id
-    recorded = session.store.campaigns.read_bank_partition(session.hop) if cycle_id else None
-    if recorded is not None:
-        return _restored(session, recorded)
-    return partition_bank(rows, campaign_config.dataset_split, seed=campaign_config.run_seed)
+    if not cycle_id:
+        return partition_bank(rows, campaign_config.dataset_split, seed=campaign_config.run_seed)
+    recorded = session.store.campaigns.read_bank_partition(session.hop)
+    if recorded is None:
+        raise ConflictError(
+            f"cycle {cycle_id} holds no drawn partition over its chain; a mint draws one, so "
+            "this cycle was not minted through it."
+        )
+    return _restored(session, recorded)
 
 
 def _restored(session: Session, recorded: PartitionRecord) -> BankPartition:
@@ -330,6 +374,7 @@ async def _apply_resume_fork(
     resolved_cycle_id: str | None,
     resumed_from_round: int,
     dataset: list[Sample],
+    cb: RunCallbacks,
     *,
     no_divergence_check: bool,
     fork_on_divergence: bool,
@@ -344,6 +389,7 @@ async def _apply_resume_fork(
             session,
             cycle,
             dataset,
+            cb.view_context,
             skip_divergence_check=no_divergence_check,
             fork_on_divergence=fork_on_divergence,
         )
@@ -417,6 +463,7 @@ async def init_optimization_loop(
         resolved_cycle_id,
         resumed_from_round,
         dataset,
+        cb,
         no_divergence_check=no_divergence_check,
         fork_on_divergence=fork_on_divergence,
     )

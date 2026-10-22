@@ -14,7 +14,6 @@ from promptpotter.domain.bench import BenchScore, PartitionRecord
 from promptpotter.domain.campaign import (
     Campaign,
     CampaignEdit,
-    CampaignResult,
     HeadToHeadRecord,
     LifecycleFilter,
     LifecycleStatus,
@@ -39,8 +38,10 @@ from promptpotter.domain.run_records import (
     ForkSpec,
     InterventionRecord,
     LaunchClaimRecord,
+    LaunchClockRecord,
     LaunchReleasedRecord,
     OptimizerStateRecord,
+    ResolvedRunRecord,
     RoundEnteredRecord,
     RoundProposedRecord,
     RunPhaseRecord,
@@ -62,24 +63,25 @@ from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.account_spend import banked_metered, sandbox_cycle_dirs
 from promptpotter.infrastructure.store.account_trail import bank_before_removal
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
+    ResolvedRun,
     StandingRounds,
+    scan_bank_partition,
     scan_cycle_facts,
     scan_launch_claim,
     scan_ledger_cycle_seed,
     scan_ledger_metered,
     scan_ledger_standing_budget,
+    scan_resolved_run,
     scan_standing_rounds,
 )
 from promptpotter.infrastructure.store.io import (
     iter_files,
     read_json_optional,
     read_text_optional,
-    read_yaml_optional,
     rmtree_robust,
     unlink_robust,
     write_json,
     write_text,
-    write_yaml,
 )
 from promptpotter.infrastructure.store.layout import (
     CampaignLayout,
@@ -165,6 +167,9 @@ class CampaignStore:
     def _layout(self, hop: CycleHop) -> CycleLayout:
         return CycleLayout(self.cycle_dir(hop))
 
+    def ledger(self, hop: CycleHop) -> Path:
+        return self._layout(hop).ledger
+
     def _append(self, hop: CycleHop, record: CycleRecord) -> None:
         cycle_dir = self.cycle_dir(hop)
         CycleEventLog.open(CycleDir(cycle_dir)).append(record)
@@ -218,7 +223,7 @@ class CampaignStore:
         return own.plus(banked_metered(self._base_dir, campaign_id, meter))
 
     def cycle_metered(self, hop: CycleHop, meter: CeilingMeter) -> Budget:
-        return _ledger_meters([self._layout(hop).ledger])[meter]
+        return _ledger_meters([self.ledger(hop)])[meter]
 
     def ceiling_meter_of(self, campaign_id: str) -> CeilingMeter:
         campaign = self.load_campaign(campaign_id)
@@ -254,13 +259,6 @@ class CampaignStore:
             )
         write_json(path, campaign.model_dump(mode="json"))
         return path
-
-    def load_result(self, campaign_id: str) -> CampaignResult | None:
-        data = read_json_optional(self._campaign_layout(campaign_id).result)
-        return None if data is None else CampaignResult.model_validate(data)
-
-    def write_result(self, campaign_id: str, result: CampaignResult) -> None:
-        write_json(self._campaign_layout(campaign_id).result, result.model_dump(mode="json"))
 
     def load_head_to_head(self, head_to_head_id: str) -> HeadToHeadRecord | None:
         return self._read_declared(
@@ -449,14 +447,14 @@ class CampaignStore:
 
     def adopt_ledger(self, hop: CycleHop, ledger: Path) -> None:
         """A MOVE, never a copy: what a draft billed is the cycle's first lines."""
-        target = self._layout(hop).ledger
+        target = self.ledger(hop)
         if target.exists():
             raise ConflictError(f"cycle {hop.cycle_id} already holds a ledger")
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(ledger, target)
 
     def mint_cycle(self, hop: CycleHop) -> None:
-        if scan_cycle_facts(self._layout(hop).ledger).minted is None:
+        if scan_cycle_facts(self.ledger(hop)).minted is None:
             self._append(hop, CycleMintedRecord())
 
     def mint_fork_cycle(
@@ -502,8 +500,7 @@ class CampaignStore:
         hop: CycleHop,
         after_round: int,
     ) -> None:
-        layout = self._layout(hop)
-        if not layout.ledger.exists():
+        if not self.ledger(hop).exists():
             raise NotFoundError(f"cycle {hop.cycle_id!r} has no ledger on disk")
         max_complete = max(self.standing_rounds(hop, moment=None).rounds, default=-1)
         if after_round > max_complete:
@@ -526,6 +523,9 @@ class CampaignStore:
             with graceful("Export artifact write failed"):
                 self._write_export(hop, export)
 
+    def bank_launch_clock(self, hop: CycleHop, record: LaunchClockRecord) -> None:
+        self._append(hop, record)
+
     def _write_export(self, hop: CycleHop, export: PromptExport) -> None:
         write_text(self._layout(hop).export, export.model_dump_json(indent=2) + "\n")
 
@@ -546,7 +546,7 @@ class CampaignStore:
 
     def line(self, hop: CycleHop) -> list[CycleHop]:
         out = [hop]
-        while successor := scan_cycle_facts(self._layout(hop).ledger).superseded_by:
+        while successor := scan_cycle_facts(self.ledger(hop)).superseded_by:
             hop = CycleHop(campaign_id=hop.campaign_id, cycle_id=successor)
             out.append(hop)
         return out
@@ -584,7 +584,7 @@ class CampaignStore:
         )
 
     def launch_claim(self, hop: CycleHop) -> LaunchClaimRecord | None:
-        return scan_launch_claim(self._layout(hop).ledger)
+        return scan_launch_claim(self.ledger(hop))
 
     def release_claim(self, hop: CycleHop, *, job_id: str, detail: str) -> None:
         claim = self.launch_claim(hop)
@@ -592,7 +592,7 @@ class CampaignStore:
             self._append(hop, LaunchReleasedRecord(job_id=job_id, detail=detail))
 
     def _declare_ended(self, hop: CycleHop, reason: StopReason) -> bool:
-        facts = scan_cycle_facts(self._layout(hop).ledger)
+        facts = scan_cycle_facts(self.ledger(hop))
         if facts.minted is None or facts.ended is not None:
             return False
         self.declare_stop(hop, RunPhaseRecord.stop(reason))
@@ -655,7 +655,7 @@ class CampaignStore:
         if root_cycle_id(hop.cycle_id) == hop.cycle_id:
             return "family root — deletion is for sibling stubs only"
         # Its OWN ledger, not the chain: a rebase fork stands on parent rounds it never closed.
-        own = scan_standing_rounds([LedgerSpan(CycleLayout(cycle_dir).ledger)]).rounds
+        own = scan_standing_rounds([LedgerSpan(self.ledger(hop))]).rounds
         if own:
             return f"closed {len(own)} round(s) of its own — cycle ran real work"
         here = Path(os.path.normpath(cycle_dir))
@@ -691,7 +691,7 @@ class CampaignStore:
             [cycle_dir],
             campaign_id=hop.campaign_id,
             cycle_id=hop.cycle_id,
-            metered=_ledger_meters([CycleLayout(cycle_dir).ledger]),
+            metered=_ledger_meters([self.ledger(hop)]),
         )
         rmtree_robust(cycle_dir)
         return True, ""
@@ -701,7 +701,7 @@ class CampaignStore:
         CycleEventLog.open(CycleDir(cycle_dir)).append(CycleSeedRecord(seed=seed))
 
     def read_cycle_seed(self, hop: CycleHop) -> CycleSeed | None:
-        return scan_ledger_cycle_seed(self._layout(hop).ledger)
+        return scan_ledger_cycle_seed(self.ledger(hop))
 
     def write_standing_budget(
         self, hop: CycleHop, budget: Budget, *, pause_at_round: int | None
@@ -712,41 +712,38 @@ class CampaignStore:
         )
 
     def read_standing_budget(self, hop: CycleHop) -> StandingBudgetRecord:
-        return scan_ledger_standing_budget(self._layout(hop).ledger)
+        return scan_ledger_standing_budget(self.ledger(hop))
 
-    def write_resolved_pipeline(self, hop: CycleHop, declaration: dict[str, Any]) -> None:
-        write_yaml(self._layout(hop).resolved_pipeline, declaration)
+    def _chain(self, hop: CycleHop) -> list[LedgerSpan]:
+        return ledger_chain(CycleDir(self.cycle_dir(hop)), moment=None)
 
-    def write_resolved_experiment(
-        self, hop: CycleHop, experiment: Mapping[str, Any] | None
+    def write_resolved_run(
+        self,
+        hop: CycleHop,
+        *,
+        declaration: dict[str, Any],
+        experiment: Mapping[str, Any] | None,
     ) -> None:
-        """First write wins: the roster names what every round ALREADY measured."""
-        if experiment is None:
-            return
-        doc = dict(experiment)
-        path = self._layout(hop).resolved_experiment
-        held = read_yaml_optional(path)
-        if held is None:
-            write_yaml(path, doc)
-        elif held != doc:
+        doc = None if experiment is None else dict(experiment)
+        held = self.read_resolved_run(hop)
+        if doc is not None and held.experiment is not None and held.experiment != doc:
             logger.warning(
-                "%s resolves a DIFFERENT panel than the one %s measured — the landed roster "
+                "%s resolves a DIFFERENT panel than the one cycle %s measured — the landed roster "
                 "stands and this run's rows are not comparable to the earlier ones. Pin the "
                 "backend's roster, or run this as a new campaign.",
                 hop.campaign_id,
-                path.name,
+                held.experiment_cycle_id,
             )
+        self._append(hop, ResolvedRunRecord(declaration=declaration, experiment=doc))
 
-    def read_resolved_experiment(self, hop: CycleHop) -> dict[str, Any] | None:
-        raw = read_yaml_optional(self._layout(hop).resolved_experiment)
-        return raw if isinstance(raw, dict) else None
+    def read_resolved_run(self, hop: CycleHop) -> ResolvedRun:
+        return scan_resolved_run(self._chain(hop))
 
     def read_bank_partition(self, hop: CycleHop) -> PartitionRecord | None:
-        raw = read_json_optional(self._layout(hop).bank_partition)
-        return None if raw is None else PartitionRecord.model_validate(raw)
+        return scan_bank_partition(self._chain(hop))
 
     def write_bank_partition(self, hop: CycleHop, record: PartitionRecord) -> None:
-        write_json(self._layout(hop).bank_partition, record.model_dump(mode="json"))
+        self._append(hop, record)
 
     def write_optimized_surface(self, hop: CycleHop, leaves: Sequence[ValueLeaf]) -> None:
         by_delivery: dict[str, list[ValueLeaf]] = {}
@@ -759,8 +756,8 @@ class CampaignStore:
             "**may-not-arrive** marks a channel the model reads only if it OPENS the artifact",
             "carrying the value — there, a value can be mutated every round and reach nothing.",
             "",
-            "These are the AXES. The VALUES they currently hold are in `pipeline.resolved.yaml`",
-            "beside this file, written on the same cadence — not copied here, because a second",
+            "These are the AXES. The VALUES they currently hold are the `resolved_run` record on",
+            "this cycle's ledger, appended on the same cadence — not copied here, because a second",
             "copy of a value is one that can disagree with the declaration it came from.",
             "",
         ]
@@ -775,7 +772,3 @@ class CampaignStore:
             ]
             lines.append("")
         write_text(self._layout(hop).optimized_surface, "\n".join(lines))
-
-    def read_resolved_pipeline(self, hop: CycleHop) -> dict[str, Any] | None:
-        raw = read_yaml_optional(self._layout(hop).resolved_pipeline)
-        return raw if isinstance(raw, dict) else None

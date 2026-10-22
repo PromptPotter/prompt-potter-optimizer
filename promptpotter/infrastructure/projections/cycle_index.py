@@ -15,7 +15,6 @@ from promptpotter.domain.run_records import (
     PhaseRecord,
     RoundClosedRecord,
     RoundEnteredRecord,
-    RoundStandingRecord,
     RunPhaseRecord,
     SpawnedRecord,
 )
@@ -85,7 +84,6 @@ _INDEXED = (
     RunPhaseRecord,
     RoundEnteredRecord,
     RoundClosedRecord,
-    RoundStandingRecord,
 )
 
 

@@ -1,6 +1,6 @@
 # application/initialization/ — run init
 
-**Run init** — the ordered chain from a `new` / `resume` invocation to the first round: `init_services` (→ `Session`) → `populate_session_scoring` → `init_cycle` (resume or create) → `init_optimization_loop` (preflight, observability, `INIT.exit`, hand off to the round loop). **Each step's preconditions are the prior step's postconditions** — called out of order, the session is left under-wired. One member is deliberately NOT of that chain: `arm_diagnostic_scoring` is step 2 alone, the one path every verb that scores outside the loop takes — never a copy per verb.
+**Run init** — the ordered chain from a `new` / `resume` invocation to the first round: `init_services` (→ `Session`) → `populate_session_scoring` → `init_cycle` (resume or create) → `init_optimization_loop` (preflight, observability, `INIT.exit`, hand off to the round loop). **Each step's preconditions are the prior step's postconditions** — called out of order, the session is left under-wired. One member is deliberately NOT of that chain: `arm_diagnostic_scoring` is step 2 alone, the one path every verb that scores outside the loop takes, and a verb scoring a cycle's points opens through `loop_start.py::open_diagnostic` — never a copy per verb.
 
 ## Registries complete at a declared step
 

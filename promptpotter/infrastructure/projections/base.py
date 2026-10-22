@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, ClassVar, get_args
 
+from promptpotter.domain.bench import PartitionRecord
 from promptpotter.domain.phases import ErrorRecord
 from promptpotter.domain.run_records import (
     AccountEventRecord,
@@ -20,6 +21,7 @@ from promptpotter.domain.run_records import (
     ForkGradedRecord,
     InterventionRecord,
     LaunchClaimRecord,
+    LaunchClockRecord,
     LaunchReleasedRecord,
     LLMCallProgressRecord,
     LLMCallRecord,
@@ -31,11 +33,11 @@ from promptpotter.domain.run_records import (
     ProviderHoldRecord,
     RaceCatchUpRecord,
     RaceStandingRecord,
+    ResolvedRunRecord,
     ResumeCheckpointRecord,
     RoundClosedRecord,
     RoundEnteredRecord,
     RoundProposedRecord,
-    RoundStandingRecord,
     RoundWarningRecord,
     RunPhaseRecord,
     RunWiringRecord,
@@ -83,7 +85,6 @@ class Projection:
             ProviderEasedRecord: cls._handle_provider_eased,
             RoundEnteredRecord: cls._handle_round_entered,
             RoundClosedRecord: cls._handle_round_closed,
-            RoundStandingRecord: cls._handle_round_standing,
             ArmRecord: cls._handle_arm,
             SampleStartedRecord: cls._handle_sample_started,
             SampleScoredRecord: cls._handle_sample_scored,
@@ -104,6 +105,8 @@ class Projection:
             CommandRecord: None,
             CommandAckRecord: None,
             CycleSeedRecord: None,
+            PartitionRecord: None,
+            ResolvedRunRecord: None,
             StandingBudgetRecord: None,
             ScoringLockedRecord: None,
             CycleMintedRecord: None,
@@ -113,6 +116,7 @@ class Projection:
             InterventionRecord: None,
             SpawnedRecord: None,
             LaunchClaimRecord: None,
+            LaunchClockRecord: None,
             LaunchReleasedRecord: None,
             # Banked by `store/account_spend.py` for a cycle that no longer exists.
             SpendTombstoneRecord: None,
@@ -139,7 +143,6 @@ class Projection:
     def _handle_round_entered(self, record: RoundEnteredRecord) -> None: ...
     def _handle_round_proposed(self, record: RoundProposedRecord) -> None: ...
     def _handle_round_closed(self, record: RoundClosedRecord) -> None: ...
-    def _handle_round_standing(self, record: RoundStandingRecord) -> None: ...
     def _handle_election(self, record: ElectionRecord) -> None: ...
     def _handle_arm(self, record: ArmRecord) -> None: ...
     def _handle_sample_started(self, record: SampleStartedRecord) -> None: ...

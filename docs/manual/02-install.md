@@ -87,6 +87,7 @@ pip install -e ".[dspy]"           # PromptPotter as a DSPy optimizer + the dspy
 pip install -e ".[harbor]"         # the harbor connector — needs a running container runtime
 pip install -e ".[dev]"            # pytest, ruff, mypy, deptry
 pip install -e ".[all]"            # The operator extras (what it leaves out: ADR-0006)
-pip install -e ".[all,dev]"        # Recommended for contributors
-pip install -e ".[all,dev,benchmarks]"  # …plus the opt-in public-bank loader
+pip install -e ".[all,benchmarks]"  # …plus the opt-in public-bank loader
 ```
+
+Contributing? `python scripts/gate.py` once builds the developer `.venv` from `uv.lock` — [`CONTRIBUTING.md`](../../CONTRIBUTING.md).

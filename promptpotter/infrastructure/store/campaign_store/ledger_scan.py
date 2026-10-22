@@ -4,7 +4,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, ClassVar, NamedTuple, get_args
 
-from promptpotter.domain.bench import BenchPasses, BenchReading
+from promptpotter.domain.bench import BenchPasses, BenchReading, PartitionRecord
 from promptpotter.domain.command_kinds import (
     LOOP_TAKEN,
     LoopPayload,
@@ -50,16 +50,17 @@ from promptpotter.domain.run_records import (
     ForkSpec,
     InterventionRecord,
     LaunchClaimRecord,
+    LaunchClockRecord,
     LaunchReleasedRecord,
     OptimizerStateRecord,
     PhaseRecord,
     PricedKeyRecord,
     RaceCatchUpRecord,
+    ResolvedRunRecord,
     ResumeCheckpointRecord,
     RoundClosedRecord,
     RoundEnteredRecord,
     RoundProposedRecord,
-    RoundStandingRecord,
     RunPhaseRecord,
     RunWiringRecord,
     SampleScoredRecord,
@@ -77,6 +78,7 @@ from promptpotter.domain.spend import (
     SpendRollup,
     metered,
 )
+from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import (
     LedgerFold,
     LedgerIndex,
@@ -100,6 +102,60 @@ class _CycleSeed:
 
     def value(self) -> CycleSeed | None:
         return self._found
+
+
+class _Partition:
+    records: ClassVar[RecordClasses] = (PartitionRecord,)
+
+    def __init__(self) -> None:
+        self._found: PartitionRecord | None = None
+
+    def feed(self, offset: int, record: PartitionRecord) -> None:
+        self._found = record
+
+    def value(self) -> PartitionRecord | None:
+        return self._found
+
+
+class ResolvedRun(NamedTuple):
+    declaration: dict[str, Any] | None = None
+    experiment: dict[str, Any] | None = None
+    # The cycle whose ledger landed the roster that stands.
+    experiment_cycle_id: str | None = None
+
+    def then(self, later: ResolvedRun) -> ResolvedRun:
+        first = self if self.experiment else later
+        return ResolvedRun(
+            declaration=later.declaration or self.declaration,
+            experiment=first.experiment,
+            experiment_cycle_id=first.experiment_cycle_id,
+        )
+
+
+class _ResolvedRun:
+    records: ClassVar[RecordClasses] = (ResolvedRunRecord,)
+
+    def __init__(self) -> None:
+        self._found = ResolvedRun()
+
+    def feed(self, offset: int, record: ResolvedRunRecord) -> None:
+        self._found = self._found.then(ResolvedRun(record.declaration, record.experiment))
+
+    def value(self) -> ResolvedRun:
+        return self._found
+
+
+class _LaunchClocks:
+    records: ClassVar[RecordClasses] = (LaunchClockRecord,)
+
+    def __init__(self) -> None:
+        self._found: list[LaunchClockRecord] = []
+
+    def feed(self, offset: int, record: LaunchClockRecord) -> None:
+        self._found.append(record)
+
+    def value(self) -> list[LaunchClockRecord]:
+        return list(self._found)
 
 
 class _StandingBudget:
@@ -145,7 +201,7 @@ _CycleFact = (
     | SpawnedRecord
     | RunPhaseRecord
     | PhaseRecord
-    | RoundStandingRecord
+    | RoundClosedRecord
     | ErrorRecord
 )
 
@@ -191,7 +247,7 @@ class _CycleFacts:
                 held = held._replace(formula=formula)
             case PhaseRecord():
                 return
-            case RoundStandingRecord():
+            case RoundClosedRecord():
                 pass
         self._held = held._replace(updated_at=record.timestamp)
 
@@ -373,7 +429,6 @@ class StandingArm(NamedTuple):
 class StandingRound(NamedTuple):
     close: RoundClosedRecord
     at_offset: int
-    standing: RunStanding | None = None
 
 
 class StandingProposal(NamedTuple):
@@ -436,15 +491,8 @@ class StandingRounds(NamedTuple):
                 )
         for n, made in later.decisions.items():
             prefix.decisions[n] = [*prefix.decisions.get(n, []), *made]
-        # A round closed again without being entered keeps its first standing.
-        closed = {
-            n: held._replace(standing=kept.standing)
-            if held.standing is None and (kept := prefix.rounds.get(n)) is not None
-            else held
-            for n, held in later.rounds.items()
-        }
         return StandingRounds(
-            rounds=dict(sorted({**prefix.rounds, **closed}.items())),
+            rounds=dict(sorted({**prefix.rounds, **later.rounds}.items())),
             proposals={**prefix.proposals, **later.proposals},
             submitted={**prefix.submitted, **later.submitted},
             restated={},
@@ -458,7 +506,7 @@ class StandingRounds(NamedTuple):
 
     @property
     def standing(self) -> RunStanding | None:
-        return self.rounds[max(self.rounds)].standing if self.rounds else None
+        return self.rounds[max(self.rounds)].close.run_standing if self.rounds else None
 
     @property
     def level_series(self) -> LevelSeries | None:
@@ -492,7 +540,6 @@ _RoundStep = (
     | ElectionRecord
     | ResumeCheckpointRecord
     | RoundClosedRecord
-    | RoundStandingRecord
     | RoundProposedRecord
     | OptimizerStateRecord
     | ArmRecord
@@ -532,16 +579,8 @@ class _Standing:
                 self._arms.close(record)
                 for arm_key in record.arms:
                     self._cells.setdefault((rnd, arm_key), {})
-                before = held.rounds.get(rnd)
-                held.rounds[rnd] = (
-                    StandingRound(record, offset)
-                    if before is None
-                    else before._replace(close=record, at_offset=offset)
-                )
+                held.rounds[rnd] = StandingRound(record, offset)
                 held.restated.pop(rnd, None)
-            case RoundStandingRecord():
-                if (closed := held.rounds.get(rnd)) is not None:
-                    held.rounds[rnd] = closed._replace(standing=record.run_standing)
             case RoundProposedRecord() if record.submitted:
                 held.submitted[rnd] = record
             case RoundProposedRecord():
@@ -837,6 +876,9 @@ class _Timeline:
 
 LEDGER_FOLDS = (
     _CycleSeed,
+    _Partition,
+    _ResolvedRun,
+    _LaunchClocks,
     _StandingBudget,
     _CycleFacts,
     _Controls,
@@ -861,6 +903,31 @@ def _view[V](ledger_path: Path, fold: Callable[[], LedgerFold[Any, V]]) -> V:
 
 def scan_ledger_cycle_seed(ledger_path: Path) -> CycleSeed | None:
     return _view(ledger_path, _CycleSeed)
+
+
+def scan_bank_partition(spans: Iterable[LedgerSpan]) -> PartitionRecord | None:
+    found: PartitionRecord | None = None
+    for span in spans:
+        found = LedgerIndex.of(span.path, LEDGER_FOLDS).view(_Partition, span.until) or found
+    return found
+
+
+def scan_resolved_run(spans: Iterable[LedgerSpan]) -> ResolvedRun:
+    resolved = ResolvedRun()
+    for span in spans:
+        own = LedgerIndex.of(span.path, LEDGER_FOLDS).view(_ResolvedRun, span.until)
+        if own.experiment is not None:
+            own = own._replace(experiment_cycle_id=CycleLayout.of_ledger(span.path).cycle_dir.name)
+        resolved = resolved.then(own)
+    return resolved
+
+
+def scan_launch_clocks(spans: Iterable[LedgerSpan]) -> list[LaunchClockRecord]:
+    return [
+        clock
+        for span in spans
+        for clock in LedgerIndex.of(span.path, LEDGER_FOLDS).view(_LaunchClocks, span.until)
+    ]
 
 
 def scan_ledger_standing_budget(ledger_path: Path) -> StandingBudgetRecord:

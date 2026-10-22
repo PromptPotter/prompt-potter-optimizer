@@ -72,7 +72,7 @@ async def operator_arms(ctx: RoundContext, drafts: list[Proposal]) -> list[Propo
             *(authored_arm(seat, arm) for arm in asked.arms),
         ]
         # Recorded and banked BEFORE the ack: a producer lost between them re-reads the answer.
-        session.store.campaigns.record_intervention(session.hop, kind="submit-arms")
+        session.record_intervention("submit-arms")
         bank_proposals(ctx, arms, submitted=True)
         session.control.take_submission(command_id, arms=len(arms))
         return arms
@@ -80,6 +80,5 @@ async def operator_arms(ctx: RoundContext, drafts: list[Proposal]) -> list[Propo
     arms = await hold_for_operator(session, _take, node=_NODE, round_num=ctx.round_num)
     if arms is None:
         raise StopLoop(StopReason.PAUSED)
-    session.human_intervened = True
     declare_running(session)
     return arms

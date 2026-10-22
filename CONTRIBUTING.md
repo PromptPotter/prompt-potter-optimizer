@@ -13,8 +13,7 @@ This page only routes: the rules live in the documents it links. Everyone here f
 
 ```bash
 git clone https://github.com/PromptPotter/prompt-potter-optimizer && cd prompt-potter-optimizer
-pip install -e ".[all,dev]"
-python scripts/gate.py          # every check CI runs
+python scripts/gate.py          # every check CI runs; the first run builds .venv from uv.lock
 ```
 
 Every optimizer runs end to end at zero spend, so a change can be tried without a provider key: see [`offline-run.md`](docs/developer/offline-run.md).

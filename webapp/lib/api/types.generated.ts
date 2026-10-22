@@ -178,8 +178,8 @@ export interface CampaignSummary {
   /** `campaign_metered_usd` in billed tokens, the figure the token ceiling binds. */
   campaign_metered_tokens: number;
   /** The headline (`architecture.md` § The bench score is not an optimizer's
-   * selection), read off the campaign's result (`result.json`) under the
-   * formula its line runs — whichever cycle rebases handed the line to.
+   * selection), read off the passes its line's ledgers banked, under the
+   * formula the line runs — whichever cycle rebases handed the line to.
    * `status` says where it stands and whether its pass may be asked for;
    * `selected` is null until the line grades its pick. Null where the root
    * config did not resolve — a manifest this build cannot read. */
@@ -2753,7 +2753,7 @@ export interface OriginEntry {
 /** One outbound SSE frame, whose receiver treats an unknown field as a drift signal. */
 export interface ProjectionEnvelope {
   /** Closed-set discriminator; every CycleRecord record_type, plus stream_snapshot. */
-  kind: 'account_event' | 'arm' | 'backend_warning' | 'decision' | 'command' | 'command_ack' | 'cycle_final' | 'cycle_minted' | 'cycle_seed' | 'cycle_superseded' | 'election' | 'error' | 'flight' | 'fork_graded' | 'intervention' | 'launch_claim' | 'launch_released' | 'llm_call_progress' | 'llm_call' | 'llm_call_start' | 'optimizer_state' | 'phase' | 'priced_key' | 'provider_eased' | 'provider_hold' | 'race_catch_up' | 'race_standing' | 'round_closed' | 'round_entered' | 'round_proposed' | 'round_standing' | 'round_warning' | 'run_phase' | 'run_wiring' | 'sample_scored' | 'sample_started' | 'scoring_locked' | 'spawned' | 'spend_hold' | 'spend_tombstone' | 'standing_budget' | 'token_usage' | 'trail_tombstone' | 'stream_snapshot';
+  kind: 'account_event' | 'arm' | 'backend_warning' | 'bank_partition' | 'decision' | 'command' | 'command_ack' | 'cycle_final' | 'cycle_minted' | 'cycle_seed' | 'cycle_superseded' | 'election' | 'error' | 'flight' | 'fork_graded' | 'intervention' | 'launch_claim' | 'launch_clock' | 'launch_released' | 'llm_call_progress' | 'llm_call' | 'llm_call_start' | 'optimizer_state' | 'phase' | 'priced_key' | 'provider_eased' | 'provider_hold' | 'race_catch_up' | 'race_standing' | 'resolved_run' | 'round_closed' | 'round_entered' | 'round_proposed' | 'round_warning' | 'run_phase' | 'run_wiring' | 'sample_scored' | 'sample_started' | 'scoring_locked' | 'spawned' | 'spend_hold' | 'spend_tombstone' | 'standing_budget' | 'token_usage' | 'trail_tombstone' | 'stream_snapshot';
   /** Target cycle the frame describes; redundant with the channel address but
    * stamped per-frame for fan-in demux. */
   cycle_id: string;

@@ -204,11 +204,7 @@ class RoundSummary(FrozenModel):
     optimizer_facts: list[OptimizerFact] = Field(default_factory=list)
 
     @classmethod
-    def of(
-        cls,
-        closed: RoundClosedRecord,
-        panel_precision: PanelPrecision | None,
-    ) -> RoundSummary:
+    def of(cls, closed: RoundClosedRecord) -> RoundSummary:
         arms = closed.cells.arms
         longest = arms[max(arms, key=lambda k: (len(arms[k]), k))] if arms else []
         election, fold = closed.election, closed.fold
@@ -240,7 +236,7 @@ class RoundSummary(FrozenModel):
             health=closed.health,
             health_alert=critical_health_title(closed.round, closed.health),
             overlap=closed.overlap,
-            panel_precision=panel_precision,
+            panel_precision=closed.panel_precision,
             optimizer_facts=closed.optimizer_facts,
         )
 

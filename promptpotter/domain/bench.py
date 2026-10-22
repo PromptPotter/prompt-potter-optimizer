@@ -21,6 +21,7 @@ from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import CellGrade, WalkedCell
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
+from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.hashing import stable_hash
 
 
@@ -89,8 +90,9 @@ class BankPartition:
 
 
 class PartitionRecord(FrozenModel):
-    """``cycles/{id}/bank_partition.json``: the partition a run init drew, as slots in its bank."""
+    """The partition a cycle's mint drew, as slots in its bank; a fork reads its parent's off the chain."""
 
+    record_type: Literal["bank_partition"] = "bank_partition"
     dataset_hash: str
     split: DatasetSplit | None
     search_ids: list[int]
@@ -98,6 +100,7 @@ class PartitionRecord(FrozenModel):
     # The held-out content two campaigns are compared on.
     bench_rows: CellSet
     demo_ids: list[int]
+    timestamp: str = Field(default_factory=utcnow_iso)
 
     @property
     def bank_ids(self) -> frozenset[int]:
@@ -194,6 +197,14 @@ class BenchPass(FrozenModel):
     reads_before: int
     # By `Sample.key`, each row measuring another dataset than the one the cycle is filed under.
     measured_datasets: dict[str, str] = Field(default_factory=dict)
+
+    def answers(self, sp_hash: str, sample_keys: list[str], scorer_id: str) -> bool:
+        """Banked whole for this point, on these rows, under this grader: re-sending it buys nothing."""
+        return self.stop is None and (self.sp_hash, self.sample_keys, self.scorer_id) == (
+            sp_hash,
+            sample_keys,
+            scorer_id,
+        )
 
     def by_dataset(self) -> dict[str | None, list[str]]:
         """``None`` is the dataset the cycle is filed under."""

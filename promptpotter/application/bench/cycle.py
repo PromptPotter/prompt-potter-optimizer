@@ -41,11 +41,7 @@ from promptpotter.domain.ruler import RulerStamp
 from promptpotter.domain.run_records import ResumeCheckpointRecord
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 from promptpotter.domain.wounds import RuntimeFailure, rf_dedup_key
-from promptpotter.infrastructure.store.layout import (
-    CycleLayout,
-    campaign_cycles_dir,
-    root_cycle_id,
-)
+from promptpotter.infrastructure.store.layout import campaign_cycles_dir, root_cycle_id
 from promptpotter.infrastructure.store.read_model import Moment
 
 if TYPE_CHECKING:
@@ -62,7 +58,7 @@ def _sibling_runtime_failures(session: Session) -> list[RuntimeFailure]:
     # This campaign's own forks under either purpose, so an arm reads only its own line.
     campaigns = session.store.campaigns
     root = root_cycle_id(session.state.cycle_id)
-    moment = Moment(CycleLayout(campaigns.cycle_dir(session.hop)).ledger, 0)
+    moment = Moment(campaigns.ledger(session.hop), 0)
     out: list[RuntimeFailure] = []
     cycles_dir = campaign_cycles_dir(campaigns.campaign_root_dir(session.campaign_id))
     for sibling in sorted(d.name for d in cycles_dir.iterdir() if d.is_dir()):
@@ -148,20 +144,6 @@ def _assert_overlay_preserved(
 
 
 @dataclass
-class CycleRoundState:
-    current_sp: JobSearchPoint | None = None
-    # ``None`` is unmeasured; it reads ONE round's rows, so the result is ``Cycle.selection``.
-    current_accuracy: float | None = None
-    current_composite_fitness: float | None = None
-    # The frontier: each sample's latest cell, of whichever individual measured it last.
-    current_results: list[GradedCell] = field(default_factory=list)
-
-    def ended_on(self, fold: ScoreSummary | None) -> None:
-        self.current_accuracy = None if fold is None else fold.accuracy
-        self.current_composite_fitness = None if fold is None else fold.composite_fitness
-
-
-@dataclass
 class Cycle:
     session: Session
     config: CampaignConfig
@@ -174,7 +156,6 @@ class Cycle:
 
     # ``rounds[0]`` IS the origin's measurement, built by ``start``, so it is never absent.
     rounds: list[RoundResult] = field(default_factory=list)
-    tracking: CycleRoundState = field(default_factory=CycleRoundState)
     opt_sp: OptSearchPoint = field(default_factory=OptSearchPoint)
     population: list[OptSearchPoint] = field(default_factory=list)
     framing: TaskDecomposition = field(default_factory=TaskDecomposition)
@@ -219,16 +200,12 @@ class Cycle:
             schema=schema,
             slot_of=session.bank.slot_of,
         )
-        tracking = CycleRoundState(current_sp=sp, current_results=list(origin_sheet))
-        tracking.ended_on(origin_round.fold)
-
         return cls(
             session=session,
             config=config,
             slices=slices,
             difficulty=difficulty,
             rounds=[origin_round],
-            tracking=tracking,
             opt_sp=opt_sp,
             framing=framing,
         )
@@ -254,12 +231,10 @@ class Cycle:
     def searchpoint(
         self, individual_id: str, *, rounds: Sequence[RoundResult] | None = None
     ) -> JobSearchPoint:
-        schema = self.session.pipeline_schema
-        assert schema is not None, "a cycle is started under a pipeline_schema"
         return measured_searchpoint(
             self.rounds if rounds is None else rounds,
             individual_id,
-            schema=schema,
+            schema=self.session.pipeline_schema,
             framing=self.framing,
             demo=self.session.scoring.require_partition().demo,
         )
@@ -272,33 +247,23 @@ class Cycle:
         """The origin's θ is carried, not re-fit: round 0 closes on the scale it opened on."""
         election = self.origin_round.election
         assert election is not None, "round 0 elects the origin it adopted"
-        schema = self.session.pipeline_schema
-        assert schema is not None, "a cycle is started under a pipeline_schema"
         self.rounds[0] = _origin_round(
             parent,
             fit=election.fit,
             ruler=election.ruler,
             optimizer_state=self.origin_round.optimizer_state,
             elects_on=election.elects_on,
-            schema=schema,
+            schema=self.session.pipeline_schema,
             slot_of=self.session.bank.slot_of,
         )
-        tr = self.tracking
-        tr.current_results = list(parent.rows)
-        tr.ended_on(self.rounds[0].fold)
 
     def replay_priors(self, priors: list[RoundResult]) -> None:
-        """Re-runnable: the frontier re-seeds from round 0, so a second replay does not accumulate."""
         if not priors:
             return
-        schema = self.session.pipeline_schema
-        demo = self.session.scoring.require_partition().demo
-        tr = self.tracking
         from_round = min(rr.round for rr in priors)
         self.rounds = [rr for rr in self.rounds if rr.round < from_round] + sorted(
             priors, key=lambda rr: rr.round
         )
-        # Never return early because ``start`` seeded tracking: that holds on a FIRST call only.
         last_rr = self.rounds[-1]
         if last_rr.election is None or (head := last_rr.head) is None:
             raise ValueError(
@@ -309,14 +274,6 @@ class Cycle:
         self.difficulty.seat(last_rr.election.ruler)
         self.population = list(last_rr.closed_state.population)
         self.slices.seat(last_rr.closed_state)
-        tr.current_sp = self.opt_sp.to_job_search_point(
-            schema=schema, framing=self.framing, demo=demo
-        )
-        acc_cum: list[GradedCell] = []
-        for rr in self.rounds:
-            acc_cum = merge_known_outcomes(acc_cum, rr.results)
-        tr.current_results = acc_cum
-        tr.ended_on(last_rr.fold)
 
     def seat(self, rr: RoundResult) -> RoundResult:
         slot = next(i for i, held in enumerate(self.rounds) if held.round == rr.round)
@@ -332,22 +289,34 @@ class Cycle:
         self.rounds = self.closed_rounds
 
     def absorb_round(self, rr: RoundResult) -> None:
-        schema = self.session.pipeline_schema
-        tr = self.tracking
-
         self.rounds.append(rr)
         # A HELD round ends on the parent itself, so nothing is adopted.
         if (head := rr.head) is not None and head.individual.id != self.opt_sp.id:
             self.opt_sp = head.individual
-        assert tr.current_sp is not None
-        tr.current_sp = self.opt_sp.to_job_search_point(
-            schema=schema,
+
+    def job_point(self, individual: OptSearchPoint) -> JobSearchPoint:
+        return individual.to_job_search_point(
+            schema=self.session.pipeline_schema,
             framing=self.framing,
             demo=self.session.scoring.require_partition().demo,
         )
-        tr.current_results = merge_known_outcomes(tr.current_results, rr.results)
-        # What the parent SCORED this round, never an accuracy over the mixed-provenance pool above.
-        tr.ended_on(rr.fold)
+
+    @property
+    def parent_point(self) -> JobSearchPoint:
+        return self.job_point(self.opt_sp)
+
+    @property
+    def parent_fold(self) -> ScoreSummary | None:
+        """What the parent SCORED the round it last ended on, never a reading of the frontier."""
+        return self.rounds[-1].fold
+
+    @property
+    def frontier(self) -> list[GradedCell]:
+        """Each sample's latest cell, of whichever individual measured it last: never scored."""
+        cells: list[GradedCell] = []
+        for rr in self.rounds:
+            cells = merge_known_outcomes(cells, rr.results)
+        return cells
 
     def banked_proposals(self, round_num: int) -> list[Proposal] | None:
         session = self.session

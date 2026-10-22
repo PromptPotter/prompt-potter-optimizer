@@ -36,7 +36,7 @@ from factories import (
 )
 
 from promptpotter.application import optimizers
-from promptpotter.application.bench.cycle import Cycle, CycleRoundState
+from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.bench.difficulty import ruler_rows
 from promptpotter.application.bench.node_context import NodeContext
 from promptpotter.application.bench.resume_and_fork.fork_siblings import (
@@ -674,10 +674,11 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         round_num=3,
         optimization={"elimination_n_min": 4, "nodes": {"pobb": {"config": {"epsilon": 0.30}}}},
         opt_sp=parent,
-        # The frontier holds every cell, answered by an individual that is not the parent.
-        tracking=CycleRoundState(current_results=list(hits), current_sp=JobSearchPoint()),
     )
-    line = [_round(round=0, cells={ArmKey("origin"): hits})]
+    # The frontier holds every cell, answered by an individual that is not the parent.
+    line = [
+        _round(round=0, cells={ArmKey("origin"): hits}, election=election([], ended_on="origin"))
+    ]
     set_line(racing.cycle, line)
     ten = [Sample(id=i, query=f"q{i}", ground_truth="g") for i in range(10)]
 

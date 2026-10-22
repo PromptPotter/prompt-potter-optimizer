@@ -4,15 +4,12 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from promptpotter.application.bench.task_context import campaign_framing
 from promptpotter.application.initialization.loop_start import (
-    arm_diagnostic_scoring,
     diagnostic_pass,
     diagnostic_trace,
+    open_diagnostic,
 )
-from promptpotter.application.initialization.wiring import bind_cycle_session
 from promptpotter.application.jobs.launcher.admission import paid_pass
-from promptpotter.application.runner.inner.spawn_context import publish_inner_spawn_context
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.measurement_provenance import RunSource
@@ -45,10 +42,6 @@ async def measure_noise_floor(
 
 
 async def _rescore_origin(stores: Stores, hop: CycleHop, k: RescoreCount) -> NoiseFloorOutcome:
-    campaign = stores.campaigns.load_campaign(hop.campaign_id)
-    if campaign is None:
-        raise DiagnosticError(f"campaign {hop.campaign_id!r} has no manifest on disk.")
-
     standing = stores.campaigns.standing_rounds(hop, moment=None).rounds.get(0)
     if standing is None:
         raise DiagnosticError(
@@ -64,18 +57,10 @@ async def _rescore_origin(stores: Stores, hop: CycleHop, k: RescoreCount) -> Noi
             f"origin arm in {hop.campaign_id}/{hop.cycle_id} round 0 carries no scored samples."
         )
 
-    session, campaign_config = await bind_cycle_session(stores, campaign, hop)
-    # Normally `run_optimization`'s: a pp-self origin's connector dispatches no inner run without it.
-    publish_inner_spawn_context(session)
-
-    arm_diagnostic_scoring(session, campaign_config, source=RunSource.NOISE_FLOOR)
-
+    opened = await open_diagnostic(stores, hop, source=RunSource.NOISE_FLOOR)
+    session = opened.session
     schema = session.pipeline_schema
-    jsp = origin.searchpoint(
-        schema=schema,
-        framing=campaign_framing(stores, campaign_config, session.dataset),
-        demo=session.scoring.require_partition().demo,
-    )
+    jsp = opened.point(origin)
     scoring_set = [s for s in session.bank.samples if s.key in sample_keys]
     if not scoring_set:
         raise DiagnosticError(
@@ -126,7 +111,7 @@ async def _rescore_origin(stores: Stores, hop: CycleHop, k: RescoreCount) -> Noi
 
     record = DiagnosticRunRecord(
         ts=utcnow_iso(),
-        dataset=campaign.dataset_name,
+        dataset=opened.campaign.dataset_name,
         source_campaign=hop.campaign_id,
         source_cycle=hop.cycle_id,
         source_candidate_id=origin.individual.id,

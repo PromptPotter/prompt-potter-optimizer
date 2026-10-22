@@ -19,8 +19,8 @@ from promptpotter.application.jobs.mint import (
     resolve_cycle_plan,
 )
 from promptpotter.application.optimizer_manifest import (
+    binding_prompt_overrides,
     resolved_overrides,
-    set_optimizer_prompt_overrides,
 )
 from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.run_phase_control import RunControl
@@ -440,37 +440,39 @@ async def _run_inner_campaign(
     spawned_by: dict[str, Any],
 ) -> CycleResult:
     """Runs in a FRESH task, so every ContextVar bound below is this cell's alone."""
-    set_optimizer_prompt_overrides(cell.overrides or None)
     store = claim_sandbox(cell.ctx)
-    opened = await _open_seat(cell, store)
-    session, config = opened.session, opened.config
-    if session.campaign_id and session.state.cycle_id:
-        session.store.campaigns.record_spawned(session.hop, SpawnedBy.model_validate(spawned_by))
-        minted.append(session.hop)
-    observers = build_run_observers(session=session, campaign_config=config)
-    try:
-        # Each send is admitted by its own book AND the ROOT's; its share bounds it at every checkpoint.
-        with inner_share(
-            config,
-            stores=session.store,
-            dataset_name=cell.spec.inner_dataset,
-            hop=session.hop if session.state.cycle_id else None,
-        ) as held:
-            result = await run_optimization(
-                opened.train_data,
+    # Over the mint too: the treatment it declares hashes the overridden prompts.
+    with binding_prompt_overrides(cell.overrides):
+        opened = await _open_seat(cell, store)
+        session, config = opened.session, opened.config
+        if session.campaign_id and session.state.cycle_id:
+            spawned = SpawnedBy.model_validate(spawned_by)
+            session.store.campaigns.record_spawned(session.hop, spawned)
+            minted.append(session.hop)
+        observers = build_run_observers(session=session, campaign_config=config)
+        try:
+            # Each send is admitted by its own book AND the ROOT's; its share bounds every checkpoint.
+            with inner_share(
                 config,
-                session=session,
-                observers=observers,
-                budget=held,
-                mode=RunMode(),
-            )
-    finally:
-        # The optimizer LLM clients and the Langfuse SDK are process-SHARED: never shut either down.
-        with contextlib.suppress(Exception):
-            await session.backend_client.aclose()
-        if session.langfuse is not None:
+                stores=session.store,
+                dataset_name=cell.spec.inner_dataset,
+                hop=session.hop if session.state.cycle_id else None,
+            ) as held:
+                result = await run_optimization(
+                    opened.train_data,
+                    config,
+                    session=session,
+                    observers=observers,
+                    budget=held,
+                    mode=RunMode(),
+                )
+        finally:
+            # The optimizer LLM clients and the Langfuse SDK are process-SHARED: never shut one down.
             with contextlib.suppress(Exception):
-                session.langfuse.reset()
+                await session.backend_client.aclose()
+            if session.langfuse is not None:
+                with contextlib.suppress(Exception):
+                    session.langfuse.reset()
     # Reported, never enforced: one origin pass sits inside its own error bar.
     origin_acc = (
         None

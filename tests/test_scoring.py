@@ -37,6 +37,7 @@ from factories import (
     pobb_knobs,
     prompted,
     round_result,
+    score_summary,
     seat,
     set_line,
     sheet,
@@ -109,7 +110,7 @@ from promptpotter.application.runner.bench import (
     read_bench,
     score_on_bench,
 )
-from promptpotter.application.runner.campaign_result import bank_campaign_result
+from promptpotter.application.runner.campaign_result import bank_campaign_result, line_launches
 from promptpotter.application.runner.cycle_close import build_cycle_result
 from promptpotter.application.runner.inner.spawn_context import publish_inner_spawn_context
 from promptpotter.application.runner.measurement import ReferencePairs
@@ -164,7 +165,6 @@ from promptpotter.domain.command_kinds import SubmitArmsPayload, SubmittedArm
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
 from promptpotter.domain.paired_reading import (
-    READING_STATE_INFO,
     ROUND_LIFT_SPEC,
     ArmKey,
     ArmName,
@@ -951,7 +951,7 @@ def _peer_cycle(
         bound = set_cycle_ledger(callbacks.ledger)
         try:
             publish_inner_spawn_context(cycle.session)
-            with binding_optimizer(cycle.optimizer):
+            with binding_optimizer(cycle.optimizer, determinism=None):
                 run_init(cycle, callbacks)
                 with spending_under(cycle.session.control.book):
                     yield cycle, callbacks
@@ -1167,11 +1167,9 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             search = list(session.scoring.require_partition().search)
             if cut_round == 1:
                 # Run init scores the origin through the gateway — here on half of CAPO's first block.
-                origin_sp = cycle.tracking.current_sp
-                assert origin_sp is not None
                 asyncio.run(
                     score_search_point(
-                        origin_sp,
+                        cycle.parent_point,
                         search[:2],
                         session,
                         label="origin",
@@ -2401,13 +2399,11 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
         assert all(reading.advance is advance for advance, reading in readings.items())
 
         def outcome(objective: float, advance: RoundAdvance) -> StopReason | None:
-            cycle.tracking.current_composite_fitness = objective
+            closing = round_result(1, improved=True, overlap=readings[advance])
+            folds = {key: score_summary(composite_fitness=objective) for key in closing.folds}
             set_line(
                 cycle,
-                [
-                    round_result(0, improved=False),
-                    round_result(1, improved=True, overlap=readings[advance]),
-                ],
+                [round_result(0, improved=False), closing.model_copy(update={"folds": folds})],
             )
             return standing_tripped(cycle, RunStanding.opening(None))
 
@@ -2598,15 +2594,6 @@ def _evidence_campaign(
     if rebased:
         stores.campaigns.mark_superseded(root, hop.cycle_id)
     if graded:
-        unread = READING_STATE_INFO[ReadingState.NO_SELECTION].sentence
-        standing = RunStanding.opening(None).model_copy(
-            update={
-                "selection": ArmName(key=ArmKey(f"{cid}:selected"), round=1, label="C1.1"),
-                "rounds_closed": 1,
-                # The line is the standing's own wording, and a read back refuses another.
-                "selection_line": f"C1.1 (round 1) — {unread}",
-            }
-        )
         key, pick = (
             ArmKey(f"{cid}:selected"),
             arm_state("C1.1", slot=ArmSlot(round=1, idx=0, total=1)),
@@ -2620,7 +2607,6 @@ def _evidence_campaign(
             ledgers[hop],
             [round_result(0, cells={}), closed],
             cycle=seat(stores, bank=_H2H_BANK).cycle,
-            standing=standing,
         )
     if steered:
         stores.campaigns.record_intervention(hop, kind="skip")
@@ -2696,8 +2682,8 @@ def _evidence_campaign(
             finished_at=f"2026-09-26T{hour:02d}:{wall // 60:02d}:{wall % 60:02d}Z",
             optimizer_phases=frozenset(),
         )
-    banked = stores.campaigns.load_result(cid)
-    assert banked is not None and banked.cycle_id == hop.cycle_id
+    campaign = stores.campaigns.load_campaign(cid)
+    assert campaign is not None and len(line_launches(stores, campaign)) == 1
     return SubjectSpec("campaign", cid)
 
 

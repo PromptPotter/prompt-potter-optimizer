@@ -24,7 +24,7 @@
 <p align="center"><sub>The numbers are this page's sections.</sub></p>
 
 ```bash
-pip install -e ".[all,dev]"            # into the repo venv
+python scripts/gate.py                 # once first — it builds .venv from uv.lock
 git config core.hooksPath .githooks    # once per clone: the gate on what you staged
 python scripts/gate.py --changed       # while editing: only the checks and tests your diff reaches
 python scripts/gate.py                 # before handing over: every check CI runs (--py | --web | --only NAME)

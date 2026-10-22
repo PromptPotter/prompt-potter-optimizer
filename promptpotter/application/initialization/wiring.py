@@ -183,32 +183,32 @@ async def _resolve_pipeline_schema(
 
 
 def _session_bank(
-    session: Session,
-    dataset_name: str,
+    stores: Stores,
+    dataset: ResolvedDataset,
     *,
     connector: Connector,
     experiment: dict[str, Any] | None,
-) -> Bank:
+) -> tuple[Bank, tuple[str, ...]]:
+    """The bank and its candidate library, empty where the connector owns the panel."""
     # First, never a fallback: rows cached under the same dataset name describe another instrument.
     if connector.owns_panel:
         if experiment is None:
             raise PayloadInvalidError(
-                f"Connector {connector.name!r} owns {dataset_name!r}'s panel, but its definition "
+                f"Connector {connector.name!r} owns {dataset.name!r}'s panel, but its definition "
                 f"declares no `panel:` and no `source:` builds one.",
                 code="pipeline_config_invalid",
             )
-        return Bank.of(samples_from_dicts(extract_panel_rows(connector, dataset_name, experiment)))
-    assert session.dataset is not None, "a session loads rows only off the dataset it resolved"
-    bank = resolve_bank(session.store, session.dataset)
+        rows = extract_panel_rows(connector, dataset.name, experiment)
+        return Bank.of(samples_from_dicts(rows)), ()
+    bank = resolve_bank(stores, dataset)
     if not bank.samples:
         raise PayloadInvalidError(
-            f"Dataset {dataset_name!r} holds no rows: no bank under its name and no "
+            f"Dataset {dataset.name!r} holds no rows: no bank under its name and no "
             f"`source:` in its definition to cut one from.",
             code="dataset_not_found",
         )
     # Unioned with the ground-truth answers, never replacing them: every label stays rankable.
-    session.candidate_library = read_candidate_library_file(session.dataset.directory)
-    return bank
+    return bank, read_candidate_library_file(dataset.directory)
 
 
 def complete_registries(*, every_treatment: bool = True) -> None:
@@ -267,28 +267,28 @@ async def init_services(
     )
     _verify_required_observation_keys(pipeline_schema, connector, dataset_name)
     await _verify_connector_revision(client, connector)
-
-    session = Session(
+    bank, candidate_library = _session_bank(
+        stores, dataset, connector=connector, experiment=experiment
+    )
+    # By hash, never a label: every answer this session files names a bank the store holds.
+    stores.tenant_datasets.put_bank(bank)
+    logger.info("Dataset: %s (%d samples)", dataset_name, len(bank.samples))
+    # After the samples, never before: the invariant is about the schema AND the bank together.
+    _warn_if_labels_have_no_ranker(pipeline_schema, bank.samples, connector)
+    return Session(
         store=stores,
         backend_id=connector.name,
         backend_client=client,
         pipeline_schema=pipeline_schema,
         pipeline_declaration=pipeline_declaration,
+        bank=bank,
+        candidate_library=candidate_library,
         dataset_name=dataset_name,
         dataset=dataset,
         identity=identity,
-        tenant_root=str(stores.base_dir),
         # ``enable_tracing=False`` (L4 inner campaigns) drops only the cloud sink, never ``FileSink``.
         langfuse=LangfuseLogger(enabled=enable_tracing),
     )
-
-    session.bank = _session_bank(session, dataset_name, connector=connector, experiment=experiment)
-    # By hash, never a label: every answer this session files names a bank the store holds.
-    stores.tenant_datasets.put_bank(session.bank)
-    logger.info("Dataset: %s (%d samples)", dataset_name, len(session.bank.samples))
-    # After the samples, never before: the invariant is about the schema AND the bank together.
-    _warn_if_labels_have_no_ranker(pipeline_schema, session.bank.samples, connector)
-    return session
 
 
 async def bind_cycle_session(

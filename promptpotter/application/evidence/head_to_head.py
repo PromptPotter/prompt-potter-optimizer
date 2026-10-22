@@ -15,6 +15,7 @@ from promptpotter.application.pipeline_resolve import resolve_campaign_config
 from promptpotter.application.runner.bench import bench_members, pair_on_bench, read_bench
 from promptpotter.application.runner.campaign_result import (
     bench_line,
+    line_launches,
     line_passes,
     line_run,
     read_line_spend,
@@ -510,7 +511,6 @@ def _read(
     record: HeadToHeadRecord | None,
 ) -> _Graded:
     reading, stores = entry
-    result = stores.campaigns.load_result(campaign.campaign_id)
     hop = stores.campaigns.line_holder(campaign.root_hop)
     selected = select_optimizer(config.optimization)
     optimizer_models = sorted({selected.model(node) for node in selected.llm_nodes})
@@ -540,11 +540,12 @@ def _read(
     budget = next_launch_budget(config, stores=stores, hop=hop)
     optimization = config.optimization
     # Live off the line's ledgers once a launch has ended: before one, nothing is banked to read.
-    cost = None if result is None else read_line_spend(stores, campaign)
+    launches = line_launches(stores, campaign)
+    cost = read_line_spend(stores, campaign) if launches else None
     spend = None if cost is None else cost.spend
     windows = [
         (start, end)
-        for run in ([] if result is None else result.launches)
+        for run in launches
         if (start := epoch_seconds(run.started_at)) is not None
         and (end := epoch_seconds(run.finished_at)) is not None
     ]
@@ -585,7 +586,7 @@ def _read(
             bench_set=bench_set,
             spend=spend,
             calls=None if cost is None else cost.calls,
-            worked_s=None if result is None else worked_seconds(result.launches),
+            worked_s=worked_seconds(launches),
             rounds=reading.cycle_rounds_scored,
             incurred_usd_ratio=None,
             optimizer_incurred_usd_ratio=None,

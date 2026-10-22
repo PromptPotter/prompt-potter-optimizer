@@ -95,7 +95,6 @@ from promptpotter.infrastructure.store.dataset_access import (
     read_dataset_pipeline,
     resolve_dataset,
 )
-from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import derived, file_sig
 from promptpotter.infrastructure.store.stores import descend_store, owned_campaign
 from promptpotter.judges.registry import judge_instrument
@@ -660,7 +659,7 @@ def _dataset_of(stores: Stores, campaign: Campaign) -> ResolvedDataset | None:
 
 
 def _criterion_locked[S](stores: Stores, hop: CycleHop, scoring: S) -> S | dict[str, str]:
-    lock = scan_ledger_scoring_lock(CycleLayout(stores.campaigns.cycle_dir(hop)).ledger)
+    lock = scan_ledger_scoring_lock(stores.campaigns.ledger(hop))
     return lock.locked if lock is not None and lock.declared == scoring else scoring
 
 
@@ -794,7 +793,7 @@ def _campaign_merge(stores: Stores, campaign: Campaign, at: SubjectSpec) -> _Cam
     dataset_dir = None if dataset is None else dataset.directory
     hop = CycleHop(campaign_id=campaign.campaign_id, cycle_id=at.cycle_id or campaign.root_cycle_id)
     # The cycle's recorded merge first: the committed dataset file carries no `param_keys` at all.
-    raw = stores.campaigns.read_resolved_pipeline(hop)
+    raw = stores.campaigns.read_resolved_run(hop).declaration
     if raw is None and dataset is not None:
         raw = dataset_pipeline_declaration(stores, dataset, experiment_outside_run(stores, dataset))
     schema = parse_pipeline_response(raw or {"nodes": {}, "pipelines": {"default": []}})
@@ -925,7 +924,7 @@ def resolve_pipeline_for_campaign(
     """``stores`` is already the store *campaign* lives in: the caller descends ``at.inside`` first."""
     m = _campaign_merge(stores, campaign, at)
     # Recorded first: a live resolve recomputes a banked identity off a roster it never ran.
-    experiment = stores.campaigns.read_resolved_experiment(m.hop) or experiment_outside_run(
+    experiment = stores.campaigns.read_resolved_run(m.hop).experiment or experiment_outside_run(
         stores, m.dataset
     )
     params = apply_identity_layer(
@@ -1320,19 +1319,20 @@ def _root_read[T](stores: Stores, campaign: Campaign, what: str, read: Callable[
             return None
 
     try:
-        key = _root_key(stores, campaign, root)
+        key = _root_key(stores, campaign)
     except _ROOT_UNRESOLVED:
         logger.exception("%s: root of %s did not resolve", what, campaign.campaign_id)
         return None
     return derived((what, root), sig=key, compute=resolve)
 
 
-def _root_key(stores: Stores, campaign: Campaign, root: Path) -> tuple[Any, ...]:
+def _root_key(stores: Stores, campaign: Campaign) -> tuple[Any, ...]:
     dataset = _dataset_of(stores, campaign)
     dataset_dir = None if dataset is None else dataset.directory
-    # The seed's VALUE, never its ledger's stat: a running root appends there on every sample.
+    # VALUES, never the ledger's stat: a running root appends there on every sample.
     seed = stores.campaigns.read_cycle_seed(campaign.root_hop)
-    lock = scan_ledger_scoring_lock(CycleLayout(root).ledger)
+    declaration = stores.campaigns.read_resolved_run(campaign.root_hop).declaration
+    lock = scan_ledger_scoring_lock(stores.campaigns.ledger(campaign.root_hop))
     return (
         campaign.declaration.digest,
         None if lock is None else stable_hash(lock.locked),
@@ -1340,7 +1340,7 @@ def _root_key(stores: Stores, campaign: Campaign, root: Path) -> tuple[Any, ...]
         campaign.root_cycle_id,
         dataset_dir,
         *(() if dataset_dir is None else (file_sig(p) for p in definition_files(dataset_dir))),
-        file_sig(CycleLayout(root).resolved_pipeline),
+        None if declaration is None else stable_hash(declaration),
         None if seed is None else stable_hash(seed.model_dump(mode="json")),
     )
 

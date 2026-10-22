@@ -38,7 +38,7 @@ from pydantic import BaseModel
 
 BASELINE = {
     # Every `.py` under the package.
-    "modules": 449,
+    "modules": 447,
     # Every `__init__.py` among them.
     "init_files": 56,
     # The `__init__.py` files that re-export names instead of staying empty.
@@ -79,14 +79,14 @@ BASELINE = {
     # Modules a test run imports: our own, followed through their module-level imports, plus
     # each outside distribution's top name. A test that reaches the server app or an extra
     # moves it as one function does not.
-    "test_reach": 363,
+    "test_reach": 362,
     # Every property of every schema the generated contract offers the browser.
     "served_fields": 1728,
     # The rows below price a CHANGE in the sites it touches, read off code and the hand-kept specs.
     # Files naming three or more `CycleRecord` arms, each a site the next arm must reach.
     "p_record": 21,
     # The arms each of those files leaves out: a mirror rotting raises it.
-    "p_record_drift": 571,
+    "p_record_drift": 606,
     # Served properties no surface reads by name.
     "p_served": 260,
     # Files naming three or more `CommandKind` rows, each a site the next row must reach.
@@ -95,7 +95,7 @@ BASELINE = {
     "p_command_drift": 226,
     # What an optimizer member is handed: `NodeContext`'s public members, inherited ones included,
     # and the public members of each object one of its properties exposes.
-    "p_member": 322,
+    "p_member": 321,
     # Places a test reaches a private name of the package: an import, an attribute, a patch target.
     "test_private_reach": 6,
 }

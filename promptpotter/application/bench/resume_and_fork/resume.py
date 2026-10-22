@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
+    from promptpotter.application.views.view_models import ViewContext
     from promptpotter.domain.results import RoundResult
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 
@@ -99,6 +100,7 @@ async def resume_with_divergence_check(
     session: Session,
     cycle: Cycle,
     dataset: list[Any],
+    view_context: ViewContext,
     *,
     skip_divergence_check: bool,
     fork_on_divergence: bool = False,
@@ -107,11 +109,6 @@ async def resume_with_divergence_check(
     scorer = sc.require_scorer()
     prior = closed_rounds(session.store, hop, scorer, before_round=resumed_from_round, moment=None)
 
-    # For the CYCLE's own state, never as a comparison anchor.
-    cycle.tracking.current_results = [
-        scorer.grade(cell.facts) for cell in cycle.tracking.current_results
-    ]
-
     # Fingerprinted BEFORE the repair, so the corrected set differs by exactly what it changed.
     packages_before = cycle.optimizer.runtime.round_packages(cycle, prior)
     cycle.replay_priors(prior)
@@ -119,7 +116,7 @@ async def resume_with_divergence_check(
     standing = campaign_store.standing_rounds(hop, moment=None)
 
     correction = await apply_correction(
-        campaign_store, hop, prior, packages_before, session, cycle, dataset
+        campaign_store, hop, prior, packages_before, session, cycle, dataset, view_context
     )
     if correction is not None:
         return correction

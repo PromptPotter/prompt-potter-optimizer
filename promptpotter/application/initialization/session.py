@@ -75,7 +75,6 @@ class Session:
     dataset_name: str | None = None
     # Where `dataset_name` resolved at init; `None` where a session measures no definition.
     dataset: ResolvedDataset | None = None
-    tenant_root: str = ""
     pipeline_params: dict[str, Any] = field(default_factory=dict)
     # Per node, the `pipeline_params` keys hashed into identity and never sent to a backend.
     identity_keys: dict[str, frozenset[str]] = field(default_factory=dict)
@@ -87,10 +86,19 @@ class Session:
     scoring: ScorerSetup = field(default_factory=ScorerSetup)
 
     source: RunSource | None = None
-    # An operator edited a locked value (ADR-0005): every run this cycle scores grades C.
+    # Seeded off the cycle's index at init; afterwards written only by `record_intervention`.
     human_intervened: bool = False
     # The bound campaign's declared purpose; a session binding none optimizes.
     purpose: Purpose = field(default_factory=Optimize)
+
+    @property
+    def tenant_root(self) -> str:
+        return str(self.store.base_dir)
+
+    def record_intervention(self, kind: str) -> None:
+        """ADR-0005: the act is banked on the cycle, and every run it scores after grades C."""
+        self.store.campaigns.record_intervention(self.hop, kind=kind)
+        self.human_intervened = True
 
     def bind_campaign(self, hop: CycleHop, *, purpose: Purpose) -> None:
         """*purpose* is the campaign's declaration's; what the run remembers derives from it."""

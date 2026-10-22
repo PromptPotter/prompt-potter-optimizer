@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Annotated, Any, Literal, TypedDict, Unpack, assert_never
 
 from pydantic import Field, field_validator
@@ -11,7 +11,7 @@ from promptpotter.domain.bench import DatasetSplit
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.paired_reading import CellSet, instrument_of
 from promptpotter.domain.pipeline_overlay import node_config_items
-from promptpotter.domain.run_records import WallClock
+from promptpotter.domain.run_records import LaunchClockRecord
 from promptpotter.domain.spend import Budget, CeilingMeter, money_axes_only
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.treatment import Treatment
@@ -226,13 +226,7 @@ def comparison_line(purpose: Purpose) -> str:
             assert_never(purpose)
 
 
-class Launch(FrozenModel):
-    started_at: str
-    finished_at: str
-    clock: WallClock
-
-
-def worked_seconds(launches: list[Launch]) -> float | None:
+def worked_seconds(launches: Sequence[LaunchClockRecord]) -> float | None:
     """Less each launch's gates, a human's, and the time its cells were not allowed to spend."""
     worked = [
         max(0.0, run.clock.elapsed_s - run.clock.gate_s - (run.clock.unworked_s or 0.0))
@@ -240,16 +234,6 @@ def worked_seconds(launches: list[Launch]) -> float | None:
         if run.clock.elapsed_s is not None
     ]
     return sum(worked) if worked else None
-
-
-class CampaignResult(FrozenModel):
-    """``campaigns/{id}/result.json``, rewritten at every launch end by the cycle holding the line.
-    Its calls and spend are folds of the line's ledgers, read where they are asked for."""
-
-    # The cycle answering for the line when this was written — the root, or where rebases led.
-    cycle_id: str
-    # Only the runner knows a launch's endpoints, so each launch's clock is banked here.
-    launches: list[Launch]
 
 
 type LifecycleStatus = Literal["active", "archived", "deleted"]

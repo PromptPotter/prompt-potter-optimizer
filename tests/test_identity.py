@@ -68,9 +68,10 @@ from promptpotter.application.jobs.mint import (
 )
 from promptpotter.application.knobs import bench_defaults_pin
 from promptpotter.application.optimizer_manifest import (
+    binding_optimizer,
+    binding_prompt_overrides,
+    bound_optimizer,
     resolve_optimizer,
-    set_determinism_clamp,
-    set_optimizer_prompt_overrides,
 )
 from promptpotter.application.optimizers.capo.members import cross_shots, mutate_shots
 from promptpotter.application.optimizers.gepa.members import GepaReflect
@@ -303,39 +304,31 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         "capo_mutate": {"instruction": "Rephrase [{{instruction}}] to {{task_description}}."}
     }
     potter = resolve_optimizer("potter", {}, gate="off")
-    try:
-        set_optimizer_prompt_overrides(None)
-        sent, capo_hashes, treated = (
-            ctx.fill(**values),
-            capo.prompt_hashes(),
-            capo.treatment().digest,
-        )
-        baseline = potter.prompt_hashes()
-        assert potter.prompt_hashes() == baseline, "an unmoved preset re-hashed"
-        set_optimizer_prompt_overrides(mutated)
+    sent, capo_hashes, treated = (ctx.fill(**values), capo.prompt_hashes(), capo.treatment().digest)
+    baseline = potter.prompt_hashes()
+    assert potter.prompt_hashes() == baseline, "an unmoved preset re-hashed"
+    with binding_prompt_overrides(mutated):
         assert ctx.fill(**values) == "Rephrase [Sort it.] to sort the list." != sent, (
             "the mutated CAPO prompt never reached the request it sends"
         )
         assert capo.treatment().digest != treated, (
             "two inner cells under two arms stamp ONE treatment — a bank reads them as one arm"
         )
-        # A valid layout edit on one node: `diagnostics` stays placed.
-        layout = {"l1_critique": {"layout": {"thinking_style": ["axis_memory"]}}}
-        for optimizer, hashes, override, edited_node in (
-            (capo, capo_hashes, mutated, "capo_mutate"),
-            (potter, baseline, layout, "l1_critique"),
-        ):
-            set_optimizer_prompt_overrides(override)
+    # A valid layout edit on one node: `diagnostics` stays placed.
+    layout = {"l1_critique": {"layout": {"thinking_style": ["axis_memory"]}}}
+    for optimizer, hashes, override, edited_node in (
+        (capo, capo_hashes, mutated, "capo_mutate"),
+        (potter, baseline, layout, "l1_critique"),
+    ):
+        with binding_prompt_overrides(override):
             moved = optimizer.prompt_hashes()
-            assert moved[edited_node] != hashes[edited_node], (
-                f"{edited_node}: an override left the node hash unchanged — audits would pool the "
-                "cycles"
-            )
-            assert {k: v for k, v in moved.items() if k != edited_node} == {
-                k: v for k, v in hashes.items() if k != edited_node
-            }, f"{edited_node}: an edit on one node moved other nodes' hashes"
-    finally:
-        set_optimizer_prompt_overrides(None)
+        assert moved[edited_node] != hashes[edited_node], (
+            f"{edited_node}: an override left the node hash unchanged — audits would pool the cycles"
+        )
+        assert {k: v for k, v in moved.items() if k != edited_node} == {
+            k: v for k, v in hashes.items() if k != edited_node
+        }, f"{edited_node}: an edit on one node moved other nodes' hashes"
+    assert capo.prompt_hashes() == capo_hashes, "an override outlived the run that bound it"
 
     # The inner campaign id separates two candidates, two seeds and two treatments.
     c1 = {"l1_generate": {"instruction": "widen the axes"}}
@@ -385,9 +378,11 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         """One optimizer call as an entry sends it; the body that reached the provider."""
 
         async def entered() -> None:
-            set_determinism_clamp(clamp)
             set_cycle_ledger(CycleEventLog(tmp_path / "asked.jsonl"))
-            with spending_under(unbounded_spend_book()):
+            with (
+                binding_optimizer(bound_optimizer(), determinism=clamp),
+                spending_under(unbounded_spend_book()),
+            ):
                 await call_mod.llm_call(
                     [{"role": "user", "content": content}],
                     config=config,
@@ -400,23 +395,20 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
 
     pinned = DeterminismClamp(temperature=0.0, seed=7, route_order=["Alibaba"])
     clamped = {"provider": "openrouter", "model": "m", "temperature": 0.9}
-    try:
-        for clamp, (temperature, seed, route) in (
-            (pinned, (0.0, 7, ["Alibaba"])),
-            (pinned.model_copy(update={"route_order": ["Baidu"]}), (0.0, 7, ["Baidu"])),
-            (None, (0.7, None, None)),
-        ):
-            sent = ask("q", clamped, clamp, temperature=0.7)
-            assert (sent["temperature"], sent.get("seed"), sent["provider"].get("order")) == (
-                temperature,
-                seed,
-                route,
-            ), (
-                f"{clamp}: the node's file value or the per-call override beat the clamp — the "
-                "campaign reports itself pinned and runs unpinned"
-            )
-    finally:
-        set_determinism_clamp(None)
+    for clamp, (temperature, seed, route) in (
+        (pinned, (0.0, 7, ["Alibaba"])),
+        (pinned.model_copy(update={"route_order": ["Baidu"]}), (0.0, 7, ["Baidu"])),
+        (None, (0.7, None, None)),
+    ):
+        sent = ask("q", clamped, clamp, temperature=0.7)
+        assert (sent["temperature"], sent.get("seed"), sent["provider"].get("order")) == (
+            temperature,
+            seed,
+            route,
+        ), (
+            f"{clamp}: the node's file value or the per-call override beat the clamp — the "
+            "campaign reports itself pinned and runs unpinned"
+        )
     assert len(list((tmp_path / "reuse" / "optimizer_reuse").glob("*.json"))) == 3, (
         "the second route replayed the first route's banked answer"
     )
@@ -886,7 +878,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     fork = CycleHop(campaign_id=steered.campaign_id, cycle_id="cycle_fork")
     for hop, rungs in ((steered.root_hop, ["low", "high"]), (fork, ["low", "high", "xhigh"])):
         stores.campaigns.mint_cycle(hop)
-        stores.campaigns.write_resolved_pipeline(hop, declaring(rungs))
+        stores.campaigns.write_resolved_run(hop, declaration=declaring(rungs), experiment=None)
     fork_seed = parse_cycle_seed(
         {"node_narrowing": {"a": rows}},
         resolve_campaign_config(stores, steered, None),
@@ -1791,12 +1783,9 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
     payload = promptpotter_wire_adapter(
         "justlogic-d234/seed-0", proposals[0].individual.pipeline_params
     )
-    try:
-        set_optimizer_prompt_overrides(payload["optimizer_prompt_overrides"])
+    with binding_prompt_overrides(payload["optimizer_prompt_overrides"]):
         capo_seat = seat(built_stores, optimization={"optimizer": "capo"})
         sent = NodeContext(capo_seat, optimizers.member("capo_mutate")).fill(
             task_description="sort the list", instruction="Sort it."
         )
-    finally:
-        set_optimizer_prompt_overrides(None)
     assert sent.endswith("Keep the rewrite under 80 words."), "the inner cell ran the parent"

@@ -15,17 +15,18 @@ from promptpotter.application.runner.bench import (
 )
 from promptpotter.application.scoring.closed_rounds import cycle_instrument
 from promptpotter.domain.bench import BenchPasses, BenchScore, LineRun
-from promptpotter.domain.campaign import Campaign, CampaignResult, Launch
+from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.results import candidate_label
+from promptpotter.domain.run_records import LaunchClockRecord
 from promptpotter.domain.spend import Budget, SpendRollup
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     LedgerSpend,
     scan_bench_passes,
+    scan_launch_clocks,
     scan_ledger_spend,
     scan_ledger_wall_clock,
 )
-from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import LedgerSpan
 
 if TYPE_CHECKING:
@@ -57,21 +58,21 @@ def bank_campaign_result(
     line = _line(stores, hop)
     if line is None:
         return
-    ledgers = [CycleLayout(stores.campaigns.cycle_dir(h)).ledger for h in line]
-    prior = stores.campaigns.load_result(hop.campaign_id)
-    launch = Launch(
+    clock = scan_ledger_wall_clock(
+        [stores.campaigns.ledger(h) for h in line],
         started_at=started_at,
         finished_at=finished_at,
-        clock=scan_ledger_wall_clock(
-            ledgers,
-            started_at=started_at,
-            finished_at=finished_at,
-            optimizer_phases=optimizer_phases,
-        ),
+        optimizer_phases=optimizer_phases,
     )
-    earlier = [] if prior is None else [r for r in prior.launches if r.started_at != started_at]
-    stores.campaigns.write_result(
-        hop.campaign_id, CampaignResult(cycle_id=hop.cycle_id, launches=[*earlier, launch])
+    stores.campaigns.bank_launch_clock(
+        hop, LaunchClockRecord(started_at=started_at, finished_at=finished_at, clock=clock)
+    )
+
+
+def line_launches(stores: Stores, campaign: Campaign) -> list[LaunchClockRecord]:
+    """Each cycle's OWN appends: a launch banks on the cycle holding the line as it ends."""
+    return scan_launch_clocks(
+        LedgerSpan(stores.campaigns.ledger(h)) for h in stores.campaigns.line(campaign.root_hop)
     )
 
 
@@ -91,16 +92,11 @@ async def bench_origin(
     stores, hop = session.store, session.hop
     if _line(stores, hop) is None:
         return None
-    sent = (
+    held = line_passes(stores, hop.campaign_id)
+    if held is not None and held.origin.answers(
         origin_sp.sp_hash(session.pipeline_schema),
         [s.key for s in session.scoring.require_partition().bench],
         session.scoring.require_scorer().id,
-    )
-    held = line_passes(stores, hop.campaign_id)
-    if (
-        held is not None
-        and held.origin.stop is None
-        and (held.origin.sp_hash, held.origin.sample_keys, held.origin.scorer_id) == sent
     ):
         passes = held
     else:
@@ -139,8 +135,7 @@ async def bench_origin(
 def read_line_spend(stores: Stores, campaign: Campaign) -> LedgerSpend:
     """Every cycle read WHOLE: what a superseded cycle paid past its cut is the line's cost too."""
     return scan_ledger_spend(
-        LedgerSpan(CycleLayout(stores.campaigns.cycle_dir(h)).ledger)
-        for h in stores.campaigns.line(campaign.root_hop)
+        LedgerSpan(stores.campaigns.ledger(h)) for h in stores.campaigns.line(campaign.root_hop)
     )
 
 
@@ -163,8 +158,7 @@ def line_passes(stores: Stores, campaign_id: str) -> BenchPasses | None:
     if campaign is None:
         return None
     return scan_bench_passes(
-        LedgerSpan(CycleLayout(stores.campaigns.cycle_dir(h)).ledger)
-        for h in stores.campaigns.line(campaign.root_hop)
+        LedgerSpan(stores.campaigns.ledger(h)) for h in stores.campaigns.line(campaign.root_hop)
     )
 
 

@@ -223,8 +223,6 @@ async def _measure_gaps(
 ) -> CellSheet | None:
     """*step*'s OWN configuration, never the round subject's. ``None`` when the pass stopped short."""
 
-    schema = cycle.session.pipeline_schema
-    assert schema is not None, "the overlap pass requires pipeline_schema"
     want = set(gaps)
     samples = [s for s in scoring_pool if s.id in want]
     logger.info(
@@ -233,11 +231,7 @@ async def _measure_gaps(
         len(samples),
     )
     scored = await score_search_point(
-        step.opt_sp.to_job_search_point(
-            schema=schema,
-            framing=cycle.framing,
-            demo=cycle.session.scoring.require_partition().demo,
-        ),
+        cycle.job_point(step.opt_sp),
         samples,
         cycle.session,
         # One run per (member, gap set), so a re-run of the same round replays it free.

@@ -31,7 +31,7 @@ from promptpotter.shared.clock import epoch_seconds
 # `encoded_path`, not the walk's rank: a rank is request-relative, so cursors would not compare.
 RayCursor = tuple[float, str, int]
 
-_INNER_KINDS: frozenset[str] = frozenset({"cycle_seed", "round_standing", "round_warning", "error"})
+_INNER_KINDS: frozenset[str] = frozenset({"cycle_seed", "round_closed", "round_warning", "error"})
 
 assert _INNER_KINDS <= RECORD_KINDS, (
     f"curation names unknown record kinds: {sorted(_INNER_KINDS - RECORD_KINDS)}"

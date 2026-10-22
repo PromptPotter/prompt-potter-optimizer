@@ -95,8 +95,7 @@ def load_lineage_spine(difficulty: DifficultyView) -> list[SpineCycle]:
         if index is None or not (rounds := closed_rounds(stores, hop, scorer, moment=None)):
             continue
         # The cycle's OWN closes: a fork's lifted rounds are its parent's simulations.
-        ledger = CycleLayout(cycle_dir_for(stores.base_dir, hop)).ledger
-        own = frozenset(scan_standing_rounds([LedgerSpan(ledger)]).rounds)
+        own = frozenset(scan_standing_rounds([LedgerSpan(stores.campaigns.ledger(hop))]).rounds)
         edges.append((entry.cycle_id, index, own))
         lines.append(rounds)
     cycles: list[SpineCycle] = []

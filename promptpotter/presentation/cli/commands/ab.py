@@ -5,15 +5,17 @@ from __future__ import annotations
 import argparse
 from typing import TYPE_CHECKING
 
+from promptpotter.application.bench.resume_and_fork.ab_replay import ab_replay_cycle
 from promptpotter.application.cycle_listing import (
     active_pointer,
     resolve_campaign_id,
     resolve_cycle_id,
 )
 from promptpotter.application.datasets.loaders import no_dataset_hint
-from promptpotter.application.diagnostics.ab import ab_replay_campaign
+from promptpotter.application.initialization.loop_start import open_diagnostic
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.results import BankedSearchPointError
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.workspace import open_stores
@@ -54,7 +56,9 @@ async def cmd_ab(args: argparse.Namespace) -> CommandResult:
     setup_logging(style="full" if args.verbose else "cli")
     stores = open_stores(args)
     try:
-        report = await ab_replay_campaign(stores=stores, hop=_target(args, stores))
+        hop = _target(args, stores)
+        opened = await open_diagnostic(stores, hop, source=RunSource.AB)
+        report = ab_replay_cycle(hop, opened.session, opened.config)
     except (DiagnosticError, BankedSearchPointError) as exc:
         raise SystemExit(f"ERROR: {exc}") from exc
 

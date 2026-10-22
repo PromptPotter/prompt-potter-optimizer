@@ -275,7 +275,7 @@ def _record(pytest_args: list[str]) -> int:
     monitoring.register_callback(tool, monitoring.events.PY_START, started)
     monitoring.set_events(tool, monitoring.events.PY_START)
     try:
-        code = int(pytest.main(["-p", "no:xdist", *pytest_args], plugins=[plugin]))
+        code = int(pytest.main(pytest_args, plugins=[plugin]))
     finally:
         monitoring.set_events(tool, 0)
         monitoring.free_tool_id(tool)
@@ -339,7 +339,7 @@ def main(argv: list[str]) -> int:
         return 0
     import pytest
 
-    return int(pytest.main(["-p", "no:xdist", *nodes, *pytest_args]))
+    return int(pytest.main([*nodes, *pytest_args]))
 
 
 if __name__ == "__main__":

@@ -85,11 +85,6 @@ def _fork_sibling_setup(
         cut=CycleEventLog.open(CycleDir(parent_dir)).next_offset,
         from_round=from_round,
     )
-    # No override reaches `dataset_split`, so the parent's draw is the fork's.
-    drawn = campaign_store.read_bank_partition(parent)
-    if drawn is None:
-        raise FileNotFoundError(f"fork parent {parent.cycle_id} holds no bank partition")
-    campaign_store.write_bank_partition(child, drawn)
     if payload.seed is not None:
         # Without its own record a rebase's config unlock silently re-locks on the fork's first `resume`.
         campaign_store.write_cycle_seed(child, payload.seed)

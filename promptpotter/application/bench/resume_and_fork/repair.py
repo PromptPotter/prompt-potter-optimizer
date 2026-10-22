@@ -30,7 +30,9 @@ if TYPE_CHECKING:
 
     from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.bench.difficulty import DifficultyView
+    from promptpotter.application.campaign_config import LivesConfig
     from promptpotter.application.initialization.session import Session
+    from promptpotter.application.views.view_models import ViewContext
     from promptpotter.domain.results import RoundResult
     from promptpotter.domain.scoring import GradedCell
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
@@ -91,10 +93,12 @@ def _rebank_on_branch(
     *,
     slot_of: Mapping[str, int],
     difficulty: DifficultyView,
+    lives: LivesConfig | None,
+    view_context: ViewContext,
 ) -> list[RoundResult]:
     branch = CycleHop(campaign_id=parent.campaign_id, cycle_id=branch_cycle_id)
     ledger = CycleEventLog.open(CycleDir(campaign_store.cycle_dir(branch)))
-    cb = RunCallbacks(ledger=ledger)
+    cb = RunCallbacks(ledger=ledger, view_context=view_context)
     keys: dict[int, list[ArmKey]] = {}
     for round_num, key in retirements:
         keys.setdefault(round_num, []).append(key)
@@ -117,10 +121,9 @@ def _rebank_on_branch(
                     )
                 )
         cb.on_election(t.round, t.election)
+        offset, _ = cb.on_round_close(t, rounds, slot_of, difficulty, lives=lives)
         # The re-close MOVES the document's address; the retired one re-folds to the holed round.
-        reclosed[t.round] = t.model_copy(
-            update={"at_offset": cb.on_round_close(t, rounds, slot_of, difficulty)}
-        )
+        reclosed[t.round] = t.model_copy(update={"at_offset": offset})
     return [reclosed.get(t.round, t) for t in rounds]
 
 
@@ -249,6 +252,7 @@ async def apply_correction(
     session: Session,
     cycle: Cycle,
     dataset: list[Any],
+    view_context: ViewContext,
 ) -> ForkResult | None:
     cut = repair_cut(prior)
     # Only what the branch carries: it REGENERATES a round above the cut rather than correct it.
@@ -303,6 +307,8 @@ async def apply_correction(
         cut.retirements,
         slot_of=session.bank.slot_of,
         difficulty=cycle.difficulty,
+        lives=cycle.config.optimization.lives,
+        view_context=view_context,
     )
     logger.warning(
         "Re-banked %d retired candidate(s) onto %s — the branch now names them itself, so "

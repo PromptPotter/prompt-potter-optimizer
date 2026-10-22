@@ -2,17 +2,18 @@ from __future__ import annotations
 
 import enum
 import os
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Any, Literal, NamedTuple, get_args
 
 from pydantic import ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
 from promptpotter.domain.backend import BackpressureReading
+from promptpotter.domain.bench import PartitionRecord
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.dashboard_rows import RunLimits
-from promptpotter.domain.l4.proxies import PanelPrecision
+from promptpotter.domain.l4.proxies import PanelPrecision, panel_precision
 from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.optimizer_state import OptimizerState
 from promptpotter.domain.paired_reading import ArmKey
@@ -197,18 +198,34 @@ class RoundClosedRecord(RoundOutcome):
     positions: dict[str, int]
     # Every standing round re-read on this close's one scale: the series moves with the clock.
     level_series: LevelSeries
+    run_standing: RunStanding
+    # Leading arm against the ORIGIN's rows: a pairing across two rounds of the closing line.
+    panel_precision: PanelPrecision | None
+    anchors: ViewAnchors
     timestamp: str = Field(default_factory=utcnow_iso)
 
     @classmethod
     def of(
-        cls, rr: RoundResult, slot_of: Mapping[str, int], level_series: LevelSeries
+        cls,
+        line: Sequence[RoundResult],
+        slot_of: Mapping[str, int],
+        level_series: LevelSeries,
+        run_standing: RunStanding,
+        anchors: ViewAnchors,
     ) -> RoundClosedRecord:
+        rr = line[-1]
         cells = rr.addresses()
+        leading = None if rr.election is None or not rr.round else rr.election.leading
         return cls(
             **{name: getattr(rr, name) for name in RoundOutcome.model_fields},
             cells=cells,
             positions={key: slot_of[key] for key in cells.sample_keys()},
             level_series=level_series,
+            run_standing=run_standing,
+            panel_precision=None
+            if leading is None
+            else panel_precision(rr.rows(leading).cells, line[0].results.cells),
+            anchors=anchors,
         )
 
 
@@ -231,18 +248,6 @@ class RoundProposedRecord(FrozenModel):
     consumed: str
     proposals: list[Proposal]
     submitted: bool = False
-    timestamp: str = Field(default_factory=utcnow_iso)
-
-
-class RoundStandingRecord(FrozenModel):
-    """Once per round, where a close can repeat, and displaced with its round."""
-
-    record_type: Literal["round_standing"] = "round_standing"
-    round: int
-    run_standing: RunStanding
-    # Leading arm against the ORIGIN's rows: a pairing across two rounds, so it rides the standing.
-    panel_precision: PanelPrecision | None = None
-    anchors: ViewAnchors
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
@@ -947,6 +952,17 @@ class CycleSeedRecord(FrozenModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
+class ResolvedRunRecord(FrozenModel):
+    """What a run init resolved, read over the chain: the declaration LAST wins, the roster FIRST."""
+
+    record_type: Literal["resolved_run"] = "resolved_run"
+    # The backend's axes with every overlay laid on; empty where the run resolved none.
+    declaration: dict[str, Any]
+    # The roster a connector only NAMES can move under its name; the one every round measured stands.
+    experiment: dict[str, Any] | None
+    timestamp: str = Field(default_factory=utcnow_iso)
+
+
 class ForkSpec(FrozenModel):
     trigger: ForkTrigger
     reason: str
@@ -1034,6 +1050,17 @@ class CycleFinalRecord(FrozenModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
+class LaunchClockRecord(FrozenModel):
+    """Banked by the cycle holding the campaign's line, at every launch end, a pause's included."""
+
+    record_type: Literal["launch_clock"] = "launch_clock"
+    started_at: str
+    finished_at: str
+    # Folded across every cycle of the line; only the runner knows a launch's endpoints.
+    clock: WallClock
+    timestamp: str = Field(default_factory=utcnow_iso)
+
+
 class CycleSupersededRecord(FrozenModel):
     """On the LEFT-BEHIND side of a supersede cut; a later ``running`` here takes the line back."""
 
@@ -1103,20 +1130,22 @@ CycleRecord = Annotated[
     | ForkGradedRecord
     | InterventionRecord
     | LaunchClaimRecord
+    | LaunchClockRecord
     | LaunchReleasedRecord
     | LLMCallProgressRecord
     | LLMCallRecord
     | LLMCallStartRecord
     | OptimizerStateRecord
+    | PartitionRecord
     | PhaseRecord
     | ProviderEasedRecord
     | ProviderHoldRecord
     | RaceCatchUpRecord
     | RaceStandingRecord
+    | ResolvedRunRecord
     | RoundClosedRecord
     | RoundEnteredRecord
     | RoundProposedRecord
-    | RoundStandingRecord
     | RoundWarningRecord
     | StandingBudgetRecord
     | RunPhaseRecord

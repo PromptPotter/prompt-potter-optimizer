@@ -541,11 +541,8 @@ async def bench_selection(
     )
     selected_hash = selected_sp.sp_hash(session.pipeline_schema)
     held = banked.pass_of(head.individual.id)
-    if (
-        held is not None
-        and held.stop is None
-        and (held.sp_hash, held.sample_keys, held.scorer_id)
-        == (selected_hash, origin.sample_keys, session.scoring.require_scorer().id)
+    if held is not None and held.answers(
+        selected_hash, origin.sample_keys, session.scoring.require_scorer().id
     ):
         return banked
     try:

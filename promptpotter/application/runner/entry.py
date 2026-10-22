@@ -13,11 +13,7 @@ from promptpotter.application.initialization.loop_start import (
     scope_memory,
 )
 from promptpotter.application.initialization.session import Session
-from promptpotter.application.optimizer_manifest import (
-    binding_optimizer,
-    select_optimizer,
-    set_determinism_clamp,
-)
+from promptpotter.application.optimizer_manifest import binding_optimizer, select_optimizer
 from promptpotter.application.run_observers import (
     RunObservers,
     build_run_observers,
@@ -29,10 +25,11 @@ from promptpotter.application.runner.campaign_result import bench_origin, declar
 from promptpotter.application.runner.cycle_close import close_cycle
 from promptpotter.application.runner.inner.spawn_context import publish_inner_spawn_context
 from promptpotter.application.runner.loop import run_round_loop
-from promptpotter.application.runner.run_prep import PreparedRun, prepare_run
-from promptpotter.application.runner.spend_arming import (
+from promptpotter.application.runner.run_prep import (
+    PreparedRun,
     arm_run_controls,
     declare_round_allowance,
+    prepare_run,
     rebase_held,
 )
 from promptpotter.application.runner.termination import (
@@ -82,6 +79,7 @@ async def _run_single_cycle(
     observers: RunObservers,
     mode: RunMode,
     started_at: str,
+    step_rounds: int | None,
 ) -> _CycleOutcome:
     origin = prep.origin
     campaign_config = prep.campaign_config
@@ -125,11 +123,7 @@ async def _run_single_cycle(
             # Its price is set aside so the selection's pass still fits under the search's ceiling.
             cycle.bench_passes = await bench_origin(
                 session,
-                origin.origin.individual.to_job_search_point(
-                    schema=session.pipeline_schema,
-                    framing=cycle.framing,
-                    demo=session.scoring.require_partition().demo,
-                ),
+                cycle.job_point(origin.origin.individual),
                 origin_id=origin.origin.individual.id,
                 spend=observers.dashboard.state.spend,
                 cb=cb,
@@ -154,7 +148,7 @@ async def _run_single_cycle(
         declare_line_bench(
             session, campaign_config, cb, passes=cycle.bench_passes, selecting=True, ending=None
         )
-        declare_round_allowance(session, prep.step_rounds)
+        declare_round_allowance(session, step_rounds)
         stop_reason, cycle_error, fork, open_round, cancel_exc, stepped = await run_round_loop(
             cycle,
             dataset,
@@ -292,124 +286,102 @@ async def run_optimization(
     budget: HeldBudget,
 ) -> CycleResult:
     """*observers* MUST be pre-built (ledger bound before origin); *dataset* is the whole bank."""
-    # Round 0 outside every round the loop enters: the origin pass, its gate and the close.
-    with at_round(0):
-        try:
-            selected = select_optimizer(campaign_config.optimization)
-            if mode.diag and selected.plan.controller is None:
-                raise PayloadInvalidError(
-                    f"--diag shows what an optimizer's controller does at a round boundary, and "
-                    f"{selected.name} declares no controller node"
-                )
-            with binding_optimizer(selected):
-                return await _optimize(
+    started_at, opened_dir = utcnow_iso(), observers.cycle_dir
+    try:
+        selected = select_optimizer(campaign_config.optimization)
+        if mode.diag and selected.plan.controller is None:
+            raise PayloadInvalidError(
+                f"--diag shows what an optimizer's controller does at a round boundary, and "
+                f"{selected.name} declares no controller node"
+            )
+        determinism = campaign_config.optimization.determinism
+        # Round 0 outside every round the loop enters: the origin pass, its gate and the close.
+        with at_round(0), binding_optimizer(selected, determinism=determinism):
+            scope_memory(session)
+            partition = cycle_partition(session, dataset, campaign_config)
+            session.scoring.partition = partition
+            dataset = list(partition.search)
+            # Before this launch takes a cell: a re-read of a cell the campaign priced prices nothing.
+            campaigns = session.store.campaigns
+            bind_priced(
+                scan_ledger_priced_keys(campaigns.campaign_cycle_ledgers(session.campaign_id))
+            )
+            refresh_rates_in_background()
+            # Unconditional: the runner cannot know a child will recurse.
+            publish_inner_spawn_context(session)
+            # Fresh per launch, keeping only the cycles this run measures FOR.
+            session.control = RunControl(enclosing=session.control.enclosing)
+            try:
+                prep = await prepare_run(
                     dataset,
                     campaign_config,
                     session=session,
                     observers=observers,
-                    langfuse_session_id=langfuse_session_id,
-                    mode=mode,
                     budget=budget,
+                    langfuse_session_id=langfuse_session_id,
                 )
-        finally:
-            release_cycle(observers.cycle_dir)
-            if session.state.cycle_id:
-                release_cycle(session.store.campaigns.cycle_dir(session.hop))
-
-
-async def _optimize(
-    dataset: list[Sample],
-    campaign_config: CampaignConfig,
-    *,
-    session: Session,
-    observers: RunObservers,
-    langfuse_session_id: str | None,
-    mode: RunMode,
-    budget: HeldBudget,
-) -> CycleResult:
-    started_at = utcnow_iso()
-    scope_memory(session)
-    partition = cycle_partition(session, dataset, campaign_config)
-    session.scoring.partition = partition
-    dataset = list(partition.search)
-    # Before this launch takes a cell: a re-read of a cell the campaign already priced prices nothing.
-    bind_priced(
-        scan_ledger_priced_keys(session.store.campaigns.campaign_cycle_ledgers(session.campaign_id))
-    )
-    refresh_rates_in_background()
-    # Unconditional: the runner cannot know a child will recurse.
-    publish_inner_spawn_context(session)
-    # Fresh per launch, keeping only the cycles this run measures FOR.
-    session.control = RunControl(enclosing=session.control.enclosing)
-    set_determinism_clamp(campaign_config.optimization.determinism)
-    try:
-        prep = await prepare_run(
-            dataset,
-            campaign_config,
-            session=session,
-            observers=observers,
-            budget=budget,
-            langfuse_session_id=langfuse_session_id,
-        )
-    except RUN_STOPS as stop:
-        stop_reason, cycle_error = end_run_on(stop, session, where="in run prep")
-        return close_cycle(
-            None,
-            session,
-            observers,
-            stop_reason=stop_reason,
-            cycle_error=cycle_error,
-            open_round=None,
-            started_at=started_at,
-            config=campaign_config,
-            diag=mode.diag,
-            pause_cause=PauseCause.INTERRUPT,
-        )
-    except (KeyboardInterrupt, asyncio.CancelledError) as exc:
-        # Prep sits outside `_run_single_cycle`'s try: undeclared, an interrupt here leaves a dead run `running`.
-        declare_run_stop(
-            session,
-            StopReason.PAUSED,
-            interrupted_by=(
-                PauseCause.CANCELLED
-                if isinstance(exc, asyncio.CancelledError)
-                else PauseCause.INTERRUPT
-            ),
-        )
-        observers.drain_all()
-        raise
-    rebase_count = 0
-    while True:
-        outcome = await _run_single_cycle(
-            prep,
-            dataset=dataset,
-            session=session,
-            observers=observers,
-            mode=mode,
-            started_at=started_at,
-        )
-        observers = outcome.observers
-        cycle_result = outcome.cycle_result
-
-        rebase_req = outcome.fork
-        if (
-            cycle_result.stop_reason != StopReason.REBASED
-            or rebase_req is None
-            or rebase_count >= MAX_AUTO_REBASES
-            or session.state.cycle_id is None
-        ):
-            if rebase_req is not None and rebase_count >= MAX_AUTO_REBASES:
-                logger.warning(
-                    "Auto-rebase cap %d reached; ignoring further fork_proposals this session.",
-                    MAX_AUTO_REBASES,
+            except RUN_STOPS as stop:
+                stop_reason, cycle_error = end_run_on(stop, session, where="in run prep")
+                return close_cycle(
+                    None,
+                    session,
+                    observers,
+                    stop_reason=stop_reason,
+                    cycle_error=cycle_error,
+                    open_round=None,
+                    started_at=started_at,
+                    config=campaign_config,
+                    diag=mode.diag,
+                    pause_cause=PauseCause.INTERRUPT,
                 )
-            return cycle_result
-
-        rebase_count += 1
-        prep, observers = _mint_and_rebase_fork(
-            prep,
-            session=session,
-            observers=observers,
-            rebase_req=rebase_req,
-            rebase_count=rebase_count,
-        )
+            except (KeyboardInterrupt, asyncio.CancelledError) as exc:
+                # Prep sits outside `_run_single_cycle`'s try: undeclared, it leaves a dead run `running`.
+                declare_run_stop(
+                    session,
+                    StopReason.PAUSED,
+                    interrupted_by=(
+                        PauseCause.CANCELLED
+                        if isinstance(exc, asyncio.CancelledError)
+                        else PauseCause.INTERRUPT
+                    ),
+                )
+                observers.drain_all()
+                raise
+            rebase_count = 0
+            while True:
+                outcome = await _run_single_cycle(
+                    prep,
+                    dataset=dataset,
+                    session=session,
+                    observers=observers,
+                    mode=mode,
+                    started_at=started_at,
+                    step_rounds=budget.step_rounds,
+                )
+                observers = outcome.observers
+                cycle_result = outcome.cycle_result
+                rebase_req = outcome.fork
+                if (
+                    cycle_result.stop_reason != StopReason.REBASED
+                    or rebase_req is None
+                    or rebase_count >= MAX_AUTO_REBASES
+                    or session.state.cycle_id is None
+                ):
+                    if rebase_req is not None and rebase_count >= MAX_AUTO_REBASES:
+                        logger.warning(
+                            "Auto-rebase cap %d reached; ignoring further fork_proposals.",
+                            MAX_AUTO_REBASES,
+                        )
+                    return cycle_result
+                rebase_count += 1
+                prep, observers = _mint_and_rebase_fork(
+                    prep,
+                    session=session,
+                    observers=observers,
+                    rebase_req=rebase_req,
+                    rebase_count=rebase_count,
+                )
+    finally:
+        release_cycle(opened_dir)
+        if session.state.cycle_id:
+            release_cycle(session.store.campaigns.cycle_dir(session.hop))
