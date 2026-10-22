@@ -51,7 +51,7 @@ async def prepare_run(
 ) -> PreparedRun:
     cb = observers.callbacks
 
-    seed = session.store.campaigns.read_cycle_seed(session.hop) if session.cycle_id else None
+    seed = session.store.campaigns.read_cycle_seed(session.hop)
     if seed is not None:
         campaign_config = apply_cycle_seed(campaign_config, seed)
         if overlay_sets_model_outside_allowed(
@@ -77,15 +77,14 @@ async def prepare_run(
         langfuse_session_id=langfuse_session_id,
     )
     declare_run_wiring(session, campaign_config, cb.ledger, tracing=observers.tracing)
-    if session.cycle_id:
-        # A fresh mint was admitted before its campaign existed: its ceiling is stored here.
-        move_campaign_money(
-            budget.standing,
-            stores=session.store,
-            job_registry=JobRegistry.attach(),
-            campaign_id=session.hop.campaign_id,
-        )
-        stand_held_budget(session.store, session.hop, budget)
+    # A fresh mint was admitted before its campaign existed: its ceiling is stored here.
+    move_campaign_money(
+        budget.standing,
+        stores=session.store,
+        job_registry=JobRegistry.attach(),
+        campaign_id=session.hop.campaign_id,
+    )
+    stand_held_budget(session.store, session.hop, budget)
 
     # After the declaration, and before the origin pass, which spends.
     arm_run_controls(session, observers)
@@ -118,7 +117,7 @@ def arm_run_controls(session: Session, observers: RunObservers) -> None:
         session.state.held,
         stores=session.store,
         job_registry=JobRegistry.attach(),
-        hop=session.hop if session.cycle_id else None,
+        hop=session.hop,
         meters=ceiling_meter(session.purpose),
         opened=session.state.launch_clock().monotonic,
         live=True,
@@ -159,8 +158,6 @@ def rebase_held(session: Session, parent: CycleHop) -> None:
 
 def declare_round_allowance(session: Session, step_rounds: int | None) -> None:
     """A launch with no allowance clears the last launch's."""
-    if not session.cycle_id:
-        return
     campaigns = session.store.campaigns
     standing = campaigns.read_standing_budget(session.hop)
     pause_at_round = (

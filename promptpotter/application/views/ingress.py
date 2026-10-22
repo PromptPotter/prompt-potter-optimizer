@@ -89,7 +89,7 @@ def init_exit(ctx: ViewContext, *, cycle: Cycle, session: Session) -> InitExitVi
     partition = session.state.scoring.require_partition()
     return InitExitView(
         origin_acc=None if (fold := cycle.origin_round.fold) is None else fold.accuracy,
-        cycle_id_short=(session.cycle_id or "?")[:12],
+        cycle_id_short=session.cycle_id[:12],
         samples=len(partition.search),
         bench_samples=len(partition.bench),
         origin_samples=len(cycle.origin_round.results),

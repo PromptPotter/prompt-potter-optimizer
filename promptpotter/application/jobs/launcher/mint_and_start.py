@@ -209,7 +209,7 @@ async def hold_existing_cycle(
     try:
         held = await admit_and_hold(request, stores=stores, job_registry=job_registry, job=job)
         bound, campaign_config = await bind_cycle_session(stores, campaign, hop)
-        refuse_drifted_resume(bound, campaign, hop, bound.bank.samples)
+        refuse_drifted_resume(bound, campaign, bound.bank.samples)
         session = configure_and_apply_pipeline(bound, campaign_config)
     except BaseException as exc:
         # `hop=None`: a refusal stamps nothing on the cycle, so it stays as resumable as it was.

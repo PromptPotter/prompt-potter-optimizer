@@ -357,12 +357,12 @@ def _continue_inner_campaign(
             "producer owns it, and two runs writing one cycle is not a measurement",
             spent={},
         )
+    bound = session.bound(hop, purpose=campaign.declaration.purpose)
     try:
-        refuse_drifted_resume(session, campaign, hop, train_data)
+        refuse_drifted_resume(bound, campaign, train_data)
     except ConfigDriftError as drift:
         raise CellUnscoreableError(str(drift), spent={}) from drift
 
-    bound = session.bound(hop, purpose=campaign.declaration.purpose)
     save_active_pointer(session.store.base_dir, hop)
     logger.info(
         "inner campaign %s/%s CONTINUES from %d banked round record(s) (was %s)",
@@ -427,7 +427,7 @@ async def _open_seat(cell: _InnerCell, store: Stores) -> _Opened:
     # reaches the drift refusal rather than a fresh root.
     campaign = session.store.campaigns.load_campaign(cell.campaign_id)
     if campaign is None:
-        plan = resolve_cycle_plan(session, declaration, train_data, hop=None)
+        plan = resolve_cycle_plan(session, declaration, train_data)
         session = mint(plan, campaign_id=cell.campaign_id, billed=None).session
     else:
         session = _continue_inner_campaign(session, campaign, train_data)
@@ -445,10 +445,8 @@ async def _run_inner_campaign(
     with binding_prompt_overrides(cell.overrides):
         opened = await _open_seat(cell, store)
         session, config = opened.session, opened.config
-        if session.campaign_id and session.cycle_id:
-            spawned = SpawnedBy.model_validate(spawned_by)
-            session.store.campaigns.record_spawned(session.hop, spawned)
-            minted.append(session.hop)
+        session.store.campaigns.record_spawned(session.hop, SpawnedBy.model_validate(spawned_by))
+        minted.append(session.hop)
         observers = build_run_observers(session=session, campaign_config=config)
         try:
             # Each send is admitted by its own book AND the ROOT's; its share bounds every checkpoint.
@@ -456,7 +454,7 @@ async def _run_inner_campaign(
                 config,
                 stores=session.store,
                 dataset_name=cell.spec.inner_dataset,
-                hop=session.hop if session.cycle_id else None,
+                hop=session.hop,
             ) as held:
                 _, result = await run_optimization(
                     opened.train_data,

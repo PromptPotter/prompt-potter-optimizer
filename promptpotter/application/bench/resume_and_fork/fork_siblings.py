@@ -6,7 +6,7 @@ import logging
 import re
 from collections.abc import Mapping
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING
 
 from promptpotter.application.bench.resume_and_fork.decisions import (
     record_decision,
@@ -38,11 +38,6 @@ if TYPE_CHECKING:
     from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
-
-
-class ForkResult(NamedTuple):
-    new_cycle_id: str
-    new_resumed_from_round: int
 
 
 def _fork_sibling_setup(

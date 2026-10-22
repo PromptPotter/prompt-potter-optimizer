@@ -393,7 +393,7 @@ async def embedded_share(
 
 @contextmanager
 def inner_share(
-    config: CampaignConfig, *, stores: Stores, dataset_name: str, hop: CycleHop | None
+    config: CampaignConfig, *, stores: Stores, dataset_name: str, hop: CycleHop
 ) -> Iterator[HeldBudget]:
     """An L4 inner campaign's share, of what the enclosing run's book has left at its spawn."""
     enclosing = bound_spend_book()
@@ -404,7 +404,7 @@ def inner_share(
         user_id=str(stores.identity.user_id),
         principal_id=acting_principal(stores.identity).id,
         workspace=stores.campaigns.workspace,
-        hop=UNRESOLVED_HOP if hop is None else hop,
+        hop=hop,
         holder=InnerRun(dataset_name),
     )
     admitted = False

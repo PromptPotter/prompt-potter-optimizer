@@ -5,10 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.bench.resume_and_fork.fork_siblings import (
-    ForkResult,
-    mint_fork,
-)
+from promptpotter.application.bench.resume_and_fork.fork_siblings import mint_fork
 from promptpotter.application.bench.resume_and_fork.repair import apply_correction
 from promptpotter.application.bench.resume_and_fork.replayers import (
     ReplayMismatch,
@@ -102,7 +99,7 @@ async def resume_with_divergence_check(
     *,
     skip_divergence_check: bool,
     fork_on_divergence: bool = False,
-) -> ForkResult | None:
+) -> str | None:
     sc = session.state.scoring
     scorer = sc.require_scorer()
     prior = closed_rounds(session.store, hop, scorer, before_round=resumed_from_round, moment=None)
@@ -130,9 +127,7 @@ async def resume_with_divergence_check(
         if not optimizer_mismatches and stale is None and not drifted:
             return None
 
-        def _branch_or_halt(
-            div: ReplayMismatch, survivors: list[RoundResult], *, self_inflicted: bool
-        ) -> ForkResult:
+        def _branch_or_halt(div: ReplayMismatch, *, self_inflicted: bool) -> str:
             """A branch this resume CAUSED takes itself; a change from OUTSIDE is the operator's call."""
             if not fork_on_divergence and not self_inflicted:
                 raise ResumeDivergenceError(
@@ -158,7 +153,10 @@ async def resume_with_divergence_check(
                     issued_by=SYSTEM_PRINCIPAL,
                 ),
             )
-            cycle.replay_priors(survivors)
+            if div.round_num == 0:
+                cycle.reopen_origin()
+            else:
+                cycle.replay_priors([t for t in prior if t.round < div.round_num])
             logger.warning(
                 "Resume diverged at round %d (%s); branched → %s. That cycle is the "
                 "continuation; this one keeps what the superseded package produced.",
@@ -166,19 +164,19 @@ async def resume_with_divergence_check(
                 div.kind,
                 new_cycle_id,
             )
-            return ForkResult(new_cycle_id=new_cycle_id, new_resumed_from_round=div.round_num)
+            return new_cycle_id
 
-        for i, t in enumerate(prior):
+        for t in prior:
             div = optimizer_mismatches.get(t.round) or replay_decisions(
                 t,
                 ledger_decisions.get(t.round, []),
                 ruler=cycle.difficulty.ruler_of(t.ruler),
             )
             if div is not None:
-                return _branch_or_halt(div, list(prior[:i]), self_inflicted=False)
+                return _branch_or_halt(div, self_inflicted=False)
 
         # The round about to run has no round file, so the loop above cannot visit it.
         if stale is not None:
-            return _branch_or_halt(stale, list(prior), self_inflicted=True)
+            return _branch_or_halt(stale, self_inflicted=True)
 
     return None

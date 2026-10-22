@@ -922,7 +922,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     assert effective_config(declared).model_dump() == door.model_dump(), (
         "a seat runs another config than the one it declared"
     )
-    plan = resolve_cycle_plan(opened, declared, rows_30, hop=None)
+    plan = resolve_cycle_plan(opened, declared, rows_30)
     for unmeasured in (
         {"optimization": {"budget": {"usd": 9.0, "rounds": 3}}},
         {"display_metric": "composite"},
@@ -930,7 +930,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         moved = declare(opened, _connector_config(**copy.deepcopy(unmeasured)), purpose=Optimize())
         assert (
             moved != declared
-            and resolve_cycle_plan(opened, moved, rows_30, hop=None).cycle_id == plan.cycle_id
+            and resolve_cycle_plan(opened, moved, rows_30).cycle_id == plan.cycle_id
         ), f"{unmeasured} — a key that bounds spend or display only — moved the root id"
     assert not declared.budget.named and declared.run_seed is None, (
         "a declaration restated a budget axis or a seed no layer set"
@@ -940,11 +940,11 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     assert armed.shared_part() == twin.shared_part(), (
         "two arms of one declaration hold different shared parts"
     )
-    arm_plan = resolve_cycle_plan(opened, armed, rows_30, hop=None)
+    arm_plan = resolve_cycle_plan(opened, armed, rows_30)
     assert arm_plan.origin_hash == plan.origin_hash, (
         "an arm and a seat over one dataset, partition and environment read different origins"
     )
-    twin_plan = resolve_cycle_plan(opened, twin, rows_30, hop=None)
+    twin_plan = resolve_cycle_plan(opened, twin, rows_30)
     run_ids = {plan.cycle_id, arm_plan.cycle_id, twin_plan.cycle_id}
     assert len(run_ids) == 3, (
         "two arms over one content, or an arm and a seat, share a run id every surface keys on"
@@ -1028,8 +1028,8 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
             dataset_hash=opened.bank.dataset_hash
         ),
     )
-    refuse_drifted_resume(opened, held_campaign, held_campaign.root_hop, rows_30)
     opened = opened.bound(held_campaign.root_hop, purpose=Optimize())
+    refuse_drifted_resume(opened, held_campaign, rows_30)
     wired_ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(held_campaign.root_hop)))
     root_cut = Cut(
         cycle=CycleDir(stores.campaigns.cycle_dir(held_campaign.root_hop)),
@@ -1063,7 +1063,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
                 f"a moved {field} default left the bench defaults pin where it was"
             )
             if not origin_moves:
-                refuse_drifted_resume(opened, held_campaign, held_campaign.root_hop, rows_30)
+                refuse_drifted_resume(opened, held_campaign, rows_30)
                 # The resume runs on, and what it runs under says so on the record every launch writes.
                 declare_run_wiring(opened, effective_config(declared), wired_ledger, tracing=None)
                 served = fold_at(root_cut)
@@ -1072,7 +1072,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
                 )
                 continue
             with pytest.raises(ConfigDriftError) as drifted:
-                refuse_drifted_resume(opened, held_campaign, held_campaign.root_hop, rows_30)
+                refuse_drifted_resume(opened, held_campaign, rows_30)
             assert drifted.value.details["defaults_pin_moved"], (
                 "a resume the moved default drifted did not name its defaults pin"
             )
@@ -1096,9 +1096,15 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         "an optimizer whose manifest moved under one declaration drifted nothing, or blamed "
         "another part"
     )
-    recut = loop_session(stores, opened.pipeline_schema, rows_30[:-1], dataset=opened.dataset)
+    recut = loop_session(
+        stores,
+        opened.pipeline_schema,
+        rows_30[:-1],
+        dataset=opened.dataset,
+        hop=held_campaign.root_hop,
+    )
     with pytest.raises(ConfigDriftError) as drifted:
-        refuse_drifted_resume(recut, held_campaign, held_campaign.root_hop, rows_30[:-1])
+        refuse_drifted_resume(recut, held_campaign, rows_30[:-1])
     assert not drifted.value.details["defaults_pin_moved"], (
         "a resume over an edited bank blamed the defaults pin"
     )

@@ -42,6 +42,7 @@ from promptpotter.domain.run_records import (
     ResolvedRunRecord,
     RoundEnteredRecord,
     RoundProposedRecord,
+    RoundRestatedRecord,
     RunPhaseRecord,
     SpawnedBy,
     SpawnedRecord,
@@ -168,10 +169,11 @@ class CampaignStore:
     def ledger(self, hop: CycleHop) -> Path:
         return self._layout(hop).ledger
 
-    def _append(self, hop: CycleHop, record: CycleRecord) -> None:
+    def _append(self, hop: CycleHop, record: CycleRecord) -> int:
         cycle_dir = self.cycle_dir(hop)
-        CycleEventLog.open(CycleDir(cycle_dir)).append(record)
+        offset = CycleEventLog.open(CycleDir(cycle_dir)).append(record)
         write_cycle_index(cycle_dir)
+        return offset
 
     def _read_declared[M: (Campaign, HeadToHeadRecord)](
         self, path: Path, model: type[M]
@@ -488,23 +490,26 @@ class CampaignStore:
     def round_submission(self, hop: CycleHop, round_num: int) -> RoundProposedRecord | None:
         return self.standing_rounds(hop, moment=None).submitted.get(round_num)
 
-    def restate_optimizer_state(self, hop: CycleHop, rr: RoundResult) -> None:
-        close = self.standing_rounds(hop, moment=None).rounds[rr.round].close
-        CycleEventLog.open(CycleDir(self.cycle_dir(hop))).append(close.restated(rr.closed_state))
+    def restate_round(self, hop: CycleHop, statement: RoundRestatedRecord) -> int:
+        return self._append(hop, statement)
 
-    def rewind_to_round(
-        self,
-        hop: CycleHop,
-        after_round: int,
-    ) -> None:
+    def restated_state(self, hop: CycleHop, rr: RoundResult) -> RoundRestatedRecord:
+        return (
+            self.standing_rounds(hop, moment=None).rounds[rr.round].close.restated(rr.closed_state)
+        )
+
+    def rewind_enters(self, hop: CycleHop, after_round: int) -> int:
         if not self.ledger(hop).exists():
             raise NotFoundError(f"cycle {hop.cycle_id!r} has no ledger on disk")
-        max_complete = max(self.standing_rounds(hop, moment=None).rounds, default=-1)
-        if after_round > max_complete:
-            raise BadRequestError(
-                f"--from {after_round}: ledger only has completed rounds 0..{max_complete}"
-            )
-        self._append(hop, RoundEnteredRecord(round=after_round + 1, rewound=True))
+        last = self.standing_rounds(hop, moment=None).last_closed
+        if last is None or after_round > last:
+            held = "none" if last is None else f"0..{last}"
+            raise BadRequestError(f"--from {after_round}: ledger's completed rounds are {held}")
+        return after_round + 1
+
+    def rewind_to_round(self, hop: CycleHop, after_round: int) -> None:
+        entered = self.rewind_enters(hop, after_round)
+        self._append(hop, RoundEnteredRecord(round=entered, rewound=True))
 
     def bank_final(
         self,
@@ -586,24 +591,23 @@ class CampaignStore:
             self._append(hop, LaunchReleasedRecord(job_id=job_id, detail=detail))
 
     def _declare_ended(self, hop: CycleHop, reason: StopReason) -> bool:
-        facts = scan_cycle_facts(self.ledger(hop))
-        if facts.minted is None or facts.ended is not None:
-            return False
-        self.declare_stop(hop, RunPhaseRecord.stop(reason))
-        return True
-
-    def mark_producer_vanished(self, hop: CycleHop) -> bool:
-        cycle_dir = self.cycle_dir(hop)
-        if derive_run_state(cycle_dir).producer.state is not ProducerState.SILENT:
-            return False
-        lock = CycleLayout(cycle_dir).producer_lock
-        # Declared holding the cycle, so a launch taking it up is never ended under itself.
-        if not producer_lock.take(lock):
+        lock = self._layout(hop).producer_lock
+        # A held cycle's producer declares its own stop; asked first, so no caller waits out a live hold.
+        if producer_lock.held(lock) or not producer_lock.take(lock):
             return False
         try:
-            return self._declare_ended(hop, StopReason.PRODUCER_VANISHED)
+            facts = scan_cycle_facts(self.ledger(hop))
+            if facts.minted is None or facts.ended is not None:
+                return False
+            self.declare_stop(hop, RunPhaseRecord.stop(reason))
+            return True
         finally:
             producer_lock.release(lock)
+
+    def mark_producer_vanished(self, hop: CycleHop) -> bool:
+        if derive_run_state(self.cycle_dir(hop)).producer.state is not ProducerState.SILENT:
+            return False
+        return self._declare_ended(hop, StopReason.PRODUCER_VANISHED)
 
     def _list_entry(self, cycle_dir: Path, index: CycleIndex) -> CycleListEntry:
         campaign_id, cycle_id = cycle_dir.parent.parent.name, cycle_dir.name

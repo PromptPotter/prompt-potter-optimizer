@@ -371,8 +371,8 @@ def seat(
     **cycle: Any,
 ) -> RoundContext:
     """Round *round_num* of a cycle started from *origin*'s reading of its session, else of one
-    whose origin was never measured; *cycle* bends its fields. Its one ledger is *hop*'s cycle's,
-    else a dir of its own."""
+    whose origin was never measured; *cycle* bends its fields. It is bound to *hop*, else to a
+    cycle of its own."""
     schema = schema or pipeline_schema(
         [PipelineNode(name="solve", tunes_llm=False, prompt_info=PROMPT_INFO)]
     )
@@ -382,13 +382,8 @@ def seat(
             "dataset_split": {"bench": bench, "demo": demo},
         }
     )
-    ledger = CycleEventLog.open(
-        CycleDir(
-            stores.projects_root / "seats" / str(next(_SEATS))
-            if hop is None
-            else stores.campaigns.cycle_dir(hop)
-        )
-    )
+    hop = hop or CycleHop(campaign_id="seats", cycle_id=f"seat{next(_SEATS)}")
+    ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(hop)))
     session = loop_session(
         stores,
         schema,

@@ -231,7 +231,7 @@ class Cycle:
         """The individual's latest arm a round of this cycle concluded."""
         return measured_arm(self.rounds, individual_id)
 
-    def restamp_origin_round(self, parent: ReadArm) -> None:
+    def _seat_origin(self, parent: ReadArm, optimizer_state: OptimizerState | None) -> None:
         """The origin's θ is carried, not re-fit: round 0 closes on the scale it opened on."""
         election = self.origin_round.election
         assert election is not None, "round 0 elects the origin it adopted"
@@ -239,23 +239,36 @@ class Cycle:
             parent,
             fit=election.fit,
             ruler=election.ruler,
-            optimizer_state=self.origin_round.optimizer_state,
+            optimizer_state=optimizer_state,
             elects_on=election.elects_on,
             schema=self.session.pipeline_schema,
             slot_of=self.session.bank.slot_of,
         )
 
+    def restamp_origin_round(self, parent: ReadArm) -> None:
+        self._seat_origin(parent, self.origin_round.optimizer_state)
+
     def replay_priors(self, priors: list[RoundResult]) -> None:
-        if not priors:
-            return
+        assert priors, "a cut at round 0 reopens the origin; a replay seats a closed round"
         from_round = min(rr.round for rr in priors)
         self.rounds = [rr for rr in self.rounds if rr.round < from_round] + sorted(
             priors, key=lambda rr: rr.round
         )
-        self.difficulty.seat(self.elected[1].ruler)
         closed = self.rounds[-1].closed_state
         self.population = list(closed.population)
         self.slices.seat(closed)
+        self.difficulty.seat(self.elected[1].ruler)
+
+    def reopen_origin(self) -> None:
+        """A fork cut at round 0 keeps the origin's measurement and none of what its close banked."""
+        origin, head = self.origin_round, self.origin_round.head
+        assert origin.election is not None and head is not None, "round 0 ends on its origin"
+        key = origin.election.ended_on
+        self.rounds = [origin]
+        self._seat_origin(ReadArm(key, head, origin.rows(key)), None)
+        self.population = []
+        self.slices = SliceMap(self.optimizer.slices)
+        self.difficulty.seat(origin.election.ruler)
 
     def seat(self, rr: RoundResult) -> RoundResult:
         slot = next(i for i, held in enumerate(self.rounds) if held.round == rr.round)
@@ -304,8 +317,6 @@ class Cycle:
 
     def banked_proposals(self, round_num: int) -> list[Proposal] | None:
         session = self.session
-        if not session.cycle_id:
-            return None
         proposed = session.store.campaigns.round_proposals(session.hop, round_num)
         return None if proposed is None else list(proposed.proposals)
 
@@ -323,14 +334,12 @@ class Cycle:
         return kind() if pending is None else cast("O", pending)
 
     def emit(self, output: RoundOutput, round_num: int) -> RoundResult | None:
-        """Pending until *round_num* closes; onto a round already closed it is restated there, and returned to bank."""
+        """Pending until *round_num* closes; onto a round already closed it returns the restatement, banked before it is seated."""
         held = self._held(round_num)
         if held is None or held.optimizer_state is None:
             self.outputs.setdefault(round_num, {})[output.kind] = output
             return None
-        return self.seat(
-            held.model_copy(update={"optimizer_state": held.optimizer_state.holding(output)})
-        )
+        return held.model_copy(update={"optimizer_state": held.optimizer_state.holding(output)})
 
     def close_state(self, round_num: int) -> OptimizerState:
         """The ONE builder of a round's state: its slices as they stand, every output kind it carries."""
@@ -367,9 +376,7 @@ class Cycle:
     def runtime_failures(self) -> list[RuntimeFailure]:
         """Concluded sibling forks' first, then this cycle's own rounds, each distinct config once."""
         if self._sibling_failures is None:
-            self._sibling_failures = (
-                _sibling_runtime_failures(self.session) if self.session.cycle_id else []
-            )
+            self._sibling_failures = _sibling_runtime_failures(self.session)
         own = (rf for rr in self.rounds[1:] for rf in _cut_failures(rr))
         return _distinct([*self._sibling_failures, *own])
 

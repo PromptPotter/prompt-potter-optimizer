@@ -60,9 +60,6 @@ if TYPE_CHECKING:
 
 def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> None:
     """The ONE ``hard_samples.json``: campaign scope reads one cycle's, dataset scope folds per request."""
-    if not session.cycle_id:
-        return
-
     ruler = cycle.difficulty.ruler
     cells = cycle.frontier
     frontier = cycle.difficulty.scale.frontier(cells)
@@ -210,8 +207,6 @@ def _fork_summary_from_index(fork_index: CycleIndex) -> ForkSummaryView:
 
 def write_log_md(session: Session, config: CampaignConfig) -> None:
     """Called once more AFTER the run ends: the stop and the winner reach the ledger after the last round rendered."""
-    if not session.cycle_id:
-        return
     with graceful("log.md render failed"):
         _render_cycle_log_md(session, config)
         _render_campaign_log_md(session)
@@ -309,8 +304,6 @@ def write_review_md(
     optimizer: SelectedOptimizer,
     framing: TaskDecomposition,
 ) -> None:
-    if not session.cycle_id:
-        return
     with graceful("review.md render failed"):
         store = session.store.campaigns
         index = store.load(session.hop, moment=None)

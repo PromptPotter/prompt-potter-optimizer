@@ -65,8 +65,22 @@ The arc's method is the session protocol in memory (`feedback_arc_of_arcs_loop`)
   refuses a junctioned `webapp/node_modules`, so web checks run only in the integration tree; at
   five builders plus a full gate the host reaped the gate's shell. Action: attribute each (scout
   first, read-only), then cut what OUR code wastes — gate lanes that overlap, a lighter build
-  check, briefs that read by section. **Re-test:** five builders and one full gate run with no
-  reap and no gate waiting longer than its own run.
+  check, briefs that read by section. Vitest's fixed worker START_TIMEOUT counts jsdom setup, so a
+  loaded host fails a green suite (happy-dom is the candidate; a new dependency). **Re-test:** five
+  builders and one full gate run with no reap and no gate waiting longer than its own run.
+- **`application/campaign_config.py` belongs in `domain/`** — the payload table completes only once
+  it is imported, and 71 modules import it. Action: move it, re-point the importers. **Re-test:** the
+  payload table is whole at `import promptpotter.domain`.
+- **No offline leg rebases mid-run.** `scripts/offline_run.py` strips every L2/L3 `fork_proposal`,
+  so `runner/entry.py::_run_line`'s later passes are reached only by a test patching privates
+  (`test_private_reach` 9). Action: a rebasing leg; the test drops its patches. **Re-test:**
+  `test_private_reach` back to 6.
+- **Ledger and readout shapes the review left standing:** `export.json` is written and never read
+  back; the operator's seat is not a `Member`; the rebase clock has no test; `LiveCandidate.samples`
+  has no reader; `round_restated` carries the whole round body; `RunStanding.after` recomputes what
+  the fold holds; the readout filters on `resumed_from_round`; `InnerCellFacts` keeps no unread
+  rounds, so the sample readout cannot name them. Action: each to its root, one builder per seam.
+  **Re-test:** each symbol named here is deleted, read, or tested.
 
 ## Open — multi-arc, no blocker
 

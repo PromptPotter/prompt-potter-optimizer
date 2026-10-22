@@ -42,15 +42,11 @@ from promptpotter.domain.results import (
     ArmFit,
     Concluded,
     Cut,
-    Measured,
-    ScoreSummary,
-    Skipped,
     arm_name,
     is_electable,
     is_leader_eligible,
     walked_short,
 )
-from promptpotter.domain.run_records import ArmRecord, SampleScoredRecord
 from promptpotter.domain.scoring import NO_CELLS
 from promptpotter.domain.validators import BrokenSignal
 from promptpotter.shared.measurement_context import (
@@ -80,7 +76,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.scoring import CellSheet, GradedCell
     from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.domain.validators import StopRule
-    from promptpotter.infrastructure.ledger import CycleEventLog
 
 logger = logging.getLogger(__name__)
 
@@ -381,7 +376,8 @@ async def _walk_population(
         key: measuring(arm, sps[key], schema, expected=len(asked[key]), sample_order=order)
         for key, arm in proposed.items()
     }
-    skips = skips_on_record(cycle.session.state.ledger, round_num)
+    session = cycle.session
+    skipped = session.store.campaigns.standing_rounds(session.hop, moment=None).skipped
     walks: dict[ArmKey, Walk | None] = {}
     for key, arm in proposed.items():
         checks: list[StopRule] = list(cycle.session.state.scoring.degradation_checks)
@@ -389,7 +385,9 @@ async def _walk_population(
         rule = race.rule(list(walks.items())) if race is not None else None
         if rule is not None:
             checks.append(rule)
-        walks[key] = _open_arm(ctx, arm, sps[key], panel.order, checks, skips.get(key))
+        walks[key] = _open_arm(
+            ctx, arm, sps[key], panel.order, checks, skipped.get((round_num, key))
+        )
 
     blocks = race.blocks if race is not None else None
 
@@ -516,22 +514,3 @@ def _conclude_arm(
     if race is not None and scored.stopped is None and not gave_up:
         race.admit(key, results.cells, sp)
     return conclude(arm, scored, elimination=elimination, breakage=breakage), results
-
-
-def skips_on_record(ledger: CycleEventLog | None, round_num: int) -> dict[ArmKey, int]:
-    """By arm: a regenerated round proposes other individuals and drops their skips."""
-    skips: dict[ArmKey, int] = {}
-    if ledger is None:
-        return skips
-    walked: dict[ArmKey, int] = {}
-    for _offset, rec in ledger.iter():
-        match rec:
-            case SampleScoredRecord(running=ScoreSummary() as running) if (
-                rec.round == round_num and rec.role == MeasurementRole.PANEL
-            ):
-                walked[ArmKey(rec.individual_id)] = running.walked
-            case ArmRecord(state=Cut(reason=Skipped())) if rec.round == round_num:
-                skips[rec.arm] = walked.get(rec.arm, 0)
-            case ArmRecord(state=Cut() | Measured()) if rec.round == round_num:
-                skips.pop(rec.arm, None)
-    return skips

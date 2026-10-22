@@ -83,9 +83,9 @@ BASELINE = {
     "served_fields": 1640,
     # The rows below price a CHANGE in the sites it touches, read off code.
     # Files naming three or more `CycleRecord` arms, each a site the next arm must reach.
-    "p_record": 19,
+    "p_record": 18,
     # The arms each of those files leaves out: a mirror rotting raises it.
-    "p_record_drift": 561,
+    "p_record_drift": 525,
     # Served properties no surface reads by name; a payload field only the terminal sends is one.
     "p_served": 177,
     # Files naming three or more `CommandKind` rows, each a site the next row must reach.
@@ -96,7 +96,7 @@ BASELINE = {
     # and the public members of each object one of its properties exposes; each `CycleRead` alike.
     "p_member": 309,
     # Places a test reaches a private name of the package: an import, an attribute, a patch target.
-    "test_private_reach": 6,
+    "test_private_reach": 9,
 }
 
 _PACKAGE_ROOT = REPO / "promptpotter"

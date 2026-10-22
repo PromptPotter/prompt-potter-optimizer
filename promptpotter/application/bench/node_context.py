@@ -50,7 +50,7 @@ from promptpotter.domain.scoring import CellSheet
 from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.llm.telemetry import at_round
-from promptpotter.shared.errors import SendRefusedError, graceful
+from promptpotter.shared.errors import SendRefusedError
 from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole
 
 if TYPE_CHECKING:
@@ -175,7 +175,7 @@ class Lineage(CycleRead):
         """Where a rewind of this cycle lands (UCB over the campaign's lineage); ``None`` where no ancestor stands."""
         return select_rewind_round(
             load_lineage_spine(self._cycle.difficulty),
-            cycle_id=self._cycle.session.cycle_id or "",
+            cycle_id=self._cycle.session.cycle_id,
             current_round=self._round.round_num,
         )
 
@@ -366,7 +366,7 @@ class NodeContext[K: StrictModel]:
         cycle = self._round.cycle
         closed = cycle.rounds[-1]
         state = closed.closed_state.holding(*(cycle.slices.get(kind) for kind in kinds))
-        self._bank(cycle.seat(closed.model_copy(update={"optimizer_state": state})))
+        self._bank(closed.model_copy(update={"optimizer_state": state}))
 
     def access(self, kind: type[Pool]) -> Access:
         return self._selected.access(self._member, kind)
@@ -383,11 +383,14 @@ class NodeContext[K: StrictModel]:
         return self._round.cycle.slices.get(kind).drawn({s.key: s for s in demo})
 
     def _bank(self, restated: RoundResult) -> None:
-        session = self._round.cycle.session
-        if restated.at_offset is None or not session.cycle_id:
-            return
-        with graceful(f"round {restated.round} optimizer state not restated"):
-            session.store.campaigns.restate_optimizer_state(session.hop, restated)
+        """On the run's own ledger before the cycle seats it: a restatement that failed to land is held nowhere."""
+        cycle = self._round.cycle
+        session = cycle.session
+        if restated.at_offset is not None:
+            ledger = session.state.ledger
+            assert ledger is not None, "a closed round is restated under the run's observers"
+            ledger.append(session.store.campaigns.restated_state(session.hop, restated))
+        cycle.seat(restated)
 
     @property
     def schema(self) -> PipelineSchema:

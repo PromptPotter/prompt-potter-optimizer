@@ -11,6 +11,7 @@ import asyncio
 import contextvars
 import json
 import threading
+import time
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -35,6 +36,7 @@ from factories import (
     sheet,
     workspace,
 )
+from filelock import FileLock
 
 from promptpotter.application import optimizers
 from promptpotter.application.bench.cycle import Cycle
@@ -49,6 +51,7 @@ from promptpotter.application.campaign_config import (
     OptimizationConfig,
     apply_config_overrides,
 )
+from promptpotter.application.initialization import loop_start
 from promptpotter.application.maintenance.archive_maintenance import (
     compact_measurement_archive,
     restore_measurement_archive,
@@ -66,6 +69,7 @@ from promptpotter.application.origin import (
     resolve_origin_opt_search_point,
     try_inherit_fork_origin,
 )
+from promptpotter.application.runner import entry
 from promptpotter.application.scoring import query_loop, search_point_scorer
 from promptpotter.application.scoring.closed_rounds import closed_rounds
 from promptpotter.application.scoring.formula.compiler import compile_scorer
@@ -77,6 +81,7 @@ from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.optimizer_state import UnregisteredStatePartError
 from promptpotter.domain.paired_reading import ArmKey, ReadingState
+from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_schema import PipelineNode
 from promptpotter.domain.results import (
     ArmSlot,
@@ -84,6 +89,7 @@ from promptpotter.domain.results import (
     PointContext,
     RoundResult,
 )
+from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import (
     AnnouncedArms,
     ArmRecord,
@@ -92,12 +98,14 @@ from promptpotter.domain.run_records import (
     ForkSpec,
     ForkTrigger,
     OriginSource,
+    RebaseRequest,
     ResumeCheckpointRecord,
     RoundEnteredRecord,
 )
 from promptpotter.domain.sample import ArchiveEntry, Bank, Sample, sample_key
 from promptpotter.domain.scoring import GRADE_KEYS, MeasuredCell
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
+from promptpotter.infrastructure import producer_lock
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.telemetry import reset_cycle_ledger, set_cycle_ledger
 from promptpotter.infrastructure.store import archive_queries, measurement_archive
@@ -114,7 +122,7 @@ from promptpotter.infrastructure.store.archive_queries import (
 )
 from promptpotter.infrastructure.store.dataset_access import DEFINITION_FILE
 from promptpotter.infrastructure.store.io import rewrite_lines
-from promptpotter.infrastructure.store.layout import campaigns_root_dir_for
+from promptpotter.infrastructure.store.layout import CycleLayout, campaigns_root_dir_for
 from promptpotter.infrastructure.store.lineage_queries import build_lineage_tree
 from promptpotter.infrastructure.store.measurement_archive import (
     MeasurementArchive,
@@ -124,6 +132,7 @@ from promptpotter.infrastructure.store.measurement_archive import (
 )
 from promptpotter.infrastructure.store.read_model import append_row
 from promptpotter.infrastructure.store.stores import Stores
+from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.identity import SYSTEM_PRINCIPAL
 from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole
 
@@ -640,7 +649,7 @@ def _emit_round(
 
 
 def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_inherits_them(
-    built_stores: Stores,
+    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     stores = built_stores
     # A replayer that cannot re-derive its decision is a named divergence, never a clean match.
@@ -816,6 +825,30 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         return [reader.selection.label for reader in readers]  # type: ignore[union-attr]
 
     assert served() == [(i, True, True) for i in ids] and selected() == ["C2.1"] * 3, "guard"
+    # A `--from` retracts rounds only once preflight admits the launch.
+    refused = loop_session(stores, pipeline_schema([]), [], hop=hop)
+
+    def refuse(*_: Any, **__: Any) -> None:
+        raise PayloadInvalidError("refused", code="spend_cap_below_round")
+
+    with monkeypatch.context() as patched, pytest.raises(PayloadInvalidError):
+        patched.setattr(loop_start, "run_preflight_checks", refuse)
+        asyncio.run(
+            loop_start.init_optimization_loop(
+                mock.Mock(),
+                [],
+                mock.Mock(),
+                cb=mock.Mock(),
+                no_divergence_check=True,
+                fork_on_divergence=False,
+                resume_from_round_override=1,
+                session=refused,
+            )
+        )
+    assert refused.state.resumed_from_round == 2, "a refused launch reported another next round"
+    assert list(stores.campaigns.standing_rounds(hop, moment=None).rounds) == [0, 1, 2], (
+        "a refused launch's `--from` retracted rounds on the ledger"
+    )
     stores.campaigns.rewind_to_round(hop, 1)
     assert selected() == ["C1.1"] * 3, (
         "the ledger, the tree and the index disagree on the selection"
@@ -1007,3 +1040,58 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     assert [next(iter(r.close.arms)) for r in stood.rounds.values()] == [prefix[0], *mine]
     assert stood.crowns == {0: prefix[0], 1: mine[0]}
     assert candidates(displaced) == prefix, "the fork's rounds displaced its parent's own"
+
+    # A supersede ends its parent only where no producer holds it: a holder declares its own stop.
+    def ended(hop: CycleHop) -> StopReason | None:
+        index = store.load(hop, moment=None)
+        assert index is not None
+        return index.stop_reason
+
+    # Held as a server-launched run holds it, from a lock of its own process.
+    lock = CycleLayout(store.cycle_dir(displaced)).producer_lock
+    producer = FileLock(str(lock))
+    producer.acquire()
+    with producer_lock.probe(lock) as seen:
+        assert seen, "a reader's probe missed the producer holding the cycle"
+    asked = time.monotonic()
+    store.mark_superseded(displaced, fork_hop.cycle_id)
+    waited = time.monotonic() - asked
+    producer.release()
+    assert ended(displaced) is None, "a supersede ended its parent under the producer running it"
+    assert waited < 0.5, f"a supersede waited {waited:.2f}s out a live producer's hold"
+    lock.touch()
+    with producer_lock.probe(lock):
+        assert not producer_lock.held(lock), (
+            "a reader's probe in flight read as a producer, so a supersede would skip its stop"
+        )
+    store.mark_superseded(displaced, fork_hop.cycle_id)
+    assert ended(displaced) is StopReason.REBASED, "a superseded parent no producer holds runs on"
+
+    # The operator's `--from` rewinds the line's first cycle; a rebase's fork stands on its own cut.
+    rewinds: list[int | None] = []
+    rebase = RebaseRequest(
+        fork_from_round=5,
+        trigger=ForkTrigger.OPTIMIZER_REBASE,
+        reason="",
+        issued_by=SYSTEM_PRINCIPAL,
+    )
+
+    async def one_cycle(prep: Any, *, mode: RunMode, rebases: int, **_: Any) -> Any:
+        rewinds.append(mode.from_round)
+        return mock.Mock(fork=None if rebases else rebase)
+
+    monkeypatch.setattr(entry, "_run_single_cycle", one_cycle)
+    monkeypatch.setattr(
+        entry, "_mint_and_rebase_fork", lambda prep, **kw: (prep, kw["session"], kw["observers"])
+    )
+    asyncio.run(
+        entry._run_line(
+            mock.Mock(),
+            dataset=[],
+            session=mock.Mock(),
+            observers=mock.Mock(),
+            mode=RunMode(from_round=3),
+            step_rounds=None,
+        )
+    )
+    assert rewinds == [3, None], "a rebase's fork re-applied the rewind to rounds it inherited"

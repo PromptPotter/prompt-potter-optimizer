@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from contextvars import Token
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from promptpotter.application.initialization.session import Session
@@ -12,7 +13,9 @@ from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import defaults_drift
 from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.scoring.closed_rounds import RoundFileProjection
+from promptpotter.application.views.ingress import run_spend_view
 from promptpotter.application.views.readout import ReadoutProjection, StatusFn
+from promptpotter.domain.campaign import ceiling_meter
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.dashboard_rows import RunLimits
 from promptpotter.domain.phases import (
@@ -38,6 +41,7 @@ from promptpotter.infrastructure.projections.audit_trail import AuditTrailProjec
 from promptpotter.infrastructure.projections.cycle_index import CycleIndexProjection
 from promptpotter.infrastructure.projections.live_dashboard.projection import DashboardCheckout
 from promptpotter.infrastructure.projections.racing_stream import RacingStreamProjection
+from promptpotter.infrastructure.runtime_flags import armed_run_limits
 from promptpotter.infrastructure.tracing.bridge import TracingProjection
 from promptpotter.infrastructure.tracing.langfuse_client import langfuse_trace_url
 from promptpotter.shared.measurement_context import instrument_depth
@@ -46,7 +50,6 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from promptpotter.application.campaign_config import CampaignConfig
-    from promptpotter.domain.phase_views import RunSpendView
     from promptpotter.domain.results import Proposal
 
 logger = logging.getLogger(__name__)
@@ -66,15 +69,24 @@ def declare_gate(session: Session, gate: GateKind, *, drafts: Sequence[Proposal]
 
 def declare_run_stop(
     session: Session,
+    observers: RunObservers,
     stop_reason: StopReason,
     *,
     interrupted_by: PauseCause,
-    spend: RunSpendView | None = None,
 ) -> None:
     """Declared where the run ENDS, never at the checkpoint that raised it: a second site, a second record."""
-    ledger = session.state.ledger
-    if ledger is None:
-        return
+    budget = armed_run_limits(
+        Path(observers.cycle_dir), observers.dashboard.state.run_limits
+    ).budget
+    meter = ceiling_meter(session.purpose)
+    spend = run_spend_view(
+        observers.dashboard.spend_metered(meter),
+        campaign_metered=session.store.campaigns.metered_spend(session.campaign_id, meter),
+        usd_cap=budget.usd,
+        token_cap=budget.tokens,
+        share=session.state.control.book.allotment,
+    )
+    ledger = observers.callbacks.ledger
     if stop_reason_outcome(stop_reason) is not StopOutcome.PAUSED:
         ledger.append(RunPhaseRecord.stop(stop_reason, spend=spend))
         return
@@ -174,12 +186,6 @@ def build_run_observers(
     readout_sink: StatusFn | None = None,
     forked_from: RunObservers | None = None,
 ) -> RunObservers:
-    if session.cycle_id is None:
-        raise RuntimeError(
-            "build_run_observers: session must already be minted via "
-            "jobs.mint.mint — it needs a cycle_id"
-        )
-
     cycle_dir = CycleDir(session.store.campaigns.cycle_dir(session.hop))
     # Before the ledger opens: from here a second launch of the cycle is refused, not interleaved.
     hold_cycle(cycle_dir)
@@ -216,8 +222,6 @@ def _bind_observers(
     audit = AuditTrailProjection.from_cycle_dir(cycle_dir)
     session.state.audit_projection = audit
     racing = RacingStreamProjection.from_cycle_dir(cycle_dir)
-
-    ledger = open_with_history(cycle_dir)
     readout = (
         ReadoutProjection.for_campaign(session, campaign_config, sink=readout_sink)
         if forked_from is None
@@ -228,6 +232,8 @@ def _bind_observers(
         raise RuntimeError(
             f"build_run_observers: the ledger of {session.hop} holds no RunWiringRecord"
         )
+    # Opened after the checkout folded, so its catch-up never feeds the checkout a line twice.
+    ledger = open_with_history(cycle_dir)
 
     ledger.bind(dashboard)
     ledger.bind(audit)

@@ -54,6 +54,7 @@ from promptpotter.application.evidence.read import subject_evidence
 from promptpotter.application.evidence.subjects import SubjectSpec
 from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.application.optimizer_manifest import (
+    binding_prompt_overrides,
     resolve_optimizer,
     running_prompt,
     select_optimizer,
@@ -99,6 +100,7 @@ DATASET = "justlogic/d234"
 STAMP = "offline-run.json"
 CONTROLLED = ("controlled", "controlled-bare")
 RESUMED = "resumed"
+DIVERGED = "diverged"
 INTERRUPTED = {1: "interrupted", 2: "interrupted-twice"}
 # The Ctrl+C contract is the pause and the resume, not the search: one round ends the cycle soonest.
 TERMINAL_ROUNDS = 1
@@ -402,6 +404,36 @@ def text_templates(config: CampaignConfig) -> dict[str, str]:
     }
 
 
+def edited_proposer(config: CampaignConfig) -> dict[str, dict[str, Any]]:
+    """Appended, so the fake still knows the node by its template's opening."""
+    selected = select_optimizer(config.optimization)
+    node = selected.proposer
+    held = running_prompt(node, selected.node_config(node), selected.manifest)
+    return {node: {"problem_description": f"{held.problem_description}\n\nEdited on resume."}}
+
+
+def forked_at_init(stores: Stores, parent: CycleHop, fork: CycleHop) -> None:
+    if fork == parent:
+        raise SystemExit("offline run: a diverged resume ran on in the cycle it diverged from")
+    layout = CycleLayout(stores.campaigns.cycle_dir(parent))
+    rebased = [
+        r
+        for r in _jsonl(layout.ledger)
+        if r.get("record_type") == "run_phase" and r.get("stop_reason") == StopReason.REBASED
+    ]
+    if [r["spend"] is not None for r in rebased] != [True]:
+        raise SystemExit(f"offline run: the parent ended on {rebased}, not one REBASED with spend")
+    if derive_run_state(layout.cycle_dir).producer.attached:
+        raise SystemExit("offline run: the fork left its parent's producer lock held")
+    last = layout.readout.read_text(encoding="utf-8").rstrip().splitlines()[-1]
+    if fork.cycle_id not in last:
+        raise SystemExit(f"offline run: the parent's readout ends {last!r}, naming no fork")
+    closed = CycleLayout(stores.campaigns.cycle_dir(fork)).ledger
+    if not any(r.get("record_type") == "round_closed" for r in _jsonl(closed)):
+        raise SystemExit("offline run: the fork closed no round of its own")
+    print(f"diverged at run init: {parent.cycle_id} REBASED onto {fork.cycle_id}, which ran on")
+
+
 async def rebound_session(stores: Stores, hop: CycleHop) -> Session:
     campaign = stores.campaigns.load_campaign(hop.campaign_id)
     assert campaign is not None
@@ -420,6 +452,7 @@ async def run_one(
     framing: bool = True,
     pause_after: int | None = None,
     bench_trigger: BenchTrigger = "at_end",
+    diverge: bool = False,
 ) -> tuple[Path, str]:
     """The archive is the workspace's, never *out*'s: campaigns in one process share it."""
     out = workspace if out is None else out
@@ -452,14 +485,18 @@ async def run_one(
             raise SystemExit(f"offline run: {optimizer} ended {result.stop_reason}, never paused")
         # The resume reads its rounds off the ledger and the archive: their checkouts are gone.
         shutil.rmtree(CycleLayout(stores.campaigns.cycle_dir(session.hop)).rounds)
-        session = await rebound_session(stores, session.hop)
-        session, result = await run_campaign(
-            session,
-            readout_sink=print,
-            budget=Budget(),
-            mode=RunMode(),
-        )
+        paused = session.hop
+        session = await rebound_session(stores, paused)
+        with binding_prompt_overrides(edited_proposer(config) if diverge else None):
+            session, result = await run_campaign(
+                session,
+                readout_sink=print,
+                budget=Budget(),
+                mode=RunMode(fork_on_divergence=diverge),
+            )
         await session.backend_client.aclose()
+        if diverge:
+            forked_at_init(stores, paused, session.hop)
     if stop_reason_outcome(result.stop_reason).exit_code:
         raise SystemExit(f"offline run: {optimizer} ended {result.stop_reason}")
     beside = sorted(
@@ -963,6 +1000,7 @@ def main() -> int:
     )
     ap.add_argument("--child", help=argparse.SUPPRESS)
     ap.add_argument("--pause-after", type=int, help=argparse.SUPPRESS)
+    ap.add_argument("--diverge", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--terminal", choices=("new", "resume"), help=argparse.SUPPRESS)
     ap.add_argument("--interrupts", type=int, default=0, help=argparse.SUPPRESS)
     args = ap.parse_args()
@@ -1001,6 +1039,7 @@ def main() -> int:
             rows=args.rows,
             pause_after=args.pause_after,
             bench_trigger=args.bench_trigger,
+            diverge=args.diverge,
         )
         print(asyncio.run(one)[0])
         return 0
@@ -1027,7 +1066,7 @@ def main() -> int:
         child_args += [f"--optimizer={name}" for name in arm_names]
     t0 = time.monotonic()
 
-    tasks = len(names) if args.controlled else 2 * len(names) + len(INTERRUPTED)
+    tasks = len(names) if args.controlled else 2 * len(names) + len(INTERRUPTED) + 1
     pool = ThreadPoolExecutor(RamBudget.read().offline_run_children(tasks))
 
     def run_child(name: str, workspace: Path, log: str, rounds: int, *extra: str) -> int:
@@ -1059,6 +1098,14 @@ def main() -> int:
         }
     )
     pause_after = min(1, args.rounds - 1)
+    # A resume checks divergence only once a round past the origin closed; one leg stands for all.
+    diverged = (
+        None
+        if args.controlled or not pause_after
+        else spawn(
+            names[0], home / names[0] / DIVERGED, f"--pause-after={pause_after}", "--diverge"
+        )
+    )
     resumed = (
         {}
         if args.controlled
@@ -1109,6 +1156,14 @@ def main() -> int:
         ok, said = leg.result()
         failed += not ok
         print(f"{names[0]}: `new` under {count} SIGINT: {said if ok else 'FAILED -- ' + said}")
+    if diverged is not None:
+        rc = diverged.result()
+        failed += bool(rc)
+        log = home / names[0] / DIVERGED / "run.log"
+        print(
+            f"{names[0]}: a resume diverged at run init "
+            f"{f'FAILED (exit {rc}) -- {log}' if rc else 'forked, its parent REBASED'}"
+        )
     if args.controlled and not failed:
         beside, bare = (home / name for name in CONTROLLED)
         for arm in (f"arm-{name}" for name in arm_names):

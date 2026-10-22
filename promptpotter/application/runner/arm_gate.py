@@ -42,9 +42,6 @@ def authored_arm(
 
 
 def arm_gate_mode(ctx: RoundContext) -> ArmGateMode:
-    """``off`` for a round that lands nowhere: one with no cycle has no ledger to be answered on."""
-    if not ctx.cycle.session.cycle_id:
-        return "off"
     return ctx.cycle.config.optimization.arm_gate
 
 

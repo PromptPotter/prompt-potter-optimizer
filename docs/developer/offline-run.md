@@ -69,6 +69,7 @@ decisions. Each campaign is a child process, as many at once as free memory hold
 | `decisions.json` | Every decision the run made, canonical: ids mapped to candidate labels; timestamps, paths and hashes dropped; floats rounded; concurrent records compared as sets. `harness` adds the stop reason, the unrouted URLs and the call counts. |
 | `run.log` | The child's stdout and stderr. |
 | `resumed/` | The same campaign in a workspace of its own, paused at a round boundary and ended on a session rebuilt from disk. |
+| `diverged/` | The first optimizer's campaign paused like `resumed/`, then resumed with `--fork-on-divergence` under an edited proposer prompt: run init must fork, its parent end on one `REBASED` stop carrying spend with its lock released and its readout naming the fork, and the fork run on. |
 | `interrupted/`, `interrupted-twice/` | The first optimizer's one-round campaign launched by the CLI's own `main` as a terminal dispatches it, under one and under two SIGINTs, then `resume`d. |
 
 **The interrupted legs are the Ctrl+C contract, run**: `new` must exit 130 with its slot released and

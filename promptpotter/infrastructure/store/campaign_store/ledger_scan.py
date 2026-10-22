@@ -25,10 +25,13 @@ from promptpotter.domain.phase_views import (
 from promptpotter.domain.phases import CampaignPhase, ErrorRecord, GateKind, RunPhase
 from promptpotter.domain.results import (
     ArmState,
+    Cut,
     IndividualWalk,
+    Measured,
     RoundCells,
     RunStanding,
     ScoreSummary,
+    Skipped,
     VerifyPass,
     VerifyReading,
 )
@@ -40,6 +43,7 @@ from promptpotter.domain.run_records import (
     CommandRecord,
     CycleFinalRecord,
     CycleMintedRecord,
+    CycleRecord,
     CycleSeed,
     CycleSeedRecord,
     CycleSupersededRecord,
@@ -206,6 +210,17 @@ _CycleFact = (
 )
 
 
+def _init_formula(record: PhaseRecord) -> str | None:
+    match record:
+        case PhaseRecord(
+            phase=CampaignPhase.INIT,
+            view=InitEnterView(composite_fitness_formula=str() as formula)
+            | InitExitView(composite_fitness_formula=str() as formula),
+        ):
+            return formula
+    return None
+
+
 class _CycleFacts:
     records: ClassVar[RecordClasses] = get_args(_CycleFact)
 
@@ -239,14 +254,10 @@ class _CycleFacts:
                 held = held._replace(interventions=(*held.interventions, record))
             case SpawnedRecord():
                 held = held._replace(spawned_by=record.spawned_by)
-            case PhaseRecord(
-                phase=CampaignPhase.INIT,
-                view=InitEnterView(composite_fitness_formula=str() as formula)
-                | InitExitView(composite_fitness_formula=str() as formula),
-            ):
-                held = held._replace(formula=formula)
             case PhaseRecord():
-                return
+                if (formula := _init_formula(record)) is None:
+                    return
+                held = held._replace(formula=formula)
             case RoundClosedRecord():
                 pass
         self._held = held._replace(updated_at=record.timestamp)
@@ -468,12 +479,14 @@ class StandingRounds(NamedTuple):
     elections: dict[int, ElectionRecord]
     # Keyed on the record's round STAMP, never ledger position: a round can close more than once.
     decisions: dict[int, list[ResumeCheckpointRecord]]
+    # The cells an operator's skip left each arm at: it stands as its proposal does, past a re-entry.
+    skipped: dict[tuple[int, ArmKey], int]
     entered: int | None = None
     rewound: int | None = None
 
     @classmethod
     def none(cls) -> StandingRounds:
-        return cls({}, {}, {}, {}, {}, {}, {})
+        return cls({}, {}, {}, {}, {}, {}, {}, {})
 
     def displaced(self, entered: int | None, rewound: int | None) -> StandingRounds:
         return self._replace(
@@ -484,6 +497,7 @@ class StandingRounds(NamedTuple):
             passes=_before(self.passes, entered),
             elections=_before(self.elections, entered),
             decisions=_before(self.decisions, entered),
+            skipped=_before(self.skipped, rewound),
         )
 
     def then(self, later: StandingRounds) -> StandingRounds:
@@ -498,9 +512,14 @@ class StandingRounds(NamedTuple):
             passes={**prefix.passes, **later.passes},
             elections={**prefix.elections, **later.elections},
             decisions=prefix.decisions,
+            skipped={**prefix.skipped, **later.skipped},
             entered=later.entered if self.entered is None else self.entered,
             rewound=later.rewound if self.rewound is None else self.rewound,
         )
+
+    @property
+    def last_closed(self) -> int | None:
+        return max(self.rounds) if self.rounds else None
 
     @property
     def standing(self) -> RunStanding | None:
@@ -593,6 +612,12 @@ class _Standing:
             case ArmRecord():
                 self._arms.announce(record)
                 self._cells.setdefault((rnd, record.arm), {})
+                match record.state:
+                    case Cut(reason=Skipped()):
+                        fold = self._arms.fold(rnd, record.arm)
+                        held.skipped[rnd, record.arm] = 0 if fold is None else fold.walked
+                    case Cut() | Measured():
+                        held.skipped.pop((rnd, record.arm), None)
             case SampleScoredRecord():
                 walking = self._arms.take(record)
                 if (cell := _walked_cell(record)) is None:
@@ -620,7 +645,19 @@ class _Standing:
             passes={k: dict(taken) for k, taken in held.passes.items()},
             elections=dict(held.elections),
             decisions={n: list(made) for n, made in held.decisions.items()},
+            skipped=dict(held.skipped),
         )
+
+
+_MOVES_ROUNDS = (RoundEnteredRecord, RoundClosedRecord, RoundRestatedRecord)
+assert set(_MOVES_ROUNDS) <= set(_Standing.records)
+
+
+def moves_index(record: CycleRecord) -> bool:
+    """Whether *record* moves a cycle's index (`projections/cycle_index.py`): a fact its fold takes, or a round that stands."""
+    if isinstance(record, PhaseRecord):
+        return _init_formula(record) is not None
+    return isinstance(record, (*_CycleFacts.records, *_MOVES_ROUNDS))
 
 
 _Naming = (

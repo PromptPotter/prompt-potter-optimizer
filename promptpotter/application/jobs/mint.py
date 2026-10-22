@@ -46,7 +46,6 @@ from promptpotter.domain.campaign import (
 )
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.opt_search_point import NodePrompt
-from promptpotter.domain.pipeline_overlay import apply_node_overlay
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
 from promptpotter.domain.results import PointContext
 from promptpotter.domain.run_records import CycleSeed, DefaultsDrift, OriginSource
@@ -166,13 +165,13 @@ def resolve_cycle_plan(
     dataset: Sequence[Sample],
     *,
     origin_override: dict[str, NodePrompt] | None = None,
-    hop: CycleHop | None,
 ) -> CyclePlan:
-    """Given *hop*, what that cycle RUNS: its root's origin with its own seed laid over the declaration."""
+    """Bound to a cycle, what it RUNS: its root's origin under its own seed, which the configure lays."""
     campaign_config = effective_config(declaration)
     schema = session.pipeline_schema
     configured = configure_and_apply_pipeline(session, campaign_config)
     pipeline_params = configured.pipeline_params
+    hop = session.hop if session.cycle_id else None
     runs_under: CycleSeed | None = None
     if hop is not None:
         assert origin_override is None, "a minted cycle's origin is its campaign root's seed"
@@ -182,13 +181,8 @@ def resolve_cycle_plan(
         root_seed = campaigns.read_cycle_seed(campaign.root_hop)
         origin_override = (root_seed.origin_prompts or None) if root_seed else None
         runs_under = campaigns.read_cycle_seed(hop)
-    running = (
-        pipeline_params
-        if runs_under is None or not runs_under.pipeline_overlay
-        else apply_node_overlay(pipeline_params, runs_under.pipeline_overlay, schema)
-    )
     partition = refuse_unrunnable(
-        apply_cycle_seed(campaign_config, runs_under), dataset, running, schema
+        apply_cycle_seed(campaign_config, runs_under), dataset, pipeline_params, schema
     )
     seed = (
         CycleSeed(origin_prompts=origin_override, origin_source=OriginSource.CAMPAIGN_ORIGIN)
@@ -241,10 +235,10 @@ class ConfigDriftError(ConflictError):
         )
 
 
-def refuse_drifted_resume(
-    session: Session, campaign: Campaign, hop: CycleHop, dataset: Sequence[Sample]
-) -> None:
-    plan = resolve_cycle_plan(session, campaign.declaration, dataset, hop=hop)
+def refuse_drifted_resume(session: Session, campaign: Campaign, dataset: Sequence[Sample]) -> None:
+    """*session* is bound to the cycle the resume runs."""
+    plan = resolve_cycle_plan(session, campaign.declaration, dataset)
+    hop = session.hop
     if campaign.root_content_hash == plan.origin_hash:
         return
     # A seed that steers the pipeline declared its own values at the cut, so it runs under them.
@@ -421,9 +415,7 @@ async def mint_framed_cycle(
                 code="arm_halt_refused",
             )
     # Every refusal the mint owes, before the check-in below bills.
-    plan = resolve_cycle_plan(
-        session, declaration, dataset, origin_override=origin_override, hop=None
-    )
+    plan = resolve_cycle_plan(session, declaration, dataset, origin_override=origin_override)
     description = _description_to_decompose(session, campaign_config, task_text)
     if description is None:
         minted = _mint_door(plan, campaign_id=campaign_id, billed=None)

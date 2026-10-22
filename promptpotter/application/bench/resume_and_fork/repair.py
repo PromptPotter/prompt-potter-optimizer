@@ -3,10 +3,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-from promptpotter.application.bench.resume_and_fork.fork_siblings import (
-    ForkResult,
-    mint_fork,
-)
+from promptpotter.application.bench.resume_and_fork.fork_siblings import mint_fork
 from promptpotter.application.bench.resume_and_fork.replayers import ReplayMismatch
 from promptpotter.application.bench.round_analysis import compute_round_diagnostics
 from promptpotter.application.run_callbacks import stated_line
@@ -95,7 +92,6 @@ def _rebank_on_branch(
     lives: LivesConfig | None,
 ) -> list[RoundResult]:
     branch = CycleHop(campaign_id=parent.campaign_id, cycle_id=branch_cycle_id)
-    ledger = CycleEventLog.open(CycleDir(campaign_store.cycle_dir(branch)))
     closes = campaign_store.standing_rounds(parent, moment=None).rounds
     keys: dict[int, list[ArmKey]] = {}
     for round_num, key in retirements:
@@ -107,10 +103,11 @@ def _rebank_on_branch(
         line, series, standing = stated_line(t, rounds, difficulty, lives=lives)
         # Under its round's own anchors, never the resuming launch's.
         anchors = closes[t.round].close.anchors
-        offset = ledger.append(
+        offset = campaign_store.restate_round(
+            branch,
             RoundRestatedRecord.of(
                 line, slot_of, series, standing, anchors, remeasured=keys[t.round]
-            )
+            ),
         )
         # The restatement MOVES the document's address; the retired one re-folds to the holed round.
         restated[t.round] = t.model_copy(update={"at_offset": offset})
@@ -242,7 +239,7 @@ async def apply_correction(
     session: Session,
     cycle: Cycle,
     dataset: list[Any],
-) -> ForkResult | None:
+) -> str | None:
     cut = repair_cut(prior)
     # Only what the branch carries: it REGENERATES a round above the cut rather than correct it.
     carried_rounds = prior[: cut.resume_at]
@@ -319,9 +316,9 @@ async def apply_correction(
             CycleEventLog.open(CycleDir(campaign_store.cycle_dir(branch))).append(carried)
         logger.warning(
             "The correction reached nothing any node reads — cut %s marked EQUIVALENT "
-            "and carries round %d's candidates across unchanged. Both lines continue.",
+            "and carries round %d's candidates across unchanged; the line continues on it.",
             repair_target,
             cut.resume_at,
         )
     cycle.replay_priors(corrected[: cut.resume_at])
-    return ForkResult(new_cycle_id=repair_target, new_resumed_from_round=cut.resume_at)
+    return repair_target

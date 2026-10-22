@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.initialization.session import Session
@@ -19,10 +17,8 @@ from promptpotter.application.runner.output import (
 )
 from promptpotter.application.runner.round import flush_pending_decisions
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
-from promptpotter.application.views.ingress import run_spend_view
 from promptpotter.config.settings import APP_VERSION
 from promptpotter.domain.bench import BenchScore
-from promptpotter.domain.campaign import ceiling_meter
 from promptpotter.domain.export import PromptExport, build_prompt_export
 from promptpotter.domain.phases import (
     STOP_REASON_INFO,
@@ -33,8 +29,7 @@ from promptpotter.domain.phases import (
 )
 from promptpotter.domain.results import CycleResult, round_clocks
 from promptpotter.domain.run_records import CycleFinal
-from promptpotter.domain.spend import NOTHING_METERED, SpendRollup
-from promptpotter.infrastructure.runtime_flags import armed_run_limits
+from promptpotter.domain.spend import SpendRollup
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_wall_clock
 from promptpotter.shared.clock import utcnow_iso
 
@@ -141,7 +136,7 @@ def close_cycle(
     selected = bound_optimizer()
     # Before the result is built: a decision made after the last round has no next `close_round`.
     if cycle is not None:
-        flush_pending_decisions(cycle, session)
+        flush_pending_decisions(cycle, observers.callbacks.ledger)
     banked = None if cycle is None else cycle.bench_passes
     bench = declare_line_bench(
         session, config, observers.callbacks, passes=banked, selecting=False, ending=stop_reason
@@ -190,23 +185,7 @@ def _finalize_run(
     is_paused = info.outcome is StopOutcome.PAUSED
     # Both needed: the table says the reason leaves a partial round, the loop whether one was open.
     interrupted_round = open_round if info.halts_mid_round else None
-    budget = armed_run_limits(
-        Path(observers.cycle_dir), observers.dashboard.state.run_limits
-    ).budget
-    meter = ceiling_meter(session.purpose)
-    spend = run_spend_view(
-        observers.dashboard.spend_metered(meter),
-        # No cycle, no campaign: nothing it could have metered.
-        campaign_metered=(
-            session.store.campaigns.metered_spend(session.campaign_id, meter)
-            if session.cycle_id
-            else NOTHING_METERED
-        ),
-        usd_cap=budget.usd,
-        token_cap=budget.tokens,
-        share=session.state.control.book.allotment,
-    )
-    if session.cycle_id and not rebasing:
+    if not rebasing:
         # Before either declaration: a reader seeing the run stopped finds its clock banked.
         bank_campaign_result(
             session.store,
@@ -220,14 +199,14 @@ def _finalize_run(
         # Declared where every paused exit converges, rather than trusting each raise site.
         declare_run_stop(
             session,
+            observers,
             stop_reason,
             interrupted_by=(
                 PauseCause.BOUND if stop_reason is StopReason.PANEL_CUT else pause_cause
             ),
-            spend=spend,
         )
-    # A pause leaves the cycle ACTIVE: the PAUSED just declared must stay the last declaration read.
-    if session.cycle_id and not is_paused:
+    else:
+        # A pause leaves the cycle ACTIVE: the PAUSED just declared must stay the last declaration read.
         session.store.campaigns.bank_final(
             session.hop,
             interrupted_round=interrupted_round,
@@ -263,10 +242,8 @@ def _finalize_run(
                 )[0],
             ),
         )
-    # After what it banked, before the digests that name the stop, and before the drain.
-    if not is_paused:
-        declare_run_stop(session, stop_reason, interrupted_by=pause_cause, spend=spend)
-    if session.cycle_id and not is_paused:
+        # After what it banked, before the digests that name the stop, and before the drain.
+        declare_run_stop(session, observers, stop_reason, interrupted_by=pause_cause)
         # A diagnostic cycle answers a question about the optimizer; it has no winner to hand on.
         if not diag:
             publish_export(session)

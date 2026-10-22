@@ -73,19 +73,16 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def init_cycle(
-    session: Session,
-    cycle_id: str | None,
-    *,
-    resume_from_round_override: int | None = None,
-) -> tuple[str | None, int]:
+def init_cycle(session: Session, *, resume_from_round_override: int | None) -> None:
     """A present-but-BROKEN cycle propagates: swallowing it re-spends the campaign from scratch."""
-
-    if not session.backend_id or cycle_id is None:
-        return None, 1
     store = session.store.campaigns
-    resolved = cycle_id
-    hop = CycleHop(campaign_id=session.campaign_id, cycle_id=resolved)
+    hop = session.hop
+    # Before anything that can raise: a fork's state is its parent's until this line.
+    session.state.resumed_from_round = (
+        _next_round(session)
+        if resume_from_round_override is None
+        else store.rewind_enters(hop, resume_from_round_override)
+    )
     # Restated on every launch: the backend may have moved its axes since.
     store.write_resolved_run(
         hop,
@@ -98,14 +95,15 @@ def init_cycle(
             prompt_delivery=session.backend_client.prompt_delivery(session.pipeline_params)
         ),
     )
-    if resume_from_round_override is not None:
-        store.rewind_to_round(hop, resume_from_round_override)
     existing = store.load(hop, moment=None)
     if existing is not None:
         session.state.human_intervened = existing.human_intervened
-        # The round NUMBER after the highest one closed, never a count: the origin is round 0.
-        return resolved, max(store.standing_rounds(hop, moment=None).rounds, default=0) + 1
-    return resolved, 1
+
+
+def _next_round(session: Session) -> int:
+    """The round NUMBER after the highest one closed, never a count: the origin is round 0."""
+    last = session.store.campaigns.standing_rounds(session.hop, moment=None).last_closed
+    return 1 if last is None else last + 1
 
 
 def populate_session_scoring(
@@ -337,85 +335,6 @@ async def _emit_preflight_and_init_session(
         await session.backend_client.init_session(session.index_terms)
 
 
-def _build_and_start_cycle(
-    origin: CampaignOrigin,
-    session: Session,
-    config: CampaignConfig,
-    cycle_id: str | None,
-    resume_from_round_override: int | None,
-) -> tuple[Cycle, str | None, int]:
-
-    cycle = Cycle.start(
-        origin.origin,
-        framing=origin.framing,
-        session=session,
-        config=config,
-    )
-    resolved_cycle_id, resumed_from_round = init_cycle(
-        session, cycle_id, resume_from_round_override=resume_from_round_override
-    )
-    return cycle, resolved_cycle_id, resumed_from_round
-
-
-async def _apply_resume_fork(
-    session: Session,
-    cycle: Cycle,
-    resolved_cycle_id: str | None,
-    resumed_from_round: int,
-    dataset: list[Sample],
-    *,
-    no_divergence_check: bool,
-    fork_on_divergence: bool,
-) -> tuple[str | None, int]:
-
-    # =1 is fresh (origin only); real resumes are >=2 (>=1 L1 round on disk).
-    if resumed_from_round > 1 and resolved_cycle_id:
-        fork_result = await resume_with_divergence_check(
-            session.store.campaigns,
-            CycleHop(campaign_id=session.campaign_id, cycle_id=resolved_cycle_id),
-            resumed_from_round,
-            session,
-            cycle,
-            dataset,
-            skip_divergence_check=no_divergence_check,
-            fork_on_divergence=fork_on_divergence,
-        )
-        if fork_result is not None:
-            resolved_cycle_id = fork_result.new_cycle_id
-            resumed_from_round = fork_result.new_resumed_from_round
-    return resolved_cycle_id, resumed_from_round
-
-
-def _finalize_loop_state(
-    cycle: Cycle,
-    session: Session,
-    cb: RunCallbacks,
-    *,
-    resumed_from_round: int,
-) -> None:
-
-    cycle.sample_index = SampleIndex.ensure_for(
-        session.store,
-        scorer=session.state.scoring.require_scorer(),
-        bank=session.bank,
-        sample_ids=session.state.scoring.require_partition().admitted_ids,
-    )
-
-    # Idempotent — runner/entry.py may have pre-opened the ledger.
-    if session.cycle_id and session.state.ledger is None:
-        session.state.ledger = CycleEventLog.open(
-            CycleDir(session.store.campaigns.cycle_dir(session.hop))
-        )
-    session.state.resumed_from_round = resumed_from_round
-
-    # A RUNNING cycle's `log.md` reads its formula off this bracket (`scorer_cell_formula`).
-    cb.on_phase(
-        CampaignPhase.INIT,
-        "exit",
-        view=init_exit(cb.view_context, cycle=cycle, session=session),
-    )
-
-
 async def init_optimization_loop(
     origin: CampaignOrigin,
     dataset: list[Sample],
@@ -424,39 +343,56 @@ async def init_optimization_loop(
     cb: RunCallbacks,
     no_divergence_check: bool,
     fork_on_divergence: bool,
-    cycle_id: str | None,
     resume_from_round_override: int | None,
     session: Session,
 ) -> tuple[Cycle, CycleHop | None]:
-    """The cycle holds the session it runs on, and beside it the cycle a divergence forked it from."""
+    """The cycle holds the session it runs on, and beside it the cycle a divergence forked it from.
+
+    INIT stays open: its caller moves onto a fork first, then closes it (`finalize_loop_state`).
+    """
+    init_cycle(session, resume_from_round_override=resume_from_round_override)
     await _emit_preflight_and_init_session(config, dataset, cb, session, origin)
-
-    cycle, resolved_cycle_id, resumed_from_round = _build_and_start_cycle(
-        origin,
-        session,
-        config,
-        cycle_id,
-        resume_from_round_override,
-    )
-
-    resolved_cycle_id, resumed_from_round = await _apply_resume_fork(
-        session,
-        cycle,
-        resolved_cycle_id,
-        resumed_from_round,
-        dataset,
-        no_divergence_check=no_divergence_check,
-        fork_on_divergence=fork_on_divergence,
-    )
+    if resume_from_round_override is not None:
+        # Only an admitted launch retracts rounds: a refused arm or preflight raised above.
+        session.store.campaigns.rewind_to_round(session.hop, resume_from_round_override)
+    cycle = Cycle.start(origin.origin, framing=origin.framing, session=session, config=config)
     forked_from: CycleHop | None = None
-    if resolved_cycle_id and resolved_cycle_id != session.cycle_id:
-        forked_from = session.hop
-        session = session.bound(
-            CycleHop(campaign_id=session.campaign_id, cycle_id=resolved_cycle_id),
-            purpose=session.purpose,
+    # =1 is fresh (origin only); real resumes are >=2 (>=1 L1 round on disk).
+    if session.state.resumed_from_round > 1:
+        fork = await resume_with_divergence_check(
+            session.store.campaigns,
+            session.hop,
+            session.state.resumed_from_round,
+            session,
+            cycle,
+            dataset,
+            skip_divergence_check=no_divergence_check,
+            fork_on_divergence=fork_on_divergence,
         )
-        cycle.session = session
-    _finalize_loop_state(cycle, session, cb, resumed_from_round=resumed_from_round)
+        if fork is not None:
+            forked_from = session.hop
+            cycle.session = session.bound(
+                CycleHop(campaign_id=session.campaign_id, cycle_id=fork), purpose=session.purpose
+            )
+            # Off the fork's own chain: one cut at round 0 closes the origin again, then runs round 1.
+            cycle.session.state.resumed_from_round = _next_round(cycle.session)
+    return cycle, forked_from
+
+
+def finalize_loop_state(cycle: Cycle, cb: RunCallbacks) -> None:
+    """*cb* is the cycle's own: INIT exits on the cycle the loop runs, a fork's included."""
+    session = cycle.session
+    cycle.sample_index = SampleIndex.ensure_for(
+        session.store,
+        scorer=session.state.scoring.require_scorer(),
+        bank=session.bank,
+        sample_ids=session.state.scoring.require_partition().admitted_ids,
+    )
+    # A RUNNING cycle's `log.md` reads its formula off this bracket (`scorer_cell_formula`).
+    cb.on_phase(
+        CampaignPhase.INIT,
+        "exit",
+        view=init_exit(cb.view_context, cycle=cycle, session=session),
+    )
     # The cycle id is FINAL only here; the spawn context was published before a fork could move it.
     retarget_inner_spawn(session)
-    return cycle, forked_from

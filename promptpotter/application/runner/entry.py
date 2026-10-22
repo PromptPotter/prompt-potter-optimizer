@@ -9,6 +9,7 @@ from promptpotter.application.bench.resume_and_fork.fork_siblings import mint_fo
 from promptpotter.application.campaign_config import CampaignConfig, apply_config_overrides
 from promptpotter.application.initialization.loop_start import (
     cycle_partition,
+    finalize_loop_state,
     init_optimization_loop,
     scope_memory,
 )
@@ -58,7 +59,6 @@ from promptpotter.infrastructure.llm.spend_book import SpendBook
 from promptpotter.infrastructure.llm.telemetry import at_round, bind_priced
 from promptpotter.infrastructure.producer_lock import release_cycle
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_priced_keys
-from promptpotter.infrastructure.store.session_pointer import cleanup_stub_fork_if_empty
 from promptpotter.shared.errors import PayloadInvalidError
 
 logger = logging.getLogger(__name__)
@@ -72,7 +72,6 @@ class _CycleOutcome:
     cycle_result: CycleResult
     # The rebase the line continues onto; ``None`` where the line ends on this cycle.
     fork: RebaseRequest | None
-    forked_from: CycleHop | None
     observers: RunObservers
     # Re-raised at the launch's exit, past its clock: it must reach the canceller.
     cancelled: asyncio.CancelledError | None
@@ -107,14 +106,19 @@ async def _run_single_cycle(
             cb=cb,
             no_divergence_check=mode.no_divergence_check,
             fork_on_divergence=mode.fork_on_divergence,
-            cycle_id=session.cycle_id or None,
             resume_from_round_override=mode.from_round,
             session=session,
         )
-        session = cycle.session
         if forked_from is not None:
-            observers = _onto_fork(session, forked_from, observers, campaign_config=campaign_config)
+            # On the parent's own ledger, as a rebase's close ends it, before its readout names the fork.
+            declare_run_stop(session, observers, StopReason.REBASED, interrupted_by=pause_cause)
+            observers.drain_all()
+            observers = _onto_fork(
+                cycle.session, forked_from, observers, campaign_config=campaign_config
+            )
             cb = observers.callbacks
+        session = cycle.session
+        finalize_loop_state(cycle, cb)
 
         book = session.state.control.book
         if (
@@ -190,7 +194,6 @@ async def _run_single_cycle(
         fork is not None
         and cancel_exc is None
         and stop_reason == StopReason.REBASED
-        and bool(session.cycle_id)
         and rebases < MAX_AUTO_REBASES
     )
     cycle_result = close_cycle(
@@ -209,7 +212,6 @@ async def _run_single_cycle(
         session=session,
         cycle_result=cycle_result,
         fork=fork if rebasing else None,
-        forked_from=forked_from,
         observers=observers,
         cancelled=cancel_exc,
     )
@@ -262,7 +264,6 @@ def _mint_and_rebase_fork(
     session = session.bound(
         CycleHop(campaign_id=parent.campaign_id, cycle_id=new_cycle_id), purpose=session.purpose
     )
-    session.state.resumed_from_round = rebase_req.fork_from_round
     observers = _onto_fork(
         session,
         parent,
@@ -305,6 +306,8 @@ async def _run_line(
         if outcome.fork is None:
             return outcome
         rebase_count += 1
+        # The operator's `--from` rewound the line's first cycle; a fork stands on its rebase's cut.
+        mode = mode.model_copy(update={"from_round": None})
         prep, session, observers = _mint_and_rebase_fork(
             prep,
             session=outcome.session,
@@ -328,6 +331,8 @@ async def run_optimization(
 
     Answers the session the run ENDED on: a fork run init or a rebase took is a cycle of its own.
     """
+    if not session.cycle_id:
+        raise RuntimeError("run_optimization runs a minted cycle: bind its session first")
     session.state.clock = LaunchClock.now()
     try:
         selected = select_optimizer(campaign_config.optimization)
@@ -378,7 +383,6 @@ async def run_optimization(
                         rebasing=False,
                     ),
                     fork=None,
-                    forked_from=None,
                     observers=observers,
                     cancelled=None,
                 )
@@ -386,6 +390,7 @@ async def run_optimization(
                 # Prep sits outside `_run_single_cycle`'s try: undeclared, it leaves a dead run `running`.
                 declare_run_stop(
                     session,
+                    observers,
                     StopReason.PAUSED,
                     interrupted_by=(
                         PauseCause.CANCELLED
@@ -404,14 +409,10 @@ async def run_optimization(
                     mode=mode,
                     step_rounds=budget.step_rounds,
                 )
-            ended = outcome.session
-            # A cancellation is one of the interrupts that leaves an empty fork dir.
-            if outcome.forked_from is not None and outcome.cycle_result.n_rounds_after_origin == 0:
-                cleanup_stub_fork_if_empty(campaign_store=ended.store.campaigns, hop=ended.hop)
             if outcome.cancelled is not None:
                 # The caught instance, not a fresh class — it carries the reason its raise site named.
                 raise outcome.cancelled
-            return ended, outcome.cycle_result
+            return outcome.session, outcome.cycle_result
     finally:
         # Whatever path exits, a fork included: the lock left the opened cycle when the line moved.
         locked = session.state.locked_cycle

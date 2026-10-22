@@ -48,8 +48,6 @@ class LoopEnd(NamedTuple):
 
 def round_bounds(session: Session, config: CampaignConfig) -> tuple[CampaignConfig, int | None]:
     """The config under the standing budget, and the round a stepped launch pauses at."""
-    if not session.cycle_id:
-        return config, None
     standing = session.store.campaigns.read_standing_budget(session.hop)
     budget = config.optimization.budget.over(standing.budget)
     if budget != config.optimization.budget:

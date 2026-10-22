@@ -758,7 +758,7 @@ class _ScoringPhase[K: Hashable]:
     def honour_stop(self, walk: Walk, now: _TurnState) -> bool:
         if now.skip:
             session = self.session
-            if session.state.control.spend_skip() and session.cycle_id:
+            if session.state.control.spend_skip():
                 # Stamped where a searchpoint is actually cut, never at the press.
                 session.record_intervention("skip")
             logger.info(

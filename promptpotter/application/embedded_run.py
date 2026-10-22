@@ -169,7 +169,7 @@ async def run_campaign(
         campaign = session.store.campaigns.load_campaign(session.campaign_id)
         if campaign is None:
             raise NotFoundError(f"campaign not found: {session.campaign_id}")
-        refuse_drifted_resume(session, campaign, session.hop, session.bank.samples)
+        refuse_drifted_resume(session, campaign, session.bank.samples)
         campaign_config = resolve_campaign_config(session.store, campaign, session.hop)
         session = configure_and_apply_pipeline(session, campaign_config)
     else:

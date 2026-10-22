@@ -139,7 +139,9 @@ async def rederive_critiques(
             with at_round(rr.round), graceful(f"round {rr.round} critique re-derivation failed"):
                 state = rr.closed_state.holding(await distil_critique(seat))
                 restated[slot] = rr.model_copy(update={"optimizer_state": state})
-                campaign_store.restate_optimizer_state(hop, restated[slot])
+                campaign_store.restate_round(
+                    hop, campaign_store.restated_state(hop, restated[slot])
+                )
                 logger.warning(
                     "Round %d critique re-distilled: its input package drifted when the "
                     "round was repaired, so the recorded one described evidence that no "

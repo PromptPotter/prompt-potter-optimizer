@@ -95,7 +95,6 @@ from promptpotter.application.runner.grade_bench import grade_line_bench
 from promptpotter.application.runner.inner import spawn, spawn_context
 from promptpotter.application.runner.inner.tasks import parse_panel
 from promptpotter.application.runner.loop import round_bounds
-from promptpotter.application.runner.measurement import skips_on_record
 from promptpotter.application.runner.termination import run_stop_reason
 from promptpotter.application.scoring import query_loop
 from promptpotter.application.scoring.cell_envelope import CellEnvelope
@@ -141,6 +140,7 @@ from promptpotter.domain.run_records import (
     ForkRemainder,
     ForkSpec,
     ForkTrigger,
+    RoundEnteredRecord,
     RunPhaseRecord,
     SampleScoredRecord,
     SampleStartedRecord,
@@ -206,6 +206,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_priced_keys,
     scan_ledger_spend,
     scan_ledger_spend_by_round,
+    scan_standing_rounds,
 )
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.dataset_access import DEFINITION_FILE, resolve_dataset
@@ -786,6 +787,7 @@ async def _walk(
         "returned": returned,
         "billed": book.usd_metered,
         "max_depth": max(depths) if depths else 0,
+        "ledger": started.path,
     }
 
 
@@ -1079,10 +1081,30 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
                 running=score_summary(walked=n),
             )
             RunCallbacks(skips).on_arm(2, ArmKey(cid), arm_state(cid, cut=cut))
-    assert skips_on_record(skips, 2) == {"a": 3, "c": 4}, "a superseded skip replayed"
+
+    def standing_skips() -> dict[tuple[int, ArmKey], int]:
+        return scan_standing_rounds([LedgerSpan(skips.path)]).skipped
+
+    assert standing_skips() == {(2, "a"): 3, (2, "c"): 4}, "a superseded skip replayed"
+    RunCallbacks(skips).on_round_entered(2)
+    assert standing_skips() == {(2, "a"): 3, (2, "c"): 4}, "a resume re-entering lost a skip"
+    skips.append(RoundEnteredRecord(round=2, rewound=True))
+    assert standing_skips() == {}, "a regenerated round inherited a displaced skip"
     replayed = await _walk(built_stores, dataset, armed=4, max_cells=4, cut_at=None, skip_at=3)
     assert replayed["stop_reason"] == "skip" and len(replayed["rows"]) == 3, "a skip did not hold"
     assert sorted(replayed["calls"]) == [s.id for s in dataset[:3]], "a skipped cell was paid"
+    # A second resume replays the skipped walk: its depth is what the replay records, never zero.
+    again = await _walk(
+        built_stores, dataset, armed=4, max_cells=4, cut_at=None, skip_at=3, resumes=replayed["sp"]
+    )
+    depth = [
+        r.running.walked
+        for _, r in CycleEventLog(again["ledger"]).iter()
+        if isinstance(r, SampleScoredRecord) and r.running is not None
+    ]
+    assert not again["calls"] and depth[-1:] == [3], (
+        "a replayed skip recorded no depth, so the next resume skips at zero cells"
+    )
 
     # A cell's envelope cancels the inner campaign it spawned, so nothing spends past it.
     monkeypatch.setattr(heartbeat, "HEARTBEAT_INTERVAL_S", 0.01)

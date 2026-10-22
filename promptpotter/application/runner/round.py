@@ -31,7 +31,6 @@ from promptpotter.application.runner.overlap import measure_overlap
 from promptpotter.application.runner.termination import panel_gate_tripped, standing_tripped
 from promptpotter.application.views.ingress import propose_enter, propose_exit, select_exit
 from promptpotter.application.views.render.primitives import overlap_series
-from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.optimizer_state import RoundOutput
 from promptpotter.domain.paired_reading import READING_STATE_INFO, ArmKey, ReadingState
 from promptpotter.domain.phase_views import MeasureEnterView
@@ -75,6 +74,7 @@ if TYPE_CHECKING:
     )
     from promptpotter.domain.results import DisplayMetric
     from promptpotter.domain.sample import Sample
+    from promptpotter.infrastructure.ledger import CycleEventLog
 
 logger = logging.getLogger(__name__)
 
@@ -381,7 +381,7 @@ def bank_walk(ctx: RoundContext, proposals: list[Proposal]) -> None:
     """Once per round: a resume re-walking a banked round reads its record and writes no second."""
     session = ctx.cycle.session
     # An EMPTY bank replays as zero arms on every resume: a permanent failure to propose.
-    if not session.cycle_id or not proposals:
+    if not proposals:
         return
     if session.store.campaigns.round_proposals(session.hop, ctx.round_num) is None:
         bank_proposals(ctx, proposals, submitted=False)
@@ -507,16 +507,11 @@ async def emit_origin_round(cycle: Cycle, session: Session, cb: RunCallbacks) ->
     await close_round(cycle, round_result, 0, session, cb)
 
 
-def flush_pending_decisions(cycle: Cycle, session: Session) -> int:
+def flush_pending_decisions(cycle: Cycle, ledger: CycleEventLog) -> None:
     """The controller acts after its round persisted; unflushed at a stop, a resume re-spends the act."""
-    if not cycle.pending_decisions or (ledger := session.state.ledger) is None:
-        return 0
-    pending = list(cycle.pending_decisions)
-    cycle.pending_decisions.clear()
-    with graceful("Decision flush failed"):
-        for d in pending:
-            ledger.append(d)
-    return len(pending)
+    while cycle.pending_decisions:
+        ledger.append(cycle.pending_decisions[0])
+        cycle.pending_decisions.pop(0)
 
 
 async def close_round(
@@ -529,9 +524,7 @@ async def close_round(
     stood = round_result.model_copy(update={"optimizer_state": cycle.close_state(round_num)})
     facts = cycle.optimizer.runtime.round_facts(cycle.optimizer, stood)
     closing = cycle.seat(stood.model_copy(update={"optimizer_facts": facts}))
-    for d in cycle.pending_decisions:
-        cb.ledger.append(d)
-    cycle.pending_decisions.clear()
+    flush_pending_decisions(cycle, cb.ledger)
     offset, standing = cb.on_round_close(
         closing,
         cycle.rounds,
@@ -540,15 +533,14 @@ async def close_round(
         lives=cycle.config.optimization.lives,
     )
     round_result = cycle.seat(closing.model_copy(update={"at_offset": offset}))
-    if session.cycle_id:
-        write_hard_samples_artifacts(session, cycle)
-        write_log_md(session, cycle.config)
-        write_review_md(
-            session,
-            accuracy_ceiling=cycle.config.accuracy_ceiling,
-            optimizer=cycle.optimizer,
-            framing=cycle.framing,
-        )
+    write_hard_samples_artifacts(session, cycle)
+    write_log_md(session, cycle.config)
+    write_review_md(
+        session,
+        accuracy_ceiling=cycle.config.accuracy_ceiling,
+        optimizer=cycle.optimizer,
+        framing=cycle.framing,
+    )
     if _rr := session.state.audit_projection:
         _rr.flush()
     if cycle.sample_index is not None:
@@ -585,7 +577,7 @@ async def post_round(
     fold, election = round_result.fold, round_result.election
     await verify_on_saturation(
         stores=session.store,
-        hop=CycleHop(campaign_id=session.campaign_id, cycle_id=session.cycle_id),
+        hop=session.hop,
         round_num=round_num,
         accuracy=None if fold is None else fold.accuracy,
         winner_id=None if election is None else election.selected,

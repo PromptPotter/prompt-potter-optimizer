@@ -139,7 +139,6 @@ async def _commit_checkin(stores: Stores, draft_id: str) -> MintedCycle:
         declare(session, campaign_config, purpose=Optimize()),
         session.bank.samples,
         origin_override=origin_override,
-        hop=None,
     )
     ledger = stores.drafts.ledger(draft.draft_id)
     minted = mint(
