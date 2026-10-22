@@ -29,8 +29,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.domain.validators import StopSignal
 
-__all__ = ["CatchUpPool", "PoBBRace"]
-
 
 def _reason(ctx: EliminationContext, unit: MeasuredUnit, labels: Mapping[ArmKey, str]) -> str:
     q = f"q{ctx['queries_scored']}/{ctx['total_queries']}"

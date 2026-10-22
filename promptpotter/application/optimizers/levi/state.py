@@ -7,15 +7,6 @@ from pydantic import Field
 from promptpotter.domain.optimizer_state import StateSlice
 from promptpotter.domain.strict_model import StrictModel
 
-__all__ = [
-    "LEVI_MANIFEST",
-    "DescriptorCalibration",
-    "DescriptorStats",
-    "EliteArchive",
-    "LeviCalibration",
-    "LeviElite",
-]
-
 LeviManifest = Literal["levi"]
 LEVI_MANIFEST: LeviManifest = "levi"
 

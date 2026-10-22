@@ -15,8 +15,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.scoring import GradedCell
 
-__all__ = ["paradigm_shift_prompt", "refine_prompt"]
-
 
 def _prompt(ctx: NodeContext[Any], individual: OptSearchPoint) -> str:
     return f"--- PROMPT START ---\n{shown(ctx, individual, ctx.prompt_node)}\n--- PROMPT END ---"

@@ -143,7 +143,8 @@ return REAL models — `round_result`, `cycle_result`, `arm_state`, plus `measur
 `measurements`, the one
 graded cell (`GradedCell`; `.facts` is the `MeasuredCell` a scorer takes, and `sheet()` holds them as given). Domain models
 and the few application models the dispatch seam needs, plus the real objects more than one
-file builds: `spend_book`, `inner_sandbox`, `workspace` and `loop_session`.
+file builds: `spend_book`, `inner_sandbox`, `workspace`, `loop_session`, `seat` (a round of a real
+`Cycle`), and the records the runner appends (`arm_walk`, `close_round`).
 
 Each builder takes only the fields a test bends. **Add a parameter when a test needs to bend one;
 never add a builder for a shape an existing one can express** — local copies of a row drift apart,

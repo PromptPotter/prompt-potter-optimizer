@@ -242,6 +242,3 @@ def write_longseal_panel(
         )
     _write(out_dir / MATERIALIZED_PANEL_FILE, _panel_yaml(tasks, provenance))
     return len(tasks)
-
-
-__all__ = ["write_longseal_panel"]

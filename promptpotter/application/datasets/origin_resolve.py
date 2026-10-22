@@ -246,6 +246,3 @@ def _coerce(field_key: str, proposed: str, draft: DraftCampaign) -> Any | None:
     if field_key in ("column.query", "column.ground_truth"):
         return proposed if proposed in draft.headers else None
     return proposed
-
-
-__all__ = ["resolve_origin_turn"]

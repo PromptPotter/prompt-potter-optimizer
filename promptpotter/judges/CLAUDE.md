@@ -47,7 +47,7 @@ last, so the formula scores the judge under a name promising something else).
 **Nothing that sets the loop's LLMs may reach a judge.** A node's permitted model set,
 `nodes.{node}.config.model`, the optimizer's own `assets/optimizers/potter/pipeline.yaml`, and any global
 "set every model" steer are all not consulted. A judge's models are declared in
-`dataset.yaml::campaign.judges.{term}.stages` and inherited from nowhere — not from the
+`dataset.yaml` `campaign.judges.{term}.stages` and inherited from nowhere — not from the
 loop, and not from a sibling term either; absent means absent, and never a borrow.
 
 Three things enforce it rather than describe it: `JudgeStage.model`/`provider` are **required**
@@ -97,7 +97,7 @@ before authoring a rubric: it costs nothing per cell and cannot saturate the way
 **The schema is a semantic decision, and it is fixed BEFORE a cell is bought.** Per-step δ pools only if "step 2" is the same KIND of thing across cells, so a
 turn *index* is not an item and an agentic episode takes however many turns it takes. Retrofitting
 a schema means re-paying for every row — the fingerprint folds the whole term → judge mapping
-(`pipeline_resolve.py::_identity_contributions`), so re-keying a grader is a new measurement, by
+(`application/pipeline_resolve.py::_identity_contributions`), so re-keying a grader is a new measurement, by
 construction. Declaration order is the step order; a later testlet or partial-credit fit reads
 the banked terms, not a re-measure
 ([`../../docs/methods/verdict-resolution.md`](../../docs/methods/verdict-resolution.md) § Phase 3).
@@ -141,7 +141,7 @@ recorded.
 ## Identity — a judge that changed must re-cut the key
 
 `Judge.fingerprint(spec)` hashes the judge name, its declared `version`, **its rubric text**, and
-the whole stage chain. `pipeline_resolve.py::_identity_contributions` folds the whole term → judge
+the whole stage chain. `application/pipeline_resolve.py::_identity_contributions` folds the whole term → judge
 mapping into ONE `node_configs` entry under `JUDGE_INSTRUMENT_KEY`, so `sp_hash` moves — an archive
 row is keyed on config, and a judge swapped silently would have every prior verdict replayed under
 the new grader. **The TERM is inside that hash**: re-keying a grader banks a different set of
@@ -152,7 +152,7 @@ measured the same thing.
 **Hash the rubric, never trust a hand-bumped version** — an author who edits a rubric and forgets
 to bump `version` still moves the fingerprint.
 
-**The scorer id folds the same digest** (`judge_instrument`, into `compiler.py::auto_scorer_id`):
+**The scorer id folds the same digest** (`judge_instrument`, into `application/scoring/formula/compiler.py::auto_scorer_id`):
 a formula reads the terms a judge banked, so one formula over two graders is two grading
 functions, and a ruler or a head-to-head keyed on the id would pool them.
 

@@ -154,6 +154,3 @@ CONNECTOR = Connector(
     prompt_fields_as_node_params=True,
     identity_config=_identity_config,
 )
-
-
-__all__ = ["CONNECTOR", "measurement_modules"]

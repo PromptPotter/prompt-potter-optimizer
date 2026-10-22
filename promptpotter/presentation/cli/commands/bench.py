@@ -15,8 +15,6 @@ from promptpotter.presentation.cli.commands.workspace import (
 
 logger = logging.getLogger("promptpotter.presentation.cli.bench")
 
-__all__ = ["cmd_bench"]
-
 
 async def cmd_bench(args: argparse.Namespace) -> CommandResult:
     store = open_stores(args)

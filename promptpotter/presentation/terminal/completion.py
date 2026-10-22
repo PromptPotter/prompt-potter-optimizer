@@ -12,8 +12,6 @@ if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
     from promptpotter.domain.results import CycleResult
 
-__all__ = ["render_completion_html", "report_completion"]
-
 
 def render_completion_html(result: CycleResult) -> str:
     if not result.result_prompt_fields:

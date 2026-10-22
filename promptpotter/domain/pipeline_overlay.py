@@ -26,21 +26,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = [
-    "RESERVED_PIPELINE_PARAM_KEYS",
-    "apply_node_overlay",
-    "fold_output_contract",
-    "merge_pipeline_params",
-    "node_config_items",
-    "normalize_model_id",
-    "overlay_is_locked_axis_only",
-    "overlay_sets_model_outside_allowed",
-    "permitted_models_from_narrowing",
-    "pin_default_routes",
-    "pinned_route",
-    "steers_disallowed_model",
-]
-
 
 # The `pipeline_params` keys that are NOT node-config dicts: `steps` is the wire scaffold.
 RESERVED_PIPELINE_PARAM_KEYS: Annotated[frozenset[str], shapes_optimizer_prompt] = frozenset(

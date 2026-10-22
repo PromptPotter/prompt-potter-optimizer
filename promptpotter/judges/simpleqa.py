@@ -11,8 +11,6 @@ from promptpotter.judges.protocol import Judge, JudgeSpec, JudgeVerdict
 if TYPE_CHECKING:
     from promptpotter.domain.scoring import MeasuredCell
 
-__all__ = ["SEALQA", "SIMPLEQA"]
-
 
 # Verbatim `openai/simple-evals/simpleqa_eval.py::GRADER_TEMPLATE`, quirks included: never fix it.
 _SIMPLEQA_RUBRIC = """

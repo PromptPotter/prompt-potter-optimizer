@@ -16,8 +16,6 @@ if TYPE_CHECKING:
     )
     from promptpotter.domain.campaign import Campaign
 
-__all__ = ["cleanup_empty_cycles", "delete_cycle"]
-
 
 def delete_cycle(
     dispatcher: CommandDispatcher, payload: DeleteCyclePayload, campaign: Campaign, hop: CycleHop

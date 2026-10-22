@@ -9,8 +9,6 @@ from typing import Any
 from promptpotter.domain.ruler import RulerFold, RulerRow, RulerScope
 from promptpotter.infrastructure.store.read_model import LineIndex, append_row
 
-__all__ = ["RulerStore"]
-
 
 class _Folds:
     def __init__(self) -> None:

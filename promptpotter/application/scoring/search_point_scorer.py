@@ -41,16 +41,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = [
-    "SCORING_ERROR_ABORT",
-    "ScoredWalk",
-    "close_walk",
-    "open_walk",
-    "replayable_on",
-    "reread_cells",
-    "score_search_point",
-]
-
 
 @dataclass(frozen=True)
 class ScoredWalk:

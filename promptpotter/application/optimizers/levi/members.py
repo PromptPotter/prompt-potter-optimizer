@@ -61,17 +61,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import CellSheet
 
-__all__ = [
-    "MEMBERS",
-    "RUNTIME",
-    "LeviCheckpointKind",
-    "LeviParadigmShiftKnobs",
-    "LeviRefineKnobs",
-    "MapElitesKnobs",
-    "ProxyCssKnobs",
-    "choose_proxy",
-]
-
 
 class LeviCheckpointKind(CheckpointKind):
     PROXY_SELECTED = "proxy_selected"

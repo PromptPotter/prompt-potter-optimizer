@@ -596,28 +596,3 @@ def split_scoring_block(
             block, None, auto_scorer_id(block, None, judge_instrument=judge_instrument)
         )
     return ScoringSpec(None, None, DEFAULT_SCORER_ID)
-
-
-__all__ = [
-    "CELL_CHANNELS",
-    "CELL_TERMS",
-    "DIALS_KEY",
-    "SAFE_BUILTINS",
-    "CellTerm",
-    "CompiledExpression",
-    "ScoringFormulaError",
-    "ScoringTermMissingError",
-    "auto_scorer_id",
-    "cell_channels_of",
-    "cell_namespace",
-    "clamp_unit_score",
-    "compile_expression",
-    "compile_scorer",
-    "objective_namespace",
-    "origin_anchors",
-    "parse_dials",
-    "realize_dials",
-    "spell_dials",
-    "split_scoring_block",
-    "validate_ast",
-]

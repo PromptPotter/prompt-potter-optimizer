@@ -6,8 +6,6 @@ from promptpotter.application.cycle_listing import list_cycles, resolve_campaign
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.workspace import open_stores
 
-__all__ = ["cmd_cycles"]
-
 
 async def cmd_cycles(args: argparse.Namespace) -> CommandResult:
     stores = open_stores(args)

@@ -474,17 +474,3 @@ async def _mint_after_framing(
 def relabel_minted(session: Session) -> None:
     """The one label move; an L4 inner cell mints through ``mint``, so it moves none."""
     session.store.tenant_datasets.relabel(session.measured_dataset, session.bank.dataset_hash)
-
-
-__all__ = [
-    "ConfigDriftError",
-    "CyclePlan",
-    "declare",
-    "fresh_campaign_id",
-    "mint",
-    "mint_framed_cycle",
-    "refuse_drifted_resume",
-    "refuse_unrunnable",
-    "relabel_minted",
-    "resolve_cycle_plan",
-]

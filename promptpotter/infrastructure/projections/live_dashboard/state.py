@@ -20,17 +20,6 @@ from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.clock import utcnow_iso
 
-__all__ = [
-    "BackendWarning",
-    "BenchPassProgress",
-    "CatchUpLogEntry",
-    "CurrentRound",
-    "DashboardError",
-    "DashboardFacts",
-    "LiveDashboardState",
-    "RacingBlock",
-]
-
 
 class CatchUpLogEntry(StrictModel):
     """One race catch-up: the priors eliminator ``member`` re-measured on one sample."""

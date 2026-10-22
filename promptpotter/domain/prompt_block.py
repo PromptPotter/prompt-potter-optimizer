@@ -6,8 +6,6 @@ from typing import Literal
 
 from promptpotter.domain.strict_model import FrozenModel
 
-__all__ = ["PromptBlock"]
-
 
 class PromptBlock(FrozenModel):
     id: str

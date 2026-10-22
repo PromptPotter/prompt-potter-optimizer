@@ -20,7 +20,7 @@ The orchestration shape is [`../../CLAUDE.md`](../../CLAUDE.md), `Cycle` and the
 
 ## Origin = conservative floor
 
-**Start every tunable in the dataset's per-node overlay (`dataset.yaml::pipeline.nodes.{name}.config`) at its FLOOR, not its centre** — low `temperature`, minimal `thinking_budget`, no expensive system-prompt scaffolding. **`reasoning_effort`'s floor is the MODEL's, so the overlay never spells one**: a declared axis no layer sets resolves to the lowest rung the running model accepts (`pipeline_resolve.py::_apply_model_floors`), where a spelled rung would follow no model a campaign swaps in. L1 expands upward when stall or axis-memory evidence supports it; an expanded start burns round-0 budget and steals the headroom L1 exists to discover. Per-dataset starting points: [`../../../../docs/operations/dataset-reasoning-matrix.md`](../../../../docs/operations/dataset-reasoning-matrix.md).
+**Start every tunable in the dataset's per-node overlay (`dataset.yaml` `pipeline.nodes.{name}.config`) at its FLOOR, not its centre** — low `temperature`, minimal `thinking_budget`, no expensive system-prompt scaffolding. **`reasoning_effort`'s floor is the MODEL's, so the overlay never spells one**: a declared axis no layer sets resolves to the lowest rung the running model accepts (`pipeline_resolve.py::_apply_model_floors`), where a spelled rung would follow no model a campaign swaps in. L1 expands upward when stall or axis-memory evidence supports it; an expanded start burns round-0 budget and steals the headroom L1 exists to discover. Per-dataset starting points: [`../../../../docs/operations/dataset-reasoning-matrix.md`](../../../../docs/operations/dataset-reasoning-matrix.md).
 
 ## Cycle stop conditions
 

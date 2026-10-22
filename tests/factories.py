@@ -4,21 +4,25 @@ import asyncio
 import functools
 import selectors
 import time
-from collections.abc import Callable, Coroutine, Iterable, Sequence
+from collections.abc import Callable, Coroutine, Iterable, Mapping, Sequence
+from itertools import count
 from pathlib import Path
 from types import EllipsisType
 from typing import Any, cast
 
 from offline_world import FakeBackend
 
+from promptpotter.application.bench.cycle import Cycle
+from promptpotter.application.bench.difficulty import DifficultyView
 from promptpotter.application.campaign_config import (
     CampaignConfig,
     OptimizationConfig,
     declare_run,
 )
-from promptpotter.application.initialization.session import Session
+from promptpotter.application.initialization.session import CycleSnapshot, ScorerSetup, Session
 from promptpotter.application.knobs import bench_defaults_pin
 from promptpotter.application.optimizer_manifest import resolve_optimizer, select_optimizer
+from promptpotter.application.optimizers.nodes import ReadArm, RoundContext, SliceMap
 from promptpotter.application.optimizers.potter.knobs import PoBBKnobs
 from promptpotter.application.optimizers.potter.records import (
     POTTER_MANIFEST,
@@ -27,21 +31,26 @@ from promptpotter.application.optimizers.potter.records import (
     L3Memory,
     Ladder,
 )
+from promptpotter.application.run_callbacks import RunCallbacks
+from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.inner.tasks import (
     InnerCell,
     InnerCells,
     InnerTaskSpec,
 )
+from promptpotter.application.scoring.formula.compiler import compile_scorer
 from promptpotter.connectors.protocol import PROBE_WORKLOAD, Connector, cell_envelope_of
 from promptpotter.connectors.termnorm import termnorm_wire_adapter
 from promptpotter.domain.bench import (
     BENCH_HEADLINE,
     BandedValue,
+    BankPartition,
     BenchScore,
     LiftCost,
     LineRun,
     OwnLevel,
     bench_status,
+    partition_bank,
 )
 from promptpotter.domain.campaign import Campaign, Optimize, Purpose
 from promptpotter.domain.cells import Seat
@@ -49,12 +58,12 @@ from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
 from promptpotter.domain.optimizer_state import Critique, OptimizerState
-from promptpotter.domain.paired_reading import PairedReading, ReadingState
+from promptpotter.domain.paired_reading import ArmKey, PairedReading, ReadingState
 from promptpotter.domain.phases import RunPhase, StopReason
-from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
+from promptpotter.domain.pipeline_schema import NodePromptInfo, PipelineNode, PipelineSchema
 from promptpotter.domain.pool import BlockPool, DemoPool
 from promptpotter.domain.results import (
-    ArmKey,
+    ArmRole,
     ArmSlot,
     ArmState,
     Broken,
@@ -68,7 +77,9 @@ from promptpotter.domain.results import (
     Invalid,
     Measured,
     OverlapReading,
+    Proposed,
     RoundResult,
+    RunStanding,
     ScoreSummary,
     Skipped,
     arm_end,
@@ -81,16 +92,18 @@ from promptpotter.domain.ruler import (
     ThetaCaveat,
     flat_ruler_id,
 )
-from promptpotter.domain.run_records import RunPhaseRecord
+from promptpotter.domain.run_records import RunPhaseRecord, SampleScoredRecord
 from promptpotter.domain.sample import Bank, Sample
-from promptpotter.domain.scoring import CellSheet, GradedCell
-from promptpotter.domain.spend import Budget, SpendBucket, SpendRollup
+from promptpotter.domain.scoring import CellSheet, GradedCell, Scorer, WalkedCell
+from promptpotter.domain.spend import Budget, CeilingMeter, SpendBucket, SpendRollup
 from promptpotter.domain.wounds import NurseOwner, RuntimeFailure, ValidationFailure
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.llm.spend_book import CeilingMeter, Hold, SpendBook
+from promptpotter.infrastructure.llm.spend_book import Hold, SpendBook
+from promptpotter.infrastructure.llm.telemetry import at_round
 from promptpotter.infrastructure.producer_lock import hold_cycle
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
+from promptpotter.infrastructure.store.dataset_access import ResolvedDataset
 from promptpotter.infrastructure.store.io import write_json
 from promptpotter.infrastructure.store.layout import inner_sandbox_dir, sandbox_owner_path
 from promptpotter.infrastructure.store.stores import Stores, build_stores
@@ -297,20 +310,110 @@ def workspace(root: Path) -> Stores:
 
 
 def loop_session(
-    stores: Stores, schema: PipelineSchema, samples: list[Sample], *, backend_id: str = ""
+    stores: Stores,
+    schema: PipelineSchema,
+    samples: Sequence[Sample],
+    *,
+    backend_id: str = "",
+    client: BackendClient | None = None,
+    scorer: Scorer | None = None,
+    partition: BankPartition | None = None,
+    control: RunControl | None = None,
+    hop: CycleHop | None = None,
+    ledger: CycleEventLog | None = None,
+    dataset: ResolvedDataset | None = None,
+    dataset_name: str | None = None,
 ) -> Session:
-    session = Session(
+    return Session(
         store=stores,
         backend_id=backend_id,
         backend_client=backend_client(
             max_cells_in_flight=1, cancel_stops_billing=True, holds_own_sends=True
-        ),
+        )
+        if client is None
+        else client,
         pipeline_schema=schema,
         bank=Bank.of(samples),
-        dataset_name=schema.name,
+        dataset_name=schema.name if dataset_name is None else dataset_name,
+        dataset=dataset,
+        campaign_id="" if hop is None else hop.campaign_id,
+        state=CycleSnapshot(cycle_id="" if hop is None else hop.cycle_id, ledger=ledger),
+        scoring=ScorerSetup(scorer=scorer, partition=partition),
+        source=RunSource.OPTIMIZATION_LOOP,
+        control=RunControl() if control is None else control,
     )
-    session.source = RunSource.OPTIMIZATION_LOOP
-    return session
+
+
+_SEAT_BANK = (Sample(id=0, query="q0", ground_truth="a"),)
+_SEATS = count()
+
+
+def seat(
+    stores: Stores,
+    *,
+    round_num: int = 1,
+    schema: PipelineSchema | None = None,
+    bank: Sequence[Sample] = _SEAT_BANK,
+    bench: int = 0,
+    demo: int = 0,
+    scorer: Scorer | None = None,
+    optimization: dict[str, Any] | None = None,
+    dataset_name: str = "seat",
+    backend_id: str = "",
+    control: RunControl | None = None,
+    hop: CycleHop | None = None,
+    origin: Callable[[Session], ReadArm] | None = None,
+    **cycle: Any,
+) -> RoundContext:
+    """Round *round_num* of a cycle started from *origin*'s reading of its session, else of one
+    whose origin was never measured; *cycle* bends its fields. Its one ledger is *hop*'s cycle's,
+    else a dir of its own."""
+    schema = schema or pipeline_schema(
+        [PipelineNode(name="solve", tunes_llm=False, prompt_info=NodePromptInfo())]
+    )
+    config = CampaignConfig.model_validate(
+        {
+            "optimization": {"degradation_threshold": 0.0, **(optimization or {})},
+            "dataset_split": {"bench": bench, "demo": demo},
+        }
+    )
+    ledger = CycleEventLog.open(
+        CycleDir(
+            stores.projects_root / "seats" / str(next(_SEATS))
+            if hop is None
+            else stores.campaigns.cycle_dir(hop)
+        )
+    )
+    session = loop_session(
+        stores,
+        schema,
+        bank,
+        backend_id=backend_id,
+        scorer=scorer
+        or compile_scorer("label_match(predicted, ground_truth)", verifier_graded=False),
+        partition=partition_bank(list(bank), config.dataset_split, seed=config.run_seed),
+        control=control,
+        hop=hop,
+        ledger=ledger,
+        dataset_name=dataset_name,
+    )
+    if origin is None:
+        seated = Cycle(
+            session=session,
+            config=config,
+            slices=SliceMap(select_optimizer(config.optimization).slices),
+            difficulty=DifficultyView.open(session, config, origin="origin"),
+            **cycle,
+        )
+    else:
+        seated = Cycle.start(
+            origin(session), schema=schema, session=session, config=config, **cycle
+        )
+    return RoundContext(seated, round_num, callbacks=RunCallbacks(ledger))
+
+
+def set_line(cycle: Cycle, line: Sequence[RoundResult]) -> None:
+    cycle.rounds = list(line)
 
 
 def minted_campaign(
@@ -350,6 +453,59 @@ def walking_cycle(stores: Stores) -> tuple[CycleHop, Path]:
     CycleEventLog.open(CycleDir(cycle_dir)).append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
     hold_cycle(cycle_dir)
     return hop, cycle_dir
+
+
+def arm_walk(
+    ledger: CycleEventLog,
+    cells: Iterable[tuple[int, WalkedCell]],
+    *,
+    rnd: int = 0,
+    individual: str = "c0",
+    role: ArmRole = MeasurementRole.ORIGIN,
+    running: ScoreSummary | None = None,
+) -> list[SampleScoredRecord]:
+    """*individual* announced as an arm of round *rnd*, then each filed cell scored at its slot."""
+    announced = Proposed(role=role, slot=ArmSlot(round=rnd, idx=0, total=1), individual=prompted())
+    RunCallbacks(ledger).on_arm(rnd, ArmKey(individual), announced)
+    rows = [
+        SampleScoredRecord(
+            round=rnd,
+            individual_id=individual,
+            role=role,
+            position=slot,
+            result=GradedCell.from_wire({"sample_key": key, "answer": answer}),
+            running=running,
+        )
+        for slot, (key, answer, _) in cells
+    ]
+    for row in rows:
+        ledger.append(row)
+    return rows
+
+
+def close_round(
+    ledger: CycleEventLog,
+    line: Sequence[RoundResult],
+    *,
+    cycle: Cycle,
+    standing: RunStanding | None = None,
+) -> None:
+    """What the runner appends as the last round of *line* runs and closes over *cycle*'s bank:
+    entered, each panel arm proposed then concluded, the election, the close, the standing."""
+    rr = line[-1]
+    n = rr.round
+    callbacks = RunCallbacks(ledger)
+    callbacks.on_round_entered(n)
+    for key, arm in rr.panel.items():
+        callbacks.on_arm(n, key, Proposed(role=arm.role, slot=arm.slot, individual=arm.individual))
+    with at_round(n):
+        for key, arm in rr.panel.items():
+            callbacks.on_arm(n, key, arm)
+    assert rr.election is not None, "a closed round elects"
+    callbacks.on_election(n, rr.election)
+    callbacks.on_round_close(rr, line, cycle.session.bank.slot_of, cycle.difficulty)
+    stood = RunStanding.after(line, lives=None) if standing is None else standing
+    callbacks.on_round_complete(rr, stood, None)
 
 
 SANDBOX_CAMPAIGN = "testds__20260101-000000"
@@ -465,7 +621,7 @@ def round_result(
     collapsed: int = 0,
     cut: int = 0,
     selected: Sequence[str] | None = None,
-    arms: dict[ArmKey, ArmState] | None = None,
+    arms: Mapping[ArmKey, ArmState] | None = None,
     voted: dict[str, Any] | None = None,
     **overrides: Any,
 ) -> RoundResult:
@@ -478,19 +634,22 @@ def round_result(
         r for r, n in (("no_op_variant", no_op), ("duplicate_variant", dup)) for _ in range(n)
     ]
     built: dict[ArmKey, ArmState] = {
-        ArmKey(f"c{i}"): arm_state(
-            f"c{i}",
-            slot=ArmSlot(round=rnd, idx=i, total=panel),
-            total=2 if i < cut else len(_TRUTH),
-        )
-        for i in range(candidates_scored)
-    } | {
-        ArmKey(f"x{i}"): arm_state(
-            f"x{i}",
-            slot=ArmSlot(round=rnd, idx=candidates_scored + i, total=panel),
-            invalid_reason=reason,
-        )
-        for i, reason in enumerate(reasons)
+        **{
+            ArmKey(f"c{i}"): arm_state(
+                f"c{i}",
+                slot=ArmSlot(round=rnd, idx=i, total=panel),
+                total=2 if i < cut else len(_TRUTH),
+            )
+            for i in range(candidates_scored)
+        },
+        **{
+            ArmKey(f"x{i}"): arm_state(
+                f"x{i}",
+                slot=ArmSlot(round=rnd, idx=candidates_scored + i, total=panel),
+                invalid_reason=reason,
+            )
+            for i, reason in enumerate(reasons)
+        },
     }
     arms = (built | {PARENT: arm_state("parent")}) if arms is None else arms
     if selected is None:

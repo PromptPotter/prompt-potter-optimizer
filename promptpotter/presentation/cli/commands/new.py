@@ -330,6 +330,3 @@ async def _run_origin(held: HeldRun, *, diag: bool) -> CommandResult:
     _checkin_line("origin", "launching origin scoring")
     result = await run_inline(held, mode=RunMode(diag=diag))
     return cycle_result_command(session, result)
-
-
-__all__ = ["cmd_new", "mint_and_run"]

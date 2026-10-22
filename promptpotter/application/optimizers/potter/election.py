@@ -21,8 +21,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.paired_reading import ArmKey
     from promptpotter.domain.scoring import CellSheet
 
-__all__ = ["elect_on_theta"]
-
 
 def _theta(value: float | None, *, signed: bool = True) -> str:
     """A θ never fit prints ``n/a``, never ``0.000``, which is a real ability."""

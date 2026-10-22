@@ -47,7 +47,7 @@ Each word is checked against what the repo already calls things; an existing nam
 
 | Term | Means | Reuses / collides |
 |---|---|---|
-| **arm** | an individual a round measures | existing (`optimizers/nodes.py::Population`). This is the "active pool" — never called a pool |
+| **arm** | an individual a round measures | existing (`domain/optimizer_state.py::OptimizerState.population`). This is the "active pool" — never called a pool |
 | **pool** | a named set of entries of ONE kind that nodes draw from and declared writers add to | `domain/pool.py::Pool` (`BlockPool`, `DemoPool`). Never "sample pool": a sample is a dataset row |
 | **entry kind** | `individual` · `block` · `shot` | `block` = `domain/prompt_block.py::PromptBlock`, a whole-field value; "allele" is not used |
 | **locus** | one separately inheritable part of an individual: a `Locus(node, key)` — an open prompt field or the shots of a prompt node, an open config param | `domain/opt_search_point.py::OptSearchPoint.loci`; an open locus IS an open axis |
@@ -161,7 +161,7 @@ browser — owned by [`../../webapp/lib/CLAUDE.md`](../../webapp/lib/CLAUDE.md) 
 [`l4-outer-loop.md`](l4-outer-loop.md); this page adds one thing it must reach.
 
 - An outer arm reaches an inner knob only where the inner member declares it a lever
-  (`optimizers/nodes.py::LlmNode.outer_levers`), and only llm nodes are in the outer's graph. `mix`
+  (`application/optimizers/nodes.py::LlmNode.outer_levers`), and only llm nodes are in the outer's graph. `mix`
   and access become levers, so the lever declaration moves to every member and the outer graph
   carries any node declaring one.
 - A lever's value space is its knob's own options and bounds; it enters the inner cell's identity

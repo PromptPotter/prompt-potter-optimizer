@@ -19,8 +19,6 @@ from promptpotter.domain.results import OptimizerFact, RoundResult, rounds_witho
 from promptpotter.domain.round_audit import RoundAudit
 from promptpotter.domain.wounds import COLLAPSE_WORDS
 
-__all__ = ["L1Stats", "compute_l1_stats", "review_reading", "round_facts"]
-
 RoundOneVerdict = Literal["healthy", "degraded", "broken", "unknown"]
 
 

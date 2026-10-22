@@ -91,11 +91,3 @@ def _rewrite_campaign_ownership(campaigns_root: Path, user_id: str) -> None:
         rewritten += 1
     if rewritten:
         logger.info("Rebound %d campaigns to user %s", rewritten, user_id)
-
-
-__all__ = [
-    "is_host",
-    "is_host_tenant_dir",
-    "maybe_claim_default",
-    "registered_user_id",
-]

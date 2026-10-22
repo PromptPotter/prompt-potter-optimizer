@@ -526,20 +526,3 @@ def closed_label_set(
     if len(distinct) > n_rows // 2:
         return None
     return tuple(distinct)
-
-
-__all__ = [
-    "MAX_SAMPLES",
-    "IngestError",
-    "IngestReason",
-    "Table",
-    "candidate_library_from_rows",
-    "closed_label_set",
-    "decode_text",
-    "file_extension",
-    "materialize_samples",
-    "parse_candidate_library",
-    "read_candidate_library_file",
-    "read_tabular",
-    "sniff_format",
-]

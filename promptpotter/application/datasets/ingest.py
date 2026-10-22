@@ -234,15 +234,3 @@ async def draft_from_origin(*, stores: Stores, origin_id: str) -> DraftCampaign:
         overrides=overrides,
         origin_campaign=campaign,
     )
-
-
-__all__ = [
-    "MAX_UPLOAD_BYTES",
-    "SlugTakenError",
-    "draft_from_dataset",
-    "draft_from_dataset_name",
-    "draft_from_origin",
-    "fetch_backend_nodes",
-    "ingest_draft",
-    "refresh_capabilities",
-]

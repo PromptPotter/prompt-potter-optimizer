@@ -7,13 +7,6 @@ from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 shapes_optimizer_prompt(__name__)
 
-__all__ = [
-    "inline_short_formula_values",
-    "render_composite_fitness_block",
-    "render_composite_fitness_oneliner",
-    "to_short_formula",
-]
-
 
 SHORT_NAMES: dict[str, str] = {
     "accuracy": "acc",

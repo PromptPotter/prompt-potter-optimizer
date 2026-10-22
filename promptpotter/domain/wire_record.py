@@ -22,19 +22,6 @@ from typing import (
 
 from pydantic import BaseModel, ConfigDict
 
-__all__ = [
-    "ALWAYS",
-    "BY_HAND",
-    "REST",
-    "WireRecord",
-    "always_as",
-    "real",
-    "record_of",
-    "text",
-    "typed_record",
-    "whole",
-]
-
 ALWAYS: Mapping[str, object] = {"wire": "always"}
 REST: Mapping[str, object] = {"wire": "rest"}
 # Sparse, written and read by the owner; its key holds whatever the field may.

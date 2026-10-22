@@ -430,6 +430,3 @@ class AxisIndex:
             top_values=records[:5],
             sample_count=total,
         )
-
-
-__all__ = ["NOISE_THRESHOLD", "AxisIndex"]

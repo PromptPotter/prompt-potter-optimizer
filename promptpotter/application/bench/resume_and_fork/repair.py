@@ -37,13 +37,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = [
-    "RepairCut",
-    "apply_correction",
-    "repair_cut",
-    "repair_incomplete_rounds",
-]
-
 
 def _repairable_hole(cell: GradedCell) -> bool:
     """``HALTED`` is no hole: the declared bound cuts the next attempt at the same place."""

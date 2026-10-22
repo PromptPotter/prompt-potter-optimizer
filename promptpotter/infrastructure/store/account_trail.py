@@ -130,6 +130,3 @@ def bank_before_removal(
 def in_time_order(lines: Iterable[TrailLine]) -> list[TrailLine]:
     """A stamp that will not parse sorts first rather than costing the read."""
     return sorted(lines, key=lambda line: epoch_seconds(line.at) or 0.0)
-
-
-__all__ = ["TrailLine", "bank_before_removal", "in_time_order", "workspace_lines"]

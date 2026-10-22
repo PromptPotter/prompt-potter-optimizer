@@ -17,8 +17,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.campaign import Campaign
     from promptpotter.domain.cycle_paths import CycleHop
 
-__all__ = ["grade_bench", "verify_candidate"]
-
 
 def verify_candidate(
     dispatcher: CommandDispatcher,

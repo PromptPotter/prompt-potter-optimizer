@@ -661,6 +661,3 @@ async def cmd_evidence(args: argparse.Namespace) -> CommandResult:
         *_ranking_lines(ev, args.top),
     ]
     return CommandResult(data=ev.model_dump(), human="\n".join(lines))
-
-
-__all__ = ["cmd_evidence"]

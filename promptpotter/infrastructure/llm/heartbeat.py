@@ -15,8 +15,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["HEARTBEAT_INTERVAL_S", "heartbeat", "waiting_on"]
-
 
 def waiting_on(client: LLMClientBase, model: str | None, *, role: str) -> str:
     name = model or "(unnamed)"

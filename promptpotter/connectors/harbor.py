@@ -1259,14 +1259,3 @@ CONNECTOR = Connector(
     answer_key=ANSWER_KEY,
     default_pipeline=(AGENT_NODE,),
 )
-
-
-__all__ = [
-    "AGENT_NODE",
-    "ANSWER_FILENAME",
-    "ANSWER_KEY",
-    "CONNECTOR",
-    "REWARD_KEY",
-    "harbor_wire_adapter",
-    "pin_roster",
-]

@@ -129,6 +129,3 @@ def select_rewind_round(
 
     best = max(candidates, key=_ucb)
     return best[1]
-
-
-__all__ = ["accumulate_node_stats", "select_rewind_round"]

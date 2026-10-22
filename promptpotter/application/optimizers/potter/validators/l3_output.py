@@ -65,11 +65,3 @@ def run_l3_output_validators(
     prior_plan: str,
 ) -> list[ValidatorOutcome]:
     return run_validators(L3_OUTPUT_VALIDATORS, source_output, prior_plan=prior_plan)
-
-
-__all__ = [
-    "L3_OUTPUT_VALIDATORS",
-    "L3_PLAN_LENGTH_FLOOR",
-    "L3_PLAN_VERBATIM_REPEAT",
-    "run_l3_output_validators",
-]

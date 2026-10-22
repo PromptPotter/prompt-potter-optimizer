@@ -681,23 +681,3 @@ def _notes(
             "worked-seconds ratio stays confounded."
         )
     return notes
-
-
-__all__ = [
-    "GUARD_DIFFERENCE_INFO",
-    "GUARD_STATE_INFO",
-    "GUARD_STATE_LABELS",
-    "VERDICT_ABSENT_INFO",
-    "Grader",
-    "GuardDifference",
-    "GuardMember",
-    "GuardState",
-    "HeadToHead",
-    "HeadToHeadEntry",
-    "HeadToHeadRow",
-    "PairGuard",
-    "SelectionPair",
-    "comparison_grader",
-    "head_to_head",
-    "pair_guard",
-]

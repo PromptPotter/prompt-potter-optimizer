@@ -12,7 +12,7 @@ from pydantic import ValidationError
 from promptpotter.application.campaign_config import CampaignConfig, merge_config_layers
 from promptpotter.application.datasets.tabular_ingest import read_candidate_library_file
 from promptpotter.application.optimizer_manifest import select_optimizer
-from promptpotter.application.scoring.formula import compile_scorer, split_scoring_block
+from promptpotter.application.scoring.formula.compiler import compile_scorer, split_scoring_block
 from promptpotter.domain.scoring import Scorer
 from promptpotter.infrastructure.store.dataset_access import (
     DEFINITION_FILE,
@@ -139,15 +139,3 @@ def read_authored_dataset(dataset_dir: Path) -> AuthoredDataset:
         active_steps=declared_pipelines(pipeline).get("default", []),
         candidate_library=read_candidate_library_file(dataset_dir),
     )
-
-
-__all__ = [
-    "campaign_file_block",
-    "dataset_campaign_block",
-    "dataset_scorer",
-    "load_dataset_campaign_config",
-    "read_authored_dataset",
-    "scorer_of",
-    "validated_campaign_config",
-    "with_optimization",
-]

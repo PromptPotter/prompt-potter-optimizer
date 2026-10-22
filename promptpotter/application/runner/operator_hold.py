@@ -14,7 +14,6 @@ if TYPE_CHECKING:
 
     from promptpotter.application.initialization.session import Session
 
-__all__ = ["hold_for_operator"]
 
 _POLL_S = 1.0
 

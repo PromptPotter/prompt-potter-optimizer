@@ -102,6 +102,3 @@ def silence_proactor_disconnect_noise() -> None:
             loop.default_exception_handler(context)
 
     loop.set_exception_handler(handler)
-
-
-__all__ = ["setup_logging", "silence_proactor_disconnect_noise"]

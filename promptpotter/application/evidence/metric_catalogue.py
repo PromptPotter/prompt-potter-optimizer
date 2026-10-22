@@ -275,19 +275,3 @@ def resolve_metric(
             f"'{CUSTOM_METRIC_PREFIX}<expression>' over {sorted(available)}."
         )
     return (named, compile_metric(named.expression))
-
-
-__all__ = [
-    "CHANNELS",
-    "CUSTOM_METRIC_KEY",
-    "CUSTOM_METRIC_PREFIX",
-    "MEASURAND",
-    "MetricSpec",
-    "MetricUnit",
-    "available_channels",
-    "catalogue_for",
-    "cell_channels",
-    "compile_metric",
-    "merge_cells",
-    "resolve_metric",
-]

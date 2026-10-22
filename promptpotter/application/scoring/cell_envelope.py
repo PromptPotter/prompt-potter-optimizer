@@ -19,8 +19,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["CellEnvelope"]
-
 
 class CellEnvelope:
     """Expiry raises ``CellHaltedError``: the cell was CUT, so no repair may re-buy a truncated trajectory."""

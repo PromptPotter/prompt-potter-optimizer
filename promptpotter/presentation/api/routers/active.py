@@ -111,6 +111,3 @@ def get_optimizer_knobs(name: str) -> OptimizerKnobsResponse:
     404 when no such optimizer is registered.
     """
     return optimizer_knobs(name)
-
-
-__all__ = ["ActiveSessionResponse"]

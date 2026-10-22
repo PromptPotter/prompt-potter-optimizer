@@ -425,6 +425,3 @@ class LangfuseLogger:
                 "keep the shutdown path responsive",
                 FLUSH_TIMEOUT_SEC,
             )
-
-
-__all__ = ["LangfuseLogger", "langfuse_trace_url"]

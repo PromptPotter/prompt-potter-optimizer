@@ -21,16 +21,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.sample import Sample
 
 
-__all__ = [
-    "PreflightWarning",
-    "check_search_split_holds_round",
-    "refuse_arm_below_round",
-    "refuse_below_reasoning_floor",
-    "refuse_unfit_pipeline",
-    "run_preflight_checks",
-]
-
-
 @dataclass(frozen=True)
 class PreflightWarning:
     code: str

@@ -36,8 +36,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.infrastructure.store.stores import Stores
 
-__all__ = ["BenchTriggerError", "grade_line_bench"]
-
 
 class BenchTriggerError(ConflictError):
     """The bench pass cannot be sent for this cycle as it stands on disk."""

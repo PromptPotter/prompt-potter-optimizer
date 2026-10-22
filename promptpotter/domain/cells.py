@@ -10,26 +10,6 @@ from promptpotter.domain.ruler import DELTA_STATE_LABEL, DeltaState, RulerStandi
 from promptpotter.domain.scoring import SampleStatus, is_hit
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 
-__all__ = [
-    "DEPTH_FIELDS",
-    "HARD_SAMPLES_VERSION",
-    "Cell",
-    "CellCandidate",
-    "CellRow",
-    "CellSpan",
-    "CellsResponse",
-    "DatasetItem",
-    "HardSampleCell",
-    "HardSamples",
-    "HeatmapScope",
-    "HitSpread",
-    "PinnedCell",
-    "SampleDifficulty",
-    "Seat",
-    "hit_spread",
-]
-
-
 # How much evidence a cell buys, never what it is: out of every key, so a deepened cell CONTINUES
 # its campaign. Named as `runner/inner/tasks.py::InnerTaskSpec` names them, which subtracts the same set.
 DEPTH_FIELDS: frozenset[str] = frozenset(

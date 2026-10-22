@@ -23,6 +23,3 @@ class ChatRequest:
 
     def asked(self) -> frozenset[str]:
         return frozenset(f.name for f in fields(self) if getattr(self, f.name) is not None)
-
-
-__all__ = ["ChatRequest"]

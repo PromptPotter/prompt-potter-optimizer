@@ -23,8 +23,8 @@ from promptpotter.application.runner.termination import (
     origin_gate_tripped,
     target_tripped,
 )
-from promptpotter.domain.phases import StopLoop, StopReason
-from promptpotter.domain.run_records import ErrorRecord, RebaseRequest
+from promptpotter.domain.phases import ErrorRecord, StopLoop, StopReason
+from promptpotter.domain.run_records import RebaseRequest
 from promptpotter.domain.sample import Sample
 from promptpotter.infrastructure.llm.telemetry import at_round
 
@@ -166,6 +166,3 @@ async def run_round_loop(
             # Handed back, never swallowed: `runner/entry.py` re-raises it past the finalize.
             cancelled=exc if isinstance(exc, asyncio.CancelledError) else None,
         )
-
-
-__all__ = ["HARD_CAP_ARMS", "LoopEnd", "round_bounds", "run_round_loop"]

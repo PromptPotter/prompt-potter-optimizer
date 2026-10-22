@@ -20,8 +20,6 @@ from promptpotter.infrastructure.projections.audit_trail import load_round_audit
 from promptpotter.infrastructure.projections.event_stream import CycleLedgerTail
 from promptpotter.infrastructure.runtime_flags import run_phase_validator_epoch
 from promptpotter.infrastructure.store.family_ray_queries import (
-    DEFAULT_RAY_LIMIT,
-    MAX_RAY_LIMIT,
     RayCursor,
     RayResponse,
     build_family_ray,
@@ -38,18 +36,9 @@ from promptpotter.infrastructure.store.read_model import Moment
 from promptpotter.infrastructure.store.stores import Stores, resolve_cycle_path
 from promptpotter.shared.errors import BadRequestError, NotFoundError
 
-__all__ = [
-    "DEFAULT_RAY_LIMIT",
-    "MAX_RAY_LIMIT",
-    "FamilyRay",
-    "RayResponse",
-    "ViewedCycle",
-    "cycle_event_frames",
-    "open_family_ray",
-    "round_audit",
-    "served_round",
-    "view_cycle",
-]
+# A router imports no infrastructure, so it reaches these through here; strict mypy re-exports
+# an import only by this list.
+__all__ = ["RayResponse"]
 
 _TAIL_POLL_INTERVAL_S = 0.5
 

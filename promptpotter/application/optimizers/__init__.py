@@ -30,17 +30,6 @@ if typing.TYPE_CHECKING:
 
 shapes_optimizer_prompt(__name__)
 
-__all__ = [
-    "ENTRY_POINT_GROUP",
-    "RUNTIME_ENTRY_POINT_GROUP",
-    "llm_nodes",
-    "member",
-    "registered",
-    "runtime",
-    "runtime_origins",
-    "runtimes",
-    "unfit_pipeline",
-]
 
 ENTRY_POINT_GROUP = "promptpotter.optimizer_nodes"
 """Published, keyed by manifest node name: renaming it un-registers every plugin at once."""

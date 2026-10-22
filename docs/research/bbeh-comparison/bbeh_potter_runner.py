@@ -20,7 +20,7 @@ from promptpotter.application.embedded_run import open_session, run_campaign
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
 from promptpotter.application.scoring.cell_envelope import CellEnvelope
-from promptpotter.application.scoring.formula import SCORING_FUNCTIONS
+from promptpotter.application.scoring.formula.matchers import SCORING_FUNCTIONS
 from promptpotter.application.scoring.sample_measurement import (
     attempt_bounds,
     cell_billing,

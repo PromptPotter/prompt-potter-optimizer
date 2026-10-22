@@ -39,7 +39,7 @@ self-optimization run of an opted-in campaign leaves only its own cycle on the s
 
 **Decision.** `register_prompt` takes a `model_config` (`PromptModelConfig`: provider, model name,
 temperature, max tokens, top-p, and `extra_params` for the rest), and MLflow's UI renders it. Each
-prompt is registered per node (`mlflow_server.py::register_export`), so that node's config goes
+prompt is registered per node (`infrastructure/tracing/mlflow_server.py::register_export`), so that node's config goes
 there; the `promptpotter.tuned_params` tag keeps every node that bears no prompt and is omitted when
 there is none.
 
@@ -52,13 +52,13 @@ This is the step that makes the round trip a team recognises: their prompt in, t
 the next version of *their* prompt, where today the name is `{tenant_id}.{dataset_name}`.
 
 **The channel exists.** A non-dataset origin already rides `CycleSeed.origin_prompts`, set
-from `origin_override` in `application/jobs/mint.py::_plan` and resolved first in
+from `origin_override` in `application/jobs/mint.py::resolve_cycle_plan` and resolved first in
 `application/origin.py::resolve_origin_opt_search_point`. Every mint path reaches `_plan`.
 
 **Decisions.**
 
 - **Fetched once, at mint, and pinned in the seed.** A resume re-resolves the origin from the seed
-  (`mint.py::refuse_drifted_resume`); a live read there would let a moved alias change a running
+  (`application/jobs/mint.py::refuse_drifted_resume`); a live read there would let a moved alias change a running
   campaign's identity.
 - **A new `OriginSource` member** for a registry origin, with its sentence in
   `application/origin.py::_SEED_ORIGIN_LINEAGE` — the import-time assert there fails without it.
@@ -74,7 +74,7 @@ from `origin_override` in `application/jobs/mint.py::_plan` and resolved first i
   (`OptSearchPoint.render`), and that is MLflow's syntax too.
 
 **Parity.** `origin_override` is accepted by `mint_framed_cycle` and `resolve_cycle_plan` and
-passed by neither `mint_and_start.py::hold_fresh_mint` nor `embedded_run.py::run_campaign`. The
+passed by neither `application/jobs/launcher/mint_and_start.py::hold_fresh_mint` nor `application/embedded_run.py::run_campaign`. The
 source is one typed field on `MintCampaignPayload` / `FreshMint` and on `EditDraftPatch`, so the
 CLI, REST, the webapp check-in, the embedded launch and `/potter-run` all name it. An arm refuses
 an origin override and keeps refusing.

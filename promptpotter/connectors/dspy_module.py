@@ -434,13 +434,3 @@ CONNECTOR = Connector(
     required_observation_keys=(RESULT_KEY, SCORE_KEY),
     default_pipeline=(PROGRAM_NODE,),
 )
-
-
-__all__ = [
-    "CONNECTOR",
-    "PROGRAM_NODE",
-    "RESULT_KEY",
-    "SCORE_KEY",
-    "DspyProgram",
-    "dataset_pipeline",
-]

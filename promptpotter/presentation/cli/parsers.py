@@ -142,17 +142,3 @@ def budget_from_args(args: argparse.Namespace) -> Budget:
     """Names only the axes a flag gave: an omitted one is left to the layers beneath."""
     given = (args.max_usd, args.max_tokens, args.max_rounds, args.max_wall_clock)
     return Budget().over(*(axis for axis in given if axis is not None))
-
-
-__all__ = [
-    "ACTIVE_CAMPAIGN",
-    "ACTIVE_CYCLE",
-    "BUDGET_AXES",
-    "CAMPAIGN_ID",
-    "GLOBAL_ARGS",
-    "NO_WAIT",
-    "Arg",
-    "Verb",
-    "budget_from_args",
-    "build_parser",
-]

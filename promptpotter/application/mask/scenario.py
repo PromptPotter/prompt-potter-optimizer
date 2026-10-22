@@ -34,6 +34,3 @@ def scenario_spine(cycle: MaskCycle) -> list[ScenarioStep]:
             break
         standing = scenario_winner
     return steps
-
-
-__all__ = ["ScenarioStep", "scenario_spine"]

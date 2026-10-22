@@ -14,19 +14,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.ruler import DeltaRuler
     from promptpotter.domain.scoring import GradedCell
 
-__all__ = [
-    "CellReading",
-    "build_round_order",
-    "decision_information_gain",
-    "decision_order",
-    "delta_learning_gain",
-    "information_per_price",
-    "marginal_hit_probability",
-    "parent_grades",
-    "pick_value",
-    "stratum_shares",
-    "update_theta_posterior",
-]
 
 # Probit scale for ``E[σ(N(m, v))] ≈ σ(m / √(1 + π·v/8))``.
 _PROBIT_SCALE = math.pi / 8.0

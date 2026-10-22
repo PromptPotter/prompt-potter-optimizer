@@ -38,15 +38,6 @@ from promptpotter.shared.errors import (
 
 logger = logging.getLogger(__name__)
 
-__all__ = [
-    "DatasetIndexEntry",
-    "OriginEntry",
-    "canonical_origin_campaign",
-    "list_datasets",
-    "list_origins",
-    "prospective_origin_id",
-]
-
 
 def prospective_origin_id(stores: Stores, dataset: ResolvedDataset) -> str | None:
     """Not ``resolve_pipeline_for_campaign``: a dataset with no campaign has no manifest to freeze."""

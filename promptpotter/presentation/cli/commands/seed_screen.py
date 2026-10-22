@@ -71,6 +71,3 @@ async def cmd_seed_screen(args: argparse.Namespace) -> CommandResult:
         + f"Record → {outcome.artifact_path}"
     )
     return CommandResult(data={"readings": [r.as_dict() for r in rows]}, human=human)
-
-
-__all__ = ["cmd_seed_screen"]

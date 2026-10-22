@@ -31,8 +31,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["resume_with_divergence_check"]
-
 
 def _stale_generation(
     campaign_store: CampaignStore,

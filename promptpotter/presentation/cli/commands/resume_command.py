@@ -337,6 +337,3 @@ async def _resume(args: argparse.Namespace) -> CommandResult:
     logger.info("Campaign: %s", session.store.campaigns.campaign_root_dir(ctx.campaign_id))
 
     return await _run_loop(args, ctx, held)
-
-
-__all__ = ["cmd_resume"]

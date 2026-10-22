@@ -8,8 +8,6 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.presentation.api.deps import StoresDep, decode_descend
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 
-__all__ = ["stream_cycle_events"]
-
 
 @campaigns_router.get(
     "/campaigns/{campaign_id}/cycles/{cycle_id}/events:subscribe",

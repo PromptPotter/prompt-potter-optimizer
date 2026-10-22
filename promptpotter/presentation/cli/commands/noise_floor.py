@@ -38,6 +38,3 @@ async def cmd_noise_floor(args: argparse.Namespace) -> CommandResult:
         f"Record → {outcome.artifact_path}"
     )
     return CommandResult(data=record.model_dump(), human=human)
-
-
-__all__ = ["cmd_noise_floor"]

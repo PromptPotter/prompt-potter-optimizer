@@ -86,6 +86,3 @@ def render_hard_sample_heatmap(shown: HardSamplesView) -> str:
         lines.append(f"  {view.samples[off[0]].label}: {', '.join(str(row[k]) for k in off)}")
 
     return "\n".join(lines)
-
-
-__all__ = ["render_hard_sample_heatmap"]

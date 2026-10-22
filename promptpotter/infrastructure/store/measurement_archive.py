@@ -273,7 +273,7 @@ class MeasurementArchive:
     def derived_dir(self) -> Path:
         return self._store_dir() / "derived"
 
-    def _cell_path(self, file_key: str) -> Path:
+    def cell_path(self, file_key: str) -> Path:
         return self._cells_dir() / f"{file_key}{_CELLS_SUFFIX}"
 
     def _claim_path(self, node_configs: list[tuple[str, dict[str, Any]]], sample_key: str) -> Path:
@@ -318,7 +318,7 @@ class MeasurementArchive:
                 held = self._files[file_key] = _CellFile()
             else:
                 self._files.move_to_end(file_key)
-            held.refresh(self._cell_path(file_key))
+            held.refresh(self.cell_path(file_key))
             if fresh:
                 weight = sum(f.size for f in self._files.values())
                 while weight > _FILES_MAX_BYTES and len(self._files) > 1:
@@ -358,7 +358,7 @@ class MeasurementArchive:
             # First: no answer is ever on disk under a configuration nothing describes.
             self._register(entry.model_copy(update={"name": role, "created_at": created_at}))
             for file_key, filed in by_file.items():
-                self._file(file_key).append(self._cell_path(file_key), filed)
+                self._file(file_key).append(self.cell_path(file_key), filed)
         return refs
 
     def _register(self, entry: ArchiveEntry) -> None:
@@ -438,7 +438,7 @@ class MeasurementArchive:
         return held or None
 
     def files_signature(self, file_keys: Iterable[str]) -> tuple[Any, ...]:
-        return tuple(file_sig(self._cell_path(key)) for key in sorted(set(file_keys)))
+        return tuple(file_sig(self.cell_path(key)) for key in sorted(set(file_keys)))
 
     def _cold_dir(self) -> Path:
         return self._store_dir() / "cold"
@@ -457,7 +457,7 @@ class MeasurementArchive:
         return sorted(n[: -len(_COLD_SUFFIX)] for n in names if n.endswith(_COLD_SUFFIX))
 
     def detail_lines(self, file_key: str) -> list[str]:
-        return read_lines(self._cell_path(file_key))
+        return read_lines(self.cell_path(file_key))
 
     def rewrite_cell_file[T](
         self,
@@ -479,7 +479,7 @@ class MeasurementArchive:
             final = bridge if after == union else _encode_cold(after)
             return PairWrite(rewrite.lines, bridge, final), result
 
-        return rewrite_pair(self._cell_path(file_key), self.cold_path(file_key), paired)
+        return rewrite_pair(self.cell_path(file_key), self.cold_path(file_key), paired)
 
     def cold_bytes_on_disk(self, file_key: str) -> int:
         try:
@@ -631,19 +631,3 @@ class ReplayFeed:
             # Windows: a holder is unlinking or replacing it this instant — the next poll reads again.
             return None
         return None if row is None else MeasuredCell.from_wire(row)
-
-
-__all__ = [
-    "ANSWER_KEY",
-    "CellClaim",
-    "CellRewrite",
-    "MeasurementArchive",
-    "MovedFields",
-    "ReplayFeed",
-    "answer_line",
-    "answer_of",
-    "cold_size",
-    "config_key",
-    "rejoined",
-    "standing",
-]

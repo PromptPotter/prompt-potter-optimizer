@@ -18,8 +18,6 @@ if TYPE_CHECKING:
         SetCampaignLabelPayload,
     )
 
-__all__ = ["campaign_lifecycle", "set_campaign_label"]
-
 
 def campaign_lifecycle(dispatcher: CommandDispatcher, payload: LifecyclePayload) -> Applier[object]:
     stores = dispatcher.stores

@@ -25,7 +25,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["run_origin_gate"]
 
 _DECISIONS: tuple[str, ...] = get_args(GateDecision)
 

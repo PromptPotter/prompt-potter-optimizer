@@ -23,12 +23,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["arm_gate_mode", "operator_arms"]
 
 _NODE = OperatorSeat.name
 
 
-def _authored(seat: NodeContext[StrictModel], arm: SubmittedArm) -> Proposal:
+def authored_arm(seat: NodeContext[StrictModel], arm: SubmittedArm) -> Proposal:
     # An undeclared node or field, or a shot the seat does not draw, fails at `NodeContext.child`.
     shots = {Locus(node, SHOTS_KEY): keys for node, keys in arm.shots.items()}
     return seat.child(
@@ -70,7 +69,7 @@ async def operator_arms(ctx: RoundContext, drafts: list[Proposal]) -> list[Propo
         command_id, asked = standing
         arms = [
             *(drafts[idx] for idx in asked.keep),
-            *(_authored(seat, arm) for arm in asked.arms),
+            *(authored_arm(seat, arm) for arm in asked.arms),
         ]
         # Recorded and banked BEFORE the ack: a producer lost between them re-reads the answer.
         session.store.campaigns.record_intervention(session.hop, kind="submit-arms")

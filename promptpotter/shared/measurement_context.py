@@ -7,19 +7,6 @@ from typing import Annotated
 
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
-__all__ = [
-    "ARM_ROLES",
-    "MAX_INSTRUMENT_DEPTH",
-    "RECORDED_ROLES",
-    "MeasuredPass",
-    "MeasurementRole",
-    "enter_instrument_mode",
-    "instrument_depth",
-    "instrument_mode",
-    "measured_pass",
-    "measured_pass_context",
-]
-
 # L4 is depth 1, and nothing else stops L5+.
 MAX_INSTRUMENT_DEPTH = 2
 

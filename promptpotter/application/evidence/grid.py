@@ -259,14 +259,3 @@ def grid_reading(
         marginalised=[k for k in keys if k not in axes],
         note=_pool_note(spec, poolable),
     )
-
-
-__all__ = [
-    "FactorCell",
-    "FactorGridReading",
-    "FactorLevel",
-    "FactorReading",
-    "factors",
-    "grid_reading",
-    "levels_by_subject",
-]

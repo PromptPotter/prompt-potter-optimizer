@@ -191,6 +191,3 @@ _WIRED_KINDS: frozenset[str] = frozenset[str](CommandKind) - {
     for route in commands_router.routes
     if isinstance(route, APIRoute)
 }
-
-
-__all__ = ["CommandEnvelope", "commands_router"]

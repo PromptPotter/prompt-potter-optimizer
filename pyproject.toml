@@ -281,7 +281,6 @@ module = [
     "dspy.*",
     "harbor.*",
     "IPython.*",
-    "tests.*",
     # Pure transitive (0 first-party imports) — pulled in by the skipped sinks /
     # CLI rendering chains; nothing here is in our typed call surface.
     "rich.*",
@@ -337,7 +336,7 @@ extend_exclude = [
     "examples/.*",  # each a distribution of its own, with its own dependency list
 ]
 # `scripts/` is a directory of programs, not a package: one imports a sibling by its bare name.
-known_first_party = ["gate", "last_green", "offline_world", "tests_owning"]
+known_first_party = ["gate", "last_green", "offline_world", "processes", "tests_owning"]
 
 # CI installs neither `observability` nor `all`, so deptry cannot read the
 # distribution's metadata and falls back to assuming the module is named after the
@@ -353,6 +352,7 @@ DEP002 = [
     "ipython",
     "uvicorn",
     "python-multipart",  # imported by FastAPI at runtime for multipart/form-data, never directly by promptpotter/
+    "python-dotenv",     # a CVE floor for pydantic-settings' `env_file` read; see [project] dependencies
     "jupyterlab",
     "pytest",
     "pytest-asyncio",

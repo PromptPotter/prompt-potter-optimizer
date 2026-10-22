@@ -13,8 +13,6 @@ from promptpotter.application.maintenance.reset import (
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, SHARED_CACHE_DIRS
 from promptpotter.presentation.cli.commands.result import CommandResult
 
-__all__ = ["cmd_reset"]
-
 
 def _render_summary(plan: ResetPlan) -> str:
     lines: list[str] = []

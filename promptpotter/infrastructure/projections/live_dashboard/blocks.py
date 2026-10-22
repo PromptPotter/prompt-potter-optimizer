@@ -112,10 +112,3 @@ def build_racing_block(buffer: RoundBuffer) -> RacingBlock | None:
         n_samples=buffer.race_n_samples,
         top=[{"id": cid, "p_best": p} for cid, p in ranked[:5]],
     )
-
-
-__all__ = [
-    "build_candidate_rows",
-    "build_racing_block",
-    "sample_row",
-]

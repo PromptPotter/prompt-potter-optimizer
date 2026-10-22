@@ -114,24 +114,3 @@ OPTIMIZER_REUSE_DIR = "optimizer_reuse"
 JUDGE_REUSE_DIR = "judge_reuse"
 
 SHARED_CACHE_DIRS: tuple[str, ...] = (MEASUREMENTS_DIR, OPTIMIZER_REUSE_DIR, JUDGE_REUSE_DIR)
-
-
-__all__ = [
-    "DEFAULT_PROJECTS_ROOT",
-    "JUDGE_REUSE_DIR",
-    "MEASUREMENTS_DIR",
-    "OPTIMIZER_REUSE_DIR",
-    "PACKAGE_ROOT",
-    "SHARED_CACHE_DIRS",
-    "checkin_assets_root",
-    "checkin_manifest_path",
-    "default_jobs_dir",
-    "env_file_path",
-    "install_cache_root",
-    "install_datasets_root",
-    "optimizer_manifest_path",
-    "optimizers_root",
-    "source_checkout_root",
-    "user_data_root",
-    "webapp_static_root",
-]

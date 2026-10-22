@@ -145,6 +145,3 @@ class AnthropicClient(LLMClientBase):
             finish_reason=_FINISH_REASONS.get(response.stop_reason or "", response.stop_reason),
             parsed=parsed,
         )
-
-
-__all__ = ["AnthropicClient"]

@@ -31,6 +31,3 @@ class DiagnosticRunStore:
         path = self._path(record.ts, record.config_hash)
         write_json(path, record.model_dump())
         return path
-
-
-__all__ = ["DiagnosticRunStore"]

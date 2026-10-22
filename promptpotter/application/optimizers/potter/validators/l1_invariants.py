@@ -24,8 +24,6 @@ from promptpotter.domain.wounds import INVARIANT_REASONS, ValidationFailure
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["detect_invariants", "lost_ideas"]
-
 
 def lost_ideas(prior_rounds: Sequence[RoundResult]) -> list[tuple[int, frozenset[str]]]:
     """Measured losses only, each read against the round BEFORE its own."""

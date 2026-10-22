@@ -27,7 +27,7 @@ from factories import (
     spend_book,
     walking_cycle,
 )
-from fastapi import BackgroundTasks
+from fastapi import BackgroundTasks, FastAPI, Request
 from pydantic import SecretStr
 
 from promptpotter.application import account, site_records
@@ -67,13 +67,14 @@ from promptpotter.domain.command_kinds import (
 )
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phases import PauseCause, ProducerState, RunPhase, StopReason
 from promptpotter.domain.pipeline_overlay import (
     permitted_models_from_narrowing,
     steers_disallowed_model,
 )
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
-from promptpotter.domain.results import ArmKey, ArmSlot
+from promptpotter.domain.results import ArmSlot
 from promptpotter.domain.round_diagnostics import RoundDiagnostics, SampleDiag
 from promptpotter.domain.run_records import CommandAckRecord, CommandRecord, RunPhaseRecord
 from promptpotter.domain.sample import ArchiveEntry
@@ -82,14 +83,20 @@ from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure
-from promptpotter.infrastructure.identity.google import ProviderIdentity
+from promptpotter.infrastructure.identity.bundle import IdentityBundle, build_identity_bundle
+from promptpotter.infrastructure.identity.google import GoogleProviderClient, ProviderIdentity
 from promptpotter.infrastructure.identity.grants import (
     grant_principal,
     read_grant,
     resolve_effective_capabilities,
     revoke_principal,
 )
+from promptpotter.infrastructure.identity.jwks import JWKSCache
 from promptpotter.infrastructure.identity.paths import IdentityPaths
+from promptpotter.infrastructure.identity.provider_config import (
+    OIDCProviderConfig,
+    ProviderConfigBundle,
+)
 from promptpotter.infrastructure.identity.session import OIDCSessionStore, SessionData
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.spend_book import spending_under
@@ -128,6 +135,7 @@ from promptpotter.shared.identity import (
     OWNER_COMMAND_CAPABILITIES,
     SYSTEM_PRINCIPAL,
     IdentityContext,
+    Issuer,
     TenantId,
     UserId,
     acting_principal,
@@ -143,12 +151,12 @@ _FENCE, _FENCE_END = "<UNTRUSTED_DATASET_CONTENT", "</UNTRUSTED_DATASET_CONTENT>
 def test_no_path_secret_or_dataset_text_leaves_its_fence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    for build in (
-        lambda: campaign_root_dir_for(tmp_path, "../escape"),
-        lambda: cycle_dir_for(tmp_path, CycleHop(campaign_id="ok_campaign", cycle_id="../escape")),
-    ):
-        with pytest.raises(ValueError):
-            build()
+    with pytest.raises(ValueError):
+        campaign_root_dir_for(WorkspaceDir(tmp_path), "../escape")
+    with pytest.raises(ValueError):
+        cycle_dir_for(
+            WorkspaceDir(tmp_path), CycleHop(campaign_id="ok_campaign", cycle_id="../escape")
+        )
 
     secret = "gsk_redact_me_xxxxxxxxxxxxxxxxxxxxxxx"
     monkeypatch.setattr(settings_mod.settings, "GROQ_API_KEY", SecretStr(secret), raising=False)
@@ -182,7 +190,7 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
         SOME_FUTURE_WEBHOOK_URL: SecretStr = SecretStr("")
 
     hook = "https://hooks.example/future-secret-value"
-    monkeypatch.setattr(log_redaction, "settings", Grown(SOME_FUTURE_WEBHOOK_URL=hook))
+    monkeypatch.setattr(log_redaction, "settings", Grown(SOME_FUTURE_WEBHOOK_URL=SecretStr(hook)))
     future = logging.LogRecord("t", logging.INFO, "", 0, "posting to %s", (hook,), None)
     log_redaction.SecretRedactionFilter().filter(future)
     assert "future-secret-value" not in future.getMessage(), "a new SecretStr setting leaked"
@@ -396,7 +404,9 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
 
     def who(user_id: str) -> IdentityContext:
         return IdentityContext(
-            user_id=UserId(user_id), tenant_id=TenantId(user_id), issuer="https://accounts.example"
+            user_id=UserId(user_id),
+            tenant_id=TenantId(user_id),
+            issuer=Issuer("https://accounts.example"),
         )
 
     seen_by_eve = machine_status(registry, identity=who("eve-id"))
@@ -424,7 +434,7 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
 ) -> None:
     grant_paths = IdentityPaths(root=tmp_path)
     grants, audit = grant_paths.grants, grant_paths.grants_audit
-    signed_in = types.SimpleNamespace(paths=grant_paths)
+    signed_in = build_identity_bundle(grant_paths)
 
     def session_of(user_id: str) -> SessionData:
         return SessionData(
@@ -465,10 +475,10 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
     assert (str(ident.user_id), str(ident.tenant_id)) == ("owner-9", "owner-9")
     assert ident.claims["principal"] == "sub-1"
     assert ident.capabilities == frozenset({CAMPAIGN_STEP_CAP})
-    skip, start = CommandKind.SKIP_SEARCHPOINT, CommandKind.START_RUN
-    require_capability(ident, skip.capability, subject=skip.value)  # holds campaign.step
+    skipping, starting = CommandKind.SKIP_SEARCHPOINT, CommandKind.START_RUN
+    require_capability(ident, skipping.capability, subject=skipping.value)  # holds campaign.step
     with pytest.raises(NotFoundError):
-        require_capability(ident, start.capability, subject=start.value)  # lacks campaign.run
+        require_capability(ident, starting.capability, subject=starting.value)  # lacks campaign.run
     assert acting_principal(ident).id == "sub-1", "audit must name the delegate, not the delegator"
     # A grant with no delegator is fail-secure: own tenant, ZERO caps — never owner.
     write_json(grants, {"grants": {"sub-2": {"capabilities": ["campaign.run"]}}})
@@ -629,26 +639,42 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
     for module in (auth, deps):
         monkeypatch.setattr(module, "DEFAULT_PROJECTS_ROOT", projects)
 
-    async def exchange_code(**_: str) -> ProviderIdentity:
-        return ProviderIdentity(
-            issuer="https://accounts.example", subject="s1", email="Ada@x.com", provider="google"
-        )
+    class Answering(GoogleProviderClient):
+        async def exchange_code(self, *, code: str, expected_nonce: str) -> ProviderIdentity:
+            return ProviderIdentity(
+                issuer="https://accounts.example",
+                subject="s1",
+                email="Ada@x.com",
+                provider="google",
+            )
 
     paths = IdentityPaths(root=tmp_path / "identity")
     sessions = OIDCSessionStore(paths.sessions_dir)
-    bundle = types.SimpleNamespace(
+    google = OIDCProviderConfig(client_id="c", client_secret="s", redirect_uri="https://r")
+    bundle = IdentityBundle(
         paths=paths,
-        config=types.SimpleNamespace(configured=("google",)),
+        config=ProviderConfigBundle(google=google, github=None),
         session_store=sessions,
-        google=types.SimpleNamespace(exchange_code=exchange_code),
+        jwks_cache=JWKSCache(),
+        google=Answering(google, JWKSCache()),
         github=None,
     )
-    request = types.SimpleNamespace(
-        app=types.SimpleNamespace(state=types.SimpleNamespace(identity_bundle=bundle)),
-        query_params={"state": "st", "code": "co"},
-        url=types.SimpleNamespace(scheme="https"),
-        cookies={},
-    )
+    app = FastAPI()
+    app.state.identity_bundle = bundle
+
+    def browser(cookies: dict[str, str]) -> Request:
+        held = "; ".join(f"{name}={value}" for name, value in cookies.items())
+        return Request(
+            {
+                "type": "http",
+                "app": app,
+                "scheme": "https",
+                "server": ("testserver", 443),
+                "path": "/auth/callback/google",
+                "query_string": b"state=st&code=co",
+                "headers": [(b"cookie", held.encode())] if held else [],
+            }
+        )
 
     def cookies(response: Any) -> dict[str, str]:
         return {
@@ -670,15 +696,14 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
             "a flow started at one provider closed at another",
         ),
     ):
-        request.cookies = started
-        refused_flow = await auth.callback(request, BackgroundTasks(), "google")
+        refused_flow = await auth.callback(browser(started), BackgroundTasks(), "google")
         assert refused_flow.headers["location"] == "/?auth_error=state_invalid_or_expired", why
         assert SESSION_COOKIE_NAME not in cookies(refused_flow), why
     assert not paths.sessions_dir.exists(), "a refused flow left a session"
-    request.cookies = {auth.OAUTH_FLOW_COOKIE_NAME: "google.st.n"}
+    request = browser({auth.OAUTH_FLOW_COOKIE_NAME: "google.st.n"})
     announcing = BackgroundTasks()
-    signed_in = await auth.callback(request, announcing, "google")
-    set_by_sign_in = cookies(signed_in)
+    welcomed = await auth.callback(request, announcing, "google")
+    set_by_sign_in = cookies(welcomed)
     assert set_by_sign_in[auth.OAUTH_FLOW_COOKIE_NAME] in ('""', ""), (
         "a used flow stayed replayable"
     )
@@ -816,11 +841,11 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
 
     monkeypatch.setattr(account, "sign_in", unrecordable)
     open_sessions = sorted(paths.sessions_dir.iterdir())
-    refused = await auth.callback(request, BackgroundTasks(), "google")
-    assert refused.headers["location"] == "/?auth_error=signin_unavailable", (
+    unrecorded = await auth.callback(request, BackgroundTasks(), "google")
+    assert unrecorded.headers["location"] == "/?auth_error=signin_unavailable", (
         "a sign-in the trail could not record went through, or answered the tab with raw JSON"
     )
-    assert SESSION_COOKIE_NAME not in cookies(refused)
+    assert SESSION_COOKIE_NAME not in cookies(unrecorded)
     assert sorted(paths.sessions_dir.iterdir()) == open_sessions, "a refused sign-in left a session"
 
 

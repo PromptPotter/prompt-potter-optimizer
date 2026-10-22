@@ -112,6 +112,3 @@ async def _generate_or_load(ctx: NodeContext[L1GenerateKnobs]) -> L1Generation:
         generation.proposals, ctx.parent, parent_pipeline_params, ctx.rounds
     )
     return replace(generation, proposals=checked)
-
-
-__all__ = ["l1_readout", "propose_l1_population", "variants_this_round"]

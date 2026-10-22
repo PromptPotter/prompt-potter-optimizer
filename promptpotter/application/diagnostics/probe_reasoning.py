@@ -117,6 +117,3 @@ def profile_suggestion(model: str, readings: list[RungReading]) -> str:
         lines.append(f"        indistinct_efforts=frozenset({inner}),")
     lines.append("    ),")
     return "\n".join(lines)
-
-
-__all__ = ["RungReading", "probe_reasoning", "profile_suggestion"]

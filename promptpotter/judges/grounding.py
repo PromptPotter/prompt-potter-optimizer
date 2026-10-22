@@ -11,8 +11,6 @@ if TYPE_CHECKING:
 
     from promptpotter.domain.scoring import MeasuredCell
 
-__all__ = ["ANSWER_GROUNDING", "EVIDENCE_RETRIEVAL"]
-
 
 # The TAIL is kept: a trace opens with setup identical across candidates.
 _TRACE_CAP = 6000

@@ -137,32 +137,3 @@ def acting_principal(identity: IdentityContext) -> Principal:
     if isinstance(claimed, str) and claimed and claimed != identity.user_id:
         return Principal(claimed, claimed)
     return Principal(identity.user_id, display_name(identity.email) or identity.user_id)
-
-
-__all__ = [
-    "CAMPAIGN_BABYSIT_CAP",
-    "CAMPAIGN_BUDGET_CAP",
-    "CAMPAIGN_CAP_BY_NAME",
-    "CAMPAIGN_CREATE_CAP",
-    "CAMPAIGN_LIFECYCLE_CAP",
-    "CAMPAIGN_LOOKAHEAD_CAP",
-    "CAMPAIGN_RUN_CAP",
-    "CAMPAIGN_STEP_CAP",
-    "OWNER_COMMAND_CAPABILITIES",
-    "SYSTEM_PRINCIPAL",
-    "TERMINAL_IDENTITY_ID",
-    "AccessState",
-    "IdentityContext",
-    "Issuer",
-    "Principal",
-    "SafeName",
-    "TenantId",
-    "UserId",
-    "acting_principal",
-    "capabilities_from_names",
-    "default_identity",
-    "display_name",
-    "has_capability",
-    "require_capability",
-    "safe_name",
-]

@@ -10,8 +10,6 @@ from promptpotter.application.maintenance.restamp import (
 )
 from promptpotter.presentation.cli.commands.result import CommandResult
 
-__all__ = ["cmd_restamp"]
-
 
 async def cmd_restamp(args: argparse.Namespace) -> CommandResult:
     apply: bool = args.apply

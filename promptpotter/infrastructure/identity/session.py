@@ -108,6 +108,3 @@ class OIDCSessionStore:
 
     def _path(self, session_id: str) -> Path:
         return self._dir / f"{session_id}.json"
-
-
-__all__ = ["OIDCSessionStore", "SessionData"]

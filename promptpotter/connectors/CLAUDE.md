@@ -3,7 +3,7 @@
 Each connector packages everything PromptPotter needs to talk to one
 backend kind. A connector is one file under this package exporting a
 ``Connector(...)`` binding (`protocol.py`) as `CONNECTOR`. Operating one is local too: model/provider switches go in
-`dataset.yaml::pipeline.nodes.{name}.config`, picked from the menu
+`dataset.yaml` `pipeline.nodes.{name}.config`, picked from the menu
 `Connector.available_models` seeds into that file — never in the backend's repo.
 
 **Adding one is local to `connectors/<name>.py` + a dataset directory, and the way that
@@ -297,16 +297,16 @@ start containers is never a tenant's choice.
 ## Conventions
 
 - **An optional import is DECLARED, on `Connector.extra`** — launch refuses on it
-  (`admission.py::probe_backend`) and the listing blocks on it before a row is read
-  (`startability.py::dataset_extra`), so no connector checks `installed()` itself.
+  (`application/jobs/launcher/admission.py::probe_backend`) and the listing blocks on it before a row is read
+  (`application/datasets/startability.py::dataset_extra`), so no connector checks `installed()` itself.
 - Wire adapters are pure functions: `(query, pipeline_params) -> dict`.
   No I/O, no logging beyond debug-level drops. The `identity_config` layer never reaches one —
-  `sample_measurement.py::measure_sample` removes it first.
+  `application/scoring/sample_measurement.py::measure_sample` removes it first.
 - `extract_experiment` returns the panel's rows, and declaring it is what `owns_panel`
   reads; a connector with no panel states its answer shape on the
   rows its dataset loads. The retrieval term index is run init's, never a connector's.
 - **A connector that `owns_panel` OWNS its dataset's `panel`, and
-  `dataset_access.py::dataset_experiment` is its ONE reader** — `init_services`, and every read
+  `infrastructure/store/dataset_access.py::dataset_experiment` is its ONE reader** — `init_services`, and every read
   outside a run: `GET /datasets`, `/origins`, `/cells` and the campaign pipeline. L4's
   `runner/inner/` reads the panel off the run's workload, never the file. Ordered before the row
   ladder, never a fallback: rows cached under the same name describe a different instrument, and
@@ -320,9 +320,9 @@ start containers is never a tenant's choice.
   a judge, which is handed the measured row and never the `Sample`.
 - **Declare every key the payload always carries** in
   `Connector.required_observation_keys`. An undeclared key is dropped at
-  `sample_measurement.py::measure_sample` and never reaches `pipeline_data`, so the
+  `application/scoring/sample_measurement.py::measure_sample` and never reaches `pipeline_data`, so the
   scoring formula grades a measurement it never received and nothing raises;
-  `wiring.py::_verify_required_observation_keys` RAISES at init instead. Unlike
+  `application/initialization/wiring.py::_verify_required_observation_keys` RAISES at init instead. Unlike
   revision pinning below this is a wrong number, not drift — so it fails the run.
   Empty (default) = the backend guarantees no key.
 - **A verifier-graded cell says WHY it scored as it did on `pipeline_data.outcome_note`** — one

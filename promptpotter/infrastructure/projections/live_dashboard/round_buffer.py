@@ -81,6 +81,3 @@ class RoundBuffer:
         self.race_member = member
         self.race_current_id = current_id
         self.race_n_samples = n_samples
-
-
-__all__ = ["RoundBuffer", "WalkedSample"]

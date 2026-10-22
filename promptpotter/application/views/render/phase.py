@@ -242,14 +242,3 @@ def render_completion(
             " + readout.log",
         ]
     return "\n".join(out)
-
-
-__all__ = [
-    "fmt_elapsed",
-    "render_completion",
-    "render_patience_status",
-    "render_progress_table",
-    "render_round_stats",
-    "round_verdict_basis",
-    "stop_lines",
-]

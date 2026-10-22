@@ -114,8 +114,6 @@ def interpolate_pipeline_params(
     return out
 
 
-__all__ = ["execute_stale_data_protocol", "measure_sample"]
-
 # Kept whatever the schema declares; ``pipeline_params`` is NOT here: the archive lifts it onto the index entry.
 _INFRA_KEYS: frozenset[str] = frozenset(
     {

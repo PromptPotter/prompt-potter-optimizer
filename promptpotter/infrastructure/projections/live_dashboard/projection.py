@@ -20,7 +20,13 @@ from promptpotter.domain.phase_views import (
     OptimizerStepEnterView,
     RoundStartView,
 )
-from promptpotter.domain.phases import STOP_REASON_INFO, CampaignPhase, DashboardState, RunPhase
+from promptpotter.domain.phases import (
+    STOP_REASON_INFO,
+    CampaignPhase,
+    DashboardState,
+    ErrorRecord,
+    RunPhase,
+)
 from promptpotter.domain.results import Concluded, Measuring
 from promptpotter.domain.results_health import is_degraded
 from promptpotter.domain.round_audit import LoopWarning, NodeBlock
@@ -29,7 +35,6 @@ from promptpotter.domain.run_records import (
     BackendWarningRecord,
     CycleRecord,
     ElectionRecord,
-    ErrorRecord,
     FlightRecord,
     LLMCallProgressRecord,
     LLMCallRecord,
@@ -637,6 +642,3 @@ def _folded(cut: Cut) -> LiveDashboardProjection | None:
     for offset, record in history.iter(limit):
         view.on_record(record, offset)
     return view
-
-
-__all__ = ["LiveDashboardProjection", "fold_at", "materializing_over", "resolve_resume_state"]

@@ -18,7 +18,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.export import PromptExport
     from promptpotter.domain.run_records import RoundClosedRecord
 
-__all__ = ["MLflowSink", "register_export"]
 
 _CYCLE = "promptpotter.cycle_id"
 _ROUND = "promptpotter.round"

@@ -226,6 +226,3 @@ def to_markdown(view: LogMdView) -> str:
         parts += _json_block("Pipeline params", view.final.result_pipeline_params)
 
     return "\n".join(parts).rstrip() + "\n"
-
-
-__all__ = ["to_markdown"]

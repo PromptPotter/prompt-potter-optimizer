@@ -29,8 +29,8 @@ values of its own carries a one-line `dataset.yaml` as its marker.
 
 **Every reader sees the definition chain laid together** (`infrastructure/store/dataset_access.py::definition_chain`):
 `defaults.yaml`, then each `family.yaml` / `dataset.yaml` from the root down, then the leaf. Each section
-merges by the kind it is: `campaign` depth-first (`campaign_config.py::merge_config_layers`); `pipeline`
-by top-level replacement with nodes through `pipeline_parsing.py::merge_node_blocks` — a default node is a
+merges by the kind it is: `campaign` depth-first (`application/campaign_config.py::merge_config_layers`); `pipeline`
+by top-level replacement with nodes through `domain/pipeline_parsing.py::merge_node_blocks` — a default node is a
 TEMPLATE, so only a node the dataset itself names receives it; `source` and `panel` key by key, a panel's local paths resolving against the deepest layer declaring a panel key.
 `task.md` and `README.md` are the nearest file; `origin.yaml` merges root-first. A value equal to what
 the chain already holds is deleted from the lower file, never restated; one that needs less than an upper
@@ -39,7 +39,7 @@ its reader derives: a knob at its schema default, a `pipelines.default` naming e
 the dataset's name, which is its path.
 
 **What a cell hashes is the merged document**, so moving a value between layers moves no key — and the
-campaign half validated, through `campaign_config.py::CampaignConfig.identity`, which drops every schema
+campaign half validated, through `application/campaign_config.py::CampaignConfig.identity`, which drops every schema
 default and the `optimizer`/`nodes` its optimizer's `Treatment` resolves against the manifest. Only
 install content has a chain: a tenant upload is whole.
 
@@ -63,7 +63,7 @@ unpinned one raises at parse; a moving ref would move the name onto a bank nobod
 
 ## Sole route for backend tunable changes
 
-**Backend overlay (`dataset.yaml::pipeline.nodes.{name}.config`) is the only way to switch model, provider, temperature, or anything in a node's `optimizer.param_keys`.** Never edit the backend repo (including the co-owned TermNorm backend) to achieve a tunable switch. Pipeline-agnostic is a §0 commitment.
+**Backend overlay (`dataset.yaml` `pipeline.nodes.{name}.config`) is the only way to switch model, provider, temperature, or anything in a node's `optimizer.param_keys`.** Never edit the backend repo (including the co-owned TermNorm backend) to achieve a tunable switch. Pipeline-agnostic is a §0 commitment.
 
 `load_dataset_node_overlay` → `configure_and_apply_pipeline()` (`application/pipeline_resolve.py`) merges the overlay onto each wire payload. **The dataset owns its task model** in `nodes.{node}.config.model` — every LLM node must declare one, or `configure_and_apply_pipeline` raises a loud setup error (no silent fall-through to the backend's own default).
 

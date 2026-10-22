@@ -14,7 +14,7 @@ from typing import Any, NamedTuple
 from pydantic import Field
 
 from promptpotter.domain import activity
-from promptpotter.domain.activity import ActivityFeed, ActivityItem
+from promptpotter.domain.activity import MAX_RAY_LIMIT, ActivityFeed, ActivityItem
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath, encode_cycle_path
 from promptpotter.domain.projection_envelope import RECORD_KINDS, bearing_record
 from promptpotter.domain.run_records import LLMCallProgressRecord
@@ -27,19 +27,6 @@ from promptpotter.infrastructure.store.layout import (
 from promptpotter.infrastructure.store.lineage_queries import FamilyCourse
 from promptpotter.infrastructure.store.read_model import LineIndex
 from promptpotter.shared.clock import epoch_seconds
-
-__all__ = [
-    "DEFAULT_RAY_LIMIT",
-    "MAX_RAY_LIMIT",
-    "RayItem",
-    "RayResponse",
-    "build_family_ray",
-    "decode_ray_cursor",
-    "ray_validator_parts",
-]
-
-DEFAULT_RAY_LIMIT = 200
-MAX_RAY_LIMIT = 1000
 
 # `encoded_path`, not the walk's rank: a rank is request-relative, so cursors would not compare.
 RayCursor = tuple[float, str, int]

@@ -535,17 +535,3 @@ class OpenAICompatibleClient(LLMClientBase):
         return try_groq_json_validate_repair(
             exc, request_params, self._provider_name, response_model
         )
-
-
-__all__ = [
-    "PROVIDER_DEFAULT_EFFORT",
-    "PROVIDER_REQUEST_PARAMS",
-    "OpenAICompatibleClient",
-    "billed_cost",
-    "gateway_body",
-    "reply_bill",
-    "reply_cost",
-    "reply_served_by",
-    "reply_usage",
-    "sent_effort",
-]

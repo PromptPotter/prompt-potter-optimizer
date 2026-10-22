@@ -30,8 +30,6 @@ from promptpotter.infrastructure.store.io import write_json
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import Moment
 
-__all__ = ["CycleIndexProjection", "read_cycle_index", "write_cycle_index"]
-
 
 def read_cycle_index(cycle_dir: Path, *, moment: Moment | None) -> CycleIndex | None:
     """A cycle's own facts are its own ledger's; its rounds stand over its whole chain."""

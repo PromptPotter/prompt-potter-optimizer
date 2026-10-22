@@ -35,36 +35,31 @@ Filed at the operator's ask, ahead of everything below: each entry is a shape th
 from being SEEN, so leaving it blinds the next plan the same way (`<next-change>`). Solve as soon
 as possible. **Rides with:** the shrink arc's stage named in each entry, or any pass in that file.
 
-- **Doc invariants are prose no gate checks, and doctrine treats the doc as contract.** "No second
-  ingress" (`docs/architecture.md` §0.5, `infrastructure/CLAUDE.md`) stands beside
-  `jobs/mint.py::_write_plan` and `initialization/loop_start.py::init_cycle` side files; the standing
-  record's "aftermath" claim beside `runner/round.py::close_round`; "never writes back" beside 19
-  `Session` writers; `webapp/lib/CLAUDE.md` display sources and `chat-foundation.md`'s
-  "schema-first gate" are false. Action: every one-X / no-second-Y / nothing-reads-Z claim names its
-  `file::symbol` and a probe a `gate.py` `doc-claims` check runs; a claim with no probe is deleted;
-  the false ones go true or go in the commit that lands R1/R3/R7/W1/W5. **Re-test:** `gate.py --only doc-claims`.
+- **Most doc invariants are still prose no gate checks, and seven that carry a probe are false.**
+  `gate.py --only doc-claims` resolves every cited `file::symbol` and runs every probe; each false
+  one is filed in `scripts/gate.py::_KNOWN_FALSE` under its phrase here: *side files beside the ledger* ·
+  *the standing record split from its close* · *dashboard.json served as the head state* · *the
+  runner writes Session* · *the sidebar ignores the successor pointer* · *a second table in
+  RoundFileView* · *no schema-first gate*. Action: each goes true and its sentence states the
+  invariant again; every other one-X / no-second-Y / nothing-reads-Z claim gains a probe or is
+  deleted. **Re-test:** `gate.py --only doc-claims`.
 - **Three "the one reader" mechanisms, each owned by a different layer file** —
-  `projections/base.py::Projection`, `store/read_model.py::LedgerFold` + `ledger_scan.py::scan_*`,
+  `infrastructure/projections/base.py::Projection`, `infrastructure/store/read_model.py::LedgerFold` + `infrastructure/store/campaign_store/ledger_scan.py::scan_*`,
   `domain/activity.py::ActivityFeed` — with no roster across layers, and `adding-a-surface.md` §1
   writing the per-record cost as a recipe. Action: one concept → mechanism → owner table in
   `promptpotter/CLAUDE.md`; every reader a `LedgerFold`, projections checkouts of folds;
   `CampaignStore.ledger(hop)` the one ledger-path derivation. **Re-test:** `rg -c
   "CycleLayout\(stores.campaigns.cycle_dir" promptpotter` → 0; computed `p_record` ≤ 4.
 - **Hand mirrors blessed as contracts** — `docs/specs/api-openapi.yaml`, `events-asyncapi.yaml`,
-  `scripts/build_ts_types.py::EXPORTED_MODELS`, `__all__`, `cli/commands/verbs.py::VERBS`,
+  `scripts/build_ts_types.py::SERVED_ROOTS`, `presentation/cli/commands/verbs.py::VERBS`,
   `webapp/lib/api/commands.ts`. Action: generated or deleted (operator decided the yaml deletion
   2026-10-22). **Re-test:** one new `CommandKind` row touches ≤ 3 files.
-- **`scripts/complexity_ledger.py` prices declared names, not change cost**, and the arc bar was
-  never compared against the arc's base. Action: computed rows `p_record`, `p_served` (declared −
-  read by any surface), `p_command`, `p_member`, `test_private_reach`; the surface-ledger check
-  compares the tip row by row against `ARC_BASE` when set. Lands BEFORE the shrink arc's backbone
-  stages, so they report probe rows. **Re-test:** the ledger prints the five rows.
 - **`application/bench/node_context.py::NodeContext` grows a method per member need** (52 → 88
   public in one arc). Action: declared typed reads refused at load, ~11 methods left, a member base
   in `optimizers/nodes.py`. **Re-test:** `p_member` ≤ 12.
 - **Derived state cached by hand on `Cycle.tracking` and a mutable `Session`, mirrored by test
   namespaces**, so a reshape looks costly and stays off the brief. Action: `Cycle` properties,
-  frozen `Session` built once in `wiring.py::bind_cycle_session`, `tests/factories.py::seat` the
+  frozen `Session` built once in `application/initialization/wiring.py::bind_cycle_session`, a `seat` in `tests/factories.py` the
   one seat. **Re-test:** `rg -c "tracking\." promptpotter` → 0; renaming a `Cycle` attribute
   changes one file under `tests/`.
 - **One model is disk, ledger and wire shape at once** —
@@ -78,7 +73,7 @@ as possible. **Rides with:** the shrink arc's stage named in each entry, or any 
 A leading `NEXT` marks the one to take up cold when nothing else is in hand.
 
 - **NEXT — the default host pin is a trial with no verdict.** A model's default host
-  (`registry.py::_MODEL_PROFILES`, `default_route`) is written into every node config before it is
+  (`infrastructure/llm/registry.py::_MODEL_PROFILES`, `default_route`) is written into every node config before it is
   keyed (`domain/pipeline_overlay.py::pin_default_routes`, optimizer calls through
   `bench/llm_call.py`); a node naming `route_order`, `[]` included, opts out. Unpinned, the cache
   is no lever: an OpenRouter `session_id` hopped hosts within three calls and billed $0.055–0.077
@@ -168,8 +163,8 @@ and delete the entry if the answer is no.
 
 - **A reserved cell's bill is on no ledger, so a re-armed book holds its first such cell whole.**
   A cell that reserves (`Connector.holds_own_sends`) writes no hold of its own, so
-  `spend_book.py::unreported_on` can re-teach a book its sends and never the cell they made up.
-  Action: a hold record per reserved cell. **Rides with:** any change to `spend_book.py::reserved`
+  `infrastructure/llm/spend_book.py::unreported_on` can re-teach a book its sends and never the cell they made up.
+  Action: a hold record per reserved cell. **Rides with:** any change to `infrastructure/llm/spend_book.py::reserved`
   or to how a harbor cell is admitted.
   **Re-test:** `grep -n "emit_spend_hold" promptpotter/infrastructure/llm/spend_book.py` — none
   inside `reserved` means a resumed harbor run still opens one cell deep under a tight ceiling.
@@ -186,10 +181,10 @@ and delete the entry if the answer is no.
 - **A resume from a pause at the origin's boundary runs round 0 again.** The cells replay, so the
   round file comes back with every cell `cached` and no token counts, the ledger holds a
   second round-0 election, and potter sends `l1_critique` a second time. A pause one round later
-  resumes with every decision equal. The re-close itself is declared (`runner/loop.py::run_round_loop`:
+  resumes with every decision equal. The re-close itself is declared (`application/runner/loop.py::run_round_loop`:
   until an L1 round closes, every launch re-closes round 0, since a stopped run's file passed no
   gate); open is whether the critique re-send should read the banked `optimizer_state` instead. **Rides with:** any change to
-  `projection.py::resolve_resume_state` or the origin round in `runner/run_prep.py`. **Re-test:**
+  `infrastructure/projections/live_dashboard/projection.py::resolve_resume_state` or the origin round in `runner/run_prep.py`. **Re-test:**
   `scripts/offline_run.py --rounds 1 --rows 60` — `decisions MOVED` on the resume line means it
   still does.
 - **INVESTIGATE — two items filed with their re-tests in `.scratch/debug-arc-seed.md`**: errored
@@ -209,7 +204,7 @@ Each needs a served field declared in `api-openapi.yaml` first, then the browser
 
 - **The "waiting" line has two predicates** — `components/shell/remote/useRemoteModel.ts` and
   `lib/derivations/time-ray.ts`. Serve `dash.wait_line` once. **Decided: a call is open
-  AND its wait target is known** (`useRemoteModel.ts::waitNote`'s rule); the
+  AND its wait target is known** (`webapp/components/shell/remote/useRemoteModel.ts::waitNote`'s rule); the
   recency rule goes. **Re-test:** both predicates still present means it stands.
 
 **Unbound context that still does not raise**
@@ -241,9 +236,9 @@ means it stands.
   its length; `phases` no longer names them. A split adds modules and removes no cycle — measured,
   declined; a rename re-points some forty-six files. **Rides with:** a pass that already moves the
   stop-reason table. **Re-test:** none needed; it is a name.
-- Every CLI verb completes the registries at entry (`cli/campaign_runner.py::main`), about a second
+- Every CLI verb completes the registries at entry (`presentation/cli/campaign_runner.py::main`), about a second
   a verb, and that call is the package's one deferred import of `application`. **Rides with:** any
-  change to `wiring.py::complete_registries`. **Re-test:** time `python -m promptpotter cycles`.
+  change to `application/initialization/wiring.py::complete_registries`. **Re-test:** time `python -m promptpotter cycles`.
 
 ## Bypasses — one defect class, held for ONE holistic pass
 
@@ -260,12 +255,12 @@ The classifier and the settle rule are one (`infrastructure/llm/spend_book.py::S
 `Admission.close`); what stands is the half no edit on this side reaches: a relay's own retry loop
 runs on its own budget and reports its attempts as a count.
 - TermNorm reports `attempts` per node and ONE usage sum, so an answered repair turn and a 5xx it
-  retried read the same, and `scoring/sample_measurement.py::_uncounted_attempts` holds both as
-  unreported. Owed by `backend-api/core/llm_providers.py::llm_call`: per node, how many attempts
+  retried read the same, and `application/scoring/sample_measurement.py::_uncounted_attempts` holds both as
+  unreported. Owed by TermNorm's `llm_call` (`backend-api/core/llm_providers.py`): per node, how many attempts
   left and reported no usage (today only a timeout says so, by voiding the whole cell). **Re-test:**
   `grep -n "unreported" backend-api/core/pipeline_context.py` in the TermNorm checkout — a per-node
   count beside `attempts` closes it, and `_uncounted_attempts` then reads that count instead.
-- A unit of work's one budget (`send_pacing.py::SendBudget`) stops at the relay's door: TermNorm's
+- A unit of work's one budget (`infrastructure/llm/send_pacing.py::SendBudget`) stops at the relay's door: TermNorm's
   `_MAX_ATTEMPTS` and terminus-2 × litellm each still count under one of our attempts — retry
   loops in the relay's own code. **Re-test:** `grep -n "_MAX_ATTEMPTS = " <termnorm>/backend-api/core/llm_providers.py`
   — a literal means that budget is still its own.
@@ -278,7 +273,7 @@ runs on its own budget and reports its attempts as a count.
   sends the response schema (`output_config.format`), and sizes `max_tokens` from a stale 8192.
   The manifests offer `provider: anthropic` all the same. **Blocker:** no Anthropic credential on
   the dev machine, so none of the four can be measured, and which models reject sampling is a
-  per-model fact `registry.py::_MODEL_PROFILES` admits only as a measurement.
+  per-model fact `infrastructure/llm/registry.py::_MODEL_PROFILES` admits only as a measurement.
   **Re-test:** `settings.ANTHROPIC_API_KEY` is empty; once it holds a key, `probe-reasoning` a
   Claude model and this is one pass.
 
@@ -319,7 +314,7 @@ runs on its own budget and reports its attempts as a count.
 
 **Cross-repo (the TermNorm sibling's `backend-api`):**
 - **The TermNorm `/version` endpoint** is what remains owed on that side; this repo then
-  bumps `termnorm.py::_EXPECTED_REVISION`. **Re-test:** `termnorm.py::_EXPECTED_REVISION`
+  bumps `connectors/termnorm.py::_EXPECTED_REVISION`. **Re-test:** `connectors/termnorm.py::_EXPECTED_REVISION`
   is `None`; the moment it holds a string the endpoint landed and this entry goes.
 - **A backend fix isn't observable without clearing a cache** — PP's measurement cache and
   TermNorm's `match_database` both key on query/searchpoint, never on backend code/revision, so a

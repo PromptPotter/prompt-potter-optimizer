@@ -24,7 +24,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.run_records import RoundClosedRecord
     from promptpotter.infrastructure.store.stores import Stores
 
-__all__ = ["answer_space_signature", "earned_blocks_for", "mine_earned_blocks"]
 
 # The long fields (instruction, problem_description) are task-specific, not transferable.
 _REUSABLE_FIELDS: frozenset[str] = frozenset(

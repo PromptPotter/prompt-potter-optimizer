@@ -41,22 +41,6 @@ from promptpotter.presentation.cli.parsers import budget_from_args
 
 logger = logging.getLogger("promptpotter.presentation.cli.lifecycle")
 
-__all__ = [
-    "cmd_archive",
-    "cmd_cancel_queued",
-    "cmd_cycle_verb",
-    "cmd_delete",
-    "cmd_discard_draft",
-    "cmd_origin_gate",
-    "cmd_pause",
-    "cmd_rename",
-    "cmd_set_concurrent_cycles",
-    "cmd_set_limits",
-    "cmd_step_cycle",
-    "cmd_submit_arms",
-    "cmd_unarchive",
-]
-
 
 async def _dispatch(
     args: argparse.Namespace,

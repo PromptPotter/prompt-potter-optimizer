@@ -91,6 +91,3 @@ async def cmd_ab(args: argparse.Namespace) -> CommandResult:
         human = "\n".join(lines)
 
     return CommandResult(data=report.to_dict(), human=human)
-
-
-__all__ = ["cmd_ab"]

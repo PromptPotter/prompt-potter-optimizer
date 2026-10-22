@@ -77,6 +77,3 @@ def _retire(path: Path) -> None:
 def _producer_path(jobs_dir: Path, producer_id: str) -> Path:
     validate_path_component(producer_id)
     return jobs_dir / _PRODUCERS_DIR / f"{producer_id}.lock"
-
-
-__all__ = ["admission_lock", "producer_alive", "this_producer", "this_producer_lock"]

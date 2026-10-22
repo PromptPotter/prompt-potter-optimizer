@@ -19,7 +19,7 @@ from promptpotter.application.preflight import (
 )
 from promptpotter.application.runner.inner.spawn_context import retarget_inner_spawn
 from promptpotter.application.scoring.classification import build_degradation_checks
-from promptpotter.application.scoring.formula import cell_channels_of
+from promptpotter.application.scoring.formula.compiler import cell_channels_of
 from promptpotter.application.scoring.sample_measurement import cell_bound
 from promptpotter.application.views.ingress import init_enter, init_exit
 from promptpotter.domain.bench import BankPartition, partition_bank, restored_partition
@@ -433,13 +433,3 @@ async def init_optimization_loop(
         resumed_from_round=resumed_from_round,
     )
     return cycle
-
-
-__all__ = [
-    "cycle_partition",
-    "diagnostic_pass",
-    "init_cycle",
-    "init_optimization_loop",
-    "populate_session_scoring",
-    "scope_memory",
-]

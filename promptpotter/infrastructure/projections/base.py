@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, ClassVar, get_args
 
+from promptpotter.domain.phases import ErrorRecord
 from promptpotter.domain.run_records import (
     AccountEventRecord,
     ArmRecord,
@@ -15,7 +16,6 @@ from promptpotter.domain.run_records import (
     CycleSeedRecord,
     CycleSupersededRecord,
     ElectionRecord,
-    ErrorRecord,
     FlightRecord,
     ForkGradedRecord,
     InterventionRecord,
@@ -49,8 +49,6 @@ from promptpotter.domain.run_records import (
     TokenUsageRecord,
     TrailTombstoneRecord,
 )
-
-__all__ = ["Projection"]
 
 type _Handler = Callable[[Projection, Any], None]
 

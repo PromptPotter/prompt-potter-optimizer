@@ -22,8 +22,6 @@ if TYPE_CHECKING:
 
     from promptpotter.domain.command_kinds import SubmitArmsPayload
 
-__all__ = ["Flight", "FlightGauge", "RunControl"]
-
 
 @dataclass(frozen=True)
 class Flight:

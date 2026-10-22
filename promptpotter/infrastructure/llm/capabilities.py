@@ -231,15 +231,3 @@ async def refresh_model_capabilities(workspace: Path, *, timeout: float = 15.0) 
         return 0
     write_json(_cache_path(workspace), {"fetched_at": utcnow_iso(), "models": models})
     return len(models)
-
-
-__all__ = [
-    "CAPABILITY_FILE",
-    "MODELS_URL",
-    "STANDARD_EFFORT_LADDER",
-    "ensure_model_capabilities",
-    "refresh_model_capabilities",
-    "resolve_menu",
-    "resolve_model_capabilities",
-    "resolve_schema_menu",
-]

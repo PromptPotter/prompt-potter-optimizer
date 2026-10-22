@@ -31,8 +31,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.paired_reading import ArmKey
     from promptpotter.domain.phase_views import PhaseView
 
-__all__ = ["RunCallbacks"]
-
 
 @dataclass
 class RunCallbacks:

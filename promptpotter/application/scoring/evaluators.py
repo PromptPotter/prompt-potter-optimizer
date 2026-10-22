@@ -28,20 +28,6 @@ if TYPE_CHECKING:
 Scope = Literal["per_sample", "per_round"]
 
 
-__all__ = [
-    "DEFAULT_CELL_FORMULA",
-    "Evaluator",
-    "JudgedTerm",
-    "SampleTerms",
-    "all_evaluators",
-    "cell_terms_meta",
-    "materialize_round_values",
-    "materialize_sample_values",
-    "resolve_cell_formula",
-    "validate_campaign_evaluator",
-]
-
-
 @shapes_optimizer_prompt
 def compute_accuracy(*, results: Sequence[GradedCell], **_: Any) -> float | None:
     """``None``, never 0.0, with no scoreable row: a zero invents the worst measurement out of none."""

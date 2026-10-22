@@ -323,6 +323,3 @@ class FileSink(TraceSink):
                 **ending,
             }
         )
-
-
-__all__ = ["FileSink"]

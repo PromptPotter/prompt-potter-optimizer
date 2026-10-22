@@ -15,6 +15,3 @@ def trail_rows(trail: Trail) -> list[str]:
 
 def trail_notes(trail: Trail) -> list[str]:
     return [f"Could not read: {', '.join(trail.unreadable)}"] if trail.unreadable else []
-
-
-__all__ = ["trail_notes", "trail_rows"]

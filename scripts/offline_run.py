@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, get_args
 
 import yaml
-from gate import RamBudget, end_children_with_this_process
+from gate import RamBudget
 from last_green import OFFLINE_RUN, OFFLINE_RUN_READS, LastGreen
 from offline_world import (
     LABELS,
@@ -39,6 +39,7 @@ from offline_world import (
     draw,
     install_network,
 )
+from processes import end_children_with_this_process
 
 from promptpotter.application import optimizers
 from promptpotter.application.campaign_config import (

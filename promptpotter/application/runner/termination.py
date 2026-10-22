@@ -10,12 +10,12 @@ from typing import TYPE_CHECKING
 from promptpotter.domain.phases import (
     REFUSAL_STOPS,
     STOP_REASON_INFO,
+    ErrorRecord,
     StopLoop,
     StopOutcome,
     StopReason,
 )
 from promptpotter.domain.results import RoundAdvance
-from promptpotter.domain.run_records import ErrorRecord
 from promptpotter.infrastructure.llm.telemetry import emit_error_record, emit_round_warning
 from promptpotter.shared.errors import (
     ErrorCategory,
@@ -145,15 +145,3 @@ def standing_tripped(cycle: Cycle, standing: RunStanding) -> StopReason | None:
     if patience is not None and standing.rounds_without_advance >= patience:
         return StopReason.CONVERGED
     return None
-
-
-__all__ = [
-    "RUN_ENDS",
-    "RUN_STOPS",
-    "end_run_on",
-    "origin_gate_tripped",
-    "panel_gate_tripped",
-    "run_stop_reason",
-    "standing_tripped",
-    "target_tripped",
-]

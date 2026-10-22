@@ -35,12 +35,6 @@ shapes_optimizer_prompt(__name__)
 
 logger = logging.getLogger(__name__)
 
-__all__ = [
-    "derive_pipeline_view",
-    "merge_node_blocks",
-    "parse_pipeline_response",
-    "parse_resolved_schema",
-]
 
 WELL_KNOWN_PARAM_TYPES: dict[str, str] = {
     "temperature": "number",

@@ -206,6 +206,3 @@ def _keys(path: Path) -> frozenset[str]:
     return (
         frozenset() if rows is None else frozenset(s.key for s in Bank.read(rows["items"]).samples)
     )
-
-
-__all__ = ["BANKS_DIR", "MATERIALIZED_DIR", "UPLOADS_DIR", "TenantDatasetStore"]

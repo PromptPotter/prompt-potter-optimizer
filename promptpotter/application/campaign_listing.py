@@ -34,14 +34,9 @@ from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.account_spend import LifetimeSpend, campaign_spend
 from promptpotter.infrastructure.store.stores import Stores, descend_store, owned_campaign
 
-__all__ = [
-    "CampaignDetailResponse",
-    "CampaignListResponse",
-    "CampaignSummary",
-    "campaign_detail",
-    "list_campaigns",
-    "owned_campaign",
-]
+# A router imports no infrastructure, so it reaches these through here; strict mypy re-exports
+# an import only by this list.
+__all__ = ["owned_campaign"]
 
 
 class CampaignSummary(StrictModel):

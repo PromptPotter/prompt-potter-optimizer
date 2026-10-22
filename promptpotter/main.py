@@ -255,6 +255,3 @@ app.include_router(site_records_router, prefix="/api/v1")
 # A catch-all, so it MUST stay the last route registered: Starlette resolves in order.
 if WEBAPP_DIR.exists():
     app.mount("/", StaticFiles(directory=WEBAPP_DIR, html=True), name="webapp")
-
-
-__all__ = ["WEBAPP_DIR", "app", "lifespan"]

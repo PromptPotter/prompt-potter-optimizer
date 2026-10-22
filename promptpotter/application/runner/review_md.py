@@ -33,8 +33,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.round_audit import RoundAudit
     from promptpotter.domain.run_records import CycleFinal, WallClock
 
-__all__ = ["render_review_md"]
-
 
 def render_review_md(
     index: CycleIndex,

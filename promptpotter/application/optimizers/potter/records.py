@@ -12,17 +12,6 @@ from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
-__all__ = [
-    "POTTER_MANIFEST",
-    "L1Layout",
-    "L1Readout",
-    "L2Memory",
-    "L3Memory",
-    "Ladder",
-    "LayerCounters",
-    "PotterCheckpointKind",
-]
-
 PotterManifest = Literal["potter"]
 POTTER_MANIFEST: PotterManifest = "potter"
 

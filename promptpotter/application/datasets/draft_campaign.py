@@ -12,7 +12,7 @@ from promptpotter.application.campaign_config import (
     CampaignConfig,
     OptimizationConfig,
 )
-from promptpotter.application.scoring.formula import (
+from promptpotter.application.scoring.formula.compiler import (
     DIALS_KEY,
     parse_dials,
     spell_dials,
@@ -489,21 +489,3 @@ def default_slug_from_filename(filename: str) -> str:
         cleaned = "upload"
     safe_name(cleaned)
     return cleaned
-
-
-__all__ = [
-    "DEFAULT_BUDGET_ROUNDS",
-    "DEFAULT_SCORING_MATCHER",
-    "PREVIEW_ROWS",
-    "SETTABLE_SCALARS",
-    "DraftCampaign",
-    "EditDraftPatch",
-    "NodeOutputEdit",
-    "OptimizationOverrides",
-    "default_slug_from_filename",
-    "merge_pipeline_overlay",
-    "mint_draft_id",
-    "new_draft",
-    "owned_draft",
-    "owned_drafts",
-]

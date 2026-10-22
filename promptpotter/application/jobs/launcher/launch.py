@@ -146,13 +146,3 @@ def _report_detached(task: asyncio.Task[object], what: str) -> None:
     exc = task.exception()
     if exc is not None:
         logger.error("%s failed: %s", what, exc, exc_info=exc)
-
-
-__all__ = [
-    "Admitted",
-    "Inline",
-    "LaunchRequest",
-    "Launched",
-    "admit",
-    "launch",
-]

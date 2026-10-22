@@ -13,7 +13,6 @@ if TYPE_CHECKING:
     from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.domain.scoring import GradedCell
 
-__all__ = ["fenced", "reflection_prompt"]
 
 _FENCE = "```"
 _LANGUAGE_TAG = re.compile(r"^\S*\n")

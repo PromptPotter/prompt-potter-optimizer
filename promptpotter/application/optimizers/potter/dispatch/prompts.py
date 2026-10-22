@@ -28,14 +28,6 @@ shapes_optimizer_prompt(__name__)
 
 logger = logging.getLogger(__name__)
 
-__all__ = [
-    "base_optimizer_template",
-    "effective_optimizer_prompts",
-    "inner_template",
-    "load_optimizer_prompt",
-    "node_layout",
-]
-
 
 def base_optimizer_template(inner: SelectedOptimizer, name: str) -> OptimizerPromptTemplate:
     """Override-free, off *inner*'s manifest file unless the bench's check-in declares *name*."""

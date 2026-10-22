@@ -33,10 +33,6 @@ if TYPE_CHECKING:
 
 shapes_optimizer_prompt(__name__)
 
-__all__ = [
-    "build_l1_response_schema",
-    "effective_l1_field_names",
-]
 
 # A ceiling on a non-prompt field reads as a live cap while binding nothing.
 assert set(OPTIMIZER_PROMPT_FIELD_MAX_CHARS) <= set(OptimizerPromptTemplate.model_fields), (

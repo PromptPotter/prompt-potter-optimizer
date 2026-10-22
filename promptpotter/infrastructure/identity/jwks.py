@@ -84,6 +84,3 @@ class JWKSCache:
                 logger.warning("Skipping malformed JWK at %s: %s", jwks_uri, exc)
         with self._lock:
             self._entries[jwks_uri] = _JWKSEntry(keys=parsed, fetched_at=time.monotonic())
-
-
-__all__ = ["JWKSCache"]

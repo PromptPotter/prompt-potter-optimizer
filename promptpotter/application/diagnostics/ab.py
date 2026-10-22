@@ -14,8 +14,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.infrastructure.store.stores import Stores
 
-__all__ = ["ab_replay_campaign"]
-
 
 async def ab_replay_campaign(
     *,

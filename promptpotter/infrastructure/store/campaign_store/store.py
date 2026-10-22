@@ -779,6 +779,3 @@ class CampaignStore:
     def read_resolved_pipeline(self, hop: CycleHop) -> dict[str, Any] | None:
         raw = read_yaml_optional(self._layout(hop).resolved_pipeline)
         return raw if isinstance(raw, dict) else None
-
-
-__all__ = ["CampaignStore"]

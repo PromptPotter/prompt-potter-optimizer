@@ -88,10 +88,3 @@ async def periodic_sweep(projects_root: Path, *, interval_s: float = SWEEP_EVERY
             # A raising tick must not END the loop: all reaping would stop for the rest of the server's uptime.
             logger.exception("periodic sweep tick failed; the loop continues")
         sleep_for = interval_s
-
-
-__all__ = [
-    "periodic_sweep",
-    "reclaim_orphan_sandboxes",
-    "sweep_dead_cycles",
-]

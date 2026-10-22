@@ -9,7 +9,7 @@ around. No I/O, no async, no infrastructure imports — anything needing a
 
 | Primitive | File | Why it's settled |
 |---|---|---|
-| `JobSearchPoint` | `search_point.py` | Frozen target spec. Its cells are filed by its node chain (`measurement_archive.py::config_key`); `content_hash(dataset)` names a campaign's root only. First positional arg to `score_search_point()` (`application/scoring/search_point_scorer.py`). |
+| `JobSearchPoint` | `search_point.py` | Frozen target spec. Its cells are filed by its node chain (`infrastructure/store/measurement_archive.py::config_key`); `content_hash(dataset)` names a campaign's root only. First positional arg to `score_search_point()` (`application/scoring/search_point_scorer.py`). |
 | `OptimizerPromptTemplate` | `opt_search_point.py` | A prompt the optimizer RUNS ON, with `render()` / `compile_prompt()`; its `RENDER_ORDER` orders for cache prefixes. **A target prompt has no class**: each prompt node declares its fields IN RENDER ORDER (`NodePromptInfo.fields`, default `search_point.py::DEFAULT_PROMPT_FIELDS`), and `render_prompt(fields, order)` joins them — that order sits inside every cell key the node renders, so it is the node's, never a shared constant. Canonical prompts in the dataset's `origin.yaml`, keyed by node. |
 | `OptSearchPoint` | `opt_search_point.py` | The individual: `{locus: value}` over the pipeline's roster — `prompts` (per prompt node a `NodePrompt`: its fields by declared name + its `shots` as demo-pool `Sample.key`s) + `pipeline_params` (its resolved node config, written by `configured` alone) + `lineage` (`parent_ids`, `variations`). A `Locus` is `(node, key)`; `PipelineSchema.locus_kind` says whether it is a prompt field, the node's shots or a config param. **`loci()` is the one roster of its parts, and a child is made by `derive` / `edited` alone** (`changes: Mapping[Locus, Any]`), so each node's variation records the loci it wrote. No site reads "the first prompt node": a member that knows one prompt reads `NodeContext.prompt_node`, which refuses a roster of none or several. **Its `id` is that content, never stored**, so the same configuration reached twice is one individual and a resume names the ids its ledger holds; a REJECTED proposal measured no individual and is named by its slot (`results.py::arm_key`). **No optimizer state rides it** — that is per-optimizer typed state (`optimizer_state.py`: the `{manifest, population, prompt_hashes, slices, outputs}` envelope around registered `StatePart`s), banked on every round's close and restored from there on resume and fork. **Neither the campaign's framing nor its shots' content is on it**: `scored_prompts(schema, framing, demo=)` splices the one into the ONE prompt node declaring `problem_description` — refusing a framed chain with none or several — and resolves the other's sample keys at render, so every render of a scored prompt is handed the pool. |
 | `CheckpointKind` | `run_records.py` | The base every decision-kind enum subclasses — the bench's `BenchCheckpointKind` here, each optimizer's in its own package — so a decision's kind names the party that took it; a ledger record carries its value. Whether a resume re-derives a kind is whether a replayer is registered for it (`application/bench/resume_and_fork/replayers.py::replayers`, the SoT for replayed-vs-archival) — no second table. |
@@ -130,9 +130,9 @@ outcome is CORRECT depends on what the payload carries:
   stay required. A missing field means the record cannot be vouched for, and a tolerant read
   hands back a winner prompt with a silently defaulted field — a wrong answer beats an
   unreadable one only until someone believes it.
-- **Ledger** — the `CycleRecord` arms. Tolerant by SKIP, not by default: `ledger.py::iter` logs
+- **Ledger** — the `CycleRecord` arms. Tolerant by SKIP, not by default: `infrastructure/ledger.py::iter` logs
   a key no arm declares and drops the WHOLE line, so a field DELETE erases every record carrying
-  it and nothing raises. Here pruning IS the repair — `restamp.py::_prune_record`, derived from
+  it and nothing raises. Here pruning IS the repair — `application/maintenance/restamp.py::_prune_record`, derived from
   the union and, inside `optimizer_state`, from each part's registered kind, so no field delete
   needs a migration of its own.
 
@@ -144,5 +144,4 @@ renamed field's value.
 
 - Frozen models by default; lineage via `derive()`, never mutation.
 - `mypy` `strict = true` is **global** (`pyproject.toml`), not a per-layer tier: the only
-  overrides are `tests.*` (loose by charter) and a third-party `follow_imports = "skip"`
-  list. `domain/` is not an `Any`-free zone either — the ledger's `any_params` tracks that debt.
+  override is a third-party `follow_imports = "skip"` list. `domain/` is not an `Any`-free zone either — the ledger's `any_params` tracks that debt.

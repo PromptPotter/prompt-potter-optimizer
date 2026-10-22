@@ -306,13 +306,22 @@ OPENROUTER_ENDPOINTS = {
 }
 
 
+def _harbor_registry() -> str:
+    from harbor.constants import DEFAULT_REGISTRY_URL
+
+    url: str = DEFAULT_REGISTRY_URL
+    return url
+
+
 class Router:
     """The world: the backend at its address, an LLM on any of its wires, an empty model
-    catalogue; anything else is named in `unrouted` and refused."""
+    catalogue, Harbor's registry once one is published; anything else is named in `unrouted`
+    and refused."""
 
     def __init__(self, llm: FakeLLM, backend: FakeBackend) -> None:
         self.llm = llm
         self.backend = backend
+        self.registry: list[dict[str, Any]] | None = None
         self.unrouted: set[str] = set()
 
     def route(
@@ -327,6 +336,8 @@ class Router:
         elif f"{u.netloc}{u.path}" == "openrouter.ai/api/v1/models":
             # No model claims a capability, so a run reads the measured profiles alone.
             answered = _json(200, {"data": []}, request)
+        elif self.registry is not None and f"{u.scheme}://{u.netloc}{u.path}" == _harbor_registry():
+            answered = _json(200, self.registry, request)
         if answered is None:
             self.unrouted.add(f"{request.method} {u.scheme}://{u.netloc}{u.path}")
             return _json(404, {"error": "offline run: no route"}, request)

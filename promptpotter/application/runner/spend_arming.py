@@ -73,6 +73,3 @@ def declare_round_allowance(session: Session, step_rounds: int | None) -> None:
     )
     if standing.pause_at_round != pause_at_round:
         campaigns.write_standing_budget(session.hop, standing.budget, pause_at_round=pause_at_round)
-
-
-__all__ = ["arm_run_controls", "declare_round_allowance", "rebase_held", "stand_held_budget"]

@@ -128,47 +128,6 @@ that one says which task bytes ran and this one which grader read the answer. Bo
 neither a tunable — nothing may put either in `param_keys`."""
 
 
-__all__ = [
-    "CampaignPipelineResponse",
-    "CampaignRunsWith",
-    "DatasetPipelineResponse",
-    "KnobRow",
-    "KnobSwitch",
-    "NodeKnobs",
-    "OptimizerEntry",
-    "OptimizerKnobsResponse",
-    "OptimizerPipelineResponse",
-    "OptimizerRoster",
-    "OptimizerSetup",
-    "PoolDraw",
-    "PoolRow",
-    "RunsWithParam",
-    "VendorModels",
-    "apply_identity_layer",
-    "campaign_runs_with",
-    "configure_and_apply_pipeline",
-    "dataset_pipeline_declaration",
-    "defaults_drift",
-    "draft_config",
-    "draft_config_rows",
-    "draft_pipeline",
-    "line_config",
-    "measurement_node",
-    "merge_declared_layers",
-    "optimizer_knobs",
-    "optimizer_roster",
-    "optimizer_setup",
-    "overlay_dataset_pipeline",
-    "resolve_campaign_config",
-    "resolve_pipeline_at",
-    "resolve_pipeline_config_params",
-    "resolve_pipeline_for_campaign",
-    "resolve_pipeline_for_dataset",
-    "resolve_pipeline_for_draft",
-    "resolve_pipeline_for_optimizer",
-]
-
-
 def resolve_pipeline_config_params(
     active: list[str],
     campaign_overlay: Mapping[str, Any],

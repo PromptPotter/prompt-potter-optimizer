@@ -21,12 +21,6 @@ from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.round_audit import NodeBlock, RoundAudit
 from promptpotter.domain.search_point import PARAM_SCOPE_KEYS
 
-__all__ = [
-    "CHECK_REGISTRY",
-    "extract_l1_variants",
-    "run_all_checks",
-]
-
 
 def _l1_block(audit: RoundAudit | None) -> NodeBlock | None:
     return None if audit is None else audit.nodes.get("l1_generate")

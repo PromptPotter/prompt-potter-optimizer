@@ -7,8 +7,6 @@ from pydantic import Field
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.strict_model import FrozenModel
 
-__all__ = ["InnerCellFacts"]
-
 
 class InnerCellFacts(FrozenModel):
     """Carried BESIDE the measurement, never as ``OuterSampleProxies`` fields the formula could score."""

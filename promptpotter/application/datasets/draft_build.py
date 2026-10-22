@@ -22,7 +22,7 @@ from promptpotter.application.pipeline_resolve import (
     draft_config,
     resolve_pipeline_for_draft,
 )
-from promptpotter.application.scoring.formula import SCORING_FUNCTIONS
+from promptpotter.application.scoring.formula.matchers import SCORING_FUNCTIONS
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.pipeline_schema import (
     CANDIDATE_LIBRARY,

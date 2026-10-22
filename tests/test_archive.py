@@ -12,29 +12,31 @@ import contextvars
 import json
 import threading
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 from unittest import mock
 
 import pytest
 from factories import (
     arm_state,
+    arm_walk,
+    close_round,
     election,
-    level_series,
     loop_session,
     measurement,
     measurements,
     minted_campaign,
     optimizer_state,
     pipeline_schema,
-    pobb_knobs,
     prompted,
     score_summary,
+    seat,
+    set_line,
     sheet,
     workspace,
 )
 
 from promptpotter.application import optimizers
+from promptpotter.application.bench.cycle import Cycle, CycleRoundState
 from promptpotter.application.bench.difficulty import ruler_rows
 from promptpotter.application.bench.node_context import NodeContext
 from promptpotter.application.bench.resume_and_fork.fork_siblings import (
@@ -52,9 +54,9 @@ from promptpotter.application.maintenance.archive_maintenance import (
 )
 from promptpotter.application.optimizers.nodes import (
     MeasuredRound,
+    Panel,
     Proposals,
     ReadArm,
-    RoundContext,
 )
 from promptpotter.application.optimizers.potter.election import elect_on_theta
 from promptpotter.application.optimizers.potter.pobb.checks import EliminationGate
@@ -63,10 +65,9 @@ from promptpotter.application.origin import (
     resolve_origin_opt_search_point,
     try_inherit_fork_origin,
 )
-from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.scoring import query_loop, search_point_scorer
 from promptpotter.application.scoring.closed_rounds import closed_rounds
-from promptpotter.application.scoring.formula import compile_scorer
+from promptpotter.application.scoring.formula.compiler import compile_scorer
 from promptpotter.application.scoring.measurement_log import open_cell
 from promptpotter.application.scoring.search_point_scorer import replayable_on
 from promptpotter.config.paths import MEASUREMENTS_DIR
@@ -74,15 +75,12 @@ from promptpotter.domain.bench import DatasetSplit, partition_bank
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.optimizer_state import UnregisteredStatePartError
-from promptpotter.domain.paired_reading import ReadingState
+from promptpotter.domain.paired_reading import ArmKey, ReadingState
 from promptpotter.domain.pipeline_schema import NodePromptInfo, PipelineNode
 from promptpotter.domain.results import (
-    ArmKey,
     ArmSlot,
     OverlapReading,
-    Proposed,
     RoundResult,
-    RunStanding,
 )
 from promptpotter.domain.run_records import (
     AnnouncedArms,
@@ -91,20 +89,15 @@ from promptpotter.domain.run_records import (
     CycleSeed,
     ForkSpec,
     ForkTrigger,
+    OriginSource,
     ResumeCheckpointRecord,
-    RoundClosedRecord,
     RoundEnteredRecord,
-    SampleScoredRecord,
 )
 from promptpotter.domain.sample import ArchiveEntry, Bank, Sample, sample_key
 from promptpotter.domain.scoring import GRADE_KEYS, MeasuredCell
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.llm.telemetry import (
-    at_round,
-    reset_cycle_ledger,
-    set_cycle_ledger,
-)
+from promptpotter.infrastructure.llm.telemetry import reset_cycle_ledger, set_cycle_ledger
 from promptpotter.infrastructure.store import archive_queries, measurement_archive
 from promptpotter.infrastructure.store.archive_queries import (
     ArmOf,
@@ -127,6 +120,7 @@ from promptpotter.infrastructure.store.measurement_archive import (
     config_key,
     standing,
 )
+from promptpotter.infrastructure.store.read_model import append_row
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.identity import SYSTEM_PRINCIPAL
 from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole
@@ -203,9 +197,13 @@ def _walk_panel(
         name="claims",
         nodes=[PipelineNode(name="solve", tunes_llm=False, prompt_info=NodePromptInfo())],
     )
-    session = loop_session(workspace(root), schema, panel if bank is None else bank, backend_id="b")
-    session.source = RunSource.OPTIMIZATION_LOOP
-    session.scoring.scorer = compile_scorer(per_sample, per_cell, verifier_graded=False)
+    session = loop_session(
+        workspace(root),
+        schema,
+        panel if bank is None else bank,
+        backend_id="b",
+        scorer=compile_scorer(per_sample, per_cell, verifier_graded=False),
+    )
     sp = prompted(instruction="Answer.").to_job_search_point(
         schema=schema, framing=TaskDecomposition(), demo=[]
     )
@@ -336,7 +334,7 @@ def test_the_archive_on_disk_keeps_every_paid_answer(
         (3, "ERROR", _LLM_ONLY, {"error_category": "transient"}),
         (4, "elsewhere", other, {}),
     ):
-        row = {"sample_key": "k1", "predicted": said, **facts}
+        row: dict[str, Any] = {"sample_key": "k1", "predicted": said, **facts}
         refs += _file(
             archive,
             [row],
@@ -374,7 +372,7 @@ def test_the_archive_on_disk_keeps_every_paid_answer(
         _bank(sid)
     assert set(feed.advance()) == {"k1", "k2", "k3"}
     file_key = config_key(tailed)
-    cells = archive._cell_path(file_key)
+    cells = archive.cell_path(file_key)
     read_to = cells.stat().st_size
     # Rewritten IN PLACE, as an ext4 swap onto a freed inode reads: every line kept, each shorter.
     cells.write_text("".join(ln.replace("T" * 400, "") for ln in archive.detail_lines(file_key)))
@@ -388,7 +386,6 @@ def test_the_archive_on_disk_keeps_every_paid_answer(
     # The other process files between this writer's look at the file and its own append.
     own = ReplayFeed(archive, tailed)
     own.advance()
-    append_row = measurement_archive.append_row
 
     def raced(path: Path, *rows: dict[str, Any]) -> range:
         monkeypatch.setattr(measurement_archive, "append_row", append_row)
@@ -493,17 +490,11 @@ def test_the_archive_on_disk_keeps_every_paid_answer(
     campaigns.mint_cycle(arm_root)
 
     def walk(hop: CycleHop, answers: list[str]) -> None:
-        ledger = CycleEventLog.open(CycleDir(campaigns.cycle_dir(hop)))
-        for i, answer in enumerate(answers):
-            ledger.append(
-                SampleScoredRecord(
-                    round=0,
-                    individual_id="c0",
-                    role=MeasurementRole.PANEL,
-                    position=i,
-                    result={"sample_key": ds.samples[i].key, "answer": answer},
-                )
-            )
+        arm_walk(
+            CycleEventLog.open(CycleDir(campaigns.cycle_dir(hop))),
+            ((i, (ds.samples[i].key, answer, False)) for i, answer in enumerate(answers)),
+            role=MeasurementRole.PANEL,
+        )
 
     def listed() -> set[str]:
         return {e.prompt_fields_id for e in list_populations(built_stores, ds)}
@@ -629,23 +620,20 @@ def _mint_sibling(
 
 
 def _emit_round(
-    ledger: CycleEventLog, closed: list[RoundResult], name: str, *, crowned: bool = True
+    closing: Cycle,
+    ledger: CycleEventLog,
+    closed: list[RoundResult],
+    name: str,
+    *,
+    crowned: bool = True,
 ) -> str:
     n = len(closed)
     pick = prompted(instruction=name)
-    key, slot = ArmKey(pick.id), ArmSlot(round=n, idx=0, total=1)
-    arm = arm_state(name, slot=slot, individual=pick)
-    vote = election([key] if crowned else [], ended_on=key)
-    rr = _round(round=n, arms={key: arm}, election=vote)
+    key = ArmKey(pick.id)
+    arm = arm_state(name, slot=ArmSlot(round=n, idx=0, total=1), individual=pick)
+    rr = _round(round=n, arms={key: arm}, election=election([key] if crowned else [], ended_on=key))
     closed.append(rr)
-    callbacks = RunCallbacks(ledger)
-    callbacks.on_round_entered(n)
-    callbacks.on_arm(n, key, Proposed(role=arm.role, slot=slot, individual=pick))
-    with at_round(n):
-        callbacks.on_arm(n, key, arm)
-    callbacks.on_election(n, vote)
-    ledger.append(RoundClosedRecord.of(rr, {}, level_series(0.0, [])))
-    callbacks.on_round_complete(rr, RunStanding.after(closed, lives=None), None)
+    close_round(ledger, closed, cycle=closing)
     return pick.id
 
 
@@ -681,21 +669,22 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     # A cut the live race made past an errored cell replays on the cells it was fit on.
     parent = prompted(instruction="parent")
     hits = sheet(measurements([1.0] * 10))
-    racing = SimpleNamespace(
-        optimizer=SimpleNamespace(knobs=lambda node: pobb_knobs(epsilon=0.30)),
-        config=SimpleNamespace(optimization=SimpleNamespace(elimination_n_min=4)),
-        difficulty=SimpleNamespace(ruler=None),
+    racing = seat(
+        stores,
+        round_num=3,
+        optimization={"elimination_n_min": 4, "nodes": {"pobb": {"config": {"epsilon": 0.30}}}},
         opt_sp=parent,
         # The frontier holds every cell, answered by an individual that is not the parent.
-        tracking=SimpleNamespace(current_results=list(hits), current_sp=JobSearchPoint()),
-        rounds=[_round(round=0, cells={ArmKey("origin"): hits})],
-        pending_decisions=[],
+        tracking=CycleRoundState(current_results=list(hits), current_sp=JobSearchPoint()),
     )
+    line = [_round(round=0, cells={ArmKey("origin"): hits})]
+    set_line(racing.cycle, line)
+    ten = [Sample(id=i, query=f"q{i}", ground_truth="g") for i in range(10)]
 
     def race_of() -> PoBBRace:
         return PoBBRace(
-            NodeContext(RoundContext(racing, 3, callbacks=None), optimizers.member("pobb")),  # type: ignore[arg-type]
-            SimpleNamespace(cells=list(range(10))),  # type: ignore[arg-type]
+            NodeContext(racing, optimizers.member("pobb")),
+            Panel(cells=ten, order=ten, block_size=len(ten)),
             lambda sp, sample, prior_id: None,  # type: ignore[arg-type, return-value]
             measured_unit="sample",
         )
@@ -709,7 +698,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     assert race_of().rule([]).check(walked.cells) is None, (
         "the parent's prior borrowed cells another individual answered"
     )
-    racing.rounds.append(_round(round=1, cells={ArmKey(parent.id): hits}))
+    set_line(racing.cycle, [*line, _round(round=1, cells={ArmKey(parent.id): hits})])
     race = race_of()
     reading = race.judge(
         race.rule([]).check(walked.cells),
@@ -718,7 +707,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         labels={ArmKey("c1"): "C3.1"},
     )
     assert reading is not None and reading.context["gate"] == EliminationGate.EPSILON
-    [cut] = racing.pending_decisions
+    [cut] = racing.cycle.pending_decisions
     assert cut.data["candidate_cells"] == [str(i) for i in range(8) if i != 2]
     assert replay_decisions(_round(round=3, cells={ArmKey("c1"): walked}), [cut]) is None, (
         "the cut the live rule made is not the cut its own record replays"
@@ -750,18 +739,12 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     parent, child = prompted(instruction="parent"), prompted(instruction="child")
     bar, arm = filed("P", {**shared, 9: None}), filed("C", {**shared, 9: "g"})
     assert bar.cells[9].scored and bar.cells[9].grade.fitness == 0.0, "guard"
-    electing = SimpleNamespace(
-        difficulty=SimpleNamespace(ruler=None),
-        rounds=[],
-        pending_decisions=[],
-        opt_sp=parent,
-        population=[parent],
-    )
+    electing = seat(stores, opt_sp=parent, population=[parent])
     walked_child = ArmKey(child.id)
     child_arm = arm_state("child", slot=ArmSlot(round=1, idx=0, total=1), individual=child)
     read_parent = ReadArm(ArmKey(parent.id), arm_state("parent", individual=parent), bar)
     selection = elect_on_theta(
-        NodeContext(RoundContext(electing, 1, callbacks=None), optimizers.member("theta_election")),  # type: ignore[arg-type]
+        NodeContext(electing, optimizers.member("theta_election")),
         MeasuredRound(
             arms={walked_child: child_arm},
             rows={walked_child: arm},
@@ -780,29 +763,38 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     )
     assert selection.selected == walked_child, "guard: the live election charges the error"
     charged, ledger = _minted(stores, "cycle_charged_parent")
-    ledger.append(RoundEnteredRecord(round=1))
-    ledger.append(
-        RoundClosedRecord.of(
+    origin_slot = ArmSlot(round=0, idx=0, total=1)
+    adopted = _round(
+        round=0,
+        arms={ArmKey("origin"): arm_state("origin", slot=origin_slot)},
+        election=election(["origin"]),
+    )
+    close_round(
+        ledger,
+        [
+            adopted,
             _round(
                 round=1,
                 arms={walked_child: child_arm, read_parent.key: read_parent.state},
                 election=election([walked_child]),
                 cells={walked_child: arm, read_parent.key: bar},
             ),
-            {cell.key: slot for slot, cell in enumerate(bar)},
-            level_series(0.0, [0.0]),
-        )
+        ],
+        cycle=seat(
+            stores, bank=[Sample(id=sid, query=f"q{sid}", ground_truth="g") for sid in range(10)]
+        ).cycle,
     )
     [closed_on_disk] = closed_rounds(stores, charged, scorer, moment=None)
-    [decided] = electing.pending_decisions
+    [decided] = electing.cycle.pending_decisions
     assert replay_decisions(closed_on_disk, [decided]) is None, (
         "the replay read the parent's charged error as a cell nobody scored"
     )
 
     # Rounds stand; a rewind retracts every election, close and crown past it, for every reader.
+    closing = seat(stores).cycle
     hop, ledger = _minted(stores, "cycle_rewound")
     closed: list[RoundResult] = []
-    ids = [_emit_round(ledger, closed, name) for name in ("c0", "c1", "c2")]
+    ids = [_emit_round(closing, ledger, closed, name) for name in ("c0", "c1", "c2")]
 
     def served() -> list[tuple[str, bool, bool]]:
         tree = build_lineage_tree(stores, (hop,), moment=None)
@@ -832,25 +824,30 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     # Every live fold reads the rewind off its record: a re-entered round's arm folds its new walk.
     folds = AnnouncedArms()
     walk = ArmRecord(round=1, arm=ArmKey(ids[1]), state=closed[1].arms[ArmKey(ids[1])])
-    cell = SampleScoredRecord(
-        round=1,
-        individual_id=ids[1],
+    [cell] = arm_walk(
+        CycleEventLog(stores.projects_root / "rewalk.jsonl"),
+        [(0, ("k0", "a", False))],
+        rnd=1,
+        individual=ids[1],
         role=MeasurementRole.PANEL,
-        position=0,
-        result={"sample_key": "k0", "answer": "a"},
         running=score_summary(),
     )
+    [rewind] = [
+        rec
+        for _, rec in ledger.iter()
+        if isinstance(rec, RoundEnteredRecord) and rec.rewound and rec.round == 1
+    ]
     folds.announce(walk)
     folds.take(cell)
     assert folds.fold(1, walk.arm) is not None, "guard"
-    folds.enter(RoundEnteredRecord(round=1, rewound=True))
+    folds.enter(rewind)
     with pytest.raises(LookupError):
         folds.take(cell)
     folds.announce(walk)
     assert folds.fold(1, walk.arm) is None, (
         "a re-announced arm folded the cells of the pass a rewind retracted"
     )
-    again = _emit_round(ledger, closed[:1], "c1_again", crowned=False)
+    again = _emit_round(closing, ledger, closed[:1], "c1_again", crowned=False)
     assert served() == [(ids[0], True, True), (again, True, False)]
     origin, held = build_lineage_tree(stores, (hop,), moment=None).children
     assert (origin.stands, held.stands) == (True, False), "an uncrowned re-run took the stand"
@@ -859,7 +856,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     # stops the read instead. `rewrite_lines` writes a fresh file: a ledger index takes a
     # same-inode growth for an append, and no writer here grows a file in place.
     peer, ledger = _minted(stores, "cycle_of_a_peer")
-    _emit_round(ledger, [], "c0")
+    _emit_round(closing, ledger, [], "c0")
 
     def _uninstall(lines: list[str]) -> tuple[list[str], None]:
         records = [json.loads(line) for line in lines]
@@ -880,9 +877,11 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     solving = pipeline_schema(
         [PipelineNode(name="solve", tunes_llm=False, prompt_info=NodePromptInfo())]
     )
-    parent, ledger = _minted(stores, "cycle_inherit_parent")
-    ledger.append(
-        RoundClosedRecord.of(
+    inheriting, ledger = _minted(stores, "cycle_inherit_parent")
+    close_round(
+        ledger,
+        [
+            adopted,
             _round(
                 round=1,
                 arms={
@@ -897,9 +896,8 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
                 folds={ArmKey("c1"): score_summary(total=10)},
                 election=election([], ended_on="parent"),
             ),
-            {},
-            level_series(0.0, [0.0]),
-        )
+        ],
+        cycle=closing,
     )
     fork = "cycle_inherit_parent_fork_abc123"
     spec = ForkSpec(
@@ -909,29 +907,24 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         from_round=1,
         from_candidate_id="c1",
     )
-    _mint_sibling(store, parent, fork, spec, from_round=0)
-    session = SimpleNamespace(
-        store=stores,
-        campaign_id=_CAMPAIGN,
-        state=SimpleNamespace(cycle_id=fork),
+    _mint_sibling(store, inheriting, fork, spec, from_round=0)
+    session = loop_session(
+        stores,
+        solving,
+        [],
         hop=CycleHop(campaign_id=_CAMPAIGN, cycle_id=fork),
-        experiment_extract={},
-        dataset=None,
-        pipeline_schema=solving,
         # The branch-point round banked no row here, so no cell is ever graded.
-        scoring=SimpleNamespace(
-            require_scorer=lambda: compile_scorer(
-                "label_match(predicted, ground_truth)", None, verifier_graded=False
-            )
-        ),
+        scorer=compile_scorer("label_match(predicted, ground_truth)", None, verifier_graded=False),
     )
 
     def inherit(fields: dict[str, str]) -> Any:
         # Resolved as `establish_campaign_origin` does: the fork seed wins.
-        seed = CycleSeed(origin_prompts=prompted(**fields).prompts, origin_source="fork_seed")
+        seed = CycleSeed(
+            origin_prompts=prompted(**fields).prompts, origin_source=OriginSource.FORK_SEED
+        )
         resolved = resolve_origin_opt_search_point(seed=seed, pipeline_params=None, schema=solving)
         return try_inherit_fork_origin(
-            session,  # type: ignore[arg-type]
+            session,
             seed,
             resolved_origin=resolved,
             sp=JobSearchPoint(),
@@ -979,8 +972,8 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
 
     # A fork's own ledger displaces its parent's prefix once.
     displaced, ledger = _minted(stores, "cycle_displaced")
-    closed: list[RoundResult] = []
-    prefix = [_emit_round(ledger, closed, f"p{n}") for n in range(3)]
+    closed = []
+    prefix = [_emit_round(closing, ledger, closed, f"p{n}") for n in range(3)]
     fork_hop = _mint_sibling(
         store,
         displaced,
@@ -1000,7 +993,10 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     assert candidates(fork_hop) == prefix, "the fork does not continue its parent's rounds"
     own = CycleEventLog.open(CycleDir(store.cycle_dir(fork_hop)))
     forked = closed[:1]
-    mine = [_emit_round(own, forked, "f1"), _emit_round(own, forked, "f2", crowned=False)]
+    mine = [
+        _emit_round(closing, own, forked, "f1"),
+        _emit_round(closing, own, forked, "f2", crowned=False),
+    ]
     stood = store.standing_rounds(fork_hop, moment=None)
     assert candidates(fork_hop) == [prefix[0], *mine], "a parent round stood beside the fork's own"
     assert [next(iter(r.close.arms)) for r in stood.rounds.values()] == [prefix[0], *mine]

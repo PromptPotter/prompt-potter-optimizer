@@ -304,6 +304,3 @@ async def bind_cycle_session(
     )
     session.bind_campaign(hop, purpose=campaign.declaration.purpose)
     return session, resolve_campaign_config(stores, campaign, hop)
-
-
-__all__ = ["bind_cycle_session", "complete_registries", "init_services"]

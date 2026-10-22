@@ -11,6 +11,7 @@ from promptpotter.domain.phase_views import BenchEnterView
 from promptpotter.domain.phases import (
     STOP_REASON_INFO,
     CampaignPhase,
+    ErrorRecord,
     GateDecision,
     GateKind,
     RunPhase,
@@ -35,7 +36,6 @@ from promptpotter.domain.run_records import (
     CycleSeedRecord,
     CycleSupersededRecord,
     ElectionRecord,
-    ErrorRecord,
     FlightRecord,
     ForkGradedRecord,
     InterventionRecord,
@@ -72,18 +72,6 @@ from promptpotter.domain.run_records import (
 from promptpotter.domain.spend import TokenAccount, prefix_reading
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.clock import duration_words
-
-__all__ = [
-    "LIFETIME",
-    "SILENT_RECORDS",
-    "ActivityDecision",
-    "ActivityFeed",
-    "ActivityItem",
-    "ActivityKind",
-    "ActivityState",
-    "DecisionAction",
-    "DecisionFact",
-]
 
 # A tail never validates these (`projection_envelope.py::NON_ACTIVITY_KINDS`); `_item` is total over the rest.
 SILENT_RECORDS = (
@@ -126,6 +114,10 @@ ActivityKind = Literal[
     "progress",
 ]
 ActivityTone = Literal["good", "warn", "bad", "muted"]
+
+# A time-ray window's items: what one request is served, and the most a store's ray fold keeps.
+DEFAULT_RAY_LIMIT = 200
+MAX_RAY_LIMIT = 1000
 
 # `status` lasts to the next status or run-phase declaration, `round` to the next round, `run` to the next launch.
 Lifetime = Literal["status", "round", "run"]

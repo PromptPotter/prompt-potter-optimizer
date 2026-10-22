@@ -424,34 +424,3 @@ def _read_heading(md: Path) -> tuple[str | None, str | None]:
     text = _MARKUP.sub(lambda m: m.group(1) or "", " ".join(paragraph))
     sentence = re.split(r"(?<=[.!?])\s", text, maxsplit=1)[0].strip()
     return title, sentence or None
-
-
-__all__ = [
-    "DEFINITION_FILE",
-    "FRAMING_FILE",
-    "MATERIALIZED_PANEL_FILE",
-    "ORIGIN_FILE",
-    "DatasetDefinition",
-    "DatasetFraming",
-    "DatasetTier",
-    "ResolvedDataset",
-    "backend_type_of_dataset",
-    "dataset_connector",
-    "dataset_experiment",
-    "dataset_panel_rows",
-    "declared_backend_type",
-    "declared_pipelines",
-    "definition_files",
-    "extract_panel_rows",
-    "is_dataset_dir",
-    "list_readable_datasets",
-    "nearest_file",
-    "read_dataset_definition",
-    "read_dataset_framing",
-    "read_dataset_origin",
-    "read_dataset_pipeline",
-    "read_framing_file",
-    "readable_task_context",
-    "render_framing_file",
-    "resolve_dataset",
-]

@@ -112,6 +112,3 @@ def _select_primary_verified_email(payload: object) -> str | None:
         ):
             return str(entry["email"])
     return None
-
-
-__all__ = ["GitHubProviderClient", "GitHubTokenExchangeError"]

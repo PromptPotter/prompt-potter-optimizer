@@ -7,7 +7,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from promptpotter.application.initialization.session import Session
-from promptpotter.application.scoring.formula import split_scoring_block
+from promptpotter.application.scoring.formula.compiler import split_scoring_block
 from promptpotter.application.views.render.ansi import (
     render_round_verdict,
     render_run_spend,
@@ -636,6 +636,3 @@ class ReadoutProjection(Projection):
         ).split("\n"):
             self._write(line)
         self._write(_node_bottom())
-
-
-__all__ = ["ReadoutProjection", "StatusFn"]

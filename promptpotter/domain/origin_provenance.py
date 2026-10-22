@@ -9,6 +9,3 @@ class Provenance(StrEnum):
     UNSET = "unset"
     PROPOSED = "proposed"
     CONFIRMED = "confirmed"
-
-
-__all__ = ["Provenance"]

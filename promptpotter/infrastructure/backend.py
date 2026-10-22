@@ -69,10 +69,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = [
-    "BackendClient",
-]
-
 
 def _reply_data(resp: httpx.Response) -> dict[str, Any] | None:
     try:

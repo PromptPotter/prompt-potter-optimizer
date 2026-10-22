@@ -17,7 +17,8 @@ from promptpotter.application.datasets.startability import checkin_rows
 from promptpotter.application.datasets.tabular_ingest import candidate_library_from_rows
 from promptpotter.application.optimizer_manifest import resolve_optimizer
 from promptpotter.application.pipeline_resolve import draft_config_rows
-from promptpotter.application.scoring.formula import SCORING_FUNCTIONS, parse_dials, spell_dials
+from promptpotter.application.scoring.formula.compiler import parse_dials, spell_dials
+from promptpotter.application.scoring.formula.matchers import SCORING_FUNCTIONS
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
@@ -33,13 +34,6 @@ if TYPE_CHECKING:
     from promptpotter.application.datasets.draft_campaign import DraftCampaign
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.infrastructure.store.stores import Stores
-
-__all__ = [
-    "DraftPatchPlan",
-    "apply_draft_patch",
-    "candidate_library_from_column",
-    "plan_draft_patch",
-]
 
 
 class DraftPatchPlan(NamedTuple):

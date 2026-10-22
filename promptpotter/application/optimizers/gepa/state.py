@@ -7,15 +7,6 @@ from pydantic import Field
 from promptpotter.domain.optimizer_state import RoundOutput, StateSlice
 from promptpotter.domain.strict_model import FrozenModel
 
-__all__ = [
-    "GEPA_MANIFEST",
-    "MinibatchBar",
-    "MinibatchBars",
-    "ParetoScores",
-    "ParetoSet",
-    "ReflectionModules",
-]
-
 GepaManifest = Literal["gepa"]
 GEPA_MANIFEST: GepaManifest = "gepa"
 

@@ -14,7 +14,7 @@ or talks to a network except through one of these seams.
 
 ## Persistence — one ingress, two projections
 
-**Sole ingress:** the per-cycle `CycleEventLog` (`ledger.py`, `cycles/{cycle_id}/.runtime/ledger.jsonl`). **There is no second ingress, ever.** The writer-side API above it is `RunCallbacks` (`application/run_callbacks.py`), a typed event constructor over `CycleEventLog.append`. A fork's file holds only its own appends: the parent's prefix is WALKED from the cut its `CycleMintedRecord` names, never copied. `append`, like every append to or rewrite of a shared file, serializes inside `store/io.py` (`append_line`, `rewrite_lines`, `replace_lines`): Windows runs `O_APPEND` as seek-then-write, and the record overwritten is lost without an error. It is not crash-atomic, and a rewrite goes tmp + `os.replace` keeping the line count, since the line index IS `sequence`.
+**Ingress:** the per-cycle `CycleEventLog` (`ledger.py`, `cycles/{cycle_id}/.runtime/ledger.jsonl`). **Side files still stand beside it** — the resolved pipeline and experiment, the bank partition and the campaign's `result.json`, each a path `store/layout.py` names. <!-- probe: git grep -cE "bank_partition\.json|pipeline\.resolved\.yaml|experiment\.resolved\.yaml|result\.json" -- promptpotter/infrastructure/store/layout.py == 0 --> The writer-side API above it is `RunCallbacks` (`application/run_callbacks.py`), a typed event constructor over `CycleEventLog.append`. A fork's file holds only its own appends: the parent's prefix is WALKED from the cut its `CycleMintedRecord` names, never copied. `append`, like every append to or rewrite of a shared file, serializes inside `store/io.py` (`append_line`, `rewrite_lines`, `replace_lines`): Windows runs `O_APPEND` as seek-then-write, and the record overwritten is lost without an error. It is not crash-atomic, and a rewrite goes tmp + `os.replace` keeping the line count, since the line index IS `sequence`.
 
 Per-call telemetry firing from deep inside the dispatch chain uses the `emit_*` shape instead (`llm/telemetry.py`) — same canonical ledger. **Which shape a new surface takes** — owned by [`../application/CLAUDE.md`](../application/CLAUDE.md) § Conventions.
 
@@ -25,7 +25,7 @@ which is why a round's close carries each row's ADDRESS and never the row. The p
 (`RunCallbacks` → `domain/scoring.py::GradedCell.ledger_wire`, `ViewContext.anchors`) keeps a record to
 the union of what its subscribers RENDER.
 
-**A record has no live-only half.** Every field is declared and persisted, so a subscriber folding live and a reader folding off disk hold the same value at every offset; a subscriber that renders a whole round folds its `RoundClosedRecord`, and `RoundStandingRecord` after it carries what only the close's aftermath knows. A fact one fold needs and the record lacks is added to the record — never handed past it in memory, where a resume sees nothing: no error, just zeros, and budget re-spent. `application/maintenance/restamp.py::compact_cycle_ledgers` re-projects written records by CALLING the writer's projections, and lifts no retired shape across.
+**A record has no live-only half.** Every field is declared and persisted, so a subscriber folding live and a reader folding off disk hold the same value at every offset; a subscriber that renders a whole round folds its `RoundClosedRecord` and the `RoundStandingRecord` after it, though `application/runner/round.py::close_round` computes the standing before the close is written. <!-- probe: git grep -cE "class RoundStandingRecord" -- promptpotter/domain/run_records.py == 0 --> A fact one fold needs and the record lacks is added to the record — never handed past it in memory, where a resume sees nothing: no error, just zeros, and budget re-spent. `application/maintenance/restamp.py::compact_cycle_ledgers` re-projects written records by CALLING the writer's projections, and lifts no retired shape across.
 
 **Newtype-guarded projections** under `projections/`:
 
@@ -36,14 +36,14 @@ the union of what its subscribers RENDER.
 | `RacingStreamProjection` (`projections/racing_stream.py`) | per cycle | `.runtime/streams/round_NNNN_{member}.jsonl` | Per-sample race standing under the eliminator `member` names, for post-hoc posterior analysis. Operator-tailable; webapp does not consume it. |
 | `ReadoutProjection` (`application/views/readout.py` — it renders through `views/render/`, so it sits a layer up) | per cycle / fork | `readout.log` | **The run readout** — the ledger stream as lines, ANSI-stripped, appended per launch. Bound at every entry point; one with a terminal hands in a line sink and sees the styled line too. |
 
-**`dashboard.json` is an operator surface, not a cache, and three guarantees hold at the writer.**
+**`dashboard.json` is an operator surface, and three guarantees hold at the writer.** The served read also takes it as the head state (`application/served_dashboard.py::_head_state`), so today it is a cache of the ledger fold too. <!-- probe: git grep -cE "def _head_state" -- promptpotter/application/served_dashboard.py == 0 -->
 An operator opening the file tree mid-run must see the truth: before deferring or skipping
 a write, answer whether they still can — and a SERVED read rests on the same guarantees
 (a served dashboard is this file, validated; a cell never is). It is **always on disk and always swapped atomically**
 (tmp + rename — never a partial write or a torn read), present after any ledger event in the cycle.
-It **settles within `_DASHBOARD_DEBOUNCE_S` of the last event** (`projection.py::_schedule_persist`
+It **settles within `_DASHBOARD_DEBOUNCE_S` of the last event** (`infrastructure/projections/live_dashboard/projection.py::_schedule_persist`
 coalesces bursts). And it flushes **immediately, with no debounce, at round boundaries**
-(`projection.py::_flush_pending_persist`), so a round's file is current before the next begins.
+(`infrastructure/projections/live_dashboard/projection.py::_flush_pending_persist`), so a round's file is current before the next begins.
 Do not relax the swap, remove those flushes, or add a path that lets the file lag past a completed
 round. The public round file carries the same atomicity, with
 `application/scoring/closed_rounds.py::RoundFileProjection` the tree's sole writer — a ledger subscriber,
@@ -52,7 +52,7 @@ round file, and it has no reader in this package or above it: the file is the op
 
 **A round IS its last `RoundClosedRecord`, and the round file is a checkout of it.** The close
 carries the whole outcome and the archive address of every row; a resume, a fork, the index and
-every served or rendered read take the rounds that STAND off the ledger chain (`ledger_scan.py::scan_standing_rounds`, rows
+every served or rendered read take the rounds that STAND off the ledger chain (`infrastructure/store/campaign_store/ledger_scan.py::scan_standing_rounds`, rows
 through `application/scoring/closed_rounds.py::closed_rounds`), never off the round files. A second writer of round truth — a file a
 resume reads, a copy a fork carries — is the bug.
 
@@ -61,8 +61,8 @@ resume reads, a copy a fork carries — is the bug.
 - **`active_node` is served**, by a `match` TOTAL over `DashboardState` (`assert_never`), naming the nodes the ledger recorded at `propose:enter` / `measure:enter` / an optimizer step's enter rather than any optimizer's literal. A partial answer does not fail loudly; it means "nothing is running", which is a lie for every state it omits.
 - **`current_round.round` is `state.round`, always**, so a reader selects this block over the audit twin by equality. There is deliberately no `live` flag beside it.
 - **`current_round.nodes` holds only THIS round's optimizer calls.** `_sticky_llm_calls` is most-recent-fire-per-slot and survives round transitions, so it is filtered by the round each block fired in: presence in the served map is the client's whole definition of "this node has fired". The measurement is not a node block: its tape and searchpoints ride `current_round.candidates`.
-- **A pass no arm walks moves the RUN's scalars and not the ROUND's population** — it counts as queries scored and drives the in-flight markers. A cell naming an arm no `ArmRecord` announced raises (`run_records.py::AnnouncedArms.take`), so every writer announces an arm before its first cell, in the cycle file that cell lands in — the SSE tail and the ray fold one file, and `RoundEnteredRecord` displaces every fold's arms from its round on.
-- **A live row is the same shape as a closed one** — `DashboardCandidate` and `DashboardSample`, both `domain/dashboard_rows.py`; `LiveCandidate` only adds what a closed round keeps in its round file. Two shapes for one entity force the client to merge them field by field. **Each field lands at the moment its FACT exists, and none of them is the round close:** the value and its band ride the scoring gateway's own fold (`search_point_scorer::_composite`) on every sample, so the whisker widens with the bar, while the crown, θ and the matched-parent lift ride `ElectionRecord`. θ cannot come sooner and its nullness before the election is a fact rather than a delay — the δ scale it is read on is fixed at measure start, when the round's arms join what it judges (`bench/difficulty.py::DifficultyView.judge`).
+- **A pass no arm walks moves the RUN's scalars and not the ROUND's population** — it counts as queries scored and drives the in-flight markers. A cell naming an arm no `ArmRecord` announced raises (`domain/run_records.py::AnnouncedArms.take`), so every writer announces an arm before its first cell, in the cycle file that cell lands in — the SSE tail and the ray fold one file, and `RoundEnteredRecord` displaces every fold's arms from its round on.
+- **A live row is the same shape as a closed one** — `DashboardCandidate` and `DashboardSample`, both `domain/dashboard_rows.py`; `LiveCandidate` only adds what a closed round keeps in its round file. Two shapes for one entity force the client to merge them field by field. **Each field lands at the moment its FACT exists, and none of them is the round close:** the value and its band ride the scoring gateway's own fold (`search_point_scorer::_composite`) on every sample, so the whisker widens with the bar, while the crown, θ and the matched-parent lift ride `ElectionRecord`. θ cannot come sooner and its nullness before the election is a fact rather than a delay — the δ scale it is read on is fixed at measure start, when the round's arms join what it judges (`application/bench/difficulty.py::DifficultyView.judge`).
 
 The **outbound SSE highway is NOT a projection/subscriber** — it *tails* the on-disk
 ledger (`projections/event_stream.py::CycleLedgerTail`), **cross-process**, so the stream
@@ -88,11 +88,11 @@ reads it from there — a 304 computed off a second copy outlives the answer it 
 **Seeding from that file may not be able to fail the run, so nothing seeds from it.**
 `resolve_resume_state` folds the seed cycle's LEDGER — a projection is never an input to itself,
 and no field on this model is on-disk shape anyone must migrate. The one reader that DOES parse the
-file (`served_dashboard.py::_head_state`; the model is `extra="forbid"`) drops a state that does
-not read as this build's WHOLE and loudly and refolds the ledger (`projection.py::fold_at`) —
+file (`application/served_dashboard.py::_head_state`; the model is `extra="forbid"`) drops a state that does
+not read as this build's WHOLE and loudly and refolds the ledger (`infrastructure/projections/live_dashboard/projection.py::fold_at`) —
 never salvaged field by field: a partial read is a compatibility shim, and the ledger is the
 truth. **What a cycle runs under is a ledger record too** (`RunWiringRecord`, declared at the
-mint and again by each launch — `run_observers.py::declare_run_wiring`), so the
+mint and again by each launch — `application/run_observers.py::declare_run_wiring`), so the
 fold needs nothing a prior file carried, and **a state exists only from that record on**: a
 replay to a moment before it (inside the check-in a root's moved-in draft ledger opens with)
 folds to `None` and serves `WarmingDashboard`.

@@ -19,6 +19,3 @@ class Treatment(FrozenModel):
     @property
     def digest(self) -> str:
         return stable_hash(self.model_dump(mode="json"))
-
-
-__all__ = ["Treatment"]

@@ -29,11 +29,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = [
-    "distil_critique",
-    "spanning_clusters",
-]
-
 
 def spanning_clusters(
     clusters: Iterable[FailureClusterReadout], rows: Iterable[int]

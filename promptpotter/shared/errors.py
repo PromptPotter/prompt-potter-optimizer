@@ -349,37 +349,3 @@ ERROR_IS_CHARGED: Annotated[dict[ErrorCategory, bool], shapes_optimizer_prompt] 
     ErrorCategory.UNKNOWN: True,
 }
 assert set(ERROR_IS_CHARGED) == set(ErrorCategory), "every ErrorCategory must take a side"
-
-
-__all__ = [
-    "ERROR_IS_CHARGED",
-    "BadRequestError",
-    "CellHaltedError",
-    "CellInfrastructureError",
-    "CellSendRefusedError",
-    "CellThrottledError",
-    "CellUnscoreableError",
-    "ConflictError",
-    "ContentTooLargeError",
-    "CycleBusyError",
-    "DatasetAccessError",
-    "DiagnosticError",
-    "ErrorCategory",
-    "MachineBusyError",
-    "ManifestUnreadableError",
-    "NotFoundError",
-    "PayloadInvalidError",
-    "PotterError",
-    "PromptCompositionError",
-    "RequestTooLargeError",
-    "ResumeDivergenceError",
-    "SendRefusedError",
-    "ServiceUnavailableError",
-    "StoredConfigInvalidError",
-    "UnauthorizedError",
-    "cell_failure",
-    "error_category",
-    "graceful",
-    "is_error_result",
-    "is_provider_credit_refusal",
-]

@@ -9,7 +9,7 @@
 ## A schemaless pipeline is a 422
 
 `init_services` raises `pipeline_config_invalid` — **422, typed rather than bare** — when the dataset's
-`dataset.yaml::pipeline` names no `backend_type`, or the declaration (a backend's answer included) names no nodes
+`dataset.yaml` `pipeline` names no `backend_type`, or the declaration (a backend's answer included) names no nodes
 or does not parse, and `backend_unreachable` when a remote backend does not answer `GET /pipeline` or
 answers a 5xx (`BackendClient.fetch_pipeline` classifies) — the local declaration overlays the backend's
 schema, never stands in for it. Every measurement is keyed on that schema, so there is no degraded run to fall through to, and a 500 here reads as `transient` to the webapp,

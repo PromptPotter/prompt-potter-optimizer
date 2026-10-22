@@ -35,10 +35,10 @@ the shape with the fewest new concepts first and rewrites its section here when 
 | Term | Means | Reuses / collides |
 |---|---|---|
 | **survey round** | a round whose arms are new starting points rather than edits of the parent | new. Not "calibration": that names the δ-ruler fit (`domain/ruler.py`), LEVI's round, and `promptpotter-self/panel` |
-| **`survey` pipeline** | the manifest walk a survey round takes | **renames** `initial_population` (`optimizers/nodes.py::INITIAL_POPULATION`) — "initial" stops describing it once the escalation can call it mid-run |
+| **`survey` pipeline** | the manifest walk a survey round takes | **renames** `initial_population` (`application/optimizers/nodes.py::INITIAL_POPULATION`) — "initial" stops describing it once the escalation can call it mid-run |
 | **standing reference** | the arm every start is read against: the origin at init, the current parent mid-run | the existing `reference_id` |
 | **band verdict** | `below_floor` · `collapsed` · `saturated` · `flat` · `in_band` | new; replaces three hand-applied band definitions (§ What it absorbs) |
-| **environment** | a (dataset, solver) pair an L4 cell measures | existing: an L4 pool seat (`promptpotter-self/pool/dataset.yaml::panel`) |
+| **environment** | a (dataset, solver) pair an L4 cell measures | existing: an L4 pool seat (`promptpotter-self/pool/dataset.yaml` `panel`) |
 
 ## The round
 
@@ -63,7 +63,7 @@ A survey round:
   `model` in `param_keys` — then an ordinary priced axis, the operator's deployment choice; otherwise
   the survey reports the band for the pinned model and moves nothing. Under L4 a model appears only as
   part of an environment, admitted per seat, never as a lever an arm earns, and never moves inside an
-  inner cell (`runner/inner/tasks.py::inner_instrument_config`). Effort stays at the model's floor
+  inner cell (`application/runner/inner/tasks.py::inner_instrument_config`). Effort stays at the model's floor
   (`application/optimizers/potter/CLAUDE.md` § Origin = conservative floor).
 - **Environments (L4 only).** The outer panel lists candidate environments; a `promptpotter-self`
   survey measures the outer origin plus K outer starting arms (optimizer-prompt variants, prompt
@@ -86,7 +86,7 @@ Computed by the backend and served; no surface recomputes it.
   focus band and the L4 admission band are two settings of one predicate, not two documents.
 - **L4:** each environment's origin cell carries the floor and modal share beside
   `domain/l4/inner_facts.py::InnerCellFacts.origin_headroom`; the admitted set is banked as a decision
-  the way `PRICED_DRAW` is (`optimizers/potter/members.py::AdaptiveQueue.draw`), and later draws read
+  the way `PRICED_DRAW` is (`application/optimizers/potter/members.py::AdaptiveQueue.draw`), and later draws read
   it. **A held-out seat is never admitted or rejected by a survey** — it is the bench, so the lift the
   pool reports stays transfer.
 
@@ -94,15 +94,15 @@ Computed by the backend and served; no surface recomputes it.
 
 ### At run init
 
-With `at_init` on, **round 1 is a survey round**: `optimizer_manifest.py::RoundPlan.walk` returns the
+With `at_init` on, **round 1 is a survey round**: `application/optimizer_manifest.py::RoundPlan.walk` returns the
 `survey` walk where no population stands — today's seeding branch, generalized. Round 0 stays the
 origin, so **C0 is still the given configuration** and every lift is read against it.
 
-The top-level manifest key `initial_population_walks` (`optimizer_manifest.py::PipelineManifest`) goes; its
+The top-level manifest key `initial_population_walks` (`application/optimizer_manifest.py::PipelineManifest`) goes; its
 `alone` / `before_default` split becomes the survey node's `races_offspring` knob (LEVI `false`, CAPO
 `true`), so the setting sits on the member that reads it.
 
-The origin gate reads the band verdict beside health: `runner/termination.py::origin_gate_tripped`
+The origin gate reads the band verdict beside health: `application/runner/termination.py::origin_gate_tripped`
 takes it, so a `strict` gate holds on `below_floor`, `collapsed` or `saturated` before any proposer
 spend.
 
@@ -155,7 +155,7 @@ off answers whether a surveyed start helps; `survey_capability` on vs off whethe
   campaign.
 - **`share` bounds every survey in a cycle together, on both axes** (`<one-budget>`): at most
   `share × budget.usd` and the same fraction of `budget.wall_clock_s`. Priced before the first send from
-  the archive's cell price (`initialization/loop_start.py::measured_cell_usd`, `cell_bound`) × rows ×
+  the archive's cell price (`application/initialization/loop_start.py::measured_cell_usd`, `cell_bound`) × rows ×
   (K + 1), and refused before it when the bound exceeds what is left — the shape
   `application/preflight.py::refuse_arm_below_round` already has. Racing makes the realised cost
   roughly the origin's × (1 + the survivors' fraction).
@@ -167,7 +167,7 @@ off answers whether a surveyed start helps; `survey_capability` on vs off whethe
 | `seed-screen` verb | Its verdict moves to `domain/`; `draw_bank` / `draw_bench` move beside `runner/inner/spawn.py`, their other reader. Whether the verb goes is open decision 3. Its sidecars stay on disk as data. |
 | `initial_population` pipeline + `initial_population_walks` | Renamed `survey`; the key becomes `races_offspring`. LEVI's calibration round is a survey with `races_offspring: false`. |
 | [`roadmap.md`](roadmap.md) § Members the presets need, *LEVI's calibration, ours too* | Lands here, as a round kind rather than a check-in step, because the escalation needs a round. |
-| Hand-curated pool admission (`promptpotter-self/pool/dataset.yaml::panel` comments) | The panel lists candidates; admission is the served verdict, banked per run. |
+| Hand-curated pool admission (`promptpotter-self/pool/dataset.yaml` `panel` comments) | The panel lists candidates; admission is the served verdict, banked per run. |
 | The band in [`../operations/dataset-selection-rationale.md`](../operations/dataset-selection-rationale.md) § Selection criteria and [`../research/benchmarks.md`](../research/benchmarks.md) § Every dataset we measured | One served verdict; the docs keep the rule and name the knob. |
 | Origin gate on health alone | Health plus the band verdict. |
 

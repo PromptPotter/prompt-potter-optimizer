@@ -17,8 +17,6 @@ from promptpotter.infrastructure.store.layout import CycleLayout
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["CycleLedgerTail"]
-
 
 class CycleLedgerTail:
     """Synchronous file I/O: a caller on an event loop uses ``asyncio.to_thread``."""

@@ -32,8 +32,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.optimizer_state import StatePart
     from promptpotter.domain.sample import Sample
 
-__all__ = ["MEMBERS", "PoolInitializer", "PoolKnobs"]
-
 
 class PoolKnobs(StrictModel):
     active: Annotated[list[str], Knob(Scope.POLICY, Estimand.SEARCH)] = Field(

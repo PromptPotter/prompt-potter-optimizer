@@ -40,6 +40,3 @@ def load_session(store: Stores, hop: CycleHop) -> SessionCtx:
             "Run `python -m promptpotter new <dataset>` to mint a fresh campaign."
         )
     return SessionCtx(store, campaign, hop.cycle_id)
-
-
-__all__ = ["SessionCtx", "load_session"]

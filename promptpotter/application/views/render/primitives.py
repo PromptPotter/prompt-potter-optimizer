@@ -294,13 +294,6 @@ def _step_tag(step_name: str | None, tags: dict[str, str]) -> str:
     return f"[{tags.get(step_name, step_name[:4])}]"
 
 
-__all__ = [
-    "fmt_ci",
-    "fmt_pvalue",
-    "render_pipeline_overlay",
-]
-
-
 def render_pipeline_overlay(
     pipeline_params: dict[str, Any] | None,
     pipeline_schema: PipelineSchema | None = None,

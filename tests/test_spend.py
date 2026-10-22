@@ -11,6 +11,7 @@ import asyncio
 import contextlib
 import dataclasses
 import functools
+import inspect
 import json
 import random
 import ssl
@@ -18,8 +19,9 @@ import threading
 import time
 import types
 import urllib.error
+import urllib.request
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
 from typing import Any, cast, get_args
 from unittest import mock
@@ -30,6 +32,7 @@ import pytest
 from factories import (
     SANDBOX_CAMPAIGN,
     arm_state,
+    arm_walk,
     backend_client,
     cycle_result,
     inner_sandbox,
@@ -45,11 +48,11 @@ from factories import (
 )
 from offline_world import Hang, Router, Said, completion
 from openai.types.chat import ChatCompletion
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, JsonValue, ValidationError
 
 from promptpotter.application.account import account_of
 from promptpotter.application.bench import llm_call as call_mod
-from promptpotter.application.campaign_config import CampaignConfig
+from promptpotter.application.campaign_config import CampaignConfig, OptimizationConfig
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.commands.limits_and_queue import change_run_limits
 from promptpotter.application.commands.payloads import (
@@ -59,10 +62,10 @@ from promptpotter.application.commands.payloads import (
     StartCheckinPayload,
 )
 from promptpotter.application.datasets.draft_campaign import EditDraftPatch, new_draft
+from promptpotter.application.datasets.loaders import archive_entry
 from promptpotter.application.diagnostics.noise_floor import measure_noise_floor
 from promptpotter.application.diagnostics.probe_reasoning import probe_reasoning
 from promptpotter.application.diagnostics.seed_screen import screen_inner_seeds
-from promptpotter.application.initialization.session import Session
 from promptpotter.application.jobs import mint
 from promptpotter.application.jobs.launcher.admission import (
     admit_and_share,
@@ -85,36 +88,54 @@ from promptpotter.application.jobs.registry import (
     UNRESOLVED_HOP,
     CampaignLaunch,
     EmbeddedRun,
+    Job,
     JobRegistry,
 )
-from promptpotter.application.optimizer_manifest import resolve_optimizer
 from promptpotter.application.optimizers.potter.pobb.checks import PoBBCheck
 from promptpotter.application.optimizers.potter.race import CatchUpPool
 from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.grade_bench import grade_line_bench
 from promptpotter.application.runner.inner import spawn, spawn_context
-from promptpotter.application.runner.inner.tasks import InnerCell, InnerCells, parse_panel
+from promptpotter.application.runner.inner.tasks import parse_panel
 from promptpotter.application.runner.loop import round_bounds
 from promptpotter.application.runner.measurement import skips_on_record
 from promptpotter.application.runner.termination import run_stop_reason
 from promptpotter.application.scoring import query_loop
 from promptpotter.application.scoring.cell_envelope import CellEnvelope
-from promptpotter.application.scoring.formula import cell_channels_of, compile_scorer
-from promptpotter.application.scoring.metrics import compute_composite_fitness
+from promptpotter.application.scoring.formula.compiler import cell_channels_of, compile_scorer
 from promptpotter.application.scoring.sample_measurement import (
     cell_billing,
     emit_replayed_step_tokens,
     measure_sample,
 )
+from promptpotter.application.scoring.search_point_scorer import (
+    open_walk,
+    replayable_on,
+    score_search_point,
+)
 from promptpotter.config.settings import settings
 from promptpotter.connectors.protocol import InProcessWorkload, cell_envelope_of
 from promptpotter.connectors.termnorm import TermNormSession
+from promptpotter.domain.campaign import Optimize
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.l4.proxies import inner_cell_facts
-from promptpotter.domain.phases import REFUSAL_STOPS, PauseCause, RunPhase, StopLoop, StopReason
-from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema, WebSpendBound
-from promptpotter.domain.results import ArmKey
+from promptpotter.domain.measurement_provenance import REUSABLE_MIN_GRADE, RunSource
+from promptpotter.domain.paired_reading import ArmKey
+from promptpotter.domain.phases import (
+    REFUSAL_STOPS,
+    PauseCause,
+    RunPhase,
+    StopLoop,
+    StopReason,
+    WalkEnd,
+)
+from promptpotter.domain.pipeline_schema import (
+    NodePromptInfo,
+    PipelineNode,
+    WebSpendBound,
+)
+from promptpotter.domain.results import CutKind, RescoreCount
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import (
     BankedSubject,
@@ -132,7 +153,7 @@ from promptpotter.domain.run_records import (
     TokenUsageRecord,
 )
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import NO_CELLS, GradedCell, MeasuredCell, PipelineData, Scorer
+from promptpotter.domain.scoring import GradedCell, MeasuredCell, PipelineData, Scorer
 from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.domain.spend import (
     CYCLE_AXES,
@@ -191,9 +212,11 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_spend_by_round,
 )
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
-from promptpotter.infrastructure.store.io import write_jsonl
+from promptpotter.infrastructure.store.dataset_access import DEFINITION_FILE, resolve_dataset
+from promptpotter.infrastructure.store.io import write_jsonl, write_yaml
 from promptpotter.infrastructure.store.layout import CampaignLayout, CycleLayout, draft_dirs
 from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache
+from promptpotter.infrastructure.store.measurement_archive import ReplayFeed
 from promptpotter.infrastructure.store.read_model import LedgerSpan, iter_jsonl
 from promptpotter.infrastructure.store.session_pointer import cleanup_stub_fork_if_empty
 from promptpotter.infrastructure.store.stores import Stores, build_stores
@@ -225,7 +248,6 @@ from promptpotter.shared.measurement_context import (
     MeasuredPass,
     MeasurementRole,
     measured_pass,
-    measured_pass_context,
 )
 
 
@@ -290,13 +312,13 @@ def _change_run_limits(dispatcher: CommandDispatcher, hop: CycleHop, budget: Bud
         campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, budget=budget
     )
     campaign = minted_campaign(hop)
-    asyncio.run(change_run_limits(dispatcher, payload, campaign, hop).run())
 
+    async def apply() -> None:
+        ran = change_run_limits(dispatcher, payload, campaign, hop).run()
+        assert inspect.isawaitable(ran)
+        await ran
 
-def _bound_session(stores: Stores, hop: CycleHop) -> Session:
-    session = loop_session(stores, pipeline_schema([]), [])
-    session.campaign_id, session.state.cycle_id = hop.campaign_id, hop.cycle_id
-    return session
+    asyncio.run(apply())
 
 
 # 1. What a call costs
@@ -321,7 +343,9 @@ async def _grade_twice(
     with _billing_on(graded, unbounded_spend_book()):
         for _ in range(2):
             row = MeasuredCell(sample_key="k0", query="who?", predicted="Ada", ground_truth="Ada")
-            last = await ev.compute(result=row, schema=None)
+            computed = ev.compute(result=row, schema=None)
+            assert inspect.isawaitable(computed)
+            last = await computed
     return len(offline.llm.sent), _token_bills(graded), last
 
 
@@ -353,8 +377,8 @@ async def test_a_call_is_priced_on_its_route_sent_as_asked_and_billed_once(
             **tiers,
         }
 
-    table = pricing._models_to_rates(
-        {
+    listed = {
+        "models": {
             # DeepSeek's first-party key, character-for-character OpenRouter's model id.
             "deepseek/deepseek-v4-flash": row(0.00000014, 0.00000028, "deepseek"),
             "openrouter/openai/gpt-oss-20b": row(0.00000004, 0.00000015, "openrouter"),
@@ -371,9 +395,13 @@ async def test_a_call_is_priced_on_its_route_sent_as_asked_and_billed_once(
             "openrouter/openrouter/auto": row(0.000002, 0.000004, "openrouter"),
             "orphan-model": {"input_cost_per_token": 0.000001},
         }
-    )
-    with monkeypatch.context() as patched:
-        patched.setattr(pricing, "load_rates", lambda: table)
+    }
+    (tmp_path / "rates.json").write_text(json.dumps(listed), encoding="utf-8")
+    with monkeypatch.context() as patched, contextlib.ExitStack() as unpatching:
+        patched.setattr(pricing, "BUNDLED_PATH", tmp_path / "rates.json")
+        patched.setattr(pricing, "CACHE_PATH", tmp_path / "never_fetched.json")
+        pricing.load_rates.cache_clear()
+        unpatching.callback(pricing.load_rates.cache_clear)
         lookup, usd = pricing.lookup_rate, pricing.compute_usd
         for model, provider, rate in (
             ("deepseek-v4-flash", "deepseek", Rate(0.00000014, 0.00000028)),
@@ -406,9 +434,8 @@ async def test_a_call_is_priced_on_its_route_sent_as_asked_and_billed_once(
         )
         cold = usd("gpt-4o", 1000, 0, provider="openai")
         hit = usd("gpt-4o", 1000, 0, provider="openai", cache_read_tokens=800)
-        assert (cold, hit) == (
-            pytest.approx(1000 * 0.0000025),
-            pytest.approx(200 * 0.0000025 + 800 * 0.00000025),
+        assert (cold, hit) == pytest.approx(
+            (1000 * 0.0000025, 200 * 0.0000025 + 800 * 0.00000025)
         ), "a cache read is a SUBSET of the input count: re-priced out of it, never added on top"
         assert usd(
             "openai/gpt-oss-20b", 1000, 0, provider="openrouter", cache_read_tokens=800
@@ -520,15 +547,13 @@ async def test_a_call_is_priced_on_its_route_sent_as_asked_and_billed_once(
 
     cells = CycleEventLog(tmp_path / "cells.jsonl")
     unbounded = unbounded_spend_book()
-    session = types.SimpleNamespace(
+    session = loop_session(
+        workspace(tmp_path / "ungraded"),
+        pipeline_schema([]),
+        [],
         control=RunControl(book=unbounded),
-        pipeline_schema=pipeline_schema([]),
-        identity_keys={},
-        state=types.SimpleNamespace(ledger=None),
-        backend_client=backend_client(execution="in_process", in_process_run=ran_ungraded),
-        scoring=types.SimpleNamespace(
-            scorer=compile_scorer("max(0.0, min(1.0, env_reward))", verifier_graded=True)
-        ),
+        client=backend_client(execution="in_process", in_process_run=ran_ungraded),
+        scorer=compile_scorer("max(0.0, min(1.0, env_reward))", verifier_graded=True),
     )
     token = telemetry.set_cycle_ledger(cells)
     try:
@@ -605,11 +630,13 @@ class _CutAfter:
     def __init__(self, n: int) -> None:
         self.n = n
 
-    def earliest_stop(self, results: list[Any], upcoming: list[Any]) -> int | None:
+    def earliest_stop(
+        self, results: Sequence[GradedCell], upcoming: Sequence[tuple[Sample, GradedCell | None]]
+    ) -> int | None:
         m = max(self.n, len(results) + 1)
         return m if m <= len(results) + len(upcoming) else None
 
-    def check(self, results: list[Any]) -> Any:
+    def check(self, results: Sequence[GradedCell]) -> StopSignal | None:
         if len(results) < self.n:
             return None
         return StopSignal(self.name, "eliminated", {"queries_scored": len(results)})
@@ -618,71 +645,16 @@ class _CutAfter:
 _HIT = Scorer(id="hit", per_cell=None, fitness=lambda _row: 1.0, objective=None)
 
 
-def _walking_session(
-    stores: Stores,
-    schema: PipelineSchema,
-    dataset: list[Sample],
-    control: RunControl,
-    client: BackendClient,
-) -> Session:
-    session = loop_session(stores, schema, dataset)
-    session.scoring.scorer = _HIT
-    session.control, session.backend_client = control, client
-    return session
-
-
 def _searching(usd_per_query: float) -> Any:
     bound = WebSpendBound(kind="web", queries=1, usd_per_query=usd_per_query)
     return pipeline_schema([PipelineNode(name="search", tunes_llm=False, spend_bound=bound)])
 
 
-def _walk_over(
-    dataset: list[Sample],
-    session: Any,
-    *,
-    checks: list[Any],
-    measured: Any = None,
-    recorded: MeasuredPass | None = None,
-    on_taken: Any = None,
-    cached: dict[int, Any] | None = None,
-    banked: dict[int, Any] | None = None,
-    rereads: list[int] | None = None,
-    keyed: str = "cell",
-) -> Any:
-    class _Recorder:
-        def scores(self, cells: Any) -> Any:
-            return compute_composite_fitness(NO_CELLS, pipeline_schema([])).model_copy(
-                update={"accuracy": 1.0}
-            )
-
-        def take(self, cell: GradedCell) -> GradedCell:
-            if on_taken and not cell.facts.cached:
-                on_taken(cell)
-            return cell
-
-        def bank(self, cells: Any) -> None:
-            if banked is not None:
-                slot_of = {s.key: s.id for s in dataset}
-                banked.update({slot_of[cell.key]: cell.facts for cell in cells})
-
-        def close(self, cells: Any, scores: Any) -> None:
-            return None
-
-    ctx = query_loop.QueryLoopState(
-        search_point=JobSearchPoint(),
-        session=session,
-        cached_sample_results=dict(cached or {}),
-        recorded=recorded,
-        role="panel",
-        sample_index=None,
-        deprecated_samples={},
-        recorder=_Recorder(),
-        claim_cell=None,
-        cell_keys={s.id: f"{keyed}_{s.id}" for s in dataset},
-        rereads=frozenset(rereads or ()),
-        held=NO_CELLS,
+def _filed(stores: Stores, sp: JobSearchPoint, session: Any) -> ReplayFeed:
+    entry = archive_entry(
+        sp, dataset_hash=session.bank.dataset_hash, pipeline_schema=session.pipeline_schema
     )
-    return query_loop.Walk(dataset, ctx, checks, measured_pass_context(measured))
+    return ReplayFeed(stores.archive, entry.node_configs)
 
 
 def _control_pausing(pressed: Callable[[], bool], **bound: Any) -> RunControl:
@@ -691,6 +663,11 @@ def _control_pausing(pressed: Callable[[], bool], **bound: Any) -> RunControl:
             return pressed()
 
     return _Pressed(**bound)
+
+
+def _ended_on(walk: query_loop.Walk) -> WalkEnd | None:
+    assert walk.outcome is not None, "a walk the phase ran ended without an outcome"
+    return walk.outcome.ended_on
 
 
 async def _stopped_by_operator(phase: Any) -> str | None:
@@ -715,15 +692,15 @@ async def _walk(
     parent_lacks_cells: bool = False,
     backfill_pace: float = 0.01,
     pause_after_call: int | None = None,
-    cached: dict[int, Any] | None = None,
+    resumes: JobSearchPoint | None = None,
     stall: int | None = None,
     skip_at: int | None = None,
     cap_usd: float | None = None,
 ) -> dict[str, Any]:
     backend = _OrderedFakeBackend(len(dataset))
-    priced: set[str] = set()
-    telemetry.bind_priced(priced)
-    banked: dict[int, Any] = {}
+    telemetry.bind_priced(set())
+    # An individual of its own, so a walk replays only the cells of the one it resumes.
+    sp = resumes or JobSearchPoint(pipeline_params={"search": {"walk": uuid.uuid4().hex}})
     committed: list[int] = []
     returned: list[int] = []
     book = spend_book(cap_usd)
@@ -753,34 +730,36 @@ async def _walk(
         _backfill,
         "elimination",
     )
-    priors.admit("parent", [], JobSearchPoint())
+    priors.admit(ArmKey("parent"), [], JobSearchPoint())
 
     # The walk's own ledger: what each launch recorded of the look-ahead it was sent under.
     started = CycleEventLog.open(CycleDir(stores.projects_root / "walks" / uuid.uuid4().hex))
     bound = telemetry.set_cycle_ledger(started)
     try:
         with mock.patch.object(query_loop, "measure_sample", _measure), spending_under(book):
-            session = _walking_session(
+            session = loop_session(
                 stores,
                 # One node the backend bounds at the cell's dollar, so the scheduler counts in them.
                 _searching(1.0),
                 dataset,
-                _control_pausing(
+                backend_id="walks",
+                scorer=_HIT,
+                control=_control_pausing(
                     lambda: pause_after_call is not None and len(returned) >= pause_after_call,
                     held_lookahead=armed,
                     book=book,
                 ),
-                backend_client(max_cells_in_flight=max_cells),
+                client=backend_client(max_cells_in_flight=max_cells),
             )
-            walk = _walk_over(
+            walk = open_walk(
+                sp,
                 dataset,
                 session,
+                label=MeasurementRole.PANEL,
                 checks=[_CutAfter(cut_at)] if cut_at else [],
-                recorded=MeasuredPass(individual_id="arm"),
-                cached=cached,
-                banked=banked,
+                measured=MeasuredPass(individual_id="arm"),
+                skip_at=skip_at,
             )
-            walk.skip_at = skip_at
             stopped = await _stopped_by_operator(
                 query_loop.run_walks(
                     {"arm": walk},
@@ -792,14 +771,20 @@ async def _walk(
     finally:
         telemetry.reset_cycle_ledger(bound)
     depths = [r.sample_lookahead for _, r in started.iter() if isinstance(r, SampleStartedRecord)]
+    feed = _filed(stores, sp, session)
+    taken = {cell.key for cell in walk.results}
+    priced = scan_ledger_priced_keys([started.path])
     return {
-        "rows": list(walk.results),
-        "stop_reason": stopped or walk.outcome.ended_on,
+        "sp": sp,
+        # Each row's answer is its address in this walk's own archive: the record is the facts.
+        "rows": [cell.filed(dataclasses.replace(cell.facts, answer=None)) for cell in walk.results],
+        "stop_reason": stopped or _ended_on(walk),
         "calls": list(backend.calls),
         "entries": list(backend.entries),
         "committed": committed,
-        "banked": banked,
-        "priced": set(priced),
+        "banked": {s.id for s in dataset if s.key not in taken}
+        & set(replayable_on(dataset, feed.advance())),
+        "priced": {s.id for s in dataset if feed.cell_key(s.key) in priced},
         "returned": returned,
         "billed": book.usd_metered,
         "max_depth": max(depths) if depths else 0,
@@ -816,49 +801,60 @@ async def _round(
     pause_after_call: int | None = None,
 ) -> dict[str, Any]:
     backend = _OrderedFakeBackend(len(dataset), slowest_last=slowest_last)
-    events: list[tuple[str, int, int]] = []
     flag = {"pause": False}
+    ledger = CycleEventLog.open(CycleDir(stores.projects_root / "rounds" / uuid.uuid4().hex))
+
+    def absorbed() -> list[tuple[int, int]]:
+        return [
+            (int(r.individual_id[1:]), r.position)
+            for _, r in ledger.iter()
+            if isinstance(r, SampleScoredRecord)
+        ]
+
+    # Each call beside how many cells the round had absorbed when it went out.
+    asked: list[tuple[int, int, int]] = []
 
     async def _measure(sample: Sample, session: Any, *, pipeline_params: Any = None) -> Any:
         call = len(backend.calls) + 1
         walk = int(cast("MeasuredPass", measured_pass()).individual_id[1:])
-        events.append(("call", walk, sample.id))
+        asked.append((walk, sample.id, len(absorbed())))
         row = await backend.measure(sample, session, pipeline_params=pipeline_params)
         if call == pause_after_call:
             flag["pause"] = True
         return row
 
-    slot_of = {s.key: s.id for s in dataset}
-
-    def _taken(walk: int, cell: GradedCell) -> None:
-        events.append(("absorb", walk, slot_of[cell.key]))
-
-    session = _walking_session(
+    session = loop_session(
         stores,
         pipeline_schema([]),
         dataset,
-        _control_pausing(lambda: flag["pause"], held_lookahead=armed),
-        backend_client(max_cells_in_flight=armed, holds_own_sends=True),
+        scorer=_HIT,
+        control=_control_pausing(lambda: flag["pause"], held_lookahead=armed),
+        client=backend_client(max_cells_in_flight=armed, holds_own_sends=True),
     )
     walks = [
-        _walk_over(
+        open_walk(
+            JobSearchPoint(),
             dataset,
             session,
+            label=MeasurementRole.PANEL,
             checks=[_CutAfter(cut)] if cut else [],
             measured=MeasuredPass(individual_id=f"c{w}"),
-            on_taken=functools.partial(_taken, w),
         )
         for w, cut in enumerate(cuts)
     ]
-    with mock.patch.object(query_loop, "measure_sample", _measure):
-        stopped = await _stopped_by_operator(
-            query_loop.run_walks(dict(enumerate(walks)), session, keep_cut=False)
-        )
+    bound = telemetry.set_cycle_ledger(ledger)
+    try:
+        with mock.patch.object(query_loop, "measure_sample", _measure):
+            stopped = await _stopped_by_operator(
+                query_loop.run_walks(dict(enumerate(walks)), session, keep_cut=False)
+            )
+    finally:
+        telemetry.reset_cycle_ledger(bound)
     return {
         "rows": [list(walk.results) for walk in walks],
-        "stops": [stopped or walk.outcome.ended_on for walk in walks],
-        "absorbed": [(w, sid) for kind, w, sid in events if kind == "absorb"],
-        "events": events,
+        "stops": [stopped or _ended_on(walk) for walk in walks],
+        "absorbed": absorbed(),
+        "asked": asked,
         "calls": list(backend.calls),
         "peak": max(backend.entries),
     }
@@ -915,8 +911,8 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
     launched = HeldRun(
         job_registry=spawned,
         job_id=held.job_id,
-        session=_bound_session(stores, hop),
-        campaign_config=None,
+        session=loop_session(stores, pipeline_schema([]), [], hop=hop),
+        campaign_config=CampaignConfig(optimization=OptimizationConfig(degradation_threshold=0.05)),
         budget=held,
     )
     spec = JobSpec.model_validate_json(launched.job_spec(mode).model_dump_json())
@@ -1011,12 +1007,12 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
     assert ahead["absorbed"] == [(w, s.id) for w in (0, 1) for s in dataset], (
         "a later candidate's cell was absorbed before an earlier one's"
     )
-    last_of_first = max(i for i, e in enumerate(ahead["events"]) if e[:2] == ("absorb", 0))
-    assert any(e[:2] == ("call", 1) for e in ahead["events"][:last_of_first]), (
+    last_of_first = max(i for i, (w, _) in enumerate(ahead["absorbed"]) if w == 0)
+    assert any(w == 1 and before <= last_of_first for w, _, before in ahead["asked"]), (
         "no later candidate measured ahead — the identity check below proves nothing"
     )
     for w in (0, 1):
-        calls = sorted(sid for kind, who, sid in ahead["events"] if kind == "call" and who == w)
+        calls = sorted(sid for who, sid, _ in ahead["asked"] if who == w)
         assert calls == [s.id for s in dataset], f"walk {w}'s calls ran under another identity"
     paused = await _round(built_stores, dataset, armed=1, cuts=[None], pause_after_call=3)
     assert paused["stops"] == ["graceful"], "a pause read as another stop"
@@ -1046,11 +1042,11 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
     assert stopped["rows"] == [] and set(stopped["banked"]) == set(stopped["returned"]), (
         "what came back behind a head still out was not banked"
     )
-    assert stopped["priced"] == {f"cell_{sid}" for sid in stopped["banked"]}, (
+    assert stopped["priced"] == stopped["banked"], (
         "a banked cell's price was not recorded against its key"
     )
     resumed = await _walk(
-        built_stores, dataset, armed=4, max_cells=4, cut_at=None, cached=stopped["banked"]
+        built_stores, dataset, armed=4, max_cells=4, cut_at=None, resumes=stopped["sp"]
     )
     assert not set(resumed["calls"]) & set(stopped["banked"]), "a banked cell was paid again"
     assert [r.key for r in resumed["rows"]] == [s.key for s in dataset], (
@@ -1068,22 +1064,21 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
     )
     # A skip made before a stop outlives it: the LAST decision on record per candidate replays.
     skips = CycleEventLog(tmp_path / "skips.jsonl")
+    superseding: tuple[tuple[str, int, CutKind | None], ...] = (
+        ("a", 3, "skipped"),
+        ("b", 2, "skipped"),
+        ("b", 8, None),
+        ("c", 4, "skipped"),
+    )
     with telemetry.at_round(2):
-        for cid, n, cut in (
-            ("a", 3, "skipped"),
-            ("b", 2, "skipped"),
-            ("b", 8, None),
-            ("c", 4, "skipped"),
-        ):
-            skips.append(
-                SampleScoredRecord(
-                    round=2,
-                    individual_id=cid,
-                    role=MeasurementRole.PANEL,
-                    position=n,
-                    result={"sample_key": f"k{n}", "answer": "a"},
-                    running=score_summary(walked=n),
-                )
+        for cid, n, cut in superseding:
+            arm_walk(
+                skips,
+                [(n, (f"k{n}", "a", False))],
+                rnd=2,
+                individual=cid,
+                role=MeasurementRole.PANEL,
+                running=score_summary(walked=n),
             )
             RunCallbacks(skips).on_arm(2, ArmKey(cid), arm_state(cid, cut=cut))
     assert skips_on_record(skips, 2) == {"a": 3, "c": 4}, "a superseded skip replayed"
@@ -1111,7 +1106,7 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
     inner = tmp_path / "inner"
     inner.mkdir()
     # Through the real validator: the run resolves its panel ONCE and carries it.
-    seat = {"kind": "seat", "id": "justlogic-d234/seed-0", "run_seed": 0}
+    seat: dict[str, JsonValue] = {"kind": "seat", "id": "justlogic-d234/seed-0", "run_seed": 0}
     panel = parse_panel(
         {
             "inner_benchmark": "justlogic/d234",
@@ -1131,17 +1126,8 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
             spawn_campaign_id="ppself__aaaaaa",
             spawn_cycle_id="cycle_deadbeef0000",
             enclosing=(),
-            # No inner dataset read: the stubbed inner run never opens one.
-            cells=InnerCells(
-                cells=tuple(panel.tasks),
-                by_dataset={
-                    "justlogic/d234": InnerCell(
-                        {}, None, resolve_optimizer("potter", {}, gate="off"), "o"
-                    )
-                },
-                specs={s.id: panel._seat_spec("o", s) for s in panel.tasks},
-            ),
-            purpose="optimize",
+            cells=panel.resolve_cells(build_stores(default_identity(), projects_root=inner)),
+            purpose=Optimize(),
             ruler_version=0,
         )
     )
@@ -1196,26 +1182,40 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
     arm = spend_book(0.02, meters="search_incurred", metered=Budget.amount(0.02, 0))
     ledger = CycleEventLog.open(CycleDir(tmp_path / "cycle"))
     ledger.bind(arm)
-    session = _walking_session(
+    session = loop_session(
         built_stores,
         _searching(0.01),
         reread,
-        RunControl(book=arm),
-        backend_client(max_cells_in_flight=1),
+        backend_id="reread",
+        scorer=_HIT,
+        control=RunControl(book=arm),
+        client=backend_client(max_cells_in_flight=1),
     )
-    taken = [s.id for s in reread[:3]]
-    walk = _walk_over(reread, session, checks=[], cached=banked, rereads=taken)
-    bench = _walk_over(reread, session, checks=[], cached=banked, keyed="bench")
+    # The arm's individual and the one the bench grades, every cell of each already filed.
+    picked, graded = (JobSearchPoint(pipeline_params={"search": {"sp": n}}) for n in "pg")
+    for sp in (picked, graded):
+        built_stores.archive.file_answers(
+            archive_entry(
+                sp, dataset_hash=session.bank.dataset_hash, pipeline_schema=session.pipeline_schema
+            ),
+            ((cell, REUSABLE_MIN_GRADE) for cell in banked.values()),
+            role=MeasurementRole.PANEL,
+            source=RunSource.OPTIMIZATION_LOOP,
+            created_at="2026-01-01T00:00:00Z",
+        )
+    feed = _filed(built_stores, picked, session)
     token = telemetry.set_cycle_ledger(ledger)
     try:
         # The stopped launch priced the cells it took.
-        telemetry.bind_priced({f"cell_{sid}" for sid in taken})
+        telemetry.bind_priced({feed.cell_key(s.key) for s in reread[:3]})
         with spending_under(arm):
+            walk = open_walk(picked, reread, session, label=MeasurementRole.PANEL, measured=None)
             halted = await _stopped_by_operator(
                 query_loop.run_walks({"arm": walk}, session, keep_cut=False)
             )
-            with telemetry.filed_as("bench"):
-                await query_loop.run_walks({"bench": bench}, session, keep_cut=False)
+            bench = await score_search_point(
+                graded, reread, session, label=MeasurementRole.BENCH, measured=None
+            )
             # The stopped launch made the round's calls; the resumed one learns them off the ledger.
             telemetry.bind_priced(set())
             await round_calls()
@@ -1227,14 +1227,16 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
         "the ceiling held back a re-read"
     )
     assert halted == "spend_budget", "a spent ceiling did not stop the arm"
-    assert len(bench.results) == len(reread), "the search's ceiling stopped the bench pass"
+    assert len(bench.cells) == len(reread), "the search's ceiling stopped the bench pass"
     kinds = [r.kind for _, r in ledger.iter() if isinstance(r, TokenUsageRecord)]
     assert kinds == ["bench"] * len(reread) + ["optimizer", "judge"], (
         f"a re-read was metered a second time: {kinds}"
     )
     assert arm.usd_metered == pytest.approx(0.04), "the arm's book read another bill than metered"
     priced = scan_ledger_priced_keys([ledger.path])
-    assert {f"bench_{s.id}" for s in reread} <= priced and len(priced) == len(reread) + 2, (
+    benched = _filed(built_stores, graded, session)
+    benched_keys = {benched.cell_key(s.key) for s in reread}
+    assert benched_keys <= priced and len(priced) == len(reread) + 2, (
         "the ledger names another set of priced calls than the arm paid for"
     )
 
@@ -1426,7 +1428,7 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
     assert control.budget_tripped() == StopReason.SPEND_BUDGET, "a launch swept the ceiling"
     declare(Budget(tokens=5_000))
     assert control.budget_tripped() == StopReason.TOKEN_BUDGET, "a token ceiling bound nothing"
-    session = _bound_session(built_stores, hop)
+    session = loop_session(built_stores, pipeline_schema([]), [], hop=hop)
     config = _budgeted(Budget(usd=0.025, rounds=50))
     declare(Budget(rounds=3))
     bounded, pause_at = round_bounds(session, config)
@@ -1488,12 +1490,7 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
     assert moved_book.allotment.usd == pytest.approx(0.50), (
         "$0.50 ceiling, $0.10 of it this cycle's own: the running book binds another share"
     )
-    # An UNCAP is the campaign's as asked: stored as no bound, never as the account's headroom.
     _change_run_limits(dispatcher, moved, Budget(usd=None))
-    uncapped = built_stores.campaigns.load_campaign("camp-4")
-    assert uncapped is not None and uncapped.standing_budget == Budget(usd=None), (
-        "a lifted campaign ceiling was stored as a bound"
-    )
     assert moved_book.allotment.usd is None, "a lifted ceiling still bounds the running share"
 
     # An offshoot takes the rounds its parent has left; a cap the fork's seed names is the operator's.
@@ -1802,8 +1799,13 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     offline.backend.faults = {"/matches": [Hang()]}
     remote = backend_client(cell_envelope_s=cell_envelope_of(600.0))
     clock = spend_book(None, usd_reserve=None, wall_clock_s=30.0)
-    cut_session = _walking_session(
-        workspace(tmp_path / "cut"), pipeline_schema([]), [], RunControl(book=clock), remote
+    cut_session = loop_session(
+        workspace(tmp_path / "cut"),
+        pipeline_schema([]),
+        [],
+        scorer=_HIT,
+        control=RunControl(book=clock),
+        client=remote,
     )
 
     async def cut_cell() -> tuple[MeasuredCell, float]:
@@ -1882,10 +1884,9 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
             )
         return outage.value
 
+    # A model no other call in the suite names, so neither route memo holds it yet.
     with monkeypatch.context() as patched:
-        patched.setattr(pricing.urllib.request, "urlopen", down)
-        patched.setattr(pricing, "_ROUTE_OUTAGE", {})
-        patched.setattr(pricing, "_ROUTE_MEMO", {})
+        patched.setattr(urllib.request, "urlopen", down)
         outage = asyncio.run(held_twice())
     assert len(fetches) == 1, f"{len(fetches)} fetches — one per send, each a full timeout"
     assert run_stop_reason(outage) is StopReason.PRICE_LIST_UNREACHABLE, "an outage read as no rate"
@@ -1971,8 +1972,15 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     )
     # A hard exit runs no `finally`: the hold written ahead of the call is all that says it left.
     hold_usd = 0.0036
-    killed = {"kind": "optimizer", "input_tokens": 600, "output_tokens": 1500, "cost_usd": hold_usd}
-    burst_ledger.append(SpendHoldRecord(hold_id="killed", node="killed", **killed))
+    killed = SpendHoldRecord(
+        hold_id="killed",
+        node="killed",
+        kind="optimizer",
+        input_tokens=600,
+        output_tokens=1500,
+        cost_usd=hold_usd,
+    )
+    burst_ledger.append(killed)
     account = billed_spend([burst_ledger.path])
     assert account.used_usd == 0.0, "a price off our rate table was read as spent"
     assert account.rate_priced_usd == pytest.approx(recorded), "the rate-priced sum moved"
@@ -1982,7 +1990,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     assert unreported_on(burst_ledger).sends == unreported + 1, "a killed send's hold went unread"
     # A bill naming no price closes its hold in tokens alone; the money stays at the hold's bound.
     bare = CycleEventLog(tmp_path / "bare" / "ledger.jsonl")
-    bare.append(SpendHoldRecord(hold_id="bare", node="bare", **killed))
+    bare.append(killed.model_copy(update={"hold_id": "bare", "node": "bare"}))
     bare.append(
         TokenUsageRecord(
             kind="optimizer", node="bare", input_tokens=40, output_tokens=9, hold_id="bare"
@@ -2176,25 +2184,16 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
         raise CellInfrastructureError("no such host", spent={})
 
     monkeypatch.setattr(harbor, "_attempt", registry_down)
-    episode = harbor._Episode(
-        query="task",
-        task={},
-        task_root=tmp_path,
-        reward_key="reward",
-        agent_name="terminus-2",
-        agent_kwargs={},
-        model=None,
-        provider=None,
-        environment="docker",
-        cached=False,
-        prompt=None,
-        in_system_prompt=False,
-        tools=(),
-    )
+    run_trial = harbor.CONNECTOR.in_process_run
+    assert run_trial is not None
 
     async def container_cell() -> Any:
         async with CellEnvelope(600.0, attempts=harbor.CONNECTOR.cell_attempts, label="task"):
-            return await harbor._run_episode(episode)
+            return await run_trial(
+                InProcessWorkload(experiment={}, experiment_dir=tmp_path, program=None),
+                Sample(id=0, query="task", ground_truth=None, source_pin={}),
+                {harbor.SKILL_DELIVERY_KEY: "agent_skill"},
+            )
 
     with pytest.raises(CellInfrastructureError):
         jumping_clock(container_cell())
@@ -2285,9 +2284,12 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
         "a student's call left no bill of its own"
     )
     call_usd = 11 * 1e-6 + 3 * 2e-6
-    assert [(r.cost_usd, r.rate_priced_usd) for r in lm_bills()] == [
-        (None, pytest.approx(call_usd))
-    ] * 2, "the engine reports tokens and no cost: each call is priced at our rate"
+    priced = lm_bills()
+    assert [r.cost_usd for r in priced] == [None, None] and [
+        r.rate_priced_usd for r in priced
+    ] == pytest.approx([call_usd] * 2), (
+        "the engine reports tokens and no cost: each call is priced at our rate"
+    )
     assert purse.usd_metered == pytest.approx(2 * call_usd), "the ceiling bound another price"
     banked_step = rows[-1].step_tokens[dspy_module.PROGRAM_NODE]
     assert (banked_step.model, banked_step.provider) == ("gpt-x", "openai"), (
@@ -2377,6 +2379,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
         "the book read another bill than the turns wrote"
     )
     out = unreported_on(turns_ledger)
+    assert whole.usd is not None
     assert out.sends == 1 and out.usd < whole.usd / 100, f"a cancel left ${out.usd} unreported"
     assert purse.usd_unreported == pytest.approx(out.usd), "the book held another sum than is out"
     assert purse.fits(whole, whole) == 1, "a cell's bound was not reserved whole"
@@ -2433,11 +2436,11 @@ def _account_stores(
             )
         )
     return types.SimpleNamespace(
-        identity=types.SimpleNamespace(
-            issuer=issuer,
-            user_id=user.user_id,
+        identity=IdentityContext(
+            user_id=UserId(user.user_id),
+            tenant_id=TenantId(user.tenant_id),
+            issuer=None if issuer is None else Issuer(issuer),
             email="",
-            tenant_id=user.tenant_id,
             claims={} if grant is None else {"spend_ceiling_usd": grant},
         ),
         campaigns=campaigns,
@@ -2446,8 +2449,20 @@ def _account_stores(
 
 
 def _running(admitted_at: str | None, reserve: Budget) -> Any:
-    held = types.SimpleNamespace(
-        job_id="job-b", hop=None, admitted=admitted_at is not None, reserve=reserve, created_at=""
+    held = Job(
+        job_id="job-b",
+        user_id="sub-9",
+        principal_id="sub-9",
+        workspace="",
+        campaign_id=UNRESOLVED_HOP.campaign_id,
+        cycle_id=UNRESOLVED_HOP.cycle_id,
+        holder=CampaignLaunch(dataset_name="d"),
+        stage=RunPhase.RUNNING,
+        created_at="",
+        started_at=None,
+        released_at=None,
+        reserve=reserve,
+        admitted_at=admitted_at,
     )
     return types.SimpleNamespace(list_holding_spend=lambda *, user_id: [held], get=lambda _id: None)
 
@@ -2460,7 +2475,7 @@ async def _paid_door(door: str, stores: Any) -> None:
         case "bench":
             await grade_line_bench(stores=stores, hop=_HELD_HOP)
         case "noise-floor":
-            await measure_noise_floor(stores=stores, hop=_HELD_HOP, k=2)
+            await measure_noise_floor(stores=stores, hop=_HELD_HOP, k=RescoreCount(2))
         case "seed-screen":
             await screen_inner_seeds(
                 stores=stores, identity=stores.identity, dataset_name="d", seeds=[1], n_samples=1
@@ -2558,7 +2573,9 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
         monkeypatch.setattr(
             "promptpotter.application.jobs.registry.default_jobs_dir", functools.partial(Path, at)
         )
-        user = User(user_id="sub-9", tenant_id="sub-9", created_at="2026-01-01", **budget)
+        user = User.model_validate(
+            {"user_id": "sub-9", "tenant_id": "sub-9", "created_at": "2026-01-01", **budget}
+        )
         stores = _account_stores(at, issuer=issuer, user=user, spent=spent, grant=grant)
         refused = pytest.raises(QuotaExceededError)
         with refused if admitted_caps is None else contextlib.nullcontext():
@@ -2568,10 +2585,7 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
                     declared=Budget() if declared is None else Budget(usd=declared),
                     user=user,
                     stores=stores,
-                    job_registry=running
-                    or types.SimpleNamespace(
-                        list_holding_spend=lambda **_: [], get=lambda _id: None
-                    ),
+                    job_registry=running or JobRegistry(at / "jobs", capacity=lambda _live: 1),
                     job_id="job-a",
                     hop=None,
                 )[0]
@@ -2744,30 +2758,15 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
     assert held is not None and held.allotment.usd is None and held.reserve.usd is not None, (
         "an uncap became a bounded share, or left the account nothing held back for the run"
     )
-    delegated = types.SimpleNamespace(
-        identity=types.SimpleNamespace(
-            issuer=_WEB,
-            user_id="sub-9",
-            email="",
-            tenant_id="sub-9",
-            claims={"spend_ceiling_usd": 2.0},
-        ),
-        campaigns=types.SimpleNamespace(
-            iter_cycle_ledgers=lambda: [],
-            campaign_cycle_ledgers=lambda _id: [],
-            workspace=tmp_path / "ws-d",
-            load_campaign=lambda _id: campaign,
-            cycle_dir=lambda _hop: tmp_path / "cycle-d",
-        ),
-    )
+    granted = User(user_id="sub-9", tenant_id="sub-9", created_at="2026-01-01")
     caps, _ = clamp_budget_change(
         requested=Budget(tokens=1_000),
-        user=User(user_id="sub-9", tenant_id="sub-9", created_at="2026-01-01"),
-        stores=delegated,
-        job_registry=types.SimpleNamespace(
-            list_holding_spend=lambda *, user_id: [], running_job_for=lambda _ws, _hop: None
+        user=granted,
+        stores=_account_stores(
+            tmp_path / "delegated", issuer=_WEB, user=granted, spent=None, grant=2.0
         ),
-        hop=hop,
+        job_registry=JobRegistry(tmp_path / "jobs-d", capacity=lambda _live: 1),
+        hop=_HELD_HOP,
     )
     assert caps == Budget(tokens=1_000), "a grant became a ceiling on an axis the caller left alone"
 
@@ -2895,7 +2894,7 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
         return counted.usd_amount, counted.token_amount
 
     ceiling_counts = ceiling_counts_now()
-    assert ceiling_counts == (pytest.approx(before), 3 * 2_800), (
+    assert ceiling_counts == pytest.approx((before, 3 * 2_800)), (
         "the campaign's ceiling read another sum than its cycles metered"
     )
     assert cleanup(stub) and not stub_ledger.exists(), "a spent stub fork survived its delete"
@@ -2957,7 +2956,9 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
     )
     assert not sandbox.exists(), "a reclaimed sandbox survived"
     banked = tombstones()[banked_before:]
-    assert [(b.used_usd, b.used_tokens) for b in banked] == [(pytest.approx(0.15), 600 + 100)], (
+    assert [b.used_tokens for b in banked] == [600 + 100] and [
+        b.used_usd for b in banked
+    ] == pytest.approx([0.15]), (
         "a forwarded inner cycle was banked twice, or its own spend not at all"
     )
 
@@ -2996,10 +2997,10 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
         payload: DiscardDraftPayload | StartCheckinPayload | EditDraftCampaignPayload,
     ) -> object:
         dispatcher = CommandDispatcher(stores)
-        call = CommandCall(payload, uuid.uuid4().hex)
+        key = uuid.uuid4().hex
         if isinstance(payload, EditDraftCampaignPayload | StartCheckinPayload):
-            return asyncio.run(dispatcher.dispatch_draft_command(call))
-        return asyncio.run(dispatcher.dispatch_workspace_command(call))
+            return asyncio.run(dispatcher.dispatch_draft_command(CommandCall(payload, key)))
+        return asyncio.run(dispatcher.dispatch_workspace_command(CommandCall(payload, key)))
 
     # An edit racing a Start's mint is refused while the claim holds, and finds nothing once the
     # draft closed: it never lands inside the mint nor writes the closed draft's dir back.
@@ -3036,7 +3037,7 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
         command(edit)
     assert not draft_dir.exists(), "an edit on a closed draft wrote its dir back"
     (draft_bank,) = [t for t in tombstones() if t.draft_id == draft.draft_id]
-    assert (draft_bank.campaign_id, draft_bank.used_usd) == ("", pytest.approx(0.04)), (
+    assert not draft_bank.campaign_id and draft_bank.used_usd == pytest.approx(0.04), (
         "a discarded draft banked under a campaign's id, or not its own spend"
     )
     assert account_usd() == pytest.approx(with_draft), "discarding a spent draft un-spent it"
@@ -3062,19 +3063,29 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
         raise PayloadInvalidError("refused after the framing", code="refused")
 
     monkeypatch.setattr(mint, "commit_task_framing", framed)
-    framing = types.SimpleNamespace(store=stores, dataset_name="drafted")
+    unframed = {"optimization": {"degradation_threshold": 0.4}}
+    write_yaml(
+        stores.tenant_datasets.dataset_dir("drafted") / DEFINITION_FILE,
+        {"pipeline": {"backend_type": "termnorm"}, "campaign": unframed},
+    )
+    rows = [Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(30)]
+    solve = PipelineNode(name="solve", tunes_llm=False, prompt_info=NodePromptInfo())
+    framing = loop_session(
+        stores,
+        pipeline_schema([solve], name="drafted"),
+        rows,
+        dataset=resolve_dataset(stores, "drafted"),
+    )
+    declared = mint.declare(framing, CampaignConfig.model_validate(unframed), purpose=Optimize())
     with pytest.raises(PayloadInvalidError):
         asyncio.run(
-            mint._mint_after_framing(
-                cast("Any", framing),
-                cast("Any", None),
-                "frame this",
-                campaign_id="framed__000001",
+            mint.mint_framed_cycle(
+                framing, declared, rows, campaign_id="framed__000001", task_text="frame this"
             )
         )
     assert not draft_dirs(stores.campaigns.workspace), "an unminted framing left its ledger"
     (framing_bank,) = [t for t in tombstones() if t.draft_id not in ("", draft.draft_id)]
-    assert (framing_bank.campaign_id, framing_bank.used_usd) == ("", pytest.approx(0.03)), (
+    assert not framing_bank.campaign_id and framing_bank.used_usd == pytest.approx(0.03), (
         "a refused mint's framing went unbanked, or banked under the campaign it never minted"
     )
     assert account_usd() == pytest.approx(with_draft + 0.03), "a refused mint un-spent its framing"

@@ -103,14 +103,3 @@ class MissingExtraError(PotterError):
 def require_extra(extra: Extra) -> None:
     if absent := missing(extra):
         raise MissingExtraError(extra, absent)
-
-
-__all__ = [
-    "Extra",
-    "MissingExtraError",
-    "install_hint",
-    "installed",
-    "missing",
-    "require_core",
-    "require_extra",
-]

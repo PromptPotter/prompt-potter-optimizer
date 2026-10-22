@@ -23,19 +23,6 @@ if TYPE_CHECKING:
 
 shapes_optimizer_prompt(__name__)
 
-__all__ = [
-    "COUPLINGS",
-    "KNOBS",
-    "Coupling",
-    "CouplingSeverity",
-    "bench_defaults_pin",
-    "check_couplings",
-    "declared_couplings",
-    "measured_address",
-    "member_knob_count",
-    "resolve_knob_states",
-]
-
 
 @dataclass(frozen=True)
 class KnobDecl:

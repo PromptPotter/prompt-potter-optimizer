@@ -35,13 +35,8 @@ def build() -> dict[str, Any]:
 def main() -> int:
     # `sort_keys` so a route-registration reorder is not a diff.
     content = json.dumps(build(), indent=2, ensure_ascii=False, sort_keys=True) + "\n"
-    _OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    prior = _OUT_PATH.read_text(encoding="utf-8") if _OUT_PATH.is_file() else ""
-    if prior == content:
-        print(f"{_OUT_PATH.relative_to(_REPO)} — up to date.")
-        return 0
     _OUT_PATH.write_text(content, encoding="utf-8", newline="\n")
-    print(f"{_OUT_PATH.relative_to(_REPO)} — regenerated.")
+    print(f"wrote {_OUT_PATH.relative_to(_REPO)}")
     return 0
 
 

@@ -11,7 +11,6 @@ from promptpotter.infrastructure.store.layout import CycleLayout
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["RacingStreamProjection"]
 
 _STREAMS_SUBPATH = (".runtime", "streams")
 

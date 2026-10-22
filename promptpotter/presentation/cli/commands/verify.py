@@ -93,6 +93,3 @@ async def cmd_verify(args: argparse.Namespace) -> CommandResult:
         )
         lines.append(f"  lift over C0, paired on {pair.coverage.scored} shared cells: {lifts}")
     return CommandResult(data=reading.model_dump(mode="json"), human="\n".join(lines))
-
-
-__all__ = ["cmd_verify"]

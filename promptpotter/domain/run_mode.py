@@ -4,8 +4,6 @@ from pydantic import Field
 
 from promptpotter.domain.strict_model import FrozenModel, WireInt
 
-__all__ = ["RunMode"]
-
 
 class RunMode(FrozenModel):
     """The SHAPE a run takes, on the wire and in the runner alike. How far it goes is its ``Budget``."""

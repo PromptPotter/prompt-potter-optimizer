@@ -13,8 +13,6 @@ from promptpotter.application.maintenance.archive_maintenance import (
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.workspace import open_stores
 
-__all__ = ["cmd_compact_archive"]
-
 _MB = 1024 * 1024
 
 

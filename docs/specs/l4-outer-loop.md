@@ -15,14 +15,14 @@ its own prompts, at bounded and visible cost.
 `mean_bench_lift` — the MEAN, over the inner rounds, of the headline accuracy of the prompt the search
 had **adopted** by that round on the cell's **held-out** rows, minus the origin prompt's on the same rows
 (`domain/l4/proxies.py::bench_level_series`, read off the cell's `each_round` bench passes). The held-out
-rows are drawn beside the origin bank under the cell's seed (`seed_screen.py::draw_bench`), marked
-`bench_only`, and reached by no inner node. `dataset.yaml::campaign.scoring.per_sample` re-anchors it `x + 0.5`:
+rows are drawn beside the origin bank under the cell's seed (`application/diagnostics/seed_screen.py::draw_bench`), marked
+`bench_only`, and reached by no inner node. `dataset.yaml` `campaign.scoring.per_sample` re-anchors it `x + 0.5`:
 linear in accuracy points, so the paired estimator's effect IS the mean held-out lift — a number to read,
 not merely to order by. `scoring.per_cell` may then weigh each cell by its wall clock against a fixed
 anchor; the reason is the comment beside it in `dataset.yaml`.
 
 `mean_round_delta` — the same trajectory read on the SEARCH split, in logits on one ability ruler
-(`difficulty.py::DifficultyView.level_series`) — is an `InnerCellFacts` fact and scores nothing; it is
+(`application/bench/difficulty.py::DifficultyView.level_series`) — is an `InnerCellFacts` fact and scores nothing; it is
 null, with `series_reason` saying why, wherever that series differences nothing.
 
 - **Held out, not in-sample.** The inner optimizer promotes on a point estimate over a small panel, so a
@@ -52,7 +52,7 @@ null, with `series_reason` saying why, wherever that series differences nothing.
   on one dataset already sit on one interval scale across seeds of different origin strength. Per-cell
   difficulty is modelled where it belongs: the round-winner election and PoBB, which fit an explicit
   per-cell δ. Every cell reads the tenant ruler at the version its outer round opened on
-  (`archive_queries.py::CellOf`), less its own parent line, so no cell's scale comes out of the treatment.
+  (`infrastructure/store/archive_queries.py::CellOf`), less its own parent line, so no cell's scale comes out of the treatment.
   The held-out lift needs none of this: both ends are read on the same rows of one cell.
 - **The row carries the seed's whole trajectory, and only ONE term of it scores.** An outer cell's
   `pipeline_data` holds `mean_bench_lift` (the scored measurand) plus `inner`, one `InnerCellFacts`
@@ -84,7 +84,7 @@ null, with `series_reason` saying why, wherever that series differences nothing.
   `floor_reason`, a collapsed arm is dropped from the election and eliminated at PoBB.
 - **One estimator per subtraction.** Reading the two ends of one difference through different estimators
   makes the shrinkage on the anchor move with the arm — a bias, which unlike noise does not average out over
-  a panel. `bench/difficulty.py::DifficultyView.level_series` reads θ_C0 and every later level in one fit on one stamp. The
+  a panel. `application/bench/difficulty.py::DifficultyView.level_series` reads θ_C0 and every later level in one fit on one stamp. The
   residual anchor *wander* is measured and not worth buying out: within-seed r = +0.75, ~2% of the delta's
   variance for a ~3% spend increase.
 
@@ -129,7 +129,7 @@ exposed to.
 - **No knob changes mid-run.** The baselines are read per inner mint; an edit splits the run into two
   fingerprint families.
 - **The solver's SPEND AXES are the instrument, and the inner search writes prompt text alone.**
-  `runner/inner/tasks.py::inner_instrument_config` narrows every inner cell's prompt nodes to
+  `application/runner/inner/tasks.py::inner_instrument_config` narrows every inner cell's prompt nodes to
   their declared prompt fields, on any dataset, whatever the dataset's `optimizer.param_keys` open: the model
   and provider are the panel's ENVIRONMENT axis, and `reasoning_effort`, `max_tokens` and `temperature`
   are rails. A lift bought with more thinking or a longer output is known in advance and is not a
@@ -139,8 +139,8 @@ exposed to.
   from the rows the origin bank left, under the cell's seed, so every arm of a cell is read on the same
   held-out rows and the search split stays the bank `seed-screen` passed, byte for byte. A dataset must hold
   `n_samples_origin + n_samples_bench` rows or its cells are refused before anything is sent.
-- **A held-out ENVIRONMENT is the outer bench.** `dataset.yaml::panel` marks a task `held_out: true` and the
-  connector seats it as a `bench_only` outer sample (`runner/inner/connector.py::_extract_experiment`), so no
+- **A held-out ENVIRONMENT is the outer bench.** `dataset.yaml` `panel` marks a task `held_out: true` and the
+  connector seats it as a `bench_only` outer sample (`application/runner/inner/connector.py::_extract_experiment`), so no
   round draws or elects on it, and `bench_trigger: each_round` grades the origin and each new selection
   there. The seat stays out of the sample's pin, so an environment moved between the bench and the search
   replays its cells. The pool declares `dataset_split: {bench: 0}` for the seat to be legal
@@ -148,16 +148,16 @@ exposed to.
   series — the elected arm's lift on the cells that elected it is a training score.
 - **The instrument is decided per CELL** (`domain/cells.py::Seat`), and each cell runs its own
   manifest; two cells running one node under different overlays refuse
-  (`runner/inner/tasks.py::InnerCells.owners`). A seat is a fresh inner campaign, run as an ordinary
+  (`application/runner/inner/tasks.py::InnerCells.owners`). A seat is a fresh inner campaign, run as an ordinary
   inner hop in the outer cycle's sandbox.
 - **θ never crosses a dataset; a lift pairs on shared cells.** A panel whose arm spans datasets serves
-  `ThetaCaveat.DISJOINT_SCOPES`, C0 is topped up on each dataset the line drew (`results.py::origin_panel`),
+  `ThetaCaveat.DISJOINT_SCOPES`, C0 is topped up on each dataset the line drew (`domain/results.py::origin_panel`),
   the bench is read per dataset with no mean across (`BenchScore.scopes`), and `adaptive_queue`'s `strata`
   draws per dataset.
-- **A cell runs the optimizer its own dataset names** (`runner/inner/tasks.py::InnerCell`),
+- **A cell runs the optimizer its own dataset names** (`application/runner/inner/tasks.py::InnerCell`),
   so a panel may mix optimizers; the outer pipeline is the union of their nodes
   (`InnerCells.pipeline`), and an arm's edit reaches a cell only on its own optimizer's nodes
-  (`InnerCells.own`). The knobs their own `dataset.yaml::campaign` sets differently are restated in `inner_nodes`.
+  (`InnerCells.own`). The knobs their own `dataset.yaml` `campaign` sets differently are restated in `inner_nodes`.
 - **`max_inner_rounds ≥ 2`.** At 1 the trajectory is length-1 and the mean is a single difference.
 - **`lives.start` sits well below `max_inner_rounds`.** Set near it, the bank cannot drain before the
   calendar cap: every inner runs full length regardless of quality, and the geometry loses its only brake.
@@ -165,10 +165,10 @@ exposed to.
   election correctly refuses to crown. The count is the round DRAW (`sp_budget_round`): equal to the
   task list it is a census, below it the tasks are a pool and each round a subset of them.
 - **A cell is keyed by its own instrument and no other cell's** — the instrument rides the cell's pin
-  (`connector.py::_instrument`: what it runs, on which dataset, under which nodes), so adding an inner
+  (`application/runner/inner/connector.py::_instrument`: what it runs, on which dataset, under which nodes), so adding an inner
   dataset or a task re-keys no banked cell, and an edit to one dataset's pipeline re-keys its cells alone.
 - **CRN is the variance control, and the only one.** No replication knob beside it; an identical cell replays.
-- **`terminal_node` is the cell's own optimizer chain's last llm node (`runner/inner/tasks.py::InnerCells.terminal`).** An
+- **`terminal_node` is the cell's own optimizer chain's last llm node (`application/runner/inner/tasks.py::InnerCells.terminal`).** An
   inner campaign consumes the ENTIRE outer config at once, and off-chain nodes lead `node_configs`, so only
   a stamp at the chain's end limits prefix-trust replay to a full match; any earlier one serves the ORIGIN's
   rows to a candidate that edits a later node. It is not a health signal and nothing may tally it: a panel
@@ -225,10 +225,10 @@ power half on demand. How to act on them is the `potter-self` skill's.
   `_identity_config`); run init's preflight counts the prior campaigns a novel instrument matches
   (`application/preflight.py::_check_instrument_replays`). A test pinning the fingerprint's VALUE is not
   the guard — it moved on a third of all commits and was removed twice; the prompt half is walked
-  (`registry.py::renderer_modules`), so only the estimator roster
+  (`application/optimizers/potter/dispatch/injections/registry.py::renderer_modules`), so only the estimator roster
   (`application/runner/inner/connector.py::measurement_modules`) can lose a member quietly.
 - **Seed retirement.** Of the first six seeds three were retired, one of them on the collapse
-  criterion (`seed_screen.py::rewards_collapse`); `dataset.yaml::panel` records the grounds per seat.
+  criterion (`application/diagnostics/seed_screen.py::rewards_collapse`); `dataset.yaml` `panel` records the grounds per seat.
 
 ## Open
 
@@ -249,7 +249,7 @@ power half on demand. How to act on them is the `potter-self` skill's.
    `TokenUsageRecord.round`). Panel aggregation `mean lift − λ·std`, where `std` is cross-seed **outcome
    dispersion** and never the θ estimation SE — penalizing `theta_se` resurrects the wide-posterior-discards-
    good-candidates pathology — routed through the P3 post-aggregate formula, never the election rank key.
-   PoBB-decisive promotion over inner-campaign arms (`scoring/selection.py::elimination_p_best`).
+   PoBB-decisive promotion over inner-campaign arms (`application/scoring/selection.py::elimination_p_best`).
 7. **Self-adopt mode — the SIFT / Darwin Gödel Machine loop, with our statistics in its gates.** Proposal,
    unbuilt, off by default. [SIFT](../research/landscape.md#sift-self-improvement-via-fast-tree-search-paper)
    and DGM let the improved agent write the next improvement; ours keeps the outer optimizer fixed. The prior
@@ -257,7 +257,7 @@ power half on demand. How to act on them is the `potter-self` skill's.
    [`../research/external-constraints.md`](../research/external-constraints.md) § L4. The mode:
    when an outer election is **decisive**, the winner's overrides become the outer campaign's own
    `optimization.nodes` overlay and the outer cycle forks onto it — the improved optimizer proposes the next
-   round. The overlay already binds per task (`runner/entry.py::run_optimization`, task-isolated from the
+   round. The overlay already binds per task (`application/runner/entry.py::run_optimization`, task-isolated from the
    inner binding), and inner cell
    identity keys on the candidate's overrides, not the outer's own set, so banked cells survive an adoption.
    What is new is the trigger and the fork. **What is never adopted is the instrument** (§ Invariants, first
@@ -285,7 +285,7 @@ power half on demand. How to act on them is the `potter-self` skill's.
    expansion vs judge vs evaluation per step, plus wall clock — as a reading `SpendRollup` should serve.
 
    **Generality is the precondition, and today the panel cannot supply it.** The panel is one benchmark
-   (`dataset.yaml::panel.inner_benchmark`), its seeds different row draws of it, so a winner is an optimizer for
+   (`dataset.yaml` `panel.inner_benchmark`), its seeds different row draws of it, so a winner is an optimizer for
    that task, and adopting it compounds the specialization. The mode does not ship before these hold:
    - **A held-out panel of other task families**, scored only by the adoption gate, never by the search, and
      reaching no outer evidence panel — the moment the proposer sees it, it is training data.

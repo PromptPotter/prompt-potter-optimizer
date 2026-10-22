@@ -357,6 +357,3 @@ class SampleIndex:
         idx = cls(bank=bank, sample_ids=sample_ids)
         idx.refresh(stores, scorer=scorer)
         return idx
-
-
-__all__ = ["FailureCluster", "SampleIndex", "SampleRecord"]

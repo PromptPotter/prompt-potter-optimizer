@@ -64,17 +64,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = [
-    "derive_verify_samples",
-    "pick_fresh",
-    "read_verify",
-    "rounds_since_verified",
-    "verify_candidate",
-    "verify_member",
-    "verify_on_saturation",
-    "verify_reading",
-]
-
 
 _VERIFY_LIFT_CAP = 5
 

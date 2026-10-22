@@ -14,7 +14,7 @@ from promptpotter.application.initialization.loop_start import (
 )
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizer_manifest import (
-    bind_optimizer,
+    binding_optimizer,
     select_optimizer,
     set_determinism_clamp,
 )
@@ -295,15 +295,22 @@ async def run_optimization(
     # Round 0 outside every round the loop enters: the origin pass, its gate and the close.
     with at_round(0):
         try:
-            return await _optimize(
-                dataset,
-                campaign_config,
-                session=session,
-                observers=observers,
-                langfuse_session_id=langfuse_session_id,
-                mode=mode,
-                budget=budget,
-            )
+            selected = select_optimizer(campaign_config.optimization)
+            if mode.diag and selected.plan.controller is None:
+                raise PayloadInvalidError(
+                    f"--diag shows what an optimizer's controller does at a round boundary, and "
+                    f"{selected.name} declares no controller node"
+                )
+            with binding_optimizer(selected):
+                return await _optimize(
+                    dataset,
+                    campaign_config,
+                    session=session,
+                    observers=observers,
+                    langfuse_session_id=langfuse_session_id,
+                    mode=mode,
+                    budget=budget,
+                )
         finally:
             release_cycle(observers.cycle_dir)
             if session.state.cycle_id:
@@ -334,13 +341,6 @@ async def _optimize(
     publish_inner_spawn_context(session)
     # Fresh per launch, keeping only the cycles this run measures FOR.
     session.control = RunControl(enclosing=session.control.enclosing)
-    selected = select_optimizer(campaign_config.optimization)
-    if mode.diag and selected.plan.controller is None:
-        raise PayloadInvalidError(
-            f"--diag shows what an optimizer's controller does at a round boundary, and "
-            f"{selected.name} declares no controller node"
-        )
-    bind_optimizer(selected)
     set_determinism_clamp(campaign_config.optimization.determinism)
     try:
         prep = await prepare_run(
@@ -413,6 +413,3 @@ async def _optimize(
             rebase_req=rebase_req,
             rebase_count=rebase_count,
         )
-
-
-__all__ = ["run_optimization"]

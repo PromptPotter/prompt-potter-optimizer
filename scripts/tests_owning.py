@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import ast
-import hashlib
 import json
 import os
 import sys
@@ -12,46 +11,19 @@ from functools import cache
 from pathlib import Path
 from typing import Any
 
-REPO = Path(__file__).resolve().parents[1]
+from last_green import file_digest
+from processes import REPO, peak_mb
+
 PACKAGE = "promptpotter"
 TESTS = "tests"
 EVERY_TEST = f"{TESTS}/"
 RECORD = REPO / ".pytest_cache" / "tests_owning.json"
-# A fifth above the whole suite's measured peak: drift passes, a growth of one fifth does not.
-CEILING_MB = 197
+# Over the suite's peak in each platform's own `peak_mb` metric: win32 a fifth above a measured
+# 172 MB peak commit; linux 197 over a measured 193 MB peak RSS, never loosened past it.
+CEILING_MB = {"win32": 206, "linux": 197}
 # Package modules the widest journey RAN: one that wires the whole engine to reach one decision
 # is the churn every reshape pays. Equality, like the ledger: a move is re-pinned with its reason.
-WIDEST_JOURNEY_MODULES = 136
-
-
-def _peak_mb() -> int:
-    """This process's peak resident memory."""
-    if sys.platform == "win32":
-        import ctypes
-
-        class Counters(ctypes.Structure):  # PROCESS_MEMORY_COUNTERS
-            _fields_ = (
-                ("cb", ctypes.c_ulong),
-                ("page_faults", ctypes.c_ulong),
-                ("peak_working_set", ctypes.c_size_t),
-                *((f"field{i}", ctypes.c_size_t) for i in range(7)),
-            )
-
-        counters = Counters(cb=ctypes.sizeof(Counters))
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        kernel32.K32GetProcessMemoryInfo.argtypes = (
-            ctypes.c_void_p,
-            ctypes.c_void_p,
-            ctypes.c_ulong,
-        )
-        current = ctypes.c_void_p(-1)  # GetCurrentProcess's pseudo-handle
-        if not kernel32.K32GetProcessMemoryInfo(current, ctypes.byref(counters), counters.cb):
-            raise ctypes.WinError(ctypes.get_last_error())
-        return int(counters.peak_working_set) >> 20
-    import resource
-
-    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss  # bytes on macOS, KiB elsewhere
-    return peak >> 20 if sys.platform == "darwin" else peak >> 10
+WIDEST_JOURNEY_MODULES = 137
 
 
 def _rel(path: str | Path) -> str | None:
@@ -64,7 +36,7 @@ def _rel(path: str | Path) -> str | None:
 
 def _hashed() -> dict[str, str]:
     files = [*(REPO / PACKAGE).rglob("*.py"), *(REPO / TESTS).glob("*.py")]
-    return {p.relative_to(REPO).as_posix(): hashlib.sha1(p.read_bytes()).hexdigest() for p in files}
+    return {p.relative_to(REPO).as_posix(): file_digest(p).hex() for p in files}
 
 
 def _module_name(rel: str) -> str:
@@ -334,8 +306,10 @@ def _record(pytest_args: list[str]) -> int:
         "utf-8",
     )
     failed = []
-    if (peak := _peak_mb()) > CEILING_MB:
-        failed.append(f"the suite peaked at {peak} MB, over its {CEILING_MB} MB ceiling")
+    if (ceiling := CEILING_MB.get(sys.platform)) is None:
+        failed.append(f"no suite peak is measured on {sys.platform}: pin one in CEILING_MB")
+    elif (peak := peak_mb()) > ceiling:
+        failed.append(f"the suite peaked at {peak} MB, over its {ceiling} MB ceiling")
     widest = max(sum(rel.startswith(f"{PACKAGE}/") for rel in rels) for rels in reached.values())
     if widest != WIDEST_JOURNEY_MODULES:
         failed.append(

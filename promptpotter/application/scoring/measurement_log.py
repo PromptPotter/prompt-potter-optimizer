@@ -81,11 +81,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.scoring import GradedCell, PipelineData, Scorer
     from promptpotter.infrastructure.store.dataset_access import ResolvedDataset
 
-__all__ = [
-    "campaign_scope_cycle",
-    "measurement_log",
-    "open_cell",
-]
 
 _SPAN_KEYS = frozenset({"step_tokens", "step_timings", "terminal_node", "total_time"})
 

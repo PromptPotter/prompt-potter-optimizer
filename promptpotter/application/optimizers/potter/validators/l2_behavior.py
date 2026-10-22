@@ -12,9 +12,6 @@ from promptpotter.application.optimizers.potter.validators.behavior_base import 
 )
 from promptpotter.domain.round_audit import RoundAudit
 
-__all__ = ["run_all_l2_checks"]
-
-
 L2_RATIONALE_FLOOR_CHARS = 40
 
 # A bare integer is not a citation: `\d` alone passes "round 2".

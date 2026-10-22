@@ -73,6 +73,3 @@ class SecretRedactionFilter(logging.Filter):
         if record.stack_info:
             record.stack_info = self._redact(record.stack_info)
         return True
-
-
-__all__ = ["REDACTED", "SecretRedactionFilter"]

@@ -83,6 +83,3 @@ class ResponseHeadersMiddleware:
             await send(message)
 
         await self.app(scope, receive, send_with_headers)
-
-
-__all__ = ["ResponseHeadersMiddleware", "cache_policy", "served_build"]

@@ -73,6 +73,3 @@ class SiteRecordStore:
 
 def default_site_record_store() -> SiteRecordStore:
     return SiteRecordStore(user_data_root() / "site_records")
-
-
-__all__ = ["SiteRecord", "SiteRecordStore", "default_site_record_store"]

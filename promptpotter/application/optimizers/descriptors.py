@@ -8,7 +8,6 @@ from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 shapes_optimizer_prompt(__name__)
 
-__all__ = ["DescriptorFeature", "behaviour_descriptor", "cell_objectives", "prompt_chars"]
 
 DescriptorFeature = Literal["target_prompt_chars", "cell_objectives"]
 

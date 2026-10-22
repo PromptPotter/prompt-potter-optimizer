@@ -122,12 +122,3 @@ def get_llm_client(provider: str) -> LLMClientBase:
         valid = ", ".join(sorted(_PROVIDER_FACTORIES))
         raise ValueError(f"Unknown LLM provider: {provider!r}. Valid: {valid}.")
     return factory()
-
-
-__all__ = [
-    "ModelProfile",
-    "default_routes",
-    "get_llm_client",
-    "model_profile",
-    "openai_compat_spec",
-]

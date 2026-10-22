@@ -88,5 +88,5 @@ OpenAI/Anthropic/OpenRouter only if named. `.env.example` is the full template.
 ## First-run smoke
 
 If `{name}` has never produced a measurement (`measurements/cells/{config_key}.jsonl`),
-run `python scripts/smoke_campaign.py --dataset {name}` (~90 s; it mints a campaign, so it falls
-under the autonomy mode).
+run a one-round campaign (it mints a campaign, so it falls under the autonomy mode):
+`python -m promptpotter new {name} --set budget.rounds=1 --set nodes.l1_generate.n_variants=3 --set nodes.adaptive_queue.sp_budget_round=5 --set nodes.escalation.l1_patience=1`.

@@ -31,8 +31,6 @@ if TYPE_CHECKING:
 
     from promptpotter.presentation.cli.commands.result import CommandResult
 
-__all__ = ["main"]
-
 
 _COMMANDS_PACKAGE = "promptpotter.presentation.cli.commands"
 

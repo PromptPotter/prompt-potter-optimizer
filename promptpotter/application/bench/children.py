@@ -18,13 +18,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = [
-    "DROPPED_MANDATORY_PLACEHOLDER",
-    "admission_failures",
-    "carried_writes",
-    "overlay_failures",
-    "placeholder_failures",
-]
 
 DROPPED_MANDATORY_PLACEHOLDER = "dropped_mandatory_placeholder"
 

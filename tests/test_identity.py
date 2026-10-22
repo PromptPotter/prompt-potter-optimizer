@@ -14,7 +14,6 @@ import io
 import json
 import random
 import re
-import types
 import zipfile
 from dataclasses import replace
 from pathlib import Path
@@ -22,7 +21,14 @@ from typing import Any, cast
 
 import openpyxl
 import pytest
-from factories import inner_cells, loop_session, minted_campaign, pipeline_schema, prompted
+from factories import (
+    inner_cells,
+    loop_session,
+    minted_campaign,
+    pipeline_schema,
+    prompted,
+    seat,
+)
 from offline_world import Router
 from pydantic import ValidationError
 
@@ -41,7 +47,7 @@ from promptpotter.application.campaign_config import (
     declare_run,
     effective_config,
 )
-from promptpotter.application.commands.launching import parse_cycle_seed
+from promptpotter.application.commands.launching import dispatch_start_checkin, parse_cycle_seed
 from promptpotter.application.commands.payloads import MintCampaignPayload, StartCheckinPayload
 from promptpotter.application.datasets import ingest
 from promptpotter.application.datasets.draft_campaign import EditDraftPatch, new_draft
@@ -49,9 +55,10 @@ from promptpotter.application.datasets.draft_patch import apply_draft_patch, pla
 from promptpotter.application.datasets.loaders import archive_entry, samples_from_dicts
 from promptpotter.application.datasets.origin_resolve import build_origin_consultation
 from promptpotter.application.datasets.tabular_ingest import IngestError, read_tabular
-from promptpotter.application.intelligence.indexes.sample import SampleFoldRow, SampleIndex
+from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.intelligence.rasch import Observation, select_round_subset
 from promptpotter.application.jobs.launcher import checkin as checkin_launch
+from promptpotter.application.jobs.launcher.launch import Inline
 from promptpotter.application.jobs.mint import (
     ConfigDriftError,
     declare,
@@ -68,7 +75,7 @@ from promptpotter.application.optimizer_manifest import (
 from promptpotter.application.optimizers.capo.members import cross_shots, mutate_shots
 from promptpotter.application.optimizers.gepa.members import GepaReflect
 from promptpotter.application.optimizers.gepa.state import ParetoScores
-from promptpotter.application.optimizers.nodes import Proposals, SliceMap
+from promptpotter.application.optimizers.nodes import Panel, Proposals
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     CycleSlice,
     InjectionBundle,
@@ -96,7 +103,7 @@ from promptpotter.application.pipeline_resolve import (
     resolved_output_schemas,
 )
 from promptpotter.application.run_observers import declare_run_wiring
-from promptpotter.application.runner.arm_gate import _authored
+from promptpotter.application.runner.arm_gate import authored_arm
 from promptpotter.application.runner.inner.connector import CONNECTOR, promptpotter_wire_adapter
 from promptpotter.application.runner.inner.spawn import inner_campaign_id
 from promptpotter.application.runner.inner.tasks import (
@@ -130,6 +137,7 @@ from promptpotter.domain.pipeline_schema import (
     SCHEMA_TOGGLE_PARAM,
     ManifestNodeOverlay,
     NodeConfigParam,
+    NodeKind,
     NodePromptInfo,
     NodeSearchNarrowing,
     ParamIntent,
@@ -150,6 +158,7 @@ from promptpotter.infrastructure.llm.registry import default_routes
 from promptpotter.infrastructure.llm.spend_book import spending_under, unbounded_spend_book
 from promptpotter.infrastructure.llm.telemetry import set_cycle_ledger
 from promptpotter.infrastructure.projections.live_dashboard.projection import fold_at
+from promptpotter.infrastructure.store.archive_queries import SampleFoldRow
 from promptpotter.infrastructure.store.dataset_access import (
     DEFINITION_FILE,
     ResolvedDataset,
@@ -287,8 +296,8 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
 
     # An L4 override moves the prompt and the hash of every preset, and the inner campaign it runs.
     capo = resolve_optimizer("capo", {}, gate="off")
-    round_ = types.SimpleNamespace(cycle=types.SimpleNamespace(optimizer=capo))
-    ctx: NodeContext[Any] = NodeContext(cast(Any, round_), optimizers.member("capo_mutate"))
+    capo_seat = seat(built_stores, optimization={"optimizer": "capo"})
+    ctx: NodeContext[Any] = NodeContext(capo_seat, optimizers.member("capo_mutate"))
     values = {"task_description": "sort the list", "instruction": "Sort it."}
     mutated = {
         "capo_mutate": {"instruction": "Rephrase [{{instruction}}] to {{task_description}}."}
@@ -312,18 +321,19 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         )
         # A valid layout edit on one node: `diagnostics` stays placed.
         layout = {"l1_critique": {"layout": {"thinking_style": ["axis_memory"]}}}
-        for optimizer, before, override, node in (
+        for optimizer, hashes, override, edited_node in (
             (capo, capo_hashes, mutated, "capo_mutate"),
             (potter, baseline, layout, "l1_critique"),
         ):
             set_optimizer_prompt_overrides(override)
             moved = optimizer.prompt_hashes()
-            assert moved[node] != before[node], (
-                f"{node}: an override left the node hash unchanged — audits would pool the cycles"
+            assert moved[edited_node] != hashes[edited_node], (
+                f"{edited_node}: an override left the node hash unchanged — audits would pool the "
+                "cycles"
             )
-            assert {k: v for k, v in moved.items() if k != node} == {
-                k: v for k, v in before.items() if k != node
-            }, f"{node}: an edit on one node moved other nodes' hashes"
+            assert {k: v for k, v in moved.items() if k != edited_node} == {
+                k: v for k, v in hashes.items() if k != edited_node
+            }, f"{edited_node}: an edit on one node moved other nodes' hashes"
     finally:
         set_optimizer_prompt_overrides(None)
 
@@ -485,11 +495,11 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         bare = normalize_model_id(model)
         gateway = next(name for name, pins in routes.items() if bare in pins)
         pin = routes[gateway][bare]
-        node = {"provider": gateway, "model": model}
-        assert filed_under(node) == filed_under({**node, "route_order": pin}), (
+        routing = {"provider": gateway, "model": model}
+        assert filed_under(routing) == filed_under({**routing, "route_order": pin}), (
             f"{model}: an unpinned node was filed apart from the host it is served by"
         )
-        assert filed_under(node) != filed_under({**node, "route_order": ["Elsewhere"]}), (
+        assert filed_under(routing) != filed_under({**routing, "route_order": ["Elsewhere"]}), (
             f"{model}: two hosts answered under one key"
         )
         for opted, route in (({}, pin), ({"route_order": []}, None)):
@@ -553,12 +563,17 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
             {"pipeline": {"nodes": {"llm_only": {"config": {"model": "a"}}}}, "campaign": campaign},
         )
 
+    resolve, extract, identity_of = (
+        CONNECTOR.resolve_experiment,
+        CONNECTOR.extract_experiment,
+        CONNECTOR.identity_config,
+    )
+    assert resolve is not None and extract is not None and identity_of is not None
+
     def keyed(declared: dict[str, Any]) -> tuple[dict[str, str], dict[str, Any]]:
-        resolved = CONNECTOR.resolve_experiment(built_stores, declared)
-        rows = samples_from_dicts(CONNECTOR.extract_experiment(resolved))
-        return {s.query: s.key for s in rows}, CONNECTOR.identity_config(
-            built_stores, outer, resolved
-        )
+        resolved = resolve(built_stores, declared)
+        rows = samples_from_dicts(extract(resolved))
+        return {s.query: s.key for s in rows}, identity_of(built_stores, outer, resolved)
 
     before, fingerprint = keyed(panel)
     other = {"kind": "seat", "id": "other", "inner_dataset": "otherbench"}
@@ -586,10 +601,7 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     )
 
     # A Harbor panel reads its pinned roster and never dials out; upstream repinning re-cuts nothing.
-    for harbor_dataset, version, include in (
-        ("spreadsheetbench-verified", "1.0", ["10452", "105-24"]),
-        ("terminal-bench-sample", "2.0", ["regex-log"]),
-    ):
+    def panel_tasks(harbor_dataset: str, version: str, include: list[str]) -> list[Any]:
         write_yaml(
             built_stores.tenant_datasets.dataset_dir(harbor_dataset) / DEFINITION_FILE,
             {
@@ -608,24 +620,32 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         resolved = experiment_outside_run(
             built_stores, resolve_dataset(built_stores, harbor_dataset)
         )
-        assert resolved is not None and [t["id"] for t in resolved["tasks"]] == include, (
+        assert resolved is not None, f"{harbor_dataset} resolved no panel"
+        return list(resolved["tasks"])
+
+    for harbor_dataset, version, include in (
+        ("spreadsheetbench-verified", "1.0", ["10452", "105-24"]),
+        ("terminal-bench-sample", "2.0", ["regex-log"]),
+    ):
+        assert [t["id"] for t in panel_tasks(harbor_dataset, version, include)] == include, (
             f"{harbor_dataset} resolved another panel than its include list"
         )
     assert not offline.unrouted, f"a panel read fetched Harbor's registry: {offline.unrouted}"
     with pytest.raises(ValueError):
-        harbor_connector._resolve_experiment(
-            built_stores, {"harbor_dataset": "unpinned", "harbor_dataset_version": "9"}
-        )
-    roster = [{"id": "a", "git_url": "u", "git_commit_id": "c1", "path": "a"}]
-    published = [roster]
+        panel_tasks("unpinned", "9", ["a"])
+
+    def published(commit: str) -> list[dict[str, Any]]:
+        task = {"name": "a", "git_url": "u", "git_commit_id": commit, "path": "a"}
+        return [{"name": "bench", "version": "1.0", "description": "", "tasks": [task]}]
+
     monkeypatch.setattr(harbor_connector, "_ROSTER_DIR", tmp_path)
-    monkeypatch.setattr(harbor_connector, "_registry_roster", lambda *_: published[0])
-    pin = harbor_connector.pin_roster("bench", "1.0")
-    assert harbor_connector.pin_roster("bench", "1.0") == pin, "an unchanged registry re-pinned"
-    published[0] = [{**roster[0], "git_commit_id": "c2"}]
+    offline.registry = published("c1")
+    roster = harbor_connector.pin_roster("bench", "1.0")
+    assert harbor_connector.pin_roster("bench", "1.0") == roster, "an unchanged registry re-pinned"
+    offline.registry = published("c2")
     with pytest.raises(ValueError):
         harbor_connector.pin_roster("bench", "1.0")
-    assert harbor_connector._pinned_roster("bench", "1.0") == roster, (
+    assert [t["git_commit_id"] for t in panel_tasks("bench", "1.0", ["a"])] == ["c1"], (
         "a repinned registry moved the panel under the name it had"
     )
 
@@ -746,7 +766,9 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         "param_allowed_values": {"reasoning_effort": ["low", "high"]},
     }
     as_rows = frozen(node_narrowing={"llm_only": rows}).optimizer_narrowing
-    assert as_rows == {"llm_only": NodeSearchNarrowing(**spelled)}, "rows froze another space"
+    assert as_rows == {"llm_only": NodeSearchNarrowing.model_validate(spelled)}, (
+        "rows froze another space"
+    )
     as_overlay = frozen(pipeline_overlay={"llm_only": {"optimizer": spelled}})
     assert as_rows == as_overlay.optimizer_narrowing, "rows and the overlay froze two spaces"
     # No field named `answer`, none named by the operator: the slot is the LAST, reasoning first.
@@ -831,7 +853,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
             "runs under it"
         )
     seed = CycleSeed(
-        optimizer_narrowing={"a": {"param_keys": []}},
+        optimizer_narrowing={"a": NodeSearchNarrowing(param_keys=[])},
         config_overrides=ConfigOverrides(budget=Budget(rounds=4)),
     )
     stores.campaigns.write_cycle_seed(campaign.root_hop, seed)
@@ -890,24 +912,28 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     )
     rows_30 = [Sample(id=i, query=f"claim {i}", ground_truth="TRUE") for i in range(30)]
     solve = PipelineNode(name="solve", tunes_llm=False, prompt_info=NodePromptInfo())
-    opened = loop_session(stores, pipeline_schema([solve], name="decl"), rows_30)
-    opened.dataset = resolve_dataset(stores, "decl")
+    opened = loop_session(
+        stores,
+        pipeline_schema([solve], name="decl"),
+        rows_30,
+        dataset=resolve_dataset(stores, "decl"),
+    )
     door = _connector_config()
-    seat = declare(opened, door, purpose=Optimize())
-    assert effective_config(seat).model_dump() == door.model_dump(), (
+    declared = declare(opened, door, purpose=Optimize())
+    assert effective_config(declared).model_dump() == door.model_dump(), (
         "a seat runs another config than the one it declared"
     )
-    plan = resolve_cycle_plan(opened, seat, rows_30, hop=None)
+    plan = resolve_cycle_plan(opened, declared, rows_30, hop=None)
     for unmeasured in (
         {"optimization": {"budget": {"usd": 9.0, "rounds": 3}}},
         {"display_metric": "composite"},
     ):
         moved = declare(opened, _connector_config(**copy.deepcopy(unmeasured)), purpose=Optimize())
         assert (
-            moved != seat
+            moved != declared
             and resolve_cycle_plan(opened, moved, rows_30, hop=None).cycle_id == plan.cycle_id
         ), f"{unmeasured} — a key that bounds spend or display only — moved the root id"
-    assert not seat.budget.named and seat.run_seed is None, (
+    assert not declared.budget.named and declared.run_seed is None, (
         "a declaration restated a budget axis or a seed no layer set"
     )
     armed = declare(opened, door, purpose=Compare(arm=Arm(head_to_head_id="h", arm_key="a")))
@@ -924,8 +950,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     assert len(run_ids) == 3, (
         "two arms over one content, or an arm and a seat, share a run id every surface keys on"
     )
-    arming = loop_session(stores, opened.pipeline_schema, rows_30)
-    arming.dataset = opened.dataset
+    arming = loop_session(stores, opened.pipeline_schema, rows_30, dataset=opened.dataset)
 
     def minted(declaration: RunDeclaration, campaign_id: str) -> object:
         return asyncio.run(
@@ -977,7 +1002,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         resolve_campaign_config(stores, as_campaign, as_campaign.root_hop).model_dump()
         == effective_config(l4_arm).model_dump()
     ), "an arm runs another config than a campaign declared that way"
-    pinned = minted_campaign(
+    held_campaign = minted_campaign(
         CycleHop(campaign_id="decl__000001", cycle_id=plan.cycle_id),
         config=door,
         dataset_name="decl",
@@ -985,21 +1010,28 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         dataset_hash=opened.bank.dataset_hash,
         owner_user_id=str(stores.identity.user_id),
     )
-    assert pinned.declaration == seat, "the manifest holds another declaration than the door made"
-    manifest_path = stores.campaigns.create_campaign(pinned)
+    assert held_campaign.declaration == declared, (
+        "the manifest holds another declaration than the door made"
+    )
+    manifest_path = stores.campaigns.create_campaign(held_campaign)
     manifest = json.loads(manifest_path.read_bytes())
     with pytest.raises(ConflictError):
-        stores.campaigns.create_campaign(pinned.model_copy(update={"root_content_hash": "drift"}))
+        stores.campaigns.create_campaign(
+            held_campaign.model_copy(update={"root_content_hash": "drift"})
+        )
     assert json.loads(manifest_path.read_bytes()) == manifest, (
         "a drifted origin re-minted over the campaign its banked rounds stand on"
     )
-    stores.campaigns.mint_cycle(pinned.root_hop)
-    refuse_drifted_resume(opened, pinned, pinned.root_hop, rows_30)
-    opened.bind_campaign(pinned.root_hop, purpose=Optimize())
-    wired_ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(pinned.root_hop)))
-    root_cut = Cut(cycle=CycleDir(stores.campaigns.cycle_dir(pinned.root_hop)), hop=pinned.root_hop)
+    stores.campaigns.mint_cycle(held_campaign.root_hop)
+    refuse_drifted_resume(opened, held_campaign, held_campaign.root_hop, rows_30)
+    opened.bind_campaign(held_campaign.root_hop, purpose=Optimize())
+    wired_ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(held_campaign.root_hop)))
+    root_cut = Cut(
+        cycle=CycleDir(stores.campaigns.cycle_dir(held_campaign.root_hop)),
+        hop=held_campaign.root_hop,
+    )
     # A default nested inside a knob's model moves the pin as a top-level one does.
-    for model, field, moved, origin_moves in (
+    for model, field, moved_default, origin_moves in (
         (CampaignConfig, "bench_trigger", "at_end", False),
         (DatasetSplit, "tolerance", 3, False),
         (CampaignConfig, "dataset_split", DatasetSplit(bench=6), True),
@@ -1007,35 +1039,35 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         declared_field = model.model_fields[field]
         shipped = declared_field.default
         try:
-            declared_field.default = moved
+            declared_field.default = moved_default
             model.model_rebuild(force=True)
             CampaignConfig.model_rebuild(force=True)
             redeclared = declare(opened, _connector_config(), purpose=Optimize())
             pinned_again = redeclared.model_copy(
-                update={"bench_defaults_pin": seat.bench_defaults_pin}
+                update={"bench_defaults_pin": declared.bench_defaults_pin}
             )
-            assert pinned_again == seat, (
+            assert pinned_again == declared, (
                 f"a moved {field} default re-declared the same inputs differently"
             )
-            reloaded = stores.campaigns.load_campaign(pinned.campaign_id)
+            reloaded = stores.campaigns.load_campaign(held_campaign.campaign_id)
             assert reloaded is not None and reloaded.model_dump(mode="json") == manifest, (
                 f"a moved {field} default rewrote the minted manifest on read"
             )
-            drift = defaults_drift(pinned)
+            drift = defaults_drift(held_campaign)
             assert drift is not None and drift.moved() == ["bench"], (
                 f"a moved {field} default left the bench defaults pin where it was"
             )
             if not origin_moves:
-                refuse_drifted_resume(opened, pinned, pinned.root_hop, rows_30)
+                refuse_drifted_resume(opened, held_campaign, held_campaign.root_hop, rows_30)
                 # The resume runs on, and what it runs under says so on the record every launch writes.
-                declare_run_wiring(opened, effective_config(seat), wired_ledger, tracing=None)
+                declare_run_wiring(opened, effective_config(declared), wired_ledger, tracing=None)
                 served = fold_at(root_cut)
                 assert served is not None and served.defaults_drift == drift, (
                     f"a launch past a moved {field} default served no drift to read"
                 )
                 continue
             with pytest.raises(ConfigDriftError) as drifted:
-                refuse_drifted_resume(opened, pinned, pinned.root_hop, rows_30)
+                refuse_drifted_resume(opened, held_campaign, held_campaign.root_hop, rows_30)
             assert drifted.value.details["defaults_pin_moved"], (
                 "a resume the moved default drifted did not name its defaults pin"
             )
@@ -1043,36 +1075,37 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
             declared_field.default = shipped
             model.model_rebuild(force=True)
             CampaignConfig.model_rebuild(force=True)
-    declare_run_wiring(opened, effective_config(seat), wired_ledger, tracing=None)
+    declare_run_wiring(opened, effective_config(declared), wired_ledger, tracing=None)
     served = fold_at(root_cut)
     assert served is not None and served.defaults_drift is None, (
         "a launch on the defaults its declaration was made over served a drift"
     )
     # The optimizer's defaults are its whole treatment: a part moved under one declaration is named.
-    reshipped = pinned.treatment.model_copy(update={"manifest": "older"})
-    moved = defaults_drift(pinned.model_copy(update={"treatment": reshipped}))
-    assert moved is not None and moved.moved() == ["manifest"], (
+    reshipped = held_campaign.treatment.model_copy(update={"manifest": "older"})
+    reshipped_drift = defaults_drift(held_campaign.model_copy(update={"treatment": reshipped}))
+    assert reshipped_drift is not None and reshipped_drift.moved() == ["manifest"], (
         "an optimizer whose manifest moved under one declaration drifted nothing, or blamed "
         "another part"
     )
-    recut = loop_session(stores, opened.pipeline_schema, rows_30[:-1])
-    recut.dataset = opened.dataset
+    recut = loop_session(stores, opened.pipeline_schema, rows_30[:-1], dataset=opened.dataset)
     with pytest.raises(ConfigDriftError) as drifted:
-        refuse_drifted_resume(recut, pinned, pinned.root_hop, rows_30[:-1])
+        refuse_drifted_resume(recut, held_campaign, held_campaign.root_hop, rows_30[:-1])
     assert not drifted.value.details["defaults_pin_moved"], (
         "a resume over an edited bank blamed the defaults pin"
     )
     # A manifest in a shape this build does not read is refused by name, never read around.
     manifest_path.write_text(json.dumps({**manifest, "defaults_pin": "older"}), encoding="utf-8")
     with pytest.raises(ManifestUnreadableError) as stale:
-        stores.campaigns.load_campaign(pinned.campaign_id)
+        stores.campaigns.load_campaign(held_campaign.campaign_id)
     assert Path(stale.value.details["path"]) == manifest_path.relative_to(stores.base_dir), (
         "an unreadable manifest was refused without naming its file"
     )
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
     # Answering in TEXT sends no contract to answer INTO.
-    text_schema = parse_pipeline_response(read_dataset_pipeline(_DATASETS / "justlogic" / "d234"))
+    text_pipeline = read_dataset_pipeline(_DATASETS / "justlogic" / "d234")
+    assert text_pipeline is not None
+    text_schema = parse_pipeline_response(text_pipeline)
     base = {n.name: dict(n.current_config) for n in text_schema.declared_nodes}
     assert {"output_schema", "answer_field"} <= base["llm_only"].keys(), (
         "the instrument declares no contract — the rest proves nothing"
@@ -1094,8 +1127,8 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     assert resolved_output_schemas(text_schema, text_point)["llm_only"] is None, (
         "a point answering in TEXT was sent a contract to answer INTO"
     )
-    items = {"type": "object", "properties": {"amount": {"type": "string"}}}
-    out = {"lines": {"type": "array", "items": items}, "total": {"type": "number"}}
+    amount_items: dict[str, Any] = {"type": "object", "properties": {"amount": {"type": "string"}}}
+    invoice = {"lines": {"type": "array", "items": amount_items}, "total": {"type": "number"}}
     nested = parse_pipeline_response(
         {
             "nodes": {
@@ -1103,7 +1136,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
                     "type": "llm",
                     "config": {
                         "model": "m",
-                        "output_schema": {"type": "object", "properties": out},
+                        "output_schema": {"type": "object", "properties": invoice},
                     },
                     "optimizer": {},
                 }
@@ -1118,7 +1151,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     assert line["description"] == "Net, in CHF." and amount not in pp["llm_only"], (
         "a nested field's description did not fold into the contract it names"
     )
-    assert "description" not in items["properties"]["amount"], (
+    assert "description" not in amount_items["properties"]["amount"], (
         "the fold mutated the declared schema it read: the parent individual still holds it"
     )
 
@@ -1155,8 +1188,8 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         "a deletion is a move like any other: an emptied field is a locus the variation wrote"
     )
     assert wiped.lineage.parent_ids == [parent.id], "a wiped field lost its parent"
-    found = admission_failures(wiped, {"l1_generate": {"invented_knob": 1}}, graded, carried=[])
-    assert [f.reason for f in found] == ["unknown_param"], "an invented knob was admitted"
+    refusals = admission_failures(wiped, {"l1_generate": {"invented_knob": 1}}, graded, carried=[])
+    assert [f.reason for f in refusals] == ["unknown_param"], "an invented knob was admitted"
     # Each carrier writes its own kind: a prompt locus the node does not declare, a config key
     # aimed at a prompt field, and a node the pipeline lacks are all refused on the child.
     _, config, carried = carried_writes(
@@ -1180,10 +1213,12 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     # an operator's arm — and a member knowing one prompt is refused pre-spend.
     two = pipeline_schema(
         [
-            PipelineNode(name="draft", kind="llm", prompt_info=NodePromptInfo(), tunes_llm=True),
+            PipelineNode(
+                name="draft", kind=NodeKind.LLM, prompt_info=NodePromptInfo(), tunes_llm=True
+            ),
             PipelineNode(
                 name="review",
-                kind="llm",
+                kind=NodeKind.LLM,
                 prompt_info=NodePromptInfo(fields=("instruction", "rubric")),
                 tunes_llm=True,
             ),
@@ -1200,28 +1235,22 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
             "review": NodePrompt(fields={"instruction": "Review it.", "rubric": "Correctness."}),
         }
     )
-    demo = types.SimpleNamespace(
-        require_partition=lambda: types.SimpleNamespace(
-            demo=(Sample(id=7, query="q", ground_truth="a"),)
-        )
-    )
     gepa = resolve_optimizer("gepa", {}, gate="off")
-    seat = types.SimpleNamespace(
-        round_num=1,
-        cycle=types.SimpleNamespace(
-            optimizer=gepa,
-            opt_sp=origin,
-            population=[origin],
-            slices=SliceMap(gepa.slices),
-            session=types.SimpleNamespace(pipeline_schema=two, scoring=demo),
-        ),
+    reflected_on = seat(
+        built_stores,
+        schema=two,
+        bank=[Sample(id=7, query="q", ground_truth="a"), Sample(id=8, query="r", ground_truth="b")],
+        demo=1,
+        optimization={"optimizer": "gepa"},
+        opt_sp=origin,
+        population=[origin],
     )
     arm = SubmittedArm(
         prompt_fields={"review": {"rubric": "Cite the clause."}},
         changes_description="tighten the review",
     )
-    operator: NodeContext[Any] = NodeContext(cast(Any, seat), gepa.plan.seat)
-    authored = _authored(operator, arm)
+    operator: NodeContext[Any] = NodeContext(reflected_on, gepa.plan.seat)
+    authored = authored_arm(operator, arm)
     assert authored.validation_failures == [], "an operator arm on the second node was refused"
     assert authored.individual.prompts["review"].fields["rubric"] == "Cite the clause.", (
         "the arm's second-node write did not land"
@@ -1231,7 +1260,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         prompt_fields={"review": {"persona": "x"}, "ghost": {"rubric": "x"}},
         changes_description="off roster",
     )
-    refused = _authored(operator, stray)
+    refused = authored_arm(operator, stray)
     assert len(refused.validation_failures) == 2, "an arm writing off the roster was measured"
     capo = resolve_optimizer("capo", {}, gate="off")
     assert optimizers.unfit_pipeline(capo, two) is not None, (
@@ -1244,22 +1273,22 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
             return []
 
         async def ask(self, prompt: str, idx: int | None = None) -> str:
-            return f"```\nRewritten in round {len(seat.cycle.population)}.\n```"
+            return f"```\nRewritten in round {len(reflected_on.cycle.population)}.\n```"
 
         def emit(self, output: Any) -> None:
             return None
 
     reflected: list[set[str]] = []
     for _ in range(3):
-        reflecting = _Reflecting(cast(Any, seat), optimizers.member("gepa_reflect"))
-        panel = types.SimpleNamespace(order=[], block_size=0)
-        out = asyncio.run(GepaReflect().propose(reflecting, cast(Any, panel), Proposals([])))
-        (child,) = out.proposals
+        reflecting = _Reflecting(reflected_on, optimizers.member("gepa_reflect"))
+        no_cells = Panel(cells=[], order=[], block_size=0)
+        reflection = asyncio.run(GepaReflect().propose(reflecting, no_cells, Proposals([])))
+        (child,) = reflection.proposals
         reflected.append(
             {locus.split(".")[0] for locus in child.individual.lineage.variations[0].loci}
         )
-        seat.cycle.population = [*seat.cycle.population, child.individual]
-        seat.cycle.slices.put(
+        reflected_on.cycle.population = [*reflected_on.cycle.population, child.individual]
+        reflected_on.cycle.slices.put(
             ParetoScores(scores={child.individual.id: {}}, parent_id=child.individual.id)
         )
     assert reflected == [{"draft"}, {"review"}, {"draft"}], (
@@ -1269,7 +1298,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         [
             PipelineNode(
                 name="review",
-                kind="llm",
+                kind=NodeKind.LLM,
                 prompt_info=NodePromptInfo(fields=("rubric",)),
                 tunes_llm=True,
             )
@@ -1282,13 +1311,13 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     # The endpoint is the operator's config: a request that names one is refused, not followed.
     termnorm = BackendClient(get("termnorm"), workload=PROBE_WORKLOAD)
     assert termnorm.base_url == settings.TERMNORM_URL.rstrip("/"), "the client left its config"
-    for wire, named in (
+    for payload_model, named in (
         (StartCheckinPayload, {"draft_id": "d" * 8}),
         (MintCampaignPayload, {"dataset_name": "d"}),
     ):
-        wire.model_validate(named)
+        payload_model.model_validate(named)
         with pytest.raises(ValidationError):
-            wire.model_validate({**named, "backend_url": "http://evil"})
+            payload_model.model_validate({**named, "backend_url": "http://evil"})
 
     # The YAML a config is written to never reinterprets a string it wrote.
     path = tmp_path / "hazards.yaml"
@@ -1464,12 +1493,12 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
     wide = partition_bank([*bank, *extra], split, seed=0)
     assert (wide.search, wide.demo) == (part.search, part.demo), "a wider bench moved a paid cell"
     assert wide.bench == (*part.bench, *extra), "a declared bench row was not held out"
-    for refused in (
+    for unsplittable, declared_split in (
         ([*bank, *extra], None),
         ([*bank, bank[0].model_copy(update={"id": 60, "bench_only": True})], split),
     ):
         with pytest.raises(ValueError):
-            partition_bank(*refused, seed=0)
+            partition_bank(unsplittable, declared_split, seed=0)
     # An L4 pool seats a held-out ENVIRONMENT the same way: the seat is out of the pin, so the
     # cell replays once searched, and a pool declaring no split cannot draw it by mistake.
     task = {"kind": "seat", "id": "gsm_hard/8b", "inner_dataset": "gsm_hard", "inner_model": "m"}
@@ -1490,10 +1519,10 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
             "datasets": {task["id"]: "gsm_hard", other["id"]: "hotpotqa"},
         }
 
-    seated, drawn = samples_from_dicts(
-        CONNECTOR.extract_experiment(resolved({**task, "held_out": True}, other))
-    )
-    searched, _ = samples_from_dicts(CONNECTOR.extract_experiment(resolved(task, other)))
+    extract = CONNECTOR.extract_experiment
+    assert extract is not None
+    seated, drawn = samples_from_dicts(extract(resolved({**task, "held_out": True}, other)))
+    searched, _ = samples_from_dicts(extract(resolved(task, other)))
     assert seated.bench_only and not searched.bench_only, "a held-out environment was searched"
     assert seated.source_pin == {**task, "instrument": "i"} and seated.key == searched.key, (
         "the seat entered the pin, so the held-out cell never replays once searched"
@@ -1506,8 +1535,8 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
     )
     # A cycle's diagnostics read the partition its run init drew: an L4 cell's held-out rows ride
     # its bank as bench-only copies, so re-drawing off its config alone searches them.
-    cell = [*bank[:30], *(s.model_copy(update={"bench_only": True}) for s in bank[30:50])]
-    cell_drawn = partition_bank(cell, DatasetSplit(bench=0), seed=0)
+    l4_bank = [*bank[:30], *(s.model_copy(update={"bench_only": True}) for s in bank[30:50])]
+    cell_drawn = partition_bank(l4_bank, DatasetSplit(bench=0), seed=0)
     back = restored_partition(bank, cell_drawn.record(dataset_hash="d"))
     assert (back.search, back.bench) == (cell_drawn.search, tuple(bank[30:50])), (
         "the restored partition is not the one the run drew"
@@ -1516,22 +1545,25 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
         "a re-draw held rows out"
     )
     # A resume after its label was re-cut reads the bank its cycle drew, never the newer one.
-    drawn, recut = Bank.of(cell), Bank.of([*cell[:40], cell[40].model_copy(update={"query": "x"})])
-    for held_bank in (drawn, recut):
+    drawn_bank = Bank.of(l4_bank)
+    recut = Bank.of([*l4_bank[:40], l4_bank[40].model_copy(update={"query": "x"})])
+    for held_bank in (drawn_bank, recut):
         built_stores.tenant_datasets.put_bank(held_bank)
     built_stores.tenant_datasets.relabel("recut", recut.dataset_hash)
     hop = CycleHop(campaign_id="camp-recut", cycle_id="cycle_recut")
     built_stores.campaigns.write_bank_partition(
         hop,
-        partition_bank(cell, DatasetSplit(bench=0), seed=0).record(dataset_hash=drawn.dataset_hash),
+        partition_bank(l4_bank, DatasetSplit(bench=0), seed=0).record(
+            dataset_hash=drawn_bank.dataset_hash
+        ),
     )
-    resumed = loop_session(
-        built_stores,
-        pipeline_schema([]),
-        list(built_stores.tenant_datasets.labelled("recut").samples),
-    )
+    relabelled = built_stores.tenant_datasets.labelled("recut")
+    assert relabelled is not None
+    resumed = loop_session(built_stores, pipeline_schema([]), list(relabelled.samples))
     resumed.bind_campaign(hop, purpose=Optimize())
-    assert resumed.bank == drawn, "a resume after a re-cut switched its cycle onto the new bank"
+    assert resumed.bank == drawn_bank, (
+        "a resume after a re-cut switched its cycle onto the new bank"
+    )
     contaminating = [Observation("bench_arm", s.key, 0.0) for s in (*part.bench, *part.demo)]
     panel = select_round_subset(list(part.search), contaminating, 20, worth={})
     assert held.isdisjoint(s.id for s in panel), "a held-out row reached a round panel"
@@ -1587,9 +1619,16 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
     )
     monkeypatch.setattr(checkin_launch, "assert_origin_ready", lambda _draft: None)
     for attempt in ("first", "retry"):
-        with pytest.raises(PayloadInvalidError) as refused:
-            asyncio.run(checkin_launch._commit_checkin(built_stores, uploaded.draft_id))
-        assert refused.value.code == "model_below_reasoning_floor", (
+        with pytest.raises(PayloadInvalidError) as start_refused:
+            asyncio.run(
+                dispatch_start_checkin(
+                    built_stores,
+                    StartCheckinPayload(draft_id=uploaded.draft_id),
+                    attempt,
+                    inline=Inline(),
+                )
+            )
+        assert start_refused.value.code == "model_below_reasoning_floor", (
             f"the {attempt} Start of an unrunnable upload was refused as something else"
         )
         assert not built_stores.tenant_datasets.slug_exists(uploaded.slug), (
@@ -1608,7 +1647,11 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
         problem_description="Assign the four-digit account code for the invoice.",
     )
     booking = pipeline_schema(
-        [PipelineNode(name="classify", kind="llm", prompt_info=NodePromptInfo(), tunes_llm=True)]
+        [
+            PipelineNode(
+                name="classify", kind=NodeKind.LLM, prompt_info=NodePromptInfo(), tunes_llm=True
+            )
+        ]
     )
     classify = booking.prompt_nodes()[0]
     bundle = InjectionBundle(
@@ -1665,8 +1708,8 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
             nodes=[
                 PipelineNode(
                     name=name,
-                    kind="llm",
-                    param_keys=fields,
+                    kind=NodeKind.LLM,
+                    param_keys=set(fields),
                     param_types=dict.fromkeys(fields, "string"),
                     tunes_llm=False,
                 )
@@ -1691,8 +1734,8 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
     assert len(filled.rendered["rendered_prompt"]) >= subject_chars, (
         "the generator was handed no subject — it is rewriting text it cannot see"
     )
-    starved = set(filled.breakdown.dropped) & NODE_LAYOUTS["l1_generate"].mandatory
-    assert not starved, f"mandatory panel(s) refused by the budget: {sorted(starved)}"
+    refused_panels = set(filled.breakdown.dropped) & NODE_LAYOUTS["l1_generate"].mandatory
+    assert not refused_panels, f"mandatory panel(s) refused by the budget: {sorted(refused_panels)}"
     # A panel mixing two manifests: each outer node is shown, and checked, as its own manifest's.
     capo = resolve_optimizer("capo", {}, gate="off")
     potter = resolve_optimizer("potter", {}, gate="off")
@@ -1722,17 +1765,12 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
 
     def proposed(overlay: dict[str, Any]) -> Any:
         node = next(iter(overlay))
-        proposing = types.SimpleNamespace(
-            cycle=types.SimpleNamespace(
-                optimizer=mixed.owners[node],
-                slices=SliceMap(()),
-                session=types.SimpleNamespace(pipeline_schema=mixed_schema, scoring=no_demo),
-            )
+        proposing = seat(
+            built_stores,
+            schema=mixed_schema,
+            optimization={"optimizer": mixed.owners[node].name},
         )
-        member = optimizers.member(node)
-        return NodeContext(cast(Any, proposing), member).child([parent], overlay=overlay)
-
-    no_demo = types.SimpleNamespace(require_partition=lambda: types.SimpleNamespace(demo=()))
+        return NodeContext(proposing, optimizers.member(node)).child([parent], overlay=overlay)
 
     proposals = parse_population(
         [proposed(overlay) for overlay in (edit, severed, severed_potter)],
@@ -1755,8 +1793,8 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
     )
     try:
         set_optimizer_prompt_overrides(payload["optimizer_prompt_overrides"])
-        round_ = types.SimpleNamespace(cycle=types.SimpleNamespace(optimizer=capo))
-        sent = NodeContext(cast(Any, round_), optimizers.member("capo_mutate")).fill(
+        capo_seat = seat(built_stores, optimization={"optimizer": "capo"})
+        sent = NodeContext(capo_seat, optimizers.member("capo_mutate")).fill(
             task_description="sort the list", instruction="Sort it."
         )
     finally:

@@ -26,7 +26,6 @@ if TYPE_CHECKING:
 
 shapes_optimizer_prompt(__name__)
 
-__all__ = ["compute_round_diagnostics"]
 
 logger = logging.getLogger(__name__)
 

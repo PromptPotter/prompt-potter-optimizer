@@ -10,7 +10,6 @@ from promptpotter.domain.scoring import ROW_GRADES
 if TYPE_CHECKING:
     from promptpotter.domain.scoring import GradedCell
 
-__all__ = ["CAPO_MANIFEST", "CapoObjective"]
 
 CapoManifest = Literal["capo"]
 CAPO_MANIFEST: CapoManifest = "capo"

@@ -474,15 +474,3 @@ CONNECTOR = Connector(
     answer_key=ANSWER_KEY,
     default_pipeline=(WRITER_NODE,),
 )
-
-
-__all__ = [
-    "ANSWER_KEY",
-    "CONNECTOR",
-    "RETRY_LEVELS",
-    "WRITER_NODE",
-    "accuracy_key",
-    "dbllmbench_wire_adapter",
-    "harness_config",
-    "project_records",
-]

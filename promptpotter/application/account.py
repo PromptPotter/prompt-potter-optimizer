@@ -244,28 +244,3 @@ def grant(sub_user_id: str, *, delegator: str, capabilities: frozenset[str], act
         actor=actor,
         audit_path=paths.grants_audit,
     )
-
-
-__all__ = [
-    "AccountTrail",
-    "Arrival",
-    "Trail",
-    "accept_terms",
-    "account_of",
-    "arrive",
-    "block_email",
-    "blocked_emails",
-    "grant",
-    "grants",
-    "local_stores",
-    "record_refusal",
-    "record_upload",
-    "registered_or_default_identity",
-    "registered_user_id",
-    "revoke_grant",
-    "sign_in",
-    "tenant_trail",
-    "trail_by_email",
-    "trails_since",
-    "unblock_email",
-]

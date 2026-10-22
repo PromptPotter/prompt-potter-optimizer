@@ -134,6 +134,3 @@ class Session:
     held: HeldBudget | None = None
     # The launch's start on ``time.monotonic()``: the wall-clock axis runs from here.
     launched: float = field(default_factory=time.monotonic)
-
-
-__all__ = ["ScorerSetup", "Session"]

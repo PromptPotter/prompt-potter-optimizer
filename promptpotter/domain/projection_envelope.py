@@ -8,15 +8,6 @@ from promptpotter.domain.activity import SILENT_RECORDS, ActivityState
 from promptpotter.domain.run_records import RECORD_ADAPTER, CycleRecord
 from promptpotter.domain.strict_model import FrozenModel
 
-__all__ = [
-    "NON_ACTIVITY_KINDS",
-    "RECORD_KINDS",
-    "ProjectionEnvelope",
-    "ProjectionKind",
-    "bearing_record",
-]
-
-
 # A missing kind is a HOLE, not a filter: the tail still consumes its offset, and the client reconnects.
 ProjectionKind = Literal[
     "account_event",

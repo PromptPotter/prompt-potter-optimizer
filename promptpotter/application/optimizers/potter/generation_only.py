@@ -59,6 +59,3 @@ async def run_generation_only_round(ctx: RoundContext) -> None:
             optimizer=cycle.optimizer,
             framing=cycle.framing,
         )
-
-
-__all__ = ["run_generation_only_round"]

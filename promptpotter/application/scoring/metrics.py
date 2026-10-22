@@ -4,7 +4,7 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
 from promptpotter.application.scoring.evaluators import materialize_round_values
-from promptpotter.application.scoring.formula import cell_channels_of
+from promptpotter.application.scoring.formula.compiler import cell_channels_of
 from promptpotter.application.scoring.selection import level_band
 from promptpotter.domain.results import CellFold, ScoreSummary, arm_end, recall_at
 from promptpotter.domain.results_health import is_degraded, is_deprecated
@@ -16,12 +16,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.results import ArmState
     from promptpotter.domain.scoring import CellSheet, GradedCell
-
-__all__ = [
-    "arm_folds",
-    "compute_composite_fitness",
-    "fold_cells",
-]
 
 
 # The registry's COMPLEMENT: `fitness`/`errored`/`degraded` are already reported as rates.

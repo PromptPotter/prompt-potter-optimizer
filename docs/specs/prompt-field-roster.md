@@ -14,7 +14,7 @@ A target prompt has no class. Each prompt node declares its fields IN RENDER ORD
 ORDER — declared once, by whoever declares the node.
 
 The optimizer's own prompt keeps a class, `OptimizerPromptTemplate`, whose `RENDER_ORDER` ends at
-`dispatch/layout.py::VOLATILE_SLOT` — why is [`dispatch-hub.md`](../developer/dispatch-hub.md)
+`application/optimizers/potter/dispatch/layout.py::VOLATILE_SLOT` — why is [`dispatch-hub.md`](../developer/dispatch-hub.md)
 § L1 layout's. It is not the operator's to permute.
 
 ## Reordering re-cuts the archive key — and that is correct

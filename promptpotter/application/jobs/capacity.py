@@ -32,9 +32,3 @@ def throttle_hold(capacity: int, ceiling: int) -> str | None:
     if capacity >= ceiling:
         return None
     return f"admitting {capacity} of {ceiling} while the provider throttle is saturated"
-
-
-__all__ = [
-    "resolve_run_capacity",
-    "throttle_hold",
-]

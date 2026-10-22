@@ -76,6 +76,3 @@ class LLMResponse(StrictModel):
             "LLM spend, and the entries say which rule the prompt fails to teach."
         ),
     )
-
-
-__all__ = ["LLMResponse"]

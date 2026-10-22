@@ -163,13 +163,3 @@ def revoke_principal(
         detail="removed" if removed else "absent",
     )
     return removed
-
-
-__all__ = [
-    "PrincipalGrant",
-    "grant_principal",
-    "list_grants",
-    "read_grant",
-    "resolve_effective_capabilities",
-    "revoke_principal",
-]

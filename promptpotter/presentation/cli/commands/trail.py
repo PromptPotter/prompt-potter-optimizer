@@ -8,8 +8,6 @@ from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.workspace import open_stores
 
-__all__ = ["cmd_trail"]
-
 
 async def cmd_trail(args: argparse.Namespace) -> CommandResult:
     email = args.email.strip()

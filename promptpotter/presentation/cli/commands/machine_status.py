@@ -8,8 +8,6 @@ from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.workspace import open_stores
 
-__all__ = ["cmd_machine_status"]
-
 
 async def cmd_machine_status(args: argparse.Namespace) -> CommandResult:
     stores = open_stores(args)

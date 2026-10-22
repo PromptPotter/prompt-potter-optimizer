@@ -70,7 +70,6 @@ from promptpotter.application.scoring.closed_rounds import (
     cycle_instrument,
     walked_rows,
 )
-from promptpotter.application.scoring.formula.compiler import ScoringFormulaError
 from promptpotter.application.scoring.paired import MemberRows, as_family
 from promptpotter.domain.candidate_diff import (
     build_candidate_flat,
@@ -94,7 +93,7 @@ from promptpotter.domain.results import (
     individual_cells,
 )
 from promptpotter.domain.ruler import CellScopes
-from promptpotter.domain.scoring import CellSheet, GradedCell, WalkedCell
+from promptpotter.domain.scoring import CellSheet, GradedCell, ScoringFormulaError, WalkedCell
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.ledger import ledger_chain
@@ -1011,14 +1010,3 @@ def _campaign_edits(
         )
         for sp_hash, acc in accums.items()
     ]
-
-
-__all__ = [
-    "ConfigKeys",
-    "EditSpread",
-    "EffectProvenance",
-    "Evidence",
-    "RankedEdit",
-    "campaigns_on_dataset",
-    "subject_evidence",
-]

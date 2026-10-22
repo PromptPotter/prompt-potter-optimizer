@@ -7,9 +7,9 @@ from promptpotter.application.mask.divergence import Verdict, find_divergences
 from promptpotter.application.mask.load import load_mask_record
 from promptpotter.application.mask.record import Lens, MaskReading, MaskRecord
 from promptpotter.application.mask.verdicts import make_abort_verdict, make_scoring_verdict
-from promptpotter.application.scoring.formula import ScoringFormulaError
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath
 from promptpotter.domain.pipeline_schema import NodeKind
+from promptpotter.domain.scoring import ScoringFormulaError
 from promptpotter.infrastructure.store.lineage_queries import (
     ArmNode,
     CourseNode,
@@ -23,6 +23,10 @@ from promptpotter.shared.errors import BadRequestError
 if TYPE_CHECKING:
     from promptpotter.application.optimizers.nodes import Eliminator
     from promptpotter.infrastructure.store.read_model import Moment
+
+# A router imports no infrastructure, so it reaches these through here; strict mypy re-exports
+# an import only by this list.
+__all__ = ["CourseNode"]
 
 
 def _abort_suppress(variant: str) -> frozenset[str]:
@@ -152,6 +156,3 @@ def lensed_tree(
         verdict,
         subset_size=len(samples) if samples else None,
     ).apply(tree)
-
-
-__all__ = ["CourseNode", "lensed_tree"]

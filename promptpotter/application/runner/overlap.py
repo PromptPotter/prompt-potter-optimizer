@@ -43,8 +43,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["measure_overlap"]
-
 
 async def measure_overlap(
     cycle: Cycle, round_result: RoundResult, scoring_pool: list[Sample]

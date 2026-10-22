@@ -27,8 +27,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["measure_noise_floor"]
-
 
 @dataclass(frozen=True)
 class NoiseFloorOutcome:

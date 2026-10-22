@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, NamedTuple
 
 from promptpotter.application.runner.termination import RUN_STOPS, run_stop_reason
 from promptpotter.application.scoring.closed_rounds import walked_rows
-from promptpotter.application.scoring.formula import cell_channels_of
+from promptpotter.application.scoring.formula.compiler import cell_channels_of
 from promptpotter.application.scoring.paired import (
     MemberRows,
     absent_pair,
@@ -71,22 +71,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.scoring import CellSheet, Scorer
     from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
     from promptpotter.infrastructure.store.stores import Stores
-
-__all__ = [
-    "BenchLine",
-    "bench_members",
-    "bench_selection",
-    "bench_series",
-    "declare_bench",
-    "grade_round_selection",
-    "graded",
-    "member_on_bench",
-    "own_level",
-    "pair_on_bench",
-    "read_bench",
-    "reserve_selection_pass",
-    "score_on_bench",
-]
 
 
 class _PassReading(NamedTuple):

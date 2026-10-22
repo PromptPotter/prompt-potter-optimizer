@@ -127,6 +127,3 @@ class DraftStore:
             rmtree_robust(draft_dir)
         finally:
             claim.release()
-
-
-__all__ = ["DraftClaim", "DraftStore"]

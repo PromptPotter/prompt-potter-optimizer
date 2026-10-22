@@ -115,6 +115,3 @@ def individual_summary(
         body_line=body_line,
         detail_lines=tuple(detail_lines),
     )
-
-
-__all__ = ["fmt_individual_header", "individual_summary"]

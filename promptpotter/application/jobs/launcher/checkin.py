@@ -175,11 +175,3 @@ async def hold_checkin_start(
 
     logger.info("start-checkin: started %s/%s (job %s)", hop.campaign_id, hop.cycle_id, job.job_id)
     return HeldRun.of(job_registry, job.job_id, session, held)
-
-
-__all__ = [
-    "CheckinStart",
-    "StartCheckinResponse",
-    "hold_checkin_start",
-    "start_ready_draft",
-]

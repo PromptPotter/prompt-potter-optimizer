@@ -30,14 +30,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.scoring import MeasuredCell
     from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache
 
-__all__ = [
-    "ENTRY_POINT_GROUP",
-    "build_evaluators",
-    "get",
-    "judge_instrument",
-    "judge_origins",
-    "registered",
-]
 
 ENTRY_POINT_GROUP = "promptpotter.judges"
 """Published: renaming it un-registers every third-party plugin at once."""

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import contextlib
 import contextvars
 import functools
 import json
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, assert_never, cast
@@ -66,29 +67,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.sample import Sample
 
 shapes_optimizer_prompt(__name__)
-
-__all__ = [
-    "ManifestNode",
-    "PipelineManifest",
-    "RoundPlan",
-    "SelectedOptimizer",
-    "bind_optimizer",
-    "bound_optimizer",
-    "checkin_manifest",
-    "declared_node_override",
-    "get_optimizer_config_overrides",
-    "llm_node_config",
-    "llm_node_manifest",
-    "optimizer_prompt",
-    "prompt_body",
-    "resolve_node_override",
-    "resolve_optimizer",
-    "resolved_overrides",
-    "running_prompt",
-    "select_optimizer",
-    "set_determinism_clamp",
-    "set_optimizer_prompt_overrides",
-]
 
 
 def _stamp(path: Path) -> int:
@@ -765,8 +743,13 @@ _BOUND: contextvars.ContextVar[SelectedOptimizer | None] = contextvars.ContextVa
 )
 
 
-def bind_optimizer(selected: SelectedOptimizer) -> None:
-    _BOUND.set(selected)
+@contextlib.contextmanager
+def binding_optimizer(selected: SelectedOptimizer) -> Iterator[None]:
+    token = _BOUND.set(selected)
+    try:
+        yield
+    finally:
+        _BOUND.reset(token)
 
 
 def bound_optimizer() -> SelectedOptimizer:

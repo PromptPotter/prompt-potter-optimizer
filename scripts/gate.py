@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import argparse
 import ast
-import ctypes
 import dataclasses
-import hashlib
+import fnmatch
 import json
 import os
 import re
@@ -23,144 +22,22 @@ from pathlib import Path
 from typing import Literal
 
 import tests_owning
-from last_green import ENGINE_RUNTIME, OFFLINE_RUN, OFFLINE_RUN_READS, LastGreen, reads
+from last_green import ENGINE_RUNTIME, OFFLINE_RUN, OFFLINE_RUN_READS, LastGreen, digest, reads
+from processes import (
+    REPO,
+    Outcome,
+    close_job,
+    end_children_with_this_process,
+    free_mb,
+    git,
+    metered,
+    open_job,
+    run,
+)
 
-_REPO = Path(__file__).resolve().parents[1]
-_WEBAPP = _REPO / "webapp"
-_PINNED = _REPO / ".venv"
+_WEBAPP = REPO / "webapp"
+_PINNED = REPO / ".venv"
 _REEXEC = "PROMPTPOTTER_GATE_REEXEC"
-
-
-_KILL_ON_JOB_CLOSE = 0x2000
-_EXTENDED_LIMIT_INFORMATION = 9
-
-
-class _Basic(ctypes.Structure):
-    _fields_ = (
-        ("per_process_user_time", ctypes.c_longlong),
-        ("per_job_user_time", ctypes.c_longlong),
-        ("limit_flags", ctypes.c_ulong),
-        ("minimum_working_set", ctypes.c_size_t),
-        ("maximum_working_set", ctypes.c_size_t),
-        ("active_process_limit", ctypes.c_ulong),
-        ("affinity", ctypes.c_size_t),
-        ("priority_class", ctypes.c_ulong),
-        ("scheduling_class", ctypes.c_ulong),
-    )
-
-
-class _Extended(ctypes.Structure):
-    _fields_ = (
-        ("basic", _Basic),
-        ("io_counters", ctypes.c_ulonglong * 6),
-        ("process_memory_limit", ctypes.c_size_t),
-        ("job_memory_limit", ctypes.c_size_t),
-        ("peak_process_memory", ctypes.c_size_t),
-        ("peak_job_memory", ctypes.c_size_t),
-    )
-
-
-if sys.platform == "win32":
-    _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    _kernel32.CreateJobObjectW.restype = ctypes.c_void_p
-    _kernel32.GetCurrentProcess.restype = ctypes.c_void_p
-    _kernel32.SetInformationJobObject.argtypes = (
-        ctypes.c_void_p,
-        ctypes.c_int,
-        ctypes.c_void_p,
-        ctypes.c_ulong,
-    )
-    _kernel32.AssignProcessToJobObject.argtypes = (ctypes.c_void_p, ctypes.c_void_p)
-    _kernel32.QueryInformationJobObject.argtypes = (
-        ctypes.c_void_p,
-        ctypes.c_int,
-        ctypes.c_void_p,
-        ctypes.c_ulong,
-        ctypes.c_void_p,
-    )
-    _kernel32.OpenProcess.restype = ctypes.c_void_p
-    _kernel32.OpenProcess.argtypes = (ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong)
-    _kernel32.CloseHandle.argtypes = (ctypes.c_void_p,)
-    _ntdll = ctypes.WinDLL("ntdll")
-    _ntdll.NtResumeProcess.argtypes = (ctypes.c_void_p,)
-    _ntdll.NtResumeProcess.restype = ctypes.c_long  # NTSTATUS
-
-# A child starts suspended and joins its check's job before it can start a grandchild.
-_CREATE_SUSPENDED = 0x4
-_SET_QUOTA_TERMINATE_RESUME = 0x0100 | 0x0001 | 0x0800
-
-
-class _Metered(threading.local):
-    """The job a lane's running check spawns into: its peak is every process that check started."""
-
-    job: int | None = None
-
-
-_metered = _Metered()
-
-
-def _join_job(job: int, pid: int) -> None:
-    if sys.platform == "win32":
-        process = _kernel32.OpenProcess(_SET_QUOTA_TERMINATE_RESUME, False, pid)
-        try:
-            if not (process and _kernel32.AssignProcessToJobObject(job, process)):
-                raise ctypes.WinError(ctypes.get_last_error())
-            # A child left suspended would hang `communicate()` with no error.
-            if status := _ntdll.NtResumeProcess(process):
-                raise OSError(f"NtResumeProcess: NTSTATUS {status & 0xFFFFFFFF:#010x}")
-        finally:
-            _kernel32.CloseHandle(process)
-
-
-def _open_job() -> int | None:
-    if sys.platform == "win32":
-        job: int | None = _kernel32.CreateJobObjectW(None, None)
-        if not job:
-            raise ctypes.WinError(ctypes.get_last_error())
-        return job
-    return None
-
-
-def _close_job(job: int | None) -> int | None:
-    """The job's peak committed memory in MB, then the job is closed."""
-    if sys.platform == "win32" and job is not None:
-        usage = _Extended()
-        queried = _kernel32.QueryInformationJobObject(
-            job, _EXTENDED_LIMIT_INFORMATION, ctypes.byref(usage), ctypes.sizeof(usage), None
-        )
-        _kernel32.CloseHandle(job)
-        if not queried:
-            raise ctypes.WinError(ctypes.get_last_error())
-        return int(usage.peak_job_memory) >> 20
-    return None
-
-
-def _free_mb() -> int:
-    if sys.platform == "win32":
-
-        class Status(ctypes.Structure):  # MEMORYSTATUSEX
-            _fields_ = (
-                ("length", ctypes.c_ulong),
-                ("load", ctypes.c_ulong),
-                ("total_phys", ctypes.c_ulonglong),
-                ("avail_phys", ctypes.c_ulonglong),
-                *((f"field{i}", ctypes.c_ulonglong) for i in range(5)),
-            )
-
-        status = Status(length=ctypes.sizeof(Status))
-        if not _kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
-            raise ctypes.WinError(ctypes.get_last_error())
-        return int(status.avail_phys) >> 20
-    if sys.platform == "darwin":
-        # What Linux names MemAvailable: free pages plus the ones the kernel reclaims on demand.
-        stat = subprocess.run(["vm_stat"], capture_output=True, text=True, check=True).stdout
-        page = re.search(r"page size of (\d+) bytes", stat)
-        pages = dict(re.findall(r"^Pages (free|inactive|speculative):\s+(\d+)\.$", stat, re.M))
-        if page is None or len(pages) != 3:
-            raise RuntimeError(f"gate: vm_stat said what it is not read for:\n{stat}")
-        return sum(map(int, pages.values())) * int(page[1]) >> 20
-    with open("/proc/meminfo", encoding="ascii") as info:
-        return next(int(line.split()[1]) >> 10 for line in info if line.startswith("MemAvailable:"))
 
 
 # What one unit of each fan-out commits: the slope of its check's job peak across widths.
@@ -182,7 +59,7 @@ class RamBudget:
     @classmethod
     def read(cls) -> RamBudget:
         inherited = os.environ.get(_FREE_MB)
-        return cls(int(inherited) if inherited else _free_mb())
+        return cls(int(inherited) if inherited else free_mb())
 
     def lanes_overlap(self) -> bool:
         return self.free_mb >= _PY_LANE_MB + _WEB_LANE_MB
@@ -213,7 +90,7 @@ def _locked(fd: int) -> bool:
 
 def _queue_behind_siblings(label: str) -> None:
     """One gate per clone at a time, every worktree's included: an OS lock, dropped when we exit."""
-    rc, common = _run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], _REPO)
+    rc, common = git("rev-parse", "--path-format=absolute", "--git-common-dir")
     if rc:  # no clone, so no sibling
         return
     path = Path(common).parent / ".gate_cache" / "gate.lock"
@@ -236,26 +113,8 @@ def _queue_behind_siblings(label: str) -> None:
     os.ftruncate(fd, 1)
     os.lseek(fd, 1, os.SEEK_SET)
     since = time.strftime("%H:%M:%S")
-    os.write(fd, f"gate[{label}] in {_REPO}, pid {os.getpid()}, since {since}".encode())
+    os.write(fd, f"gate[{label}] in {REPO}, pid {os.getpid()}, since {since}".encode())
 
-
-def end_children_with_this_process() -> None:
-    """Windows only: POSIX reaps a foreground tree through its process group."""
-    if sys.platform == "win32":
-        limits = _Extended()
-        limits.basic.limit_flags = _KILL_ON_JOB_CLOSE
-        job = _kernel32.CreateJobObjectW(None, None)
-        if not (
-            job
-            and _kernel32.SetInformationJobObject(
-                job, _EXTENDED_LIMIT_INFORMATION, ctypes.byref(limits), ctypes.sizeof(limits)
-            )
-            and _kernel32.AssignProcessToJobObject(job, _kernel32.GetCurrentProcess())
-        ):
-            raise ctypes.WinError(ctypes.get_last_error())
-
-
-Outcome = tuple[int, str]
 
 _LINTED = (".ts", ".tsx", ".js", ".jsx", ".mjs")
 # Anything else under `webapp/` is in no module graph, so it narrows nothing.
@@ -276,12 +135,12 @@ class Selection:
     @classmethod
     def build(cls, staged: bool, changed: bool) -> Selection:
         if changed:
-            _, tracked = _run(["git", "diff", "--name-only", "HEAD"], _REPO)
-            _, untracked = _run(["git", "ls-files", "-o", "--exclude-standard"], _REPO)
+            _, tracked = git("diff", "--name-only", "HEAD")
+            _, untracked = git("ls-files", "-o", "--exclude-standard")
             return cls(False, (), (), tuple(filter(None, (tracked + "\n" + untracked).split("\n"))))
         if not staged:
             return cls(False, (), ())
-        _, out = _run(["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"], _REPO)
+        _, out = git("diff", "--cached", "--name-only", "--diff-filter=ACM")
         names = [n for n in out.splitlines() if n]
         return cls(
             True,
@@ -295,29 +154,6 @@ class Selection:
         )
 
 
-def _run(argv: Sequence[str], cwd: Path, **extra_env: str) -> Outcome:
-    env = {**os.environ, "PYTHONIOENCODING": "utf-8", **extra_env}
-    job = _metered.job
-    with subprocess.Popen(
-        list(argv),
-        cwd=cwd,
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        encoding="utf-8",
-        errors="replace",
-        creationflags=0 if job is None else _CREATE_SUSPENDED,
-    ) as proc:
-        if job is not None:
-            try:
-                _join_job(job, proc.pid)
-            except OSError:
-                proc.kill()
-                raise
-        out, err = proc.communicate()
-    return proc.returncode, (out + err).strip()
-
-
 def _py(*args: str) -> list[str]:
     return [sys.executable, "-m", *args]
 
@@ -329,7 +165,7 @@ def _node(exe: str, *args: str) -> list[str]:
 
 def _snapshot(paths: Sequence[str]) -> list[bytes | None]:
     # Prior CONTENT, never the index: a model edit leaves the regenerated file right but unstaged.
-    return [(_REPO / p).read_bytes() if (_REPO / p).exists() else None for p in paths]
+    return [(REPO / p).read_bytes() if (REPO / p).exists() else None for p in paths]
 
 
 def _stale(paths: Sequence[str], before: Sequence[bytes | None]) -> Outcome:
@@ -342,7 +178,7 @@ def _stale(paths: Sequence[str], before: Sequence[bytes | None]) -> Outcome:
 def _scan(files: Sequence[Path], needle: re.Pattern[str]) -> list[str]:
     hits = []
     for path in files:
-        rel = path.relative_to(_REPO).as_posix()
+        rel = path.relative_to(REPO).as_posix()
         # Not `splitlines()`: it breaks on five of the characters `_CONTROL_CHAR` hunts.
         for num, line in enumerate(path.read_text(encoding="utf-8").split("\n"), 1):
             if needle.search(line):
@@ -379,8 +215,8 @@ _LAYERING: tuple[tuple[str, tuple[str, ...], str], ...] = (
 def _layering(_: Selection) -> Outcome:
     package = "promptpotter/"
     imports: dict[str, list[str]] = {}
-    for path in _sources(_REPO / package, "*.py"):
-        rel = path.relative_to(_REPO).as_posix()
+    for path in _sources(REPO / package, "*.py"):
+        rel = path.relative_to(REPO).as_posix()
         reached = tests_owning._imported(
             ast.parse(path.read_text(encoding="utf-8")),
             tests_owning._module_name(rel),
@@ -477,7 +313,7 @@ def _unbuilt_schemas(out: str) -> Outcome:
 
 _ANSWERS = "probe answers: "
 _PROBE_HOST = f"""
-import contextlib, io, json, runpy, sys
+import contextlib, io, json, os, runpy, sys
 answers = []
 for source in json.loads(sys.argv[1]):
     out, code = io.StringIO(), 0
@@ -485,6 +321,7 @@ for source in json.loads(sys.argv[1]):
         try:
             if source.endswith(".py"):
                 sys.argv = [source]
+                sys.path.insert(0, os.path.dirname(os.path.abspath(source)))
                 runpy.run_path(source, run_name="__main__")
             else:
                 exec(source, {{"__name__": "__probe__"}})
@@ -528,12 +365,12 @@ def _ask_together(probes: tuple[_Probe, ...]) -> dict[_Probe, Outcome]:
     before = [_snapshot(probe.regenerates) for probe in ordered]
     sources = json.dumps([probe.source for probe in ordered])
     began = time.monotonic()
-    asking, _metered.job = _metered.job, (job := _open_job())
+    asking, metered.job = metered.job, (job := open_job())
     try:
-        rc, out = _run([sys.executable, "-X", "utf8", "-c", _PROBE_HOST, sources], _REPO)
+        rc, out = run([sys.executable, "-X", "utf8", "-c", _PROBE_HOST, sources], REPO)
     finally:
-        _metered.job = asking
-        _HOSTS.append(_Hosted(len(ordered), time.monotonic() - began, _close_job(job)))
+        metered.job = asking
+        _HOSTS.append(_Hosted(len(ordered), time.monotonic() - began, close_job(job)))
     marked = [line for line in out.splitlines() if line.startswith(_ANSWERS)]
     if not marked:
         return dict.fromkeys(ordered, (rc or 1, out))
@@ -555,9 +392,9 @@ _CONTROL_CHAR = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 def _undiffable(_: Selection) -> Outcome:
     files = [
-        *_sources(_REPO / "promptpotter", "*.py"),
-        *_sources(_REPO / "scripts", "*.py"),
-        *_sources(_REPO / "tests", "*.py"),
+        *_sources(REPO / "promptpotter", "*.py"),
+        *_sources(REPO / "scripts", "*.py"),
+        *_sources(REPO / "tests", "*.py"),
         *(
             p
             for root in ("components", "lib", "app")
@@ -597,10 +434,10 @@ def _path_claims(text: str) -> set[str]:
 
 
 def _instruction_files(_: Selection) -> Outcome:
-    code, listed = _run(["git", "ls-files", "-z", *_INSTRUCTION_FILES], _REPO)
+    code, listed = git("ls-files", "-z", *_INSTRUCTION_FILES)
     if code:
         return code, listed
-    code, tracked = _run(["git", "ls-files", "-z"], _REPO)
+    code, tracked = git("ls-files", "-z")
     if code:
         return code, tracked
     tails: set[str] = set()
@@ -614,34 +451,29 @@ def _instruction_files(_: Selection) -> Outcome:
     # Both spellings git may know a claim by: from the root, and from the file's own directory.
     unresolved: dict[tuple[str, str], set[str]] = {}
     for rel in filter(None, listed.split("\0")):
-        text = (_REPO / rel).read_text(encoding="utf-8")
+        text = (REPO / rel).read_text(encoding="utf-8")
         if (words := len(text.split())) > _INSTRUCTION_MAX_WORDS:
             over.append(f"{rel}: {words} words")
         if Path(rel).name == "CLAUDE.md":
             pages[Path(rel).parent] = len(text.encode())
-        here = (_REPO / rel).parent
+        here = (REPO / rel).parent
         for claim in _path_claims(text):
             if claim.startswith("../"):
                 # One that climbs out of the repo names a sibling checkout no clone can vouch for.
                 target = Path(os.path.normpath(here / claim))
-                if target.is_relative_to(_REPO) and not target.exists():
+                if target.is_relative_to(REPO) and not target.exists():
                     unresolved[rel, claim] = set()
                 continue
-            on_disk = any((base / claim).exists() for base in (here, _REPO))
+            on_disk = any((base / claim).exists() for base in (here, REPO))
             if not on_disk and claim.strip("/") not in tails:
-                beside = f"{here.relative_to(_REPO).as_posix()}/{claim}".removeprefix("./")
+                beside = f"{here.relative_to(REPO).as_posix()}/{claim}".removeprefix("./")
                 unresolved[rel, claim] = {claim, beside}
     if asked := sorted(set().union(*unresolved.values())):
-        answer = subprocess.run(
-            ["git", "check-ignore", "--stdin", "-z", "--verbose"],
-            cwd=_REPO,
-            input="\0".join(asked).encode(),
-            capture_output=True,
-        )
-        if answer.returncode not in (0, 1):  # 1 is "none of them is ignored"
-            return answer.returncode, answer.stderr.decode(errors="replace")
+        code, answer = git("check-ignore", "--stdin", "-z", "--verbose", input="\0".join(asked))
+        if code not in (0, 1):  # 1 is "none of them is ignored"
+            return code, answer
         # `--verbose` for the PATTERN: git on Windows reports a missing directory as matched by an empty one.
-        fields = answer.stdout.decode().split("\0")  # source, line, pattern, path — per path
+        fields = answer.split("\0")  # source, line, pattern, path — per path
         ignored = {
             path for pattern, path in zip(fields[2::4], fields[3::4], strict=False) if pattern
         }
@@ -654,7 +486,7 @@ def _instruction_files(_: Selection) -> Outcome:
         ),
         reverse=True,
     )
-    code, hook = _run([sys.executable, ".claude/hooks/shell_file_io.py", "--selftest"], _REPO)
+    code, hook = run([sys.executable, ".claude/hooks/shell_file_io.py", "--selftest"], REPO)
     failures = [hook] if code else []
     if over:
         failures.append(f"over {_INSTRUCTION_MAX_WORDS} words:\n" + "\n".join(over))
@@ -670,6 +502,192 @@ def _instruction_files(_: Selection) -> Outcome:
     return (1, "\n".join(failures)) if failures else (0, "")
 
 
+_CLAIM_DOCS = (
+    "promptpotter/*CLAUDE.md",
+    "docs/architecture.md",
+    "docs/specs/*.md",
+    "webapp/*CLAUDE.md",
+)
+# A source or spec file: `index.json::rounds` names a runtime artifact no clone holds.
+_SYMBOL_CLAIM = re.compile(r"([\w./-]+\.(?:py|tsx?|ya?ml|md|toml|css))::([A-Za-z_][\w.*]*\w\*?)")
+_PROBE_OPENS = re.compile(r"<!--\s*probe:")
+_PROBE = re.compile(r'<!--\s*probe:\s*(git grep -cE "([^"]+)" -- (\S+) (==|<=|>=) (\d+))\s*-->')
+# Git's ERE runs in bounded time except through a back-reference.
+_BACKREFERENCE = re.compile(r"\\[1-9]")
+_TRACKER = "docs/specs/code-debt-cleanup.md"
+# An invariant a doc states as the target while its sentence says what holds today, keyed to the
+# phrase the tracker's URGENT section files it under; once true, the sentence is the invariant.
+_KNOWN_FALSE = {
+    r'git grep -cE "bank_partition\.json|pipeline\.resolved\.yaml|experiment\.resolved\.yaml|'
+    r'result\.json" -- promptpotter/infrastructure/store/layout.py == 0': (
+        "side files beside the ledger"
+    ),
+    'git grep -cE "class RoundStandingRecord" -- promptpotter/domain/run_records.py == 0': (
+        "the standing record split from its close"
+    ),
+    'git grep -cE "def _head_state" -- promptpotter/application/served_dashboard.py == 0': (
+        "dashboard.json served as the head state"
+    ),
+    r'git grep -cE "^\s*session\.[a-z_]+ = " -- promptpotter/application/runner == 0': (
+        "the runner writes Session"
+    ),
+    'git grep -cE "superseded_by" -- webapp/lib/derivations/campaign-forest.ts >= 1': (
+        "the sidebar ignores the successor pointer"
+    ),
+    'git grep -cE "<table" -- webapp/components/files/RoundFileView.tsx == 0': (
+        "a second table in RoundFileView"
+    ),
+    r'git grep -cE "api-openapi\.yaml" -- scripts/gate.py >= 1': "no schema-first gate",
+}
+
+
+@cache
+def _defined(path: Path) -> frozenset[str]:
+    """Dotted names a module binds: its defs, classes and assignments, a class's own `self.x`.
+
+    A class also binds what its in-file bases bind, and a union alias what its members bind.
+    """
+    names: set[str] = set()
+    heirs: dict[str, set[str]] = {}  # an in-file class or union alias → the names it inherits from
+
+    def scope(body: list[ast.stmt], prefix: str) -> None:
+        for node in body:
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+                names.add(prefix + node.name)
+                if isinstance(node, ast.ClassDef):
+                    heirs[prefix + node.name] = {
+                        b.id for b in node.bases if isinstance(b, ast.Name)
+                    }
+                    scope(node.body, f"{prefix}{node.name}.")
+                    names.update(
+                        f"{prefix}{node.name}.{sub.attr}"
+                        for sub in ast.walk(node)
+                        if isinstance(sub, ast.Attribute)
+                        and isinstance(sub.ctx, ast.Store)
+                        and isinstance(sub.value, ast.Name)
+                        and sub.value.id == "self"
+                    )
+            elif isinstance(node, ast.Assign | ast.AnnAssign | ast.TypeAlias):
+                targets = (
+                    node.targets
+                    if isinstance(node, ast.Assign)
+                    else [node.target if isinstance(node, ast.AnnAssign) else node.name]
+                )
+                names.update(
+                    prefix + n.id for t in targets for n in ast.walk(t) if isinstance(n, ast.Name)
+                )
+                if not prefix and isinstance(node.value, ast.BinOp) and len(targets) == 1:
+                    members = {n.id for n in ast.walk(node.value) if isinstance(n, ast.Name)}
+                    heirs.update(
+                        (n.id, members) for n in ast.walk(targets[0]) if isinstance(n, ast.Name)
+                    )
+            elif isinstance(node, ast.If | ast.Try):
+                scope(node.body, prefix)
+
+    scope(ast.parse(path.read_text(encoding="utf-8")).body, "")
+    grew = True
+    while grew:
+        inherited = {
+            f"{heir}.{name.partition('.')[2]}"
+            for heir, bases in heirs.items()
+            for name in names
+            if name.partition(".")[0] in bases and "." in name
+        }
+        grew = not inherited <= names
+        names |= inherited
+    return frozenset(names)
+
+
+def _symbol_in(path: Path, symbol: str) -> bool:
+    """A method may be cited bare (`ledger.py::iter`); outside Python, the identifier opens a word."""
+    if path.suffix != ".py":
+        head = symbol.split(".")[0]
+        word = re.escape(head.rstrip("*")) + ("" if head.endswith("*") else r"\b")
+        return bool(re.search(rf"(?<!\w){word}", path.read_text(encoding="utf-8")))
+    names = _defined(path)
+    tails = {name.rpartition(".")[2] for name in names}
+    return any(fnmatch.fnmatchcase(n, symbol) for n in names) or symbol in tails
+
+
+def _probe_count(pattern: str, where: str) -> int | str:
+    """The lines *pattern* matches in the tracked files under *where*, or why it cannot be run."""
+    if os.path.isabs(where) or where.startswith(("/", "\\")) or ".." in Path(where).parts:
+        return f"`{where}` is outside the tree"
+    if _BACKREFERENCE.search(pattern):
+        return "a back-reference has no time bound"
+    code, listed = git("ls-files", "--", where)
+    if code or not listed:
+        return f"`{where}` names no tracked file"
+    code, out = git("grep", "-cE", "-e", pattern, "--", where)
+    if code not in (0, 1):  # 1 is "no line matched"
+        return out
+    return sum(int(line.rpartition(":")[2]) for line in out.splitlines())
+
+
+def _doc_claims(_: Selection) -> Outcome:
+    code, claim_docs = git("ls-files", "-z", "--", *_CLAIM_DOCS)
+    if code:
+        return code, claim_docs
+    code, every_doc = git("ls-files", "-z", "--", "*.md")
+    if code:
+        return code, every_doc
+    failures: list[str] = []
+    for rel in filter(None, claim_docs.split("\0")):
+        # A cited path hangs off the doc's own directory or one above it, or off the package.
+        here = (REPO / rel).parent
+        bases = (here, *(d for d in here.parents if REPO in (d, *d.parents)), REPO / "promptpotter")
+        prose = _FENCE.sub("", (REPO / rel).read_text(encoding="utf-8"))
+        for span in _BACKTICKED.findall(prose):
+            for cited, symbol in _SYMBOL_CLAIM.findall(span):
+                beside = (Path(os.path.normpath(b / cited)) for b in bases)
+                found = [p for p in beside if p.is_file()]
+                if not found:
+                    failures.append(f"  {rel}: `{cited}::{symbol}` names no file")
+                elif not any(_symbol_in(p, symbol) for p in found):
+                    failures.append(f"  {rel}: `{cited}::{symbol}` names nothing defined there")
+    tracker = (REPO / _TRACKER).read_text(encoding="utf-8")
+    urgent = " ".join(tracker.partition("\n## URGENT")[2].partition("\n## ")[0].split())
+    failures += [
+        f"  `_KNOWN_FALSE` files `{probe}` under {phrase!r}, which {_TRACKER} § URGENT lacks"
+        for probe, phrase in _KNOWN_FALSE.items()
+        if phrase not in urgent
+    ]
+    probed: set[str] = set()
+    for rel in filter(None, every_doc.split("\0")):
+        # A probe quoted in code is an example, never one to run.
+        prose = _BACKTICKED.sub("", _FENCE.sub("", (REPO / rel).read_text(encoding="utf-8")))
+        for opened in _PROBE_OPENS.finditer(prose):
+            if not (parsed := _PROBE.match(prose, opened.start())):
+                line = prose[opened.start() :].partition("\n")[0]
+                failures.append(f"  {rel}: a probe that does not parse: {line}")
+                continue
+            probe, pattern, where, op, bound = parsed.groups()
+            probed.add(probe)
+            count = _probe_count(pattern, where)
+            if isinstance(count, str):
+                failures.append(f"  {rel}: `{probe}` cannot run: {count}")
+                continue
+            limit = int(bound)
+            holds = {"==": count == limit, "<=": count <= limit, ">=": count >= limit}[op]
+            tracked = _KNOWN_FALSE.get(probe)
+            if holds and tracked:
+                failures.append(
+                    f"  {rel}: `{probe}` now holds, so {tracked!r} is done: the sentence states "
+                    "the invariant again and the entry leaves `_KNOWN_FALSE` and the tracker"
+                )
+            elif not holds and not tracked:
+                failures.append(
+                    f"  {rel}: `{probe}` counts {count}, so the sentence beside it is false"
+                )
+    failures += [
+        f"  `_KNOWN_FALSE` names a probe no doc carries: `{p}`"
+        for p in _KNOWN_FALSE.keys() - probed
+    ]
+    if failures:
+        return 1, "a doc claim the tree does not keep:\n" + "\n".join(failures)
+    return 0, ""
+
+
 # `--staged` lints staged paths verbatim, so a directory missing here is linted by the hook only.
 _RUFF_TARGETS = ("promptpotter/", "scripts/", "tests/", "examples/")
 
@@ -677,24 +695,24 @@ _RUFF_TARGETS = ("promptpotter/", "scripts/", "tests/", "examples/")
 def _ruff(*argv: str) -> Callable[[Selection], Outcome]:
     def check(sel: Selection) -> Outcome:
         paths = sel.py_files if sel.staged else _RUFF_TARGETS
-        return _run(_py("ruff", *argv, *paths), _REPO)
+        return run(_py("ruff", *argv, *paths), REPO)
 
     return check
 
 
 def _tsc(_sel: Selection) -> Outcome:
     # `next build` checks neither this nor eslint: next.config sets `typescript.ignoreBuildErrors`.
-    return _run(_node("npm", "run", "typecheck"), _WEBAPP)
+    return run(_node("npm", "run", "typecheck"), _WEBAPP)
 
 
 def _eslint(sel: Selection) -> Outcome:
     # `web_files` is empty outside --staged, where bare `eslint` means the whole tree.
-    return _run(_node("npm", "run", "lint", "--", *sel.web_files, *(sel.narrowed or ())), _WEBAPP)
+    return run(_node("npm", "run", "lint", "--", *sel.web_files, *(sel.narrowed or ())), _WEBAPP)
 
 
 def _playwright(_sel: Selection) -> Outcome:
     # Only `cold`: `walk` reads the operator's own `.promptpotter/` and `spend` costs real money.
-    return _run(_node("npx", "playwright", "test", "--project=cold"), _WEBAPP)
+    return run(_node("npx", "playwright", "test", "--project=cold"), _WEBAPP)
 
 
 def _lock_satisfies(requirer: str, dep: str, entries: frozenset[str]) -> bool:
@@ -742,7 +760,7 @@ _ALERT_FIELDS = (
 def _npm_audit(_: Selection) -> Outcome:
     # `--audit-level` sets the exit code only; `--omit=dev` because the wheel carries no dev tooling.
     audit = ("audit", "--package-lock-only", "--omit=dev", "--audit-level=high")
-    return _run(_node("npm", *audit), _WEBAPP)
+    return run(_node("npm", *audit), _WEBAPP)
 
 
 # No fixed release exists to bump to; each goes the day its fix ships.
@@ -759,13 +777,13 @@ def _pip_audit(_: Selection) -> Outcome:
     with tempfile.TemporaryDirectory() as tmp:
         frozen = str(Path(tmp) / "requirements.txt")
         export = [uv, "export", "--frozen", "--all-extras", "--no-emit-project", "--quiet"]
-        rc, out = _run([*export, "--output-file", frozen], _REPO)
+        rc, out = run([*export, "--output-file", frozen], REPO)
         if rc:
             return rc, out
         ignored = [arg for vuln in _PIP_AUDIT_UNPATCHED for arg in ("--ignore-vuln", vuln)]
         # A `uv` tool, so the scanner is never a dependency of the lock it audits.
         audit = [uv, "tool", "run", "--quiet", _PIP_AUDIT, "--requirement", frozen]
-        return _run([*audit, "--no-deps", "--disable-pip", *ignored], _REPO)
+        return run([*audit, "--no-deps", "--disable-pip", *ignored], REPO)
 
 
 def _advisories(_: Selection) -> Outcome:
@@ -777,7 +795,7 @@ def _advisories(_: Selection) -> Outcome:
             "cannot answer is not a guard.\nInstall the GitHub CLI, or read them on the "
             "repository's Security tab before cutting the release."
         )
-    rc, out = _run(
+    rc, out = run(
         [
             gh,
             "api",
@@ -786,7 +804,7 @@ def _advisories(_: Selection) -> Outcome:
             "-q",
             _ALERT_FIELDS,
         ],
-        _REPO,
+        REPO,
     )
     if rc:
         return rc, out or "gh could not read this repository's Dependabot alerts."
@@ -816,7 +834,7 @@ def _advisories(_: Selection) -> Outcome:
 # Too narrow is the one way a kept green can lie, so widen on any doubt: `_TREE` costs only a rerun.
 _TREE = ("",)
 _ENGINE = ("!webapp/",)
-_GATE = ("scripts/gate.py", "scripts/last_green.py")
+_GATE = ("scripts/gate.py", "scripts/last_green.py", "scripts/processes.py")
 _WEBAPP_READS = ("webapp/", "tests/fixtures/", *_GATE)
 _ENGINE_RUNTIME = (*ENGINE_RUNTIME, *_GATE)
 
@@ -841,6 +859,8 @@ class Check:
     product: tuple[str, ...] = ()
     # Returns `None` where ownership cannot be told, and then the whole check runs.
     narrow: Callable[[Sequence[str]], tuple[str, ...] | None] | None = None
+    # Environment variables naming a git revision its verdict reads: each one's COMMIT is in its key.
+    revs: tuple[str, ...] = ()
 
     def inputs(self) -> tuple[str, ...] | None:
         if self.kind == "release":  # the answer lives on the network
@@ -850,10 +870,19 @@ class Check:
 
     def key(self, store: LastGreen) -> str | None:
         prefixes = self.inputs()
-        return None if prefixes is None else store.key(prefixes, self.product)
+        if prefixes is None:
+            return None
+        commits = []
+        for name in self.revs:
+            if asked := os.environ.get(name):
+                code, commit = git("rev-parse", "--verify", "--quiet", f"{asked}^{{commit}}")
+                if code:  # nothing to key on: the check runs and names the bad revision itself
+                    return None
+                commits.append(f"{name}={commit}".encode())
+        return digest(store.key(prefixes, self.product).encode(), *commits).hex()
 
     def kept(self, store: LastGreen, key: str | None) -> bool:
-        standing = not self.builds or (_REPO / self.builds).exists()
+        standing = not self.builds or (REPO / self.builds).exists()
         return key is not None and standing and store.holds(self.name, key)
 
 
@@ -862,43 +891,43 @@ def _web_modules(changed: Sequence[str]) -> tuple[str, ...] | None:
         path.startswith(_WEB_MODULES) and path.endswith((".ts", ".tsx")) for path in changed
     ):
         return None
-    return tuple(path[len("webapp/") :] for path in changed if (_REPO / path).is_file())
+    return tuple(path[len("webapp/") :] for path in changed if (REPO / path).is_file())
 
 
 def _vitest(sel: Selection) -> Outcome:
     if sel.narrowed:
         related = ("vitest", "related", "--run", "--passWithNoTests", *sel.narrowed)
-        return _run(_node("npx", *related), _WEBAPP)
-    return _run(_node("npm", "run", "test"), _WEBAPP)
+        return run(_node("npx", *related), _WEBAPP)
+    return run(_node("npm", "run", "test"), _WEBAPP)
 
 
 def _pytest(sel: Selection) -> Outcome:
     if sel.narrowed is None:
-        return _run([sys.executable, "scripts/tests_owning.py", "--record"], _REPO)
+        return run([sys.executable, "scripts/tests_owning.py", "--record"], REPO)
     if not sel.narrowed:
         return 0, "no test owns what moved"
-    return _run(_py("pytest", "-p", "no:xdist", *sel.narrowed), _REPO)
+    return run(_py("pytest", "-p", "no:xdist", *sel.narrowed), REPO)
 
 
 @cache
 def _suite_reads() -> tuple[str, ...]:
     """The suite, its runner, and every module it imports bare off pytest's `pythonpath`."""
-    config = tomllib.loads((_REPO / "pyproject.toml").read_text(encoding="utf-8"))
+    config = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
     path = config["tool"]["pytest"]["ini_options"]["pythonpath"]
-    todo = sorted((_REPO / "tests").glob("*.py"))
+    todo = sorted((REPO / "tests").glob("*.py"))
     seen: set[Path] = set()
     while todo:
         module = todo.pop()
         if module in seen:
             continue
         seen.add(module)
-        rel = module.relative_to(_REPO).as_posix()
+        rel = module.relative_to(REPO).as_posix()
         tree = ast.parse(module.read_text(encoding="utf-8"))
         for name in tests_owning._import_names(
             tree, tests_owning._module_name(rel), False, deferred=True
         ):
-            todo.extend(p for d in path if (p := _REPO / d / f"{name}.py").is_file())
-    imported = {p.relative_to(_REPO).as_posix() for p in seen}
+            todo.extend(p for d in path if (p := REPO / d / f"{name}.py").is_file())
+    imported = {p.relative_to(REPO).as_posix() for p in seen}
     beside = sorted(rel for rel in imported if not rel.startswith("tests/"))
     return (*_ENGINE_RUNTIME, "tests/", "scripts/tests_owning.py", *beside)
 
@@ -923,6 +952,7 @@ def _mypy(_sel: Selection) -> Outcome:
     targets = (
         "promptpotter/",
         "scripts/",
+        "tests/",
         f"{_BBEH_DIR}/bbeh_potter_runner.py",
         f"{_EXAMPLE_PLUGIN_DIR}/example_optimizer/",
     )
@@ -930,10 +960,10 @@ def _mypy(_sel: Selection) -> Outcome:
     # The warm `.mypy_cache/` is TRUSTED: delete it only on a suspected false green against CI.
     for platform in _PLATFORMS:
         foreign = () if platform == sys.platform else ("--cache-dir", f".mypy_cache/{platform}")
-        rc, out = _run(
+        rc, out = run(
             _py("mypy", "--platform", platform, *foreign, *targets),
-            _REPO,
-            MYPYPATH=os.pathsep.join(str(_REPO / d) for d in (_BBEH_DIR, _EXAMPLE_PLUGIN_DIR)),
+            REPO,
+            MYPYPATH=os.pathsep.join(str(REPO / d) for d in (_BBEH_DIR, _EXAMPLE_PLUGIN_DIR)),
         )
         if rc:
             return rc, f"as {platform}:\n{out}"
@@ -944,11 +974,11 @@ _EXTRA_ARG = re.compile(r"--extra[ =]([\w-]+)")
 
 
 def _extras(_: Selection) -> Outcome:
-    declared = tomllib.loads((_REPO / "pyproject.toml").read_text(encoding="utf-8"))
+    declared = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
     known = set(declared["project"]["optional-dependencies"])
     callers = [
-        *(_REPO / ".github" / "workflows").glob("*.yml"),
-        *(_REPO / "deploy-linux").glob("*.sh"),
+        *(REPO / ".github" / "workflows").glob("*.yml"),
+        *(REPO / "deploy-linux").glob("*.sh"),
     ]
     asked = {
         (path.name, name)
@@ -965,7 +995,7 @@ def _extras(_: Selection) -> Outcome:
 CHECKS: tuple[Check, ...] = (
     Check("ruff-format", "py", _ruff("format", "--check"), staged=True),
     Check("ruff-check", "py", _ruff("check"), staged=True),
-    Check("deptry", "py", lambda _: _run(_py("deptry", "."), _REPO)),
+    Check("deptry", "py", lambda _: run(_py("deptry", "."), REPO)),
     Check("mypy", "py", _mypy),
     Check("extras", "py", _extras, staged=True),
     Check("layering", "py", _layering, staged=True),
@@ -982,20 +1012,22 @@ CHECKS: tuple[Check, ...] = (
         reads=_ENGINE_RUNTIME,
     ),
     Check("instruction-files", "py", _instruction_files, staged=True, reads=_TREE),
+    Check("doc-claims", "py", _doc_claims, staged=True, reads=_TREE),
     Check(
         "surface-ledger",
         "py",
-        lambda _: _run([sys.executable, "scripts/complexity_ledger.py", "--check"], _REPO),
+        lambda _: run([sys.executable, "scripts/complexity_ledger.py", "--check"], REPO),
         staged=True,
         reads=(
             "promptpotter/",
             "tests/",
             "examples/",
-            "scripts/complexity_ledger.py",
-            "scripts/tests_owning.py",
-            "docs/specs/openapi.generated.json",
+            "scripts/",
+            "docs/specs/",
+            *(f"webapp/{root}/" for root in ("app", "components", "lib")),
             "pyproject.toml",
         ),
+        revs=("ARC_BASE",),
     ),
     # "py" so it runs without `webapp/node_modules`, which is routinely absent.
     Check("undiffable", "py", _undiffable, staged=True, reads=_TREE),
@@ -1052,10 +1084,10 @@ CHECKS: tuple[Check, ...] = (
     Check(
         OFFLINE_RUN,
         "py",
-        lambda _: _run(
+        lambda _: run(
             [sys.executable, "scripts/offline_run.py"],
-            _REPO,
-            PROMPTPOTTER_HOME=str(_REPO / ".gate_cache" / OFFLINE_RUN),
+            REPO,
+            PROMPTPOTTER_HOME=str(REPO / ".gate_cache" / OFFLINE_RUN),
         ),
         landing=True,
         reads=OFFLINE_RUN_READS,
@@ -1066,7 +1098,7 @@ CHECKS: tuple[Check, ...] = (
     Check(
         "next-build",
         "web",
-        lambda _: _run(
+        lambda _: run(
             _node("npm", "run", "build"),
             _WEBAPP,
             NEXT_BUILD_CPUS=str(RamBudget.read().next_workers()),
@@ -1113,12 +1145,12 @@ class Result:
 
 
 def _execute(check: Check, sel: Selection, store: LastGreen | None) -> Result:
-    _metered.job = job = _open_job()
+    metered.job = job = open_job()
     try:
         result = _verdict(check, sel, store)
     finally:
-        _metered.job = None
-        peak = _close_job(job)
+        metered.job = None
+        peak = close_job(job)
     return result if result.kept else dataclasses.replace(result, peak_mb=peak)
 
 
@@ -1167,8 +1199,20 @@ def _lanes(
 
 # `api`: mypy resolves fastapi. `harbor`, `dspy`: a test skipped for a missing extra never ran.
 _PINNED_EXTRAS = ("dev", "api", "harbor", "dspy", "excel")
-_LOCK_INPUTS = ("pyproject.toml", "uv.lock")
+# What decides the installed env; a tool table (`[tool.ruff]`, `[tool.deptry]`) does not.
+_INSTALL_KEYS = ("dependencies", "optional-dependencies", "requires-python")
 _LOCK_STAMP = _PINNED / "gate-lock.sha256"
+
+
+def _install_digest(extras: list[str]) -> str:
+    pyproject = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
+    declared = {key: pyproject["project"].get(key) for key in _INSTALL_KEYS}
+    declared["build-system"] = pyproject.get("build-system")
+    return digest(
+        (REPO / "uv.lock").read_bytes(),
+        json.dumps(declared, sort_keys=True).encode(),
+        " ".join(extras).encode(),
+    ).hex()
 
 
 def _editable_target() -> Path | None:
@@ -1183,22 +1227,21 @@ def _editable_target() -> Path | None:
 
 def _reexec_pinned() -> None:
     # From another interpreter, `mypy` resolves different stubs than `uv.lock` pins.
-    if os.environ.get(_REEXEC) or (Path(sys.prefix) == _PINNED and _editable_target() == _REPO):
+    if os.environ.get(_REEXEC):
         return
     # A junctioned `.venv` is its owner's: a sync here would re-point the owner's editable install.
     owner = _PINNED.resolve().parent
     extras = [arg for extra in _PINNED_EXTRAS for arg in ("--extra", extra)]
-    locked = hashlib.sha256(
-        b"\0".join(
-            [*((_REPO / name).read_bytes() for name in _LOCK_INPUTS), " ".join(extras).encode()]
-        )
-    ).hexdigest()
+    locked = _install_digest(extras)
     bindir = _PINNED / ("Scripts" if sys.platform == "win32" else "bin")
     python = bindir / ("python.exe" if sys.platform == "win32" else "python")
     stamped = _LOCK_STAMP.exists() and _LOCK_STAMP.read_text() == locked
     target = _editable_target()
-    if not (python.exists() and stamped and target == owner):
-        if owner != _REPO:
+    if python.exists() and stamped and target == owner:
+        if Path(sys.prefix) == _PINNED and target == REPO:
+            return
+    else:
+        if owner != REPO:
             raise SystemExit(
                 f"gate: {_PINNED} is {owner}'s venv, and the gate never syncs a venv this tree "
                 f"does not own (pins {'match' if stamped else 'differ'}, editable on {target}).\n"
@@ -1211,18 +1254,18 @@ def _reexec_pinned() -> None:
                 "gate: `uv` is not on PATH, so the locked env is unreachable.\n"
                 f"Run: uv sync --frozen --inexact {' '.join(extras)}"
             )
-        if subprocess.run([uv, "sync", "--frozen", "--inexact", *extras], cwd=_REPO).returncode:
+        if subprocess.run([uv, "sync", "--frozen", "--inexact", *extras], cwd=REPO).returncode:
             raise SystemExit("gate: `uv sync` could not build the locked env.")
         _LOCK_STAMP.write_text(locked)
     proc = subprocess.run(
         [str(python), __file__, *sys.argv[1:]],
-        cwd=_REPO,
+        cwd=REPO,
         env={
             **os.environ,
             _REEXEC: "1",
             "VIRTUAL_ENV": str(_PINNED),
             # A borrowed venv's editable install names its owner; the checks read this tree.
-            "PYTHONPATH": os.pathsep.join(filter(None, (str(_REPO), os.environ.get("PYTHONPATH")))),
+            "PYTHONPATH": os.pathsep.join(filter(None, (str(REPO), os.environ.get("PYTHONPATH")))),
             "PATH": f"{bindir}{os.pathsep}{os.environ.get('PATH', '')}",
         },
     )
@@ -1253,7 +1296,13 @@ def main() -> int:
         help="while iterating: the checks that read a file changed since HEAD, and inside "
         "pytest, vitest and eslint only what owns one",
     )
-    parser.add_argument("--only", metavar="NAME", help="one check by name")
+    parser.add_argument(
+        "--only",
+        metavar="NAME",
+        action="append",
+        default=[],
+        help="checks by name, the flag repeated or the names comma-separated",
+    )
     parser.add_argument(
         "--commit-msg", metavar="FILE", help="the commit-msg hook: a subject opening on ASCII"
     )
@@ -1270,9 +1319,11 @@ def main() -> int:
     kinds = {k for k, on in selected if on} or {"py", "web"}
     checks = [c for c in CHECKS if c.kind in kinds and (c.staged or not args.staged)]
     if args.only:
-        checks = [c for c in CHECKS if c.name == args.only]
-        if not checks:
-            parser.error(f"no such check: {args.only} (have: {', '.join(c.name for c in CHECKS)})")
+        asked = {name for value in args.only for name in value.split(",") if name}
+        if unknown := sorted(asked - {c.name for c in CHECKS}):
+            have = ", ".join(c.name for c in CHECKS)
+            parser.error(f"no such check: {', '.join(unknown)} (have: {have})")
+        checks = [c for c in CHECKS if c.name in asked]
 
     sel = Selection.build(args.staged, args.changed)
     if args.staged:
